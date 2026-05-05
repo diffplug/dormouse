@@ -232,6 +232,35 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.playScenario(id, scenario);
   }
 
+  /**
+   * Drive the alert-manager's activity monitor for a fixed duration with
+   * no data output — useful for animating a fake "task running" state on
+   * a pane while the visual feedback lives elsewhere. Calls
+   * `alertManager.onData(id)` immediately, then again every `intervalMs`
+   * until `durationMs` elapses, after which silence resumes and the bell
+   * transitions naturally to MIGHT_NEED_ATTENTION → ALERT_RINGING.
+   * Returns a dispose handle that cancels remaining ticks.
+   */
+  pumpActivity(id: string, durationMs: number, intervalMs = 1000): () => void {
+    if (!this.terminals.has(id)) return () => {};
+    let cancelled = false;
+    this.alertManager.onData(id);
+    const tick = () => {
+      if (cancelled) return;
+      this.alertManager.onData(id);
+    };
+    const interval = setInterval(tick, intervalMs);
+    const stop = setTimeout(() => {
+      cancelled = true;
+      clearInterval(interval);
+    }, durationMs);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      clearTimeout(stop);
+    };
+  }
+
   private playScenario(id: string, scenario: FakeScenario): void {
     const timers: ReturnType<typeof setTimeout>[] = [];
     this.activeTimers.set(id, timers);

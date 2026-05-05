@@ -143,25 +143,6 @@ export const SCENARIO_LONG_RUNNING: FakeScenario = {
 };
 
 /**
- * Fake busy-task demo for the playground tutorial. Designed to drive the
- * alert-manager through BUSY → MIGHT_NEED_ATTENTION → ALERT_RINGING with
- * no shell integration:
- *   - Three output bursts spaced ~1.6s apart (>1.5s = "still working")
- *   - Then ~6s of silence so the silence thresholds elapse
- */
-export const SCENARIO_BUSY_TASK_DEMO: FakeScenario = {
-  name: 'busy-task-demo',
-  chunks: [
-    instant(`${fg(33)}Building project...${RESET}\r\n`, 0),
-    instant(`  ${fg(90)}compiling src/main.ts${RESET}\r\n`, 1600),
-    instant(`  ${fg(90)}compiling src/util.ts${RESET}\r\n`, 1600),
-    instant(`  ${fg(90)}bundling output${RESET}\r\n`, 1600),
-    instant(`${fg(32)}done!${RESET}\r\n`, 200),
-    instant(PROMPT, 100),
-  ],
-};
-
-/**
  * Boxed paragraph for Copy Rewrapped vs Copy Raw demonstration. The frame
  * is pure box-drawing characters so `rewrap.ts` strips them; the text
  * inside wraps across lines so Rewrapped joins them with single spaces.

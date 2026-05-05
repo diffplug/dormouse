@@ -62,7 +62,10 @@ The detector subscribes to `subscribeToActivity()` and tracks per-id `(status, t
 | `al-todo-clear` | Press passthrough Enter to clear the TODO | `todo` transitions `true → false` |
 | `al-todo-manual` | Manually add a TODO (`t` or right-click) | `todo` transitions `false → true` while previous status was NOT `ALERT_RINGING` |
 
-The Alert section view shows a runner-local instruction: "Press `s` here to start a fake busy task." `s` is **not** a real MouseTerm shortcut; it is intercepted by `TutRunner` only while the Alert section is open, and calls `adapter.playScenarioNow(PANE_TARGET, SCENARIO_BUSY_TASK_DEMO)`. Detection is purely output-based via the existing `ActivityMonitor`, so no shell integration is required.
+The Alert section view shows a runner-local instruction: "Press `s` here to start a fake busy task." `s` is **not** a real MouseTerm shortcut; it is intercepted by `TutRunner` only while the Alert section is open. When pressed, the runner does two things:
+
+1. Calls `adapter.pumpActivity(PANE_TARGET, 3000, 800)` — drives the alert-manager's activity monitor on the demo pane for 3 seconds, with **no text output**, so the bell on the demo tab tilts to BUSY without scrolling any scenario text on that pane.
+2. Animates a countdown in-place where the "Press s…" hint was: `⠋ Fake task will finish in 3..` → `2..` → `1..` → `✓ Fake task done.` → `⠋ Listening for the bell to ring…` → `✓ Bell rang.` Total ~9s. Detection is purely timing-based via the existing `ActivityMonitor`, so no shell integration is required.
 
 ### Section 3 — Copy paste (4 items)
 
@@ -85,7 +88,7 @@ The Copy Rewrapped step uses `SCENARIO_BOXED_PARAGRAPH` (in `lib/src/lib/platfor
 
 - **`WallEvent.kill`** and **`WallEvent.move`** — new discriminants on the `WallEvent` union (`lib/src/components/wall/wall-types.ts`). `kill` fires from `acceptKill` in `Wall.tsx`. `move` fires from `handle-pane-shortcuts.ts` after the Cmd/Ctrl-Arrow swap, via a new `fireEvent` callback added to `WallKeyboardCtx`.
 - **`FakePtyAdapter.playScenarioNow(id, scenario)`** — public method that replays a `FakeScenario` on a live pty; cancels any in-flight scenario for the same id first. Drives `alertManager.onData()` exactly like the spawn-time playback so bell state transitions fire.
-- **`SCENARIO_BUSY_TASK_DEMO`** — three output bursts spaced ~1.6s apart (>1.5s = "still working") followed by silence so `T_MIGHT_NEED_ATTENTION` (2s) and `T_ALERT_RINGING_CONFIRM` (3s) elapse. Drives the bell `BUSY → MIGHT_NEED_ATTENTION → ALERT_RINGING`.
+- **`FakePtyAdapter.pumpActivity(id, durationMs, intervalMs)`** — drives the alert-manager for a fixed duration with no data output. The runner uses this so the bell on the demo pane tilts/rings while the visible "task running" animation lives entirely inside the tutorial pane.
 - **`SCENARIO_BOXED_PARAGRAPH`** — boxed multi-line prose, used by `tut-boxed`.
 
 `SCENARIO_TUTORIAL_MOTD` was removed — the runner now owns the main pane's screen.

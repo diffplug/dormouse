@@ -63,7 +63,11 @@ function Playground() {
               state: tutorialState,
               onExit,
               onTriggerBusyDemo: () => {
-                adapter.playScenarioNow(PANE_TARGET, scenarios.SCENARIO_BUSY_TASK_DEMO);
+                // Drive the alert-manager on tut-target for 3s of activity,
+                // then silence (the alert-manager rings ~5s after silence
+                // begins). No text output — the visual feedback is the
+                // countdown animation rendered inside the tutorial runner.
+                adapter.pumpActivity(PANE_TARGET, 3000, 800);
               },
             });
           }

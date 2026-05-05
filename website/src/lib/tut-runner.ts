@@ -33,7 +33,9 @@ interface TutRunnerOptions {
   onTriggerBusyDemo?: () => void;
 }
 
-type Screen = "menu" | "section";
+type Screen = "menu" | "section" | "reset";
+
+const RESET_CONFIRM_WORD = "reset";
 
 export class TutRunner implements InteractiveProgram {
   private adapter: FakePtyAdapter;
@@ -45,10 +47,13 @@ export class TutRunner implements InteractiveProgram {
   private screen: Screen = "menu";
   private menuIndex = 0;
   private sectionId: string | null = null;
+  private resetBuffer = "";
+  private resetMismatch = false;
   private spinnerFrame = 0;
   private spinnerTimer: ReturnType<typeof setInterval> | null = null;
   private stateUnsub: (() => void) | null = null;
   private resizeUnsub: (() => void) | null = null;
+  private busyDemoStart: number | null = null;
   private disposed = false;
 
   constructor(options: TutRunnerOptions) {
@@ -99,6 +104,21 @@ export class TutRunner implements InteractiveProgram {
         i += 1;
         continue;
       }
+      if (this.screen === "reset") {
+        if (ch === "\x7f" || ch === "\b") {
+          if (this.resetBuffer.length > 0) {
+            this.resetBuffer = this.resetBuffer.slice(0, -1);
+            this.resetMismatch = false;
+            this.render();
+          }
+        } else if (ch >= " " && this.resetBuffer.length < 32) {
+          this.resetBuffer += ch;
+          this.resetMismatch = false;
+          this.render();
+        }
+        i += 1;
+        continue;
+      }
       if (ch === "q" || ch === "Q") {
         this.exit();
         return;
@@ -108,7 +128,7 @@ export class TutRunner implements InteractiveProgram {
         this.sectionId === "alert" &&
         (ch === "s" || ch === "S")
       ) {
-        this.onTriggerBusyDemo?.();
+        this.startBusyDemo();
         i += 1;
         continue;
       }
@@ -122,12 +142,18 @@ export class TutRunner implements InteractiveProgram {
 
   // --- Input ---
 
+  private menuLength(): number {
+    // SECTIONS + the trailing "Reset progress" entry
+    return SECTIONS.length + 1;
+  }
+
   private handleArrow(letter: string): void {
     if (this.screen !== "menu") return;
+    const len = this.menuLength();
     if (letter === "A") {
-      this.menuIndex = (this.menuIndex - 1 + SECTIONS.length) % SECTIONS.length;
+      this.menuIndex = (this.menuIndex - 1 + len) % len;
     } else if (letter === "B") {
-      this.menuIndex = (this.menuIndex + 1) % SECTIONS.length;
+      this.menuIndex = (this.menuIndex + 1) % len;
     } else {
       return;
     }
@@ -136,17 +162,45 @@ export class TutRunner implements InteractiveProgram {
 
   private handleEnter(): void {
     if (this.screen === "menu") {
+      if (this.menuIndex === SECTIONS.length) {
+        this.screen = "reset";
+        this.resetBuffer = "";
+        this.resetMismatch = false;
+        this.render();
+        return;
+      }
       const section = SECTIONS[this.menuIndex];
       if (!section) return;
       this.sectionId = section.id;
       this.screen = "section";
       this.render();
+      return;
+    }
+    if (this.screen === "reset") {
+      if (this.resetBuffer.trim().toLowerCase() === RESET_CONFIRM_WORD) {
+        this.state.reset();
+        this.resetBuffer = "";
+        this.resetMismatch = false;
+        this.screen = "menu";
+        this.render();
+      } else {
+        this.resetBuffer = "";
+        this.resetMismatch = true;
+        this.render();
+      }
     }
   }
 
   private handleEscape(): void {
     if (this.screen === "section") {
       this.sectionId = null;
+      this.screen = "menu";
+      this.render();
+      return;
+    }
+    if (this.screen === "reset") {
+      this.resetBuffer = "";
+      this.resetMismatch = false;
       this.screen = "menu";
       this.render();
       return;
@@ -159,11 +213,26 @@ export class TutRunner implements InteractiveProgram {
     this.cleanup(true);
   }
 
+  private startBusyDemo(): void {
+    // Phases are computed from elapsed time inside renderBusyDemoLines:
+    // 0–3s countdown, 3–8s "listening", 8–11s "bell rang", then back to
+    // the original "Press s…" hint. Driven by the spinner's render tick;
+    // no separate timer needed.
+    this.busyDemoStart = Date.now();
+    this.onTriggerBusyDemo?.();
+    this.render();
+  }
+
   // --- Render ---
 
   private render(): void {
     if (this.disposed) return;
-    const lines = this.screen === "menu" ? this.renderMenu() : this.renderSection();
+    const lines =
+      this.screen === "menu"
+        ? this.renderMenu()
+        : this.screen === "reset"
+        ? this.renderReset()
+        : this.renderSection();
     let out = `${HOME}${CLEAR}`;
     for (const line of lines) {
       out += `${line}\r\n`;
@@ -192,7 +261,37 @@ export class TutRunner implements InteractiveProgram {
           : `${DIM}[${done}/${t} complete]${RESET}`;
       lines.push(`  ${marker} ${label}  ${progress}`);
     });
+
+    const resetIndex = SECTIONS.length;
+    const resetMarker = this.menuIndex === resetIndex ? `${fg(36)}❯${RESET}` : " ";
+    const resetLabel =
+      this.menuIndex === resetIndex
+        ? `${BOLD}Reset progress${RESET}`
+        : `${DIM}Reset progress${RESET}`;
     lines.push("");
+    lines.push(`  ${resetMarker} ${resetLabel}`);
+    lines.push("");
+    return lines;
+  }
+
+  private renderReset(): string[] {
+    const lines: string[] = [];
+    lines.push("");
+    lines.push(`  ${BOLD}Reset progress${RESET}`);
+    lines.push(`  ${DIM}Esc to cancel${RESET}`);
+    lines.push("");
+    lines.push(
+      `  This will clear all checkmarks across every section.`,
+    );
+    lines.push(
+      `  ${DIM}Type ${fg(36)}reset${RESET}${DIM} and press Enter to confirm.${RESET}`,
+    );
+    lines.push("");
+    lines.push(`   ${fg(36)}>${RESET} ${this.resetBuffer}${fg(33)}_${RESET}`);
+    if (this.resetMismatch) {
+      lines.push("");
+      lines.push(`  ${fg(31)}That didn't match. Type "reset" exactly.${RESET}`);
+    }
     return lines;
   }
 
@@ -221,15 +320,34 @@ export class TutRunner implements InteractiveProgram {
 
     if (section.id === "alert") {
       lines.push("");
-      lines.push(`  ${DIM}Press ${fg(36)}s${RESET}${DIM} here to start a fake busy task.${RESET}`);
+      lines.push(...this.renderBusyDemoLines());
     }
 
     if (done === total) {
       lines.push("");
-      lines.push(`  ${fg(32)}Section complete.${RESET}`);
+      lines.push(
+        `  ${fg(32)}Section complete.${RESET} ${DIM}Press ${fg(36)}Esc${RESET}${DIM} to go back.${RESET}`,
+      );
     }
 
     return lines;
+  }
+
+  private renderBusyDemoLines(): string[] {
+    const idleHint = `  ${DIM}Press ${fg(36)}s${RESET}${DIM} here to start a fake busy task.${RESET}`;
+    if (this.busyDemoStart === null) return [idleHint];
+    const elapsed = Date.now() - this.busyDemoStart;
+    if (elapsed < 3_000) {
+      const spinner = SPINNER_FRAMES[this.spinnerFrame];
+      const secsLeft = Math.max(1, Math.ceil((3_000 - elapsed) / 1_000));
+      const dots = ".".repeat(4 - secsLeft);
+      return [
+        `  ${fg(33)}${spinner}${RESET} Fake task will finish in ${BOLD}${secsLeft}${RESET}${dots}`,
+      ];
+    }
+    return [
+      `  ${fg(32)}✓${RESET} Fake task finished. ${DIM}Press ${fg(36)}s${RESET}${DIM} to start another one.${RESET}`,
+    ];
   }
 
   private renderItem(item: Item, index: number, activeIndex: number): string[] {
@@ -264,6 +382,7 @@ export class TutRunner implements InteractiveProgram {
       clearInterval(this.spinnerTimer);
       this.spinnerTimer = null;
     }
+    this.busyDemoStart = null;
     this.stateUnsub?.();
     this.stateUnsub = null;
     this.resizeUnsub?.();
