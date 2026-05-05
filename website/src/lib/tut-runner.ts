@@ -24,6 +24,15 @@ const CLEAR = "\x1b[2J";
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_INTERVAL_MS = 100;
 
+/**
+ * Static "your turn" pointer for the active section item. Animating this
+ * would feed the activity monitor on whichever pane the runner lives on,
+ * so the bell on a pane that hosts the runner could never reach the
+ * RINGING state — the activity-monitor only rings after a stretch of
+ * silence. A static glyph keeps the pane quiet between user actions.
+ */
+const ACTIVE_ITEM_GLYPH = "●";
+
 interface TutRunnerOptions {
   adapter: FakePtyAdapter;
   terminalId: string;
@@ -70,11 +79,27 @@ export class TutRunner implements InteractiveProgram {
     this.resizeUnsub = this.adapter.onPtyResize((d) => {
       if (d.id === this.terminalId) this.render();
     });
+    this.render();
+  }
+
+  private startSpinnerTicks(): void {
+    if (this.spinnerTimer) return;
     this.spinnerTimer = setInterval(() => {
       this.spinnerFrame = (this.spinnerFrame + 1) % SPINNER_FRAMES.length;
       this.render();
+      if (
+        this.busyDemoStart === null ||
+        Date.now() - this.busyDemoStart >= 3_000
+      ) {
+        this.stopSpinnerTicks();
+      }
     }, SPINNER_INTERVAL_MS);
-    this.render();
+  }
+
+  private stopSpinnerTicks(): void {
+    if (!this.spinnerTimer) return;
+    clearInterval(this.spinnerTimer);
+    this.spinnerTimer = null;
   }
 
   handleInput(data: string): void {
@@ -214,12 +239,13 @@ export class TutRunner implements InteractiveProgram {
   }
 
   private startBusyDemo(): void {
-    // Phases are computed from elapsed time inside renderBusyDemoLines:
-    // 0–3s countdown, 3–8s "listening", 8–11s "bell rang", then back to
-    // the original "Press s…" hint. Driven by the spinner's render tick;
-    // no separate timer needed.
+    // Countdown phase (0–3s) is the only animated piece in the runner.
+    // It writes a fresh frame to xterm every SPINNER_INTERVAL_MS, then
+    // settles into a static "Fake task finished" line that stays put
+    // until the user presses s again.
     this.busyDemoStart = Date.now();
     this.onTriggerBusyDemo?.();
+    this.startSpinnerTicks();
     this.render();
   }
 
@@ -357,7 +383,7 @@ export class TutRunner implements InteractiveProgram {
     if (complete) {
       mark = `${fg(32)}✓${RESET}`;
     } else if (isActive) {
-      mark = `${fg(33)}${SPINNER_FRAMES[this.spinnerFrame]}${RESET}`;
+      mark = `${fg(33)}${ACTIVE_ITEM_GLYPH}${RESET}`;
     } else {
       mark = `${DIM}·${RESET}`;
     }
@@ -378,10 +404,7 @@ export class TutRunner implements InteractiveProgram {
   private cleanup(notifyExit: boolean): void {
     if (this.disposed) return;
     this.disposed = true;
-    if (this.spinnerTimer) {
-      clearInterval(this.spinnerTimer);
-      this.spinnerTimer = null;
-    }
+    this.stopSpinnerTicks();
     this.busyDemoStart = null;
     this.stateUnsub?.();
     this.stateUnsub = null;
