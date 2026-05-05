@@ -1,0 +1,84 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`TutRunner snapshots > renders Alert and TODO with all items incomplete 1`] = `
+"[H[2J
+  [1mAlert and TODO[0m  [2m0/6 complete[0m
+  [2mEsc to go back[0m
+
+   [33m●[0m  [1mEnable alerts on a pane[0m
+      [2mClick the bell, or press a in command mode with the pane selected.[0m
+   [2m·[0m  Watch the bell tilt while a task runs
+   [2m·[0m  Bell rings when the task completes
+   [2m·[0m  TODO tag appears when you dismiss the ringing alert
+   [2m·[0m  Press Enter inside the pane to clear the TODO
+   [2m·[0m  Manually add a TODO
+
+  [2mPress [36ms[0m[2m here to start a fake busy task.[0m
+"
+`;
+
+exports[`TutRunner snapshots > renders Copy paste with all items incomplete 1`] = `
+"[H[2J
+  [1mCopy paste[0m  [2m0/4 complete[0m
+  [2mEsc to go back[0m
+
+   [33m●[0m  [1mDrag-select text in any pane[0m
+   [2m·[0m  Click Copy Raw
+   [2m·[0m  Click Copy Rewrapped on the boxed paragraph
+   [2m·[0m  Click the cursor icon on the ascii-splash pane
+
+  [2mSome programs trap the mouse — the cursor icon lets you override.[0m
+  [2mascii-splash redraws every frame, so it cancels selections: looks cool, undragable.[0m
+"
+`;
+
+exports[`TutRunner snapshots > renders Keyboard navigation with all items complete 1`] = `
+"[H[2J
+  [1mKeyboard navigation[0m  [2m7/7 complete[0m
+  [2mEsc to go back[0m
+
+   [32m✓[0m  [2mEnter command mode[0m
+   [32m✓[0m  [2mAdd a horizontal divider[0m
+   [32m✓[0m  [2mMove between panes with arrow keys[0m
+   [32m✓[0m  [2mAdd a vertical divider[0m
+   [32m✓[0m  [2mMinimize a pane[0m
+   [32m✓[0m  [2mKill a pane[0m
+   [32m✓[0m  [2mMove a pane with Cmd/Ctrl + arrow[0m
+
+  [2mtmux shortcuts also work — % " d x.[0m
+
+  [32mSection complete.[0m [2mPress [36mEsc[0m[2m to go back.[0m
+"
+`;
+
+exports[`TutRunner snapshots > renders Keyboard navigation with all items incomplete 1`] = `
+"[H[2J
+  [1mKeyboard navigation[0m  [2m0/7 complete[0m
+  [2mEsc to go back[0m
+
+   [33m●[0m  [1mEnter command mode[0m
+      [2mPress LShift then RShift quickly (or LCmd then RCmd on Mac).[0m
+   [2m·[0m  Add a horizontal divider
+   [2m·[0m  Move between panes with arrow keys
+   [2m·[0m  Add a vertical divider
+   [2m·[0m  Minimize a pane
+   [2m·[0m  Kill a pane
+   [2m·[0m  Move a pane with Cmd/Ctrl + arrow
+
+  [2mtmux shortcuts also work — % " d x.[0m
+"
+`;
+
+exports[`TutRunner snapshots > renders the top-level menu 1`] = `
+"[H[2J
+  [1mMouseTerm Playground Tutorial[0m
+  [2m0/17 complete · Esc/q to exit · Enter to open · ↑↓ to navigate[0m
+
+  [36m❯[0m [1mKeyboard navigation[0m  [2m[0/7 complete][0m
+    Alert and TODO  [2m[0/6 complete][0m
+    Copy paste  [2m[0/4 complete][0m
+
+    [2mReset progress[0m
+
+"
+`;
