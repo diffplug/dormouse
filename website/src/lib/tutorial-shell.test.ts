@@ -9,22 +9,35 @@ function createHarness() {
     handleInput: vi.fn(),
     dispose: vi.fn(),
   };
-  const startAsciiSplash = vi.fn((args: string[], onExit: () => void) => {
-    exitProgram = onExit;
-    return program;
-  });
-  const shell = new TutorialShell((data) => output.push(data), startAsciiSplash);
-  return { output, program, shell, startAsciiSplash, exitProgram: () => exitProgram?.() };
+  const startProgram = vi.fn(
+    (name: string, _args: string[], onExit: () => void) => {
+      if (name !== "ascii-splash" && name !== "splash") return null;
+      exitProgram = onExit;
+      return program;
+    },
+  );
+  const shell = new TutorialShell((data) => output.push(data), startProgram);
+  return {
+    output,
+    program,
+    shell,
+    startProgram,
+    exitProgram: () => exitProgram?.(),
+  };
 }
 
-describe("TutorialShell ascii-splash integration", () => {
-  it("launches ascii-splash and delegates input while it is active", () => {
-    const { output, program, shell, startAsciiSplash, exitProgram } = createHarness();
+describe("TutorialShell program dispatch", () => {
+  it("launches the program named by the first token and delegates input", () => {
+    const { output, program, shell, startProgram, exitProgram } = createHarness();
 
     shell.handleInput("ascii-splash --no-mouse\r");
     shell.handleInput("q");
 
-    expect(startAsciiSplash).toHaveBeenCalledWith(["--no-mouse"], expect.any(Function));
+    expect(startProgram).toHaveBeenCalledWith(
+      "ascii-splash",
+      ["--no-mouse"],
+      expect.any(Function),
+    );
     expect(program.start).toHaveBeenCalledTimes(1);
     expect(program.handleInput).toHaveBeenCalledWith("q");
 
@@ -39,6 +52,25 @@ describe("TutorialShell ascii-splash integration", () => {
     shell.dispose();
 
     expect(program.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("auto-launches via runCommand without parsing input", () => {
+    const { program, shell, startProgram } = createHarness();
+
+    shell.runCommand("ascii-splash");
+
+    expect(startProgram).toHaveBeenCalledWith(
+      "ascii-splash",
+      [],
+      expect.any(Function),
+    );
+    expect(program.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("prints an unknown-command message when startProgram returns null", () => {
+    const { output, shell } = createHarness();
+    shell.handleInput("nope\r");
+    expect(output.join("")).toContain("Unknown command");
   });
 
   it("recalls the previous command on up arrow instead of echoing the escape sequence", () => {

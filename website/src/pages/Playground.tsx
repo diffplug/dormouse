@@ -2,14 +2,15 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import SiteHeader from "../components/SiteHeader";
 import { ThemePicker } from "mouseterm-lib/components/ThemePicker";
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
-import { TutorialDetector } from "../lib/tutorial-detection";
+import { TutorialState } from "../lib/tutorial-state";
+import { TutDetector } from "../lib/tut-detector";
+import { TutRunner } from "../lib/tut-runner";
 
 export { Playground as Component };
 
-// Pane IDs — stable so we can assign scenarios before mount
 const PANE_MAIN = "tut-main";
-const PANE_NPM = "tut-npm";
-const PANE_LS = "tut-ls";
+const PANE_TARGET = "tut-target";
+const PANE_BOXED = "tut-boxed";
 
 type FakePtyAdapter = import("mouseterm-lib/lib/platform/fake-adapter").FakePtyAdapter;
 type WallEvent = import("mouseterm-lib/components/Wall").WallEvent;
@@ -21,59 +22,92 @@ function Playground() {
   } | null>(null);
   const adapterRef = useRef<FakePtyAdapter | null>(null);
   const shellRegistryRef = useRef<PlaygroundShellRegistry | null>(null);
-  const detectorRef = useRef<TutorialDetector | null>(null);
+  const detectorRef = useRef<TutDetector | null>(null);
+  const stateRef = useRef<TutorialState | null>(null);
   const dockviewDisposablesRef = useRef<DockviewDisposable[]>([]);
+  const detectorAttachRef = useRef<((api: any) => void) | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     async function loadWall() {
       const platform = await import("mouseterm-lib/lib/platform");
       const registry = await import("mouseterm-lib/lib/terminal-registry");
+      const mouseSelection = await import("mouseterm-lib/lib/mouse-selection");
       const wall = await import("mouseterm-lib/components/Wall");
       const scenarios = await import("mouseterm-lib/lib/platform/fake-scenarios");
       const asciiSplash = await import("../lib/ascii-splash-runner");
-
       await import("mouseterm-lib/index.css");
+      if (cancelled) return;
 
       const adapter = platform.initPlatform("fake");
       registry.initAlertStateReceiver();
       adapterRef.current = adapter;
 
       adapter.setDefaultScenario(scenarios.SCENARIO_SHELL_PROMPT);
-      adapter.setScenario(PANE_NPM, scenarios.SCENARIO_LONG_RUNNING);
-      adapter.setScenario(PANE_LS, scenarios.SCENARIO_LS_OUTPUT);
-      adapter.setScenario(PANE_MAIN, scenarios.SCENARIO_TUTORIAL_MOTD);
+      adapter.setScenario(PANE_TARGET, scenarios.SCENARIO_SHELL_PROMPT);
+      adapter.setScenario(PANE_BOXED, scenarios.SCENARIO_BOXED_PARAGRAPH);
+      // tut-main has no scenario — runner takes over the screen entirely.
 
-      // Named scenarios print demo output first; the shell takes over once
-      // scenario playback ends.
+      const tutorialState = new TutorialState();
+      stateRef.current = tutorialState;
+      const detector = new TutDetector(tutorialState);
+      detectorRef.current = detector;
+
       const shellRegistry = new PlaygroundShellRegistry(
         adapter,
-        (terminalId, args, onExit) => new asciiSplash.AsciiSplashRunner({
-          adapter,
-          terminalId,
-          args,
-          onExit,
-        }),
+        (terminalId, name, args, onExit) => {
+          if (name === "tut") {
+            return new TutRunner({
+              adapter,
+              terminalId,
+              state: tutorialState,
+              onExit,
+              onTriggerBusyDemo: () => {
+                adapter.playScenarioNow(PANE_TARGET, scenarios.SCENARIO_BUSY_TASK_DEMO);
+              },
+            });
+          }
+          if (name === "ascii-splash" || name === "splash") {
+            return new asciiSplash.AsciiSplashRunner({
+              adapter,
+              terminalId,
+              args,
+              onExit,
+            });
+          }
+          return null;
+        },
       );
       shellRegistryRef.current = shellRegistry;
-      const mainShell = shellRegistry.ensureShell(PANE_MAIN);
-      shellRegistry.ensureShell(PANE_NPM);
-      shellRegistry.ensureShell(PANE_LS);
 
-      const detector = new TutorialDetector(mainShell);
-      detectorRef.current = detector;
+      const mainShell = shellRegistry.ensureShell(PANE_MAIN);
+      shellRegistry.ensureShell(PANE_TARGET);
+      shellRegistry.ensureShell(PANE_BOXED);
+
+      // Auto-launch the tutorial in the main pane.
+      mainShell.runCommand("tut");
+
+      // Stash modules for handleApiReady to attach the detector once
+      // dockview is alive.
+      detectorAttachRef.current = (api) => {
+        detector.attach(api, registry, mouseSelection);
+      };
 
       setWallModule({ Wall: wall.Wall });
     }
     loadWall();
 
     return () => {
+      cancelled = true;
       for (const disposable of dockviewDisposablesRef.current) {
         disposable.dispose();
       }
       dockviewDisposablesRef.current = [];
       detectorRef.current?.dispose();
+      detectorRef.current = null;
       shellRegistryRef.current?.disposeAll();
       shellRegistryRef.current = null;
+      stateRef.current = null;
     };
   }, []);
 
@@ -87,24 +121,24 @@ function Playground() {
     dockviewDisposablesRef.current.push(addDisposable);
 
     api.addPanel({
-      id: PANE_NPM,
+      id: PANE_TARGET,
       component: "terminal",
       tabComponent: "terminal",
-      title: "npm install",
+      title: "demo",
       position: { referencePanel: PANE_MAIN, direction: "right" },
     });
     api.addPanel({
-      id: PANE_LS,
+      id: PANE_BOXED,
       component: "terminal",
       tabComponent: "terminal",
-      title: "project",
-      position: { referencePanel: PANE_NPM, direction: "below" },
+      title: "release notes",
+      position: { referencePanel: PANE_TARGET, direction: "below" },
     });
 
     const mainPanel = api.getPanel(PANE_MAIN);
     if (mainPanel) mainPanel.api.setActive();
 
-    detectorRef.current?.attach(api);
+    detectorAttachRef.current?.(api);
   }, []);
 
   const handleWallEvent = useCallback((event: WallEvent) => {

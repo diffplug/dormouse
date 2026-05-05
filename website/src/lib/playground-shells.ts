@@ -3,9 +3,10 @@ import { TutorialShell, type InteractiveProgram } from "./tutorial-shell";
 
 export type StartPlaygroundProgram = (
   terminalId: string,
+  name: string,
   args: string[],
   onExit: () => void,
-) => InteractiveProgram;
+) => InteractiveProgram | null;
 
 export class PlaygroundShellRegistry {
   private adapter: FakePtyAdapter;
@@ -27,7 +28,7 @@ export class PlaygroundShellRegistry {
 
     const shell = new TutorialShell(
       (data) => this.adapter.sendOutput(id, data),
-      (args, onExit) => this.startProgram(id, args, onExit),
+      (name, args, onExit) => this.startProgram(id, name, args, onExit),
     );
     this.shells.set(id, shell);
     this.adapter.setInputHandler(id, (data) => shell.handleInput(data));

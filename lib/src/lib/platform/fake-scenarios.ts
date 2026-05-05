@@ -75,19 +75,6 @@ export const SCENARIO_SHELL_PROMPT: FakeScenario = {
   chunks: [instant(PROMPT, 500)],
 };
 
-/** Tutorial MOTD — welcome message above the prompt, styled with dim text. */
-export const SCENARIO_TUTORIAL_MOTD: FakeScenario = {
-  name: 'tutorial-motd',
-  chunks: [
-    instant(
-      `\r\n${fg(90)}  Welcome to MouseTerm.${RESET}\r\n` +
-      `${fg(90)}  Type ${fg(36)}tut${fg(90)} to start the interactive tutorial.${RESET}\r\n\r\n`,
-      300,
-    ),
-    instant(PROMPT, 200),
-  ],
-};
-
 /** Types `ls -la` then shows colorized directory listing. */
 export const SCENARIO_LS_OUTPUT: FakeScenario = {
   name: 'ls-output',
@@ -152,6 +139,54 @@ export const SCENARIO_LONG_RUNNING: FakeScenario = {
     instant(` ${fg(32)}done!${RESET}\r\n`, 200),
     instant(`\r\nadded 847 packages in 5.2s\r\n\r\n`, 100),
     instant(PROMPT, 200),
+  ],
+};
+
+/**
+ * Fake busy-task demo for the playground tutorial. Designed to drive the
+ * alert-manager through BUSY → MIGHT_NEED_ATTENTION → ALERT_RINGING with
+ * no shell integration:
+ *   - Three output bursts spaced ~1.6s apart (>1.5s = "still working")
+ *   - Then ~6s of silence so the silence thresholds elapse
+ */
+export const SCENARIO_BUSY_TASK_DEMO: FakeScenario = {
+  name: 'busy-task-demo',
+  chunks: [
+    instant(`${fg(33)}Building project...${RESET}\r\n`, 0),
+    instant(`  ${fg(90)}compiling src/main.ts${RESET}\r\n`, 1600),
+    instant(`  ${fg(90)}compiling src/util.ts${RESET}\r\n`, 1600),
+    instant(`  ${fg(90)}bundling output${RESET}\r\n`, 1600),
+    instant(`${fg(32)}done!${RESET}\r\n`, 200),
+    instant(PROMPT, 100),
+  ],
+};
+
+/**
+ * Boxed paragraph for Copy Rewrapped vs Copy Raw demonstration. The frame
+ * is pure box-drawing characters so `rewrap.ts` strips them; the text
+ * inside wraps across lines so Rewrapped joins them with single spaces.
+ */
+export const SCENARIO_BOXED_PARAGRAPH: FakeScenario = {
+  name: 'boxed-paragraph',
+  chunks: [
+    instant(
+      [
+        '',
+        `${fg(36)}┌─────────────────────────────────────────┐${RESET}`,
+        `${fg(36)}│${RESET}  ${BOLD}Release notes — v1.4.0${RESET}                ${fg(36)}│${RESET}`,
+        `${fg(36)}├─────────────────────────────────────────┤${RESET}`,
+        `${fg(36)}│${RESET}  MouseTerm now keeps a tab visible       ${fg(36)}│${RESET}`,
+        `${fg(36)}│${RESET}  even while a long-running command is    ${fg(36)}│${RESET}`,
+        `${fg(36)}│${RESET}  hidden in the baseboard, so background  ${fg(36)}│${RESET}`,
+        `${fg(36)}│${RESET}  work never gets lost.                   ${fg(36)}│${RESET}`,
+        `${fg(36)}│${RESET}                                          ${fg(36)}│${RESET}`,
+        `${fg(36)}│${RESET}  Drag-select the paragraph above and     ${fg(36)}│${RESET}`,
+        `${fg(36)}│${RESET}  try Copy Raw vs Copy Rewrapped.         ${fg(36)}│${RESET}`,
+        `${fg(36)}└─────────────────────────────────────────┘${RESET}`,
+        '',
+      ].join('\r\n'),
+      400,
+    ),
   ],
 };
 

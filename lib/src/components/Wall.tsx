@@ -198,12 +198,16 @@ export function Wall({
     if (!ck || ck.exit) return;
     setConfirmKill({ ...ck, exit: 'confirm' });
     onExit();
+    onEventRef.current?.({ type: 'kill', id: ck.id });
     confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
   }, []);
 
   // --- External event notifications ---
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
+  const fireEvent = useCallback((event: WallEvent) => {
+    onEventRef.current?.(event);
+  }, []);
 
   useEffect(() => { onEventRef.current?.({ type: 'modeChange', mode }); }, [mode]);
   useEffect(() => { onEventRef.current?.({ type: 'zoomChange', zoomed }); }, [zoomed]);
@@ -555,6 +559,7 @@ export function Wall({
     setConfirmKill,
     setRenamingPaneId,
     setSelectedId,
+    fireEvent,
   });
 
   // --- Render ---

@@ -1,7 +1,7 @@
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { DockviewApi } from 'dockview-react';
 import type { ConfirmKill } from '../../KillConfirm';
-import type { DooredItem, WallMode, WallSelectionKind } from '../wall-types';
+import type { DooredItem, WallEvent, WallMode, WallSelectionKind } from '../wall-types';
 import type { WallActions } from '../wall-context';
 
 /** Refs + callbacks shared by every keyboard branch. Bundled to avoid 25-arg
@@ -30,6 +30,7 @@ export interface WallKeyboardCtx {
   setConfirmKill: Dispatch<SetStateAction<ConfirmKill | null>>;
   setRenamingPaneId: Dispatch<SetStateAction<string | null>>;
   setSelectedId: Dispatch<SetStateAction<string | null>>;
+  fireEvent: (event: WallEvent) => void;
 }
 
 /** Per-press dual-tap state — left-Meta then right-Meta within 500ms exits

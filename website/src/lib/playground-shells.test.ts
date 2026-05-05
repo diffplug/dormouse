@@ -42,7 +42,12 @@ describe("PlaygroundShellRegistry", () => {
     registry.ensureShell("two");
     adapter.writePty("two", "ascii-splash --no-mouse\r");
 
-    expect(startProgram).toHaveBeenCalledWith("two", ["--no-mouse"], expect.any(Function));
+    expect(startProgram).toHaveBeenCalledWith(
+      "two",
+      "ascii-splash",
+      ["--no-mouse"],
+      expect.any(Function),
+    );
     expect(program.start).toHaveBeenCalledTimes(1);
   });
 

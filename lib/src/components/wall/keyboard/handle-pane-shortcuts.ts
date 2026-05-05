@@ -70,6 +70,7 @@ export function handlePaneShortcuts(
 
     swapTerminals(sid, targetId);
     swapPanelTitles(api, sid, targetId);
+    ctx.fireEvent({ type: 'move', fromId: sid, toId: targetId });
 
     navHistory.current = { direction: dir, fromId: sid };
     ctx.selectPane(targetId);

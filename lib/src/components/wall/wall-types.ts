@@ -14,6 +14,8 @@ export type WallEvent =
   | { type: 'zoomChange'; zoomed: boolean }
   | { type: 'minimizeChange'; count: number }
   | { type: 'split'; direction: 'horizontal' | 'vertical'; source: 'keyboard' | 'mouse' }
-  | { type: 'selectionChange'; id: string | null; kind: WallSelectionKind };
+  | { type: 'selectionChange'; id: string | null; kind: WallSelectionKind }
+  | { type: 'kill'; id: string }
+  | { type: 'move'; fromId: string; toId: string };
 
 export type SpawnDirection = 'left' | 'top' | 'top-left';
