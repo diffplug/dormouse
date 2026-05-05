@@ -23,6 +23,7 @@ const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
 const BOLD = `${ESC}1m`;
 const DIM = `${ESC}2m`;
+const ITALIC = `${ESC}3m`;
 const fg = (code: number) => `${ESC}${code}m`;
 
 const ENTER_ALT = "\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l";
@@ -402,7 +403,7 @@ export class TutRunner implements InteractiveProgram {
       : item.title;
     const lines = [`   ${mark}  ${title}`];
     if (isActive && item.hint) {
-      lines.push(`      ${DIM}${item.hint}${RESET}`);
+      lines.push(`        ${ITALIC}${item.hint}${RESET}`);
     }
     return lines;
   }
