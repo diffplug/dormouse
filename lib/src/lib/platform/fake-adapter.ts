@@ -209,9 +209,16 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.inputHandlers.delete(id);
   }
 
-  /** Send data to a terminal's output (as if the PTY produced it). */
+  /**
+   * Send data to a terminal's output (as if the PTY produced it). Drives
+   * the alert-manager's activity feed the same way real PTY data does in
+   * the Tauri/VSCode adapters — without this, browser-side echo (e.g.
+   * TutorialShell's per-character echo, AsciiSplashRunner frames) never
+   * reaches the activity monitor and the bell can never tilt or ring.
+   */
   sendOutput(id: string, data: string): void {
     if (!this.terminals.has(id)) return;
+    this.alertManager.onData(id);
     for (const handler of this.dataHandlers) {
       handler({ id, data });
     }
