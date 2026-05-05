@@ -1,11 +1,3 @@
-/**
- * Tutorial shell — handles the `tut` command in the playground's fake terminal.
- *
- * Provides line editing (echo, backspace) and command parsing.
- * Routes `tut`, `tut status`, `tut reset` to tutorial logic.
- */
-
-// ANSI helpers
 const ESC = '\x1b[';
 const RESET = `${ESC}0m`;
 const BOLD = `${ESC}1m`;
@@ -13,6 +5,7 @@ const DIM = `${ESC}2m`;
 const fg = (code: number) => `${ESC}${code}m`;
 
 const PROMPT = `${fg(32)}user${RESET}@${fg(36)}mouseterm${RESET}:${BOLD}${fg(34)}~${RESET}$ `;
+const CLEAR_LINE = `${ESC}2K`;
 
 const STORAGE_PREFIX = 'mouseterm-tutorial-step-';
 const TOTAL_STEPS = 6;
@@ -65,34 +58,119 @@ const STEPS: TutorialStep[] = [
 
 export type SendOutput = (data: string) => void;
 
+export interface InteractiveProgram {
+  start(): void;
+  handleInput(data: string): void;
+  dispose(): void;
+}
+
+export type StartInteractiveProgram = (args: string[], onExit: () => void) => InteractiveProgram;
+
 export class TutorialShell {
   private lineBuffer = '';
+  private history: string[] = [];
+  private historyIndex: number | null = null;
+  private historyDraft = '';
   private sendOutput: SendOutput;
+  private startAsciiSplash?: StartInteractiveProgram;
+  private activeProgram: InteractiveProgram | null = null;
 
-  constructor(sendOutput: SendOutput) {
+  constructor(sendOutput: SendOutput, startAsciiSplash?: StartInteractiveProgram) {
     this.sendOutput = sendOutput;
+    this.startAsciiSplash = startAsciiSplash;
   }
 
-  /** Handle a keystroke from the user. */
+  dispose(): void {
+    this.activeProgram?.dispose();
+    this.activeProgram = null;
+  }
+
   handleInput(data: string): void {
-    for (const ch of data) {
+    if (this.activeProgram) {
+      this.activeProgram.handleInput(data);
+      return;
+    }
+
+    for (let index = 0; index < data.length; index++) {
+      const ch = data[index];
+      if (ch === '\x1b') {
+        const remaining = data.slice(index);
+        const csi = remaining.match(/^\x1b\[([0-?]*)([ -/]*)([@-~])/);
+        if (csi) {
+          this.handleControlSequence(csi[3]);
+          index += csi[0].length - 1;
+          continue;
+        }
+        const ss3 = remaining.match(/^\x1bO(.)/);
+        if (ss3) {
+          this.handleControlSequence(ss3[1]);
+          index += ss3[0].length - 1;
+          continue;
+        }
+        // Lone escape byte: drop it so partial sequences don't echo.
+        continue;
+      }
+
       if (ch === '\r' || ch === '\n') {
         this.sendOutput('\r\n');
-        this.processCommand(this.lineBuffer.trim());
+        const command = this.lineBuffer.trim();
+        this.pushHistory(command);
+        this.processCommand(command);
         this.lineBuffer = '';
+        this.historyIndex = null;
+        this.historyDraft = '';
       } else if (ch === '\x7f' || ch === '\b') {
-        // Backspace
         if (this.lineBuffer.length > 0) {
           this.lineBuffer = this.lineBuffer.slice(0, -1);
-          // Move cursor back, overwrite with space, move back again
+          this.historyIndex = null;
           this.sendOutput('\b \b');
         }
       } else if (ch >= ' ') {
-        // Printable character
         this.lineBuffer += ch;
+        this.historyIndex = null;
         this.sendOutput(ch);
       }
     }
+  }
+
+  private handleControlSequence(finalByte: string): void {
+    if (finalByte === 'A') {
+      this.recallHistory(-1);
+    } else if (finalByte === 'B') {
+      this.recallHistory(1);
+    }
+  }
+
+  private pushHistory(command: string): void {
+    if (!command) return;
+    if (this.history[this.history.length - 1] === command) return;
+    this.history.push(command);
+  }
+
+  private recallHistory(direction: -1 | 1): void {
+    if (this.history.length === 0) return;
+    if (this.historyIndex === null) {
+      if (direction === 1) return;
+      this.historyDraft = this.lineBuffer;
+      this.historyIndex = this.history.length - 1;
+    } else {
+      this.historyIndex += direction;
+      if (this.historyIndex < 0) {
+        this.historyIndex = 0;
+      } else if (this.historyIndex >= this.history.length) {
+        this.historyIndex = null;
+        this.lineBuffer = this.historyDraft;
+        this.redrawPromptLine();
+        return;
+      }
+    }
+
+    this.lineBuffer = this.history[this.historyIndex];
+    this.redrawPromptLine();
+  }
+
+  private redrawPromptLine(): void {
+    this.sendOutput(`\r${CLEAR_LINE}${PROMPT}${this.lineBuffer}`);
   }
 
   private processCommand(cmd: string): void {
@@ -101,14 +179,25 @@ export class TutorialShell {
       return;
     }
 
+    const [argv0, ...args] = cmd.split(/\s+/);
     if (cmd === 'tut') {
       this.showCurrentStep();
     } else if (cmd === 'tut status') {
       this.showStatus();
     } else if (cmd === 'tut reset') {
       this.resetProgress();
+    } else if (argv0 === 'ascii-splash' || argv0 === 'splash') {
+      if (this.startAsciiSplash) {
+        this.activeProgram = this.startAsciiSplash(args, () => {
+          this.activeProgram = null;
+          this.sendOutput(PROMPT);
+        });
+        this.activeProgram.start();
+        return;
+      }
+      this.sendOutput(`${fg(90)}ascii-splash is not available in this environment.${RESET}\r\n`);
     } else {
-      this.sendOutput(`${fg(90)}Unknown command. Type ${fg(36)}tut${fg(90)} to start the tutorial.${RESET}\r\n`);
+      this.sendOutput(`${fg(90)}Unknown command. Type ${fg(36)}tut${fg(90)} or ${fg(36)}ascii-splash${fg(90)}.${RESET}\r\n`);
     }
 
     this.sendOutput(PROMPT);

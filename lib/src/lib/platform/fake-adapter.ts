@@ -7,11 +7,24 @@ export interface FakeScenario {
   exitCode?: number;
 }
 
+export interface FakePtySize {
+  cols: number;
+  rows: number;
+}
+
+export interface FakePtyResizeDetail extends FakePtySize {
+  id: string;
+}
+
+const DEFAULT_PTY_SIZE: FakePtySize = { cols: 80, rows: 30 };
+
 export class FakePtyAdapter implements PlatformAdapter {
   private dataHandlers = new Set<(detail: { id: string; data: string }) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
+  private resizeHandlers = new Set<(detail: FakePtyResizeDetail) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private terminals = new Set<string>();
+  private terminalSizes = new Map<string, FakePtySize>();
   private activeTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
   private defaultScenario: FakeScenario | null = null;
   private scenarioMap = new Map<string, FakeScenario>();
@@ -53,10 +66,13 @@ export class FakePtyAdapter implements PlatformAdapter {
     }
     this.activeTimers.clear();
     this.terminals.clear();
+    this.terminalSizes.clear();
     this.defaultScenario = null;
     this.scenarioMap.clear();
     this.dataHandlers.clear();
     this.exitHandlers.clear();
+    this.resizeHandlers.clear();
+    this.inputHandlers.clear();
     this.alertManager.dispose();
     this.alertManager = new AlertManager();
     this.alertManager.onStateChange((id, state) => {
@@ -70,8 +86,12 @@ export class FakePtyAdapter implements PlatformAdapter {
     return [{ name: 'fake-shell', path: '/bin/fake', args: [] }];
   }
 
-  spawnPty(id: string): void {
+  spawnPty(id: string, options?: { cols?: number; rows?: number }): void {
     this.terminals.add(id);
+    this.terminalSizes.set(id, {
+      cols: options?.cols ?? DEFAULT_PTY_SIZE.cols,
+      rows: options?.rows ?? DEFAULT_PTY_SIZE.rows,
+    });
     const scenario = this.scenarioMap.get(id) ?? this.defaultScenario;
     if (scenario) {
       this.playScenario(id, scenario);
@@ -94,7 +114,16 @@ export class FakePtyAdapter implements PlatformAdapter {
     }
   }
 
-  resizePty(_id: string, _cols: number, _rows: number): void {}
+  resizePty(id: string, cols: number, rows: number): void {
+    if (!this.terminals.has(id)) return;
+    const next = { cols, rows };
+    const prev = this.terminalSizes.get(id);
+    if (prev?.cols === cols && prev.rows === rows) return;
+    this.terminalSizes.set(id, next);
+    for (const handler of this.resizeHandlers) {
+      handler({ id, ...next });
+    }
+  }
 
   killPty(id: string): void {
     const timers = this.activeTimers.get(id);
@@ -103,6 +132,8 @@ export class FakePtyAdapter implements PlatformAdapter {
       this.activeTimers.delete(id);
     }
     this.terminals.delete(id);
+    this.terminalSizes.delete(id);
+    this.inputHandlers.delete(id);
     for (const handler of this.exitHandlers) {
       handler({ id, exitCode: 0 });
     }
@@ -127,6 +158,10 @@ export class FakePtyAdapter implements PlatformAdapter {
   async getCwd(_id: string): Promise<string | null> { return null; }
   async getScrollback(_id: string): Promise<string | null> { return null; }
 
+  getPtySize(id: string): FakePtySize {
+    return this.terminalSizes.get(id) ?? DEFAULT_PTY_SIZE;
+  }
+
   async readClipboardFilePaths(): Promise<string[] | null> { return null; }
   async readClipboardImageAsFilePath(): Promise<string | null> { return null; }
 
@@ -135,6 +170,12 @@ export class FakePtyAdapter implements PlatformAdapter {
   offPtyList(_handler: (detail: { ptys: PtyInfo[] }) => void): void {}
   onPtyReplay(_handler: (detail: { id: string; data: string }) => void): void {}
   offPtyReplay(_handler: (detail: { id: string; data: string }) => void): void {}
+  onPtyResize(handler: (detail: FakePtyResizeDetail) => void): () => void {
+    this.resizeHandlers.add(handler);
+    return () => {
+      this.resizeHandlers.delete(handler);
+    };
+  }
   onRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}
   offRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}
   notifySessionFlushComplete(_requestId: string): void {}

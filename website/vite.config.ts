@@ -8,6 +8,10 @@ export default defineConfig({
   resolve: {
     alias: {
       "mouseterm-lib": path.resolve(__dirname, "../lib/src"),
+      "ascii-splash-internal": path.resolve(
+        __dirname,
+        "node_modules/ascii-splash/dist",
+      ),
       "@standalone-latest": path.resolve(
         __dirname,
         "public/standalone-latest.json",

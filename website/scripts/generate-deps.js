@@ -1,5 +1,5 @@
-import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,9 +7,36 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../..");
 const outPath = resolve(__dirname, "../src/data/dependencies.json");
 const themeExtensionsPath = resolve(repoRoot, "lib/src/lib/themes/bundled-extensions.json");
+const productDependencyFilters = [
+  "mouseterm",
+  "mouseterm-standalone",
+  "mouseterm-lib",
+];
 
+function getInstalledStoreDir() {
+  if (process.env.PNPM_STORE_DIR) return process.env.PNPM_STORE_DIR;
+  try {
+    const modulesYaml = readFileSync(resolve(repoRoot, "node_modules/.modules.yaml"), "utf-8");
+    return modulesYaml.match(/"storeDir":\s*"([^"]+)"/)?.[1] ?? null;
+  } catch {
+    // Codex worktrees often do not have node_modules, but the shared pnpm
+    // store is still present under PNPM_HOME.
+    const pnpmHomeStore = process.env.PNPM_HOME ? resolve(process.env.PNPM_HOME, "store/v10") : null;
+    return pnpmHomeStore && existsSync(pnpmHomeStore) ? pnpmHomeStore : null;
+  }
+}
+
+const storeDir = getInstalledStoreDir();
+const licenseArgs = [
+  ...(storeDir ? [`--config.store-dir=${storeDir}`] : []),
+  ...productDependencyFilters.flatMap((filter) => ["--filter", filter]),
+  "licenses",
+  "list",
+  "--prod",
+  "--json",
+];
 const raw = JSON.parse(
-  execSync("pnpm licenses list --prod --json", { cwd: repoRoot, encoding: "utf-8" })
+  execFileSync("pnpm", licenseArgs, { cwd: repoRoot, encoding: "utf-8" })
 );
 
 const licenseAliases = {
@@ -61,11 +88,16 @@ const missingAuthor = {
   "@tauri-apps/plugin-shell": "Tauri Apps Contributors",
   "@tauri-apps/plugin-updater": "Tauri Apps Contributors",
   "@xterm/xterm": "Christopher Jeffrey, SourceLair Private Company, xterm.js authors",
+  "atomically": "Fabio Spampinato",
   "node-addon-api": "Node.js API collaborators",
+  "pngjs": "pngjs contributors",
   "react": "Meta Platforms, Inc. and affiliates",
   "react-dom": "Meta Platforms, Inc. and affiliates",
   "scheduler": "Meta Platforms, Inc. and affiliates",
+  "stubborn-fs": "Fabio Spampinato",
+  "stubborn-utils": "Fabio Spampinato",
   "tailwindcss": "Tailwind Labs, Inc.",
+  "when-exit": "Fabio Spampinato",
 };
 for (const dep of deps) {
   if (!dep.license) {

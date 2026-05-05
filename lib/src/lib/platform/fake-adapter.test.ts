@@ -90,11 +90,94 @@ describe('FakePtyAdapter', () => {
     expect(events2).toEqual(['x', 'y']);
   });
 
-  it('resizePty is a no-op', () => {
+  it('tracks default PTY size on spawn', () => {
     const { adapter } = createAdapter();
     adapter.spawnPty('t1');
-    // Should not throw
+    expect(adapter.getPtySize('t1')).toEqual({ cols: 80, rows: 30 });
+  });
+
+  it('tracks requested PTY size on spawn', () => {
+    const { adapter } = createAdapter();
+    adapter.spawnPty('t1', { cols: 132, rows: 43 });
+    expect(adapter.getPtySize('t1')).toEqual({ cols: 132, rows: 43 });
+  });
+
+  it('tracks resizePty and notifies resize subscribers', () => {
+    const { adapter } = createAdapter();
+    const resizes: { id: string; cols: number; rows: number }[] = [];
+    adapter.spawnPty('t1');
+    adapter.onPtyResize((detail) => resizes.push(detail));
+
     adapter.resizePty('t1', 120, 40);
+    adapter.resizePty('t1', 120, 40);
+    adapter.resizePty('t1', 121, 40);
+
+    expect(adapter.getPtySize('t1')).toEqual({ cols: 121, rows: 40 });
+    expect(resizes).toEqual([
+      { id: 't1', cols: 120, rows: 40 },
+      { id: 't1', cols: 121, rows: 40 },
+    ]);
+  });
+
+  it('unsubscribes resize subscribers', () => {
+    const { adapter } = createAdapter();
+    const resizes: { id: string; cols: number; rows: number }[] = [];
+    adapter.spawnPty('t1');
+    const unsubscribe = adapter.onPtyResize((detail) => resizes.push(detail));
+
+    adapter.resizePty('t1', 120, 40);
+    unsubscribe();
+    adapter.resizePty('t1', 121, 41);
+
+    expect(resizes).toEqual([{ id: 't1', cols: 120, rows: 40 }]);
+  });
+
+  it('ignores resizePty for non-spawned terminals', () => {
+    const { adapter } = createAdapter();
+    const resizes: { id: string; cols: number; rows: number }[] = [];
+    adapter.onPtyResize((detail) => resizes.push(detail));
+
+    adapter.resizePty('nope', 120, 40);
+
+    expect(adapter.getPtySize('nope')).toEqual({ cols: 80, rows: 30 });
+    expect(resizes).toEqual([]);
+  });
+
+  it('clears tracked size on kill', () => {
+    const { adapter } = createAdapter();
+    adapter.spawnPty('t1', { cols: 132, rows: 43 });
+    adapter.killPty('t1');
+    expect(adapter.getPtySize('t1')).toEqual({ cols: 80, rows: 30 });
+  });
+
+  it('clears input handlers on kill', () => {
+    const { adapter, dataEvents } = createAdapter();
+    const handled: string[] = [];
+    adapter.spawnPty('t1');
+    adapter.setInputHandler('t1', (data) => handled.push(data));
+
+    adapter.writePty('t1', 'before');
+    adapter.killPty('t1');
+    adapter.spawnPty('t1');
+    adapter.writePty('t1', 'after');
+
+    expect(handled).toEqual(['before']);
+    expect(dataEvents).toEqual([{ id: 't1', data: 'after' }]);
+  });
+
+  it('clears input handlers on reset', () => {
+    const { adapter, dataEvents } = createAdapter();
+    const handled: string[] = [];
+    adapter.spawnPty('t1');
+    adapter.setInputHandler('t1', (data) => handled.push(data));
+
+    adapter.reset();
+    adapter.onPtyData((detail) => dataEvents.push(detail));
+    adapter.spawnPty('t1');
+    adapter.writePty('t1', 'after-reset');
+
+    expect(handled).toEqual([]);
+    expect(dataEvents).toEqual([{ id: 't1', data: 'after-reset' }]);
   });
 
   // --- Scenario Playback (Story 11.2) ---

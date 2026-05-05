@@ -10,7 +10,7 @@ At the `/playground` route on the website. **Status: Implemented** (Epics 14, 15
 
 ### Implementation
 
-- `website/src/pages/Playground.tsx` — Page component. Dynamically imports Wall (SSR-safe). Initializes `FakePtyAdapter`, `TutorialShell`, and `TutorialDetector`. Passes `onApiReady` to set up the 3-pane layout and `onEvent` for step detection.
+- `website/src/pages/Playground.tsx` — Page component. Dynamically imports Wall (SSR-safe). Initializes `FakePtyAdapter`, per-terminal `TutorialShell` instances through `PlaygroundShellRegistry`, `AsciiSplashRunner`, and `TutorialDetector`. Passes `onApiReady` to set up the 3-pane layout and `onEvent` for step detection.
 - `website/src/components/SiteHeader.tsx` — Shared header. Accepts an optional playground-only `controls` slot and a `themeAware` mode that reads the active VSCode theme variables.
 - `mouseterm-lib/components/ThemePicker` — Shared header dropdown for bundled and installed themes. The playground passes `variant="playground-header"` and the footer action opens the OpenVSX installer.
 - `website/vite.config.ts` — Vite alias `mouseterm-lib` → `../lib/src` for workspace imports.
@@ -19,13 +19,15 @@ At the `/playground` route on the website. **Status: Implemented** (Epics 14, 15
 
 The sandbox starts pre-populated — not empty. Scenarios assigned via `FakePtyAdapter.setScenario()` before Wall mounts:
 
-- **Pane 1** (`tut-main`, left, ~60%): `SCENARIO_TUTORIAL_MOTD` — MOTD welcome message + shell prompt. `TutorialShell` handles all input via `FakePtyAdapter.setInputHandler()`.
-- **Pane 2** (`tut-npm`, right-top, ~40%): `SCENARIO_LONG_RUNNING` — `npm install` with progress dots.
+- **Pane 1** (`tut-main`, left, ~60%): `SCENARIO_TUTORIAL_MOTD` — MOTD welcome message + shell prompt.
+- **Pane 2** (`tut-npm`, right-top, ~40%): `SCENARIO_LONG_RUNNING` — `npm install` with progress dots, then returns to the shell prompt.
 - **Pane 3** (`tut-ls`, right-bottom): `SCENARIO_LS_OUTPUT` — `ls -la` output with a prompt.
 
 The two right-side panes are added in `onApiReady` with `position: { referencePanel, direction }` after Wall creates the initial main pane.
 
-## The `tut` Command
+Every playground pane gets its own `TutorialShell` input handler through `PlaygroundShellRegistry`. Initial demo scenarios own their output while they are playing, then the shell handles Enter, line editing, `tut`, and `ascii-splash` / `splash`. Newly split or spawned fake terminals use `SCENARIO_SHELL_PROMPT` by default so they start at `user@mouseterm:~$` instead of a blank terminal.
+
+## Playground Shell Commands
 
 Implemented in `website/src/lib/tutorial-shell.ts` (`TutorialShell` class).
 
@@ -34,9 +36,33 @@ The fake terminal accepts these inputs:
 - **`tut`** — Shows the current tutorial step (or the next incomplete one). Does NOT show the full checklist upfront.
 - **`tut status`** — Shows all 6 steps with `[x]`/`[ ]` completion markers, grouped by phase.
 - **`tut reset`** — Clears localStorage progress and confirms.
-- **Anything else** — `Unknown command. Type tut to start the tutorial.`
+- **`ascii-splash` / `splash`** — Launches the browser playground runner for `ascii-splash@0.3.0`.
+- **Anything else** — `Unknown command. Type tut or ascii-splash.`
 
-`TutorialShell` provides full line editing (character echo, backspace) and parses commands on Enter. Output goes through `FakePtyAdapter.sendOutput()`.
+`TutorialShell` provides line editing (character echo, backspace), command history (`Up` / `Down` over xterm cursor-key escape sequences), and parses commands on Enter. Output goes through `FakePtyAdapter.sendOutput()`.
+
+### `ascii-splash`
+
+Implemented in `website/src/lib/ascii-splash-runner.ts` (`AsciiSplashRunner` class). That file's top comment is the source note for the browser adapter: it lists the upstream `ascii-splash@0.3.0` internals being reused and the local modifications made for MouseTerm/xterm/FakePty integration.
+
+The runner uses the real upstream `ascii-splash` engine, buffer, themes, UI overlays, command parser/executor, transitions, and pattern classes. It does **not** import the upstream CLI entrypoint or `terminal-kit` renderer. Instead, it provides a browser terminal boundary:
+
+- Renderer output is ANSI bytes sent through `FakePtyAdapter.sendOutput()`.
+- Keyboard and SGR mouse bytes from `FakePtyAdapter.writePty()` are decoded and routed to the upstream command/pattern controls.
+- Resize events come from `FakePtyAdapter.onPtyResize()`.
+- Start/cleanup uses xterm alt-screen, cursor visibility, and mouse-reporting control sequences.
+
+Supported CLI options in the playground runner:
+
+- `--pattern` / `-p`
+- `--quality` / `-q`
+- `--fps` / `-f`
+- `--theme` / `-t`
+- `--no-mouse`
+- `--help` / `-h`
+- `--version` / `-V`
+
+Exit with `q`, Escape, or Ctrl+C. Config persistence is disabled in the playground; upstream save/favorite commands report that no config loader is available.
 
 ### Cold Start
 
@@ -142,12 +168,14 @@ The picker restores the persisted active theme on mount. The playground header i
 
 - All progress keyed as `mouseterm-tutorial-step-N` in localStorage (values: `'true'`).
 - `FakePtyAdapter` extensions: `setInputHandler(id, fn)` routes `writePty` calls to a custom handler; `sendOutput(id, data)` writes to a terminal's output stream.
+- `PlaygroundShellRegistry` creates one `TutorialShell` per pane id, clears input handlers on disposal, and starts `AsciiSplashRunner` against the pane that launched it.
+- `FakePtyAdapter` also tracks fake PTY dimensions from `spawnPty()` / `resizePty()`, exposes `getPtySize(id)`, and provides `onPtyResize(fn)` for browser-side fake programs such as `AsciiSplashRunner`.
 - `Wall` extensions: `initialPaneIds` prop seeds the first pane(s); `onApiReady` callback prop exposes `DockviewApi`; `onEvent` callback prop fires `WallEvent` for mode/zoom/minimize/selection/split changes (types: `modeChange`, `zoomChange`, `minimizeChange`, `split`, `selectionChange`).
 - `SCENARIO_TUTORIAL_MOTD` scenario added to `lib/src/lib/platform/fake-scenarios.ts`.
 
 ## Mouse and Clipboard Feature Coverage
 
-The Playground is the primary dogfood surface for the features in `docs/specs/mouse-and-clipboard.md`. As of the current three-pane layout (tutorial MOTD, `npm install`, `ls -la`) most of those features are not reachable from the Playground — the scenarios don't emit the relevant escape sequences or the right kinds of text.
+The Playground is the primary dogfood surface for the features in `docs/specs/mouse-and-clipboard.md`. The initial three-pane layout (tutorial MOTD, `npm install`, `ls -la`) still has limited coverage, but the main pane can now launch `ascii-splash`, which exercises mouse reporting and animated redraw behavior.
 
 ### Current state
 
@@ -155,13 +183,13 @@ Legend: ✅ exercisable today, ⚠️ partial, ❌ not exercisable.
 
 | Spec § | Feature | Status | Why |
 |---|---|---|---|
-| §1 | Mouse icon visible when program requests reporting | ❌ | No scenario emits `\x1b[?1000h` / `?1002h` / `?1003h` / `?1006h`. |
-| §2 | Temporary/permanent override, banner, Make-permanent / Cancel | ❌ | Blocked on §1. |
+| §1 | Mouse icon visible when program requests reporting | ✅ | Run `ascii-splash`; the runner emits `\x1b[?1000h` / `?1002h` / `?1003h` / `?1006h` unless `--no-mouse` is used. |
+| §2 | Temporary/permanent override, banner, Make-permanent / Cancel | ✅ | Run `ascii-splash`, then use the header mouse icon while the animation is active. |
 | §3.1–§3.3 | Drag, Alt-block shape, "Hold Alt" hint | ✅ | Works on any visible text. |
 | §3.3 | "Press e to select the full URL/path" hint | ❌ | No qualifying tokens; bare filenames like `package.json` don't match the patterns in `lib/src/lib/smart-token.ts`. |
-| §3.4 | Pure-scroll follows, cancel-on-change, cancel-on-resize | ⚠️ | Scenarios are too short to scroll; nothing emits additional output after the initial burst; resize cancel works. |
+| §3.4 | Pure-scroll follows, cancel-on-change, cancel-on-resize | ⚠️ | `ascii-splash` makes cancel-on-change and resize cancel observable; scenarios are still too short for pure-scroll coverage. |
 | §3.5 | Scrollback-origin / cross-boundary drags | ⚠️ | Scrollback is too short to exercise. |
-| §3.6 | Keyboard routing during drag | ⚠️ | Works, but hard to observe — no program in Playground reacts to dropped keystrokes. |
+| §3.6 | Keyboard routing during drag | ✅ | `ascii-splash` reacts to keys and mouse; with override active, drag-time keyboard consumption is observable. |
 | §3.7 | Popup on mouse-up, new-drag-replaces | ✅ | Any selection. |
 | §4.1.1 | Copy Raw | ✅ | Any selection. |
 | §4.1.2 | Copy Rewrapped (box-strip + paragraph unwrap) | ❌ | No box-drawing characters anywhere; no multi-line prose. Rewrapped output is identical to Raw. |
@@ -176,10 +204,10 @@ Legend: ✅ exercisable today, ⚠️ partial, ❌ not exercisable.
 
 ### Remediation plan
 
-Add three new scenarios in `lib/src/lib/platform/fake-scenarios.ts` and expand the Playground layout in `website/src/pages/Playground.tsx` to surface them alongside the existing tutorial pane. Each scenario closes a specific set of gaps; all three together plus the tutorial MOTD make every currently-implemented feature reachable.
+Add three new scenarios in `lib/src/lib/platform/fake-scenarios.ts` and expand the Playground layout in `website/src/pages/Playground.tsx` to surface them alongside the existing tutorial pane. Together with `ascii-splash`, these close the remaining content-shape gaps.
 
-1. **`SCENARIO_MOUSE_TUI`** — closes §1, §2, §8.5.
-   Emits `\x1b[?1000h\x1b[?1006h\x1b[?2004h` and then draws an idle `htop`-style ANSI-framed view. A minimal input handler for this pane discards any mouse-report bytes xterm forwards. With this pane present the Mouse icon appears in its header, clicking it activates the temporary-override banner, and pastes into it are wrapped in `\x1b[200~ … \x1b[201~`.
+1. **`SCENARIO_BRACKETED_PASTE_TUI`** — closes §8.5.
+   Emits `\x1b[?2004h` and then draws an idle ANSI-framed view. A minimal input handler for this pane discards input. With this pane present, pastes into it are wrapped in `\x1b[200~ … \x1b[201~`.
 
 2. **`SCENARIO_SMART_TOKENS`** — closes §3.3 extension hint, §5.1–§5.3.
    Prints one of each detectable shape so every branch in `lib/src/lib/smart-token.ts`'s `PATTERNS` list has a live example:
@@ -195,9 +223,9 @@ Add three new scenarios in `lib/src/lib/platform/fake-scenarios.ts` and expand t
 
    Dragging across any of them shows "Press e to select the full URL/path" and `e` extends.
 
-3. **`SCENARIO_BOXED_OUTPUT`** — closes §4.1.2 and §3.4.
+3. **`SCENARIO_BOXED_OUTPUT`** — closes §4.1.2.
    A short release-notes-shaped message framed in `┌─│└` so Copy Rewrapped (via `lib/src/lib/rewrap.ts`) strips the frame and joins the wrapped lines — clipboard contents visibly differ from Copy Raw. A slowly-updating ticker line at the bottom gives cancel-on-change something concrete to react to.
 
-**Playground layout:** keep `PANE_MAIN` as the tutorial entry; replace `PANE_NPM` / `PANE_LS` with `PANE_TUI` / `PANE_TOKENS` / `PANE_BOXED` (three `api.addPanel` calls in `handleApiReady`, same pattern as the existing ones at `website/src/pages/Playground.tsx:62-75`). A 2×2 grid fits on load.
+**Playground layout:** keep `PANE_MAIN` as the tutorial entry; replace `PANE_NPM` / `PANE_LS` with `PANE_BRACKETED` / `PANE_TOKENS` / `PANE_BOXED` (three `api.addPanel` calls in `handleApiReady`, same pattern as the existing ones at `website/src/pages/Playground.tsx:62-75`). A 2×2 grid fits on load.
 
 **Optional:** teach `TutorialShell.handleInput` to recognize `\x1b[200~ … \x1b[201~` and print `[pasted: …]` so bracketed-paste wrapping is visually distinct for users who paste into `PANE_MAIN`.

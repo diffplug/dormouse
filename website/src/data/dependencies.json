@@ -7,13 +7,6 @@
     "homepage": "https://phosphoricons.com"
   },
   {
-    "name": "@remix-run/router",
-    "version": "1.23.2",
-    "license": "MIT",
-    "author": "Remix Software",
-    "homepage": "https://github.com/remix-run/react-router#readme"
-  },
-  {
     "name": "@tauri-apps/api",
     "version": "2.10.1",
     "license": "MIT OR Apache-2.0",
@@ -117,20 +110,6 @@
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
-  },
-  {
-    "name": "react-router",
-    "version": "6.30.3",
-    "license": "MIT",
-    "author": "Remix Software",
-    "homepage": "https://github.com/remix-run/react-router#readme"
-  },
-  {
-    "name": "react-router-dom",
-    "version": "6.30.3",
-    "license": "MIT",
-    "author": "Remix Software",
-    "homepage": "https://github.com/remix-run/react-router#readme"
   },
   {
     "name": "scheduler",

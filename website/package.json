@@ -8,10 +8,12 @@
     "dev": "vite-react-ssg dev",
     "prebuild": "node scripts/generate-deps.js",
     "build": "vite-react-ssg build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
+    "ascii-splash": "0.3.0",
     "mouseterm-lib": "workspace:*",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -25,6 +27,7 @@
     "tailwindcss": "^4.0.0",
     "typescript": "^5.9.0",
     "vite": "^7.3.0",
-    "vite-react-ssg": "^0.8.9"
+    "vite-react-ssg": "^0.8.9",
+    "vitest": "^4.1.1"
   }
 }
