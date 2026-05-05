@@ -23,6 +23,15 @@ function stripAnsi(data: string): string {
   return data.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
 }
 
+function getRunnerState(runner: AsciiSplashRunner) {
+  return runner as unknown as {
+    commandExecutor: { patterns: unknown[] } | null;
+    currentPatternIndex: number;
+    engine: { getPattern(): unknown } | null;
+    patterns: unknown[];
+  };
+}
+
 describe("AsciiSplashRunner", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -161,5 +170,26 @@ describe("AsciiSplashRunner", () => {
 
     runnerA.dispose();
     runnerB.dispose();
+  });
+
+  it("keeps command executor patterns synced after random pattern and theme commands", () => {
+    const { runner } = createHarness(["--pattern", "waves"]);
+    runner.start();
+    const targetPatternIndex = 2;
+    const initialState = getRunnerState(runner);
+    expect(initialState.patterns.length).toBeGreaterThan(targetPatternIndex);
+    const random = vi.spyOn(Math, "random").mockReturnValue((targetPatternIndex + 0.1) / initialState.patterns.length);
+
+    try {
+      runner.handleInput("r");
+
+      const state = getRunnerState(runner);
+      expect(state.currentPatternIndex).toBe(targetPatternIndex);
+      expect(state.engine?.getPattern()).toBe(state.patterns[targetPatternIndex]);
+      expect(state.commandExecutor?.patterns).toBe(state.patterns);
+    } finally {
+      runner.dispose();
+      random.mockRestore();
+    }
   });
 });

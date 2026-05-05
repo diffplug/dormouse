@@ -558,7 +558,8 @@ export class AsciiSplashRunner implements InteractiveProgram {
       const themeName = THEME_NAMES[themeIndex] ?? "ocean";
       this.currentTheme = getTheme(themeName);
       this.currentThemeIndex = themeIndex;
-      this.patterns = createPatternsFromConfig(this.config, this.currentTheme);
+      this.syncCurrentPatternIndexFromEngine();
+      this.rebuildPatterns();
       const nextPattern = this.patterns[this.currentPatternIndex] ?? this.patterns[0];
       this.engine?.setPattern(nextPattern);
       this.commandExecutor?.updateState(this.currentPatternIndex, this.currentThemeIndex);
@@ -784,7 +785,8 @@ export class AsciiSplashRunner implements InteractiveProgram {
 
   private setQuality(quality: QualityPreset): void {
     this.config = { ...this.config, quality };
-    this.patterns = createPatternsFromConfig(this.config, this.currentTheme);
+    this.syncCurrentPatternIndexFromEngine();
+    this.rebuildPatterns();
     this.setFps(qualityPresets[quality]);
     this.engine?.setPattern(this.patterns[this.currentPatternIndex]);
     this.commandExecutor?.updateState(this.currentPatternIndex, this.currentThemeIndex);
@@ -795,7 +797,8 @@ export class AsciiSplashRunner implements InteractiveProgram {
     const nextThemeName = getNextThemeName(this.currentTheme.name);
     this.currentTheme = getTheme(nextThemeName);
     this.currentThemeIndex = THEME_NAMES.indexOf(this.currentTheme.name);
-    this.patterns = createPatternsFromConfig(this.config, this.currentTheme);
+    this.syncCurrentPatternIndexFromEngine();
+    this.rebuildPatterns();
     this.engine?.setPattern(this.patterns[this.currentPatternIndex]);
     this.commandExecutor?.updateState(this.currentPatternIndex, this.currentThemeIndex);
     this.statusBar.update({ themeName: this.currentTheme.displayName });
@@ -883,10 +886,20 @@ export class AsciiSplashRunner implements InteractiveProgram {
     });
   }
 
-  private syncStateFromEngine(): void {
+  private rebuildPatterns(): void {
+    const nextPatterns = createPatternsFromConfig(this.config, this.currentTheme);
+    this.patterns.splice(0, this.patterns.length, ...nextPatterns);
+    this.currentPatternIndex = Math.min(this.currentPatternIndex, Math.max(0, this.patterns.length - 1));
+  }
+
+  private syncCurrentPatternIndexFromEngine(): void {
     const active = this.engine?.getPattern();
     const index = active ? this.patterns.indexOf(active) : -1;
     if (index >= 0) this.currentPatternIndex = index;
+  }
+
+  private syncStateFromEngine(): void {
+    this.syncCurrentPatternIndexFromEngine();
     this.statusBar.update({
       patternName: this.getCurrentPatternDisplayName(),
       presetNumber: this.currentPresetIndex,
