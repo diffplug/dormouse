@@ -22,13 +22,17 @@ exports[`TutRunner snapshots > renders Copy paste with all items incomplete 1`] 
   [1mCopy paste[0m  [2m0/4 complete[0m
   [2m[36mEsc[39m to go back[0m
 
-   [33m●[0m  [1mDrag-select text in any pane[0m
-   [2m·[0m  Click Copy Raw
-   [2m·[0m  Click Copy Rewrapped on the boxed paragraph
-   [2m·[0m  Click the cursor icon on the ascii-splash pane
+   [33m●[0m  [1mDrag-select some text[0m
+        [3mThe paragraph below is a good example — "Some terminal programs..."[0m
+   [2m·[0m  Copy-paste it somewhere else with "Copy Raw"
+   [2m·[0m  Copy-paste it somewhere else with "Copy Rewrapped"
+   [2m·[0m  Click the cursor icon on the [36mascii-splash[39m pane
 
-  [2mSome programs trap the mouse — the cursor icon lets you override.[0m
-  [2mascii-splash redraws every frame, so it cancels selections: looks cool, undragable.[0m
+  [2mSome terminal programs trap the cursor, and some do not. This tutorial pane[0m
+  [2mdoes not trap the cursor, so MouseTerm does not show a cursor icon. The[0m
+  [2m[36mascii-splash[39m program which makes the cool patterns in this playground does[0m
+  [2mtrap the cursor — that is how it is able to respond to mouse movement. [36mlazygit[39m[0m
+  [2mis an excellent and popular program which traps the cursor.[0m
 "
 `;
 

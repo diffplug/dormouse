@@ -108,25 +108,29 @@ export const SECTIONS: Section[] = [
     items: [
       {
         id: 'cp-select',
-        title: 'Drag-select text in any pane',
+        title: 'Drag-select some text',
+        hint: 'The paragraph below is a good example — "Some terminal programs..."',
       },
       {
         id: 'cp-raw',
-        title: 'Click Copy Raw',
+        title: 'Copy-paste it somewhere else with "Copy Raw"',
+        hint: 'When you paste, notice how it keeps all the line-breaks. Gross!',
       },
       {
         id: 'cp-rewrap',
-        title: 'Click Copy Rewrapped on the boxed paragraph',
+        title: 'Copy-paste it somewhere else with "Copy Rewrapped"',
+        hint:
+          'When you paste, notice how the line-breaks were removed, and the text rewraps neatly wherever you paste it?',
       },
       {
         id: 'cp-override',
-        title: 'Click the cursor icon on the ascii-splash pane',
-        hint: 'Type `ascii-splash` in any pane to launch it first.',
+        title: 'Click the cursor icon on the `ascii-splash` pane',
+        hint:
+          'This will allow you to drag-select, which would be impossible otherwise. Unfortunately, you still won\'t be able to copy because `ascii-splash` animates, and that animation cancels the copy. But it will work on real programs like `lazygit`!',
       },
     ],
     prose: [
-      'Some programs trap the mouse — the cursor icon lets you override.',
-      'ascii-splash redraws every frame, so it cancels selections: looks cool, undragable.',
+      'Some terminal programs trap the cursor, and some do not. This tutorial pane does not trap the cursor, so MouseTerm does not show a cursor icon. The `ascii-splash` program which makes the cool patterns in this playground does trap the cursor — that is how it is able to respond to mouse movement. `lazygit` is an excellent and popular program which traps the cursor.',
     ],
   },
 ];

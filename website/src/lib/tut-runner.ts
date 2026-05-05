@@ -362,7 +362,12 @@ export class TutRunner implements InteractiveProgram {
 
     if (section.prose && section.prose.length > 0) {
       lines.push("");
-      for (const p of section.prose) lines.push(`  ${DIM}${p}${RESET}`);
+      const indent = "  ";
+      for (const p of section.prose) {
+        for (const wrapped of this.wrapText(p, indent.length)) {
+          lines.push(`${indent}${DIM}${wrapped}${RESET}`);
+        }
+      }
     }
 
     if (section.id === "alert") {
@@ -415,7 +420,7 @@ export class TutRunner implements InteractiveProgram {
     const lines = [`   ${mark}  ${title}`];
     if (isActive && item.hint) {
       const indent = "        ";
-      for (const wrapped of this.wrapHint(item.hint, indent.length)) {
+      for (const wrapped of this.wrapText(item.hint, indent.length)) {
         lines.push(`${indent}${ITALIC}${wrapped}${RESET}`);
       }
     }
@@ -423,12 +428,12 @@ export class TutRunner implements InteractiveProgram {
   }
 
   /**
-   * Word-wrap a hint to fit the current pty width, leaving room for the
-   * 8-column indent. Backtick-wrapped key markers get expanded into ANSI
-   * by `highlightKeys` later — those bytes don't take screen columns, so
-   * count them as zero-width here.
+   * Word-wrap text to fit the current pty width, leaving `indentCols`
+   * columns for the leading indent the caller will prefix. Backtick
+   * markers expand into zero-width ANSI at frame time via
+   * `highlightKeys`, so they don't count against the visible width.
    */
-  private wrapHint(hint: string, indentCols: number): string[] {
+  private wrapText(text: string, indentCols: number): string[] {
     const { cols } = this.adapter.getPtySize(this.terminalId);
     const max = Math.max(20, cols - indentCols);
     const visibleLen = (s: string) => {
@@ -436,7 +441,7 @@ export class TutRunner implements InteractiveProgram {
       for (const ch of s) if (ch !== "`") n++;
       return n;
     };
-    const words = hint.split(/\s+/).filter(Boolean);
+    const words = text.split(/\s+/).filter(Boolean);
     const lines: string[] = [];
     let line = "";
     let lineVis = 0;
