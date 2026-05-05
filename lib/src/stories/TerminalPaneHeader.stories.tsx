@@ -92,13 +92,6 @@ async function openAlertRightClickDialog() {
   await wait(100);
 }
 
-async function clickTodoPill() {
-  await wait(100);
-  const todoButton = document.querySelector<HTMLButtonElement>(`[data-session-todo-for="${SESSION_ID}"]`);
-  todoButton?.click();
-  await wait(100);
-}
-
 const meta: Meta<typeof TabStory> = {
   title: 'Components/TerminalPaneHeader',
   component: TabStory,
@@ -177,14 +170,6 @@ export const AlertRightClickDialog: Story = {
     todo: false,
   }),
   play: openAlertRightClickDialog,
-};
-
-export const TodoClickToDismiss: Story = {
-  parameters: primedState({
-    status: 'NOTHING_TO_SHOW',
-    todo: true,
-  }),
-  play: clickTodoPill,
 };
 
 export const TodoOnly: Story = {

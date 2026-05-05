@@ -1,81 +1,147 @@
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
-import type { WallMode } from '../components/Wall';
-import { MarchingAntsRect } from '../components/Wall';
+import '@xterm/xterm/css/xterm.css';
+import { SelectionOverlay } from '../components/SelectionOverlay';
+import {
+  focusSession,
+  getOrCreateTerminal,
+  getTerminalOverlayDims,
+  mountElement,
+  refitSession,
+  unmountElement,
+} from '../lib/terminal-registry';
+import { flattenScenario, SCENARIO_LS_OUTPUT } from '../lib/platform';
+import {
+  setHintToken,
+  setSelection,
+  type Selection,
+  type TokenHint,
+} from '../lib/mouse-selection';
+import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../components/design';
 
-function SelectionOverlayDemo({ initialMode = 'command' as WallMode }) {
-  const [mode, setMode] = useState<WallMode>(initialMode);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ width: 484, height: 284 });
+function SelectionOverlayStory({
+  id,
+  selection,
+  hintToken = null,
+}: {
+  id: string;
+  selection: Omit<Selection, 'startedInScrollback'>;
+  hintToken?: TokenHint | null;
+}) {
+  const terminalHostRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      setSize({ width: entry.contentRect.width - 16, height: entry.contentRect.height - 16 });
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+    const terminalHost = terminalHostRef.current;
+    if (!terminalHost) return;
 
-  const color = getComputedStyle(document.documentElement).getPropertyValue('--color-header-active-bg').trim() || '#094771';
+    getOrCreateTerminal(id);
+    mountElement(id, terminalHost);
 
-  const overlayStyle: React.CSSProperties = {
-    position: 'absolute',
-    inset: 8,
-    borderRadius: '0.5rem',
-    pointerEvents: 'none',
-    transition: 'border 150ms, box-shadow 150ms',
-  };
+    const observer = new ResizeObserver(() => refitSession(id));
+    observer.observe(terminalHost);
 
-  if (mode === 'passthrough') {
-    overlayStyle.border = `2px solid ${color}`;
-    overlayStyle.boxShadow = `0 0 15px color-mix(in srgb, ${color} 30%, transparent)`;
-  }
+    return () => {
+      observer.disconnect();
+      unmountElement(id);
+    };
+  }, [id]);
+
+  useEffect(() => {
+    focusSession(id, true);
+  }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const applySelection = () => {
+      if (cancelled) return;
+      const dims = getTerminalOverlayDims(id);
+      if (!dims || dims.cellHeight === 0) {
+        timer = setTimeout(applySelection, 50);
+        return;
+      }
+
+      setSelection(id, { ...selection, startedInScrollback: false });
+      setHintToken(id, hintToken);
+    };
+
+    timer = setTimeout(applySelection, 100);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      setSelection(id, null);
+      setHintToken(id, null);
+    };
+  }, [id, selection, hintToken]);
 
   return (
-    <div ref={containerRef} style={{ width: 500, height: 300 }} className="relative bg-app-bg">
-      {/* Simulated terminal content */}
-      <div className="p-4 font-mono text-sm text-terminal-fg">
-        <div>user@mouseterm:~$ ls -la</div>
-        <div>total 48</div>
-        <div>drwxr-xr-x  12 user staff  384 Mar 16 10:30 .</div>
-      </div>
-      {/* Selection overlay */}
-      {mode === 'command' ? (
-        <div style={{ position: 'absolute', inset: 8, pointerEvents: 'none' }}>
-          <MarchingAntsRect width={size.width} height={size.height} isDoor={false} color={color} />
-        </div>
-      ) : (
-        <div style={overlayStyle} />
-      )}
-      {/* Mode toggle */}
-      <div className="absolute bottom-2 right-2 flex gap-2">
-        <button
-          className={`px-3 py-1 rounded text-sm font-mono ${mode === 'passthrough' ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg'}`}
-          onClick={() => setMode('passthrough')}
-        >passthrough</button>
-        <button
-          className={`px-3 py-1 rounded text-sm font-mono ${mode === 'command' ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg'}`}
-          onClick={() => setMode('command')}
-        >command</button>
-      </div>
+    <div
+      className={`relative bg-terminal-bg ${TERMINAL_BOTTOM_RADIUS_CLASS}`}
+      style={{ width: 620, height: 340 }}
+    >
+      <div ref={terminalHostRef} className="h-full w-full" />
+      <SelectionOverlay terminalId={id} />
     </div>
   );
 }
 
-const meta: Meta<typeof SelectionOverlayDemo> = {
+const meta: Meta<typeof SelectionOverlayStory> = {
   title: 'Components/SelectionOverlay',
-  component: SelectionOverlayDemo,
+  component: SelectionOverlayStory,
+  parameters: {
+    fakePty: { scenario: flattenScenario(SCENARIO_LS_OUTPUT) },
+  },
 };
 
 export default meta;
-type Story = StoryObj<typeof SelectionOverlayDemo>;
+type Story = StoryObj<typeof SelectionOverlayStory>;
 
-export const CommandMode: Story = {
-  args: { initialMode: 'command' },
+export const LinewiseDrag: Story = {
+  args: {
+    id: 'selection-overlay-linewise-drag',
+    selection: {
+      startRow: 2,
+      startCol: 5,
+      endRow: 6,
+      endCol: 24,
+      shape: 'linewise',
+      dragging: true,
+    },
+  },
 };
 
-export const PassthroughMode: Story = {
-  args: { initialMode: 'passthrough' },
+export const BlockDrag: Story = {
+  args: {
+    id: 'selection-overlay-block-drag',
+    selection: {
+      startRow: 2,
+      startCol: 6,
+      endRow: 5,
+      endCol: 26,
+      shape: 'block',
+      dragging: true,
+    },
+  },
+};
+
+export const SmartPathHint: Story = {
+  args: {
+    id: 'selection-overlay-smart-path-hint',
+    selection: {
+      startRow: 2,
+      startCol: 5,
+      endRow: 6,
+      endCol: 24,
+      shape: 'linewise',
+      dragging: true,
+    },
+    hintToken: {
+      kind: 'path',
+      row: 8,
+      startCol: 35,
+      endCol: 38,
+      text: 'src',
+    },
+  },
 };

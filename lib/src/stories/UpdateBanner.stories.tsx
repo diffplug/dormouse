@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { UpdateBanner, type UpdateBannerState } from '../../../standalone/src/UpdateBanner';
 
-function UpdateBannerStory({ state }: { state: UpdateBannerState }) {
+function UpdateBannerStory({ state, expectedNullReason }: { state: UpdateBannerState; expectedNullReason?: string }) {
   return (
     <div className="bg-app-bg" style={{ width: '100%' }}>
       <UpdateBanner
@@ -10,6 +10,11 @@ function UpdateBannerStory({ state }: { state: UpdateBannerState }) {
         onOpenChangelog={() => console.log('Open changelog')}
         onOpenDebug={() => console.log('Open debug')}
       />
+      {expectedNullReason ? (
+        <div className="inline-flex border border-dashed border-border bg-surface-raised px-2 py-1 font-mono text-xs text-muted">
+          Expected empty banner: {expectedNullReason}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -43,18 +48,14 @@ export const PostUpdateFailure: Story = {
 export const Idle: Story = {
   args: {
     state: { status: 'idle' },
+    expectedNullReason: 'idle has no update notice to show.',
   },
 };
 
 export const Dismissed: Story = {
   args: {
     state: { status: 'dismissed' },
-  },
-};
-
-export const LongVersionString: Story = {
-  args: {
-    state: { status: 'downloaded', version: '1.23.456-beta.7+build.2025.04.10' },
+    expectedNullReason: 'the user has already dismissed this notice.',
   },
 };
 

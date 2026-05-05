@@ -7,6 +7,18 @@ const DEFAULT_SHELLS = [
   { name: 'fish', path: '/usr/bin/fish' },
 ];
 
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function openShellSelector({ canvasElement }: { canvasElement: HTMLElement }) {
+  await wait(100);
+  const shellButton = Array.from(canvasElement.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="menu"]'))
+    .find((button) => DEFAULT_SHELLS.some((shell) => button.textContent?.includes(shell.name)));
+  shellButton?.click();
+  await wait(100);
+}
+
 function AppBarStory(props: React.ComponentProps<typeof AppBar>) {
   return (
     <div style={{ width: '100%' }}>
@@ -32,6 +44,7 @@ export const SingleShell: Story = {
   args: {
     shells: [{ name: 'bash', path: '/bin/bash' }],
   },
+  play: openShellSelector,
 };
 
 export const ManyShells: Story = {
@@ -44,4 +57,5 @@ export const ManyShells: Story = {
       { name: 'nu', path: '/usr/bin/nu' },
     ],
   },
+  play: openShellSelector,
 };
