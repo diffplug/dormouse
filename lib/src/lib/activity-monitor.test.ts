@@ -114,17 +114,28 @@ describe('ActivityMonitor', () => {
     ]);
   });
 
-  it('returns to NOTHING_TO_SHOW instead of ALERT_RINGING if attention is still present', () => {
+  it('waits in MIGHT_NEED_ATTENTION while attention is held, then rings once it clears', () => {
     const { monitor, changes, attention } = createMonitor();
     driveMonitorToMightNeedAttention(monitor);
     attention.current = true;
+
+    // Confirm timer fires while attention is held — should re-arm, not reset.
     vi.advanceTimersByTime(3_000);
-    expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
+    expect(monitor.getStatus()).toBe('MIGHT_NEED_ATTENTION');
+
+    // Even after several confirm cycles, still parked at MIGHT_NEED_ATTENTION.
+    vi.advanceTimersByTime(6_000);
+    expect(monitor.getStatus()).toBe('MIGHT_NEED_ATTENTION');
+
+    // User looks away — next confirm tick should ring.
+    attention.current = false;
+    vi.advanceTimersByTime(3_000);
+    expect(monitor.getStatus()).toBe('ALERT_RINGING');
     expect(changes).toEqual([
       'MIGHT_BE_BUSY',
       'BUSY',
       'MIGHT_NEED_ATTENTION',
-      'NOTHING_TO_SHOW',
+      'ALERT_RINGING',
     ]);
   });
 

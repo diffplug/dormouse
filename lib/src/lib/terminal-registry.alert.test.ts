@@ -308,7 +308,7 @@ describe('terminal-registry alert behavior', () => {
     expect(getActivity(id)).toMatchObject({ status: 'BUSY' });
   });
 
-  it('Story 4: completion while still attended does not ring', () => {
+  it('Story 4: completion while still attended waits at MIGHT_NEED_ATTENTION until attention expires, then rings', () => {
     const id = 'story-4';
     createSession(id);
     toggleSessionAlert(id);
@@ -318,8 +318,18 @@ describe('terminal-registry alert behavior', () => {
     advance(2_000);
     advance(3_000);
 
+    // Task is done but the user is currently looking at the pane —
+    // park at MIGHT_NEED_ATTENTION rather than silently swallowing the alert.
     expect(getActivity(id)).toEqual({
-      status: 'NOTHING_TO_SHOW',
+      status: 'MIGHT_NEED_ATTENTION',
+      todo: false,
+    });
+
+    // Once the attention idle timer expires (cfg.alert.userAttention = 15_000ms),
+    // the next confirm tick rings.
+    advance(15_000);
+    expect(getActivity(id)).toEqual({
+      status: 'ALERT_RINGING',
       todo: false,
     });
   });
