@@ -4,6 +4,10 @@
  * localStorage key suffixes.
  */
 
+import { cfg } from "mouseterm-lib/cfg";
+
+const USER_ATTENTION_SECS = Math.round(cfg.alert.userAttention / 1000);
+
 export type ItemId = string;
 
 export interface Item {
@@ -74,11 +78,13 @@ export const SECTIONS: Section[] = [
       {
         id: 'al-busy',
         title: 'Watch the bell tilt while a task runs',
-        hint: 'Press `s` here to start a fake busy task on the demo pane.',
+        hint: 'Press `s` to start a fake busy task in this demo pane.',
       },
       {
         id: 'al-ring',
         title: 'Bell rings when the task completes',
+        hint:
+          `Don't type! If you type, MouseTerm will think you are paying attention to this task and the bell will not ring. The bell only rings if (a) the pane is not selected or (b) you have not interacted with the pane for the past ${USER_ATTENTION_SECS} seconds.`,
       },
       {
         id: 'al-todo-auto',

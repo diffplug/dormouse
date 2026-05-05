@@ -414,8 +414,47 @@ export class TutRunner implements InteractiveProgram {
       : item.title;
     const lines = [`   ${mark}  ${title}`];
     if (isActive && item.hint) {
-      lines.push(`        ${ITALIC}${item.hint}${RESET}`);
+      const indent = "        ";
+      for (const wrapped of this.wrapHint(item.hint, indent.length)) {
+        lines.push(`${indent}${ITALIC}${wrapped}${RESET}`);
+      }
     }
+    return lines;
+  }
+
+  /**
+   * Word-wrap a hint to fit the current pty width, leaving room for the
+   * 8-column indent. Backtick-wrapped key markers get expanded into ANSI
+   * by `highlightKeys` later — those bytes don't take screen columns, so
+   * count them as zero-width here.
+   */
+  private wrapHint(hint: string, indentCols: number): string[] {
+    const { cols } = this.adapter.getPtySize(this.terminalId);
+    const max = Math.max(20, cols - indentCols);
+    const visibleLen = (s: string) => {
+      let n = 0;
+      for (const ch of s) if (ch !== "`") n++;
+      return n;
+    };
+    const words = hint.split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let line = "";
+    let lineVis = 0;
+    for (const word of words) {
+      const wv = visibleLen(word);
+      if (line === "") {
+        line = word;
+        lineVis = wv;
+      } else if (lineVis + 1 + wv <= max) {
+        line += " " + word;
+        lineVis += 1 + wv;
+      } else {
+        lines.push(line);
+        line = word;
+        lineVis = wv;
+      }
+    }
+    if (line) lines.push(line);
     return lines;
   }
 
