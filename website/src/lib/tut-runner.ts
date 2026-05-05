@@ -25,6 +25,17 @@ const BOLD = `${ESC}1m`;
 const DIM = `${ESC}2m`;
 const ITALIC = `${ESC}3m`;
 const fg = (code: number) => `${ESC}${code}m`;
+const FG_DEFAULT = `${ESC}39m`;
+
+/**
+ * Replace `` `KEY` `` markers with a cyan-foreground span. Uses
+ * `\x1b[36m` / `\x1b[39m` (default foreground) so the highlight composes
+ * cleanly with surrounding bold / italic / dim attributes — only the
+ * foreground color is touched, not the rest of the SGR state.
+ */
+function highlightKeys(line: string): string {
+  return line.replace(/`([^`]+)`/g, `${fg(36)}$1${FG_DEFAULT}`);
+}
 
 const ENTER_ALT = "\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l";
 const LEAVE_ALT = "\x1b[2J\x1b[H\x1b[?25h\x1b[?1049l";
@@ -271,7 +282,7 @@ export class TutRunner implements InteractiveProgram {
         : this.renderSection();
     let out = `${HOME}${CLEAR}`;
     for (const line of lines) {
-      out += `${line}\r\n`;
+      out += `${highlightKeys(line)}\r\n`;
     }
     this.write(out);
   }
@@ -282,7 +293,7 @@ export class TutRunner implements InteractiveProgram {
     lines.push("");
     lines.push(`  ${BOLD}MouseTerm Playground Tutorial${RESET}`);
     lines.push(
-      `  ${DIM}${total.done}/${total.total} complete · Esc/q to exit · Enter to open · ↑↓ to navigate${RESET}`,
+      `  ${DIM}${total.done}/${total.total} complete · \`Esc\`/\`q\` to exit · \`Enter\` to open · \`↑↓\` to navigate${RESET}`,
     );
     lines.push("");
     SECTIONS.forEach((section, index) => {
@@ -314,13 +325,13 @@ export class TutRunner implements InteractiveProgram {
     const lines: string[] = [];
     lines.push("");
     lines.push(`  ${BOLD}Reset progress${RESET}`);
-    lines.push(`  ${DIM}Esc to cancel${RESET}`);
+    lines.push(`  ${DIM}\`Esc\` to cancel${RESET}`);
     lines.push("");
     lines.push(
       `  This will clear all checkmarks across every section.`,
     );
     lines.push(
-      `  ${DIM}Type ${fg(36)}reset${RESET}${DIM} and press Enter to confirm.${RESET}`,
+      `  ${DIM}Type \`reset\` and press \`Enter\` to confirm.${RESET}`,
     );
     lines.push("");
     lines.push(`   ${fg(36)}>${RESET} ${this.resetBuffer}${fg(33)}_${RESET}`);
@@ -341,7 +352,7 @@ export class TutRunner implements InteractiveProgram {
     const lines: string[] = [];
     lines.push("");
     lines.push(`  ${BOLD}${section.title}${RESET}  ${DIM}${done}/${total} complete${RESET}`);
-    lines.push(`  ${DIM}Esc to go back${RESET}`);
+    lines.push(`  ${DIM}\`Esc\` to go back${RESET}`);
     lines.push("");
 
     const activeIndex = section.items.findIndex((i) => !this.state.isComplete(i.id));
@@ -362,7 +373,7 @@ export class TutRunner implements InteractiveProgram {
     if (done === total) {
       lines.push("");
       lines.push(
-        `  ${fg(32)}Section complete.${RESET} ${DIM}Press ${fg(36)}Esc${RESET}${DIM} to go back.${RESET}`,
+        `  ${fg(32)}Section complete.${RESET} ${DIM}Press \`Esc\` to go back.${RESET}`,
       );
     }
 
@@ -370,7 +381,7 @@ export class TutRunner implements InteractiveProgram {
   }
 
   private renderBusyDemoLines(): string[] {
-    const idleHint = `  ${DIM}Press ${fg(36)}s${RESET}${DIM} here to start a fake busy task.${RESET}`;
+    const idleHint = `  ${DIM}Press \`s\` here to start a fake busy task.${RESET}`;
     if (this.busyDemoStart === null) return [idleHint];
     const elapsed = Date.now() - this.busyDemoStart;
     if (elapsed < BUSY_DEMO_DURATION_MS) {
@@ -381,7 +392,7 @@ export class TutRunner implements InteractiveProgram {
       ];
     }
     return [
-      `  ${fg(32)}✓${RESET} Fake task finished. ${DIM}Press ${fg(36)}s${RESET}${DIM} to start another one.${RESET}`,
+      `  ${fg(32)}✓${RESET} Fake task finished. ${DIM}Press \`s\` to start another one.${RESET}`,
     ];
   }
 

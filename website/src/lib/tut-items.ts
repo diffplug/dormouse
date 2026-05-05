@@ -27,40 +27,40 @@ export const SECTIONS: Section[] = [
       {
         id: 'kb-mode',
         title: 'Enter command mode',
-        hint: 'Press LShift then RShift quickly (or LCmd then RCmd on Mac).',
+        hint: 'Press `LShift` then `RShift` quickly (or `LCmd` then `RCmd` on Mac).',
       },
       {
         id: 'kb-split-h',
         title: 'Add a horizontal divider',
-        hint: 'In command mode, press - to split top/bottom.',
+        hint: 'In command mode, press `-` to split top/bottom.',
       },
       {
         id: 'kb-arrows',
         title: 'Move between panes with arrow keys',
-        hint: 'Use arrow keys in command mode.',
+        hint: 'Use `arrow keys` in command mode.',
       },
       {
         id: 'kb-split-v',
         title: 'Add a vertical divider',
-        hint: 'In command mode, press | (Shift+\\) to split left/right.',
+        hint: 'In command mode, press `|` (`Shift+\\`) to split left/right.',
       },
       {
         id: 'kb-min',
         title: 'Minimize a pane',
-        hint: 'Press m. Click the door in the baseboard to bring it back.',
+        hint: 'Press `m`. Click the door in the baseboard to bring it back.',
       },
       {
         id: 'kb-kill',
         title: 'Kill a pane',
-        hint: 'Press k, then type the random letter to confirm.',
+        hint: 'Press `k`, then type the random letter to confirm.',
       },
       {
         id: 'kb-move',
-        title: 'Move a pane with Cmd/Ctrl + arrow',
+        title: 'Move a pane with `Cmd/Ctrl + arrow`',
         hint: 'Swap the selected pane with its neighbor.',
       },
     ],
-    prose: ['tmux shortcuts also work — % " d x.'],
+    prose: ['tmux shortcuts also work — `%` `"` `d` `x`.'],
   },
   {
     id: 'alert',
@@ -69,12 +69,12 @@ export const SECTIONS: Section[] = [
       {
         id: 'al-enable',
         title: 'Enable alerts on a pane',
-        hint: 'Click the bell, or press a in command mode with the pane selected.',
+        hint: 'Click the bell, or press `a` in command mode with the pane selected.',
       },
       {
         id: 'al-busy',
         title: 'Watch the bell tilt while a task runs',
-        hint: 'Press s here to start a fake busy task on the demo pane.',
+        hint: 'Press `s` here to start a fake busy task on the demo pane.',
       },
       {
         id: 'al-ring',
@@ -87,12 +87,12 @@ export const SECTIONS: Section[] = [
       },
       {
         id: 'al-todo-clear',
-        title: 'Press Enter inside the pane to clear the TODO',
+        title: 'Press `Enter` inside the pane to clear the TODO',
       },
       {
         id: 'al-todo-manual',
         title: 'Manually add a TODO',
-        hint: 'Press t in command mode, or right-click the bell.',
+        hint: 'Press `t` in command mode, or right-click the bell.',
       },
     ],
   },
@@ -115,7 +115,7 @@ export const SECTIONS: Section[] = [
       {
         id: 'cp-override',
         title: 'Click the cursor icon on the ascii-splash pane',
-        hint: 'Type ascii-splash in any pane to launch it first.',
+        hint: 'Type `ascii-splash` in any pane to launch it first.',
       },
     ],
     prose: [
