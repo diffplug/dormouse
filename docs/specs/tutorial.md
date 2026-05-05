@@ -64,8 +64,8 @@ The detector subscribes to `subscribeToActivity()` and tracks per-id `(status, t
 
 The Alert section view shows a runner-local instruction: "Press `s` here to start a fake busy task." `s` is **not** a real MouseTerm shortcut; it is intercepted by `TutRunner` only while the Alert section is open. When pressed, the runner does two things:
 
-1. Calls `adapter.pumpActivity(PANE_TARGET, 3000, 800)` — drives the alert-manager's activity monitor on the demo pane for 3 seconds, with **no text output**, so the bell on the demo tab tilts to BUSY without scrolling any scenario text on that pane.
-2. Animates a countdown in-place where the "Press s…" hint was: `⠋ Fake task will finish in 3..` → `2..` → `1..` → `✓ Fake task done.` → `⠋ Listening for the bell to ring…` → `✓ Bell rang.` Total ~9s. Detection is purely timing-based via the existing `ActivityMonitor`, so no shell integration is required.
+1. Calls `adapter.pumpActivity(PANE_TARGET, BUSY_DEMO_DURATION_MS, 800)` — drives the alert-manager's activity monitor on the demo pane with **no text output**, so the bell tilts to BUSY without scrolling any scenario text. `BUSY_DEMO_DURATION_MS` is `cfg.alert.userAttention + 1` so silence begins after the attention idle window has expired; otherwise the "user is looking at this pane" check inside `ActivityMonitor.startNeedsAttentionConfirmTimer` would suppress the ring rather than let it fire.
+2. Animates a countdown in-place where the "Press s…" hint was: `⠋ Fake task will finish in N seconds.` ticking down to 1, then a static `✓ Fake task finished. Press s to start another one.` once the activity stops. Detection is purely timing-based via the existing `ActivityMonitor`, so no shell integration is required.
 
 ### Section 3 — Copy paste (4 items)
 

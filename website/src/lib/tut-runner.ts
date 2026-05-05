@@ -5,10 +5,19 @@
  * exit. No `terminal-kit` package dependency.
  */
 
+import { cfg } from "mouseterm-lib/cfg";
 import type { FakePtyAdapter } from "mouseterm-lib/lib/platform/fake-adapter";
 import type { InteractiveProgram } from "./tutorial-shell";
 import { SECTIONS, type Item } from "./tut-items";
 import type { TutorialState } from "./tutorial-state";
+
+/**
+ * The fake busy task runs for one tick longer than the user-attention idle
+ * window so that, by the time the activity monitor's silence threshold
+ * fires, attention has expired and the bell rings instead of being
+ * suppressed by the "user is looking at this pane" check.
+ */
+export const BUSY_DEMO_DURATION_MS = cfg.alert.userAttention + 1;
 
 const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
@@ -89,7 +98,7 @@ export class TutRunner implements InteractiveProgram {
       this.render();
       if (
         this.busyDemoStart === null ||
-        Date.now() - this.busyDemoStart >= 3_000
+        Date.now() - this.busyDemoStart >= BUSY_DEMO_DURATION_MS
       ) {
         this.stopSpinnerTicks();
       }
@@ -363,12 +372,11 @@ export class TutRunner implements InteractiveProgram {
     const idleHint = `  ${DIM}Press ${fg(36)}s${RESET}${DIM} here to start a fake busy task.${RESET}`;
     if (this.busyDemoStart === null) return [idleHint];
     const elapsed = Date.now() - this.busyDemoStart;
-    if (elapsed < 3_000) {
+    if (elapsed < BUSY_DEMO_DURATION_MS) {
       const spinner = SPINNER_FRAMES[this.spinnerFrame];
-      const secsLeft = Math.max(1, Math.ceil((3_000 - elapsed) / 1_000));
-      const dots = ".".repeat(4 - secsLeft);
+      const secsLeft = Math.max(1, Math.ceil((BUSY_DEMO_DURATION_MS - elapsed) / 1_000));
       return [
-        `  ${fg(33)}${spinner}${RESET} Fake task will finish in ${BOLD}${secsLeft}${RESET}${dots}`,
+        `  ${fg(33)}${spinner}${RESET} Fake task will finish in ${BOLD}${secsLeft}${RESET} seconds.`,
       ];
     }
     return [

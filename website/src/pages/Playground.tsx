@@ -4,7 +4,7 @@ import { ThemePicker } from "mouseterm-lib/components/ThemePicker";
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
 import { TutorialState } from "../lib/tutorial-state";
 import { TutDetector } from "../lib/tut-detector";
-import { TutRunner } from "../lib/tut-runner";
+import { BUSY_DEMO_DURATION_MS, TutRunner } from "../lib/tut-runner";
 
 export { Playground as Component };
 
@@ -63,11 +63,13 @@ function Playground() {
               state: tutorialState,
               onExit,
               onTriggerBusyDemo: () => {
-                // Drive the alert-manager on tut-target for 3s of activity,
-                // then silence (the alert-manager rings ~5s after silence
-                // begins). No text output — the visual feedback is the
-                // countdown animation rendered inside the tutorial runner.
-                adapter.pumpActivity(PANE_TARGET, 3000, 800);
+                // Run for slightly longer than the user-attention idle
+                // window so silence begins after attention has expired.
+                // Otherwise the activity-monitor's "user is looking at
+                // this pane" check would suppress the ring instead of
+                // letting it fire. No text output — the visual feedback
+                // is the countdown rendered inside the tutorial runner.
+                adapter.pumpActivity(PANE_TARGET, BUSY_DEMO_DURATION_MS, 800);
               },
             });
           }

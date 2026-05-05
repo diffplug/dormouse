@@ -162,12 +162,7 @@ export class ActivityMonitor {
       this.needsAttentionConfirmTimer = null;
       if (this.status !== 'MIGHT_NEED_ATTENTION') return;
       if (this.hasAttention()) {
-        // User is currently paying attention — don't ring on top of them.
-        // But the task IS done; we shouldn't silently swallow the alert.
-        // Re-arm and check again later. The bell stays at MIGHT_NEED_ATTENTION
-        // until either new output arrives (back to BUSY) or attention
-        // expires (this branch flips to ALERT_RINGING).
-        this.startNeedsAttentionConfirmTimer();
+        this.attend();
         return;
       }
       this.resetOutputTracking();
