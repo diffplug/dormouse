@@ -3,7 +3,7 @@ import { CommandBuffer } from "ascii-splash-internal/engine/CommandBuffer.js";
 import { CommandExecutor } from "ascii-splash-internal/engine/CommandExecutor.js";
 import { CommandParser } from "ascii-splash-internal/engine/CommandParser.js";
 import { defaultConfig, qualityPresets } from "ascii-splash-internal/config/defaults.js";
-import { getNextThemeName, getTheme, THEMES } from "ascii-splash-internal/config/themes.js";
+import { getNextThemeName, getTheme, THEME_NAMES, THEMES } from "ascii-splash-internal/config/themes.js";
 import { TransitionManager } from "ascii-splash-internal/renderer/TransitionManager.js";
 import { Buffer as SplashBuffer } from "ascii-splash-internal/renderer/Buffer.js";
 import { HelpOverlay } from "ascii-splash-internal/ui/HelpOverlay.js";
@@ -34,14 +34,9 @@ import { TunnelPattern } from "ascii-splash-internal/patterns/TunnelPattern.js";
 import { WavePattern } from "ascii-splash-internal/patterns/WavePattern.js";
 import type { Cell, Color, Pattern, Point, Size, Theme } from "ascii-splash-internal/types/index.js";
 import type { FakePtyAdapter } from "mouseterm-lib/lib/platform/fake-adapter";
+import type { InteractiveProgram } from "./tutorial-shell";
 
 type QualityPreset = "low" | "medium" | "high";
-
-export interface InteractiveProgram {
-  start(): void;
-  handleInput(data: string): void;
-  dispose(): void;
-}
 
 interface AsciiSplashRunnerOptions {
   adapter: FakePtyAdapter;
@@ -133,7 +128,12 @@ const PATTERN_DISPLAY_NAMES: Record<string, string> = {
   metaball: "Metaball",
 };
 
-const THEME_NAMES = ["ocean", "matrix", "starlight", "fire", "monochrome"] as const;
+const ARROW_KEY_NAMES: Record<string, string> = { A: "UP", B: "DOWN", C: "RIGHT", D: "LEFT" };
+
+const OCEANBEACH_PATTERN_INDEX = PATTERN_NAMES.indexOf("oceanbeach");
+const PRESET_COUNT = 6;
+const PATTERN_BUFFER_TIMEOUT_MS = 5000;
+const PATTERN_SWITCH_GUARD_MS = 16;
 
 const HELP_TEXT = [
   "Usage: ascii-splash [options]",
@@ -218,7 +218,7 @@ function parseArgs(args: string[]): ParsedOptions {
   if (parsed.fps !== undefined && (!Number.isFinite(parsed.fps) || parsed.fps < 10 || parsed.fps > 60)) {
     return { ...parsed, error: `FPS must be a number between 10 and 60` };
   }
-  if (!THEME_NAMES.includes(parsed.theme as (typeof THEME_NAMES)[number])) {
+  if (!THEME_NAMES.includes(parsed.theme)) {
     return { ...parsed, error: `Invalid theme: ${parsed.theme}` };
   }
   return parsed;
@@ -451,8 +451,8 @@ class BrowserTerminalRenderer {
         output += "\x1b[39m";
       }
       output += change.cell.char;
-      output += "\x1b[0m";
     }
+    output += "\x1b[0m";
     this.write(output);
     this.buffer.swap();
     return changes.length;
@@ -489,14 +489,12 @@ export class AsciiSplashRunner implements InteractiveProgram {
   private currentPresetIndex = 1;
   private currentThemeIndex = 0;
   private currentTheme: Theme = getTheme("ocean");
-  private currentQuality: QualityPreset = "medium";
   private patternBuffer = "";
   private patternBufferActive = false;
   private patternBufferTimeout: ReturnType<typeof setTimeout> | null = null;
   private debugMode = false;
   private isPatternSwitching = false;
   private disposed = false;
-  private exited = false;
   private config: SplashConfig = defaultConfig;
 
   constructor(options: AsciiSplashRunnerOptions) {
@@ -533,9 +531,8 @@ export class AsciiSplashRunner implements InteractiveProgram {
       mouseEnabled: parsed.mouseEnabled,
       patterns: defaultConfig.patterns,
     };
-    this.currentQuality = parsed.quality;
     this.currentTheme = getTheme(parsed.theme);
-    this.currentThemeIndex = THEME_NAMES.indexOf(this.currentTheme.name as (typeof THEME_NAMES)[number]);
+    this.currentThemeIndex = THEME_NAMES.indexOf(this.currentTheme.name);
     this.patterns = createPatternsFromConfig(this.config, this.currentTheme);
     this.currentPatternIndex = Math.max(0, PATTERN_NAMES.indexOf((this.config.defaultPattern ?? "waves") as (typeof PATTERN_NAMES)[number]));
 
@@ -587,23 +584,23 @@ export class AsciiSplashRunner implements InteractiveProgram {
     if (this.disposed) return;
     let index = 0;
     while (index < data.length) {
-      const mouse = data.slice(index).match(/^\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
-      if (mouse) {
-        this.handleMouse(Number(mouse[1]), Number(mouse[2]) - 1, Number(mouse[3]) - 1, mouse[4]);
-        index += mouse[0].length;
-        continue;
+      if (data[index] === "\x1b" && data[index + 1] === "[") {
+        const remaining = data.slice(index);
+        const mouse = remaining.match(/^\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
+        if (mouse) {
+          this.handleMouse(Number(mouse[1]), Number(mouse[2]) - 1, Number(mouse[3]) - 1, mouse[4]);
+          index += mouse[0].length;
+          continue;
+        }
+        const arrow = remaining.match(/^\x1b\[([ABCD])/);
+        if (arrow) {
+          this.handleKey({ name: ARROW_KEY_NAMES[arrow[1]], data: { isCharacter: false } });
+          index += arrow[0].length;
+          continue;
+        }
       }
 
-      const arrow = data.slice(index).match(/^\x1b\[([ABCD])/);
-      if (arrow) {
-        const names: Record<string, string> = { A: "UP", B: "DOWN", C: "RIGHT", D: "LEFT" };
-        this.handleKey({ name: names[arrow[1]], data: { isCharacter: false } });
-        index += arrow[0].length;
-        continue;
-      }
-
-      const ch = data[index];
-      this.handleKey(decodeKey(ch));
+      this.handleKey(decodeKey(data[index]));
       index++;
     }
   }
@@ -688,7 +685,7 @@ export class AsciiSplashRunner implements InteractiveProgram {
     } else if (/^[1-9]$/.test(input.name)) {
       this.switchPattern(Number(input.name) - 1);
     } else if (input.name === "o") {
-      this.switchPattern(17);
+      this.switchPattern(OCEANBEACH_PATTERN_INDEX);
     } else if (input.name === "n") {
       this.switchPattern((this.currentPatternIndex + 1) % this.patterns.length);
     } else if (input.name === "b") {
@@ -723,11 +720,11 @@ export class AsciiSplashRunner implements InteractiveProgram {
         this.showCommandResult(result.message, result.success);
       }
     } else if (input.name === "[") {
-      if (this.currentQuality === "high") this.setQuality("medium");
-      else if (this.currentQuality === "medium") this.setQuality("low");
+      if (this.config.quality === "high") this.setQuality("medium");
+      else if (this.config.quality === "medium") this.setQuality("low");
     } else if (input.name === "]") {
-      if (this.currentQuality === "low") this.setQuality("medium");
-      else if (this.currentQuality === "medium") this.setQuality("high");
+      if (this.config.quality === "low") this.setQuality("medium");
+      else if (this.config.quality === "medium") this.setQuality("high");
     }
 
     if (toastManager.hasToasts()) {
@@ -764,15 +761,15 @@ export class AsciiSplashRunner implements InteractiveProgram {
     this.toastManager.info(`Pattern: ${this.getCurrentPatternDisplayName()}`, 2000);
     setTimeout(() => {
       this.isPatternSwitching = false;
-    }, 16);
+    }, PATTERN_SWITCH_GUARD_MS);
   }
 
   private cyclePreset(direction: 1 | -1): void {
     const currentPattern = this.patterns[this.currentPatternIndex];
     if (!currentPattern.applyPreset) return;
     const nextPreset = direction === 1
-      ? (this.currentPresetIndex % 6) + 1
-      : this.currentPresetIndex === 1 ? 6 : this.currentPresetIndex - 1;
+      ? (this.currentPresetIndex % PRESET_COUNT) + 1
+      : this.currentPresetIndex === 1 ? PRESET_COUNT : this.currentPresetIndex - 1;
     if (!currentPattern.applyPreset(nextPreset)) return;
     this.currentPresetIndex = nextPreset;
     this.statusBar.update({ presetNumber: nextPreset });
@@ -786,20 +783,18 @@ export class AsciiSplashRunner implements InteractiveProgram {
   }
 
   private setQuality(quality: QualityPreset): void {
-    this.currentQuality = quality;
     this.config = { ...this.config, quality };
     this.patterns = createPatternsFromConfig(this.config, this.currentTheme);
     this.setFps(qualityPresets[quality]);
     this.engine?.setPattern(this.patterns[this.currentPatternIndex]);
     this.commandExecutor?.updateState(this.currentPatternIndex, this.currentThemeIndex);
-    const qualityNames = { low: "LOW (15 FPS)", medium: "MEDIUM (30 FPS)", high: "HIGH (60 FPS)" };
-    this.toastManager.info(`Quality: ${qualityNames[quality]}`, 1500);
+    this.toastManager.info(`Quality: ${quality.toUpperCase()} (${qualityPresets[quality]} FPS)`, 1500);
   }
 
   private cycleTheme(): void {
     const nextThemeName = getNextThemeName(this.currentTheme.name);
     this.currentTheme = getTheme(nextThemeName);
-    this.currentThemeIndex = THEME_NAMES.indexOf(this.currentTheme.name as (typeof THEME_NAMES)[number]);
+    this.currentThemeIndex = THEME_NAMES.indexOf(this.currentTheme.name);
     this.patterns = createPatternsFromConfig(this.config, this.currentTheme);
     this.engine?.setPattern(this.patterns[this.currentPatternIndex]);
     this.commandExecutor?.updateState(this.currentPatternIndex, this.currentThemeIndex);
@@ -828,7 +823,7 @@ export class AsciiSplashRunner implements InteractiveProgram {
       this.patternBufferActive = false;
       this.patternBuffer = "";
       this.patternBufferTimeout = null;
-    }, 5000);
+    }, PATTERN_BUFFER_TIMEOUT_MS);
   }
 
   private executePatternBuffer(): void {
@@ -896,7 +891,7 @@ export class AsciiSplashRunner implements InteractiveProgram {
       patternName: this.getCurrentPatternDisplayName(),
       presetNumber: this.currentPresetIndex,
       themeName: this.currentTheme.displayName,
-      fps: this.engine?.getFps() ?? qualityPresets[this.currentQuality],
+      fps: this.engine?.getFps() ?? qualityPresets[this.config.quality ?? "medium"],
     });
     this.commandExecutor?.updateState(this.currentPatternIndex, this.currentThemeIndex);
   }
@@ -914,8 +909,10 @@ export class AsciiSplashRunner implements InteractiveProgram {
     }
 
     const { toastManager } = this;
-    toastManager.update(now);
-    toastManager.render(cells, size);
+    if (toastManager.hasToasts()) {
+      toastManager.update(now);
+      toastManager.render(cells, size);
+    }
 
     const { helpOverlay } = this;
     if (helpOverlay.isVisible()) {
@@ -966,7 +963,7 @@ export class AsciiSplashRunner implements InteractiveProgram {
       "-----------------",
       `Pattern: ${currentPattern.name}`,
       `Theme: ${this.currentTheme.displayName}`,
-      `Quality: ${this.currentQuality.toUpperCase()}`,
+      `Quality: ${(this.config.quality ?? "medium").toUpperCase()}`,
       `FPS: ${metrics.fps.toFixed(1)} / ${metrics.targetFps}`,
       `Frame: ${metrics.frameTime.toFixed(2)}ms`,
       `Changed: ${metrics.changedCells} / ${size.width * size.height}`,
@@ -1009,10 +1006,7 @@ export class AsciiSplashRunner implements InteractiveProgram {
     this.renderer?.cleanup();
     this.engine = null;
     this.renderer = null;
-    if (notifyExit && !this.exited) {
-      this.exited = true;
-      this.onExit();
-    }
+    if (notifyExit) this.onExit();
   }
 }
 

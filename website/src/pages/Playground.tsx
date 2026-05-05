@@ -38,14 +38,13 @@ function Playground() {
       registry.initAlertStateReceiver();
       adapterRef.current = adapter;
 
-      // Assign scenarios to panes before Wall mounts them
       adapter.setDefaultScenario(scenarios.SCENARIO_SHELL_PROMPT);
       adapter.setScenario(PANE_NPM, scenarios.SCENARIO_LONG_RUNNING);
       adapter.setScenario(PANE_LS, scenarios.SCENARIO_LS_OUTPUT);
       adapter.setScenario(PANE_MAIN, scenarios.SCENARIO_TUTORIAL_MOTD);
 
-      // Wire up a shell for every playground terminal. Named scenarios print
-      // demo output first; the shell takes over once scenario playback ends.
+      // Named scenarios print demo output first; the shell takes over once
+      // scenario playback ends.
       const shellRegistry = new PlaygroundShellRegistry(
         adapter,
         (terminalId, args, onExit) => new asciiSplash.AsciiSplashRunner({
@@ -60,7 +59,6 @@ function Playground() {
       shellRegistry.ensureShell(PANE_NPM);
       shellRegistry.ensureShell(PANE_LS);
 
-      // Wire up step detection
       const detector = new TutorialDetector(mainShell);
       detectorRef.current = detector;
 
@@ -106,7 +104,6 @@ function Playground() {
     const mainPanel = api.getPanel(PANE_MAIN);
     if (mainPanel) mainPanel.api.setActive();
 
-    // Attach step detection to the API
     detectorRef.current?.attach(api);
   }, []);
 

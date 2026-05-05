@@ -1,11 +1,3 @@
-/**
- * Tutorial shell — handles the `tut` command in the playground's fake terminal.
- *
- * Provides line editing (echo, backspace) and command parsing.
- * Routes `tut`, `tut status`, `tut reset` to tutorial logic.
- */
-
-// ANSI helpers
 const ESC = '\x1b[';
 const RESET = `${ESC}0m`;
 const BOLD = `${ESC}1m`;
@@ -93,7 +85,6 @@ export class TutorialShell {
     this.activeProgram = null;
   }
 
-  /** Handle a keystroke from the user. */
   handleInput(data: string): void {
     if (this.activeProgram) {
       this.activeProgram.handleInput(data);
@@ -101,22 +92,25 @@ export class TutorialShell {
     }
 
     for (let index = 0; index < data.length; index++) {
-      const remaining = data.slice(index);
-      const csi = remaining.match(/^\x1b\[([0-?]*)([ -/]*)([@-~])/);
-      if (csi) {
-        this.handleControlSequence(csi[3]);
-        index += csi[0].length - 1;
-        continue;
-      }
-
-      const ss3 = remaining.match(/^\x1bO(.)/);
-      if (ss3) {
-        this.handleControlSequence(ss3[1]);
-        index += ss3[0].length - 1;
-        continue;
-      }
-
       const ch = data[index];
+      if (ch === '\x1b') {
+        const remaining = data.slice(index);
+        const csi = remaining.match(/^\x1b\[([0-?]*)([ -/]*)([@-~])/);
+        if (csi) {
+          this.handleControlSequence(csi[3]);
+          index += csi[0].length - 1;
+          continue;
+        }
+        const ss3 = remaining.match(/^\x1bO(.)/);
+        if (ss3) {
+          this.handleControlSequence(ss3[1]);
+          index += ss3[0].length - 1;
+          continue;
+        }
+        // Lone escape byte: drop it so partial sequences don't echo.
+        continue;
+      }
+
       if (ch === '\r' || ch === '\n') {
         this.sendOutput('\r\n');
         const command = this.lineBuffer.trim();
@@ -126,17 +120,12 @@ export class TutorialShell {
         this.historyIndex = null;
         this.historyDraft = '';
       } else if (ch === '\x7f' || ch === '\b') {
-        // Backspace
         if (this.lineBuffer.length > 0) {
           this.lineBuffer = this.lineBuffer.slice(0, -1);
           this.historyIndex = null;
-          // Move cursor back, overwrite with space, move back again
           this.sendOutput('\b \b');
         }
-      } else if (ch === '\x1b') {
-        // Ignore lone escape bytes so partial terminal sequences do not echo.
       } else if (ch >= ' ') {
-        // Printable character
         this.lineBuffer += ch;
         this.historyIndex = null;
         this.sendOutput(ch);
@@ -190,15 +179,15 @@ export class TutorialShell {
       return;
     }
 
+    const [argv0, ...args] = cmd.split(/\s+/);
     if (cmd === 'tut') {
       this.showCurrentStep();
     } else if (cmd === 'tut status') {
       this.showStatus();
     } else if (cmd === 'tut reset') {
       this.resetProgress();
-    } else if (cmd === 'ascii-splash' || cmd.startsWith('ascii-splash ') || cmd === 'splash' || cmd.startsWith('splash ')) {
+    } else if (argv0 === 'ascii-splash' || argv0 === 'splash') {
       if (this.startAsciiSplash) {
-        const args = cmd.split(/\s+/).slice(1);
         this.activeProgram = this.startAsciiSplash(args, () => {
           this.activeProgram = null;
           this.sendOutput(PROMPT);

@@ -16,6 +16,8 @@ export interface FakePtyResizeDetail extends FakePtySize {
   id: string;
 }
 
+const DEFAULT_PTY_SIZE: FakePtySize = { cols: 80, rows: 30 };
+
 export class FakePtyAdapter implements PlatformAdapter {
   private dataHandlers = new Set<(detail: { id: string; data: string }) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
@@ -87,8 +89,8 @@ export class FakePtyAdapter implements PlatformAdapter {
   spawnPty(id: string, options?: { cols?: number; rows?: number }): void {
     this.terminals.add(id);
     this.terminalSizes.set(id, {
-      cols: options?.cols ?? 80,
-      rows: options?.rows ?? 30,
+      cols: options?.cols ?? DEFAULT_PTY_SIZE.cols,
+      rows: options?.rows ?? DEFAULT_PTY_SIZE.rows,
     });
     const scenario = this.scenarioMap.get(id) ?? this.defaultScenario;
     if (scenario) {
@@ -157,7 +159,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   async getScrollback(_id: string): Promise<string | null> { return null; }
 
   getPtySize(id: string): FakePtySize {
-    return this.terminalSizes.get(id) ?? { cols: 80, rows: 30 };
+    return this.terminalSizes.get(id) ?? DEFAULT_PTY_SIZE;
   }
 
   async readClipboardFilePaths(): Promise<string[] | null> { return null; }
