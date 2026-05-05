@@ -43,7 +43,7 @@ The fake terminal accepts these inputs:
 
 ### `ascii-splash`
 
-Implemented in `website/src/lib/ascii-splash-runner.ts` (`AsciiSplashRunner` class).
+Implemented in `website/src/lib/ascii-splash-runner.ts` (`AsciiSplashRunner` class). That file's top comment is the source note for the browser adapter: it lists the upstream `ascii-splash@0.3.0` internals being reused and the local modifications made for MouseTerm/xterm/FakePty integration.
 
 The runner uses the real upstream `ascii-splash` engine, buffer, themes, UI overlays, command parser/executor, transitions, and pattern classes. It does **not** import the upstream CLI entrypoint or `terminal-kit` renderer. Instead, it provides a browser terminal boundary:
 

@@ -1,3 +1,25 @@
+/*
+ * Browser adapter for ascii-splash@0.3.0 in the MouseTerm website playground.
+ *
+ * This file is not the upstream CLI entrypoint. It imports upstream internals
+ * from ascii-splash/dist through the website's `ascii-splash-internal` Vite
+ * alias, then replaces the Node terminal-kit boundary with a FakePtyAdapter
+ * runner that speaks xterm byte streams.
+ *
+ * Upstream pieces kept: AnimationEngine, Buffer, CommandBuffer, CommandParser,
+ * CommandExecutor, themes, defaults, UI overlay classes, TransitionManager, and
+ * all pattern classes.
+ *
+ * Local changes/wrapping:
+ * - BrowserTerminalRenderer writes ANSI output through FakePtyAdapter.sendOutput.
+ * - Keyboard bytes and SGR mouse sequences are decoded from writePty input.
+ * - Alt-screen, cursor, mouse-reporting, resize, start, and cleanup lifecycle
+ *   are handled for xterm.js inside MouseTerm.
+ * - UI overlays/transitions are instantiated per runner instead of using
+ *   upstream singleton getters so multiple panes can run independently.
+ * - Config persistence is intentionally omitted; upstream commands that need a
+ *   config loader report that it is unavailable.
+ */
 import { AnimationEngine } from "ascii-splash-internal/engine/AnimationEngine.js";
 import { CommandBuffer } from "ascii-splash-internal/engine/CommandBuffer.js";
 import { CommandExecutor } from "ascii-splash-internal/engine/CommandExecutor.js";
