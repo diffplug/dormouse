@@ -12,6 +12,7 @@ function mountRunner(completedIds: ItemId[] = []) {
   adapter.spawnPty(id);
 
   const frames: string[] = [];
+  let exitCount = 0;
   adapter.onPtyData(({ data }) => frames.push(data));
 
   const state = new TutorialState();
@@ -21,7 +22,9 @@ function mountRunner(completedIds: ItemId[] = []) {
     adapter,
     terminalId: id,
     state,
-    onExit: () => {},
+    onExit: () => {
+      exitCount += 1;
+    },
   });
   adapter.setInputHandler(id, (data) => runner.handleInput(data));
   runner.start();
@@ -34,6 +37,7 @@ function mountRunner(completedIds: ItemId[] = []) {
       const i = all.lastIndexOf(FRAME_RESET);
       return i >= 0 ? all.slice(i) : all;
     },
+    exitCount: () => exitCount,
     dispose: () => runner.dispose(),
   };
 }
@@ -71,6 +75,19 @@ describe("TutRunner snapshots", () => {
     const { sendKeys, lastFrame, dispose } = mountRunner(allKeyboardIds);
     sendKeys("\r");
     expect(lastFrame()).toMatchSnapshot();
+    dispose();
+  });
+
+  it("backs out of a section with q before exiting from the menu", () => {
+    const { sendKeys, lastFrame, exitCount, dispose } = mountRunner();
+    sendKeys("\r");
+
+    sendKeys("q");
+    expect(lastFrame()).toContain("MouseTerm Playground Tutorial");
+    expect(exitCount()).toBe(0);
+
+    sendKeys("q");
+    expect(exitCount()).toBe(1);
     dispose();
   });
 });

@@ -157,7 +157,7 @@ export class TutRunner implements InteractiveProgram {
         continue;
       }
       if (ch === "q" || ch === "Q") {
-        this.exit();
+        this.handleEscape();
         return;
       }
       if (
@@ -482,4 +482,3 @@ export class TutRunner implements InteractiveProgram {
     this.adapter.sendOutput(this.terminalId, data);
   }
 }
-
