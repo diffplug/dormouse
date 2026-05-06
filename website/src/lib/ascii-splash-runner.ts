@@ -55,7 +55,12 @@ import { StarfieldPattern } from "ascii-splash-internal/patterns/StarfieldPatter
 import { TunnelPattern } from "ascii-splash-internal/patterns/TunnelPattern.js";
 import { WavePattern } from "ascii-splash-internal/patterns/WavePattern.js";
 import type { Cell, Color, Pattern, Point, Size, Theme } from "ascii-splash-internal/types/index.js";
-import { ENTER_ALT_SCREEN, LEAVE_ALT_SCREEN } from "mouseterm-lib/lib/ansi";
+import {
+  ENTER_ALT_SCREEN,
+  LEAVE_ALT_SCREEN,
+  MOUSE_DISABLE,
+  MOUSE_ENABLE,
+} from "mouseterm-lib/lib/ansi";
 import type { FakePtyAdapter } from "mouseterm-lib/lib/platform/fake-adapter";
 import type { InteractiveProgram } from "./tutorial-shell";
 
@@ -94,8 +99,6 @@ interface KeyInput {
 }
 
 const VERSION = "0.3.0";
-const MOUSE_ENABLE = "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h";
-const MOUSE_DISABLE = "\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l";
 
 const PATTERN_NAMES = [
   "waves",

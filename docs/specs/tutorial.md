@@ -15,11 +15,15 @@ Three browser-side pieces in `website/src/lib/`, mirroring the pattern in `websi
 
 - `SiteHeader` at top with the `Theme:` dropdown control on `/playground` (other routes do not render it). Header is `themeAware` so `--vscode-*` variables drive its background, border, text, and banner colors.
 - `<main>` is a flex container so Wall's `flex-1 min-h-0` root gets a real height.
-- `Wall` runs `FakePtyAdapter` with `initialMode="passthrough"` and three initial panes:
-  - **`tut-main`** (left, ~50%) — auto-launches `TutRunner` on mount via `mainShell.runCommand("tut")`.
-  - **`tut-target`** (right-top, ~25%) — `SCENARIO_SHELL_PROMPT`. Used as the demo pane for keyboard-nav and alert sections.
-  - **`tut-boxed`** (right-bottom, ~25%) — `SCENARIO_BOXED_PARAGRAPH`. The boxed paragraph for Copy Rewrapped vs Copy Raw.
-- The two right-side panes are added in `onApiReady` with `position: { referencePanel, direction }` after Wall creates the initial main pane.
+- `Wall` runs `FakePtyAdapter` with `initialMode="passthrough"`. The pane layout branches at mount on `window.innerWidth < 768` (Tailwind's `md` breakpoint, locked at mount; not reactive to resize):
+  - **Desktop (≥ 768px)** — three panes:
+    - **`tut-main`** (left, ~50%) — auto-launches `TutRunner` via `mainShell.runCommand("tut")`.
+    - **`tut-boxed`** (right-top, ~25%) — titled "changelog". Auto-launches `ChangelogRunner` via `boxedShell.runCommand("changelog")`. Doubles as the Copy Rewrapped target — its wrapped lines exercise the rewrap path.
+    - **`tut-splash`** (right-bottom, ~25%) — titled "ascii-splash". Auto-launches `AsciiSplashRunner` via `splashShell.runCommand("ascii-splash")`.
+  - **Phone (< 768px)** — two stacked panes; the changelog is dropped because the screen is too narrow to host it usefully:
+    - **`tut-main`** (top, ~50%) — same as desktop.
+    - **`tut-splash`** (bottom, ~50%) — same as desktop.
+- Side panes are added in `onApiReady` with `position: { referencePanel, direction }` after Wall creates the initial main pane.
 
 Every playground pane gets a `TutorialShell` input handler through `PlaygroundShellRegistry`. Newly split or spawned fake terminals use `SCENARIO_SHELL_PROMPT` by default. The shell dispatches by command name to a `startProgram` factory provided by the page; the factory wires `tut` → `TutRunner` and `ascii-splash` / `splash` → `AsciiSplashRunner`.
 
@@ -64,7 +68,7 @@ The detector subscribes to `subscribeToActivity()` and tracks per-id `(status, t
 
 The detector remembers the most recent pane whose alert was enabled. The Alert section view shows a runner-local instruction: "Press `s` here to start a fake busy task." `s` is **not** a real MouseTerm shortcut; it is intercepted by `TutRunner` only while the Alert section is open. When pressed, the runner does two things:
 
-1. Resolves that pane to its current PTY session id, then calls `adapter.pumpActivity(sessionId, BUSY_DEMO_DURATION_MS, 800)` — drives the alert-manager's activity monitor on the same alert-enabled session with **no text output**, so the bell tilts to BUSY without scrolling any scenario text. The session id is resolved at trigger time so `Cmd/Ctrl+Arrow` swaps do not leave the tutorial pumping an old pane id. If no alert-enabled pane is known, the runner falls back to `PANE_TARGET`. `BUSY_DEMO_DURATION_MS` is `cfg.alert.userAttention + 250` so silence begins after the attention idle window has expired, with a small scheduler-jitter guard; otherwise the "user is looking at this pane" check inside `ActivityMonitor.startNeedsAttentionConfirmTimer` would suppress the ring rather than let it fire.
+1. Resolves that pane to its current PTY session id, then calls `adapter.pumpActivity(sessionId, BUSY_DEMO_DURATION_MS, 800)` — drives the alert-manager's activity monitor on the same alert-enabled session with **no text output**, so the bell tilts to BUSY without scrolling any scenario text. The session id is resolved at trigger time so `Cmd/Ctrl+Arrow` swaps do not leave the tutorial pumping an old pane id. If no alert-enabled pane is known, the runner falls back to `PANE_BOXED` (the changelog pane). `BUSY_DEMO_DURATION_MS` is `cfg.alert.userAttention + 250` so silence begins after the attention idle window has expired, with a small scheduler-jitter guard; otherwise the "user is looking at this pane" check inside `ActivityMonitor.startNeedsAttentionConfirmTimer` would suppress the ring rather than let it fire.
 2. Animates a countdown in-place where the "Press s…" hint was: `⠋ Fake task will finish in N seconds.` ticking down to 1, then a static `✓ Fake task finished. Press s to start another one.` once the activity stops. Detection is purely timing-based via the existing `ActivityMonitor`, so no shell integration is required.
 
 ### Section 3 — Copy paste (4 items)
@@ -75,21 +79,22 @@ The detector subscribes to `subscribeToMouseSelection()` and tracks per-id trans
 |---|---|---|
 | `cp-select` | Drag-select text in any pane | `selection` transitions `null → non-null` |
 | `cp-raw` | Click Copy Raw | `copyFlash` transitions to `'raw'` (set by `flashCopy()` after the popup button fires) |
-| `cp-rewrap` | Click Copy Rewrapped on the boxed paragraph | `copyFlash` transitions to `'rewrapped'` |
+| `cp-rewrap` | Click Copy Rewrapped on wrapped text in the changelog pane | `copyFlash` transitions to `'rewrapped'` |
 | `cp-override` | Run `ascii-splash`, then click its cursor icon | `override` transitions `'off' → 'temporary' \| 'permanent'` |
 
 Prose:
 - "Some programs trap the mouse — the cursor icon lets you override."
 - "`ascii-splash` redraws every frame, so it cancels selections: looks cool, undragable."
 
-The Copy Rewrapped step uses `SCENARIO_BOXED_PARAGRAPH` (in `lib/src/lib/platform/fake-scenarios.ts`). Frame-only and frame-flanking box-drawing runs are stripped by `lib/src/lib/rewrap.ts` so Rewrapped joins the wrapped paragraph; clipboard contents visibly differ from Raw.
+The Copy Rewrapped step uses the wrapped item lines `ChangelogRunner` produces in the `tut-boxed` pane. The runner word-wraps each item to fit the pane width, so Rewrapped joins those lines back together while Raw preserves the wrap; clipboard contents visibly differ. The user must override mouse capture first (the `cp-override` step) before drag-selecting inside the changelog pane, since the runner enables SGR mouse-reporting.
+
+While the Copy paste section is open, pressing `p` toggles the **Place To Paste** modal — a draggable scratch box with eight pointer-event resize handles (four edges + four corners), rendered by `website/src/components/PlaceToPaste.tsx` and mounted at the page level. `TutRunner` intercepts `p`/`P` (mirroring the Alert section's `s` busy-demo intercept) and calls `onTogglePlaceToPaste`; `Playground` flips a `placeToPasteOpen` flag so the modal is portal-free and overlays the wall. The runner renders a persistent `Press \`p\` to toggle the Place To Paste …` line above the section's prose paragraph so the prompt is visible regardless of which item is active. Users paste copied text into the modal's single textarea and resize it to see whether the text reflows (Rewrapped) or stays line-broken (Raw).
 
 ## Lib changes added for this tutorial
 
 - **`WallEvent.kill`** and **`WallEvent.move`** — new discriminants on the `WallEvent` union (`lib/src/components/wall/wall-types.ts`). `kill` fires from `acceptKill` in `Wall.tsx`. `move` fires from `handle-pane-shortcuts.ts` after the Cmd/Ctrl-Arrow swap, via a new `fireEvent` callback added to `WallKeyboardCtx`.
 - **`FakePtyAdapter.pumpActivity(id, durationMs, intervalMs)`** — drives the alert-manager for a fixed duration with no data output. The runner uses this so the bell on the demo pane tilts/rings while the visible "task running" animation lives entirely inside the tutorial pane.
 - **`FakePtyAdapter.sendOutput(id, data)`** — pushes data through the data handlers as if the PTY produced it, also driving `alertManager.onData()`. Used by `TutRunner` and `AsciiSplashRunner` so browser-side echoes still feed the activity monitor.
-- **`SCENARIO_BOXED_PARAGRAPH`** — boxed multi-line prose, used by `tut-boxed`.
 
 `SCENARIO_TUTORIAL_MOTD` was removed — the runner now owns the main pane's screen.
 
@@ -115,7 +120,7 @@ The picker restores the persisted active theme on mount. The playground header i
 
 ## Mouse and Clipboard Feature Coverage
 
-The Playground is the primary dogfood surface for the features in `docs/specs/mouse-and-clipboard.md`. The new tutorial layout (`tut-main` running the runner, `tut-target` shell, `tut-boxed` boxed paragraph) plus the user-launched `ascii-splash` pane covers most of the spec; one notable gap remains.
+The Playground is the primary dogfood surface for the features in `docs/specs/mouse-and-clipboard.md`. The tutorial layout (`tut-main` running the runner, `tut-boxed` auto-running `changelog`, `tut-splash` auto-running `ascii-splash`) covers most of the spec; one notable gap remains.
 
 Legend: ✅ exercisable today, ⚠️ partial, ❌ not exercisable.
 
@@ -130,7 +135,7 @@ Legend: ✅ exercisable today, ⚠️ partial, ❌ not exercisable.
 | §3.6 | Keyboard routing during drag | ✅ | `ascii-splash` reacts to keys and mouse; with override active, drag-time keyboard consumption is observable. |
 | §3.7 | Popup on mouse-up, new-drag-replaces | ✅ | Any selection. |
 | §4.1.1 | Copy Raw | ✅ | Any selection. |
-| §4.1.2 | Copy Rewrapped (box-strip + paragraph unwrap) | ✅ | `SCENARIO_BOXED_PARAGRAPH` provides a boxed paragraph in `tut-boxed`. |
+| §4.1.2 | Copy Rewrapped (paragraph unwrap) | ✅ | `ChangelogRunner` in `tut-boxed` renders wrapped item lines that exercise the rewrap path. |
 | §4.2 | Cmd+C / Cmd+Shift+C | ✅ | Any selection. |
 | §4.3 | Esc / click-outside dismiss | ✅ | Any selection popup. |
 | §5 | Smart-extension (URL / abs path / rel path / Windows path / error location) | ❌ | No matching tokens in the scenarios. |

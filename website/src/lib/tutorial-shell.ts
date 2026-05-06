@@ -166,7 +166,7 @@ export class TutorialShell {
     });
     if (!program) {
       this.sendOutput(
-        `${fg(90)}Unknown command. Try ${fg(36)}tut${fg(90)} or ${fg(36)}ascii-splash${fg(90)}.${RESET}\r\n`,
+        `${fg(90)}Unknown command. Try ${fg(36)}tut${fg(90)}, ${fg(36)}ascii-splash${fg(90)}, or ${fg(36)}changelog${fg(90)}.${RESET}\r\n`,
       );
       this.showPrompt();
       return;

@@ -21,6 +21,12 @@ export const fg = (code: number): string => `${ESC}${code}m`;
 export const ENTER_ALT_SCREEN = `${ESC}?1049h${CLEAR_SCREEN}${CURSOR_HOME}${ESC}?25l`;
 export const LEAVE_ALT_SCREEN = `${CLEAR_SCREEN}${CURSOR_HOME}${ESC}?25h${ESC}?1049l`;
 
+// SGR mouse-reporting toggles. xterm parses these and the wall's
+// mouse-mode-observer flips the cursor-icon override on/off so the user
+// knows MouseTerm is "trapping the mouse" while the program runs.
+export const MOUSE_ENABLE = `${ESC}?1000h${ESC}?1002h${ESC}?1003h${ESC}?1006h`;
+export const MOUSE_DISABLE = `${ESC}?1003l${ESC}?1002l${ESC}?1000l${ESC}?1006l`;
+
 // Stylized `user@mouseterm:~$ ` prompt used by the playground shell and
 // by canned scenarios so they look the same.
 export const PROMPT = `${fg(32)}user${RESET}@${fg(36)}mouseterm${RESET}:${BOLD}${fg(34)}~${RESET}$ `;
