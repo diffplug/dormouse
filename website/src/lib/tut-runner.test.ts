@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { FakePtyAdapter } from "mouseterm-lib/lib/platform/fake-adapter";
-import { SECTIONS } from "./tut-items";
+import { SECTIONS, type ItemId } from "./tut-items";
 import { TutRunner } from "./tut-runner";
 import { TutorialState } from "./tutorial-state";
 
 const FRAME_RESET = "\x1b[H\x1b[2J";
 
-function mountRunner(completedIds: string[] = []) {
+function mountRunner(completedIds: ItemId[] = []) {
   const adapter = new FakePtyAdapter();
   const id = "test-pane";
   adapter.spawnPty(id);

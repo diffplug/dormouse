@@ -1,14 +1,29 @@
-/**
- * Section + item definitions shared by TutRunner (display) and TutDetector
- * (event-to-completion mapping). Item ids are stable — they're the
- * localStorage key suffixes.
- */
-
 import { cfg } from "mouseterm-lib/cfg";
 
 const USER_ATTENTION_SECS = Math.round(cfg.alert.userAttention / 1000);
 
-export type ItemId = string;
+// Item ids are the persistence key — keep them stable across releases.
+export const ITEM_IDS = [
+  "kb-mode",
+  "kb-split-h",
+  "kb-arrows",
+  "kb-split-v",
+  "kb-min",
+  "kb-kill",
+  "kb-move",
+  "al-enable",
+  "al-busy",
+  "al-ring",
+  "al-todo-auto",
+  "al-todo-clear",
+  "al-todo-manual",
+  "cp-select",
+  "cp-raw",
+  "cp-rewrap",
+  "cp-override",
+] as const;
+
+export type ItemId = (typeof ITEM_IDS)[number];
 
 export interface Item {
   id: ItemId;
@@ -23,7 +38,7 @@ export interface Section {
   prose?: string[];
 }
 
-export const SECTIONS: Section[] = [
+export const SECTIONS: readonly Section[] = [
   {
     id: 'keyboard',
     title: 'Keyboard navigation',
@@ -135,7 +150,7 @@ export const SECTIONS: Section[] = [
   },
 ];
 
-export const ALL_ITEM_IDS: ItemId[] = SECTIONS.flatMap((s) => s.items.map((i) => i.id));
+export const ALL_ITEM_IDS: readonly ItemId[] = ITEM_IDS;
 
 export function itemSection(id: ItemId): Section | undefined {
   return SECTIONS.find((s) => s.items.some((i) => i.id === id));
