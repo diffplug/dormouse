@@ -88,12 +88,12 @@ export const SECTIONS: readonly Section[] = [
       {
         id: 'al-enable',
         title: 'Enable alerts on a pane',
-        hint: 'Click the bell, or press `a` in command mode with the pane selected.',
+        hint: 'Click the bell on the pane you want to use, or press `a` in command mode with that pane selected.',
       },
       {
         id: 'al-busy',
         title: 'Watch the bell tilt while a task runs',
-        hint: 'Press `s` to start a fake busy task in this demo pane.',
+        hint: 'Press `s` here to start a fake busy task on that alert-enabled pane.',
       },
       {
         id: 'al-ring',

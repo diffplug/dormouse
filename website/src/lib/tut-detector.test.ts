@@ -10,6 +10,7 @@ function makeDetectorHarness() {
   let mouseListener: (() => void) | null = null;
   let activitySnapshot = new Map<string, ActivityState>();
   let mouseSnapshot = new Map<string, MouseSelectionState>();
+  const onAlertDemoPaneChange = vi.fn();
 
   const state = new TutorialState();
   const detector = new TutDetector(
@@ -32,6 +33,7 @@ function makeDetectorHarness() {
         };
       },
     },
+    { onAlertDemoPaneChange },
   );
 
   detector.attach({
@@ -53,6 +55,7 @@ function makeDetectorHarness() {
       mouseListener?.();
     },
     activePanelChange: (id: string) => activePanelListener?.({ id }),
+    onAlertDemoPaneChange,
   };
 }
 
@@ -129,5 +132,27 @@ describe("TutDetector", () => {
     ]));
 
     expect(state.isComplete("al-enable")).toBe(true);
+  });
+
+  it("tracks the pane whose alert was enabled for the busy demo", () => {
+    const { onAlertDemoPaneChange, setActivitySnapshot } = makeDetectorHarness();
+
+    setActivitySnapshot(new Map([
+      ["pane-a", { status: "ALERT_DISABLED", todo: false }],
+      ["pane-b", { status: "ALERT_DISABLED", todo: false }],
+    ]));
+    setActivitySnapshot(new Map([
+      ["pane-a", { status: "ALERT_DISABLED", todo: false }],
+      ["pane-b", { status: "NOTHING_TO_SHOW", todo: false }],
+    ]));
+
+    expect(onAlertDemoPaneChange).toHaveBeenLastCalledWith("pane-b");
+
+    setActivitySnapshot(new Map([
+      ["pane-a", { status: "ALERT_DISABLED", todo: false }],
+      ["pane-b", { status: "ALERT_DISABLED", todo: false }],
+    ]));
+
+    expect(onAlertDemoPaneChange).toHaveBeenLastCalledWith(null);
   });
 });

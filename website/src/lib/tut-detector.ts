@@ -17,14 +17,21 @@ interface MouseSelectionModule {
   getMouseSelectionSnapshot: () => Map<string, MouseSelectionState>;
 }
 
+interface TutDetectorOptions {
+  onAlertDemoPaneChange?: (id: string | null) => void;
+}
+
 export class TutDetector {
   private state: TutorialState;
   private activityStore: ActivityStoreModule;
   private mouseStore: MouseSelectionModule;
+  private onAlertDemoPaneChange?: (id: string | null) => void;
   private api: DockviewApi | null = null;
   private currentMode: WallMode = "command";
   private currentPaneId: string | null = null;
   private commandModePanels = new Set<string>();
+  private alertEnabledPaneIds = new Set<string>();
+  private preferredAlertPaneId: string | null = null;
   private prevActivity = new Map<string, ActivityState>();
   private prevMouse = new Map<string, MouseSelectionState>();
   private disposables: (() => void)[] = [];
@@ -33,10 +40,12 @@ export class TutDetector {
     state: TutorialState,
     activityStore: ActivityStoreModule,
     mouseStore: MouseSelectionModule,
+    options: TutDetectorOptions = {},
   ) {
     this.state = state;
     this.activityStore = activityStore;
     this.mouseStore = mouseStore;
+    this.onAlertDemoPaneChange = options.onAlertDemoPaneChange;
   }
 
   attach(api: DockviewApi): void {
@@ -45,7 +54,12 @@ export class TutDetector {
     // mis-read as a transition from "nothing".
     for (const [id, s] of this.activityStore.getActivitySnapshot()) {
       this.prevActivity.set(id, { ...s });
+      if (s.status !== "ALERT_DISABLED") {
+        this.alertEnabledPaneIds.add(id);
+        this.preferredAlertPaneId ??= id;
+      }
     }
+    this.emitAlertDemoPaneChange();
     for (const [id, s] of this.mouseStore.getMouseSelectionSnapshot()) {
       this.prevMouse.set(id, { ...s });
     }
@@ -127,6 +141,15 @@ export class TutDetector {
 
       if (prev.status === "ALERT_DISABLED" && current.status !== "ALERT_DISABLED") {
         this.state.markComplete("al-enable");
+        this.alertEnabledPaneIds.add(id);
+        this.preferredAlertPaneId = id;
+        this.emitAlertDemoPaneChange();
+      } else if (prev.status !== "ALERT_DISABLED" && current.status === "ALERT_DISABLED") {
+        this.alertEnabledPaneIds.delete(id);
+        if (this.preferredAlertPaneId === id) {
+          this.preferredAlertPaneId = this.alertEnabledPaneIds.values().next().value ?? null;
+          this.emitAlertDemoPaneChange();
+        }
       }
 
       // Gate al-busy / al-ring on a true status transition. Without the
@@ -158,7 +181,14 @@ export class TutDetector {
       this.prevActivity.set(id, { ...current });
     }
     for (const id of this.prevActivity.keys()) {
-      if (!snapshot.has(id)) this.prevActivity.delete(id);
+      if (!snapshot.has(id)) {
+        this.prevActivity.delete(id);
+        this.alertEnabledPaneIds.delete(id);
+        if (this.preferredAlertPaneId === id) {
+          this.preferredAlertPaneId = this.alertEnabledPaneIds.values().next().value ?? null;
+          this.emitAlertDemoPaneChange();
+        }
+      }
     }
   }
 
@@ -190,5 +220,9 @@ export class TutDetector {
   dispose(): void {
     for (const fn of this.disposables) fn();
     this.disposables = [];
+  }
+
+  private emitAlertDemoPaneChange(): void {
+    this.onAlertDemoPaneChange?.(this.preferredAlertPaneId);
   }
 }

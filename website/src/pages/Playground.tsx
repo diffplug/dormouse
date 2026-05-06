@@ -28,6 +28,7 @@ function Playground() {
   const tutorialAutoStartedRef = useRef(false);
   const spawnUnsubRef = useRef<(() => void) | null>(null);
   const busyDemoDisposeRef = useRef<(() => void) | null>(null);
+  const alertDemoPaneIdRef = useRef<string | null>(null);
 
   const tryAutoStartTutorial = useCallback(() => {
     if (tutorialAutoStartedRef.current) return;
@@ -64,7 +65,11 @@ function Playground() {
 
       const tutorialState = new TutorialState();
       stateRef.current = tutorialState;
-      const detector = new TutDetector(tutorialState, registry, mouseSelection);
+      const detector = new TutDetector(tutorialState, registry, mouseSelection, {
+        onAlertDemoPaneChange: (id) => {
+          alertDemoPaneIdRef.current = id;
+        },
+      });
       detectorRef.current = detector;
 
       const shellRegistry = new PlaygroundShellRegistry(
@@ -77,9 +82,11 @@ function Playground() {
               state: tutorialState,
               onExit,
               onTriggerBusyDemo: () => {
+                const paneId = alertDemoPaneIdRef.current ?? PANE_TARGET;
+                const sessionId = registry.resolveTerminalSessionId(paneId);
                 busyDemoDisposeRef.current?.();
                 busyDemoDisposeRef.current = adapter.pumpActivity(
-                  PANE_TARGET,
+                  sessionId,
                   BUSY_DEMO_DURATION_MS,
                   800,
                 );
@@ -127,6 +134,7 @@ function Playground() {
       shellRegistryRef.current = null;
       stateRef.current = null;
       tutorialAutoStartedRef.current = false;
+      alertDemoPaneIdRef.current = null;
       spawnUnsubRef.current?.();
       spawnUnsubRef.current = null;
       busyDemoDisposeRef.current?.();

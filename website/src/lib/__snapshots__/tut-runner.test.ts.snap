@@ -6,7 +6,8 @@ exports[`TutRunner snapshots > renders Alert and TODO with all items incomplete 
   [2m[36mEsc[39m to go back[0m
 
    [33m●[0m  [1mEnable alerts on a pane[0m
-        [3mClick the bell, or press [36ma[39m in command mode with the pane selected.[0m
+        [3mClick the bell on the pane you want to use, or press [36ma[39m in command mode[0m
+        [3mwith that pane selected.[0m
    [2m·[0m  Watch the bell tilt while a task runs
    [2m·[0m  Bell rings when the task completes
    [2m·[0m  TODO tag appears when you dismiss the ringing alert
