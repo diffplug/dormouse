@@ -163,7 +163,10 @@ export class TutRunner implements InteractiveProgram {
         this.sectionId === "alert" &&
         (ch === "s" || ch === "S")
       ) {
-        this.startBusyDemo();
+        // Ignore presses while the demo is still running — otherwise each
+        // press starts a fresh pumpActivity interval that stacks on top of
+        // the previous one until they all expire.
+        if (!this.busyDemoInProgress()) this.startBusyDemo();
         i += 1;
         continue;
       }
@@ -246,6 +249,11 @@ export class TutRunner implements InteractiveProgram {
   private exit(): void {
     if (this.disposed) return;
     this.cleanup(true);
+  }
+
+  private busyDemoInProgress(): boolean {
+    if (this.busyDemoStart === null) return false;
+    return Date.now() - this.busyDemoStart < BUSY_DEMO_DURATION_MS;
   }
 
   private startBusyDemo(): void {
