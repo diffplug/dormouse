@@ -25,7 +25,6 @@ function Playground() {
   const detectorRef = useRef<TutDetector | null>(null);
   const stateRef = useRef<TutorialState | null>(null);
   const dockviewDisposablesRef = useRef<DockviewDisposable[]>([]);
-  const detectorAttachRef = useRef<((api: any) => void) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,7 +53,7 @@ function Playground() {
 
       const tutorialState = new TutorialState();
       stateRef.current = tutorialState;
-      const detector = new TutDetector(tutorialState);
+      const detector = new TutDetector(tutorialState, registry, mouseSelection);
       detectorRef.current = detector;
 
       const shellRegistry = new PlaygroundShellRegistry(
@@ -67,12 +66,6 @@ function Playground() {
               state: tutorialState,
               onExit,
               onTriggerBusyDemo: () => {
-                // Run for slightly longer than the user-attention idle
-                // window so silence begins after attention has expired.
-                // Otherwise the activity-monitor's "user is looking at
-                // this pane" check would suppress the ring instead of
-                // letting it fire. No text output — the visual feedback
-                // is the countdown rendered inside the tutorial runner.
                 adapter.pumpActivity(PANE_TARGET, BUSY_DEMO_DURATION_MS, 800);
               },
             });
@@ -94,14 +87,7 @@ function Playground() {
       shellRegistry.ensureShell(PANE_TARGET);
       shellRegistry.ensureShell(PANE_BOXED);
 
-      // Auto-launch the tutorial in the main pane.
       mainShell.runCommand("tut");
-
-      // Stash modules for handleApiReady to attach the detector once
-      // dockview is alive.
-      detectorAttachRef.current = (api) => {
-        detector.attach(api, registry, mouseSelection);
-      };
 
       setWallModule({ Wall: wall.Wall });
     }
@@ -148,7 +134,7 @@ function Playground() {
     const mainPanel = api.getPanel(PANE_MAIN);
     if (mainPanel) mainPanel.api.setActive();
 
-    detectorAttachRef.current?.(api);
+    detectorRef.current?.attach(api);
   }, []);
 
   const handleWallEvent = useCallback((event: WallEvent) => {

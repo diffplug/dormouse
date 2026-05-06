@@ -1,9 +1,3 @@
-/**
- * Watches DockviewApi, WallEvents, the alert/activity store, and the
- * mouse-selection store, and marks the matching tutorial item complete in
- * `TutorialState` whenever the user performs the corresponding action.
- */
-
 import type { TutorialState } from "./tutorial-state";
 
 type DockviewApi = any;
@@ -24,31 +18,31 @@ interface MouseSelectionModule {
 
 export class TutDetector {
   private state: TutorialState;
+  private activityStore: ActivityStoreModule;
+  private mouseStore: MouseSelectionModule;
   private currentMode: WallMode = "command";
   private commandModePanels = new Set<string>();
   private prevActivity = new Map<string, ActivityState>();
   private prevMouse = new Map<string, MouseSelectionState>();
   private disposables: (() => void)[] = [];
-  private attached = false;
 
-  constructor(state: TutorialState) {
-    this.state = state;
-  }
-
-  attach(
-    api: DockviewApi,
+  constructor(
+    state: TutorialState,
     activityStore: ActivityStoreModule,
     mouseStore: MouseSelectionModule,
-  ): void {
-    if (this.attached) return;
-    this.attached = true;
+  ) {
+    this.state = state;
+    this.activityStore = activityStore;
+    this.mouseStore = mouseStore;
+  }
 
+  attach(api: DockviewApi): void {
     // Seed previous-state maps so the very first listener fire isn't
     // mis-read as a transition from "nothing".
-    for (const [id, s] of activityStore.getActivitySnapshot()) {
+    for (const [id, s] of this.activityStore.getActivitySnapshot()) {
       this.prevActivity.set(id, { ...s });
     }
-    for (const [id, s] of mouseStore.getMouseSelectionSnapshot()) {
+    for (const [id, s] of this.mouseStore.getMouseSelectionSnapshot()) {
       this.prevMouse.set(id, { ...s });
     }
 
@@ -63,10 +57,10 @@ export class TutDetector {
     this.disposables.push(() => activeUnsub.dispose());
 
     this.disposables.push(
-      activityStore.subscribeToActivity(() => this.processActivity(activityStore)),
+      this.activityStore.subscribeToActivity(() => this.processActivity()),
     );
     this.disposables.push(
-      mouseStore.subscribeToMouseSelection(() => this.processMouse(mouseStore)),
+      this.mouseStore.subscribeToMouseSelection(() => this.processMouse()),
     );
   }
 
@@ -102,8 +96,8 @@ export class TutDetector {
     }
   }
 
-  private processActivity(store: ActivityStoreModule): void {
-    const snapshot = store.getActivitySnapshot();
+  private processActivity(): void {
+    const snapshot = this.activityStore.getActivitySnapshot();
     for (const [id, current] of snapshot) {
       const prev = this.prevActivity.get(id);
 
@@ -136,8 +130,8 @@ export class TutDetector {
     }
   }
 
-  private processMouse(store: MouseSelectionModule): void {
-    const snapshot = store.getMouseSelectionSnapshot();
+  private processMouse(): void {
+    const snapshot = this.mouseStore.getMouseSelectionSnapshot();
     for (const [id, current] of snapshot) {
       const prev = this.prevMouse.get(id);
 
@@ -162,6 +156,5 @@ export class TutDetector {
   dispose(): void {
     for (const fn of this.disposables) fn();
     this.disposables = [];
-    this.attached = false;
   }
 }

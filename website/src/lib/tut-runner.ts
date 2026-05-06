@@ -1,10 +1,3 @@
-/**
- * Browser TUI for the playground tutorial. Follows the same pattern as
- * `ascii-splash-runner.ts`: alt-screen on, render an ANSI-driven view from
- * `TutorialState`, accept input via `FakePtyAdapter.writePty`, restore on
- * exit. No `terminal-kit` package dependency.
- */
-
 import { cfg } from "mouseterm-lib/cfg";
 import type { FakePtyAdapter } from "mouseterm-lib/lib/platform/fake-adapter";
 import type { InteractiveProgram } from "./tutorial-shell";
@@ -260,10 +253,6 @@ export class TutRunner implements InteractiveProgram {
   }
 
   private startBusyDemo(): void {
-    // Countdown phase (0–3s) is the only animated piece in the runner.
-    // It writes a fresh frame to xterm every SPINNER_INTERVAL_MS, then
-    // settles into a static "Fake task finished" line that stays put
-    // until the user presses s again.
     this.busyDemoStart = Date.now();
     this.onTriggerBusyDemo?.();
     this.startSpinnerTicks();
