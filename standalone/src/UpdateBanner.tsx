@@ -45,19 +45,19 @@ export function UpdateBanner({ state, onDismiss, onApproveUpdate, onOpenChangelo
       links = [];
       break;
     case 'downloading':
-      message = `Downloading update (v${state.version})...`;
+      message = `Downloading update v${state.version}`;
       links = [{ label: 'Changelog', onClick: onOpenChangelog }];
       break;
     case 'downloaded':
-      message = `Update downloaded (v${state.version}) — will install when you quit.`;
+      message = `Update downloaded (v${state.version}) — will install when you quit`;
       links = [{ label: 'Changelog', onClick: onOpenChangelog }];
       break;
     case 'post-update-success':
-      message = `Updated to v${state.to} — from v${state.from}.`;
+      message = `Updated to v${state.to} — from v${state.from}`;
       links = [{ label: 'Changelog', onClick: onOpenChangelog }];
       break;
     case 'post-update-failure':
-      message = 'Update failed.';
+      message = 'Update failed';
       links = [{ label: 'Click here to debug', onClick: onOpenDebug }];
       break;
     default: {
@@ -70,9 +70,12 @@ export function UpdateBanner({ state, onDismiss, onApproveUpdate, onOpenChangelo
     <span className="flex items-center gap-1.5 pb-1 text-sm font-mono text-muted">
       <span className="truncate">{message}</span>
       {links.map((link) => (
-        <button key={link.label} onClick={link.onClick} className={linkClass} style={linkStyle}>
-          {link.label}
-        </button>
+        <span key={link.label} className="contents">
+          <span className="shrink-0">·</span>
+          <button onClick={link.onClick} className={linkClass} style={linkStyle}>
+            {link.label}
+          </button>
+        </span>
       ))}
       <button
         onClick={onDismiss}
