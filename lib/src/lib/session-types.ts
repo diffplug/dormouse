@@ -191,9 +191,19 @@ export function migrateSessionV2toV3(v2: PersistedSessionV2): PersistedSession {
 }
 
 export function readPersistedSession(raw: unknown): PersistedSession | null {
-  if (!isRecord(raw)) return null;
-  if (isPersistedSessionV3(raw)) return raw;
-  if (isPersistedSessionV2(raw)) return migrateSessionV2toV3(raw);
-  if (isPersistedSessionV1(raw)) return migrateSessionV2toV3(migrateSessionV1toV2(raw));
+  const value = parseJsonString(raw);
+  if (!isRecord(value)) return null;
+  if (isPersistedSessionV3(value)) return value;
+  if (isPersistedSessionV2(value)) return migrateSessionV2toV3(value);
+  if (isPersistedSessionV1(value)) return migrateSessionV2toV3(migrateSessionV1toV2(value));
   return null;
+}
+
+function parseJsonString(raw: unknown): unknown {
+  if (typeof raw !== 'string') return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
 }

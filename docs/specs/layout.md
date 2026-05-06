@@ -271,6 +271,8 @@ Pane IDs are session IDs. `TerminalPane` calls `getOrCreateTerminal(id)` on Reac
 
 Layout, scrollback, cwd, minimized items, and alert state are saved to persistent storage via a debounced save (500ms). Saves are triggered by layout changes, panel add/remove, and a 30s periodic interval. Saves are flushed immediately on PTY exit, `pagehide`, and extension shutdown requests.
 
+Saved snapshots are read through `readPersistedSession()`, which accepts the canonical object shape and defensively parses a JSON-stringified blob before validation and migration. This keeps malformed storage inert while covering hosts that hand back serialized JSON instead of the parsed object.
+
 On startup, recovery is priority-based:
 1. **Resume** (webview hidden/shown, live PTYs): request PTY list + replay data from platform, `resumeTerminal()` for each (500ms timeout). If the saved session covers every live PTY, restore the saved dockview layout when its visible panel set matches and reattach saved minimized items as doors. This still counts as a live resume when every live session is minimized, so recovery must not fall through to cold restore just because the visible `paneIds` list is empty.
 2. **Restore** (app restart, cold start): restore layout from serialized dockview state, `restoreTerminal()` for each pane with saved cwd + scrollback, and spawn each PTY with the current default shell selection

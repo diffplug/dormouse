@@ -201,6 +201,28 @@ describe('readPersistedSession', () => {
     expect(readPersistedSession(v3)).toBe(v3);
   });
 
+  it('reads a JSON-stringified v3 blob', () => {
+    const v3 = {
+      version: 3 as const,
+      layout: null,
+      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, scrollback: 'saved output', resumeCommand: null }],
+      doors: [],
+    };
+
+    expect(readPersistedSession(JSON.stringify(v3))).toEqual(v3);
+  });
+
+  it('decodes escaped control bytes in JSON-stringified scrollback', () => {
+    const v3 = {
+      version: 3 as const,
+      layout: null,
+      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, scrollback: '\u001b[31mred', resumeCommand: null }],
+      doors: [],
+    };
+
+    expect(readPersistedSession(JSON.stringify(v3))?.panes[0].scrollback).toBe('\x1b[31mred');
+  });
+
   it('migrates a v2 blob on read (numeric TODO → boolean)', () => {
     const v2 = {
       version: 2 as const,
@@ -254,6 +276,8 @@ describe('readPersistedSession', () => {
     expect(readPersistedSession(undefined)).toBeNull();
     expect(readPersistedSession({ version: 99 })).toBeNull();
     expect(readPersistedSession('not an object')).toBeNull();
+    expect(readPersistedSession('{')).toBeNull();
+    expect(readPersistedSession(JSON.stringify({ version: 99 }))).toBeNull();
     expect(readPersistedSession({ version: 2, layout: null, panes: 'nope' })).toBeNull();
     expect(readPersistedSession({ version: 2, layout: null, panes: [], doors: {} })).toBeNull();
     expect(readPersistedSession({ version: 1, layout: null, panes: [] as const, detached: {} })).toBeNull();
