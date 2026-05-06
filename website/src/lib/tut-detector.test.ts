@@ -88,4 +88,33 @@ describe("TutDetector", () => {
 
     expect(state.isComplete("kb-arrows")).toBe(true);
   });
+
+  it("does not credit al-busy or al-ring when a pane is already in that status at first observation", () => {
+    const { state, setActivitySnapshot } = makeDetectorHarness();
+
+    setActivitySnapshot(new Map([
+      ["pane-a", { status: "BUSY", todo: false }],
+      ["pane-b", { status: "ALERT_RINGING", todo: false }],
+    ]));
+
+    expect(state.isComplete("al-busy")).toBe(false);
+    expect(state.isComplete("al-ring")).toBe(false);
+  });
+
+  it("credits al-busy and al-ring on a true status transition", () => {
+    const { state, setActivitySnapshot } = makeDetectorHarness();
+
+    setActivitySnapshot(new Map([
+      ["pane-a", { status: "NOTHING_TO_SHOW", todo: false }],
+    ]));
+    setActivitySnapshot(new Map([
+      ["pane-a", { status: "BUSY", todo: false }],
+    ]));
+    expect(state.isComplete("al-busy")).toBe(true);
+
+    setActivitySnapshot(new Map([
+      ["pane-a", { status: "ALERT_RINGING", todo: false }],
+    ]));
+    expect(state.isComplete("al-ring")).toBe(true);
+  });
 });
