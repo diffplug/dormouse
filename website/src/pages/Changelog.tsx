@@ -148,12 +148,14 @@ function ReleaseArticle({ release }: { release: ChangelogRelease }) {
             </time>
           ) : null}
         </div>
-        <Link
-          to={`/changelog/after/${release.tag}`}
+        <a
+          href={`https://github.com/diffplug/mouseterm/releases/tag/${release.tag}`}
           className="text-sm text-[var(--color-caramel)] hover:underline"
+          target="_blank"
+          rel="noopener noreferrer"
         >
-          Newer than this
-        </Link>
+          Download from GitHub
+        </a>
       </div>
 
       {release.sections.map((section) => (
