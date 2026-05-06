@@ -153,6 +153,9 @@ export class TutDetector {
 
       this.prevActivity.set(id, { ...current });
     }
+    for (const id of this.prevActivity.keys()) {
+      if (!snapshot.has(id)) this.prevActivity.delete(id);
+    }
   }
 
   private processMouse(): void {
@@ -174,6 +177,9 @@ export class TutDetector {
       }
 
       this.prevMouse.set(id, { ...current });
+    }
+    for (const id of this.prevMouse.keys()) {
+      if (!snapshot.has(id)) this.prevMouse.delete(id);
     }
   }
 
