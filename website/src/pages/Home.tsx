@@ -912,15 +912,16 @@ function Home() {
           />
           <div className="order-1 md:order-2">
             <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] mb-6">
-              Walk away, roam on
+              Take one for the road
             </h2>
             <p className="mb-4 text-lg leading-relaxed opacity-70">
-              Coming next: <span className="text-[var(--color-caramel)]">Roam</span>. Close your laptop
-              with Claude Code or Codex still running, and your session follows you to your phone.
-              No setup, no "I'm walking away" dance.
+              Coming next: <span className="text-[var(--color-caramel)]">Roam</span>. Pair a
+              terminal session to your phone over WebRTC and take a stroll, the MouseTerm alert
+              system will buzz you if there's anything to do. A hosted auto-pairing service comes
+              later — just leave and keep working, no "I'm walking away" dance.
             </p>
             <p className="mb-6 text-lg leading-relaxed opacity-70">
-              Subscribe below to <a href="https://nedshed.dev" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">nedshed.dev</a> — my dev log. Roam launches there first.
+              Subscribe below to <a href="https://nedshed.dev" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">nedshed.dev</a> — my dev log. Roam launches there first. When the hosted service is ready, we'll do discounts for early adopters, so don't miss out!
             </p>
             <NotifySignupForm />
           </div>
@@ -931,10 +932,10 @@ function Home() {
             <a href="/dependencies" className="underline hover:opacity-100">Dependencies</a>
             <a href="https://github.com/diffplug/mouseterm/issues" className="underline hover:opacity-100">Report an issue</a>
             <p>
-              Brought to you by{" "}
+              Built by{" "}
               <a href="https://nedshed.dev" className="underline hover:opacity-100">nedshed.dev</a>
-              {" "}and{" "}
-              <a href="https://diffplug.com" className="underline hover:opacity-100">DiffPlug</a>
+              {" "}(the labs division of{" "}
+              <a href="https://diffplug.com" className="underline hover:opacity-100">DiffPlug LLC</a>)
             </p>
           </div>
         </footer>
