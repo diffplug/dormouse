@@ -13,6 +13,20 @@ import type { WallKeyboardCtx } from './types';
  * Cmd-C / Cmd-Shift-C / Cmd-V outside drag. Returns true if handled.
  */
 export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx): boolean {
+  // Don't shadow native clipboard ops when focus is inside a real text
+  // input (overlay modal, search box, etc.) — let the browser handle
+  // copy/paste there. Xterm's hidden helper textarea is the input proxy
+  // for the terminal itself, so we keep intercepting its keydowns.
+  const tgt = e.target as HTMLElement | null;
+  if (
+    tgt &&
+    (tgt.tagName === 'INPUT' ||
+      (tgt.tagName === 'TEXTAREA' && !tgt.classList.contains('xterm-helper-textarea')) ||
+      tgt.isContentEditable)
+  ) {
+    return false;
+  }
+
   const sid = ctx.selectedIdRef.current;
   if (!sid) return false;
 
