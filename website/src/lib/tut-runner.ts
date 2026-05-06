@@ -61,6 +61,8 @@ interface TutRunnerOptions {
   onExit: () => void;
   /** Called when the user presses `s` inside the Alert section. */
   onTriggerBusyDemo?: () => void;
+  /** Called when the user presses `p` inside the Copy paste section. */
+  onTogglePlaceToPaste?: () => void;
 }
 
 type Screen = "menu" | "section" | "reset";
@@ -73,6 +75,7 @@ export class TutRunner implements InteractiveProgram {
   private state: TutorialState;
   private onExit: () => void;
   private onTriggerBusyDemo?: () => void;
+  private onTogglePlaceToPaste?: () => void;
 
   private screen: Screen = "menu";
   private menuIndex = 0;
@@ -92,6 +95,7 @@ export class TutRunner implements InteractiveProgram {
     this.state = options.state;
     this.onExit = options.onExit;
     this.onTriggerBusyDemo = options.onTriggerBusyDemo;
+    this.onTogglePlaceToPaste = options.onTogglePlaceToPaste;
   }
 
   start(): void {
@@ -178,6 +182,15 @@ export class TutRunner implements InteractiveProgram {
         // press starts a fresh pumpActivity interval that stacks on top of
         // the previous one until they all expire.
         if (!this.busyDemoInProgress()) this.startBusyDemo();
+        i += 1;
+        continue;
+      }
+      if (
+        this.screen === "section" &&
+        this.sectionId === "copy" &&
+        (ch === "p" || ch === "P")
+      ) {
+        this.onTogglePlaceToPaste?.();
         i += 1;
         continue;
       }

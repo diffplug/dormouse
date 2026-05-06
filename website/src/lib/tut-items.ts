@@ -129,7 +129,8 @@ export const SECTIONS: readonly Section[] = [
       {
         id: 'cp-raw',
         title: 'Copy-paste it somewhere else with "Copy Raw"',
-        hint: 'When you paste, notice how it keeps all the line-breaks. Gross!',
+        hint:
+          'Press `p` to toggle the Place To Paste — a draggable, resizable scratch box. Paste there and resize it; notice how Copy Raw keeps all the line-breaks. Gross!',
       },
       {
         id: 'cp-rewrap',

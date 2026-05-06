@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import SiteHeader from "../components/SiteHeader";
+import { PlaceToPaste } from "../components/PlaceToPaste";
 import { ThemePicker } from "mouseterm-lib/components/ThemePicker";
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
 import { TutorialState } from "../lib/tutorial-state";
@@ -20,6 +21,7 @@ function Playground() {
   const [WallModule, setWallModule] = useState<{
     Wall: React.ComponentType<any>;
   } | null>(null);
+  const [placeToPasteOpen, setPlaceToPasteOpen] = useState(false);
   const adapterRef = useRef<FakePtyAdapter | null>(null);
   const shellRegistryRef = useRef<PlaygroundShellRegistry | null>(null);
   const detectorRef = useRef<TutDetector | null>(null);
@@ -101,6 +103,7 @@ function Playground() {
                   BUSY_DEMO_INTERVAL_MS,
                 );
               },
+              onTogglePlaceToPaste: () => setPlaceToPasteOpen((open) => !open),
             });
           }
           if (name === "ascii-splash" || name === "splash") {
@@ -215,6 +218,9 @@ function Playground() {
           />
         ) : null}
       </main>
+      {placeToPasteOpen ? (
+        <PlaceToPaste onClose={() => setPlaceToPasteOpen(false)} />
+      ) : null}
     </>
   );
 }
