@@ -26,6 +26,15 @@ import type { TutorialState } from "./tutorial-state";
  */
 export const BUSY_DEMO_DURATION_MS = cfg.alert.userAttention + 250;
 
+/**
+ * Interval between fake-busy ticks. Must stay safely below
+ * cfg.alert.busyCandidateGap so consecutive onData calls register as
+ * continuous activity rather than separate bursts. Half the gap gives
+ * comfortable margin against scheduler jitter; deriving from cfg means
+ * tuning the gap won't silently break the demo.
+ */
+export const BUSY_DEMO_INTERVAL_MS = Math.floor(cfg.alert.busyCandidateGap / 2);
+
 // Replace `` `KEY` `` markers with a cyan span. Uses default-foreground
 // (39m) to close the span so the highlight composes cleanly with
 // surrounding bold/italic/dim — only the color is touched.

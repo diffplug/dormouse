@@ -4,7 +4,7 @@ import { ThemePicker } from "mouseterm-lib/components/ThemePicker";
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
 import { TutorialState } from "../lib/tutorial-state";
 import { TutDetector } from "../lib/tut-detector";
-import { BUSY_DEMO_DURATION_MS, TutRunner } from "../lib/tut-runner";
+import { BUSY_DEMO_DURATION_MS, BUSY_DEMO_INTERVAL_MS, TutRunner } from "../lib/tut-runner";
 
 export { Playground as Component };
 
@@ -88,7 +88,7 @@ function Playground() {
                 busyDemoDisposeRef.current = adapter.pumpActivity(
                   sessionId,
                   BUSY_DEMO_DURATION_MS,
-                  800,
+                  BUSY_DEMO_INTERVAL_MS,
                 );
               },
             });
