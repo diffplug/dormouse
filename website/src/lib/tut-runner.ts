@@ -231,6 +231,11 @@ export class TutRunner implements InteractiveProgram {
 
   private handleEscape(): void {
     if (this.screen === "section") {
+      // The spinner only animates the Alert section's "fake task running"
+      // line, so it has nothing to draw outside that section — stop it
+      // here rather than letting it re-render the menu every 100ms until
+      // the demo's natural duration elapses.
+      this.stopSpinnerTicks();
       this.sectionId = null;
       this.screen = "menu";
       this.render();
