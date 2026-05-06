@@ -1,5 +1,10 @@
 import { forwardRef } from "react";
 
+export const STATIC_PAGE_HEADER_STYLE: React.CSSProperties = {
+  background: "rgba(10, 10, 10, 0.85)",
+  backdropFilter: "blur(12px)",
+};
+
 const NAV_LINKS: readonly { href: string; label: string; external?: boolean; hideOnMobile?: boolean }[] = [
   { href: "/playground", label: "Playground", hideOnMobile: true },
   { href: "/#download", label: "Download", hideOnMobile: true },

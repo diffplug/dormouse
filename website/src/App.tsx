@@ -10,6 +10,14 @@ export const routes: RouteRecord[] = [
     lazy: () => import("./pages/Playground"),
   },
   {
+    path: "/changelog",
+    lazy: () => import("./pages/Changelog"),
+  },
+  {
+    path: "/changelog/after/:version",
+    lazy: () => import("./pages/Changelog"),
+  },
+  {
     path: "/dependencies",
     lazy: () => import("./pages/Dependencies"),
   },

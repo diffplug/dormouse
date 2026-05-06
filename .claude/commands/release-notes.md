@@ -1,10 +1,10 @@
 ---
 name: release-notes
-description: Draft release notes and recommend a version bump for the next mouseterm release by analyzing all merge commits and squash-merged PRs since the last release tag. Outputs a Keep a Changelog section ready to paste into CHANGELOG.md. Used as step 2 of the release checklist in docs/specs/deploy.md.
+description: Draft release notes, recommend and apply a version bump, and update CHANGELOG.md for the next mouseterm release by analyzing all merge commits and squash-merged PRs since the last release tag. Used as step 2 of the release checklist in docs/specs/deploy.md.
 user-invocable: true
 ---
 
-You are drafting release notes and recommending a version bump for the next mouseterm release.
+You are drafting release notes, recommending and applying a version bump, and updating CHANGELOG.md for the next mouseterm release.
 
 ## 1. Gather context
 
@@ -34,7 +34,11 @@ mouseterm uses **breaking.added.bugfix** semantics (semver-shaped, but named for
 
 Pick the highest-severity bump that any single change requires.
 
-## 3. Edit `CHANGELOG.md`
+## 3. Run the version bump
+
+Run `./scripts/bump-version.sh X.Y.Z` with the recommended version before editing the changelog. Show the script's output so the user can review the diff stat.
+
+## 4. Edit `CHANGELOG.md`
 
 Edit `CHANGELOG.md` directly — insert a new section above the most recent existing release, in this exact shape:
 
@@ -65,8 +69,10 @@ Rules for the entries:
 
 Do not ask the user to paste it themselves — make the edit. The earlier flat-bullet entries (0.8.0 and below) are legacy; do not reformat them.
 
-## 4. Run the version bump
+## 5. Finish
 
-After saving the changelog edit, run `./scripts/bump-version.sh X.Y.Z` with the recommended version. Show the script's output so the user can review the diff stat. Then remind the user of the next step:
+Do not run `website/scripts/generate-changelog.js` as part of the release-notes command. `website/src/data/changelog.json` is a gitignored generated artifact, and the website `prebuild`, `predev`, and `pretest` lifecycle scripts regenerate it from `CHANGELOG.md`.
+
+Then remind the user of the next step:
 
 > Review the diff, then `git commit -am 'Release vX.Y.Z'` and `git tag vX.Y.Z`.

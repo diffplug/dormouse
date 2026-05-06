@@ -1,13 +1,10 @@
 import deps from "../data/dependencies.json";
-import SiteHeader from "../components/SiteHeader";
-
-const HEADER_BG = "rgba(10, 10, 10, 0.85)";
-const HEADER_STYLE = { background: HEADER_BG, backdropFilter: "blur(12px)" };
+import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 
 export function Component() {
   return (
     <>
-      <SiteHeader activePath="/dependencies" style={HEADER_STYLE} />
+      <SiteHeader activePath="/dependencies" style={STATIC_PAGE_HEADER_STYLE} />
 
       <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)] pt-24 pb-16">
         <div className="mx-auto max-w-3xl px-4 md:px-6">
