@@ -1,7 +1,12 @@
 import { DEFAULT_MOUSE_SELECTION_STATE } from "mouseterm-lib/lib/mouse-selection";
 import type { TutorialState } from "./tutorial-state";
 
-type DockviewApi = any;
+interface DockviewApi {
+  activePanel?: { id?: string } | null;
+  onDidActivePanelChange: (
+    listener: (panel: { id?: string } | undefined) => void,
+  ) => { dispose: () => void };
+}
 type WallEvent = import("mouseterm-lib/components/Wall").WallEvent;
 type WallMode = import("mouseterm-lib/components/Wall").WallMode;
 type ActivityState = import("mouseterm-lib/lib/terminal-registry").ActivityState;
