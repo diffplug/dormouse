@@ -60,7 +60,9 @@ export function approveUpdate(): void {
 }
 
 export function openChangelog(): void {
-  openUrl('https://mouseterm.com/changelog', 'changelog');
+  const version = currentVersion.trim();
+  const path = version ? `/changelog/after/${encodeURIComponent(version)}` : '/changelog';
+  openUrl(`https://mouseterm.com${path}`, 'changelog');
 }
 
 export async function buildDebugReport(error: string, toVersion: string): Promise<string> {

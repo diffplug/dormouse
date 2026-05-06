@@ -7,7 +7,7 @@ function UpdateBannerStory({ state, expectedNullReason }: { state: UpdateBannerS
       <UpdateBanner
         state={state}
         onDismiss={() => console.log('Dismiss')}
-        onApproveUpdate={() => console.log('Approve update')}
+        onApproveUpdate={() => console.log('Install on quit')}
         onOpenChangelog={() => console.log('Open changelog')}
         onOpenDebug={() => console.log('Open debug')}
       />
@@ -74,7 +74,7 @@ export const Dismissed: Story = {
 
 export const NarrowViewport: Story = {
   args: {
-    state: { status: 'downloaded', version: '0.5.0' },
+    state: { status: 'available', version: '0.5.0' },
   },
   decorators: [
     (Story) => (

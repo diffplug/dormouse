@@ -48,7 +48,7 @@ Update status appears as a text notice on the right side of the Baseboard (the a
 | `post-update-success` | "Updated to v0.5.0 — from v0.4.0." | "Changelog" | 10 seconds |
 | `post-update-failure` | "Update failed." | "Click here to debug" | No |
 
-The "Install on quit" action is the user's approval to download the update now and install it when they quit.
+The "Install on quit" action is the user's approval to download the update now and install it when they quit. Changelog actions open `https://mouseterm.com/changelog/after/<current-version>` using the current app version returned by Tauri. If the version cannot be read, the action falls back to `https://mouseterm.com/changelog`.
 
 All states are dismissible via [×]. Dismissing an unapproved `available` notice means no update is downloaded or installed in that session. Dismissing a `downloading` or `downloaded` notice hides it for the session only — it does not cancel an already-approved download/install.
 

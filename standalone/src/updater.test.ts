@@ -265,9 +265,13 @@ describe('updater', () => {
   });
 
   describe('actions', () => {
-    it('openChangelog calls shell open', () => {
+    it('openChangelog opens the release notes after the current app version', async () => {
+      startUpdateCheck();
+      await vi.advanceTimersByTimeAsync(0);
+
       openChangelog();
-      expect(mocks.shellOpen).toHaveBeenCalledWith('https://mouseterm.com/changelog');
+
+      expect(mocks.shellOpen).toHaveBeenCalledWith('https://mouseterm.com/changelog/after/0.4.0');
     });
   });
 
