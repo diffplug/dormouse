@@ -269,21 +269,28 @@ export class FakePtyAdapter implements PlatformAdapter {
   pumpActivity(id: string, durationMs: number, intervalMs = 1000): () => void {
     if (!this.terminals.has(id)) return () => {};
     let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
+    let stop: ReturnType<typeof setTimeout> | null = null;
+    const cancel = () => {
+      if (cancelled) return;
+      cancelled = true;
+      if (interval !== null) clearInterval(interval);
+      if (stop !== null) clearTimeout(stop);
+    };
     this.alertManager.onData(id);
     const tick = () => {
       if (cancelled) return;
+      // Pty may have been killed mid-duration. Stop pumping rather than
+      // feeding the activity monitor for a terminal that no longer exists.
+      if (!this.terminals.has(id)) {
+        cancel();
+        return;
+      }
       this.alertManager.onData(id);
     };
-    const interval = setInterval(tick, intervalMs);
-    const stop = setTimeout(() => {
-      cancelled = true;
-      clearInterval(interval);
-    }, durationMs);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-      clearTimeout(stop);
-    };
+    interval = setInterval(tick, intervalMs);
+    stop = setTimeout(cancel, durationMs);
+    return cancel;
   }
 
   private playScenario(id: string, scenario: FakeScenario): void {
