@@ -195,6 +195,7 @@ function Playground() {
         {WallModule ? (
           <WallModule.Wall
             initialPaneIds={[PANE_MAIN]}
+            initialMode="passthrough"
             onApiReady={handleApiReady}
             onEvent={handleWallEvent}
           />

@@ -129,6 +129,8 @@ Extreme case: a single door with a very long title, with more doors on both side
 
 ## Modes
 
+Wall starts in `command` mode by default. Embedders may pass `initialMode="passthrough"` when the first pane is an already-running interactive surface that should receive keyboard input immediately.
+
 ### Passthrough mode
 - All keyboard input routes to the active session's xterm.js instance
 - Only the mode-exit gesture (LCmd → RCmd) is intercepted

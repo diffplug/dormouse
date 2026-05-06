@@ -87,6 +87,7 @@ const tabComponents = { terminal: TerminalPaneHeader };
 
 export function Wall({
   initialPaneIds,
+  initialMode = 'command',
   restoredLayout,
   initialDoors,
   onApiReady,
@@ -94,6 +95,7 @@ export function Wall({
   baseboardNotice,
 }: {
   initialPaneIds?: string[];
+  initialMode?: WallMode;
   restoredLayout?: unknown;
   initialDoors?: PersistedDoor[];
   onApiReady?: (api: DockviewApi) => void;
@@ -147,7 +149,7 @@ export function Wall({
   }, []);
 
   // We own these — dockview is just for spatial layout and DnD
-  const [mode, setMode] = useState<WallMode>('command');
+  const [mode, setMode] = useState<WallMode>(initialMode);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<WallSelectionKind>('pane');
 

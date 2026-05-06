@@ -15,7 +15,7 @@ Three browser-side pieces in `website/src/lib/`, mirroring the pattern in `websi
 
 - `SiteHeader` at top with the `Theme:` dropdown control on `/playground` (other routes do not render it). Header is `themeAware` so `--vscode-*` variables drive its background, border, text, and banner colors.
 - `<main>` is a flex container so Wall's `flex-1 min-h-0` root gets a real height.
-- `Wall` runs `FakePtyAdapter` with three initial panes:
+- `Wall` runs `FakePtyAdapter` with `initialMode="passthrough"` and three initial panes:
   - **`tut-main`** (left, ~50%) — auto-launches `TutRunner` on mount via `mainShell.runCommand("tut")`.
   - **`tut-target`** (right-top, ~25%) — `SCENARIO_SHELL_PROMPT`. Used as the demo pane for keyboard-nav and alert sections.
   - **`tut-boxed`** (right-bottom, ~25%) — `SCENARIO_BOXED_PARAGRAPH`. The boxed paragraph for Copy Rewrapped vs Copy Raw.
