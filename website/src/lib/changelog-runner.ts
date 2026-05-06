@@ -78,6 +78,8 @@ export class ChangelogRunner implements InteractiveProgram {
   private selectedIndex = 0;
   private listOffset = 0;
   private detailOffset = 0;
+  private hoverIndex: number | null = null;
+  private lastMousePos: { col: number; row: number } | null = null;
   private resizeUnsub: (() => void) | null = null;
   private disposed = false;
   private detailCache: { index: number; width: number; lines: string[] } | null = null;
@@ -161,6 +163,7 @@ export class ChangelogRunner implements InteractiveProgram {
   }
 
   private handleMouse(button: number, col: number, row: number, finalByte: string): void {
+    this.lastMousePos = { col, row };
     // Wheel scroll routes to whichever column the cursor is over so each
     // side scrolls independently.
     if (button === WHEEL_UP) {
@@ -173,17 +176,31 @@ export class ChangelogRunner implements InteractiveProgram {
       else this.scrollDetail(1);
       return;
     }
+    // Motion (no button held). 1003h reports these as button code 35:
+    // bit 5 (motion) | code 3 (no button). Highlight the list row under
+    // the cursor so the user can see where a click would land.
+    if (button === 35 && finalByte === "M") {
+      if (this.listIndexAt(col, row) !== this.hoverIndex) this.render();
+      return;
+    }
     // Left-button press on the version list selects that release.
-    if (button === 0 && finalByte === "M" && col < LIST_WIDTH) {
-      const bodyTop = HEADER_ROWS;
-      const idx = this.listOffset + (row - bodyTop);
-      if (idx >= 0 && idx < RELEASES.length) {
+    if (button === 0 && finalByte === "M") {
+      const idx = this.listIndexAt(col, row);
+      if (idx !== null) {
         this.selectedIndex = idx;
         this.detailOffset = 0;
         this.ensureSelectionVisible();
         this.render();
       }
     }
+  }
+
+  private listIndexAt(col: number, row: number): number | null {
+    if (col >= LIST_WIDTH) return null;
+    const r = row - HEADER_ROWS;
+    if (r < 0 || r >= this.bodyHeight()) return null;
+    const idx = this.listOffset + r;
+    return idx >= 0 && idx < RELEASES.length ? idx : null;
   }
 
   private moveSelection(delta: number): void {
@@ -280,6 +297,12 @@ export class ChangelogRunner implements InteractiveProgram {
   private render(): void {
     if (this.disposed) return;
     this.lastSize = { ...this.size };
+    // Re-sync hover from the cursor's last position so wheel-scrolls and
+    // keyboard jumps move the highlight to whatever release is now under
+    // the mouse.
+    this.hoverIndex = this.lastMousePos
+      ? this.listIndexAt(this.lastMousePos.col, this.lastMousePos.row)
+      : null;
     const bodyH = this.bodyHeight();
     const detailLines = this.getDetailLines();
 
@@ -296,6 +319,8 @@ export class ChangelogRunner implements InteractiveProgram {
         const padded = label.length > LIST_WIDTH - 2 ? label.slice(0, LIST_WIDTH - 2) : label.padEnd(LIST_WIDTH - 2);
         if (idx === this.selectedIndex) {
           leftCell = `${fg(36)}❯${RESET} ${BOLD}${padded}${RESET}`;
+        } else if (idx === this.hoverIndex) {
+          leftCell = `${fg(36)}›${RESET} ${padded}`;
         } else {
           leftCell = `  ${padded}`;
         }
