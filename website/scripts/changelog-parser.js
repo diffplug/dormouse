@@ -84,8 +84,5 @@ export function parseChangelog(markdown) {
     appendContinuation(currentSection, line);
   }
 
-  return {
-    generatedFrom: "CHANGELOG.md",
-    releases,
-  };
+  return { releases };
 }

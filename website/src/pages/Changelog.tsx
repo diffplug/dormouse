@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import SiteHeader from "../components/SiteHeader";
+import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import changelog from "../data/changelog.json";
 
 interface ChangelogItem {
@@ -24,49 +24,31 @@ interface ChangelogData {
   releases: ChangelogRelease[];
 }
 
-const CHANGELOG = changelog as ChangelogData;
-const RELEASES = CHANGELOG.releases;
-const RELEASE_VERSION_SET = new Set(RELEASES.map((release) => release.version));
-const HEADER_STYLE = {
-  background: "rgba(10, 10, 10, 0.85)",
-  backdropFilter: "blur(12px)",
-};
+const RELEASES = (changelog as ChangelogData).releases;
+const INLINE_TOKEN_RE = /`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)/g;
+const DATE_FORMATTER = new Intl.DateTimeFormat("en", {
+  month: "long",
+  day: "numeric",
+  year: "numeric",
+  timeZone: "UTC",
+});
 
 function normalizeVersionParam(version: string) {
   const normalized = version.trim().replace(/^v/i, "");
   return /^\d+\.\d+\.\d+$/.test(normalized) ? normalized : null;
 }
 
-function compareVersions(left: string, right: string) {
-  const leftParts = left.split(".").map(Number);
-  const rightParts = right.split(".").map(Number);
-
-  for (let index = 0; index < 3; index += 1) {
-    const difference = leftParts[index] - rightParts[index];
-    if (difference !== 0) return difference;
-  }
-
-  return 0;
-}
-
 function formatDate(date: string | null) {
   if (!date) return null;
-
-  return new Intl.DateTimeFormat("en", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(`${date}T00:00:00Z`));
+  return DATE_FORMATTER.format(new Date(`${date}T00:00:00Z`));
 }
 
 function renderInlineMarkdown(text: string) {
   const nodes: ReactNode[] = [];
-  const inlineToken = /`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)/g;
   let cursor = 0;
   let key = 0;
 
-  for (const match of text.matchAll(inlineToken)) {
+  for (const match of text.matchAll(INLINE_TOKEN_RE)) {
     if (match.index > cursor) {
       nodes.push(text.slice(cursor, match.index));
     }
@@ -75,7 +57,7 @@ function renderInlineMarkdown(text: string) {
       nodes.push(
         <code
           key={`code-${key}`}
-          className="rounded-sm bg-[var(--color-surface)] px-1 py-0.5 text-[0.9em] text-[var(--color-text)]"
+          className="rounded-sm bg-[var(--color-surface)] px-1 py-0.5 text-[var(--color-text)]"
         >
           {match[1]}
         </code>,
@@ -165,24 +147,34 @@ function ReleaseArticle({ release }: { release: ChangelogRelease }) {
   );
 }
 
+function FilterNotice({ children }: { children: ReactNode }) {
+  return (
+    <div className="mb-8 border-l-2 border-[var(--color-caramel)] pl-4 text-sm text-[var(--color-text)]/75">
+      {children}{" "}
+      <Link to="/changelog" className="text-[var(--color-caramel)] hover:underline">
+        Show all releases.
+      </Link>
+    </div>
+  );
+}
+
 export function Component() {
   const { version: versionParam } = useParams();
   const requestedVersion = versionParam ? normalizeVersionParam(versionParam) : null;
-  const baselineVersion =
-    requestedVersion && RELEASE_VERSION_SET.has(requestedVersion) ? requestedVersion : null;
-  const hasInvalidFilter = Boolean(versionParam && !baselineVersion);
-  let visibleReleases: ChangelogRelease[];
-  if (hasInvalidFilter) {
-    visibleReleases = [];
-  } else if (baselineVersion) {
-    visibleReleases = RELEASES.filter((release) => compareVersions(release.version, baselineVersion) > 0);
-  } else {
-    visibleReleases = RELEASES;
-  }
+  const baselineIndex = requestedVersion
+    ? RELEASES.findIndex((release) => release.version === requestedVersion)
+    : -1;
+  const baselineVersion = baselineIndex >= 0 ? requestedVersion : null;
+  const hasInvalidFilter = Boolean(versionParam) && !baselineVersion;
+  const visibleReleases = hasInvalidFilter
+    ? []
+    : baselineVersion
+      ? RELEASES.slice(0, baselineIndex)
+      : RELEASES;
 
   return (
     <>
-      <SiteHeader activePath="/changelog" style={HEADER_STYLE} />
+      <SiteHeader activePath="/changelog" style={STATIC_PAGE_HEADER_STYLE} />
 
       <main className="min-h-screen bg-[var(--color-bg)] px-4 pt-24 pb-16 text-[var(--color-text)] md:px-6">
         <div className="mx-auto max-w-3xl">
@@ -195,35 +187,23 @@ export function Component() {
             </p>
           </div>
 
-          {baselineVersion ? (
-            <div className="mb-8 border-l-2 border-[var(--color-caramel)] pl-4 text-sm text-[var(--color-text)]/75">
-              Showing releases newer than v{baselineVersion}.{" "}
-              <Link to="/changelog" className="text-[var(--color-caramel)] hover:underline">
-                Show all releases.
-              </Link>
-            </div>
-          ) : null}
-
           {hasInvalidFilter ? (
-            <div className="mb-8 border-l-2 border-[var(--color-caramel)] pl-4 text-sm text-[var(--color-text)]/75">
-              No such release "{versionParam}".{" "}
-              <Link to="/changelog" className="text-[var(--color-caramel)] hover:underline">
-                Show all releases.
-              </Link>
-            </div>
+            <FilterNotice>No such release "{versionParam}".</FilterNotice>
           ) : null}
 
-          {visibleReleases.length > 0 ? (
-            <div>
-              {visibleReleases.map((release) => (
-                <ReleaseArticle key={release.version} release={release} />
-              ))}
-            </div>
-          ) : hasInvalidFilter ? null : (
+          {baselineVersion ? (
+            <FilterNotice>Showing releases newer than v{baselineVersion}.</FilterNotice>
+          ) : null}
+
+          {visibleReleases.map((release) => (
+            <ReleaseArticle key={release.version} release={release} />
+          ))}
+
+          {baselineVersion && visibleReleases.length === 0 ? (
             <div className="border-t border-[var(--color-text)]/10 py-8 text-[var(--color-text)]/60">
               No releases newer than v{baselineVersion}.
             </div>
-          )}
+          ) : null}
         </div>
       </main>
     </>
