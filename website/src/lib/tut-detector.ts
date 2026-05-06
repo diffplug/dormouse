@@ -1,3 +1,4 @@
+import { DEFAULT_MOUSE_SELECTION_STATE } from "mouseterm-lib/lib/mouse-selection";
 import type { TutorialState } from "./tutorial-state";
 
 type DockviewApi = any;
@@ -15,15 +16,6 @@ interface MouseSelectionModule {
   subscribeToMouseSelection: (listener: () => void) => () => void;
   getMouseSelectionSnapshot: () => Map<string, MouseSelectionState>;
 }
-
-const DEFAULT_MOUSE_STATE: MouseSelectionState = {
-  mouseReporting: "none",
-  bracketedPaste: false,
-  override: "off",
-  selection: null,
-  hintToken: null,
-  copyFlash: null,
-};
 
 export class TutDetector {
   private state: TutorialState;
@@ -166,7 +158,7 @@ export class TutDetector {
   private processMouse(): void {
     const snapshot = this.mouseStore.getMouseSelectionSnapshot();
     for (const [id, current] of snapshot) {
-      const prev = this.prevMouse.get(id) ?? DEFAULT_MOUSE_STATE;
+      const prev = this.prevMouse.get(id) ?? DEFAULT_MOUSE_SELECTION_STATE;
 
       if (current.copyFlash && current.copyFlash !== prev.copyFlash) {
         if (current.copyFlash === "raw") this.state.markComplete("cp-raw");
