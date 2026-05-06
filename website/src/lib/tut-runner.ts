@@ -1,3 +1,15 @@
+import {
+  BOLD,
+  CLEAR_SCREEN,
+  CURSOR_HOME,
+  DIM,
+  ENTER_ALT_SCREEN,
+  FG_DEFAULT,
+  ITALIC,
+  LEAVE_ALT_SCREEN,
+  RESET,
+  fg,
+} from "mouseterm-lib/lib/ansi";
 import { cfg } from "mouseterm-lib/cfg";
 import type { FakePtyAdapter } from "mouseterm-lib/lib/platform/fake-adapter";
 import type { InteractiveProgram } from "./tutorial-shell";
@@ -12,28 +24,12 @@ import type { TutorialState } from "./tutorial-state";
  */
 export const BUSY_DEMO_DURATION_MS = cfg.alert.userAttention + 1;
 
-const ESC = "\x1b[";
-const RESET = `${ESC}0m`;
-const BOLD = `${ESC}1m`;
-const DIM = `${ESC}2m`;
-const ITALIC = `${ESC}3m`;
-const fg = (code: number) => `${ESC}${code}m`;
-const FG_DEFAULT = `${ESC}39m`;
-
-/**
- * Replace `` `KEY` `` markers with a cyan-foreground span. Uses
- * `\x1b[36m` / `\x1b[39m` (default foreground) so the highlight composes
- * cleanly with surrounding bold / italic / dim attributes — only the
- * foreground color is touched, not the rest of the SGR state.
- */
+// Replace `` `KEY` `` markers with a cyan span. Uses default-foreground
+// (39m) to close the span so the highlight composes cleanly with
+// surrounding bold/italic/dim — only the color is touched.
 function highlightKeys(line: string): string {
   return line.replace(/`([^`]+)`/g, `${fg(36)}$1${FG_DEFAULT}`);
 }
-
-const ENTER_ALT = "\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l";
-const LEAVE_ALT = "\x1b[2J\x1b[H\x1b[?25h\x1b[?1049l";
-const HOME = "\x1b[H";
-const CLEAR = "\x1b[2J";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_INTERVAL_MS = 100;
@@ -88,7 +84,7 @@ export class TutRunner implements InteractiveProgram {
   }
 
   start(): void {
-    this.write(ENTER_ALT);
+    this.write(ENTER_ALT_SCREEN);
     this.stateUnsub = this.state.subscribe(() => this.render());
     this.resizeUnsub = this.adapter.onPtyResize((d) => {
       if (d.id === this.terminalId) this.render();
@@ -269,7 +265,7 @@ export class TutRunner implements InteractiveProgram {
         : this.screen === "reset"
         ? this.renderReset()
         : this.renderSection();
-    let out = `${HOME}${CLEAR}`;
+    let out = `${CURSOR_HOME}${CLEAR_SCREEN}`;
     for (const line of lines) {
       out += `${highlightKeys(line)}\r\n`;
     }
@@ -463,7 +459,7 @@ export class TutRunner implements InteractiveProgram {
     this.stateUnsub = null;
     this.resizeUnsub?.();
     this.resizeUnsub = null;
-    this.write(LEAVE_ALT);
+    this.write(LEAVE_ALT_SCREEN);
     if (notifyExit) this.onExit();
   }
 

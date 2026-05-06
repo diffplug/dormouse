@@ -1,10 +1,4 @@
-const ESC = '\x1b[';
-const RESET = `${ESC}0m`;
-const BOLD = `${ESC}1m`;
-const fg = (code: number) => `${ESC}${code}m`;
-
-const PROMPT = `${fg(32)}user${RESET}@${fg(36)}mouseterm${RESET}:${BOLD}${fg(34)}~${RESET}$ `;
-const CLEAR_LINE = `${ESC}2K`;
+import { CLEAR_LINE, PROMPT, RESET, fg } from 'mouseterm-lib/lib/ansi';
 
 export type SendOutput = (data: string) => void;
 

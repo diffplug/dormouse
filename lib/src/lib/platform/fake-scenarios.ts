@@ -1,3 +1,4 @@
+import { BOLD, PROMPT, RESET, fg } from '../ansi';
 import type { FakeScenario } from './fake-adapter';
 
 // --- Helpers for building scenarios ---
@@ -58,14 +59,6 @@ export function flattenScenario(scenario: FakeScenario): FakeScenario {
     exitCode: scenario.exitCode,
   };
 }
-
-// ANSI helpers
-const ESC = '\x1b[';
-const RESET = `${ESC}0m`;
-const BOLD = `${ESC}1m`;
-const fg = (code: number) => `${ESC}${code}m`;
-
-const PROMPT = `${fg(32)}user${RESET}@${fg(36)}mouseterm${RESET}:${BOLD}${fg(34)}~${RESET}$ `;
 
 // --- Scenarios ---
 
