@@ -77,7 +77,11 @@ export class TutDetector {
         if (event.mode === "command" && this.currentMode === "passthrough") {
           this.state.markComplete("kb-mode");
           this.commandModePanels.clear();
-          const activePaneId = this.currentPaneId ?? this.api?.activePanel?.id;
+          // Prefer dockview's active panel — that is the source pane the
+          // arrow-nav handler navigates *from*, and what onDidActivePanelChange
+          // fires against. Falling back to the wall's selection covers the
+          // edge case where the api is missing (e.g. unit tests).
+          const activePaneId = this.api?.activePanel?.id ?? this.currentPaneId;
           if (activePaneId) this.commandModePanels.add(activePaneId);
         }
         this.currentMode = event.mode;
