@@ -60,9 +60,12 @@ export function approveUpdate(): void {
 }
 
 export function openChangelog(): void {
-  const version = currentVersion.trim();
-  const path = version ? `/changelog/after/${encodeURIComponent(version)}` : '/changelog';
-  openUrl(`https://mouseterm.com${path}`, 'changelog');
+  void openCurrentVersionChangelog();
+}
+
+async function openCurrentVersionChangelog(): Promise<void> {
+  const version = (await getVersion()).trim();
+  openUrl(`https://mouseterm.com/changelog/after/${encodeURIComponent(version)}`, 'changelog');
 }
 
 export async function buildDebugReport(error: string, toVersion: string): Promise<string> {
@@ -100,11 +103,7 @@ export function startUpdateCheck(): void {
 }
 
 async function runUpdateCheck(): Promise<void> {
-  try {
-    currentVersion = await getVersion();
-  } catch {
-    currentVersion = '';
-  }
+  currentVersion = await getVersion();
 
   let hadFailureMarker = false;
 

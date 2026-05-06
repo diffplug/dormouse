@@ -265,11 +265,9 @@ describe('updater', () => {
   });
 
   describe('actions', () => {
-    it('openChangelog opens the release notes after the current app version', async () => {
-      startUpdateCheck();
-      await vi.advanceTimersByTimeAsync(0);
-
+    it('openChangelog reads the current app version and opens release notes after it', async () => {
       openChangelog();
+      await vi.advanceTimersByTimeAsync(0);
 
       expect(mocks.shellOpen).toHaveBeenCalledWith('https://mouseterm.com/changelog/after/0.4.0');
     });
