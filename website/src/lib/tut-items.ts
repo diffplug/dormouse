@@ -139,13 +139,13 @@ export const SECTIONS: readonly Section[] = [
       },
       {
         id: 'cp-override',
-        title: 'Run `ascii-splash`, then click its cursor icon',
+        title: 'Click the cursor icon in `changelog`',
         hint:
-          'Use the demo pane prompt: run `ascii-splash`, click the cursor icon in its header, then drag-select. The animation cancels copying, but the same override works on real programs like `lazygit`.',
+          'Try to click and drag in the changelog tab - you can\'t! That\'s because you can click the versions - the Terminal User Interface traps the mouse which breaks copy-paste. Click the cursor icon in its header, which disables the mouse tracking long enough for you to do a drag-select.',
       },
     ],
     prose: [
-      'Some terminal programs trap the cursor, and some do not. This tutorial pane does not trap the cursor, so MouseTerm does not show a cursor icon. The `ascii-splash` program traps the cursor — that is how it is able to respond to mouse movement. `lazygit` is an excellent and popular program which traps the cursor.',
+      'Some terminal programs trap the cursor, and some do not. This tutorial pane does not trap the cursor, so MouseTerm does not show a cursor icon. The `ascii-splash` and `changelog` programs trap the cursor — that is how they are able to respond to mouse movement. `lazygit` is an excellent and popular program which traps the cursor.',
     ],
   },
 ];

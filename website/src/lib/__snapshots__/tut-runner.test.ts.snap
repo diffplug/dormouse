@@ -27,15 +27,15 @@ exports[`TutRunner snapshots > renders Copy paste with all items incomplete 1`] 
         [3mThe paragraph below is a good example — "Some terminal programs..."[0m
    [2m·[0m  Copy-paste it somewhere else with "Copy Raw"
    [2m·[0m  Copy-paste it somewhere else with "Copy Rewrapped"
-   [2m·[0m  Run [36mascii-splash[39m, then click its cursor icon
+   [2m·[0m  Click the cursor icon in [36mchangelog[39m
 
   [2mPress [36mp[39m to toggle the Place To Paste.[0m
 
   [2mSome terminal programs trap the cursor, and some do not. This tutorial pane[0m
   [2mdoes not trap the cursor, so MouseTerm does not show a cursor icon. The[0m
-  [2m[36mascii-splash[39m program traps the cursor — that is how it is able to respond to[0m
-  [2mmouse movement. [36mlazygit[39m is an excellent and popular program which traps the[0m
-  [2mcursor.[0m
+  [2m[36mascii-splash[39m and [36mchangelog[39m programs trap the cursor — that is how they are[0m
+  [2mable to respond to mouse movement. [36mlazygit[39m is an excellent and popular program[0m
+  [2mwhich traps the cursor.[0m
 "
 `;
 
