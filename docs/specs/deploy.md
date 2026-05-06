@@ -16,15 +16,13 @@ Every release produces three artifact groups under one version and changelog:
 Human-driven steps, in order:
 
 1. **Update dependencies page** — run `node website/scripts/generate-deps.js` and review the diff in `website/src/data/dependencies.json`. Commit if changed.
-2. **Draft release notes and pick version** — run `/release-notes` in Claude Code at the repo root. The slash command (defined in [.claude/commands/release-notes.md](../../.claude/commands/release-notes.md)) walks the merge commits and squash-merged PRs since the last tag, drafts a Keep a Changelog block, and recommends a `breaking.added.bugfix` version bump. Review and edit the output, paste it into `CHANGELOG.md` replacing the `[Unreleased]` section, and use the recommended `X.Y.Z` in the next step.
-
-3. **Bump versions** — `./scripts/bump-version.sh X.Y.Z`. Edits the four version files in lockstep and runs `cargo check` so `Cargo.lock` follows along.
-4. **Commit and tag** — `git commit -m "Release vX.Y.Z"` then `git tag vX.Y.Z`.
-5. **Push** — `git push && git push origin vX.Y.Z`. This triggers CI (Stage 1).
-6. **Set environment variables** — copy the relevant secrets into the terminal from your password manager (see [Environment / secrets](#environment--secrets) for the list).
-7. **Run local signing** — plug in the PIV USB key, then `./scripts/sign-and-deploy.sh all X.Y.Z`. The script waits for CI, downloads unsigned artifacts, signs macOS + Windows, generates the Tauri update manifest into `website/public/standalone-latest.json`, and creates the GitHub Release. Run `./scripts/sign-and-deploy.sh --help` for resume-after-failure subcommands.
-8. **Deploy website** — commit the updated `website/public/standalone-latest.json` and deploy mouseterm.com so the updater endpoint is live.
-9. **Verify the release**
+2. **Draft release notes and bump version** — run `/release-notes` in Claude Code at the repo root. The slash command (defined in [.claude/commands/release-notes.md](../../.claude/commands/release-notes.md)) walks the merge commits and squash-merged PRs since the last tag, recommends a `breaking.added.bugfix` version bump, runs `./scripts/bump-version.sh X.Y.Z`, and edits `CHANGELOG.md` for the same version. Review and edit the resulting diff if needed.
+3. **Commit and tag** — `git commit -am "Release vX.Y.Z"` then `git tag vX.Y.Z`.
+4. **Push** — `git push && git push origin vX.Y.Z`. This triggers CI (Stage 1).
+5. **Set environment variables** — copy the relevant secrets into the terminal from your password manager (see [Environment / secrets](#environment--secrets) for the list).
+6. **Run local signing** — plug in the PIV USB key, then `./scripts/sign-and-deploy.sh all X.Y.Z`. The script waits for CI, downloads unsigned artifacts, signs macOS + Windows, generates the Tauri update manifest into `website/public/standalone-latest.json`, and creates the GitHub Release. Run `./scripts/sign-and-deploy.sh --help` for resume-after-failure subcommands.
+7. **Deploy website** — commit the updated `website/public/standalone-latest.json` and deploy mouseterm.com so the updater endpoint is live.
+8. **Verify the release**
    - Check GitHub Release assets are correct
    - On a Mac: extract the `.tar.gz`, open the `.app`, confirm no Gatekeeper warnings
    - On Windows: run the `.exe` installer, confirm no SmartScreen warnings
@@ -203,6 +201,12 @@ Note: the update manifest URLs include the version in the *path* (`/v0.1.0/`) bu
 ## Changelog
 
 A single `CHANGELOG.md` at the repo root, following [Keep a Changelog](https://keepachangelog.com/) format. The `[Unreleased]` section is promoted to `[X.Y.Z]` at release time. The release notes include both standalone and VSCode changes in one entry.
+
+The website changelog page imports generated data from `website/src/data/changelog.json`, but `CHANGELOG.md` is the source of truth and the JSON is gitignored. You do not normally run `website/scripts/generate-changelog.js` by hand:
+- `pnpm --filter mouseterm-website build` runs it through the website `prebuild` script before Vite bundles the static site.
+- `pnpm --filter mouseterm-website dev` and `pnpm --filter mouseterm-website test` also regenerate it through lifecycle scripts so clean checkouts work locally.
+
+If you edit `CHANGELOG.md` manually outside `/release-notes` and want to preview the generated data immediately, run `node website/scripts/generate-changelog.js`. Do not commit `website/src/data/changelog.json`.
 
 ## Environment / secrets
 
