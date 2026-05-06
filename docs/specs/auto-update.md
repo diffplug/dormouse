@@ -1,6 +1,6 @@
 # Auto-Update Spec
 
-The standalone app checks for updates on launch, downloads silently in the background, and installs when the user quits. A banner tells the user an update is pending. On next launch, a brief banner confirms the update succeeded (or notes a failure).
+The standalone app checks for updates on launch and prompts in the Baseboard when one is available. It does not download or install the update until the user approves the prompt. Once approved, the app downloads the update in the background and installs it when the user quits. On next launch, a brief banner confirms the update succeeded (or notes a failure).
 
 ## How it works
 
@@ -9,40 +9,48 @@ app launch
   │
   ├─ check for post-install markers in localStorage
   │    ├─ success marker → show "Updated to vX.Y.Z" banner (auto-dismisses after 10s)
-  │    ├─ failure marker → show "Update failed — will retry" banner
+  │    ├─ failure marker → show "Update failed." banner with debug action
   │    └─ no marker → continue
   │
   ├─ wait 5 seconds
   │
   ├─ check(endpoint) ──→ no update ──→ done (silent)
   │                  │
-  │                  └─→ update available → download in background
-  │                                           ├─ success → show "will install when you quit" banner
-  │                                           └─ failure → log error, done (silent)
+  │                  └─→ update available → show approval prompt
+  │                                           │
+  │                                           ├─ dismissed/no approval → no download, no install
+  │                                           │
+  │                                           └─ user approves → download in background
+  │                                                              ├─ success → show "will install when you quit" banner
+  │                                                              └─ failure → log error, return to approval prompt
   │
   ... user works normally ...
   │
   user quits
   │
-  ├─ no pending update → exit normally
-  └─ pending update → write success marker → install() → exit
+  ├─ no approved, downloaded update → exit normally
+  └─ approved, downloaded update → write success marker → install() → exit
                          │
                          └─ install fails → overwrite with failure marker → exit normally
 ```
 
-The `Update` object from `download()` is held in memory for the session. The close handler intercepts the window close event, writes a success marker to `localStorage` *before* calling `install()` (because on Windows, NSIS force-kills the process), then calls `install()`. In Vite dev mode (`pnpm dev:standalone`), the close handler skips `install()` without preventing the close. Dev mode is useful for testing check/download/banner behavior, but install must be tested from a packaged app because the updater resolves its replacement target from the current executable path.
+The `Update` object returned by `check()` is held in memory as an available update. Clicking the approval action calls `download()` and promotes it to a pending update only after the download succeeds. The close handler intercepts the window close event only when there is an approved, downloaded update, writes a success marker to `localStorage` *before* calling `install()` (because on Windows, NSIS force-kills the process), then calls `install()`. In Vite dev mode (`pnpm dev:standalone`), the close handler skips `install()` without preventing the close. Dev mode is useful for testing check/download/banner behavior, but install must be tested from a packaged app because the updater resolves its replacement target from the current executable path.
 
 ## Update notice in the Baseboard
 
 Update status appears as a text notice on the right side of the Baseboard (the always-visible bottom strip — see `layout.md`). It coexists with doors and shortcut hints.
 
-| State | Message | Changelog | Auto-dismiss |
-|-------|---------|-----------|--------------|
-| `downloaded` | "Update downloaded (v0.5.0) — will install when you quit." | Yes | No |
-| `post-update-success` | "Updated to v0.5.0 — from v0.4.0." | Yes | 10 seconds |
-| `post-update-failure` | "Update to v0.5.0 failed — will retry next launch." | No | No |
+| State | Message | Actions | Auto-dismiss |
+|-------|---------|---------|--------------|
+| `available` | "Update available (v0.5.0)." | "Install on quit", "Changelog" | No |
+| `downloading` | "Downloading update (v0.5.0)..." | "Changelog" | No |
+| `downloaded` | "Update downloaded (v0.5.0) — will install when you quit." | "Changelog" | No |
+| `post-update-success` | "Updated to v0.5.0 — from v0.4.0." | "Changelog" | 10 seconds |
+| `post-update-failure` | "Update failed." | "Click here to debug" | No |
 
-All states are dismissible via [×]. Dismissing hides the notice for the session only — it does not affect whether the update installs on quit.
+The "Install on quit" action is the user's approval to download the update now and install it when they quit.
+
+All states are dismissible via [×]. Dismissing an unapproved `available` notice means no update is downloaded or installed in that session. Dismissing a `downloading` or `downloaded` notice hides it for the session only — it does not cancel an already-approved download/install.
 
 The notice matches the Baseboard's existing text style (9px mono, `text-muted`). It's pushed right via `ml-auto` so it doesn't compete with doors or the shortcut hint on the left.
 
@@ -70,13 +78,13 @@ Single key: `mouseterm:update-result`
 | Successful install | `{ "from": "0.4.0", "to": "0.5.0" }` | On next launch, after reading |
 | Failed install | `{ "failed": true, "version": "0.5.0", "error": "..." }` | On next launch, after reading |
 
-The success marker is written *before* `install()` because Windows NSIS force-kills the process — if we wrote it after, it would never persist. If `install()` then throws, the marker is overwritten with a failure entry.
+The success marker is written *before* `install()` because Windows NSIS force-kills the process — if we wrote it after, it would never persist. If `install()` then throws, the marker is overwritten with a failure entry. No marker is written for an update that was found but never approved.
 
 ## Files
 
 | File | Role |
 |------|------|
-| [`standalone/src/updater.ts`](../../standalone/src/updater.ts) | State machine, update check, background download, close handler, post-install markers |
+| [`standalone/src/updater.ts`](../../standalone/src/updater.ts) | State machine, update check, user-approved download, close handler, post-install markers |
 | [`standalone/src/UpdateBanner.tsx`](../../standalone/src/UpdateBanner.tsx) | Pure presentational component — renders inline notice content for the Baseboard |
 | [`standalone/src/main.tsx`](../../standalone/src/main.tsx) | Passes `<ConnectedUpdateBanner />` as the `baseboardNotice` prop to `<App />`, calls `startUpdateCheck()` after platform init |
 
@@ -108,9 +116,9 @@ The Rust side registers the plugin with `tauri_plugin_updater::Builder::new().bu
 
 ## Design decisions
 
-**Why install on quit, not on demand?** MouseTerm is a terminal app with running processes. A mid-session relaunch would kill all sessions. By installing at quit time, the user has already decided to close their terminals.
+**Why install on quit after approval, not immediately?** MouseTerm is a terminal app with running processes. A mid-session relaunch would kill all sessions. By installing at quit time, the user has already decided to close their terminals.
 
-**Why no "skip this version"?** The update is already downloaded and will install on quit regardless. There's nothing to opt out of. [×] just hides the notification.
+**Why no silent download?** Update bundles can be large, can fail for environment-specific reasons, and may surprise users who did not opt into changing the app. The launch probe is silent, but download/install only begins after explicit approval.
 
 **Why the Baseboard, not a top banner?** A top banner pushes terminal content down, which is disruptive in a terminal app. The Baseboard is already a status strip — the update notice fits naturally alongside doors and shortcut hints. It also avoids adding a new UI element; the notice just occupies unused space in an existing one.
 

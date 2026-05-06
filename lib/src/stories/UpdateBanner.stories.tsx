@@ -7,6 +7,7 @@ function UpdateBannerStory({ state, expectedNullReason }: { state: UpdateBannerS
       <UpdateBanner
         state={state}
         onDismiss={() => console.log('Dismiss')}
+        onApproveUpdate={() => console.log('Approve update')}
         onOpenChangelog={() => console.log('Open changelog')}
         onOpenDebug={() => console.log('Open debug')}
       />
@@ -26,6 +27,18 @@ const meta: Meta<typeof UpdateBannerStory> = {
 
 export default meta;
 type Story = StoryObj<typeof UpdateBannerStory>;
+
+export const Available: Story = {
+  args: {
+    state: { status: 'available', version: '0.5.0' },
+  },
+};
+
+export const Downloading: Story = {
+  args: {
+    state: { status: 'downloading', version: '0.5.0' },
+  },
+};
 
 export const Downloaded: Story = {
   args: {
