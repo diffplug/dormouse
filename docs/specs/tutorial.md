@@ -15,11 +15,15 @@ Three browser-side pieces in `website/src/lib/`, mirroring the pattern in `websi
 
 - `SiteHeader` at top with the `Theme:` dropdown control on `/playground` (other routes do not render it). Header is `themeAware` so `--vscode-*` variables drive its background, border, text, and banner colors.
 - `<main>` is a flex container so Wall's `flex-1 min-h-0` root gets a real height.
-- `Wall` runs `FakePtyAdapter` with `initialMode="passthrough"` and three initial panes:
-  - **`tut-main`** (left, ~50%) — auto-launches `TutRunner` on mount via `mainShell.runCommand("tut")`.
-  - **`tut-boxed`** (right-top, ~25%) — titled "changelog". Auto-launches `ChangelogRunner` on mount via `boxedShell.runCommand("changelog")`. Doubles as the Copy Rewrapped target — its wrapped lines exercise the rewrap path.
-  - **`tut-splash`** (right-bottom, ~25%) — titled "ascii-splash". Auto-launches `AsciiSplashRunner` on mount via `splashShell.runCommand("ascii-splash")`.
-- The two right-side panes are added in `onApiReady` with `position: { referencePanel, direction }` after Wall creates the initial main pane.
+- `Wall` runs `FakePtyAdapter` with `initialMode="passthrough"`. The pane layout branches at mount on `window.innerWidth < 768` (Tailwind's `md` breakpoint, locked at mount; not reactive to resize):
+  - **Desktop (≥ 768px)** — three panes:
+    - **`tut-main`** (left, ~50%) — auto-launches `TutRunner` via `mainShell.runCommand("tut")`.
+    - **`tut-boxed`** (right-top, ~25%) — titled "changelog". Auto-launches `ChangelogRunner` via `boxedShell.runCommand("changelog")`. Doubles as the Copy Rewrapped target — its wrapped lines exercise the rewrap path.
+    - **`tut-splash`** (right-bottom, ~25%) — titled "ascii-splash". Auto-launches `AsciiSplashRunner` via `splashShell.runCommand("ascii-splash")`.
+  - **Phone (< 768px)** — two stacked panes; the changelog is dropped because the screen is too narrow to host it usefully:
+    - **`tut-main`** (top, ~50%) — same as desktop.
+    - **`tut-splash`** (bottom, ~50%) — same as desktop.
+- Side panes are added in `onApiReady` with `position: { referencePanel, direction }` after Wall creates the initial main pane.
 
 Every playground pane gets a `TutorialShell` input handler through `PlaygroundShellRegistry`. Newly split or spawned fake terminals use `SCENARIO_SHELL_PROMPT` by default. The shell dispatches by command name to a `startProgram` factory provided by the page; the factory wires `tut` → `TutRunner` and `ascii-splash` / `splash` → `AsciiSplashRunner`.
 

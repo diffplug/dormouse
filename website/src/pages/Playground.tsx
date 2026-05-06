@@ -23,6 +23,10 @@ function Playground() {
     Wall: React.ComponentType<any>;
   } | null>(null);
   const [placeToPasteOpen, setPlaceToPasteOpen] = useState(false);
+  // Phone gets a vertical two-pane layout (tutorial on top, ascii-splash below).
+  // Desktop gets the full three-pane layout including the changelog. Locked
+  // at mount, not reactive to resize.
+  const isPhoneRef = useRef(false);
   const adapterRef = useRef<FakePtyAdapter | null>(null);
   const shellRegistryRef = useRef<PlaygroundShellRegistry | null>(null);
   const detectorRef = useRef<TutDetector | null>(null);
@@ -61,6 +65,10 @@ function Playground() {
 
   useEffect(() => {
     let cancelled = false;
+    // Tailwind's md breakpoint — matches the header's `md:top-20` so the
+    // pane area below begins at the same threshold.
+    isPhoneRef.current = typeof window !== "undefined" && window.innerWidth < 768;
+    const isPhone = isPhoneRef.current;
     async function loadWall() {
       const platform = await import("mouseterm-lib/lib/platform");
       const registry = await import("mouseterm-lib/lib/terminal-registry");
@@ -82,8 +90,8 @@ function Playground() {
       // `user@mouseterm:~$` write that would land in the runner's
       // alt-screen and corrupt its output.
       adapter.setScenario(PANE_MAIN, { name: "none", chunks: [] });
-      adapter.setScenario(PANE_BOXED, { name: "none", chunks: [] });
       adapter.setScenario(PANE_SPLASH, { name: "none", chunks: [] });
+      if (!isPhone) adapter.setScenario(PANE_BOXED, { name: "none", chunks: [] });
 
       const tutorialState = new TutorialState();
       stateRef.current = tutorialState;
@@ -133,8 +141,8 @@ function Playground() {
       shellRegistryRef.current = shellRegistry;
 
       shellRegistry.ensureShell(PANE_MAIN);
-      shellRegistry.ensureShell(PANE_BOXED);
       shellRegistry.ensureShell(PANE_SPLASH);
+      if (!isPhone) shellRegistry.ensureShell(PANE_BOXED);
 
       // Subscribe before Wall mounts so the spawn fired by TerminalPane's
       // mount effect doesn't race past us. If the pty already exists by
@@ -142,11 +150,11 @@ function Playground() {
       spawnUnsubRef.current = adapter.onPtySpawn(({ id }) => {
         if (id === PANE_MAIN) tryAutoStartTutorial();
         if (id === PANE_SPLASH) tryAutoStartSplash();
-        if (id === PANE_BOXED) tryAutoStartChangelog();
+        if (!isPhone && id === PANE_BOXED) tryAutoStartChangelog();
       });
       if (adapter.hasPty(PANE_MAIN)) tryAutoStartTutorial();
       if (adapter.hasPty(PANE_SPLASH)) tryAutoStartSplash();
-      if (adapter.hasPty(PANE_BOXED)) tryAutoStartChangelog();
+      if (!isPhone && adapter.hasPty(PANE_BOXED)) tryAutoStartChangelog();
 
       setWallModule({ Wall: wall.Wall });
     }
@@ -183,20 +191,30 @@ function Playground() {
     });
     dockviewDisposablesRef.current.push(addDisposable);
 
-    api.addPanel({
-      id: PANE_BOXED,
-      component: "terminal",
-      tabComponent: "terminal",
-      title: "changelog",
-      position: { referencePanel: PANE_MAIN, direction: "right" },
-    });
-    api.addPanel({
-      id: PANE_SPLASH,
-      component: "terminal",
-      tabComponent: "terminal",
-      title: "ascii-splash",
-      position: { referencePanel: PANE_BOXED, direction: "below" },
-    });
+    if (isPhoneRef.current) {
+      api.addPanel({
+        id: PANE_SPLASH,
+        component: "terminal",
+        tabComponent: "terminal",
+        title: "ascii-splash",
+        position: { referencePanel: PANE_MAIN, direction: "below" },
+      });
+    } else {
+      api.addPanel({
+        id: PANE_BOXED,
+        component: "terminal",
+        tabComponent: "terminal",
+        title: "changelog",
+        position: { referencePanel: PANE_MAIN, direction: "right" },
+      });
+      api.addPanel({
+        id: PANE_SPLASH,
+        component: "terminal",
+        tabComponent: "terminal",
+        title: "ascii-splash",
+        position: { referencePanel: PANE_BOXED, direction: "below" },
+      });
+    }
 
     const mainPanel = api.getPanel(PANE_MAIN);
     if (mainPanel) {
