@@ -34,9 +34,14 @@ export class TutorialShell {
   private activeProgram: InteractiveProgram | null = null;
   private promptShown = false;
 
-  constructor(sendOutput: SendOutput, startProgram: StartProgram) {
+  constructor(
+    sendOutput: SendOutput,
+    startProgram: StartProgram,
+    options: { promptShown?: boolean } = {},
+  ) {
     this.sendOutput = sendOutput;
     this.startProgram = startProgram;
+    this.promptShown = options.promptShown ?? false;
   }
 
   dispose(): void {

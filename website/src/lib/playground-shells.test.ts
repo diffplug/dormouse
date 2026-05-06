@@ -32,6 +32,24 @@ describe("PlaygroundShellRegistry", () => {
     expect(output.two.join("")).toContain("$ ");
   });
 
+  it("does not print a duplicate prompt when the scenario already provided one", () => {
+    const adapter = new FakePtyAdapter();
+    const output: string[] = [];
+    adapter.onPtyData((detail) => output.push(detail.data));
+    adapter.spawnPty("one");
+
+    const registry = new PlaygroundShellRegistry(
+      adapter,
+      () => createProgram(),
+      () => true,
+    );
+    registry.ensureShell("one");
+
+    adapter.writePty("one", "x");
+
+    expect(output.join("")).toBe("x");
+  });
+
   it("starts interactive programs against the active terminal id", () => {
     const adapter = new FakePtyAdapter();
     const program = createProgram();

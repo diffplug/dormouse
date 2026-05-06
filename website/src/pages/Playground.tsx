@@ -109,6 +109,7 @@ function Playground() {
           }
           return null;
         },
+        (terminalId) => terminalId !== PANE_MAIN && terminalId !== PANE_BOXED,
       );
       shellRegistryRef.current = shellRegistry;
 
