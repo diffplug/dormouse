@@ -117,4 +117,17 @@ describe("TutDetector", () => {
     ]));
     expect(state.isComplete("al-ring")).toBe(true);
   });
+
+  it("credits al-enable after a newly-created pane is first observed disabled", () => {
+    const { state, setActivitySnapshot } = makeDetectorHarness();
+
+    setActivitySnapshot(new Map([
+      ["pane-a", { status: "ALERT_DISABLED", todo: false }],
+    ]));
+    setActivitySnapshot(new Map([
+      ["pane-a", { status: "NOTHING_TO_SHOW", todo: false }],
+    ]));
+
+    expect(state.isComplete("al-enable")).toBe(true);
+  });
 });
