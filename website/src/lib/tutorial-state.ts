@@ -1,17 +1,26 @@
-import { ALL_ITEM_IDS, SECTIONS, type ItemId } from "./tut-items";
+import { ALL_ITEM_IDS, ITEM_IDS, SECTIONS, type ItemId } from "./tut-items";
 
-const STORAGE_PREFIX = "mouseterm-tut-v2-";
+const STORAGE_KEY = "mouseterm-tut-v3";
+const KNOWN_IDS: ReadonlySet<ItemId> = new Set(ITEM_IDS);
 
 export class TutorialState {
   private completed = new Set<ItemId>();
   private listeners = new Set<() => void>();
+  private storage = typeof localStorage !== "undefined" ? localStorage : null;
 
   constructor() {
-    if (typeof localStorage === "undefined") return;
-    for (const id of ALL_ITEM_IDS) {
-      if (localStorage.getItem(STORAGE_PREFIX + id) === "1") {
-        this.completed.add(id);
+    const raw = this.storage?.getItem(STORAGE_KEY);
+    if (!raw) return;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+      for (const entry of parsed) {
+        if (typeof entry === "string" && KNOWN_IDS.has(entry as ItemId)) {
+          this.completed.add(entry as ItemId);
+        }
       }
+    } catch {
+      // Corrupt payload — start fresh.
     }
   }
 
@@ -29,21 +38,15 @@ export class TutorialState {
   markComplete(id: ItemId): boolean {
     if (this.completed.has(id)) return false;
     this.completed.add(id);
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(STORAGE_PREFIX + id, "1");
-    }
+    this.persist();
     this.notify();
     return true;
   }
 
   reset(): void {
     if (this.completed.size === 0) return;
-    if (typeof localStorage !== "undefined") {
-      for (const id of this.completed) {
-        localStorage.removeItem(STORAGE_PREFIX + id);
-      }
-    }
     this.completed.clear();
+    this.storage?.removeItem(STORAGE_KEY);
     this.notify();
   }
 
@@ -63,5 +66,9 @@ export class TutorialState {
 
   private notify(): void {
     for (const fn of this.listeners) fn();
+  }
+
+  private persist(): void {
+    this.storage?.setItem(STORAGE_KEY, JSON.stringify([...this.completed]));
   }
 }
