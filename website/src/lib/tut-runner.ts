@@ -17,12 +17,14 @@ import { SECTIONS, type Item } from "./tut-items";
 import type { TutorialState } from "./tutorial-state";
 
 /**
- * The fake busy task runs for one tick longer than the user-attention idle
- * window so that, by the time the activity monitor's silence threshold
- * fires, attention has expired and the bell rings instead of being
- * suppressed by the "user is looking at this pane" check.
+ * The fake busy task must outlast the user-attention idle window so that,
+ * by the time the activity monitor's silence threshold fires, attention
+ * has expired and the bell rings instead of being suppressed by the
+ * "user is looking at this pane" check. The 250ms margin is a safety
+ * guard against scheduler jitter — the exact value doesn't matter as
+ * long as it's larger than realistic clock skew.
  */
-export const BUSY_DEMO_DURATION_MS = cfg.alert.userAttention + 1;
+export const BUSY_DEMO_DURATION_MS = cfg.alert.userAttention + 250;
 
 // Replace `` `KEY` `` markers with a cyan span. Uses default-foreground
 // (39m) to close the span so the highlight composes cleanly with
