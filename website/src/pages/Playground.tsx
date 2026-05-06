@@ -46,7 +46,11 @@ function Playground() {
       adapter.setDefaultScenario(scenarios.SCENARIO_SHELL_PROMPT);
       adapter.setScenario(PANE_TARGET, scenarios.SCENARIO_SHELL_PROMPT);
       adapter.setScenario(PANE_BOXED, scenarios.SCENARIO_BOXED_PARAGRAPH);
-      // tut-main has no scenario — runner takes over the screen entirely.
+      // tut-main is owned by the TutRunner — explicitly suppress the
+      // default shell-prompt scenario, otherwise spawnPty queues a
+      // delayed `user@mouseterm:~$` write that lands underneath the
+      // menu and stays there until the next runner re-render clears it.
+      adapter.setScenario(PANE_MAIN, { name: "none", chunks: [] });
 
       const tutorialState = new TutorialState();
       stateRef.current = tutorialState;
