@@ -49,6 +49,10 @@ function Playground() {
       attempts += 1;
       if (attempts < 60) {
         tutorialAutoStartRafRef.current = requestAnimationFrame(tick);
+      } else {
+        console.warn(
+          `[Playground] gave up waiting for ${PANE_MAIN} pty after ${attempts} frames; tutorial did not auto-start`,
+        );
       }
     };
 
