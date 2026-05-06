@@ -139,7 +139,6 @@ async function runUpdateCheck(): Promise<void> {
     return;
   }
 
-  // Wait 5 seconds, then check for updates
   await new Promise((resolve) => setTimeout(resolve, 5_000));
 
   try {
@@ -174,10 +173,14 @@ async function downloadApprovedUpdate(): Promise<void> {
       await update.download();
       availableUpdate = null;
       pendingUpdate = update;
-      setState({ status: 'downloaded', version: update.version });
+      // Honor a dismissal that arrived during the download — install still
+      // happens on quit because pendingUpdate is set.
+      if (state.status === 'downloading') {
+        setState({ status: 'downloaded', version: update.version });
+      }
     } catch (e) {
       console.error('[updater] Download failed:', e);
-      if (availableUpdate === update) {
+      if (state.status === 'downloading' && availableUpdate === update) {
         setState({ status: 'available', version: update.version });
       }
     } finally {
@@ -210,7 +213,8 @@ function registerCloseHandler(): void {
   closeHandlerRegistered = true;
 
   getCurrentWindow().onCloseRequested(async (event) => {
-    if (!pendingUpdate) return;
+    const update = pendingUpdate;
+    if (!update) return;
 
     if (shouldSkipInstallInDev()) {
       console.warn('[updater] Skipping update install in dev mode. Use a packaged app to test install.');
@@ -224,14 +228,14 @@ function registerCloseHandler(): void {
       // Write success marker BEFORE install — on Windows, NSIS force-kills the process
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         from: currentVersion,
-        to: pendingUpdate.version,
+        to: update.version,
       }));
-      await pendingUpdate.install();
+      await update.install();
     } catch (e) {
       // Overwrite with failure marker
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         failed: true,
-        version: pendingUpdate!.version,
+        version: update.version,
         error: String(e),
       }));
       console.error('[updater] Install failed:', e);
