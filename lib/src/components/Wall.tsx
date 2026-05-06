@@ -185,6 +185,13 @@ export function Wall({
     if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
   }, []);
 
+  // --- External event notifications ---
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
+  const fireEvent = useCallback((event: WallEvent) => {
+    onEventRef.current?.(event);
+  }, []);
+
   // Confirm runs orchestrateKill concurrently with the letter flash so the
   // pane fade begins while the flash is still playing.
   const rejectKill = useCallback(() => {
@@ -198,16 +205,9 @@ export function Wall({
     if (!ck || ck.exit) return;
     setConfirmKill({ ...ck, exit: 'confirm' });
     onExit();
-    onEventRef.current?.({ type: 'kill', id: ck.id });
+    fireEvent({ type: 'kill', id: ck.id });
     confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
-  }, []);
-
-  // --- External event notifications ---
-  const onEventRef = useRef(onEvent);
-  onEventRef.current = onEvent;
-  const fireEvent = useCallback((event: WallEvent) => {
-    onEventRef.current?.(event);
-  }, []);
+  }, [fireEvent]);
 
   useEffect(() => { onEventRef.current?.({ type: 'modeChange', mode }); }, [mode]);
   useEffect(() => { onEventRef.current?.({ type: 'zoomChange', zoomed }); }, [zoomed]);
