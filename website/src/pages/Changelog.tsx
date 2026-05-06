@@ -170,10 +170,15 @@ export function Component() {
   const requestedVersion = versionParam ? normalizeVersionParam(versionParam) : null;
   const baselineVersion =
     requestedVersion && RELEASE_VERSION_SET.has(requestedVersion) ? requestedVersion : null;
-  const visibleReleases = baselineVersion
-    ? RELEASES.filter((release) => compareVersions(release.version, baselineVersion) > 0)
-    : RELEASES;
   const hasInvalidFilter = Boolean(versionParam && !baselineVersion);
+  let visibleReleases: ChangelogRelease[];
+  if (hasInvalidFilter) {
+    visibleReleases = [];
+  } else if (baselineVersion) {
+    visibleReleases = RELEASES.filter((release) => compareVersions(release.version, baselineVersion) > 0);
+  } else {
+    visibleReleases = RELEASES;
+  }
 
   return (
     <>
@@ -214,7 +219,7 @@ export function Component() {
                 <ReleaseArticle key={release.version} release={release} />
               ))}
             </div>
-          ) : (
+          ) : hasInvalidFilter ? null : (
             <div className="border-t border-[var(--color-text)]/10 py-8 text-[var(--color-text)]/60">
               No releases newer than v{baselineVersion}.
             </div>
