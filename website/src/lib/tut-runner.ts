@@ -351,8 +351,7 @@ export class TutRunner implements InteractiveProgram {
   private renderSection(): string[] {
     const section = SECTIONS.find((s) => s.id === this.sectionId);
     if (!section) {
-      this.screen = "menu";
-      return this.renderMenu();
+      throw new Error(`renderSection: unknown sectionId ${this.sectionId}`);
     }
     const { done, total } = this.state.sectionProgress(section.id);
     const lines: string[] = [];
