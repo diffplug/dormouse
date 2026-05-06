@@ -101,10 +101,14 @@ export class FakePtyAdapter implements PlatformAdapter {
     for (const handler of this.spawnHandlers) {
       handler({ id });
     }
-    const scenario = this.scenarioMap.get(id) ?? this.defaultScenario;
+    const scenario = this.resolveScenario(id);
     if (scenario) {
       this.playScenario(id, scenario);
     }
+  }
+
+  private resolveScenario(id: string): FakeScenario | null {
+    return this.scenarioMap.get(id) ?? this.defaultScenario;
   }
 
   writePty(id: string, data: string): void {
@@ -178,8 +182,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   /** True when the scenario assigned to `id` (or the default scenario, if
    *  no per-id scenario is set) leaves the pty at a shell prompt. */
   scenarioEndsWithPrompt(id: string): boolean {
-    const scenario = this.scenarioMap.get(id) ?? this.defaultScenario;
-    return scenario?.endsWithPrompt === true;
+    return this.resolveScenario(id)?.endsWithPrompt === true;
   }
 
   async readClipboardFilePaths(): Promise<string[] | null> { return null; }
