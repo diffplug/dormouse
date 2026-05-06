@@ -1,19 +1,27 @@
-> [!CAUTION]
-> This project is under construction and not ready for public use. Please check back in a few days!
-
 # MouseTerm
 
-Multitasking terminal for mice.
+**Multitasking terminal for the mouse, tmux-compatible.**
 
-- VSCode plugin or standalone desktop app
-- tmux-compatible keybindings AND mouse
-- alert system for notifying when a terminal task is done or waiting for user input
+Run multiple terminals side-by-side, click to split, drag to resize.
+When a pane stops outputting for two seconds, it's marked done — works
+with any CLI tool, no plugins or config.
 
-Major URLs:
-- [homepage with screen recordings](https://mouseterm.com)
-- [download standalone app or VSCode plugins](https://mouseterm.com/#download)
-- [playground and tutorial](https://mouseterm.com/playground)
-- [production dependencies](https://mouseterm.com/dependencies)
+![MouseTerm hero](website/src/assets/video-climb-blink-and-stare.webp)
+
+## Try it
+
+- **[Playground](https://mouseterm.com/playground)** — try in your browser, no install
+- **[Demo videos and downloads](https://mouseterm.com)** — Mac, Windows, Linux
+- **[Marketplace](https://marketplace.visualstudio.com/items?itemName=diffplug.mouseterm)** / **[Open VSX](https://open-vsx.org/extension/diffplug/mouseterm)** — VS Code extension (also works in Cursor, Windsurf, Antigravity)
+
+## Features
+
+- **Automatic completion detection.** When a pane goes quiet for two seconds, it's marked done. Works with builds, AI agents, scripts, anything.
+- **tmux-compatible keybindings.** Same prefix, same splits, same pane navigation. Muscle memory transfers.
+- **Full mouse support.** Click to split, drag to resize, scroll to navigate. Or stay on the keyboard.
+- **Copy-paste that works.** Click and drag selects text the way you'd expect, even in mouse-aware TUIs that normally swallow it as escape codes. Ctrl+C copies; killing the program is a separate gesture.
+- **Sleep/wake panes.** Minimize a terminal to a compact status indicator. It keeps running and you can still see whether its task finished.
+- **Dual distribution.** Standalone desktop app (Mac/Windows/Linux) or VS Code extension.
 
 ## Development
 
@@ -22,8 +30,6 @@ This project uses pnpm, react, typescript, vite, tailwind, storybook, and xterm.
 The terminal is currently hosted by `node-pty`, but we plan on switching to a Rust backend for the PTY.
 
 ### Quickstart
-
-Here are the key development loops:
 
 ```sh
 pnpm install
@@ -54,3 +60,5 @@ This project was built with a combination of Claude, Codex, and Devin. Recommend
 ## License
 
 [FSL-1.1-MIT](LICENSE) — Copyright 2026 DiffPlug LLC
+
+[Production dependencies](https://mouseterm.com/dependencies)

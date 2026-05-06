@@ -9,7 +9,7 @@ import {
   TerminalIcon,
   WindowsLogoIcon,
 } from "@phosphor-icons/react";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEventHandler, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEventHandler, type ReactNode } from "react";
 import SiteHeader from "../components/SiteHeader";
 import posterUrl from "../assets/video-climb-blink-and-stare.webp";
 import videoUrl from "../assets/video-climb-blink-and-stare.mp4";
@@ -18,6 +18,7 @@ import copyPasteVideoUrl from "../assets/video-copy-paste.mp4";
 import tmuxVideoUrl from "../assets/video-tmux.mp4";
 import visualStudioIconUrl from "../assets/visual-studio-icon.svg";
 import tinyIconUrl from "../assets/icon-tiny-dark.png";
+import phoneMockupUrl from "../assets/phone-mockup.webp";
 import standaloneLatest from "@standalone-latest";
 
 export { Home as Component };
@@ -240,6 +241,89 @@ function DownloadGroupHeader({
       </span>
       <h3 className="font-display text-xl text-[var(--color-text)]">{children}</h3>
     </div>
+  );
+}
+
+const EMAIL_REGEX =
+  /^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+
+function NotifySignupForm() {
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (loading) return;
+
+    if (!EMAIL_REGEX.test(email)) {
+      setMessage("Please enter a valid email");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const response = await fetch("https://substackapi.com/api/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          domain: "https://nedshed.dev/",
+        }),
+      });
+      const data = await response.json();
+
+      if (data.errors) {
+        setMessage(data.errors[0].msg);
+      } else if (data.requires_confirmation) {
+        setSuccess(true);
+      }
+    } catch {
+      setMessage("Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (success) {
+    return (
+      <p className="text-lg leading-relaxed text-[var(--color-caramel)]">
+        Thanks — check your email to confirm your subscription.
+      </p>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+        <input
+          type="email"
+          name="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+          required
+          disabled={loading}
+          aria-label="Email address"
+          className="min-h-12 w-full rounded-md border border-[var(--color-text)]/20 bg-[var(--color-bg)] px-4 py-3 text-base text-[var(--color-text)] placeholder:opacity-40 focus:border-[var(--color-caramel)] focus:outline-none disabled:opacity-50 sm:flex-1"
+        />
+        <button
+          type="submit"
+          disabled={loading}
+          className="min-h-12 inline-flex items-center justify-center rounded-md border border-[var(--color-caramel)] bg-[var(--color-caramel)]/15 px-6 py-3 text-base font-display text-[var(--color-caramel)] transition hover:bg-[var(--color-caramel)]/25 disabled:opacity-50 sm:w-auto"
+        >
+          {loading ? "Subscribing..." : "Notify me when it's ready"}
+        </button>
+      </div>
+      {message && (
+        <p className="text-sm text-red-400" role="alert">
+          {message}
+        </p>
+      )}
+    </form>
   );
 }
 
@@ -814,6 +898,29 @@ function Home() {
                 </div>
               )}
             </div>
+          </div>
+        </section>
+
+        <section id="notify" className="mx-auto max-w-5xl px-4 py-20 md:px-6 border-t border-[var(--color-text)]/10 grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-center">
+          <img
+            src={phoneMockupUrl}
+            alt="MouseTerm Playground running on a phone"
+            className="block w-full max-w-[280px] mx-auto md:max-w-none"
+          />
+          <div>
+            <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] mb-6">
+              Coming soon: walk away from any agent
+            </h2>
+            <p className="mb-4 text-lg leading-relaxed opacity-70">
+              Auto-pair your laptop with your phone. Close your laptop with
+              Claude Code or Codex still running, and pick up the session on
+              your phone. No setup, no "I'm walking away" dance.
+            </p>
+            <p className="mb-6 text-lg leading-relaxed opacity-70">
+              Free with a room code. Auto-pairing across tools will be a paid
+              tier — first 100 founding members lock <span className="text-[var(--color-caramel)]">$24/yr for life</span>.
+            </p>
+            <NotifySignupForm />
           </div>
         </section>
 
