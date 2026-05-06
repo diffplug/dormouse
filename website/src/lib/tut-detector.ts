@@ -55,6 +55,9 @@ export class TutDetector {
   }
 
   attach(api: DockviewApi): void {
+    if (this.api) {
+      throw new Error("TutDetector.attach called twice");
+    }
     this.api = api;
     // Seed previous-state maps so the very first listener fire isn't
     // mis-read as a transition from "nothing".
