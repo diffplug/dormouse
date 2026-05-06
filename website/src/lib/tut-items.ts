@@ -139,13 +139,13 @@ export const SECTIONS: readonly Section[] = [
       },
       {
         id: 'cp-override',
-        title: 'Click the cursor icon on the `ascii-splash` pane',
+        title: 'Run `ascii-splash`, then click its cursor icon',
         hint:
-          'This will allow you to drag-select, which would be impossible otherwise. Unfortunately, you still won\'t be able to copy because `ascii-splash` animates, and that animation cancels the copy. But it will work on real programs like `lazygit`!',
+          'Use the demo pane prompt: run `ascii-splash`, click the cursor icon in its header, then drag-select. The animation cancels copying, but the same override works on real programs like `lazygit`.',
       },
     ],
     prose: [
-      'Some terminal programs trap the cursor, and some do not. This tutorial pane does not trap the cursor, so MouseTerm does not show a cursor icon. The `ascii-splash` program which makes the cool patterns in this playground does trap the cursor — that is how it is able to respond to mouse movement. `lazygit` is an excellent and popular program which traps the cursor.',
+      'Some terminal programs trap the cursor, and some do not. This tutorial pane does not trap the cursor, so MouseTerm does not show a cursor icon. The `ascii-splash` program traps the cursor — that is how it is able to respond to mouse movement. `lazygit` is an excellent and popular program which traps the cursor.',
     ],
   },
 ];

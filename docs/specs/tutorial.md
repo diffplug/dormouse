@@ -76,11 +76,11 @@ The detector subscribes to `subscribeToMouseSelection()` and tracks per-id trans
 | `cp-select` | Drag-select text in any pane | `selection` transitions `null → non-null` |
 | `cp-raw` | Click Copy Raw | `copyFlash` transitions to `'raw'` (set by `flashCopy()` after the popup button fires) |
 | `cp-rewrap` | Click Copy Rewrapped on the boxed paragraph | `copyFlash` transitions to `'rewrapped'` |
-| `cp-override` | Click the cursor icon on the ascii-splash pane | `override` transitions `'off' → 'temporary' \| 'permanent'` |
+| `cp-override` | Run `ascii-splash`, then click its cursor icon | `override` transitions `'off' → 'temporary' \| 'permanent'` |
 
 Prose:
 - "Some programs trap the mouse — the cursor icon lets you override."
-- "ascii-splash redraws every frame, so it cancels selections: looks cool, undragable."
+- "`ascii-splash` redraws every frame, so it cancels selections: looks cool, undragable."
 
 The Copy Rewrapped step uses `SCENARIO_BOXED_PARAGRAPH` (in `lib/src/lib/platform/fake-scenarios.ts`). Frame-only and frame-flanking box-drawing runs are stripped by `lib/src/lib/rewrap.ts` so Rewrapped joins the wrapped paragraph; clipboard contents visibly differ from Raw.
 
