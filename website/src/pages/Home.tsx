@@ -38,6 +38,9 @@ const HEADER_REVEAL_LEAD = 0.04;
 const UNPIN_THRESHOLD = 0.8;
 const HERO_VIDEO_FPS = 120;
 
+/** Vertical padding applied to all content sections after the hero. */
+const SECTION_PY = "py-8";
+
 /** Clamp a value to 0–1. */
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 const useClientLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
@@ -756,7 +759,7 @@ function Home() {
 
       {/* ── Content sections — pulled up to appear as video starts scrolling ── */}
       <div className="relative z-10 bg-[var(--color-bg)]" style={{ marginTop: `-${(1 - UNPIN_THRESHOLD) * RUNWAY_VH}vh` }}>
-        <section id="features" className="mx-auto max-w-2xl px-4 md:px-6 py-20">
+        <section id="features" className={`mx-auto max-w-2xl px-4 md:px-6 ${SECTION_PY}`}>
           <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">Stop watching terminals spin</h2>
           <p className="text-lg leading-relaxed opacity-70 mb-4">
             MouseTerm tracks activity the same way you do — visual motion. When a
@@ -771,7 +774,7 @@ function Home() {
         </section>
 
         {/* Section 2: text left, image right */}
-        <section className="mx-auto max-w-5xl px-4 md:px-6 py-12 grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start">
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
           <div>
             <h2 className="font-display text-xl mb-6">Copy paste like you meant</h2>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
@@ -789,7 +792,7 @@ function Home() {
         </section>
 
         {/* Section 3: image left, text right */}
-        <section className="mx-auto max-w-5xl px-4 md:px-6 py-12 grid md:grid-cols-[3fr_2fr] gap-8 md:gap-12 items-start">
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[3fr_2fr] gap-8 md:gap-12 items-start`}>
           <FeatureVideo src={tmuxVideoUrl} className="order-2 md:order-1" />
           <div className="order-1 md:order-2">
             <h2 className="font-display text-xl mb-6">Soft as a mouse, sharp as tmux</h2>
@@ -806,7 +809,7 @@ function Home() {
           </div>
         </section>
 
-        <section id="download" className="mx-auto max-w-5xl px-4 py-20 md:px-6" style={downloadAccentStyle}>
+        <section id="download" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`} style={downloadAccentStyle}>
           <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">Get MouseTerm</h2>
           <p className="mb-4 text-lg leading-relaxed opacity-70">The multitasking terminal for mice.</p>
           <DownloadButton
@@ -901,7 +904,7 @@ function Home() {
           </div>
         </section>
 
-        <section id="notify" className="mx-auto max-w-5xl px-4 py-20 md:px-6 border-t border-[var(--color-text)]/10 grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-center">
+        <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} border-t border-[var(--color-text)]/10 grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
           <img
             src={phoneMockupUrl}
             alt="MouseTerm Playground running on a phone"

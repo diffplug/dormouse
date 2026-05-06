@@ -14,6 +14,13 @@ html {
   color: var(--color-text);
   font-family: var(--font-body);
   font-kerning: normal;
+  scroll-padding-top: 4rem; /* matches SiteHeader h-16 on mobile */
+}
+
+@media (min-width: 768px) {
+  html {
+    scroll-padding-top: 5rem; /* matches SiteHeader h-20 on desktop (≥ md) */
+  }
 }
 
 /* Override lib's terminal-app styles (body overflow:hidden, #root height:100vh,
