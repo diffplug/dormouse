@@ -1,4 +1,5 @@
 import type { TutorialState } from "./tutorial-state";
+import { DEFAULT_MOUSE_SELECTION_STATE } from "mouseterm-lib/lib/mouse-selection";
 
 type DockviewApi = any;
 type WallEvent = import("mouseterm-lib/components/Wall").WallEvent;
@@ -139,11 +140,7 @@ export class TutDetector {
   private processMouse(): void {
     const snapshot = this.mouseStore.getMouseSelectionSnapshot();
     for (const [id, current] of snapshot) {
-      const prev = this.prevMouse.get(id);
-      if (!prev) {
-        this.prevMouse.set(id, { ...current });
-        continue;
-      }
+      const prev = this.prevMouse.get(id) ?? DEFAULT_MOUSE_SELECTION_STATE;
 
       if (current.copyFlash && current.copyFlash !== prev.copyFlash) {
         if (current.copyFlash === "raw") this.state.markComplete("cp-raw");
