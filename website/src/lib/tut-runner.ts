@@ -387,6 +387,15 @@ export class TutRunner implements InteractiveProgram {
       lines.push(...this.renderItem(item, index, activeIndex));
     });
 
+    if (section.id === "copy") {
+      lines.push("");
+      const indent = "  ";
+      const text = "Press `p` to toggle the Place To Paste.";
+      for (const wrapped of this.wrapText(text, indent.length)) {
+        lines.push(`${indent}${DIM}${wrapped}${RESET}`);
+      }
+    }
+
     if (section.prose && section.prose.length > 0) {
       lines.push("");
       const indent = "  ";

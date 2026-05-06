@@ -84,7 +84,7 @@ Prose:
 
 The Copy Rewrapped step uses `SCENARIO_BOXED_PARAGRAPH` (in `lib/src/lib/platform/fake-scenarios.ts`). Frame-only and frame-flanking box-drawing runs are stripped by `lib/src/lib/rewrap.ts` so Rewrapped joins the wrapped paragraph; clipboard contents visibly differ from Raw.
 
-While the Copy paste section is open, pressing `p` toggles the **Place To Paste** modal — a draggable, CSS-`resize:both` scratch box rendered by `website/src/components/PlaceToPaste.tsx` and mounted at the page level. `TutRunner` intercepts `p`/`P` (mirroring the Alert section's `s` busy-demo intercept) and calls `onTogglePlaceToPaste`; `Playground` flips a `placeToPasteOpen` flag so the modal is portal-free and overlays the wall. Users paste copied text into its single textarea and resize the modal to see whether the text reflows (Rewrapped) or stays line-broken (Raw).
+While the Copy paste section is open, pressing `p` toggles the **Place To Paste** modal — a draggable scratch box with eight pointer-event resize handles (four edges + four corners), rendered by `website/src/components/PlaceToPaste.tsx` and mounted at the page level. `TutRunner` intercepts `p`/`P` (mirroring the Alert section's `s` busy-demo intercept) and calls `onTogglePlaceToPaste`; `Playground` flips a `placeToPasteOpen` flag so the modal is portal-free and overlays the wall. The runner renders a persistent `Press \`p\` to toggle the Place To Paste …` line above the section's prose paragraph so the prompt is visible regardless of which item is active. Users paste copied text into the modal's single textarea and resize it to see whether the text reflows (Rewrapped) or stays line-broken (Raw).
 
 ## Lib changes added for this tutorial
 
