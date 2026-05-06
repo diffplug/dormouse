@@ -244,6 +244,8 @@ interface PersistedDoor {
 5. Graceful shutdown: save state -> SIGTERM -> 2s wait -> force kill
 6. On activate: saved state loaded and passed to routers for cold-start restore
 
+Every saved-session entry point must pass through `readPersistedSession()`. That reader accepts both the canonical parsed object and a JSON-stringified session blob before validating/migrating, which covers VS Code state APIs that may hand back the inner serialized JSON string.
+
 ### Theme integration
 
 Two-layer CSS variable system: VS Code injects `--vscode-*` tokens; `lib/src/theme.css` maps them directly to semantic `--color-*` tokens for use in Tailwind utility classes. The webview entry point installs `installVscodeThemeVarResolver()` before React renders. That resolver reads VSCode-provided variables, materializes only missing MouseTerm-consumed variables on `body.style`, and watches `body`/`html` class and style mutations so theme changes recompute those materialized values.
