@@ -25,6 +25,35 @@ function Playground() {
   const detectorRef = useRef<TutDetector | null>(null);
   const stateRef = useRef<TutorialState | null>(null);
   const dockviewDisposablesRef = useRef<DockviewDisposable[]>([]);
+  const tutorialAutoStartedRef = useRef(false);
+  const tutorialAutoStartRafRef = useRef<number | null>(null);
+
+  const scheduleTutorialAutoStart = useCallback(() => {
+    if (tutorialAutoStartedRef.current || tutorialAutoStartRafRef.current !== null) return;
+
+    let attempts = 0;
+    const tick = () => {
+      tutorialAutoStartRafRef.current = null;
+      if (tutorialAutoStartedRef.current) return;
+
+      const adapter = adapterRef.current;
+      const shellRegistry = shellRegistryRef.current;
+      if (!adapter || !shellRegistry) return;
+
+      if (adapter.hasPty(PANE_MAIN)) {
+        tutorialAutoStartedRef.current = true;
+        shellRegistry.ensureShell(PANE_MAIN).runCommand("tut");
+        return;
+      }
+
+      attempts += 1;
+      if (attempts < 60) {
+        tutorialAutoStartRafRef.current = requestAnimationFrame(tick);
+      }
+    };
+
+    tutorialAutoStartRafRef.current = requestAnimationFrame(tick);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,11 +112,9 @@ function Playground() {
       );
       shellRegistryRef.current = shellRegistry;
 
-      const mainShell = shellRegistry.ensureShell(PANE_MAIN);
+      shellRegistry.ensureShell(PANE_MAIN);
       shellRegistry.ensureShell(PANE_TARGET);
       shellRegistry.ensureShell(PANE_BOXED);
-
-      mainShell.runCommand("tut");
 
       setWallModule({ Wall: wall.Wall });
     }
@@ -104,6 +131,11 @@ function Playground() {
       shellRegistryRef.current?.disposeAll();
       shellRegistryRef.current = null;
       stateRef.current = null;
+      tutorialAutoStartedRef.current = false;
+      if (tutorialAutoStartRafRef.current !== null) {
+        cancelAnimationFrame(tutorialAutoStartRafRef.current);
+        tutorialAutoStartRafRef.current = null;
+      }
     };
   }, []);
 
@@ -135,6 +167,7 @@ function Playground() {
     if (mainPanel) mainPanel.api.setActive();
 
     detectorRef.current?.attach(api);
+    scheduleTutorialAutoStart();
   }, []);
 
   const handleWallEvent = useCallback((event: WallEvent) => {

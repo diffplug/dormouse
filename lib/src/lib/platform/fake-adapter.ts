@@ -162,6 +162,10 @@ export class FakePtyAdapter implements PlatformAdapter {
     return this.terminalSizes.get(id) ?? DEFAULT_PTY_SIZE;
   }
 
+  hasPty(id: string): boolean {
+    return this.terminals.has(id);
+  }
+
   async readClipboardFilePaths(): Promise<string[] | null> { return null; }
   async readClipboardImageAsFilePath(): Promise<string | null> { return null; }
 
