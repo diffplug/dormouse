@@ -17,8 +17,8 @@ Three browser-side pieces in `website/src/lib/`, mirroring the pattern in `websi
 - `<main>` is a flex container so Wall's `flex-1 min-h-0` root gets a real height.
 - `Wall` runs `FakePtyAdapter` with `initialMode="passthrough"` and three initial panes:
   - **`tut-main`** (left, ~50%) — auto-launches `TutRunner` on mount via `mainShell.runCommand("tut")`.
-  - **`tut-target`** (right-top, ~25%) — `SCENARIO_SHELL_PROMPT`. Used as the demo pane for keyboard-nav and alert sections.
-  - **`tut-boxed`** (right-bottom, ~25%) — `SCENARIO_BOXED_PARAGRAPH`. The boxed paragraph for Copy Rewrapped vs Copy Raw.
+  - **`tut-boxed`** (right-top, ~25%) — titled "changelog". `SCENARIO_BOXED_PARAGRAPH`. The boxed paragraph for Copy Rewrapped vs Copy Raw.
+  - **`tut-splash`** (right-bottom, ~25%) — titled "ascii-splash". Auto-launches `AsciiSplashRunner` on mount via `splashShell.runCommand("ascii-splash")`.
 - The two right-side panes are added in `onApiReady` with `position: { referencePanel, direction }` after Wall creates the initial main pane.
 
 Every playground pane gets a `TutorialShell` input handler through `PlaygroundShellRegistry`. Newly split or spawned fake terminals use `SCENARIO_SHELL_PROMPT` by default. The shell dispatches by command name to a `startProgram` factory provided by the page; the factory wires `tut` → `TutRunner` and `ascii-splash` / `splash` → `AsciiSplashRunner`.
@@ -64,7 +64,7 @@ The detector subscribes to `subscribeToActivity()` and tracks per-id `(status, t
 
 The detector remembers the most recent pane whose alert was enabled. The Alert section view shows a runner-local instruction: "Press `s` here to start a fake busy task." `s` is **not** a real MouseTerm shortcut; it is intercepted by `TutRunner` only while the Alert section is open. When pressed, the runner does two things:
 
-1. Resolves that pane to its current PTY session id, then calls `adapter.pumpActivity(sessionId, BUSY_DEMO_DURATION_MS, 800)` — drives the alert-manager's activity monitor on the same alert-enabled session with **no text output**, so the bell tilts to BUSY without scrolling any scenario text. The session id is resolved at trigger time so `Cmd/Ctrl+Arrow` swaps do not leave the tutorial pumping an old pane id. If no alert-enabled pane is known, the runner falls back to `PANE_TARGET`. `BUSY_DEMO_DURATION_MS` is `cfg.alert.userAttention + 250` so silence begins after the attention idle window has expired, with a small scheduler-jitter guard; otherwise the "user is looking at this pane" check inside `ActivityMonitor.startNeedsAttentionConfirmTimer` would suppress the ring rather than let it fire.
+1. Resolves that pane to its current PTY session id, then calls `adapter.pumpActivity(sessionId, BUSY_DEMO_DURATION_MS, 800)` — drives the alert-manager's activity monitor on the same alert-enabled session with **no text output**, so the bell tilts to BUSY without scrolling any scenario text. The session id is resolved at trigger time so `Cmd/Ctrl+Arrow` swaps do not leave the tutorial pumping an old pane id. If no alert-enabled pane is known, the runner falls back to `PANE_BOXED` (the changelog pane). `BUSY_DEMO_DURATION_MS` is `cfg.alert.userAttention + 250` so silence begins after the attention idle window has expired, with a small scheduler-jitter guard; otherwise the "user is looking at this pane" check inside `ActivityMonitor.startNeedsAttentionConfirmTimer` would suppress the ring rather than let it fire.
 2. Animates a countdown in-place where the "Press s…" hint was: `⠋ Fake task will finish in N seconds.` ticking down to 1, then a static `✓ Fake task finished. Press s to start another one.` once the activity stops. Detection is purely timing-based via the existing `ActivityMonitor`, so no shell integration is required.
 
 ### Section 3 — Copy paste (4 items)
@@ -115,7 +115,7 @@ The picker restores the persisted active theme on mount. The playground header i
 
 ## Mouse and Clipboard Feature Coverage
 
-The Playground is the primary dogfood surface for the features in `docs/specs/mouse-and-clipboard.md`. The new tutorial layout (`tut-main` running the runner, `tut-target` shell, `tut-boxed` boxed paragraph) plus the user-launched `ascii-splash` pane covers most of the spec; one notable gap remains.
+The Playground is the primary dogfood surface for the features in `docs/specs/mouse-and-clipboard.md`. The tutorial layout (`tut-main` running the runner, `tut-boxed` changelog/boxed-paragraph pane, `tut-splash` auto-running `ascii-splash`) covers most of the spec; one notable gap remains.
 
 Legend: ✅ exercisable today, ⚠️ partial, ❌ not exercisable.
 
