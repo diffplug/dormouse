@@ -199,9 +199,9 @@ export function Component() {
 
           {hasInvalidFilter ? (
             <div className="mb-8 border-l-2 border-[var(--color-caramel)] pl-4 text-sm text-[var(--color-text)]/75">
-              Could not filter after "{versionParam}"; showing all releases.{" "}
+              No such release "{versionParam}".{" "}
               <Link to="/changelog" className="text-[var(--color-caramel)] hover:underline">
-                Reset the changelog.
+                Show all releases.
               </Link>
             </div>
           ) : null}
