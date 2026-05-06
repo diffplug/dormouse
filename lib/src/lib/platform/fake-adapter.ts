@@ -225,21 +225,6 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
 
   /**
-   * Replay a scenario against a live pty. Cancels any in-flight scenario
-   * for the same id first. Drives the alert-manager via `onData` exactly
-   * like the spawn-time playback path so bell state transitions fire.
-   */
-  playScenarioNow(id: string, scenario: FakeScenario): void {
-    if (!this.terminals.has(id)) return;
-    const existing = this.activeTimers.get(id);
-    if (existing) {
-      existing.forEach(clearTimeout);
-      this.activeTimers.delete(id);
-    }
-    this.playScenario(id, scenario);
-  }
-
-  /**
    * Drive the alert-manager's activity monitor for a fixed duration with
    * no data output — useful for animating a fake "task running" state on
    * a pane while the visual feedback lives elsewhere. Calls
