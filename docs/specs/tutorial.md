@@ -8,7 +8,7 @@ Three browser-side pieces in `website/src/lib/`, mirroring the pattern in `websi
 
 - **`tut-runner.ts`** (`TutRunner`) — alt-screen TUI. Subscribes to `TutorialState` and re-renders whenever progress changes. Routes input bytes via `FakePtyAdapter.writePty(id, …)`.
 - **`tut-detector.ts`** (`TutDetector`) — wires app events to `TutorialState.markComplete(id)`. Subscribes to `DockviewApi.onDidActivePanelChange`, the `WallEvent` stream, the `subscribeToActivity` store from `mouseterm-lib/lib/terminal-registry`, and the `subscribeToMouseSelection` store from `mouseterm-lib/lib/mouse-selection`.
-- **`tutorial-state.ts`** (`TutorialState`) — single in-memory progress store, persisted per-item to `localStorage` under the `mouseterm-tut-v2-` prefix.
+- **`tutorial-state.ts`** (`TutorialState`) — single in-memory progress store, persisted as a JSON array of completed item ids under the `mouseterm-tut-v3` localStorage key.
 - **`tut-items.ts`** — section + item definitions (titles, hints) shared by runner and detector. Item ids are stable; they are the localStorage key suffixes.
 
 ## Layout
@@ -37,7 +37,7 @@ Esc / `q` / Ctrl+C pops back one screen (section → menu → exit). Exiting the
 
 | ID | Title | Detection |
 |---|---|---|
-| `kb-mode` | Enter command mode (LShift→RShift / LMeta→RMeta) | `WallEvent.modeChange` to `'command'` |
+| `kb-mode` | Enter command mode | `WallEvent.modeChange` to `'command'` (the modifier dual-tap is in the hint) |
 | `kb-split-h` | Add a horizontal divider with `-` (or `"`) | `WallEvent.split { source: 'keyboard', direction: 'vertical' }` |
 | `kb-arrows` | Move between panes with arrow keys | `onDidActivePanelChange` ≥ 2 distinct panels while in command mode |
 | `kb-split-v` | Add a vertical divider with `\|` (or `%`) | `WallEvent.split { source: 'keyboard', direction: 'horizontal' }` |
@@ -87,16 +87,16 @@ The Copy Rewrapped step uses `SCENARIO_BOXED_PARAGRAPH` (in `lib/src/lib/platfor
 ## Lib changes added for this tutorial
 
 - **`WallEvent.kill`** and **`WallEvent.move`** — new discriminants on the `WallEvent` union (`lib/src/components/wall/wall-types.ts`). `kill` fires from `acceptKill` in `Wall.tsx`. `move` fires from `handle-pane-shortcuts.ts` after the Cmd/Ctrl-Arrow swap, via a new `fireEvent` callback added to `WallKeyboardCtx`.
-- **`FakePtyAdapter.playScenarioNow(id, scenario)`** — public method that replays a `FakeScenario` on a live pty; cancels any in-flight scenario for the same id first. Drives `alertManager.onData()` exactly like the spawn-time playback so bell state transitions fire.
 - **`FakePtyAdapter.pumpActivity(id, durationMs, intervalMs)`** — drives the alert-manager for a fixed duration with no data output. The runner uses this so the bell on the demo pane tilts/rings while the visible "task running" animation lives entirely inside the tutorial pane.
+- **`FakePtyAdapter.sendOutput(id, data)`** — pushes data through the data handlers as if the PTY produced it, also driving `alertManager.onData()`. Used by `TutRunner` and `AsciiSplashRunner` so browser-side echoes still feed the activity monitor.
 - **`SCENARIO_BOXED_PARAGRAPH`** — boxed multi-line prose, used by `tut-boxed`.
 
 `SCENARIO_TUTORIAL_MOTD` was removed — the runner now owns the main pane's screen.
 
 ## Storage
 
-- Per-item completion: `localStorage["mouseterm-tut-v2-<itemId>"] = "1"`. Wiped on `TutorialState.reset()`.
-- Legacy keys `mouseterm-tutorial-step-N` from the previous design are not read; new playground sessions get a fresh start.
+- Completion: `localStorage["mouseterm-tut-v3"] = JSON.stringify([...completedItemIds])`. Removed on `TutorialState.reset()`. Unknown ids in a stored payload are filtered out on load, so renaming an id is a one-way reset for that item.
+- Legacy keys `mouseterm-tutorial-step-N` and `mouseterm-tut-v2-*` from previous designs are not read; new playground sessions get a fresh start.
 
 ## Theme Picker
 
