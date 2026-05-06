@@ -1,0 +1,304 @@
+{
+  "generatedFrom": "CHANGELOG.md",
+  "releases": [
+    {
+      "version": "0.9.1",
+      "tag": "v0.9.1",
+      "date": "2026-05-01",
+      "sections": [
+        {
+          "title": "Changed",
+          "items": [
+            {
+              "text": "🖥️ Drop-to-paste from the OS file explorer is temporarily inert on standalone while we wait on upstream Tauri ([tauri#14373](https://github.com/tauri-apps/tauri/issues/14373)) to allow native drag-drop without blocking HTML5 drag events ([#39](https://github.com/diffplug/mouseterm/pull/39)).",
+              "children": []
+            }
+          ]
+        },
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "text": "The mouse-override banner now renders inline in the terminal pane body and no longer stacks with the action-button tooltip ([#43](https://github.com/diffplug/mouseterm/pull/43)).",
+              "children": []
+            },
+            {
+              "text": "Themes with translucent selection backgrounds (e.g. Selenized Dark) no longer bleed through MouseTerm's solid AppBar and tab fills ([#37](https://github.com/diffplug/mouseterm/pull/37)).",
+              "children": []
+            },
+            {
+              "text": "🖥️ Force-closing the standalone host now reliably kills the Node sidecar tree via a Windows Job Object / Unix process group, so subsequent builds no longer hit orphan `node.exe` processes locking files ([#41](https://github.com/diffplug/mouseterm/pull/41)).",
+              "children": []
+            },
+            {
+              "text": "🖥️ Standalone macOS terminals run zsh as a login shell when no args are provided, so `~/.zprofile` runs and Homebrew/asdf land on `PATH` ([#40](https://github.com/diffplug/mouseterm/pull/40)).",
+              "children": []
+            },
+            {
+              "text": "🖥️ Pane drag-and-drop reordering works again on standalone ([#39](https://github.com/diffplug/mouseterm/pull/39)).",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.9.0",
+      "tag": "v0.9.0",
+      "date": "2026-04-30",
+      "sections": [
+        {
+          "title": "Added",
+          "items": [
+            {
+              "text": "🖥️ Debug dialog for failed auto-updates — surfaces the error and copies a pre-filled bug report (version, platform, last ~10 KB of `mouseterm.log`) ([#35](https://github.com/diffplug/mouseterm/pull/35)).",
+              "children": []
+            }
+          ]
+        },
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "text": "Terminals auto-spawned from a blank workspace now respect the selected shell ([#33](https://github.com/diffplug/mouseterm/pull/33)).",
+              "children": []
+            },
+            {
+              "text": "🖥️ Polish app bar header to align with pane chrome and shared design tokens ([#34](https://github.com/diffplug/mouseterm/pull/34)).",
+              "children": []
+            },
+            {
+              "text": "🖥️ macOS auto-update — strip AppleDouble (`._*`) sidecars from the signed tarball that were breaking every v0.7.x → v0.8.0 install ([#35](https://github.com/diffplug/mouseterm/pull/35)).",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.8.0",
+      "tag": "v0.8.0",
+      "date": "2026-04-29",
+      "sections": [
+        {
+          "title": "Changes",
+          "items": [
+            {
+              "text": "Add intuitive shortcuts alongside the tmux shortcuts.",
+              "children": []
+            },
+            {
+              "text": "Simplify the TODO behavior to clear when ENTER pressed within a session, got rid of the \"soft TODO\" system.",
+              "children": []
+            },
+            {
+              "text": "Improve VS Code theme translation.",
+              "children": [
+                {
+                  "text": "Added a \"Theme debugger\" to assist with this.",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "text": "Fix terminal selection on Windows.",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.7.0",
+      "tag": "v0.7.0",
+      "date": "2026-04-22",
+      "sections": [
+        {
+          "title": "Changes",
+          "items": [
+            {
+              "text": "Overhaul the theming system.",
+              "children": []
+            },
+            {
+              "text": "Overhaul mouse and clipboard handling.",
+              "children": []
+            },
+            {
+              "text": "Overhaul alerting system.",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.6.2",
+      "tag": "v0.6.2",
+      "date": "2026-04-13",
+      "sections": [
+        {
+          "title": "Changes",
+          "items": [
+            {
+              "text": "Fix issues with deployed Tauri on Win and Mac (Linux is working great!)",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.6.1",
+      "tag": "v0.6.1",
+      "date": "2026-04-13",
+      "sections": [
+        {
+          "title": "Changes",
+          "items": [
+            {
+              "text": "Fix missing Tauri update permissions.",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.6.0",
+      "tag": "v0.6.0",
+      "date": "2026-04-13",
+      "sections": [
+        {
+          "title": "Changes",
+          "items": [
+            {
+              "text": "Standalone: fix some issues with node sidecar.",
+              "children": []
+            },
+            {
+              "text": "Standalone: app-rendered title bar.",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.5.2",
+      "tag": "v0.5.2",
+      "date": "2026-04-10",
+      "sections": [
+        {
+          "title": "Changes",
+          "items": [
+            {
+              "text": "Codex fixes.",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.5.1",
+      "tag": "v0.5.1",
+      "date": "2026-04-10",
+      "sections": [
+        {
+          "title": "Changes",
+          "items": [
+            {
+              "text": "Fix uploading glob.",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.5.0",
+      "tag": "v0.5.0",
+      "date": "2026-04-10",
+      "sections": [
+        {
+          "title": "Changes",
+          "items": [
+            {
+              "text": "Get ready to test auto-update for the standalone apps.",
+              "children": []
+            },
+            {
+              "text": "Add icons to the standalone apps.",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.4.0",
+      "tag": "v0.4.0",
+      "date": "2026-04-10",
+      "sections": [
+        {
+          "title": "Changes",
+          "items": [
+            {
+              "text": "Yet yet another initial release to test publishing.",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.3.0",
+      "tag": "v0.3.0",
+      "date": "2026-04-10",
+      "sections": [
+        {
+          "title": "Changes",
+          "items": [
+            {
+              "text": "Yet another initial release to test publishing.",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.2.0",
+      "tag": "v0.2.0",
+      "date": "2026-04-09",
+      "sections": [
+        {
+          "title": "Changes",
+          "items": [
+            {
+              "text": "Another initial release to test publishing.",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.1.0",
+      "tag": "v0.1.0",
+      "date": "2026-04-09",
+      "sections": [
+        {
+          "title": "Changes",
+          "items": [
+            {
+              "text": "Initial release to test publishing.",
+              "children": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

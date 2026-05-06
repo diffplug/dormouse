@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite-react-ssg dev",
-    "prebuild": "node scripts/generate-deps.js",
+    "prebuild": "node scripts/generate-deps.js && node scripts/generate-changelog.js",
     "build": "vite-react-ssg build",
     "preview": "vite preview",
     "test": "vitest run"
