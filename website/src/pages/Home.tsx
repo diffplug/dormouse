@@ -251,7 +251,6 @@ function Home() {
   const word0Ref = useRef<HTMLSpanElement>(null);
   const word1Ref = useRef<HTMLSpanElement>(null);
   const word2Ref = useRef<HTMLSpanElement>(null);
-  const asteriskRef = useRef<HTMLElement>(null);
   const footnoteRef = useRef<HTMLParagraphElement>(null);
   const headerRef = useRef<HTMLElement>(null);
   const headerBrandRef = useRef<HTMLAnchorElement>(null);
@@ -476,12 +475,11 @@ function Home() {
         el.style.transform = `translateY(${(1 - progress) * 12}px)`;
       }
 
-      // Asterisk + footnote
-      const astProgress = clamp01(
+      // Footnote
+      const footnoteProgress = clamp01(
         (fraction - ASTERISK_THRESHOLD) / 0.08
       );
-      if (asteriskRef.current) asteriskRef.current.style.opacity = String(astProgress);
-      if (footnoteRef.current) footnoteRef.current.style.opacity = String(astProgress * 0.7);
+      if (footnoteRef.current) footnoteRef.current.style.opacity = String(footnoteProgress * 0.7);
 
       // Header: reveal brand + background just before the tmux-shortcuts
       // footnote appears, so it reads as dark once the line is visible.
@@ -659,16 +657,14 @@ function Home() {
               Terminal
             </span>
             <span ref={word2Ref} style={{ opacity: 0, transform: "translateY(12px)" }}>
-              <span className="text-[var(--color-caramel)] relative">
-                for Mice<sup ref={asteriskRef} className="absolute left-full top-3" style={{ opacity: 0 }}>*</sup>
-              </span>
+              <span className="text-[var(--color-caramel)]">for Mice</span>
             </span>
             <p
               ref={footnoteRef}
-              className="mt-3 text-lg"
+              className="-mt-1 text-lg"
               style={{ opacity: 0 }}
             >
-              *supports (and teaches) tmux shortcuts
+              (and hotkey wizards too)
             </p>
           </div>
         </div>
