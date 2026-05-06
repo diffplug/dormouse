@@ -243,10 +243,15 @@ export class FakePtyAdapter implements PlatformAdapter {
    * the Tauri/VSCode adapters — without this, browser-side echo (e.g.
    * TutorialShell's per-character echo, AsciiSplashRunner frames) never
    * reaches the activity monitor and the bell can never tilt or ring.
+   *
+   * Pass `{ skipActivity: true }` for writes that are pure UI chrome and
+   * shouldn't count as a "task is active" signal — e.g. a tutorial TUI
+   * re-rendering its menu on state change. Without the opt-out, every
+   * runner frame would tilt the bell on whichever pane hosts the runner.
    */
-  sendOutput(id: string, data: string): void {
+  sendOutput(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
     if (!this.terminals.has(id)) return;
-    this.alertManager.onData(id);
+    if (!options.skipActivity) this.alertManager.onData(id);
     for (const handler of this.dataHandlers) {
       handler({ id, data });
     }
