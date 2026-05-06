@@ -42,13 +42,13 @@ Update status appears as a text notice on the right side of the Baseboard (the a
 
 | State | Message | Actions | Auto-dismiss |
 |-------|---------|---------|--------------|
-| `available` | "Update available (v0.5.0)." | "Install on quit", "Changelog" | No |
+| `available` | "Update available" | "Changelog", "Install when I quit" | No |
 | `downloading` | "Downloading update (v0.5.0)..." | "Changelog" | No |
 | `downloaded` | "Update downloaded (v0.5.0) — will install when you quit." | "Changelog" | No |
 | `post-update-success` | "Updated to v0.5.0 — from v0.4.0." | "Changelog" | 10 seconds |
 | `post-update-failure` | "Update failed." | "Click here to debug" | No |
 
-The "Install on quit" action is the user's approval to download the update now and install it when they quit. Changelog actions call Tauri's `getVersion()` and open `https://mouseterm.com/changelog/after/<current-version>`.
+The "Install when I quit" action is the user's approval to download the update now and install it when they quit. The inline "Changelog" action calls Tauri's `getVersion()` and opens `https://mouseterm.com/changelog/after/<current-version>`.
 
 All states are dismissible via [×]. Dismissing an unapproved `available` notice means no update is downloaded or installed in that session. Dismissing a `downloading` or `downloaded` notice hides it for the session only — it does not cancel an already-approved download/install.
 

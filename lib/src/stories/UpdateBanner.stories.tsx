@@ -7,7 +7,7 @@ function UpdateBannerStory({ state, expectedNullReason }: { state: UpdateBannerS
       <UpdateBanner
         state={state}
         onDismiss={() => console.log('Dismiss')}
-        onApproveUpdate={() => console.log('Install on quit')}
+        onApproveUpdate={() => console.log('Install when I quit')}
         onOpenChangelog={() => console.log('Open changelog')}
         onOpenDebug={() => console.log('Open debug')}
       />

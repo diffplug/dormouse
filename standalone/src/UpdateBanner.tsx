@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { XIcon } from '@phosphor-icons/react';
 
 export type UpdateBannerState =
@@ -23,16 +24,25 @@ const linkStyle = { color: 'var(--vscode-textLink-foreground)' };
 export function UpdateBanner({ state, onDismiss, onApproveUpdate, onOpenChangelog, onOpenDebug }: UpdateBannerProps) {
   if (state.status === 'idle' || state.status === 'dismissed') return null;
 
-  let message: string;
+  let message: ReactNode;
   let links: { label: string; onClick: () => void }[];
 
   switch (state.status) {
     case 'available':
-      message = `Update available (v${state.version}).`;
-      links = [
-        { label: 'Install on quit', onClick: onApproveUpdate },
-        { label: 'Changelog', onClick: onOpenChangelog },
-      ];
+      message = (
+        <>
+          Update available
+          {' · '}
+          <button onClick={onOpenChangelog} className={linkClass} style={linkStyle}>
+            Changelog
+          </button>
+          {' · '}
+          <button onClick={onApproveUpdate} className={linkClass} style={linkStyle}>
+            Install when I quit
+          </button>
+        </>
+      );
+      links = [];
       break;
     case 'downloading':
       message = `Downloading update (v${state.version})...`;
