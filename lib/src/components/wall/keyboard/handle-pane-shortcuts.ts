@@ -53,7 +53,7 @@ export function handlePaneShortcuts(
     return true;
   }
 
-  if (isArrowKey(e.key) && e.metaKey) {
+  if (isArrowKey(e.key) && (e.metaKey || e.ctrlKey)) {
     e.preventDefault();
     e.stopPropagation();
     if (!sid) return true;

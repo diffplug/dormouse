@@ -10,7 +10,7 @@ export function handlePaneNavigation(
   ctx: WallKeyboardCtx,
   navHistory: NavHistoryRef,
 ): boolean {
-  if (!isArrowKey(e.key) || e.metaKey) {
+  if (!isArrowKey(e.key) || e.metaKey || e.ctrlKey) {
     return false;
   }
   e.preventDefault();
