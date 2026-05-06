@@ -92,6 +92,23 @@ describe("TutDetector", () => {
     expect(state.isComplete("kb-arrows")).toBe(true);
   });
 
+  it("does not credit kb-arrows for the focus change that follows a Cmd/Ctrl+Arrow swap", () => {
+    const { state, detector, activePanelChange } = makeDetectorHarness();
+
+    detector.handleWallEvent({ type: "selectionChange", id: "pane-a", kind: "pane" });
+    detector.handleWallEvent({ type: "modeChange", mode: "passthrough" });
+    detector.handleWallEvent({ type: "modeChange", mode: "command" });
+    detector.handleWallEvent({ type: "move", fromId: "pane-a", toId: "pane-b" });
+    activePanelChange("pane-b");
+
+    expect(state.isComplete("kb-move")).toBe(true);
+    expect(state.isComplete("kb-arrows")).toBe(false);
+
+    // A subsequent plain arrow nav to a third pane should still credit kb-arrows.
+    activePanelChange("pane-c");
+    expect(state.isComplete("kb-arrows")).toBe(true);
+  });
+
   it("does not credit al-busy or al-ring when a pane is already in that status at first observation", () => {
     const { state, setActivitySnapshot } = makeDetectorHarness();
 

@@ -32,6 +32,7 @@ export class TutDetector {
   private commandModePanels = new Set<string>();
   private alertEnabledPaneIds = new Set<string>();
   private preferredAlertPaneId: string | null = null;
+  private pendingMoveTargetId: string | null = null;
   private prevActivity = new Map<string, ActivityState>();
   private prevMouse = new Map<string, MouseSelectionState>();
   private disposables: (() => void)[] = [];
@@ -67,6 +68,14 @@ export class TutDetector {
     const activeUnsub = api.onDidActivePanelChange((panel: { id?: string } | undefined) => {
       if (!panel?.id) return;
       if (this.currentMode !== "command") return;
+      // Cmd/Ctrl+Arrow fires `move` then re-selects the swap target, which
+      // would otherwise grow commandModePanels to 2 and credit `kb-arrows`
+      // even though the user never pressed a bare arrow key. Consume the
+      // expected focus-change so only true arrow navigation counts.
+      if (this.pendingMoveTargetId === panel.id) {
+        this.pendingMoveTargetId = null;
+        return;
+      }
       this.commandModePanels.add(panel.id);
       if (this.commandModePanels.size >= 2) {
         this.state.markComplete("kb-arrows");
@@ -116,6 +125,7 @@ export class TutDetector {
         break;
       case "move":
         this.state.markComplete("kb-move");
+        this.pendingMoveTargetId = event.toId;
         break;
       case "selectionChange":
         if (event.kind === "pane") {
