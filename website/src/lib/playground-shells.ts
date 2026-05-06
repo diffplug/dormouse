@@ -44,7 +44,7 @@ export class PlaygroundShellRegistry {
 
   disposeAll(): void {
     this.adapter.offPtyExit(this.handlePtyExit);
-    for (const id of this.shells.keys()) {
+    for (const id of [...this.shells.keys()]) {
       this.disposeShell(id);
     }
   }
