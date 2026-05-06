@@ -100,10 +100,17 @@ export class TutDetector {
     const snapshot = this.activityStore.getActivitySnapshot();
     for (const [id, current] of snapshot) {
       const prev = this.prevActivity.get(id);
+      // First time we see an id (e.g. a pane added after attach()), record
+      // its state without firing any transitions — we have no "before" to
+      // compare against, so treating undefined as a transition from
+      // ALERT_DISABLED / todo=false would falsely credit work the user
+      // didn't do (e.g. al-todo-manual when restored state has todo=true).
+      if (!prev) {
+        this.prevActivity.set(id, { ...current });
+        continue;
+      }
 
-      const wasEnabled = prev && prev.status !== "ALERT_DISABLED";
-      const nowEnabled = current.status !== "ALERT_DISABLED";
-      if (!wasEnabled && nowEnabled) {
+      if (prev.status === "ALERT_DISABLED" && current.status !== "ALERT_DISABLED") {
         this.state.markComplete("al-enable");
       }
 
@@ -114,15 +121,14 @@ export class TutDetector {
         this.state.markComplete("al-ring");
       }
 
-      const prevTodo = prev?.todo ?? false;
-      if (!prevTodo && current.todo) {
-        if (prev?.status === "ALERT_RINGING") {
+      if (!prev.todo && current.todo) {
+        if (prev.status === "ALERT_RINGING") {
           this.state.markComplete("al-todo-auto");
         } else {
           this.state.markComplete("al-todo-manual");
         }
       }
-      if (prevTodo && !current.todo) {
+      if (prev.todo && !current.todo) {
         this.state.markComplete("al-todo-clear");
       }
 
@@ -134,18 +140,21 @@ export class TutDetector {
     const snapshot = this.mouseStore.getMouseSelectionSnapshot();
     for (const [id, current] of snapshot) {
       const prev = this.prevMouse.get(id);
+      if (!prev) {
+        this.prevMouse.set(id, { ...current });
+        continue;
+      }
 
-      if (current.copyFlash && current.copyFlash !== prev?.copyFlash) {
+      if (current.copyFlash && current.copyFlash !== prev.copyFlash) {
         if (current.copyFlash === "raw") this.state.markComplete("cp-raw");
         if (current.copyFlash === "rewrapped") this.state.markComplete("cp-rewrap");
       }
 
-      if (!prev?.selection && current.selection) {
+      if (!prev.selection && current.selection) {
         this.state.markComplete("cp-select");
       }
 
-      const prevOverride = prev?.override ?? "off";
-      if (prevOverride === "off" && current.override !== "off") {
+      if (prev.override === "off" && current.override !== "off") {
         this.state.markComplete("cp-override");
       }
 
