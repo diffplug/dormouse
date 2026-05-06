@@ -21,7 +21,9 @@ export class TutDetector {
   private state: TutorialState;
   private activityStore: ActivityStoreModule;
   private mouseStore: MouseSelectionModule;
+  private api: DockviewApi | null = null;
   private currentMode: WallMode = "command";
+  private currentPaneId: string | null = null;
   private commandModePanels = new Set<string>();
   private prevActivity = new Map<string, ActivityState>();
   private prevMouse = new Map<string, MouseSelectionState>();
@@ -38,6 +40,7 @@ export class TutDetector {
   }
 
   attach(api: DockviewApi): void {
+    this.api = api;
     // Seed previous-state maps so the very first listener fire isn't
     // mis-read as a transition from "nothing".
     for (const [id, s] of this.activityStore.getActivitySnapshot()) {
@@ -74,6 +77,8 @@ export class TutDetector {
         if (event.mode === "command" && this.currentMode === "passthrough") {
           this.state.markComplete("kb-mode");
           this.commandModePanels.clear();
+          const activePaneId = this.currentPaneId ?? this.api?.activePanel?.id;
+          if (activePaneId) this.commandModePanels.add(activePaneId);
         }
         this.currentMode = event.mode;
         break;
@@ -93,6 +98,11 @@ export class TutDetector {
         break;
       case "move":
         this.state.markComplete("kb-move");
+        break;
+      case "selectionChange":
+        if (event.kind === "pane") {
+          this.currentPaneId = event.id;
+        }
         break;
     }
   }

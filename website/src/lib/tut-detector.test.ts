@@ -77,4 +77,15 @@ describe("TutDetector", () => {
 
     expect(state.isComplete("cp-select")).toBe(true);
   });
+
+  it("credits arrow navigation after the first move away from the command-mode origin pane", () => {
+    const { state, detector, activePanelChange } = makeDetectorHarness();
+
+    detector.handleWallEvent({ type: "selectionChange", id: "pane-a", kind: "pane" });
+    detector.handleWallEvent({ type: "modeChange", mode: "passthrough" });
+    detector.handleWallEvent({ type: "modeChange", mode: "command" });
+    activePanelChange("pane-b");
+
+    expect(state.isComplete("kb-arrows")).toBe(true);
+  });
 });
