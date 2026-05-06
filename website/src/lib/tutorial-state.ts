@@ -38,8 +38,8 @@ export class TutorialState {
   markComplete(id: ItemId): boolean {
     if (this.completed.has(id)) return false;
     this.completed.add(id);
-    this.persist();
     this.notify();
+    this.persist();
     return true;
   }
 
@@ -69,6 +69,12 @@ export class TutorialState {
   }
 
   private persist(): void {
-    this.storage?.setItem(STORAGE_KEY, JSON.stringify([...this.completed]));
+    if (!this.storage) return;
+    try {
+      this.storage.setItem(STORAGE_KEY, JSON.stringify([...this.completed]));
+    } catch {
+      // Quota or access errors shouldn't break in-memory progress —
+      // listeners already fired against the new state.
+    }
   }
 }
