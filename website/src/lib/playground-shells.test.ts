@@ -33,21 +33,29 @@ describe("PlaygroundShellRegistry", () => {
   });
 
   it("does not print a duplicate prompt when the scenario already provided one", () => {
-    const adapter = new FakePtyAdapter();
-    const output: string[] = [];
-    adapter.onPtyData((detail) => output.push(detail.data));
-    adapter.spawnPty("one");
+    vi.useFakeTimers();
+    try {
+      const adapter = new FakePtyAdapter();
+      const output: string[] = [];
+      adapter.onPtyData((detail) => output.push(detail.data));
+      adapter.setScenario("one", {
+        name: "with-prompt",
+        chunks: [{ delay: 0, data: "PROMPT " }],
+        endsWithPrompt: true,
+      });
+      adapter.spawnPty("one");
+      vi.runAllTimers();
+      output.length = 0;
 
-    const registry = new PlaygroundShellRegistry(
-      adapter,
-      () => createProgram(),
-      () => true,
-    );
-    registry.ensureShell("one");
+      const registry = new PlaygroundShellRegistry(adapter, () => createProgram());
+      registry.ensureShell("one");
 
-    adapter.writePty("one", "x");
+      adapter.writePty("one", "x");
 
-    expect(output.join("")).toBe("x");
+      expect(output.join("")).toBe("x");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("starts interactive programs against the active terminal id", () => {

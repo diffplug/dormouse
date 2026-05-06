@@ -66,6 +66,7 @@ export function flattenScenario(scenario: FakeScenario): FakeScenario {
 export const SCENARIO_SHELL_PROMPT: FakeScenario = {
   name: 'shell-prompt',
   chunks: [instant(PROMPT, 500)],
+  endsWithPrompt: true,
 };
 
 /** Types `ls -la` then shows colorized directory listing. */
@@ -92,6 +93,7 @@ export const SCENARIO_LS_OUTPUT: FakeScenario = {
     ),
     instant(PROMPT, 200),
   ],
+  endsWithPrompt: true,
 };
 
 /** Demonstrates all 16 ANSI colors with labels. */
@@ -118,6 +120,7 @@ export const SCENARIO_ANSI_COLORS: FakeScenario = {
     instant(`\r\n`, 100),
     instant(PROMPT, 200),
   ],
+  endsWithPrompt: true,
 };
 
 /** Shows a long-running process with progress dots. */
@@ -133,6 +136,7 @@ export const SCENARIO_LONG_RUNNING: FakeScenario = {
     instant(`\r\nadded 847 packages in 5.2s\r\n\r\n`, 100),
     instant(PROMPT, 200),
   ],
+  endsWithPrompt: true,
 };
 
 /**

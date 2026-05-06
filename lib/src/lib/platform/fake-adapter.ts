@@ -5,6 +5,10 @@ export interface FakeScenario {
   name: string;
   chunks: { delay: number; data: string }[];
   exitCode?: number;
+  /** Set to true when the final chunk leaves the pty at a shell prompt.
+   * The playground shell registry consults this to avoid printing a
+   * duplicate prompt on first user input. */
+  endsWithPrompt?: boolean;
 }
 
 export interface FakePtySize {
@@ -164,6 +168,13 @@ export class FakePtyAdapter implements PlatformAdapter {
 
   hasPty(id: string): boolean {
     return this.terminals.has(id);
+  }
+
+  /** True when the scenario assigned to `id` (or the default scenario, if
+   *  no per-id scenario is set) leaves the pty at a shell prompt. */
+  scenarioEndsWithPrompt(id: string): boolean {
+    const scenario = this.scenarioMap.get(id) ?? this.defaultScenario;
+    return scenario?.endsWithPrompt === true;
   }
 
   async readClipboardFilePaths(): Promise<string[] | null> { return null; }

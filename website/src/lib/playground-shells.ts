@@ -11,20 +11,14 @@ export type StartPlaygroundProgram = (
 export class PlaygroundShellRegistry {
   private adapter: FakePtyAdapter;
   private startProgram: StartPlaygroundProgram;
-  private promptInitiallyShown: (id: string) => boolean;
   private shells = new Map<string, TutorialShell>();
   private handlePtyExit = (detail: { id: string }) => {
     this.disposeShell(detail.id);
   };
 
-  constructor(
-    adapter: FakePtyAdapter,
-    startProgram: StartPlaygroundProgram,
-    promptInitiallyShown: (id: string) => boolean = () => false,
-  ) {
+  constructor(adapter: FakePtyAdapter, startProgram: StartPlaygroundProgram) {
     this.adapter = adapter;
     this.startProgram = startProgram;
-    this.promptInitiallyShown = promptInitiallyShown;
     this.adapter.onPtyExit(this.handlePtyExit);
   }
 
@@ -35,7 +29,7 @@ export class PlaygroundShellRegistry {
     const shell = new TutorialShell(
       (data) => this.adapter.sendOutput(id, data),
       (name, args, onExit) => this.startProgram(id, name, args, onExit),
-      { promptShown: this.promptInitiallyShown(id) },
+      { promptShown: this.adapter.scenarioEndsWithPrompt(id) },
     );
     this.shells.set(id, shell);
     this.adapter.setInputHandler(id, (data) => shell.handleInput(data));
