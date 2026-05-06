@@ -9,14 +9,11 @@ const MIN = { w: 240, h: 140 };
 
 type ResizeDir = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
-const EDGE_HANDLES: { dir: ResizeDir; cls: string; cursor: string }[] = [
+const RESIZE_HANDLES: { dir: ResizeDir; cls: string; cursor: string }[] = [
   { dir: "n", cls: "top-0 left-0 right-0 h-1.5", cursor: "cursor-ns-resize" },
   { dir: "s", cls: "bottom-0 left-0 right-0 h-1.5", cursor: "cursor-ns-resize" },
   { dir: "w", cls: "top-0 bottom-0 left-0 w-1.5", cursor: "cursor-ew-resize" },
   { dir: "e", cls: "top-0 bottom-0 right-0 w-1.5", cursor: "cursor-ew-resize" },
-];
-
-const CORNER_HANDLES: { dir: ResizeDir; cls: string; cursor: string }[] = [
   { dir: "nw", cls: "top-0 left-0 w-2.5 h-2.5", cursor: "cursor-nwse-resize" },
   { dir: "ne", cls: "top-0 right-0 w-2.5 h-2.5", cursor: "cursor-nesw-resize" },
   { dir: "sw", cls: "bottom-0 left-0 w-2.5 h-2.5", cursor: "cursor-nesw-resize" },
@@ -148,17 +145,7 @@ export function PlaceToPaste({ onClose }: PlaceToPasteProps) {
         placeholder="Paste here, then drag any edge or corner to resize and watch the text reflow (or not)."
         spellCheck={false}
       />
-      {EDGE_HANDLES.map((h) => (
-        <div
-          key={h.dir}
-          className={`absolute ${h.cls} ${h.cursor}`}
-          onPointerDown={onResizeDown(h.dir)}
-          onPointerMove={onResizeMove}
-          onPointerUp={onResizeUp}
-          onPointerCancel={onResizeUp}
-        />
-      ))}
-      {CORNER_HANDLES.map((h) => (
+      {RESIZE_HANDLES.map((h) => (
         <div
           key={h.dir}
           className={`absolute ${h.cls} ${h.cursor}`}

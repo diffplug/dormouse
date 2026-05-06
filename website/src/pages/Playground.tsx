@@ -18,57 +18,56 @@ type FakePtyAdapter = import("mouseterm-lib/lib/platform/fake-adapter").FakePtyA
 type WallEvent = import("mouseterm-lib/components/Wall").WallEvent;
 type DockviewDisposable = { dispose: () => void };
 
+// Tailwind's md breakpoint — matches the header's `md:top-20` so the pane
+// area below begins at the same threshold. Locked at mount, not reactive
+// to resize.
+const isPhoneAtMount = () =>
+  typeof window !== "undefined" && window.innerWidth < 768;
+
+interface PaneSpec {
+  id: string;
+  command: string;
+}
+
 function Playground() {
   const [WallModule, setWallModule] = useState<{
     Wall: React.ComponentType<any>;
   } | null>(null);
   const [placeToPasteOpen, setPlaceToPasteOpen] = useState(false);
-  // Phone gets a vertical two-pane layout (tutorial on top, ascii-splash below).
-  // Desktop gets the full three-pane layout including the changelog. Locked
-  // at mount, not reactive to resize.
-  const isPhoneRef = useRef(false);
+  // Phone: tutorial on top, ascii-splash below. Desktop: tutorial left,
+  // changelog top-right, ascii-splash bottom-right.
+  const [isPhone] = useState(isPhoneAtMount);
+
   const adapterRef = useRef<FakePtyAdapter | null>(null);
   const shellRegistryRef = useRef<PlaygroundShellRegistry | null>(null);
   const detectorRef = useRef<TutDetector | null>(null);
   const stateRef = useRef<TutorialState | null>(null);
   const dockviewDisposablesRef = useRef<DockviewDisposable[]>([]);
-  const tutorialAutoStartedRef = useRef(false);
-  const splashAutoStartedRef = useRef(false);
-  const changelogAutoStartedRef = useRef(false);
+  const autoStartedRef = useRef<Set<string>>(new Set());
   const spawnUnsubRef = useRef<(() => void) | null>(null);
   const busyDemoDisposeRef = useRef<(() => void) | null>(null);
   const alertDemoPaneIdRef = useRef<string | null>(null);
 
-  const tryAutoStartTutorial = useCallback(() => {
-    if (tutorialAutoStartedRef.current) return;
+  const tryAutoStart = useCallback((pane: PaneSpec) => {
+    if (autoStartedRef.current.has(pane.id)) return;
     const shellRegistry = shellRegistryRef.current;
     if (!shellRegistry) return;
-    tutorialAutoStartedRef.current = true;
-    shellRegistry.ensureShell(PANE_MAIN).runCommand("tut");
-  }, []);
-
-  const tryAutoStartSplash = useCallback(() => {
-    if (splashAutoStartedRef.current) return;
-    const shellRegistry = shellRegistryRef.current;
-    if (!shellRegistry) return;
-    splashAutoStartedRef.current = true;
-    shellRegistry.ensureShell(PANE_SPLASH).runCommand("ascii-splash");
-  }, []);
-
-  const tryAutoStartChangelog = useCallback(() => {
-    if (changelogAutoStartedRef.current) return;
-    const shellRegistry = shellRegistryRef.current;
-    if (!shellRegistry) return;
-    changelogAutoStartedRef.current = true;
-    shellRegistry.ensureShell(PANE_BOXED).runCommand("changelog");
+    autoStartedRef.current.add(pane.id);
+    shellRegistry.ensureShell(pane.id).runCommand(pane.command);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    // Tailwind's md breakpoint — matches the header's `md:top-20` so the
-    // pane area below begins at the same threshold.
-    isPhoneRef.current = typeof window !== "undefined" && window.innerWidth < 768;
-    const isPhone = isPhoneRef.current;
+    const panes: PaneSpec[] = isPhone
+      ? [
+          { id: PANE_MAIN, command: "tut" },
+          { id: PANE_SPLASH, command: "ascii-splash" },
+        ]
+      : [
+          { id: PANE_MAIN, command: "tut" },
+          { id: PANE_BOXED, command: "changelog" },
+          { id: PANE_SPLASH, command: "ascii-splash" },
+        ];
     async function loadWall() {
       const platform = await import("mouseterm-lib/lib/platform");
       const registry = await import("mouseterm-lib/lib/terminal-registry");
@@ -84,14 +83,12 @@ function Playground() {
       adapterRef.current = adapter;
 
       adapter.setDefaultScenario(scenarios.SCENARIO_SHELL_PROMPT);
-      // tut-main is owned by TutRunner, tut-splash by AsciiSplashRunner, and
-      // tut-boxed by ChangelogRunner — explicitly suppress the default
-      // shell-prompt scenario, otherwise spawnPty queues a delayed
-      // `user@mouseterm:~$` write that would land in the runner's
-      // alt-screen and corrupt its output.
-      adapter.setScenario(PANE_MAIN, { name: "none", chunks: [] });
-      adapter.setScenario(PANE_SPLASH, { name: "none", chunks: [] });
-      if (!isPhone) adapter.setScenario(PANE_BOXED, { name: "none", chunks: [] });
+      // Each runner-owned pane suppresses the default shell-prompt scenario,
+      // otherwise spawnPty queues a delayed `user@mouseterm:~$` write that
+      // would land in the runner's alt-screen and corrupt its output.
+      for (const pane of panes) {
+        adapter.setScenario(pane.id, { name: "none", chunks: [] });
+      }
 
       const tutorialState = new TutorialState();
       stateRef.current = tutorialState;
@@ -140,21 +137,19 @@ function Playground() {
       );
       shellRegistryRef.current = shellRegistry;
 
-      shellRegistry.ensureShell(PANE_MAIN);
-      shellRegistry.ensureShell(PANE_SPLASH);
-      if (!isPhone) shellRegistry.ensureShell(PANE_BOXED);
+      for (const pane of panes) shellRegistry.ensureShell(pane.id);
 
+      const paneById = new Map(panes.map((p) => [p.id, p]));
       // Subscribe before Wall mounts so the spawn fired by TerminalPane's
       // mount effect doesn't race past us. If the pty already exists by
       // the time we get here, fire immediately.
       spawnUnsubRef.current = adapter.onPtySpawn(({ id }) => {
-        if (id === PANE_MAIN) tryAutoStartTutorial();
-        if (id === PANE_SPLASH) tryAutoStartSplash();
-        if (!isPhone && id === PANE_BOXED) tryAutoStartChangelog();
+        const pane = paneById.get(id);
+        if (pane) tryAutoStart(pane);
       });
-      if (adapter.hasPty(PANE_MAIN)) tryAutoStartTutorial();
-      if (adapter.hasPty(PANE_SPLASH)) tryAutoStartSplash();
-      if (!isPhone && adapter.hasPty(PANE_BOXED)) tryAutoStartChangelog();
+      for (const pane of panes) {
+        if (adapter.hasPty(pane.id)) tryAutoStart(pane);
+      }
 
       setWallModule({ Wall: wall.Wall });
     }
@@ -171,16 +166,14 @@ function Playground() {
       shellRegistryRef.current?.disposeAll();
       shellRegistryRef.current = null;
       stateRef.current = null;
-      tutorialAutoStartedRef.current = false;
-      splashAutoStartedRef.current = false;
-      changelogAutoStartedRef.current = false;
+      autoStartedRef.current.clear();
       alertDemoPaneIdRef.current = null;
       spawnUnsubRef.current?.();
       spawnUnsubRef.current = null;
       busyDemoDisposeRef.current?.();
       busyDemoDisposeRef.current = null;
     };
-  }, []);
+  }, [isPhone, tryAutoStart]);
 
   const handleApiReady = useCallback((api: any) => {
     const shellRegistry = shellRegistryRef.current;
@@ -191,7 +184,7 @@ function Playground() {
     });
     dockviewDisposablesRef.current.push(addDisposable);
 
-    if (isPhoneRef.current) {
+    if (isPhone) {
       api.addPanel({
         id: PANE_SPLASH,
         component: "terminal",
@@ -223,7 +216,7 @@ function Playground() {
     }
 
     detectorRef.current?.attach(api);
-  }, []);
+  }, [isPhone]);
 
   const handleWallEvent = useCallback((event: WallEvent) => {
     detectorRef.current?.handleWallEvent(event);

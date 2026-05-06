@@ -29,7 +29,7 @@ const RUNWAY_VH = 300;
 const ICON_INITIAL_HIDE_FRAC = 0.67; // Fraction of icon's rendered height hidden at load — leaves top third visible
 const HOOK_FADE_REMAINING = 0.10;    // Hook begins fading when bottom 10% of icon enters viewport
 const WORD_THRESHOLDS = [0.25, 0.40, 0.55] as const;
-const ASTERISK_THRESHOLD = 0.65;
+const FOOTNOTE_THRESHOLD = 0.65;
 const HEADER_REVEAL_LEAD = 0.04;
 
 /** Fraction of runway where the hero text unpins and scrolls away (0–1).
@@ -477,14 +477,14 @@ function Home() {
 
       // Footnote
       const footnoteProgress = clamp01(
-        (fraction - ASTERISK_THRESHOLD) / 0.08
+        (fraction - FOOTNOTE_THRESHOLD) / 0.08
       );
       if (footnoteRef.current) footnoteRef.current.style.opacity = String(footnoteProgress * 0.7);
 
       // Header: reveal brand + background just before the tmux-shortcuts
       // footnote appears, so it reads as dark once the line is visible.
       const headerProgress = clamp01(
-        (fraction - (ASTERISK_THRESHOLD - HEADER_REVEAL_LEAD)) / HEADER_REVEAL_LEAD
+        (fraction - (FOOTNOTE_THRESHOLD - HEADER_REVEAL_LEAD)) / HEADER_REVEAL_LEAD
       );
       if (headerBrandRef.current) {
         headerBrandRef.current.style.opacity = String(headerProgress);

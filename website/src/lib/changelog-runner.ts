@@ -6,6 +6,8 @@ import {
   ENTER_ALT_SCREEN,
   FG_DEFAULT,
   LEAVE_ALT_SCREEN,
+  MOUSE_DISABLE,
+  MOUSE_ENABLE,
   RESET,
   fg,
 } from "mouseterm-lib/lib/ansi";
@@ -13,17 +15,14 @@ import type { FakePtyAdapter } from "mouseterm-lib/lib/platform/fake-adapter";
 import type { InteractiveProgram } from "./tutorial-shell";
 import changelogData from "../data/changelog.json";
 
-// Toggle SGR mouse-reporting on entry/exit. Same sequences ascii-splash uses;
-// xterm parses them and the wall's mouse-mode-observer flips the cursor-icon
-// override on, so the user knows MouseTerm is "trapping the mouse" while
-// changelog runs.
-const MOUSE_ENABLE = "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h";
-const MOUSE_DISABLE = "\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l";
-
 const LIST_WIDTH = 12;
 const SEPARATOR = "│";
 const HEADER_ROWS = 2; // title + blank
 const FOOTER_ROWS = 1; // hint line
+
+// SGR mouse button codes for wheel events.
+const WHEEL_UP = 64;
+const WHEEL_DOWN = 65;
 
 interface Item {
   text: string;
@@ -44,7 +43,6 @@ interface Release {
 
 const RELEASES = (changelogData as { releases: Release[] }).releases;
 
-// `[label](url)` → `label`. Markdown link clutter doesn't help in a terminal.
 function stripLinks(text: string): string {
   return text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
 }
@@ -82,6 +80,8 @@ export class ChangelogRunner implements InteractiveProgram {
   private detailOffset = 0;
   private resizeUnsub: (() => void) | null = null;
   private disposed = false;
+  private detailCache: { index: number; width: number; lines: string[] } | null = null;
+  private lastSize = { cols: 0, rows: 0 };
 
   constructor(options: ChangelogRunnerOptions) {
     this.adapter = options.adapter;
@@ -93,7 +93,10 @@ export class ChangelogRunner implements InteractiveProgram {
     this.write(ENTER_ALT_SCREEN);
     this.write(MOUSE_ENABLE);
     this.resizeUnsub = this.adapter.onPtyResize((d) => {
-      if (d.id === this.terminalId) this.render();
+      if (d.id !== this.terminalId) return;
+      const { cols, rows } = this.size;
+      if (cols === this.lastSize.cols && rows === this.lastSize.rows) return;
+      this.render();
     });
     this.render();
   }
@@ -158,14 +161,14 @@ export class ChangelogRunner implements InteractiveProgram {
   }
 
   private handleMouse(button: number, col: number, row: number, finalByte: string): void {
-    // SGR scroll wheel: 64 = up, 65 = down. Routes to whichever column the
-    // cursor is over so each side scrolls independently.
-    if (button === 64) {
+    // Wheel scroll routes to whichever column the cursor is over so each
+    // side scrolls independently.
+    if (button === WHEEL_UP) {
       if (col < LIST_WIDTH) this.scrollList(-1);
       else this.scrollDetail(-1);
       return;
     }
-    if (button === 65) {
+    if (button === WHEEL_DOWN) {
       if (col < LIST_WIDTH) this.scrollList(1);
       else this.scrollDetail(1);
       return;
@@ -223,7 +226,7 @@ export class ChangelogRunner implements InteractiveProgram {
   }
 
   private scrollDetail(delta: number): void {
-    const lines = this.computeDetailLines();
+    const lines = this.getDetailLines();
     const max = Math.max(0, lines.length - this.bodyHeight());
     const next = Math.max(0, Math.min(max, this.detailOffset + delta));
     if (next === this.detailOffset) return;
@@ -243,10 +246,19 @@ export class ChangelogRunner implements InteractiveProgram {
     return Math.max(10, this.size.cols - LIST_WIDTH - SEPARATOR.length);
   }
 
-  private computeDetailLines(): string[] {
-    const release = RELEASES[this.selectedIndex];
-    if (!release) return ["No releases."];
+  private getDetailLines(): string[] {
     const w = this.detailWidth();
+    const cached = this.detailCache;
+    if (cached && cached.index === this.selectedIndex && cached.width === w) {
+      return cached.lines;
+    }
+    const release = RELEASES[this.selectedIndex];
+    const lines = release ? this.buildDetailLines(release, w) : ["No releases."];
+    this.detailCache = { index: this.selectedIndex, width: w, lines };
+    return lines;
+  }
+
+  private buildDetailLines(release: Release, w: number): string[] {
     const out: string[] = [];
     out.push(`${BOLD}${release.version}${RESET} ${DIM}— ${release.date}${RESET}`);
     out.push("");
@@ -267,8 +279,9 @@ export class ChangelogRunner implements InteractiveProgram {
 
   private render(): void {
     if (this.disposed) return;
+    this.lastSize = { ...this.size };
     const bodyH = this.bodyHeight();
-    const detailLines = this.computeDetailLines();
+    const detailLines = this.getDetailLines();
 
     let frame = `${CURSOR_HOME}${CLEAR_SCREEN}`;
     frame += `${BOLD}MouseTerm changelog${RESET}  ${DIM}${RELEASES.length} releases · \`q\` to quit · ↑↓ select · wheel scrolls${RESET}\r\n`;
