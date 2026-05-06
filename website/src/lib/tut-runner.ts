@@ -213,6 +213,12 @@ export class TutRunner implements InteractiveProgram {
       if (!section) return;
       this.sectionId = section.id;
       this.screen = "section";
+      // Resume the spinner if we're entering Alert while a demo started
+      // earlier is still running. Otherwise the countdown line would
+      // render with a frozen spinner glyph (timer was stopped on Esc out).
+      if (section.id === "alert" && this.busyDemoInProgress()) {
+        this.startSpinnerTicks();
+      }
       this.render();
       return;
     }
