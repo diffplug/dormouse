@@ -2,7 +2,6 @@ import { forwardRef } from "react";
 
 const NAV_LINKS: readonly { href: string; label: string; external?: boolean; hideOnMobile?: boolean }[] = [
   { href: "/playground", label: "Playground", hideOnMobile: true },
-  { href: "/changelog", label: "Changelog", hideOnMobile: true },
   { href: "/#download", label: "Download", hideOnMobile: true },
   { href: "https://github.com/diffplug/mouseterm", label: "GitHub", external: true },
 ];
