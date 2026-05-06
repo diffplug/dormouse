@@ -27,6 +27,7 @@ function Playground() {
   const dockviewDisposablesRef = useRef<DockviewDisposable[]>([]);
   const tutorialAutoStartedRef = useRef(false);
   const spawnUnsubRef = useRef<(() => void) | null>(null);
+  const busyDemoDisposeRef = useRef<(() => void) | null>(null);
 
   const tryAutoStartTutorial = useCallback(() => {
     if (tutorialAutoStartedRef.current) return;
@@ -76,7 +77,12 @@ function Playground() {
               state: tutorialState,
               onExit,
               onTriggerBusyDemo: () => {
-                adapter.pumpActivity(PANE_TARGET, BUSY_DEMO_DURATION_MS, 800);
+                busyDemoDisposeRef.current?.();
+                busyDemoDisposeRef.current = adapter.pumpActivity(
+                  PANE_TARGET,
+                  BUSY_DEMO_DURATION_MS,
+                  800,
+                );
               },
             });
           }
@@ -123,6 +129,8 @@ function Playground() {
       tutorialAutoStartedRef.current = false;
       spawnUnsubRef.current?.();
       spawnUnsubRef.current = null;
+      busyDemoDisposeRef.current?.();
+      busyDemoDisposeRef.current = null;
     };
   }, []);
 
