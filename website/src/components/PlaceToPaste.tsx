@@ -117,7 +117,7 @@ export function PlaceToPaste({ onClose }: PlaceToPasteProps) {
     <div
       role="dialog"
       aria-label="Place To Paste"
-      className="fixed flex flex-col overflow-hidden border border-[var(--vscode-widget-border,_#454545)] bg-[var(--vscode-editor-background,_#1e1e1e)] text-[var(--vscode-editor-foreground,_#d4d4d4)] shadow-lg"
+      className="fixed flex flex-col overflow-hidden border border-[var(--color-border)] bg-[var(--color-terminal-bg)] text-[var(--color-terminal-fg)] shadow-lg"
       style={{
         left: pos.x,
         top: pos.y,
@@ -127,7 +127,7 @@ export function PlaceToPaste({ onClose }: PlaceToPasteProps) {
       }}
     >
       <div
-        className="flex flex-none cursor-move items-center justify-between border-b border-[var(--vscode-widget-border,_#454545)] bg-[var(--vscode-titleBar-activeBackground,_#3c3c3c)] px-2 py-1 select-none"
+        className="flex flex-none cursor-move items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-header-active-bg)] px-2 py-1 text-[var(--color-header-active-fg)] select-none"
         onPointerDown={onHeaderPointerDown}
         onPointerMove={onHeaderPointerMove}
         onPointerUp={onHeaderPointerUp}
