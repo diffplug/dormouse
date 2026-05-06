@@ -30,6 +30,7 @@ function Playground() {
   const dockviewDisposablesRef = useRef<DockviewDisposable[]>([]);
   const tutorialAutoStartedRef = useRef(false);
   const splashAutoStartedRef = useRef(false);
+  const changelogAutoStartedRef = useRef(false);
   const spawnUnsubRef = useRef<(() => void) | null>(null);
   const busyDemoDisposeRef = useRef<(() => void) | null>(null);
   const alertDemoPaneIdRef = useRef<string | null>(null);
@@ -50,6 +51,14 @@ function Playground() {
     shellRegistry.ensureShell(PANE_SPLASH).runCommand("ascii-splash");
   }, []);
 
+  const tryAutoStartChangelog = useCallback(() => {
+    if (changelogAutoStartedRef.current) return;
+    const shellRegistry = shellRegistryRef.current;
+    if (!shellRegistry) return;
+    changelogAutoStartedRef.current = true;
+    shellRegistry.ensureShell(PANE_BOXED).runCommand("changelog");
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     async function loadWall() {
@@ -67,13 +76,13 @@ function Playground() {
       adapterRef.current = adapter;
 
       adapter.setDefaultScenario(scenarios.SCENARIO_SHELL_PROMPT);
-      adapter.setScenario(PANE_BOXED, scenarios.SCENARIO_BOXED_PARAGRAPH);
-      // tut-main is owned by the TutRunner, tut-splash by AsciiSplashRunner —
-      // explicitly suppress the default shell-prompt scenario, otherwise
-      // spawnPty queues a delayed `user@mouseterm:~$` write that lands
-      // underneath the runner output and stays there until the next
-      // re-render clears it.
+      // tut-main is owned by TutRunner, tut-splash by AsciiSplashRunner, and
+      // tut-boxed by ChangelogRunner — explicitly suppress the default
+      // shell-prompt scenario, otherwise spawnPty queues a delayed
+      // `user@mouseterm:~$` write that would land in the runner's
+      // alt-screen and corrupt its output.
       adapter.setScenario(PANE_MAIN, { name: "none", chunks: [] });
+      adapter.setScenario(PANE_BOXED, { name: "none", chunks: [] });
       adapter.setScenario(PANE_SPLASH, { name: "none", chunks: [] });
 
       const tutorialState = new TutorialState();
@@ -133,9 +142,11 @@ function Playground() {
       spawnUnsubRef.current = adapter.onPtySpawn(({ id }) => {
         if (id === PANE_MAIN) tryAutoStartTutorial();
         if (id === PANE_SPLASH) tryAutoStartSplash();
+        if (id === PANE_BOXED) tryAutoStartChangelog();
       });
       if (adapter.hasPty(PANE_MAIN)) tryAutoStartTutorial();
       if (adapter.hasPty(PANE_SPLASH)) tryAutoStartSplash();
+      if (adapter.hasPty(PANE_BOXED)) tryAutoStartChangelog();
 
       setWallModule({ Wall: wall.Wall });
     }
@@ -154,6 +165,7 @@ function Playground() {
       stateRef.current = null;
       tutorialAutoStartedRef.current = false;
       splashAutoStartedRef.current = false;
+      changelogAutoStartedRef.current = false;
       alertDemoPaneIdRef.current = null;
       spawnUnsubRef.current?.();
       spawnUnsubRef.current = null;

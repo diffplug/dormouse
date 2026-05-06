@@ -139,35 +139,6 @@ export const SCENARIO_LONG_RUNNING: FakeScenario = {
   endsWithPrompt: true,
 };
 
-/**
- * Boxed paragraph for Copy Rewrapped vs Copy Raw demonstration. The frame
- * is pure box-drawing characters so `rewrap.ts` strips them; the text
- * inside wraps across lines so Rewrapped joins them with single spaces.
- */
-export const SCENARIO_BOXED_PARAGRAPH: FakeScenario = {
-  name: 'boxed-paragraph',
-  chunks: [
-    instant(
-      [
-        '',
-        `${fg(36)}┌─────────────────────────────────────────┐${RESET}`,
-        `${fg(36)}│${RESET}  ${BOLD}Release notes — v1.4.0${RESET}                ${fg(36)}│${RESET}`,
-        `${fg(36)}├─────────────────────────────────────────┤${RESET}`,
-        `${fg(36)}│${RESET}  MouseTerm now keeps a tab visible       ${fg(36)}│${RESET}`,
-        `${fg(36)}│${RESET}  even while a long-running command is    ${fg(36)}│${RESET}`,
-        `${fg(36)}│${RESET}  hidden in the baseboard, so background  ${fg(36)}│${RESET}`,
-        `${fg(36)}│${RESET}  work never gets lost.                   ${fg(36)}│${RESET}`,
-        `${fg(36)}│${RESET}                                          ${fg(36)}│${RESET}`,
-        `${fg(36)}│${RESET}  Drag-select the paragraph above and     ${fg(36)}│${RESET}`,
-        `${fg(36)}│${RESET}  try Copy Raw vs Copy Rewrapped.         ${fg(36)}│${RESET}`,
-        `${fg(36)}└─────────────────────────────────────────┘${RESET}`,
-        '',
-      ].join('\r\n'),
-      400,
-    ),
-  ],
-};
-
 /** Rapid output burst — tests xterm.js scroll performance. */
 export const SCENARIO_FAST_OUTPUT: FakeScenario = {
   name: 'fast-output',

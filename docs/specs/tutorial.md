@@ -17,7 +17,7 @@ Three browser-side pieces in `website/src/lib/`, mirroring the pattern in `websi
 - `<main>` is a flex container so Wall's `flex-1 min-h-0` root gets a real height.
 - `Wall` runs `FakePtyAdapter` with `initialMode="passthrough"` and three initial panes:
   - **`tut-main`** (left, ~50%) — auto-launches `TutRunner` on mount via `mainShell.runCommand("tut")`.
-  - **`tut-boxed`** (right-top, ~25%) — titled "changelog". `SCENARIO_BOXED_PARAGRAPH`. The boxed paragraph for Copy Rewrapped vs Copy Raw.
+  - **`tut-boxed`** (right-top, ~25%) — titled "changelog". Auto-launches `ChangelogRunner` on mount via `boxedShell.runCommand("changelog")`. Doubles as the Copy Rewrapped target — its wrapped lines exercise the rewrap path.
   - **`tut-splash`** (right-bottom, ~25%) — titled "ascii-splash". Auto-launches `AsciiSplashRunner` on mount via `splashShell.runCommand("ascii-splash")`.
 - The two right-side panes are added in `onApiReady` with `position: { referencePanel, direction }` after Wall creates the initial main pane.
 
@@ -75,14 +75,14 @@ The detector subscribes to `subscribeToMouseSelection()` and tracks per-id trans
 |---|---|---|
 | `cp-select` | Drag-select text in any pane | `selection` transitions `null → non-null` |
 | `cp-raw` | Click Copy Raw | `copyFlash` transitions to `'raw'` (set by `flashCopy()` after the popup button fires) |
-| `cp-rewrap` | Click Copy Rewrapped on the boxed paragraph | `copyFlash` transitions to `'rewrapped'` |
+| `cp-rewrap` | Click Copy Rewrapped on wrapped text in the changelog pane | `copyFlash` transitions to `'rewrapped'` |
 | `cp-override` | Run `ascii-splash`, then click its cursor icon | `override` transitions `'off' → 'temporary' \| 'permanent'` |
 
 Prose:
 - "Some programs trap the mouse — the cursor icon lets you override."
 - "`ascii-splash` redraws every frame, so it cancels selections: looks cool, undragable."
 
-The Copy Rewrapped step uses `SCENARIO_BOXED_PARAGRAPH` (in `lib/src/lib/platform/fake-scenarios.ts`). Frame-only and frame-flanking box-drawing runs are stripped by `lib/src/lib/rewrap.ts` so Rewrapped joins the wrapped paragraph; clipboard contents visibly differ from Raw.
+The Copy Rewrapped step uses the wrapped item lines `ChangelogRunner` produces in the `tut-boxed` pane. The runner word-wraps each item to fit the pane width, so Rewrapped joins those lines back together while Raw preserves the wrap; clipboard contents visibly differ. The user must override mouse capture first (the `cp-override` step) before drag-selecting inside the changelog pane, since the runner enables SGR mouse-reporting.
 
 While the Copy paste section is open, pressing `p` toggles the **Place To Paste** modal — a draggable scratch box with eight pointer-event resize handles (four edges + four corners), rendered by `website/src/components/PlaceToPaste.tsx` and mounted at the page level. `TutRunner` intercepts `p`/`P` (mirroring the Alert section's `s` busy-demo intercept) and calls `onTogglePlaceToPaste`; `Playground` flips a `placeToPasteOpen` flag so the modal is portal-free and overlays the wall. The runner renders a persistent `Press \`p\` to toggle the Place To Paste …` line above the section's prose paragraph so the prompt is visible regardless of which item is active. Users paste copied text into the modal's single textarea and resize it to see whether the text reflows (Rewrapped) or stays line-broken (Raw).
 
@@ -91,7 +91,6 @@ While the Copy paste section is open, pressing `p` toggles the **Place To Paste*
 - **`WallEvent.kill`** and **`WallEvent.move`** — new discriminants on the `WallEvent` union (`lib/src/components/wall/wall-types.ts`). `kill` fires from `acceptKill` in `Wall.tsx`. `move` fires from `handle-pane-shortcuts.ts` after the Cmd/Ctrl-Arrow swap, via a new `fireEvent` callback added to `WallKeyboardCtx`.
 - **`FakePtyAdapter.pumpActivity(id, durationMs, intervalMs)`** — drives the alert-manager for a fixed duration with no data output. The runner uses this so the bell on the demo pane tilts/rings while the visible "task running" animation lives entirely inside the tutorial pane.
 - **`FakePtyAdapter.sendOutput(id, data)`** — pushes data through the data handlers as if the PTY produced it, also driving `alertManager.onData()`. Used by `TutRunner` and `AsciiSplashRunner` so browser-side echoes still feed the activity monitor.
-- **`SCENARIO_BOXED_PARAGRAPH`** — boxed multi-line prose, used by `tut-boxed`.
 
 `SCENARIO_TUTORIAL_MOTD` was removed — the runner now owns the main pane's screen.
 
@@ -117,7 +116,7 @@ The picker restores the persisted active theme on mount. The playground header i
 
 ## Mouse and Clipboard Feature Coverage
 
-The Playground is the primary dogfood surface for the features in `docs/specs/mouse-and-clipboard.md`. The tutorial layout (`tut-main` running the runner, `tut-boxed` changelog/boxed-paragraph pane, `tut-splash` auto-running `ascii-splash`) covers most of the spec; one notable gap remains.
+The Playground is the primary dogfood surface for the features in `docs/specs/mouse-and-clipboard.md`. The tutorial layout (`tut-main` running the runner, `tut-boxed` auto-running `changelog`, `tut-splash` auto-running `ascii-splash`) covers most of the spec; one notable gap remains.
 
 Legend: ✅ exercisable today, ⚠️ partial, ❌ not exercisable.
 
@@ -132,7 +131,7 @@ Legend: ✅ exercisable today, ⚠️ partial, ❌ not exercisable.
 | §3.6 | Keyboard routing during drag | ✅ | `ascii-splash` reacts to keys and mouse; with override active, drag-time keyboard consumption is observable. |
 | §3.7 | Popup on mouse-up, new-drag-replaces | ✅ | Any selection. |
 | §4.1.1 | Copy Raw | ✅ | Any selection. |
-| §4.1.2 | Copy Rewrapped (box-strip + paragraph unwrap) | ✅ | `SCENARIO_BOXED_PARAGRAPH` provides a boxed paragraph in `tut-boxed`. |
+| §4.1.2 | Copy Rewrapped (paragraph unwrap) | ✅ | `ChangelogRunner` in `tut-boxed` renders wrapped item lines that exercise the rewrap path. |
 | §4.2 | Cmd+C / Cmd+Shift+C | ✅ | Any selection. |
 | §4.3 | Esc / click-outside dismiss | ✅ | Any selection popup. |
 | §5 | Smart-extension (URL / abs path / rel path / Windows path / error location) | ❌ | No matching tokens in the scenarios. |
