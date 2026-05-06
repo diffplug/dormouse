@@ -1,3 +1,4 @@
+import { BOLD, PROMPT, RESET, fg } from '../ansi';
 import type { FakeScenario } from './fake-adapter';
 
 // --- Helpers for building scenarios ---
@@ -59,33 +60,13 @@ export function flattenScenario(scenario: FakeScenario): FakeScenario {
   };
 }
 
-// ANSI helpers
-const ESC = '\x1b[';
-const RESET = `${ESC}0m`;
-const BOLD = `${ESC}1m`;
-const fg = (code: number) => `${ESC}${code}m`;
-
-const PROMPT = `${fg(32)}user${RESET}@${fg(36)}mouseterm${RESET}:${BOLD}${fg(34)}~${RESET}$ `;
-
 // --- Scenarios ---
 
 /** Simple shell prompt — waits 500ms then shows prompt. Stays alive for interaction. */
 export const SCENARIO_SHELL_PROMPT: FakeScenario = {
   name: 'shell-prompt',
   chunks: [instant(PROMPT, 500)],
-};
-
-/** Tutorial MOTD — welcome message above the prompt, styled with dim text. */
-export const SCENARIO_TUTORIAL_MOTD: FakeScenario = {
-  name: 'tutorial-motd',
-  chunks: [
-    instant(
-      `\r\n${fg(90)}  Welcome to MouseTerm.${RESET}\r\n` +
-      `${fg(90)}  Type ${fg(36)}tut${fg(90)} to start the interactive tutorial.${RESET}\r\n\r\n`,
-      300,
-    ),
-    instant(PROMPT, 200),
-  ],
+  endsWithPrompt: true,
 };
 
 /** Types `ls -la` then shows colorized directory listing. */
@@ -112,6 +93,7 @@ export const SCENARIO_LS_OUTPUT: FakeScenario = {
     ),
     instant(PROMPT, 200),
   ],
+  endsWithPrompt: true,
 };
 
 /** Demonstrates all 16 ANSI colors with labels. */
@@ -138,6 +120,7 @@ export const SCENARIO_ANSI_COLORS: FakeScenario = {
     instant(`\r\n`, 100),
     instant(PROMPT, 200),
   ],
+  endsWithPrompt: true,
 };
 
 /** Shows a long-running process with progress dots. */
@@ -152,6 +135,36 @@ export const SCENARIO_LONG_RUNNING: FakeScenario = {
     instant(` ${fg(32)}done!${RESET}\r\n`, 200),
     instant(`\r\nadded 847 packages in 5.2s\r\n\r\n`, 100),
     instant(PROMPT, 200),
+  ],
+  endsWithPrompt: true,
+};
+
+/**
+ * Boxed paragraph for Copy Rewrapped vs Copy Raw demonstration. The frame
+ * is pure box-drawing characters so `rewrap.ts` strips them; the text
+ * inside wraps across lines so Rewrapped joins them with single spaces.
+ */
+export const SCENARIO_BOXED_PARAGRAPH: FakeScenario = {
+  name: 'boxed-paragraph',
+  chunks: [
+    instant(
+      [
+        '',
+        `${fg(36)}┌─────────────────────────────────────────┐${RESET}`,
+        `${fg(36)}│${RESET}  ${BOLD}Release notes — v1.4.0${RESET}                ${fg(36)}│${RESET}`,
+        `${fg(36)}├─────────────────────────────────────────┤${RESET}`,
+        `${fg(36)}│${RESET}  MouseTerm now keeps a tab visible       ${fg(36)}│${RESET}`,
+        `${fg(36)}│${RESET}  even while a long-running command is    ${fg(36)}│${RESET}`,
+        `${fg(36)}│${RESET}  hidden in the baseboard, so background  ${fg(36)}│${RESET}`,
+        `${fg(36)}│${RESET}  work never gets lost.                   ${fg(36)}│${RESET}`,
+        `${fg(36)}│${RESET}                                          ${fg(36)}│${RESET}`,
+        `${fg(36)}│${RESET}  Drag-select the paragraph above and     ${fg(36)}│${RESET}`,
+        `${fg(36)}│${RESET}  try Copy Raw vs Copy Rewrapped.         ${fg(36)}│${RESET}`,
+        `${fg(36)}└─────────────────────────────────────────┘${RESET}`,
+        '',
+      ].join('\r\n'),
+      400,
+    ),
   ],
 };
 

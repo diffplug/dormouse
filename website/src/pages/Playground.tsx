@@ -2,14 +2,15 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import SiteHeader from "../components/SiteHeader";
 import { ThemePicker } from "mouseterm-lib/components/ThemePicker";
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
-import { TutorialDetector } from "../lib/tutorial-detection";
+import { TutorialState } from "../lib/tutorial-state";
+import { TutDetector } from "../lib/tut-detector";
+import { BUSY_DEMO_DURATION_MS, BUSY_DEMO_INTERVAL_MS, TutRunner } from "../lib/tut-runner";
 
 export { Playground as Component };
 
-// Pane IDs — stable so we can assign scenarios before mount
 const PANE_MAIN = "tut-main";
-const PANE_NPM = "tut-npm";
-const PANE_LS = "tut-ls";
+const PANE_TARGET = "tut-target";
+const PANE_BOXED = "tut-boxed";
 
 type FakePtyAdapter = import("mouseterm-lib/lib/platform/fake-adapter").FakePtyAdapter;
 type WallEvent = import("mouseterm-lib/components/Wall").WallEvent;
@@ -21,59 +22,123 @@ function Playground() {
   } | null>(null);
   const adapterRef = useRef<FakePtyAdapter | null>(null);
   const shellRegistryRef = useRef<PlaygroundShellRegistry | null>(null);
-  const detectorRef = useRef<TutorialDetector | null>(null);
+  const detectorRef = useRef<TutDetector | null>(null);
+  const stateRef = useRef<TutorialState | null>(null);
   const dockviewDisposablesRef = useRef<DockviewDisposable[]>([]);
+  const tutorialAutoStartedRef = useRef(false);
+  const spawnUnsubRef = useRef<(() => void) | null>(null);
+  const busyDemoDisposeRef = useRef<(() => void) | null>(null);
+  const alertDemoPaneIdRef = useRef<string | null>(null);
+
+  const tryAutoStartTutorial = useCallback(() => {
+    if (tutorialAutoStartedRef.current) return;
+    const shellRegistry = shellRegistryRef.current;
+    if (!shellRegistry) return;
+    tutorialAutoStartedRef.current = true;
+    shellRegistry.ensureShell(PANE_MAIN).runCommand("tut");
+  }, []);
 
   useEffect(() => {
+    let cancelled = false;
     async function loadWall() {
       const platform = await import("mouseterm-lib/lib/platform");
       const registry = await import("mouseterm-lib/lib/terminal-registry");
+      const mouseSelection = await import("mouseterm-lib/lib/mouse-selection");
       const wall = await import("mouseterm-lib/components/Wall");
       const scenarios = await import("mouseterm-lib/lib/platform/fake-scenarios");
       const asciiSplash = await import("../lib/ascii-splash-runner");
-
       await import("mouseterm-lib/index.css");
+      if (cancelled) return;
 
       const adapter = platform.initPlatform("fake");
       registry.initAlertStateReceiver();
       adapterRef.current = adapter;
 
       adapter.setDefaultScenario(scenarios.SCENARIO_SHELL_PROMPT);
-      adapter.setScenario(PANE_NPM, scenarios.SCENARIO_LONG_RUNNING);
-      adapter.setScenario(PANE_LS, scenarios.SCENARIO_LS_OUTPUT);
-      adapter.setScenario(PANE_MAIN, scenarios.SCENARIO_TUTORIAL_MOTD);
+      adapter.setScenario(PANE_TARGET, scenarios.SCENARIO_SHELL_PROMPT);
+      adapter.setScenario(PANE_BOXED, scenarios.SCENARIO_BOXED_PARAGRAPH);
+      // tut-main is owned by the TutRunner — explicitly suppress the
+      // default shell-prompt scenario, otherwise spawnPty queues a
+      // delayed `user@mouseterm:~$` write that lands underneath the
+      // menu and stays there until the next runner re-render clears it.
+      adapter.setScenario(PANE_MAIN, { name: "none", chunks: [] });
 
-      // Named scenarios print demo output first; the shell takes over once
-      // scenario playback ends.
+      const tutorialState = new TutorialState();
+      stateRef.current = tutorialState;
+      const detector = new TutDetector(tutorialState, registry, mouseSelection, {
+        onAlertDemoPaneChange: (id) => {
+          alertDemoPaneIdRef.current = id;
+        },
+      });
+      detectorRef.current = detector;
+
       const shellRegistry = new PlaygroundShellRegistry(
         adapter,
-        (terminalId, args, onExit) => new asciiSplash.AsciiSplashRunner({
-          adapter,
-          terminalId,
-          args,
-          onExit,
-        }),
+        (terminalId, name, args, onExit) => {
+          if (name === "tut") {
+            return new TutRunner({
+              adapter,
+              terminalId,
+              state: tutorialState,
+              onExit,
+              onTriggerBusyDemo: () => {
+                const paneId = alertDemoPaneIdRef.current ?? PANE_TARGET;
+                const sessionId = registry.resolveTerminalSessionId(paneId);
+                busyDemoDisposeRef.current?.();
+                busyDemoDisposeRef.current = adapter.pumpActivity(
+                  sessionId,
+                  BUSY_DEMO_DURATION_MS,
+                  BUSY_DEMO_INTERVAL_MS,
+                );
+              },
+            });
+          }
+          if (name === "ascii-splash" || name === "splash") {
+            return new asciiSplash.AsciiSplashRunner({
+              adapter,
+              terminalId,
+              args,
+              onExit,
+            });
+          }
+          return null;
+        },
       );
       shellRegistryRef.current = shellRegistry;
-      const mainShell = shellRegistry.ensureShell(PANE_MAIN);
-      shellRegistry.ensureShell(PANE_NPM);
-      shellRegistry.ensureShell(PANE_LS);
 
-      const detector = new TutorialDetector(mainShell);
-      detectorRef.current = detector;
+      shellRegistry.ensureShell(PANE_MAIN);
+      shellRegistry.ensureShell(PANE_TARGET);
+      shellRegistry.ensureShell(PANE_BOXED);
+
+      // Subscribe before Wall mounts so the spawn fired by TerminalPane's
+      // mount effect doesn't race past us. If the pty already exists by
+      // the time we get here, fire immediately.
+      spawnUnsubRef.current = adapter.onPtySpawn(({ id }) => {
+        if (id === PANE_MAIN) tryAutoStartTutorial();
+      });
+      if (adapter.hasPty(PANE_MAIN)) tryAutoStartTutorial();
 
       setWallModule({ Wall: wall.Wall });
     }
     loadWall();
 
     return () => {
+      cancelled = true;
       for (const disposable of dockviewDisposablesRef.current) {
         disposable.dispose();
       }
       dockviewDisposablesRef.current = [];
       detectorRef.current?.dispose();
+      detectorRef.current = null;
       shellRegistryRef.current?.disposeAll();
       shellRegistryRef.current = null;
+      stateRef.current = null;
+      tutorialAutoStartedRef.current = false;
+      alertDemoPaneIdRef.current = null;
+      spawnUnsubRef.current?.();
+      spawnUnsubRef.current = null;
+      busyDemoDisposeRef.current?.();
+      busyDemoDisposeRef.current = null;
     };
   }, []);
 
@@ -87,18 +152,18 @@ function Playground() {
     dockviewDisposablesRef.current.push(addDisposable);
 
     api.addPanel({
-      id: PANE_NPM,
+      id: PANE_TARGET,
       component: "terminal",
       tabComponent: "terminal",
-      title: "npm install",
+      title: "demo",
       position: { referencePanel: PANE_MAIN, direction: "right" },
     });
     api.addPanel({
-      id: PANE_LS,
+      id: PANE_BOXED,
       component: "terminal",
       tabComponent: "terminal",
-      title: "project",
-      position: { referencePanel: PANE_NPM, direction: "below" },
+      title: "release notes",
+      position: { referencePanel: PANE_TARGET, direction: "below" },
     });
 
     const mainPanel = api.getPanel(PANE_MAIN);
@@ -128,6 +193,7 @@ function Playground() {
         {WallModule ? (
           <WallModule.Wall
             initialPaneIds={[PANE_MAIN]}
+            initialMode="passthrough"
             onApiReady={handleApiReady}
             onEvent={handleWallEvent}
           />

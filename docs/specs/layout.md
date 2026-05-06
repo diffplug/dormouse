@@ -66,7 +66,7 @@ The content area is a tiling layout of panes, powered by dockview. Each pane occ
 - `group.model.onWillDrop`: `event.position === 'center'` → intercepted and converted to a **swap**
 - All other positions and kinds are allowed — these create splits
 
-**Center drop = swap.** Dropping a pane onto the center of another swaps their session content (same as `Cmd+Arrow`). The overlay is allowed so the user sees a valid drop target, but `group.model.onWillDrop` intercepts it, calls `swapTerminals()` + swaps titles, then `preventDefault()` to block the merge.
+**Center drop = swap.** Dropping a pane onto the center of another swaps their session content (same as `Cmd/Ctrl+Arrow`). The overlay is allowed so the user sees a valid drop target, but `group.model.onWillDrop` intercepts it, calls `swapTerminals()` + swaps titles, then `preventDefault()` to block the merge.
 
 ### Pane header
 
@@ -129,6 +129,8 @@ Extreme case: a single door with a very long title, with more doors on both side
 
 ## Modes
 
+Wall starts in `command` mode by default. Embedders may pass `initialMode="passthrough"` when the first pane is an already-running interactive surface that should receive keyboard input immediately.
+
 ### Passthrough mode
 - All keyboard input routes to the active session's xterm.js instance
 - Only the mode-exit gesture (LCmd → RCmd) is intercepted
@@ -162,7 +164,7 @@ All handled in a single capture-phase `keydown` listener on `window`. Every hand
 | `"` | Horizontal split — new pane to the right | — |
 | `%` | Vertical split — new pane below | — |
 | Arrow keys | Spatial navigation between panes | Left/Right between doors, Up to panes |
-| `Cmd+Arrow` | Swap session content with neighbor | — |
+| `Cmd/Ctrl+Arrow` | Swap session content with neighbor | — |
 | `Enter` | Enter passthrough mode | Restore session + enter passthrough |
 | `,` | Inline rename | — |
 | `x` | Kill with confirmation | Restore session + kill confirmation |
@@ -210,7 +212,7 @@ A breadcrumb tracks the last navigation direction and origin pane. Pressing the 
 
 Down from the bottom-most pane navigates to the first door in the baseboard. Up from a door navigates to the last pane. Left/Right navigates between doors.
 
-### Cmd+Arrow swap
+### Cmd/Ctrl+Arrow swap
 
 Swaps session **content** between two panes — the layout shape is unchanged. Uses `swapTerminals()` from terminal-registry which swaps registry entries and reattaches DOM elements to each other's containers. Also swaps dockview panel titles. Selection follows the moved session. Uses the same back-navigation breadcrumb as arrow keys.
 

@@ -5,6 +5,10 @@ export interface FakeScenario {
   name: string;
   chunks: { delay: number; data: string }[];
   exitCode?: number;
+  /** Set to true when the final chunk leaves the pty at a shell prompt.
+   * The playground shell registry consults this to avoid printing a
+   * duplicate prompt on first user input. */
+  endsWithPrompt?: boolean;
 }
 
 export interface FakePtySize {
@@ -23,6 +27,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private resizeHandlers = new Set<(detail: FakePtyResizeDetail) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
+  private spawnHandlers = new Set<(detail: { id: string }) => void>();
   private terminals = new Set<string>();
   private terminalSizes = new Map<string, FakePtySize>();
   private activeTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
@@ -72,6 +77,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.dataHandlers.clear();
     this.exitHandlers.clear();
     this.resizeHandlers.clear();
+    this.spawnHandlers.clear();
     this.inputHandlers.clear();
     this.alertManager.dispose();
     this.alertManager = new AlertManager();
@@ -92,10 +98,17 @@ export class FakePtyAdapter implements PlatformAdapter {
       cols: options?.cols ?? DEFAULT_PTY_SIZE.cols,
       rows: options?.rows ?? DEFAULT_PTY_SIZE.rows,
     });
-    const scenario = this.scenarioMap.get(id) ?? this.defaultScenario;
+    for (const handler of this.spawnHandlers) {
+      handler({ id });
+    }
+    const scenario = this.resolveScenario(id);
     if (scenario) {
       this.playScenario(id, scenario);
     }
+  }
+
+  private resolveScenario(id: string): FakeScenario | null {
+    return this.scenarioMap.get(id) ?? this.defaultScenario;
   }
 
   writePty(id: string, data: string): void {
@@ -162,6 +175,16 @@ export class FakePtyAdapter implements PlatformAdapter {
     return this.terminalSizes.get(id) ?? DEFAULT_PTY_SIZE;
   }
 
+  hasPty(id: string): boolean {
+    return this.terminals.has(id);
+  }
+
+  /** True when the scenario assigned to `id` (or the default scenario, if
+   *  no per-id scenario is set) leaves the pty at a shell prompt. */
+  scenarioEndsWithPrompt(id: string): boolean {
+    return this.resolveScenario(id)?.endsWithPrompt === true;
+  }
+
   async readClipboardFilePaths(): Promise<string[] | null> { return null; }
   async readClipboardImageAsFilePath(): Promise<string | null> { return null; }
 
@@ -174,6 +197,14 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.resizeHandlers.add(handler);
     return () => {
       this.resizeHandlers.delete(handler);
+    };
+  }
+  /** Fires synchronously inside `spawnPty(id)` after the pty is registered
+   *  but before its scenario starts playing. Returns an unsubscribe fn. */
+  onPtySpawn(handler: (detail: { id: string }) => void): () => void {
+    this.spawnHandlers.add(handler);
+    return () => {
+      this.spawnHandlers.delete(handler);
     };
   }
   onRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}
@@ -209,12 +240,60 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.inputHandlers.delete(id);
   }
 
-  /** Send data to a terminal's output (as if the PTY produced it). */
-  sendOutput(id: string, data: string): void {
+  /**
+   * Send data to a terminal's output (as if the PTY produced it). Drives
+   * the alert-manager's activity feed the same way real PTY data does in
+   * the Tauri/VSCode adapters — without this, browser-side echo (e.g.
+   * TutorialShell's per-character echo, AsciiSplashRunner frames) never
+   * reaches the activity monitor and the bell can never tilt or ring.
+   *
+   * Pass `{ skipActivity: true }` for writes that are pure UI chrome and
+   * shouldn't count as a "task is active" signal — e.g. a tutorial TUI
+   * re-rendering its menu on state change. Without the opt-out, every
+   * runner frame would tilt the bell on whichever pane hosts the runner.
+   */
+  sendOutput(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
     if (!this.terminals.has(id)) return;
+    if (!options.skipActivity) this.alertManager.onData(id);
     for (const handler of this.dataHandlers) {
       handler({ id, data });
     }
+  }
+
+  /**
+   * Drive the alert-manager's activity monitor for a fixed duration with
+   * no data output — useful for animating a fake "task running" state on
+   * a pane while the visual feedback lives elsewhere. Calls
+   * `alertManager.onData(id)` immediately, then again every `intervalMs`
+   * until `durationMs` elapses, after which silence resumes and the bell
+   * transitions naturally to MIGHT_NEED_ATTENTION → ALERT_RINGING.
+   * Returns a dispose handle that cancels remaining ticks.
+   */
+  pumpActivity(id: string, durationMs: number, intervalMs = 1000): () => void {
+    if (!this.terminals.has(id)) return () => {};
+    let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
+    let stop: ReturnType<typeof setTimeout> | null = null;
+    const cancel = () => {
+      if (cancelled) return;
+      cancelled = true;
+      if (interval !== null) clearInterval(interval);
+      if (stop !== null) clearTimeout(stop);
+    };
+    this.alertManager.onData(id);
+    const tick = () => {
+      if (cancelled) return;
+      // Pty may have been killed mid-duration. Stop pumping rather than
+      // feeding the activity monitor for a terminal that no longer exists.
+      if (!this.terminals.has(id)) {
+        cancel();
+        return;
+      }
+      this.alertManager.onData(id);
+    };
+    interval = setInterval(tick, intervalMs);
+    stop = setTimeout(cancel, durationMs);
+    return cancel;
   }
 
   private playScenario(id: string, scenario: FakeScenario): void {

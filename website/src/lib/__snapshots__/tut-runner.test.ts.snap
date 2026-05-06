@@ -1,0 +1,89 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`TutRunner snapshots > renders Alert and TODO with all items incomplete 1`] = `
+"[H[2J
+  [1mAlert and TODO[0m  [2m0/6 complete[0m
+  [2m[36mEsc[39m to go back[0m
+
+   [33m●[0m  [1mEnable alerts on a pane[0m
+        [3mClick the bell on the pane you want to use, or press [36ma[39m in command mode[0m
+        [3mwith that pane selected.[0m
+   [2m·[0m  Watch the bell tilt while a task runs
+   [2m·[0m  Bell rings when the task completes
+   [2m·[0m  TODO tag appears when you dismiss the ringing alert
+   [2m·[0m  Press [36mEnter[39m inside the pane to clear the TODO
+   [2m·[0m  Manually add a TODO
+
+  [2mPress [36ms[39m here to start a fake busy task.[0m
+"
+`;
+
+exports[`TutRunner snapshots > renders Copy paste with all items incomplete 1`] = `
+"[H[2J
+  [1mCopy paste[0m  [2m0/4 complete[0m
+  [2m[36mEsc[39m to go back[0m
+
+   [33m●[0m  [1mDrag-select some text[0m
+        [3mThe paragraph below is a good example — "Some terminal programs..."[0m
+   [2m·[0m  Copy-paste it somewhere else with "Copy Raw"
+   [2m·[0m  Copy-paste it somewhere else with "Copy Rewrapped"
+   [2m·[0m  Run [36mascii-splash[39m, then click its cursor icon
+
+  [2mSome terminal programs trap the cursor, and some do not. This tutorial pane[0m
+  [2mdoes not trap the cursor, so MouseTerm does not show a cursor icon. The[0m
+  [2m[36mascii-splash[39m program traps the cursor — that is how it is able to respond to[0m
+  [2mmouse movement. [36mlazygit[39m is an excellent and popular program which traps the[0m
+  [2mcursor.[0m
+"
+`;
+
+exports[`TutRunner snapshots > renders Keyboard navigation with all items complete 1`] = `
+"[H[2J
+  [1mKeyboard navigation[0m  [2m7/7 complete[0m
+  [2m[36mEsc[39m to go back[0m
+
+   [32m✓[0m  [2mEnter command mode[0m
+   [32m✓[0m  [2mAdd a horizontal divider[0m
+   [32m✓[0m  [2mMove between panes with arrow keys[0m
+   [32m✓[0m  [2mAdd a vertical divider[0m
+   [32m✓[0m  [2mMinimize a pane[0m
+   [32m✓[0m  [2mKill a pane[0m
+   [32m✓[0m  [2mMove a pane with [36mCmd/Ctrl + arrow[39m[0m
+
+  [2mtmux shortcuts also work — [36m%[39m [36m"[39m [36md[39m [36mx[39m.[0m
+
+  [32mSection complete.[0m [2mPress [36mEsc[39m to go back.[0m
+"
+`;
+
+exports[`TutRunner snapshots > renders Keyboard navigation with all items incomplete 1`] = `
+"[H[2J
+  [1mKeyboard navigation[0m  [2m0/7 complete[0m
+  [2m[36mEsc[39m to go back[0m
+
+   [33m●[0m  [1mEnter command mode[0m
+        [3mPress [36mLShift[39m then [36mRShift[39m quickly (or [36mLCmd[39m then [36mRCmd[39m on Mac).[0m
+   [2m·[0m  Add a horizontal divider
+   [2m·[0m  Move between panes with arrow keys
+   [2m·[0m  Add a vertical divider
+   [2m·[0m  Minimize a pane
+   [2m·[0m  Kill a pane
+   [2m·[0m  Move a pane with [36mCmd/Ctrl + arrow[39m
+
+  [2mtmux shortcuts also work — [36m%[39m [36m"[39m [36md[39m [36mx[39m.[0m
+"
+`;
+
+exports[`TutRunner snapshots > renders the top-level menu 1`] = `
+"[H[2J
+  [1mMouseTerm Playground Tutorial[0m
+  [2m0/17 complete · [36mEsc[39m/[36mq[39m to exit · [36mEnter[39m to open · [36m↑↓[39m to navigate[0m
+
+  [36m❯[0m [1mKeyboard navigation[0m  [2m[0/7 complete][0m
+    Alert and TODO  [2m[0/6 complete][0m
+    Copy paste  [2m[0/4 complete][0m
+
+    [2mReset progress[0m
+
+"
+`;

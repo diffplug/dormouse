@@ -32,6 +32,32 @@ describe("PlaygroundShellRegistry", () => {
     expect(output.two.join("")).toContain("$ ");
   });
 
+  it("does not print a duplicate prompt when the scenario already provided one", () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new FakePtyAdapter();
+      const output: string[] = [];
+      adapter.onPtyData((detail) => output.push(detail.data));
+      adapter.setScenario("one", {
+        name: "with-prompt",
+        chunks: [{ delay: 0, data: "PROMPT " }],
+        endsWithPrompt: true,
+      });
+      adapter.spawnPty("one");
+      vi.runAllTimers();
+      output.length = 0;
+
+      const registry = new PlaygroundShellRegistry(adapter, () => createProgram());
+      registry.ensureShell("one");
+
+      adapter.writePty("one", "x");
+
+      expect(output.join("")).toBe("x");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("starts interactive programs against the active terminal id", () => {
     const adapter = new FakePtyAdapter();
     const program = createProgram();
@@ -42,7 +68,12 @@ describe("PlaygroundShellRegistry", () => {
     registry.ensureShell("two");
     adapter.writePty("two", "ascii-splash --no-mouse\r");
 
-    expect(startProgram).toHaveBeenCalledWith("two", ["--no-mouse"], expect.any(Function));
+    expect(startProgram).toHaveBeenCalledWith(
+      "two",
+      "ascii-splash",
+      ["--no-mouse"],
+      expect.any(Function),
+    );
     expect(program.start).toHaveBeenCalledTimes(1);
   });
 

@@ -53,7 +53,7 @@ export function handlePaneShortcuts(
     return true;
   }
 
-  if (isArrowKey(e.key) && e.metaKey) {
+  if (isArrowKey(e.key) && (e.metaKey || e.ctrlKey)) {
     e.preventDefault();
     e.stopPropagation();
     if (!sid) return true;
@@ -70,6 +70,7 @@ export function handlePaneShortcuts(
 
     swapTerminals(sid, targetId);
     swapPanelTitles(api, sid, targetId);
+    ctx.fireEvent({ type: 'move', fromId: sid, toId: targetId });
 
     navHistory.current = { direction: dir, fromId: sid };
     ctx.selectPane(targetId);

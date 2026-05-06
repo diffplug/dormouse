@@ -165,6 +165,7 @@ function setupTerminalEntry(id: string): TerminalEntry {
   }
 
   registry.set(id, entry);
+  notifyActivityListeners();
   startThemeObserver();
   return entry;
 }

@@ -87,6 +87,7 @@ const tabComponents = { terminal: TerminalPaneHeader };
 
 export function Wall({
   initialPaneIds,
+  initialMode = 'command',
   restoredLayout,
   initialDoors,
   onApiReady,
@@ -94,6 +95,7 @@ export function Wall({
   baseboardNotice,
 }: {
   initialPaneIds?: string[];
+  initialMode?: WallMode;
   restoredLayout?: unknown;
   initialDoors?: PersistedDoor[];
   onApiReady?: (api: DockviewApi) => void;
@@ -147,7 +149,7 @@ export function Wall({
   }, []);
 
   // We own these — dockview is just for spatial layout and DnD
-  const [mode, setMode] = useState<WallMode>('command');
+  const [mode, setMode] = useState<WallMode>(initialMode);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<WallSelectionKind>('pane');
 
@@ -185,6 +187,13 @@ export function Wall({
     if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
   }, []);
 
+  // --- External event notifications ---
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
+  const fireEvent = useCallback((event: WallEvent) => {
+    onEventRef.current?.(event);
+  }, []);
+
   // Confirm runs orchestrateKill concurrently with the letter flash so the
   // pane fade begins while the flash is still playing.
   const rejectKill = useCallback(() => {
@@ -198,12 +207,9 @@ export function Wall({
     if (!ck || ck.exit) return;
     setConfirmKill({ ...ck, exit: 'confirm' });
     onExit();
+    fireEvent({ type: 'kill', id: ck.id });
     confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
-  }, []);
-
-  // --- External event notifications ---
-  const onEventRef = useRef(onEvent);
-  onEventRef.current = onEvent;
+  }, [fireEvent]);
 
   useEffect(() => { onEventRef.current?.({ type: 'modeChange', mode }); }, [mode]);
   useEffect(() => { onEventRef.current?.({ type: 'zoomChange', zoomed }); }, [zoomed]);
@@ -555,6 +561,7 @@ export function Wall({
     setConfirmKill,
     setRenamingPaneId,
     setSelectedId,
+    fireEvent,
   });
 
   // --- Render ---
