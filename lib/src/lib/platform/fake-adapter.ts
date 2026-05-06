@@ -27,6 +27,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private resizeHandlers = new Set<(detail: FakePtyResizeDetail) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
+  private spawnHandlers = new Set<(detail: { id: string }) => void>();
   private terminals = new Set<string>();
   private terminalSizes = new Map<string, FakePtySize>();
   private activeTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
@@ -76,6 +77,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.dataHandlers.clear();
     this.exitHandlers.clear();
     this.resizeHandlers.clear();
+    this.spawnHandlers.clear();
     this.inputHandlers.clear();
     this.alertManager.dispose();
     this.alertManager = new AlertManager();
@@ -96,6 +98,9 @@ export class FakePtyAdapter implements PlatformAdapter {
       cols: options?.cols ?? DEFAULT_PTY_SIZE.cols,
       rows: options?.rows ?? DEFAULT_PTY_SIZE.rows,
     });
+    for (const handler of this.spawnHandlers) {
+      handler({ id });
+    }
     const scenario = this.scenarioMap.get(id) ?? this.defaultScenario;
     if (scenario) {
       this.playScenario(id, scenario);
@@ -189,6 +194,14 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.resizeHandlers.add(handler);
     return () => {
       this.resizeHandlers.delete(handler);
+    };
+  }
+  /** Fires synchronously inside `spawnPty(id)` after the pty is registered
+   *  but before its scenario starts playing. Returns an unsubscribe fn. */
+  onPtySpawn(handler: (detail: { id: string }) => void): () => void {
+    this.spawnHandlers.add(handler);
+    return () => {
+      this.spawnHandlers.delete(handler);
     };
   }
   onRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}

@@ -26,37 +26,14 @@ function Playground() {
   const stateRef = useRef<TutorialState | null>(null);
   const dockviewDisposablesRef = useRef<DockviewDisposable[]>([]);
   const tutorialAutoStartedRef = useRef(false);
-  const tutorialAutoStartRafRef = useRef<number | null>(null);
+  const spawnUnsubRef = useRef<(() => void) | null>(null);
 
-  const scheduleTutorialAutoStart = useCallback(() => {
-    if (tutorialAutoStartedRef.current || tutorialAutoStartRafRef.current !== null) return;
-
-    let attempts = 0;
-    const tick = () => {
-      tutorialAutoStartRafRef.current = null;
-      if (tutorialAutoStartedRef.current) return;
-
-      const adapter = adapterRef.current;
-      const shellRegistry = shellRegistryRef.current;
-      if (!adapter || !shellRegistry) return;
-
-      if (adapter.hasPty(PANE_MAIN)) {
-        tutorialAutoStartedRef.current = true;
-        shellRegistry.ensureShell(PANE_MAIN).runCommand("tut");
-        return;
-      }
-
-      attempts += 1;
-      if (attempts < 60) {
-        tutorialAutoStartRafRef.current = requestAnimationFrame(tick);
-      } else {
-        console.warn(
-          `[Playground] gave up waiting for ${PANE_MAIN} pty after ${attempts} frames; tutorial did not auto-start`,
-        );
-      }
-    };
-
-    tutorialAutoStartRafRef.current = requestAnimationFrame(tick);
+  const tryAutoStartTutorial = useCallback(() => {
+    if (tutorialAutoStartedRef.current) return;
+    const shellRegistry = shellRegistryRef.current;
+    if (!shellRegistry) return;
+    tutorialAutoStartedRef.current = true;
+    shellRegistry.ensureShell(PANE_MAIN).runCommand("tut");
   }, []);
 
   useEffect(() => {
@@ -120,6 +97,14 @@ function Playground() {
       shellRegistry.ensureShell(PANE_TARGET);
       shellRegistry.ensureShell(PANE_BOXED);
 
+      // Subscribe before Wall mounts so the spawn fired by TerminalPane's
+      // mount effect doesn't race past us. If the pty already exists by
+      // the time we get here, fire immediately.
+      spawnUnsubRef.current = adapter.onPtySpawn(({ id }) => {
+        if (id === PANE_MAIN) tryAutoStartTutorial();
+      });
+      if (adapter.hasPty(PANE_MAIN)) tryAutoStartTutorial();
+
       setWallModule({ Wall: wall.Wall });
     }
     loadWall();
@@ -136,10 +121,8 @@ function Playground() {
       shellRegistryRef.current = null;
       stateRef.current = null;
       tutorialAutoStartedRef.current = false;
-      if (tutorialAutoStartRafRef.current !== null) {
-        cancelAnimationFrame(tutorialAutoStartRafRef.current);
-        tutorialAutoStartRafRef.current = null;
-      }
+      spawnUnsubRef.current?.();
+      spawnUnsubRef.current = null;
     };
   }, []);
 
@@ -171,7 +154,6 @@ function Playground() {
     if (mainPanel) mainPanel.api.setActive();
 
     detectorRef.current?.attach(api);
-    scheduleTutorialAutoStart();
   }, []);
 
   const handleWallEvent = useCallback((event: WallEvent) => {
