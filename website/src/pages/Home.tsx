@@ -908,20 +908,19 @@ function Home() {
           <img
             src={phoneMockupUrl}
             alt="MouseTerm Playground running on a phone"
-            className="block w-full max-w-[280px] mx-auto md:max-w-none"
+            className="order-2 md:order-1 block w-full max-w-[280px] mx-auto md:max-w-none"
           />
-          <div>
+          <div className="order-1 md:order-2">
             <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] mb-6">
-              Coming soon: walk away from any agent
+              Walk away, roam on
             </h2>
             <p className="mb-4 text-lg leading-relaxed opacity-70">
-              Auto-pair your laptop with your phone. Close your laptop with
-              Claude Code or Codex still running, and pick up the session on
-              your phone. No setup, no "I'm walking away" dance.
+              Coming next: <span className="text-[var(--color-caramel)]">Roam</span>. Close your laptop
+              with Claude Code or Codex still running, and your session follows you to your phone.
+              No setup, no "I'm walking away" dance.
             </p>
             <p className="mb-6 text-lg leading-relaxed opacity-70">
-              Free with a room code. Auto-pairing across tools will be a paid
-              tier — first 100 founding members lock <span className="text-[var(--color-caramel)]">$24/yr for life</span>.
+              Subscribe below to <a href="https://nedshed.dev" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">nedshed.dev</a> — my dev log. Roam launches there first.
             </p>
             <NotifySignupForm />
           </div>
