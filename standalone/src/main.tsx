@@ -15,6 +15,7 @@ import {
   startUpdateCheck,
   useUpdateState,
   dismissBanner,
+  approveUpdate,
   openChangelog,
   buildDebugReport,
 } from "./updater";
@@ -46,6 +47,7 @@ function ConnectedUpdateBanner() {
       <UpdateBanner
         state={state}
         onDismiss={dismissBanner}
+        onApproveUpdate={approveUpdate}
         onOpenChangelog={openChangelog}
         onOpenDebug={() => {
           if (liveFailure) {

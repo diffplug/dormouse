@@ -47,7 +47,13 @@ function makeUpdate(version = '0.5.0') {
 }
 
 // Import after mocks
-import { startUpdateCheck, openChangelog, buildDebugReport, _resetForTesting } from './updater';
+import {
+  startUpdateCheck,
+  approveUpdate,
+  openChangelog,
+  buildDebugReport,
+  _resetForTesting,
+} from './updater';
 
 describe('updater', () => {
   beforeEach(() => {
@@ -120,13 +126,17 @@ describe('updater', () => {
       expect(mocks.check).toHaveBeenCalledOnce();
     });
 
-    it('downloads when an update is available', async () => {
+    it('does not download until the user approves the update', async () => {
       const update = makeUpdate();
       mocks.check.mockResolvedValue(update);
 
       startUpdateCheck();
       await vi.advanceTimersByTimeAsync(5_000);
-      // Let check() and download() resolve
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(update.download).not.toHaveBeenCalled();
+
+      approveUpdate();
       await vi.advanceTimersByTimeAsync(0);
 
       expect(update.download).toHaveBeenCalledOnce();
@@ -151,6 +161,8 @@ describe('updater', () => {
       startUpdateCheck();
       await vi.advanceTimersByTimeAsync(5_000);
       await vi.advanceTimersByTimeAsync(0);
+      approveUpdate();
+      await vi.advanceTimersByTimeAsync(0);
 
       expect(update.download).toHaveBeenCalledOnce();
     });
@@ -171,6 +183,8 @@ describe('updater', () => {
 
       startUpdateCheck();
       await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(0);
+      approveUpdate();
       await vi.advanceTimersByTimeAsync(0);
 
       // Get the close handler
@@ -201,6 +215,8 @@ describe('updater', () => {
       startUpdateCheck();
       await vi.advanceTimersByTimeAsync(5_000);
       await vi.advanceTimersByTimeAsync(0);
+      approveUpdate();
+      await vi.advanceTimersByTimeAsync(0);
 
       const closeHandler = mocks.onCloseRequested.mock.calls[0][0];
       const event = { preventDefault: vi.fn() };
@@ -212,6 +228,24 @@ describe('updater', () => {
       expect(marker.failed).toBe(true);
       expect(marker.version).toBe('0.5.0');
       expect(mocks.windowClose).toHaveBeenCalled();
+    });
+
+    it('does not install an available update before approval', async () => {
+      const update = makeUpdate('0.5.0');
+      mocks.check.mockResolvedValue(update);
+
+      startUpdateCheck();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const closeHandler = mocks.onCloseRequested.mock.calls[0][0];
+      const event = { preventDefault: vi.fn() };
+
+      await closeHandler(event);
+
+      expect(event.preventDefault).not.toHaveBeenCalled();
+      expect(update.download).not.toHaveBeenCalled();
+      expect(update.install).not.toHaveBeenCalled();
     });
 
     it('does not prevent close when no update is pending', async () => {
@@ -231,9 +265,11 @@ describe('updater', () => {
   });
 
   describe('actions', () => {
-    it('openChangelog calls shell open', () => {
+    it('openChangelog reads the current app version and opens release notes after it', async () => {
       openChangelog();
-      expect(mocks.shellOpen).toHaveBeenCalledWith('https://mouseterm.com/changelog');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mocks.shellOpen).toHaveBeenCalledWith('https://mouseterm.com/changelog/after/0.4.0');
     });
   });
 

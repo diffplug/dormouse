@@ -18,7 +18,9 @@ function openUrl(url: string, context: string): void {
 const STORAGE_KEY = 'mouseterm:update-result';
 
 let state: UpdateBannerState = { status: 'idle' };
+let availableUpdate: Update | null = null;
 let pendingUpdate: Update | null = null;
+let downloadPromise: Promise<void> | null = null;
 let currentVersion = '';
 
 const listeners = new Set<() => void>();
@@ -53,8 +55,17 @@ export function dismissBanner(): void {
   setState({ status: 'dismissed' });
 }
 
+export function approveUpdate(): void {
+  void downloadApprovedUpdate();
+}
+
 export function openChangelog(): void {
-  openUrl('https://mouseterm.com/changelog', 'changelog');
+  void openCurrentVersionChangelog();
+}
+
+async function openCurrentVersionChangelog(): Promise<void> {
+  const version = (await getVersion()).trim();
+  openUrl(`https://mouseterm.com/changelog/after/${encodeURIComponent(version)}`, 'changelog');
 }
 
 export async function buildDebugReport(error: string, toVersion: string): Promise<string> {
@@ -92,11 +103,7 @@ export function startUpdateCheck(): void {
 }
 
 async function runUpdateCheck(): Promise<void> {
-  try {
-    currentVersion = await getVersion();
-  } catch {
-    currentVersion = '';
-  }
+  currentVersion = await getVersion();
 
   let hadFailureMarker = false;
 
@@ -126,15 +133,13 @@ async function runUpdateCheck(): Promise<void> {
     // Corrupt marker — ignore
   }
 
-  // Skip the auto-update probe on a failure-marker launch: re-downloading the
-  // same version that just failed will fail again on quit, and the state
-  // transition to `downloaded` would unmount any open debug dialog.
+  // Skip the auto-update probe on a failure-marker launch: prompting for the
+  // same version that just failed would unmount any open debug dialog.
   if (hadFailureMarker) {
     registerCloseHandler();
     return;
   }
 
-  // Wait 5 seconds, then check for updates
   await new Promise((resolve) => setTimeout(resolve, 5_000));
 
   try {
@@ -144,14 +149,47 @@ async function runUpdateCheck(): Promise<void> {
       return;
     }
 
-    await update.download();
-    pendingUpdate = update;
-    setState({ status: 'downloaded', version: update.version });
+    availableUpdate = update;
+    setState({ status: 'available', version: update.version });
   } catch (e) {
-    console.error('[updater] Check/download failed:', e);
+    console.error('[updater] Check failed:', e);
   }
 
   registerCloseHandler();
+}
+
+async function downloadApprovedUpdate(): Promise<void> {
+  if (downloadPromise) {
+    await downloadPromise;
+    return;
+  }
+
+  const update = availableUpdate;
+  if (!update) return;
+
+  setState({ status: 'downloading', version: update.version });
+
+  downloadPromise = (async () => {
+    try {
+      await update.download();
+      availableUpdate = null;
+      pendingUpdate = update;
+      // Honor a dismissal that arrived during the download — install still
+      // happens on quit because pendingUpdate is set.
+      if (state.status === 'downloading') {
+        setState({ status: 'downloaded', version: update.version });
+      }
+    } catch (e) {
+      console.error('[updater] Download failed:', e);
+      if (state.status === 'downloading' && availableUpdate === update) {
+        setState({ status: 'available', version: update.version });
+      }
+    } finally {
+      downloadPromise = null;
+    }
+  })();
+
+  await downloadPromise;
 }
 
 // --- Test support ---
@@ -159,7 +197,9 @@ async function runUpdateCheck(): Promise<void> {
 /** @internal Reset all module state for testing. */
 export function _resetForTesting(): void {
   state = { status: 'idle' };
+  availableUpdate = null;
   pendingUpdate = null;
+  downloadPromise = null;
   currentVersion = '';
   closeHandlerRegistered = false;
   listeners.clear();
@@ -174,7 +214,8 @@ function registerCloseHandler(): void {
   closeHandlerRegistered = true;
 
   getCurrentWindow().onCloseRequested(async (event) => {
-    if (!pendingUpdate) return;
+    const update = pendingUpdate;
+    if (!update) return;
 
     if (shouldSkipInstallInDev()) {
       console.warn('[updater] Skipping update install in dev mode. Use a packaged app to test install.');
@@ -188,14 +229,14 @@ function registerCloseHandler(): void {
       // Write success marker BEFORE install — on Windows, NSIS force-kills the process
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         from: currentVersion,
-        to: pendingUpdate.version,
+        to: update.version,
       }));
-      await pendingUpdate.install();
+      await update.install();
     } catch (e) {
       // Overwrite with failure marker
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         failed: true,
-        version: pendingUpdate!.version,
+        version: update.version,
         error: String(e),
       }));
       console.error('[updater] Install failed:', e);
