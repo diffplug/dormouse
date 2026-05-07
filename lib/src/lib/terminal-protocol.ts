@@ -22,6 +22,9 @@ interface Osc99PendingNotification {
 }
 
 const OSC_INCOMPLETE_LIMIT = 16_384;
+const NO_EVENTS: readonly TerminalProtocolEvent[] = Object.freeze([]);
+// OSC introducers (ESC ] / 0x9D) and the iTerm2 extended-DA query (ESC [ > q / 0x9B > q).
+const NEEDS_PARSE_RE = /[\x1b\x9b\x9d]/;
 const OSC99_PENDING_TTL_MS = 60_000;
 const OSC99_MAX_PENDING_IDS = 64;
 const TITLE_LIMIT = 256;
@@ -36,6 +39,9 @@ export class TerminalProtocolParser {
   private osc99Pending = new Map<string, Osc99PendingNotification>();
 
   process(data: string): TerminalProtocolParseResult {
+    if (this.pending === '' && !NEEDS_PARSE_RE.test(data)) {
+      return { visibleData: data, events: NO_EVENTS as TerminalProtocolEvent[] };
+    }
     const text = this.pending + data;
     this.pending = '';
     const events: TerminalProtocolEvent[] = [];
@@ -216,32 +222,27 @@ function findOscTerminator(text: string, from: number): { index: number; end: nu
   return { index: first.index, end: first.index + first.endOffset };
 }
 
+// OSC 9;4 state code → progress shape. Codes 1 and 4 require a percent
+// (drop the update if missing); 2 accepts a missing/invalid percent as null.
+const OSC94_STATE_TABLE: Record<string, (raw: string | null) => ProtocolProgressUpdate | null> = {
+  '': () => ({ state: 'clear', percent: null }),
+  '0': () => ({ state: 'clear', percent: null }),
+  '1': (raw) => {
+    const percent = parsePercent(raw);
+    return percent === null ? null : { state: 'normal', percent };
+  },
+  '2': (raw) => ({ state: 'error', percent: parsePercent(raw) }),
+  '3': () => ({ state: 'indeterminate', percent: null }),
+  '4': (raw) => {
+    const percent = parsePercent(raw);
+    return percent === null ? null : { state: 'warning', percent };
+  },
+};
+
 function parseOsc94(content: string): ProtocolProgressUpdate | null {
   const fields = content.split(';');
-  const state = fields[2] ?? '';
-  const rawPercent = fields[3] ?? null;
-
-  if (state === '' || state === '0') return { state: 'clear', percent: null };
-
-  if (state === '1') {
-    const percent = parsePercent(rawPercent);
-    return percent === null ? null : { state: 'normal', percent };
-  }
-
-  if (state === '2') {
-    return { state: 'error', percent: parsePercent(rawPercent) };
-  }
-
-  if (state === '3') {
-    return { state: 'indeterminate', percent: null };
-  }
-
-  if (state === '4') {
-    const percent = parsePercent(rawPercent);
-    return percent === null ? null : { state: 'warning', percent };
-  }
-
-  return null;
+  const handler = OSC94_STATE_TABLE[fields[2] ?? ''];
+  return handler ? handler(fields[3] ?? null) : null;
 }
 
 function parsePercent(raw: string | null): number | null {
@@ -304,6 +305,7 @@ function appendLimited(existing: string, next: string, limit: number): string {
 }
 
 function truncateText(input: string, limit: number): string {
+  if (input.length <= limit) return input;
   return Array.from(input).slice(0, limit).join('');
 }
 

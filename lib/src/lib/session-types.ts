@@ -1,6 +1,6 @@
 import type { DoorDirection } from './spatial-nav';
 import type { SessionStatus } from './activity-monitor';
-import { migrateTodoState, type ActivityNotification, type TodoState } from './alert-manager';
+import { ACTIVITY_NOTIFICATION_SOURCES, migrateTodoState, type ActivityNotification, type TodoState } from './alert-manager';
 
 export interface PersistedAlertState {
   status: SessionStatus;
@@ -93,9 +93,8 @@ function isPersistedAlertShape(value: unknown): boolean {
 
 function isActivityNotificationShape(value: unknown): boolean {
   if (!isRecord(value)) return false;
-  const source = value.source;
   return (
-    (source === 'OSC 9' || source === 'OSC 9;4' || source === 'OSC 99' || source === 'OSC 777') &&
+    (ACTIVITY_NOTIFICATION_SOURCES as readonly string[]).includes(value.source as string) &&
     (typeof value.title === 'string' || value.title === null) &&
     (typeof value.body === 'string' || value.body === null)
   );

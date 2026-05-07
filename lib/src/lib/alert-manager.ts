@@ -6,7 +6,8 @@ export { type SessionStatus } from './activity-monitor';
 /** Boolean TODO state: on (true) or off (false). */
 export type TodoState = boolean;
 
-export type ActivityNotificationSource = 'OSC 9' | 'OSC 9;4' | 'OSC 99' | 'OSC 777';
+export const ACTIVITY_NOTIFICATION_SOURCES = ['OSC 9', 'OSC 9;4', 'OSC 99', 'OSC 777'] as const;
+export type ActivityNotificationSource = typeof ACTIVITY_NOTIFICATION_SOURCES[number];
 
 export interface ActivityNotification {
   source: ActivityNotificationSource;
@@ -29,8 +30,6 @@ interface ActiveProtocolProgress {
   percent: number | null;
 }
 
-const ACTIVITY_NOTIFICATION_SOURCES: ActivityNotificationSource[] = ['OSC 9', 'OSC 9;4', 'OSC 99', 'OSC 777'];
-
 /** Migrate legacy persisted TodoState values (numeric, string, boolean) to a boolean. */
 export function migrateTodoState(todo: unknown): TodoState {
   if (typeof todo === 'boolean') return todo;
@@ -44,7 +43,7 @@ export function migrateTodoState(todo: unknown): TodoState {
 export function normalizeActivityNotification(value: unknown): ActivityNotification | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  if (!ACTIVITY_NOTIFICATION_SOURCES.includes(record.source as ActivityNotificationSource)) return null;
+  if (!(ACTIVITY_NOTIFICATION_SOURCES as readonly string[]).includes(record.source as string)) return null;
 
   const title = normalizeNotificationTextField(record.title);
   const body = normalizeNotificationTextField(record.body);
@@ -102,6 +101,7 @@ export class AlertManager {
   private attentionId: string | null = null;
   private attentionTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<(id: string, state: AlertState) => void>();
+  private lastEmitted = new Map<string, AlertState>();
 
   // --- State change subscription ---
 
@@ -117,12 +117,9 @@ export class AlertManager {
     entry?.monitor?.onData();
   }
 
-  onExit(id: string): void {
-    const entry = this.entries.get(id);
-    if (!entry) return;
-    // PTY exited — monitor will detect the silence and transition naturally.
-    // We keep the entry so alert/todo state is preserved.
-  }
+  // Intentional no-op: the monitor detects silence and transitions naturally,
+  // and we keep the entry so alert/todo state survives the PTY exit.
+  onExit(_id: string): void {}
 
   onResize(id: string): void {
     const entry = this.entries.get(id);
@@ -212,11 +209,9 @@ export class AlertManager {
     this.notify(id);
   }
 
-  private clearProtocolProgressAndRing(entry: AlertEntry): boolean {
-    const changed = entry.protocolStatus !== 'IDLE' || entry.progress !== null;
+  private clearProtocolProgressAndRing(entry: AlertEntry): void {
     entry.protocolStatus = 'IDLE';
     entry.progress = null;
-    return changed;
   }
 
   // --- Attention tracking ---
@@ -481,8 +476,6 @@ export class AlertManager {
     entry.protocolStatus = 'IDLE';
     entry.progress = null;
 
-    // If the visual alert was enabled (anything other than ALERT_DISABLED or
-    // protocol-only OSC_NOTIF_BUSY), create a monitor.
     if (state.status !== 'ALERT_DISABLED' && state.status !== 'OSC_NOTIF_BUSY') {
       if (!entry.monitor) {
         entry.monitor = this.createMonitor(id);
@@ -497,6 +490,7 @@ export class AlertManager {
     }
     this.entries.clear();
     this.listeners.clear();
+    this.lastEmitted.clear();
     this.clearAttentionTimer();
   }
 
@@ -528,8 +522,24 @@ export class AlertManager {
 
   private notify(id: string): void {
     const state = this.getState(id);
+    const last = this.lastEmitted.get(id);
+    if (last && alertStatesEqual(last, state)) return;
+    if (this.entries.has(id)) {
+      this.lastEmitted.set(id, state);
+    } else {
+      this.lastEmitted.delete(id);
+    }
     for (const listener of this.listeners) {
       listener(id, state);
     }
   }
+}
+
+function alertStatesEqual(a: AlertState, b: AlertState): boolean {
+  if (a.status !== b.status || a.todo !== b.todo || a.attentionDismissedRing !== b.attentionDismissedRing) return false;
+  const an = a.notification;
+  const bn = b.notification;
+  if (an === bn) return true;
+  if (an === null || bn === null) return false;
+  return an.source === bn.source && an.title === bn.title && an.body === bn.body;
 }

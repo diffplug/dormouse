@@ -53,6 +53,13 @@ const tabVariant = tv({
 
 type HeaderTier = 'full' | 'compact' | 'minimal';
 
+const ALERT_BUTTON_DEFAULT = { aria: 'Disable alert', tooltip: '[a] Disable alerts' };
+const ALERT_BUTTON_LABELS: Partial<Record<SessionStatus, { aria: string; tooltip: string }>> = {
+  ALERT_RINGING: { aria: 'Alert ringing', tooltip: 'Alert ringing' },
+  OSC_NOTIF_BUSY: { aria: 'Progress active', tooltip: 'Progress active' },
+  ALERT_DISABLED: { aria: 'Enable alert', tooltip: '[a] Enable alerts' },
+};
+
 export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
@@ -82,20 +89,9 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
   const [dialogTriggerRect, setDialogTriggerRect] = useState<DOMRect | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
   const showTodoPill = todoPill.visible && tier !== 'minimal';
-  const alertButtonAriaLabel = activity.status === 'ALERT_RINGING'
-    ? 'Alert ringing'
-    : activity.status === 'OSC_NOTIF_BUSY'
-      ? 'Progress active'
-      : activity.status === 'ALERT_DISABLED'
-        ? 'Enable alert'
-        : 'Disable alert';
-  const alertButtonTooltip = activity.status === 'ALERT_RINGING'
-    ? 'Alert ringing'
-    : activity.status === 'OSC_NOTIF_BUSY'
-      ? 'Progress active'
-      : activity.status === 'ALERT_DISABLED'
-        ? '[a] Enable alerts'
-        : '[a] Disable alerts';
+  const alertButtonLabels = ALERT_BUTTON_LABELS[activity.status] ?? ALERT_BUTTON_DEFAULT;
+  const alertButtonAriaLabel = alertButtonLabels.aria;
+  const alertButtonTooltip = alertButtonLabels.tooltip;
   const alertButtonTooltipDetail = activity.status === 'ALERT_RINGING'
     ? 'Click to dismiss and show options'
     : 'Right-click for options';

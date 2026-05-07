@@ -26,6 +26,17 @@ let nextFlushRequestId = 0;
 const alertManager = new AlertManager();
 const alertProtocolParsers = new Map<string, TerminalProtocolParser>();
 
+// Subscribers that want each PTY chunk *after* OSC sequences have been parsed
+// out (display path). Decoupled from ptyManager.addCallbacks so we only run
+// the protocol parser once per chunk regardless of webview count.
+type ProcessedDataListener = (id: string, visibleData: string) => void;
+const processedDataListeners = new Set<ProcessedDataListener>();
+
+function onProcessedPtyData(listener: ProcessedDataListener): () => void {
+  processedDataListeners.add(listener);
+  return () => { processedDataListeners.delete(listener); };
+}
+
 // Log all alert state transitions (including timer-driven ones)
 alertManager.onStateChange((id, state) => {
   log.info(`[alert] ${id}: → ${state.status} (todo=${state.todo})`);
@@ -41,7 +52,10 @@ ptyManager.addCallbacks({
     for (const response of collectTerminalProtocolResponses(parsed.events)) {
       ptyManager.write(id, response);
     }
-    if (parsed.visibleData.length > 0) alertManager.onData(id);
+    if (parsed.visibleData.length > 0) {
+      alertManager.onData(id);
+      for (const listener of processedDataListeners) listener(id, parsed.visibleData);
+    }
     const after = alertManager.getState(id).status;
     if (before !== after) {
       log.info(`[alert-feed] ${id}: ${before} → ${after}`);
@@ -142,23 +156,12 @@ export function attachRouter(
    * Returns a cleanup function that unsubscribes everything.
    */
   function connectWebview(): () => void {
-    const displayProtocolParsers = new Map<string, TerminalProtocolParser>();
-    const getDisplayProtocolParser = (id: string): TerminalProtocolParser => {
-      let parser = displayProtocolParsers.get(id);
-      if (!parser) {
-        parser = new TerminalProtocolParser();
-        displayProtocolParsers.set(id, parser);
-      }
-      return parser;
-    };
-
+    const removeProcessedListener = onProcessedPtyData((id, visibleData) => {
+      if (!ownedPtyIds.has(id)) return;
+      webview.postMessage({ type: 'pty:data', id, data: visibleData } satisfies ExtensionMessage);
+    });
     const removePtyCallbacks = ptyManager.addCallbacks({
-      onData(id: string, data: string) {
-        if (!ownedPtyIds.has(id)) return;
-        const parsed = getDisplayProtocolParser(id).process(data);
-        if (parsed.visibleData.length === 0) return;
-        webview.postMessage({ type: 'pty:data', id, data: parsed.visibleData } satisfies ExtensionMessage);
-      },
+      onData() {},
       onExit(id: string, exitCode: number) {
         if (!ownedPtyIds.has(id)) return;
         webview.postMessage({ type: 'pty:exit', id, exitCode } satisfies ExtensionMessage);
@@ -178,6 +181,7 @@ export function attachRouter(
     });
 
     return () => {
+      removeProcessedListener();
       removePtyCallbacks();
       removeAlertListener();
     };
