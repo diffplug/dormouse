@@ -279,7 +279,7 @@ The TODO pill stays compact and stable:
 - It does not resize to arbitrary notification text.
 - It may show a small dot treatment when protocol detail is present, as long as the pill remains fixed-width enough for narrow headers.
 
-Protocol detail appears in a preview surface anchored to the TODO pill or alert bell:
+Protocol detail appears in a preview surface anchored below the TODO pill or alert bell:
 
 - Show on TODO hover/focus.
 - Show when the selected Pane has a TODO with notification detail and there is enough space.

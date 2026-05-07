@@ -8,6 +8,7 @@ import {
   type WallMode,
   type WallActions,
 } from '../components/Wall';
+import type { ActivityNotification } from '../lib/alert-manager';
 
 const SESSION_ID = 'tab-story';
 
@@ -33,6 +34,14 @@ function primedState(state: Record<string, unknown>) {
       },
     },
   };
+}
+
+function primedNotificationState(notification: ActivityNotification, status = 'ALERT_DISABLED') {
+  return primedState({
+    status,
+    todo: true,
+    notification,
+  });
 }
 
 function TabStory({
@@ -91,6 +100,46 @@ async function openAlertRightClickDialog() {
   }));
   await wait(100);
 }
+
+async function openTodoNotificationPreview() {
+  await wait(100);
+  const todoButton = document.querySelector<HTMLButtonElement>(`[data-session-todo-for="${SESSION_ID}"]`);
+  todoButton?.focus();
+  await wait(100);
+}
+
+const NOTIFICATIONS = {
+  osc9BodyOnly: {
+    source: 'OSC 9',
+    title: null,
+    body: 'Build finished successfully.',
+  },
+  osc777TitleAndBody: {
+    source: 'OSC 777',
+    title: 'Tests complete',
+    body: '341 passed, 0 failed',
+  },
+  osc99TitleOnly: {
+    source: 'OSC 99',
+    title: 'Claude is waiting',
+    body: null,
+  },
+  progressComplete: {
+    source: 'OSC 9;4',
+    title: 'Progress complete',
+    body: 'Progress 100%',
+  },
+  terminalBell: {
+    source: 'BEL',
+    title: 'Terminal bell',
+    body: null,
+  },
+  longBody: {
+    source: 'OSC 99',
+    title: 'Long notification text should wrap without pushing controls out of the header',
+    body: 'This body is intentionally long so the TODO dialog has to wrap text and constrain the scroll area. It represents agent output with several clauses, paths, and status details that should remain readable without replacing the visible TODO pill text or changing the pane header layout.',
+  },
+} satisfies Record<string, ActivityNotification>;
 
 const meta: Meta<typeof TabStory> = {
   title: 'Components/TerminalPaneHeader',
@@ -177,6 +226,52 @@ export const TodoOnly: Story = {
     status: 'ALERT_DISABLED',
     todo: true,
   }),
+};
+
+export const TodoWithNotificationPreview: Story = {
+  parameters: primedNotificationState(NOTIFICATIONS.osc777TitleAndBody),
+  play: openTodoNotificationPreview,
+};
+
+export const TodoWithLongNotificationPreview: Story = {
+  args: {
+    width: 320,
+  },
+  parameters: primedNotificationState(NOTIFICATIONS.longBody),
+  play: openTodoNotificationPreview,
+};
+
+export const NotificationDialogTitleAndBody: Story = {
+  parameters: primedNotificationState(NOTIFICATIONS.osc777TitleAndBody, 'ALERT_RINGING'),
+  play: openAlertRightClickDialog,
+};
+
+export const NotificationDialogBodyOnly: Story = {
+  parameters: primedNotificationState(NOTIFICATIONS.osc9BodyOnly, 'ALERT_RINGING'),
+  play: openAlertRightClickDialog,
+};
+
+export const NotificationDialogTitleOnly: Story = {
+  parameters: primedNotificationState(NOTIFICATIONS.osc99TitleOnly, 'ALERT_RINGING'),
+  play: openAlertRightClickDialog,
+};
+
+export const NotificationDialogProgressComplete: Story = {
+  parameters: primedNotificationState(NOTIFICATIONS.progressComplete, 'ALERT_RINGING'),
+  play: openAlertRightClickDialog,
+};
+
+export const NotificationDialogTerminalBell: Story = {
+  parameters: primedNotificationState(NOTIFICATIONS.terminalBell, 'ALERT_RINGING'),
+  play: openAlertRightClickDialog,
+};
+
+export const NotificationDialogLongBody: Story = {
+  args: {
+    width: 320,
+  },
+  parameters: primedNotificationState(NOTIFICATIONS.longBody, 'ALERT_RINGING'),
+  play: openAlertRightClickDialog,
 };
 
 export const TodoAndAlertEnabled: Story = {
