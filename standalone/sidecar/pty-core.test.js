@@ -18,7 +18,10 @@ test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
   assert.equal(config.cwdWarning, null);
   assert.equal(config.cols, 80);
   assert.equal(config.rows, 30);
-  assert.equal(config.env.TERM_PROGRAM, 'MouseTerm');
+  assert.equal(config.env.TERM_PROGRAM, 'iTerm.app');
+  assert.equal(config.env.TERM_PROGRAM_VERSION, '3.5.0');
+  assert.equal(config.env.LC_TERMINAL, 'iTerm2');
+  assert.equal(config.env.LC_TERMINAL_VERSION, '3.5.0');
   assert.deepEqual(config.shellArgs, ['-l']);
 });
 
@@ -35,7 +38,10 @@ test('resolveSpawnConfig uses Windows shell and profile defaults', () => {
   assert.equal(config.shell, 'C:\\Windows\\System32\\cmd.exe');
   assert.equal(config.cwd, 'C:\\Users\\tester');
   assert.equal(config.cwdWarning, null);
-  assert.equal(config.env.TERM_PROGRAM, 'MouseTerm');
+  assert.equal(config.env.TERM_PROGRAM, 'iTerm.app');
+  assert.equal(config.env.TERM_PROGRAM_VERSION, '3.5.0');
+  assert.equal(config.env.LC_TERMINAL, 'iTerm2');
+  assert.equal(config.env.LC_TERMINAL_VERSION, '3.5.0');
   assert.deepEqual(config.shellArgs, []);
 });
 

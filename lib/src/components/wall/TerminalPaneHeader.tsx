@@ -84,17 +84,22 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
   const showTodoPill = todoPill.visible && tier !== 'minimal';
   const alertButtonAriaLabel = activity.status === 'ALERT_RINGING'
     ? 'Alert ringing'
-    : activity.status === 'ALERT_DISABLED'
-      ? 'Enable alert'
-      : 'Disable alert';
+    : activity.status === 'OSC_NOTIF_BUSY'
+      ? 'Progress active'
+      : activity.status === 'ALERT_DISABLED'
+        ? 'Enable alert'
+        : 'Disable alert';
   const alertButtonTooltip = activity.status === 'ALERT_RINGING'
     ? 'Alert ringing'
-    : activity.status === 'ALERT_DISABLED'
-      ? '[a] Enable alerts'
-      : '[a] Disable alerts';
+    : activity.status === 'OSC_NOTIF_BUSY'
+      ? 'Progress active'
+      : activity.status === 'ALERT_DISABLED'
+        ? '[a] Enable alerts'
+        : '[a] Disable alerts';
   const alertButtonTooltipDetail = activity.status === 'ALERT_RINGING'
     ? 'Click to dismiss and show options'
     : 'Right-click for options';
+  const todoNotificationPreview = formatNotificationPreview(activity.notification);
 
   const closeDialog = useCallback(() => setDialogTriggerRect(null), []);
 
@@ -195,8 +200,9 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
             data-session-todo-for={api.id}
             data-flourishing={todoPill.flourishing ? 'true' : 'false'}
             className={`todo-pill-shell shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10`}
-            aria-label="Dismiss TODO"
+            aria-label={todoNotificationPreview ? `Dismiss TODO: ${todoNotificationPreview}` : 'Dismiss TODO'}
             aria-hidden={todoPill.flourishing ? true : undefined}
+            title={todoNotificationPreview}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
@@ -279,4 +285,12 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
       )}
     </div>
   );
+}
+
+function formatNotificationPreview(notification: { title: string | null; body: string | null } | null): string | undefined {
+  if (!notification) return undefined;
+  const parts = [notification.title, notification.body].filter((part): part is string => !!part);
+  if (parts.length === 0) return undefined;
+  const preview = parts.join('\n');
+  return preview.length > 512 ? `${preview.slice(0, 509)}...` : preview;
 }

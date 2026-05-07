@@ -1,6 +1,6 @@
 import { cfg } from '../cfg';
 
-export type SessionStatus =
+export type VisualSessionStatus =
   | 'ALERT_DISABLED'
   | 'NOTHING_TO_SHOW'
   | 'MIGHT_BE_BUSY'
@@ -8,9 +8,11 @@ export type SessionStatus =
   | 'MIGHT_NEED_ATTENTION'
   | 'ALERT_RINGING';
 
+export type SessionStatus = VisualSessionStatus | 'OSC_NOTIF_BUSY';
+
 export interface ActivityMonitorOptions {
   hasAttention?: () => boolean;
-  onChange?: (status: SessionStatus, previousStatus: SessionStatus) => void;
+  onChange?: (status: VisualSessionStatus, previousStatus: VisualSessionStatus) => void;
 }
 
 const T_BUSY_CANDIDATE_GAP = cfg.alert.busyCandidateGap;
@@ -20,7 +22,7 @@ const T_ALERT_RINGING_CONFIRM = cfg.alert.needsAttentionConfirm;
 const T_RESIZE_DEBOUNCE = cfg.alert.resizeDebounce;
 
 export class ActivityMonitor {
-  private status: SessionStatus = 'NOTHING_TO_SHOW';
+  private status: VisualSessionStatus = 'NOTHING_TO_SHOW';
   private resizeGrace = false;
   private busyCandidateTimer: ReturnType<typeof setTimeout> | null = null;
   private busyConfirmTimer: ReturnType<typeof setTimeout> | null = null;
@@ -32,14 +34,14 @@ export class ActivityMonitor {
   private lastOutputAt: number | null = null;
   private outputCountSinceAttention = 0;
   private readonly hasAttention: () => boolean;
-  private readonly onChange: ((status: SessionStatus, previousStatus: SessionStatus) => void) | null;
+  private readonly onChange: ((status: VisualSessionStatus, previousStatus: VisualSessionStatus) => void) | null;
 
   constructor(options?: ActivityMonitorOptions) {
     this.hasAttention = options?.hasAttention ?? (() => false);
     this.onChange = options?.onChange ?? null;
   }
 
-  getStatus(): SessionStatus {
+  getStatus(): VisualSessionStatus {
     return this.status;
   }
 
@@ -205,7 +207,7 @@ export class ActivityMonitor {
     this.outputCountSinceAttention = 0;
   }
 
-  private setStatus(status: SessionStatus): void {
+  private setStatus(status: VisualSessionStatus): void {
     if (this.status === status) return;
     const previousStatus = this.status;
     this.status = status;

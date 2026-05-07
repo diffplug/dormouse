@@ -1,4 +1,4 @@
-import type { SessionStatus, TodoState } from '../../lib/src/lib/alert-manager';
+import type { ActivityNotification, SessionStatus, TodoState } from '../../lib/src/lib/alert-manager';
 
 // Messages from webview → extension host
 export type WebviewMessage =
@@ -49,4 +49,11 @@ export type ExtensionMessage =
   | { type: 'mouseterm:openThemeDebugger' }
   | { type: 'mouseterm:flushSessionSave'; requestId: string }
   // Alert state updates
-  | { type: 'alert:state'; id: string; status: SessionStatus; todo: TodoState; attentionDismissedRing: boolean };
+  | {
+    type: 'alert:state';
+    id: string;
+    status: SessionStatus;
+    todo: TodoState;
+    notification: ActivityNotification | null;
+    attentionDismissedRing: boolean;
+  };

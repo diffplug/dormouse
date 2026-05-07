@@ -50,7 +50,13 @@ export class VSCodeAdapter implements PlatformAdapter {
         }
       } else if (msg.type === 'alert:state') {
         for (const handler of this.alertStateHandlers) {
-          handler({ id: msg.id, status: msg.status, todo: msg.todo, attentionDismissedRing: msg.attentionDismissedRing });
+          handler({
+            id: msg.id,
+            status: msg.status,
+            todo: msg.todo,
+            notification: msg.notification ?? null,
+            attentionDismissedRing: msg.attentionDismissedRing,
+          });
         }
       } else if (msg.type === 'mouseterm:newTerminal') {
         window.dispatchEvent(new CustomEvent('mouseterm:new-terminal', {

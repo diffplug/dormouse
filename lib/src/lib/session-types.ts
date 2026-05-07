@@ -1,10 +1,11 @@
 import type { DoorDirection } from './spatial-nav';
 import type { SessionStatus } from './activity-monitor';
-import { migrateTodoState, type TodoState } from './alert-manager';
+import { migrateTodoState, type ActivityNotification, type TodoState } from './alert-manager';
 
 export interface PersistedAlertState {
   status: SessionStatus;
   todo: TodoState;
+  notification?: ActivityNotification | null;
 }
 
 export interface PersistedPane {
@@ -86,7 +87,18 @@ function isPersistedAlertShape(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (typeof value.status !== 'string') return false;
   const t = value.todo;
-  return typeof t === 'boolean' || typeof t === 'number' || typeof t === 'string';
+  if (!(typeof t === 'boolean' || typeof t === 'number' || typeof t === 'string')) return false;
+  return value.notification === undefined || value.notification === null || isActivityNotificationShape(value.notification);
+}
+
+function isActivityNotificationShape(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const source = value.source;
+  return (
+    (source === 'OSC 9' || source === 'OSC 9;4' || source === 'OSC 99' || source === 'OSC 777') &&
+    (typeof value.title === 'string' || value.title === null) &&
+    (typeof value.body === 'string' || value.body === null)
+  );
 }
 
 function isPersistedPaneShape(value: unknown): boolean {

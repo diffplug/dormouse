@@ -1,5 +1,10 @@
 import type { AlertStateDetail, PlatformAdapter, PtyInfo } from './types';
 import { AlertManager, type SessionStatus } from '../alert-manager';
+import {
+  applyTerminalProtocolEvents,
+  collectTerminalProtocolResponses,
+  TerminalProtocolParser,
+} from '../terminal-protocol';
 
 export interface FakeScenario {
   name: string;
@@ -34,6 +39,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   private defaultScenario: FakeScenario | null = null;
   private scenarioMap = new Map<string, FakeScenario>();
   private inputHandlers = new Map<string, (data: string) => void>();
+  private protocolParsers = new Map<string, TerminalProtocolParser>();
   private alertManager = new AlertManager();
 
   constructor() {
@@ -79,6 +85,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.resizeHandlers.clear();
     this.spawnHandlers.clear();
     this.inputHandlers.clear();
+    this.protocolParsers.clear();
     this.alertManager.dispose();
     this.alertManager = new AlertManager();
     this.alertManager.onStateChange((id, state) => {
@@ -94,6 +101,7 @@ export class FakePtyAdapter implements PlatformAdapter {
 
   spawnPty(id: string, options?: { cols?: number; rows?: number }): void {
     this.terminals.add(id);
+    this.protocolParsers.set(id, new TerminalProtocolParser());
     this.terminalSizes.set(id, {
       cols: options?.cols ?? DEFAULT_PTY_SIZE.cols,
       rows: options?.rows ?? DEFAULT_PTY_SIZE.rows,
@@ -121,10 +129,7 @@ export class FakePtyAdapter implements PlatformAdapter {
       inputHandler(data);
       return;
     }
-    this.alertManager.onData(id);
-    for (const handler of this.dataHandlers) {
-      handler({ id, data });
-    }
+    this.emitPtyData(id, data);
   }
 
   resizePty(id: string, cols: number, rows: number): void {
@@ -147,6 +152,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.terminals.delete(id);
     this.terminalSizes.delete(id);
     this.inputHandlers.delete(id);
+    this.protocolParsers.delete(id);
     for (const handler of this.exitHandlers) {
       handler({ id, exitCode: 0 });
     }
@@ -254,10 +260,7 @@ export class FakePtyAdapter implements PlatformAdapter {
    */
   sendOutput(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
     if (!this.terminals.has(id)) return;
-    if (!options.skipActivity) this.alertManager.onData(id);
-    for (const handler of this.dataHandlers) {
-      handler({ id, data });
-    }
+    this.emitPtyData(id, data, options);
   }
 
   /**
@@ -305,10 +308,7 @@ export class FakePtyAdapter implements PlatformAdapter {
       cumulativeDelay += chunk.delay;
       const timer = setTimeout(() => {
         if (!this.terminals.has(id)) return;
-        this.alertManager.onData(id);
-        for (const handler of this.dataHandlers) {
-          handler({ id, data: chunk.data });
-        }
+        this.emitPtyData(id, chunk.data);
       }, cumulativeDelay);
       timers.push(timer);
     }
@@ -329,6 +329,30 @@ export class FakePtyAdapter implements PlatformAdapter {
         this.activeTimers.delete(id);
       }, cumulativeDelay + 1);
       timers.push(cleanupTimer);
+    }
+  }
+
+  private getProtocolParser(id: string): TerminalProtocolParser {
+    let parser = this.protocolParsers.get(id);
+    if (!parser) {
+      parser = new TerminalProtocolParser();
+      this.protocolParsers.set(id, parser);
+    }
+    return parser;
+  }
+
+  private emitPtyData(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
+    const parsed = this.getProtocolParser(id).process(data);
+    applyTerminalProtocolEvents(this.alertManager, id, parsed.events);
+    const inputHandler = this.inputHandlers.get(id);
+    for (const response of collectTerminalProtocolResponses(parsed.events)) {
+      inputHandler?.(response);
+    }
+
+    if (parsed.visibleData.length === 0) return;
+    if (!options.skipActivity) this.alertManager.onData(id);
+    for (const handler of this.dataHandlers) {
+      handler({ id, data: parsed.visibleData });
     }
   }
 }

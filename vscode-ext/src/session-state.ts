@@ -30,7 +30,7 @@ export function mergeAlertStates(state: unknown, alertStates: Map<string, AlertS
       return {
         ...pane,
         alert: alert
-          ? { status: alert.status, todo: alert.todo }
+          ? { status: alert.status, todo: alert.todo, notification: alert.notification }
           : pane.alert ?? null,
       };
     }),
@@ -55,7 +55,7 @@ export async function refreshSavedSessionStateFromPtys(
       // Capture alert state regardless of PTY liveness
       const alertState = alertStates?.get(pane.id);
       const alert: PersistedAlertState | null = alertState
-        ? { status: alertState.status, todo: alertState.todo }
+        ? { status: alertState.status, todo: alertState.todo, notification: alertState.notification }
         : pane.alert ?? null;
 
       if (!ptys.has(pane.id)) {

@@ -4,7 +4,7 @@
 
 ## Conceptual model
 
-A **Session** is a single PTY instance — a running shell process with its scrollback, environment, and working directory. Sessions are managed by the terminal registry and persist independently of how they are displayed. Each session also carries Activity state (alert status from the activity monitor, optional TODO flag).
+A **Session** is a single PTY instance — a running shell process with its scrollback, environment, and working directory. Sessions are managed by the terminal registry and persist independently of how they are displayed. Each session also carries Activity state (projected alert status, optional TODO flag, and optional protocol notification detail).
 
 A Session's **View** state places it in one of two containers:
 
@@ -281,7 +281,7 @@ On startup, recovery is priority-based:
 
 ### Activity state
 
-Each session carries `ActivityState` with `status: SessionStatus` and `todo: TodoState`. These are synced to React via `useSyncExternalStore`. State that arrives from the platform before a registry entry exists (resume scenario) is held as "primed state" and applied when the registry entry is created.
+Each session carries `ActivityState` with `status: SessionStatus`, `todo: TodoState`, and `notification: ActivityNotification | null`. `status` is the projected public status from the timer-based visual track plus the terminal-report protocol track described in `docs/specs/alert.md`; it may be `OSC_NOTIF_BUSY` when OSC progress has cocked the bell. These are synced to React via `useSyncExternalStore`. State that arrives from the platform before a registry entry exists (resume scenario) is held as "primed state" and applied when the registry entry is created.
 
 ## Theme
 

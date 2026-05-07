@@ -180,4 +180,79 @@ describe('AlertManager in isolation', () => {
     manager.clearTodo(id);
     expect(manager.getState(id).todo).toBe(false);
   });
+
+  it('protocol notifications ring and create TODO detail even when visual alerts are disabled', () => {
+    const id = 'osc-notification';
+
+    manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
+
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_RINGING',
+      todo: true,
+      notification: { source: 'OSC 9', title: null, body: 'Build finished' },
+    });
+
+    manager.dismissAlert(id);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_DISABLED',
+      todo: true,
+      notification: { source: 'OSC 9', title: null, body: 'Build finished' },
+    });
+
+    manager.clearTodo(id);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_DISABLED',
+      todo: false,
+      notification: null,
+    });
+  });
+
+  it('OSC progress cocks the protocol alarm without participating in visual timers', () => {
+    const id = 'osc-progress';
+
+    manager.updateProtocolProgress(id, { state: 'normal', percent: 25 });
+    expect(manager.getState(id)).toMatchObject({
+      status: 'OSC_NOTIF_BUSY',
+      todo: false,
+      notification: null,
+    });
+
+    vi.advanceTimersByTime(60_000);
+    expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
+
+    manager.updateProtocolProgress(id, { state: 'clear', percent: null });
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_RINGING',
+      todo: true,
+      notification: { source: 'OSC 9;4', title: 'Progress complete', body: 'Progress 25%' },
+    });
+  });
+
+  it('protocol completion is suppressed while the user has attention', () => {
+    const id = 'osc-progress-attention';
+
+    manager.attend(id);
+    manager.updateProtocolProgress(id, { state: 'normal', percent: 25 });
+    expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
+
+    manager.updateProtocolProgress(id, { state: 'normal', percent: 100 });
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_DISABLED',
+      todo: false,
+      notification: null,
+    });
+  });
+
+  it('direct protocol notifications are suppressed while the user has attention', () => {
+    const id = 'osc-notification-attention';
+
+    manager.attend(id);
+    manager.notifyFromProtocol(id, { source: 'OSC 777', title: 'done', body: 'Build finished' });
+
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_DISABLED',
+      todo: false,
+      notification: null,
+    });
+  });
 });

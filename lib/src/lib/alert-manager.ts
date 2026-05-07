@@ -6,6 +6,31 @@ export { type SessionStatus } from './activity-monitor';
 /** Boolean TODO state: on (true) or off (false). */
 export type TodoState = boolean;
 
+export type ActivityNotificationSource = 'OSC 9' | 'OSC 9;4' | 'OSC 99' | 'OSC 777';
+
+export interface ActivityNotification {
+  source: ActivityNotificationSource;
+  title: string | null;
+  body: string | null;
+}
+
+export type ProtocolProgressState = 'clear' | 'normal' | 'warning' | 'indeterminate' | 'error';
+
+export interface ProtocolProgressUpdate {
+  state: ProtocolProgressState;
+  percent: number | null;
+}
+
+type ProtocolStatus = 'IDLE' | 'OSC_NOTIF_BUSY' | 'ALERT_RINGING';
+type ActiveProtocolProgressState = 'normal' | 'warning' | 'indeterminate';
+
+interface ActiveProtocolProgress {
+  state: ActiveProtocolProgressState;
+  percent: number | null;
+}
+
+const ACTIVITY_NOTIFICATION_SOURCES: ActivityNotificationSource[] = ['OSC 9', 'OSC 9;4', 'OSC 99', 'OSC 777'];
+
 /** Migrate legacy persisted TodoState values (numeric, string, boolean) to a boolean. */
 export function migrateTodoState(todo: unknown): TodoState {
   if (typeof todo === 'boolean') return todo;
@@ -16,11 +41,34 @@ export function migrateTodoState(todo: unknown): TodoState {
   return false;
 }
 
+export function normalizeActivityNotification(value: unknown): ActivityNotification | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (!ACTIVITY_NOTIFICATION_SOURCES.includes(record.source as ActivityNotificationSource)) return null;
+
+  const title = normalizeNotificationTextField(record.title);
+  const body = normalizeNotificationTextField(record.body);
+  if (!title && !body) return null;
+  return {
+    source: record.source as ActivityNotificationSource,
+    title,
+    body,
+  };
+}
+
+function normalizeNotificationTextField(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export type AlertButtonActionResult = 'enabled' | 'disabled' | 'dismissed' | 'noop';
 
 export interface AlertState {
   status: SessionStatus;
   todo: TodoState;
+  notification: ActivityNotification | null;
   /** Used by dismissOrToggleAlert to detect post-attention dismiss */
   attentionDismissedRing: boolean;
 }
@@ -28,12 +76,16 @@ export interface AlertState {
 export const DEFAULT_ALERT_STATE: AlertState = {
   status: 'ALERT_DISABLED',
   todo: false,
+  notification: null,
   attentionDismissedRing: false,
 };
 
 interface AlertEntry {
   monitor: ActivityMonitor | null;
+  protocolStatus: ProtocolStatus;
+  progress: ActiveProtocolProgress | null;
   todo: TodoState;
+  notification: ActivityNotification | null;
   attentionDismissedRing: boolean;
 }
 
@@ -77,6 +129,96 @@ export class AlertManager {
     entry?.monitor?.onResize();
   }
 
+  // --- Terminal-report protocol track ---
+
+  notifyFromProtocol(id: string, notification: ActivityNotification): void {
+    const entry = this.getOrCreateEntry(id);
+    const normalized = normalizeActivityNotification(notification);
+    if (!normalized) return;
+
+    if (this.hasAttention(id)) {
+      if (entry.protocolStatus === 'ALERT_RINGING') {
+        entry.protocolStatus = 'IDLE';
+        entry.progress = null;
+        this.notify(id);
+      }
+      return;
+    }
+
+    entry.notification = normalized;
+    entry.todo = true;
+    entry.protocolStatus = 'ALERT_RINGING';
+    entry.progress = null;
+    entry.attentionDismissedRing = false;
+    this.notify(id);
+  }
+
+  updateProtocolProgress(id: string, progress: ProtocolProgressUpdate): void {
+    const entry = this.getOrCreateEntry(id);
+
+    if (progress.state === 'clear') {
+      if (!entry.progress) return;
+      this.completeProtocolProgress(id, entry, entry.progress);
+      return;
+    }
+
+    if (progress.state === 'error') {
+      this.ringOrSuppressProtocolProgress(id, entry, {
+        title: 'Progress error',
+        progress: { percent: progress.percent },
+      });
+      return;
+    }
+
+    if (progress.state === 'normal' && progress.percent === 100) {
+      this.completeProtocolProgress(id, entry, {
+        state: entry.progress?.state === 'warning' ? 'warning' : 'normal',
+        percent: progress.percent,
+      });
+      return;
+    }
+
+    entry.progress = { state: progress.state, percent: progress.percent };
+    entry.protocolStatus = 'OSC_NOTIF_BUSY';
+    entry.attentionDismissedRing = false;
+    this.notify(id);
+  }
+
+  private completeProtocolProgress(id: string, entry: AlertEntry, progress: ActiveProtocolProgress): void {
+    const title = progress.state === 'warning' ? 'Progress warning' : 'Progress complete';
+    this.ringOrSuppressProtocolProgress(id, entry, { title, progress });
+  }
+
+  private ringOrSuppressProtocolProgress(
+    id: string,
+    entry: AlertEntry,
+    detail: { title: string; progress: Pick<ActiveProtocolProgress, 'percent'> },
+  ): void {
+    if (this.hasAttention(id)) {
+      this.clearProtocolProgressAndRing(entry);
+      this.notify(id);
+      return;
+    }
+
+    entry.notification = {
+      source: 'OSC 9;4',
+      title: detail.title,
+      body: detail.progress.percent === null ? null : `Progress ${Math.round(detail.progress.percent)}%`,
+    };
+    entry.todo = true;
+    entry.protocolStatus = 'ALERT_RINGING';
+    entry.progress = null;
+    entry.attentionDismissedRing = false;
+    this.notify(id);
+  }
+
+  private clearProtocolProgressAndRing(entry: AlertEntry): boolean {
+    const changed = entry.protocolStatus !== 'IDLE' || entry.progress !== null;
+    entry.protocolStatus = 'IDLE';
+    entry.progress = null;
+    return changed;
+  }
+
   // --- Attention tracking ---
 
   private hasAttention(id: string): boolean {
@@ -107,10 +249,17 @@ export class AlertManager {
    */
   attend(id: string): void {
     const entry = this.getOrCreateEntry(id);
-    const previousStatus = entry.monitor?.getStatus();
+    const previousVisualStatus = entry.monitor?.getStatus();
+    const protocolWasRinging = entry.protocolStatus === 'ALERT_RINGING';
     this.setAttention(id);
 
-    if (previousStatus === 'ALERT_RINGING') {
+    if (protocolWasRinging) {
+      entry.attentionDismissedRing = true;
+      entry.todo = true;
+      entry.protocolStatus = 'IDLE';
+      entry.progress = null;
+    }
+    if (previousVisualStatus === 'ALERT_RINGING') {
       entry.attentionDismissedRing = true;
       entry.todo = true;
     }
@@ -169,11 +318,23 @@ export class AlertManager {
 
   dismissAlert(id: string): void {
     const entry = this.entries.get(id);
-    if (!entry?.monitor) return;
-    if (entry.monitor.getStatus() !== 'ALERT_RINGING') return;
-    entry.todo = true;
-    entry.monitor.attend();
-    // onChange fires → notify
+    if (!entry) return;
+
+    let dismissed = false;
+    if (entry.protocolStatus === 'ALERT_RINGING') {
+      entry.todo = true;
+      entry.protocolStatus = 'IDLE';
+      entry.progress = null;
+      dismissed = true;
+    }
+
+    if (entry.monitor?.getStatus() === 'ALERT_RINGING') {
+      entry.todo = true;
+      entry.monitor.attend();
+      return; // onChange fires → notify
+    }
+
+    if (dismissed) this.notify(id);
   }
 
   /**
@@ -187,35 +348,56 @@ export class AlertManager {
       this.toggleAlert(id);
       return 'enabled';
     }
-    let result: AlertButtonActionResult;
+
     switch (displayedStatus) {
       case 'ALERT_DISABLED':
         this.toggleAlert(id);
-        result = 'enabled';
-        break;
+        return 'enabled';
       case 'ALERT_RINGING':
         this.dismissAlert(id);
-        result = 'dismissed';
-        break;
+        return 'dismissed';
+      case 'OSC_NOTIF_BUSY':
+        if (entry.attentionDismissedRing) {
+          entry.attentionDismissedRing = false;
+          this.notify(id);
+          return 'dismissed';
+        }
+        if (!entry.monitor) return 'noop';
+        this.disableAlert(id);
+        return 'disabled';
       default:
         if (entry.attentionDismissedRing) {
           entry.attentionDismissedRing = false;
-          result = 'dismissed';
           this.notify(id);
-          break;
+          return 'dismissed';
         }
         this.disableAlert(id);
-        result = 'disabled';
+        return 'disabled';
     }
-    return result;
   }
 
   // --- Todo controls ---
 
   toggleTodo(id: string): void {
     const entry = this.getOrCreateEntry(id);
-    entry.todo = !entry.todo;
-    if (entry.todo && entry.monitor?.getStatus() === 'ALERT_RINGING') {
+    const nextTodo = !entry.todo;
+    entry.todo = nextTodo;
+
+    if (!nextTodo) {
+      entry.notification = null;
+      if (entry.protocolStatus === 'ALERT_RINGING') {
+        entry.protocolStatus = 'IDLE';
+        entry.progress = null;
+      }
+      this.notify(id);
+      return;
+    }
+
+    if (entry.protocolStatus === 'ALERT_RINGING') {
+      entry.protocolStatus = 'IDLE';
+      entry.progress = null;
+    }
+    if (entry.monitor?.getStatus() === 'ALERT_RINGING') {
       entry.monitor.attend();
       return; // onChange fires → notify
     }
@@ -224,10 +406,16 @@ export class AlertManager {
 
   markTodo(id: string): void {
     const entry = this.getOrCreateEntry(id);
-    const isRinging = entry.monitor?.getStatus() === 'ALERT_RINGING';
-    if (entry.todo && !isRinging) return;
+    const isProtocolRinging = entry.protocolStatus === 'ALERT_RINGING';
+    const isVisualRinging = entry.monitor?.getStatus() === 'ALERT_RINGING';
+    if (entry.todo && !isProtocolRinging && !isVisualRinging) return;
+
     entry.todo = true;
-    if (isRinging) {
+    if (isProtocolRinging) {
+      entry.protocolStatus = 'IDLE';
+      entry.progress = null;
+    }
+    if (isVisualRinging) {
       entry.monitor!.attend();
       return; // onChange fires → notify
     }
@@ -238,6 +426,11 @@ export class AlertManager {
     const entry = this.getOrCreateEntry(id);
     if (!entry.todo) return;
     entry.todo = false;
+    entry.notification = null;
+    if (entry.protocolStatus === 'ALERT_RINGING') {
+      entry.protocolStatus = 'IDLE';
+      entry.progress = null;
+    }
     this.notify(id);
   }
 
@@ -247,8 +440,9 @@ export class AlertManager {
     const entry = this.entries.get(id);
     if (!entry) return DEFAULT_ALERT_STATE;
     return {
-      status: entry.monitor?.getStatus() ?? 'ALERT_DISABLED',
+      status: this.getProjectedStatus(entry),
       todo: entry.todo,
+      notification: entry.notification,
       attentionDismissedRing: entry.attentionDismissedRing,
     };
   }
@@ -276,15 +470,20 @@ export class AlertManager {
 
   /**
    * Seed alert state from a persisted session (cold-start restore).
-   * Creates an entry with the saved todo state and, if the alert was enabled,
+   * Creates an entry with the saved todo state and, if the visual alert was enabled,
    * creates a fresh ActivityMonitor (it will start in NOTHING_TO_SHOW until
    * PTY data arrives).
    */
-  seed(id: string, state: { status: string; todo: unknown }): void {
+  seed(id: string, state: { status: string; todo: unknown; notification?: unknown }): void {
     const entry = this.getOrCreateEntry(id);
     entry.todo = migrateTodoState(state.todo);
-    // If the alert was enabled (anything other than ALERT_DISABLED), create a monitor
-    if (state.status !== 'ALERT_DISABLED') {
+    entry.notification = entry.todo ? normalizeActivityNotification(state.notification) : null;
+    entry.protocolStatus = 'IDLE';
+    entry.progress = null;
+
+    // If the visual alert was enabled (anything other than ALERT_DISABLED or
+    // protocol-only OSC_NOTIF_BUSY), create a monitor.
+    if (state.status !== 'ALERT_DISABLED' && state.status !== 'OSC_NOTIF_BUSY') {
       if (!entry.monitor) {
         entry.monitor = this.createMonitor(id);
       }
@@ -303,10 +502,25 @@ export class AlertManager {
 
   // --- Internals ---
 
+  private getProjectedStatus(entry: AlertEntry): SessionStatus {
+    const visualStatus = entry.monitor?.getStatus() ?? 'ALERT_DISABLED';
+    if (entry.protocolStatus === 'ALERT_RINGING') return 'ALERT_RINGING';
+    if (visualStatus === 'ALERT_RINGING') return 'ALERT_RINGING';
+    if (entry.protocolStatus === 'OSC_NOTIF_BUSY') return 'OSC_NOTIF_BUSY';
+    return visualStatus;
+  }
+
   private getOrCreateEntry(id: string): AlertEntry {
     let entry = this.entries.get(id);
     if (!entry) {
-      entry = { monitor: null, todo: false, attentionDismissedRing: false };
+      entry = {
+        monitor: null,
+        protocolStatus: 'IDLE',
+        progress: null,
+        todo: false,
+        notification: null,
+        attentionDismissedRing: false,
+      };
       this.entries.set(id, entry);
     }
     return entry;

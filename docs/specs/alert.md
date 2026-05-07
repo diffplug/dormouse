@@ -4,11 +4,14 @@
 
 The alert system is an opt-in reminder for a **Session** that may finish work while the user is looking elsewhere. Alert state lives on the Session itself, not on the Pane or Door that currently displays it.
 
+Explicit terminal notification/progress escape sequences are the exception to the opt-in rule. `OSC 9`, `OSC 9;4`, `OSC 99`, and `OSC 777` handling is specified in `docs/specs/iTerm2.md`; those protocol signals may cock the bell or force `ALERT_RINGING` even when the activity monitor is disabled.
+
 This spec uses semantic state names that describe what the Session currently owes the user:
 
 - `NOTHING_TO_SHOW`
 - `MIGHT_BE_BUSY`
 - `BUSY`
+- `OSC_NOTIF_BUSY`
 - `MIGHT_NEED_ATTENTION`
 - `ALERT_RINGING`
 
@@ -39,13 +42,24 @@ This is guidance only. The system does not auto-enable or auto-disable alerts ba
 
 Each Session owns:
 
-- `status: 'ALERT_DISABLED' | 'NOTHING_TO_SHOW' | 'MIGHT_BE_BUSY' | 'BUSY' | 'MIGHT_NEED_ATTENTION' | 'ALERT_RINGING'`
-  - This is the unified alert and activity state for the Session.
-  - `ALERT_DISABLED`: alert is off; no activity tracking is performed. Default state.
-  - Stable states: `ALERT_DISABLED`, `NOTHING_TO_SHOW`, `BUSY`, `ALERT_RINGING`.
+- `status: 'ALERT_DISABLED' | 'NOTHING_TO_SHOW' | 'MIGHT_BE_BUSY' | 'BUSY' | 'OSC_NOTIF_BUSY' | 'MIGHT_NEED_ATTENTION' | 'ALERT_RINGING'`
+  - This is the public projected alert and activity state for the Session.
+  - `ALERT_DISABLED`: visual alert tracking is off and no protocol state is active. Default state.
+  - Stable states: `ALERT_DISABLED`, `NOTHING_TO_SHOW`, `BUSY`, `OSC_NOTIF_BUSY`, `ALERT_RINGING`.
   - Transitional states: `MIGHT_BE_BUSY`, `MIGHT_NEED_ATTENTION`.
-  - When the user enables the alert, status transitions from `ALERT_DISABLED` to `NOTHING_TO_SHOW` and activity tracking begins fresh from that moment.
-  - When the user disables the alert, activity tracking stops and status returns to `ALERT_DISABLED`.
+  - When the user enables the visual alert track, `visualStatus` transitions from `ALERT_DISABLED` to `NOTHING_TO_SHOW` and timer-based activity tracking begins fresh from that moment.
+  - When the user disables the visual alert track, timer-based activity tracking stops and `visualStatus` returns to `ALERT_DISABLED`. Public `status` may still be `OSC_NOTIF_BUSY` or `ALERT_RINGING` if `protocolStatus` is active.
+- `visualStatus: 'ALERT_DISABLED' | 'NOTHING_TO_SHOW' | 'MIGHT_BE_BUSY' | 'BUSY' | 'MIGHT_NEED_ATTENTION' | 'ALERT_RINGING'`
+  - Internal timer-based status owned by the existing visual activity monitor.
+  - It is driven only by meaningful output, silence timers, and attention.
+  - It may be deleted in a future terminal-report-only implementation without changing the protocol notification model.
+- `protocolStatus: 'IDLE' | 'OSC_NOTIF_BUSY' | 'ALERT_RINGING'`
+  - Internal terminal-report status owned by parsed OSC protocols from `docs/specs/iTerm2.md`.
+  - It is driven only by terminal reports such as `OSC 9`, `OSC 9;4`, `OSC 99`, and `OSC 777`.
+  - It does not use output/silence timers from the visual activity monitor.
+  - It does use the shared attention model. A protocol completion/notification received while the user is actively attending that Session must not ring.
+  - `OSC_NOTIF_BUSY` means a terminal report says work is in progress, but there is not yet a notification owed to the user.
+  - `ALERT_RINGING` means a terminal report explicitly created a notification or completed/errored a reported progress cycle.
 - `todo: boolean`
   - Reminder state for the Session. Default `false`.
   - `false`: no TODO.
@@ -57,6 +71,11 @@ Each Session also owns:
 
 - `attentionDismissedRing: boolean`
   - True when the user attended to a ringing Session (clicked into the Pane, typed in passthrough, etc.). Cleared when the bell is next clicked or the alert is toggled/disabled. Used by the bell button to show the context menu on the next click instead of immediately disabling.
+- `notification: ActivityNotification | null`
+  - Latest explicit protocol notification detail, when a Session received a supported terminal notification sequence.
+  - Defined in `docs/specs/iTerm2.md`.
+  - This metadata is attached to TODO/alert state; it does not replace the boolean `todo` model or the visible TODO pill text.
+  - `OSC 9;4` progress is tracked through `protocolStatus` while active; completion/error promotes it into this notification field.
 
 The workspace owns:
 
@@ -68,8 +87,10 @@ The workspace owns:
 Important invariants:
 
 - Alert state is session-scoped and survives Pane <-> Door transitions.
-- `status` describes what the Session owes the user since the last explicit attention boundary.
-- Destroying a Session clears `todo` with it; the activity monitor is disposed.
+- `visualStatus` describes what the timer-based track owes the user since the last explicit attention boundary.
+- `protocolStatus` describes what terminal reports say independently of the visual track.
+- Public `status` is a projection of those tracks for existing UI.
+- Destroying a Session clears `todo`, `notification`, and `protocolStatus` with it; the activity monitor is disposed.
 - Re-rendering, theme changes, resize reflow, or remounting a Pane must not create a new alert by themselves.
 
 ## Attention model
@@ -103,6 +124,22 @@ Attention is cleared when:
 Doors never directly hold attention. A Door can only regain attention by being restored into a Pane through an action that enters passthrough.
 
 ## State model
+
+There are two independent state models:
+
+- **Visual track**: the existing timer-based activity monitor. It watches meaningful output, silence, and user attention. Its internal state is `visualStatus`.
+- **Terminal-report track**: parsed OSC protocols from the PTY. It relies entirely on terminal reports and never uses the output/silence timers. Its internal state is `protocolStatus`.
+
+The public `status` is a projection used by existing UI:
+
+1. If `protocolStatus === 'ALERT_RINGING'`, public `status = ALERT_RINGING`.
+2. Else if `visualStatus === 'ALERT_RINGING'`, public `status = ALERT_RINGING`.
+3. Else if `protocolStatus === 'OSC_NOTIF_BUSY'`, public `status = OSC_NOTIF_BUSY`.
+4. Else public `status = visualStatus`.
+
+This projection is deliberate. Deleting the visual track should leave `protocolStatus: IDLE | OSC_NOTIF_BUSY | ALERT_RINGING` plus the same public projection behavior. The OSC path must be able to cock the bell and ring without `ActivityMonitor`, silence timers, or meaningful-output heuristics. It still relies on the shared user-attention model.
+
+### Visual track
 
 The point of the state machine is not to model every output blip. It is to answer a narrow question:
 
@@ -140,6 +177,12 @@ All values are configurable via `cfg.alert`. Total silence from last meaningful 
   - Stable state.
   - There is enough evidence that the Session is doing ongoing work and may later produce something worth surfacing.
 
+- `OSC_NOTIF_BUSY`
+  - Stable projected state from the terminal-report track.
+  - The terminal explicitly reported ongoing progress or a similar protocol-backed busy condition.
+  - It looks the same as `BUSY` in the Pane header and Door, but it does not participate in visual-track timers.
+  - Visual-track silence does not move it to `MIGHT_NEED_ATTENTION`; only a terminal report can clear it or promote it to `ALERT_RINGING`.
+
 - `MIGHT_NEED_ATTENTION`
   - Transitional state entered when a `BUSY` Session goes quiet.
   - This may be true completion, or only a pause in output.
@@ -166,6 +209,25 @@ All values are configurable via `cfg.alert`. Total silence from last meaningful 
 | `ALERT_RINGING` | new meaningful output and the Session has attention | `MIGHT_BE_BUSY` | A new work cycle may be starting. |
 | `ALERT_RINGING` | new meaningful output but the Session lacks attention | `ALERT_RINGING` | Latch: new output does not silently clear the alert without user awareness. |
 
+These transition rules apply to the visual track only. `OSC_NOTIF_BUSY` is not entered, exited, or promoted by these timers.
+
+### Terminal-report track
+
+| Current | Event | Next | Notes |
+|---|---|---|---|
+| `IDLE` | terminal report starts progress (`OSC 9;4` active state) | `OSC_NOTIF_BUSY` | Cock the bell without enabling the visual activity monitor. |
+| `OSC_NOTIF_BUSY` | terminal report updates progress | `OSC_NOTIF_BUSY` | Refresh internal progress state. Public UI remains visually identical to `BUSY`. |
+| `OSC_NOTIF_BUSY` | terminal report completes progress and Session lacks attention | `ALERT_RINGING` | Create `notification`, set `todo = true`, and ring. |
+| `OSC_NOTIF_BUSY` | terminal report completes progress and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
+| `OSC_NOTIF_BUSY` | terminal report errors progress and Session lacks attention | `ALERT_RINGING` | Create error `notification`, set `todo = true`, and ring. |
+| `OSC_NOTIF_BUSY` | terminal report errors progress and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
+| `OSC_NOTIF_BUSY` | Session destroyed | `IDLE` | Session teardown clears protocol state. |
+| `ALERT_RINGING` | explicit attention boundary / dismiss / TODO clear | `IDLE` | Public status falls back to visual projection after protocol ring clears. |
+| any | direct notification (`OSC 9`, completed `OSC 99`, `OSC 777`) and Session lacks attention | `ALERT_RINGING` | Create `notification`, set `todo = true`, and ring immediately. |
+| any | direct notification (`OSC 9`, completed `OSC 99`, `OSC 777`) and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
+
+`OSC_NOTIF_BUSY` never auto-rings because of silence. If a program starts progress and never sends completion/error, MouseTerm remains cocked until another terminal report completes/errors the progress cycle or the Session is destroyed.
+
 ### Meaningful output
 
 `Meaningful output` means terminal output that is not suppressed as incidental UI churn. In particular:
@@ -178,26 +240,38 @@ The implementation may later learn additional suppressions, but this spec only r
 
 ## Alert trigger
 
-Alert logic is driven entirely by transitions in `status`.
+Visual alert logic is driven by transitions in `visualStatus`. Protocol alert logic is driven by transitions in `protocolStatus`. The public `status` projection reflects whichever track currently has the strongest user-facing claim.
 
 ### Ringing starts when all of these are true
 
-- the Session has an active activity monitor (i.e. `status !== 'ALERT_DISABLED'`)
-- the Session transitions from `MIGHT_NEED_ATTENTION` into `ALERT_RINGING`
+- the Session has an active visual activity monitor (i.e. `visualStatus !== 'ALERT_DISABLED'`)
+- the Session's `visualStatus` transitions from `MIGHT_NEED_ATTENTION` into `ALERT_RINGING`
 - the Session does not currently have attention
+
+### Protocol override
+
+Supported terminal notification sequences from `docs/specs/iTerm2.md` may create a protocol ring. Supported `OSC 9;4` progress sequences set `protocolStatus = OSC_NOTIF_BUSY` and may later promote to `protocolStatus = ALERT_RINGING`. Protocol rings:
+
+- force public `status = ALERT_RINGING` even when the Session's activity monitor is disabled
+- obey attention suppression because the user may already be typing into or reading that Session
+- set `todo = true` and attach sanitized notification detail
+- do not enable or disable the activity monitor
+- return to `ALERT_DISABLED` after dismissal if no activity monitor was enabled before the protocol ring
 
 ### Ringing does not start when any of these are true
 
 - the Session already has attention at the moment it would otherwise enter `ALERT_RINGING`
 - the Session is merely re-rendered or reattached while already `ALERT_RINGING`
 - the only recent output was resize noise already ignored by the completion detector
-- the alert is disabled (`status === 'ALERT_DISABLED'`)
+- the visual alert track is disabled (`visualStatus === 'ALERT_DISABLED'`)
 
 This "fresh transition into `ALERT_RINGING` only" rule is critical. It prevents duplicate alerts on remount, theme change, or Pane <-> Door movement.
 
+Resize/activity-monitor suppression rules apply only to visual rings. Attention suppression applies to both visual and protocol rings.
+
 ## Alert clearing rules
 
-The Session leaves `ALERT_RINGING` and returns to `NOTHING_TO_SHOW` when any of these happen:
+For activity-monitor rings, the Session leaves `ALERT_RINGING` and returns to `NOTHING_TO_SHOW` when any of these happen:
 
 - the user attends to the Session (clicking into the Pane, typing in passthrough, restoring a Door via click/`Enter`)
 - the user dismisses the alert (clicking the ringing bell, pressing `a`)
@@ -206,9 +280,13 @@ The Session leaves `ALERT_RINGING` and returns to `NOTHING_TO_SHOW` when any of 
 
 All attention-based dismissals (the first three above) set `todo = true` if it is not already set. This prevents phantom dismissals where the alert vanishes without a trace. Once the TODO is visible, the user can clear it explicitly from the pill/dialog or by typing `Enter` as passthrough input into that Session's shell (i.e., the keystroke is forwarded to the PTY). The command-mode `Enter` that *switches into* passthrough does not clear the TODO. Synthetic terminal reports (focus events, cursor-position responses) also do not count as user input for clearing.
 
-The Session leaves `ALERT_RINGING` and returns to `ALERT_DISABLED` when:
+For protocol rings from `docs/specs/iTerm2.md`, clearing the protocol ring sets `protocolStatus = IDLE` and returns public `status` to the projected visual-track state. If no visual activity monitor was enabled before the protocol ring, the Session returns to `ALERT_DISABLED`.
 
-- the user disables alerts on that Session (disposes the activity monitor)
+The visual track leaves `ALERT_RINGING` and returns to `ALERT_DISABLED` when:
+
+- the user disables visual alerts on that Session (disposes the activity monitor)
+
+Disabling visual alerts does not clear `protocolStatus`. If `protocolStatus` is `OSC_NOTIF_BUSY` or `ALERT_RINGING`, public `status` remains protocol-driven.
 
 The Session's alert state is cleared entirely when:
 
@@ -216,9 +294,9 @@ The Session's alert state is cleared entirely when:
 
 If more output arrives later and the Session makes a fresh transition back into `ALERT_RINGING`, the alert rings again.
 
-Marking a Session as TODO resets the alert to `NOTHING_TO_SHOW` and sets `todo = true`, but it does **not** disable future alerts. `todo` and the alert toggle are separate concerns.
+Marking a Session as TODO resets an activity-monitor alert to `NOTHING_TO_SHOW` and sets `todo = true`, but it does **not** disable future alerts. `todo` and the alert toggle are separate concerns. Protocol rings preserve the same TODO behavior, with return-state details defined in `docs/specs/iTerm2.md`.
 
-Disabling alerts disposes the activity monitor and returns `status` to `ALERT_DISABLED`.
+Disabling alerts disposes the visual activity monitor and returns `visualStatus` to `ALERT_DISABLED`. Public `status` returns to `ALERT_DISABLED` only when `protocolStatus === 'IDLE'`.
 
 ## UI
 
@@ -248,6 +326,7 @@ Alert button:
   - `NOTHING_TO_SHOW`: `BellIcon` filled, muted, upright
   - `MIGHT_BE_BUSY`: `BellIcon` filled, muted, tilted slightly (-22.5°)
   - `BUSY`: `BellIcon` filled, muted, tilted 45°
+  - `OSC_NOTIF_BUSY`: same visual treatment as `BUSY`
   - `MIGHT_NEED_ATTENTION`: `BellIcon` filled, muted, tilted 60°
   - `ALERT_RINGING`: `BellIcon` filled, warning color, rocking animation (±45° bell-ring keyframe); reduced-motion: static 45° tilt
 - escalation is conveyed by increasing tilt angle, not by a separate badge element
@@ -258,6 +337,7 @@ Interaction (`dismissOrToggleAlert` state machine):
 - left-click the bell while `ALERT_DISABLED`: enables the alert (creates activity monitor)
 - left-click the bell while `ALERT_RINGING`: dismisses the alert, creates a TODO if none exists, then opens the context menu anchored below the button
 - left-click the bell after an attention-based dismissal (`attentionDismissedRing` is set): clears the flag and opens the context menu. This lets the user access TODO/disable options after attending to a ringing Session without requiring a right-click.
+- left-click the bell while `OSC_NOTIF_BUSY`: does not clear protocol progress. If the visual track is enabled, disables only the visual track; if the visual track is disabled, opens the context menu.
 - left-click the bell in any other enabled state: disables the alert (destroys activity monitor)
 - pressing `a` on a selected Pane in command mode: same as left-click
 - right-click the bell (any state): opens a context menu with:
@@ -278,6 +358,7 @@ Door indicators:
 - show TODO pill when `todo === true`
 - if `status === 'ALERT_RINGING'`, the Door bell icon uses warning color and the same rocking animation as the Pane header
 - the Door bell icon shows the same tilt angles as the Pane header for escalation states
+- `OSC_NOTIF_BUSY` uses the same Door bell treatment as `BUSY`
 
 Door interaction:
 
