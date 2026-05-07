@@ -213,7 +213,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
             type="button"
             data-session-todo-for={api.id}
             data-flourishing={todoPill.flourishing ? 'true' : 'false'}
-            className={`todo-pill-shell shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10`}
+            className={`todo-pill-shell shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10 focus:outline-none`}
             aria-label={todoNotificationPreview ? `Dismiss TODO: ${todoNotificationPreview}` : 'Dismiss TODO'}
             aria-describedby={todoPreviewRect && activity.notification ? todoPreviewId : undefined}
             aria-hidden={todoPill.flourishing ? true : undefined}
