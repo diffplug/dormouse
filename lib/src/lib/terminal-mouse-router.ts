@@ -1,4 +1,4 @@
-import { Terminal } from '@xterm/xterm';
+import type { Terminal } from '@xterm/xterm';
 import {
   beginDrag,
   endDrag,
@@ -12,6 +12,26 @@ import {
 import { detectTokenAt } from './smart-token';
 import { extractSelectionText } from './selection-text';
 import type { TerminalOverlayDims } from './terminal-store';
+
+function consumeMouseEvent(ev: MouseEvent, stopImmediate = false): void {
+  ev.preventDefault();
+  ev.stopPropagation();
+  if (stopImmediate) ev.stopImmediatePropagation();
+}
+
+function stateRequiresNativeMouseSuppression(state: ReturnType<typeof getMouseSelectionState>): boolean {
+  return state.mouseReporting !== 'none'
+    && (state.override !== 'off' || state.selection?.startedInScrollback === true);
+}
+
+function clearTemporaryOverrideAfterMouseDispatch(id: string): void {
+  if (getMouseSelectionState(id).override !== 'temporary') return;
+  queueMicrotask(() => {
+    if (getMouseSelectionState(id).override === 'temporary') {
+      setOverride(id, 'off');
+    }
+  });
+}
 
 export function attachTerminalMouseRouter({
   id,
@@ -47,12 +67,13 @@ export function attachTerminalMouseRouter({
     col: number;
     altKey: boolean;
     startedInScrollback: boolean;
+    button: number;
     clientX: number;
     clientY: number;
+    suppressNativeMouse: boolean;
   } | null = null;
 
   const onMouseDown = (ev: MouseEvent) => {
-    if (ev.button !== 0) return;
     const state = getMouseSelectionState(id);
     const cell = computeCell(ev);
     const terminalOwns =
@@ -60,18 +81,34 @@ export function attachTerminalMouseRouter({
       || state.override !== 'off'
       || cell.startedInScrollback;
     if (!terminalOwns) return;
+    const suppressNativeMouse = state.mouseReporting !== 'none';
+    if (suppressNativeMouse) {
+      consumeMouseEvent(ev, true);
+      terminal.focus();
+    }
+    if (ev.button !== 0 && !suppressNativeMouse) return;
     pendingDrag = {
       row: cell.row,
       col: cell.col,
       altKey: ev.altKey,
       startedInScrollback: cell.startedInScrollback,
+      button: ev.button,
       clientX: ev.clientX,
       clientY: ev.clientY,
+      suppressNativeMouse,
     };
+  };
+
+  const onOverrideMouseEvent = (ev: MouseEvent) => {
+    const state = getMouseSelectionState(id);
+    if (state.mouseReporting === 'none' || state.override === 'off') return;
+    consumeMouseEvent(ev, true);
   };
 
   const onWindowMouseMove = (ev: MouseEvent) => {
     if (pendingDrag) {
+      if (pendingDrag.suppressNativeMouse) consumeMouseEvent(ev, true);
+      if (pendingDrag.button !== 0) return;
       const dx = ev.clientX - pendingDrag.clientX;
       const dy = ev.clientY - pendingDrag.clientY;
       if (dx * dx + dy * dy < DRAG_THRESHOLD_PX_SQ) return;
@@ -85,10 +122,10 @@ export function attachTerminalMouseRouter({
       pendingDrag = null;
     }
     if (!isDragging(id)) return;
+    const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
     const cell = computeCell(ev);
     updateDrag(id, { row: cell.row, col: cell.col, altKey: ev.altKey });
-    ev.preventDefault();
-    ev.stopPropagation();
+    consumeMouseEvent(ev, suppressNativeMouse);
 
     const line = terminal.buffer.active.getLine(cell.row);
     const text = line?.translateToString(false, 0, terminal.cols);
@@ -103,24 +140,24 @@ export function attachTerminalMouseRouter({
   };
 
   const onWindowMouseUp = (ev: MouseEvent) => {
-    if (ev.button !== 0) return;
     if (pendingDrag) {
-      if (getMouseSelectionState(id).override === 'temporary') {
-        setOverride(id, 'off');
-      }
+      if (pendingDrag.suppressNativeMouse) consumeMouseEvent(ev, true);
+      if (ev.button !== pendingDrag.button) return;
+      clearTemporaryOverrideAfterMouseDispatch(id);
       pendingDrag = null;
       return;
     }
+    if (ev.button !== 0) return;
     if (!isDragging(id)) return;
+    const state = getMouseSelectionState(id);
+    const shouldClearTemporaryOverride = state.override === 'temporary';
+    const suppressNativeMouse = stateRequiresNativeMouseSuppression(state);
     endDrag(id);
     setHintToken(id, null);
     const sel = getMouseSelectionState(id).selection;
     setSelectionBaseline(sel ? extractSelectionText(terminal, sel) : null);
-    if (getMouseSelectionState(id).override === 'temporary') {
-      setOverride(id, 'off');
-    }
-    ev.preventDefault();
-    ev.stopPropagation();
+    if (shouldClearTemporaryOverride) clearTemporaryOverrideAfterMouseDispatch(id);
+    consumeMouseEvent(ev, suppressNativeMouse);
   };
 
   const onAltChange = (ev: KeyboardEvent) => {
@@ -129,6 +166,12 @@ export function attachTerminalMouseRouter({
   };
 
   element.addEventListener('mousedown', onMouseDown, true);
+  element.addEventListener('mousemove', onOverrideMouseEvent, true);
+  element.addEventListener('mouseup', onOverrideMouseEvent, true);
+  element.addEventListener('click', onOverrideMouseEvent, true);
+  element.addEventListener('dblclick', onOverrideMouseEvent, true);
+  element.addEventListener('auxclick', onOverrideMouseEvent, true);
+  element.addEventListener('contextmenu', onOverrideMouseEvent, true);
   window.addEventListener('mousemove', onWindowMouseMove, true);
   window.addEventListener('mouseup', onWindowMouseUp, true);
   window.addEventListener('keydown', onAltChange, true);
@@ -136,6 +179,12 @@ export function attachTerminalMouseRouter({
 
   return () => {
     element.removeEventListener('mousedown', onMouseDown, true);
+    element.removeEventListener('mousemove', onOverrideMouseEvent, true);
+    element.removeEventListener('mouseup', onOverrideMouseEvent, true);
+    element.removeEventListener('click', onOverrideMouseEvent, true);
+    element.removeEventListener('dblclick', onOverrideMouseEvent, true);
+    element.removeEventListener('auxclick', onOverrideMouseEvent, true);
+    element.removeEventListener('contextmenu', onOverrideMouseEvent, true);
     window.removeEventListener('mousemove', onWindowMouseMove, true);
     window.removeEventListener('mouseup', onWindowMouseUp, true);
     window.removeEventListener('keydown', onAltChange, true);

@@ -21,6 +21,7 @@ import {
   inputContainsEnter,
   inputIsReplayTerminalReport,
   inputIsSyntheticTerminalReport,
+  stripMouseReportsFromInput,
   writeReplay,
 } from './terminal-report-filter';
 import { getTerminalTheme, paintTerminalHost, startThemeObserver } from './terminal-theme';
@@ -76,20 +77,26 @@ function wireXtermHandlers(
   selectionBaselineRef: { current: string | null },
 ): () => void {
   const inputDisposable = terminal.onData((data) => {
-    const isSyntheticTerminalReport = inputIsSyntheticTerminalReport(data);
+    let input = data;
+    if (getMouseSelectionState(id).override !== 'off') {
+      input = stripMouseReportsFromInput(input);
+      if (input.length === 0) return;
+    }
 
-    if (inputIsReplayTerminalReport(data) && registry.get(id)?.isReplaying) return;
+    const isSyntheticTerminalReport = inputIsSyntheticTerminalReport(input);
+
+    if (inputIsReplayTerminalReport(input) && registry.get(id)?.isReplaying) return;
 
     if (!isSyntheticTerminalReport) {
       const entry = registry.get(id);
       const hadTodo = entry?.todo === true;
       getPlatform().alertAttend(id);
-      if (hadTodo && inputContainsEnter(data)) {
+      if (hadTodo && inputContainsEnter(input)) {
         getPlatform().alertClearTodo(id);
       }
     }
 
-    getPlatform().writePty(id, data);
+    getPlatform().writePty(id, input);
   });
 
   const resizeDisposable = terminal.onResize(({ cols, rows }) => {
