@@ -53,11 +53,15 @@ const tabVariant = tv({
 
 type HeaderTier = 'full' | 'compact' | 'minimal';
 
-const ALERT_BUTTON_DEFAULT = { aria: 'Disable alert', tooltip: '[a] Disable alerts' };
-const ALERT_BUTTON_LABELS: Partial<Record<SessionStatus, { aria: string; tooltip: string }>> = {
+const ALERT_BUTTON_ENABLED = { aria: 'Disable alert', tooltip: '[a] Disable alerts' };
+const ALERT_BUTTON_LABELS: Record<SessionStatus, { aria: string; tooltip: string }> = {
+  ALERT_DISABLED: { aria: 'Enable alert', tooltip: '[a] Enable alerts' },
+  NOTHING_TO_SHOW: ALERT_BUTTON_ENABLED,
+  MIGHT_BE_BUSY: ALERT_BUTTON_ENABLED,
+  BUSY: ALERT_BUTTON_ENABLED,
+  MIGHT_NEED_ATTENTION: ALERT_BUTTON_ENABLED,
   ALERT_RINGING: { aria: 'Alert ringing', tooltip: 'Alert ringing' },
   OSC_NOTIF_BUSY: { aria: 'Progress active', tooltip: 'Progress active' },
-  ALERT_DISABLED: { aria: 'Enable alert', tooltip: '[a] Enable alerts' },
 };
 
 export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
@@ -89,7 +93,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
   const [dialogTriggerRect, setDialogTriggerRect] = useState<DOMRect | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
   const showTodoPill = todoPill.visible && tier !== 'minimal';
-  const alertButtonLabels = ALERT_BUTTON_LABELS[activity.status] ?? ALERT_BUTTON_DEFAULT;
+  const alertButtonLabels = ALERT_BUTTON_LABELS[activity.status];
   const alertButtonAriaLabel = alertButtonLabels.aria;
   const alertButtonTooltip = alertButtonLabels.tooltip;
   const alertButtonTooltipDetail = activity.status === 'ALERT_RINGING'

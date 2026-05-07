@@ -77,8 +77,8 @@ export class TerminalProtocolParser {
       index = terminator.end;
     }
 
-    const result = stripDeviceAttributeQueries(visibleData, events);
-    return { visibleData: result.visibleData, events: filterTerminalBellEvents(result.events) };
+    const stripped = stripDeviceAttributeQueries(visibleData, events);
+    return { visibleData: stripped, events: filterTerminalBellEvents(events) };
   }
 
   reset(): void {
@@ -208,21 +208,29 @@ export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]
 }
 
 function stripStandaloneBells(segment: string, events: TerminalProtocolEvent[]): string {
-  if (!segment.includes('\x07')) return segment;
+  const bellIndex = segment.indexOf('\x07');
+  if (bellIndex === -1) return segment;
   events.push({ kind: 'notification', notification: TERMINAL_BELL_NOTIFICATION });
   return segment.replace(/\x07/g, '');
 }
 
 function filterTerminalBellEvents(events: TerminalProtocolEvent[]): TerminalProtocolEvent[] {
-  const hasRicherAlertEvent = events.some((event) => {
-    if (event.kind === 'progress') return true;
-    return event.kind === 'notification' && event.notification.source !== 'BEL';
-  });
+  if (events.length === 0) return events;
+  let bellCount = 0;
+  let hasRicher = false;
+  for (const event of events) {
+    if (event.kind === 'progress') hasRicher = true;
+    else if (event.kind === 'notification') {
+      if (event.notification.source === 'BEL') bellCount += 1;
+      else hasRicher = true;
+    }
+  }
+  if (bellCount === 0) return events;
+  if (!hasRicher && bellCount === 1) return events;
   let keptBell = false;
   return events.filter((event) => {
     if (event.kind !== 'notification' || event.notification.source !== 'BEL') return true;
-    if (hasRicherAlertEvent) return false;
-    if (keptBell) return false;
+    if (hasRicher || keptBell) return false;
     keptBell = true;
     return true;
   });
@@ -239,15 +247,16 @@ function findNextOsc(text: string, from: number): { index: number; contentStart:
 }
 
 function findOscTerminator(text: string, from: number): { index: number; end: number } | null {
-  const candidates = [
-    { index: text.indexOf('\x07', from), endOffset: 1 },
-    { index: text.indexOf('\x1b\\', from), endOffset: 2 },
-    { index: text.indexOf('\x9c', from), endOffset: 1 },
-  ].filter((candidate) => candidate.index !== -1);
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => a.index - b.index);
-  const first = candidates[0];
-  return { index: first.index, end: first.index + first.endOffset };
+  const bel = text.indexOf('\x07', from);
+  const st = text.indexOf('\x1b\\', from);
+  const c1St = text.indexOf('\x9c', from);
+  let bestIndex = -1;
+  let bestEndOffset = 1;
+  if (bel !== -1) { bestIndex = bel; bestEndOffset = 1; }
+  if (st !== -1 && (bestIndex === -1 || st < bestIndex)) { bestIndex = st; bestEndOffset = 2; }
+  if (c1St !== -1 && (bestIndex === -1 || c1St < bestIndex)) { bestIndex = c1St; bestEndOffset = 1; }
+  if (bestIndex === -1) return null;
+  return { index: bestIndex, end: bestIndex + bestEndOffset };
 }
 
 // OSC 9;4 state code → progress shape. Codes 1 and 4 require a percent
@@ -312,19 +321,11 @@ function normalizeOsc99ResponseId(id: string | null): string | null {
 function decodeBase64(input: string): string | null {
   const normalized = input.trim();
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(normalized) || normalized.length % 4 === 1) return null;
-
   try {
-    const atobFn = (globalThis as { atob?: (value: string) => string }).atob;
-    if (typeof atobFn === 'function') {
-      const binary = atobFn(normalized);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-      return new TextDecoder().decode(bytes);
-    }
-
-    const bufferCtor = (globalThis as { Buffer?: { from(value: string, encoding: 'base64'): Uint8Array } }).Buffer;
-    if (!bufferCtor) return null;
-    return new TextDecoder().decode(bufferCtor.from(normalized, 'base64'));
+    const binary = atob(normalized);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
   } catch {
     return null;
   }
@@ -348,13 +349,11 @@ function truncateText(input: string, limit: number): string {
   return Array.from(input).slice(0, limit).join('');
 }
 
-function stripDeviceAttributeQueries(
-  visibleData: string,
-  events: TerminalProtocolEvent[],
-): TerminalProtocolParseResult {
+function stripDeviceAttributeQueries(visibleData: string, events: TerminalProtocolEvent[]): string {
+  if (visibleData.indexOf('\x1b[>q') === -1 && visibleData.indexOf('\x9b>q') === -1) return visibleData;
+
   let stripped = '';
   let index = 0;
-
   while (index < visibleData.length) {
     const escQueryIndex = visibleData.indexOf('\x1b[>q', index);
     const c1QueryIndex = visibleData.indexOf('\x9b>q', index);
@@ -362,13 +361,11 @@ function stripDeviceAttributeQueries(
       stripped += visibleData.slice(index);
       break;
     }
-
     const useEsc = escQueryIndex !== -1 && (c1QueryIndex === -1 || escQueryIndex < c1QueryIndex);
     const queryIndex = useEsc ? escQueryIndex : c1QueryIndex;
     stripped += visibleData.slice(index, queryIndex);
     events.push({ kind: 'response', data: ITERM2_DEVICE_ATTRIBUTES_RESPONSE });
     index = queryIndex + (useEsc ? 4 : 3);
   }
-
-  return { visibleData: stripped, events };
+  return stripped;
 }

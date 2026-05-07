@@ -134,20 +134,11 @@ export class AlertManager {
     if (!normalized) return;
 
     if (this.hasAttention(id)) {
-      if (entry.protocolStatus === 'ALERT_RINGING') {
-        entry.protocolStatus = 'IDLE';
-        entry.progress = null;
-        this.notify(id);
-      }
+      if (this.clearProtocolProgress(entry)) this.notify(id);
       return;
     }
 
-    entry.notification = normalized;
-    entry.todo = true;
-    entry.protocolStatus = 'ALERT_RINGING';
-    entry.progress = null;
-    entry.attentionDismissedRing = false;
-    this.notify(id);
+    this.setProtocolRinging(id, entry, normalized);
   }
 
   updateProtocolProgress(id: string, progress: ProtocolProgressUpdate): void {
@@ -160,10 +151,7 @@ export class AlertManager {
     }
 
     if (progress.state === 'error') {
-      this.ringOrSuppressProtocolProgress(id, entry, {
-        title: 'Progress error',
-        progress: { percent: progress.percent },
-      });
+      this.ringOrSuppressProtocolProgress(id, entry, 'Progress error', progress.percent);
       return;
     }
 
@@ -175,6 +163,15 @@ export class AlertManager {
       return;
     }
 
+    if (
+      entry.protocolStatus === 'OSC_NOTIF_BUSY'
+      && !entry.attentionDismissedRing
+      && entry.progress?.state === progress.state
+      && entry.progress?.percent === progress.percent
+    ) {
+      return;
+    }
+
     entry.progress = { state: progress.state, percent: progress.percent };
     entry.protocolStatus = 'OSC_NOTIF_BUSY';
     entry.attentionDismissedRing = false;
@@ -183,25 +180,29 @@ export class AlertManager {
 
   private completeProtocolProgress(id: string, entry: AlertEntry, progress: ActiveProtocolProgress): void {
     const title = progress.state === 'warning' ? 'Progress warning' : 'Progress complete';
-    this.ringOrSuppressProtocolProgress(id, entry, { title, progress });
+    this.ringOrSuppressProtocolProgress(id, entry, title, progress.percent);
   }
 
   private ringOrSuppressProtocolProgress(
     id: string,
     entry: AlertEntry,
-    detail: { title: string; progress: Pick<ActiveProtocolProgress, 'percent'> },
+    title: string,
+    percent: number | null,
   ): void {
     if (this.hasAttention(id)) {
-      this.clearProtocolProgressAndRing(entry);
+      this.clearProtocolProgress(entry);
       this.notify(id);
       return;
     }
-
-    entry.notification = {
+    this.setProtocolRinging(id, entry, {
       source: 'OSC 9;4',
-      title: detail.title,
-      body: detail.progress.percent === null ? null : `Progress ${Math.round(detail.progress.percent)}%`,
-    };
+      title,
+      body: percent === null ? null : `Progress ${Math.round(percent)}%`,
+    });
+  }
+
+  private setProtocolRinging(id: string, entry: AlertEntry, notification: ActivityNotification): void {
+    entry.notification = notification;
     entry.todo = true;
     entry.protocolStatus = 'ALERT_RINGING';
     entry.progress = null;
@@ -209,9 +210,18 @@ export class AlertManager {
     this.notify(id);
   }
 
-  private clearProtocolProgressAndRing(entry: AlertEntry): void {
+  private clearProtocolRingIfActive(entry: AlertEntry): boolean {
+    if (entry.protocolStatus !== 'ALERT_RINGING') return false;
     entry.protocolStatus = 'IDLE';
     entry.progress = null;
+    return true;
+  }
+
+  private clearProtocolProgress(entry: AlertEntry): boolean {
+    if (entry.protocolStatus === 'IDLE' && entry.progress === null) return false;
+    entry.protocolStatus = 'IDLE';
+    entry.progress = null;
+    return true;
   }
 
   // --- Attention tracking ---
@@ -315,13 +325,8 @@ export class AlertManager {
     const entry = this.entries.get(id);
     if (!entry) return;
 
-    let dismissed = false;
-    if (entry.protocolStatus === 'ALERT_RINGING') {
-      entry.todo = true;
-      entry.protocolStatus = 'IDLE';
-      entry.progress = null;
-      dismissed = true;
-    }
+    const dismissed = this.clearProtocolRingIfActive(entry);
+    if (dismissed) entry.todo = true;
 
     if (entry.monitor?.getStatus() === 'ALERT_RINGING') {
       entry.todo = true;
@@ -380,18 +385,12 @@ export class AlertManager {
 
     if (!nextTodo) {
       entry.notification = null;
-      if (entry.protocolStatus === 'ALERT_RINGING') {
-        entry.protocolStatus = 'IDLE';
-        entry.progress = null;
-      }
+      this.clearProtocolRingIfActive(entry);
       this.notify(id);
       return;
     }
 
-    if (entry.protocolStatus === 'ALERT_RINGING') {
-      entry.protocolStatus = 'IDLE';
-      entry.progress = null;
-    }
+    this.clearProtocolRingIfActive(entry);
     if (entry.monitor?.getStatus() === 'ALERT_RINGING') {
       entry.monitor.attend();
       return; // onChange fires → notify
@@ -401,15 +400,12 @@ export class AlertManager {
 
   markTodo(id: string): void {
     const entry = this.getOrCreateEntry(id);
-    const isProtocolRinging = entry.protocolStatus === 'ALERT_RINGING';
     const isVisualRinging = entry.monitor?.getStatus() === 'ALERT_RINGING';
-    if (entry.todo && !isProtocolRinging && !isVisualRinging) return;
+    const wasProtocolRinging = entry.protocolStatus === 'ALERT_RINGING';
+    if (entry.todo && !wasProtocolRinging && !isVisualRinging) return;
 
     entry.todo = true;
-    if (isProtocolRinging) {
-      entry.protocolStatus = 'IDLE';
-      entry.progress = null;
-    }
+    this.clearProtocolRingIfActive(entry);
     if (isVisualRinging) {
       entry.monitor!.attend();
       return; // onChange fires → notify
@@ -422,10 +418,7 @@ export class AlertManager {
     if (!entry.todo) return;
     entry.todo = false;
     entry.notification = null;
-    if (entry.protocolStatus === 'ALERT_RINGING') {
-      entry.protocolStatus = 'IDLE';
-      entry.progress = null;
-    }
+    this.clearProtocolRingIfActive(entry);
     this.notify(id);
   }
 
