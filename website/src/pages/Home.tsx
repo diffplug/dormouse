@@ -9,7 +9,7 @@ import {
   TerminalIcon,
   WindowsLogoIcon,
 } from "@phosphor-icons/react";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEventHandler, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEventHandler, type ReactNode } from "react";
 import SiteHeader from "../components/SiteHeader";
 import posterUrl from "../assets/video-climb-blink-and-stare.webp";
 import videoUrl from "../assets/video-climb-blink-and-stare.mp4";
@@ -18,6 +18,7 @@ import copyPasteVideoUrl from "../assets/video-copy-paste.mp4";
 import tmuxVideoUrl from "../assets/video-tmux.mp4";
 import visualStudioIconUrl from "../assets/visual-studio-icon.svg";
 import tinyIconUrl from "../assets/icon-tiny-dark.png";
+import phoneMockupUrl from "../assets/phone-mockup.webp";
 import standaloneLatest from "@standalone-latest";
 
 export { Home as Component };
@@ -36,6 +37,9 @@ const HEADER_REVEAL_LEAD = 0.04;
  *  The video keeps scrubbing underneath. */
 const UNPIN_THRESHOLD = 0.8;
 const HERO_VIDEO_FPS = 120;
+
+/** Vertical padding applied to all content sections after the hero. */
+const SECTION_PY = "py-8";
 
 /** Clamp a value to 0–1. */
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
@@ -240,6 +244,89 @@ function DownloadGroupHeader({
       </span>
       <h3 className="font-display text-xl text-[var(--color-text)]">{children}</h3>
     </div>
+  );
+}
+
+const EMAIL_REGEX =
+  /^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+
+function NotifySignupForm() {
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (loading) return;
+
+    if (!EMAIL_REGEX.test(email)) {
+      setMessage("Please enter a valid email");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const response = await fetch("https://substackapi.com/api/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          domain: "https://nedshed.dev/",
+        }),
+      });
+      const data = await response.json();
+
+      if (data.errors) {
+        setMessage(data.errors[0].msg);
+      } else if (data.requires_confirmation) {
+        setSuccess(true);
+      }
+    } catch {
+      setMessage("Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (success) {
+    return (
+      <p className="text-lg leading-relaxed text-[var(--color-caramel)]">
+        Thanks — check your email to confirm your subscription.
+      </p>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+        <input
+          type="email"
+          name="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+          required
+          disabled={loading}
+          aria-label="Email address"
+          className="min-h-12 w-full rounded-md border border-[var(--color-text)]/20 bg-[var(--color-bg)] px-4 py-3 text-base text-[var(--color-text)] placeholder:opacity-40 focus:border-[var(--color-caramel)] focus:outline-none disabled:opacity-50 sm:flex-1"
+        />
+        <button
+          type="submit"
+          disabled={loading}
+          className="min-h-12 inline-flex items-center justify-center rounded-md border border-[var(--color-caramel)] bg-[var(--color-caramel)]/15 px-6 py-3 text-base font-display text-[var(--color-caramel)] transition hover:bg-[var(--color-caramel)]/25 disabled:opacity-50 sm:w-auto"
+        >
+          {loading ? "Subscribing..." : "Notify me when it's ready"}
+        </button>
+      </div>
+      {message && (
+        <p className="text-sm text-red-400" role="alert">
+          {message}
+        </p>
+      )}
+    </form>
   );
 }
 
@@ -672,7 +759,7 @@ function Home() {
 
       {/* ── Content sections — pulled up to appear as video starts scrolling ── */}
       <div className="relative z-10 bg-[var(--color-bg)]" style={{ marginTop: `-${(1 - UNPIN_THRESHOLD) * RUNWAY_VH}vh` }}>
-        <section id="features" className="mx-auto max-w-2xl px-4 md:px-6 py-20">
+        <section id="features" className={`mx-auto max-w-2xl px-4 md:px-6 ${SECTION_PY}`}>
           <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">Stop watching terminals spin</h2>
           <p className="text-lg leading-relaxed opacity-70 mb-4">
             MouseTerm tracks activity the same way you do — visual motion. When a
@@ -687,7 +774,7 @@ function Home() {
         </section>
 
         {/* Section 2: text left, image right */}
-        <section className="mx-auto max-w-5xl px-4 md:px-6 py-12 grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start">
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
           <div>
             <h2 className="font-display text-xl mb-6">Copy paste like you meant</h2>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
@@ -705,7 +792,7 @@ function Home() {
         </section>
 
         {/* Section 3: image left, text right */}
-        <section className="mx-auto max-w-5xl px-4 md:px-6 py-12 grid md:grid-cols-[3fr_2fr] gap-8 md:gap-12 items-start">
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[3fr_2fr] gap-8 md:gap-12 items-start`}>
           <FeatureVideo src={tmuxVideoUrl} className="order-2 md:order-1" />
           <div className="order-1 md:order-2">
             <h2 className="font-display text-xl mb-6">Soft as a mouse, sharp as tmux</h2>
@@ -722,7 +809,7 @@ function Home() {
           </div>
         </section>
 
-        <section id="download" className="mx-auto max-w-5xl px-4 py-20 md:px-6" style={downloadAccentStyle}>
+        <section id="download" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`} style={downloadAccentStyle}>
           <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">Get MouseTerm</h2>
           <p className="mb-4 text-lg leading-relaxed opacity-70">The multitasking terminal for mice.</p>
           <DownloadButton
@@ -817,15 +904,38 @@ function Home() {
           </div>
         </section>
 
+        <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} border-t border-[var(--color-text)]/10 grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
+          <img
+            src={phoneMockupUrl}
+            alt="MouseTerm Playground running on a phone"
+            className="order-2 md:order-1 block w-full max-w-[280px] mx-auto md:max-w-none"
+          />
+          <div className="order-1 md:order-2">
+            <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] mb-6">
+              Take one for the road
+            </h2>
+            <p className="mb-4 text-lg leading-relaxed opacity-70">
+              Coming next: <span className="text-[var(--color-caramel)]">Roam</span>. Pair a
+              terminal session to your phone over WebRTC and take a stroll, the MouseTerm alert
+              system will buzz you if there's anything to do. A hosted auto-pairing service comes
+              later — just leave and keep working, no "I'm walking away" dance.
+            </p>
+            <p className="mb-6 text-lg leading-relaxed opacity-70">
+              Subscribe below to <a href="https://nedshed.dev" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">nedshed.dev</a> — my dev log. Roam launches there first. When the hosted service is ready, we'll do discounts for early adopters, so don't miss out!
+            </p>
+            <NotifySignupForm />
+          </div>
+        </section>
+
         <footer className="border-t border-[var(--color-text)]/20 py-10">
           <div className="mx-auto max-w-2xl px-4 md:px-6 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm opacity-50">
             <a href="/dependencies" className="underline hover:opacity-100">Dependencies</a>
             <a href="https://github.com/diffplug/mouseterm/issues" className="underline hover:opacity-100">Report an issue</a>
             <p>
-              Brought to you by{" "}
+              Built by{" "}
               <a href="https://nedshed.dev" className="underline hover:opacity-100">nedshed.dev</a>
-              {" "}and{" "}
-              <a href="https://diffplug.com" className="underline hover:opacity-100">DiffPlug</a>
+              {" "}(the labs division of{" "}
+              <a href="https://diffplug.com" className="underline hover:opacity-100">DiffPlug LLC</a>)
             </p>
           </div>
         </footer>
