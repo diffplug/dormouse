@@ -10,8 +10,9 @@ MouseTerm should be compatible with applications that look for iTerm2-style term
 - `OSC 9;4` iTerm2 progress form
 - `OSC 99` kitty desktop notification protocol
 - `OSC 777` rxvt / WezTerm `notify` form
+- standalone terminal `BEL` (`\x07`) for tools that choose a terminal-bell notification channel
 
-Notification sequences are explicit application requests for attention. They bypass the normal opt-in activity monitor. If a Session receives a complete displayable notification sequence, the Session may ring even when its alert toggle was disabled. It must not ring while the user is actively attending that Session.
+Notification sequences and standalone terminal bells are explicit application requests for attention. They bypass the normal opt-in activity monitor. If a Session receives a complete displayable notification sequence or a standalone `BEL`, the Session may ring even when its alert toggle was disabled. It must not ring while the user is actively attending that Session.
 
 Progress sequences do not ring immediately. They "cock" the alarm bell: MouseTerm treats active progress as an explicit finite-work cycle, exposes `OSC_NOTIF_BUSY`, and rings when the progress cycle completes or enters an error state.
 
@@ -45,14 +46,27 @@ Because this identity can cause tools to emit more iTerm2 escape codes, unsuppor
 
 ## Supported Protocols
 
-All three notification families use OSC sequences introduced by `ESC ]`. MouseTerm must accept either `BEL` (`\x07`) or `ST` (`ESC \`) terminators for these notification families.
+The OSC notification families use sequences introduced by `ESC ]`. MouseTerm must accept either `BEL` (`\x07`) or `ST` (`ESC \`) terminators for these notification families. A `BEL` that terminates an OSC is part of that OSC sequence, not a standalone bell notification.
 
 | Protocol | Shape | Fields | Notes |
 |---|---|---|---|
+| `BEL` | `BEL` outside an OSC sequence | none | Generic terminal-bell notification. |
 | `OSC 9` | `OSC 9 ; [message] ST` | `message` | iTerm2's legacy notification form. No title/body split. |
 | `OSC 9;4` | `OSC 9 ; 4 ; [state] ; [progress] ST` or `OSC 9 ; 4 ST` | progress state/progress | Progress only. Cocks the bell and may later ring on completion/error. |
 | `OSC 99` | `OSC 99 ; [metadata] ; [payload] ST` | metadata keys plus payload | kitty's rich notification protocol. Chunked and extensible. |
 | `OSC 777` | `OSC 777 ; notify ; [title] ; [body] ST` | `title`, `body` | rxvt/WezTerm notification form. Only `notify` is supported. |
+
+### Standalone BEL
+
+A `BEL` byte outside an OSC sequence creates one generated notification:
+
+- `source: 'BEL'`
+- `title: 'Terminal bell'`
+- `body: null`
+
+Standalone `BEL` is for compatibility with tools that choose a plain terminal-bell notification channel. It strips the bell byte from visible terminal output and rings through the same protocol path as OSC notifications, subject to the shared user-attention check.
+
+If a parse batch contains both standalone `BEL` and a richer OSC notification/progress event, MouseTerm keeps the richer OSC event and drops the generic `BEL` notification detail so `iterm2_with_bell`-style tools cannot overwrite useful TODO preview text.
 
 ### OSC 9
 
@@ -146,8 +160,9 @@ For a completed OSC 99 notification:
 
 Support query:
 
-- `OSC 99 ; i=[id] : p=? ; ST` may be answered with MouseTerm's actual support.
-- Initial minimal response should advertise only `title` and `body`, for example: `OSC 99 ; i=[id] : p=? ; o=always:p=title,body ST`.
+- `OSC 99 ; i=[id] : p=? ; ST` must be answered with MouseTerm's actual support.
+- Initial minimal response advertises only `title` and `body`, for example: `OSC 99 ; i=[id] : p=? ; o=always:p=title,body ST`.
+- Preserve a valid query id in the response metadata. If the id is missing or cannot be safely echoed in OSC 99 metadata, omit `i=[id]` and respond with `OSC 99 ; p=? ; o=always:p=title,body ST`.
 - Do not advertise click reports, close reports, urgency, sounds, icons, buttons, or auto-expiry unless implemented end-to-end.
 
 ## Normalized Data Model
@@ -155,7 +170,7 @@ Support query:
 Protocol notifications are normalized before they touch UI. Keep this shape intentionally small: these are only fields MouseTerm plans to render.
 
 ```typescript
-type ActivityNotificationSource = 'OSC 9' | 'OSC 9;4' | 'OSC 99' | 'OSC 777';
+type ActivityNotificationSource = 'OSC 9' | 'OSC 9;4' | 'OSC 99' | 'OSC 777' | 'BEL';
 
 interface ActivityNotification {
   source: ActivityNotificationSource;
@@ -182,6 +197,7 @@ Mapping rules:
 - `OSC 777` stores `{ source: 'OSC 777', title, body }`.
 - `OSC 99` stores `{ source: 'OSC 99', title, body }` after chunk assembly and sanitization.
 - `OSC 9;4` stores nothing while progress is active. On completion/error it generates `{ source: 'OSC 9;4', title, body }`, where `title` is a short summary such as `Progress complete`, `Progress error`, or `Progress warning`, and `body` contains the percent when available.
+- Standalone `BEL` stores `{ source: 'BEL', title: 'Terminal bell', body: null }`.
 
 Persistence:
 
@@ -275,7 +291,7 @@ Preview content:
 - Primary line: title if present, otherwise the first body excerpt.
 - Body: clamp to 3 lines in a hover preview.
 - For generated `OSC 9;4` notifications, title/body already contain the progress summary; no separate progress object is rendered.
-- Footer metadata: protocol source (`OSC 9`, `OSC 9;4`, `OSC 99`, `OSC 777`).
+- Footer metadata: protocol source (`OSC 9`, `OSC 9;4`, `OSC 99`, `OSC 777`, `BEL`).
 
 A full detail dialog/popover may be opened from the preview or existing alert context menu:
 
@@ -371,11 +387,13 @@ Requirements:
 - `OSC 9;4;2` rings immediately with indeterminate error detail.
 - `OSC 9;4;0` rings as completion only if there was an active progress cycle.
 - `OSC 9;4;1;100` rings immediately as an explicit completion report.
+- Standalone `BEL` rings and stores generated terminal-bell detail.
 - `OSC 777;notify;title;body` rings and stores title/body.
 - Unsupported `OSC 777` subcommands are ignored.
 - OSC 99 `d=0` chunks do not ring before completion.
 - OSC 99 `d=1` completion rings once with combined title/body.
-- OSC 99 `p=?`, `p=close`, `p=alive`, `p=icon`, and `p=buttons` do not ring by themselves.
+- OSC 99 `p=?` is answered and does not ring; `p=close`, `p=alive`, `p=icon`, and `p=buttons` do not ring by themselves.
+- Extra standalone `BEL` in the same parse batch as a richer OSC event does not replace the richer notification detail.
 - Protocol notifications ring with alert disabled.
 - Protocol notifications do not ring when the Session has attention.
 - Dismissal returns an alert-disabled Session to `ALERT_DISABLED`.

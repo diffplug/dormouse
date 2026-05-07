@@ -23,14 +23,17 @@ interface Osc99PendingNotification {
 
 const OSC_INCOMPLETE_LIMIT = 16_384;
 const NO_EVENTS: readonly TerminalProtocolEvent[] = Object.freeze([]);
-// OSC introducers (ESC ] / 0x9D) and the iTerm2 extended-DA query (ESC [ > q / 0x9B > q).
-const NEEDS_PARSE_RE = /[\x1b\x9b\x9d]/;
+// Standalone BEL, OSC introducers (ESC ] / 0x9D), and the iTerm2 extended-DA query (ESC [ > q / 0x9B > q).
+const NEEDS_PARSE_RE = /[\x07\x1b\x9b\x9d]/;
 const OSC99_PENDING_TTL_MS = 60_000;
 const OSC99_MAX_PENDING_IDS = 64;
 const TITLE_LIMIT = 256;
 const BODY_LIMIT = 4096;
 const OSC99_PENDING_TITLE_LIMIT = 2048;
 const OSC99_PENDING_BODY_LIMIT = 16_384;
+const OSC99_SUPPORT_PAYLOAD = 'o=always:p=title,body';
+const OSC99_RESPONSE_ID_RE = /^[^\s:;\x00-\x1f\x7f-\x9f]+$/;
+const TERMINAL_BELL_NOTIFICATION: ActivityNotification = { source: 'BEL', title: 'Terminal bell', body: null };
 export const ITERM2_COMPAT_VERSION = '3.5.0';
 export const ITERM2_DEVICE_ATTRIBUTES_RESPONSE = `\x1bP>|iTerm2 ${ITERM2_COMPAT_VERSION}\x1b\\`;
 
@@ -51,11 +54,11 @@ export class TerminalProtocolParser {
     while (index < text.length) {
       const osc = findNextOsc(text, index);
       if (!osc) {
-        visibleData += text.slice(index);
+        visibleData += stripStandaloneBells(text.slice(index), events);
         break;
       }
 
-      visibleData += text.slice(index, osc.index);
+      visibleData += stripStandaloneBells(text.slice(index, osc.index), events);
       const terminator = findOscTerminator(text, osc.contentStart);
       if (!terminator) {
         const incomplete = text.slice(osc.index);
@@ -74,7 +77,8 @@ export class TerminalProtocolParser {
       index = terminator.end;
     }
 
-    return stripDeviceAttributeQueries(visibleData, events);
+    const result = stripDeviceAttributeQueries(visibleData, events);
+    return { visibleData: result.visibleData, events: filterTerminalBellEvents(result.events) };
   }
 
   reset(): void {
@@ -126,7 +130,10 @@ export class TerminalProtocolParser {
     const metadata = parseOsc99Metadata(rawMetadata);
     const payloadType = metadata.get('p') ?? 'title';
 
-    if (payloadType === '?' || payloadType === 'close' || payloadType === 'alive') return [];
+    if (payloadType === '?') {
+      return [{ kind: 'response', data: formatOsc99SupportResponse(metadata.get('i') ?? null) }];
+    }
+    if (payloadType === 'close' || payloadType === 'alive') return [];
 
     const id = sanitizeOsc99Id(metadata.get('i') ?? null);
     const done = metadata.get('d') !== '0';
@@ -200,6 +207,27 @@ export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]
   return events.flatMap((event) => (event.kind === 'response' ? [event.data] : []));
 }
 
+function stripStandaloneBells(segment: string, events: TerminalProtocolEvent[]): string {
+  if (!segment.includes('\x07')) return segment;
+  events.push({ kind: 'notification', notification: TERMINAL_BELL_NOTIFICATION });
+  return segment.replace(/\x07/g, '');
+}
+
+function filterTerminalBellEvents(events: TerminalProtocolEvent[]): TerminalProtocolEvent[] {
+  const hasRicherAlertEvent = events.some((event) => {
+    if (event.kind === 'progress') return true;
+    return event.kind === 'notification' && event.notification.source !== 'BEL';
+  });
+  let keptBell = false;
+  return events.filter((event) => {
+    if (event.kind !== 'notification' || event.notification.source !== 'BEL') return true;
+    if (hasRicherAlertEvent) return false;
+    if (keptBell) return false;
+    keptBell = true;
+    return true;
+  });
+}
+
 function findNextOsc(text: string, from: number): { index: number; contentStart: number } | null {
   const escIndex = text.indexOf('\x1b]', from);
   const c1Index = text.indexOf('\x9d', from);
@@ -268,6 +296,17 @@ function sanitizeOsc99Id(id: string | null): string | null {
   if (!id) return null;
   const sanitized = sanitizeText(id, TITLE_LIMIT);
   return sanitized || null;
+}
+
+function formatOsc99SupportResponse(rawId: string | null): string {
+  const id = normalizeOsc99ResponseId(rawId);
+  const metadata = id ? `i=${id}:p=?` : 'p=?';
+  return `\x1b]99;${metadata};${OSC99_SUPPORT_PAYLOAD}\x1b\\`;
+}
+
+function normalizeOsc99ResponseId(id: string | null): string | null {
+  if (!id || id.length > TITLE_LIMIT) return null;
+  return OSC99_RESPONSE_ID_RE.test(id) ? id : null;
 }
 
 function decodeBase64(input: string): string | null {

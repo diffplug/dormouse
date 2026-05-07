@@ -2,9 +2,49 @@ import { describe, expect, it } from 'vitest';
 import { ITERM2_DEVICE_ATTRIBUTES_RESPONSE, TerminalProtocolParser } from './terminal-protocol';
 
 describe('TerminalProtocolParser', () => {
+  it('parses and strips standalone terminal bells', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('before\x07after');
+
+    expect(result.visibleData).toBe('beforeafter');
+    expect(result.events).toEqual([
+      { kind: 'notification', notification: { source: 'BEL', title: 'Terminal bell', body: null } },
+    ]);
+  });
+
+  it('collapses repeated standalone terminal bells in one parse batch', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('\x07before\x07after\x07');
+
+    expect(result.visibleData).toBe('beforeafter');
+    expect(result.events).toEqual([
+      { kind: 'notification', notification: { source: 'BEL', title: 'Terminal bell', body: null } },
+    ]);
+  });
+
   it('parses and strips OSC 9 notifications', () => {
     const parser = new TerminalProtocolParser();
     const result = parser.process(`before\x1b]9;Build finished\x07after`);
+
+    expect(result.visibleData).toBe('beforeafter');
+    expect(result.events).toEqual([
+      { kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'Build finished' } },
+    ]);
+  });
+
+  it('does not add terminal bell detail for the BEL terminator of a supported OSC notification', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('\x1b]9;Build finished\x07');
+
+    expect(result.visibleData).toBe('');
+    expect(result.events).toEqual([
+      { kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'Build finished' } },
+    ]);
+  });
+
+  it('prefers richer OSC notification detail over an extra terminal bell in the same batch', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('before\x1b]9;Build finished\x07\x07after');
 
     expect(result.visibleData).toBe('beforeafter');
     expect(result.events).toEqual([
@@ -59,6 +99,27 @@ describe('TerminalProtocolParser', () => {
         kind: 'notification',
         notification: { source: 'OSC 99', title: 'Build', body: 'Finished successfully' },
       },
+    ]);
+  });
+
+  it('responds to OSC 99 support queries with title and body support', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('\x1b]99;i=n1:p=?;\x07');
+
+    expect(result.visibleData).toBe('');
+    expect(result.events).toEqual([
+      { kind: 'response', data: '\x1b]99;i=n1:p=?;o=always:p=title,body\x1b\\' },
+    ]);
+  });
+
+  it('omits invalid or missing ids from OSC 99 support-query responses', () => {
+    const parser = new TerminalProtocolParser();
+
+    expect(parser.process('\x1b]99;p=?;\x07').events).toEqual([
+      { kind: 'response', data: '\x1b]99;p=?;o=always:p=title,body\x1b\\' },
+    ]);
+    expect(parser.process('\x1b]99;i=bad id:p=?;\x07').events).toEqual([
+      { kind: 'response', data: '\x1b]99;p=?;o=always:p=title,body\x1b\\' },
     ]);
   });
 

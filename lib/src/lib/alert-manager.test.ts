@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager } from './alert-manager';
+import { applyTerminalProtocolEvents } from './terminal-protocol';
 
 describe('AlertManager in isolation', () => {
   let manager: AlertManager;
@@ -207,6 +208,20 @@ describe('AlertManager in isolation', () => {
     });
   });
 
+  it('terminal bell notifications ring and create TODO detail even when visual alerts are disabled', () => {
+    const id = 'terminal-bell';
+
+    applyTerminalProtocolEvents(manager, id, [
+      { kind: 'notification', notification: { source: 'BEL', title: 'Terminal bell', body: null } },
+    ]);
+
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_RINGING',
+      todo: true,
+      notification: { source: 'BEL', title: 'Terminal bell', body: null },
+    });
+  });
+
   it('OSC progress cocks the protocol alarm without participating in visual timers', () => {
     const id = 'osc-progress';
 
@@ -248,6 +263,21 @@ describe('AlertManager in isolation', () => {
 
     manager.attend(id);
     manager.notifyFromProtocol(id, { source: 'OSC 777', title: 'done', body: 'Build finished' });
+
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_DISABLED',
+      todo: false,
+      notification: null,
+    });
+  });
+
+  it('terminal bell notifications are suppressed while the user has attention', () => {
+    const id = 'terminal-bell-attention';
+
+    manager.attend(id);
+    applyTerminalProtocolEvents(manager, id, [
+      { kind: 'notification', notification: { source: 'BEL', title: 'Terminal bell', body: null } },
+    ]);
 
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_DISABLED',

@@ -68,6 +68,23 @@ describe('FakePtyAdapter', () => {
     });
   });
 
+  it('parses terminal bell output into alert state without forwarding the bell byte', () => {
+    const { adapter, dataEvents } = createAdapter();
+    const alertEvents: unknown[] = [];
+    adapter.onAlertState((detail) => alertEvents.push(detail));
+    adapter.spawnPty('t1');
+
+    adapter.sendOutput('t1', '\x07');
+
+    expect(dataEvents).toEqual([]);
+    expect(alertEvents.at(-1)).toMatchObject({
+      id: 't1',
+      status: 'ALERT_RINGING',
+      todo: true,
+      notification: { source: 'BEL', title: 'Terminal bell', body: null },
+    });
+  });
+
   it('responds to iTerm2 device attribute queries through the PTY input path', () => {
     const { adapter, dataEvents } = createAdapter();
     const received: string[] = [];

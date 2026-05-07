@@ -6,7 +6,7 @@ export { type SessionStatus } from './activity-monitor';
 /** Boolean TODO state: on (true) or off (false). */
 export type TodoState = boolean;
 
-export const ACTIVITY_NOTIFICATION_SOURCES = ['OSC 9', 'OSC 9;4', 'OSC 99', 'OSC 777'] as const;
+export const ACTIVITY_NOTIFICATION_SOURCES = ['OSC 9', 'OSC 9;4', 'OSC 99', 'OSC 777', 'BEL'] as const;
 export type ActivityNotificationSource = typeof ACTIVITY_NOTIFICATION_SOURCES[number];
 
 export interface ActivityNotification {

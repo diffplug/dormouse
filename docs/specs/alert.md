@@ -4,7 +4,7 @@
 
 The alert system is an opt-in reminder for a **Session** that may finish work while the user is looking elsewhere. Alert state lives on the Session itself, not on the Pane or Door that currently displays it.
 
-Explicit terminal notification/progress escape sequences are the exception to the opt-in rule. `OSC 9`, `OSC 9;4`, `OSC 99`, and `OSC 777` handling is specified in `docs/specs/iTerm2.md`; those protocol signals may cock the bell or force `ALERT_RINGING` even when the activity monitor is disabled.
+Explicit terminal notification/progress reports are the exception to the opt-in rule. `OSC 9`, `OSC 9;4`, `OSC 99`, `OSC 777`, and standalone terminal `BEL` handling is specified in `docs/specs/iTerm2.md`; those protocol signals may cock the bell or force `ALERT_RINGING` even when the activity monitor is disabled.
 
 This spec uses semantic state names that describe what the Session currently owes the user:
 
@@ -54,8 +54,8 @@ Each Session owns:
   - It is driven only by meaningful output, silence timers, and attention.
   - It may be deleted in a future terminal-report-only implementation without changing the protocol notification model.
 - `protocolStatus: 'IDLE' | 'OSC_NOTIF_BUSY' | 'ALERT_RINGING'`
-  - Internal terminal-report status owned by parsed OSC protocols from `docs/specs/iTerm2.md`.
-  - It is driven only by terminal reports such as `OSC 9`, `OSC 9;4`, `OSC 99`, and `OSC 777`.
+  - Internal terminal-report status owned by parsed terminal reports from `docs/specs/iTerm2.md`.
+  - It is driven only by terminal reports such as `OSC 9`, `OSC 9;4`, `OSC 99`, `OSC 777`, and standalone `BEL`.
   - It does not use output/silence timers from the visual activity monitor.
   - It does use the shared attention model. A protocol completion/notification received while the user is actively attending that Session must not ring.
   - `OSC_NOTIF_BUSY` means a terminal report says work is in progress, but there is not yet a notification owed to the user.
@@ -128,7 +128,7 @@ Doors never directly hold attention. A Door can only regain attention by being r
 There are two independent state models:
 
 - **Visual track**: the existing timer-based activity monitor. It watches meaningful output, silence, and user attention. Its internal state is `visualStatus`.
-- **Terminal-report track**: parsed OSC protocols from the PTY. It relies entirely on terminal reports and never uses the output/silence timers. Its internal state is `protocolStatus`.
+- **Terminal-report track**: parsed terminal notification/progress reports from the PTY. It relies entirely on terminal reports and never uses the output/silence timers. Its internal state is `protocolStatus`.
 
 The public `status` is a projection used by existing UI:
 
@@ -137,7 +137,7 @@ The public `status` is a projection used by existing UI:
 3. Else if `protocolStatus === 'OSC_NOTIF_BUSY'`, public `status = OSC_NOTIF_BUSY`.
 4. Else public `status = visualStatus`.
 
-This projection is deliberate. Deleting the visual track should leave `protocolStatus: IDLE | OSC_NOTIF_BUSY | ALERT_RINGING` plus the same public projection behavior. The OSC path must be able to cock the bell and ring without `ActivityMonitor`, silence timers, or meaningful-output heuristics. It still relies on the shared user-attention model.
+This projection is deliberate. Deleting the visual track should leave `protocolStatus: IDLE | OSC_NOTIF_BUSY | ALERT_RINGING` plus the same public projection behavior. The terminal-report path must be able to cock the bell and ring without `ActivityMonitor`, silence timers, or meaningful-output heuristics. It still relies on the shared user-attention model.
 
 ### Visual track
 
@@ -223,8 +223,8 @@ These transition rules apply to the visual track only. `OSC_NOTIF_BUSY` is not e
 | `OSC_NOTIF_BUSY` | terminal report errors progress and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
 | `OSC_NOTIF_BUSY` | Session destroyed | `IDLE` | Session teardown clears protocol state. |
 | `ALERT_RINGING` | explicit attention boundary / dismiss / TODO clear | `IDLE` | Public status falls back to visual projection after protocol ring clears. |
-| any | direct notification (`OSC 9`, completed `OSC 99`, `OSC 777`) and Session lacks attention | `ALERT_RINGING` | Create `notification`, set `todo = true`, and ring immediately. |
-| any | direct notification (`OSC 9`, completed `OSC 99`, `OSC 777`) and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
+| any | direct notification (`OSC 9`, completed `OSC 99`, `OSC 777`, standalone `BEL`) and Session lacks attention | `ALERT_RINGING` | Create `notification`, set `todo = true`, and ring immediately. |
+| any | direct notification (`OSC 9`, completed `OSC 99`, `OSC 777`, standalone `BEL`) and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
 
 `OSC_NOTIF_BUSY` never auto-rings because of silence. If a program starts progress and never sends completion/error, MouseTerm remains cocked until another terminal report completes/errors the progress cycle or the Session is destroyed.
 
@@ -250,7 +250,7 @@ Visual alert logic is driven by transitions in `visualStatus`. Protocol alert lo
 
 ### Protocol override
 
-Supported terminal notification sequences from `docs/specs/iTerm2.md` may create a protocol ring. Supported `OSC 9;4` progress sequences set `protocolStatus = OSC_NOTIF_BUSY` and may later promote to `protocolStatus = ALERT_RINGING`. Protocol rings:
+Supported terminal notification reports from `docs/specs/iTerm2.md` may create a protocol ring. Supported `OSC 9;4` progress sequences set `protocolStatus = OSC_NOTIF_BUSY` and may later promote to `protocolStatus = ALERT_RINGING`. Protocol rings:
 
 - force public `status = ALERT_RINGING` even when the Session's activity monitor is disabled
 - obey attention suppression because the user may already be typing into or reading that Session
