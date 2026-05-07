@@ -7,11 +7,14 @@ import {
   setDragAlt,
   setHintToken,
   setOverride,
+  stateRequiresNativeMouseSuppression,
   updateDrag,
 } from './mouse-selection';
 import { detectTokenAt } from './smart-token';
 import { extractSelectionText } from './selection-text';
 import type { TerminalOverlayDims } from './terminal-store';
+
+const OVERRIDE_MOUSE_EVENTS = ['mousemove', 'mouseup', 'click', 'dblclick', 'auxclick', 'contextmenu'] as const;
 
 function consumeMouseEvent(ev: MouseEvent, stopImmediate = false): void {
   ev.preventDefault();
@@ -19,11 +22,9 @@ function consumeMouseEvent(ev: MouseEvent, stopImmediate = false): void {
   if (stopImmediate) ev.stopImmediatePropagation();
 }
 
-function stateRequiresNativeMouseSuppression(state: ReturnType<typeof getMouseSelectionState>): boolean {
-  return state.mouseReporting !== 'none'
-    && (state.override !== 'off' || state.selection?.startedInScrollback === true);
-}
-
+// Defer the override clear so any same-tick listener that re-reads the state
+// (e.g. xterm's own mouseup handler) still sees `temporary` and can emit its
+// trailing report before we flip back to `off`.
 function clearTemporaryOverrideAfterMouseDispatch(id: string): void {
   if (getMouseSelectionState(id).override !== 'temporary') return;
   queueMicrotask(() => {
@@ -70,7 +71,6 @@ export function attachTerminalMouseRouter({
     button: number;
     clientX: number;
     clientY: number;
-    suppressNativeMouse: boolean;
   } | null = null;
 
   const onMouseDown = (ev: MouseEvent) => {
@@ -95,7 +95,6 @@ export function attachTerminalMouseRouter({
       button: ev.button,
       clientX: ev.clientX,
       clientY: ev.clientY,
-      suppressNativeMouse,
     };
   };
 
@@ -107,7 +106,7 @@ export function attachTerminalMouseRouter({
 
   const onWindowMouseMove = (ev: MouseEvent) => {
     if (pendingDrag) {
-      if (pendingDrag.suppressNativeMouse) consumeMouseEvent(ev, true);
+      if (stateRequiresNativeMouseSuppression(getMouseSelectionState(id))) consumeMouseEvent(ev, true);
       if (pendingDrag.button !== 0) return;
       const dx = ev.clientX - pendingDrag.clientX;
       const dy = ev.clientY - pendingDrag.clientY;
@@ -122,10 +121,9 @@ export function attachTerminalMouseRouter({
       pendingDrag = null;
     }
     if (!isDragging(id)) return;
-    const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
     const cell = computeCell(ev);
     updateDrag(id, { row: cell.row, col: cell.col, altKey: ev.altKey });
-    consumeMouseEvent(ev, suppressNativeMouse);
+    consumeMouseEvent(ev, stateRequiresNativeMouseSuppression(getMouseSelectionState(id)));
 
     const line = terminal.buffer.active.getLine(cell.row);
     const text = line?.translateToString(false, 0, terminal.cols);
@@ -141,22 +139,20 @@ export function attachTerminalMouseRouter({
 
   const onWindowMouseUp = (ev: MouseEvent) => {
     if (pendingDrag) {
-      if (pendingDrag.suppressNativeMouse) consumeMouseEvent(ev, true);
       if (ev.button !== pendingDrag.button) return;
+      if (stateRequiresNativeMouseSuppression(getMouseSelectionState(id))) consumeMouseEvent(ev, true);
       clearTemporaryOverrideAfterMouseDispatch(id);
       pendingDrag = null;
       return;
     }
     if (ev.button !== 0) return;
     if (!isDragging(id)) return;
-    const state = getMouseSelectionState(id);
-    const shouldClearTemporaryOverride = state.override === 'temporary';
-    const suppressNativeMouse = stateRequiresNativeMouseSuppression(state);
+    const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
     endDrag(id);
     setHintToken(id, null);
     const sel = getMouseSelectionState(id).selection;
     setSelectionBaseline(sel ? extractSelectionText(terminal, sel) : null);
-    if (shouldClearTemporaryOverride) clearTemporaryOverrideAfterMouseDispatch(id);
+    clearTemporaryOverrideAfterMouseDispatch(id);
     consumeMouseEvent(ev, suppressNativeMouse);
   };
 
@@ -166,12 +162,9 @@ export function attachTerminalMouseRouter({
   };
 
   element.addEventListener('mousedown', onMouseDown, true);
-  element.addEventListener('mousemove', onOverrideMouseEvent, true);
-  element.addEventListener('mouseup', onOverrideMouseEvent, true);
-  element.addEventListener('click', onOverrideMouseEvent, true);
-  element.addEventListener('dblclick', onOverrideMouseEvent, true);
-  element.addEventListener('auxclick', onOverrideMouseEvent, true);
-  element.addEventListener('contextmenu', onOverrideMouseEvent, true);
+  for (const type of OVERRIDE_MOUSE_EVENTS) {
+    element.addEventListener(type, onOverrideMouseEvent, true);
+  }
   window.addEventListener('mousemove', onWindowMouseMove, true);
   window.addEventListener('mouseup', onWindowMouseUp, true);
   window.addEventListener('keydown', onAltChange, true);
@@ -179,12 +172,9 @@ export function attachTerminalMouseRouter({
 
   return () => {
     element.removeEventListener('mousedown', onMouseDown, true);
-    element.removeEventListener('mousemove', onOverrideMouseEvent, true);
-    element.removeEventListener('mouseup', onOverrideMouseEvent, true);
-    element.removeEventListener('click', onOverrideMouseEvent, true);
-    element.removeEventListener('dblclick', onOverrideMouseEvent, true);
-    element.removeEventListener('auxclick', onOverrideMouseEvent, true);
-    element.removeEventListener('contextmenu', onOverrideMouseEvent, true);
+    for (const type of OVERRIDE_MOUSE_EVENTS) {
+      element.removeEventListener(type, onOverrideMouseEvent, true);
+    }
     window.removeEventListener('mousemove', onWindowMouseMove, true);
     window.removeEventListener('mouseup', onWindowMouseUp, true);
     window.removeEventListener('keydown', onAltChange, true);
