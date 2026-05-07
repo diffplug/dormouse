@@ -202,6 +202,16 @@ export function isDragging(id: string): boolean {
 }
 
 /**
+ * True when xterm is in a mouse-reporting mode AND the user is in a context
+ * where the host (not the PTY) should own the mouse — i.e. an active override
+ * or a selection that began in scrollback.
+ */
+export function stateRequiresNativeMouseSuppression(state: MouseSelectionState): boolean {
+  return state.mouseReporting !== 'none'
+    && (state.override !== 'off' || state.selection?.startedInScrollback === true);
+}
+
+/**
  * Extend the in-progress selection to fully cover a detected token (spec §5.3).
  * No-op when no drag is active. Preserves the drag anchor; adjusts the end
  * toward whichever token boundary is farther from the anchor so the drag
