@@ -979,8 +979,11 @@ function Home() {
               system will buzz you if there's anything to do. A hosted auto-pairing service comes
               later — just leave and keep working, no "I'm walking away" dance.
             </p>
+            <p className="mb-4 text-lg leading-relaxed opacity-70">
+              Open source and free to self-host, or pay us a little bit and you can use ours.
+            </p>
             <p className="mb-6 text-lg leading-relaxed opacity-70">
-              Subscribe below to <a href="https://nedshed.dev" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">nedshed.dev</a> — my dev log. Roam launches there first. When the hosted service is ready, we'll do discounts for early adopters, so don't miss out!
+              The devlog for this project lives at <a href="https://nedshed.dev" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">nedshed.dev</a>. We'll announce the launch there. Discounts for early adopters, so don't miss out!
             </p>
             <NotifySignupForm />
           </div>
