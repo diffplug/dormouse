@@ -15,13 +15,7 @@ import {
   markSessionAttention,
   toggleSessionTodo,
   setPendingShellOpts,
-  buildAppTitleResolver,
   getDefaultShellOpts,
-  getActivitySnapshot,
-  getTerminalPaneState,
-  getTerminalPaneStateSnapshot,
-  deriveHeader,
-  resolveDisplayPrimary,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
   type SessionStatus,
@@ -86,6 +80,11 @@ function idsMatch(a: string[], b: string[]): boolean {
     console.assert(isSorted(a) && isSorted(b), 'idsMatch: inputs must be sorted');
   }
   return a.length === b.length && a.every((id, i) => id === b[i]);
+}
+
+function persistedPanelTitle(title: string | null | undefined): string {
+  const trimmed = title?.trim();
+  return trimmed || UNNAMED_PANEL_TITLE;
 }
 
 const components = { terminal: TerminalPanel };
@@ -268,13 +267,7 @@ export function Wall({
     if (!api) return;
     const panel = api.getPanel(id);
     if (!panel) return;
-    const terminalStateSnapshot = getTerminalPaneStateSnapshot();
-    const derivedTitle = deriveHeader(
-      getTerminalPaneState(id),
-      [...terminalStateSnapshot.values()],
-      { appTitleForPane: buildAppTitleResolver(terminalStateSnapshot, getActivitySnapshot()) },
-    ).primary;
-    const title = resolveDisplayPrimary(derivedTitle, panel.title ?? id);
+    const title = persistedPanelTitle(panel.title);
     const layoutAtMinimize = cloneLayout(api.toJSON());
 
     // Capture the nearest adjacent pane and our actual relative position

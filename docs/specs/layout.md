@@ -229,7 +229,7 @@ Swaps session **content** between two panes — the layout shape is unchanged. U
    - `layoutAtMinimize`: full layout snapshot
    - `layoutAtMinimizeSignature`: structural fingerprint (ignores sizes)
 2. Remove pane from dockview (`api.removePanel`)
-3. Add to `doors` state → door appears in baseboard
+3. Add to `doors` state → door appears in baseboard. The door stores only the stable dockview/user title for persistence; its visible label is derived from live terminal semantic state at render time.
 4. Session stays in registry (not disposed)
 5. Selection moves to the new door (stays in command mode)
 
@@ -273,7 +273,7 @@ Pane IDs are session IDs. `TerminalPane` calls `getOrCreateTerminal(id)` on Reac
 
 ### Session persistence
 
-Layout, scrollback, cwd, minimized items, and alert state are saved to persistent storage via a debounced save (500ms). Saves are triggered by layout changes, panel add/remove, and a 30s periodic interval. Saves are flushed immediately on PTY exit, `pagehide`, and extension shutdown requests.
+Layout, scrollback, cwd, minimized items, user-pinned titles, and alert state are saved to persistent storage via a debounced save (500ms). Derived command/app labels shown on minimized doors are display-only and are not persisted as user-pinned titles. Saves are triggered by layout changes, panel add/remove, and a 30s periodic interval. Saves are flushed immediately on PTY exit, `pagehide`, and extension shutdown requests.
 
 Saved snapshots are read through `readPersistedSession()`, which accepts the canonical object shape and defensively parses a JSON-stringified blob before validation and migration. This keeps malformed storage inert while covering hosts that hand back serialized JSON instead of the parsed object.
 

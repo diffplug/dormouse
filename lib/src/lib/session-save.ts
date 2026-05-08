@@ -1,7 +1,8 @@
 import type { PlatformAdapter } from './platform/types';
 import { readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession } from './session-types';
 import { detectResumeCommand } from './resume-patterns';
-import { getLivePersistedAlertState, resolveTerminalSessionId } from './terminal-registry';
+import { getLivePersistedAlertState, getTerminalPaneState, resolveTerminalSessionId } from './terminal-registry';
+import { UNNAMED_PANEL_TITLE } from './terminal-state';
 
 function getPreviousPaneMap(platform: PlatformAdapter): Map<string, PersistedPane> {
   const saved = readPersistedSession(platform.getState());
@@ -20,9 +21,13 @@ export async function saveSession(
   const previousPanes = getPreviousPaneMap(platform);
   const allPanes = new Map<string, { id: string; title: string }>();
   for (const pane of panes) {
-    allPanes.set(pane.id, pane);
+    allPanes.set(pane.id, { id: pane.id, title: persistedVisiblePaneTitle(pane.title) });
   }
-  for (const item of doors) {
+  const persistedDoors = doors.map((door) => ({
+    ...door,
+    title: persistedDoorTitle(door.id),
+  }));
+  for (const item of persistedDoors) {
     allPanes.set(item.id, { id: item.id, title: item.title });
   }
 
@@ -46,6 +51,16 @@ export async function saveSession(
       };
     }),
   );
-  const session: PersistedSession = { version: 3, panes: persisted, doors, layout };
+  const session: PersistedSession = { version: 3, panes: persisted, doors: persistedDoors, layout };
   platform.saveState(session);
+}
+
+function persistedVisiblePaneTitle(title: string): string {
+  const trimmed = title.trim();
+  return trimmed || UNNAMED_PANEL_TITLE;
+}
+
+function persistedDoorTitle(id: string): string {
+  const userTitle = getTerminalPaneState(id).titleCandidates.user?.title.trim();
+  return userTitle || UNNAMED_PANEL_TITLE;
 }
