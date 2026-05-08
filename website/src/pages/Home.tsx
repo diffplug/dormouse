@@ -442,6 +442,12 @@ function Home() {
 
     const prefersReducedMotion = typeof window.matchMedia === "function"
       && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // Touch devices have native momentum scrolling that's smoother than our
+    // easing — running both layers fights and looks janky (especially on iOS
+    // Safari where transforms during scroll are sensitive). Snap on touch.
+    const isTouchDevice = typeof window.matchMedia === "function"
+      && window.matchMedia("(pointer: coarse)").matches;
+    const skipSmoothing = prefersReducedMotion || isTouchDevice;
 
     const readRunwayScroll = () => -runway.getBoundingClientRect().top;
     let targetScroll = readRunwayScroll();
@@ -663,7 +669,7 @@ function Home() {
 
       targetScroll = readRunwayScroll();
 
-      if (prefersReducedMotion) {
+      if (skipSmoothing) {
         smoothScroll = targetScroll;
       } else {
         const decay = Math.exp(-Math.LN2 * dt / HERO_SCROLL_HALFLIFE_S);
