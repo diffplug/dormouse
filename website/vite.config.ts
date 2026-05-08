@@ -3,8 +3,10 @@ import react from "@vitejs/plugin-react-swc";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
 
-// Mirrors website/functions/api/notify-signup.ts so the form works under
-// `vite dev`. Cloudflare Pages runs the real Function in production.
+// Mirrors functions/api/notify-signup.ts so the form works under `vite dev`.
+// Cloudflare Pages runs the real Function in production. Lives at the repo
+// root (not website/) because the Pages project's root directory is the repo
+// root.
 function notifySignupDevPlugin(): Plugin {
   return {
     name: "notify-signup-dev",
