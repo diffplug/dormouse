@@ -51,6 +51,10 @@ export class VSCodeAdapter implements PlatformAdapter {
           handler({ ptys: msg.ptys });
         }
       } else if (msg.type === 'pty:replay') {
+        // Replay arrives as raw buffered output. Run it through the protocol
+        // parser so semantic OSCs (CWD, prompt, title) repopulate pane state
+        // and are stripped before xterm sees them, mirroring live pty:data.
+        // See docs/specs/vscode.md for the replay invariants.
         const parser = this.getReplayProtocolParser(msg.id);
         const parsed = parser.process(msg.data);
         applyTerminalSemanticEventsByPtyId(msg.id, collectTerminalSemanticEvents(parsed.events));

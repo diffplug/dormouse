@@ -93,6 +93,9 @@ export class TauriAdapter implements PlatformAdapter {
 
     this.unlistenFns.push(
       await listen<{ id: string; data: string }>("pty:replay", (event) => {
+        // Replay arrives as raw buffered output. Run it through the protocol
+        // parser so semantic OSCs (CWD, prompt, title) repopulate pane state
+        // and are stripped before xterm sees them, mirroring live pty:data.
         const { id, data } = event.payload;
         const parsed = this.getProtocolParser(id).process(data);
         applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
