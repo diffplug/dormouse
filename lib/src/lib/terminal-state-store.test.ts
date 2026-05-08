@@ -58,6 +58,23 @@ describe('terminal semantic state store command input fallback', () => {
     expect(getTerminalPaneState('pane').currentCommand?.displayCommand).toBe('lazygit');
   });
 
+  it('does not match command output that merely ends in a prompt-shaped suffix', () => {
+    recordTerminalUserInput('pane', 'lazygit\r');
+    recordTerminalOutput('pane', '\r\nstep 1: 50% complete\r\nstep 2: 95% \r\n');
+
+    expect(getTerminalPaneState('pane').currentCommand?.displayCommand).toBe('lazygit');
+  });
+
+  it('ignores prompt-shaped lines emitted inside the alt-screen buffer', () => {
+    recordTerminalUserInput('pane', 'lazygit\r');
+    recordTerminalOutput(
+      'pane',
+      '\x1b[?1049h\r\nuser@host repo $ rendered by tui\r\nmore tui output',
+    );
+
+    expect(getTerminalPaneState('pane').currentCommand?.displayCommand).toBe('lazygit');
+  });
+
   it('does not resurrect a disposed pane when a late process CWD arrives', () => {
     fillTerminalProcessCwd('pane', '/Users/me/project');
     expect(getTerminalPaneStateSnapshot().has('pane')).toBe(false);

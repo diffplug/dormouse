@@ -188,12 +188,50 @@ function resolvePaneStateIdByPtyId(ptyId: string): string {
 }
 
 function looksLikeReturnedShellPrompt(output: string): boolean {
-  const text = stripTerminalControls(output).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  const lines = text.split('\n');
-  const lastLine = lines[lines.length - 1]?.trimStart() ?? '';
-  if (!lastLine || lastLine.length > 200) return false;
-  if (/^(?:PS\s+.+>|.+[$#%>❯λ])\s?$/.test(lastLine)) return true;
-  return /^[➜❯λ]\s+.+\s$/.test(lines[lines.length - 1] ?? '');
+  const visible = stripAltScreenSpans(output);
+  const text = stripTerminalControls(visible).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  // Real prompts come on a fresh line. Requiring a leading newline rejects
+  // arbitrary command output that happens to end with a prompt-like character.
+  const newlineIndex = text.lastIndexOf('\n');
+  if (newlineIndex === -1) return false;
+  const lastLine = text.slice(newlineIndex + 1).trimStart();
+  if (lastLine.length < 3 || lastLine.length > 200) return false;
+  // PowerShell `PS C:\path>` (with optional trailing space).
+  if (/^PS\s+\S.*>\s?$/.test(lastLine)) return true;
+  // Arrow-style prompts (oh-my-zsh, starship, fish defaults).
+  if (/^[➜❯λ]\s+\S/.test(lastLine) && lastLine.endsWith(' ')) return true;
+  // Generic shell prompts: require a path/user context signal AND a trailing
+  // prompt char + space. The context check rejects lines like "step 1: done"
+  // or "loading 95% complete" that happen to end in a punctuation mark.
+  if (!/[\/~@:]/.test(lastLine)) return false;
+  return /[$#%>]\s$/.test(lastLine);
+}
+
+function stripAltScreenSpans(input: string): string {
+  // Drop content between alt-screen enter (`\x1b[?1049h`) and exit (`\x1b[?1049l`).
+  // Fullscreen TUIs (vim, lazygit, less) render into the alt buffer, which is
+  // not the user's prompt, so anything inside that span must not match.
+  let result = '';
+  let cursor = 0;
+  let inAlt = false;
+  while (cursor < input.length) {
+    if (!inAlt) {
+      const next = input.indexOf('\x1b[?1049h', cursor);
+      if (next === -1) {
+        result += input.slice(cursor);
+        break;
+      }
+      result += input.slice(cursor, next);
+      cursor = next + 8;
+      inAlt = true;
+    } else {
+      const next = input.indexOf('\x1b[?1049l', cursor);
+      if (next === -1) return result;
+      cursor = next + 8;
+      inAlt = false;
+    }
+  }
+  return result;
 }
 
 function stripTerminalControls(input: string): string {
