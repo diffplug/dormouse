@@ -23,8 +23,13 @@ import standaloneLatest from "@standalone-latest";
 
 export { Home as Component };
 
+/** Multiplier on how much scroll is required to drive the hero animation.
+ *  Larger = less sensitive to wheel ticks (more scrolling needed to advance).
+ *  1 = baseline, 2 = half as sensitive, 0.5 = twice as sensitive. */
+const HERO_SLOMO_FACTOR = 2;
+
 /** Scroll runway length in viewport heights. Larger = slower reveal. */
-const RUNWAY_VH = 300;
+const RUNWAY_VH = 300 * HERO_SLOMO_FACTOR;
 
 /** Scroll thresholds within the pinned runway (0–1) */
 const ICON_INITIAL_HIDE_FRAC = 0.67; // Fraction of icon's rendered height hidden at load — leaves top third visible
@@ -534,7 +539,11 @@ function Home() {
       const iconHeight = naturalAspect > containerAspect
         ? video.offsetWidth / naturalAspect  // width-limited
         : video.offsetHeight;                 // height-limited
-      const initialOffset = iconHeight * ICON_INITIAL_HIDE_FRAC;
+      // iconHidePx: pixel offset of the icon at rest (scroll=0), independent of slomo.
+      // iconRiseScroll: scroll distance consumed before the icon is fully risen — slomo
+      // stretches this so each wheel tick lifts the icon less.
+      const iconHidePx = iconHeight * ICON_INITIAL_HIDE_FRAC;
+      const iconRiseScroll = iconHidePx * HERO_SLOMO_FACTOR;
 
       // Scrub video: hold frame 0 during icon rise, then scrub remaining range.
       // Quantize to source frames and skip duplicate frame requests. This avoids
@@ -542,9 +551,9 @@ function Home() {
       let targetFrame = 0;
       if (video.duration && isFinite(video.duration)) {
         let target = 0;
-        if (runwayScroll >= initialOffset) {
-          const videoProgress = (runwayHeight - initialOffset) > 0
-            ? clamp01((runwayScroll - initialOffset) / (runwayHeight - initialOffset))
+        if (runwayScroll >= iconRiseScroll) {
+          const videoProgress = (runwayHeight - iconRiseScroll) > 0
+            ? clamp01((runwayScroll - iconRiseScroll) / (runwayHeight - iconRiseScroll))
             : 0;
           target = videoProgress * video.duration;
         }
@@ -612,10 +621,10 @@ function Home() {
       const slideAmount = Math.max(0, runwayScroll - contentEnterScroll);
 
       // Video transform combines two behaviors:
-      //   1. Icon-rise (runwayScroll 0 → initialOffset): translate down so only
-      //      the top third is visible; scroll lifts it 1:1 until fully in view.
+      //   1. Icon-rise (runwayScroll 0 → iconRiseScroll): translate down so only
+      //      the top third is visible; scroll lifts it at rate 1/SLOMO until in view.
       //   2. Unpin slide (fraction > UNPIN_THRESHOLD): translate up with content.
-      const iconCurrentOffset = Math.max(0, initialOffset - runwayScroll);
+      const iconCurrentOffset = Math.max(0, iconHidePx - runwayScroll / HERO_SLOMO_FACTOR);
       const videoTranslateY = iconCurrentOffset > 0
         ? iconCurrentOffset
         : slideAmount > 0 ? -slideAmount : 0;
