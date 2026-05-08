@@ -4,6 +4,7 @@ import {
   cwdFromOsc633,
   cwdFromOsc7,
   cwdFromOsc9_9,
+  notificationDisplayTitle,
   type CommandRunSource,
   type TerminalSemanticEvent,
   type TerminalTitle,
@@ -230,7 +231,21 @@ export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]
 }
 
 export function collectTerminalSemanticEvents(events: TerminalProtocolEvent[]): TerminalSemanticEvent[] {
-  return events.flatMap((event) => (event.kind === 'semantic' ? [event.event] : []));
+  const semanticEvents: TerminalSemanticEvent[] = [];
+  for (const event of events) {
+    if (event.kind === 'semantic') {
+      semanticEvents.push(event.event);
+      continue;
+    }
+    if (event.kind !== 'notification') continue;
+    const title = notificationDisplayTitle(event.notification);
+    if (!title) continue;
+    semanticEvents.push({
+      type: 'title',
+      title: { title, source: 'notification', updatedAt: Date.now() },
+    });
+  }
+  return semanticEvents;
 }
 
 function stripStandaloneBells(segment: string, events: TerminalProtocolEvent[]): string {

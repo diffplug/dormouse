@@ -15,7 +15,9 @@ import {
   markSessionAttention,
   toggleSessionTodo,
   setPendingShellOpts,
+  buildAppTitleResolver,
   getDefaultShellOpts,
+  getActivitySnapshot,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
   deriveHeader,
@@ -266,9 +268,11 @@ export function Wall({
     if (!api) return;
     const panel = api.getPanel(id);
     if (!panel) return;
+    const terminalStateSnapshot = getTerminalPaneStateSnapshot();
     const derivedTitle = deriveHeader(
       getTerminalPaneState(id),
-      [...getTerminalPaneStateSnapshot().values()],
+      [...terminalStateSnapshot.values()],
+      { appTitleForPane: buildAppTitleResolver(terminalStateSnapshot, getActivitySnapshot()) },
     ).primary;
     const title = resolveDisplayPrimary(derivedTitle, panel.title ?? id);
     const layoutAtMinimize = cloneLayout(api.toJSON());

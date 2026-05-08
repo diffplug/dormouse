@@ -34,7 +34,7 @@ import {
   subscribeToTerminalPaneState,
   type SessionStatus,
 } from '../../lib/terminal-registry';
-import { createTerminalPaneState, deriveHeader, resolveDisplayPrimary } from '../../lib/terminal-state';
+import { buildAppTitleResolver, createTerminalPaneState, deriveHeader, resolveDisplayPrimary } from '../../lib/terminal-state';
 import {
   DialogKeyboardContext,
   ModeContext,
@@ -85,7 +85,11 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
   const paneState = terminalStates.get(api.id) ?? createTerminalPaneState();
   const allPaneStates = useMemo(() => [...terminalStates.values()], [terminalStates]);
   const visiblePaneStates = allPaneStates.length > 0 ? allPaneStates : [paneState];
-  const derivedHeader = deriveHeader(paneState, visiblePaneStates);
+  const appTitleForPane = useMemo(
+    () => buildAppTitleResolver(terminalStates, activityStates),
+    [terminalStates, activityStates],
+  );
+  const derivedHeader = deriveHeader(paneState, visiblePaneStates, { appTitleForPane });
   const displayTitle = resolveDisplayPrimary(derivedHeader.primary, api.title);
   const mouseState = mouseStates.get(api.id) ?? DEFAULT_MOUSE_SELECTION_STATE;
   const showMouseIcon = mouseState.mouseReporting !== 'none';

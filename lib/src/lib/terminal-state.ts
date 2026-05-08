@@ -42,7 +42,7 @@ export interface CommandRun {
   };
 }
 
-export type TerminalTitleSource = 'osc0' | 'osc2' | 'user' | 'profile' | 'derived';
+export type TerminalTitleSource = 'osc0' | 'osc2' | 'notification' | 'user' | 'profile' | 'derived';
 
 export interface TerminalTitle {
   title: string;
@@ -77,6 +77,7 @@ export interface DirectoryDisplayOptions {
 
 export interface HeaderOptions extends DirectoryDisplayOptions {
   shellName?: string;
+  appTitleForPane?: (pane: TerminalPaneState) => string | null | undefined;
 }
 
 export interface DerivedHeader {
@@ -92,6 +93,12 @@ export interface TerminalGroup {
   key: string;
   label: string;
   panes: TerminalPaneState[];
+}
+
+export interface TerminalNotificationTitleLike {
+  source?: string;
+  title?: string | null;
+  body?: string | null;
 }
 
 export const DEFAULT_TERMINAL_PANE_STATE: TerminalPaneState = Object.freeze({
@@ -368,6 +375,28 @@ export function deriveHeader(
   return exitCode === undefined
     ? { primary, secondary, status }
     : { primary, secondary, status, exitCode };
+}
+
+export function notificationDisplayTitle(
+  notification: TerminalNotificationTitleLike | null | undefined,
+): string | null {
+  if (notification?.source === 'OSC 9') {
+    const body = notification.body?.trim();
+    if (body) return body;
+  }
+  return null;
+}
+
+export function buildAppTitleResolver(
+  terminalStates: Map<string, TerminalPaneState>,
+  activityStates: Map<string, { notification?: TerminalNotificationTitleLike | null }>,
+): (pane: TerminalPaneState) => string | null {
+  const titlesByPane = new WeakMap<TerminalPaneState, string>();
+  for (const [id, pane] of terminalStates) {
+    const title = notificationDisplayTitle(activityStates.get(id)?.notification);
+    if (title) titlesByPane.set(pane, title);
+  }
+  return (pane) => titlesByPane.get(pane) ?? null;
 }
 
 export function groupTerminalPanes(
@@ -651,6 +680,10 @@ function truncateCommandTitle(title: string): string {
 
 function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): string {
   if (pane.title?.source === 'user') return pane.title.title;
+  const appTitle = options.appTitleForPane?.(pane)?.trim();
+  if (appTitle) return appTitle;
+  const terminalTitle = activeTerminalTitle(pane);
+  if (terminalTitle) return terminalTitle;
   if (pane.currentCommand) return pane.currentCommand.displayCommand;
   if (pane.activity.kind === 'finished' && pane.lastCommand) return pane.lastCommand.displayCommand;
   return idleLabel(pane, options);
@@ -659,6 +692,15 @@ function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): string 
 function idleLabel(pane: TerminalPaneState, _options: { shellName?: string } = {}): string {
   if (pane.title?.source === 'user') return pane.title.title;
   return DEFAULT_IDLE_TITLE;
+}
+
+function activeTerminalTitle(pane: TerminalPaneState): string | null {
+  if (!pane.title || pane.title.source === 'user') return null;
+  const title = pane.title.title.trim();
+  if (!title) return null;
+  const command = pane.currentCommand ?? (pane.activity.kind === 'finished' ? pane.lastCommand : null);
+  if (!command || pane.title.updatedAt < command.startedAt) return null;
+  return title;
 }
 
 function headerStatus(pane: TerminalPaneState): DerivedHeader['status'] {

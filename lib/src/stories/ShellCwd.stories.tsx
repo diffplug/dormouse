@@ -111,7 +111,8 @@ export const CommandSnapshotBehavior: Story = storyFor([
 
 export const TitleFallbacksAndPinnedTitles: Story = storyFor([
   caseState('title-user', 'User-pinned title', running('/repo/app', 'npm run dev', { title: terminalTitle('Production API', 'user') }), 'Pinned title overrides command and CWD'),
-  caseState('title-command-over-title', 'Command over title', running('/repo/app', 'npm run dev', { title: terminalTitle('zsh', 'osc0') }), 'Running command beats terminal title'),
+  caseState('title-app-over-command', 'App title over command', running('/repo/app', 'npm run dev', { title: terminalTitle('dev server: ready', 'osc0') }), 'Fresh app title beats command'),
+  caseState('title-stale-shell', 'Stale shell title', running('/repo/app', 'npm run dev', { title: terminalTitleAt('zsh', 'osc0', BASE_TIME - 1) }), 'Pre-command shell title does not beat command'),
   caseState('title-osc0', 'OSC 0 unknown command', running('/repo/app', null, { title: terminalTitle('zsh', 'osc0') }), 'Terminal title fallback for unknown active command'),
   caseState('title-osc2', 'OSC 2 unknown command', running('/repo/app', null, { title: terminalTitle('vim', 'osc2') }), 'Terminal title fallback for unknown active command'),
   caseState('title-idle-fallback', 'Idle fallback', idle({ activity: { kind: 'editing' } }), 'No foreground command'),
@@ -337,7 +338,11 @@ function commandRun({
 }
 
 function terminalTitle(title: string, source: TerminalTitle['source']): TerminalTitle {
-  return { title, source, updatedAt: BASE_TIME };
+  return terminalTitleAt(title, source, BASE_TIME);
+}
+
+function terminalTitleAt(title: string, source: TerminalTitle['source'], updatedAt: number): TerminalTitle {
+  return { title, source, updatedAt };
 }
 
 function makeDoorItem(id: string, title: string): DooredItem {

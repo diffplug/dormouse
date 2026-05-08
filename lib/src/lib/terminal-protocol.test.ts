@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ITERM2_DEVICE_ATTRIBUTES_RESPONSE, TerminalProtocolParser } from './terminal-protocol';
+import { collectTerminalSemanticEvents, ITERM2_DEVICE_ATTRIBUTES_RESPONSE, TerminalProtocolParser } from './terminal-protocol';
 
 describe('TerminalProtocolParser', () => {
   it('parses and strips standalone terminal bells', () => {
@@ -29,6 +29,12 @@ describe('TerminalProtocolParser', () => {
     expect(result.visibleData).toBe('beforeafter');
     expect(result.events).toEqual([
       { kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'Build finished' } },
+    ]);
+    expect(collectTerminalSemanticEvents(result.events)).toEqual([
+      {
+        type: 'title',
+        title: { title: 'Build finished', source: 'notification', updatedAt: expect.any(Number) },
+      },
     ]);
   });
 
@@ -85,6 +91,7 @@ describe('TerminalProtocolParser', () => {
     expect(result.events).toEqual([
       { kind: 'notification', notification: { source: 'OSC 777', title: 'Title', body: 'one;two;three' } },
     ]);
+    expect(collectTerminalSemanticEvents(result.events)).toEqual([]);
   });
 
   it('assembles OSC 99 title and body chunks', () => {
@@ -100,6 +107,7 @@ describe('TerminalProtocolParser', () => {
         notification: { source: 'OSC 99', title: 'Build', body: 'Finished successfully' },
       },
     ]);
+    expect(collectTerminalSemanticEvents(result.events)).toEqual([]);
   });
 
   it('responds to OSC 99 support queries with title and body support', () => {

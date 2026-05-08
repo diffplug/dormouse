@@ -16,6 +16,8 @@ Notification sequences and standalone terminal bells are explicit application re
 
 Progress sequences do not ring immediately. They "cock" the alarm bell: MouseTerm treats active progress as an explicit finite-work cycle, exposes `OSC_NOTIF_BUSY`, and rings when the progress cycle completes or enters an error state.
 
+Legacy `OSC 9` message text also participates in pane header/door title derivation as an app-sent title override, even when the alert ring itself is suppressed because the Session has attention. Rich notification titles from `OSC 99` and `OSC 777` are not tab/door title overrides; they stay in the TODO notification UI.
+
 ## Non-goals
 
 - No native OS notifications, browser notifications, or sound in this phase. "Alarm" means MouseTerm's existing `ALERT_RINGING` visual state.

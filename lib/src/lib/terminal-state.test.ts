@@ -8,7 +8,9 @@ import {
   cwdIdentity,
   DEFAULT_IDLE_TITLE,
   deriveHeader,
+  buildAppTitleResolver,
   groupTerminalPanes,
+  notificationDisplayTitle,
   reduceTerminalState,
   shortestUniqueCwdLabels,
   summarizeCommandLine,
@@ -229,6 +231,47 @@ describe('header and grouping derivation', () => {
       secondary: 'api',
       status: 'running',
     });
+  });
+
+  it('lets fresh app-sent terminal titles override running command labels', () => {
+    const pane = runningPane('/repo/app', 'lazygit');
+    pane.title = { title: 'lazygit: mouseterm', source: 'osc0', updatedAt: 2 };
+
+    expect(deriveHeader(pane, [pane])).toEqual({
+      primary: 'lazygit: mouseterm',
+      status: 'running',
+    });
+  });
+
+  it('ignores stale shell titles from before a command started', () => {
+    const pane = runningPane('/repo/app', 'lazygit');
+    pane.title = { title: 'zsh', source: 'osc0', updatedAt: 0 };
+
+    expect(deriveHeader(pane, [pane])).toEqual({
+      primary: 'lazygit',
+      status: 'running',
+    });
+  });
+
+  it('lets legacy OSC 9 message text override derived command labels', () => {
+    const pane = runningPane('/repo/app', 'npm run build');
+    const terminalStates = new Map([['pane', pane]]);
+    const activityStates = new Map([
+      ['pane', { notification: { source: 'OSC 9', title: null, body: 'Build finished' } }],
+    ]);
+
+    expect(notificationDisplayTitle(activityStates.get('pane')?.notification)).toBe('Build finished');
+    expect(deriveHeader(pane, [pane], {
+      appTitleForPane: buildAppTitleResolver(terminalStates, activityStates),
+    })).toEqual({
+      primary: 'Build finished',
+      status: 'running',
+    });
+  });
+
+  it('does not use rich notification titles as tab title overrides', () => {
+    expect(notificationDisplayTitle({ source: 'OSC 777', title: 'Tests', body: '341 passed' })).toBeNull();
+    expect(notificationDisplayTitle({ source: 'OSC 99', title: 'Build', body: 'Finished successfully' })).toBeNull();
   });
 
   it('preserves remote identity when two panes have the same path', () => {

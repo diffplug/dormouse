@@ -5,6 +5,7 @@ import { DoorElementsContext } from './wall/wall-context';
 import type { DooredItem } from './wall/wall-types';
 import { IS_MAC } from '../lib/platform';
 import {
+  buildAppTitleResolver,
   DEFAULT_ACTIVITY_STATE,
   deriveHeader,
   getActivitySnapshot,
@@ -26,6 +27,10 @@ export function Baseboard({ items, onReattach, notice }: BaseboardProps) {
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
   const allPaneStates = useMemo(() => [...terminalStates.values()], [terminalStates]);
+  const appTitleForPane = useMemo(
+    () => buildAppTitleResolver(terminalStates, activityStates),
+    [terminalStates, activityStates],
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [startIndex, setStartIndex] = useState(0);
@@ -151,7 +156,7 @@ export function Baseboard({ items, onReattach, notice }: BaseboardProps) {
       <div ref={measureEl} className="absolute -left-[9999px] flex gap-1.5" aria-hidden>
         {items.map(item => {
           const activity = activityStates.get(item.id) ?? DEFAULT_ACTIVITY_STATE;
-          const title = deriveDoorTitle(item.title, item.id, terminalStates, allPaneStates);
+          const title = deriveDoorTitle(item.title, item.id, terminalStates, allPaneStates, appTitleForPane);
           return (
             <Door
               key={item.id}
@@ -185,7 +190,7 @@ export function Baseboard({ items, onReattach, notice }: BaseboardProps) {
 
       {items.slice(startIndex, endIndex).map(item => {
         const activity = activityStates.get(item.id) ?? DEFAULT_ACTIVITY_STATE;
-        const title = deriveDoorTitle(item.title, item.id, terminalStates, allPaneStates);
+        const title = deriveDoorTitle(item.title, item.id, terminalStates, allPaneStates, appTitleForPane);
         return (
           <Door
             key={item.id}
@@ -218,8 +223,9 @@ function deriveDoorTitle(
   id: string,
   terminalStates: Map<string, TerminalPaneState>,
   allPaneStates: TerminalPaneState[],
+  appTitleForPane: (pane: TerminalPaneState) => string | null | undefined,
 ): string {
   const paneState = terminalStates.get(id) ?? createTerminalPaneState();
   const visible = allPaneStates.length > 0 ? allPaneStates : [paneState];
-  return resolveDisplayPrimary(deriveHeader(paneState, visible).primary, savedTitle);
+  return resolveDisplayPrimary(deriveHeader(paneState, visible, { appTitleForPane }).primary, savedTitle);
 }

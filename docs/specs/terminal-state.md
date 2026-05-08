@@ -11,7 +11,7 @@ MouseTerm models terminal panes by:
 - whether the shell is at a prompt, editing, running a foreground command, or waiting after command finish
 - command exit status
 - command directory at start time
-- terminal title as a fallback label for unknown active commands
+- app-sent terminal or notification title as an override label
 
 Session CWD and command execution state are separate. `cwd` means "the shell/session reported this directory"; it is not necessarily the internal CWD of a foreground program. A command snapshots `cwdAtStart` when it starts, and that snapshot is used for grouping and header disambiguation while the command is running or freshly finished.
 
@@ -80,12 +80,12 @@ type CommandRun = {
 ```ts
 type TerminalTitle = {
   title: string;
-  source: "osc0" | "osc2" | "user" | "profile" | "derived";
+  source: "osc0" | "osc2" | "notification" | "user" | "profile" | "derived";
   updatedAt: number;
 };
 ```
 
-Terminal title is separate from command state. It is useful as a fallback label, but it is not a command lifecycle signal.
+Terminal title is separate from command state. It is useful as an app-sent label override, but it is not a command lifecycle signal.
 
 ## Normalized Events
 
@@ -172,7 +172,8 @@ type DerivedHeader = {
 Rules:
 
 - A user-pinned title is primary.
-- A running command uses `currentCommand.displayCommand`.
+- An app-sent title override is primary after user-pinned titles. This includes legacy `OSC 9` message text and OSC 0/2 terminal titles sent after the current command started. Rich notification titles from `OSC 99` and `OSC 777` stay in TODO notification UI and do not become header/door labels.
+- A running command uses `currentCommand.displayCommand` when there is no app-sent title override.
 - A freshly finished command uses `lastCommand.displayCommand` until the next prompt signal.
 - Idle terminals use `<idle>` unless a user-pinned title exists.
 - Unknown active commands may use terminal title or shell fallback.
