@@ -45,12 +45,12 @@ describe('VSCodeAdapter PTY exit handling', () => {
     expect(terminalStateStoreMocks.removeTerminalPaneState).not.toHaveBeenCalled();
   });
 
-  it('clears semantic pane state when the adapter explicitly kills a PTY', () => {
+  it('lets lifecycle cleanup remove semantic pane state after explicitly killing a PTY', () => {
     const adapter = new VSCodeAdapter();
 
     adapter.killPty('pane-1');
 
-    expect(terminalStateStoreMocks.removeTerminalPaneState).toHaveBeenCalledWith('pane-1');
+    expect(terminalStateStoreMocks.removeTerminalPaneState).not.toHaveBeenCalled();
     expect(postMessage).toHaveBeenCalledWith({ type: 'pty:kill', id: 'pane-1' });
   });
 });

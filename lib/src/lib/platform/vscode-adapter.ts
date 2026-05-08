@@ -6,7 +6,6 @@ import {
 } from '../terminal-protocol';
 import {
   applyTerminalSemanticEventsByPtyId,
-  removeTerminalPaneState,
 } from '../terminal-state-store';
 
 export class VSCodeAdapter implements PlatformAdapter {
@@ -148,7 +147,6 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   killPty(id: string): void {
     this.replayProtocolParsers.delete(id);
-    removeTerminalPaneState(id);
     this.vscode.postMessage({ type: 'pty:kill', id });
   }
 
