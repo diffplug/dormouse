@@ -78,7 +78,8 @@ export class TerminalProtocolParser {
     }
 
     const stripped = stripDeviceAttributeQueries(visibleData, events);
-    return { visibleData: stripped, events: filterTerminalBellEvents(events) };
+    if (stripped.pending) this.pending = stripped.pending + this.pending;
+    return { visibleData: stripped.visibleData, events: filterTerminalBellEvents(events) };
   }
 
   reset(): void {
@@ -349,23 +350,37 @@ function truncateText(input: string, limit: number): string {
   return Array.from(input).slice(0, limit).join('');
 }
 
-function stripDeviceAttributeQueries(visibleData: string, events: TerminalProtocolEvent[]): string {
-  if (visibleData.indexOf('\x1b[>q') === -1 && visibleData.indexOf('\x9b>q') === -1) return visibleData;
+const DEVICE_ATTRIBUTE_PENDING_SUFFIXES = ['\x1b[>', '\x1b[', '\x1b', '\x9b>', '\x9b'];
+
+function stripDeviceAttributeQueries(
+  visibleData: string,
+  events: TerminalProtocolEvent[],
+): { visibleData: string; pending: string } {
+  const pending = takeDeviceAttributePendingSuffix(visibleData);
+  const searchableData = pending ? visibleData.slice(0, -pending.length) : visibleData;
+
+  if (searchableData.indexOf('\x1b[>q') === -1 && searchableData.indexOf('\x9b>q') === -1) {
+    return { visibleData: searchableData, pending };
+  }
 
   let stripped = '';
   let index = 0;
-  while (index < visibleData.length) {
-    const escQueryIndex = visibleData.indexOf('\x1b[>q', index);
-    const c1QueryIndex = visibleData.indexOf('\x9b>q', index);
+  while (index < searchableData.length) {
+    const escQueryIndex = searchableData.indexOf('\x1b[>q', index);
+    const c1QueryIndex = searchableData.indexOf('\x9b>q', index);
     if (escQueryIndex === -1 && c1QueryIndex === -1) {
-      stripped += visibleData.slice(index);
+      stripped += searchableData.slice(index);
       break;
     }
     const useEsc = escQueryIndex !== -1 && (c1QueryIndex === -1 || escQueryIndex < c1QueryIndex);
     const queryIndex = useEsc ? escQueryIndex : c1QueryIndex;
-    stripped += visibleData.slice(index, queryIndex);
+    stripped += searchableData.slice(index, queryIndex);
     events.push({ kind: 'response', data: ITERM2_DEVICE_ATTRIBUTES_RESPONSE });
     index = queryIndex + (useEsc ? 4 : 3);
   }
-  return stripped;
+  return { visibleData: stripped, pending };
+}
+
+function takeDeviceAttributePendingSuffix(visibleData: string): string {
+  return DEVICE_ATTRIBUTE_PENDING_SUFFIXES.find((suffix) => visibleData.endsWith(suffix)) ?? '';
 }

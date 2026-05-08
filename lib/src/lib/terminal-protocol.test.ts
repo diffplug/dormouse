@@ -140,4 +140,36 @@ describe('TerminalProtocolParser', () => {
       { kind: 'response', data: ITERM2_DEVICE_ATTRIBUTES_RESPONSE },
     ]);
   });
+
+  it('buffers split iTerm2 extended device attribute queries', () => {
+    const parser = new TerminalProtocolParser();
+
+    expect(parser.process('before\x1b')).toEqual({ visibleData: 'before', events: [] });
+    expect(parser.process('[>')).toEqual({ visibleData: '', events: [] });
+    const result = parser.process('qafter');
+
+    expect(result.visibleData).toBe('after');
+    expect(result.events).toEqual([
+      { kind: 'response', data: ITERM2_DEVICE_ATTRIBUTES_RESPONSE },
+    ]);
+  });
+
+  it('buffers split C1 extended device attribute queries', () => {
+    const parser = new TerminalProtocolParser();
+
+    expect(parser.process('before\x9b>')).toEqual({ visibleData: 'before', events: [] });
+    const result = parser.process('qafter');
+
+    expect(result.visibleData).toBe('after');
+    expect(result.events).toEqual([
+      { kind: 'response', data: ITERM2_DEVICE_ATTRIBUTES_RESPONSE },
+    ]);
+  });
+
+  it('releases buffered CSI prefixes when they are not device attribute queries', () => {
+    const parser = new TerminalProtocolParser();
+
+    expect(parser.process('\x1b[')).toEqual({ visibleData: '', events: [] });
+    expect(parser.process('31mred')).toEqual({ visibleData: '\x1b[31mred', events: [] });
+  });
 });
