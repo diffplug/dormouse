@@ -38,6 +38,13 @@ const HEADER_REVEAL_LEAD = 0.04;
 const UNPIN_THRESHOLD = 0.8;
 const HERO_VIDEO_FPS = 120;
 
+/** Critically-damped smoothing for the scroll value driving the hero animation.
+ *  Half-life is the time for the displayed value to close half the gap to the
+ *  scroll target — short enough to feel responsive, long enough to absorb the
+ *  discrete jumps from clicky mouse wheels (Windows especially). */
+const HERO_SCROLL_HALFLIFE_S = 0.06;
+const HERO_SCROLL_SETTLE_PX = 0.5;
+
 /** Vertical padding applied to all content sections after the hero. */
 const SECTION_PY = "py-8";
 
@@ -415,8 +422,8 @@ function Home() {
     };
 
     const wordRefs = [word0Ref, word1Ref, word2Ref];
-    let ticking = false;
-    let frameId = 0;
+    let smoothRafId = 0;
+    let lastSmoothTimestamp = 0;
     let handoffAnimationFrameId = 0;
     let handoffTimeoutId = 0;
     let videoFrameCallbackId = 0;
@@ -426,6 +433,13 @@ function Home() {
     let videoCanReplacePoster = false;
     let disposed = false;
     let lastSeekFrame = -1;
+
+    const prefersReducedMotion = typeof window.matchMedia === "function"
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    const readRunwayScroll = () => -runway.getBoundingClientRect().top;
+    let targetScroll = readRunwayScroll();
+    let smoothScroll = targetScroll;
 
     function setPosterVisible(visible: boolean) {
       if (posterIsVisible === visible) return;
@@ -492,12 +506,10 @@ function Home() {
       });
     }
 
-    function syncScrollState() {
+    function syncScrollState(runwayScroll: number) {
       if (disposed) return;
 
       // How far through the scroll runway (0–1, clamped for animations)
-      const rect = runway.getBoundingClientRect();
-      const runwayScroll = -rect.top;
       const runwayHeight = runway.offsetHeight - window.innerHeight;
       const fraction = runwayHeight > 0
         ? clamp01(runwayScroll / runwayHeight)
@@ -620,14 +632,38 @@ function Home() {
       }
     }
 
-    function scheduleScrollSync() {
-      if (ticking) return;
-      ticking = true;
+    function smoothFrame(now: number) {
+      if (disposed) {
+        smoothRafId = 0;
+        return;
+      }
+      // Clamp dt so a tab returning from background doesn't snap-jump.
+      const dt = Math.min(0.1, (now - lastSmoothTimestamp) / 1000);
+      lastSmoothTimestamp = now;
 
-      frameId = requestAnimationFrame(() => {
-        ticking = false;
-        syncScrollState();
-      });
+      targetScroll = readRunwayScroll();
+
+      if (prefersReducedMotion) {
+        smoothScroll = targetScroll;
+      } else {
+        const decay = Math.exp(-Math.LN2 * dt / HERO_SCROLL_HALFLIFE_S);
+        smoothScroll = targetScroll - (targetScroll - smoothScroll) * decay;
+      }
+
+      syncScrollState(smoothScroll);
+
+      if (Math.abs(targetScroll - smoothScroll) > HERO_SCROLL_SETTLE_PX) {
+        smoothRafId = requestAnimationFrame(smoothFrame);
+      } else {
+        smoothScroll = targetScroll;
+        smoothRafId = 0;
+      }
+    }
+
+    function scheduleScrollSync() {
+      if (smoothRafId) return;
+      lastSmoothTimestamp = performance.now();
+      smoothRafId = requestAnimationFrame(smoothFrame);
     }
 
     // Mobile unlock
@@ -678,13 +714,13 @@ function Home() {
     }
 
     window.addEventListener("scroll", onScroll, { passive: true });
-    syncScrollState(); // initial position, before first paint
+    syncScrollState(smoothScroll); // initial position, before first paint
     setHeroLayoutReady(true);
 
     return () => {
       disposed = true;
       cancelPosterHandoff();
-      cancelAnimationFrame(frameId);
+      if (smoothRafId) cancelAnimationFrame(smoothRafId);
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("touchstart", unlock);
       video.removeEventListener("canplaythrough", handleCanPlayThrough);
