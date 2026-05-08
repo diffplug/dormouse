@@ -224,3 +224,4 @@ unknown | idle | running | finished
 ```
 
 Directory group keys use `cwdIdentity(cwd)` so remote hosts and Windows/POSIX path kinds remain distinct.
+Windows UNC display labels keep `\\server\share\` as the path root and do not repeat the server/share in the trailing path segments.

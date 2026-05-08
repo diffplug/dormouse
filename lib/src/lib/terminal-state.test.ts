@@ -67,6 +67,16 @@ describe('terminal CWD normalization', () => {
     expect(labels.get(cwdIdentity(sibling))).toBe('other/app');
     expect(cwdDisplay(remote)).toBe('prod-box:me/app');
   });
+
+  it('does not duplicate UNC roots in full-depth labels', () => {
+    const share = cwdFromOsc9_9('\\\\server\\share\\repo\\app', 100)!;
+    const otherShare = cwdFromOsc9_9('\\\\server\\other\\repo\\app', 100)!;
+    const labels = shortestUniqueCwdLabels([share, otherShare]);
+
+    expect(cwdDisplay(share, { maxSegments: 2 })).toBe('\\\\server\\share\\repo\\app');
+    expect(labels.get(cwdIdentity(share))).toBe('\\\\server\\share\\repo\\app');
+    expect(labels.get(cwdIdentity(otherShare))).toBe('\\\\server\\other\\repo\\app');
+  });
 });
 
 describe('terminal command state reducer', () => {

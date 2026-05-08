@@ -595,7 +595,7 @@ function pathParts(path: string, kind: PathKind): { root: string; segments: stri
     const unc = normalized.match(/^\\\\([^\\]+)\\([^\\]+)\\?(.*)$/);
     if (unc) {
       const rest = unc[3] ? unc[3].split('\\').filter(Boolean) : [];
-      return { root: `\\\\${unc[1]}\\${unc[2]}\\`, segments: [unc[1], unc[2], ...rest], separator: '\\' };
+      return { root: `\\\\${unc[1]}\\${unc[2]}\\`, segments: rest, separator: '\\' };
     }
     const drive = normalized.match(/^([A-Za-z]:)\\?(.*)$/);
     if (drive) {
