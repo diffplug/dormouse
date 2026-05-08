@@ -10,7 +10,6 @@ import {
 } from "mouseterm-lib/lib/terminal-protocol";
 import {
   applyTerminalSemanticEventsByPtyId,
-  removeTerminalPaneState,
 } from "mouseterm-lib/lib/terminal-state-store";
 
 function invoke(cmd: string, args?: Record<string, unknown>): void {
@@ -145,7 +144,6 @@ export class TauriAdapter implements PlatformAdapter {
 
   killPty(id: string): void {
     this.protocolParsers.delete(id);
-    removeTerminalPaneState(id);
     invoke("pty_kill", { id });
   }
 
