@@ -9,8 +9,10 @@ import {
   recordTerminalUserInput,
   recordTerminalUserInputByPtyId,
   removeTerminalPaneState,
+  setTerminalUserTitle,
 } from './terminal-state-store';
 import { registry, type TerminalEntry } from './terminal-store';
+import { DEFAULT_IDLE_TITLE, UNNAMED_PANEL_TITLE } from './terminal-state';
 
 describe('terminal semantic state store command input fallback', () => {
   afterEach(() => {
@@ -59,6 +61,17 @@ describe('terminal semantic state store command input fallback', () => {
   it('does not resurrect a disposed pane when a late process CWD arrives', () => {
     fillTerminalProcessCwd('pane', '/Users/me/project');
     expect(getTerminalPaneStateSnapshot().has('pane')).toBe(false);
+  });
+
+  it('refuses to pin sentinel labels as a user title', () => {
+    setTerminalUserTitle('pane', DEFAULT_IDLE_TITLE);
+    setTerminalUserTitle('pane', UNNAMED_PANEL_TITLE);
+    setTerminalUserTitle('pane', '   ');
+
+    expect(getTerminalPaneState('pane').titleCandidates.user).toBeUndefined();
+
+    setTerminalUserTitle('pane', 'Production API');
+    expect(getTerminalPaneState('pane').titleCandidates.user?.title).toBe('Production API');
   });
 
   it('records PTY fallback state under the current pane after a swap', () => {

@@ -2,7 +2,9 @@ import {
   createTerminalPaneState,
   cwdFromManualPath,
   cwdFromProcessPath,
+  DEFAULT_IDLE_TITLE,
   reduceTerminalState,
+  UNNAMED_PANEL_TITLE,
   type CwdState,
   type TerminalPaneState,
   type TerminalSemanticEvent,
@@ -120,9 +122,11 @@ export function recordTerminalOutputByPtyId(ptyId: string, output: string): void
   recordTerminalOutput(resolvePaneStateIdByPtyId(ptyId), output);
 }
 
+const RESERVED_USER_TITLES = new Set<string>([DEFAULT_IDLE_TITLE, UNNAMED_PANEL_TITLE]);
+
 export function setTerminalUserTitle(id: string, title: string): void {
   const trimmed = title.trim();
-  if (!trimmed) return;
+  if (!trimmed || RESERVED_USER_TITLES.has(trimmed)) return;
   const terminalTitle: TerminalTitle = {
     title: trimmed,
     source: 'user',
