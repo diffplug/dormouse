@@ -114,6 +114,26 @@ describe('resumeOrRestore', () => {
     });
   });
 
+  it('seeds saved visible pane titles when resuming live PTYs', async () => {
+    const saved: PersistedSession = {
+      version: 3,
+      layout: { panels: { 'pane-a': {} } },
+      panes: [
+        { id: 'pane-a', title: 'Production API', cwd: null, scrollback: null, resumeCommand: null },
+      ],
+    };
+
+    await resumeOrRestore(createPlatform([
+      { id: 'pane-a', alive: true },
+    ], saved));
+
+    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('pane-a', 'pane-a-replay', {
+      alive: true,
+      exitCode: undefined,
+      title: 'Production API',
+    });
+  });
+
   it('does not reuse a saved layout when live PTYs do not match saved panes', async () => {
     const saved: PersistedSession = {
       version: 3,

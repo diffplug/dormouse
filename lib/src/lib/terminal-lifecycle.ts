@@ -228,7 +228,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
 export function resumeTerminal(
   id: string,
   replayData: string | null,
-  exitInfo?: { alive: boolean; exitCode?: number },
+  exitInfo?: { alive: boolean; exitCode?: number; title?: string | null },
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
@@ -240,6 +240,10 @@ export function resumeTerminal(
   }
   if (exitInfo && !exitInfo.alive) {
     entry.terminal.write(`\r\n[Process exited with code ${exitInfo.exitCode ?? -1}]\r\n`);
+  }
+  const savedTitle = exitInfo?.title?.trim();
+  if (savedTitle && savedTitle !== UNNAMED_PANEL_TITLE) {
+    setTerminalUserTitle(id, savedTitle);
   }
 
   return entry;
