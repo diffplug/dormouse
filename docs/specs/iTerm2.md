@@ -1,6 +1,6 @@
 # iTerm2 Compatibility Spec
 
-> See `docs/specs/ontology.md` for canonical Session vocabulary and `docs/specs/alert.md` for the Activity state machine. This spec defines terminal-emulator identity and explicit terminal notification escape sequences.
+> See `docs/specs/ontology.md` for canonical Session vocabulary and `docs/specs/alert.md` for the Activity state machine. This spec defines terminal-emulator identity and explicit terminal notification escape sequences. CWD, shell lifecycle, OSC 133, OSC 633, OSC 1337 `CurrentDir`, and OSC 0/2 title fallback are defined in `docs/specs/terminal-state.md`.
 
 ## Goal
 
@@ -47,6 +47,14 @@ Because this identity can cause tools to emit more iTerm2 escape codes, unsuppor
 ## Supported Protocols
 
 The OSC notification families use sequences introduced by `ESC ]`. MouseTerm must accept either `BEL` (`\x07`) or `ST` (`ESC \`) terminators for these notification families. A `BEL` that terminates an OSC is part of that OSC sequence, not a standalone bell notification.
+
+The same streaming parser also recognizes semantic terminal OSCs from `docs/specs/terminal-state.md`:
+
+- `OSC 7` / `OSC 9;9` / `OSC 633;P;Cwd=` / `OSC 1337;CurrentDir=` for CWD
+- `OSC 133` and `OSC 633` prompt/command boundaries
+- `OSC 0` and `OSC 2` title fallback
+
+Those semantic sequences are normalized into `TerminalSemanticEvent` and consumed by terminal state, not by the Activity alert machine.
 
 | Protocol | Shape | Fields | Notes |
 |---|---|---|---|

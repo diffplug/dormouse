@@ -25,6 +25,15 @@ import {
   writeReplay,
 } from './terminal-report-filter';
 import { getTerminalTheme, paintTerminalHost, startThemeObserver } from './terminal-theme';
+import {
+  ensureTerminalPaneState,
+  fillTerminalProcessCwd,
+  removeTerminalPaneState,
+  resetTerminalPaneState,
+  seedTerminalManualCwd,
+  setTerminalUserTitle,
+  swapTerminalPaneStates,
+} from './terminal-state-store';
 
 function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDivElement } {
   const styles = getComputedStyle(document.body);
@@ -174,6 +183,7 @@ function setupTerminalEntry(id: string): TerminalEntry {
   }
 
   registry.set(id, entry);
+  ensureTerminalPaneState(id);
   notifyActivityListeners();
   startThemeObserver();
   return entry;
@@ -188,6 +198,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   if (existing) return existing;
 
   const entry = setupTerminalEntry(id);
+  resetTerminalPaneState(id);
 
   const shellOpts = pendingShellOpts.get(id);
   pendingShellOpts.delete(id);
@@ -198,6 +209,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     rows: dims?.rows || 30,
     ...shellOpts,
   });
+  void getPlatform().getCwd(id).then((cwd) => fillTerminalProcessCwd(id, cwd));
 
   return entry;
 }
@@ -230,6 +242,11 @@ export function restoreTerminal(
   if (existing) return existing;
 
   const entry = setupTerminalEntry(id);
+  resetTerminalPaneState(id);
+  seedTerminalManualCwd(id, opts.cwd);
+  if (opts.title && opts.title !== '<unnamed>') {
+    setTerminalUserTitle(id, opts.title);
+  }
 
   if (opts.scrollback) {
     writeReplay(entry, opts.scrollback, '\r\n');
@@ -246,6 +263,7 @@ export function restoreTerminal(
     shell: opts.shell,
     args: opts.args,
   });
+  void getPlatform().getCwd(id).then((cwd) => fillTerminalProcessCwd(id, cwd));
 
   return entry;
 }
@@ -278,6 +296,7 @@ export function disposeSession(id: string): void {
   entry.element.remove();
   entry.terminal.dispose();
   registry.delete(id);
+  removeTerminalPaneState(id);
   removeMouseSelectionState(id);
   notifyActivityListeners();
 }
@@ -295,6 +314,7 @@ export function swapTerminals(idA: string, idB: string): void {
 
   registry.set(idA, entryB);
   registry.set(idB, entryA);
+  swapTerminalPaneStates(idA, idB);
 
   if (containerA) {
     containerA.appendChild(entryB.element);

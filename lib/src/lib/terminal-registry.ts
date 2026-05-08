@@ -2,6 +2,15 @@ export type { SessionStatus } from './activity-monitor';
 export type { TodoState, AlertButtonActionResult } from './alert-manager';
 export type { ActivityState } from './session-activity-store';
 export type { TerminalEntry, TerminalOverlayDims } from './terminal-store';
+export type {
+  CommandRun,
+  CwdState,
+  DerivedHeader,
+  ShellActivity,
+  TerminalPaneState,
+  TerminalSemanticEvent,
+  TerminalTitle,
+} from './terminal-state';
 
 export {
   clearPrimedActivity,
@@ -42,3 +51,34 @@ export {
 } from './terminal-lifecycle';
 
 export { setDefaultShellOpts, getDefaultShellOpts } from './shell-defaults';
+
+export {
+  applyTerminalSemanticEvents,
+  applyTerminalSemanticEventsByPtyId,
+  ensureTerminalPaneState,
+  fillTerminalProcessCwd,
+  getTerminalPaneState,
+  getTerminalPaneStateSnapshot,
+  removeTerminalPaneState,
+  resetTerminalPaneState,
+  seedTerminalManualCwd,
+  setTerminalUserTitle,
+  subscribeToTerminalPaneState,
+} from './terminal-state-store';
+
+export {
+  cwdDisplay,
+  cwdFromManualPath,
+  cwdFromOsc1337,
+  cwdFromOsc633,
+  cwdFromOsc7,
+  cwdFromOsc9_9,
+  cwdFromProcessPath,
+  cwdIdentity,
+  deriveFallbackCommandTitle,
+  deriveHeader,
+  groupTerminalPanes,
+  reduceTerminalState,
+  shortestUniqueCwdLabels,
+  summarizeCommandLine,
+} from './terminal-state';

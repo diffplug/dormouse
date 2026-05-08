@@ -1,9 +1,19 @@
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
+import {
+  cwdFromOsc1337,
+  cwdFromOsc633,
+  cwdFromOsc7,
+  cwdFromOsc9_9,
+  type CommandRunSource,
+  type TerminalSemanticEvent,
+  type TerminalTitle,
+} from './terminal-state';
 
 export type TerminalProtocolEvent =
   | { kind: 'notification'; notification: ActivityNotification }
   | { kind: 'progress'; progress: ProtocolProgressUpdate }
-  | { kind: 'response'; data: string };
+  | { kind: 'response'; data: string }
+  | { kind: 'semantic'; event: TerminalSemanticEvent };
 
 export interface TerminalProtocolAlertSink {
   notifyFromProtocol(id: string, notification: ActivityNotification): void;
@@ -88,7 +98,13 @@ export class TerminalProtocolParser {
   }
 
   private parseOsc(content: string): TerminalProtocolEvent[] | null {
+    if (content === '7' || content.startsWith('7;')) return parseOsc7(content);
     if (content === '9' || content.startsWith('9;')) return this.parseOsc9(content);
+    if (content === '133' || content.startsWith('133;')) return parseOsc133(content);
+    if (content === '633' || content.startsWith('633;')) return parseOsc633(content);
+    if (content === '1337' || content.startsWith('1337;')) return parseOsc1337(content);
+    if (content === '0' || content.startsWith('0;')) return parseOscTitle(content, 'osc0');
+    if (content === '2' || content.startsWith('2;')) return parseOscTitle(content, 'osc2');
     if (content === '99' || content.startsWith('99;')) return this.parseOsc99(content);
     if (content === '777' || content.startsWith('777;')) return this.parseOsc777(content);
     return null;
@@ -96,6 +112,11 @@ export class TerminalProtocolParser {
 
   private parseOsc9(content: string): TerminalProtocolEvent[] {
     if (!content.startsWith('9;')) return [];
+
+    if (content.startsWith('9;9;')) {
+      const cwd = cwdFromOsc9_9(content.slice('9;9;'.length));
+      return cwd ? [{ kind: 'semantic', event: { type: 'cwd', cwd } }] : [];
+    }
 
     if (content === '9;4' || content.startsWith('9;4;')) {
       const progress = parseOsc94(content);
@@ -208,6 +229,10 @@ export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]
   return events.flatMap((event) => (event.kind === 'response' ? [event.data] : []));
 }
 
+export function collectTerminalSemanticEvents(events: TerminalProtocolEvent[]): TerminalSemanticEvent[] {
+  return events.flatMap((event) => (event.kind === 'semantic' ? [event.event] : []));
+}
+
 function stripStandaloneBells(segment: string, events: TerminalProtocolEvent[]): string {
   const bellIndex = segment.indexOf('\x07');
   if (bellIndex === -1) return segment;
@@ -258,6 +283,93 @@ function findOscTerminator(text: string, from: number): { index: number; end: nu
   if (c1St !== -1 && (bestIndex === -1 || c1St < bestIndex)) { bestIndex = c1St; bestEndOffset = 1; }
   if (bestIndex === -1) return null;
   return { index: bestIndex, end: bestIndex + bestEndOffset };
+}
+
+function parseOsc7(content: string): TerminalProtocolEvent[] {
+  if (!content.startsWith('7;')) return [];
+  const cwd = cwdFromOsc7(content.slice(2));
+  return cwd ? [{ kind: 'semantic', event: { type: 'cwd', cwd } }] : [];
+}
+
+function parseOsc133(content: string): TerminalProtocolEvent[] {
+  const fields = content.split(';');
+  if (fields[0] !== '133') return [];
+  switch (fields[1]) {
+    case 'A':
+      return [{ kind: 'semantic', event: { type: 'promptStart' } }];
+    case 'B':
+      return [{ kind: 'semantic', event: { type: 'promptEnd' } }];
+    case 'C':
+      return [commandStartEvent('osc133_boundaries')];
+    case 'D':
+      return [{ kind: 'semantic', event: { type: 'commandFinish', exitCode: parseExitCode(fields[2]) } }];
+    default:
+      return [];
+  }
+}
+
+function parseOsc633(content: string): TerminalProtocolEvent[] {
+  const fields = content.split(';');
+  if (fields[0] !== '633') return [];
+  switch (fields[1]) {
+    case 'A':
+      return [{ kind: 'semantic', event: { type: 'promptStart' } }];
+    case 'B':
+      return [{ kind: 'semantic', event: { type: 'promptEnd' } }];
+    case 'C':
+      return [commandStartEvent('osc633_boundaries')];
+    case 'D':
+      return [{ kind: 'semantic', event: { type: 'commandFinish', exitCode: parseExitCode(fields[2]) } }];
+    case 'E': {
+      const prefix = '633;E;';
+      if (!content.startsWith(prefix)) return [];
+      return [{ kind: 'semantic', event: { type: 'commandLine', commandLine: content.slice(prefix.length) } }];
+    }
+    case 'P':
+      return parseOsc633Property(content.slice('633;P;'.length));
+    default:
+      return [];
+  }
+}
+
+function parseOsc633Property(rawProperties: string): TerminalProtocolEvent[] {
+  for (const property of rawProperties.split(';')) {
+    if (!property.startsWith('Cwd=')) continue;
+    const cwd = cwdFromOsc633(property.slice('Cwd='.length));
+    return cwd ? [{ kind: 'semantic', event: { type: 'cwd', cwd } }] : [];
+  }
+  return [];
+}
+
+function parseOsc1337(content: string): TerminalProtocolEvent[] {
+  const prefix = '1337;CurrentDir=';
+  if (!content.startsWith(prefix)) return [];
+  const cwd = cwdFromOsc1337(content.slice(prefix.length));
+  return cwd ? [{ kind: 'semantic', event: { type: 'cwd', cwd } }] : [];
+}
+
+function parseOscTitle(content: string, source: TerminalTitle['source']): TerminalProtocolEvent[] {
+  const prefix = source === 'osc0' ? '0;' : '2;';
+  if (!content.startsWith(prefix)) return [];
+  const titleText = sanitizeText(content.slice(prefix.length), TITLE_LIMIT);
+  if (!titleText) return [];
+  return [{
+    kind: 'semantic',
+    event: {
+      type: 'title',
+      title: { title: titleText, source, updatedAt: Date.now() },
+    },
+  }];
+}
+
+function commandStartEvent(source: CommandRunSource): TerminalProtocolEvent {
+  return { kind: 'semantic', event: { type: 'commandStart', source } };
+}
+
+function parseExitCode(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  const value = Number(raw);
+  return Number.isInteger(value) ? value : undefined;
 }
 
 // OSC 9;4 state code → progress shape. Codes 1 and 4 require a percent

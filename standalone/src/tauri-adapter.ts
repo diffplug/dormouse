@@ -4,9 +4,14 @@ import type { AlertStateDetail, PlatformAdapter, PtyInfo } from "mouseterm-lib/l
 import { AlertManager, type SessionStatus } from "mouseterm-lib/lib/alert-manager";
 import {
   applyTerminalProtocolEvents,
+  collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
 } from "mouseterm-lib/lib/terminal-protocol";
+import {
+  applyTerminalSemanticEventsByPtyId,
+  removeTerminalPaneState,
+} from "mouseterm-lib/lib/terminal-state-store";
 
 function invoke(cmd: string, args?: Record<string, unknown>): void {
   rawInvoke(cmd, args).catch((err) =>
@@ -54,6 +59,7 @@ export class TauriAdapter implements PlatformAdapter {
         const { id, data } = event.payload;
         const parsed = this.getProtocolParser(id).process(data);
         applyTerminalProtocolEvents(this.alertManager, id, parsed.events);
+        applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
         for (const response of collectTerminalProtocolResponses(parsed.events)) {
           invoke("pty_write", { id, data: response });
         }
@@ -85,8 +91,11 @@ export class TauriAdapter implements PlatformAdapter {
 
     this.unlistenFns.push(
       await listen<{ id: string; data: string }>("pty:replay", (event) => {
+        const { id, data } = event.payload;
+        const parsed = this.getProtocolParser(id).process(data);
+        applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
         for (const handler of this.replayHandlers) {
-          handler(event.payload);
+          handler({ id, data: parsed.visibleData });
         }
       }),
     );
@@ -132,6 +141,7 @@ export class TauriAdapter implements PlatformAdapter {
 
   killPty(id: string): void {
     this.protocolParsers.delete(id);
+    removeTerminalPaneState(id);
     invoke("pty_kill", { id });
   }
 

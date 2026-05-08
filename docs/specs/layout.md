@@ -4,7 +4,7 @@
 
 ## Conceptual model
 
-A **Session** is a single PTY instance — a running shell process with its scrollback, environment, and working directory. Sessions are managed by the terminal registry and persist independently of how they are displayed. Each session also carries Activity state (projected alert status, optional TODO flag, and optional protocol notification detail).
+A **Session** is a single PTY instance — a running shell process with its scrollback, environment, and semantic terminal state. Sessions are managed by the terminal registry and persist independently of how they are displayed. Each session also carries Activity state (projected alert status, optional TODO flag, and optional protocol notification detail). CWD, foreground-command lifecycle, command titles, terminal titles, header derivation, and grouping keys are defined in `docs/specs/terminal-state.md`.
 
 A Session's **View** state places it in one of two containers:
 
@@ -72,9 +72,11 @@ The content area is a tiling layout of panes, powered by dockview. Each pane occ
 
 Each pane has a 30px header that doubles as a drag handle. The header uses `cursor-grab` / `active:cursor-grabbing`, `select-none`, and the shared terminal top radius from `lib/src/components/design.tsx`. Background and foreground use the `--color-header-active-*` / `--color-header-inactive-*` token pairs, which map to VSCode file-tree list colors. Dockview's default close button and right-actions container are hidden via CSS.
 
+The header label is derived from `TerminalPaneState`: user-pinned title first, then current/freshly-finished command title, then terminal title or shell fallback. When visible panes would have duplicate primary labels, the header adds a compact directory disambiguator using the running command's `cwdAtStart` or the idle pane's latest `cwd`.
+
 Elements from left to right:
 
-- Session name (click to rename, truncates with ellipsis)
+- Derived session label (click to rename/pin, truncates with ellipsis)
 - Alert bell button (reflects session activity status)
 - TODO pill (if todo state is set; hidden in minimal tier)
 - Flexible gap
@@ -102,7 +104,7 @@ The header adapts to available width via ResizeObserver in three tiers:
 
 Below the content area is the baseboard (`h-7`, 28px). It is always visible and has no top divider. The dockview area ends 2px above it, leaving a narrow theme-colored gap that keeps rounded pane corners distinct from the baseboard. Its horizontal padding matches the Dockview wrapper's 6px inset, so doors align with the panes above. When empty, it shows keyboard shortcut hints when there are no doors and the container is wider than 350px (currently: `LCmd → RCmd to enter command mode`).
 
-When a session is minimized, it becomes a **door** on the baseboard. The door displays the session's title, a TODO badge (if set), and an alert bell icon with activity dot. It uses the bottom edge of the window as its bottom border, with left, top, and right borders using the shared terminal top radius from `lib/src/components/design.tsx` — resembling a mouse hole and matching pane rounding. Door dimensions: `min-w-[68px] max-w-[220px] h-6`.
+When a session is minimized, it becomes a **door** on the baseboard. The door displays the same derived terminal label as the pane header, a TODO badge (if set), and an alert bell icon with activity dot. It uses the bottom edge of the window as its bottom border, with left, top, and right borders using the shared terminal top radius from `lib/src/components/design.tsx` — resembling a mouse hole and matching pane rounding. Door dimensions: `min-w-[68px] max-w-[220px] h-6`.
 
 ### Door interaction
 
@@ -283,6 +285,8 @@ On startup, recovery is priority-based:
 
 Each session carries `ActivityState` with `status: SessionStatus`, `todo: TodoState`, and `notification: ActivityNotification | null`. `status` is the projected public status from the timer-based visual track plus the terminal-report protocol track described in `docs/specs/alert.md`; it may be `OSC_NOTIF_BUSY` when OSC progress has cocked the bell. These are synced to React via `useSyncExternalStore`. State that arrives from the platform before a registry entry exists (resume scenario) is held as "primed state" and applied when the registry entry is created.
 
+Each session also carries `TerminalPaneState` from `docs/specs/terminal-state.md`. The frontend store is keyed by the current pane/session id, and PTY-originated semantic events are resolved through `ptyId` so swapped sessions keep their CWD and command state with the terminal content.
+
 ## Theme
 
 Custom `mousetermTheme` extends dockview's `themeAbyss`:
@@ -362,6 +366,8 @@ The deferred spawn also only calls `selectPane` if selection is null. The kill h
 | `lib/src/lib/terminal-registry.ts` | Public facade preserving registry imports |
 | `lib/src/lib/terminal-store.ts` | Registry maps, terminal entry shape, pending shell opts, overlay dimension types |
 | `lib/src/lib/terminal-lifecycle.ts` | Session lifecycle: create, resume, restore, mount, unmount, dispose, swap, focus, refit |
+| `lib/src/lib/terminal-state.ts` | Pure semantic terminal model: CWD normalization, command reducer, header derivation, grouping helpers |
+| `lib/src/lib/terminal-state-store.ts` | React-facing terminal semantic state store and PTY-id to pane-id resolution |
 | `lib/src/lib/session-activity-store.ts` | React activity snapshot store, primed alert state, alert/TODO platform delegates |
 | `lib/src/lib/terminal-theme.ts` | xterm theme extraction, terminal host painting, theme MutationObserver |
 | `lib/src/lib/terminal-report-filter.ts` | Synthetic/replay terminal report detection and replay writer |

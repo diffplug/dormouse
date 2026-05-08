@@ -1,4 +1,5 @@
 import type { ActivityNotification, SessionStatus, TodoState } from '../../lib/src/lib/alert-manager';
+import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 
 // Messages from webview → extension host
 export type WebviewMessage =
@@ -37,6 +38,7 @@ export interface PtyInfo {
 export type ExtensionMessage =
   | { type: 'pty:data'; id: string; data: string }
   | { type: 'pty:exit'; id: string; exitCode: number }
+  | { type: 'terminal:semanticEvents'; id: string; events: TerminalSemanticEvent[] }
   | { type: 'pty:list'; ptys: PtyInfo[] }
   | { type: 'pty:replay'; id: string; data: string }
   | { type: 'pty:cwd'; id: string; cwd: string | null; requestId?: string }

@@ -1,5 +1,13 @@
 import type { AlertStateDetail, PlatformAdapter, PtyInfo } from './types';
 import { setDefaultShellOpts } from '../shell-defaults';
+import {
+  collectTerminalSemanticEvents,
+  TerminalProtocolParser,
+} from '../terminal-protocol';
+import {
+  applyTerminalSemanticEventsByPtyId,
+  removeTerminalPaneState,
+} from '../terminal-state-store';
 
 export class VSCodeAdapter implements PlatformAdapter {
   private vscode: ReturnType<typeof acquireVsCodeApi>;
@@ -10,6 +18,7 @@ export class VSCodeAdapter implements PlatformAdapter {
   private replayHandlers = new Set<(detail: { id: string; data: string }) => void>();
   private flushRequestHandlers = new Set<(detail: { requestId: string }) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
+  private replayProtocolParsers = new Map<string, TerminalProtocolParser>();
 
   constructor() {
     this.vscode = acquireVsCodeApi();
@@ -41,9 +50,14 @@ export class VSCodeAdapter implements PlatformAdapter {
           handler({ ptys: msg.ptys });
         }
       } else if (msg.type === 'pty:replay') {
+        const parser = this.getReplayProtocolParser(msg.id);
+        const parsed = parser.process(msg.data);
+        applyTerminalSemanticEventsByPtyId(msg.id, collectTerminalSemanticEvents(parsed.events));
         for (const handler of this.replayHandlers) {
-          handler({ id: msg.id, data: msg.data });
+          handler({ id: msg.id, data: parsed.visibleData });
         }
+      } else if (msg.type === 'terminal:semanticEvents') {
+        applyTerminalSemanticEventsByPtyId(msg.id, msg.events ?? []);
       } else if (msg.type === 'mouseterm:flushSessionSave') {
         for (const handler of this.flushRequestHandlers) {
           handler({ requestId: msg.requestId });
@@ -115,6 +129,7 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[] }): void {
+    this.replayProtocolParsers.set(id, new TerminalProtocolParser());
     this.vscode.postMessage({ type: 'pty:spawn', id, options });
   }
 
@@ -127,6 +142,8 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   killPty(id: string): void {
+    this.replayProtocolParsers.delete(id);
+    removeTerminalPaneState(id);
     this.vscode.postMessage({ type: 'pty:kill', id });
   }
 
@@ -272,5 +289,14 @@ export class VSCodeAdapter implements PlatformAdapter {
     // first resolveWebviewView call. Fall back to hostState on the very
     // first load, before any setState has run.
     return this.vscode.getState() ?? this.hostState;
+  }
+
+  private getReplayProtocolParser(id: string): TerminalProtocolParser {
+    let parser = this.replayProtocolParsers.get(id);
+    if (!parser) {
+      parser = new TerminalProtocolParser();
+      this.replayProtocolParsers.set(id, parser);
+    }
+    return parser;
   }
 }

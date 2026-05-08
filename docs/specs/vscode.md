@@ -39,6 +39,8 @@ Frontend Library (lib/src/)
     ├── terminal-lifecycle.ts     — xterm lifecycle, PTY wiring, mount/dispose/swap/focus
     ├── terminal-theme.ts         — xterm theme observer and host painting
     ├── terminal-report-filter.ts — replay/synthetic report filtering
+    ├── terminal-state.ts       — terminal CWD/command semantic model and derivation helpers
+    ├── terminal-state-store.ts — frontend semantic state store keyed by pane/session id
     ├── terminal-mouse-router.ts  — mouse selection routing
     ├── session-activity-store.ts — alert/TODO projection and delegates
     ├── reconnect.ts              — resume (live-PTY) + restore (cold-start) entry point
@@ -181,10 +183,11 @@ All types defined in `message-types.ts`. Webview-side handling in `vscode-adapte
 
 | Message | Purpose |
 |---------|---------|
-| `pty:data` | PTY output (routed only to owning router) |
+| `pty:data` | PTY output after supported OSC sequences have been parsed/stripped (routed only to owning router) |
 | `pty:exit` | PTY process exited (with exitCode) |
+| `terminal:semanticEvents` | Normalized CWD/title/prompt/command events parsed in the extension host from live PTY data |
 | `pty:list` | List of all resumable PTYs (response to `mouseterm:init`) |
-| `pty:replay` | Buffered output since spawn (response to `mouseterm:init`) |
+| `pty:replay` | Buffered raw output since spawn (response to `mouseterm:init`); the webview parses semantic OSCs during replay reconstruction without triggering alerts |
 | `pty:cwd` | CWD query response (matched by requestId) |
 | `pty:scrollback` | Scrollback query response (matched by requestId) |
 | `pty:shells` | Available shells list response (matched by requestId) |

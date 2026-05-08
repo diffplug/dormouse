@@ -125,10 +125,114 @@ describe('TerminalProtocolParser', () => {
 
   it('passes unsupported OSC sequences through to xterm', () => {
     const parser = new TerminalProtocolParser();
-    const result = parser.process('\x1b]0;title\x07text');
+    const result = parser.process('\x1b]555;unknown\x07text');
 
-    expect(result.visibleData).toBe('\x1b]0;title\x07text');
+    expect(result.visibleData).toBe('\x1b]555;unknown\x07text');
     expect(result.events).toEqual([]);
+  });
+
+  it('parses and strips CWD OSC sequences into semantic events', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('a\x1b]7;file://prod-box/home/me/project\x1b\\b\x1b]9;9;C:\\repo\x07c');
+
+    expect(result.visibleData).toBe('abc');
+    expect(result.events).toEqual([
+      {
+        kind: 'semantic',
+        event: {
+          type: 'cwd',
+          cwd: {
+            uri: 'file://prod-box/home/me/project',
+            path: '/home/me/project',
+            host: 'prod-box',
+            scheme: 'file',
+            pathKind: 'posix',
+            isRemote: true,
+            source: 'osc7',
+            updatedAt: expect.any(Number),
+          },
+        },
+      },
+      {
+        kind: 'semantic',
+        event: {
+          type: 'cwd',
+          cwd: {
+            path: 'C:\\repo',
+            pathKind: 'windows',
+            isRemote: false,
+            source: 'osc9_9',
+            updatedAt: expect.any(Number),
+          },
+        },
+      },
+    ]);
+  });
+
+  it('parses OSC 133 and 633 command lifecycle events', () => {
+    const parser = new TerminalProtocolParser();
+
+    expect(parser.process('\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07\x1b]133;D;2\x07').events).toEqual([
+      { kind: 'semantic', event: { type: 'promptStart' } },
+      { kind: 'semantic', event: { type: 'promptEnd' } },
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc133_boundaries' } },
+      { kind: 'semantic', event: { type: 'commandFinish', exitCode: 2 } },
+    ]);
+
+    expect(parser.process('\x1b]633;E;pnpm test --watch\x07\x1b]633;C\x07\x1b]633;D\x07').events).toEqual([
+      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'pnpm test --watch' } },
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
+      { kind: 'semantic', event: { type: 'commandFinish', exitCode: undefined } },
+    ]);
+  });
+
+  it('parses OSC 633 and 1337 CWD plus title fallbacks', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('\x1b]633;P;Cwd=/tmp/with%20space\x07\x1b]1337;CurrentDir=/Users/me/app\x07\x1b]0;zsh\x07\x1b]2;vim\x07');
+
+    expect(result.visibleData).toBe('');
+    expect(result.events).toEqual([
+      {
+        kind: 'semantic',
+        event: {
+          type: 'cwd',
+          cwd: {
+            path: '/tmp/with space',
+            pathKind: 'posix',
+            isRemote: false,
+            source: 'osc633',
+            updatedAt: expect.any(Number),
+          },
+        },
+      },
+      {
+        kind: 'semantic',
+        event: {
+          type: 'cwd',
+          cwd: {
+            path: '/Users/me/app',
+            pathKind: 'posix',
+            isRemote: false,
+            source: 'osc1337',
+            updatedAt: expect.any(Number),
+          },
+        },
+      },
+      {
+        kind: 'semantic',
+        event: {
+          type: 'title',
+          title: { title: 'zsh', source: 'osc0', updatedAt: expect.any(Number) },
+        },
+      },
+      {
+        kind: 'semantic',
+        event: {
+          type: 'title',
+          title: { title: 'vim', source: 'osc2', updatedAt: expect.any(Number) },
+        },
+      },
+    ]);
   });
 
   it('responds to iTerm2 extended device attribute queries', () => {

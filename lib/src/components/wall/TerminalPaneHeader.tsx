@@ -29,9 +29,12 @@ import {
   clearSessionTodo,
   DEFAULT_ACTIVITY_STATE,
   getActivitySnapshot,
+  getTerminalPaneStateSnapshot,
   subscribeToActivity,
+  subscribeToTerminalPaneState,
   type SessionStatus,
 } from '../../lib/terminal-registry';
+import { createTerminalPaneState, deriveHeader } from '../../lib/terminal-state';
 import {
   DialogKeyboardContext,
   ModeContext,
@@ -75,9 +78,19 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
   const windowFocused = useContext(WindowFocusedContext);
   const setDialogKeyboardActive = useContext(DialogKeyboardContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
+  const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
   const mouseStates = useSyncExternalStore(subscribeToMouseSelection, getMouseSelectionSnapshot);
   const actions = useContext(WallActionsContext);
   const activity = activityStates.get(api.id) ?? DEFAULT_ACTIVITY_STATE;
+  const paneState = terminalStates.get(api.id) ?? createTerminalPaneState();
+  const visiblePaneStates = terminalStates.size > 0 ? [...terminalStates.values()] : [paneState];
+  const derivedHeader = deriveHeader(paneState, visiblePaneStates);
+  const apiTitle = api.title ?? '';
+  const displayTitle = paneState.title?.source === 'user'
+    ? paneState.title.title
+    : derivedHeader.primary === 'shell' && apiTitle && apiTitle !== '<unnamed>'
+      ? apiTitle
+      : derivedHeader.primary;
   const mouseState = mouseStates.get(api.id) ?? DEFAULT_MOUSE_SELECTION_STATE;
   const showMouseIcon = mouseState.mouseReporting !== 'none';
   const inOverride = mouseState.override !== 'off';
@@ -147,7 +160,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
         {isRenaming ? (
           <input
             className="bg-transparent outline-none border-none text-inherit font-medium font-mono w-full min-w-0 p-0 m-0"
-            defaultValue={api.title}
+            defaultValue={displayTitle}
             autoFocus
             ref={(el) => el?.select()}
             onKeyDown={(e) => {
@@ -163,10 +176,15 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
           />
         ) : (
           <span
-            className="min-w-0 truncate cursor-text font-medium text-inherit decoration-current/50 underline-offset-2 hover:underline"
+            className="flex min-w-0 cursor-text items-baseline font-medium text-inherit decoration-current/50 underline-offset-2 hover:underline"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); actions.onStartRename(api.id); }}
-          >{api.title}</span>
+          >
+            <span className="min-w-0 truncate">{displayTitle}</span>
+            {derivedHeader.secondary && (
+              <span className="ml-1 max-w-[45%] shrink-0 truncate opacity-70">{derivedHeader.secondary}</span>
+            )}
+          </span>
         )}
         <HeaderActionButton
           className={[

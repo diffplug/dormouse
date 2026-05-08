@@ -16,6 +16,10 @@ import {
   toggleSessionTodo,
   setPendingShellOpts,
   getDefaultShellOpts,
+  getTerminalPaneState,
+  getTerminalPaneStateSnapshot,
+  deriveHeader,
+  setTerminalUserTitle,
   type SessionStatus,
 } from '../lib/terminal-registry';
 import { findReattachNeighbor } from '../lib/spatial-nav';
@@ -260,7 +264,12 @@ export function Wall({
     if (!api) return;
     const panel = api.getPanel(id);
     if (!panel) return;
-    const title = panel.title ?? id;
+    const derivedTitle = deriveHeader(
+      getTerminalPaneState(id),
+      [...getTerminalPaneStateSnapshot().values()],
+    ).primary;
+    const panelTitle = panel.title ?? id;
+    const title = derivedTitle === 'shell' && panelTitle !== '<unnamed>' ? panelTitle : derivedTitle;
     const layoutAtMinimize = cloneLayout(api.toJSON());
 
     // Capture the nearest adjacent pane and our actual relative position
@@ -527,6 +536,7 @@ export function Wall({
       const trimmed = value.trim();
       if (trimmed) {
         apiRef.current?.getPanel(id)?.api.setTitle(trimmed);
+        setTerminalUserTitle(id, trimmed);
       }
       setRenamingPaneId(null);
     },
