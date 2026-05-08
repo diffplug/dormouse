@@ -11,7 +11,7 @@ MouseTerm models terminal panes by:
 - whether the shell is at a prompt, editing, running a foreground command, or waiting after command finish
 - command exit status
 - command directory at start time
-- terminal title as a fallback label
+- terminal title as a fallback label for unknown active commands
 
 Session CWD and command execution state are separate. `cwd` means "the shell/session reported this directory"; it is not necessarily the internal CWD of a foreground program. A command snapshots `cwdAtStart` when it starts, and that snapshot is used for grouping and header disambiguation while the command is running or freshly finished.
 
@@ -68,6 +68,7 @@ type CommandRun = {
     | "osc633_boundaries"
     | "osc133_boundaries"
     | "foreground_process"
+    | "user_input"
     | "title";
   outputRange?: {
     startMarkId?: string;
@@ -139,12 +140,14 @@ The parser accepts both BEL and ST terminators and handles split chunks. Unsuppo
 `reduceTerminalState(state, event)` is the only state transition surface.
 
 - `cwd` replaces the latest session CWD.
-- `promptStart` sets `{ kind: "prompt" }`.
-- `promptEnd` sets `{ kind: "editing" }`.
+- `promptStart` sets `{ kind: "prompt" }` and clears stale pending command-line fallback.
+- `promptEnd` sets `{ kind: "editing" }` and clears stale pending command-line fallback.
 - `commandLine` stores `pendingCommandLine`.
+- User-entered prompt input may also store `pendingCommandLine` as an explicit fallback before an OSC 133/633 command-start boundary. This fallback is only used while the shell is idle/editing; foreground-program input is ignored. If the submitted line is non-empty, the input fallback may create a `currentCommand` immediately with `source: "user_input"` so shells without command-start integration still show the active command.
 - `commandStart` creates `currentCommand`, snapshots `cwdAtStart`, clears `pendingCommandLine`, and sets `{ kind: "running" }`.
 - `commandFinish` moves `currentCommand` to `lastCommand`, stores `finishedAt`/`exitCode`, clears `currentCommand`, and sets `{ kind: "finished", exitCode }`.
-- A later prompt signal moves the pane out of `finished`.
+- A later prompt signal moves the pane out of `finished`. If a command was started from `user_input` and no explicit `commandFinish` arrived, the prompt signal also clears `currentCommand` so the header returns to `<idle>`.
+- For `user_input` fallback commands only, visible output that looks like a returned shell prompt may synthesize the same prompt transition. This is a scoped fallback for shells that do not emit command finish/start OSCs.
 
 CWD fallback order is:
 
@@ -171,7 +174,8 @@ Rules:
 - A user-pinned title is primary.
 - A running command uses `currentCommand.displayCommand`.
 - A freshly finished command uses `lastCommand.displayCommand` until the next prompt signal.
-- Idle terminals use title or shell fallback.
+- Idle terminals use `<idle>` unless a user-pinned title exists.
+- Unknown active commands may use terminal title or shell fallback.
 - Duplicate primary labels get a shortest unique directory label.
 - Running and finished commands disambiguate with `cwdAtStart`.
 - Idle terminals disambiguate with `pane.cwd`.
@@ -189,7 +193,7 @@ pane.currentCommand?.cwdAtStart ?? pane.cwd
 Command grouping uses:
 
 ```ts
-pane.currentCommand?.displayCommand ?? idleLabel(pane)
+pane.currentCommand?.displayCommand ?? "<idle>"
 ```
 
 Status grouping uses:

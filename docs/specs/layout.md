@@ -72,7 +72,7 @@ The content area is a tiling layout of panes, powered by dockview. Each pane occ
 
 Each pane has a 30px header that doubles as a drag handle. The header uses `cursor-grab` / `active:cursor-grabbing`, `select-none`, and the shared terminal top radius from `lib/src/components/design.tsx`. Background and foreground use the `--color-header-active-*` / `--color-header-inactive-*` token pairs, which map to VSCode file-tree list colors. Dockview's default close button and right-actions container are hidden via CSS.
 
-The header label is derived from `TerminalPaneState`: user-pinned title first, then current/freshly-finished command title, then terminal title or shell fallback. When visible panes would have duplicate primary labels, the header adds a compact directory disambiguator using the running command's `cwdAtStart` or the idle pane's latest `cwd`.
+The header label is derived from `TerminalPaneState`: user-pinned title first, then current/freshly-finished command title, then `<idle>` for idle panes. Terminal titles remain a fallback for unknown active commands, not the default idle label. When visible panes would have duplicate primary labels, the header adds a compact directory disambiguator using the running command's `cwdAtStart` or the idle pane's latest `cwd`.
 
 Elements from left to right:
 

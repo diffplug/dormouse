@@ -6,6 +6,7 @@ import {
   cwdFromOsc7,
   cwdFromOsc9_9,
   cwdIdentity,
+  DEFAULT_IDLE_TITLE,
   deriveHeader,
   groupTerminalPanes,
   reduceTerminalState,
@@ -122,6 +123,69 @@ describe('terminal command state reducer', () => {
     state = reduceTerminalState(state, { type: 'promptStart' });
     expect(state.activity).toEqual({ kind: 'prompt' });
   });
+
+  it('uses a pending typed command line for OSC 133 command boundaries', () => {
+    let state = createTerminalPaneState({ cwd: cwdFromManualPath('/repo/app', 1)! });
+    state = reduceTerminalState(state, { type: 'promptEnd' });
+    state = reduceTerminalState(state, { type: 'commandLine', commandLine: 'lazygit' });
+    state = reduceTerminalState(state, { type: 'commandStart', source: 'osc133_boundaries' }, {
+      now: () => 2,
+      createId: () => 'cmd-typed',
+    });
+
+    expect(state.currentCommand).toMatchObject({
+      id: 'cmd-typed',
+      rawCommandLine: 'lazygit',
+      displayCommand: 'lazygit',
+      source: 'osc133_boundaries',
+    });
+
+    state = reduceTerminalState(state, { type: 'commandFinish', exitCode: 0 }, { now: () => 3 });
+    expect(deriveHeader(state, [state])).toEqual({
+      primary: 'lazygit',
+      status: 'finished',
+      exitCode: 0,
+    });
+
+    state = reduceTerminalState(state, { type: 'promptStart' });
+    expect(deriveHeader(state, [state])).toEqual({
+      primary: DEFAULT_IDLE_TITLE,
+      status: 'idle',
+    });
+  });
+
+  it('clears stale pending typed command lines on a fresh prompt', () => {
+    let state = createTerminalPaneState({ pendingCommandLine: 'stale command' });
+
+    state = reduceTerminalState(state, { type: 'promptStart' });
+    expect(state.pendingCommandLine).toBeNull();
+
+    state = reduceTerminalState({ ...state, pendingCommandLine: 'another stale command' }, { type: 'promptEnd' });
+    expect(state.pendingCommandLine).toBeNull();
+  });
+
+  it('moves an unclosed command back to idle when the next prompt starts', () => {
+    const cwd = cwdFromManualPath('/repo/app', 1)!;
+    let state = createTerminalPaneState({ cwd });
+    state = reduceTerminalState(state, { type: 'commandLine', commandLine: 'lazygit' });
+    state = reduceTerminalState(state, { type: 'commandStart', source: 'user_input' }, {
+      now: () => 2,
+      createId: () => 'cmd-user-input',
+    });
+
+    expect(deriveHeader(state, [state])).toEqual({
+      primary: 'lazygit',
+      status: 'running',
+    });
+
+    state = reduceTerminalState(state, { type: 'promptStart' });
+
+    expect(state.currentCommand).toBeNull();
+    expect(deriveHeader(state, [state])).toEqual({
+      primary: DEFAULT_IDLE_TITLE,
+      status: 'idle',
+    });
+  });
 });
 
 describe('command title summarizer', () => {
@@ -142,6 +206,15 @@ describe('command title summarizer', () => {
 });
 
 describe('header and grouping derivation', () => {
+  it('uses <idle> for terminals without a foreground command', () => {
+    const pane = createTerminalPaneState({ cwd: cwdFromManualPath('/repo/app', 1)!, activity: { kind: 'editing' } });
+
+    expect(deriveHeader(pane, [pane])).toEqual({
+      primary: DEFAULT_IDLE_TITLE,
+      status: 'idle',
+    });
+  });
+
   it('uses command start CWD for running headers and disambiguates duplicates', () => {
     const app = runningPane('/repo/app', 'pnpm test --watch');
     const api = runningPane('/repo/api', 'pnpm test --watch');
@@ -172,7 +245,7 @@ describe('header and grouping derivation', () => {
     const finished = reduceTerminalState(running, { type: 'commandFinish', exitCode: 0 }, { now: () => 2 });
 
     expect(groupTerminalPanes([running, idle], 'directory').map((group) => group.label)).toEqual(['app', 'api']);
-    expect(groupTerminalPanes([running, idle], 'command').map((group) => group.label)).toEqual(['npm run dev', 'shell']);
+    expect(groupTerminalPanes([running, idle], 'command').map((group) => group.label)).toEqual(['npm run dev', DEFAULT_IDLE_TITLE]);
     expect(groupTerminalPanes([running, idle, finished], 'status').map((group) => group.key)).toEqual([
       'running',
       'unknown',

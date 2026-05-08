@@ -24,6 +24,7 @@ export type CommandRunSource =
   | 'osc633_boundaries'
   | 'osc133_boundaries'
   | 'foreground_process'
+  | 'user_input'
   | 'title';
 
 export interface CommandRun {
@@ -102,6 +103,7 @@ export const DEFAULT_TERMINAL_PANE_STATE: TerminalPaneState = Object.freeze({
   title: null,
 });
 
+export const DEFAULT_IDLE_TITLE = '<idle>';
 export const DEFAULT_COMMAND_TITLE = 'shell';
 export const UNNAMED_PANEL_TITLE = '<unnamed>';
 const DEFAULT_DIRECTORY_LABEL = 'Unknown directory';
@@ -132,11 +134,21 @@ export function reduceTerminalState(
       if (state.cwd && sameCwd(state.cwd, event.cwd)) return state;
       return { ...state, cwd: event.cwd };
     case 'promptStart':
-      if (state.activity.kind === 'prompt') return state;
-      return { ...state, activity: { kind: 'prompt' } };
+      if (state.activity.kind === 'prompt' && state.pendingCommandLine === null && state.currentCommand === null) return state;
+      return {
+        ...state,
+        activity: { kind: 'prompt' },
+        currentCommand: null,
+        pendingCommandLine: null,
+      };
     case 'promptEnd':
-      if (state.activity.kind === 'editing') return state;
-      return { ...state, activity: { kind: 'editing' } };
+      if (state.activity.kind === 'editing' && state.pendingCommandLine === null && state.currentCommand === null) return state;
+      return {
+        ...state,
+        activity: { kind: 'editing' },
+        currentCommand: null,
+        pendingCommandLine: null,
+      };
     case 'commandLine':
       if (state.pendingCommandLine === event.commandLine) return state;
       return { ...state, pendingCommandLine: event.commandLine };
@@ -325,6 +337,7 @@ export function resolveDisplayPrimary(
   derivedPrimary: string,
   fallbackTitle: string | null | undefined,
 ): string {
+  if (derivedPrimary === DEFAULT_IDLE_TITLE) return derivedPrimary;
   if (derivedPrimary !== DEFAULT_COMMAND_TITLE) return derivedPrimary;
   const trimmed = fallbackTitle?.trim();
   if (trimmed && trimmed !== UNNAMED_PANEL_TITLE) return trimmed;
@@ -643,10 +656,9 @@ function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): string 
   return idleLabel(pane, options);
 }
 
-function idleLabel(pane: TerminalPaneState, options: { shellName?: string } = {}): string {
-  const title = pane.title?.title?.trim();
-  if (title) return title;
-  return options.shellName?.trim() || DEFAULT_COMMAND_TITLE;
+function idleLabel(pane: TerminalPaneState, _options: { shellName?: string } = {}): string {
+  if (pane.title?.source === 'user') return pane.title.title;
+  return DEFAULT_IDLE_TITLE;
 }
 
 function headerStatus(pane: TerminalPaneState): DerivedHeader['status'] {

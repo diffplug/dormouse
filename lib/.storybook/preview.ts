@@ -8,8 +8,12 @@ import {
   clearPrimedActivity,
   disposeAllSessions,
   getActivitySnapshot,
+  getTerminalPaneStateSnapshot,
   primeActivity,
+  removeTerminalPaneState,
+  resetTerminalPaneState,
   type ActivityState,
+  type TerminalPaneState,
 } from '../src/lib/terminal-registry';
 import { computeDynamicPalette } from '../src/lib/themes/dynamic-palette';
 import { VSCODE_THEMES, VSCODE_THEME_TYPES } from './themes';
@@ -157,6 +161,11 @@ const preview: Preview = {
             byIndex?: Partial<ActivityState>[];
           }
         | undefined;
+      const primedTerminalState = context.parameters?.primedTerminalState as
+        | {
+            byId?: Record<string, Partial<TerminalPaneState>>;
+          }
+        | undefined;
       const platform = fakePlatform as FakePtyAdapter;
 
       if (scenario) platform.setDefaultScenario(scenario);
@@ -167,6 +176,13 @@ const preview: Preview = {
 
         const applyPrimedState = () => {
           clearPrimedActivity();
+          for (const id of getTerminalPaneStateSnapshot().keys()) {
+            removeTerminalPaneState(id);
+          }
+
+          for (const [id, state] of Object.entries(primedTerminalState?.byId ?? {})) {
+            resetTerminalPaneState(id, state);
+          }
 
           for (const [id, state] of Object.entries(primedSessionState?.byId ?? {})) {
             primeActivity(id, state);
@@ -189,10 +205,13 @@ const preview: Preview = {
           window.cancelAnimationFrame(raf1);
           window.cancelAnimationFrame(raf2);
           clearPrimedActivity();
+          for (const id of getTerminalPaneStateSnapshot().keys()) {
+            removeTerminalPaneState(id);
+          }
           platform.clearDefaultScenario();
           disposeAllSessions();
         };
-      }, [platform, primedSessionState]);
+      }, [platform, primedSessionState, primedTerminalState]);
 
       return createElement(Story);
     },
