@@ -769,10 +769,10 @@ function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): string 
   if (terminalTitle) return terminalTitle;
   if (pane.currentCommand) return pane.currentCommand.displayCommand;
   if (pane.activity.kind === 'finished' && pane.lastCommand) return pane.lastCommand.displayCommand;
-  return idleLabel(pane, options);
+  return idleLabel(pane);
 }
 
-function idleLabel(pane: TerminalPaneState, _options: { shellName?: string } = {}): string {
+function idleLabel(pane: TerminalPaneState): string {
   const userTitle = titleCandidateForSource(pane, 'user')?.title.trim();
   if (userTitle) return userTitle;
   return DEFAULT_IDLE_TITLE;
