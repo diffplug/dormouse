@@ -99,6 +99,10 @@ export function recordTerminalUserInput(id: string, input: string): void {
   }
 }
 
+export function recordTerminalUserInputByPtyId(ptyId: string, input: string): void {
+  recordTerminalUserInput(resolvePaneStateIdByPtyId(ptyId), input);
+}
+
 export function recordTerminalOutput(id: string, output: string): void {
   if (!output) return;
   const state = paneStates.get(id);
@@ -110,6 +114,10 @@ export function recordTerminalOutput(id: string, output: string): void {
 
   promptOutputBuffers.delete(id);
   applyTerminalSemanticEvents(id, [{ type: 'promptStart' }, { type: 'promptEnd' }]);
+}
+
+export function recordTerminalOutputByPtyId(ptyId: string, output: string): void {
+  recordTerminalOutput(resolvePaneStateIdByPtyId(ptyId), output);
 }
 
 export function setTerminalUserTitle(id: string, title: string): void {

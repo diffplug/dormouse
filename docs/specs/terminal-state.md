@@ -162,6 +162,7 @@ The parser accepts both BEL and ST terminators and handles split chunks. Unsuppo
 - `promptEnd` sets `{ kind: "editing" }` and clears stale pending command-line fallback.
 - `commandLine` stores `pendingCommandLine`.
 - User-entered prompt input may also store `pendingCommandLine` as an explicit fallback before an OSC 133/633 command-start boundary. This fallback is only used while the shell is idle/editing; foreground-program input is ignored. If the submitted line is non-empty, the input fallback may create a `currentCommand` immediately with `source: "user_input"` so shells without command-start integration still show the active command.
+- The typed-command fallback resolves the current Session id from the PTY id before recording input or prompt-looking output, so drag-to-swap moves the fallback state with the visible pane.
 - `commandStart` creates `currentCommand`, snapshots `cwdAtStart`, clears `pendingCommandLine`, and sets `{ kind: "running" }`.
 - `commandFinish` moves `currentCommand` to `lastCommand`, stores `finishedAt`/`exitCode`, clears `currentCommand`, and sets `{ kind: "finished", exitCode }`.
 - `title` updates `title` and the per-source entry in `titleCandidates`. Later OSC title events do not erase earlier user, shell, or notification channel candidates from other sources.

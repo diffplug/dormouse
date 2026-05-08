@@ -3,13 +3,19 @@ import {
   applyTerminalSemanticEvents,
   getTerminalPaneState,
   recordTerminalOutput,
+  recordTerminalOutputByPtyId,
   recordTerminalUserInput,
+  recordTerminalUserInputByPtyId,
   removeTerminalPaneState,
 } from './terminal-state-store';
+import { registry, type TerminalEntry } from './terminal-store';
 
 describe('terminal semantic state store command input fallback', () => {
   afterEach(() => {
     removeTerminalPaneState('pane');
+    removeTerminalPaneState('pane-a');
+    removeTerminalPaneState('pane-b');
+    registry.delete('pane-b');
   });
 
   it('promotes a submitted prompt line into the current command immediately', () => {
@@ -46,5 +52,23 @@ describe('terminal semantic state store command input fallback', () => {
     recordTerminalOutput('pane', 'loading repositories...\r\n');
 
     expect(getTerminalPaneState('pane').currentCommand?.displayCommand).toBe('lazygit');
+  });
+
+  it('records PTY fallback state under the current pane after a swap', () => {
+    registry.set('pane-b', { ptyId: 'pane-a' } as unknown as TerminalEntry);
+
+    recordTerminalUserInputByPtyId('pane-a', 'lazygit\r');
+
+    expect(getTerminalPaneState('pane-a').currentCommand).toBeNull();
+    expect(getTerminalPaneState('pane-b').currentCommand).toMatchObject({
+      rawCommandLine: 'lazygit',
+      displayCommand: 'lazygit',
+      source: 'user_input',
+    });
+
+    recordTerminalOutputByPtyId('pane-a', '\r\nuser@host repo % ');
+
+    expect(getTerminalPaneState('pane-b').currentCommand).toBeNull();
+    expect(getTerminalPaneState('pane-b').activity).toEqual({ kind: 'editing' });
   });
 });

@@ -28,8 +28,8 @@ import { getTerminalTheme, paintTerminalHost, startThemeObserver } from './termi
 import {
   ensureTerminalPaneState,
   fillTerminalProcessCwd,
-  recordTerminalOutput,
-  recordTerminalUserInput,
+  recordTerminalOutputByPtyId,
+  recordTerminalUserInputByPtyId,
   removeTerminalPaneState,
   resetTerminalPaneState,
   seedTerminalManualCwd,
@@ -72,7 +72,7 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
   const platform = getPlatform();
   const handleData = (detail: { id: string; data: string }) => {
     if (detail.id === id) {
-      recordTerminalOutput(id, detail.data);
+      recordTerminalOutputByPtyId(id, detail.data);
       terminal.write(detail.data);
     }
   };
@@ -107,7 +107,7 @@ function wireXtermHandlers(
     if (inputIsReplayTerminalReport(input) && registry.get(id)?.isReplaying) return;
 
     if (!isSyntheticTerminalReport) {
-      recordTerminalUserInput(id, input);
+      recordTerminalUserInputByPtyId(id, input);
       const entry = registry.get(id);
       const hadTodo = entry?.todo === true;
       getPlatform().alertAttend(id);
