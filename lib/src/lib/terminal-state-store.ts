@@ -8,7 +8,7 @@ import {
   type TerminalSemanticEvent,
   type TerminalTitle,
 } from './terminal-state';
-import { registry } from './terminal-store';
+import { getSessionIdByPtyId } from './terminal-store';
 
 const paneStates = new Map<string, TerminalPaneState>();
 const listeners = new Set<() => void>();
@@ -16,7 +16,9 @@ let cachedSnapshot: Map<string, TerminalPaneState> | null = null;
 
 export function subscribeToTerminalPaneState(listener: () => void): () => void {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 export function getTerminalPaneStateSnapshot(): Map<string, TerminalPaneState> {
@@ -55,10 +57,12 @@ export function applyTerminalSemanticEventsByPtyId(ptyId: string, events: Termin
 
 export function applyTerminalSemanticEvents(id: string, events: TerminalSemanticEvent[]): void {
   if (events.length === 0) return;
-  let next = paneStates.get(id) ?? createTerminalPaneState();
+  const prev = paneStates.get(id) ?? createTerminalPaneState();
+  let next = prev;
   for (const event of events) {
     next = reduceTerminalState(next, event);
   }
+  if (next === prev && paneStates.has(id)) return;
   paneStates.set(id, next);
   notifyTerminalPaneStateListeners();
 }
@@ -75,18 +79,12 @@ export function setTerminalUserTitle(id: string, title: string): void {
 }
 
 export function seedTerminalManualCwd(id: string, path: string | null | undefined): void {
-  if (!path) {
+  const cwd = path ? cwdFromManualPath(path) : null;
+  if (cwd && !paneStates.get(id)?.cwd) {
+    ensureTerminalPaneState(id, { cwd });
+  } else {
     ensureTerminalPaneState(id);
-    return;
   }
-  const cwd = cwdFromManualPath(path);
-  if (!cwd) {
-    ensureTerminalPaneState(id);
-    return;
-  }
-  const existing = paneStates.get(id);
-  if (existing?.cwd) return;
-  ensureTerminalPaneState(id, { cwd });
 }
 
 export function fillTerminalProcessCwd(id: string, path: string | null | undefined): void {
@@ -116,10 +114,7 @@ function updateCwdIfAllowed(id: string, cwd: CwdState): void {
 }
 
 function resolvePaneStateIdByPtyId(ptyId: string): string {
-  for (const [id, entry] of registry) {
-    if (entry.ptyId === ptyId) return id;
-  }
-  return ptyId;
+  return getSessionIdByPtyId(ptyId) ?? ptyId;
 }
 
 function notifyTerminalPaneStateListeners(): void {

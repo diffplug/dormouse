@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { tv } from 'tailwind-variants';
@@ -34,7 +34,7 @@ import {
   subscribeToTerminalPaneState,
   type SessionStatus,
 } from '../../lib/terminal-registry';
-import { createTerminalPaneState, deriveHeader } from '../../lib/terminal-state';
+import { createTerminalPaneState, deriveHeader, resolveDisplayPrimary } from '../../lib/terminal-state';
 import {
   DialogKeyboardContext,
   ModeContext,
@@ -83,14 +83,10 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
   const actions = useContext(WallActionsContext);
   const activity = activityStates.get(api.id) ?? DEFAULT_ACTIVITY_STATE;
   const paneState = terminalStates.get(api.id) ?? createTerminalPaneState();
-  const visiblePaneStates = terminalStates.size > 0 ? [...terminalStates.values()] : [paneState];
+  const allPaneStates = useMemo(() => [...terminalStates.values()], [terminalStates]);
+  const visiblePaneStates = allPaneStates.length > 0 ? allPaneStates : [paneState];
   const derivedHeader = deriveHeader(paneState, visiblePaneStates);
-  const apiTitle = api.title ?? '';
-  const displayTitle = paneState.title?.source === 'user'
-    ? paneState.title.title
-    : derivedHeader.primary === 'shell' && apiTitle && apiTitle !== '<unnamed>'
-      ? apiTitle
-      : derivedHeader.primary;
+  const displayTitle = resolveDisplayPrimary(derivedHeader.primary, api.title);
   const mouseState = mouseStates.get(api.id) ?? DEFAULT_MOUSE_SELECTION_STATE;
   const showMouseIcon = mouseState.mouseReporting !== 'none';
   const inOverride = mouseState.override !== 'off';

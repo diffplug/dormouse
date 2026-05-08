@@ -102,7 +102,8 @@ export const DEFAULT_TERMINAL_PANE_STATE: TerminalPaneState = Object.freeze({
   title: null,
 });
 
-const DEFAULT_COMMAND_TITLE = 'shell';
+export const DEFAULT_COMMAND_TITLE = 'shell';
+export const UNNAMED_PANEL_TITLE = '<unnamed>';
 const DEFAULT_DIRECTORY_LABEL = 'Unknown directory';
 const COMMAND_TITLE_LIMIT = 48;
 let nextCommandRunId = 0;
@@ -128,12 +129,16 @@ export function reduceTerminalState(
 
   switch (event.type) {
     case 'cwd':
+      if (state.cwd && sameCwd(state.cwd, event.cwd)) return state;
       return { ...state, cwd: event.cwd };
     case 'promptStart':
+      if (state.activity.kind === 'prompt') return state;
       return { ...state, activity: { kind: 'prompt' } };
     case 'promptEnd':
+      if (state.activity.kind === 'editing') return state;
       return { ...state, activity: { kind: 'editing' } };
     case 'commandLine':
+      if (state.pendingCommandLine === event.commandLine) return state;
       return { ...state, pendingCommandLine: event.commandLine };
     case 'commandStart': {
       const raw = state.pendingCommandLine;
@@ -156,7 +161,9 @@ export function reduceTerminalState(
     }
     case 'commandFinish': {
       if (!state.currentCommand) {
-        return { ...state, activity: finishedActivity(event.exitCode) };
+        const next = finishedActivity(event.exitCode);
+        if (sameActivity(state.activity, next)) return state;
+        return { ...state, activity: next };
       }
       const finishedCommand: CommandRun = {
         ...state.currentCommand,
@@ -171,8 +178,23 @@ export function reduceTerminalState(
       };
     }
     case 'title':
+      if (state.title && sameTitle(state.title, event.title)) return state;
       return { ...state, title: event.title };
   }
+}
+
+function sameCwd(a: CwdState, b: CwdState): boolean {
+  return cwdIdentity(a) === cwdIdentity(b) && a.source === b.source;
+}
+
+function sameTitle(a: TerminalTitle, b: TerminalTitle): boolean {
+  return a.title === b.title && a.source === b.source;
+}
+
+function sameActivity(a: ShellActivity, b: ShellActivity): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'finished' && b.kind === 'finished') return a.exitCode === b.exitCode;
+  return true;
 }
 
 export function cwdFromOsc7(rawUri: string, now = Date.now()): CwdState | null {
@@ -297,6 +319,16 @@ export function deriveFallbackCommandTitle(
   const title = state?.title?.title?.trim();
   if (title) return title;
   return options.shellName?.trim() || DEFAULT_COMMAND_TITLE;
+}
+
+export function resolveDisplayPrimary(
+  derivedPrimary: string,
+  fallbackTitle: string | null | undefined,
+): string {
+  if (derivedPrimary !== DEFAULT_COMMAND_TITLE) return derivedPrimary;
+  const trimmed = fallbackTitle?.trim();
+  if (trimmed && trimmed !== UNNAMED_PANEL_TITLE) return trimmed;
+  return derivedPrimary;
 }
 
 export function deriveHeader(

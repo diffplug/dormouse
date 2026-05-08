@@ -75,10 +75,13 @@ export {
   cwdFromOsc9_9,
   cwdFromProcessPath,
   cwdIdentity,
+  DEFAULT_COMMAND_TITLE,
   deriveFallbackCommandTitle,
   deriveHeader,
   groupTerminalPanes,
   reduceTerminalState,
+  resolveDisplayPrimary,
   shortestUniqueCwdLabels,
   summarizeCommandLine,
+  UNNAMED_PANEL_TITLE,
 } from './terminal-state';

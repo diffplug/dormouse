@@ -34,6 +34,11 @@ import {
   setTerminalUserTitle,
   swapTerminalPaneStates,
 } from './terminal-state-store';
+import { UNNAMED_PANEL_TITLE } from './terminal-state';
+
+function seedProcessCwdAfterSpawn(id: string): void {
+  void getPlatform().getCwd(id).then((cwd) => fillTerminalProcessCwd(id, cwd));
+}
 
 function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDivElement } {
   const styles = getComputedStyle(document.body);
@@ -209,7 +214,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     rows: dims?.rows || 30,
     ...shellOpts,
   });
-  void getPlatform().getCwd(id).then((cwd) => fillTerminalProcessCwd(id, cwd));
+  seedProcessCwdAfterSpawn(id);
 
   return entry;
 }
@@ -244,7 +249,7 @@ export function restoreTerminal(
   const entry = setupTerminalEntry(id);
   resetTerminalPaneState(id);
   seedTerminalManualCwd(id, opts.cwd);
-  if (opts.title && opts.title !== '<unnamed>') {
+  if (opts.title && opts.title !== UNNAMED_PANEL_TITLE) {
     setTerminalUserTitle(id, opts.title);
   }
 
@@ -263,7 +268,7 @@ export function restoreTerminal(
     shell: opts.shell,
     args: opts.args,
   });
-  void getPlatform().getCwd(id).then((cwd) => fillTerminalProcessCwd(id, cwd));
+  seedProcessCwdAfterSpawn(id);
 
   return entry;
 }

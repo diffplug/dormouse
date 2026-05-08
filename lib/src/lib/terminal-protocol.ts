@@ -294,39 +294,33 @@ function parseOsc7(content: string): TerminalProtocolEvent[] {
 function parseOsc133(content: string): TerminalProtocolEvent[] {
   const fields = content.split(';');
   if (fields[0] !== '133') return [];
-  switch (fields[1]) {
-    case 'A':
-      return [{ kind: 'semantic', event: { type: 'promptStart' } }];
-    case 'B':
-      return [{ kind: 'semantic', event: { type: 'promptEnd' } }];
-    case 'C':
-      return [commandStartEvent('osc133_boundaries')];
-    case 'D':
-      return [{ kind: 'semantic', event: { type: 'commandFinish', exitCode: parseExitCode(fields[2]) } }];
-    default:
-      return [];
-  }
+  return parsePromptBoundary(fields, 'osc133_boundaries');
 }
 
 function parseOsc633(content: string): TerminalProtocolEvent[] {
   const fields = content.split(';');
   if (fields[0] !== '633') return [];
+  if (fields[1] === 'E') {
+    const prefix = '633;E;';
+    if (!content.startsWith(prefix)) return [];
+    return [{ kind: 'semantic', event: { type: 'commandLine', commandLine: content.slice(prefix.length) } }];
+  }
+  if (fields[1] === 'P') {
+    return parseOsc633Property(content.slice('633;P;'.length));
+  }
+  return parsePromptBoundary(fields, 'osc633_boundaries');
+}
+
+function parsePromptBoundary(fields: string[], commandStartSource: CommandRunSource): TerminalProtocolEvent[] {
   switch (fields[1]) {
     case 'A':
       return [{ kind: 'semantic', event: { type: 'promptStart' } }];
     case 'B':
       return [{ kind: 'semantic', event: { type: 'promptEnd' } }];
     case 'C':
-      return [commandStartEvent('osc633_boundaries')];
+      return [commandStartEvent(commandStartSource)];
     case 'D':
       return [{ kind: 'semantic', event: { type: 'commandFinish', exitCode: parseExitCode(fields[2]) } }];
-    case 'E': {
-      const prefix = '633;E;';
-      if (!content.startsWith(prefix)) return [];
-      return [{ kind: 'semantic', event: { type: 'commandLine', commandLine: content.slice(prefix.length) } }];
-    }
-    case 'P':
-      return parseOsc633Property(content.slice('633;P;'.length));
     default:
       return [];
   }

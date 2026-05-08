@@ -19,7 +19,9 @@ import {
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
   deriveHeader,
+  resolveDisplayPrimary,
   setTerminalUserTitle,
+  UNNAMED_PANEL_TITLE,
   type SessionStatus,
 } from '../lib/terminal-registry';
 import { findReattachNeighbor } from '../lib/spatial-nav';
@@ -268,8 +270,7 @@ export function Wall({
       getTerminalPaneState(id),
       [...getTerminalPaneStateSnapshot().values()],
     ).primary;
-    const panelTitle = panel.title ?? id;
-    const title = derivedTitle === 'shell' && panelTitle !== '<unnamed>' ? panelTitle : derivedTitle;
+    const title = resolveDisplayPrimary(derivedTitle, panel.title ?? id);
     const layoutAtMinimize = cloneLayout(api.toJSON());
 
     // Capture the nearest adjacent pane and our actual relative position
@@ -453,7 +454,7 @@ export function Wall({
         id: newId,
         component: 'terminal',
         tabComponent: 'terminal',
-        title: '<unnamed>',
+        title: UNNAMED_PANEL_TITLE,
         position: active ? { referencePanel: active.id, direction: pickSplitDirection(active) } : undefined,
       });
       selectPane(newId);
@@ -484,7 +485,7 @@ export function Wall({
       id: newId,
       component: 'terminal',
       tabComponent: 'terminal',
-      title: '<unnamed>',
+      title: UNNAMED_PANEL_TITLE,
       position: ref ? { referencePanel: ref, direction } : undefined,
     });
     selectPane(newId);

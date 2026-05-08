@@ -9,6 +9,7 @@ import {
   deriveHeader,
   getActivitySnapshot,
   getTerminalPaneStateSnapshot,
+  resolveDisplayPrimary,
   subscribeToActivity,
   subscribeToTerminalPaneState,
 } from '../lib/terminal-registry';
@@ -24,6 +25,7 @@ export function Baseboard({ items, onReattach, notice }: BaseboardProps) {
   const { elements: doorElements, bumpVersion } = useContext(DoorElementsContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
+  const allPaneStates = useMemo(() => [...terminalStates.values()], [terminalStates]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [startIndex, setStartIndex] = useState(0);
@@ -149,7 +151,7 @@ export function Baseboard({ items, onReattach, notice }: BaseboardProps) {
       <div ref={measureEl} className="absolute -left-[9999px] flex gap-1.5" aria-hidden>
         {items.map(item => {
           const activity = activityStates.get(item.id) ?? DEFAULT_ACTIVITY_STATE;
-          const title = deriveDoorTitle(item.title, item.id, terminalStates);
+          const title = deriveDoorTitle(item.title, item.id, terminalStates, allPaneStates);
           return (
             <Door
               key={item.id}
@@ -183,7 +185,7 @@ export function Baseboard({ items, onReattach, notice }: BaseboardProps) {
 
       {items.slice(startIndex, endIndex).map(item => {
         const activity = activityStates.get(item.id) ?? DEFAULT_ACTIVITY_STATE;
-        const title = deriveDoorTitle(item.title, item.id, terminalStates);
+        const title = deriveDoorTitle(item.title, item.id, terminalStates, allPaneStates);
         return (
           <Door
             key={item.id}
@@ -215,8 +217,9 @@ function deriveDoorTitle(
   savedTitle: string,
   id: string,
   terminalStates: Map<string, TerminalPaneState>,
+  allPaneStates: TerminalPaneState[],
 ): string {
   const paneState = terminalStates.get(id) ?? createTerminalPaneState();
-  const derived = deriveHeader(paneState, terminalStates.size > 0 ? [...terminalStates.values()] : [paneState]).primary;
-  return derived === 'shell' && savedTitle !== '<unnamed>' ? savedTitle : derived;
+  const visible = allPaneStates.length > 0 ? allPaneStates : [paneState];
+  return resolveDisplayPrimary(deriveHeader(paneState, visible).primary, savedTitle);
 }

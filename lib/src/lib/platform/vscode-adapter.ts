@@ -42,6 +42,8 @@ export class VSCodeAdapter implements PlatformAdapter {
           handler({ id: msg.id, data: msg.data });
         }
       } else if (msg.type === 'pty:exit') {
+        this.replayProtocolParsers.delete(msg.id);
+        removeTerminalPaneState(msg.id);
         for (const handler of this.exitHandlers) {
           handler({ id: msg.id, exitCode: msg.exitCode });
         }
