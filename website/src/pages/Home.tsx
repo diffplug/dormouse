@@ -1,6 +1,7 @@
 import {
   AppleLogoIcon,
   CheckCircleIcon,
+  CircleNotchIcon,
   CubeIcon,
   DesktopIcon,
   DotsThreeOutlineIcon,
@@ -265,6 +266,9 @@ const EMAIL_REGEX =
 function NotifySignupForm() {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
+  const [redirecting, setRedirecting] = useState(false);
+
+  const redirectUrl = `https://nedshed.dev/subscribe?email=${encodeURIComponent(email)}`;
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -272,7 +276,28 @@ function NotifySignupForm() {
       setMessage("Please enter a valid email");
       return;
     }
-    window.location.href = `https://nedshed.dev/subscribe?email=${encodeURIComponent(email)}`;
+    setRedirecting(true);
+    window.setTimeout(() => {
+      window.location.href = redirectUrl;
+    }, 3000);
+  }
+
+  if (redirecting) {
+    return (
+      <div className="flex items-center gap-3 text-lg leading-relaxed text-[var(--color-caramel)]">
+        <CircleNotchIcon className="shrink-0 animate-spin" size={28} weight="bold" />
+        <p>
+          Just one more lick! Hit subscribe after{" "}
+          <a
+            href={redirectUrl}
+            className="underline underline-offset-2 hover:opacity-80"
+          >
+            the redirect
+          </a>
+          ...
+        </p>
+      </div>
+    );
   }
 
   return (
