@@ -132,7 +132,7 @@ Command lifecycle:
 | `OSC 133 ; A ST` / `OSC 633 ; A ST` | `promptStart` |
 | `OSC 133 ; B ST` / `OSC 633 ; B ST` | `promptEnd` |
 | `OSC 133 ; C ST` | `commandStart(source: "osc133_boundaries")` |
-| `OSC 633 ; E ; <commandline> ST` | `commandLine` |
+| `OSC 633 ; E ; <commandline> [; <nonce>] ST` | `commandLine`; parses only the command field and decodes VS Code `\xAB` / `\\` escapes before storing it. |
 | `OSC 633 ; C ST` | `commandStart(source: "osc633_E"` when a pending command line exists, otherwise `"osc633_boundaries")` |
 | `OSC 133 ; D ; <exitCode?> ST` / `OSC 633 ; D ; <exitCode?> ST` | `commandFinish` |
 

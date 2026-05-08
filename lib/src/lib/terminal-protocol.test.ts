@@ -204,6 +204,14 @@ describe('TerminalProtocolParser', () => {
     ]);
   });
 
+  it('decodes OSC 633 command lines without including the optional nonce', () => {
+    const parser = new TerminalProtocolParser();
+
+    expect(parser.process('\x1b]633;E;echo one\\x3btwo \\\\ path;nonce-123\x07').events).toEqual([
+      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'echo one;two \\ path' } },
+    ]);
+  });
+
   it('parses OSC 633 and 1337 CWD plus title fallbacks', () => {
     const parser = new TerminalProtocolParser();
     const result = parser.process('\x1b]633;P;Cwd=/tmp/with%20space\x07\x1b]1337;CurrentDir=/Users/me/app\x07\x1b]0;zsh\x07\x1b]2;vim\x07');

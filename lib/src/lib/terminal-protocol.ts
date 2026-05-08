@@ -318,7 +318,8 @@ function parseOsc633(content: string): TerminalProtocolEvent[] {
   if (fields[1] === 'E') {
     const prefix = '633;E;';
     if (!content.startsWith(prefix)) return [];
-    return [{ kind: 'semantic', event: { type: 'commandLine', commandLine: content.slice(prefix.length) } }];
+    const rawCommand = content.slice(prefix.length).split(';', 1)[0] ?? '';
+    return [{ kind: 'semantic', event: { type: 'commandLine', commandLine: decodeOsc633Value(rawCommand) } }];
   }
   if (fields[1] === 'P') {
     return parseOsc633Property(content.slice('633;P;'.length));
@@ -379,6 +380,13 @@ function parseExitCode(raw: string | undefined): number | undefined {
   if (raw === undefined || raw === '') return undefined;
   const value = Number(raw);
   return Number.isInteger(value) ? value : undefined;
+}
+
+function decodeOsc633Value(value: string): string {
+  return value.replace(/\\\\|\\x([0-9a-fA-F]{2})/g, (match, hex: string | undefined) => {
+    if (match === '\\\\') return '\\';
+    return String.fromCharCode(Number.parseInt(hex ?? '00', 16));
+  });
 }
 
 // OSC 9;4 state code → progress shape. Codes 1 and 4 require a percent
