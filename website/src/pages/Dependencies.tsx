@@ -11,10 +11,12 @@ export function Component() {
           <h1 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-2">
             Dependencies
           </h1>
-          <p className="text-base opacity-50 mb-10">
-            MouseTerm is built on {deps.length} open-source packages. Thank you to every author and contributor.
+          <p className="text-base opacity-70 mb-2">
+            MouseTerm (standalone app and VS Code plugin) has {deps.length} transitive dependencies. Thank you to every author and contributor.
           </p>
-
+          <p className="text-base opacity-70 mb-10">
+            Thanks also to <a href="https://github.com/reowens/ascii-splash" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">ascii-splash</a> and <a href="https://github.com/remix-run/react-router" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">react-router</a> and their transitive dependencies, which we use for this marketing page but are not part of the end-user application.
+          </p>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left border-b border-[var(--color-text)]/10">

@@ -3,7 +3,7 @@
 @theme {
   --font-display: "Ubuntu Sans Mono", ui-monospace, monospace;
   --font-body: "Ubuntu Mono", ui-monospace, monospace;
-  --color-bg: oklch(10% 0.01 60);
+  --color-bg: #000000;
   --color-surface: oklch(18% 0.015 60);
   --color-text: #dedede;
   --color-caramel: #b47624;
