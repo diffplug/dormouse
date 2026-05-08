@@ -330,7 +330,7 @@ function NotifySignupForm() {
           disabled={loading}
           className="min-h-12 inline-flex items-center justify-center rounded-md border border-[var(--color-caramel)] bg-[var(--color-caramel)]/15 px-6 py-3 text-base font-display text-[var(--color-caramel)] transition hover:bg-[var(--color-caramel)]/25 disabled:opacity-50 sm:w-auto"
         >
-          {loading ? "Subscribing..." : "Notify me when it's ready"}
+          {loading ? "Subscribing..." : "Notify me when Roam ships"}
         </button>
       </div>
       {message && (
@@ -971,7 +971,7 @@ function Home() {
           />
           <div className="order-1 md:order-2">
             <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] mb-6">
-              Take one for the road
+              Walk away. Keep going.
             </h2>
             <p className="mb-4 text-lg leading-relaxed opacity-70">
               Coming next: <span className="text-[var(--color-caramel)]">Roam</span>. Pair a
@@ -980,12 +980,13 @@ function Home() {
               later — just leave and keep working, no "I'm walking away" dance.
             </p>
             <p className="mb-4 text-lg leading-relaxed opacity-70">
-              Open source and free to self-host, or pay us a little bit and you can use ours.
-            </p>
-            <p className="mb-6 text-lg leading-relaxed opacity-70">
-              The devlog for this project lives at <a href="https://nedshed.dev" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">nedshed.dev</a>. We'll announce the launch there. Discounts for early adopters, so don't miss out!
+              Open source and free to self-host, or pay us a little bit and you can use ours. We'll discount for early adopters, so don't miss out!
             </p>
             <NotifySignupForm />
+            <p className="mb-6 text-lg leading-relaxed opacity-70">
+              This signs you up for my personal devlog <a href="https://nedshed.dev" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">nedshed.dev</a> on Substack. The next post will be the launch post, you can unsubscribe after that.
+            </p>
+
           </div>
         </section>
 
