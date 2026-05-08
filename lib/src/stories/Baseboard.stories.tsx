@@ -1,6 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { Baseboard } from '../components/Baseboard';
 import type { DooredItem } from '../components/Wall';
+import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
+
+const BASE_TIME = 1_700_000_000_000;
+
 const makeItem = (id: string, title: string): DooredItem => ({
   id,
   title,
@@ -11,12 +15,25 @@ const makeItem = (id: string, title: string): DooredItem => ({
   layoutAtMinimizeSignature: '',
 });
 
-function withState(byId: Record<string, Record<string, unknown>>) {
+function withState(items: DooredItem[], byId: Record<string, Record<string, unknown>>) {
   return {
     primedSessionState: {
       byId,
     },
+    primedTerminalState: {
+      byId: Object.fromEntries(items.map((item, index) => [item.id, userTitleState(item.title, index)])),
+    },
   };
+}
+
+function userTitleState(title: string, index: number): TerminalPaneState {
+  return createTerminalPaneState({
+    title: {
+      title,
+      source: 'user',
+      updatedAt: BASE_TIME + index,
+    },
+  });
 }
 
 function BaseboardStory({ items }: { items: DooredItem[] }) {
@@ -38,11 +55,34 @@ const meta: Meta<typeof BaseboardStory> = {
 export default meta;
 type Story = StoryObj<typeof BaseboardStory>;
 
+const oneRingingDoorItems = [makeItem('p1', 'build-server')];
+const mixedDoorStateItems = [
+  makeItem('p1', 'dev-server'),
+  makeItem('p2', 'test-runner'),
+  makeItem('p3', 'logs'),
+  makeItem('p4', 'notarization'),
+];
+const overflowWithRingingDoorItems = [
+  makeItem('p1', 'frontend-dev'),
+  makeItem('p2', 'backend-api'),
+  makeItem('p3', 'database-migrations'),
+  makeItem('p4', 'test-runner'),
+  makeItem('p5', 'log-aggregator'),
+  makeItem('p6', 'build-pipeline'),
+  makeItem('p7', 'monitoring'),
+  makeItem('p8', 'linter'),
+];
+const extremeTitleWithBothIndicatorsItems = [
+  makeItem('p1', 'short'),
+  makeItem('p2', 'my-extremely-long-running-background-process-with-a-very-descriptive-name'),
+  makeItem('p3', 'another'),
+];
+
 export const OneRingingDoor: Story = {
   args: {
-    items: [makeItem('p1', 'build-server')],
+    items: oneRingingDoorItems,
   },
-  parameters: withState({
+  parameters: withState(oneRingingDoorItems, {
     p1: {
       status: 'ALERT_RINGING',
 
@@ -53,14 +93,9 @@ export const OneRingingDoor: Story = {
 
 export const MixedDoorStates: Story = {
   args: {
-    items: [
-      makeItem('p1', 'dev-server'),
-      makeItem('p2', 'test-runner'),
-      makeItem('p3', 'logs'),
-      makeItem('p4', 'notarization'),
-    ],
+    items: mixedDoorStateItems,
   },
-  parameters: withState({
+  parameters: withState(mixedDoorStateItems, {
     p1: {
       status: 'NOTHING_TO_SHOW',
 
@@ -86,18 +121,9 @@ export const MixedDoorStates: Story = {
 
 export const OverflowWithRingingDoor: Story = {
   args: {
-    items: [
-      makeItem('p1', 'frontend-dev'),
-      makeItem('p2', 'backend-api'),
-      makeItem('p3', 'database-migrations'),
-      makeItem('p4', 'test-runner'),
-      makeItem('p5', 'log-aggregator'),
-      makeItem('p6', 'build-pipeline'),
-      makeItem('p7', 'monitoring'),
-      makeItem('p8', 'linter'),
-    ],
+    items: overflowWithRingingDoorItems,
   },
-  parameters: withState({
+  parameters: withState(overflowWithRingingDoorItems, {
     p2: {
       status: 'NOTHING_TO_SHOW',
 
@@ -125,13 +151,9 @@ export const OverflowWithRingingDoor: Story = {
 
 export const ExtremeTitleWithBothIndicators: Story = {
   args: {
-    items: [
-      makeItem('p1', 'short'),
-      makeItem('p2', 'my-extremely-long-running-background-process-with-a-very-descriptive-name'),
-      makeItem('p3', 'another'),
-    ],
+    items: extremeTitleWithBothIndicatorsItems,
   },
-  parameters: withState({
+  parameters: withState(extremeTitleWithBothIndicatorsItems, {
     p2: {
       status: 'ALERT_RINGING',
 

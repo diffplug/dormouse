@@ -188,7 +188,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
       className={tabVariant({ state: isActiveHeader ? 'active' : 'inactive' })}
       onMouseDown={() => actions.onClickPanel(api.id)}
     >
-      <div className="flex flex-1 min-w-0 items-center gap-2">
+      <div className="flex flex-1 min-w-0 items-center gap-1.5">
         {isRenaming ? (
           <input
             className="bg-transparent outline-none border-none text-inherit font-medium font-mono w-full min-w-0 p-0 m-0"
@@ -209,7 +209,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
         ) : (
           <span
             data-title-candidates-for={api.id}
-            className="flex min-w-0 cursor-text items-baseline font-medium text-inherit decoration-current/50 underline-offset-2 hover:underline"
+            className="inline-flex max-w-full min-w-0 shrink cursor-text items-baseline overflow-hidden font-medium text-inherit decoration-current/50 underline-offset-2 hover:underline"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); actions.onStartRename(api.id); }}
             onContextMenu={(e) => {
@@ -218,9 +218,9 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
               setTitleCandidatesRect(e.currentTarget.getBoundingClientRect());
             }}
           >
-            <span className="min-w-0 truncate">{displayTitle}</span>
+            <span className="min-w-0 shrink truncate">{displayTitle}</span>
             {derivedHeader.secondary && (
-              <span className="ml-1 max-w-[45%] shrink-0 truncate opacity-70">{derivedHeader.secondary}</span>
+              <span className="ml-1 min-w-0 shrink truncate opacity-70">{derivedHeader.secondary}</span>
             )}
           </span>
         )}
