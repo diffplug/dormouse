@@ -223,6 +223,30 @@ describe('readPersistedSession', () => {
     expect(readPersistedSession(JSON.stringify(v3))?.panes[0].scrollback).toBe('\x1b[31mred');
   });
 
+  it('accepts persisted terminal bell notification detail', () => {
+    const v3 = {
+      version: 3 as const,
+      layout: null,
+      panes: [
+        {
+          id: 'pane-a',
+          title: 'Pane A',
+          cwd: null,
+          scrollback: null,
+          resumeCommand: null,
+          alert: {
+            status: 'ALERT_RINGING' as const,
+            todo: true,
+            notification: { source: 'BEL' as const, title: 'Terminal bell', body: null },
+          },
+        },
+      ],
+      doors: [],
+    };
+
+    expect(readPersistedSession(v3)).toBe(v3);
+  });
+
   it('migrates a v2 blob on read (numeric TODO → boolean)', () => {
     const v2 = {
       version: 2 as const,

@@ -60,7 +60,7 @@ The detector subscribes to `subscribeToActivity()` and tracks per-id `(status, t
 | ID | Title | Detection |
 |---|---|---|
 | `al-enable` | Enable alerts on a pane (click bell or `a`) | status transitions away from `ALERT_DISABLED` |
-| `al-busy` | Watch the bell tilt while a task runs | status enters `BUSY` or `MIGHT_BE_BUSY` |
+| `al-busy` | Watch the bell tilt while a task runs | status enters `BUSY`, `MIGHT_BE_BUSY`, or `OSC_NOTIF_BUSY` |
 | `al-ring` | Bell rings on completion | status enters `ALERT_RINGING` |
 | `al-todo-auto` | TODO appears when you dismiss the ringing alert | `todo` transitions `false → true` while previous status was `ALERT_RINGING` |
 | `al-todo-clear` | Press passthrough Enter to clear the TODO | `todo` transitions `true → false` |

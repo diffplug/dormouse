@@ -1,4 +1,5 @@
-import { useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { tv } from 'tailwind-variants';
 import {
@@ -53,6 +54,19 @@ const tabVariant = tv({
 
 type HeaderTier = 'full' | 'compact' | 'minimal';
 
+const ALERT_BUTTON_ENABLED = { aria: 'Disable alert', tooltip: '[a] Disable alerts' };
+const ALERT_BUTTON_LABELS: Record<SessionStatus, { aria: string; tooltip: string }> = {
+  ALERT_DISABLED: { aria: 'Enable alert', tooltip: '[a] Enable alerts' },
+  NOTHING_TO_SHOW: ALERT_BUTTON_ENABLED,
+  MIGHT_BE_BUSY: ALERT_BUTTON_ENABLED,
+  BUSY: ALERT_BUTTON_ENABLED,
+  MIGHT_NEED_ATTENTION: ALERT_BUTTON_ENABLED,
+  ALERT_RINGING: { aria: 'Alert ringing', tooltip: 'Alert ringing' },
+  OSC_NOTIF_BUSY: { aria: 'Progress active', tooltip: 'Progress active' },
+};
+const TODO_PREVIEW_GAP = 6;
+const TODO_PREVIEW_MARGIN = 8;
+
 export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
@@ -80,23 +94,24 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
   const suppressAlertClickRef = useRef(false);
   const [tier, setTier] = useState<HeaderTier>('full');
   const [dialogTriggerRect, setDialogTriggerRect] = useState<DOMRect | null>(null);
+  const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
   const showTodoPill = todoPill.visible && tier !== 'minimal';
-  const alertButtonAriaLabel = activity.status === 'ALERT_RINGING'
-    ? 'Alert ringing'
-    : activity.status === 'ALERT_DISABLED'
-      ? 'Enable alert'
-      : 'Disable alert';
-  const alertButtonTooltip = activity.status === 'ALERT_RINGING'
-    ? 'Alert ringing'
-    : activity.status === 'ALERT_DISABLED'
-      ? '[a] Enable alerts'
-      : '[a] Disable alerts';
+  const alertButtonLabels = ALERT_BUTTON_LABELS[activity.status];
+  const alertButtonAriaLabel = alertButtonLabels.aria;
+  const alertButtonTooltip = alertButtonLabels.tooltip;
   const alertButtonTooltipDetail = activity.status === 'ALERT_RINGING'
     ? 'Click to dismiss and show options'
     : 'Right-click for options';
+  const todoNotificationPreview = formatNotificationPreview(activity.notification);
+  const todoPreviewId = `todo-notification-preview-${api.id}`;
 
   const closeDialog = useCallback(() => setDialogTriggerRect(null), []);
+  const closeTodoPreview = useCallback(() => setTodoPreviewRect(null), []);
+  const openTodoPreview = useCallback((button: HTMLButtonElement) => {
+    if (!activity.notification) return;
+    setTodoPreviewRect(button.getBoundingClientRect());
+  }, [activity.notification]);
 
   const triggerAlertButtonAction = useCallback((displayedStatus: SessionStatus, button: HTMLButtonElement) => {
     const result = actions.onAlertButton(api.id, displayedStatus);
@@ -117,6 +132,10 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (!activity.notification) setTodoPreviewRect(null);
+  }, [activity.notification]);
 
   return (
     <div
@@ -194,12 +213,18 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
             type="button"
             data-session-todo-for={api.id}
             data-flourishing={todoPill.flourishing ? 'true' : 'false'}
-            className={`todo-pill-shell shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10`}
-            aria-label="Dismiss TODO"
+            className={`todo-pill-shell shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10 focus:outline-none`}
+            aria-label={todoNotificationPreview ? `Dismiss TODO: ${todoNotificationPreview}` : 'Dismiss TODO'}
+            aria-describedby={todoPreviewRect && activity.notification ? todoPreviewId : undefined}
             aria-hidden={todoPill.flourishing ? true : undefined}
             onMouseDown={(e) => e.stopPropagation()}
+            onMouseEnter={(e) => openTodoPreview(e.currentTarget)}
+            onMouseLeave={closeTodoPreview}
+            onFocus={(e) => openTodoPreview(e.currentTarget)}
+            onBlur={closeTodoPreview}
             onClick={(e) => {
               e.stopPropagation();
+              closeTodoPreview();
               clearSessionTodo(api.id);
             }}
           >
@@ -277,6 +302,80 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
           onKeyboardActiveChange={setDialogKeyboardActive}
         />
       )}
+      {todoPreviewRect && activity.notification && !dialogTriggerRect && (
+        <TodoNotificationPreview
+          id={todoPreviewId}
+          notification={activity.notification}
+          anchorRect={todoPreviewRect}
+        />
+      )}
     </div>
   );
+}
+
+function TodoNotificationPreview({
+  id,
+  notification,
+  anchorRect,
+}: {
+  id: string;
+  notification: { title: string | null; body: string | null };
+  anchorRect: DOMRect;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [style, setStyle] = useState<CSSProperties>({
+    position: 'fixed',
+    left: anchorRect.left,
+    top: anchorRect.bottom + TODO_PREVIEW_GAP,
+  });
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const top = anchorRect.bottom + TODO_PREVIEW_GAP;
+    const maxLeft = Math.max(TODO_PREVIEW_MARGIN, window.innerWidth - rect.width - TODO_PREVIEW_MARGIN);
+    setStyle({
+      position: 'fixed',
+      left: Math.min(Math.max(anchorRect.left, TODO_PREVIEW_MARGIN), maxLeft),
+      top,
+      maxHeight: Math.max(48, window.innerHeight - top - TODO_PREVIEW_MARGIN),
+    });
+  }, [anchorRect]);
+
+  return createPortal(
+    <div
+      ref={ref}
+      id={id}
+      role="tooltip"
+      className="z-[1000] max-w-80 rounded border border-border bg-surface-raised px-2.5 py-2 font-mono text-sm leading-snug text-foreground shadow-md"
+      style={style}
+    >
+      {notification.title && (
+        <div className="font-medium break-words">{notification.title}</div>
+      )}
+      {notification.body && (
+        <div
+          className="mt-1 whitespace-pre-wrap break-words text-muted"
+          style={{
+            display: '-webkit-box',
+            WebkitBoxOrient: 'vertical',
+            WebkitLineClamp: 3,
+            overflow: 'hidden',
+          }}
+        >
+          {notification.body}
+        </div>
+      )}
+    </div>,
+    document.body,
+  );
+}
+
+function formatNotificationPreview(notification: { title: string | null; body: string | null } | null): string | undefined {
+  if (!notification) return undefined;
+  const parts = [notification.title, notification.body].filter((part): part is string => !!part);
+  if (parts.length === 0) return undefined;
+  const preview = parts.join('\n');
+  return preview.length > 512 ? `${preview.slice(0, 509)}...` : preview;
 }

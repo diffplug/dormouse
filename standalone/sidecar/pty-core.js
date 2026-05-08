@@ -24,6 +24,7 @@ function resolveDefaultShell(platform = process.platform, env = process.env) {
 }
 
 const LOGIN_ARG_UNSUPPORTED_SHELLS = new Set(['csh', 'tcsh']);
+const ITERM2_COMPAT_VERSION = '3.5.0';
 
 function resolveLoginArg(shell, platform = process.platform) {
   if (platform === 'win32') {
@@ -74,7 +75,13 @@ function resolveSpawnConfig(options, runtime = {}) {
     rows,
     cwd: missingExplicitCwd ? defaultCwd : (cwd || defaultCwd),
     cwdWarning: missingExplicitCwd ? `unable to restore because directory ${cwd} was removed` : null,
-    env: { ...env, TERM_PROGRAM: 'MouseTerm' },
+    env: {
+      ...env,
+      TERM_PROGRAM: 'iTerm.app',
+      TERM_PROGRAM_VERSION: ITERM2_COMPAT_VERSION,
+      LC_TERMINAL: 'iTerm2',
+      LC_TERMINAL_VERSION: ITERM2_COMPAT_VERSION,
+    },
     shell,
     shellArgs,
   };

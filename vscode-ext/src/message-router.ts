@@ -1,6 +1,11 @@
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
 import { AlertManager, type SessionStatus } from '../../lib/src/lib/alert-manager';
+import {
+  applyTerminalProtocolEvents,
+  collectTerminalProtocolResponses,
+  TerminalProtocolParser,
+} from '../../lib/src/lib/terminal-protocol';
 import type { PersistedSession } from '../../lib/src/lib/session-types';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
 import { log } from './log';
@@ -19,6 +24,18 @@ let nextFlushRequestId = 0;
 // Shared alert manager — survives router disposal so alert state persists
 // across webview collapse/expand cycles.
 const alertManager = new AlertManager();
+const alertProtocolParsers = new Map<string, TerminalProtocolParser>();
+
+// Subscribers that want each PTY chunk *after* OSC sequences have been parsed
+// out (display path). Decoupled from ptyManager.addCallbacks so we only run
+// the protocol parser once per chunk regardless of webview count.
+type ProcessedDataListener = (id: string, visibleData: string) => void;
+const processedDataListeners = new Set<ProcessedDataListener>();
+
+function onProcessedPtyData(listener: ProcessedDataListener): () => void {
+  processedDataListeners.add(listener);
+  return () => { processedDataListeners.delete(listener); };
+}
 
 // Log all alert state transitions (including timer-driven ones)
 alertManager.onStateChange((id, state) => {
@@ -28,9 +45,17 @@ alertManager.onStateChange((id, state) => {
 // Feed PTY data to the alert manager so it can track activity.
 // This is module-level so it runs regardless of webview visibility.
 ptyManager.addCallbacks({
-  onData(id: string) {
+  onData(id: string, data: string) {
     const before = alertManager.getState(id).status;
-    alertManager.onData(id);
+    const parsed = getAlertProtocolParser(id).process(data);
+    applyTerminalProtocolEvents(alertManager, id, parsed.events);
+    for (const response of collectTerminalProtocolResponses(parsed.events)) {
+      ptyManager.write(id, response);
+    }
+    if (parsed.visibleData.length > 0) {
+      alertManager.onData(id);
+      for (const listener of processedDataListeners) listener(id, parsed.visibleData);
+    }
     const after = alertManager.getState(id).status;
     if (before !== after) {
       log.info(`[alert-feed] ${id}: ${before} → ${after}`);
@@ -39,8 +64,18 @@ ptyManager.addCallbacks({
   onExit(id: string) {
     log.info(`[alert-feed] ${id}: PTY exited`);
     alertManager.onExit(id);
+    alertProtocolParsers.delete(id);
   },
 });
+
+function getAlertProtocolParser(id: string): TerminalProtocolParser {
+  let parser = alertProtocolParsers.get(id);
+  if (!parser) {
+    parser = new TerminalProtocolParser();
+    alertProtocolParsers.set(id, parser);
+  }
+  return parser;
+}
 
 export function getAlertStates() {
   return alertManager.getAllStates();
@@ -121,11 +156,12 @@ export function attachRouter(
    * Returns a cleanup function that unsubscribes everything.
    */
   function connectWebview(): () => void {
+    const removeProcessedListener = onProcessedPtyData((id, visibleData) => {
+      if (!ownedPtyIds.has(id)) return;
+      webview.postMessage({ type: 'pty:data', id, data: visibleData } satisfies ExtensionMessage);
+    });
     const removePtyCallbacks = ptyManager.addCallbacks({
-      onData(id: string, data: string) {
-        if (!ownedPtyIds.has(id)) return;
-        webview.postMessage({ type: 'pty:data', id, data } satisfies ExtensionMessage);
-      },
+      onData() {},
       onExit(id: string, exitCode: number) {
         if (!ownedPtyIds.has(id)) return;
         webview.postMessage({ type: 'pty:exit', id, exitCode } satisfies ExtensionMessage);
@@ -135,11 +171,17 @@ export function attachRouter(
     const removeAlertListener = alertManager.onStateChange((id, state) => {
       if (!ownedPtyIds.has(id)) return;
       webview.postMessage({
-        type: 'alert:state', id, status: state.status, todo: state.todo, attentionDismissedRing: state.attentionDismissedRing,
+        type: 'alert:state',
+        id,
+        status: state.status,
+        todo: state.todo,
+        notification: state.notification,
+        attentionDismissedRing: state.attentionDismissedRing,
       } satisfies ExtensionMessage);
     });
 
     return () => {
+      removeProcessedListener();
       removePtyCallbacks();
       removeAlertListener();
     };
@@ -150,6 +192,7 @@ export function attachRouter(
     switch (msg.type) {
       case 'pty:spawn': {
         claim(msg.id);
+        alertProtocolParsers.set(msg.id, new TerminalProtocolParser());
         const spawnOptions = { ...msg.options };
         if (!spawnOptions.cwd) {
           spawnOptions.cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -165,6 +208,7 @@ export function attachRouter(
         break;
       case 'pty:kill':
         release(msg.id);
+        alertProtocolParsers.delete(msg.id);
         ptyManager.kill(msg.id);
         break;
       case 'pty:getCwd':
@@ -262,6 +306,7 @@ export function attachRouter(
               claim(pane.id);
             }
             if (pane.alert) {
+              alertProtocolParsers.delete(pane.id);
               alertManager.seed(pane.id, pane.alert);
             }
           }
@@ -292,7 +337,12 @@ export function attachRouter(
           const alertState = alertManager.getState(id);
           log.info(`[alert-reconnect] ${id}: sending ${alertState.status} (todo=${alertState.todo})`);
           webview.postMessage({
-            type: 'alert:state', id, status: alertState.status, todo: alertState.todo, attentionDismissedRing: alertState.attentionDismissedRing,
+            type: 'alert:state',
+            id,
+            status: alertState.status,
+            todo: alertState.todo,
+            notification: alertState.notification,
+            attentionDismissedRing: alertState.attentionDismissedRing,
           } satisfies ExtensionMessage);
         }
         break;
@@ -352,7 +402,10 @@ export function attachRouter(
       disconnectWebview = null;
       for (const id of ownedPtyIds) {
         globalOwnedPtyIds.delete(id);
-        if (killOnDispose) ptyManager.kill(id);
+        if (killOnDispose) {
+          alertProtocolParsers.delete(id);
+          ptyManager.kill(id);
+        }
       }
       ownedPtyIds.clear();
       messageDisposable.dispose();

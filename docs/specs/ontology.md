@@ -63,7 +63,7 @@ A **Session** is the tuple of its `SessionId` plus one state per layer. `Session
 
 Keep the existing state machine (see `docs/specs/alert.md` for transition rules):
 
-`ALERT_DISABLED` · `NOTHING_TO_SHOW` · `MIGHT_BE_BUSY` · `BUSY` · `MIGHT_NEED_ATTENTION` · `ALERT_RINGING`
+`ALERT_DISABLED` · `NOTHING_TO_SHOW` · `MIGHT_BE_BUSY` · `BUSY` · `OSC_NOTIF_BUSY` · `MIGHT_NEED_ATTENTION` · `ALERT_RINGING`
 
 ### Snapshot
 

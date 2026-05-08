@@ -261,7 +261,7 @@ describe('terminal-registry alert behavior', () => {
 
     advance(12_000);
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: false,
     });
@@ -318,7 +318,7 @@ describe('terminal-registry alert behavior', () => {
     advance(2_000);
     advance(3_000);
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: false,
     });
@@ -332,7 +332,7 @@ describe('terminal-registry alert behavior', () => {
     driveToRingingNeedsAttention(id);
     attendSession(id);
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: true,
     });
@@ -370,7 +370,7 @@ describe('terminal-registry alert behavior', () => {
     driveToRingingNeedsAttention(id);
     markSessionTodo(id);
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: true,
     });
@@ -384,7 +384,7 @@ describe('terminal-registry alert behavior', () => {
     driveToRingingNeedsAttention(id);
     disableSessionAlert(id);
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'ALERT_DISABLED',
       todo: false,
     });
@@ -393,7 +393,7 @@ describe('terminal-registry alert behavior', () => {
     emitOutput(id, 'more work');
     advance(12_000);
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'ALERT_DISABLED',
       todo: false,
     });
@@ -431,7 +431,7 @@ describe('terminal-registry alert behavior', () => {
 
     reattachDoorViaEnter(id);
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: true,
     });
@@ -447,7 +447,7 @@ describe('terminal-registry alert behavior', () => {
     driveToRingingNeedsAttention(id);
     reattachDoorViaD(id);
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'ALERT_RINGING',
       todo: false,
     });
@@ -462,7 +462,7 @@ describe('terminal-registry alert behavior', () => {
     emitOutput(id, 'redraw noise');
     advance(12_000);
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: false,
     });
@@ -482,11 +482,11 @@ describe('terminal-registry alert behavior', () => {
     dismissSessionAlert(alpha);
     attendSession(beta);
 
-    expect(getActivity(alpha)).toEqual({
+    expect(getActivity(alpha)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: true,
     });
-    expect(getActivity(beta)).toEqual({
+    expect(getActivity(beta)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: true,
     });
@@ -499,7 +499,7 @@ describe('terminal-registry alert behavior', () => {
     driveToRingingNeedsAttention(id);
     toggleSessionTodo(id);
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: true,
     });
@@ -514,7 +514,7 @@ describe('terminal-registry alert behavior', () => {
     advance(2_000);
     advance(3_000);
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'ALERT_RINGING',
       todo: false,
     });
@@ -542,7 +542,7 @@ describe('terminal-registry alert behavior', () => {
     driveToRingingNeedsAttention(id);
     entry.terminal.emitInput('\r');
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: true,
     });
@@ -558,7 +558,7 @@ describe('terminal-registry alert behavior', () => {
     emitOutput(id, 'more work');
     advance(12_000);
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'ALERT_DISABLED',
       todo: false,
     });
@@ -693,7 +693,7 @@ describe('terminal-registry alert behavior', () => {
     driveToRingingNeedsAttention(id);
     emitOutput(id, 'next task');
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'ALERT_RINGING',
       todo: false,
     });
@@ -707,7 +707,7 @@ describe('terminal-registry alert behavior', () => {
     driveToRingingNeedsAttention(id);
     disableSessionAlert(id);
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'ALERT_DISABLED',
       todo: false,
     });
@@ -719,7 +719,7 @@ describe('terminal-registry alert behavior', () => {
 
     dismissOrToggleAlert(id, 'ALERT_DISABLED');
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: false,
     });
@@ -733,7 +733,7 @@ describe('terminal-registry alert behavior', () => {
 
     dismissOrToggleAlert(id, 'BUSY');
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'ALERT_DISABLED',
       todo: false,
     });
@@ -747,7 +747,7 @@ describe('terminal-registry alert behavior', () => {
 
     dismissOrToggleAlert(id, 'ALERT_RINGING');
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: true,
     });
@@ -761,14 +761,14 @@ describe('terminal-registry alert behavior', () => {
     driveToRingingNeedsAttention(id);
     markSessionAttention(id);
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: true,
     });
 
     dismissOrToggleAlert(id, 'ALERT_RINGING');
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: true,
     });
@@ -782,13 +782,13 @@ describe('terminal-registry alert behavior', () => {
     driveToRingingNeedsAttention(id);
     markSessionAttention(id);
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: true,
     });
 
     expect(dismissOrToggleAlert(id, 'NOTHING_TO_SHOW')).toBe('dismissed');
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: true,
     });
@@ -802,7 +802,7 @@ describe('terminal-registry alert behavior', () => {
     driveToRingingNeedsAttention(id);
     focusSession(id, true);
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'ALERT_RINGING',
       todo: false,
     });
@@ -819,7 +819,7 @@ describe('terminal-registry alert behavior', () => {
     advance(1_600);
     emitOutput(id, 'working...');
 
-    expect(getActivity(id)).toEqual({
+    expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: false,
     });
@@ -840,11 +840,11 @@ describe('terminal-registry alert behavior', () => {
     emitOutput(alpha, 'working...');
     emitOutput(alpha, 'more work');
 
-    expect(getActivity(alpha)).toEqual({
+    expect(getActivity(alpha)).toMatchObject({
       status: 'ALERT_DISABLED',
       todo: false,
     });
-    expect(getActivity(beta)).toEqual({
+    expect(getActivity(beta)).toMatchObject({
       status: 'BUSY',
       todo: false,
     });
@@ -859,22 +859,22 @@ describe('terminal-registry alert behavior', () => {
     markSessionTodo(alpha);
     swapTerminals(alpha, beta);
 
-    expect(getActivity(alpha)).toEqual({
+    expect(getActivity(alpha)).toMatchObject({
       status: 'ALERT_DISABLED',
       todo: false,
     });
-    expect(getActivity(beta)).toEqual({
+    expect(getActivity(beta)).toMatchObject({
       status: 'ALERT_DISABLED',
       todo: true,
     });
 
     clearSessionTodo(beta);
 
-    expect(getActivity(alpha)).toEqual({
+    expect(getActivity(alpha)).toMatchObject({
       status: 'ALERT_DISABLED',
       todo: false,
     });
-    expect(getActivity(beta)).toEqual({
+    expect(getActivity(beta)).toMatchObject({
       status: 'ALERT_DISABLED',
       todo: false,
     });

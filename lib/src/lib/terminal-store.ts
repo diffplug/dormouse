@@ -1,11 +1,12 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import type { SessionStatus } from './activity-monitor';
-import type { TodoState } from './alert-manager';
+import type { ActivityNotification, TodoState } from './alert-manager';
 
 export interface ActivityState {
   status: SessionStatus;
   todo: TodoState;
+  notification: ActivityNotification | null;
 }
 
 export interface TerminalEntry {
@@ -16,6 +17,7 @@ export interface TerminalEntry {
   cleanup: () => void;
   alertStatus: SessionStatus;
   todo: TodoState;
+  notification: ActivityNotification | null;
   attentionDismissedRing: boolean;
   isReplaying: boolean;
 }

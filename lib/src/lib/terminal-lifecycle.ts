@@ -161,6 +161,7 @@ function setupTerminalEntry(id: string): TerminalEntry {
     cleanup,
     alertStatus: 'ALERT_DISABLED',
     todo: false,
+    notification: null,
     attentionDismissedRing: false,
     isReplaying: false,
   };
@@ -169,6 +170,7 @@ function setupTerminalEntry(id: string): TerminalEntry {
   if (primed) {
     if (primed.status !== undefined) entry.alertStatus = primed.status;
     if (primed.todo !== undefined) entry.todo = primed.todo;
+    if (primed.notification !== undefined) entry.notification = primed.notification;
   }
 
   registry.set(id, entry);

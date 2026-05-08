@@ -15,6 +15,7 @@ export type { ActivityState } from './terminal-store';
 export const DEFAULT_ACTIVITY_STATE: ActivityState = {
   status: 'ALERT_DISABLED',
   todo: false,
+  notification: null,
 };
 
 const activityListeners = new Set<() => void>();
@@ -57,6 +58,7 @@ function readLiveActivity(id: string): ActivityState | null {
   return {
     status: entry.alertStatus,
     todo: entry.todo,
+    notification: entry.notification,
   };
 }
 
@@ -77,6 +79,7 @@ export function getLivePersistedAlertState(id: string): PersistedAlertState | nu
   return {
     status: state.status,
     todo: state.todo,
+    notification: state.notification,
   };
 }
 
@@ -118,11 +121,12 @@ export function initAlertStateReceiver(): void {
     if (entry) {
       entry.alertStatus = detail.status;
       entry.todo = detail.todo;
+      entry.notification = detail.notification;
       entry.attentionDismissedRing = detail.attentionDismissedRing;
       primedActivityStates.delete(detail.id);
       notifyActivityListeners();
     } else {
-      primeActivity(detail.id, { status: detail.status, todo: detail.todo });
+      primeActivity(detail.id, { status: detail.status, todo: detail.todo, notification: detail.notification });
     }
   };
   platform.onAlertState(currentAlertHandler);
@@ -137,6 +141,9 @@ export function dismissOrToggleAlert(id: string, displayedStatus: SessionStatus)
       break;
     case 'ALERT_RINGING':
       result = 'dismissed';
+      break;
+    case 'OSC_NOTIF_BUSY':
+      result = entry?.attentionDismissedRing ? 'dismissed' : 'noop';
       break;
     default:
       if (entry?.attentionDismissedRing) {

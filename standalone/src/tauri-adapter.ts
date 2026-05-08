@@ -2,6 +2,11 @@ import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { AlertStateDetail, PlatformAdapter, PtyInfo } from "mouseterm-lib/lib/platform/types";
 import { AlertManager, type SessionStatus } from "mouseterm-lib/lib/alert-manager";
+import {
+  applyTerminalProtocolEvents,
+  collectTerminalProtocolResponses,
+  TerminalProtocolParser,
+} from "mouseterm-lib/lib/terminal-protocol";
 
 function invoke(cmd: string, args?: Record<string, unknown>): void {
   rawInvoke(cmd, args).catch((err) =>
@@ -29,6 +34,7 @@ export class TauriAdapter implements PlatformAdapter {
   private filesDroppedHandlers = new Set<(paths: string[]) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private unlistenFns: Array<() => void> = [];
+  private protocolParsers = new Map<string, TerminalProtocolParser>();
   private alertManager = new AlertManager();
 
   constructor() {
@@ -45,10 +51,17 @@ export class TauriAdapter implements PlatformAdapter {
     // (The Rust backend manages the Node.js sidecar lifecycle via std::process::Command)
     this.unlistenFns.push(
       await listen<{ id: string; data: string }>("pty:data", (event) => {
-        // Feed data to alert manager for activity monitoring
-        this.alertManager.onData(event.payload.id);
+        const { id, data } = event.payload;
+        const parsed = this.getProtocolParser(id).process(data);
+        applyTerminalProtocolEvents(this.alertManager, id, parsed.events);
+        for (const response of collectTerminalProtocolResponses(parsed.events)) {
+          invoke("pty_write", { id, data: response });
+        }
+        if (parsed.visibleData.length === 0) return;
+        // Feed visible data to alert manager for visual activity monitoring.
+        this.alertManager.onData(id);
         for (const handler of this.dataHandlers) {
-          handler(event.payload);
+          handler({ id, data: parsed.visibleData });
         }
       }),
     );
@@ -90,6 +103,7 @@ export class TauriAdapter implements PlatformAdapter {
 
   shutdown(): void {
     this.alertManager.dispose();
+    this.protocolParsers.clear();
     for (const unlisten of this.unlistenFns) {
       unlisten();
     }
@@ -104,6 +118,7 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[] }): void {
+    this.protocolParsers.set(id, new TerminalProtocolParser());
     invoke("pty_spawn", { id, options });
   }
 
@@ -116,6 +131,7 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   killPty(id: string): void {
+    this.protocolParsers.delete(id);
     invoke("pty_kill", { id });
   }
 
@@ -263,5 +279,14 @@ export class TauriAdapter implements PlatformAdapter {
     } catch {
       return null;
     }
+  }
+
+  private getProtocolParser(id: string): TerminalProtocolParser {
+    let parser = this.protocolParsers.get(id);
+    if (!parser) {
+      parser = new TerminalProtocolParser();
+      this.protocolParsers.set(id, parser);
+    }
+    return parser;
   }
 }

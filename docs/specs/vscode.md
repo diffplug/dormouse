@@ -190,7 +190,7 @@ All types defined in `message-types.ts`. Webview-side handling in `vscode-adapte
 | `pty:shells` | Available shells list response (matched by requestId) |
 | `mouseterm:flushSessionSave` | Request webview to save state now (deactivate trigger, matched by requestId) |
 | `mouseterm:openThemeDebugger` | Command-triggered request to open the shared theme debugger dialog |
-| `alert:state` | Alert state change (status, todo, attentionDismissedRing) |
+| `alert:state` | Alert state change (projected status, todo, notification, attentionDismissedRing) |
 
 ### Serialization and restore
 
@@ -222,6 +222,7 @@ interface PersistedPane {
 interface PersistedAlertState {
   status: SessionStatus;
   todo: boolean;
+  notification?: ActivityNotification | null;
 }
 
 interface PersistedDoor {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FakePtyAdapter, type FakeScenario } from './fake-adapter';
+import { ITERM2_DEVICE_ATTRIBUTES_RESPONSE } from '../terminal-protocol';
 
 describe('FakePtyAdapter', () => {
   beforeEach(() => {
@@ -48,6 +49,52 @@ describe('FakePtyAdapter', () => {
     const { adapter, dataEvents } = createAdapter();
     adapter.writePty('nope', 'hello');
     expect(dataEvents).toEqual([]);
+  });
+
+  it('parses OSC notification output into alert state without forwarding the OSC sequence', () => {
+    const { adapter, dataEvents } = createAdapter();
+    const alertEvents: unknown[] = [];
+    adapter.onAlertState((detail) => alertEvents.push(detail));
+    adapter.spawnPty('t1');
+
+    adapter.sendOutput('t1', '\x1b]9;Build finished\x07');
+
+    expect(dataEvents).toEqual([]);
+    expect(alertEvents.at(-1)).toMatchObject({
+      id: 't1',
+      status: 'ALERT_RINGING',
+      todo: true,
+      notification: { source: 'OSC 9', title: null, body: 'Build finished' },
+    });
+  });
+
+  it('parses terminal bell output into alert state without forwarding the bell byte', () => {
+    const { adapter, dataEvents } = createAdapter();
+    const alertEvents: unknown[] = [];
+    adapter.onAlertState((detail) => alertEvents.push(detail));
+    adapter.spawnPty('t1');
+
+    adapter.sendOutput('t1', '\x07');
+
+    expect(dataEvents).toEqual([]);
+    expect(alertEvents.at(-1)).toMatchObject({
+      id: 't1',
+      status: 'ALERT_RINGING',
+      todo: true,
+      notification: { source: 'BEL', title: 'Terminal bell', body: null },
+    });
+  });
+
+  it('responds to iTerm2 device attribute queries through the PTY input path', () => {
+    const { adapter, dataEvents } = createAdapter();
+    const received: string[] = [];
+    adapter.spawnPty('t1');
+    adapter.setInputHandler('t1', (data) => received.push(data));
+
+    adapter.sendOutput('t1', '\x1b[>q');
+
+    expect(dataEvents).toEqual([]);
+    expect(received).toEqual([ITERM2_DEVICE_ATTRIBUTES_RESPONSE]);
   });
 
   it('killPty fires onPtyExit with code 0', () => {

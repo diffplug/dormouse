@@ -206,6 +206,19 @@ export function TodoAlertDialog({
         />
       </div>
 
+      {activity.notification && (
+        <div className="mb-3 max-w-80 border-t border-border pt-2 text-sm leading-relaxed text-foreground">
+          {activity.notification.title && (
+            <div className="font-medium break-words">{activity.notification.title}</div>
+          )}
+          {activity.notification.body && (
+            <div className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words text-muted">
+              {activity.notification.body}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="border-t border-border pt-2 text-sm leading-relaxed text-muted">
         When a tab with a ringing alert is selected,<br />
         the alert is cleared and the tab gets a TODO.<br />
