@@ -287,7 +287,7 @@ function NotifySignupForm() {
       <div className="flex items-center gap-3 text-lg leading-relaxed text-[var(--color-caramel)]">
         <CircleNotchIcon className="shrink-0 animate-spin" size={28} weight="bold" />
         <p>
-          Just one more lick! Hit subscribe after{" "}
+          Just one more click! Hit <span className="text-[var(--color-text)]/70">subscribe</span> after{" "}
           <a
             href={redirectUrl}
             className="underline underline-offset-2 hover:opacity-80"
