@@ -1,19 +1,26 @@
 // Cloudflare Pages Function: proxies notify-signup to nedshed.dev (Substack
-// custom domain). substackapi.com/widget.js is deprecated and silently no-ops;
-// the first-party endpoint requires a server-side hop because it doesn't send
-// CORS headers.
-//
-// Forwards the client IP via X-Forwarded-For so Substack rate-limits per
-// end-user, not per CF egress IP — without this, all signups share one bucket
-// and trip 429s under any real traffic.
+// custom domain). The substackapi.com embed widget is deprecated and silently
+// no-ops, so we hit the first-party endpoint server-side. Two failure modes
+// the proxy cannot solve:
+//   1. Already-subscribed emails — Substack's no-JS endpoint refuses to
+//      disclose dedup state and returns "Please enable JavaScript".
+//   2. Rate limits / bot heuristics — Substack soft-blocks suspicious-looking
+//      callers (datacenter IPs hitting subscribe in volume).
+// In both cases we tell the client to fall back to the hosted subscribe page
+// (nedshed.dev/subscribe?email=...), which runs Substack's full JS flow and
+// handles all cases including already-subscribed.
 
 const SUBSTACK_ENDPOINT = "https://nedshed.dev/api/v1/free?nojs=true";
+const FALLBACK_BASE = "https://nedshed.dev/subscribe";
 
 const EMAIL_REGEX =
   /^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
 
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+const fallbackUrl = (email: string) =>
+  `${FALLBACK_BASE}?email=${encodeURIComponent(email)}`;
 
 export const onRequestPost = async ({ request }: { request: Request }): Promise<Response> => {
   let email: unknown;
@@ -50,11 +57,19 @@ export const onRequestPost = async ({ request }: { request: Request }): Promise<
   };
   if (clientIp) upstreamHeaders["X-Forwarded-For"] = clientIp;
 
-  const upstream = await fetch(SUBSTACK_ENDPOINT, {
-    method: "POST",
-    headers: upstreamHeaders,
-    body,
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(SUBSTACK_ENDPOINT, {
+      method: "POST",
+      headers: upstreamHeaders,
+      body,
+    });
+  } catch {
+    return Response.json(
+      { ok: false, fallback: true, fallbackUrl: fallbackUrl(email) },
+      { status: 502 },
+    );
+  }
 
   if (upstream.ok) {
     return Response.json({ ok: true });
@@ -62,35 +77,27 @@ export const onRequestPost = async ({ request }: { request: Request }): Promise<
 
   const text = await upstream.text();
 
-  if (upstream.status === 429) {
-    return Response.json(
-      {
-        ok: false,
-        error: "Too many signups right now. Please try again in a minute.",
-        _upstream: { status: 429 },
-      },
-      { status: 429 },
-    );
+  // Parse the response to decide between inline error (validation) vs fallback
+  // redirect (anti-bot, already-subscribed, rate limit, anything else).
+  let parsed: unknown = null;
+  try { parsed = JSON.parse(text); } catch { /* non-JSON body */ }
+
+  // Substack's standard validation shape: { errors: [{ msg, ... }, ...] }
+  // Show those inline so the user can fix their email.
+  if (
+    parsed && typeof parsed === "object" &&
+    Array.isArray((parsed as { errors?: unknown }).errors)
+  ) {
+    const errors = (parsed as { errors: Array<{ msg?: string }> }).errors;
+    const msg = errors[0]?.msg ?? "Please enter a valid email";
+    return Response.json({ ok: false, error: msg }, { status: 400 });
   }
 
-  let message = "Something went wrong. Please try again.";
-  let errorMsgs: string[] = [];
-  try {
-    const data = JSON.parse(text) as { errors?: Array<{ msg?: string }> };
-    if (data.errors) {
-      errorMsgs = data.errors.map((e) => e?.msg ?? "").filter(Boolean);
-      if (errorMsgs[0]) message = errorMsgs[0];
-    }
-  } catch {
-    // upstream returned non-JSON; keep generic message
-  }
-
+  // Anything else (JS-challenge "please enable JavaScript", 429, 5xx, weird
+  // shape) — bounce the user to Substack's hosted subscribe page, which runs
+  // the full JS flow and handles already-subscribed cleanly.
   return Response.json(
-    {
-      ok: false,
-      error: message,
-      _upstream: { status: upstream.status, errors: errorMsgs, bodyPreview: text.slice(0, 300) },
-    },
-    { status: upstream.status },
+    { ok: false, fallback: true, fallbackUrl: fallbackUrl(email) },
+    { status: upstream.status >= 500 ? 502 : 409 },
   );
 };

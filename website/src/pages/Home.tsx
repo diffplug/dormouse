@@ -286,15 +286,25 @@ function NotifySignupForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
-      const data = (await response.json()) as { ok?: boolean; error?: string };
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        fallback?: boolean;
+        fallbackUrl?: string;
+      };
       if (data.ok) {
         setSuccess(true);
+      } else if (data.fallback && data.fallbackUrl) {
+        // Cases the proxy can't handle (already-subscribed, anti-bot,
+        // rate-limited) — bounce to Substack's hosted subscribe page where
+        // the JS flow handles all of these properly.
+        window.location.href = data.fallbackUrl;
       } else {
         setMessage(data.error ?? "Something went wrong. Please try again.");
+        setLoading(false);
       }
     } catch {
       setMessage("Something went wrong. Please try again.");
-    } finally {
       setLoading(false);
     }
   }

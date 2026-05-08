@@ -41,28 +41,40 @@ function notifySignupDevPlugin(): Plugin {
           referral_code: "",
           source: "subscribe_modal",
         });
-        const upstream = await fetch("https://nedshed.dev/api/v1/free?nojs=true", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            Origin: "https://nedshed.dev",
-            Referer: "https://nedshed.dev/",
-          },
-          body,
-        });
+        const fallback = `https://nedshed.dev/subscribe?email=${encodeURIComponent(email)}`;
+        let upstream;
+        try {
+          upstream = await fetch("https://nedshed.dev/api/v1/free?nojs=true", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              Origin: "https://nedshed.dev",
+              Referer: "https://nedshed.dev/",
+            },
+            body,
+          });
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ ok: false, fallback: true, fallbackUrl: fallback }));
+          return;
+        }
         res.setHeader("content-type", "application/json");
         if (upstream.ok) {
           res.end(JSON.stringify({ ok: true }));
           return;
         }
         const text = await upstream.text();
-        let message = "Something went wrong. Please try again.";
-        try {
-          const data = JSON.parse(text);
-          if (data?.errors?.[0]?.msg) message = data.errors[0].msg;
-        } catch { /* keep generic */ }
-        res.statusCode = upstream.status;
-        res.end(JSON.stringify({ ok: false, error: message }));
+        let parsed = null;
+        try { parsed = JSON.parse(text); } catch { /* non-JSON */ }
+        if (parsed && Array.isArray(parsed.errors)) {
+          const msg = parsed.errors[0]?.msg ?? "Please enter a valid email";
+          res.statusCode = 400;
+          res.end(JSON.stringify({ ok: false, error: msg }));
+          return;
+        }
+        res.statusCode = upstream.status >= 500 ? 502 : 409;
+        res.end(JSON.stringify({ ok: false, fallback: true, fallbackUrl: fallback }));
       });
     },
   };
