@@ -111,6 +111,7 @@ describe('resumeOrRestore', () => {
     expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('pane-c', 'pane-c-replay', {
       alive: true,
       exitCode: undefined,
+      title: 'Pane C',
     });
   });
 
@@ -131,6 +132,35 @@ describe('resumeOrRestore', () => {
       alive: true,
       exitCode: undefined,
       title: 'Production API',
+    });
+  });
+
+  it('seeds saved minimized door titles when resuming live PTYs', async () => {
+    const saved: PersistedSession = {
+      version: 3,
+      layout: { panels: {} },
+      doors: [{
+        id: 'pane-a',
+        title: 'Renamed Door',
+        neighborId: null,
+        direction: 'right',
+        remainingPaneIds: [],
+        layoutAtMinimize: { panels: {} },
+        layoutAtMinimizeSignature: 'sig',
+      }],
+      panes: [
+        { id: 'pane-a', title: 'Renamed Door', cwd: null, scrollback: null, resumeCommand: null },
+      ],
+    };
+
+    await resumeOrRestore(createPlatform([
+      { id: 'pane-a', alive: true },
+    ], saved));
+
+    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('pane-a', 'pane-a-replay', {
+      alive: true,
+      exitCode: undefined,
+      title: 'Renamed Door',
     });
   });
 
