@@ -349,6 +349,7 @@ function Home() {
   const headerRef = useRef<HTMLElement>(null);
   const headerBrandRef = useRef<HTMLAnchorElement>(null);
   const hookRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [installGuide, setInstallGuide] = useState<string | null>(null);
   const [heroVideoSrc, setHeroVideoSrc] = useState<string | undefined>();
   const [heroPosterReady, setHeroPosterReady] = useState(false);
@@ -506,8 +507,18 @@ function Home() {
       });
     }
 
-    function syncScrollState(runwayScroll: number) {
+    function syncScrollState(runwayScroll: number, scrollLag = 0) {
       if (disposed) return;
+
+      // The content section below the hero scrolls natively (raw scroll), but
+      // the hero is animated on the smoothed clock. Counter-translate the
+      // content by the lag so its top edge tracks the video bottom; native
+      // scrollbar position stays correct, only the paint is delayed.
+      if (contentRef.current) {
+        contentRef.current.style.transform = scrollLag !== 0
+          ? `translate3d(0, ${scrollLag.toFixed(3)}px, 0)`
+          : '';
+      }
 
       // How far through the scroll runway (0–1, clamped for animations)
       const runwayHeight = runway.offsetHeight - window.innerHeight;
@@ -650,7 +661,7 @@ function Home() {
         smoothScroll = targetScroll - (targetScroll - smoothScroll) * decay;
       }
 
-      syncScrollState(smoothScroll);
+      syncScrollState(smoothScroll, targetScroll - smoothScroll);
 
       if (Math.abs(targetScroll - smoothScroll) > HERO_SCROLL_SETTLE_PX) {
         smoothRafId = requestAnimationFrame(smoothFrame);
@@ -794,7 +805,7 @@ function Home() {
       </div>
 
       {/* ── Content sections — pulled up to appear as video starts scrolling ── */}
-      <div className="relative z-10 bg-[var(--color-bg)]" style={{ marginTop: `-${(1 - UNPIN_THRESHOLD) * RUNWAY_VH}vh` }}>
+      <div ref={contentRef} className="relative z-10 bg-[var(--color-bg)] will-change-transform" style={{ marginTop: `-${(1 - UNPIN_THRESHOLD) * RUNWAY_VH}vh` }}>
         <section id="features" className={`mx-auto max-w-2xl px-4 md:px-6 ${SECTION_PY}`}>
           <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">Stop watching terminals spin</h2>
           <p className="text-lg leading-relaxed opacity-70 mb-4">
