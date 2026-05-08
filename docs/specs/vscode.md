@@ -122,6 +122,7 @@ This means:
 - Hiding the MouseTerm panel doesn't kill its PTYs.
 - VS Code toggling the panel visibility doesn't destroy sessions.
 - When the view becomes visible again, the webview **resumes** over still-owned PTYs and reapplies the saved visible-pane layout when the saved session covers the live PTY set and the layout's visible panels match.
+- A PTY process that exits naturally can remain mounted as an exited pane; frontend semantic state such as CWD, title candidates, and last command is retained until the Session is actually disposed.
 - Each message router tracks which PTYs it owns; PTYs cannot be stolen by another router.
 - Explicitly killed PTYs are **tombstoned** in the extension host (`Process: Tombstoned`) so a late child-process `exit` event cannot recreate their buffer and make them resumable.
 - Multiple VS Code windows each get their own extension host process, and therefore their own pty-host child process.
