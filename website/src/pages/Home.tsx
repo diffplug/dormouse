@@ -9,7 +9,7 @@ import {
   TerminalIcon,
   WindowsLogoIcon,
 } from "@phosphor-icons/react";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEventHandler, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEventHandler, type ReactNode } from "react";
 import SiteHeader from "../components/SiteHeader";
 import posterUrl from "../assets/video-climb-blink-and-stare.webp";
 import videoUrl from "../assets/video-climb-blink-and-stare.mp4";
@@ -259,29 +259,52 @@ function DownloadGroupHeader({
   );
 }
 
-// Subscribe form is rendered by Supascribe's hosted widget — Substack's own
-// embed (substackapi.com/widget.js) is deprecated and Substack redirects
-// integrators to Supascribe. The widget handles validation, dedup, anti-bot,
-// and the success state. Embed config (button text, colors, success message,
-// publication) lives in the Supascribe dashboard, not in code.
-const SUPASCRIBE_LOADER =
-  "https://js.supascribe.com/v1/loader/tvUgzXGYX9ZKopXgZED4fHG9NN53.js";
-const SUPASCRIBE_EMBED_ID = "96490531467";
+const EMAIL_REGEX =
+  /^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
 
 function NotifySignupForm() {
-  useEffect(() => {
-    if (document.querySelector(`script[src="${SUPASCRIBE_LOADER}"]`)) return;
-    const script = document.createElement("script");
-    script.src = SUPASCRIBE_LOADER;
-    script.async = true;
-    document.body.appendChild(script);
-  }, []);
+  const [email, setEmail] = useState("");
+  const [message, setMessage] = useState("");
+
+  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!EMAIL_REGEX.test(email)) {
+      setMessage("Please enter a valid email");
+      return;
+    }
+    window.location.href = `https://nedshed.dev/subscribe?email=${encodeURIComponent(email)}`;
+  }
 
   return (
-    <div
-      data-supascribe-embed-id={SUPASCRIBE_EMBED_ID}
-      data-supascribe-subscribe
-    />
+    <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+      <label htmlFor="notify-email" className="font-display text-sm opacity-50">
+        Email
+      </label>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+        <input
+          id="notify-email"
+          type="email"
+          name="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+          required
+          autoComplete="email"
+          className="min-h-12 w-full rounded-md border border-[var(--color-text)]/50 bg-[var(--color-bg)] px-4 py-3 text-base text-[var(--color-text)]/70 placeholder:opacity-50 focus:border-[var(--color-caramel)] focus:outline-none sm:flex-1"
+        />
+        <button
+          type="submit"
+          className="min-h-12 inline-flex items-center justify-center rounded-md border border-[var(--color-caramel)] bg-[var(--color-caramel)]/15 px-6 py-3 text-base font-display text-[var(--color-caramel)] transition hover:bg-[var(--color-caramel)]/25 sm:w-auto"
+        >
+          Notify me when Roam ships
+        </button>
+      </div>
+      {message && (
+        <p className="text-sm text-red-400" role="alert">
+          {message}
+        </p>
+      )}
+    </form>
   );
 }
 
