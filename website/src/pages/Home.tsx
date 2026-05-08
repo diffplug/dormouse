@@ -281,20 +281,16 @@ function NotifySignupForm() {
     setMessage("");
 
     try {
-      const response = await fetch("https://substackapi.com/api/subscribe", {
+      const response = await fetch("/api/notify-signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          domain: "https://nedshed.dev/",
-        }),
+        body: JSON.stringify({ email }),
       });
-      const data = await response.json();
-
-      if (data.errors) {
-        setMessage(data.errors[0].msg);
-      } else if (data.requires_confirmation) {
+      const data = (await response.json()) as { ok?: boolean; error?: string };
+      if (data.ok) {
         setSuccess(true);
+      } else {
+        setMessage(data.error ?? "Something went wrong. Please try again.");
       }
     } catch {
       setMessage("Something went wrong. Please try again.");
