@@ -42,13 +42,24 @@ export interface CommandRun {
   };
 }
 
-export type TerminalTitleSource = 'osc0' | 'osc2' | 'notification' | 'user' | 'profile' | 'derived';
+export type TerminalTitleSource =
+  | 'osc0'
+  | 'osc2'
+  | 'osc9'
+  | 'osc99'
+  | 'osc777'
+  | 'notification'
+  | 'user'
+  | 'profile'
+  | 'derived';
 
 export interface TerminalTitle {
   title: string;
   source: TerminalTitleSource;
   updatedAt: number;
 }
+
+export type TerminalTitleCandidates = Partial<Record<TerminalTitleSource, TerminalTitle>>;
 
 export interface TerminalPaneState {
   cwd: CwdState | null;
@@ -57,6 +68,7 @@ export interface TerminalPaneState {
   currentCommand: CommandRun | null;
   lastCommand: CommandRun | null;
   title: TerminalTitle | null;
+  titleCandidates: TerminalTitleCandidates;
 }
 
 export type TerminalSemanticEvent =
@@ -108,6 +120,7 @@ export const DEFAULT_TERMINAL_PANE_STATE: TerminalPaneState = Object.freeze({
   currentCommand: null,
   lastCommand: null,
   title: null,
+  titleCandidates: Object.freeze({}),
 });
 
 export const DEFAULT_IDLE_TITLE = '<idle>';
@@ -118,13 +131,15 @@ const COMMAND_TITLE_LIMIT = 48;
 let nextCommandRunId = 0;
 
 export function createTerminalPaneState(initial?: Partial<TerminalPaneState>): TerminalPaneState {
+  const titleCandidates = createTitleCandidates(initial?.titleCandidates, initial?.title);
   return {
     cwd: initial?.cwd ?? null,
     activity: initial?.activity ?? { kind: 'unknown' },
     pendingCommandLine: initial?.pendingCommandLine ?? null,
     currentCommand: initial?.currentCommand ?? null,
     lastCommand: initial?.lastCommand ?? null,
-    title: initial?.title ?? null,
+    title: initial?.title ?? latestTitleCandidate(titleCandidates),
+    titleCandidates,
   };
 }
 
@@ -197,8 +212,17 @@ export function reduceTerminalState(
       };
     }
     case 'title':
-      if (state.title && sameTitle(state.title, event.title)) return state;
-      return { ...state, title: event.title };
+      if (state.title && sameTitle(state.title, event.title) && sameTitle(state.titleCandidates?.[event.title.source], event.title)) {
+        return state;
+      }
+      return {
+        ...state,
+        title: event.title,
+        titleCandidates: {
+          ...(state.titleCandidates ?? {}),
+          [event.title.source]: event.title,
+        },
+      };
   }
 }
 
@@ -206,8 +230,8 @@ function sameCwd(a: CwdState, b: CwdState): boolean {
   return cwdIdentity(a) === cwdIdentity(b) && a.source === b.source;
 }
 
-function sameTitle(a: TerminalTitle, b: TerminalTitle): boolean {
-  return a.title === b.title && a.source === b.source;
+function sameTitle(a: TerminalTitle | null | undefined, b: TerminalTitle | null | undefined): boolean {
+  return a?.title === b?.title && a?.source === b?.source && a?.updatedAt === b?.updatedAt;
 }
 
 function sameActivity(a: ShellActivity, b: ShellActivity): boolean {
@@ -335,7 +359,7 @@ export function deriveFallbackCommandTitle(
   state?: TerminalPaneState | null,
   options: { shellName?: string } = {},
 ): string {
-  const title = state?.title?.title?.trim();
+  const title = latestTerminalTitleCandidate(state)?.title.trim();
   if (title) return title;
   return options.shellName?.trim() || DEFAULT_COMMAND_TITLE;
 }
@@ -387,6 +411,26 @@ export function notificationDisplayTitle(
   return null;
 }
 
+export function terminalTitleFromNotification(
+  notification: TerminalNotificationTitleLike | null | undefined,
+  updatedAt = Date.now(),
+): TerminalTitle | null {
+  if (!notification) return null;
+  if (notification.source === 'OSC 9') {
+    const title = notificationDisplayTitle(notification);
+    return title ? { title, source: 'osc9', updatedAt } : null;
+  }
+  if (notification.source === 'OSC 99') {
+    const title = notification.title?.trim();
+    return title ? { title, source: 'osc99', updatedAt } : null;
+  }
+  if (notification.source === 'OSC 777') {
+    const title = notification.title?.trim();
+    return title ? { title, source: 'osc777', updatedAt } : null;
+  }
+  return null;
+}
+
 export function buildAppTitleResolver(
   terminalStates: Map<string, TerminalPaneState>,
   activityStates: Map<string, { notification?: TerminalNotificationTitleLike | null }>,
@@ -397,6 +441,34 @@ export function buildAppTitleResolver(
     if (title) titlesByPane.set(pane, title);
   }
   return (pane) => titlesByPane.get(pane) ?? null;
+}
+
+export function titleCandidatesForDisplay(pane: TerminalPaneState): TerminalTitle[] {
+  return titleCandidateValues(pane.titleCandidates ?? {}, pane.title)
+    .sort((a, b) => b.updatedAt - a.updatedAt || titleSourceLabel(a.source).localeCompare(titleSourceLabel(b.source)));
+}
+
+export function titleSourceLabel(source: TerminalTitleSource): string {
+  switch (source) {
+    case 'osc0':
+      return 'OSC 0';
+    case 'osc2':
+      return 'OSC 2';
+    case 'osc9':
+      return 'OSC 9';
+    case 'osc99':
+      return 'OSC 99';
+    case 'osc777':
+      return 'OSC 777';
+    case 'notification':
+      return 'notification';
+    case 'user':
+      return 'user';
+    case 'profile':
+      return 'profile';
+    case 'derived':
+      return 'derived';
+  }
 }
 
 export function groupTerminalPanes(
@@ -679,7 +751,8 @@ function truncateCommandTitle(title: string): string {
 }
 
 function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): string {
-  if (pane.title?.source === 'user') return pane.title.title;
+  const userTitle = titleCandidateForSource(pane, 'user')?.title.trim();
+  if (userTitle) return userTitle;
   const appTitle = options.appTitleForPane?.(pane)?.trim();
   if (appTitle) return appTitle;
   const terminalTitle = activeTerminalTitle(pane);
@@ -690,17 +763,18 @@ function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): string 
 }
 
 function idleLabel(pane: TerminalPaneState, _options: { shellName?: string } = {}): string {
-  if (pane.title?.source === 'user') return pane.title.title;
+  const userTitle = titleCandidateForSource(pane, 'user')?.title.trim();
+  if (userTitle) return userTitle;
   return DEFAULT_IDLE_TITLE;
 }
 
 function activeTerminalTitle(pane: TerminalPaneState): string | null {
-  if (!pane.title || pane.title.source === 'user') return null;
-  const title = pane.title.title.trim();
-  if (!title) return null;
   const command = pane.currentCommand ?? (pane.activity.kind === 'finished' ? pane.lastCommand : null);
-  if (!command || pane.title.updatedAt < command.startedAt) return null;
-  return title;
+  if (!command) return null;
+  const title = latestTitleCandidateForSources(pane, ['osc0', 'osc2', 'osc9', 'notification']);
+  if (!title || title.updatedAt < command.startedAt) return null;
+  const text = title.title.trim();
+  return text || null;
 }
 
 function headerStatus(pane: TerminalPaneState): DerivedHeader['status'] {
@@ -741,4 +815,54 @@ function groupBy(
     }
   }
   return [...groups.values()];
+}
+
+function createTitleCandidates(
+  initialCandidates: TerminalTitleCandidates | undefined,
+  initialTitle: TerminalTitle | null | undefined,
+): TerminalTitleCandidates {
+  const candidates: TerminalTitleCandidates = { ...(initialCandidates ?? {}) };
+  if (initialTitle) candidates[initialTitle.source] = initialTitle;
+  return candidates;
+}
+
+function titleCandidateValues(candidates: TerminalTitleCandidates, latestTitle: TerminalTitle | null): TerminalTitle[] {
+  const bySource = new Map<TerminalTitleSource, TerminalTitle>();
+  for (const candidate of Object.values(candidates)) {
+    if (!candidate) continue;
+    bySource.set(candidate.source, candidate);
+  }
+  if (latestTitle && !bySource.has(latestTitle.source)) bySource.set(latestTitle.source, latestTitle);
+  return [...bySource.values()];
+}
+
+function latestTitleCandidate(candidates: TerminalTitleCandidates): TerminalTitle | null {
+  return titleCandidateValues(candidates, null)
+    .sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
+}
+
+function latestTerminalTitleCandidate(state: TerminalPaneState | null | undefined): TerminalTitle | null {
+  if (!state) return null;
+  return titleCandidateValues(state.titleCandidates ?? {}, state.title)
+    .filter((candidate) => candidate.source !== 'user')
+    .sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
+}
+
+function titleCandidateForSource(
+  pane: TerminalPaneState,
+  source: TerminalTitleSource,
+): TerminalTitle | null {
+  const candidate = pane.titleCandidates?.[source];
+  if (candidate) return candidate;
+  return pane.title?.source === source ? pane.title : null;
+}
+
+function latestTitleCandidateForSources(
+  pane: TerminalPaneState,
+  sources: TerminalTitleSource[],
+): TerminalTitle | null {
+  const allowed = new Set(sources);
+  return titleCandidateValues(pane.titleCandidates ?? {}, pane.title)
+    .filter((candidate) => allowed.has(candidate.source))
+    .sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
 }

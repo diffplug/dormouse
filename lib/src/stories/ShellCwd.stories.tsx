@@ -119,6 +119,18 @@ export const TitleFallbacksAndPinnedTitles: Story = storyFor([
   caseState('title-long-user', 'Long user title', idle({ cwd: manual('/repo/app'), title: terminalTitle('my-extremely-long-running-background-process-with-a-very-descriptive-name', 'user') }), 'Truncates before controls'),
 ]);
 
+export const TitleCandidatePopup: Story = {
+  ...storyFor([
+    caseState(
+      'title-candidates-popup',
+      'Title candidates popup',
+      titleCandidateState(),
+      'Right-click popup lists each latest title channel',
+    ),
+  ]),
+  play: openTitleCandidatesPopup,
+};
+
 export const GroupingKeys: Story = storyFor([
   caseState('group-app-dev', 'App dev server', running('/repo/app', 'npm run dev'), 'Directory: app, command: npm run dev, status: running'),
   caseState('group-api-dev', 'API dev server', running('/repo/api', 'npm run dev'), 'Directory: api, command: npm run dev, status: running'),
@@ -343,6 +355,43 @@ function terminalTitle(title: string, source: TerminalTitle['source']): Terminal
 
 function terminalTitleAt(title: string, source: TerminalTitle['source'], updatedAt: number): TerminalTitle {
   return { title, source, updatedAt };
+}
+
+function titleCandidateState(): TerminalPaneState {
+  const pane = running('/repo/app', 'npm run dev');
+  const candidates = {
+    user: terminalTitleAt('Pinned production API', 'user', BASE_TIME + 6_000),
+    osc0: terminalTitleAt('mouseterm', 'osc0', BASE_TIME + 1_000),
+    osc2: terminalTitleAt('zsh', 'osc2', BASE_TIME + 2_000),
+    osc9: terminalTitleAt('Build finished', 'osc9', BASE_TIME + 5_000),
+    osc99: terminalTitleAt('Codex waiting', 'osc99', BASE_TIME + 4_000),
+    osc777: terminalTitleAt('Tests complete', 'osc777', BASE_TIME + 3_000),
+  } satisfies TerminalPaneState['titleCandidates'];
+  return createTerminalPaneState({
+    ...pane,
+    title: candidates.user,
+    titleCandidates: candidates,
+  });
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function openTitleCandidatesPopup() {
+  await wait(100);
+  const title = document.querySelector<HTMLElement>('[data-title-candidates-for="title-candidates-popup"]');
+  if (!title) return;
+
+  const rect = title.getBoundingClientRect();
+  title.dispatchEvent(new MouseEvent('contextmenu', {
+    bubbles: true,
+    cancelable: true,
+    button: 2,
+    clientX: rect.left + rect.width / 2,
+    clientY: rect.top + rect.height / 2,
+  }));
+  await wait(100);
 }
 
 function makeDoorItem(id: string, title: string): DooredItem {

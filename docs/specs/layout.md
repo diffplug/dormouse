@@ -74,9 +74,11 @@ Each pane has a 30px header that doubles as a drag handle. The header uses `curs
 
 The header label is derived from `TerminalPaneState` plus scoped protocol notification state: user-pinned title first, then app-sent title overrides, then current/freshly-finished command title, then `<idle>` for idle panes. App-sent overrides include legacy OSC 9 message text and OSC 0/2 terminal titles emitted after the current command started. Rich notification titles from OSC 99/777 stay in TODO notification UI rather than replacing the tab/door label. Older shell titles remain fallback-only and do not replace the default idle label. When visible panes would have duplicate primary labels, the header adds a compact directory disambiguator using the running command's `cwdAtStart` or the idle pane's latest `cwd`.
 
+Right-clicking the derived session label opens a diagnostic popup listing the latest title candidate per channel, including user, OSC 0, OSC 2, OSC 9, OSC 99, and OSC 777 where present. Each row shows the channel, latest candidate text, and timestamp. The popup is diagnostic only; it does not change the title priority rules.
+
 Elements from left to right:
 
-- Derived session label (click to rename/pin, truncates with ellipsis)
+- Derived session label (click to rename/pin, right-click to inspect title candidates, truncates with ellipsis)
 - Alert bell button (reflects session activity status)
 - TODO pill (if todo state is set; hidden in minimal tier)
 - Flexible gap

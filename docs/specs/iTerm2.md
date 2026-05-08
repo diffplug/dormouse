@@ -16,7 +16,7 @@ Notification sequences and standalone terminal bells are explicit application re
 
 Progress sequences do not ring immediately. They "cock" the alarm bell: MouseTerm treats active progress as an explicit finite-work cycle, exposes `OSC_NOTIF_BUSY`, and rings when the progress cycle completes or enters an error state.
 
-Legacy `OSC 9` message text also participates in pane header/door title derivation as an app-sent title override, even when the alert ring itself is suppressed because the Session has attention. Rich notification titles from `OSC 99` and `OSC 777` are not tab/door title overrides; they stay in the TODO notification UI.
+Legacy `OSC 9` message text also participates in pane header/door title derivation as an app-sent title override, even when the alert ring itself is suppressed because the Session has attention. Rich notification titles from `OSC 99` and `OSC 777` are stored as title candidates for the header diagnostic popup, but they are not tab/door title overrides; they stay in the TODO notification UI.
 
 ## Non-goals
 
@@ -208,6 +208,12 @@ Mapping rules:
 - `OSC 99` stores `{ source: 'OSC 99', title, body }` after chunk assembly and sanitization.
 - `OSC 9;4` stores nothing while progress is active. On completion/error it generates `{ source: 'OSC 9;4', title, body }`, where `title` is a short summary such as `Progress complete`, `Progress error`, or `Progress warning`, and `body` contains the percent when available.
 - Standalone `BEL` stores `{ source: 'BEL', title: 'Terminal bell', body: null }`.
+
+Title candidate side effects:
+
+- `OSC 9` also records `titleCandidates.osc9 = message` and may override the pane header/door label.
+- `OSC 777` also records `titleCandidates.osc777 = title` for diagnostics only.
+- `OSC 99` also records `titleCandidates.osc99 = title` for diagnostics only.
 
 Persistence:
 

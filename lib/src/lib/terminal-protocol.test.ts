@@ -33,7 +33,7 @@ describe('TerminalProtocolParser', () => {
     expect(collectTerminalSemanticEvents(result.events)).toEqual([
       {
         type: 'title',
-        title: { title: 'Build finished', source: 'notification', updatedAt: expect.any(Number) },
+        title: { title: 'Build finished', source: 'osc9', updatedAt: expect.any(Number) },
       },
     ]);
   });
@@ -91,7 +91,12 @@ describe('TerminalProtocolParser', () => {
     expect(result.events).toEqual([
       { kind: 'notification', notification: { source: 'OSC 777', title: 'Title', body: 'one;two;three' } },
     ]);
-    expect(collectTerminalSemanticEvents(result.events)).toEqual([]);
+    expect(collectTerminalSemanticEvents(result.events)).toEqual([
+      {
+        type: 'title',
+        title: { title: 'Title', source: 'osc777', updatedAt: expect.any(Number) },
+      },
+    ]);
   });
 
   it('assembles OSC 99 title and body chunks', () => {
@@ -107,7 +112,12 @@ describe('TerminalProtocolParser', () => {
         notification: { source: 'OSC 99', title: 'Build', body: 'Finished successfully' },
       },
     ]);
-    expect(collectTerminalSemanticEvents(result.events)).toEqual([]);
+    expect(collectTerminalSemanticEvents(result.events)).toEqual([
+      {
+        type: 'title',
+        title: { title: 'Build', source: 'osc99', updatedAt: expect.any(Number) },
+      },
+    ]);
   });
 
   it('responds to OSC 99 support queries with title and body support', () => {

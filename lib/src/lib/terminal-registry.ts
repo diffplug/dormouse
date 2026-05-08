@@ -10,6 +10,7 @@ export type {
   TerminalPaneState,
   TerminalSemanticEvent,
   TerminalTitle,
+  TerminalTitleCandidates,
 } from './terminal-state';
 
 export {
@@ -86,5 +87,8 @@ export {
   resolveDisplayPrimary,
   shortestUniqueCwdLabels,
   summarizeCommandLine,
+  terminalTitleFromNotification,
+  titleCandidatesForDisplay,
+  titleSourceLabel,
   UNNAMED_PANEL_TITLE,
 } from './terminal-state';

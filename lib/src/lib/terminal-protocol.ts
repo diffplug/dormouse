@@ -4,7 +4,7 @@ import {
   cwdFromOsc633,
   cwdFromOsc7,
   cwdFromOsc9_9,
-  notificationDisplayTitle,
+  terminalTitleFromNotification,
   type CommandRunSource,
   type TerminalSemanticEvent,
   type TerminalTitle,
@@ -238,11 +238,11 @@ export function collectTerminalSemanticEvents(events: TerminalProtocolEvent[]): 
       continue;
     }
     if (event.kind !== 'notification') continue;
-    const title = notificationDisplayTitle(event.notification);
+    const title = terminalTitleFromNotification(event.notification);
     if (!title) continue;
     semanticEvents.push({
       type: 'title',
-      title: { title, source: 'notification', updatedAt: Date.now() },
+      title,
     });
   }
   return semanticEvents;

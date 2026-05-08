@@ -14,6 +14,8 @@ import {
   reduceTerminalState,
   shortestUniqueCwdLabels,
   summarizeCommandLine,
+  terminalTitleFromNotification,
+  titleCandidatesForDisplay,
   type CwdState,
 } from './terminal-state';
 
@@ -126,6 +128,21 @@ describe('terminal command state reducer', () => {
     expect(state.activity).toEqual({ kind: 'prompt' });
   });
 
+  it('stores latest title candidates by source channel', () => {
+    let state = createTerminalPaneState();
+    state = reduceTerminalState(state, { type: 'title', title: { title: 'zsh', source: 'osc0', updatedAt: 1 } });
+    state = reduceTerminalState(state, { type: 'title', title: { title: 'vim', source: 'osc2', updatedAt: 2 } });
+    state = reduceTerminalState(state, { type: 'title', title: { title: 'mouseterm', source: 'osc0', updatedAt: 3 } });
+
+    expect(state.title).toEqual({ title: 'mouseterm', source: 'osc0', updatedAt: 3 });
+    expect(state.titleCandidates.osc0).toEqual({ title: 'mouseterm', source: 'osc0', updatedAt: 3 });
+    expect(state.titleCandidates.osc2).toEqual({ title: 'vim', source: 'osc2', updatedAt: 2 });
+    expect(titleCandidatesForDisplay(state).map((candidate) => [candidate.source, candidate.title])).toEqual([
+      ['osc0', 'mouseterm'],
+      ['osc2', 'vim'],
+    ]);
+  });
+
   it('uses a pending typed command line for OSC 133 command boundaries', () => {
     let state = createTerminalPaneState({ cwd: cwdFromManualPath('/repo/app', 1)! });
     state = reduceTerminalState(state, { type: 'promptEnd' });
@@ -234,8 +251,10 @@ describe('header and grouping derivation', () => {
   });
 
   it('lets fresh app-sent terminal titles override running command labels', () => {
-    const pane = runningPane('/repo/app', 'lazygit');
-    pane.title = { title: 'lazygit: mouseterm', source: 'osc0', updatedAt: 2 };
+    const pane = reduceTerminalState(
+      runningPane('/repo/app', 'lazygit'),
+      { type: 'title', title: { title: 'lazygit: mouseterm', source: 'osc0', updatedAt: 2 } },
+    );
 
     expect(deriveHeader(pane, [pane])).toEqual({
       primary: 'lazygit: mouseterm',
@@ -244,13 +263,27 @@ describe('header and grouping derivation', () => {
   });
 
   it('ignores stale shell titles from before a command started', () => {
-    const pane = runningPane('/repo/app', 'lazygit');
-    pane.title = { title: 'zsh', source: 'osc0', updatedAt: 0 };
+    const pane = reduceTerminalState(
+      runningPane('/repo/app', 'lazygit'),
+      { type: 'title', title: { title: 'zsh', source: 'osc0', updatedAt: 0 } },
+    );
 
     expect(deriveHeader(pane, [pane])).toEqual({
       primary: 'lazygit',
       status: 'running',
     });
+  });
+
+  it('keeps user-pinned titles primary when newer app title candidates arrive', () => {
+    let pane = runningPane('/repo/app', 'npm run dev');
+    pane = reduceTerminalState(pane, { type: 'title', title: { title: 'dev server', source: 'user', updatedAt: 2 } });
+    pane = reduceTerminalState(pane, { type: 'title', title: { title: 'vite', source: 'osc0', updatedAt: 3 } });
+
+    expect(deriveHeader(pane, [pane])).toEqual({
+      primary: 'dev server',
+      status: 'running',
+    });
+    expect(titleCandidatesForDisplay(pane).map((candidate) => candidate.source)).toEqual(['osc0', 'user']);
   });
 
   it('lets legacy OSC 9 message text override derived command labels', () => {
@@ -272,6 +305,25 @@ describe('header and grouping derivation', () => {
   it('does not use rich notification titles as tab title overrides', () => {
     expect(notificationDisplayTitle({ source: 'OSC 777', title: 'Tests', body: '341 passed' })).toBeNull();
     expect(notificationDisplayTitle({ source: 'OSC 99', title: 'Build', body: 'Finished successfully' })).toBeNull();
+    expect(terminalTitleFromNotification({ source: 'OSC 777', title: 'Tests', body: '341 passed' }, 2)).toEqual({
+      title: 'Tests',
+      source: 'osc777',
+      updatedAt: 2,
+    });
+    expect(terminalTitleFromNotification({ source: 'OSC 99', title: 'Build', body: 'Finished successfully' }, 3)).toEqual({
+      title: 'Build',
+      source: 'osc99',
+      updatedAt: 3,
+    });
+
+    const pane = reduceTerminalState(
+      runningPane('/repo/app', 'npm test'),
+      { type: 'title', title: { title: 'Tests', source: 'osc777', updatedAt: 3 } },
+    );
+    expect(deriveHeader(pane, [pane])).toEqual({
+      primary: 'npm test',
+      status: 'running',
+    });
   });
 
   it('preserves remote identity when two panes have the same path', () => {
