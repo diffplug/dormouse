@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { collectTerminalSemanticEvents, ITERM2_DEVICE_ATTRIBUTES_RESPONSE, TerminalProtocolParser } from './terminal-protocol';
+import { createTerminalPaneState, deriveHeader, reduceTerminalState, type TerminalSemanticEvent } from './terminal-state';
 
 describe('TerminalProtocolParser', () => {
   it('parses and strips standalone terminal bells', () => {
@@ -204,6 +205,40 @@ describe('TerminalProtocolParser', () => {
     ]);
   });
 
+  it('preserves stream order when collecting command starts and title candidates', () => {
+    const staleTitleParser = new TerminalProtocolParser();
+    const staleTitleEvents = collectTerminalSemanticEvents(
+      staleTitleParser.process('\x1b]633;E;npm test\x07\x1b]0;zsh\x07\x1b]633;C\x07').events,
+      { now: () => 100 },
+    );
+    const staleTitle = staleTitleEvents.find((event) => event.type === 'title');
+    const staleCommandStart = staleTitleEvents.find((event) => event.type === 'commandStart');
+
+    expect(staleTitle?.type === 'title' ? staleTitle.title.updatedAt : null)
+      .toBeLessThan(staleCommandStart?.type === 'commandStart' ? staleCommandStart.startedAt ?? 0 : 0);
+    const staleTitleState = reduceSemanticEvents(staleTitleEvents);
+    expect(deriveHeader(staleTitleState, [staleTitleState])).toEqual({
+      primary: 'npm test',
+      status: 'running',
+    });
+
+    const freshTitleParser = new TerminalProtocolParser();
+    const freshTitleEvents = collectTerminalSemanticEvents(
+      freshTitleParser.process('\x1b]633;E;npm test\x07\x1b]633;C\x07\x1b]0;vitest\x07').events,
+      { now: () => 100 },
+    );
+    const freshTitle = freshTitleEvents.find((event) => event.type === 'title');
+    const freshCommandStart = freshTitleEvents.find((event) => event.type === 'commandStart');
+
+    expect(freshTitle?.type === 'title' ? freshTitle.title.updatedAt : 0)
+      .toBeGreaterThan(freshCommandStart?.type === 'commandStart' ? freshCommandStart.startedAt ?? 0 : 0);
+    const freshTitleState = reduceSemanticEvents(freshTitleEvents);
+    expect(deriveHeader(freshTitleState, [freshTitleState])).toEqual({
+      primary: 'vitest',
+      status: 'running',
+    });
+  });
+
   it('decodes OSC 633 command lines without including the optional nonce', () => {
     const parser = new TerminalProtocolParser();
 
@@ -303,3 +338,11 @@ describe('TerminalProtocolParser', () => {
     expect(parser.process('31mred')).toEqual({ visibleData: '\x1b[31mred', events: [] });
   });
 });
+
+function reduceSemanticEvents(events: TerminalSemanticEvent[]) {
+  let state = createTerminalPaneState();
+  for (const event of events) {
+    state = reduceTerminalState(state, event, { now: () => 999, createId: () => 'cmd-1' });
+  }
+  return state;
+}

@@ -230,15 +230,19 @@ export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]
   return events.flatMap((event) => (event.kind === 'response' ? [event.data] : []));
 }
 
-export function collectTerminalSemanticEvents(events: TerminalProtocolEvent[]): TerminalSemanticEvent[] {
+export function collectTerminalSemanticEvents(
+  events: TerminalProtocolEvent[],
+  options: { now?: () => number } = {},
+): TerminalSemanticEvent[] {
   const semanticEvents: TerminalSemanticEvent[] = [];
+  const nextTimestamp = createOrderedEventTimestamp(options.now ?? Date.now);
   for (const event of events) {
     if (event.kind === 'semantic') {
-      semanticEvents.push(event.event);
+      semanticEvents.push(timestampSemanticEvent(event.event, nextTimestamp));
       continue;
     }
     if (event.kind !== 'notification') continue;
-    const title = terminalTitleFromNotification(event.notification);
+    const title = terminalTitleFromNotification(event.notification, nextTimestamp());
     if (!title) continue;
     semanticEvents.push({
       type: 'title',
@@ -246,6 +250,32 @@ export function collectTerminalSemanticEvents(events: TerminalProtocolEvent[]): 
     });
   }
   return semanticEvents;
+}
+
+function createOrderedEventTimestamp(now: () => number): () => number {
+  let lastTimestamp = Number.NEGATIVE_INFINITY;
+  return () => {
+    const candidate = now();
+    const timestamp = candidate > lastTimestamp ? candidate : lastTimestamp + 0.001;
+    lastTimestamp = timestamp;
+    return timestamp;
+  };
+}
+
+function timestampSemanticEvent(
+  event: TerminalSemanticEvent,
+  nextTimestamp: () => number,
+): TerminalSemanticEvent {
+  switch (event.type) {
+    case 'cwd':
+      return { ...event, cwd: { ...event.cwd, updatedAt: nextTimestamp() } };
+    case 'commandStart':
+      return { ...event, startedAt: nextTimestamp() };
+    case 'title':
+      return { ...event, title: { ...event.title, updatedAt: nextTimestamp() } };
+    default:
+      return event;
+  }
 }
 
 function stripStandaloneBells(segment: string, events: TerminalProtocolEvent[]): string {

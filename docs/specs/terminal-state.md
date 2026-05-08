@@ -107,12 +107,13 @@ type TerminalSemanticEvent =
   | { type: "promptStart" }
   | { type: "promptEnd" }
   | { type: "commandLine"; commandLine: string }
-  | { type: "commandStart"; source?: CommandRun["source"] }
+  | { type: "commandStart"; source?: CommandRun["source"]; startedAt?: number }
   | { type: "commandFinish"; exitCode?: number }
   | { type: "title"; title: TerminalTitle };
 ```
 
 Feature code consumes `TerminalPaneState` or `TerminalSemanticEvent`, never raw OSC sequences.
+Protocol-derived semantic events are timestamped in stream order before they reach the reducer, so command-start boundaries and title candidates from the same PTY chunk remain comparable even when they were parsed in the same millisecond.
 
 ## Supported OSC Inputs
 
@@ -163,7 +164,7 @@ The parser accepts both BEL and ST terminators and handles split chunks. Unsuppo
 - `commandLine` stores `pendingCommandLine`.
 - User-entered prompt input may also store `pendingCommandLine` as an explicit fallback before an OSC 133/633 command-start boundary. This fallback is only used while the shell is idle/editing; foreground-program input is ignored. If the submitted line is non-empty, the input fallback may create a `currentCommand` immediately with `source: "user_input"` so shells without command-start integration still show the active command.
 - The typed-command fallback resolves the current Session id from the PTY id before recording input or prompt-looking output, so drag-to-swap moves the fallback state with the visible pane.
-- `commandStart` creates `currentCommand`, snapshots `cwdAtStart`, clears `pendingCommandLine`, and sets `{ kind: "running" }`.
+- `commandStart` creates `currentCommand`, snapshots `cwdAtStart`, uses `event.startedAt` when present, clears `pendingCommandLine`, and sets `{ kind: "running" }`.
 - `commandFinish` moves `currentCommand` to `lastCommand`, stores `finishedAt`/`exitCode`, clears `currentCommand`, and sets `{ kind: "finished", exitCode }`.
 - `title` updates `title` and the per-source entry in `titleCandidates`. Later OSC title events do not erase earlier user, shell, or notification channel candidates from other sources.
 - A later prompt signal moves the pane out of `finished`. If a command was started from `user_input` and no explicit `commandFinish` arrived, the prompt signal also clears `currentCommand` so the header returns to `<idle>`.

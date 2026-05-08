@@ -76,7 +76,7 @@ export type TerminalSemanticEvent =
   | { type: 'promptStart' }
   | { type: 'promptEnd' }
   | { type: 'commandLine'; commandLine: string }
-  | { type: 'commandStart'; source?: CommandRunSource }
+  | { type: 'commandStart'; source?: CommandRunSource; startedAt?: number }
   | { type: 'commandFinish'; exitCode?: number }
   | { type: 'title'; title: TerminalTitle };
 
@@ -193,7 +193,7 @@ export function reduceTerminalState(
           rawCommandLine: raw,
           displayCommand: raw ? summarizeCommandLine(raw) : deriveFallbackCommandTitle(state),
           cwdAtStart: state.cwd,
-          startedAt: now(),
+          startedAt: event.startedAt ?? now(),
           source,
         },
         activity: { kind: 'running' },
