@@ -171,7 +171,8 @@ export function swapTerminalPaneStates(idA: string, idB: string): void {
 }
 
 function updateCwdIfAllowed(id: string, cwd: CwdState): void {
-  const current = paneStates.get(id) ?? createTerminalPaneState();
+  const current = paneStates.get(id);
+  if (!current) return;
   const currentSource = current.cwd?.source;
   if (currentSource && currentSource !== 'manual' && currentSource !== 'process') return;
   paneStates.set(id, { ...current, cwd });

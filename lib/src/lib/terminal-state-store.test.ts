@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   applyTerminalSemanticEvents,
+  fillTerminalProcessCwd,
   getTerminalPaneState,
+  getTerminalPaneStateSnapshot,
   recordTerminalOutput,
   recordTerminalOutputByPtyId,
   recordTerminalUserInput,
@@ -52,6 +54,11 @@ describe('terminal semantic state store command input fallback', () => {
     recordTerminalOutput('pane', 'loading repositories...\r\n');
 
     expect(getTerminalPaneState('pane').currentCommand?.displayCommand).toBe('lazygit');
+  });
+
+  it('does not resurrect a disposed pane when a late process CWD arrives', () => {
+    fillTerminalProcessCwd('pane', '/Users/me/project');
+    expect(getTerminalPaneStateSnapshot().has('pane')).toBe(false);
   });
 
   it('records PTY fallback state under the current pane after a swap', () => {
