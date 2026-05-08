@@ -137,11 +137,18 @@ export function setTerminalUserTitle(id: string, title: string): void {
 
 export function seedTerminalManualCwd(id: string, path: string | null | undefined): void {
   const cwd = path ? cwdFromManualPath(path) : null;
-  if (cwd && !paneStates.get(id)?.cwd) {
-    ensureTerminalPaneState(id, { cwd });
-  } else {
+  const current = paneStates.get(id);
+  if (!cwd) {
     ensureTerminalPaneState(id);
+    return;
   }
+  if (!current) {
+    ensureTerminalPaneState(id, { cwd });
+    return;
+  }
+  if (current.cwd) return;
+  paneStates.set(id, { ...current, cwd });
+  notifyTerminalPaneStateListeners();
 }
 
 export function fillTerminalProcessCwd(id: string, path: string | null | undefined): void {

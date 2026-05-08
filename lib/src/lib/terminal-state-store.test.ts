@@ -10,6 +10,8 @@ import {
   recordTerminalUserInput,
   recordTerminalUserInputByPtyId,
   removeTerminalPaneState,
+  resetTerminalPaneState,
+  seedTerminalManualCwd,
   setTerminalUserTitle,
 } from './terminal-state-store';
 import { registry, type TerminalEntry } from './terminal-store';
@@ -79,6 +81,17 @@ describe('terminal semantic state store command input fallback', () => {
   it('does not resurrect a disposed pane when a late process CWD arrives', () => {
     fillTerminalProcessCwd('pane', '/Users/me/project');
     expect(getTerminalPaneStateSnapshot().has('pane')).toBe(false);
+  });
+
+  it('seeds restored manual CWD after reset created a blank pane state', () => {
+    resetTerminalPaneState('pane');
+
+    seedTerminalManualCwd('pane', '/Users/me/project');
+
+    expect(getTerminalPaneState('pane').cwd).toMatchObject({
+      path: '/Users/me/project',
+      source: 'manual',
+    });
   });
 
   it('refuses to pin sentinel labels as a user title', () => {
