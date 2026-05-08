@@ -131,14 +131,21 @@ const COMMAND_TITLE_LIMIT = 48;
 let nextCommandRunId = 0;
 
 export function createTerminalPaneState(initial?: Partial<TerminalPaneState>): TerminalPaneState {
-  const titleCandidates = createTitleCandidates(initial?.titleCandidates, initial?.title);
+  const titleCandidates: TerminalTitleCandidates = { ...initial?.titleCandidates };
+  if (initial?.title) titleCandidates[initial.title.source] = initial.title;
+  let title = initial?.title ?? null;
+  if (!title) {
+    for (const candidate of Object.values(titleCandidates)) {
+      if (candidate && (!title || candidate.updatedAt > title.updatedAt)) title = candidate;
+    }
+  }
   return {
     cwd: initial?.cwd ?? null,
     activity: initial?.activity ?? { kind: 'unknown' },
     pendingCommandLine: initial?.pendingCommandLine ?? null,
     currentCommand: initial?.currentCommand ?? null,
     lastCommand: initial?.lastCommand ?? null,
-    title: initial?.title ?? latestTitleCandidate(titleCandidates),
+    title,
     titleCandidates,
   };
 }
@@ -211,18 +218,20 @@ export function reduceTerminalState(
         activity: finishedActivity(event.exitCode),
       };
     }
-    case 'title':
-      if (state.title && sameTitle(state.title, event.title) && sameTitle(state.titleCandidates?.[event.title.source], event.title)) {
+    case 'title': {
+      const existing = state.titleCandidates[event.title.source];
+      if (state.title && existing && sameTitle(state.title, event.title) && sameTitle(existing, event.title)) {
         return state;
       }
       return {
         ...state,
         title: event.title,
         titleCandidates: {
-          ...(state.titleCandidates ?? {}),
+          ...state.titleCandidates,
           [event.title.source]: event.title,
         },
       };
+    }
   }
 }
 
@@ -230,8 +239,8 @@ function sameCwd(a: CwdState, b: CwdState): boolean {
   return cwdIdentity(a) === cwdIdentity(b) && a.source === b.source;
 }
 
-function sameTitle(a: TerminalTitle | null | undefined, b: TerminalTitle | null | undefined): boolean {
-  return a?.title === b?.title && a?.source === b?.source && a?.updatedAt === b?.updatedAt;
+function sameTitle(a: TerminalTitle, b: TerminalTitle): boolean {
+  return a.title === b.title && a.source === b.source && a.updatedAt === b.updatedAt;
 }
 
 function sameActivity(a: ShellActivity, b: ShellActivity): boolean {
@@ -444,8 +453,9 @@ export function buildAppTitleResolver(
 }
 
 export function titleCandidatesForDisplay(pane: TerminalPaneState): TerminalTitle[] {
-  return titleCandidateValues(pane.titleCandidates ?? {}, pane.title)
-    .sort((a, b) => b.updatedAt - a.updatedAt || titleSourceLabel(a.source).localeCompare(titleSourceLabel(b.source)));
+  return Object.values(pane.titleCandidates)
+    .filter((candidate): candidate is TerminalTitle => !!candidate)
+    .sort((a, b) => b.updatedAt - a.updatedAt || a.source.localeCompare(b.source));
 }
 
 export function titleSourceLabel(source: TerminalTitleSource): string {
@@ -768,10 +778,12 @@ function idleLabel(pane: TerminalPaneState, _options: { shellName?: string } = {
   return DEFAULT_IDLE_TITLE;
 }
 
+const HEADER_APP_TITLE_SOURCES: TerminalTitleSource[] = ['osc0', 'osc2', 'osc9', 'notification'];
+
 function activeTerminalTitle(pane: TerminalPaneState): string | null {
   const command = pane.currentCommand ?? (pane.activity.kind === 'finished' ? pane.lastCommand : null);
   if (!command) return null;
-  const title = latestTitleCandidateForSources(pane, ['osc0', 'osc2', 'osc9', 'notification']);
+  const title = latestTitleCandidateForSources(pane, HEADER_APP_TITLE_SOURCES);
   if (!title || title.updatedAt < command.startedAt) return null;
   const text = title.title.trim();
   return text || null;
@@ -817,52 +829,32 @@ function groupBy(
   return [...groups.values()];
 }
 
-function createTitleCandidates(
-  initialCandidates: TerminalTitleCandidates | undefined,
-  initialTitle: TerminalTitle | null | undefined,
-): TerminalTitleCandidates {
-  const candidates: TerminalTitleCandidates = { ...(initialCandidates ?? {}) };
-  if (initialTitle) candidates[initialTitle.source] = initialTitle;
-  return candidates;
-}
-
-function titleCandidateValues(candidates: TerminalTitleCandidates, latestTitle: TerminalTitle | null): TerminalTitle[] {
-  const bySource = new Map<TerminalTitleSource, TerminalTitle>();
-  for (const candidate of Object.values(candidates)) {
-    if (!candidate) continue;
-    bySource.set(candidate.source, candidate);
-  }
-  if (latestTitle && !bySource.has(latestTitle.source)) bySource.set(latestTitle.source, latestTitle);
-  return [...bySource.values()];
-}
-
-function latestTitleCandidate(candidates: TerminalTitleCandidates): TerminalTitle | null {
-  return titleCandidateValues(candidates, null)
-    .sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
-}
-
 function latestTerminalTitleCandidate(state: TerminalPaneState | null | undefined): TerminalTitle | null {
   if (!state) return null;
-  return titleCandidateValues(state.titleCandidates ?? {}, state.title)
-    .filter((candidate) => candidate.source !== 'user')
-    .sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
+  let latest: TerminalTitle | null = null;
+  for (const candidate of Object.values(state.titleCandidates)) {
+    if (!candidate || candidate.source === 'user') continue;
+    if (!latest || candidate.updatedAt > latest.updatedAt) latest = candidate;
+  }
+  return latest;
 }
 
 function titleCandidateForSource(
   pane: TerminalPaneState,
   source: TerminalTitleSource,
 ): TerminalTitle | null {
-  const candidate = pane.titleCandidates?.[source];
-  if (candidate) return candidate;
-  return pane.title?.source === source ? pane.title : null;
+  return pane.titleCandidates[source] ?? null;
 }
 
 function latestTitleCandidateForSources(
   pane: TerminalPaneState,
   sources: TerminalTitleSource[],
 ): TerminalTitle | null {
-  const allowed = new Set(sources);
-  return titleCandidateValues(pane.titleCandidates ?? {}, pane.title)
-    .filter((candidate) => allowed.has(candidate.source))
-    .sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
+  let latest: TerminalTitle | null = null;
+  for (const source of sources) {
+    const candidate = pane.titleCandidates[source];
+    if (!candidate) continue;
+    if (!latest || candidate.updatedAt > latest.updatedAt) latest = candidate;
+  }
+  return latest;
 }

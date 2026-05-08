@@ -163,8 +163,9 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
     if (!activity.notification) setTodoPreviewRect(null);
   }, [activity.notification]);
 
+  const titleCandidatesOpen = !!titleCandidatesRect;
   useEffect(() => {
-    if (!titleCandidatesRect) return;
+    if (!titleCandidatesOpen) return;
     const close = () => setTitleCandidatesRect(null);
     const closeOnKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') close();
@@ -179,7 +180,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
       window.removeEventListener('scroll', close, true);
       window.removeEventListener('keydown', closeOnKey);
     };
-  }, [titleCandidatesRect]);
+  }, [titleCandidatesOpen]);
 
   return (
     <div
