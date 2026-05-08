@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   applyTerminalSemanticEvents,
   fillTerminalProcessCwd,
+  fillTerminalProcessCwdByPtyId,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
   recordTerminalOutput,
@@ -107,5 +108,18 @@ describe('terminal semantic state store command input fallback', () => {
 
     expect(getTerminalPaneState('pane-b').currentCommand).toBeNull();
     expect(getTerminalPaneState('pane-b').activity).toEqual({ kind: 'editing' });
+  });
+
+  it('records process CWD under the current pane after a swap', () => {
+    registry.set('pane-b', { ptyId: 'pane-a' } as unknown as TerminalEntry);
+    applyTerminalSemanticEvents('pane-b', [{ type: 'promptStart' }]);
+
+    fillTerminalProcessCwdByPtyId('pane-a', '/Users/me/project');
+
+    expect(getTerminalPaneState('pane-a').cwd).toBeNull();
+    expect(getTerminalPaneState('pane-b').cwd).toMatchObject({
+      path: '/Users/me/project',
+      source: 'process',
+    });
   });
 });

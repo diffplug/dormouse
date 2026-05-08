@@ -151,6 +151,10 @@ export function fillTerminalProcessCwd(id: string, path: string | null | undefin
   updateCwdIfAllowed(id, cwd);
 }
 
+export function fillTerminalProcessCwdByPtyId(ptyId: string, path: string | null | undefined): void {
+  fillTerminalProcessCwd(resolvePaneStateIdByPtyId(ptyId), path);
+}
+
 export function swapTerminalPaneStates(idA: string, idB: string): void {
   const stateA = paneStates.get(idA);
   const stateB = paneStates.get(idB);

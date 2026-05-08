@@ -58,6 +58,7 @@ export {
   applyTerminalSemanticEventsByPtyId,
   ensureTerminalPaneState,
   fillTerminalProcessCwd,
+  fillTerminalProcessCwdByPtyId,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
   removeTerminalPaneState,

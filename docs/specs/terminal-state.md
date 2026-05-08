@@ -178,6 +178,7 @@ CWD fallback order is:
 4. `null`
 
 Process-derived CWD may fill `null` or replace manual/restored CWD, but it must not overwrite explicit OSC CWD.
+Asynchronous process CWD query results are applied through PTY-id resolution, so a result that arrives after `swap` updates the Session that currently owns that PTY.
 
 ## Header Derivation
 

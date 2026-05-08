@@ -27,7 +27,7 @@ import {
 import { getTerminalTheme, paintTerminalHost, startThemeObserver } from './terminal-theme';
 import {
   ensureTerminalPaneState,
-  fillTerminalProcessCwd,
+  fillTerminalProcessCwdByPtyId,
   recordTerminalOutputByPtyId,
   recordTerminalUserInputByPtyId,
   removeTerminalPaneState,
@@ -39,7 +39,7 @@ import {
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 
 function seedProcessCwdAfterSpawn(id: string): void {
-  void getPlatform().getCwd(id).then((cwd) => fillTerminalProcessCwd(id, cwd));
+  void getPlatform().getCwd(id).then((cwd) => fillTerminalProcessCwdByPtyId(id, cwd));
 }
 
 function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDivElement } {
