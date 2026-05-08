@@ -306,15 +306,19 @@ function NotifySignupForm() {
   if (success) {
     return (
       <p className="text-lg leading-relaxed text-[var(--color-caramel)]">
-        Thanks — check your email to confirm your subscription.
+        Confirm by email to lock in — the next post is the Roam launch.
       </p>
     );
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+      <label htmlFor="notify-email" className="font-display text-sm opacity-50">
+        Email
+      </label>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
         <input
+          id="notify-email"
           type="email"
           name="email"
           value={email}
@@ -322,8 +326,8 @@ function NotifySignupForm() {
           placeholder="you@example.com"
           required
           disabled={loading}
-          aria-label="Email address"
-          className="min-h-12 w-full rounded-md border border-[var(--color-text)]/20 bg-[var(--color-bg)] px-4 py-3 text-base text-[var(--color-text)] placeholder:opacity-40 focus:border-[var(--color-caramel)] focus:outline-none disabled:opacity-50 sm:flex-1"
+          autoComplete="email"
+          className="min-h-12 w-full rounded-md border border-[var(--color-text)]/50 bg-[var(--color-bg)] px-4 py-3 text-base text-[var(--color-text)]/70 placeholder:opacity-50 focus:border-[var(--color-caramel)] focus:outline-none disabled:opacity-70 sm:flex-1"
         />
         <button
           type="submit"
@@ -963,7 +967,7 @@ function Home() {
           </div>
         </section>
 
-        <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} border-t border-[var(--color-text)]/10 grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
+        <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
           <img
             src={phoneMockupUrl}
             alt="MouseTerm Playground running on a phone"
@@ -983,22 +987,23 @@ function Home() {
               Open source and free to self-host, or pay us a little bit and you can use ours. We'll discount for early adopters, so don't miss out!
             </p>
             <NotifySignupForm />
-            <p className="mb-6 text-lg leading-relaxed opacity-70">
-              This signs you up for my personal devlog <a href="https://nedshed.dev" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">nedshed.dev</a> on Substack. The next post will be the launch post, you can unsubscribe after that.
+            <p className="mt-3 text-base leading-snug opacity-50">
+              This signs you up for my personal devlog <a href="https://nedshed.dev" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">nedshed.dev</a> on Substack. The next post will be the launch post, you can unsubscribe any time.
             </p>
-
           </div>
         </section>
 
         <footer className="border-t border-[var(--color-text)]/20 py-10">
-          <div className="mx-auto max-w-2xl px-4 md:px-6 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm opacity-50">
+          <div className="mx-auto max-w-5xl px-4 md:px-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-base text-center opacity-50">
             <a href="/dependencies" className="underline hover:opacity-100">Dependencies</a>
             <a href="https://github.com/diffplug/mouseterm/issues" className="underline hover:opacity-100">Report an issue</a>
             <p>
               Built by{" "}
-              <a href="https://nedshed.dev" className="underline hover:opacity-100">nedshed.dev</a>
-              {" "}(the labs division of{" "}
-              <a href="https://diffplug.com" className="underline hover:opacity-100">DiffPlug LLC</a>)
+              <a href="https://nedshed.dev" className="underline hover:opacity-100">nedshed.dev</a>{" "}
+              <span className="whitespace-nowrap">
+                (the labs division of{" "}
+                <a href="https://diffplug.com" className="underline hover:opacity-100">DiffPlug LLC</a>)
+              </span>
             </p>
           </div>
         </footer>
