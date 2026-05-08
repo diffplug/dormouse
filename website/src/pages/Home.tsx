@@ -20,11 +20,11 @@ import visualStudioIconUrl from "../assets/visual-studio-icon.svg";
 import tinyIconUrl from "../assets/icon-tiny-dark.png";
 import phoneMockupUrl from "../assets/phone-mockup.webp";
 import standaloneLatest from "@standalone-latest";
+import { prefersReducedMotion } from "mouseterm-lib/lib/ui-geometry";
 
 export { Home as Component };
 
-/** Multiplier on how much scroll is required to drive the hero animation.
- *  Larger = less sensitive to wheel ticks (more scrolling needed to advance).
+/** Multiplier on scroll required to drive the hero animation.
  *  1 = baseline, 2 = half as sensitive, 0.5 = twice as sensitive. */
 const HERO_SLOMO_FACTOR = 2;
 
@@ -440,18 +440,14 @@ function Home() {
     let disposed = false;
     let lastSeekFrame = -1;
 
-    const prefersReducedMotion = typeof window.matchMedia === "function"
-      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    // Touch devices have native momentum scrolling that's smoother than our
-    // easing — running both layers fights and looks janky (especially on iOS
-    // Safari where transforms during scroll are sensitive). Snap on touch.
+    // Mobile has native momentum scrolling; layering ours on top fights it
+    // (especially on iOS Safari where transforms during scroll are sensitive).
     const isTouchDevice = typeof window.matchMedia === "function"
       && window.matchMedia("(pointer: coarse)").matches;
-    const skipSmoothing = prefersReducedMotion || isTouchDevice;
+    const skipSmoothing = prefersReducedMotion() || isTouchDevice;
 
     const readRunwayScroll = () => -runway.getBoundingClientRect().top;
-    let targetScroll = readRunwayScroll();
-    let smoothScroll = targetScroll;
+    let smoothScroll = readRunwayScroll();
 
     function setPosterVisible(visible: boolean) {
       if (posterIsVisible === visible) return;
@@ -518,20 +514,9 @@ function Home() {
       });
     }
 
-    function syncScrollState(runwayScroll: number, scrollLag = 0) {
+    function syncScrollState(runwayScroll: number, scrollLag: number) {
       if (disposed) return;
 
-      // The content section below the hero scrolls natively (raw scroll), but
-      // the hero is animated on the smoothed clock. Counter-translate the
-      // content by the lag so its top edge tracks the video bottom; native
-      // scrollbar position stays correct, only the paint is delayed.
-      if (contentRef.current) {
-        contentRef.current.style.transform = scrollLag !== 0
-          ? `translate3d(0, ${scrollLag.toFixed(3)}px, 0)`
-          : '';
-      }
-
-      // How far through the scroll runway (0–1, clamped for animations)
       const runwayHeight = runway.offsetHeight - window.innerHeight;
       const fraction = runwayHeight > 0
         ? clamp01(runwayScroll / runwayHeight)
@@ -545,9 +530,7 @@ function Home() {
       const iconHeight = naturalAspect > containerAspect
         ? video.offsetWidth / naturalAspect  // width-limited
         : video.offsetHeight;                 // height-limited
-      // iconHidePx: pixel offset of the icon at rest (scroll=0), independent of slomo.
-      // iconRiseScroll: scroll distance consumed before the icon is fully risen — slomo
-      // stretches this so each wheel tick lifts the icon less.
+      // Slomo stretches scroll-px without changing the at-rest pixel offset.
       const iconHidePx = iconHeight * ICON_INITIAL_HIDE_FRAC;
       const iconRiseScroll = iconHidePx * HERO_SLOMO_FACTOR;
 
@@ -626,10 +609,7 @@ function Home() {
       const contentEnterScroll = runway.offsetHeight * UNPIN_THRESHOLD - window.innerHeight;
       const slideAmount = Math.max(0, runwayScroll - contentEnterScroll);
 
-      // Video transform combines two behaviors:
-      //   1. Icon-rise (runwayScroll 0 → iconRiseScroll): translate down so only
-      //      the top third is visible; scroll lifts it at rate 1/SLOMO until in view.
-      //   2. Unpin slide (fraction > UNPIN_THRESHOLD): translate up with content.
+      // Icon-rise (lifts at rate 1/SLOMO), then unpin slide takes over.
       const iconCurrentOffset = Math.max(0, iconHidePx - runwayScroll / HERO_SLOMO_FACTOR);
       const videoTranslateY = iconCurrentOffset > 0
         ? iconCurrentOffset
@@ -656,6 +636,15 @@ function Home() {
           ? `translate3d(0, -${heroOffset.toFixed(3)}px, 0)`
           : '';
       }
+
+      // Counter-translate the (natively-scrolled) content section by the same
+      // lag the smoother is closing, so its top edge tracks the smoothed video.
+      // Done last to avoid forcing layout between the reads above.
+      if (contentRef.current) {
+        contentRef.current.style.transform = scrollLag !== 0
+          ? `translate3d(0, ${scrollLag.toFixed(3)}px, 0)`
+          : '';
+      }
     }
 
     function smoothFrame(now: number) {
@@ -667,27 +656,35 @@ function Home() {
       const dt = Math.min(0.1, (now - lastSmoothTimestamp) / 1000);
       lastSmoothTimestamp = now;
 
-      targetScroll = readRunwayScroll();
+      const target = readRunwayScroll();
 
       if (skipSmoothing) {
-        smoothScroll = targetScroll;
+        smoothScroll = target;
       } else {
         const decay = Math.exp(-Math.LN2 * dt / HERO_SCROLL_HALFLIFE_S);
-        smoothScroll = targetScroll - (targetScroll - smoothScroll) * decay;
+        smoothScroll = target - (target - smoothScroll) * decay;
       }
 
-      syncScrollState(smoothScroll, targetScroll - smoothScroll);
+      // Snap before paint so the final frame clears the lag transform exactly.
+      const settled = Math.abs(target - smoothScroll) <= HERO_SCROLL_SETTLE_PX;
+      if (settled) smoothScroll = target;
 
-      if (Math.abs(targetScroll - smoothScroll) > HERO_SCROLL_SETTLE_PX) {
-        smoothRafId = requestAnimationFrame(smoothFrame);
-      } else {
-        smoothScroll = targetScroll;
+      syncScrollState(smoothScroll, target - smoothScroll);
+
+      if (settled) {
         smoothRafId = 0;
+        if (contentRef.current) contentRef.current.style.willChange = '';
+      } else {
+        smoothRafId = requestAnimationFrame(smoothFrame);
       }
     }
 
     function scheduleScrollSync() {
       if (smoothRafId) return;
+      // Promote the content layer only while smoothing is active. Toggling
+      // (vs. always-on) avoids holding a composited layer for the page
+      // lifetime when no animation is in flight.
+      if (contentRef.current) contentRef.current.style.willChange = 'transform';
       lastSmoothTimestamp = performance.now();
       smoothRafId = requestAnimationFrame(smoothFrame);
     }
@@ -740,7 +737,7 @@ function Home() {
     }
 
     window.addEventListener("scroll", onScroll, { passive: true });
-    syncScrollState(smoothScroll); // initial position, before first paint
+    syncScrollState(smoothScroll, 0); // initial position, before first paint
     setHeroLayoutReady(true);
 
     return () => {
@@ -820,7 +817,7 @@ function Home() {
       </div>
 
       {/* ── Content sections — pulled up to appear as video starts scrolling ── */}
-      <div ref={contentRef} className="relative z-10 bg-[var(--color-bg)] will-change-transform" style={{ marginTop: `-${(1 - UNPIN_THRESHOLD) * RUNWAY_VH}vh` }}>
+      <div ref={contentRef} className="relative z-10 bg-[var(--color-bg)]" style={{ marginTop: `-${(1 - UNPIN_THRESHOLD) * RUNWAY_VH}vh` }}>
         <section id="features" className={`mx-auto max-w-2xl px-4 md:px-6 ${SECTION_PY}`}>
           <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">Stop watching terminals spin</h2>
           <p className="text-lg leading-relaxed opacity-70 mb-4">
