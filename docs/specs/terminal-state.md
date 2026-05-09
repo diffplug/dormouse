@@ -174,14 +174,13 @@ The parser accepts both BEL and ST terminators and handles split chunks. Unsuppo
 - A later prompt signal moves the pane out of `finished`. If a command was started from `user_input` and no explicit `commandFinish` arrived, the prompt signal also clears `currentCommand` so the header returns to `<idle>`.
 - For `user_input` fallback commands only, visible output that looks like a returned shell prompt may synthesize the same prompt transition. This is a scoped fallback for shells that do not emit command finish/start OSCs.
 
-CWD fallback order is:
+CWD precedence:
 
-1. OSC-reported CWD
-2. process CWD, if available
-3. initial launch or restored directory
-4. `null`
+- OSC-sourced CWD (`osc7`, `osc9_9`, `osc633`, `osc1337`) wins over everything. Once an OSC has reported a directory, only a later OSC can replace it.
+- Process-polled CWD (`process`) updates only when the current source is `null`, `manual`, or another `process` reading. It fills the gap when the shell does not emit OSC 7 / 633;P / 1337 / 9;9.
+- Manually seeded CWD (`manual`) is the initial seed during session restore or known-spawn-directory launches. It is replaceable by any later source.
+- Default is `null`.
 
-Process-derived CWD may fill `null` or replace manual/restored CWD, but it must not overwrite explicit OSC CWD.
 Asynchronous process CWD query results are applied through PTY-id resolution, so a result that arrives after `swap` updates the Session that currently owns that PTY.
 
 ## Header Derivation
