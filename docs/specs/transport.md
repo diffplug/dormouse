@@ -56,7 +56,7 @@ Both are capped at 1M chars per PTY. When the cap is reached, oldest chunks are 
 3. Host responds with:
    - { type: 'pty:list', ptys: [{ id, alive, exitCode }] }   // all owned PTYs
    - { type: 'pty:replay', id, data }                         // buffered output per PTY
-4. Webview restores terminals from replay data, seeds saved pane and door titles back via `setTerminalUserTitle()` (which silently drops reserved sentinels like `<idle>` and `<unnamed>`), and resumes the live stream.
+4. Webview restores terminals from replay data, seeds saved pane and door titles back via `setTerminalUserTitle()` (which rejects titles starting with `<idle>`, the sentinel that prefixes the auto-generated finished-pane header). The seed callers in `terminal-lifecycle.ts` additionally skip `<unnamed>` so the default panel placeholder does not get seeded as a real user pin during cold-restore. (Persistence cannot distinguish a deliberate `<unnamed>` pin from the default placeholder, so a user who explicitly pinned `<unnamed>` will see it revert to the derived header on app reload.)
 5. If the saved session covers those live PTYs, the frontend uses the saved dockview layout when its visible panels match and reattaches saved minimized doors; minimized PTYs are registered but remain doors instead of visible panes.
 ```
 

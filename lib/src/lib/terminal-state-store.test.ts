@@ -94,15 +94,21 @@ describe('terminal semantic state store command input fallback', () => {
     });
   });
 
-  it('refuses to pin sentinel labels as a user title and reports the reason', () => {
+  it('refuses to pin `<idle>` (or any title starting with `<idle>`) as a user title and reports the reason', () => {
     expect(setTerminalUserTitle('pane', DEFAULT_IDLE_TITLE)).toEqual({ accepted: false, reason: 'reserved' });
-    expect(setTerminalUserTitle('pane', UNNAMED_PANEL_TITLE)).toEqual({ accepted: false, reason: 'reserved' });
+    expect(setTerminalUserTitle('pane', `${DEFAULT_IDLE_TITLE} npm run build`)).toEqual({ accepted: false, reason: 'reserved' });
+    expect(setTerminalUserTitle('pane', `${DEFAULT_IDLE_TITLE}foo`)).toEqual({ accepted: false, reason: 'reserved' });
     expect(setTerminalUserTitle('pane', '   ')).toEqual({ accepted: false, reason: 'empty' });
 
     expect(getTerminalPaneState('pane').titleCandidates.user).toBeUndefined();
 
     expect(setTerminalUserTitle('pane', 'Production API')).toEqual({ accepted: true });
     expect(getTerminalPaneState('pane').titleCandidates.user?.title).toBe('Production API');
+  });
+
+  it('lets the user pin `<unnamed>` explicitly even though it is the default placeholder', () => {
+    expect(setTerminalUserTitle('pane', UNNAMED_PANEL_TITLE)).toEqual({ accepted: true });
+    expect(getTerminalPaneState('pane').titleCandidates.user?.title).toBe(UNNAMED_PANEL_TITLE);
   });
 
   it('records PTY fallback state under the current pane after a swap', () => {

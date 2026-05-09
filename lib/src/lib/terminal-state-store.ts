@@ -4,7 +4,6 @@ import {
   cwdFromProcessPath,
   DEFAULT_IDLE_TITLE,
   reduceTerminalState,
-  UNNAMED_PANEL_TITLE,
   type CwdState,
   type TerminalPaneState,
   type TerminalSemanticEvent,
@@ -122,16 +121,23 @@ export function recordTerminalOutputByPtyId(ptyId: string, output: string): void
   recordTerminalOutput(resolvePaneStateIdByPtyId(ptyId), output);
 }
 
-const RESERVED_USER_TITLES = new Set<string>([DEFAULT_IDLE_TITLE, UNNAMED_PANEL_TITLE]);
-
 export type SetTerminalUserTitleResult =
   | { accepted: true }
   | { accepted: false; reason: 'empty' | 'reserved' };
 
+// `<idle>` is the sentinel that prefixes the auto-generated header for finished panes
+// (`<idle> ${LAST_TITLE}`); any user-pin title starting with `<idle>` would be indistinguishable
+// from that derived state. `<unnamed>` is just the default panel placeholder, so we let users
+// pin to it explicitly if they want — the resume/restore seed paths already skip `<unnamed>`
+// before calling this function, so they never accidentally seed it as a real pin.
+function isReservedUserTitle(trimmed: string): boolean {
+  return trimmed === DEFAULT_IDLE_TITLE || trimmed.startsWith(DEFAULT_IDLE_TITLE);
+}
+
 export function setTerminalUserTitle(id: string, title: string): SetTerminalUserTitleResult {
   const trimmed = title.trim();
   if (!trimmed) return { accepted: false, reason: 'empty' };
-  if (RESERVED_USER_TITLES.has(trimmed)) return { accepted: false, reason: 'reserved' };
+  if (isReservedUserTitle(trimmed)) return { accepted: false, reason: 'reserved' };
   const terminalTitle: TerminalTitle = {
     title: trimmed,
     source: 'user',
