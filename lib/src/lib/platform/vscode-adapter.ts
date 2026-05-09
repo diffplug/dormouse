@@ -17,7 +17,6 @@ export class VSCodeAdapter implements PlatformAdapter {
   private replayHandlers = new Set<(detail: { id: string; data: string }) => void>();
   private flushRequestHandlers = new Set<(detail: { requestId: string }) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
-  private replayProtocolParsers = new Map<string, TerminalProtocolParser>();
 
   constructor() {
     this.vscode = acquireVsCodeApi();
@@ -41,7 +40,6 @@ export class VSCodeAdapter implements PlatformAdapter {
           handler({ id: msg.id, data: msg.data });
         }
       } else if (msg.type === 'pty:exit') {
-        this.replayProtocolParsers.delete(msg.id);
         for (const handler of this.exitHandlers) {
           handler({ id: msg.id, exitCode: msg.exitCode });
         }
@@ -50,11 +48,11 @@ export class VSCodeAdapter implements PlatformAdapter {
           handler({ ptys: msg.ptys });
         }
       } else if (msg.type === 'pty:replay') {
-        // Replay arrives as raw buffered output. Run it through the protocol
-        // parser so semantic OSCs (CWD, prompt, title) repopulate pane state
-        // and are stripped before xterm sees them, mirroring live pty:data.
-        // See docs/specs/vscode.md for the replay invariants.
-        const parser = this.getReplayProtocolParser(msg.id);
+        // Replay arrives as raw buffered output in a single chunk. Live pty:data
+        // is pre-parsed by the extension host, so we only need a one-shot parser
+        // here to reconstruct semantic state from the buffered bytes and strip
+        // OSCs before xterm sees them. See docs/specs/vscode.md.
+        const parser = new TerminalProtocolParser();
         const parsed = parser.process(msg.data);
         applyTerminalSemanticEventsByPtyId(msg.id, collectTerminalSemanticEvents(parsed.events));
         for (const handler of this.replayHandlers) {
@@ -133,7 +131,6 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[] }): void {
-    this.replayProtocolParsers.set(id, new TerminalProtocolParser());
     this.vscode.postMessage({ type: 'pty:spawn', id, options });
   }
 
@@ -146,7 +143,6 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   killPty(id: string): void {
-    this.replayProtocolParsers.delete(id);
     this.vscode.postMessage({ type: 'pty:kill', id });
   }
 
@@ -292,14 +288,5 @@ export class VSCodeAdapter implements PlatformAdapter {
     // first resolveWebviewView call. Fall back to hostState on the very
     // first load, before any setState has run.
     return this.vscode.getState() ?? this.hostState;
-  }
-
-  private getReplayProtocolParser(id: string): TerminalProtocolParser {
-    let parser = this.replayProtocolParsers.get(id);
-    if (!parser) {
-      parser = new TerminalProtocolParser();
-      this.replayProtocolParsers.set(id, parser);
-    }
-    return parser;
   }
 }
