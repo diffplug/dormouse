@@ -88,8 +88,8 @@ All types live in `vscode-ext/src/message-types.ts` (the canonical schema; other
 | `alert:remove` | Remove alert state entirely |
 | `alert:resize` | Notify alert of terminal resize (debounce noise) |
 | `alert:clearAttention` | Clear attention timer |
-| `alert:toggleTodo` | Toggle TODO (false ↔ hard) |
-| `alert:markTodo` | Set hard TODO |
+| `alert:toggleTodo` | Toggle TODO (`false` ↔ `true`) |
+| `alert:markTodo` | Set TODO to `true` |
 | `alert:clearTodo` | Remove TODO |
 
 **Host → webview:**

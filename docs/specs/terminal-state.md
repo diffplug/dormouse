@@ -158,7 +158,7 @@ Non-OSC title source:
 
 - `user` — user-pinned title set via the inline rename UI (`setTerminalUserTitle`). Always wins over every other candidate.
 
-The parser accepts both BEL and ST terminators and handles split chunks. Unsupported OSCs pass through to xterm unchanged; supported-but-malformed semantic OSCs are consumed without changing state.
+The parser accepts both BEL and ST terminators and handles split chunks. Supported-but-malformed semantic OSCs are consumed without changing state. Unsupported OSC pass-through vs. consume/ignore behavior is defined centrally in `docs/specs/OSC.md`.
 
 ## Reducer
 

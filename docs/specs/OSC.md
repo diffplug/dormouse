@@ -15,7 +15,7 @@ Supported OSCs are parsed at the PTY data boundary in the platform adapter:
 - VS Code: in the extension host (`message-router.ts` / `pty-manager.ts`), before `pty:data` is forwarded to the webview.
 - Standalone and fake adapters: in the frontend adapter, before xterm.js sees the bytes.
 
-After parsing, supported sequences are consumed and not re-emitted. The platform sends two streams to the webview:
+After parsing, supported sequences are consumed and not re-emitted. Known unsupported iTerm2/clipboard-capable OSCs listed in [Known-unimplemented iTerm2 sequences](#known-unimplemented-iterm2-sequences) are also consumed and ignored. The platform sends two streams to the webview:
 
 - `pty:data` — terminal output with supported OSCs already parsed/stripped. Feeds xterm.js.
 - `terminal:semanticEvents` — normalized semantic events parsed in the platform (CWD, prompt/command boundaries, titles). Feeds `TerminalPaneState`.
@@ -28,7 +28,7 @@ The parser also classifies each PTY data chunk for activity-monitor purposes:
 - A chunk that contains only notification/progress OSCs after parsing must not be fed to the activity monitor's `onData()` as generic meaningful output.
 - A chunk that contains visible output plus notification/progress OSCs still counts visible output as activity.
 
-Unknown OSC sequences pass through to xterm.js unchanged (and are then ignored by xterm.js if it does not recognize them — see the iTerm2-identity fail-inertly rule below).
+Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js can handle standard terminal behavior MouseTerm does not model. Security-sensitive or iTerm2-identity-triggered OSCs must not rely on xterm.js defaults: if they are not in [Supported OSCs](#supported-oscs), MouseTerm consumes and ignores them without visible terminal garbage, clipboard access, file access, focus changes, or other side effects.
 
 ## Supported OSCs
 
@@ -72,7 +72,7 @@ Because this identity can cause tools to emit more iTerm2 escape codes than Mous
 
 ## Known-unimplemented iTerm2 sequences
 
-MouseTerm intentionally does not implement the following iTerm2 OSC sequences. They must fail inertly per the rule above.
+MouseTerm intentionally does not implement the following iTerm2 OSC sequences. They must fail inertly per the rule above, which means they are consumed/ignored rather than forwarded to xterm.js.
 
 | Sequence | Purpose | Reason for non-support |
 |---|---|---|
@@ -87,7 +87,7 @@ MouseTerm intentionally does not implement the following iTerm2 OSC sequences. T
 | `OSC 50 ; <font> ST` | Set font dynamically | Font is host-controlled. |
 | `OSC 52 ; <selection> ; <data> ST` | Programmatic clipboard write | Security: same rationale as `CopyToClipboard`. |
 
-This list is non-exhaustive. Any iTerm2 OSC not in the [Supported OSCs](#supported-oscs) table is ignored.
+This list is non-exhaustive. Any iTerm2-compatibility OSC family that MouseTerm can identify and that is not in the [Supported OSCs](#supported-oscs) table is ignored.
 
 ## References
 

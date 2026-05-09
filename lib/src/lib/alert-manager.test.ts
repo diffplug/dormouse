@@ -271,6 +271,22 @@ describe('AlertManager in isolation', () => {
     });
   });
 
+  it('attended direct notifications do not clear active protocol progress', () => {
+    const id = 'osc-progress-with-attended-notification';
+
+    manager.updateProtocolProgress(id, { state: 'normal', percent: 25 });
+    expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
+
+    manager.attend(id);
+    manager.notifyFromProtocol(id, { source: 'OSC 777', title: 'done', body: 'Build finished' });
+
+    expect(manager.getState(id)).toMatchObject({
+      status: 'OSC_NOTIF_BUSY',
+      todo: false,
+      notification: null,
+    });
+  });
+
   it('terminal bell notifications are suppressed while the user has attention', () => {
     const id = 'terminal-bell-attention';
 

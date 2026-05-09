@@ -133,10 +133,7 @@ export class AlertManager {
     const normalized = normalizeActivityNotification(notification);
     if (!normalized) return;
 
-    if (this.hasAttention(id)) {
-      if (this.clearProtocolProgress(entry)) this.notify(id);
-      return;
-    }
+    if (this.hasAttention(id)) return;
 
     this.setProtocolRinging(id, entry, normalized);
   }

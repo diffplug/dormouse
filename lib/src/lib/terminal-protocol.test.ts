@@ -150,6 +150,14 @@ describe('TerminalProtocolParser', () => {
     expect(result.events).toEqual([]);
   });
 
+  it('strips known unsupported iTerm2 and clipboard OSC sequences', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('a\x1b]52;c;SGVsbG8=\x07b\x1b]50;Monaco\x07c');
+
+    expect(result.visibleData).toBe('abc');
+    expect(result.events).toEqual([]);
+  });
+
   it('parses and strips CWD OSC sequences into semantic events', () => {
     const parser = new TerminalProtocolParser();
     const result = parser.process('a\x1b]7;file://prod-box/home/me/project\x1b\\b\x1b]9;9;C:\\repo\x07c');

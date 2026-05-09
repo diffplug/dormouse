@@ -108,6 +108,7 @@ export class TerminalProtocolParser {
     if (content === '2' || content.startsWith('2;')) return parseOscTitle(content, 'osc2');
     if (content === '99' || content.startsWith('99;')) return this.parseOsc99(content);
     if (content === '777' || content.startsWith('777;')) return this.parseOsc777(content);
+    if (isKnownUnsupportedIterm2Osc(content)) return [];
     return null;
   }
 
@@ -406,6 +407,17 @@ function parseOscTitle(content: string, source: TerminalTitle['source']): Termin
       title: { title: titleText, source, updatedAt: 0 },
     },
   }];
+}
+
+function isKnownUnsupportedIterm2Osc(content: string): boolean {
+  // Security-sensitive iTerm2 compatibility OSCs are consumed rather than
+  // forwarded to xterm.js. In particular, OSC 52 is a clipboard-write channel.
+  return (
+    content === '50' ||
+    content.startsWith('50;') ||
+    content === '52' ||
+    content.startsWith('52;')
+  );
 }
 
 function commandStartEvent(source: CommandRunSource): TerminalProtocolEvent {

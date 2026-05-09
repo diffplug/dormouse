@@ -250,9 +250,13 @@ These transition rules apply to the visual track only. `OSC_NOTIF_BUSY` is not e
 | `OSC_NOTIF_BUSY` | terminal report errors progress and Session lacks attention | `ALERT_RINGING` | Create error `notification`, set `todo = true`, and ring. |
 | `OSC_NOTIF_BUSY` | terminal report errors progress and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
 | `OSC_NOTIF_BUSY` | Session destroyed | `IDLE` | Session teardown clears protocol state. |
+| `IDLE` | explicit progress completion report (`OSC 9;4;1;100`) and Session lacks attention | `ALERT_RINGING` | Create generated completion `notification`, set `todo = true`, and ring. |
+| `IDLE` | explicit progress completion report (`OSC 9;4;1;100`) and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
+| `IDLE` | explicit progress error report (`OSC 9;4;2`) and Session lacks attention | `ALERT_RINGING` | Create generated error `notification`, set `todo = true`, and ring. |
+| `IDLE` | explicit progress error report (`OSC 9;4;2`) and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
 | `ALERT_RINGING` | explicit attention boundary / dismiss / TODO clear | `IDLE` | Public status falls back to visual projection after protocol ring clears. |
 | any | direct notification (`OSC 9`, completed `OSC 99`, `OSC 777`, standalone `BEL`) and Session lacks attention | `ALERT_RINGING` | Create `notification`, set `todo = true`, and ring immediately. |
-| any | direct notification (`OSC 9`, completed `OSC 99`, `OSC 777`, standalone `BEL`) and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
+| any | direct notification (`OSC 9`, completed `OSC 99`, `OSC 777`, standalone `BEL`) and Session has attention | unchanged | User already sees it; suppress that notification only. Do not create TODO, and do not clear unrelated active progress. |
 
 `OSC_NOTIF_BUSY` never auto-rings because of silence. If a program starts progress and never sends completion/error, MouseTerm remains cocked until another terminal report completes/errors the progress cycle or the Session is destroyed.
 
@@ -270,7 +274,7 @@ The implementation may later learn additional suppressions, but this spec only r
 
 Protocol notifications and standalone terminal bells are explicit application requests for attention. They bypass the normal opt-in activity monitor: a Session may ring even when its alert toggle was disabled. They must not ring while the user is actively attending that Session.
 
-Progress sequences do not ring immediately. They "cock" the alarm bell — MouseTerm treats active progress as an explicit finite-work cycle, exposes `OSC_NOTIF_BUSY`, and rings when the cycle completes or enters an error state.
+Active/in-progress progress sequences do not ring immediately. They "cock" the alarm bell — MouseTerm treats active progress as an explicit finite-work cycle and exposes `OSC_NOTIF_BUSY`. Explicit completion/error progress reports may ring immediately when the Session lacks attention.
 
 The OSC sequence registry, parser placement, and stripping behavior live in `docs/specs/OSC.md`. This section defines per-protocol semantics for the five supported notification sources.
 
@@ -473,7 +477,7 @@ Implementation surface inside `AlertManager`:
 - the Session already has attention at the moment it would otherwise enter `ALERT_RINGING`
 - the Session is merely re-rendered or reattached while already `ALERT_RINGING`
 - the only recent output was resize noise already ignored by the completion detector
-- the visual alert track is disabled (`visualStatus === 'ALERT_DISABLED'`)
+- for visual/activity-monitor rings only: the visual alert track is disabled (`visualStatus === 'ALERT_DISABLED'`)
 
 This "fresh transition into `ALERT_RINGING` only" rule is critical. It prevents duplicate alerts on remount, theme change, or Pane <-> Door movement.
 
