@@ -1,5 +1,7 @@
 # MouseTerm VS Code Integration Spec
 
+> See `docs/specs/transport.md` for the PTY lifecycle, message protocol, persisted-session types, and adapter-agnostic invariants that VS Code shares with the standalone and fake adapters. This spec covers the VS Code-specific layer: panel/view registration, persistence APIs, theme integration, CSP, build, and dream-architecture commands.
+
 ## What's built
 
 MouseTerm has two hosting modes: a `WebviewView` in the bottom panel (alongside Terminal, Problems, Output) and `WebviewPanel` editor tabs (via `mouseterm.open`, supports multiple instances). Both restore across "Developer: Reload Window". PTY lifecycle is fully decoupled from the webview — PTYs live in the extension host via `pty-manager.ts`, survive panel visibility toggling, and replay buffered output on **resume**. Session persistence works across cold **restore**: pane layout, CWD, scrollback, alert state (enabled/disabled + todo), and resume commands are saved and restored on cold start. The view uses `workspaceState` for persistence; editor panels use VS Code's per-panel `vscode.setState()` so multiple panels don't clobber each other. Alert state is merged into every periodic save (not just deactivate) so it survives even if VS Code kills the extension host before deactivate completes. A `WebviewPanelSerializer` handles editor tab restoration; `onWebviewPanel:mouseterm` activation event ensures the extension activates early enough. Theme integration uses VSCode `--vscode-*` tokens plus MouseTerm semantic `--color-*` tokens, with a small resolver that materializes missing consumed VSCode colors from registry defaults. CSP is strict with nonce-gated scripts.
@@ -59,15 +61,14 @@ Frontend Library (lib/src/)
         └── fake-adapter.ts       — mock adapter for testing + website playground
 ```
 
-### Invariants
+### Invariants (VS Code-specific)
 
-- **Save before kill.** Deactivate must save session state *before* killing PTYs. CWD and scrollback queries need live processes. See ordering in `extension.ts:deactivate()`.
+Universal PTY/transport invariants live in `docs/specs/transport.md`. The rules below are specific to running inside the VS Code extension host.
+
+- **Save before kill.** `deactivate()` must save session state *before* killing PTYs. CWD and scrollback queries need live processes. See ordering in `extension.ts:deactivate()`.
 - **Alert state is global.** A single `AlertManager` instance in `message-router.ts` is shared across all routers and survives router disposal. PTY data feeds into it at module level, regardless of webview visibility.
-- **PTY ownership.** Each router tracks its PTYs in `ownedPtyIds`. A module-level `globalOwnedPtyIds` set prevents a resuming router from stealing PTYs owned by another webview.
-- **Shell login args are shell-specific.** The shared `pty-core.js` launches POSIX shells with `-l` only for shells that accept it. `csh`/`tcsh` must be spawned without `-l` so both the standalone app and VS Code extension can open a usable terminal for users whose login shell is C shell-derived.
+- **PTY ownership tracking.** Each router tracks its PTYs in `ownedPtyIds`. A module-level `globalOwnedPtyIds` set prevents a resuming router from stealing PTYs owned by another webview.
 - **mergeAlertStates on every save path.** Both the frontend periodic save (`onSaveState` callback) and the backend deactivate refresh (`refreshSavedSessionStateFromPtys`) must merge current alert states. Missing this causes alert state to revert on restore.
-- **Scrollback trailing newline.** Restored scrollback must end with `\n` to avoid zsh printing a `%` artifact at the top of the terminal.
-- **Replay drops terminal replies only.** While saved output is being replayed into xterm.js, terminal-generated OSC/CSI/DCS query and focus reports are dropped so they do not enter the resumed/restored shell's input buffer. The replay filter must preserve user keyboard escape sequences, including arrows, function keys, and bracketed paste.
 - **retainContextWhenHidden.** Set on both `WebviewPanel` (editor tabs) and `WebviewView` (bottom panel) so that xterm.js DOM, scrollback, and PTY subscriptions survive panel hide/show without going through a resume.
 - **Two save sources.** Session state is saved from two places: the frontend (debounced 500ms + 30s interval via `mouseterm:saveState`) and the backend (deactivate flushes webviews then refreshes from live PTYs). Both paths must produce consistent state.
 
@@ -100,9 +101,9 @@ Frontend Library (lib/src/)
 }
 ```
 
-### PTY lifecycle (decoupled from webview)
+### Webview hosting
 
-PTYs are managed by the extension host, not by the webview. The webview is a view layer that **resumes** over live PTYs (host-preserved) or **restores** from a Snapshot (cold start). See `ontology.md` for the Process / Link states.
+VS Code-specific layout of the transport model in `docs/specs/transport.md`:
 
 ```
 Extension Host (always running while extension is active)
@@ -118,83 +119,13 @@ Extension Host (always running while extension is active)
     └── message-router: owns pty-3
 ```
 
-This means:
+VS Code-specific consequences:
+
 - Hiding the MouseTerm panel doesn't kill its PTYs.
 - VS Code toggling the panel visibility doesn't destroy sessions.
-- When the view becomes visible again, the webview **resumes** over still-owned PTYs and reapplies the saved visible-pane layout when the saved session covers the live PTY set and the layout's visible panels match.
-- A PTY process that exits naturally can remain mounted as an exited pane; frontend semantic state such as CWD, title candidates, and last command is retained until the Session is actually disposed.
-- Each message router tracks which PTYs it owns; PTYs cannot be stolen by another router.
-- Explicitly killed PTYs are **tombstoned** in the extension host (`Process: Tombstoned`) so a late child-process `exit` event cannot recreate their buffer and make them resumable.
 - Multiple VS Code windows each get their own extension host process, and therefore their own pty-host child process.
 
-#### PTY buffering
-
-`pty-manager.ts` maintains two buffer types per PTY:
-
-- **replayChunks**: cleared on first consume, used for resume (webview hidden then shown)
-- **scrollbackChunks**: never cleared, used for repeat resumes and session save
-
-Both are capped at 1M chars per PTY. When the cap is reached, oldest chunks are trimmed.
-
-#### Reconnection protocol
-
-```
-1. Webview becomes visible (or panel deserializes)
-2. Webview sends: { type: 'mouseterm:init' }
-3. Extension responds with:
-   - { type: 'pty:list', ptys: [{ id, alive, exitCode }] }   // all owned PTYs
-   - { type: 'pty:replay', id, data }                         // buffered output per PTY
-4. Webview restores terminals from replay data, seeds any non-unnamed saved pane or door titles as user titles, and resumes the live stream
-5. If the saved session covers those live PTYs, the frontend uses the saved dockview layout when its visible panels match and reattaches saved minimized doors; minimized PTYs are registered but remain doors instead of visible panes
-```
-
-For cold restore (no live PTYs), the webview falls back to saved session state: spawns new PTYs in saved CWDs using the currently selected MouseTerm shell, injects saved scrollback (with trailing newline to avoid zsh `%` artifact), and restores dockview layout. The entry module (`reconnect.ts`) uses a 500ms timeout when waiting for the PTY list.
-
-### Message protocol
-
-All types defined in `message-types.ts`. Webview-side handling in `vscode-adapter.ts`; host-side handling in `message-router.ts`.
-
-**Webview -> Extension Host:**
-
-| Message | Purpose |
-|---------|---------|
-| `pty:spawn` | Create new PTY (id, optional cols/rows/cwd/shell/args) |
-| `pty:input` | Write data to PTY |
-| `pty:resize` | Resize PTY dimensions |
-| `pty:kill` | Kill PTY and release ownership |
-| `pty:getCwd` | Query PTY working directory (request-response via requestId) |
-| `pty:getScrollback` | Query PTY scrollback buffer (request-response via requestId) |
-| `pty:getShells` | Query available shells (request-response via requestId) |
-| `mouseterm:init` | Trigger resume: get PTY list + replay data |
-| `mouseterm:saveState` | Frontend persisting session state |
-| `mouseterm:flushSessionSaveDone` | Ack for deactivate-triggered flush (matched by requestId) |
-| `alert:toggle` | Toggle alert enabled/disabled for a PTY |
-| `alert:disable` | Disable alert for a PTY |
-| `alert:dismiss` | Dismiss ringing alert |
-| `alert:dismissOrToggle` | Context-dependent: dismiss if ringing, else toggle |
-| `alert:attend` | Mark user as attending to a PTY |
-| `alert:remove` | Remove alert state entirely |
-| `alert:resize` | Notify alert of terminal resize (debounce noise) |
-| `alert:clearAttention` | Clear attention timer |
-| `alert:toggleTodo` | Toggle TODO (false <-> hard) |
-| `alert:markTodo` | Set hard TODO |
-| `alert:clearTodo` | Remove TODO |
-
-**Extension Host -> Webview:**
-
-| Message | Purpose |
-|---------|---------|
-| `pty:data` | PTY output after supported OSC sequences have been parsed/stripped (routed only to owning router) |
-| `pty:exit` | PTY process exited (with exitCode) |
-| `terminal:semanticEvents` | Normalized CWD/title/prompt/command events parsed in the extension host from live PTY data |
-| `pty:list` | List of all resumable PTYs (response to `mouseterm:init`) |
-| `pty:replay` | Buffered raw output since spawn (response to `mouseterm:init`); the webview parses semantic OSCs during replay reconstruction without triggering alerts |
-| `pty:cwd` | CWD query response (matched by requestId) |
-| `pty:scrollback` | Scrollback query response (matched by requestId) |
-| `pty:shells` | Available shells list response (matched by requestId) |
-| `mouseterm:flushSessionSave` | Request webview to save state now (deactivate trigger, matched by requestId) |
-| `mouseterm:openThemeDebugger` | Command-triggered request to open the shared theme debugger dialog |
-| `alert:state` | Alert state change (projected status, todo, notification, attentionDismissedRing) |
+PTY lifecycle, buffering, the reconnection sequence, and the full message protocol live in `docs/specs/transport.md`.
 
 ### Serialization and restore
 
@@ -204,52 +135,16 @@ All types defined in `message-types.ts`. Webview-side handling in `vscode-adapte
 activationEvents: ["onWebviewPanel:mouseterm"]
 ```
 
-**Session structure** (from `session-types.ts`):
+The persisted-session shape (`PersistedSession` / `PersistedPane` / `PersistedAlertState` / `PersistedDoor`) lives in `docs/specs/transport.md`; it is shared with the standalone and fake adapters.
 
-```typescript
-interface PersistedSession {
-  version: 3;
-  panes: PersistedPane[];
-  doors?: PersistedDoor[];
-  layout: unknown; // SerializedDockview
-}
+**VS Code persistence flow:**
 
-interface PersistedPane {
-  id: string;
-  cwd: string | null;
-  title: string;
-  scrollback: string | null;
-  resumeCommand: string | null;
-  alert?: PersistedAlertState | null;
-}
-
-interface PersistedAlertState {
-  status: SessionStatus;
-  todo: boolean;
-  notification?: ActivityNotification | null;
-}
-
-interface PersistedDoor {
-  id: string;
-  title: string;
-  neighborId: string | null;
-  direction: DoorDirection;
-  remainingPaneIds: string[];
-  layoutAtMinimize: unknown;
-  layoutAtMinimizeSignature: string;
-}
-```
-
-**Persistence flow:**
-
-1. Frontend saves state periodically (debounced 500ms + 30s interval) via `mouseterm:saveState` message
-2. Router's `onSaveState` callback merges in current alert states via `mergeAlertStates()`
-3. WebviewView writes to `workspaceState`; WebviewPanels persist via `vscode.setState()` (per-panel, no clobbering)
-4. On deactivate: flush all sessions from webviews (1s timeout), then refresh from live PTYs (queries CWD + scrollback while processes are still alive)
-5. Graceful shutdown: save state -> SIGTERM -> 2s wait -> force kill
-6. On activate: saved state loaded and passed to routers for cold-start restore
-
-Every saved-session entry point must pass through `readPersistedSession()`. That reader accepts both the canonical parsed object and a JSON-stringified session blob before validating/migrating, which covers VS Code state APIs that may hand back the inner serialized JSON string.
+1. Frontend saves state periodically (debounced 500ms + 30s interval) via `mouseterm:saveState` message.
+2. Router's `onSaveState` callback merges in current alert states via `mergeAlertStates()`.
+3. WebviewView writes to `workspaceState`; WebviewPanels persist via `vscode.setState()` (per-panel, no clobbering).
+4. On deactivate: flush all sessions from webviews (1s timeout), then refresh from live PTYs (queries CWD + scrollback while processes are still alive).
+5. Graceful shutdown: save state → SIGTERM → 2s wait → force kill.
+6. On activate: saved state loaded and passed to routers for cold-start restore via `readPersistedSession()` (defined in `docs/specs/transport.md`), which tolerates both parsed objects and JSON-stringified blobs returned by VS Code state APIs.
 
 ### Theme integration
 
