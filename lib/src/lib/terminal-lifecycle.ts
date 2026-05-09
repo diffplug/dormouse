@@ -251,7 +251,7 @@ export function resumeTerminal(
 
 export function restoreTerminal(
   id: string,
-  opts: { cwd?: string | null; scrollback?: string | null; title?: string; cwdWarning?: string | null; shell?: string; args?: string[] },
+  opts: { cwd?: string | null; scrollback?: string | null; title?: string | null; cwdWarning?: string | null; shell?: string; args?: string[] },
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
@@ -259,8 +259,9 @@ export function restoreTerminal(
   const entry = setupTerminalEntry(id);
   resetTerminalPaneState(id);
   seedTerminalManualCwd(id, opts.cwd);
-  if (opts.title && opts.title !== UNNAMED_PANEL_TITLE) {
-    setTerminalUserTitle(id, opts.title);
+  const trimmedTitle = opts.title?.trim();
+  if (trimmedTitle && trimmedTitle !== UNNAMED_PANEL_TITLE) {
+    setTerminalUserTitle(id, trimmedTitle);
   }
 
   if (opts.scrollback) {
