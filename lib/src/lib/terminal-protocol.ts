@@ -348,6 +348,11 @@ function parseOsc633(content: string): TerminalProtocolEvent[] {
   if (fields[1] === 'E') {
     const prefix = '633;E;';
     if (!content.startsWith(prefix)) return [];
+    // VS Code shell integration encodes the command as <command>[;<nonce>], with
+    // any literal `;` inside <command> escaped as `\x3b`. We split on the first
+    // unescaped `;` (taking only the command field) and then unescape. Emitters
+    // that send raw, unescaped semicolons will see their command truncated; this
+    // matches VS Code's contract rather than guessing a delimiter.
     const rawCommand = content.slice(prefix.length).split(';', 1)[0] ?? '';
     return [{ kind: 'semantic', event: { type: 'commandLine', commandLine: decodeOsc633Value(rawCommand) } }];
   }
