@@ -10,6 +10,10 @@ vi.mock('../terminal-state-store', () => ({
   removeTerminalPaneState: terminalStateStoreMocks.removeTerminalPaneState,
 }));
 
+import {
+  collectTerminalSemanticEvents,
+  TerminalProtocolParser,
+} from '../terminal-protocol';
 import { VSCodeAdapter } from './vscode-adapter';
 
 describe('VSCodeAdapter PTY exit handling', () => {
@@ -95,5 +99,33 @@ describe('VSCodeAdapter PTY exit handling', () => {
 
     expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledTimes(1);
     expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledWith('pane-1', events);
+  });
+
+  it('round-trips host-parsed semantic events through JSON to the webview adapter', () => {
+    // Simulate the extension host: run live PTY data through the same parser
+    // that message-router.ts uses, collect semantic events, then ship them
+    // over the postMessage wire as terminal:semanticEvents.
+    const hostParser = new TerminalProtocolParser();
+    const parsed = hostParser.process(
+      'before\x1b]7;file://prod-box/srv/app\x1b\\\x1b]133;A\x07after',
+    );
+    const hostEvents = collectTerminalSemanticEvents(parsed.events);
+    expect(hostEvents).toHaveLength(2);
+
+    // postMessage forces structured-clone-equivalent serialization. JSON
+    // round-trip is a sufficient stand-in: it would drop functions or
+    // non-cloneable values, so passing this also documents that the wire
+    // payload contains only plain data.
+    const wirePayload = JSON.parse(JSON.stringify({
+      type: 'terminal:semanticEvents',
+      id: 'pane-1',
+      events: hostEvents,
+    }));
+
+    new VSCodeAdapter();
+    windowTarget.dispatchEvent(new MessageEvent('message', { data: wirePayload }));
+
+    expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledTimes(1);
+    expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledWith('pane-1', hostEvents);
   });
 });
