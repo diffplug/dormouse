@@ -4,15 +4,6 @@ Audit of the changed regions in `iTerm2.md`, `layout.md`, `terminal-state.md` (n
 
 ## Substantive conflicts
 
-### 8. Resume seeding: `non-unnamed` filter only on one side
-
-`vscode.md` vs `layout.md`.
-
-- `vscode.md`: "seeds any **non-unnamed** saved pane or door titles as user titles."
-- `layout.md`: "seed any saved pane or door title as the Session's user title."
-
-If `<unnamed>` is rejected at write time per the rename rules (`layout.md` line 262), the read-time filter is unnecessary; if legacy data can contain it, both specs should agree on the filter. Pick one.
-
 ## Smaller issues
 
 ### 9. "Stale pending command-line fallback"
@@ -29,4 +20,4 @@ If `<unnamed>` is rejected at write time per the rename rules (`layout.md` line 
 
 ---
 
-Severity: all remaining items are minor. (#1, #2, #3, #4, #5, #6, #7 are resolved.)
+Severity: all remaining items are minor. (#1, #2, #3, #4, #5, #6, #7, #8 are resolved.)

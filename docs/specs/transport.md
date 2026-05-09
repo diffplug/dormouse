@@ -56,7 +56,7 @@ Both are capped at 1M chars per PTY. When the cap is reached, oldest chunks are 
 3. Host responds with:
    - { type: 'pty:list', ptys: [{ id, alive, exitCode }] }   // all owned PTYs
    - { type: 'pty:replay', id, data }                         // buffered output per PTY
-4. Webview restores terminals from replay data, seeds any non-unnamed saved pane or door titles as user titles, and resumes the live stream.
+4. Webview restores terminals from replay data, seeds saved pane and door titles back via `setTerminalUserTitle()` (which silently drops reserved sentinels like `<idle>` and `<unnamed>`), and resumes the live stream.
 5. If the saved session covers those live PTYs, the frontend uses the saved dockview layout when its visible panels match and reattaches saved minimized doors; minimized PTYs are registered but remain doors instead of visible panes.
 ```
 
