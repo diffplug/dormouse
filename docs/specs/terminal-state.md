@@ -69,6 +69,13 @@ type CommandRun = {
     | "osc633_boundaries"
     | "osc133_boundaries"
     | "user_input";
+  /**
+   * App-sent OSC 0/2/9 title that was active when this command finished. Snapshotted by
+   * `commandFinish` so post-finish title events (e.g. the shell resetting OSC 0 to `zsh`) do
+   * not overwrite the in-run title we want to show as `<idle> ${LAST_TITLE}`.
+   * Only set on finished commands.
+   */
+  finalTerminalTitle?: TerminalTitle;
   outputRange?: {
     startMarkId?: string;
     endMarkId?: string;
@@ -171,7 +178,7 @@ The parser accepts both BEL and ST terminators and handles split chunks. Support
 - User-entered prompt input may also store `pendingCommandLine` as an explicit fallback before an OSC 133/633 command-start boundary. This fallback is only used while the shell is idle/editing; foreground-program input is ignored. If the submitted line is non-empty, the input fallback may create a `currentCommand` immediately with `source: "user_input"` so shells without command-start integration still show the active command.
 - The typed-command fallback resolves the current Session id from the PTY id before recording input or prompt-looking output, so drag-to-swap moves the fallback state with the visible pane.
 - `commandStart` creates `currentCommand`, snapshots `cwdAtStart`, uses `event.startedAt` when present, clears `pendingCommandLine`, and sets `{ kind: "running" }`.
-- `commandFinish` moves `currentCommand` to `lastCommand`, stores `finishedAt`/`exitCode`, clears `currentCommand`, and sets `{ kind: "finished", exitCode }`.
+- `commandFinish` moves `currentCommand` to `lastCommand`, stores `finishedAt`/`exitCode`, snapshots the latest in-run OSC 0/2/9 title into `lastCommand.finalTerminalTitle` (titles older than `startedAt` or younger than `finishedAt` are excluded), clears `currentCommand`, and sets `{ kind: "finished", exitCode }`.
 - `title` updates `title` and the per-source entry in `titleCandidates`. Later OSC title events do not erase earlier user, shell, or notification channel candidates from other sources.
 - A later prompt signal moves the pane out of `finished`. If a command was started from `user_input` and no explicit `commandFinish` arrived, the prompt signal also clears `currentCommand` so the header returns to `<idle>`.
 - For `user_input` fallback commands only, visible output that looks like a returned shell prompt may synthesize the same prompt transition. This is a scoped fallback for shells that do not emit command finish/start OSCs.
@@ -199,14 +206,17 @@ The header carries only the primary label and an optional secondary disambiguato
 Header priority — first match wins:
 
 1. User-pinned title.
-2. While a command is running:
+2. While a command is running (`currentCommand` is set):
    - App-sent title override emitted after the current command started — legacy `OSC 9` message text or `OSC 0`/`OSC 2` terminal title.
    - `currentCommand.displayCommand`.
-3. Otherwise (no running command — `prompt`, `editing`, `finished`, `unknown`): `<idle>`.
+3. After a command has finished (`currentCommand` is null and `lastCommand` is set): `<idle> ${LAST_TITLE}`, where `LAST_TITLE` follows the same priority as the running case applied to `lastCommand`:
+   - App-sent title override that was emitted between `lastCommand.startedAt` and `lastCommand.finishedAt`. The candidate is taken from `lastCommand.finalTerminalTitle` (snapshotted at finish) so a post-finish title event cannot overwrite it.
+   - `lastCommand.displayCommand`.
+4. Otherwise (no running command and no last command): `<idle>`.
 
-Rich notification titles from `OSC 99` and `OSC 777` are stored in `titleCandidates` for the diagnostic popup but never become header/door labels. Older shell titles (terminal titles emitted before the current command started, or with no command running) remain fallback-only and do not replace `<idle>`.
+Rich notification titles from `OSC 99` and `OSC 777` are stored in `titleCandidates` for the diagnostic popup but never become header/door labels. Older shell titles (terminal titles emitted before the current command started, or after the last command finished) remain fallback-only and do not replace `<idle>` or pollute `LAST_TITLE`.
 
-A freshly finished command shows `<idle>`. The just-finished command's exit code, output, and TODO notification are surfaced via the alert/TODO machinery (`docs/specs/alert.md`); the header itself returns to a peaceful idle state. `lastCommand` is still tracked for grouping and for callers that want exit-code metadata, but it does not appear in the header.
+`<idle> ${LAST_TITLE}` keeps the just-finished context visible so the user can see at a glance which program just exited. Exit code, output, and TODO notification are still surfaced via the alert/TODO machinery (`docs/specs/alert.md`); the header itself stays peaceful but informative. `<idle> ${LAST_TITLE}` persists across subsequent prompt/editing transitions until a new `commandStart` replaces it; only a fresh pane (no `lastCommand` at all) shows plain `<idle>`.
 
 Disambiguation:
 
@@ -240,7 +250,7 @@ Status grouping projects `ShellActivity.kind` (5 values) onto 4 buckets:
 | `running`            | `running`     |
 | `finished`           | `finished`    |
 
-`prompt` and `editing` collapse into a single `idle` bucket because the user-visible distinction between "at the prompt" and "typing a command" is not load-bearing for grouping. `finished` stays distinct so a recently-completed pane can be filtered separately even though its header label is `<idle>`.
+`prompt` and `editing` collapse into a single `idle` bucket because the user-visible distinction between "at the prompt" and "typing a command" is not load-bearing for grouping. `finished` stays distinct so a recently-completed pane can be filtered separately even though its header label has the same `<idle>` prefix as plain idle panes.
 
 Directory group keys use `cwdIdentity(cwd)` so remote hosts and Windows/POSIX path kinds remain distinct.
 Windows UNC display labels keep `\\server\share\` as the path root and do not repeat the server/share in the trailing path segments.

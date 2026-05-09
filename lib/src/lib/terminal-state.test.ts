@@ -172,12 +172,12 @@ describe('terminal command state reducer', () => {
     state = reduceTerminalState(state, { type: 'commandFinish', exitCode: 0 }, { now: () => 3 });
     expect(state.activity).toEqual({ kind: 'finished', exitCode: 0 });
     expect(deriveHeader(state, [state])).toEqual({
-      primary: DEFAULT_IDLE_TITLE,
+      primary: `${DEFAULT_IDLE_TITLE} lazygit`,
     });
 
     state = reduceTerminalState(state, { type: 'promptStart' });
     expect(deriveHeader(state, [state])).toEqual({
-      primary: DEFAULT_IDLE_TITLE,
+      primary: `${DEFAULT_IDLE_TITLE} lazygit`,
     });
   });
 
@@ -338,6 +338,53 @@ describe('header and grouping derivation', () => {
     );
     expect(deriveHeader(pane, [pane])).toEqual({
       primary: 'npm test',
+    });
+  });
+
+  it('shows `<idle> ${displayCommand}` after a command finishes', () => {
+    const running = runningPane('/repo/app', 'npm run build');
+    const finished = reduceTerminalState(running, { type: 'commandFinish', exitCode: 0 }, { now: () => 2 });
+
+    expect(finished.lastCommand?.displayCommand).toBe('npm run build');
+    expect(deriveHeader(finished, [finished])).toEqual({
+      primary: `${DEFAULT_IDLE_TITLE} npm run build`,
+    });
+
+    const afterPrompt = reduceTerminalState(finished, { type: 'promptStart' });
+    expect(deriveHeader(afterPrompt, [afterPrompt])).toEqual({
+      primary: `${DEFAULT_IDLE_TITLE} npm run build`,
+    });
+  });
+
+  it('uses the in-run app-sent title as `<idle> ${LAST_TITLE}`', () => {
+    let pane = runningPane('/repo/app', 'lazygit');
+    pane = reduceTerminalState(pane, { type: 'title', title: { title: 'lazygit: mouseterm', source: 'osc0', updatedAt: 2 } });
+    pane = reduceTerminalState(pane, { type: 'commandFinish', exitCode: 0 }, { now: () => 3 });
+
+    expect(deriveHeader(pane, [pane])).toEqual({
+      primary: `${DEFAULT_IDLE_TITLE} lazygit: mouseterm`,
+    });
+  });
+
+  it('ignores titles emitted after the last command finished when deriving LAST_TITLE', () => {
+    let pane = runningPane('/repo/app', 'lazygit');
+    pane = reduceTerminalState(pane, { type: 'title', title: { title: 'lazygit: mouseterm', source: 'osc0', updatedAt: 2 } });
+    pane = reduceTerminalState(pane, { type: 'commandFinish', exitCode: 0 }, { now: () => 3 });
+    // Shell sets the title back to its default after the command exits.
+    pane = reduceTerminalState(pane, { type: 'title', title: { title: 'zsh', source: 'osc0', updatedAt: 4 } });
+
+    expect(deriveHeader(pane, [pane])).toEqual({
+      primary: `${DEFAULT_IDLE_TITLE} lazygit: mouseterm`,
+    });
+  });
+
+  it('keeps a user-pinned title primary even after a command finishes', () => {
+    let pane = runningPane('/repo/app', 'npm run build');
+    pane = reduceTerminalState(pane, { type: 'title', title: { title: 'build pane', source: 'user', updatedAt: 2 } });
+    pane = reduceTerminalState(pane, { type: 'commandFinish', exitCode: 0 }, { now: () => 3 });
+
+    expect(deriveHeader(pane, [pane])).toEqual({
+      primary: 'build pane',
     });
   });
 

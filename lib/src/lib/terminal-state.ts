@@ -34,6 +34,13 @@ export interface CommandRun {
   finishedAt?: number;
   exitCode?: number;
   source: CommandRunSource;
+  /**
+   * App-sent title (OSC 0 / 2 / 9) that was active when this command finished, snapshotted by
+   * `commandFinish` so post-finish title events (e.g. the shell resetting the title to `zsh`)
+   * do not overwrite the in-run title we want to show in the `<idle> ${LAST_TITLE}` header.
+   * Only set on finished commands; never read before `finishedAt`.
+   */
+  finalTerminalTitle?: TerminalTitle;
   outputRange?: {
     startMarkId?: string;
     endMarkId?: string;
@@ -199,10 +206,13 @@ export function reduceTerminalState(
         if (sameActivity(state.activity, next)) return state;
         return { ...state, activity: next };
       }
+      const finishedAt = now();
+      const finalTerminalTitle = snapshotInRunTerminalTitle(state, state.currentCommand, finishedAt);
       const finishedCommand: CommandRun = {
         ...state.currentCommand,
-        finishedAt: now(),
+        finishedAt,
         exitCode: event.exitCode,
+        ...(finalTerminalTitle ? { finalTerminalTitle } : {}),
       };
       return {
         ...state,
@@ -759,27 +769,33 @@ function truncateCommandTitle(title: string): string {
 function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): string {
   const userTitle = titleCandidateForSource(pane, 'user')?.title.trim();
   if (userTitle) return userTitle;
-  if (!pane.currentCommand) return DEFAULT_IDLE_TITLE;
+  if (pane.currentCommand) return commandHeaderLabel(pane, pane.currentCommand, options);
+  if (pane.lastCommand) return `${DEFAULT_IDLE_TITLE} ${commandHeaderLabel(pane, pane.lastCommand, options)}`;
+  return DEFAULT_IDLE_TITLE;
+}
+
+function commandHeaderLabel(pane: TerminalPaneState, command: CommandRun, options: HeaderOptions): string {
   const appTitle = options.appTitleForPane?.(pane)?.trim();
-  if (appTitle && isAppTitleFresh(pane)) return appTitle;
-  const terminalTitle = activeTerminalTitle(pane);
+  if (appTitle && isAppTitleFreshFor(pane, command)) return appTitle;
+  const terminalTitle = terminalTitleForCommand(pane, command);
   if (terminalTitle) return terminalTitle;
-  return pane.currentCommand.displayCommand;
+  return command.displayCommand;
 }
 
 // appTitleForPane is sourced from the alert manager's current OSC 9 notification.
 // The protocol parser populates titleCandidates.osc9 from the same OSC 9 stream,
 // so when both exist they share a timestamp. Use the candidate to apply the same
-// staleness rule we apply in activeTerminalTitle: an OSC 9 emitted before the
-// current command started must not override the command's own label. If no osc9
-// candidate exists (e.g. notification was injected without going through the
-// parser), trust the appTitle to preserve legacy behaviour.
-function isAppTitleFresh(pane: TerminalPaneState): boolean {
-  const command = pane.currentCommand;
-  if (!command) return true;
+// staleness rule we apply in terminalTitleForCommand: an OSC 9 emitted before the
+// command started (or — for finished commands — after it ended) must not override
+// the command's own label. If no osc9 candidate exists (e.g. notification was
+// injected without going through the parser), trust the appTitle to preserve
+// legacy behaviour.
+function isAppTitleFreshFor(pane: TerminalPaneState, command: CommandRun): boolean {
   const osc9 = pane.titleCandidates.osc9;
   if (!osc9) return true;
-  return osc9.updatedAt >= command.startedAt;
+  if (osc9.updatedAt < command.startedAt) return false;
+  if (command.finishedAt !== undefined && osc9.updatedAt > command.finishedAt) return false;
+  return true;
 }
 
 function idleLabel(pane: TerminalPaneState): string {
@@ -790,13 +806,44 @@ function idleLabel(pane: TerminalPaneState): string {
 
 const HEADER_APP_TITLE_SOURCES: TerminalTitleSource[] = ['osc0', 'osc2', 'osc9'];
 
-function activeTerminalTitle(pane: TerminalPaneState): string | null {
-  const command = pane.currentCommand;
-  if (!command) return null;
-  const title = latestTitleCandidateForSources(pane, HEADER_APP_TITLE_SOURCES);
-  if (!title || title.updatedAt < command.startedAt) return null;
-  const text = title.title.trim();
-  return text || null;
+function terminalTitleForCommand(pane: TerminalPaneState, command: CommandRun): string | null {
+  // For finished commands the live `titleCandidates` map may have been overwritten by post-finish
+  // events (e.g. the shell resetting OSC 0 to `zsh`), so trust the snapshot taken at commandFinish.
+  if (command.finishedAt !== undefined && command.finalTerminalTitle) {
+    const snapshot = command.finalTerminalTitle.title.trim();
+    if (snapshot) return snapshot;
+  }
+  return findInRunTerminalTitle(pane, command)?.title.trim() || null;
+}
+
+function snapshotInRunTerminalTitle(
+  state: TerminalPaneState,
+  command: CommandRun,
+  finishedAt: number,
+): TerminalTitle | undefined {
+  // Same scan as findInRunTerminalTitle but with an explicit upper bound, used by the reducer
+  // before `command.finishedAt` is set.
+  let best: TerminalTitle | undefined;
+  for (const source of HEADER_APP_TITLE_SOURCES) {
+    const candidate = state.titleCandidates[source];
+    if (!candidate) continue;
+    if (candidate.updatedAt < command.startedAt) continue;
+    if (candidate.updatedAt > finishedAt) continue;
+    if (!best || candidate.updatedAt > best.updatedAt) best = candidate;
+  }
+  return best;
+}
+
+function findInRunTerminalTitle(pane: TerminalPaneState, command: CommandRun): TerminalTitle | null {
+  let best: TerminalTitle | null = null;
+  for (const source of HEADER_APP_TITLE_SOURCES) {
+    const candidate = pane.titleCandidates[source];
+    if (!candidate) continue;
+    if (candidate.updatedAt < command.startedAt) continue;
+    if (command.finishedAt !== undefined && candidate.updatedAt > command.finishedAt) continue;
+    if (!best || candidate.updatedAt > best.updatedAt) best = candidate;
+  }
+  return best;
 }
 
 function cwdForHeader(pane: TerminalPaneState): CwdState | null {
@@ -842,15 +889,3 @@ function titleCandidateForSource(
   return pane.titleCandidates[source] ?? null;
 }
 
-function latestTitleCandidateForSources(
-  pane: TerminalPaneState,
-  sources: TerminalTitleSource[],
-): TerminalTitle | null {
-  let latest: TerminalTitle | null = null;
-  for (const source of sources) {
-    const candidate = pane.titleCandidates[source];
-    if (!candidate) continue;
-    if (!latest || candidate.updatedAt > latest.updatedAt) latest = candidate;
-  }
-  return latest;
-}
