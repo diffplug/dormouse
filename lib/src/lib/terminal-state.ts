@@ -764,12 +764,27 @@ function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): string 
   const userTitle = titleCandidateForSource(pane, 'user')?.title.trim();
   if (userTitle) return userTitle;
   const appTitle = options.appTitleForPane?.(pane)?.trim();
-  if (appTitle) return appTitle;
+  if (appTitle && isAppTitleFresh(pane)) return appTitle;
   const terminalTitle = activeTerminalTitle(pane);
   if (terminalTitle) return terminalTitle;
   if (pane.currentCommand) return pane.currentCommand.displayCommand;
   if (pane.activity.kind === 'finished' && pane.lastCommand) return pane.lastCommand.displayCommand;
   return idleLabel(pane);
+}
+
+// appTitleForPane is sourced from the alert manager's current OSC 9 notification.
+// The protocol parser populates titleCandidates.osc9 from the same OSC 9 stream,
+// so when both exist they share a timestamp. Use the candidate to apply the same
+// staleness rule we apply in activeTerminalTitle: an OSC 9 emitted before the
+// current command started must not override the command's own label. If no osc9
+// candidate exists (e.g. notification was injected without going through the
+// parser), trust the appTitle to preserve legacy behaviour.
+function isAppTitleFresh(pane: TerminalPaneState): boolean {
+  const command = pane.currentCommand ?? (pane.activity.kind === 'finished' ? pane.lastCommand : null);
+  if (!command) return true;
+  const osc9 = pane.titleCandidates.osc9;
+  if (!osc9) return true;
+  return osc9.updatedAt >= command.startedAt;
 }
 
 function idleLabel(pane: TerminalPaneState): string {
