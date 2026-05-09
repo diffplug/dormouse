@@ -152,6 +152,8 @@ Title candidate diagnostics:
 | `OSC 99 ; ... title/body ... ST` | `osc99` | No |
 | `OSC 777 ; notify ; <title> ; <body> ST` | `osc777` | No |
 
+Only the OSC 9 *message* form (`OSC 9 ; <message>`) feeds the title channel. The OSC 9 *progress* form (`OSC 9 ; 4 ; <state> ; <progress>`) carries no text payload and does not contribute a title candidate; its semantics are documented in `docs/specs/alert.md`.
+
 Non-OSC title source:
 
 - `user` — user-pinned title set via the inline rename UI (`setTerminalUserTitle`). Always wins over every other candidate.
