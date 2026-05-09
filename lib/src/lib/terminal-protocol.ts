@@ -393,11 +393,12 @@ function parseOscTitle(content: string, source: TerminalTitle['source']): Termin
   if (!content.startsWith(prefix)) return [];
   const titleText = sanitizeText(content.slice(prefix.length), TITLE_LIMIT);
   if (!titleText) return [];
+  // updatedAt is set authoritatively by collectTerminalSemanticEvents in stream order.
   return [{
     kind: 'semantic',
     event: {
       type: 'title',
-      title: { title: titleText, source, updatedAt: Date.now() },
+      title: { title: titleText, source, updatedAt: 0 },
     },
   }];
 }
