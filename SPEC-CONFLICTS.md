@@ -4,10 +4,6 @@ Audit of the changed regions in `iTerm2.md`, `layout.md`, `terminal-state.md` (n
 
 ## Substantive conflicts
 
-### 7. Right-click popup channels (6) ≠ `TerminalTitle.source` enum (9)
-
-`layout.md` says the diagnostic popup lists "user, OSC 0, OSC 2, OSC 9, OSC 99, and OSC 777 where present." The type allows three more (`notification`, `profile`, `derived`). Either the popup is exhaustive (and the enum has dead values), or the enum is right (and the popup spec is incomplete).
-
 ### 8. Resume seeding: `non-unnamed` filter only on one side
 
 `vscode.md` vs `layout.md`.
@@ -33,4 +29,4 @@ If `<unnamed>` is rejected at write time per the rename rules (`layout.md` line 
 
 ---
 
-Severity: all remaining items are minor. (#1, #2, #3, #4, #5, #6 are resolved.)
+Severity: all remaining items are minor. (#1, #2, #3, #4, #5, #6, #7 are resolved.)
