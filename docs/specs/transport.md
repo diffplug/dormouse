@@ -64,7 +64,7 @@ For cold restore (no live PTYs), the webview falls back to saved session state: 
 
 ## Message protocol
 
-All types live in `vscode-ext/src/message-types.ts` (the canonical schema; other adapters import or mirror it). Webview-side handling lives in adapter modules (e.g., `vscode-adapter.ts`, `fake-adapter.ts`); host-side handling lives in the per-adapter message router.
+Message types live in `vscode-ext/src/message-types.ts` (the canonical schema; other adapters import or mirror it). The persisted-session types in the next section live in `lib/src/lib/session-types.ts` because they cross the webview/host boundary and are also consumed by frontend persistence helpers. Webview-side handling lives in adapter modules (e.g., `vscode-adapter.ts`, `fake-adapter.ts`); host-side handling lives in the per-adapter message router.
 
 **Webview → host:**
 

@@ -15,7 +15,7 @@ Supported OSCs are parsed at the PTY data boundary in the platform adapter:
 - VS Code: in the extension host (`message-router.ts` / `pty-manager.ts`), before `pty:data` is forwarded to the webview.
 - Standalone and fake adapters: in the frontend adapter, before xterm.js sees the bytes.
 
-After parsing, supported sequences are consumed and not re-emitted. Known unsupported iTerm2/clipboard-capable OSCs listed in [Known-unimplemented iTerm2 sequences](#known-unimplemented-iterm2-sequences) are also consumed and ignored. The platform sends two streams to the webview:
+After parsing, supported sequences are consumed and not re-emitted. Known unsupported iTerm2/clipboard-capable OSCs listed in [Known-unimplemented iTerm2 and clipboard-capable sequences](#known-unimplemented-iterm2-and-clipboard-capable-sequences) are also consumed and ignored. The platform sends two streams to the webview:
 
 - `pty:data` — terminal output with supported OSCs already parsed/stripped. Feeds xterm.js.
 - `terminal:semanticEvents` — normalized semantic events parsed in the platform (CWD, prompt/command boundaries, titles). Feeds `TerminalPaneState`.
@@ -49,6 +49,8 @@ Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js c
 | `OSC 777 ; notify ; <title> ; <body> ST` | rxvt/WezTerm notification | [alert.md](alert.md#osc-777) |
 | `OSC 1337 ; CurrentDir=<cwd> ST` | CWD (iTerm2 compatibility) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 
+Some sequences are dual-purpose. The notification rows for `OSC 9 ; <message> ST`, `OSC 99` (`p=title`/`p=body`), and `OSC 777 ; notify` also feed the title-candidate channel in `terminal-state.md` — see its [Title candidate diagnostics](terminal-state.md#supported-osc-inputs) table. Only the OSC 9 *message* form can become a header/door label; OSC 99 and OSC 777 candidates are stored for the diagnostic popup only. The OSC 9 *progress* form (`OSC 9 ; 4`) carries no text and never contributes a title candidate.
+
 ## iTerm2 identity
 
 MouseTerm reports an iTerm2-compatible identity so that tools (shells, build systems, agent clients) emit the iTerm2-style escape codes that this spec set supports.
@@ -70,9 +72,9 @@ Device/version query:
 
 Because this identity can cause tools to emit more iTerm2 escape codes than MouseTerm implements, **unsupported escape codes must fail inertly**: consume or ignore them without visible terminal garbage, privilege escalation, clipboard access, file access, or focus stealing.
 
-## Known-unimplemented iTerm2 sequences
+## Known-unimplemented iTerm2 and clipboard-capable sequences
 
-MouseTerm intentionally does not implement the following iTerm2 OSC sequences. They must fail inertly per the rule above, which means they are consumed/ignored rather than forwarded to xterm.js.
+MouseTerm intentionally does not implement the following sequences. They are mostly iTerm2-proprietary; `OSC 50` (font) and `OSC 52` (clipboard) are standard xterm extensions included here because the iTerm2 identity prompts tools to emit them and they have security implications. All of them must fail inertly per the rule above, which means they are consumed/ignored rather than forwarded to xterm.js.
 
 | Sequence | Purpose | Reason for non-support |
 |---|---|---|
