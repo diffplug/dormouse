@@ -53,4 +53,47 @@ describe('VSCodeAdapter PTY exit handling', () => {
     expect(terminalStateStoreMocks.removeTerminalPaneState).not.toHaveBeenCalled();
     expect(postMessage).toHaveBeenCalledWith({ type: 'pty:kill', id: 'pane-1' });
   });
+
+  it('parses replay buffers into semantic events and strips OSCs before forwarding', () => {
+    const adapter = new VSCodeAdapter();
+    const replays: Array<{ id: string; data: string }> = [];
+    adapter.onPtyReplay((detail) => replays.push(detail));
+
+    windowTarget.dispatchEvent(new MessageEvent('message', {
+      data: {
+        type: 'pty:replay',
+        id: 'pane-1',
+        data: 'hello\x1b]7;file://localhost/Users/me/project\x1b\\world',
+      },
+    }));
+
+    // Visible data is stripped of the OSC 7 sequence.
+    expect(replays).toEqual([{ id: 'pane-1', data: 'helloworld' }]);
+
+    // Semantic CWD event was forwarded under the PTY id.
+    expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledTimes(1);
+    const [forwardedId, forwardedEvents] = terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId.mock.calls[0];
+    expect(forwardedId).toBe('pane-1');
+    expect(forwardedEvents).toHaveLength(1);
+    expect(forwardedEvents[0]).toMatchObject({
+      type: 'cwd',
+      cwd: { path: '/Users/me/project', source: 'osc7' },
+    });
+  });
+
+  it('forwards extension-host semantic events to the pane state store', () => {
+    const adapter = new VSCodeAdapter();
+    const events = [
+      { type: 'cwd' as const, cwd: { path: '/repo', pathKind: 'posix' as const, isRemote: false, source: 'osc633' as const, updatedAt: 5 } },
+      { type: 'promptStart' as const },
+    ];
+
+    windowTarget.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'terminal:semanticEvents', id: 'pane-1', events },
+    }));
+    void adapter;
+
+    expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledTimes(1);
+    expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledWith('pane-1', events);
+  });
 });
