@@ -94,14 +94,14 @@ describe('terminal semantic state store command input fallback', () => {
     });
   });
 
-  it('refuses to pin sentinel labels as a user title', () => {
-    setTerminalUserTitle('pane', DEFAULT_IDLE_TITLE);
-    setTerminalUserTitle('pane', UNNAMED_PANEL_TITLE);
-    setTerminalUserTitle('pane', '   ');
+  it('refuses to pin sentinel labels as a user title and reports the reason', () => {
+    expect(setTerminalUserTitle('pane', DEFAULT_IDLE_TITLE)).toEqual({ accepted: false, reason: 'reserved' });
+    expect(setTerminalUserTitle('pane', UNNAMED_PANEL_TITLE)).toEqual({ accepted: false, reason: 'reserved' });
+    expect(setTerminalUserTitle('pane', '   ')).toEqual({ accepted: false, reason: 'empty' });
 
     expect(getTerminalPaneState('pane').titleCandidates.user).toBeUndefined();
 
-    setTerminalUserTitle('pane', 'Production API');
+    expect(setTerminalUserTitle('pane', 'Production API')).toEqual({ accepted: true });
     expect(getTerminalPaneState('pane').titleCandidates.user?.title).toBe('Production API');
   });
 

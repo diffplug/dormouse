@@ -124,15 +124,21 @@ export function recordTerminalOutputByPtyId(ptyId: string, output: string): void
 
 const RESERVED_USER_TITLES = new Set<string>([DEFAULT_IDLE_TITLE, UNNAMED_PANEL_TITLE]);
 
-export function setTerminalUserTitle(id: string, title: string): void {
+export type SetTerminalUserTitleResult =
+  | { accepted: true }
+  | { accepted: false; reason: 'empty' | 'reserved' };
+
+export function setTerminalUserTitle(id: string, title: string): SetTerminalUserTitleResult {
   const trimmed = title.trim();
-  if (!trimmed || RESERVED_USER_TITLES.has(trimmed)) return;
+  if (!trimmed) return { accepted: false, reason: 'empty' };
+  if (RESERVED_USER_TITLES.has(trimmed)) return { accepted: false, reason: 'reserved' };
   const terminalTitle: TerminalTitle = {
     title: trimmed,
     source: 'user',
     updatedAt: Date.now(),
   };
   applyTerminalSemanticEvents(id, [{ type: 'title', title: terminalTitle }]);
+  return { accepted: true };
 }
 
 export function seedTerminalManualCwd(id: string, path: string | null | undefined): void {

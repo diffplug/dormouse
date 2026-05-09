@@ -19,6 +19,7 @@ import { TodoAlertDialog } from '../TodoAlertDialog';
 import { TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
 import { bellIconClass } from '../bell-icon-class';
 import { useTodoPillContent } from '../TodoPillBody';
+import { IllegalRenameWarning, type RenameRejection } from './IllegalRenameWarning';
 import {
   DEFAULT_MOUSE_SELECTION_STATE,
   getMouseSelectionSnapshot,
@@ -119,6 +120,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
   const [dialogTriggerRect, setDialogTriggerRect] = useState<DOMRect | null>(null);
   const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
   const [titleCandidatesRect, setTitleCandidatesRect] = useState<DOMRect | null>(null);
+  const [renameWarning, setRenameWarning] = useState<{ rect: DOMRect; reason: RenameRejection; value: string } | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
   const titleCandidates = useMemo(() => titleCandidatesForDisplay(paneState), [paneState]);
   const showTodoPill = todoPill.visible && tier !== 'minimal';
@@ -134,6 +136,16 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
   const closeDialog = useCallback(() => setDialogTriggerRect(null), []);
   const closeTodoPreview = useCallback(() => setTodoPreviewRect(null), []);
   const closeTitleCandidates = useCallback(() => setTitleCandidatesRect(null), []);
+  const closeRenameWarning = useCallback(() => setRenameWarning(null), []);
+  const submitRename = useCallback((value: string, anchor: HTMLElement) => {
+    const rect = anchor.getBoundingClientRect();
+    const result = actions.onFinishRename(api.id, value);
+    if (!result.accepted) {
+      setRenameWarning({ rect, reason: result.reason, value });
+    } else {
+      setRenameWarning(null);
+    }
+  }, [actions, api.id]);
   const openTodoPreview = useCallback((button: HTMLButtonElement) => {
     if (!activity.notification) return;
     setTodoPreviewRect(button.getBoundingClientRect());
@@ -191,18 +203,19 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
       <div className="flex flex-1 min-w-0 items-center gap-1.5">
         {isRenaming ? (
           <input
+            data-renaming-input-for={api.id}
             className="bg-transparent outline-none border-none text-inherit font-medium font-mono w-full min-w-0 p-0 m-0"
             defaultValue={displayTitle}
             autoFocus
             ref={(el) => el?.select()}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
-                actions.onFinishRename(api.id, (e.target as HTMLInputElement).value);
+                submitRename((e.target as HTMLInputElement).value, e.currentTarget);
               }
               if (e.key === 'Escape') actions.onCancelRename();
               e.stopPropagation();
             }}
-            onBlur={(e) => actions.onFinishRename(api.id, e.target.value)}
+            onBlur={(e) => submitRename(e.target.value, e.currentTarget)}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           />
@@ -371,6 +384,14 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
           candidates={titleCandidates}
           currentTitle={displayTitle}
           onClose={closeTitleCandidates}
+        />
+      )}
+      {renameWarning && (
+        <IllegalRenameWarning
+          anchorRect={renameWarning.rect}
+          reason={renameWarning.reason}
+          attemptedValue={renameWarning.value}
+          onClose={closeRenameWarning}
         />
       )}
     </div>

@@ -259,6 +259,8 @@ The name `<span>` is replaced by an `<input>` with:
 - `stopPropagation` on `mousedown`/`click`/`keydown` to prevent panel click or drag
 - All command-mode shortcuts are bypassed while renaming
 
+Sentinel labels (`<idle>`, `<unnamed>`) and empty values are rejected as user-pin titles. When the user submits one, the input still closes (so it is not a blocking dialog) and a small auto-dismissing warning popover anchored under the input names the offending value. The popover dismisses on the next pointerdown, scroll, resize, `Escape`, or after 3s.
+
 ## Session lifecycle and terminal registry
 
 Pane IDs are session IDs. `TerminalPane` calls `getOrCreateTerminal(id)` on React mount and `unmountElement(id)` on React unmount. The session (xterm.js instance, PTY, DOM element) persists in the registry across mount/unmount cycles — the DOM element is detached from its container but the Registry entry stays `Mounted`.

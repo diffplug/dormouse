@@ -532,11 +532,16 @@ export function Wall({
     },
     onFinishRename: (id: string, value: string) => {
       const trimmed = value.trim();
-      if (trimmed) {
+      if (!trimmed) {
+        setRenamingPaneId(null);
+        return { accepted: false, reason: 'empty' as const };
+      }
+      const result = setTerminalUserTitle(id, trimmed);
+      if (result.accepted) {
         apiRef.current?.getPanel(id)?.api.setTitle(trimmed);
-        setTerminalUserTitle(id, trimmed);
       }
       setRenamingPaneId(null);
+      return result;
     },
     onCancelRename: () => {
       setRenamingPaneId(null);

@@ -9,6 +9,7 @@ import {
   type WallActions,
 } from '../components/Wall';
 import type { ActivityNotification } from '../lib/alert-manager';
+import type { SetTerminalUserTitleResult } from '../lib/terminal-registry';
 
 const SESSION_ID = 'tab-story';
 
@@ -22,9 +23,14 @@ const noopActions: WallActions = {
   onZoom: () => {},
   onClickPanel: () => {},
   onStartRename: () => {},
-  onFinishRename: () => {},
+  onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
 };
+
+function actionsRejecting(reason: 'empty' | 'reserved'): WallActions {
+  const rejection: SetTerminalUserTitleResult = { accepted: false, reason };
+  return { ...noopActions, onFinishRename: () => rejection };
+}
 
 function primedState(state: Record<string, unknown>) {
   return {
@@ -51,6 +57,7 @@ function TabStory({
   isRenaming = false,
   width = 360,
   reducedMotion = false,
+  actions = noopActions,
 }: {
   title?: string;
   mode?: WallMode;
@@ -58,13 +65,14 @@ function TabStory({
   isRenaming?: boolean;
   width?: number;
   reducedMotion?: boolean;
+  actions?: WallActions;
 }) {
   const mockApi = { id: SESSION_ID, title } as any;
 
   return (
     <ModeContext.Provider value={mode}>
       <SelectedIdContext.Provider value={isSelected ? SESSION_ID : null}>
-        <WallActionsContext.Provider value={noopActions}>
+        <WallActionsContext.Provider value={actions}>
           <RenamingIdContext.Provider value={isRenaming ? SESSION_ID : null}>
             <div
               className={reducedMotion ? '[&_button]:!animate-none [&_*]:!transition-none' : undefined}
@@ -106,6 +114,21 @@ async function openTodoNotificationPreview() {
   const todoButton = document.querySelector<HTMLButtonElement>(`[data-session-todo-for="${SESSION_ID}"]`);
   todoButton?.focus();
   await wait(100);
+}
+
+async function submitReservedRename() {
+  await wait(100);
+  const input = document.querySelector<HTMLInputElement>(
+    `[data-renaming-input-for="${SESSION_ID}"]`,
+  ) ?? document.querySelector<HTMLInputElement>('input');
+  if (!input) return;
+  input.value = '<idle>';
+  input.dispatchEvent(new KeyboardEvent('keydown', {
+    key: 'Enter',
+    bubbles: true,
+    cancelable: true,
+  }));
+  await wait(50);
 }
 
 const NOTIFICATIONS = {
@@ -333,4 +356,17 @@ export const ReducedMotionRinging: Story = {
 
     todo: false,
   }),
+};
+
+export const RenameRejectedReserved: Story = {
+  args: {
+    title: 'build-server',
+    isRenaming: true,
+    actions: actionsRejecting('reserved'),
+  },
+  parameters: primedState({
+    status: 'NOTHING_TO_SHOW',
+    todo: false,
+  }),
+  play: submitReservedRename,
 };

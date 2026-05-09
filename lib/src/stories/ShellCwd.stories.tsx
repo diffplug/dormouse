@@ -49,7 +49,7 @@ const noopActions: WallActions = {
   onZoom: () => {},
   onClickPanel: () => {},
   onStartRename: () => {},
-  onFinishRename: () => {},
+  onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
 };
 

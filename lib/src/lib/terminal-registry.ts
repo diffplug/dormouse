@@ -67,6 +67,7 @@ export {
   setTerminalUserTitle,
   subscribeToTerminalPaneState,
 } from './terminal-state-store';
+export type { SetTerminalUserTitleResult } from './terminal-state-store';
 
 export {
   cwdDisplay,
