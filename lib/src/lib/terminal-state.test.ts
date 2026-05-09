@@ -170,16 +170,14 @@ describe('terminal command state reducer', () => {
     });
 
     state = reduceTerminalState(state, { type: 'commandFinish', exitCode: 0 }, { now: () => 3 });
+    expect(state.activity).toEqual({ kind: 'finished', exitCode: 0 });
     expect(deriveHeader(state, [state])).toEqual({
-      primary: 'lazygit',
-      status: 'finished',
-      exitCode: 0,
+      primary: DEFAULT_IDLE_TITLE,
     });
 
     state = reduceTerminalState(state, { type: 'promptStart' });
     expect(deriveHeader(state, [state])).toEqual({
       primary: DEFAULT_IDLE_TITLE,
-      status: 'idle',
     });
   });
 
@@ -204,7 +202,6 @@ describe('terminal command state reducer', () => {
 
     expect(deriveHeader(state, [state])).toEqual({
       primary: 'lazygit',
-      status: 'running',
     });
 
     state = reduceTerminalState(state, { type: 'promptStart' });
@@ -212,7 +209,6 @@ describe('terminal command state reducer', () => {
     expect(state.currentCommand).toBeNull();
     expect(deriveHeader(state, [state])).toEqual({
       primary: DEFAULT_IDLE_TITLE,
-      status: 'idle',
     });
   });
 });
@@ -240,7 +236,6 @@ describe('header and grouping derivation', () => {
 
     expect(deriveHeader(pane, [pane])).toEqual({
       primary: DEFAULT_IDLE_TITLE,
-      status: 'idle',
     });
   });
 
@@ -251,12 +246,10 @@ describe('header and grouping derivation', () => {
     expect(deriveHeader(app, [app, api])).toEqual({
       primary: 'pnpm test --watch',
       secondary: 'app',
-      status: 'running',
     });
     expect(deriveHeader(api, [app, api])).toEqual({
       primary: 'pnpm test --watch',
       secondary: 'api',
-      status: 'running',
     });
   });
 
@@ -268,7 +261,6 @@ describe('header and grouping derivation', () => {
 
     expect(deriveHeader(pane, [pane])).toEqual({
       primary: 'lazygit: mouseterm',
-      status: 'running',
     });
   });
 
@@ -280,7 +272,6 @@ describe('header and grouping derivation', () => {
 
     expect(deriveHeader(pane, [pane])).toEqual({
       primary: 'lazygit',
-      status: 'running',
     });
   });
 
@@ -291,7 +282,6 @@ describe('header and grouping derivation', () => {
 
     expect(deriveHeader(pane, [pane])).toEqual({
       primary: 'dev server',
-      status: 'running',
     });
     expect(titleCandidatesForDisplay(pane).map((candidate) => candidate.source)).toEqual(['osc0', 'user']);
   });
@@ -308,7 +298,6 @@ describe('header and grouping derivation', () => {
       appTitleForPane: buildAppTitleResolver(terminalStates, activityStates),
     })).toEqual({
       primary: 'Build finished',
-      status: 'running',
     });
   });
 
@@ -326,7 +315,6 @@ describe('header and grouping derivation', () => {
       appTitleForPane: buildAppTitleResolver(terminalStates, activityStates),
     })).toEqual({
       primary: 'npm run build',
-      status: 'running',
     });
   });
 
@@ -350,7 +338,6 @@ describe('header and grouping derivation', () => {
     );
     expect(deriveHeader(pane, [pane])).toEqual({
       primary: 'npm test',
-      status: 'running',
     });
   });
 

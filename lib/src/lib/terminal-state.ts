@@ -95,8 +95,6 @@ export interface HeaderOptions extends DirectoryDisplayOptions {
 export interface DerivedHeader {
   primary: string;
   secondary?: string;
-  status: 'unknown' | 'idle' | 'running' | 'finished';
-  exitCode?: number;
 }
 
 export type TerminalGroupingMode = 'none' | 'directory' | 'command' | 'status';
@@ -390,7 +388,6 @@ export function deriveHeader(
   options: HeaderOptions = {},
 ): DerivedHeader {
   const primary = headerPrimary(pane, options);
-  const status = headerStatus(pane);
   const samePrimary = visiblePanes.filter((candidate) => headerPrimary(candidate, options) === primary);
   const cwd = cwdForHeader(pane);
   let secondary: string | undefined;
@@ -404,10 +401,7 @@ export function deriveHeader(
     }
   }
 
-  const exitCode = pane.activity.kind === 'finished' ? pane.activity.exitCode : undefined;
-  return exitCode === undefined
-    ? { primary, secondary, status }
-    : { primary, secondary, status, exitCode };
+  return { primary, secondary };
 }
 
 export function notificationDisplayTitle(
@@ -509,9 +503,22 @@ export function groupTerminalPanes(
   }
 
   return groupBy(panes, (pane) => {
-    const status = headerStatus(pane);
+    const status = statusBucket(pane.activity.kind);
     return { key: status, label: status };
   });
+}
+
+function statusBucket(kind: ShellActivity['kind']): 'unknown' | 'idle' | 'running' | 'finished' {
+  switch (kind) {
+    case 'running':
+      return 'running';
+    case 'finished':
+      return 'finished';
+    case 'unknown':
+      return 'unknown';
+    default:
+      return 'idle';
+  }
 }
 
 function cwdFromDecodedPath(rawPath: string, source: CwdSource, now: number): CwdState | null {
@@ -763,13 +770,12 @@ function truncateCommandTitle(title: string): string {
 function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): string {
   const userTitle = titleCandidateForSource(pane, 'user')?.title.trim();
   if (userTitle) return userTitle;
+  if (!pane.currentCommand) return DEFAULT_IDLE_TITLE;
   const appTitle = options.appTitleForPane?.(pane)?.trim();
   if (appTitle && isAppTitleFresh(pane)) return appTitle;
   const terminalTitle = activeTerminalTitle(pane);
   if (terminalTitle) return terminalTitle;
-  if (pane.currentCommand) return pane.currentCommand.displayCommand;
-  if (pane.activity.kind === 'finished' && pane.lastCommand) return pane.lastCommand.displayCommand;
-  return idleLabel(pane);
+  return pane.currentCommand.displayCommand;
 }
 
 // appTitleForPane is sourced from the alert manager's current OSC 9 notification.
@@ -780,7 +786,7 @@ function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): string 
 // candidate exists (e.g. notification was injected without going through the
 // parser), trust the appTitle to preserve legacy behaviour.
 function isAppTitleFresh(pane: TerminalPaneState): boolean {
-  const command = pane.currentCommand ?? (pane.activity.kind === 'finished' ? pane.lastCommand : null);
+  const command = pane.currentCommand;
   if (!command) return true;
   const osc9 = pane.titleCandidates.osc9;
   if (!osc9) return true;
@@ -796,7 +802,7 @@ function idleLabel(pane: TerminalPaneState): string {
 const HEADER_APP_TITLE_SOURCES: TerminalTitleSource[] = ['osc0', 'osc2', 'osc9', 'notification'];
 
 function activeTerminalTitle(pane: TerminalPaneState): string | null {
-  const command = pane.currentCommand ?? (pane.activity.kind === 'finished' ? pane.lastCommand : null);
+  const command = pane.currentCommand;
   if (!command) return null;
   const title = latestTitleCandidateForSources(pane, HEADER_APP_TITLE_SOURCES);
   if (!title || title.updatedAt < command.startedAt) return null;
@@ -804,22 +810,8 @@ function activeTerminalTitle(pane: TerminalPaneState): string | null {
   return text || null;
 }
 
-function headerStatus(pane: TerminalPaneState): DerivedHeader['status'] {
-  switch (pane.activity.kind) {
-    case 'running':
-      return 'running';
-    case 'finished':
-      return 'finished';
-    case 'unknown':
-      return 'unknown';
-    default:
-      return 'idle';
-  }
-}
-
 function cwdForHeader(pane: TerminalPaneState): CwdState | null {
   if (pane.currentCommand?.cwdAtStart) return pane.currentCommand.cwdAtStart;
-  if (pane.activity.kind === 'finished' && pane.lastCommand?.cwdAtStart) return pane.lastCommand.cwdAtStart;
   return pane.cwd;
 }
 

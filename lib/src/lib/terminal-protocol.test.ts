@@ -219,7 +219,6 @@ describe('TerminalProtocolParser', () => {
     const staleTitleState = reduceSemanticEvents(staleTitleEvents);
     expect(deriveHeader(staleTitleState, [staleTitleState])).toEqual({
       primary: 'npm test',
-      status: 'running',
     });
 
     const freshTitleParser = new TerminalProtocolParser();
@@ -235,7 +234,6 @@ describe('TerminalProtocolParser', () => {
     const freshTitleState = reduceSemanticEvents(freshTitleEvents);
     expect(deriveHeader(freshTitleState, [freshTitleState])).toEqual({
       primary: 'vitest',
-      status: 'running',
     });
   });
 

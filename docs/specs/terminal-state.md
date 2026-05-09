@@ -13,7 +13,7 @@ MouseTerm models terminal panes by:
 - command directory at start time
 - app-sent terminal or notification title as an override label
 
-Session CWD and command execution state are separate. `cwd` means "the shell/session reported this directory"; it is not necessarily the internal CWD of a foreground program. A command snapshots `cwdAtStart` when it starts, and that snapshot is used for grouping and header disambiguation while the command is running or freshly finished.
+Session CWD and command execution state are separate. `cwd` means "the shell/session reported this directory"; it is not necessarily the internal CWD of a foreground program. A command snapshots `cwdAtStart` when it starts, and that snapshot is used for grouping and header disambiguation while the command is running.
 
 ## Core Model
 
@@ -186,22 +186,28 @@ Asynchronous process CWD query results are applied through PTY-id resolution, so
 type DerivedHeader = {
   primary: string;
   secondary?: string;
-  status: "unknown" | "idle" | "running" | "finished";
-  exitCode?: number;
 };
 ```
 
-Rules:
+The header carries only the primary label and an optional secondary disambiguator. Activity state lives on `pane.activity` directly; consumers that need it (status grouping, exit-code badges) read it from there.
 
-- A user-pinned title is primary.
-- An app-sent title override is primary after user-pinned titles. This includes legacy `OSC 9` message text and OSC 0/2 terminal titles sent after the current command started. Rich notification titles from `OSC 99` and `OSC 777` are stored in `titleCandidates` for diagnostics and stay in TODO notification UI; they do not become header/door labels.
-- A running command uses `currentCommand.displayCommand` when there is no app-sent title override.
-- A freshly finished command uses `lastCommand.displayCommand` until the next prompt signal.
-- Idle terminals use `<idle>` unless a user-pinned title exists.
-- Unknown active commands may use terminal title or shell fallback.
-- Duplicate primary labels get a shortest unique directory label.
-- Running and finished commands disambiguate with `cwdAtStart`.
-- Idle terminals disambiguate with `pane.cwd`.
+Header priority — first match wins:
+
+1. User-pinned title.
+2. While a command is running:
+   - App-sent title override emitted after the current command started — legacy `OSC 9` message text or `OSC 0`/`OSC 2` terminal title.
+   - `currentCommand.displayCommand`.
+3. Otherwise (no running command — `prompt`, `editing`, `finished`, `unknown`): `<idle>`.
+
+Rich notification titles from `OSC 99` and `OSC 777` are stored in `titleCandidates` for the diagnostic popup but never become header/door labels. Older shell titles (terminal titles emitted before the current command started, or with no command running) remain fallback-only and do not replace `<idle>`.
+
+A freshly finished command shows `<idle>`. The just-finished command's exit code, output, and TODO notification are surfaced via the alert/TODO machinery (`docs/specs/alert.md`); the header itself returns to a peaceful idle state. `lastCommand` is still tracked for grouping and for callers that want exit-code metadata, but it does not appear in the header.
+
+Disambiguation:
+
+- Duplicate primary labels get a shortest unique directory secondary label.
+- Running commands disambiguate with `currentCommand.cwdAtStart`.
+- Panes without a running command disambiguate with `pane.cwd`.
 
 ## Grouping
 
@@ -219,11 +225,17 @@ Command grouping uses:
 pane.currentCommand?.displayCommand ?? "<idle>"
 ```
 
-Status grouping uses:
+Status grouping projects `ShellActivity.kind` (5 values) onto 4 buckets:
 
-```ts
-unknown | idle | running | finished
-```
+| `pane.activity.kind` | Status bucket |
+|---|---|
+| `unknown`            | `unknown`     |
+| `prompt`             | `idle`        |
+| `editing`            | `idle`        |
+| `running`            | `running`     |
+| `finished`           | `finished`    |
+
+`prompt` and `editing` collapse into a single `idle` bucket because the user-visible distinction between "at the prompt" and "typing a command" is not load-bearing for grouping. `finished` stays distinct so a recently-completed pane can be filtered separately even though its header label is `<idle>`.
 
 Directory group keys use `cwdIdentity(cwd)` so remote hosts and Windows/POSIX path kinds remain distinct.
 Windows UNC display labels keep `\\server\share\` as the path root and do not repeat the server/share in the trailing path segments.

@@ -4,16 +4,6 @@ Audit of the changed regions in `iTerm2.md`, `layout.md`, `terminal-state.md` (n
 
 ## Substantive conflicts
 
-### 1. `ShellActivity` (5 kinds) ≠ `DerivedHeader.status` / status grouping (4 values)
-
-`terminal-state.md`:
-
-- `ShellActivity.kind`: `unknown | prompt | editing | running | finished` (line 48–53).
-- `DerivedHeader.status`: `"unknown" | "idle" | "running" | "finished"` (line 189).
-- Status grouping (line 225): `unknown | idle | running | finished`.
-
-`prompt` and `editing` collapse to `idle` somewhere, but the spec never states that mapping. Two different vocabularies for the same axis.
-
 ### 2. Header-derivation rules don't form a clean priority chain
 
 `terminal-state.md` line 194–204 vs `layout.md`.
@@ -70,4 +60,4 @@ If `<unnamed>` is rejected at write time per the rename rules (`layout.md` line 
 
 ---
 
-Severity: #1 and #2 are blockers — they change actual behavior depending on which spec a reader trusts. #5 is a spec-hygiene issue that will silently rot. The rest are minor. (#3 and #4 were resolved by the docs/specs reorganization in `096a3d5`.)
+Severity: #2 is a blocker — it changes actual behavior depending on which spec a reader trusts. #5 is a spec-hygiene issue that will silently rot. The rest are minor. (#1, #3, #4 are resolved.)

@@ -164,7 +164,7 @@ function ShellCwdMatrix({
                 <div className="truncate text-sm font-semibold">{item.label}</div>
                 {item.note && <div className="truncate text-xs text-muted">{item.note}</div>}
               </div>
-              <DerivedBadge header={header} />
+              <DerivedBadge state={item.state} header={header} />
               <div style={{ width: HEADER_WIDTH }}>
                 <HeaderPreview id={item.id} title={item.fallbackTitle ?? UNNAMED_PANEL_TITLE} />
               </div>
@@ -206,10 +206,18 @@ function BaseboardPreview({ id, title }: { id: string; title: string }) {
   );
 }
 
-function DerivedBadge({ header }: { header: ReturnType<typeof deriveHeader> }) {
+function DerivedBadge({
+  state,
+  header,
+}: {
+  state: TerminalPaneState;
+  header: ReturnType<typeof deriveHeader>;
+}) {
+  const exit = state.activity.kind === 'finished' ? state.activity.exitCode : undefined;
+  const status = state.activity.kind;
   return (
     <div className="min-w-0 text-xs text-muted">
-      <div className="truncate">{header.status}{header.exitCode !== undefined ? ` ${header.exitCode}` : ''}</div>
+      <div className="truncate">{status}{exit !== undefined ? ` ${exit}` : ''}</div>
       <div className="truncate">{header.secondary ?? 'no secondary'}</div>
     </div>
   );
