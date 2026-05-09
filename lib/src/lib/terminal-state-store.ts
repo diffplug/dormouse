@@ -198,6 +198,13 @@ function resolvePaneStateIdByPtyId(ptyId: string): string {
   return getSessionIdByPtyId(ptyId) ?? ptyId;
 }
 
+// Best-effort heuristic for shells without OSC 133/633 integration. Used only
+// when currentCommand.source === 'user_input' to detect "command finished and
+// the shell is prompting again." Custom prompts that lack the path/user context
+// signal (`/`, `~`, `@`, `:`) or a recognized terminator (`$`, `#`, `%`, `>`)
+// will not match — that's intentional, since false positives would prematurely
+// flip a running command back to idle. Shells that emit OSC 133/633 take the
+// fast path and never reach this code.
 function looksLikeReturnedShellPrompt(output: string): boolean {
   const visible = stripAltScreenSpans(output);
   const text = stripTerminalControls(visible).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
