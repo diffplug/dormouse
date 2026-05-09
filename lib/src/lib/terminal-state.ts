@@ -23,9 +23,7 @@ export type CommandRunSource =
   | 'osc633_E'
   | 'osc633_boundaries'
   | 'osc133_boundaries'
-  | 'foreground_process'
-  | 'user_input'
-  | 'title';
+  | 'user_input';
 
 export interface CommandRun {
   id: string;
@@ -48,10 +46,7 @@ export type TerminalTitleSource =
   | 'osc9'
   | 'osc99'
   | 'osc777'
-  | 'notification'
-  | 'user'
-  | 'profile'
-  | 'derived';
+  | 'user';
 
 export interface TerminalTitle {
   title: string;
@@ -464,14 +459,8 @@ export function titleSourceLabel(source: TerminalTitleSource): string {
       return 'OSC 99';
     case 'osc777':
       return 'OSC 777';
-    case 'notification':
-      return 'notification';
     case 'user':
       return 'user';
-    case 'profile':
-      return 'profile';
-    case 'derived':
-      return 'derived';
   }
 }
 
@@ -799,7 +788,7 @@ function idleLabel(pane: TerminalPaneState): string {
   return DEFAULT_IDLE_TITLE;
 }
 
-const HEADER_APP_TITLE_SOURCES: TerminalTitleSource[] = ['osc0', 'osc2', 'osc9', 'notification'];
+const HEADER_APP_TITLE_SOURCES: TerminalTitleSource[] = ['osc0', 'osc2', 'osc9'];
 
 function activeTerminalTitle(pane: TerminalPaneState): string | null {
   const command = pane.currentCommand;

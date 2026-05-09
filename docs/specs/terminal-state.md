@@ -68,9 +68,7 @@ type CommandRun = {
     | "osc633_E"
     | "osc633_boundaries"
     | "osc133_boundaries"
-    | "foreground_process"
-    | "user_input"
-    | "title";
+    | "user_input";
   outputRange?: {
     startMarkId?: string;
     endMarkId?: string;
@@ -87,10 +85,7 @@ type TerminalTitle = {
     | "osc9"
     | "osc99"
     | "osc777"
-    | "notification"
-    | "user"
-    | "profile"
-    | "derived";
+    | "user";
   updatedAt: number;
 };
 ```
@@ -126,6 +121,11 @@ CWD:
 | `OSC 633 ; P ; Cwd=<cwd> ST` | `osc633` | VS Code-style CWD. |
 | `OSC 1337 ; CurrentDir=<cwd> ST` | `osc1337` | iTerm2-style CWD compatibility. |
 
+Non-OSC CWD sources:
+
+- `process` — adapter polled the PTY's process for its working directory. Used when no OSC source has reported recently.
+- `manual` — caller seeded the CWD directly (e.g., session restore from saved state, or a known spawn directory). Produced by `cwdFromManualPath()`.
+
 Command lifecycle:
 
 | Sequence | Event |
@@ -151,6 +151,10 @@ Title candidate diagnostics:
 | `OSC 9 ; <message> ST` | `osc9` | Yes |
 | `OSC 99 ; ... title/body ... ST` | `osc99` | No |
 | `OSC 777 ; notify ; <title> ; <body> ST` | `osc777` | No |
+
+Non-OSC title source:
+
+- `user` — user-pinned title set via the inline rename UI (`setTerminalUserTitle`). Always wins over every other candidate.
 
 The parser accepts both BEL and ST terminators and handles split chunks. Unsupported OSCs pass through to xterm unchanged; supported-but-malformed semantic OSCs are consumed without changing state.
 

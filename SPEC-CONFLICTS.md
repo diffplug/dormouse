@@ -4,12 +4,6 @@ Audit of the changed regions in `iTerm2.md`, `layout.md`, `terminal-state.md` (n
 
 ## Substantive conflicts
 
-### 5. Dead/unreferenced enum values
-
-- `CommandRun.source` (line 67–73) declares `"foreground_process"` and `"title"`, but no rule, table row, or fallback in the document produces them.
-- `CwdState.source` (line 40) declares `"manual"`, with no production rule. CWD fallback step 3 ("initial launch or restored directory") is the most likely candidate, but it's never tied to the `manual` value.
-- `TerminalTitle.source` (line 84–93) declares `"notification"`, `"profile"`, and `"derived"` — none of these are produced by any documented event, none appear in the `titleCandidates` tables in `iTerm2.md`, and none are listed in `layout.md`'s right-click popup channels.
-
 ### 6. Disambiguator coverage is inconsistent
 
 - `layout.md`: "running command's `cwdAtStart` or the idle pane's latest `cwd`" — only running and idle.
@@ -47,4 +41,4 @@ If `<unnamed>` is rejected at write time per the rename rules (`layout.md` line 
 
 ---
 
-Severity: #5 is a spec-hygiene issue that will silently rot. The rest are minor. (#1, #2, #3, #4 are resolved.)
+Severity: all remaining items are minor. (#1, #2, #3, #4, #5 are resolved.)

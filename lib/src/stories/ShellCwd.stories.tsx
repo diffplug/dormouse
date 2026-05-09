@@ -91,7 +91,7 @@ export const HostAndDirectoryDisambiguation: Story = storyFor([
 ]);
 
 export const ShellActivityLifecycle: Story = storyFor([
-  caseState('activity-unknown', 'Unknown', idle({ activity: { kind: 'unknown' }, title: terminalTitle('shell', 'derived') }), 'No shell integration signal'),
+  caseState('activity-unknown', 'Unknown', idle({ activity: { kind: 'unknown' }, title: terminalTitle('shell', 'osc0') }), 'No shell integration signal'),
   caseState('activity-prompt', 'Prompt drawing', idle({ activity: { kind: 'prompt' }, title: terminalTitle('zsh', 'osc0') }), 'Prompt start'),
   caseState('activity-editing', 'Editing', idle({ activity: { kind: 'editing' }, title: terminalTitle('zsh', 'osc0') }), 'At prompt'),
   caseState('activity-running', 'Running', running('/repo/app', 'npm run dev'), 'Foreground command active'),
