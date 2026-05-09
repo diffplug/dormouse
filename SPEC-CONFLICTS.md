@@ -4,19 +4,6 @@ Audit of the changed regions in `iTerm2.md`, `layout.md`, `terminal-state.md` (n
 
 ## Substantive conflicts
 
-### 2. Header-derivation rules don't form a clean priority chain
-
-`terminal-state.md` line 194–204 vs `layout.md`.
-
-`layout.md` lays out a clean order: *user-pinned → app-sent override → current/freshly-finished command → `<idle>`*.
-
-But the bullets in `terminal-state.md` contradict that:
-
-- "A freshly finished command uses `lastCommand.displayCommand` until the next prompt signal." — no override carve-out, even though the bullet above grants override precedence.
-- "Idle terminals use `<idle>` unless a user-pinned title exists." — omits the app-sent override case entirely.
-
-Read literally, an app-sent OSC 9 on an idle pane would be ignored (idle rule wins), and an override during `lastCommand` would be ignored (finished rule wins). Both contradict `layout.md`'s priority list.
-
 ### 5. Dead/unreferenced enum values
 
 - `CommandRun.source` (line 67–73) declares `"foreground_process"` and `"title"`, but no rule, table row, or fallback in the document produces them.
@@ -60,4 +47,4 @@ If `<unnamed>` is rejected at write time per the rename rules (`layout.md` line 
 
 ---
 
-Severity: #2 is a blocker — it changes actual behavior depending on which spec a reader trusts. #5 is a spec-hygiene issue that will silently rot. The rest are minor. (#1, #3, #4 are resolved.)
+Severity: #5 is a spec-hygiene issue that will silently rot. The rest are minor. (#1, #2, #3, #4 are resolved.)
