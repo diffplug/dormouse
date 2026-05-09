@@ -47,6 +47,13 @@ export function getEntryByPtyId(ptyId: string): TerminalEntry | null {
   return null;
 }
 
+export function getSessionIdByPtyId(ptyId: string): string | null {
+  for (const [id, entry] of registry) {
+    if (entry.ptyId === ptyId) return id;
+  }
+  return null;
+}
+
 export function resolveTerminalSessionId(id: string): string {
   return registry.get(id)?.ptyId ?? id;
 }

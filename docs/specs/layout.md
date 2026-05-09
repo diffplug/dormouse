@@ -4,7 +4,7 @@
 
 ## Conceptual model
 
-A **Session** is a single PTY instance — a running shell process with its scrollback, environment, and working directory. Sessions are managed by the terminal registry and persist independently of how they are displayed. Each session also carries Activity state (projected alert status, optional TODO flag, and optional protocol notification detail).
+A **Session** is a single PTY instance — a running shell process with its scrollback, environment, and semantic terminal state. Sessions are managed by the terminal registry and persist independently of how they are displayed. Each session also carries Activity state (projected alert status, optional TODO flag, and optional protocol notification detail). CWD, foreground-command lifecycle, command titles, terminal titles, header derivation, and grouping keys are defined in `docs/specs/terminal-state.md`.
 
 A Session's **View** state places it in one of two containers:
 
@@ -72,9 +72,13 @@ The content area is a tiling layout of panes, powered by dockview. Each pane occ
 
 Each pane has a 30px header that doubles as a drag handle. The header uses `cursor-grab` / `active:cursor-grabbing`, `select-none`, and the shared terminal top radius from `lib/src/components/design.tsx`. Background and foreground use the `--color-header-active-*` / `--color-header-inactive-*` token pairs, which map to VSCode file-tree list colors. Dockview's default close button and right-actions container are hidden via CSS.
 
+The header label is the `DerivedHeader` returned by `deriveHeader(paneState, visiblePanes)` in `docs/specs/terminal-state.md` — that spec is the single source of truth for the priority chain (user-pinned title, app-sent overrides, current command title, `<idle> ${LAST_TITLE}` for finished panes, plain `<idle>` for fresh panes), the disambiguator rule, and which OSC sources contribute. Layout's job is to render the result: the primary label truncates with ellipsis, the secondary label (when present) is shown muted next to it, click renames/pins, right-click opens the diagnostic popup.
+
+The diagnostic popup lists the latest entry per `titleCandidates` channel as defined in `docs/specs/terminal-state.md`. Each row shows the channel, latest candidate text, and timestamp. The popup is diagnostic only; it does not change the title priority rules.
+
 Elements from left to right:
 
-- Session name (click to rename, truncates with ellipsis)
+- Derived session label (click to rename/pin, right-click to inspect title candidates, truncates with ellipsis)
 - Alert bell button (reflects session activity status)
 - TODO pill (if todo state is set; hidden in minimal tier)
 - Flexible gap
@@ -102,7 +106,7 @@ The header adapts to available width via ResizeObserver in three tiers:
 
 Below the content area is the baseboard (`h-7`, 28px). It is always visible and has no top divider. The dockview area ends 2px above it, leaving a narrow theme-colored gap that keeps rounded pane corners distinct from the baseboard. Its horizontal padding matches the Dockview wrapper's 6px inset, so doors align with the panes above. When empty, it shows keyboard shortcut hints when there are no doors and the container is wider than 350px (currently: `LCmd → RCmd to enter command mode`).
 
-When a session is minimized, it becomes a **door** on the baseboard. The door displays the session's title, a TODO badge (if set), and an alert bell icon with activity dot. It uses the bottom edge of the window as its bottom border, with left, top, and right borders using the shared terminal top radius from `lib/src/components/design.tsx` — resembling a mouse hole and matching pane rounding. Door dimensions: `min-w-[68px] max-w-[220px] h-6`.
+When a session is minimized, it becomes a **door** on the baseboard. The door displays the same derived terminal label as the pane header, a TODO badge (if set), and an alert bell icon with activity dot. It uses the bottom edge of the window as its bottom border, with left, top, and right borders using the shared terminal top radius from `lib/src/components/design.tsx` — resembling a mouse hole and matching pane rounding. Door dimensions: `min-w-[68px] max-w-[220px] h-6`.
 
 ### Door interaction
 
@@ -225,7 +229,7 @@ Swaps session **content** between two panes — the layout shape is unchanged. U
    - `layoutAtMinimize`: full layout snapshot
    - `layoutAtMinimizeSignature`: structural fingerprint (ignores sizes)
 2. Remove pane from dockview (`api.removePanel`)
-3. Add to `doors` state → door appears in baseboard
+3. Add to `doors` state → door appears in baseboard. The door stores only the stable dockview/user title for persistence; its visible label is derived from live terminal semantic state at render time.
 4. Session stays in registry (not disposed)
 5. Selection moves to the new door (stays in command mode)
 
@@ -255,6 +259,8 @@ The name `<span>` is replaced by an `<input>` with:
 - `stopPropagation` on `mousedown`/`click`/`keydown` to prevent panel click or drag
 - All command-mode shortcuts are bypassed while renaming
 
+User-pin titles must not start with `<idle>` (the sentinel that prefixes the auto-generated header for finished panes), and empty values are also rejected. `<unnamed>` is the default panel placeholder but is otherwise allowed as a deliberate user pin. When the user submits a rejected value, the input still closes (so it is not a blocking dialog) and a small auto-dismissing warning popover anchored under the input names the offending value. The popover dismisses on the next pointerdown, scroll, resize, `Escape`, or after 3s.
+
 ## Session lifecycle and terminal registry
 
 Pane IDs are session IDs. `TerminalPane` calls `getOrCreateTerminal(id)` on React mount and `unmountElement(id)` on React unmount. The session (xterm.js instance, PTY, DOM element) persists in the registry across mount/unmount cycles — the DOM element is detached from its container but the Registry entry stays `Mounted`.
@@ -269,19 +275,21 @@ Pane IDs are session IDs. `TerminalPane` calls `getOrCreateTerminal(id)` on Reac
 
 ### Session persistence
 
-Layout, scrollback, cwd, minimized items, and alert state are saved to persistent storage via a debounced save (500ms). Saves are triggered by layout changes, panel add/remove, and a 30s periodic interval. Saves are flushed immediately on PTY exit, `pagehide`, and extension shutdown requests.
+Layout, scrollback, cwd, minimized items, user-pinned titles, and alert state are saved to persistent storage via a debounced save (500ms). Derived command/app labels shown on minimized doors are display-only and are not persisted as user-pinned titles. Saves are triggered by layout changes, panel add/remove, and a 30s periodic interval. Saves are flushed immediately on PTY exit, `pagehide`, and extension shutdown requests.
 
 Saved snapshots are read through `readPersistedSession()`, which accepts the canonical object shape and defensively parses a JSON-stringified blob before validation and migration. This keeps malformed storage inert while covering hosts that hand back serialized JSON instead of the parsed object.
 
 On startup, recovery is priority-based:
-1. **Resume** (webview hidden/shown, live PTYs): request PTY list + replay data from platform, `resumeTerminal()` for each (500ms timeout). If the saved session covers every live PTY, restore the saved dockview layout when its visible panel set matches and reattach saved minimized items as doors. This still counts as a live resume when every live session is minimized, so recovery must not fall through to cold restore just because the visible `paneIds` list is empty.
+1. **Resume** (webview hidden/shown, live PTYs): request PTY list + replay data from platform, `resumeTerminal()` for each (500ms timeout). Saved pane and door titles are seeded back via `setTerminalUserTitle()` (see `docs/specs/transport.md`) so persisted placeholder labels never replay as user pins. If the saved session covers every live PTY, restore the saved dockview layout when its visible panel set matches and reattach saved minimized items as doors. This still counts as a live resume when every live session is minimized, so recovery must not fall through to cold restore just because the visible `paneIds` list is empty.
 2. **Restore** (app restart, cold start): restore layout from serialized dockview state, `restoreTerminal()` for each pane with saved cwd + scrollback, and spawn each PTY with the current default shell selection
 3. **Fallback/manual pane creation**: when no saved layout can be safely applied, add multiple panes as splits from the previous pane rather than tabs, and spawn each PTY with the current default shell selection
 4. **Empty state**: create a single new pane with the current default shell selection
 
 ### Activity state
 
-Each session carries `ActivityState` with `status: SessionStatus`, `todo: TodoState`, and `notification: ActivityNotification | null`. `status` is the projected public status from the timer-based visual track plus the terminal-report protocol track described in `docs/specs/alert.md`; it may be `OSC_NOTIF_BUSY` when OSC progress has cocked the bell. These are synced to React via `useSyncExternalStore`. State that arrives from the platform before a registry entry exists (resume scenario) is held as "primed state" and applied when the registry entry is created.
+Each session carries `ActivityState` with `status: SessionStatus`, `todo: boolean`, and `notification: ActivityNotification | null`. `status` is the projected public status from the timer-based visual track plus the terminal-report protocol track described in `docs/specs/alert.md`; it may be `OSC_NOTIF_BUSY` when OSC progress has cocked the bell. These are synced to React via `useSyncExternalStore`. State that arrives from the platform before a registry entry exists (resume scenario) is held as "primed state" and applied when the registry entry is created.
+
+Each session also carries `TerminalPaneState` from `docs/specs/terminal-state.md`. The frontend store is keyed by the current pane/session id, and PTY-originated semantic events are resolved through `ptyId` so swapped sessions keep their CWD and command state with the terminal content.
 
 ## Theme
 
@@ -362,6 +370,8 @@ The deferred spawn also only calls `selectPane` if selection is null. The kill h
 | `lib/src/lib/terminal-registry.ts` | Public facade preserving registry imports |
 | `lib/src/lib/terminal-store.ts` | Registry maps, terminal entry shape, pending shell opts, overlay dimension types |
 | `lib/src/lib/terminal-lifecycle.ts` | Session lifecycle: create, resume, restore, mount, unmount, dispose, swap, focus, refit |
+| `lib/src/lib/terminal-state.ts` | Pure semantic terminal model: CWD normalization, command reducer, header derivation, grouping helpers |
+| `lib/src/lib/terminal-state-store.ts` | React-facing terminal semantic state store and PTY-id to pane-id resolution |
 | `lib/src/lib/session-activity-store.ts` | React activity snapshot store, primed alert state, alert/TODO platform delegates |
 | `lib/src/lib/terminal-theme.ts` | xterm theme extraction, terminal host painting, theme MutationObserver |
 | `lib/src/lib/terminal-report-filter.ts` | Synthetic/replay terminal report detection and replay writer |

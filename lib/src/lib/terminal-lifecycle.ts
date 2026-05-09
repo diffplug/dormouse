@@ -25,6 +25,22 @@ import {
   writeReplay,
 } from './terminal-report-filter';
 import { getTerminalTheme, paintTerminalHost, startThemeObserver } from './terminal-theme';
+import {
+  ensureTerminalPaneState,
+  fillTerminalProcessCwdByPtyId,
+  recordTerminalOutputByPtyId,
+  recordTerminalUserInputByPtyId,
+  removeTerminalPaneState,
+  resetTerminalPaneState,
+  seedTerminalManualCwd,
+  setTerminalUserTitle,
+  swapTerminalPaneStates,
+} from './terminal-state-store';
+import { UNNAMED_PANEL_TITLE } from './terminal-state';
+
+function seedProcessCwdAfterSpawn(id: string): void {
+  void getPlatform().getCwd(id).then((cwd) => fillTerminalProcessCwdByPtyId(id, cwd));
+}
 
 function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDivElement } {
   const styles = getComputedStyle(document.body);
@@ -55,7 +71,10 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
 function wirePtyEvents(id: string, terminal: Terminal): () => void {
   const platform = getPlatform();
   const handleData = (detail: { id: string; data: string }) => {
-    if (detail.id === id) terminal.write(detail.data);
+    if (detail.id === id) {
+      recordTerminalOutputByPtyId(id, detail.data);
+      terminal.write(detail.data);
+    }
   };
   const handleExit = (detail: { id: string; exitCode: number }) => {
     if (detail.id === id) terminal.write(`\r\n[Process exited with code ${detail.exitCode}]\r\n`);
@@ -88,6 +107,7 @@ function wireXtermHandlers(
     if (inputIsReplayTerminalReport(input) && registry.get(id)?.isReplaying) return;
 
     if (!isSyntheticTerminalReport) {
+      recordTerminalUserInputByPtyId(id, input);
       const entry = registry.get(id);
       const hadTodo = entry?.todo === true;
       getPlatform().alertAttend(id);
@@ -174,6 +194,7 @@ function setupTerminalEntry(id: string): TerminalEntry {
   }
 
   registry.set(id, entry);
+  ensureTerminalPaneState(id);
   notifyActivityListeners();
   startThemeObserver();
   return entry;
@@ -188,6 +209,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   if (existing) return existing;
 
   const entry = setupTerminalEntry(id);
+  resetTerminalPaneState(id);
 
   const shellOpts = pendingShellOpts.get(id);
   pendingShellOpts.delete(id);
@@ -198,6 +220,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     rows: dims?.rows || 30,
     ...shellOpts,
   });
+  seedProcessCwdAfterSpawn(id);
 
   return entry;
 }
@@ -205,7 +228,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
 export function resumeTerminal(
   id: string,
   replayData: string | null,
-  exitInfo?: { alive: boolean; exitCode?: number },
+  exitInfo?: { alive: boolean; exitCode?: number; title?: string | null },
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
@@ -218,18 +241,28 @@ export function resumeTerminal(
   if (exitInfo && !exitInfo.alive) {
     entry.terminal.write(`\r\n[Process exited with code ${exitInfo.exitCode ?? -1}]\r\n`);
   }
+  const savedTitle = exitInfo?.title?.trim();
+  if (savedTitle && savedTitle !== UNNAMED_PANEL_TITLE) {
+    setTerminalUserTitle(id, savedTitle);
+  }
 
   return entry;
 }
 
 export function restoreTerminal(
   id: string,
-  opts: { cwd?: string | null; scrollback?: string | null; title?: string; cwdWarning?: string | null; shell?: string; args?: string[] },
+  opts: { cwd?: string | null; scrollback?: string | null; title?: string | null; cwdWarning?: string | null; shell?: string; args?: string[] },
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
 
   const entry = setupTerminalEntry(id);
+  resetTerminalPaneState(id);
+  seedTerminalManualCwd(id, opts.cwd);
+  const trimmedTitle = opts.title?.trim();
+  if (trimmedTitle && trimmedTitle !== UNNAMED_PANEL_TITLE) {
+    setTerminalUserTitle(id, trimmedTitle);
+  }
 
   if (opts.scrollback) {
     writeReplay(entry, opts.scrollback, '\r\n');
@@ -246,6 +279,7 @@ export function restoreTerminal(
     shell: opts.shell,
     args: opts.args,
   });
+  seedProcessCwdAfterSpawn(id);
 
   return entry;
 }
@@ -278,6 +312,7 @@ export function disposeSession(id: string): void {
   entry.element.remove();
   entry.terminal.dispose();
   registry.delete(id);
+  removeTerminalPaneState(id);
   removeMouseSelectionState(id);
   notifyActivityListeners();
 }
@@ -295,6 +330,7 @@ export function swapTerminals(idA: string, idB: string): void {
 
   registry.set(idA, entryB);
   registry.set(idB, entryA);
+  swapTerminalPaneStates(idA, idB);
 
   if (containerA) {
     containerA.appendChild(entryB.element);

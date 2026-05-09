@@ -16,6 +16,8 @@ import {
   toggleSessionTodo,
   setPendingShellOpts,
   getDefaultShellOpts,
+  setTerminalUserTitle,
+  UNNAMED_PANEL_TITLE,
   type SessionStatus,
 } from '../lib/terminal-registry';
 import { findReattachNeighbor } from '../lib/spatial-nav';
@@ -78,6 +80,11 @@ function idsMatch(a: string[], b: string[]): boolean {
     console.assert(isSorted(a) && isSorted(b), 'idsMatch: inputs must be sorted');
   }
   return a.length === b.length && a.every((id, i) => id === b[i]);
+}
+
+function persistedPanelTitle(title: string | null | undefined): string {
+  const trimmed = title?.trim();
+  return trimmed || UNNAMED_PANEL_TITLE;
 }
 
 const components = { terminal: TerminalPanel };
@@ -260,7 +267,7 @@ export function Wall({
     if (!api) return;
     const panel = api.getPanel(id);
     if (!panel) return;
-    const title = panel.title ?? id;
+    const title = persistedPanelTitle(panel.title);
     const layoutAtMinimize = cloneLayout(api.toJSON());
 
     // Capture the nearest adjacent pane and our actual relative position
@@ -444,7 +451,7 @@ export function Wall({
         id: newId,
         component: 'terminal',
         tabComponent: 'terminal',
-        title: '<unnamed>',
+        title: UNNAMED_PANEL_TITLE,
         position: active ? { referencePanel: active.id, direction: pickSplitDirection(active) } : undefined,
       });
       selectPane(newId);
@@ -475,7 +482,7 @@ export function Wall({
       id: newId,
       component: 'terminal',
       tabComponent: 'terminal',
-      title: '<unnamed>',
+      title: UNNAMED_PANEL_TITLE,
       position: ref ? { referencePanel: ref, direction } : undefined,
     });
     selectPane(newId);
@@ -525,10 +532,16 @@ export function Wall({
     },
     onFinishRename: (id: string, value: string) => {
       const trimmed = value.trim();
-      if (trimmed) {
+      if (!trimmed) {
+        setRenamingPaneId(null);
+        return { accepted: false, reason: 'empty' as const };
+      }
+      const result = setTerminalUserTitle(id, trimmed);
+      if (result.accepted) {
         apiRef.current?.getPanel(id)?.api.setTitle(trimmed);
       }
       setRenamingPaneId(null);
+      return result;
     },
     onCancelRename: () => {
       setRenamingPaneId(null);

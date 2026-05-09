@@ -4,7 +4,7 @@
 
 The alert system is an opt-in reminder for a **Session** that may finish work while the user is looking elsewhere. Alert state lives on the Session itself, not on the Pane or Door that currently displays it.
 
-Explicit terminal notification/progress reports are the exception to the opt-in rule. `OSC 9`, `OSC 9;4`, `OSC 99`, `OSC 777`, and standalone terminal `BEL` handling is specified in `docs/specs/iTerm2.md`; those protocol signals may cock the bell or force `ALERT_RINGING` even when the activity monitor is disabled.
+Explicit terminal notification/progress reports are the exception to the opt-in rule. `OSC 9`, `OSC 9;4`, `OSC 99`, `OSC 777`, and standalone terminal `BEL` handling is specified in [Notification protocols](#notification-protocols) below; those protocol signals may cock the bell or force `ALERT_RINGING` even when the activity monitor is disabled. The OSC sequence registry and parsing-location rules live in `docs/specs/OSC.md`.
 
 This spec uses semantic state names that describe what the Session currently owes the user:
 
@@ -20,7 +20,10 @@ This document is the source of truth for the naming and behavior of this state m
 ## Non-goals
 
 - No command sniffing or per-tool heuristics. We do not try to guess whether `vim`, `npm dev`, `claude`, or any other command is "appropriate" for alerts.
-- No sound, OS notifications, or browser notifications in v1.
+- No sound, native OS notifications, or browser notifications in v1. "Alarm" means MouseTerm's existing `ALERT_RINGING` visual state.
+- No standalone progress bar widget. `OSC 9;4` progress updates `protocolStatus` while active; completion/error creates TODO detail. It does not add a separate progress widget to the Pane header.
+- No full iTerm2/kitty/rxvt/WezTerm feature parity. Unsupported sequences are ignored unless another spec claims them.
+- No HTML, Markdown, ANSI styling, shell command parsing, or clickable action buttons inside TODO notification previews.
 - No Door-specific alert menu that overrides the existing click-to-reattach behavior from `docs/specs/layout.md`.
 
 ## When alerts are useful
@@ -54,7 +57,7 @@ Each Session owns:
   - It is driven only by meaningful output, silence timers, and attention.
   - It may be deleted in a future terminal-report-only implementation without changing the protocol notification model.
 - `protocolStatus: 'IDLE' | 'OSC_NOTIF_BUSY' | 'ALERT_RINGING'`
-  - Internal terminal-report status owned by parsed terminal reports from `docs/specs/iTerm2.md`.
+  - Internal terminal-report status owned by parsed terminal reports (see [Notification protocols](#notification-protocols)).
   - It is driven only by terminal reports such as `OSC 9`, `OSC 9;4`, `OSC 99`, `OSC 777`, and standalone `BEL`.
   - It does not use output/silence timers from the visual activity monitor.
   - It does use the shared attention model. A protocol completion/notification received while the user is actively attending that Session must not ring.
@@ -73,9 +76,34 @@ Each Session also owns:
   - True when the user attended to a ringing Session (clicked into the Pane, typed in passthrough, etc.). Cleared when the bell is next clicked or the alert is toggled/disabled. Used by the bell button to show the context menu on the next click instead of immediately disabling.
 - `notification: ActivityNotification | null`
   - Latest explicit protocol notification detail, when a Session received a supported terminal notification sequence.
-  - Defined in `docs/specs/iTerm2.md`.
   - This metadata is attached to TODO/alert state; it does not replace the boolean `todo` model or the visible TODO pill text.
   - `OSC 9;4` progress is tracked through `protocolStatus` while active; completion/error promotes it into this notification field.
+
+`ActivityNotification` shape (intentionally small — these are the only fields rendered):
+
+```ts
+type ActivityNotificationSource = 'OSC 9' | 'OSC 9;4' | 'OSC 99' | 'OSC 777' | 'BEL';
+
+interface ActivityNotification {
+  source: ActivityNotificationSource;
+  title: string | null;
+  body: string | null;
+}
+```
+
+Per-source mapping rules (full protocol semantics in [Notification protocols](#notification-protocols)):
+
+- `OSC 9` stores `{ source: 'OSC 9', title: null, body: message }`.
+- `OSC 777` stores `{ source: 'OSC 777', title, body }`.
+- `OSC 99` stores `{ source: 'OSC 99', title, body }` after chunk assembly and sanitization.
+- `OSC 9;4` stores nothing while progress is active. On completion/error it generates `{ source: 'OSC 9;4', title, body }`, where `title` is a short summary such as `Progress complete`, `Progress error`, or `Progress warning`, and `body` contains the percent when available.
+- Standalone `BEL` stores `{ source: 'BEL', title: 'Terminal bell', body: null }`.
+
+Persistence rules:
+
+- Persist the latest `ActivityNotification` with the Session's alert state.
+- Persist only sanitized text and metadata, not raw escape sequences.
+- On restore, persisted notification detail should restore TODO detail, but must not create a fresh ring or re-cock the bell by itself.
 
 The workspace owns:
 
@@ -222,9 +250,13 @@ These transition rules apply to the visual track only. `OSC_NOTIF_BUSY` is not e
 | `OSC_NOTIF_BUSY` | terminal report errors progress and Session lacks attention | `ALERT_RINGING` | Create error `notification`, set `todo = true`, and ring. |
 | `OSC_NOTIF_BUSY` | terminal report errors progress and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
 | `OSC_NOTIF_BUSY` | Session destroyed | `IDLE` | Session teardown clears protocol state. |
+| `IDLE` | explicit progress completion report (`OSC 9;4;1;100`) and Session lacks attention | `ALERT_RINGING` | Create generated completion `notification`, set `todo = true`, and ring. |
+| `IDLE` | explicit progress completion report (`OSC 9;4;1;100`) and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
+| `IDLE` | explicit progress error report (`OSC 9;4;2`) and Session lacks attention | `ALERT_RINGING` | Create generated error `notification`, set `todo = true`, and ring. |
+| `IDLE` | explicit progress error report (`OSC 9;4;2`) and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
 | `ALERT_RINGING` | explicit attention boundary / dismiss / TODO clear | `IDLE` | Public status falls back to visual projection after protocol ring clears. |
 | any | direct notification (`OSC 9`, completed `OSC 99`, `OSC 777`, standalone `BEL`) and Session lacks attention | `ALERT_RINGING` | Create `notification`, set `todo = true`, and ring immediately. |
-| any | direct notification (`OSC 9`, completed `OSC 99`, `OSC 777`, standalone `BEL`) and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
+| any | direct notification (`OSC 9`, completed `OSC 99`, `OSC 777`, standalone `BEL`) and Session has attention | unchanged | User already sees it; suppress that notification only. Do not create TODO, and do not clear unrelated active progress. |
 
 `OSC_NOTIF_BUSY` never auto-rings because of silence. If a program starts progress and never sends completion/error, MouseTerm remains cocked until another terminal report completes/errors the progress cycle or the Session is destroyed.
 
@@ -238,6 +270,178 @@ These transition rules apply to the visual track only. `OSC_NOTIF_BUSY` is not e
 
 The implementation may later learn additional suppressions, but this spec only requires resize churn suppression today.
 
+## Notification protocols
+
+Protocol notifications and standalone terminal bells are explicit application requests for attention. They bypass the normal opt-in activity monitor: a Session may ring even when its alert toggle was disabled. They must not ring while the user is actively attending that Session.
+
+Active/in-progress progress sequences do not ring immediately. They "cock" the alarm bell — MouseTerm treats active progress as an explicit finite-work cycle and exposes `OSC_NOTIF_BUSY`. Explicit completion/error progress reports may ring immediately when the Session lacks attention.
+
+The OSC sequence registry, parser placement, and stripping behavior live in `docs/specs/OSC.md`. This section defines per-protocol semantics for the five supported notification sources.
+
+| Protocol | Shape | Fields | Notes |
+|---|---|---|---|
+| `BEL` | `BEL` outside an OSC sequence | none | Generic terminal-bell notification. |
+| `OSC 9` | `OSC 9 ; [message] ST` | `message` | iTerm2's legacy notification form. No title/body split. |
+| `OSC 9;4` | `OSC 9 ; 4 ; [state] ; [progress] ST` or `OSC 9 ; 4 ST` | progress state/progress | Progress only. Cocks the bell and may later ring on completion/error. |
+| `OSC 99` | `OSC 99 ; [metadata] ; [payload] ST` | metadata keys plus payload | kitty's rich notification protocol. Chunked and extensible. |
+| `OSC 777` | `OSC 777 ; notify ; [title] ; [body] ST` | `title`, `body` | rxvt/WezTerm notification form. Only `notify` is supported. |
+
+### Standalone BEL
+
+A `BEL` byte outside an OSC sequence creates one generated notification:
+
+- `source: 'BEL'`
+- `title: 'Terminal bell'`
+- `body: null`
+
+Standalone `BEL` is for compatibility with tools that choose a plain terminal-bell notification channel. It strips the bell byte from visible terminal output and rings through the same protocol path as OSC notifications, subject to the shared user-attention check.
+
+If a parse batch contains both standalone `BEL` and a richer OSC notification/progress event, MouseTerm keeps the richer OSC event and drops the generic `BEL` notification detail so `iterm2_with_bell`-style tools cannot overwrite useful TODO preview text.
+
+### OSC 9
+
+`OSC 9 ; [message] ST` creates one notification:
+
+- `source: 'OSC 9'`
+- `title: null`
+- `body: [message]`
+
+The message is plain text. There is no formal title, subtitle, urgency, app id, or notification id.
+
+OSC 9 also feeds the title-candidate channel for header/door label derivation; that side effect is specified in `docs/specs/terminal-state.md` and does not affect alert behavior.
+
+### OSC 9;4 progress
+
+If the first OSC 9 parameter is `4`, the sequence belongs to the progress protocol:
+
+- `OSC 9 ; 4 ST` clears progress
+- `OSC 9 ; 4 ; 0 ST` clears progress
+- `OSC 9 ; 4 ; 1 ; [0-100] ST` sets normal progress
+- `OSC 9 ; 4 ; 2 ; [0-100?] ST` sets error progress
+- `OSC 9 ; 4 ; 3 ST` sets indeterminate progress
+- `OSC 9 ; 4 ; 4 ; [0-100] ST` sets warning progress
+
+The official fields are only:
+
+- `state`
+- optional `progress` percent
+
+There is no title, body, subtitle, notification id, application name, urgency, or message text in `OSC 9;4`.
+
+MouseTerm behavior:
+
+- Non-clear states create or update an internal protocol progress cycle.
+- Active progress cocks the bell by setting `protocolStatus = OSC_NOTIF_BUSY`. Public `status` projects this as `OSC_NOTIF_BUSY`, which looks the same as `BUSY` but is independent of the timer-based activity monitor.
+- `state = 1` with `progress < 100` is normal active progress. Do not ring.
+- `state = 1` with `progress = 100` is a completion report. Ring immediately as a completed progress cycle only if the Session lacks attention.
+- `state = 2` is an error signal. Ring immediately and attach a generated progress notification to the TODO only if the Session lacks attention.
+- `state = 3` is indeterminate active progress. Do not ring until cleared or replaced by an error/completion signal.
+- `state = 4` is warning active progress. Do not ring immediately; remember the warning internally, and if the cycle later rings MouseTerm preserves that warning in the generated progress notification.
+- `state = 0` or abbreviated `OSC 9 ; 4 ST` clears progress. If it clears an active protocol progress cycle, ring as completion. If there was no active protocol progress cycle, ignore it.
+- Invalid states, missing required progress values for states `1` and `4`, and out-of-range progress values are ignored. Clamp only for display if an implementation has already accepted the sequence.
+
+Progress completion creates a generated notification, but does not invent copy beyond the normalized progress summary. The TODO preview should say things like `Progress complete`, `Progress error`, `Progress warning`, or `Progress 75%` rather than replacing the TODO pill text.
+
+### OSC 777
+
+`OSC 777 ; notify ; [title] ; [body] ST` creates one notification:
+
+- `source: 'OSC 777'`
+- `title: [title]`
+- `body: [body]`
+
+Only the `notify` subcommand is supported. The format has no escaping for semicolons. For compatibility, parse the title as the field after `notify` and treat the rest of the sequence after the next semicolon as the body, preserving additional semicolons in the body. A title containing a semicolon cannot be represented portably.
+
+### OSC 99
+
+`OSC 99 ; [metadata] ; [payload] ST` uses colon-delimited metadata where each key is a single ASCII letter. Unknown keys are ignored. Unknown payload types are ignored unless this spec adds them later.
+
+Initial supported metadata keys:
+
+| Key | Meaning | Initial MouseTerm behavior |
+|---|---|---|
+| `i` | notification identifier | Used to assemble chunks and coalesce updates for the same notification. |
+| `d` | done flag, `0` or `1`, default `1` | `d=0` stores a partial notification without ringing. `d=1` completes and rings. |
+| `e` | payload encoding, `0` plain or `1` base64 | Decode RFC 4648 base64 when `e=1`; reject invalid base64. |
+| `p` | payload type, default `title` | Support `title` and `body`; handle management/query payloads separately. |
+| `f` | base64 application name | Decode only if needed for protocol validity; do not store or render in this phase. |
+| `t` | base64 notification type | Ignore in this phase. |
+| `u` | urgency, `0`, `1`, or `2` | Ignore in this phase; urgency does not change alert mechanics. |
+| `o` | occasion, `always`, `unfocused`, `invisible` | Parse but ignore for MouseTerm ringing; explicit OSC notifications always ring. |
+| `w` | auto-close milliseconds | Parse but ignore for TODO lifetime. TODO clears only by MouseTerm's normal TODO clearing rules. |
+
+Payload types:
+
+| `p` value | Behavior |
+|---|---|
+| `title` | Append payload to the pending notification title. |
+| `body` | Append payload to the pending notification body. |
+| `?` | Support query. Does not ring. |
+| `close` | Close/update management. Does not ring. |
+| `alive` | Liveness query. Does not ring. |
+| `icon` | Ignore payload content in this phase. Does not ring by itself. |
+| `buttons` | Ignore payload content in this phase. Does not ring by itself. |
+
+Official kitty OSC 99 does not define a `subtitle` payload. If real-world agent tools emit `p=subtitle`, ignore it unless a later spec chooses to render a third user-facing text field.
+
+For a completed OSC 99 notification:
+
+- If title and body are both empty after sanitization, ignore it.
+- If there is a body but no title, the body is the primary preview line.
+- If there is a title but no body, render title only.
+- If the same `i` arrives again after completion, treat it as an update to the same notification detail and ring again.
+- If `i` is omitted, each completed notification is unique.
+
+Support query:
+
+- `OSC 99 ; i=[id] : p=? ; ST` must be answered with MouseTerm's actual support.
+- Initial minimal response advertises only `title` and `body`, for example: `OSC 99 ; i=[id] : p=? ; o=always:p=title,body ST`.
+- Preserve a valid query id in the response metadata. If the id is missing or cannot be safely echoed in OSC 99 metadata, omit `i=[id]` and respond with `OSC 99 ; p=? ; o=always:p=title,body ST`.
+- Do not advertise click reports, close reports, urgency, sounds, icons, buttons, or auto-expiry unless implemented end-to-end.
+
+## Notification text handling
+
+Terminal notifications are untrusted terminal output. Treat all text as plain text.
+
+Input normalization:
+
+- Decode UTF-8 strictly enough to avoid replacement-character floods.
+- Strip C0/C1 control characters after protocol parsing.
+- Collapse CR/LF/TAB and other controls to spaces.
+- Trim leading/trailing whitespace.
+- Do not interpret ANSI, OSC, HTML, Markdown, URLs, shell paths, or emoji shortcodes as markup.
+
+Protocol-defined limits:
+
+- OSC 9;4 progress carries only a numeric state and optional numeric percent. There is no user-facing text payload.
+- OSC 99 defines a payload chunk limit of 2048 bytes before base64 or 4096 bytes after base64. It permits chunking title/body multiple times, while allowing terminals to impose sensible denial-of-service limits.
+- OSC 9 and OSC 777 do not define formal text length limits in the referenced terminal docs.
+
+MouseTerm-imposed limits:
+
+- Store at most 256 Unicode grapheme clusters for `title`.
+- Store at most 4096 grapheme clusters for `body`.
+- Parser memory for incomplete OSC 99 chunks is capped per Session. Drop the oldest incomplete chunks when the cap is exceeded.
+- Expire incomplete OSC 99 chunks after 60 seconds if no `d=1` completion arrives.
+
+Expected UI copy length:
+
+- Titles are expected to be one short line, usually under 80 characters.
+- Bodies are expected to be a few short lines at most. In MouseTerm chrome, show a compact preview and make the full stored body available in a popover/dialog.
+
+## Notification security
+
+Any remote process can emit these sequences over SSH. The feature is useful because it works over SSH, but the UI must be robust against hostile text.
+
+Requirements:
+
+- Sanitize all text before storing or rendering.
+- Cap stored text and incomplete parser state.
+- Never execute commands, open URLs, copy to clipboard, read files, or focus outside MouseTerm from these sequences.
+- Do not render custom icons or buttons in this phase.
+- Do not let notification text alter accessible labels beyond plain-text names.
+- Do not allow repeated notifications to allocate unbounded history. Store only the latest detail, not an infinite list.
+
 ## Alert trigger
 
 Visual alert logic is driven by transitions in `visualStatus`. Protocol alert logic is driven by transitions in `protocolStatus`. The public `status` projection reflects whichever track currently has the strongest user-facing claim.
@@ -250,7 +454,7 @@ Visual alert logic is driven by transitions in `visualStatus`. Protocol alert lo
 
 ### Protocol override
 
-Supported terminal notification reports from `docs/specs/iTerm2.md` may create a protocol ring. Supported `OSC 9;4` progress sequences set `protocolStatus = OSC_NOTIF_BUSY` and may later promote to `protocolStatus = ALERT_RINGING`. Protocol rings:
+Supported terminal notification reports (see [Notification protocols](#notification-protocols)) may create a protocol ring. Supported `OSC 9;4` progress sequences set `protocolStatus = OSC_NOTIF_BUSY` and may later promote to `protocolStatus = ALERT_RINGING`. Protocol rings:
 
 - force public `status = ALERT_RINGING` even when the Session's activity monitor is disabled
 - obey attention suppression because the user may already be typing into or reading that Session
@@ -258,12 +462,22 @@ Supported terminal notification reports from `docs/specs/iTerm2.md` may create a
 - do not enable or disable the activity monitor
 - return to `ALERT_DISABLED` after dismissal if no activity monitor was enabled before the protocol ring
 
+Implementation surface inside `AlertManager`:
+
+- A protocol-ring flag or source field independent of `ActivityMonitor`.
+- `OSC 9;4` progress is tracked internally in `AlertManager`, not in public `ActivityState`.
+- `getState(id).status` returns `ALERT_RINGING` while the protocol ring is active.
+- `getState(id).status` returns `OSC_NOTIF_BUSY` while internal protocol progress is active and no stronger state is present.
+- Dismiss/attend clears the protocol ring; status falls back to the visual track or `ALERT_DISABLED` if no `ActivityMonitor` exists.
+- Completing or erroring a protocol progress cycle creates an `ActivityNotification` and promotes it into a protocol ring only if the Session lacks attention.
+- Methods such as `notifyFromProtocol(id, notification)` and `updateProtocolProgress(id, state, percent)` are exposed through `PlatformAdapter` / VS Code messages.
+
 ### Ringing does not start when any of these are true
 
 - the Session already has attention at the moment it would otherwise enter `ALERT_RINGING`
 - the Session is merely re-rendered or reattached while already `ALERT_RINGING`
 - the only recent output was resize noise already ignored by the completion detector
-- the visual alert track is disabled (`visualStatus === 'ALERT_DISABLED'`)
+- for visual/activity-monitor rings only: the visual alert track is disabled (`visualStatus === 'ALERT_DISABLED'`)
 
 This "fresh transition into `ALERT_RINGING` only" rule is critical. It prevents duplicate alerts on remount, theme change, or Pane <-> Door movement.
 
@@ -280,7 +494,7 @@ For activity-monitor rings, the Session leaves `ALERT_RINGING` and returns to `N
 
 All attention-based dismissals (the first three above) set `todo = true` if it is not already set. This prevents phantom dismissals where the alert vanishes without a trace. Once the TODO is visible, the user can clear it explicitly from the pill/dialog or by typing `Enter` as passthrough input into that Session's shell (i.e., the keystroke is forwarded to the PTY). The command-mode `Enter` that *switches into* passthrough does not clear the TODO. Synthetic terminal reports (focus events, cursor-position responses) also do not count as user input for clearing.
 
-For protocol rings from `docs/specs/iTerm2.md`, clearing the protocol ring sets `protocolStatus = IDLE` and returns public `status` to the projected visual-track state. If no visual activity monitor was enabled before the protocol ring, the Session returns to `ALERT_DISABLED`.
+For protocol rings (see [Notification protocols](#notification-protocols)), clearing the protocol ring sets `protocolStatus = IDLE` and returns public `status` to the projected visual-track state. If no visual activity monitor was enabled before the protocol ring, the Session returns to `ALERT_DISABLED`.
 
 The visual track leaves `ALERT_RINGING` and returns to `ALERT_DISABLED` when:
 
@@ -294,7 +508,7 @@ The Session's alert state is cleared entirely when:
 
 If more output arrives later and the Session makes a fresh transition back into `ALERT_RINGING`, the alert rings again.
 
-Marking a Session as TODO resets an activity-monitor alert to `NOTHING_TO_SHOW` and sets `todo = true`, but it does **not** disable future alerts. `todo` and the alert toggle are separate concerns. Protocol rings preserve the same TODO behavior, with return-state details defined in `docs/specs/iTerm2.md`.
+Marking a Session as TODO resets an activity-monitor alert to `NOTHING_TO_SHOW` and sets `todo = true`, but it does **not** disable future alerts. `todo` and the alert toggle are separate concerns. Protocol rings preserve the same TODO behavior; clearing TODO clears `notification` unless the user explicitly chooses a future "keep details" action.
 
 Disabling alerts disposes the visual activity monitor and returns `visualStatus` to `ALERT_DISABLED`. Public `status` returns to `ALERT_DISABLED` only when `protocolStatus === 'IDLE'`.
 
@@ -316,6 +530,7 @@ TODO pill:
 - clicking the TODO pill clears it
 - when TODO clears, the pill briefly morphs to a `✓` glyph in the success color (~500 ms) before unmounting — this marks the moment of completion so the pill never vanishes silently
 - no empty placeholder when off
+- the visible pill remains `TODO`. It does not resize to arbitrary notification text, and does not adopt protocol-supplied title/body strings. It may show a small dot treatment when notification detail is present, as long as the pill remains fixed-width enough for narrow headers.
 
 Alert button:
 
@@ -347,6 +562,30 @@ Interaction (`dismissOrToggleAlert` state machine):
 - tooltip includes "Right-click for options" hint
 
 The alert control has higher layout priority than split or zoom controls. Long titles must truncate before the bell disappears.
+
+### Notification preview and detail
+
+Protocol notification detail appears in a preview surface anchored below the TODO pill or alert bell:
+
+- Shown on TODO hover/focus.
+- Shown when the selected Pane has a TODO with notification detail and there is enough space.
+- Shown above a Door on hover/focus without changing Door click behavior.
+- Click/`Enter` on a Door remains reattach-and-attend; no Door-only menus.
+
+Preview content:
+
+- Primary line: `title` if present, otherwise the first body excerpt.
+- Body: clamp to 3 lines in the hover preview.
+- For generated `OSC 9;4` notifications, title/body already contain the progress summary; no separate progress widget is rendered.
+- Footer metadata: protocol source (`OSC 9`, `OSC 9;4`, `OSC 99`, `OSC 777`, `BEL`).
+
+A full detail dialog/popover may be opened from the preview or the existing alert context menu:
+
+- Text wraps and can scroll.
+- No raw escape sequence is shown by default.
+- Focus traps and `Escape` behavior follow [Accessibility and motion](#accessibility-and-motion).
+
+Recommended decision: do not replace TODO text with notification text. The header and Door need fixed, scannable indicators across many Sessions. Replacing `TODO` with unbounded remote-controlled text creates overflow, localization, spoofing, and attention-noise problems. A hover/selected expansion gives the notification context without destabilizing the layout.
 
 ### Door
 
@@ -457,7 +696,57 @@ Consequences:
 - User never presses `Enter` into the terminal → TODO persists.
 - User later notices the TODO pill and clicks it to clear it.
 
+### OSC 9 rings with alerts disabled
+
+- Session starts with `status = ALERT_DISABLED`, `todo = false`.
+- PTY emits `OSC 9 ; Build finished ST`.
+- MouseTerm stores body `Build finished`, sets `todo = true`, and reports `ALERT_RINGING`.
+- User clicks into the Pane.
+- Ring clears. Because the activity monitor was disabled, status returns to `ALERT_DISABLED`; TODO remains until explicitly cleared or passthrough `Enter` is sent.
+
+### OSC 777 preserves title and body
+
+- PTY emits `OSC 777 ; notify ; Tests ; 341 passed ST`.
+- Preview primary line is `Tests`.
+- Preview body is `341 passed`.
+- The TODO pill remains `TODO`.
+
+### OSC 99 chunked title/body
+
+- PTY emits `OSC 99 ; i=build-1:d=0 ; Build complete ST`.
+- No ring yet.
+- PTY emits `OSC 99 ; i=build-1:p=body:d=1 ; All tests passed ST`.
+- MouseTerm combines title and body, then rings once.
+
+### OSC 9 progress cocks the bell
+
+- PTY emits `OSC 9 ; 4 ; 1 ; 50 ST`.
+- MouseTerm stores progress `normal, 50%`.
+- Public `status` becomes `OSC_NOTIF_BUSY`; the bell looks like `BUSY` without creating a TODO.
+- PTY emits `OSC 9 ; 4 ; 0 ST` while the Session lacks attention.
+- MouseTerm rings, sets `todo = true`, and the TODO preview says progress completed.
+
+### OSC 9 progress error rings immediately
+
+- PTY emits `OSC 9 ; 4 ; 2 ; 75 ST` while the Session lacks attention.
+- MouseTerm stores progress `error, 75%`.
+- MouseTerm rings immediately and attaches error progress detail to the TODO.
+
+### OSC notification while typing does not ring
+
+- User is typing into a Session in passthrough mode, so the Session has attention.
+- PTY emits `OSC 9 ; Build finished ST`.
+- MouseTerm does not ring and does not create a TODO because the user is already attending that Session.
+
+### Restore does not replay old notifications
+
+- A Session receives an OSC notification and saves state with TODO detail.
+- The app reloads and replays buffered output containing the original OSC.
+- The TODO detail is restored from persisted state, but no fresh ring is emitted from replay.
+
 ## Verification checklist
+
+Visual track:
 
 - Alert only rings on a fresh transition into `ALERT_RINGING`
 - Single quick responses stay in `NOTHING_TO_SHOW`
@@ -469,3 +758,34 @@ Consequences:
 - very long titles do not push bell or TODO indicators out of bounds
 - ringing is still understandable with reduced motion enabled
 - multiple simultaneous ringing Sessions remain independently dismissible
+
+Notification protocols:
+
+- `OSC 9;message` rings and stores `message`.
+- `OSC 9;4;1;50` sets `OSC_NOTIF_BUSY` and stores `normal, 50%` internally.
+- `OSC 9;4;3` sets `OSC_NOTIF_BUSY` and stores indeterminate progress internally.
+- `OSC 9;4;4;25` sets `OSC_NOTIF_BUSY` and stores warning progress internally.
+- `OSC 9;4;2` rings immediately with indeterminate error detail.
+- `OSC 9;4;0` rings as completion only if there was an active progress cycle.
+- `OSC 9;4;1;100` rings immediately as an explicit completion report.
+- Standalone `BEL` rings and stores generated terminal-bell detail.
+- `OSC 777;notify;title;body` rings and stores title/body.
+- Unsupported `OSC 777` subcommands are ignored.
+- OSC 99 `d=0` chunks do not ring before completion.
+- OSC 99 `d=1` completion rings once with combined title/body.
+- OSC 99 `p=?` is answered and does not ring; `p=close`, `p=alive`, `p=icon`, and `p=buttons` do not ring by themselves.
+- Extra standalone `BEL` in the same parse batch as a richer OSC event does not replace the richer notification detail.
+- Protocol notifications ring with alert disabled.
+- Protocol notifications do not ring when the Session has attention.
+- Dismissal returns an alert-disabled Session to `ALERT_DISABLED`.
+- Dismissal returns an alert-enabled Session to its monitor-backed state.
+- TODO pill text remains stable under very long notification text.
+- Hover/focus preview wraps long text and does not overflow narrow headers or Doors.
+- Replay/restore does not re-fire notification side effects.
+
+## References
+
+- iTerm2 proprietary escape codes (OSC 9, OSC 9;4): https://iterm2.com/documentation-escape-codes.html
+- kitty desktop notifications (OSC 99): https://sw.kovidgoyal.net/kitty/desktop-notifications/
+- WezTerm escape sequences and notification handling (OSC 9, OSC 777): https://wezterm.org/escape-sequences.html, https://wezterm.org/config/lua/config/notification_handling.html
+- foot control sequences (OSC 9, OSC 99, OSC 777): https://manpages.ubuntu.com/manpages/resolute/man7/foot-ctlseqs.7.html

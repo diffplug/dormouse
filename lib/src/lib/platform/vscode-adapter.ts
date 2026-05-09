@@ -1,5 +1,12 @@
 import type { AlertStateDetail, PlatformAdapter, PtyInfo } from './types';
 import { setDefaultShellOpts } from '../shell-defaults';
+import {
+  collectTerminalSemanticEvents,
+  TerminalProtocolParser,
+} from '../terminal-protocol';
+import {
+  applyTerminalSemanticEventsByPtyId,
+} from '../terminal-state-store';
 
 export class VSCodeAdapter implements PlatformAdapter {
   private vscode: ReturnType<typeof acquireVsCodeApi>;
@@ -41,9 +48,18 @@ export class VSCodeAdapter implements PlatformAdapter {
           handler({ ptys: msg.ptys });
         }
       } else if (msg.type === 'pty:replay') {
+        // Replay arrives as raw buffered output in a single chunk. Live pty:data
+        // is pre-parsed by the extension host, so we only need a one-shot parser
+        // here to reconstruct semantic state from the buffered bytes and strip
+        // OSCs before xterm sees them. See docs/specs/vscode.md.
+        const parser = new TerminalProtocolParser();
+        const parsed = parser.process(msg.data);
+        applyTerminalSemanticEventsByPtyId(msg.id, collectTerminalSemanticEvents(parsed.events));
         for (const handler of this.replayHandlers) {
-          handler({ id: msg.id, data: msg.data });
+          handler({ id: msg.id, data: parsed.visibleData });
         }
+      } else if (msg.type === 'terminal:semanticEvents') {
+        applyTerminalSemanticEventsByPtyId(msg.id, msg.events ?? []);
       } else if (msg.type === 'mouseterm:flushSessionSave') {
         for (const handler of this.flushRequestHandlers) {
           handler({ requestId: msg.requestId });

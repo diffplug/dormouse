@@ -4,9 +4,13 @@ import type { AlertStateDetail, PlatformAdapter, PtyInfo } from "mouseterm-lib/l
 import { AlertManager, type SessionStatus } from "mouseterm-lib/lib/alert-manager";
 import {
   applyTerminalProtocolEvents,
+  collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
 } from "mouseterm-lib/lib/terminal-protocol";
+import {
+  applyTerminalSemanticEventsByPtyId,
+} from "mouseterm-lib/lib/terminal-state-store";
 
 function invoke(cmd: string, args?: Record<string, unknown>): void {
   rawInvoke(cmd, args).catch((err) =>
@@ -54,6 +58,7 @@ export class TauriAdapter implements PlatformAdapter {
         const { id, data } = event.payload;
         const parsed = this.getProtocolParser(id).process(data);
         applyTerminalProtocolEvents(this.alertManager, id, parsed.events);
+        applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
         for (const response of collectTerminalProtocolResponses(parsed.events)) {
           invoke("pty_write", { id, data: response });
         }
@@ -69,6 +74,7 @@ export class TauriAdapter implements PlatformAdapter {
     this.unlistenFns.push(
       await listen<{ id: string; exitCode: number }>("pty:exit", (event) => {
         this.alertManager.onExit(event.payload.id);
+        this.protocolParsers.delete(event.payload.id);
         for (const handler of this.exitHandlers) {
           handler(event.payload);
         }
@@ -85,8 +91,14 @@ export class TauriAdapter implements PlatformAdapter {
 
     this.unlistenFns.push(
       await listen<{ id: string; data: string }>("pty:replay", (event) => {
+        // Replay arrives as raw buffered output. Run it through the protocol
+        // parser so semantic OSCs (CWD, prompt, title) repopulate pane state
+        // and are stripped before xterm sees them, mirroring live pty:data.
+        const { id, data } = event.payload;
+        const parsed = this.getProtocolParser(id).process(data);
+        applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
         for (const handler of this.replayHandlers) {
-          handler(event.payload);
+          handler({ id, data: parsed.visibleData });
         }
       }),
     );

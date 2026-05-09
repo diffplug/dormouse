@@ -3,9 +3,11 @@ import * as ptyManager from './pty-manager';
 import { AlertManager, type SessionStatus } from '../../lib/src/lib/alert-manager';
 import {
   applyTerminalProtocolEvents,
+  collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
 } from '../../lib/src/lib/terminal-protocol';
+import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { PersistedSession } from '../../lib/src/lib/session-types';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
 import { log } from './log';
@@ -31,10 +33,17 @@ const alertProtocolParsers = new Map<string, TerminalProtocolParser>();
 // the protocol parser once per chunk regardless of webview count.
 type ProcessedDataListener = (id: string, visibleData: string) => void;
 const processedDataListeners = new Set<ProcessedDataListener>();
+type SemanticEventsListener = (id: string, events: TerminalSemanticEvent[]) => void;
+const semanticEventsListeners = new Set<SemanticEventsListener>();
 
 function onProcessedPtyData(listener: ProcessedDataListener): () => void {
   processedDataListeners.add(listener);
   return () => { processedDataListeners.delete(listener); };
+}
+
+function onTerminalSemanticEvents(listener: SemanticEventsListener): () => void {
+  semanticEventsListeners.add(listener);
+  return () => { semanticEventsListeners.delete(listener); };
 }
 
 // Log all alert state transitions (including timer-driven ones)
@@ -49,6 +58,10 @@ ptyManager.addCallbacks({
     const before = alertManager.getState(id).status;
     const parsed = getAlertProtocolParser(id).process(data);
     applyTerminalProtocolEvents(alertManager, id, parsed.events);
+    const semanticEvents = collectTerminalSemanticEvents(parsed.events);
+    if (semanticEvents.length > 0) {
+      for (const listener of semanticEventsListeners) listener(id, semanticEvents);
+    }
     for (const response of collectTerminalProtocolResponses(parsed.events)) {
       ptyManager.write(id, response);
     }
@@ -160,6 +173,10 @@ export function attachRouter(
       if (!ownedPtyIds.has(id)) return;
       webview.postMessage({ type: 'pty:data', id, data: visibleData } satisfies ExtensionMessage);
     });
+    const removeSemanticListener = onTerminalSemanticEvents((id, events) => {
+      if (!ownedPtyIds.has(id)) return;
+      webview.postMessage({ type: 'terminal:semanticEvents', id, events } satisfies ExtensionMessage);
+    });
     const removePtyCallbacks = ptyManager.addCallbacks({
       onData() {},
       onExit(id: string, exitCode: number) {
@@ -182,6 +199,7 @@ export function attachRouter(
 
     return () => {
       removeProcessedListener();
+      removeSemanticListener();
       removePtyCallbacks();
       removeAlertListener();
     };

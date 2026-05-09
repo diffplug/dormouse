@@ -63,18 +63,23 @@ function resumeLiveSessions(platform: PlatformAdapter): Promise<ReconnectResult 
         return;
       }
 
+      const savedState = platform.getState();
+      const savedTitles = getSavedPaneTitles(savedState, ptyList.map((pty) => pty.id));
       const ids: string[] = [];
       for (const pty of ptyList) {
-        resumeTerminal(pty.id, replayBuffer.get(pty.id) ?? null, {
+        const resumeInfo: { alive: boolean; exitCode?: number; title?: string } = {
           alive: pty.alive,
           exitCode: pty.exitCode,
-        });
+        };
+        const savedTitle = savedTitles.get(pty.id);
+        if (savedTitle !== undefined) resumeInfo.title = savedTitle;
+        resumeTerminal(pty.id, replayBuffer.get(pty.id) ?? null, resumeInfo);
         ids.push(pty.id);
       }
       // Pull saved visible/doors state so a resume (e.g. after panel
       // close/reopen) restores splits and doors instead of stacking every live
       // PTY into one tab group.
-      const savedPlan = getSavedResumePlan(platform.getState(), ids);
+      const savedPlan = getSavedResumePlan(savedState, ids);
       if (savedPlan) {
         resolve(savedPlan);
         return;
@@ -87,6 +92,19 @@ function resumeLiveSessions(platform: PlatformAdapter): Promise<ReconnectResult 
     platform.onPtyReplay(handleReplay);
     platform.requestInit();
   });
+}
+
+function getSavedPaneTitles(savedState: unknown, liveIds: string[]): Map<string, string> {
+  const saved = readPersistedSession(savedState);
+  if (!saved || !Array.isArray(saved.panes)) return new Map();
+
+  const liveSet = new Set(liveIds);
+  const result = new Map<string, string>();
+  for (const pane of saved.panes) {
+    if (!liveSet.has(pane.id)) continue;
+    result.set(pane.id, pane.title);
+  }
+  return result;
 }
 
 function getSavedResumePlan(savedState: unknown, liveIds: string[]): ReconnectResult | null {

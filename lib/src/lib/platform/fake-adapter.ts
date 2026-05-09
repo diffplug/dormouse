@@ -2,9 +2,13 @@ import type { AlertStateDetail, PlatformAdapter, PtyInfo } from './types';
 import { AlertManager, type SessionStatus } from '../alert-manager';
 import {
   applyTerminalProtocolEvents,
+  collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
 } from '../terminal-protocol';
+import {
+  applyTerminalSemanticEventsByPtyId,
+} from '../terminal-state-store';
 
 export interface FakeScenario {
   name: string;
@@ -344,6 +348,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   private emitPtyData(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
     const parsed = this.getProtocolParser(id).process(data);
     applyTerminalProtocolEvents(this.alertManager, id, parsed.events);
+    applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
     const inputHandler = this.inputHandlers.get(id);
     for (const response of collectTerminalProtocolResponses(parsed.events)) {
       inputHandler?.(response);

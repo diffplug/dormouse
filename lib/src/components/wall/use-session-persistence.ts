@@ -3,6 +3,7 @@ import type { DockviewApi } from 'dockview-react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
 import { saveSession } from '../../lib/session-save';
+import { UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
 import type { DooredItem, WallSelectionKind } from './wall-types';
 
 export function useSessionPersistence({
@@ -26,7 +27,7 @@ export function useSessionPersistence({
     const api = apiRef.current;
     if (!api) return Promise.resolve();
 
-    const panes = api.panels.map((p) => ({ id: p.id, title: p.title ?? '<unnamed>' }));
+    const panes = api.panels.map((p) => ({ id: p.id, title: p.title ?? UNNAMED_PANEL_TITLE }));
     return saveSession(getPlatform(), api.toJSON(), panes, doorsRef.current ?? []);
   }, [apiRef, doorsRef]);
 

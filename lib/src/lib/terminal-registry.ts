@@ -2,6 +2,16 @@ export type { SessionStatus } from './activity-monitor';
 export type { TodoState, AlertButtonActionResult } from './alert-manager';
 export type { ActivityState } from './session-activity-store';
 export type { TerminalEntry, TerminalOverlayDims } from './terminal-store';
+export type {
+  CommandRun,
+  CwdState,
+  DerivedHeader,
+  ShellActivity,
+  TerminalPaneState,
+  TerminalSemanticEvent,
+  TerminalTitle,
+  TerminalTitleCandidates,
+} from './terminal-state';
 
 export {
   clearPrimedActivity,
@@ -42,3 +52,45 @@ export {
 } from './terminal-lifecycle';
 
 export { setDefaultShellOpts, getDefaultShellOpts } from './shell-defaults';
+
+export {
+  applyTerminalSemanticEvents,
+  applyTerminalSemanticEventsByPtyId,
+  ensureTerminalPaneState,
+  fillTerminalProcessCwd,
+  fillTerminalProcessCwdByPtyId,
+  getTerminalPaneState,
+  getTerminalPaneStateSnapshot,
+  removeTerminalPaneState,
+  resetTerminalPaneState,
+  seedTerminalManualCwd,
+  setTerminalUserTitle,
+  subscribeToTerminalPaneState,
+} from './terminal-state-store';
+export type { SetTerminalUserTitleResult } from './terminal-state-store';
+
+export {
+  cwdDisplay,
+  cwdFromManualPath,
+  cwdFromOsc1337,
+  cwdFromOsc633,
+  cwdFromOsc7,
+  cwdFromOsc9_9,
+  cwdFromProcessPath,
+  cwdIdentity,
+  buildAppTitleResolver,
+  DEFAULT_COMMAND_TITLE,
+  DEFAULT_IDLE_TITLE,
+  deriveFallbackCommandTitle,
+  deriveHeader,
+  groupTerminalPanes,
+  notificationDisplayTitle,
+  reduceTerminalState,
+  resolveDisplayPrimary,
+  shortestUniqueCwdLabels,
+  summarizeCommandLine,
+  terminalTitleFromNotification,
+  titleCandidatesForDisplay,
+  titleSourceLabel,
+  UNNAMED_PANEL_TITLE,
+} from './terminal-state';

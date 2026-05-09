@@ -6,7 +6,7 @@ import type {
   DockviewWillDropEvent,
   SerializedDockview,
 } from 'dockview-react';
-import { getDefaultShellOpts, setPendingShellOpts, swapTerminals } from '../../lib/terminal-registry';
+import { getDefaultShellOpts, setPendingShellOpts, swapTerminals, UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
 import { prefersReducedMotion } from '../../lib/ui-geometry';
 import type { DooredItem, WallMode, WallSelectionKind, SpawnDirection } from './wall-types';
 import { pickSplitDirection, swapPanelTitles } from './dockview-helpers';
@@ -76,7 +76,7 @@ export function useDockviewReady({
         id,
         component: 'terminal',
         tabComponent: 'terminal',
-        title: '<unnamed>',
+        title: UNNAMED_PANEL_TITLE,
         position: referencePanel ? { referencePanel: referencePanel.id, direction } : undefined,
       });
     };
@@ -152,7 +152,7 @@ export function useDockviewReady({
         const id = generatePaneId();
         primeDefaultShell(id);
         freshlySpawnedRef.current.set(id, 'top-left');
-        e.api.addPanel({ id, component: 'terminal', tabComponent: 'terminal', title: '<unnamed>' });
+        e.api.addPanel({ id, component: 'terminal', tabComponent: 'terminal', title: UNNAMED_PANEL_TITLE });
         if (selectedIdRef.current === null) {
           selectPane(id);
         }

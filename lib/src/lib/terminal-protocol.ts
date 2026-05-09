@@ -1,9 +1,20 @@
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
+import {
+  cwdFromOsc1337,
+  cwdFromOsc633,
+  cwdFromOsc7,
+  cwdFromOsc9_9,
+  terminalTitleFromNotification,
+  type CommandRunSource,
+  type TerminalSemanticEvent,
+  type TerminalTitle,
+} from './terminal-state';
 
 export type TerminalProtocolEvent =
   | { kind: 'notification'; notification: ActivityNotification }
   | { kind: 'progress'; progress: ProtocolProgressUpdate }
-  | { kind: 'response'; data: string };
+  | { kind: 'response'; data: string }
+  | { kind: 'semantic'; event: TerminalSemanticEvent };
 
 export interface TerminalProtocolAlertSink {
   notifyFromProtocol(id: string, notification: ActivityNotification): void;
@@ -88,14 +99,26 @@ export class TerminalProtocolParser {
   }
 
   private parseOsc(content: string): TerminalProtocolEvent[] | null {
+    if (content === '7' || content.startsWith('7;')) return parseOsc7(content);
     if (content === '9' || content.startsWith('9;')) return this.parseOsc9(content);
+    if (content === '133' || content.startsWith('133;')) return parseOsc133(content);
+    if (content === '633' || content.startsWith('633;')) return parseOsc633(content);
+    if (content === '1337' || content.startsWith('1337;')) return parseOsc1337(content);
+    if (content === '0' || content.startsWith('0;')) return parseOscTitle(content, 'osc0');
+    if (content === '2' || content.startsWith('2;')) return parseOscTitle(content, 'osc2');
     if (content === '99' || content.startsWith('99;')) return this.parseOsc99(content);
     if (content === '777' || content.startsWith('777;')) return this.parseOsc777(content);
+    if (isKnownUnsupportedIterm2Osc(content)) return [];
     return null;
   }
 
   private parseOsc9(content: string): TerminalProtocolEvent[] {
     if (!content.startsWith('9;')) return [];
+
+    if (content.startsWith('9;9;')) {
+      const cwd = cwdFromOsc9_9(content.slice('9;9;'.length));
+      return cwd ? [{ kind: 'semantic', event: { type: 'cwd', cwd } }] : [];
+    }
 
     if (content === '9;4' || content.startsWith('9;4;')) {
       const progress = parseOsc94(content);
@@ -208,6 +231,54 @@ export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]
   return events.flatMap((event) => (event.kind === 'response' ? [event.data] : []));
 }
 
+export function collectTerminalSemanticEvents(
+  events: TerminalProtocolEvent[],
+  options: { now?: () => number } = {},
+): TerminalSemanticEvent[] {
+  const semanticEvents: TerminalSemanticEvent[] = [];
+  const nextTimestamp = createOrderedEventTimestamp(options.now ?? Date.now);
+  for (const event of events) {
+    if (event.kind === 'semantic') {
+      semanticEvents.push(timestampSemanticEvent(event.event, nextTimestamp));
+      continue;
+    }
+    if (event.kind !== 'notification') continue;
+    const title = terminalTitleFromNotification(event.notification, nextTimestamp());
+    if (!title) continue;
+    semanticEvents.push({
+      type: 'title',
+      title,
+    });
+  }
+  return semanticEvents;
+}
+
+function createOrderedEventTimestamp(now: () => number): () => number {
+  let lastTimestamp = Number.NEGATIVE_INFINITY;
+  return () => {
+    const candidate = now();
+    const timestamp = candidate > lastTimestamp ? candidate : lastTimestamp + 0.001;
+    lastTimestamp = timestamp;
+    return timestamp;
+  };
+}
+
+function timestampSemanticEvent(
+  event: TerminalSemanticEvent,
+  nextTimestamp: () => number,
+): TerminalSemanticEvent {
+  switch (event.type) {
+    case 'cwd':
+      return { ...event, cwd: { ...event.cwd, updatedAt: nextTimestamp() } };
+    case 'commandStart':
+      return { ...event, startedAt: nextTimestamp() };
+    case 'title':
+      return { ...event, title: { ...event.title, updatedAt: nextTimestamp() } };
+    default:
+      return event;
+  }
+}
+
 function stripStandaloneBells(segment: string, events: TerminalProtocolEvent[]): string {
   const bellIndex = segment.indexOf('\x07');
   if (bellIndex === -1) return segment;
@@ -258,6 +329,112 @@ function findOscTerminator(text: string, from: number): { index: number; end: nu
   if (c1St !== -1 && (bestIndex === -1 || c1St < bestIndex)) { bestIndex = c1St; bestEndOffset = 1; }
   if (bestIndex === -1) return null;
   return { index: bestIndex, end: bestIndex + bestEndOffset };
+}
+
+function parseOsc7(content: string): TerminalProtocolEvent[] {
+  if (!content.startsWith('7;')) return [];
+  const cwd = cwdFromOsc7(content.slice(2));
+  return cwd ? [{ kind: 'semantic', event: { type: 'cwd', cwd } }] : [];
+}
+
+function parseOsc133(content: string): TerminalProtocolEvent[] {
+  const fields = content.split(';');
+  if (fields[0] !== '133') return [];
+  return parsePromptBoundary(fields, 'osc133_boundaries');
+}
+
+function parseOsc633(content: string): TerminalProtocolEvent[] {
+  const fields = content.split(';');
+  if (fields[0] !== '633') return [];
+  if (fields[1] === 'E') {
+    const prefix = '633;E;';
+    if (!content.startsWith(prefix)) return [];
+    // VS Code shell integration encodes the command as <command>[;<nonce>], with
+    // any literal `;` inside <command> escaped as `\x3b`. We split on the first
+    // unescaped `;` (taking only the command field) and then unescape. Emitters
+    // that send raw, unescaped semicolons will see their command truncated; this
+    // matches VS Code's contract rather than guessing a delimiter.
+    const rawCommand = content.slice(prefix.length).split(';', 1)[0] ?? '';
+    return [{ kind: 'semantic', event: { type: 'commandLine', commandLine: decodeOsc633Value(rawCommand) } }];
+  }
+  if (fields[1] === 'P') {
+    return parseOsc633Property(content.slice('633;P;'.length));
+  }
+  return parsePromptBoundary(fields, 'osc633_boundaries');
+}
+
+function parsePromptBoundary(fields: string[], commandStartSource: CommandRunSource): TerminalProtocolEvent[] {
+  switch (fields[1]) {
+    case 'A':
+      return [{ kind: 'semantic', event: { type: 'promptStart' } }];
+    case 'B':
+      return [{ kind: 'semantic', event: { type: 'promptEnd' } }];
+    case 'C':
+      return [commandStartEvent(commandStartSource)];
+    case 'D':
+      return [{ kind: 'semantic', event: { type: 'commandFinish', exitCode: parseExitCode(fields[2]) } }];
+    default:
+      return [];
+  }
+}
+
+function parseOsc633Property(rawProperties: string): TerminalProtocolEvent[] {
+  for (const property of rawProperties.split(';')) {
+    if (!property.startsWith('Cwd=')) continue;
+    const cwd = cwdFromOsc633(property.slice('Cwd='.length));
+    return cwd ? [{ kind: 'semantic', event: { type: 'cwd', cwd } }] : [];
+  }
+  return [];
+}
+
+function parseOsc1337(content: string): TerminalProtocolEvent[] {
+  const prefix = '1337;CurrentDir=';
+  if (!content.startsWith(prefix)) return [];
+  const cwd = cwdFromOsc1337(content.slice(prefix.length));
+  return cwd ? [{ kind: 'semantic', event: { type: 'cwd', cwd } }] : [];
+}
+
+function parseOscTitle(content: string, source: TerminalTitle['source']): TerminalProtocolEvent[] {
+  const prefix = source === 'osc0' ? '0;' : '2;';
+  if (!content.startsWith(prefix)) return [];
+  const titleText = sanitizeText(content.slice(prefix.length), TITLE_LIMIT);
+  if (!titleText) return [];
+  // updatedAt is set authoritatively by collectTerminalSemanticEvents in stream order.
+  return [{
+    kind: 'semantic',
+    event: {
+      type: 'title',
+      title: { title: titleText, source, updatedAt: 0 },
+    },
+  }];
+}
+
+function isKnownUnsupportedIterm2Osc(content: string): boolean {
+  // Security-sensitive iTerm2 compatibility OSCs are consumed rather than
+  // forwarded to xterm.js. In particular, OSC 52 is a clipboard-write channel.
+  return (
+    content === '50' ||
+    content.startsWith('50;') ||
+    content === '52' ||
+    content.startsWith('52;')
+  );
+}
+
+function commandStartEvent(source: CommandRunSource): TerminalProtocolEvent {
+  return { kind: 'semantic', event: { type: 'commandStart', source } };
+}
+
+function parseExitCode(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  const value = Number(raw);
+  return Number.isInteger(value) ? value : undefined;
+}
+
+function decodeOsc633Value(value: string): string {
+  return value.replace(/\\\\|\\x([0-9a-fA-F]{2})/g, (match, hex: string | undefined) => {
+    if (match === '\\\\') return '\\';
+    return String.fromCharCode(Number.parseInt(hex ?? '00', 16));
+  });
 }
 
 // OSC 9;4 state code → progress shape. Codes 1 and 4 require a percent

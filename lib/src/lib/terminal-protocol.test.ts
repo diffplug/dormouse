@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ITERM2_DEVICE_ATTRIBUTES_RESPONSE, TerminalProtocolParser } from './terminal-protocol';
+import { collectTerminalSemanticEvents, ITERM2_DEVICE_ATTRIBUTES_RESPONSE, TerminalProtocolParser } from './terminal-protocol';
+import { createTerminalPaneState, deriveHeader, reduceTerminalState, type TerminalSemanticEvent } from './terminal-state';
 
 describe('TerminalProtocolParser', () => {
   it('parses and strips standalone terminal bells', () => {
@@ -29,6 +30,12 @@ describe('TerminalProtocolParser', () => {
     expect(result.visibleData).toBe('beforeafter');
     expect(result.events).toEqual([
       { kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'Build finished' } },
+    ]);
+    expect(collectTerminalSemanticEvents(result.events)).toEqual([
+      {
+        type: 'title',
+        title: { title: 'Build finished', source: 'osc9', updatedAt: expect.any(Number) },
+      },
     ]);
   });
 
@@ -85,6 +92,12 @@ describe('TerminalProtocolParser', () => {
     expect(result.events).toEqual([
       { kind: 'notification', notification: { source: 'OSC 777', title: 'Title', body: 'one;two;three' } },
     ]);
+    expect(collectTerminalSemanticEvents(result.events)).toEqual([
+      {
+        type: 'title',
+        title: { title: 'Title', source: 'osc777', updatedAt: expect.any(Number) },
+      },
+    ]);
   });
 
   it('assembles OSC 99 title and body chunks', () => {
@@ -98,6 +111,12 @@ describe('TerminalProtocolParser', () => {
       {
         kind: 'notification',
         notification: { source: 'OSC 99', title: 'Build', body: 'Finished successfully' },
+      },
+    ]);
+    expect(collectTerminalSemanticEvents(result.events)).toEqual([
+      {
+        type: 'title',
+        title: { title: 'Build', source: 'osc99', updatedAt: expect.any(Number) },
       },
     ]);
   });
@@ -125,10 +144,162 @@ describe('TerminalProtocolParser', () => {
 
   it('passes unsupported OSC sequences through to xterm', () => {
     const parser = new TerminalProtocolParser();
-    const result = parser.process('\x1b]0;title\x07text');
+    const result = parser.process('\x1b]555;unknown\x07text');
 
-    expect(result.visibleData).toBe('\x1b]0;title\x07text');
+    expect(result.visibleData).toBe('\x1b]555;unknown\x07text');
     expect(result.events).toEqual([]);
+  });
+
+  it('strips known unsupported iTerm2 and clipboard OSC sequences', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('a\x1b]52;c;SGVsbG8=\x07b\x1b]50;Monaco\x07c');
+
+    expect(result.visibleData).toBe('abc');
+    expect(result.events).toEqual([]);
+  });
+
+  it('parses and strips CWD OSC sequences into semantic events', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('a\x1b]7;file://prod-box/home/me/project\x1b\\b\x1b]9;9;C:\\repo\x07c');
+
+    expect(result.visibleData).toBe('abc');
+    expect(result.events).toEqual([
+      {
+        kind: 'semantic',
+        event: {
+          type: 'cwd',
+          cwd: {
+            uri: 'file://prod-box/home/me/project',
+            path: '/home/me/project',
+            host: 'prod-box',
+            scheme: 'file',
+            pathKind: 'posix',
+            isRemote: true,
+            source: 'osc7',
+            updatedAt: expect.any(Number),
+          },
+        },
+      },
+      {
+        kind: 'semantic',
+        event: {
+          type: 'cwd',
+          cwd: {
+            path: 'C:\\repo',
+            pathKind: 'windows',
+            isRemote: false,
+            source: 'osc9_9',
+            updatedAt: expect.any(Number),
+          },
+        },
+      },
+    ]);
+  });
+
+  it('parses OSC 133 and 633 command lifecycle events', () => {
+    const parser = new TerminalProtocolParser();
+
+    expect(parser.process('\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07\x1b]133;D;2\x07').events).toEqual([
+      { kind: 'semantic', event: { type: 'promptStart' } },
+      { kind: 'semantic', event: { type: 'promptEnd' } },
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc133_boundaries' } },
+      { kind: 'semantic', event: { type: 'commandFinish', exitCode: 2 } },
+    ]);
+
+    expect(parser.process('\x1b]633;E;pnpm test --watch\x07\x1b]633;C\x07\x1b]633;D\x07').events).toEqual([
+      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'pnpm test --watch' } },
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
+      { kind: 'semantic', event: { type: 'commandFinish', exitCode: undefined } },
+    ]);
+  });
+
+  it('preserves stream order when collecting command starts and title candidates', () => {
+    const staleTitleParser = new TerminalProtocolParser();
+    const staleTitleEvents = collectTerminalSemanticEvents(
+      staleTitleParser.process('\x1b]633;E;npm test\x07\x1b]0;zsh\x07\x1b]633;C\x07').events,
+      { now: () => 100 },
+    );
+    const staleTitle = staleTitleEvents.find((event) => event.type === 'title');
+    const staleCommandStart = staleTitleEvents.find((event) => event.type === 'commandStart');
+
+    expect(staleTitle?.type === 'title' ? staleTitle.title.updatedAt : null)
+      .toBeLessThan(staleCommandStart?.type === 'commandStart' ? staleCommandStart.startedAt ?? 0 : 0);
+    const staleTitleState = reduceSemanticEvents(staleTitleEvents);
+    expect(deriveHeader(staleTitleState, [staleTitleState])).toEqual({
+      primary: 'npm test',
+    });
+
+    const freshTitleParser = new TerminalProtocolParser();
+    const freshTitleEvents = collectTerminalSemanticEvents(
+      freshTitleParser.process('\x1b]633;E;npm test\x07\x1b]633;C\x07\x1b]0;vitest\x07').events,
+      { now: () => 100 },
+    );
+    const freshTitle = freshTitleEvents.find((event) => event.type === 'title');
+    const freshCommandStart = freshTitleEvents.find((event) => event.type === 'commandStart');
+
+    expect(freshTitle?.type === 'title' ? freshTitle.title.updatedAt : 0)
+      .toBeGreaterThan(freshCommandStart?.type === 'commandStart' ? freshCommandStart.startedAt ?? 0 : 0);
+    const freshTitleState = reduceSemanticEvents(freshTitleEvents);
+    expect(deriveHeader(freshTitleState, [freshTitleState])).toEqual({
+      primary: 'vitest',
+    });
+  });
+
+  it('decodes OSC 633 command lines without including the optional nonce', () => {
+    const parser = new TerminalProtocolParser();
+
+    expect(parser.process('\x1b]633;E;echo one\\x3btwo \\\\ path;nonce-123\x07').events).toEqual([
+      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'echo one;two \\ path' } },
+    ]);
+  });
+
+  it('parses OSC 633 and 1337 CWD plus title fallbacks', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('\x1b]633;P;Cwd=/tmp/with%20space\x07\x1b]1337;CurrentDir=/Users/me/app\x07\x1b]0;zsh\x07\x1b]2;vim\x07');
+
+    expect(result.visibleData).toBe('');
+    expect(result.events).toEqual([
+      {
+        kind: 'semantic',
+        event: {
+          type: 'cwd',
+          cwd: {
+            path: '/tmp/with space',
+            pathKind: 'posix',
+            isRemote: false,
+            source: 'osc633',
+            updatedAt: expect.any(Number),
+          },
+        },
+      },
+      {
+        kind: 'semantic',
+        event: {
+          type: 'cwd',
+          cwd: {
+            path: '/Users/me/app',
+            pathKind: 'posix',
+            isRemote: false,
+            source: 'osc1337',
+            updatedAt: expect.any(Number),
+          },
+        },
+      },
+      {
+        kind: 'semantic',
+        event: {
+          type: 'title',
+          title: { title: 'zsh', source: 'osc0', updatedAt: expect.any(Number) },
+        },
+      },
+      {
+        kind: 'semantic',
+        event: {
+          type: 'title',
+          title: { title: 'vim', source: 'osc2', updatedAt: expect.any(Number) },
+        },
+      },
+    ]);
   });
 
   it('responds to iTerm2 extended device attribute queries', () => {
@@ -173,3 +344,11 @@ describe('TerminalProtocolParser', () => {
     expect(parser.process('31mred')).toEqual({ visibleData: '\x1b[31mred', events: [] });
   });
 });
+
+function reduceSemanticEvents(events: TerminalSemanticEvent[]) {
+  let state = createTerminalPaneState();
+  for (const event of events) {
+    state = reduceTerminalState(state, event, { now: () => 999, createId: () => 'cmd-1' });
+  }
+  return state;
+}

@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import type { AlertButtonActionResult, SessionStatus } from '../../lib/terminal-registry';
+import type { AlertButtonActionResult, SessionStatus, SetTerminalUserTitleResult } from '../../lib/terminal-registry';
 import type { WallMode, SpawnDirection } from './wall-types';
 
 export interface PaneElementsState {
@@ -33,7 +33,7 @@ export interface WallActions {
   onZoom: (id: string) => void;
   onClickPanel: (id: string) => void;
   onStartRename: (id: string) => void;
-  onFinishRename: (id: string, value: string) => void;
+  onFinishRename: (id: string, value: string) => SetTerminalUserTitleResult;
   onCancelRename: () => void;
 }
 
@@ -47,7 +47,7 @@ export const WallActionsContext = createContext<WallActions>({
   onZoom: () => {},
   onClickPanel: () => {},
   onStartRename: () => {},
-  onFinishRename: () => {},
+  onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
 });
 

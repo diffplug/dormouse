@@ -4,7 +4,17 @@ import { Door } from './Door';
 import { DoorElementsContext } from './wall/wall-context';
 import type { DooredItem } from './wall/wall-types';
 import { IS_MAC } from '../lib/platform';
-import { DEFAULT_ACTIVITY_STATE, getActivitySnapshot, subscribeToActivity } from '../lib/terminal-registry';
+import {
+  buildAppTitleResolver,
+  DEFAULT_ACTIVITY_STATE,
+  deriveHeader,
+  getActivitySnapshot,
+  getTerminalPaneStateSnapshot,
+  resolveDisplayPrimary,
+  subscribeToActivity,
+  subscribeToTerminalPaneState,
+} from '../lib/terminal-registry';
+import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
 
 export interface BaseboardProps {
   items: DooredItem[];
@@ -15,6 +25,12 @@ export interface BaseboardProps {
 export function Baseboard({ items, onReattach, notice }: BaseboardProps) {
   const { elements: doorElements, bumpVersion } = useContext(DoorElementsContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
+  const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
+  const allPaneStates = useMemo(() => [...terminalStates.values()], [terminalStates]);
+  const appTitleForPane = useMemo(
+    () => buildAppTitleResolver(terminalStates, activityStates),
+    [terminalStates, activityStates],
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [startIndex, setStartIndex] = useState(0);
@@ -52,7 +68,7 @@ export function Baseboard({ items, onReattach, notice }: BaseboardProps) {
     if (arrowMeasureEl.current) {
       layoutMetrics.current.arrowWidth = arrowMeasureEl.current.offsetWidth;
     }
-  }, [items, activityStates]);
+  }, [items, activityStates, terminalStates]);
 
   // Reset startIndex when the set of door items changes (not just count)
   const itemKey = useMemo(() => items.map(i => i.id).join('\0'), [items]);
@@ -140,10 +156,11 @@ export function Baseboard({ items, onReattach, notice }: BaseboardProps) {
       <div ref={measureEl} className="absolute -left-[9999px] flex gap-1.5" aria-hidden>
         {items.map(item => {
           const activity = activityStates.get(item.id) ?? DEFAULT_ACTIVITY_STATE;
+          const title = deriveDoorTitle(item.title, item.id, terminalStates, allPaneStates, appTitleForPane);
           return (
             <Door
               key={item.id}
-              title={item.title}
+              title={title}
               status={activity.status}
               todo={activity.todo}
 
@@ -173,11 +190,12 @@ export function Baseboard({ items, onReattach, notice }: BaseboardProps) {
 
       {items.slice(startIndex, endIndex).map(item => {
         const activity = activityStates.get(item.id) ?? DEFAULT_ACTIVITY_STATE;
+        const title = deriveDoorTitle(item.title, item.id, terminalStates, allPaneStates, appTitleForPane);
         return (
           <Door
             key={item.id}
             doorId={item.id}
-            title={item.title}
+            title={title}
             status={activity.status}
             todo={activity.todo}
             onClick={() => onReattach(item)}
@@ -198,4 +216,16 @@ export function Baseboard({ items, onReattach, notice }: BaseboardProps) {
       {notice && <div className="ml-auto shrink-0">{notice}</div>}
     </div>
   );
+}
+
+function deriveDoorTitle(
+  savedTitle: string,
+  id: string,
+  terminalStates: Map<string, TerminalPaneState>,
+  allPaneStates: TerminalPaneState[],
+  appTitleForPane: (pane: TerminalPaneState) => string | null | undefined,
+): string {
+  const paneState = terminalStates.get(id) ?? createTerminalPaneState();
+  const visible = allPaneStates.length > 0 ? allPaneStates : [paneState];
+  return resolveDisplayPrimary(deriveHeader(paneState, visible, { appTitleForPane }).primary, savedTitle);
 }
