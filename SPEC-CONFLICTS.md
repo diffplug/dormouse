@@ -27,24 +27,6 @@ But the bullets in `terminal-state.md` contradict that:
 
 Read literally, an app-sent OSC 9 on an idle pane would be ignored (idle rule wins), and an override during `lastCommand` would be ignored (finished rule wins). Both contradict `layout.md`'s priority list.
 
-### 3. OSC 9 title-override timing is stated three different ways
-
-- `iTerm2.md` prose: "Legacy `OSC 9` message text also participates in pane header/door title derivation as an app-sent title override" — unconditional.
-- `iTerm2.md` table: "may override the pane header/door label" — conditional, condition unstated.
-- `layout.md` and `terminal-state.md`: only OSC 9 / OSC 0/2 "emitted **after the current command started**" are overrides; "Older shell titles remain fallback-only."
-
-These three need to agree, and the timing condition itself is underdefined: what about an OSC 9 emitted while running, after the command has now finished (i.e., `lastCommand` is set)? `layout.md`'s priority list says the override still beats the finished-command title, but `terminal-state.md`'s reducer/rules don't say when an override expires. Does it survive the next `commandStart`? Next prompt? Forever?
-
-### 4. `pty:data` strip semantics conflict with the "streaming parser" description
-
-`vscode.md` vs `iTerm2.md`.
-
-`vscode.md` (changed) now says `pty:data` is "PTY output **after supported OSC sequences have been parsed/stripped**" and adds a separate `terminal:semanticEvents` message for the parsed events.
-
-But `iTerm2.md` (changed) describes "**The same streaming parser**" recognizing OSC 7/9;9/633/1337/133/0/2 — this parser, in the surrounding spec context, is the webview parser. If the extension host has already stripped those sequences from `pty:data`, the webview's "same streaming parser" never sees them in live data, only in `pty:replay`.
-
-Either the parser exists in two places (under-specified), or one of these two specs is wrong about who parses what. As written, "the same streaming parser also recognizes" is misleading.
-
 ### 5. Dead/unreferenced enum values
 
 - `CommandRun.source` (line 67–73) declares `"foreground_process"` and `"title"`, but no rule, table row, or fallback in the document produces them.
@@ -88,4 +70,4 @@ If `<unnamed>` is rejected at write time per the rename rules (`layout.md` line 
 
 ---
 
-Severity: #1, #2, and #3 are blockers — they change actual behavior depending on which spec a reader trusts. #4 and #5 are spec-hygiene issues that will silently rot. The rest are minor.
+Severity: #1 and #2 are blockers — they change actual behavior depending on which spec a reader trusts. #5 is a spec-hygiene issue that will silently rot. The rest are minor. (#3 and #4 were resolved by the docs/specs reorganization in `096a3d5`.)
