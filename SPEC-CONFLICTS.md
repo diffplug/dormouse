@@ -4,14 +4,6 @@ Audit of the changed regions in `iTerm2.md`, `layout.md`, `terminal-state.md` (n
 
 ## Substantive conflicts
 
-### 6. Disambiguator coverage is inconsistent
-
-- `layout.md`: "running command's `cwdAtStart` or the idle pane's latest `cwd`" — only running and idle.
-- `terminal-state.md`: running **and finished** use `cwdAtStart`; idle uses `pane.cwd`.
-- Neither covers `unknown`-kind panes, even though `unknown` is a first-class status.
-
-`layout.md` silently drops the "finished" case.
-
 ### 7. Right-click popup channels (6) ≠ `TerminalTitle.source` enum (9)
 
 `layout.md` says the diagnostic popup lists "user, OSC 0, OSC 2, OSC 9, OSC 99, and OSC 777 where present." The type allows three more (`notification`, `profile`, `derived`). Either the popup is exhaustive (and the enum has dead values), or the enum is right (and the popup spec is incomplete).
@@ -41,4 +33,4 @@ If `<unnamed>` is rejected at write time per the rename rules (`layout.md` line 
 
 ---
 
-Severity: all remaining items are minor. (#1, #2, #3, #4, #5 are resolved.)
+Severity: all remaining items are minor. (#1, #2, #3, #4, #5, #6 are resolved.)
