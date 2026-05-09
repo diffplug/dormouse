@@ -163,8 +163,8 @@ The parser accepts both BEL and ST terminators and handles split chunks. Unsuppo
 `reduceTerminalState(state, event)` is the only state transition surface.
 
 - `cwd` replaces the latest session CWD.
-- `promptStart` sets `{ kind: "prompt" }` and clears stale pending command-line fallback.
-- `promptEnd` sets `{ kind: "editing" }` and clears stale pending command-line fallback.
+- `promptStart` sets `{ kind: "prompt" }`, clears `currentCommand`, and clears `pendingCommandLine`. Any pending input that was not yet consumed by a `commandStart` is dropped — a fresh prompt is the unambiguous signal that no command is in flight.
+- `promptEnd` sets `{ kind: "editing" }`, clears `currentCommand`, and clears `pendingCommandLine` for the same reason.
 - `commandLine` stores `pendingCommandLine`.
 - User-entered prompt input may also store `pendingCommandLine` as an explicit fallback before an OSC 133/633 command-start boundary. This fallback is only used while the shell is idle/editing; foreground-program input is ignored. If the submitted line is non-empty, the input fallback may create a `currentCommand` immediately with `source: "user_input"` so shells without command-start integration still show the active command.
 - The typed-command fallback resolves the current Session id from the PTY id before recording input or prompt-looking output, so drag-to-swap moves the fallback state with the visible pane.
