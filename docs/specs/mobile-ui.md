@@ -18,6 +18,10 @@ The main interface has a terminal viewport and a bottom navigation row:
 Recent | Type | Draft | Keys
 ```
 
+The website `/tether` prototype also exposes a small floating theme switcher
+above the terminal. It uses the shared MouseTerm `ThemePicker` and must not
+replace or reorder the four-item bottom navigation.
+
 Only the most important sections need complete behavior in v0:
 
 * **Type**: implemented.
@@ -433,6 +437,7 @@ Prototype behavior:
 Build exactly this:
 
 * One terminal playground screen.
+* Floating theme switcher using the shared MouseTerm theme picker.
 * Bottom navigation row:
 
 ```text
