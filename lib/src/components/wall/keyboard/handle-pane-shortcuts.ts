@@ -84,12 +84,10 @@ export function handlePaneShortcuts(
     if (ctx.selectedTypeRef.current === 'door') {
       const item = ctx.doorsRef.current.find((d) => d.id === sid);
       if (item) {
-        ctx.handleReattachRef.current(
-          item,
-          isUntouched(sid)
-            ? { enterPassthrough: false, killImmediately: true }
-            : { enterPassthrough: false, confirmKill: true },
-        );
+        ctx.handleReattachRef.current(item, {
+          enterPassthrough: false,
+          afterRestore: isUntouched(sid) ? 'kill-immediately' : 'confirm-kill',
+        });
       }
       return true;
     }

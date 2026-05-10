@@ -356,13 +356,12 @@ export function Wall({
 
   const handleReattach = useCallback((
     item: DooredItem,
-    options?: { enterPassthrough?: boolean; confirmKill?: boolean; killImmediately?: boolean },
+    options?: { enterPassthrough?: boolean; afterRestore?: 'confirm-kill' | 'kill-immediately' },
   ) => {
     const api = apiRef.current;
     if (!api) return;
     const enterPassthrough = options?.enterPassthrough ?? true;
-    const confirmKillAfterRestore = options?.confirmKill ?? false;
-    const killImmediatelyAfterRestore = options?.killImmediately ?? false;
+    const afterRestore = options?.afterRestore;
 
     const currentLayoutSignature = getLayoutStructureSignature(api.toJSON());
     // Exact reattach is only safe when the layout structure matches AND the
@@ -434,9 +433,9 @@ export function Wall({
         // Guard against panel removal between scheduling and execution
         if (!apiRef.current?.getPanel(item.id)) return;
         focusSession(item.id, false);
-        if (killImmediatelyAfterRestore) {
+        if (afterRestore === 'kill-immediately') {
           killPaneImmediately(item.id);
-        } else if (confirmKillAfterRestore) {
+        } else if (afterRestore === 'confirm-kill') {
           setConfirmKill({ id: item.id, char: randomKillChar() });
         }
       });

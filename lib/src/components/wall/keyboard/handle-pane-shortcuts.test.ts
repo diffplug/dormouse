@@ -94,7 +94,7 @@ describe('handlePaneShortcuts kill behavior', () => {
 
     expect(reattach).toHaveBeenCalledWith(
       { id: 'pane-a', title: 'Pane A' },
-      { enterPassthrough: false, killImmediately: true },
+      { enterPassthrough: false, afterRestore: 'kill-immediately' },
     );
   });
 
@@ -109,7 +109,7 @@ describe('handlePaneShortcuts kill behavior', () => {
 
     expect(reattach).toHaveBeenCalledWith(
       { id: 'pane-a', title: 'Pane A' },
-      { enterPassthrough: false, confirmKill: true },
+      { enterPassthrough: false, afterRestore: 'confirm-kill' },
     );
   });
 });
