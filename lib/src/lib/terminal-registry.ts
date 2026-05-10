@@ -42,6 +42,8 @@ export {
   getOrCreateTerminal,
   getTerminalInstance,
   getTerminalOverlayDims,
+  isUntouched,
+  markSessionTouched,
   mountElement,
   refitSession,
   restoreTerminal,

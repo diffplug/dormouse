@@ -19,13 +19,14 @@ export interface WallKeyboardCtx {
   killInProgressRef: RefObject<boolean>;
   overlayElRef: RefObject<HTMLDivElement | null>;
   wallActionsRef: RefObject<WallActions>;
-  handleReattachRef: RefObject<(item: DooredItem, options?: { enterPassthrough?: boolean; confirmKill?: boolean }) => void>;
+  handleReattachRef: RefObject<(item: DooredItem, options?: { enterPassthrough?: boolean; confirmKill?: boolean; killImmediately?: boolean }) => void>;
   selectPane: (id: string) => void;
   selectDoor: (id: string) => void;
   enterTerminalMode: (id: string) => void;
   exitTerminalMode: () => void;
   minimizePane: (id: string) => void;
-  acceptKill: (onExit: () => void) => void;
+  killPaneImmediately: (id: string) => void;
+  acceptKill: () => void;
   rejectKill: () => void;
   setConfirmKill: Dispatch<SetStateAction<ConfirmKill | null>>;
   setRenamingPaneId: Dispatch<SetStateAction<string | null>>;

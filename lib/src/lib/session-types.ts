@@ -14,6 +14,7 @@ export interface PersistedPane {
   title: string;
   scrollback: string | null;
   resumeCommand: string | null;
+  untouched: boolean;
   alert?: PersistedAlertState | null;
 }
 
@@ -32,6 +33,15 @@ export interface PersistedSession {
   panes: PersistedPane[];
   doors?: PersistedDoor[];
   layout: unknown; // SerializedDockview — kept as `unknown` to avoid dockview dep in types
+}
+
+type PersistedPaneInput = Omit<PersistedPane, 'untouched'> & { untouched?: boolean };
+
+interface PersistedSessionV3Input {
+  version: 3;
+  panes: PersistedPaneInput[];
+  doors?: PersistedDoor[];
+  layout: unknown;
 }
 
 // --- Legacy v2 shapes (read-only, for migration) ---
@@ -108,6 +118,7 @@ function isPersistedPaneShape(value: unknown): boolean {
     (typeof value.cwd === 'string' || value.cwd === null) &&
     (typeof value.scrollback === 'string' || value.scrollback === null) &&
     (typeof value.resumeCommand === 'string' || value.resumeCommand === null) &&
+    (value.untouched === undefined || typeof value.untouched === 'boolean') &&
     (value.alert === undefined || isPersistedAlertShape(value.alert))
   );
 }
@@ -158,7 +169,7 @@ function isPersistedSessionV2(value: unknown): value is PersistedSessionV2 {
   );
 }
 
-function isPersistedSessionV3(value: unknown): value is PersistedSession {
+function isPersistedSessionV3(value: unknown): value is PersistedSessionV3Input {
   if (!isRecord(value) || value.version !== 3) return false;
   return (
     Array.isArray(value.panes) &&
@@ -194,6 +205,7 @@ export function migrateSessionV2toV3(v2: PersistedSessionV2): PersistedSession {
     doors: v2.doors,
     panes: v2.panes.map((pane) => ({
       ...pane,
+      untouched: false,
       alert: pane.alert
         ? { status: pane.alert.status, todo: migrateTodoState(pane.alert.todo) }
         : pane.alert,
@@ -204,10 +216,23 @@ export function migrateSessionV2toV3(v2: PersistedSessionV2): PersistedSession {
 export function readPersistedSession(raw: unknown): PersistedSession | null {
   const value = parseJsonString(raw);
   if (!isRecord(value)) return null;
-  if (isPersistedSessionV3(value)) return value;
+  if (isPersistedSessionV3(value)) return normalizeSessionV3(value);
   if (isPersistedSessionV2(value)) return migrateSessionV2toV3(value);
   if (isPersistedSessionV1(value)) return migrateSessionV2toV3(migrateSessionV1toV2(value));
   return null;
+}
+
+function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession {
+  if (session.panes.every((pane) => typeof pane.untouched === 'boolean')) {
+    return session as PersistedSession;
+  }
+  return {
+    ...session,
+    panes: session.panes.map((pane) => ({
+      ...pane,
+      untouched: pane.untouched ?? false,
+    })),
+  };
 }
 
 function parseJsonString(raw: unknown): unknown {

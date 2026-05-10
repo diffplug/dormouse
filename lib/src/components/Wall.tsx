@@ -16,10 +16,12 @@ import {
   toggleSessionTodo,
   setPendingShellOpts,
   getDefaultShellOpts,
+  isUntouched,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
   type SessionStatus,
 } from '../lib/terminal-registry';
+import { orchestrateKill } from '../lib/kill-animation';
 import { findReattachNeighbor } from '../lib/spatial-nav';
 import { cloneLayout, getLayoutStructureSignature } from '../lib/layout-snapshot';
 import type { PersistedDoor } from '../lib/session-types';
@@ -209,14 +211,6 @@ export function Wall({
     setConfirmKill({ ...ck, exit: 'shake' });
     shakeTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_SHAKE_MS);
   }, []);
-  const acceptKill = useCallback((onExit: () => void) => {
-    const ck = confirmKillRef.current;
-    if (!ck || ck.exit) return;
-    setConfirmKill({ ...ck, exit: 'confirm' });
-    onExit();
-    fireEvent({ type: 'kill', id: ck.id });
-    confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
-  }, [fireEvent]);
 
   useEffect(() => { onEventRef.current?.({ type: 'modeChange', mode }); }, [mode]);
   useEffect(() => { onEventRef.current?.({ type: 'zoomChange', zoomed }); }, [zoomed]);
@@ -234,6 +228,21 @@ export function Wall({
     const panel = apiRef.current?.getPanel(id);
     if (panel) panel.api.setActive();
   }, []);
+
+  const killPaneImmediately = useCallback((id: string) => {
+    const api = apiRef.current;
+    if (!api?.getPanel(id)) return;
+    orchestrateKill(api, id, selectPane, setSelectedId, killInProgressRef, overlayElRef);
+    fireEvent({ type: 'kill', id });
+  }, [fireEvent, selectPane]);
+
+  const acceptKill = useCallback(() => {
+    const ck = confirmKillRef.current;
+    if (!ck || ck.exit) return;
+    setConfirmKill({ ...ck, exit: 'confirm' });
+    killPaneImmediately(ck.id);
+    confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
+  }, [killPaneImmediately]);
 
   /** Select a door in the baseboard */
   const selectDoor = useCallback((id: string) => {
@@ -347,12 +356,13 @@ export function Wall({
 
   const handleReattach = useCallback((
     item: DooredItem,
-    options?: { enterPassthrough?: boolean; confirmKill?: boolean },
+    options?: { enterPassthrough?: boolean; confirmKill?: boolean; killImmediately?: boolean },
   ) => {
     const api = apiRef.current;
     if (!api) return;
     const enterPassthrough = options?.enterPassthrough ?? true;
     const confirmKillAfterRestore = options?.confirmKill ?? false;
+    const killImmediatelyAfterRestore = options?.killImmediately ?? false;
 
     const currentLayoutSignature = getLayoutStructureSignature(api.toJSON());
     // Exact reattach is only safe when the layout structure matches AND the
@@ -424,12 +434,14 @@ export function Wall({
         // Guard against panel removal between scheduling and execution
         if (!apiRef.current?.getPanel(item.id)) return;
         focusSession(item.id, false);
-        if (confirmKillAfterRestore) {
+        if (killImmediatelyAfterRestore) {
+          killPaneImmediately(item.id);
+        } else if (confirmKillAfterRestore) {
           setConfirmKill({ id: item.id, char: randomKillChar() });
         }
       });
     }
-  }, [selectPane, enterTerminalMode]);
+  }, [selectPane, enterTerminalMode, killPaneImmediately]);
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
@@ -494,6 +506,10 @@ export function Wall({
   const wallActions: WallActions = useMemo(() => ({
     onKill: (id: string) => {
       exitTerminalMode();
+      if (isUntouched(id)) {
+        killPaneImmediately(id);
+        return;
+      }
       const char = randomKillChar();
       setConfirmKill({ id, char });
     },
@@ -546,7 +562,7 @@ export function Wall({
     onCancelRename: () => {
       setRenamingPaneId(null);
     },
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode]);
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately]);
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
 
@@ -569,6 +585,7 @@ export function Wall({
     enterTerminalMode,
     exitTerminalMode,
     minimizePane,
+    killPaneImmediately,
     acceptKill,
     rejectKill,
     setConfirmKill,

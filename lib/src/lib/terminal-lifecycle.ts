@@ -102,9 +102,15 @@ function wireXtermHandlers(
       if (input.length === 0) return;
     }
 
-    const isSyntheticTerminalReport = inputIsSyntheticTerminalReport(input);
+    const isReplayTerminalReport = inputIsReplayTerminalReport(input);
 
-    if (inputIsReplayTerminalReport(input) && registry.get(id)?.isReplaying) return;
+    if (isReplayTerminalReport && registry.get(id)?.isReplaying) return;
+
+    if (!isReplayTerminalReport) {
+      markSessionTouched(id);
+    }
+
+    const isSyntheticTerminalReport = inputIsSyntheticTerminalReport(input);
 
     if (!isSyntheticTerminalReport) {
       recordTerminalUserInputByPtyId(id, input);
@@ -149,7 +155,7 @@ function wireXtermHandlers(
   };
 }
 
-function setupTerminalEntry(id: string): TerminalEntry {
+function setupTerminalEntry(id: string, options: { untouched?: boolean } = {}): TerminalEntry {
   const { terminal, fit, element } = createXtermHost();
   const selectionBaselineRef = { current: null as string | null };
 
@@ -184,6 +190,7 @@ function setupTerminalEntry(id: string): TerminalEntry {
     notification: null,
     attentionDismissedRing: false,
     isReplaying: false,
+    untouched: options.untouched ?? false,
   };
 
   const primed = consumePrimedActivity(id);
@@ -208,7 +215,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
 
-  const entry = setupTerminalEntry(id);
+  const entry = setupTerminalEntry(id, { untouched: true });
   resetTerminalPaneState(id);
 
   const shellOpts = pendingShellOpts.get(id);
@@ -228,12 +235,12 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
 export function resumeTerminal(
   id: string,
   replayData: string | null,
-  exitInfo?: { alive: boolean; exitCode?: number; title?: string | null },
+  exitInfo?: { alive: boolean; exitCode?: number; title?: string | null; untouched?: boolean },
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
 
-  const entry = setupTerminalEntry(id);
+  const entry = setupTerminalEntry(id, { untouched: exitInfo?.untouched ?? false });
 
   if (replayData) {
     writeReplay(entry, replayData);
@@ -251,12 +258,12 @@ export function resumeTerminal(
 
 export function restoreTerminal(
   id: string,
-  opts: { cwd?: string | null; scrollback?: string | null; title?: string | null; cwdWarning?: string | null; shell?: string; args?: string[] },
+  opts: { cwd?: string | null; scrollback?: string | null; title?: string | null; cwdWarning?: string | null; shell?: string; args?: string[]; untouched?: boolean },
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
 
-  const entry = setupTerminalEntry(id);
+  const entry = setupTerminalEntry(id, { untouched: opts.untouched ?? false });
   resetTerminalPaneState(id);
   seedTerminalManualCwd(id, opts.cwd);
   const trimmedTitle = opts.title?.trim();
@@ -387,6 +394,16 @@ export function getTerminalOverlayDims(id: string): TerminalOverlayDims | null {
     gridLeft,
     gridTop,
   };
+}
+
+export function isUntouched(id: string): boolean {
+  return registry.get(id)?.untouched ?? false;
+}
+
+export function markSessionTouched(id: string): void {
+  const entry = registry.get(id);
+  if (!entry || !entry.untouched) return;
+  entry.untouched = false;
 }
 
 export function focusSession(id: string, focused: boolean): void {

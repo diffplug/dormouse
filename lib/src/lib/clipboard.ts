@@ -3,7 +3,7 @@ import { rewrap } from './rewrap';
 import { extractSelectionText } from './selection-text';
 import { getPlatform } from './platform';
 import { shellEscapePath } from './shell-escape';
-import { getTerminalInstance } from './terminal-registry';
+import { getTerminalInstance, markSessionTouched } from './terminal-registry';
 
 async function writeText(text: string): Promise<void> {
   if (!text) return;
@@ -47,6 +47,7 @@ function writePasteToPty(terminalId: string, text: string): void {
   if (!text) return;
   const bracketed = getMouseSelectionState(terminalId).bracketedPaste;
   const payload = bracketed ? `\x1b[200~${text}\x1b[201~` : text;
+  markSessionTouched(terminalId);
   getPlatform().writePty(terminalId, payload);
 }
 

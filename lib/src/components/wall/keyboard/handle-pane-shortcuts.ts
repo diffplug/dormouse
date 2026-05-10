@@ -2,6 +2,7 @@ import { findPaneInDirection } from '../../../lib/spatial-nav';
 import {
   dismissOrToggleAlert,
   getActivity,
+  isUntouched,
   swapTerminals,
   toggleSessionTodo,
 } from '../../../lib/terminal-registry';
@@ -82,7 +83,18 @@ export function handlePaneShortcuts(
     e.stopPropagation();
     if (ctx.selectedTypeRef.current === 'door') {
       const item = ctx.doorsRef.current.find((d) => d.id === sid);
-      if (item) ctx.handleReattachRef.current(item, { enterPassthrough: false, confirmKill: true });
+      if (item) {
+        ctx.handleReattachRef.current(
+          item,
+          isUntouched(sid)
+            ? { enterPassthrough: false, killImmediately: true }
+            : { enterPassthrough: false, confirmKill: true },
+        );
+      }
+      return true;
+    }
+    if (isUntouched(sid)) {
+      ctx.killPaneImmediately(sid);
       return true;
     }
     const char = randomKillChar();
