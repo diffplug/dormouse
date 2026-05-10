@@ -321,7 +321,7 @@ function NotifySignupForm() {
           type="submit"
           className="min-h-12 inline-flex items-center justify-center rounded-md border border-[var(--color-caramel)] bg-[var(--color-caramel)]/15 px-6 py-3 text-base font-display text-[var(--color-caramel)] transition hover:bg-[var(--color-caramel)]/25 sm:w-auto"
         >
-          Notify me when Roam ships
+          Notify me when Tether ships
         </button>
       </div>
       {message && (
@@ -965,7 +965,7 @@ function Home() {
               Walk away. Keep going.
             </h2>
             <p className="mb-4 text-lg leading-relaxed opacity-70">
-              Coming next: <span className="text-[var(--color-caramel)]">Roam</span>. Pair a
+              Coming next: <span className="text-[var(--color-caramel)]">Tether</span>. Pair a
               terminal session to your phone over WebRTC and take a stroll, the MouseTerm alert
               system will buzz you if there's anything to do. A hosted auto-pairing service comes
               later — just leave and keep working, no "I'm walking away" dance.
