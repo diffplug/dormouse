@@ -42,34 +42,46 @@ export function NotifySignupForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-2">
-      <label htmlFor="notify-email" className="font-display text-sm opacity-50">
-        Email
-      </label>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
-        <input
-          id="notify-email"
-          type="email"
-          name="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@example.com"
-          required
-          autoComplete="email"
-          className="min-h-12 w-full rounded-md border border-[var(--color-text)]/50 bg-[var(--color-bg)] px-4 py-3 text-base text-[var(--color-text)]/70 placeholder:opacity-50 focus:border-[var(--color-caramel)] focus:outline-none sm:flex-1"
-        />
-        <button
-          type="submit"
-          className="min-h-12 inline-flex items-center justify-center rounded-md border border-[var(--color-caramel)] bg-[var(--color-caramel)]/15 px-6 py-3 text-base font-display text-[var(--color-caramel)] transition hover:bg-[var(--color-caramel)]/25 sm:w-auto"
+    <>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+        <label htmlFor="notify-email" className="font-display text-sm opacity-50">
+          Email
+        </label>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+          <input
+            id="notify-email"
+            type="email"
+            name="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            required
+            autoComplete="email"
+            className="min-h-12 w-full rounded-md border border-[var(--color-text)]/50 bg-[var(--color-bg)] px-4 py-3 text-base text-[var(--color-text)]/70 placeholder:opacity-50 focus:border-[var(--color-caramel)] focus:outline-none sm:flex-1"
+          />
+          <button
+            type="submit"
+            className="min-h-12 inline-flex items-center justify-center rounded-md border border-[var(--color-caramel)] bg-[var(--color-caramel)]/15 px-6 py-3 text-base font-display text-[var(--color-caramel)] transition hover:bg-[var(--color-caramel)]/25 sm:w-auto"
+          >
+            Notify me when Tether ships
+          </button>
+        </div>
+        {message && (
+          <p className="text-sm text-red-400" role="alert">
+            {message}
+          </p>
+        )}
+      </form>
+      <p className="mt-3 text-base leading-snug opacity-50">
+        This signs you up for my personal devlog{" "}
+        <a
+          href="https://nedshed.dev"
+          className="text-[var(--color-caramel)] underline-offset-2 hover:underline"
         >
-          Notify me when Tether ships
-        </button>
-      </div>
-      {message && (
-        <p className="text-sm text-red-400" role="alert">
-          {message}
-        </p>
-      )}
-    </form>
+          nedshed.dev
+        </a>{" "}
+        on Substack. The next post will be the launch post, you can unsubscribe any time.
+      </p>
+    </>
   );
 }

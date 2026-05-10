@@ -232,9 +232,6 @@ function DesktopTetherPage() {
             Open source and free to self-host, or pay us a little bit and you can use ours. We'll discount for early adopters, so don't miss out!
           </p>
           <NotifySignupForm />
-          <p className="mt-3 text-base leading-snug opacity-50">
-            This signs you up for my personal devlog <a href="https://nedshed.dev" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">nedshed.dev</a> on Substack. The next post will be the launch post, you can unsubscribe any time.
-          </p>
         </section>
 
         <section aria-label="MouseTerm Tether phone preview" className="mx-auto w-full max-w-[390px]">
