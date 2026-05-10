@@ -185,7 +185,7 @@ function DesktopTetherPage() {
           <div className="rounded-[2.4rem] border border-white/15 bg-neutral-950 p-3 shadow-[0_24px_90px_rgba(0,0,0,0.55)]">
             <div className="mx-auto mb-2 h-1.5 w-24 rounded-full bg-white/20" />
             <div className="aspect-[390/812] overflow-hidden rounded-[1.8rem] border border-white/10 bg-black">
-              <div className="h-full pointer-events-none" aria-hidden="true">
+              <div className="h-full pointer-events-none" aria-hidden="true" inert>
                 <TetherTerminalExperience interactive={false} />
               </div>
             </div>
