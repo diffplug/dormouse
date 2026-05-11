@@ -85,8 +85,20 @@ Universal PTY/transport invariants live in `docs/specs/transport.md`. The rules 
       { "command": "mouseterm.focus", "title": "MouseTerm: Focus",
         "icon": { "light": "icon-tiny-light.png", "dark": "icon-tiny-dark.png" } },
       { "command": "mouseterm.open", "title": "MouseTerm: Open in Editor" },
-      { "command": "mouseterm.debugTheme", "title": "MouseTerm: Debug Theme" }
+      { "command": "mouseterm.debugTheme", "title": "MouseTerm: Debug Theme" },
+      { "command": "mouseterm.newTerminal", "title": "MouseTerm: New Terminal",
+        "icon": "$(add)" },
+      { "command": "mouseterm.selectShell", "title": "MouseTerm: Select Shell",
+        "icon": "$(gear)" }
     ],
+    "menus": {
+      "view/title": [
+        { "command": "mouseterm.selectShell", "group": "navigation@1",
+          "when": "view == mouseterm.view" },
+        { "command": "mouseterm.newTerminal", "group": "navigation@2",
+          "when": "view == mouseterm.view" }
+      ]
+    },
     "viewsContainers": {
       "panel": [
         { "id": "mouseterm-panel", "title": "MouseTerm", "icon": "$(terminal)" }
@@ -126,6 +138,12 @@ VS Code-specific consequences:
 - Multiple VS Code windows each get their own extension host process, and therefore their own pty-host child process.
 
 PTY lifecycle, buffering, the reconnection sequence, and the full message protocol live in `docs/specs/transport.md`.
+
+### Shell selection
+
+The VS Code view title contributes `MouseTerm: Select Shell` and `MouseTerm: New Terminal`. The selected shell name is mirrored into the `WebviewView.description`, and `mouseterm:selectedShell` keeps the webview's default-shell slot current for split/spawn/restore paths.
+
+`mouseterm.newTerminal` focuses the MouseTerm view and posts `mouseterm:newTerminal` with the currently selected shell. `mouseterm.selectShell` opens a QuickPick, saves the shell path globally or per workspace, applies the description/default-shell update, and, when the picked shell differs from the previous selection, focuses the view and posts `mouseterm:newTerminal` with `replaceUntouched: true` and `announce: true`. The shared `Wall` logic then replaces only a selected untouched terminal in-place; touched terminals cause an additional pane to be spawned instead.
 
 ### Serialization and restore
 

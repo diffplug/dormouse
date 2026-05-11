@@ -23,7 +23,18 @@ describe('VSCodeAdapter PTY exit handling', () => {
   beforeEach(() => {
     windowTarget = new EventTarget();
     postMessage = vi.fn();
+    class TestCustomEvent<T = unknown> extends Event {
+      readonly detail: T;
+
+      constructor(type: string, eventInitDict?: CustomEventInit<T>) {
+        super(type, eventInitDict);
+        this.detail = eventInitDict?.detail as T;
+      }
+
+      initCustomEvent(): void {}
+    }
     vi.stubGlobal('window', windowTarget);
+    vi.stubGlobal('CustomEvent', TestCustomEvent);
     vi.stubGlobal('acquireVsCodeApi', () => ({
       postMessage,
       getState: vi.fn(),
@@ -127,5 +138,32 @@ describe('VSCodeAdapter PTY exit handling', () => {
 
     expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledTimes(1);
     expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledWith('pane-1', hostEvents);
+  });
+
+  it('forwards shell replacement requests from the extension host', () => {
+    const requests: unknown[] = [];
+    windowTarget.addEventListener('mouseterm:new-terminal', (event) => {
+      requests.push((event as CustomEvent).detail);
+    });
+
+    new VSCodeAdapter();
+    windowTarget.dispatchEvent(new MessageEvent('message', {
+      data: {
+        type: 'mouseterm:newTerminal',
+        shell: '/bin/zsh',
+        args: ['-l'],
+        name: 'zsh',
+        replaceUntouched: true,
+        announce: true,
+      },
+    }));
+
+    expect(requests).toEqual([{
+      shell: '/bin/zsh',
+      args: ['-l'],
+      name: 'zsh',
+      replaceUntouched: true,
+      announce: true,
+    }]);
   });
 });

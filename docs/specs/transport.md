@@ -104,6 +104,8 @@ Message types live in `vscode-ext/src/message-types.ts` (the canonical schema; o
 | `pty:cwd` | CWD query response (matched by requestId) |
 | `pty:scrollback` | Scrollback query response (matched by requestId) |
 | `pty:shells` | Available shells list response (matched by requestId) |
+| `mouseterm:newTerminal` | Host/UI request to spawn a terminal. Payload may include `shell`, `args`, display `name`, `replaceUntouched`, and `announce`; the webview replaces the selected untouched terminal in-place only when `replaceUntouched` is true, otherwise it spawns a new pane. |
+| `mouseterm:selectedShell` | Update the webview's default shell options for later split/spawn/restore paths. |
 | `mouseterm:flushSessionSave` | Request webview to save state now (host shutdown trigger, matched by requestId) |
 | `mouseterm:openThemeDebugger` | Command-triggered request to open the shared theme debugger dialog |
 | `alert:state` | Alert state change (projected status, todo, notification, attentionDismissedRing) |

@@ -76,7 +76,13 @@ export class VSCodeAdapter implements PlatformAdapter {
         }
       } else if (msg.type === 'mouseterm:newTerminal') {
         window.dispatchEvent(new CustomEvent('mouseterm:new-terminal', {
-          detail: { shell: msg.shell, args: msg.args },
+          detail: {
+            shell: msg.shell,
+            args: msg.args,
+            name: msg.name,
+            replaceUntouched: msg.replaceUntouched,
+            announce: msg.announce,
+          },
         }));
       } else if (msg.type === 'mouseterm:selectedShell') {
         setDefaultShellOpts(msg.shell ? { shell: msg.shell, args: msg.args } : null);

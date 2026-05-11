@@ -271,6 +271,7 @@ Pane IDs are session IDs. `TerminalPane` calls `getOrCreateTerminal(id)` on Reac
 - **Resume**: `resumeTerminal` creates xterm entry and writes replay data without spawning a new PTY. Used when the webview is recreated while the host retains Live PTYs (Link: Severed → Resuming → Live).
 - **Restore**: `restoreTerminal` creates xterm entry and spawns a new PTY with saved cwd and scrollback. Used on cold start from a saved Snapshot (Link: Cold → Live).
 - **Untouched**: new `getOrCreateTerminal` sessions start untouched. `isUntouched(id)` exposes the flag, and user-originated PTY input clears it via the registry input paths. Resume/restore seed the persisted flag; missing legacy snapshot data defaults to touched (`false`) so close confirmation remains conservative.
+- **Shell selection replacement**: the standalone shell dropdown and VS Code shell picker send `mouseterm:new-terminal` with `replaceUntouched` when the selected shell type changes. `Wall` always creates a new session id for that request. If the currently selected pane or door is untouched, the new terminal is inserted in the same dockview position (`direction: 'within'`; doors first reattach through the normal restore path), the old untouched session is disposed, and the old panel is removed without kill confirmation. If the selected terminal is touched or no terminal is selected, the request spawns a new pane near the active panel. Announced shell-selection spawns show a transient pane-anchored notice such as `Switched to zsh` or `Opened bash`.
 - During resume/restore replay, xterm.js may emit terminal-generated replies for OSC/CSI/DCS queries that were embedded in saved output. The registry drops those replay-time replies before they reach the new shell. This filter is limited to query/focus reports, and must not swallow user keyboard escape sequences such as arrows, function keys, or bracketed paste.
 - **mount / unmount (DOM)**: `mountElement` reparents the persistent DOM element into a container; `unmountElement` removes it. The Registry entry survives.
 - **Dispose**: `disposeSession` kills the PTY, disposes xterm, removes the registry entry. Only called on explicit kill (`x`).
@@ -319,6 +320,8 @@ When a pane is added, its dockview group element gets a directional `.pane-spawn
 - **Auto-spawn after last-pane kill/minimize** → reveal from the top-left corner.
 
 The direction is carried via `FreshlySpawnedContext` — a `Map<paneId, SpawnDirection>` written by the spawn call site and consumed once by `TerminalPanel`'s `useLayoutEffect` on first mount.
+
+Shell-selection replacement uses the same pane add/remove primitives but also shows a short fixed-position notice over the resulting pane. The notice fades in/out over 1500ms via `.shell-spawn-notice` and is suppressed to a static render for reduced-motion users.
 
 ### Kill (in-place fade + FLIP reclaim)
 
