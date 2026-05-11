@@ -21,6 +21,7 @@ const SEQUENCE_LABELS = new Map<string, string>([
   [MOBILE_TERMINAL_KEY_SEQUENCES.ctrlC, 'CTRL_C'],
   [MOBILE_TERMINAL_KEY_SEQUENCES.esc, 'ESC'],
   [MOBILE_TERMINAL_KEY_SEQUENCES.tab, 'TAB'],
+  [MOBILE_TERMINAL_KEY_SEQUENCES.space, 'SPACE'],
   [MOBILE_TERMINAL_KEY_SEQUENCES.enter, 'ENTER'],
   [MOBILE_TERMINAL_KEY_SEQUENCES.backspace, 'BACKSPACE'],
   [MOBILE_TERMINAL_KEY_SEQUENCES.up, 'ARROW_UP'],
@@ -106,6 +107,14 @@ export const NonInteractivePhoneMockup: Story = {
   args: {
     defaultSection: 'type',
     interactive: false,
+  },
+  render: (args) => <StoryFrame {...args} />,
+};
+
+export const CursorTouchAvailable: Story = {
+  args: {
+    defaultSection: 'keys',
+    cursorTouchAvailable: true,
   },
   render: (args) => <StoryFrame {...args} />,
 };

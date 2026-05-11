@@ -1,15 +1,23 @@
-import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentType } from "react";
 import { ShareIcon } from "@phosphor-icons/react";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import { NotifySignupForm } from "../components/NotifySignupForm";
-import { MobileTerminalUi } from "mouseterm-lib/components/MobileTerminalUi";
+import { MobileTerminalUi, type MobileTerminalTouchMode } from "mouseterm-lib/components/MobileTerminalUi";
 import { ThemePicker } from "mouseterm-lib/components/ThemePicker";
 import { restoreActiveTheme } from "mouseterm-lib/lib/themes";
+import {
+  getMouseSelectionSnapshot,
+  setOverride as setMouseOverride,
+  subscribeToMouseSelection,
+} from "mouseterm-lib/lib/mouse-selection";
+import { PlaygroundShellRegistry } from "../lib/playground-shells";
+import { TutorialState } from "../lib/tutorial-state";
+import { BUSY_DEMO_DURATION_MS, BUSY_DEMO_INTERVAL_MS, TutRunner } from "../lib/tut-runner";
+import { ChangelogRunner } from "../lib/changelog-runner";
 
 export { Tether as Component };
 
 type FakePtyAdapter = import("mouseterm-lib/lib/platform/fake-adapter").FakePtyAdapter;
-type AsciiSplashRunner = import("../lib/ascii-splash-runner").AsciiSplashRunner;
 
 const TETHER_PANE = "tether-ascii-splash";
 const TETHER_THEME_ID = "vscode.theme-kimbie-dark.kimbie-dark";
@@ -19,8 +27,13 @@ interface WallModule {
 }
 
 interface DockviewApiLike {
+  activePanel?: { id?: string } | null;
   getPanel(id: string): { api: { setTitle(title: string): void; setActive(): void } } | undefined;
+  onDidAddPanel(listener: (panel: { id?: string } | undefined) => void): { dispose: () => void };
+  onDidActivePanelChange(listener: (panel: { id?: string } | undefined) => void): { dispose: () => void };
 }
+
+type DockviewDisposable = { dispose: () => void };
 
 function useIsMobileViewport() {
   const [isMobile, setIsMobile] = useState(false);
@@ -54,8 +67,30 @@ function TetherTerminalExperience({
   useTetherTheme();
   const [WallModule, setWallModule] = useState<WallModule | null>(null);
   const adapterRef = useRef<FakePtyAdapter | null>(null);
-  const runnerRef = useRef<AsciiSplashRunner | null>(null);
-  const restartingRef = useRef<number | null>(null);
+  const shellRegistryRef = useRef<PlaygroundShellRegistry | null>(null);
+  const dockviewDisposablesRef = useRef<DockviewDisposable[]>([]);
+  const autoStartedRef = useRef<Set<string>>(new Set());
+  const spawnUnsubRef = useRef<(() => void) | null>(null);
+  const busyDemoDisposeRef = useRef<(() => void) | null>(null);
+  const [activePaneId, setActivePaneId] = useState(TETHER_PANE);
+  const [touchMode, setTouchMode] = useState<MobileTerminalTouchMode>("gestures");
+  const mouseStates = useSyncExternalStore(
+    subscribeToMouseSelection,
+    getMouseSelectionSnapshot,
+    getMouseSelectionSnapshot,
+  );
+  const activeMouseState = mouseStates.get(activePaneId);
+  const cursorTouchAvailable = activeMouseState?.mouseReporting !== undefined
+    && activeMouseState.mouseReporting !== "none";
+
+  const tryAutoStart = useCallback((id: string) => {
+    if (id !== TETHER_PANE) return;
+    if (autoStartedRef.current.has(id)) return;
+    const shellRegistry = shellRegistryRef.current;
+    if (!shellRegistry) return;
+    autoStartedRef.current.add(id);
+    shellRegistry.ensureShell(id).runCommand("ascii-splash");
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,6 +99,7 @@ function TetherTerminalExperience({
       const platform = await import("mouseterm-lib/lib/platform");
       const registry = await import("mouseterm-lib/lib/terminal-registry");
       const wall = await import("mouseterm-lib/components/Wall");
+      const scenarios = await import("mouseterm-lib/lib/platform/fake-scenarios");
       const asciiSplash = await import("../lib/ascii-splash-runner");
       await import("mouseterm-lib/index.css");
       if (cancelled) return;
@@ -73,67 +109,98 @@ function TetherTerminalExperience({
       adapter.reset();
       registry.initAlertStateReceiver();
       adapterRef.current = adapter;
-      adapter.clearDefaultScenario();
+      adapter.setDefaultScenario(scenarios.SCENARIO_SHELL_PROMPT);
       adapter.setScenario(TETHER_PANE, { name: "none", chunks: [] });
 
-      const startRunner = () => {
-        if (cancelled || runnerRef.current || !adapter.hasPty(TETHER_PANE)) return;
-        const runner = new asciiSplash.AsciiSplashRunner({
-          adapter,
-          terminalId: TETHER_PANE,
-          args: [],
-          onExit: () => {
-            runnerRef.current = null;
-            if (cancelled) return;
-            restartingRef.current = window.setTimeout(() => {
-              restartingRef.current = null;
-              startRunner();
-            }, 120);
-          },
-        });
-        runnerRef.current = runner;
-        runner.start();
-      };
+      const tutorialState = new TutorialState();
+      const shellRegistry = new PlaygroundShellRegistry(
+        adapter,
+        (terminalId, name, args, onExit) => {
+          if (name === "tut") {
+            return new TutRunner({
+              adapter,
+              terminalId,
+              state: tutorialState,
+              onExit,
+              onTriggerBusyDemo: () => {
+                busyDemoDisposeRef.current?.();
+                busyDemoDisposeRef.current = adapter.pumpActivity(
+                  terminalId,
+                  BUSY_DEMO_DURATION_MS,
+                  BUSY_DEMO_INTERVAL_MS,
+                );
+              },
+              onTogglePlaceToPaste: () => {},
+            });
+          }
+          if (name === "ascii-splash" || name === "splash") {
+            return new asciiSplash.AsciiSplashRunner({
+              adapter,
+              terminalId,
+              args,
+              onExit,
+            });
+          }
+          if (name === "changelog") {
+            return new ChangelogRunner({ adapter, terminalId, onExit });
+          }
+          return null;
+        },
+      );
+      shellRegistryRef.current = shellRegistry;
+      shellRegistry.ensureShell(TETHER_PANE);
 
-      adapter.setInputHandler(TETHER_PANE, (data) => {
-        runnerRef.current?.handleInput(data);
+      spawnUnsubRef.current = adapter.onPtySpawn(({ id }) => {
+        shellRegistry.ensureShell(id);
+        tryAutoStart(id);
       });
-
-      const unsubscribeSpawn = adapter.onPtySpawn(({ id }) => {
-        if (id === TETHER_PANE) startRunner();
-      });
-      if (adapter.hasPty(TETHER_PANE)) startRunner();
+      if (adapter.hasPty(TETHER_PANE)) tryAutoStart(TETHER_PANE);
 
       setWallModule({ Wall: wall.Wall });
-
-      return () => {
-        unsubscribeSpawn();
-      };
     }
 
-    let disposeSpawn: (() => void) | undefined;
-    loadWall().then((dispose) => {
-      if (cancelled) {
-        dispose?.();
-      } else {
-        disposeSpawn = dispose;
-      }
-    });
+    loadWall();
 
     return () => {
       cancelled = true;
-      disposeSpawn?.();
-      if (restartingRef.current !== null) {
-        window.clearTimeout(restartingRef.current);
-        restartingRef.current = null;
+      for (const disposable of dockviewDisposablesRef.current) {
+        disposable.dispose();
       }
-      runnerRef.current?.dispose();
-      runnerRef.current = null;
-      adapterRef.current?.clearInputHandler(TETHER_PANE);
+      dockviewDisposablesRef.current = [];
+      spawnUnsubRef.current?.();
+      spawnUnsubRef.current = null;
+      busyDemoDisposeRef.current?.();
+      busyDemoDisposeRef.current = null;
+      shellRegistryRef.current?.disposeAll();
+      shellRegistryRef.current = null;
+      autoStartedRef.current.clear();
+      adapterRef.current = null;
     };
-  }, []);
+  }, [tryAutoStart]);
+
+  useEffect(() => {
+    const reporting = activeMouseState?.mouseReporting ?? "none";
+    if (touchMode === "selection" && reporting !== "none") {
+      setMouseOverride(activePaneId, "permanent");
+    } else {
+      setMouseOverride(activePaneId, "off");
+    }
+  }, [activeMouseState?.mouseReporting, activePaneId, touchMode]);
 
   const handleApiReady = useCallback((api: DockviewApiLike) => {
+    const addDisposable = api.onDidAddPanel((panel) => {
+      if (panel?.id) shellRegistryRef.current?.ensureShell(panel.id);
+    });
+    dockviewDisposablesRef.current.push(addDisposable);
+
+    const activeDisposable = api.onDidActivePanelChange((panel) => {
+      if (panel?.id) setActivePaneId(panel.id);
+    });
+    dockviewDisposablesRef.current.push(activeDisposable);
+
+    setActivePaneId(api.activePanel?.id ?? TETHER_PANE);
+    shellRegistryRef.current?.ensureShell(TETHER_PANE);
+
     const panel = api.getPanel(TETHER_PANE);
     if (!panel) return;
     panel.api.setTitle("ascii-splash");
@@ -154,7 +221,10 @@ function TetherTerminalExperience({
       }
       interactive={interactive}
       fillViewport={fillViewport}
-      onSendInput={(data) => adapterRef.current?.writePty(TETHER_PANE, data)}
+      activeTouchMode={touchMode}
+      onTouchModeChange={setTouchMode}
+      cursorTouchAvailable={cursorTouchAvailable}
+      onSendInput={(data) => adapterRef.current?.writePty(activePaneId, data)}
     />
   );
 }

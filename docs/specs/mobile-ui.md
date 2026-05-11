@@ -2,253 +2,150 @@
 
 ## 1. Overview
 
-This document specifies a greenfield prototype for a mobile-first terminal UI.
+This document specifies the `/tether` mobile terminal prototype.
 
 The prototype tests one core idea:
 
 ```text
-Native phone keyboard for text + simple terminal controls for missing keys.
+Stable terminal viewport + explicit touch mode + explicit keyboard mode.
 ```
 
-The app should feel like a lightweight mobile terminal playground. It does not need remote sessions, SSH, user accounts, or production infrastructure. The first version should use a local playground PTY, fake shell, in-browser terminal demo, or command simulator that is realistic enough to test the mobile UI.
+The app should feel like a lightweight mobile terminal playground. It does not
+need remote sessions, SSH, user accounts, or production infrastructure.
 
-The main interface has a terminal viewport and a bottom navigation row:
+The website `/tether` prototype exposes a small floating theme switcher above
+the terminal. It uses the shared MouseTerm `ThemePicker`.
 
-```text
-Recent | Type | Draft | Keys
-```
+`/tether` uses the same fake playground terminal stack as `/playground`:
+`PlaygroundShellRegistry` attaches a `TutorialShell` to every spawned pane, the
+same fake commands dispatch to browser-side runners, and the first pane simply
+auto-runs `ascii-splash` as its initial command.
 
-The website `/tether` prototype also exposes a small floating theme switcher
-above the terminal. It uses the shared MouseTerm `ThemePicker` and must not
-replace or reorder the four-item bottom navigation.
+## 2. Prototype Goals
 
-Only the most important sections need complete behavior in v0:
+Primary goals:
 
-* **Type**: implemented.
-* **Keys**: implemented.
-* **Recent**: opens a TODO pane.
-* **Draft**: opens a TODO pane.
-
-## 2. Prototype goals
-
-### 2.1 Primary goals
-
-* Test mobile terminal text entry using the native phone keyboard.
-* Test whether simple on-screen terminal controls make missing keys usable on a phone.
-* Keep the terminal viewport usable when the mobile keyboard is visible.
-* Provide enough terminal behavior to evaluate typing, Enter, Backspace, arrows, Escape, Tab, and Ctrl+C.
+* Keep the terminal viewport stable when the native phone keyboard opens or closes.
+* Let the user explicitly choose what terminal touches mean.
+* Let the user explicitly choose what appears in the stable keyboard reserve area.
+* Test normal mobile text entry using the native phone keyboard.
+* Provide enough terminal behavior to evaluate typing, Enter, Backspace, arrows, Escape, Tab, and app interruption.
 * Keep the implementation small and easy to iterate on.
 
-### 2.2 Non-goals
-
-The prototype does not need:
+Non-goals:
 
 * Remote shell support.
 * SSH support.
 * WebSocket transport.
 * User accounts.
 * Session persistence.
-* Multiple terminal sessions.
 * Command history storage.
-* Snippet management.
 * A real draft/scratchpad workflow.
-* Terminal mouse mode.
 * Advanced gestures.
 * Production security hardening.
 * Full accessibility implementation.
 
-## 3. Core layout
+## 3. Core Layout
 
-## 3.1 Default portrait layout
-
-```text
-┌─────────────────────────┐
-│ Terminal playground      │
-│                         │
-│                         │
-├─────────────────────────┤
-│ Active pane              │
-├─────────────────────────┤
-│ Recent | Type | Draft | Keys
-└─────────────────────────┘
-```
-
-The active pane changes when the user taps a bottom navigation item.
-
-## 3.2 Type mode layout
-
-Type is the default active section.
+The mobile UI is split into fixed and flexible regions:
 
 ```text
 ┌─────────────────────────┐
-│ Terminal playground      │
+│ Pane title               │ fixed/small
+├─────────────────────────┤
+│ Pane content             │ flexible terminal area
+├─────────────────────────┤
+│ Touch mode selector      │ thin, always visible
+├─────────────────────────┤
+│ Keyboard mode selector   │ thin, always visible
+├─────────────────────────┤
+│ Keyboard reserve area    │ stable height
 │                         │
-├─────────────────────────┤
-│ Esc Tab Ctrl+C ← ↓ ↑ →   │
-├─────────────────────────┤
-│ Recent | Type | Draft | Keys
-├─────────────────────────┤
-│ native phone keyboard    │
+│ Shows app keyboard UI    │ when OS keyboard hidden
+│ Occupied by OS keyboard  │ when OS keyboard visible
 └─────────────────────────┘
 ```
 
-When the native keyboard is open, the terminal viewport should resize to remain visible.
+The pane title and pane content come from the embedded `Wall` terminal pane. The
+mobile wrapper owns the two selectors and the fixed-height keyboard reserve.
 
-## 3.3 Keys mode layout
+The root height must not be recalculated from `window.visualViewport` on every
+keyboard resize. The reserve area is intentionally stable so the terminal region
+does not bounce while the OS keyboard animates.
 
-Keys mode shows the same important controls in a larger layout.
+## 4. Touch Mode Selector
 
-```text
-┌─────────────────────────┐
-│ Terminal playground      │
-│                         │
-├─────────────────────────┤
-│ Esc     Tab     Ctrl+C   │
-│ ←       ↓       ↑       →│
-├─────────────────────────┤
-│ Recent | Type | Draft | Keys
-└─────────────────────────┘
-```
+The touch selector controls what happens when the user touches the pane content
+area. It is thin and always visible between the terminal content and the
+keyboard mode selector.
 
-Keys mode is useful when the user needs more reliable taps for arrow keys and Ctrl+C.
+Touch modes:
 
-## 3.4 TODO pane layout
+| Mode | Icon | Availability | Behavior |
+| --- | --- | --- | --- |
+| Gestures | `HandPointingIcon` | Always available | Touch drags generate arrow keys. Drag left sends left, drag right sends right, drag up sends up, and drag down sends down. |
+| Text selection | `CursorTextIcon` | Always available | Touches are reserved for terminal text selection and copy/paste. If the TUI is capturing mouse events, MouseTerm activates mouse override for the active pane. |
+| Cursor | `CursorClickIcon` | Only when the active TUI is capturing mouse events | Touches are passed through as terminal mouse/cursor input. |
 
-Recent and Draft should open simple placeholder panes.
+Default touch mode is **Gestures**.
 
-```text
-┌─────────────────────────┐
-│ Terminal playground      │
-│                         │
-├─────────────────────────┤
-│ TODO: Recent             │
-├─────────────────────────┤
-│ Recent | Type | Draft | Keys
-└─────────────────────────┘
-```
+If Cursor mode is active and the active pane stops capturing mouse events, the
+selector must fall back to Gestures.
 
-```text
-┌─────────────────────────┐
-│ Terminal playground      │
-│                         │
-├─────────────────────────┤
-│ TODO: Draft              │
-├─────────────────────────┤
-│ Recent | Type | Draft | Keys
-└─────────────────────────┘
-```
+## 5. Keyboard Mode Selector
 
-The TODO panes should make the app structure visible without implementing those workflows.
-
-## 4. Bottom navigation
-
-The bottom navigation row is always present unless the native keyboard or viewport constraints make that impossible.
+The keyboard mode selector controls what appears in the keyboard reserve area.
+It is thin, always visible, and has four items:
 
 ```text
 Recent | Type | Draft | Keys
 ```
 
-### 4.1 Navigation behavior
+Keyboard modes:
 
-| Item   | v0 behavior                                |
-| ------ | ------------------------------------------ |
-| Recent | Opens TODO pane                            |
-| Type   | Opens Type pane and focuses terminal input |
-| Draft  | Opens TODO pane                            |
-| Keys   | Opens large Keys pane                      |
+| Mode | Reserve area content |
+| --- | --- |
+| Recent | The entire reserve area displays `Recent - WIP`. |
+| Type | The reserve area focuses the hidden terminal input. Every typed key is echoed into the terminal as it happens. |
+| Draft | The entire reserve area displays `Draft - WIP`. |
+| Keys | The entire reserve area displays terminal key buttons. |
 
-### 4.2 Active state
+Default keyboard mode is **Type**.
 
-The active item should be visually obvious.
+Switching to Type should focus the hidden input and open the native keyboard
+where browser policy allows. Switching away from Type should blur the hidden
+input so the app keyboard UI is visible again.
 
-Recommended active states:
+Tapping the **Type** selector must focus the hidden input synchronously during
+the tap/click handler. Do not defer this focus to `requestAnimationFrame` or a
+timer, because mobile browsers may then treat it as no longer user-initiated and
+refuse to open the native keyboard.
 
-* Highlight the selected label.
-* Use a top border or pill background.
-* Keep the active pane directly above the nav row.
+## 6. Keys Mode
 
-### 4.3 Default state
-
-The app should start in **Type** mode.
-
-## 5. Terminal playground
-
-The terminal area is the main testing surface.
-
-### 5.1 Requirements
-
-The terminal playground should:
-
-* Display terminal-like output.
-* Accept typed input from the native mobile keyboard.
-* Show a cursor.
-* Support Enter.
-* Support Backspace.
-* Respond visibly to arrow keys.
-* Respond visibly to Escape, Tab, and Ctrl+C.
-* Scroll when output exceeds the visible area.
-* Resize when the mobile keyboard appears or disappears.
-
-### 5.2 Implementation options
-
-Use the simplest implementation that gives a realistic enough interaction test.
-
-Acceptable options:
-
-* xterm.js connected to a local playground process.
-* xterm.js with an in-browser command simulator.
-* A custom terminal-like component if true terminal emulation is not needed yet.
-
-Prefer xterm.js if the prototype should test realistic cursor movement, ANSI behavior, and terminal rendering.
-
-### 5.3 Minimal fake shell behavior
-
-A fake shell is acceptable for v0.
-
-Minimum useful behavior:
-
-* Echo typed characters.
-* Maintain a command line buffer.
-* Enter submits the current command.
-* Backspace edits the current command.
-* Arrow keys produce visible behavior.
-* Ctrl+C clears or interrupts the current command.
-* Escape and Tab produce visible behavior.
-
-Example commands:
+Keys mode displays exactly these buttons:
 
 ```text
-help
-clear
-echo hello
+Esc   Tab   Space   Enter
+←     ↓     ↑       →
 ```
 
-The shell only needs enough behavior to test the mobile controls.
+Mappings:
 
-## 6. Type pane
+| Button | Sequence |
+| --- | --- |
+| Esc | `\x1B` |
+| Tab | `\x09` |
+| Space | ` ` |
+| Enter | `\r` |
+| ← | `\x1B[D` |
+| ↓ | `\x1B[B` |
+| ↑ | `\x1B[A` |
+| → | `\x1B[C` |
 
-Type is the primary implemented pane.
+Tapping a key sends exactly one action. Long-press repeat is not required for v0.
 
-### 6.1 Purpose
-
-Type mode lets the user enter normal text through the native phone keyboard while keeping a compact terminal control row available.
-
-### 6.2 Layout
-
-```text
-Esc Tab Ctrl+C ← ↓ ↑ →
-```
-
-### 6.3 Behavior
-
-When the user opens Type mode:
-
-* Focus the terminal input.
-* Open the native phone keyboard where browser policy allows.
-* Show the compact terminal control row.
-* Keep the terminal viewport visible above the controls and keyboard.
-
-### 6.4 Hidden input
+## 7. Type Mode Input
 
 Use a hidden or visually minimal input configured for terminal-style typing:
 
@@ -263,220 +160,144 @@ Use a hidden or visually minimal input configured for terminal-style typing:
 ></textarea>
 ```
 
-### 6.5 Text input behavior
-
 Required behavior:
 
-* Normal characters are sent to the terminal playground.
+* Normal characters are sent to the active terminal immediately.
 * Enter sends terminal Enter.
 * Backspace works.
+* Physical `Ctrl+C` sends `\x03`.
 * Autocorrect and autocapitalization are disabled where possible.
-* Input should support mobile keyboard behavior and IME composition.
-* The app should not depend only on `keydown` for text input.
+* Input supports mobile keyboard behavior and IME composition.
+* The app does not depend only on `keydown` for text input.
 
-## 7. Keys pane
+## 8. Terminal Playground Behavior
 
-Keys is the second implemented pane.
+A fake shell is acceptable for v0.
 
-### 7.1 Purpose
+Minimum useful behavior:
 
-Keys mode provides larger tap targets for the terminal controls that are most important on mobile.
+* Echo typed characters.
+* Maintain a command line buffer.
+* Enter submits the current command.
+* Backspace edits the current command.
+* Arrow keys produce visible behavior.
+* Escape and Tab produce visible behavior.
+* When a fake full-screen app such as `ascii-splash`, `splash`, `changelog`, or
+  `tut` is running, `Ctrl+C` sends `\x03` to that app; if the app exits, the
+  terminal returns to the fake shell prompt instead of restarting the app.
+* New panes created from the wall get the same fake shell behavior and prompt as
+  regular `/playground` panes.
 
-### 7.2 Layout
-
-```text
-┌───────────────────────┐
-│ Esc   Tab   Ctrl+C     │
-│ ←     ↓     ↑     →    │
-└───────────────────────┘
-```
-
-### 7.3 Controls
-
-| Button | Behavior         |
-| ------ | ---------------- |
-| Esc    | Send Escape      |
-| Tab    | Send Tab         |
-| Ctrl+C | Send interrupt   |
-| ←      | Send left arrow  |
-| ↓      | Send down arrow  |
-| ↑      | Send up arrow    |
-| →      | Send right arrow |
-
-### 7.4 Interaction rules
-
-* Tapping a key sends exactly one action.
-* The same key mappings should be used in Type mode and Keys mode.
-* Keys mode should not add extra controls in v0.
-* Long-press repeat is not required for v0.
-* Modifier-lock behavior is not required for v0.
-
-## 8. Recent TODO pane
-
-### 8.1 Purpose
-
-Recent is visible in the navigation so the overall app structure can be tested, but it does not implement command history in v0.
-
-### 8.2 Layout
+Example commands:
 
 ```text
-TODO: Recent commands
-
-This pane will eventually show recently used commands.
+help
+clear
+echo hello
+ascii-splash
+changelog
+tut
 ```
 
-### 8.3 Behavior
+The shell only needs enough behavior to test the mobile controls.
 
-* Tapping Recent opens the TODO pane.
-* The terminal remains visible above the pane.
-* No command list is required.
-* No storage is required.
+## 9. Keyboard Reserve
 
-## 9. Draft TODO pane
+The keyboard reserve area has a stable height. It should not be recomputed from
+`visualViewport` while the native keyboard animates.
 
-### 9.1 Purpose
+When the OS keyboard is hidden, the reserve area shows the selected app keyboard
+UI (`Recent - WIP`, Type focus target, `Draft - WIP`, or Keys buttons).
 
-Draft is visible in the navigation so the overall app structure can be tested, but it does not implement scratchpad or dual-pane editing in v0.
+When the OS keyboard is visible, the OS keyboard may cover or occupy that same
+physical area. This is preferred over resizing the whole app around the keyboard.
 
-### 9.2 Layout
-
-```text
-TODO: Draft
-
-This pane will eventually support composing text before sending it to the terminal.
-```
-
-### 9.3 Behavior
-
-* Tapping Draft opens the TODO pane.
-* The terminal remains visible above the pane.
-* No editable scratchpad is required.
-* No copy/paste workflow is required.
-
-## 10. Key sequence mapping
-
-Use these mappings for both Type mode and Keys mode.
-
-| UI action   | Sequence       |
-| ----------- | -------------- |
-| Ctrl+C      | `\x03`         |
-| Esc         | `\x1B`         |
-| Tab         | `\x09`         |
-| Enter       | `\r`           |
-| Backspace   | Usually `\x7F` |
-| Arrow Up    | `\x1B[A`       |
-| Arrow Down  | `\x1B[B`       |
-| Arrow Right | `\x1B[C`       |
-| Arrow Left  | `\x1B[D`       |
-
-If the playground terminal uses a higher-level input API instead of raw terminal sequences, map these actions to the equivalent local action.
-
-## 11. Keyboard visibility and layout
-
-Keyboard handling should be simple and pragmatic.
-
-The prototype should resize the terminal area when the phone keyboard appears. Use the simplest reliable approach available:
-
-1. Use `window.visualViewport` resize events if available.
-2. Fall back to normal viewport sizing.
-3. Avoid complex keyboard detection logic unless the layout is broken.
-
-Minimal approach:
-
-```js
-function updateLayoutForKeyboard() {
-  const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-  document.documentElement.style.setProperty(
-    "--visible-height",
-    `${viewportHeight}px`
-  );
-}
-
-window.visualViewport?.addEventListener("resize", updateLayoutForKeyboard);
-window.visualViewport?.addEventListener("scroll", updateLayoutForKeyboard);
-window.addEventListener("resize", updateLayoutForKeyboard);
-updateLayoutForKeyboard();
-```
-
-The prototype does not need to perfectly detect whether the keyboard is present. It only needs to keep the terminal, active pane, and nav row usable.
-
-## 12. Touch interactions
-
-Keep touch behavior minimal.
+## 10. Touch Interactions
 
 Required interactions:
 
-* Tap terminal to focus typing.
-* Tap Type to focus typing.
-* Tap control buttons.
-* Tap bottom navigation items.
-* Scroll terminal output.
+* Tap keyboard mode selector items.
+* Tap touch mode selector items.
+* Tap Type reserve area to focus typing.
+* Type through the native keyboard.
+* Tap key buttons in Keys mode.
+* Drag in Gestures mode to send arrow keys.
+* Use Text selection mode for terminal selection and copy/paste.
+* Use Cursor mode for terminal mouse/cursor input when a TUI requests mouse reporting.
+
+Pane-content touches must never open the native keyboard. The pane content area
+may focus the terminal internally for key routing or mouse handling, but the
+mobile wrapper must configure text inputs created by the terminal surface as
+non-keyboard targets (`inputmode="none"`, readonly, not tab-reachable) and
+immediately blur them when the touch starts there. Since `Wall` may defer xterm
+focus to `requestAnimationFrame`, the wrapper must also repeat that blur shortly
+after the touch. The only mobile UI surfaces that should open the native
+keyboard are the Type selector and the Type reserve area.
 
 Not required for v0:
 
-* Swipe navigation.
-* Long-press arrow repeat.
+* Long-press key repeat.
+* Multi-touch gestures.
 * Trackpad mode.
-* Two-finger gestures.
-* Terminal mouse mode.
-* Custom text selection behavior.
+* A full command history UI.
+* A real draft editor.
 
-## 13. Copy and paste
+## 11. Copy And Paste
 
 Keep copy and paste minimal.
 
 Prototype behavior:
 
+* Text selection mode should allow the existing terminal selection and copy/paste flows to work.
 * Let users paste through the native browser/OS paste flow where possible.
-* Let terminal output selection rely on default browser behavior where possible.
-* No custom clipboard manager is required.
+* No custom mobile clipboard manager is required.
 * No multi-line paste review is required.
 
-## 14. Recommended v0 scope
+## 12. Recommended v0 Scope
 
 Build exactly this:
 
 * One terminal playground screen.
 * Floating theme switcher using the shared MouseTerm theme picker.
-* Bottom navigation row:
+* Touch mode selector:
+
+```text
+Gestures | Text selection | Cursor
+```
+
+* Keyboard mode selector:
 
 ```text
 Recent | Type | Draft | Keys
 ```
 
-* Type pane with compact controls:
+* Stable keyboard reserve area.
+* Recent reserve content: `Recent - WIP`.
+* Draft reserve content: `Draft - WIP`.
+* Type mode native mobile keyboard input.
+* Keys buttons:
 
 ```text
-Esc Tab Ctrl+C ← ↓ ↑ →
+Esc   Tab   Space   Enter
+←     ↓     ↑       →
 ```
 
-* Keys pane with larger controls:
-
-```text
-Esc   Tab   Ctrl+C
-←     ↓     ↑     →
-```
-
-* Recent TODO pane.
-* Draft TODO pane.
-* Native mobile keyboard input.
-* Basic viewport resizing when the keyboard opens.
 * Simple local playground terminal behavior.
 
-## 15. Prototype success criteria
+## 13. Prototype Success Criteria
 
 The prototype should answer these questions:
 
-1. Is the terminal viewport usable when the mobile keyboard is open?
-2. Is the compact Type control row easy to reach?
-3. Is the larger Keys pane necessary or useful?
-4. Are arrow keys usable enough for command history and cursor movement?
-5. Is Ctrl+C discoverable and easy to trigger?
-6. Does the native keyboard feel acceptable for terminal text entry?
-7. Does the four-item navigation row make sense, even with Recent and Draft as placeholders?
+1. Does the terminal viewport feel stable when the mobile keyboard opens and closes?
+2. Is the touch mode selector understandable and reachable?
+3. Are gesture arrows usable enough for command history and cursor movement?
+4. Is text selection discoverable and reliable on mobile?
+5. Is Cursor mode useful when a TUI captures mouse events?
+6. Does native keyboard Type mode feel acceptable for terminal text entry?
+7. Does the stable keyboard reserve feel better than resizing the whole UI?
 8. Is the UI too cramped in portrait orientation?
 
-## 16. Future work
+## 14. Future Work
 
 Potential later additions:
 
@@ -484,12 +305,10 @@ Potential later additions:
 * Draft scratchpad.
 * Dual-pane copy/paste.
 * Pinned snippets.
-* Ctrl+D and Ctrl+Z.
+* Ctrl+C, Ctrl+D, and Ctrl+Z app-key buttons.
 * Alt and modifier behavior.
 * Home, End, PgUp, PgDn.
 * Long-press key repeat.
-* Gesture navigation.
-* Terminal mouse mode.
 * Remote backend PTY.
 * SSH sessions.
 * User accounts.
@@ -497,12 +316,12 @@ Potential later additions:
 * Multi-session support.
 * Production security model.
 
-## 17. Product principle
+## 15. Product Principle
 
 The v0 prototype should stay focused:
 
 ```text
-Type and Keys are real.
-Recent and Draft establish the shape of the app.
+Touch modes make pane touches explicit.
+Keyboard modes make the reserve area explicit.
 Everything else waits.
 ```
