@@ -60,12 +60,13 @@ const KEYBOARD_MODES: { id: MobileTerminalKeyboardMode; label: string }[] = [
 const TOUCH_MODES: Array<{
   id: MobileTerminalTouchMode;
   label: string;
+  shortLabel: string;
   title: string;
   Icon: ComponentType<{ size?: number; weight?: 'regular' | 'bold' | 'duotone' | 'fill' }>;
 }> = [
-  { id: 'gestures', label: 'Gestures', title: 'Gestures', Icon: HandPointingIcon },
-  { id: 'selection', label: 'Text selection', title: 'Text selection', Icon: CursorTextIcon },
-  { id: 'cursor', label: 'Cursor', title: 'Cursor', Icon: CursorClickIcon },
+  { id: 'gestures', label: 'Gestures', shortLabel: 'Gestures', title: 'Gestures: drags send arrow keys', Icon: HandPointingIcon },
+  { id: 'selection', label: 'Text selection', shortLabel: 'Select', title: 'Text selection: touches select terminal text', Icon: CursorTextIcon },
+  { id: 'cursor', label: 'Cursor', shortLabel: 'Cursor', title: 'Cursor: touches send terminal mouse events', Icon: CursorClickIcon },
 ];
 
 export interface MobileTerminalUiProps {
@@ -162,18 +163,27 @@ function KeyboardModeButton({
       key={id}
       type="button"
       disabled={disabled}
+      aria-label={`${label} keyboard mode`}
       aria-current={selected ? 'page' : undefined}
       onClick={() => onSelect(id)}
       className={clsx(
-        'min-w-0 border-t-2 px-1 font-mono text-sm transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring',
+        'min-w-0 rounded px-1.5 py-1 font-mono text-xs leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
         'disabled:pointer-events-none disabled:opacity-60',
         selected
-          ? 'border-focus-ring bg-header-active-bg text-header-active-fg'
-          : 'border-transparent text-muted hover:bg-header-inactive-bg hover:text-foreground',
+          ? 'bg-header-active-bg text-header-active-fg shadow-[inset_0_0_0_1px_var(--color-focus-ring)]'
+          : 'text-muted hover:bg-header-inactive-bg hover:text-foreground',
       )}
     >
       <span className="truncate">{label}</span>
     </button>
+  );
+}
+
+function SelectorLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="w-[4.5rem] shrink-0 pl-2 pr-1 font-mono text-[11px] leading-none text-muted">
+      {children}
+    </div>
   );
 }
 
@@ -189,33 +199,72 @@ function TouchModeSelector({
   onSelect: (mode: MobileTerminalTouchMode) => void;
 }) {
   return (
-    <div className="grid h-10 shrink-0 grid-cols-3 border-t border-border bg-app-bg">
-      {TOUCH_MODES.map((item) => {
-        const selected = item.id === mode;
-        const itemDisabled = disabled || (item.id === 'cursor' && !cursorAvailable);
-        const Icon = item.Icon;
-        return (
-          <button
+    <section
+      aria-label="Touch mode"
+      className="flex h-12 shrink-0 items-center border-t border-border bg-app-bg"
+    >
+      <SelectorLabel>Touch</SelectorLabel>
+      <div className="mr-2 grid min-w-0 flex-1 grid-cols-3 gap-1 rounded bg-surface-raised p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
+        {TOUCH_MODES.map((item) => {
+          const selected = item.id === mode;
+          const itemDisabled = disabled || (item.id === 'cursor' && !cursorAvailable);
+          const Icon = item.Icon;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              title={item.title}
+              aria-label={item.label}
+              aria-pressed={selected}
+              disabled={itemDisabled}
+              onClick={() => onSelect(item.id)}
+              className={clsx(
+                'flex min-w-0 items-center justify-center gap-1 rounded px-1.5 py-1 font-mono text-xs leading-none transition-colors',
+                'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
+                'disabled:pointer-events-none disabled:opacity-35',
+                selected
+                  ? 'bg-header-active-bg text-header-active-fg shadow-[inset_0_0_0_1px_var(--color-focus-ring)]'
+                  : 'text-muted hover:bg-header-inactive-bg hover:text-foreground',
+              )}
+            >
+              <Icon size={15} weight={selected ? 'bold' : 'regular'} />
+              <span className="truncate">{item.shortLabel}</span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function KeyboardModeSelector({
+  mode,
+  disabled,
+  onSelect,
+}: {
+  mode: MobileTerminalKeyboardMode;
+  disabled: boolean;
+  onSelect: (mode: MobileTerminalKeyboardMode) => void;
+}) {
+  return (
+    <section
+      aria-label="Keyboard mode"
+      className="flex h-12 shrink-0 items-center border-t border-border bg-app-bg"
+    >
+      <SelectorLabel>Input</SelectorLabel>
+      <nav className="mr-2 grid min-w-0 flex-1 grid-cols-4 gap-1 rounded bg-surface-raised p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
+        {KEYBOARD_MODES.map((item) => (
+          <KeyboardModeButton
             key={item.id}
-            type="button"
-            title={item.title}
-            aria-label={item.label}
-            aria-pressed={selected}
-            disabled={itemDisabled}
-            onClick={() => onSelect(item.id)}
-            className={clsx(
-              'grid min-w-0 place-items-center border-t-2 transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring',
-              'disabled:pointer-events-none disabled:opacity-35',
-              selected
-                ? 'border-focus-ring bg-header-active-bg text-header-active-fg'
-                : 'border-transparent text-muted hover:bg-header-inactive-bg hover:text-foreground',
-            )}
-          >
-            <Icon size={18} weight={selected ? 'bold' : 'regular'} />
-          </button>
-        );
-      })}
-    </div>
+            id={item.id}
+            label={item.label}
+            selected={item.id === mode}
+            disabled={disabled}
+            onSelect={onSelect}
+          />
+        ))}
+      </nav>
+    </section>
   );
 }
 
@@ -431,18 +480,11 @@ export function MobileTerminalUi({
         onSelect={setTouchMode}
       />
 
-      <nav className="grid h-10 shrink-0 grid-cols-4 border-t border-border bg-app-bg">
-        {KEYBOARD_MODES.map((item) => (
-          <KeyboardModeButton
-            key={item.id}
-            id={item.id}
-            label={item.label}
-            selected={item.id === keyboardMode}
-            disabled={!interactive}
-            onSelect={setKeyboardMode}
-          />
-        ))}
-      </nav>
+      <KeyboardModeSelector
+        mode={keyboardMode}
+        disabled={!interactive}
+        onSelect={setKeyboardMode}
+      />
 
       <div className="h-64 shrink-0 border-t border-border bg-app-bg">
         {keyboardMode === 'recent' ? <WorkInProgressPane label="Recent" /> : null}

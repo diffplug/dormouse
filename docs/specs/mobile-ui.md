@@ -55,9 +55,9 @@ The mobile UI is split into fixed and flexible regions:
 ├─────────────────────────┤
 │ Pane content             │ flexible terminal area
 ├─────────────────────────┤
-│ Touch mode selector      │ thin, always visible
+│ Touch mode selector      │ labeled, always visible
 ├─────────────────────────┤
-│ Keyboard mode selector   │ thin, always visible
+│ Keyboard mode selector   │ labeled, always visible
 ├─────────────────────────┤
 │ Keyboard reserve area    │ stable height
 │                         │
@@ -76,16 +76,20 @@ does not bounce while the OS keyboard animates.
 ## 4. Touch Mode Selector
 
 The touch selector controls what happens when the user touches the pane content
-area. It is thin and always visible between the terminal content and the
-keyboard mode selector.
+area. It is always visible between the terminal content and the keyboard mode
+selector.
+
+The selector must be self-labeling. It should use a compact left-side `Touch`
+label plus segmented buttons that include both an icon and a short mode label.
+Icon-only touch controls are too hard to discover in this prototype.
 
 Touch modes:
 
-| Mode | Icon | Availability | Behavior |
-| --- | --- | --- | --- |
-| Gestures | `HandPointingIcon` | Always available | Touch drags generate arrow keys. Drag left sends left, drag right sends right, drag up sends up, and drag down sends down. |
-| Text selection | `CursorTextIcon` | Always available | Touches are reserved for terminal text selection and copy/paste. If the TUI is capturing mouse events, MouseTerm activates mouse override for the active pane. |
-| Cursor | `CursorClickIcon` | Only when the active TUI is capturing mouse events | Touches are passed through as terminal mouse/cursor input. |
+| Mode | Button label | Icon | Availability | Behavior |
+| --- | --- | --- | --- | --- |
+| Gestures | `Gestures` | `HandPointingIcon` | Always available | Touch drags generate arrow keys. Drag left sends left, drag right sends right, drag up sends up, and drag down sends down. |
+| Text selection | `Select` | `CursorTextIcon` | Always available | Touches are reserved for terminal text selection and copy/paste. If the TUI is capturing mouse events, MouseTerm activates mouse override for the active pane. |
+| Cursor | `Cursor` | `CursorClickIcon` | Only when the active TUI is capturing mouse events | Touches are passed through as terminal mouse/cursor input. |
 
 Default touch mode is **Gestures**.
 
@@ -95,11 +99,15 @@ selector must fall back to Gestures.
 ## 5. Keyboard Mode Selector
 
 The keyboard mode selector controls what appears in the keyboard reserve area.
-It is thin, always visible, and has four items:
+It is always visible and has four items:
 
 ```text
 Recent | Type | Draft | Keys
 ```
+
+The selector must be self-labeling. It should use a compact left-side `Input`
+label plus segmented text buttons. The label describes the reserve area's
+purpose without adding a longer instruction line.
 
 Keyboard modes:
 
@@ -262,13 +270,13 @@ Build exactly this:
 * Touch mode selector:
 
 ```text
-Gestures | Text selection | Cursor
+Touch  Gestures | Select | Cursor
 ```
 
 * Keyboard mode selector:
 
 ```text
-Recent | Type | Draft | Keys
+Input  Recent | Type | Draft | Keys
 ```
 
 * Stable keyboard reserve area.
