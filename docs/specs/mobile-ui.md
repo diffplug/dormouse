@@ -102,13 +102,11 @@ Gesture mode is the default pane-content touch behavior. Tapping the pane conten
 opens a radial menu offset from the touch origin. The menu should appear in the
 opposite diagonal from the user's thumb so the compass rose fills the visible
 area away from the touch point. For example, a lower-right thumb press opens the
-rose up and left; a lower-left thumb press opens it up and right. The center `o`
-is only the menu origin marker; it is not an action.
+rose up and left; a lower-left thumb press opens it up and right.
 
-As the user drags, the UI draws a visible line from the initial thumb press to
-the current thumb position. The offset compass rose may also mirror that motion
-with a lighter guide line so the selected direction remains readable away from
-the thumb.
+As the user drags, the UI draws only the offset guide line inside the visible
+compass rose. It must not draw a line directly under the user's thumb, and it
+must not render a center marker that obscures the offset line.
 
 Gesture mode uses these radii:
 
@@ -117,6 +115,12 @@ Gesture mode uses these radii:
 | `RADIUS_LAYOUT` | `92px` | Distance from the offset compass rose origin to the menu item groups. |
 | `RADIUS_SELECT` | `RADIUS_LAYOUT * 0.75` | Visible circle drawn around the offset compass rose origin. When the mirrored drag reaches this distance, the closest compass direction is selected. |
 | `RADIUS_HIGHLIGHT` | `RADIUS_SELECT * 0.5` | No circle is drawn. When the drag reaches this distance, the closest compass direction is highlighted, but not selected. |
+
+Gesture menu item state uses the same palette as pane headers. Idle groups and
+options use inactive header background/foreground. Highlighted or selected
+groups and options use active header background/foreground plus an inset
+`color-focus-ring` ring. Layout-affecting borders must not be used to indicate
+gesture selection state.
 
 The radial menu is a two-stage gesture:
 
