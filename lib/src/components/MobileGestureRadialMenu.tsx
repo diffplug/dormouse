@@ -65,28 +65,28 @@ const ROOT_DIAGONAL_LAYOUT: Partial<Record<
   {
     centerPlacement: ChipPlacement;
     centerHalfWidth: number;
-    secondaryStack: 'above' | 'below';
+    secondarySide: 'east' | 'west';
   }
 >> = {
   ne: {
     centerPlacement: 'bottomLeft',
     centerHalfWidth: 35,
-    secondaryStack: 'above',
+    secondarySide: 'east',
   },
   se: {
     centerPlacement: 'topLeft',
     centerHalfWidth: 23,
-    secondaryStack: 'below',
+    secondarySide: 'east',
   },
   sw: {
     centerPlacement: 'topRight',
     centerHalfWidth: 17,
-    secondaryStack: 'below',
+    secondarySide: 'west',
   },
   nw: {
     centerPlacement: 'bottomRight',
     centerHalfWidth: 17,
-    secondaryStack: 'above',
+    secondarySide: 'west',
   },
 };
 
@@ -262,13 +262,13 @@ function rootOptionLayout(
     diagonalLayout.centerPlacement,
     diagonalLayout.centerHalfWidth,
   );
-  const stackDirection = diagonalLayout.secondaryStack === 'above' ? -1 : 1;
+  const sideDirection = diagonalLayout.secondarySide === 'east' ? 1 : -1;
   return {
     point: {
-      x: centerPoint.x + (optionIndex === 1 ? -ROOT_CLUSTER_AXIS_GAP : ROOT_CLUSTER_AXIS_GAP),
-      y: centerPoint.y + stackDirection * ROOT_CHIP_STACK_OFFSET,
+      x: centerPoint.x + sideDirection * (diagonalLayout.centerHalfWidth + GAP_CLUSTER),
+      y: centerPoint.y + (optionIndex === 1 ? -ROOT_SIDE_STACK_OFFSET : ROOT_SIDE_STACK_OFFSET),
     },
-    placement: optionIndex === 1 ? 'left' : 'right',
+    placement: diagonalLayout.secondarySide === 'east' ? 'right' : 'left',
   };
 }
 
