@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
+import { clsx } from 'clsx';
 import {
   DockviewReact,
   themeAbyss,
@@ -594,8 +595,8 @@ export function Wall({
           <DialogKeyboardContext.Provider value={setDialogKeyboardActive}>
           <div className="flex-1 min-h-0 flex flex-col bg-app-bg text-app-fg font-sans overflow-hidden">
             {/* Dockview — 2px bottom inset keeps rounded panes distinct from the baseboard when present. */}
-            <div className={`flex-1 min-h-0 relative px-1.5 pt-1.5 ${showBaseboard ? 'pb-0.5' : 'pb-1.5'}`}>
-              <div ref={dockviewContainerRef} className={`absolute inset-x-1.5 top-1.5 ${showBaseboard ? 'bottom-0.5' : 'bottom-1.5'}`}>
+            <div className={clsx('flex-1 min-h-0 relative px-1.5 pt-1.5', showBaseboard ? 'pb-0.5' : 'pb-1.5')}>
+              <div ref={dockviewContainerRef} className={clsx('absolute inset-x-1.5 top-1.5', showBaseboard ? 'bottom-0.5' : 'bottom-1.5')}>
                 <DockviewReact
                   components={components}
                   tabComponents={tabComponents}
