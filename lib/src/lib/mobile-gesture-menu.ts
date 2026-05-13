@@ -24,6 +24,11 @@ export interface MobileGesturePoint {
   y: number;
 }
 
+export interface MobileGestureBounds {
+  width: number;
+  height: number;
+}
+
 export type MobileGestureDirectAction =
   | { kind: 'input'; input: MobileGestureInputId }
   | { kind: 'text'; text: string }
@@ -91,6 +96,8 @@ export const MOBILE_GESTURE_IDLE_STATE: MobileGestureTrackingState = { phase: 'i
 export const MOBILE_GESTURE_BREAKOUT_RADIUS = 44;
 export const MOBILE_GESTURE_RETURN_RADIUS = 26;
 export const MOBILE_GESTURE_TURN_THRESHOLD = 0.55;
+export const MOBILE_GESTURE_DISPLAY_MARGIN = 112;
+export const MOBILE_GESTURE_THUMB_OFFSET = 132;
 
 export const MOBILE_GESTURE_DIRECTION_VECTORS: Record<MobileGestureDirection, MobileGesturePoint> = {
   n: { x: 0, y: -1 },
@@ -199,6 +206,10 @@ function distance(a: MobileGesturePoint, b: MobileGesturePoint): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
 export function directionFromVector(dx: number, dy: number): MobileGestureDirection | null {
   if (Math.hypot(dx, dy) === 0) return null;
   const angle = Math.atan2(dy, dx) * 180 / Math.PI;
@@ -263,6 +274,30 @@ export function beginMobileGesture(
   };
 }
 
+export function displayOriginAwayFromThumb(
+  origin: MobileGesturePoint,
+  bounds: MobileGestureBounds,
+): MobileGesturePoint {
+  const xDirection = origin.x < bounds.width / 2 ? 1 : -1;
+  const yDirection = origin.y < bounds.height / 2 ? 1 : -1;
+  return {
+    x: bounds.width > MOBILE_GESTURE_DISPLAY_MARGIN * 2
+      ? clamp(
+        origin.x + xDirection * MOBILE_GESTURE_THUMB_OFFSET,
+        MOBILE_GESTURE_DISPLAY_MARGIN,
+        bounds.width - MOBILE_GESTURE_DISPLAY_MARGIN,
+      )
+      : bounds.width / 2,
+    y: bounds.height > MOBILE_GESTURE_DISPLAY_MARGIN * 2
+      ? clamp(
+        origin.y + yDirection * MOBILE_GESTURE_THUMB_OFFSET,
+        MOBILE_GESTURE_DISPLAY_MARGIN,
+        bounds.height - MOBILE_GESTURE_DISPLAY_MARGIN,
+      )
+      : bounds.height / 2,
+  };
+}
+
 export function updateMobileGesture(
   state: MobileGestureTrackingState,
   point: MobileGesturePoint,
@@ -323,8 +358,9 @@ export function finishMobileGesture(state: MobileGestureTrackingState): MobileGe
 export function mobileGestureStateFromPoints(
   points: MobileGesturePoint[],
   origin: MobileGesturePoint = { x: 195, y: 220 },
+  displayOrigin: MobileGesturePoint = origin,
 ): MobileGestureTrackingState {
-  let state = beginMobileGesture(1, origin);
+  let state = beginMobileGesture(1, origin, displayOrigin);
   for (const point of points) {
     state = updateMobileGesture(state, point);
   }

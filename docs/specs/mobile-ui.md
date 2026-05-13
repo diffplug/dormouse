@@ -99,8 +99,16 @@ selector must fall back to Gestures.
 ## 5. Gesture Mode
 
 Gesture mode is the default pane-content touch behavior. Tapping the pane content
-opens a radial menu at the touch origin. The center `o` is only the origin
-marker; it is not an action.
+opens a radial menu offset from the touch origin. The menu should appear in the
+opposite diagonal from the user's thumb so the compass rose fills the visible
+area away from the touch point. For example, a lower-right thumb press opens the
+rose up and left; a lower-left thumb press opens it up and right. The center `o`
+is only the menu origin marker; it is not an action.
+
+As the user drags, the UI draws a visible line from the initial thumb press to
+the current thumb position. The offset compass rose may also mirror that motion
+with a lighter guide line so the selected direction remains readable away from
+the thumb.
 
 The radial menu is a two-stage gesture:
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   beginMobileGesture,
+  displayOriginAwayFromThumb,
   finishMobileGesture,
   updateMobileGesture,
   type MobileGestureAction,
@@ -84,6 +85,20 @@ describe('mobile gesture menu state machine', () => {
     expect(runGesture([point(70, 70), point(70, 0)])).toEqual({
       kind: 'input',
       input: 'shiftEnter',
+    });
+  });
+
+  it('places the display origin up and left from a lower-right thumb press', () => {
+    expect(displayOriginAwayFromThumb({ x: 320, y: 300 }, { width: 390, height: 460 })).toEqual({
+      x: 188,
+      y: 168,
+    });
+  });
+
+  it('places the display origin up and right from a lower-left thumb press', () => {
+    expect(displayOriginAwayFromThumb({ x: 70, y: 300 }, { width: 390, height: 460 })).toEqual({
+      x: 202,
+      y: 168,
     });
   });
 });

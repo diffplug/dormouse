@@ -33,7 +33,7 @@ function directionPoint(
   };
 }
 
-function displayCurrentPoint(state: Exclude<MobileGestureTrackingState, { phase: 'idle' }>) {
+function translatedCurrentPoint(state: Exclude<MobileGestureTrackingState, { phase: 'idle' }>) {
   return {
     x: state.displayOrigin.x + state.currentPoint.x - state.origin.x,
     y: state.displayOrigin.y + state.currentPoint.y - state.origin.y,
@@ -77,7 +77,7 @@ function OptionPill({
 export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackingState }) {
   if (state.phase === 'idle') return null;
 
-  const currentPoint = displayCurrentPoint(state);
+  const translatedPoint = translatedCurrentPoint(state);
 
   return (
     <div
@@ -86,13 +86,40 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
     >
       <svg className="absolute inset-0 h-full w-full">
         <line
+          x1={state.origin.x}
+          y1={state.origin.y}
+          x2={state.currentPoint.x}
+          y2={state.currentPoint.y}
+          stroke="var(--color-focus-ring)"
+          strokeOpacity="0.9"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+        />
+        <line
           x1={state.displayOrigin.x}
           y1={state.displayOrigin.y}
-          x2={currentPoint.x}
-          y2={currentPoint.y}
+          x2={translatedPoint.x}
+          y2={translatedPoint.y}
           stroke="var(--color-focus-ring)"
-          strokeOpacity="0.75"
+          strokeOpacity="0.35"
           strokeWidth="2"
+          strokeDasharray="4 4"
+          strokeLinecap="round"
+        />
+        <circle
+          cx={state.origin.x}
+          cy={state.origin.y}
+          r="4"
+          fill="var(--color-focus-ring)"
+          fillOpacity="0.9"
+        />
+        <circle
+          cx={state.currentPoint.x}
+          cy={state.currentPoint.y}
+          r="5"
+          fill="var(--color-header-active-bg)"
+          stroke="var(--color-focus-ring)"
+          strokeWidth="1"
         />
         <circle
           cx={state.displayOrigin.x}

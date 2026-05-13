@@ -21,6 +21,7 @@ import {
 } from './MobileGestureRadialMenu';
 import {
   beginMobileGesture,
+  displayOriginAwayFromThumb,
   finishMobileGesture,
   MOBILE_GESTURE_IDLE_STATE,
   updateMobileGesture,
@@ -309,23 +310,11 @@ function WorkInProgressPane({ label }: { label: 'Recent' | 'Draft' }) {
 
 type MobileGestureConfirmationAction = Extract<MobileGestureAction, { kind: 'confirm' }>;
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
 function localPointerPoint(event: PointerEvent<HTMLElement>): MobileGesturePoint {
   const rect = event.currentTarget.getBoundingClientRect();
   return {
     x: event.clientX - rect.left,
     y: event.clientY - rect.top,
-  };
-}
-
-function gestureDisplayOrigin(origin: MobileGesturePoint, rect: DOMRect): MobileGesturePoint {
-  const margin = 104;
-  return {
-    x: rect.width > margin * 2 ? clamp(origin.x, margin, rect.width - margin) : rect.width / 2,
-    y: rect.height > margin * 2 ? clamp(origin.y, margin, rect.height - margin) : rect.height / 2,
   };
 }
 
@@ -521,7 +510,7 @@ export function MobileTerminalUi({
     commitGestureState(beginMobileGesture(
       event.pointerId,
       origin,
-      gestureDisplayOrigin(origin, event.currentTarget.getBoundingClientRect()),
+      displayOriginAwayFromThumb(origin, event.currentTarget.getBoundingClientRect()),
     ));
   }, [blurPaneTextInputs, commitGestureState, interactive, touchMode]);
 

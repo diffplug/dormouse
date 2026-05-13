@@ -10,6 +10,7 @@ import {
   MobileGestureRadialMenu,
 } from '../components/MobileGestureRadialMenu';
 import {
+  displayOriginAwayFromThumb,
   MOBILE_GESTURE_IDLE_STATE,
   mobileGestureStateFromPoints,
   type MobileGesturePoint,
@@ -96,7 +97,8 @@ function StoryFrame(args: MobileTerminalUiProps) {
   );
 }
 
-const GESTURE_ORIGIN: MobileGesturePoint = { x: 195, y: 220 };
+const GESTURE_BOUNDS = { width: 390, height: 460 };
+const GESTURE_ORIGIN: MobileGesturePoint = { x: 300, y: 280 };
 
 function gesturePoint(dx: number, dy: number): MobileGesturePoint {
   return {
@@ -106,7 +108,11 @@ function gesturePoint(dx: number, dy: number): MobileGesturePoint {
 }
 
 function gestureState(points: MobileGesturePoint[]): MobileGestureTrackingState {
-  return mobileGestureStateFromPoints(points, GESTURE_ORIGIN);
+  return mobileGestureStateFromPoints(
+    points,
+    GESTURE_ORIGIN,
+    displayOriginAwayFromThumb(GESTURE_ORIGIN, GESTURE_BOUNDS),
+  );
 }
 
 function GestureSnapshotFrame({
