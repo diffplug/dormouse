@@ -19,6 +19,8 @@ const GAP_CLUSTER = 2;
 const ROOT_CHIP_HALF_HEIGHT = 9;
 const ROOT_CHIP_STACK_OFFSET = ROOT_CHIP_HALF_HEIGHT * 2 + GAP_CLUSTER;
 const ROOT_CHIP_HALF_WIDTH_ARROW = 11;
+const ROOT_CLUSTER_AXIS_GAP = GAP_CLUSTER / 2;
+const ROOT_SIDE_STACK_OFFSET = ROOT_CHIP_HALF_HEIGHT + ROOT_CLUSTER_AXIS_GAP;
 const GAP_CARDINAL_RING = 12;
 const ROOT_CARDINAL_X = RADIUS_SELECT + ROOT_CHIP_HALF_WIDTH_ARROW + GAP_CARDINAL_RING;
 const ROOT_CARDINAL_Y = RADIUS_SELECT + ROOT_CHIP_HALF_HEIGHT + GAP_CARDINAL_RING;
@@ -165,24 +167,24 @@ function rootOptionLayout(
     };
     if (direction === 'n') {
       if (optionIndex === 1) {
-        point.x -= ROOT_CHIP_HALF_WIDTH_ARROW + GAP_CLUSTER;
+        point.x -= ROOT_CLUSTER_AXIS_GAP;
         point.y -= ROOT_CHIP_STACK_OFFSET;
         return { point, placement: 'left' };
       }
       if (optionIndex === 2) {
-        point.x += ROOT_CHIP_HALF_WIDTH_ARROW + GAP_CLUSTER;
+        point.x += ROOT_CLUSTER_AXIS_GAP;
         point.y -= ROOT_CHIP_STACK_OFFSET;
         return { point, placement: 'right' };
       }
     }
     if (direction === 's') {
       if (optionIndex === 1) {
-        point.x -= ROOT_CHIP_HALF_WIDTH_ARROW + GAP_CLUSTER;
+        point.x -= ROOT_CLUSTER_AXIS_GAP;
         point.y += ROOT_CHIP_STACK_OFFSET;
         return { point, placement: 'left' };
       }
       if (optionIndex === 2) {
-        point.x += ROOT_CHIP_HALF_WIDTH_ARROW + GAP_CLUSTER;
+        point.x += ROOT_CLUSTER_AXIS_GAP;
         point.y += ROOT_CHIP_STACK_OFFSET;
         return { point, placement: 'right' };
       }
@@ -190,24 +192,24 @@ function rootOptionLayout(
     if (direction === 'e') {
       if (optionIndex === 1) {
         point.x += ROOT_CHIP_HALF_WIDTH_ARROW + GAP_CLUSTER;
-        point.y -= ROOT_CHIP_STACK_OFFSET;
+        point.y -= ROOT_SIDE_STACK_OFFSET;
         return { point, placement: 'right' };
       }
       if (optionIndex === 2) {
         point.x += ROOT_CHIP_HALF_WIDTH_ARROW + GAP_CLUSTER;
-        point.y += ROOT_CHIP_STACK_OFFSET;
+        point.y += ROOT_SIDE_STACK_OFFSET;
         return { point, placement: 'right' };
       }
     }
     if (direction === 'w') {
       if (optionIndex === 1) {
         point.x -= ROOT_CHIP_HALF_WIDTH_ARROW + GAP_CLUSTER;
-        point.y -= ROOT_CHIP_STACK_OFFSET;
+        point.y -= ROOT_SIDE_STACK_OFFSET;
         return { point, placement: 'left' };
       }
       if (optionIndex === 2) {
         point.x -= ROOT_CHIP_HALF_WIDTH_ARROW + GAP_CLUSTER;
-        point.y += ROOT_CHIP_STACK_OFFSET;
+        point.y += ROOT_SIDE_STACK_OFFSET;
         return { point, placement: 'left' };
       }
     }

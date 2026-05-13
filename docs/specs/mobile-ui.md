@@ -136,11 +136,13 @@ labels.
 Root labels are laid out as a square keypad, not on a circle. N, S, E, and W
 use a hierarchical layout: the arrow chip sits closest to the select circle, and
 the four arrow chips use one shared `GAP_CARDINAL_RING` from the select circle
-edge. The two secondary chips sit just outside each arrow. Diagonal groups keep
-corner L shapes so the diagonal corner still reads as one group without
-compressing all three labels into a line. Exploded option labels use the square
-direction anchors directly. The root label pack stays close to the select
-circle, while preserving enough room for long labels like Backspace.
+edge. The two secondary chips sit just outside each arrow. N/S secondary pairs
+use `GAP_CLUSTER` as the horizontal edge-to-edge gap across the axis; E/W
+secondary pairs use the same `GAP_CLUSTER` as the vertical edge-to-edge gap.
+Diagonal groups keep corner L shapes so the diagonal corner still reads as one
+group without compressing all three labels into a line. Exploded option labels
+use the square direction anchors directly. The root label pack stays close to
+the select circle, while preserving enough room for long labels like Backspace.
 
 Each root cluster uses `GAP_CLUSTER = 2px`. The first option in each group is
 the cluster center and is centered on the group's anchor. Items to the left are
@@ -195,14 +197,14 @@ remain spelled out.
 Root gesture menu:
 
 ```text
-Esc      ⌃C*             k   PgUp             n Backspace
+Esc      ⌃C*             k PgUp             n Backspace
 Quit**                   ▲                               Paste*
 
 Home   ◀                                           ▶   End
 h                                                       l
 
 ⬆︎Tab                    ▼                   y ⬆︎Enter
-Tab Space              j   PgDn                Enter
+Tab Space              j PgDn                Enter
 ```
 
 `⌃C` and `Paste` require an in-pane confirmation modal before they run.
