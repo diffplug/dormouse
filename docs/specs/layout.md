@@ -18,7 +18,7 @@ Transitioning between Pane and Door does not alter the Session in any way. Minim
 There are two areas:
 
 - **Content** — tiling layout containing Panes, powered by dockview
-- **Baseboard** — always-visible bottom strip containing Doors and shortcut hints
+- **Baseboard** — bottom strip containing Doors and shortcut hints. It is visible in the main shell; tightly constrained embedders may suppress it with `Wall showBaseboard={false}` when they do not expose door/minimize workflows.
 
 The user can navigate between all elements using the mouse, or by entering `command` mode and using the keyboard.
 
@@ -32,7 +32,7 @@ Wall
 │       │   │       ├── TerminalPanel → TerminalPane → xterm.js
 │       │   │       └── TerminalPaneHeader (tab component, drag handle)
 │       │   └── WorkspaceSelectionOverlay (fixed positioned, pointer-events: none)
-│       ├── Baseboard (always-visible bottom strip, shortcut hints when empty)
+│       ├── Baseboard (bottom strip, shortcut hints when empty; optional for constrained embedders)
 │       │   └── Door components (one per minimized session)
 │       └── KillConfirmOverlay (conditional)
 ```
@@ -104,7 +104,9 @@ The header adapts to available width via ResizeObserver in three tiers:
 
 ## Baseboard
 
-Below the content area is the baseboard (`h-7`, 28px). It is always visible and has no top divider. The dockview area ends 2px above it, leaving a narrow theme-colored gap that keeps rounded pane corners distinct from the baseboard. Its horizontal padding matches the Dockview wrapper's 6px inset, so doors align with the panes above. When empty, it shows keyboard shortcut hints when there are no doors and the container is wider than 350px (currently: `LCmd → RCmd to enter command mode`).
+Below the content area is the baseboard (`h-7`, 28px). It is visible by default and has no top divider. The dockview area ends 2px above it, leaving a narrow theme-colored gap that keeps rounded pane corners distinct from the baseboard. Its horizontal padding matches the Dockview wrapper's 6px inset, so doors align with the panes above. When empty, it shows keyboard shortcut hints when there are no doors and the container is wider than 350px (currently: `LCmd → RCmd to enter command mode`).
+
+`Wall` accepts `showBaseboard={false}` for constrained embedders such as the website mobile Tether prototype, where a separate bottom navigation owns the area below the terminal and door workflows are outside the prototype scope. The main app shell keeps the default `showBaseboard=true`.
 
 When a session is minimized, it becomes a **door** on the baseboard. The door displays the same derived terminal label as the pane header, a TODO badge (if set), and an alert bell icon with activity dot. It uses the bottom edge of the window as its bottom border, with left, top, and right borders using the shared terminal top radius from `lib/src/components/design.tsx` — resembling a mouse hole and matching pane rounding. Door dimensions: `min-w-[68px] max-w-[220px] h-6`.
 

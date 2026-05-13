@@ -36,6 +36,22 @@ html body {
   height: auto;
 }
 
+html body.tether-marketing-body {
+  overflow: auto;
+}
+
+body.tether-marketing-body #root {
+  height: auto;
+}
+
+html body.tether-terminal-body {
+  overflow: hidden;
+}
+
+body.tether-terminal-body #root {
+  height: 100vh;
+}
+
 [data-theme-picker-current="true"] {
   background-image: linear-gradient(currentColor, currentColor);
   background-position: 0 100%;

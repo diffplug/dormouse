@@ -1,0 +1,281 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-05-11T00:00:00Z",
+  "title": "Design System: MouseTerm",
+  "extensions": {
+    "colorMeta": {
+      "app-bg": {
+        "role": "neutral",
+        "displayName": "App Background (Host Sidebar)",
+        "canonical": "var(--vscode-sideBar-background)",
+        "tonalRamp": ["#0d0905", "#150e07", "#1a1309", "#221a0f", "#2b2114", "#3a2c1a", "#5e452e", "#8a6843"]
+      },
+      "app-fg": {
+        "role": "neutral",
+        "displayName": "App Foreground (Host Sidebar Text)",
+        "canonical": "var(--vscode-sideBar-foreground)",
+        "tonalRamp": ["#3a2c1a", "#5e452e", "#8a6843", "#a98968", "#c7a07d", "#d3af86", "#e3c5a3", "#efdac4"]
+      },
+      "surface-raised": {
+        "role": "neutral",
+        "displayName": "Raised Surface (Popovers, Dialogs)",
+        "canonical": "var(--vscode-editorWidget-background)",
+        "tonalRamp": ["#15100a", "#1d150c", "#241a10", "#2b2114", "#33271a", "#3e3020", "#5e452e", "#8a6843"]
+      },
+      "foreground": {
+        "role": "neutral",
+        "displayName": "Primary Foreground",
+        "canonical": "var(--vscode-editor-foreground)",
+        "tonalRamp": ["#3a2c1a", "#5e452e", "#8a6843", "#a98968", "#c7a07d", "#d3af86", "#e3c5a3", "#efdac4"]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted Foreground (Shortcuts, Hints)",
+        "canonical": "var(--vscode-descriptionForeground)",
+        "tonalRamp": ["#3a2c1a", "#5e452e", "#776046", "#8a6843", "#9a7a52", "#a98968", "#c7a07d", "#d3af86"]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Panel Border (Hairline on Raised Surfaces)",
+        "canonical": "var(--vscode-panel-border)",
+        "tonalRamp": ["#221a0f", "#2b2114", "#3a2c1a", "#4a3823", "#5e452e", "#6f5538", "#8a6843", "#a98968"]
+      },
+      "header-active-bg": {
+        "role": "primary",
+        "displayName": "Focused Header (the closest thing to an accent)",
+        "canonical": "var(--vscode-list-activeSelectionBackground)",
+        "tonalRamp": ["#2e2410", "#3e3018", "#523f20", "#665128", "#7e602f", "#9a7638", "#b58c45", "#cda35a"]
+      },
+      "header-active-fg": {
+        "role": "primary",
+        "displayName": "Focused Header Text",
+        "canonical": "var(--vscode-list-activeSelectionForeground)",
+        "tonalRamp": ["#8a6843", "#a98968", "#c7a07d", "#d3af86", "#e3c5a3", "#efdac4", "#f5e8d6", "#ffffff"]
+      },
+      "header-inactive-bg": {
+        "role": "secondary",
+        "displayName": "Unfocused Header",
+        "canonical": "var(--vscode-list-inactiveSelectionBackground)",
+        "tonalRamp": ["#221a0f", "#2b2114", "#3a2c1a", "#4a3823", "#5e452e", "#6f5538", "#8a6843", "#a98968"]
+      },
+      "header-inactive-fg": {
+        "role": "secondary",
+        "displayName": "Unfocused Header Text",
+        "canonical": "var(--vscode-list-inactiveSelectionForeground)",
+        "tonalRamp": ["#5e452e", "#8a6843", "#a98968", "#c7a07d", "#d3af86", "#e3c5a3", "#efdac4", "#f5e8d6"]
+      },
+      "door-bg": {
+        "role": "tertiary",
+        "displayName": "Door (runtime-picked for OKLab separation)",
+        "canonical": "var(--color-door-bg)",
+        "tonalRamp": ["#221a0f", "#2b2114", "#3a2c1a", "#4a3823", "#5e452e", "#6f5538", "#8a6843", "#a98968"]
+      },
+      "door-fg": {
+        "role": "tertiary",
+        "displayName": "Door Text",
+        "canonical": "var(--color-door-fg)",
+        "tonalRamp": ["#5e452e", "#8a6843", "#a98968", "#c7a07d", "#d3af86", "#e3c5a3", "#efdac4", "#f5e8d6"]
+      },
+      "focus-ring": {
+        "role": "tertiary",
+        "displayName": "Focus Ring (runtime-picked for chroma)",
+        "canonical": "var(--color-focus-ring)",
+        "tonalRamp": ["#5e452e", "#8a6843", "#a98968", "#c7a07d", "#d3af86", "#e3c5a3", "#f9d181", "#fee9b3"]
+      },
+      "terminal-bg": {
+        "role": "neutral",
+        "displayName": "Terminal Background (orthogonal to chrome)",
+        "canonical": "var(--vscode-terminal-background)",
+        "tonalRamp": ["#0d0905", "#150e07", "#1a1309", "#221a0f", "#2b2114", "#3a2c1a", "#4a3823", "#5e452e"]
+      },
+      "terminal-fg": {
+        "role": "neutral",
+        "displayName": "Terminal Foreground",
+        "canonical": "var(--vscode-terminal-foreground)",
+        "tonalRamp": ["#5e452e", "#8a6843", "#a98968", "#c7a07d", "#d3af86", "#e3c5a3", "#efdac4", "#f5e8d6"]
+      },
+      "input-bg": {
+        "role": "neutral",
+        "displayName": "Input Background",
+        "canonical": "var(--vscode-input-background)",
+        "tonalRamp": ["#15100a", "#1d150c", "#241a10", "#2b2114", "#33271a", "#3e3020", "#5e452e", "#8a6843"]
+      },
+      "input-border": {
+        "role": "neutral",
+        "displayName": "Input Border",
+        "canonical": "var(--vscode-input-border)",
+        "tonalRamp": ["#221a0f", "#2b2114", "#3a2c1a", "#4a3823", "#5e452e", "#6f5538", "#8a6843", "#a98968"]
+      },
+      "error": {
+        "role": "primary",
+        "displayName": "Error / Destructive (terminal ANSI red)",
+        "canonical": "var(--vscode-terminal-ansiRed)",
+        "tonalRamp": ["#3d1e10", "#5a2c17", "#75381e", "#984828", "#cc6633", "#d97f4f", "#e29a72", "#ecbfa1"]
+      },
+      "success": {
+        "role": "primary",
+        "displayName": "Success / Affirm (terminal ANSI green)",
+        "canonical": "var(--vscode-terminal-ansiGreen)",
+        "tonalRamp": ["#293119", "#3d4824", "#52602f", "#6a7a3a", "#889b4a", "#9eaf60", "#b5c280", "#cdd6a4"]
+      },
+      "alarm": {
+        "role": "primary",
+        "displayName": "Alarm / Bell (terminal ANSI yellow, runtime-rotated per surface)",
+        "canonical": "var(--vscode-terminal-ansiYellow)",
+        "tonalRamp": ["#4a3818", "#6e5424", "#917030", "#b58c45", "#d3a85c", "#f9d181", "#fbdda3", "#fee9b3"]
+      },
+      "window-close-hover": {
+        "role": "primary",
+        "displayName": "Window Close Hover (native OS red, the only literal)",
+        "canonical": "#b92a1b",
+        "tonalRamp": ["#3d0e09", "#5a160d", "#751c12", "#982618", "#b92a1b", "#cf493a", "#dd6e60", "#e89889"]
+      }
+    },
+    "typographyMeta": {
+      "body": {
+        "displayName": "Body (the workhorse step)",
+        "purpose": "Pane headers, doors, button labels, popup contents. Almost everything sits here."
+      },
+      "label": {
+        "displayName": "Label (tiny, wide tracking)",
+        "purpose": "TODO pills, kill-confirm hints, anything that has to be readable at 10px."
+      },
+      "shortcut": {
+        "displayName": "Shortcut [bracketed]",
+        "purpose": "Keybinding hints, always rendered through <Shortcut> or renderShortcuts()."
+      }
+    },
+    "shadows": [
+      { "name": "popover", "value": "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)", "purpose": "Tooltips, selection popup, header tooltips. Surface is in the air, not heavy." },
+      { "name": "dialog",  "value": "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)", "purpose": "Kill-confirm sheet, TODO alert dialog. Floats above chrome." },
+      { "name": "modal",   "value": "0 25px 50px -12px rgb(0 0 0 / 0.25)", "purpose": "Theme picker dropdown, theme debugger, theme store. Top-of-app surface." },
+      { "name": "inset-focus-ring", "value": "inset 0 0 0 1px var(--color-focus-ring)", "purpose": "Mobile segmented-control selected state. Inset because a border would shift layout on toggle." },
+      { "name": "inset-border", "value": "inset 0 0 0 1px var(--color-border)", "purpose": "Mobile segmented-control container. Same layout-stability reason." }
+    ],
+    "motion": [
+      { "name": "ease-quart-out",      "value": "cubic-bezier(0.22, 1, 0.36, 1)",  "purpose": "Default for pane spawn/kill and any layout-adjacent transition. Exponential ease-out, no bounce." },
+      { "name": "spring-overshoot",    "value": "cubic-bezier(0.34, 1.56, 0.64, 1)", "purpose": "Reserved for celebratory state-resolution: TODO check pop-in, kill-confirm letter flash, copy-confirm scale. Used only at 220–500ms; never on layout." },
+      { "name": "ease-in-out-bell",    "value": "ease-in-out", "purpose": "Bell ring continuous animation (800ms, infinite, alternating ±45deg rotation)." },
+      { "name": "ease-out-shake",      "value": "ease-out",    "purpose": "Kill-overlay shake-x (400ms, x-axis only)." },
+      { "name": "duration-pane",       "value": "440ms", "purpose": "Pane spawn and kill choreography." },
+      { "name": "duration-flourish",   "value": "500ms", "purpose": "TODO pill dismiss sequence." },
+      { "name": "duration-confirm",    "value": "220ms", "purpose": "Kill-overlay confirm letter flash." },
+      { "name": "duration-copy-flash", "value": "260ms", "purpose": "Selection popup copy-confirm scale flash." },
+      { "name": "duration-bell-ring",  "value": "800ms", "purpose": "One full ring cycle." },
+      { "name": "duration-shake",      "value": "400ms", "purpose": "Kill-cancel shake-x." }
+    ],
+    "breakpoints": [
+      { "name": "md", "value": "768px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Door",
+      "kind": "custom",
+      "refersTo": "door",
+      "description": "Pane-header indicator on the baseboard. Top corners rounded, square bottom; the signature component of the system.",
+      "html": "<button class=\"ds-door\" type=\"button\" title=\"build\"><span class=\"ds-door__title\">build</span><span class=\"ds-door__badges\"><span class=\"ds-todo-pill\">TODO</span><svg class=\"ds-door__bell\" viewBox=\"0 0 256 256\" width=\"11\" height=\"11\" aria-hidden=\"true\"><path fill=\"currentColor\" d=\"M221.8 175.94C216.25 166.38 208 139.33 208 104a80 80 0 1 0-160 0c0 35.34-8.26 62.38-13.81 71.94A16 16 0 0 0 48 200h40.81a40 40 0 0 0 78.38 0H208a16 16 0 0 0 13.8-24.06ZM128 216a24 24 0 0 1-22.62-16h45.24A24 24 0 0 1 128 216Z\"/></svg></span></button>",
+      "css": ".ds-door { display: flex; align-items: center; gap: 8px; height: 24px; min-width: 68px; max-width: 220px; padding: 0 10px; overflow: hidden; border: none; border-radius: 8px 8px 0 0; background: var(--color-door-bg, #5e452e); color: var(--color-door-fg, #d3af86); font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 0.75rem; line-height: 1rem; font-weight: 500; cursor: pointer; } .ds-door__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; } .ds-door__badges { display: flex; align-items: center; gap: 6px; flex-shrink: 0; } .ds-door__bell { color: var(--vscode-terminal-ansiYellow, #f9d181); }"
+    },
+    {
+      "name": "Pane Header (Active)",
+      "kind": "nav",
+      "refersTo": "header-active-bg",
+      "description": "Focused pane header tab. The bg swap between this and the inactive variant is the entire focus affordance.",
+      "html": "<div class=\"ds-pane-header ds-pane-header--active\"><span class=\"ds-pane-header__title\">~/src/lib · pnpm dev</span><div class=\"ds-pane-header__actions\"><button class=\"ds-header-btn\" aria-label=\"Toggle alert\"><svg viewBox=\"0 0 256 256\" width=\"14\" height=\"14\" aria-hidden=\"true\"><path fill=\"currentColor\" d=\"M221.8 175.94C216.25 166.38 208 139.33 208 104a80 80 0 1 0-160 0c0 35.34-8.26 62.38-13.81 71.94A16 16 0 0 0 48 200h40.81a40 40 0 0 0 78.38 0H208a16 16 0 0 0 13.8-24.06Z\"/></svg></button><button class=\"ds-header-btn\" aria-label=\"Kill\"><svg viewBox=\"0 0 256 256\" width=\"14\" height=\"14\" aria-hidden=\"true\"><path fill=\"currentColor\" d=\"M205.66 194.34a8 8 0 0 1-11.32 11.32L128 139.31l-66.34 66.35a8 8 0 0 1-11.32-11.32L116.69 128 50.34 61.66a8 8 0 0 1 11.32-11.32L128 116.69l66.34-66.35a8 8 0 0 1 11.32 11.32L139.31 128Z\"/></svg></button></div></div>",
+      "css": ".ds-pane-header { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 8px 8px 0 0; font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 0.75rem; font-weight: 500; } .ds-pane-header--active { background: var(--vscode-list-activeSelectionBackground, #7e602f); color: var(--vscode-list-activeSelectionForeground, #ffffff); } .ds-pane-header__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-pane-header__actions { display: flex; gap: 2px; flex-shrink: 0; } .ds-header-btn { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: none; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; transition: background 120ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-header-btn:hover { background: color-mix(in srgb, currentColor 10%, transparent); } .ds-header-btn:focus-visible { outline: 1px solid var(--color-focus-ring, #f9d181); outline-offset: 1px; }"
+    },
+    {
+      "name": "Pane Header (Inactive)",
+      "kind": "nav",
+      "refersTo": "header-inactive-bg",
+      "description": "Unfocused pane header. Identical geometry to active; only the background and foreground differ.",
+      "html": "<div class=\"ds-pane-header ds-pane-header--inactive\"><span class=\"ds-pane-header__title\">~/src/web · vite preview</span></div>",
+      "css": ".ds-pane-header--inactive { background: var(--vscode-list-inactiveSelectionBackground, #5e452e); color: var(--vscode-list-inactiveSelectionForeground, #d3af86); }"
+    },
+    {
+      "name": "Window Close Button",
+      "kind": "button",
+      "refersTo": "chrome-button-window-close",
+      "description": "Windows/Linux native-style window close. The one place a literal hex (#b92a1b) is allowed in the system, because the platform convention is a hard red.",
+      "html": "<button class=\"ds-win-close\" aria-label=\"Close\"><svg viewBox=\"0 0 256 256\" width=\"12\" height=\"12\" aria-hidden=\"true\"><path fill=\"currentColor\" d=\"M205.66 194.34a8 8 0 0 1-11.32 11.32L128 139.31l-66.34 66.35a8 8 0 0 1-11.32-11.32L116.69 128 50.34 61.66a8 8 0 0 1 11.32-11.32L128 116.69l66.34-66.35a8 8 0 0 1 11.32 11.32L139.31 128Z\"/></svg></button>",
+      "css": ".ds-win-close { display: flex; align-items: center; justify-content: center; width: 44px; height: 20px; padding: 0; border: none; background: transparent; color: inherit; cursor: pointer; transition: background 120ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-win-close:hover { background: #b92a1b; color: #ffffff; }"
+    },
+    {
+      "name": "Tooltip / Popup Button Row",
+      "kind": "card",
+      "refersTo": "popup-button-row",
+      "description": "The raised-surface primitive. Used as a tooltip body, a selection popup, and an illegal-rename warning. Always carries the popover shadow.",
+      "html": "<div class=\"ds-popup\" role=\"tooltip\"><span class=\"ds-popup__line\">Kill pane</span><span class=\"ds-popup__line\"><span class=\"ds-shortcut\">[⌘W]</span></span></div>",
+      "css": ".ds-popup { display: inline-flex; flex-direction: column; gap: 2px; padding: 6px 8px; background: var(--vscode-editorWidget-background, #2b2114); color: var(--vscode-editor-foreground, #d3af86); border: 1px solid var(--vscode-panel-border, #5e452e); border-radius: 4px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 0.75rem; line-height: 1rem; font-weight: 500; white-space: nowrap; } .ds-popup__line { display: block; } .ds-shortcut { color: var(--vscode-descriptionForeground, #a98968); }"
+    },
+    {
+      "name": "Kill Confirm Dialog",
+      "kind": "card",
+      "refersTo": "kill-confirm-dialog",
+      "description": "The kill-confirmation sheet that appears centered over a focused pane. Uses surface-raised + dialog shadow + the spring-overshoot curve when the user confirms.",
+      "html": "<div class=\"ds-kill\" role=\"dialog\" aria-label=\"Confirm kill\"><div class=\"ds-kill__title\">Kill <span class=\"ds-kill__name\">pnpm dev</span>?</div><div class=\"ds-kill__hint\"><span class=\"ds-shortcut\">[y]</span> confirm <span class=\"ds-shortcut\">[n]</span> cancel</div></div>",
+      "css": ".ds-kill { display: inline-flex; flex-direction: column; gap: 6px; padding: 16px 24px; background: var(--vscode-editorWidget-background, #2b2114); color: var(--vscode-editor-foreground, #d3af86); border: 1px solid var(--vscode-panel-border, #5e452e); border-radius: 8px; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 0.75rem; text-align: center; } .ds-kill__title { font-weight: 500; } .ds-kill__name { color: var(--vscode-terminal-ansiRed, #cc6633); font-weight: 600; } .ds-kill__hint { color: var(--vscode-descriptionForeground, #a98968); font-size: 0.625rem; }"
+    },
+    {
+      "name": "TODO Pill",
+      "kind": "chip",
+      "refersTo": "todo-pill",
+      "description": "Tiny inline label inside pane headers and doors. The wider tracking (0.08em) is mandatory at this 10px size; without it the letters smear.",
+      "html": "<span class=\"ds-todo-pill\">TODO</span>",
+      "css": ".ds-todo-pill { display: inline-block; padding: 0 2px; font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 0.625rem; line-height: 1rem; font-weight: 600; letter-spacing: 0.08em; color: var(--vscode-editor-foreground, #d3af86); }"
+    },
+    {
+      "name": "Theme Picker Trigger",
+      "kind": "button",
+      "refersTo": "header-action-button-labeled",
+      "description": "The labeled chrome button used to open the theme picker. Inherits header fg; hovers with a 10% wash of currentColor so it works under any theme.",
+      "html": "<button class=\"ds-trigger\" aria-label=\"Theme\"><span>Kimbie Dark</span><svg viewBox=\"0 0 256 256\" width=\"10\" height=\"10\" aria-hidden=\"true\"><path fill=\"currentColor\" d=\"M213.66 101.66l-80 80a8 8 0 0 1-11.32 0l-80-80a8 8 0 0 1 11.32-11.32L128 164.69l74.34-74.35a8 8 0 0 1 11.32 11.32Z\"/></svg></button>",
+      "css": ".ds-trigger { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border: none; border-radius: 4px; background: transparent; color: inherit; font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 0.625rem; font-weight: 500; cursor: pointer; transition: background 120ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-trigger:hover { background: color-mix(in srgb, currentColor 10%, transparent); } .ds-trigger:focus-visible { outline: 1px solid var(--color-focus-ring, #f9d181); outline-offset: 1px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Native Tenant",
+    "overview": "MouseTerm is a tenant in someone else's house. The house is VSCode. The user picked the furniture (their theme), the lighting (their mode), the typography (their editor font). MouseTerm moves in, multiplies what the user can do with their terminals, and leaves the decor alone. The system is intentionally minimal and bg-only. Chrome recedes; terminals are the content. Hierarchy is conveyed through background shifts between header-active-bg and header-inactive-bg, not through borders, shadows, or accent stripes. Status is conveyed through shape and position and through the active terminal palette's own ANSI red/green/yellow, not through a separate design-system palette.",
+    "keyCharacteristics": [
+      "Host-theme-driven palette: every color is a var(--vscode-*) passthrough.",
+      "Bg-only chrome: no decorative borders, no resting shadows, no accent stripes.",
+      "Monospace everywhere: sans and mono resolve to the same VSCode editor font.",
+      "Tight type scale: text-xs (10px) and text-sm (12px) override Tailwind defaults; almost everything sits on these two steps.",
+      "Status through palette already in the room: alerts use the user's ANSI red / green / yellow, not a brand color.",
+      "Motion: short, exponential ease-out for layout transitions; sparing spring-overshoot reserved for celebratory state-resolution."
+    ],
+    "rules": [
+      { "name": "The Host-Theme-Only Rule", "body": "Never write a hex value or oklch() literal into theme.css or a component. Never use var(..., fallback) chains. Every color must resolve through --vscode-* or one of the body-published runtime picks. The one allowed exception is #b92a1b for native window-close hover.", "section": "colors" },
+      { "name": "The Bg-Only Chrome Rule", "body": "Pane headers, doors, and the baseboard convey hierarchy through background shifts only. Do not add borders or shadows to 'make the hierarchy work.'", "section": "colors" },
+      { "name": "The Active Header Doubles as Accent Rule", "body": "Animated emphasis (copy-confirm flash, active-pane selection ring) tints with header-active-bg/25. The accent is not separate from the focus signal; they are the same color, used at different opacities.", "section": "colors" },
+      { "name": "The Two-Step Rule", "body": "Almost everything sits on text-xs or text-sm. If a new surface wants text-base or larger, the surface is probably wrong.", "section": "typography" },
+      { "name": "The Bracket-Shortcut Rule", "body": "Keybindings always render as [k] in muted color via <Shortcut> or renderShortcuts(...). Never put Ctrl+K or ⌘K in chrome text.", "section": "typography" },
+      { "name": "The Flat-At-Rest Rule", "body": "Surfaces in the resting layout (panes, doors, baseboard, terminal content) carry no shadow. Shadow appears only when a surface enters the air.", "section": "elevation" },
+      { "name": "The Inset-Over-Border Rule", "body": "When a surface needs a 1px stroke that may toggle on state change, prefer shadow-[inset_0_0_0_1px_…] over border. The shadow does not affect layout; the border does.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do route every color through a --vscode-* variable or a body-published runtime pick (--color-door-*, --color-focus-ring, --color-alarm-vs-*). The frontmatter is the contract.",
+      "Do keep chrome on text-xs (10px) and text-sm (12px). The Tailwind defaults are overridden for a reason; do not write text-base into chrome to 'make it readable.'",
+      "Do use hover:bg-current/10 for neutral hover feedback inside theme-tinted chrome. It is the one hover treatment that always works.",
+      "Do convey active-vs-inactive pane state through the header-active-bg / header-inactive-bg background swap. That is the entire focus affordance.",
+      "Do render keybindings as [k] via <Shortcut> / renderShortcuts. Always muted, always bracketed.",
+      "Do gate every keyframe animation behind @media (prefers-reduced-motion: reduce).",
+      "Do use shadow-[inset_0_0_0_1px_var(--color-…)] instead of border when a stroke may toggle on state change.",
+      "Do treat doors as the navigation primitive. Doors own rounded-t-lg; terminal bodies own rounded-b-lg; together they form one rectangle.",
+      "Do use the spring-overshoot curve cubic-bezier(0.34, 1.56, 0.64, 1) only for state-resolution moments (TODO check, kill confirm, copy flash), and keep durations short (220-500ms)."
+    ],
+    "donts": [
+      "Don't write a hex color anywhere except #b92a1b for the windowClose hover. No exceptions. No oklch() literals either; even those bypass the host theme.",
+      "Don't add var(--vscode-*, #fallback) fallback chains in theme.css. The runtime host plus the resolver are responsible for providing the variable; a fallback hides a real bug.",
+      "Don't add borders or shadows to pane headers or doors to 'make the hierarchy work.' The hierarchy is header-active-bg vs. header-inactive-bg.",
+      "Don't introduce a text-muted color inside an active or inactive pane header. Header-internal text inherits the header foreground; muting inside it breaks the focus signal.",
+      "Don't use rounded SaaS cards, gradient accents, gradient text, or glassmorphism. PRODUCT.md names these directly.",
+      "Don't use hacker-aesthetic green-on-black, terminal-cliché Matrix tints, or any color that signals 'this is a programmer tool.' The user's theme decides what color this tool is.",
+      "Don't animate layout properties (width, height, top, left, padding). Pane transitions use clip-path and opacity deliberately so layout measurements stay valid mid-animation.",
+      "Don't add an emoji, mascot, or illustration to chrome. PRODUCT.md is explicit.",
+      "Don't wrap things in containers. Most surfaces don't need one; the host's sidebar already is the container.",
+      "Don't introduce a new pass-through --mt-* token or a one-off color for tabs, badges, accents, or button hovers. If a new rendered surface truly needs a token that isn't in the hierarchy, update theme.css and design.tsx together, document the addition in docs/specs/theme.md, and update CONSUMED_VSCODE_KEYS in bundle-themes.mjs."
+    ]
+  }
+}

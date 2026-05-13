@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
+import { clsx } from 'clsx';
 import {
   DockviewReact,
   themeAbyss,
@@ -100,6 +101,7 @@ export function Wall({
   onApiReady,
   onEvent,
   baseboardNotice,
+  showBaseboard = true,
 }: {
   initialPaneIds?: string[];
   initialMode?: WallMode;
@@ -108,6 +110,7 @@ export function Wall({
   onApiReady?: (api: DockviewApi) => void;
   onEvent?: (event: WallEvent) => void;
   baseboardNotice?: ReactNode;
+  showBaseboard?: boolean;
 } = {}) {
   const apiRef = useRef<DockviewApi | null>(null);
   const [dockviewApi, setDockviewApi] = useState<DockviewApi | null>(null);
@@ -591,9 +594,9 @@ export function Wall({
           <FreshlySpawnedContext.Provider value={freshlySpawnedRef.current}>
           <DialogKeyboardContext.Provider value={setDialogKeyboardActive}>
           <div className="flex-1 min-h-0 flex flex-col bg-app-bg text-app-fg font-sans overflow-hidden">
-            {/* Dockview — 2px bottom inset keeps rounded panes distinct from the baseboard. */}
-            <div className="flex-1 min-h-0 relative px-1.5 pt-1.5 pb-0.5">
-              <div ref={dockviewContainerRef} className="absolute inset-x-1.5 top-1.5 bottom-0.5">
+            {/* Dockview — 2px bottom inset keeps rounded panes distinct from the baseboard when present. */}
+            <div className={clsx('flex-1 min-h-0 relative px-1.5 pt-1.5', showBaseboard ? 'pb-0.5' : 'pb-1.5')}>
+              <div ref={dockviewContainerRef} className={clsx('absolute inset-x-1.5 top-1.5', showBaseboard ? 'bottom-0.5' : 'bottom-1.5')}>
                 <DockviewReact
                   components={components}
                   tabComponents={tabComponents}
@@ -605,8 +608,10 @@ export function Wall({
               </div>
             </div>
 
-            {/* Baseboard — always visible */}
-            <Baseboard items={doors} onReattach={handleReattach} notice={baseboardNotice} />
+            {/* Baseboard — always visible in the main shell; embedders may suppress it for constrained mobile prototypes. */}
+            {showBaseboard ? (
+              <Baseboard items={doors} onReattach={handleReattach} notice={baseboardNotice} />
+            ) : null}
 
             {/* Kill confirmation overlay — centered over the pane being killed */}
             {confirmKill && (
