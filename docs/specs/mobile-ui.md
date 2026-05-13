@@ -7,7 +7,7 @@ This document specifies the `/tether` mobile terminal prototype.
 The prototype tests one core idea:
 
 ```text
-Stable terminal viewport + explicit touch mode + explicit keyboard mode.
+Stable terminal viewport + mobile session viewport + explicit touch mode + explicit input mode.
 ```
 
 The app should feel like a lightweight mobile terminal playground. It does not
@@ -27,7 +27,8 @@ Primary goals:
 
 * Keep the terminal viewport stable when the native phone keyboard opens or closes.
 * Let the user explicitly choose what terminal touches mean.
-* Let the user explicitly choose what appears in the stable keyboard reserve area.
+* Let the user explicitly choose what appears in the stable reserve area.
+* Show one terminal session at a time on mobile, with session switching available from the reserve controls.
 * Test normal mobile text entry using the native phone keyboard.
 * Provide enough terminal behavior to evaluate typing, Enter, Backspace, arrows, Escape, Tab, and app interruption.
 * Keep the implementation small and easy to iterate on.
@@ -41,6 +42,7 @@ Non-goals:
 * Session persistence.
 * Command history storage.
 * A real draft/scratchpad workflow.
+* Mobile split-pane layout.
 * Multi-touch gestures.
 * Production security hardening.
 * Full accessibility implementation.
@@ -51,23 +53,35 @@ The mobile UI is split into fixed and flexible regions:
 
 ```text
 ┌─────────────────────────┐
-│ Pane title               │ fixed/small
+│ Mobile session header     │ fixed/small
 ├─────────────────────────┤
 │ Pane content             │ flexible terminal area
 ├─────────────────────────┤
-│ Touch mode selector      │ labeled, always visible
+│ Touch mode selector      │ always visible
 ├─────────────────────────┤
-│ Keyboard mode selector   │ labeled, always visible
+│ Reserve mode selector    │ always visible
 ├─────────────────────────┤
-│ Keyboard reserve area    │ stable height
+│ Reserve area             │ stable height
 │                         │
 │ Shows app keyboard UI    │ when OS keyboard hidden
 │ Occupied by OS keyboard  │ when OS keyboard visible
 └─────────────────────────┘
 ```
 
-The pane title and pane content come from the embedded `Wall` terminal pane. The
-mobile wrapper owns the two selectors and the fixed-height keyboard reserve.
+The mobile session header and pane content come from `MobileWall`, a mobile
+composition that displays one active terminal session at a time. Desktop `Wall`
+remains the tiling workspace; mobile does not expose split-pane layout. The
+mobile wrapper owns the two selectors and the fixed-height reserve. The selector
+block should use one divider between the Touch and Input rows, with no divider
+above Touch and no divider below Input. The mobile session header should not use
+the desktop terminal title corner radius; it is a flush mobile bar. The alert
+bell sits immediately after the title before secondary title detail. The mobile
+header keeps a minimize button, and in the `/tether` prototype that action opens
+the Sessions reserve instead of creating a desktop Door. The Touch row and its
+selector tray should sit on `terminal-bg` so they read as part of the terminal
+surface above. The Input row and reserve area should sit on
+`header-inactive-bg` with `header-inactive-fg`, so the lower input controls are
+distinct from the terminal while still following the selected theme.
 
 The root height must not be recalculated from `window.visualViewport` on every
 keyboard resize. The reserve area is intentionally stable so the terminal region
@@ -76,12 +90,12 @@ does not bounce while the OS keyboard animates.
 ## 4. Touch Mode Selector
 
 The touch selector controls what happens when the user touches the pane content
-area. It is always visible between the terminal content and the keyboard mode
+area. It is always visible between the terminal content and the input mode
 selector.
 
-The selector must be self-labeling. It should use a compact left-side `Touch`
-label plus segmented buttons that include both an icon and a short mode label.
-Icon-only touch controls are too hard to discover in this prototype.
+The selector must be self-labeling through segmented buttons that include both
+an icon and a short mode label. Icon-only touch controls are too hard to
+discover in this prototype.
 
 Touch modes:
 
@@ -89,11 +103,11 @@ Touch modes:
 | --- | --- | --- | --- | --- |
 | Gestures | `Gestures` | `HandPointingIcon` | Always available | Pane-content touches, pen presses, and primary mouse/trackpad clicks open the Gesture mode radial menu. |
 | Text selection | `Select` | `CursorTextIcon` | Always available | Touches are reserved for terminal text selection and copy/paste. If the TUI is capturing mouse events, MouseTerm activates mouse override for the active pane. |
-| Cursor | `Cursor` | `CursorClickIcon` | Only when the active TUI is capturing mouse events | Touches are passed through as terminal mouse/cursor input. |
+| Mouse | `Mouse` | `CursorClickIcon` | Only when the active TUI is capturing mouse events | Touches are passed through as terminal mouse input. |
 
 Default touch mode is **Gestures**.
 
-If Cursor mode is active and the active pane stops capturing mouse events, the
+If Mouse mode is active and the active pane stops capturing mouse events, the
 selector must fall back to Gestures.
 
 Gesture mode intentionally consumes primary mouse/trackpad clicks in addition to
@@ -104,7 +118,7 @@ mouse/trackpad click in pane content must start radial gesture handling, call
 through to the embedded `Wall`, xterm, or dockview for focus, selection, or pane
 interaction. Non-primary mouse buttons are ignored by gesture handling so their
 browser or host behavior can continue. Users who want terminal selection or TUI
-mouse input must choose Select or Cursor mode explicitly.
+mouse input must choose Select or Mouse mode explicitly.
 
 ## 5. Gesture Mode
 
@@ -289,29 +303,28 @@ Gesture action mappings:
 | ⬆︎Enter | `\x1B[13;2u` |
 | y | `y` |
 
-## 6. Keyboard Mode Selector
+## 6. Input Mode Selector
 
-The keyboard mode selector controls what appears in the keyboard reserve area.
-It is always visible and has four items:
+The input mode selector controls what appears in the reserve area. It is always
+visible and has four items:
 
 ```text
-Recent | Type | Draft | Keys
+Sessions | Recent | Type | Draft
 ```
 
-The selector must be self-labeling. It should use a compact left-side `Input`
-label plus segmented text buttons. The label describes the reserve area's
-purpose without adding a longer instruction line.
+The selector must be self-labeling through segmented buttons that include both
+an icon and a short mode label.
 
-Keyboard modes:
+Input modes:
 
-| Mode | Reserve area content |
-| --- | --- |
-| Recent | The entire reserve area displays `Recent - WIP`. |
-| Type | The reserve area focuses the hidden terminal input. Every typed key is echoed into the terminal as it happens. |
-| Draft | The entire reserve area displays `Draft - WIP`. |
-| Keys | The entire reserve area displays terminal key buttons. |
+| Mode | Button label | Icon | Reserve area content |
+| --- | --- | --- | --- |
+| Sessions | `Sessions` | `TerminalWindowIcon` | The reserve area displays mobile session rows with active, alert, and TODO state. Selecting a session makes it the single visible terminal. |
+| Recent | `Recent` | `ClockCounterClockwiseIcon` | The entire reserve area displays `WIP - commands you have recently executed will be available here`. |
+| Type | `Type` | `TextTIcon` | The reserve area displays `Onscreen keyboard goes here` and focuses the hidden terminal input. Every typed key is echoed into the terminal as it happens. |
+| Draft | `Draft` | `ArticleNyTimesIcon` | The entire reserve area displays `WIP - this will be a place to draft prompts before pasting into the terminal`. |
 
-Default keyboard mode is **Type**.
+Default input mode is **Type**.
 
 Switching to Type should focus the hidden input and open the native keyboard
 where browser policy allows. Switching away from Type should blur the hidden
@@ -322,31 +335,7 @@ the tap/click handler. Do not defer this focus to `requestAnimationFrame` or a
 timer, because mobile browsers may then treat it as no longer user-initiated and
 refuse to open the native keyboard.
 
-## 7. Keys Mode
-
-Keys mode displays exactly these buttons:
-
-```text
-Esc   Tab   Space   Enter
-◀     ▼     ▲       ▶
-```
-
-Mappings:
-
-| Button | Sequence |
-| --- | --- |
-| Esc | `\x1B` |
-| Tab | `\x09` |
-| Space | ` ` |
-| Enter | `\r` |
-| ◀ | `\x1B[D` |
-| ▼ | `\x1B[B` |
-| ▲ | `\x1B[A` |
-| ▶ | `\x1B[C` |
-
-Tapping a key sends exactly one action. Long-press repeat is not required for v0.
-
-## 8. Type Mode Input
+## 7. Type Mode Input
 
 Use a hidden or visually minimal input configured for terminal-style typing:
 
@@ -371,7 +360,7 @@ Required behavior:
 * Input supports mobile keyboard behavior and IME composition.
 * The app does not depend only on `keydown` for text input.
 
-## 9. Terminal Playground Behavior
+## 8. Terminal Playground Behavior
 
 A fake shell is acceptable for v0.
 
@@ -381,7 +370,7 @@ Minimum useful behavior:
 * Maintain a command line buffer.
 * Enter submits the current command.
 * Backspace edits the current command.
-* Arrow keys produce visible behavior.
+* Gesture-generated arrow keys produce visible behavior.
 * Escape and Tab produce visible behavior.
 * When a fake full-screen app such as `ascii-splash`, `splash`, `changelog`, or
   `tut` is running, `Ctrl+C` sends `\x03` to that app; if the app exits, the
@@ -402,30 +391,31 @@ tut
 
 The shell only needs enough behavior to test the mobile controls.
 
-## 10. Keyboard Reserve
+## 9. Keyboard Reserve
 
 The keyboard reserve area has a stable height. It should not be recomputed from
 `visualViewport` while the native keyboard animates.
 
 When the OS keyboard is hidden, the reserve area shows the selected app keyboard
-UI (`Recent - WIP`, Type focus target, `Draft - WIP`, or Keys buttons).
+UI: session list, `WIP - commands you have recently executed will be available here`,
+`Onscreen keyboard goes here`, or `WIP - this will be a place to draft prompts before pasting into the terminal`.
 
 When the OS keyboard is visible, the OS keyboard may cover or occupy that same
 physical area. This is preferred over resizing the whole app around the keyboard.
 
-## 11. Touch Interactions
+## 10. Touch Interactions
 
 Required interactions:
 
-* Tap keyboard mode selector items.
+* Tap input mode selector items.
 * Tap touch mode selector items.
+* Switch active sessions through Sessions mode.
 * Tap Type reserve area to focus typing.
 * Type through the native keyboard.
-* Tap key buttons in Keys mode.
 * Use Gesture mode to open the radial menu and send terminal inputs.
 * Confirm sensitive Gesture mode actions before sending `Ctrl+C` or reading the clipboard for Paste.
 * Use Text selection mode for terminal selection and copy/paste.
-* Use Cursor mode for terminal mouse/cursor input when a TUI requests mouse reporting.
+* Use Mouse mode for terminal mouse input when a TUI requests mouse reporting.
 
 Pane-content touches must never open the native keyboard. The pane content area
 may focus the terminal internally for key routing or mouse handling, but the
@@ -444,7 +434,7 @@ Not required for v0:
 * A full command history UI.
 * A real draft editor.
 
-## 12. Copy And Paste
+## 11. Copy And Paste
 
 Keep copy and paste minimal.
 
@@ -455,7 +445,7 @@ Prototype behavior:
 * No custom mobile clipboard manager is required.
 * No multi-line paste review is required.
 
-## 13. Recommended v0 Scope
+## 12. Recommended v0 Scope
 
 Build exactly this:
 
@@ -464,30 +454,24 @@ Build exactly this:
 * Touch mode selector:
 
 ```text
-Touch  Gestures | Select | Cursor
+Gestures | Select | Mouse
 ```
 
-* Keyboard mode selector:
+* Input mode selector:
 
 ```text
-Input  Recent | Type | Draft | Keys
+Sessions | Recent | Type | Draft
 ```
 
 * Stable keyboard reserve area.
-* Recent reserve content: `Recent - WIP`.
-* Draft reserve content: `Draft - WIP`.
+* Sessions reserve content: active session rows with alert and TODO state.
+* Recent reserve content: `WIP - commands you have recently executed will be available here`.
+* Draft reserve content: `WIP - this will be a place to draft prompts before pasting into the terminal`.
 * Type mode native mobile keyboard input.
 * Gesture mode radial menu for arrows, navigation keys, Esc, Tab, Enter, simple vim-like keys, confirmed Ctrl+C, confirmed Paste, and Quit breakout.
-* Keys buttons:
-
-```text
-Esc   Tab   Space   Enter
-◀     ▼     ▲       ▶
-```
-
 * Simple local playground terminal behavior.
 
-## 14. Prototype Success Criteria
+## 13. Prototype Success Criteria
 
 The prototype should answer these questions:
 
@@ -495,12 +479,12 @@ The prototype should answer these questions:
 2. Is the touch mode selector understandable and reachable?
 3. Is Gesture mode fast and understandable enough for arrows, navigation keys, and common TUI exits?
 4. Is text selection discoverable and reliable on mobile?
-5. Is Cursor mode useful when a TUI captures mouse events?
+5. Is Mouse mode useful when a TUI captures mouse events?
 6. Does native keyboard Type mode feel acceptable for terminal text entry?
 7. Does the stable keyboard reserve feel better than resizing the whole UI?
 8. Is the UI too cramped in portrait orientation?
 
-## 15. Future Work
+## 14. Future Work
 
 Potential later additions:
 
@@ -518,12 +502,12 @@ Potential later additions:
 * Multi-session support.
 * Production security model.
 
-## 16. Product Principle
+## 15. Product Principle
 
 The v0 prototype should stay focused:
 
 ```text
 Touch modes make pane touches explicit.
-Keyboard modes make the reserve area explicit.
+Input modes make the reserve area explicit.
 Everything else waits.
 ```
