@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentType } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ShareIcon } from "@phosphor-icons/react";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import { NotifySignupForm } from "../components/NotifySignupForm";
@@ -23,7 +23,7 @@ const TETHER_PANE = "tether-ascii-splash";
 const TETHER_THEME_ID = "vscode.theme-kimbie-dark.kimbie-dark";
 
 interface WallModule {
-  Wall: ComponentType<any>;
+  Wall: typeof import("mouseterm-lib/components/Wall")["Wall"];
 }
 
 interface DockviewApiLike {

@@ -181,7 +181,7 @@ function KeyboardModeButton({
 
 function SelectorLabel({ children }: { children: ReactNode }) {
   return (
-    <div className="w-[4.5rem] shrink-0 pl-2 pr-1 font-mono text-[11px] leading-none text-muted">
+    <div className="w-[4.5rem] shrink-0 pl-2 pr-1 font-mono text-xs leading-none text-muted">
       {children}
     </div>
   );
