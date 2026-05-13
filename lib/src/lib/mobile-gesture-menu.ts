@@ -281,7 +281,7 @@ function pointOnRadius(
   };
 }
 
-function translatedPoint(
+export function translatedPoint(
   displayOrigin: MobileGesturePoint,
   origin: MobileGesturePoint,
   point: MobileGesturePoint,

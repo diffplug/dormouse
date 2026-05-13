@@ -9,6 +9,7 @@ import {
   RADIUS_LAYOUT,
   RADIUS_FADE_START,
   RADIUS_SELECT,
+  translatedPoint,
   type MobileGestureConfirmation,
   type MobileGestureDirection,
   type MobileGestureOptionIndex,
@@ -72,8 +73,6 @@ type ChipPlacement =
   | 'center'
   | 'left'
   | 'right'
-  | 'above'
-  | 'below'
   | 'topLeft'
   | 'topRight'
   | 'bottomLeft'
@@ -117,10 +116,6 @@ function translateForPlacement(placement: ChipPlacement): string {
       return 'translate(-100%, -50%)';
     case 'right':
       return 'translate(0, -50%)';
-    case 'above':
-      return 'translate(-50%, -100%)';
-    case 'below':
-      return 'translate(-50%, 0)';
     case 'topLeft':
       return 'translate(0, 0)';
     case 'topRight':
@@ -134,14 +129,6 @@ function translateForPlacement(placement: ChipPlacement): string {
   }
 }
 
-function translatedStyle(x: number, y: number, scale = 1, placement: ChipPlacement = 'center'): CSSProperties {
-  return {
-    left: x,
-    top: y,
-    transform: `${translateForPlacement(placement)} scale(${scale})`,
-  };
-}
-
 function translatedChipStyle(
   x: number,
   y: number,
@@ -150,7 +137,9 @@ function translatedChipStyle(
   opacity: number,
 ): CSSProperties {
   return {
-    ...translatedStyle(x, y, scale, placement),
+    left: x,
+    top: y,
+    transform: `${translateForPlacement(placement)} scale(${scale})`,
     opacity,
   };
 }
@@ -207,17 +196,6 @@ function directionPoint(
 }
 
 type ActiveGestureState = Exclude<MobileGestureTrackingState, { phase: 'idle' }>;
-
-function translatedCurrentPoint(
-  state: ActiveGestureState,
-  origin: { x: number; y: number },
-  displayOrigin: { x: number; y: number },
-) {
-  return {
-    x: displayOrigin.x + state.currentPoint.x - origin.x,
-    y: displayOrigin.y + state.currentPoint.y - origin.y,
-  };
-}
 
 function activeRootDirection(state: ActiveGestureState): MobileGestureDirection | undefined {
   switch (state.phase) {
@@ -317,7 +295,7 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
 
   const phaseOrigin = state.phase === 'root' ? state.origin : state.optionOrigin;
   const phaseDisplayOrigin = state.phase === 'root' ? state.displayOrigin : state.displayOptionOrigin;
-  const currentDisplayPoint = translatedCurrentPoint(state, phaseOrigin, phaseDisplayOrigin);
+  const currentDisplayPoint = translatedPoint(phaseDisplayOrigin, phaseOrigin, state.currentPoint);
   const rootDirection = activeRootDirection(state);
   const tickDirection = activeTickDirection(state);
   const selectTicks = SELECT_TICK_DIRECTIONS.map((direction) => {
@@ -384,7 +362,7 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
             targetOpacity,
           )}
         >
-          <div className={state.phase === 'root' ? 'mobile-gesture-chip-spawn' : undefined}>
+          <div className={clsx(state.phase === 'root' && 'mobile-gesture-chip-spawn')}>
             <OptionChip label={option.label} active={active} />
           </div>
         </div>
