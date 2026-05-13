@@ -127,6 +127,7 @@ const DIAGONAL = Math.SQRT1_2;
 export const MOBILE_GESTURE_IDLE_STATE: MobileGestureTrackingState = { phase: 'idle' };
 export const RADIUS_LAYOUT = 92;
 export const RADIUS_SELECT = RADIUS_LAYOUT * 0.75;
+export const RADIUS_FADE_START = RADIUS_SELECT * 0.25;
 export const RADIUS_HIGHLIGHT = RADIUS_SELECT * 0.5;
 export const MOBILE_GESTURE_COMPLETE_MS = 220;
 export const MOBILE_GESTURE_DISPLAY_MARGIN = 168;

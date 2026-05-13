@@ -7,6 +7,7 @@ import {
   MOBILE_GESTURE_OPTION_DIRECTIONS,
   MOBILE_GESTURE_QUIT_GROUP,
   RADIUS_LAYOUT,
+  RADIUS_FADE_START,
   RADIUS_SELECT,
   type MobileGestureConfirmation,
   type MobileGestureDirection,
@@ -139,6 +140,42 @@ function translatedStyle(x: number, y: number, scale = 1, placement: ChipPlaceme
     top: y,
     transform: `${translateForPlacement(placement)} scale(${scale})`,
   };
+}
+
+type GestureChipStyle = CSSProperties & { '--mobile-gesture-target-opacity'?: number };
+
+function translatedChipStyle(
+  x: number,
+  y: number,
+  scale: number,
+  placement: ChipPlacement,
+  opacity: number,
+): GestureChipStyle {
+  return {
+    ...translatedStyle(x, y, scale, placement),
+    opacity,
+    '--mobile-gesture-target-opacity': opacity,
+  };
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function rootGroupOpacity(state: ActiveGestureState, direction: MobileGestureDirection): number {
+  if (state.phase !== 'root') return 1;
+  const dx = state.currentPoint.x - state.origin.x;
+  const dy = state.currentPoint.y - state.origin.y;
+  const dragDistance = Math.hypot(dx, dy);
+  if (dragDistance <= RADIUS_FADE_START) return 1;
+  const dragHat = {
+    x: dx / RADIUS_SELECT,
+    y: dy / RADIUS_SELECT,
+  };
+  const unitToGroup = MOBILE_GESTURE_DIRECTION_VECTORS[direction];
+  const targetOpacity = clamp01(0.75 + dragHat.x * unitToGroup.x + dragHat.y * unitToGroup.y);
+  const fadeProgress = clamp01((dragDistance - RADIUS_FADE_START) / (RADIUS_SELECT - RADIUS_FADE_START));
+  return 1 + (targetOpacity - 1) * fadeProgress;
 }
 
 function centerFromPlacedCorner(
@@ -334,19 +371,21 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
       const faded = state.phase === 'quit'
         || (state.phase === 'options' && !isSelectedGroup)
         || state.phase === 'complete';
+      const targetOpacity = faded ? 0 : rootGroupOpacity(state, direction);
       return (
         <div
           key={`${direction}-${index}`}
           className={clsx(
             'absolute transition-[left,top,opacity,transform] ease-out',
             state.phase === 'complete' ? 'duration-200' : 'duration-150',
-            faded ? 'opacity-0' : 'opacity-100',
+            state.phase === 'root' && 'mobile-gesture-chip-spawn',
           )}
-          style={translatedStyle(
+          style={translatedChipStyle(
             layout.point.x,
             layout.point.y,
             isCompletingRootOption ? COMPLETE_SCALE : 1,
             layout.placement,
+            targetOpacity,
           )}
         >
           <OptionChip label={option.label} active={active} />
@@ -375,9 +414,14 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
           className={clsx(
             'absolute transition-[left,top,opacity,transform] ease-out',
             state.phase === 'complete' ? 'duration-200' : 'duration-150',
-            state.phase === 'complete' ? 'opacity-0' : 'opacity-100',
           )}
-          style={translatedStyle(point.x, point.y, isCompletingQuitOption ? COMPLETE_SCALE : 1)}
+          style={translatedChipStyle(
+            point.x,
+            point.y,
+            isCompletingQuitOption ? COMPLETE_SCALE : 1,
+            'center',
+            state.phase === 'complete' ? 0 : 1,
+          )}
         >
           <OptionChip
             label={option.label}
@@ -405,16 +449,21 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
           strokeDasharray="4 4"
           strokeLinecap="round"
         />
-        <circle
-          cx={phaseDisplayOrigin.x}
-          cy={phaseDisplayOrigin.y}
-          r={RADIUS_SELECT}
-          fill="none"
-          stroke="var(--color-focus-ring)"
-          strokeOpacity="0.22"
-          strokeWidth="1.5"
-        />
-        {selectTicks}
+        <g
+          className={state.phase === 'root' ? 'mobile-gesture-circle-spawn' : undefined}
+          style={{ transformOrigin: `${phaseDisplayOrigin.x}px ${phaseDisplayOrigin.y}px` }}
+        >
+          <circle
+            cx={phaseDisplayOrigin.x}
+            cy={phaseDisplayOrigin.y}
+            r={RADIUS_SELECT}
+            fill="none"
+            stroke="var(--color-focus-ring)"
+            strokeOpacity="0.22"
+            strokeWidth="1.5"
+          />
+          {selectTicks}
+        </g>
       </svg>
 
       {rootOptions}

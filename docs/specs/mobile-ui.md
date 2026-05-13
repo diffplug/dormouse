@@ -114,6 +114,7 @@ Gesture mode uses these radii:
 | --- | --- | --- |
 | `RADIUS_LAYOUT` | `92px` | Base half-side for square direction anchors around the offset compass rose origin. Exploded option labels land on these anchors; root labels are packed around the same square so long labels do not overlap. |
 | `RADIUS_SELECT` | `RADIUS_LAYOUT * 0.75` | Visible circle drawn around the offset compass rose origin. When the mirrored drag reaches this distance, the closest compass direction is selected. |
+| `RADIUS_FADE_START` | `RADIUS_SELECT * 0.25` | No directional root-group fading happens before this drag distance. |
 | `RADIUS_HIGHLIGHT` | `RADIUS_SELECT * 0.5` | No circle is drawn. When the drag reaches this distance, the closest compass direction is highlighted, but not selected. |
 
 Gesture menu item state uses the same palette as pane headers. Idle groups and
@@ -126,6 +127,22 @@ heavier elevation is reserved for active chips.
 The select circle renders subtle ticks at the eight compass directions. The
 current highlighted or selected direction uses a stronger tick so the circle and
 label clusters read as one gesture system.
+
+When the rose opens on touch-down, root labels fade in and the select circle
+grows from zero radius to `RADIUS_SELECT`. This is a short state-reveal motion,
+not an ongoing decoration; reduced-motion users get the final state immediately.
+
+While the user is still choosing a root group, the root groups fade according to
+the current drag vector only after the drag exceeds `RADIUS_FADE_START`. Before
+that threshold, all root groups render at full opacity. After the threshold,
+define `dragHat = (currentPoint - origin) / RADIUS_SELECT` and `unitToGroup` as
+the unit vector from the origin to the group's compass direction. The root group
+target opacity is `clamp(0.75 + dragHat dot unitToGroup, 0, 1)`. The rendered
+opacity blends smoothly from `1` at `RADIUS_FADE_START` to that target at
+`RADIUS_SELECT` using
+`fadeProgress = clamp((dragDistance - RADIUS_FADE_START) / (RADIUS_SELECT -
+RADIUS_FADE_START), 0, 1)` and
+`opacity = 1 + (targetOpacity - 1) * fadeProgress`.
 
 Each root compass group renders as three separate labels placed close together,
 not as one combined pill. When a group is selected, those same three labels tween

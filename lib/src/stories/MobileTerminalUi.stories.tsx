@@ -16,6 +16,7 @@ import {
   MOBILE_GESTURE_IDLE_STATE,
   MOBILE_GESTURE_OPTION_DIRECTIONS,
   mobileGestureStateFromPoints,
+  RADIUS_FADE_START,
   RADIUS_HIGHLIGHT,
   RADIUS_SELECT,
   type MobileGestureDirection,
@@ -249,6 +250,10 @@ export const CursorTouchAvailable: Story = {
 
 export const GestureMenuOpened: Story = {
   render: () => <GestureSnapshotFrame state={gestureState([])} />,
+};
+
+export const GestureRootFadeStart: Story = {
+  render: () => <GestureSnapshotFrame state={gestureState([gesturePoint(RADIUS_FADE_START, 0)])} />,
 };
 
 export const GestureEastHighlight: Story = {
