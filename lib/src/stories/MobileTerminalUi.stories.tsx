@@ -1,10 +1,18 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   MOBILE_TERMINAL_KEY_SEQUENCES,
   MobileTerminalUi,
+  type MobileTerminalKeyboardMode,
   type MobileTerminalUiProps,
 } from '../components/MobileTerminalUi';
+import { MobileWall, useMobileWallSessionItems, type MobileWallSession } from '../components/MobileWall';
+import {
+  flattenScenario,
+  initPlatform,
+  type FakePtyAdapter,
+  type FakeScenario,
+} from '../lib/platform';
 
 const meta: Meta<typeof MobileTerminalUi> = {
   title: 'App/MobileTerminalUi',
@@ -16,6 +24,30 @@ const meta: Meta<typeof MobileTerminalUi> = {
 
 export default meta;
 type Story = StoryObj<typeof MobileTerminalUi>;
+
+const TETHER_WALL_PANE = 'storybook-tether-wall';
+const TETHER_WALL_SESSIONS: MobileWallSession[] = [{ id: TETHER_WALL_PANE, title: 'ascii-splash' }];
+
+const TETHER_WALL_SCENARIO: FakeScenario = {
+  name: 'tether-wall-ascii-splash',
+  chunks: [{
+    delay: 0,
+    data: [
+      '\x1b[32mascii-splash\x1b[0m\r\n',
+      '\x1b[2mpattern=oceanbeach quality=medium fps=30\x1b[0m\r\n',
+      '\r\n',
+      '\r\n',
+      '\r\n',
+      '                 ~~~~~ * ~~~~~\r\n',
+      '                   ~~~~ /|\\ ~~~~\r\n',
+      '                 ~~~~ /_|_\\ ~~~~\r\n',
+      '                   ~~~~ / \\ ~~~~\r\n',
+      '\r\n',
+      '\r\n',
+      '$ _',
+    ].join(''),
+  }],
+};
 
 const SEQUENCE_LABELS = new Map<string, string>([
   [MOBILE_TERMINAL_KEY_SEQUENCES.ctrlC, 'CTRL_C'],
@@ -75,6 +107,45 @@ function StoryFrame(args: MobileTerminalUiProps) {
   );
 }
 
+function TetherWallFrame(args: MobileTerminalUiProps) {
+  const adapterRef = useRef<FakePtyAdapter | null>(null);
+  if (!adapterRef.current) adapterRef.current = initPlatform('fake');
+  const [activePaneId, setActivePaneId] = useState(TETHER_WALL_PANE);
+  const [keyboardMode, setKeyboardMode] = useState<MobileTerminalKeyboardMode>(
+    args.activeKeyboardMode ?? args.activeSection ?? args.defaultKeyboardMode ?? args.defaultSection ?? 'type',
+  );
+  const sessionItems = useMobileWallSessionItems(TETHER_WALL_SESSIONS, activePaneId);
+
+  return (
+    <main className="fixed inset-0 bg-black">
+      <MobileTerminalUi
+        {...args}
+        fillViewport
+        terminal={(
+          <MobileWall
+            sessions={TETHER_WALL_SESSIONS}
+            activeSessionId={activePaneId}
+            onActiveSessionChange={setActivePaneId}
+            onSessionMinimize={() => setKeyboardMode('sessions')}
+          />
+        )}
+        activeKeyboardMode={keyboardMode}
+        onKeyboardModeChange={(mode) => {
+          setKeyboardMode(mode);
+          args.onKeyboardModeChange?.(mode);
+          args.onSectionChange?.(mode);
+        }}
+        sessions={sessionItems}
+        onSessionSelect={setActivePaneId}
+        onSendInput={(data) => {
+          args.onSendInput?.(data);
+          adapterRef.current?.writePty(activePaneId, data);
+        }}
+      />
+    </main>
+  );
+}
+
 export const TypePane: Story = {
   args: {
     defaultSection: 'type',
@@ -117,4 +188,15 @@ export const CursorTouchAvailable: Story = {
     cursorTouchAvailable: true,
   },
   render: (args) => <StoryFrame {...args} />,
+};
+
+export const TetherWall: Story = {
+  args: {
+    defaultSection: 'type',
+  },
+  parameters: {
+    layout: 'fullscreen',
+    fakePty: { scenario: flattenScenario(TETHER_WALL_SCENARIO) },
+  },
+  render: (args) => <TetherWallFrame {...args} />,
 };

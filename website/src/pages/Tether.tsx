@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { ShareIcon } from "@phosphor-icons/react";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import { NotifySignupForm } from "../components/NotifySignupForm";
-import { MobileTerminalUi, type MobileTerminalTouchMode } from "mouseterm-lib/components/MobileTerminalUi";
+import { MobileTerminalUi, type MobileTerminalKeyboardMode, type MobileTerminalTouchMode } from "mouseterm-lib/components/MobileTerminalUi";
+import { MobileWall, useMobileWallSessionItems, type MobileWallSession } from "mouseterm-lib/components/MobileWall";
 import { ThemePicker } from "mouseterm-lib/components/ThemePicker";
 import { restoreActiveTheme } from "mouseterm-lib/lib/themes";
 import {
@@ -21,19 +22,7 @@ type FakePtyAdapter = import("mouseterm-lib/lib/platform/fake-adapter").FakePtyA
 
 const TETHER_PANE = "tether-ascii-splash";
 const TETHER_THEME_ID = "vscode.theme-kimbie-dark.kimbie-dark";
-
-interface WallModule {
-  Wall: typeof import("mouseterm-lib/components/Wall")["Wall"];
-}
-
-interface DockviewApiLike {
-  activePanel?: { id?: string } | null;
-  getPanel(id: string): { api: { setTitle(title: string): void; setActive(): void } } | undefined;
-  onDidAddPanel(listener: (panel: { id?: string } | undefined) => void): { dispose: () => void };
-  onDidActivePanelChange(listener: (panel: { id?: string } | undefined) => void): { dispose: () => void };
-}
-
-type DockviewDisposable = { dispose: () => void };
+const TETHER_SESSIONS: MobileWallSession[] = [{ id: TETHER_PANE, title: "ascii-splash" }];
 
 function useIsMobileViewport() {
   const [isMobile, setIsMobile] = useState(false);
@@ -65,15 +54,16 @@ function TetherTerminalExperience({
   fillViewport?: boolean;
 }) {
   useTetherTheme();
-  const [WallModule, setWallModule] = useState<WallModule | null>(null);
+  const [terminalReady, setTerminalReady] = useState(false);
   const adapterRef = useRef<FakePtyAdapter | null>(null);
   const shellRegistryRef = useRef<PlaygroundShellRegistry | null>(null);
-  const dockviewDisposablesRef = useRef<DockviewDisposable[]>([]);
   const autoStartedRef = useRef<Set<string>>(new Set());
   const spawnUnsubRef = useRef<(() => void) | null>(null);
   const busyDemoDisposeRef = useRef<(() => void) | null>(null);
   const [activePaneId, setActivePaneId] = useState(TETHER_PANE);
   const [touchMode, setTouchMode] = useState<MobileTerminalTouchMode>("gestures");
+  const [keyboardMode, setKeyboardMode] = useState<MobileTerminalKeyboardMode>("type");
+  const sessionItems = useMobileWallSessionItems(TETHER_SESSIONS, activePaneId);
   const mouseStates = useSyncExternalStore(
     subscribeToMouseSelection,
     getMouseSelectionSnapshot,
@@ -98,7 +88,6 @@ function TetherTerminalExperience({
     async function loadWall() {
       const platform = await import("mouseterm-lib/lib/platform");
       const registry = await import("mouseterm-lib/lib/terminal-registry");
-      const wall = await import("mouseterm-lib/components/Wall");
       const scenarios = await import("mouseterm-lib/lib/platform/fake-scenarios");
       const asciiSplash = await import("../lib/ascii-splash-runner");
       await import("mouseterm-lib/index.css");
@@ -156,17 +145,13 @@ function TetherTerminalExperience({
       });
       if (adapter.hasPty(TETHER_PANE)) tryAutoStart(TETHER_PANE);
 
-      setWallModule({ Wall: wall.Wall });
+      setTerminalReady(true);
     }
 
     loadWall();
 
     return () => {
       cancelled = true;
-      for (const disposable of dockviewDisposablesRef.current) {
-        disposable.dispose();
-      }
-      dockviewDisposablesRef.current = [];
       spawnUnsubRef.current?.();
       spawnUnsubRef.current = null;
       busyDemoDisposeRef.current?.();
@@ -187,35 +172,15 @@ function TetherTerminalExperience({
     }
   }, [activeMouseState?.mouseReporting, activePaneId, touchMode]);
 
-  const handleApiReady = useCallback((api: DockviewApiLike) => {
-    const addDisposable = api.onDidAddPanel((panel) => {
-      if (panel?.id) shellRegistryRef.current?.ensureShell(panel.id);
-    });
-    dockviewDisposablesRef.current.push(addDisposable);
-
-    const activeDisposable = api.onDidActivePanelChange((panel) => {
-      if (panel?.id) setActivePaneId(panel.id);
-    });
-    dockviewDisposablesRef.current.push(activeDisposable);
-
-    setActivePaneId(api.activePanel?.id ?? TETHER_PANE);
-    shellRegistryRef.current?.ensureShell(TETHER_PANE);
-
-    const panel = api.getPanel(TETHER_PANE);
-    if (!panel) return;
-    panel.api.setTitle("ascii-splash");
-    panel.api.setActive();
-  }, []);
-
   return (
     <MobileTerminalUi
       terminal={
-        WallModule ? (
-          <WallModule.Wall
-            initialPaneIds={[TETHER_PANE]}
-            initialMode="passthrough"
-            onApiReady={handleApiReady}
-            showBaseboard={false}
+        terminalReady ? (
+          <MobileWall
+            sessions={TETHER_SESSIONS}
+            activeSessionId={activePaneId}
+            onActiveSessionChange={setActivePaneId}
+            onSessionMinimize={() => setKeyboardMode("sessions")}
           />
         ) : null
       }
@@ -223,7 +188,11 @@ function TetherTerminalExperience({
       fillViewport={fillViewport}
       activeTouchMode={touchMode}
       onTouchModeChange={setTouchMode}
+      activeKeyboardMode={keyboardMode}
+      onKeyboardModeChange={setKeyboardMode}
       cursorTouchAvailable={cursorTouchAvailable}
+      sessions={sessionItems}
+      onSessionSelect={setActivePaneId}
       onSendInput={(data) => adapterRef.current?.writePty(activePaneId, data)}
     />
   );

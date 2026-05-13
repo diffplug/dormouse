@@ -11,19 +11,31 @@ import {
 } from 'react';
 import {
   ArticleNyTimesIcon,
+  BellIcon,
   ClockCounterClockwiseIcon,
   CursorClickIcon,
   CursorTextIcon,
   HandPointingIcon,
   KeyboardIcon,
+  TerminalWindowIcon,
   TextTIcon,
 } from '@phosphor-icons/react';
 import { clsx } from 'clsx';
+import { bellIconClass } from './bell-icon-class';
 
-export type MobileTerminalKeyboardMode = 'recent' | 'type' | 'draft' | 'keys';
+export type MobileTerminalKeyboardMode = 'sessions' | 'recent' | 'type' | 'draft' | 'keys';
 export type MobileTerminalSection = MobileTerminalKeyboardMode;
 export type MobileTerminalTouchMode = 'gestures' | 'selection' | 'cursor';
 type PhosphorIcon = ComponentType<{ size?: number; weight?: 'regular' | 'bold' | 'duotone' | 'fill' }>;
+
+export interface MobileTerminalSessionItem {
+  id: string;
+  title: string;
+  secondary?: string | null;
+  active?: boolean;
+  status?: 'ALERT_DISABLED' | 'NOTHING_TO_SHOW' | 'MIGHT_BE_BUSY' | 'BUSY' | 'MIGHT_NEED_ATTENTION' | 'ALERT_RINGING' | 'OSC_NOTIF_BUSY';
+  todo?: boolean;
+}
 
 export const MOBILE_TERMINAL_KEY_SEQUENCES = {
   ctrlC: '\x03',
@@ -56,6 +68,7 @@ const TERMINAL_KEYS: TerminalKey[] = [
 ];
 
 const KEYBOARD_MODES: Array<{ id: MobileTerminalKeyboardMode; label: string; Icon: PhosphorIcon }> = [
+  { id: 'sessions', label: 'Sessions', Icon: TerminalWindowIcon },
   { id: 'recent', label: 'Recent', Icon: ClockCounterClockwiseIcon },
   { id: 'type', label: 'Type', Icon: TextTIcon },
   { id: 'draft', label: 'Draft', Icon: ArticleNyTimesIcon },
@@ -88,6 +101,8 @@ export interface MobileTerminalUiProps {
   cursorTouchAvailable?: boolean;
   onSendInput?: (data: string) => void;
   onFocusInput?: () => void;
+  sessions?: MobileTerminalSessionItem[];
+  onSessionSelect?: (id: string) => void;
   interactive?: boolean;
   fillViewport?: boolean;
   className?: string;
@@ -170,7 +185,7 @@ function KeyboardModeButton({
       key={id}
       type="button"
       disabled={disabled}
-      aria-label={`${label} keyboard mode`}
+      aria-label={`${label} input mode`}
       aria-current={selected ? 'page' : undefined}
       onClick={() => onSelect(id)}
       className={clsx(
@@ -189,14 +204,6 @@ function KeyboardModeButton({
   );
 }
 
-function SelectorLabel({ children }: { children: ReactNode }) {
-  return (
-    <div className="w-12 shrink-0 pl-2 pr-1 font-mono text-xs leading-none text-muted">
-      {children}
-    </div>
-  );
-}
-
 function TouchModeSelector({
   mode,
   cursorAvailable,
@@ -211,10 +218,9 @@ function TouchModeSelector({
   return (
     <section
       aria-label="Touch mode"
-      className="flex h-9 shrink-0 items-center bg-app-bg"
+      className="flex h-9 shrink-0 items-center bg-terminal-bg px-2"
     >
-      <SelectorLabel>Touch</SelectorLabel>
-      <div className="mr-2 grid min-w-0 flex-1 grid-cols-3 gap-1 rounded bg-surface-raised p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
+      <div className="grid min-w-0 flex-1 grid-cols-3 gap-1 rounded bg-terminal-bg p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
         {TOUCH_MODES.map((item) => {
           const selected = item.id === mode;
           const itemDisabled = disabled || (item.id === 'cursor' && !cursorAvailable);
@@ -258,11 +264,10 @@ function KeyboardModeSelector({
 }) {
   return (
     <section
-      aria-label="Keyboard mode"
-      className="flex h-9 shrink-0 items-center border-t border-border bg-app-bg"
+      aria-label="Input mode"
+      className="flex h-9 shrink-0 items-center border-t border-border bg-header-inactive-bg px-2 text-header-inactive-fg"
     >
-      <SelectorLabel>Input</SelectorLabel>
-      <nav className="mr-2 grid min-w-0 flex-1 grid-cols-4 gap-1 rounded bg-surface-raised p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
+      <nav className="grid min-w-0 flex-1 grid-cols-[1.35fr_repeat(4,minmax(0,1fr))] gap-1 rounded bg-header-inactive-bg p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
         {KEYBOARD_MODES.map((item) => (
           <KeyboardModeButton
             key={item.id}
@@ -287,6 +292,76 @@ function WorkInProgressPane({ label }: { label: 'Recent' | 'Draft' }) {
   );
 }
 
+function SessionsPane({
+  sessions,
+  disabled,
+  onSelect,
+}: {
+  sessions: MobileTerminalSessionItem[];
+  disabled: boolean;
+  onSelect?: (id: string) => void;
+}) {
+  if (sessions.length === 0) {
+    return (
+      <div className="grid h-full place-items-center px-4 text-center font-mono text-sm text-muted">
+        No sessions
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full overflow-auto p-2">
+      <div className="grid gap-1">
+        {sessions.map((session) => {
+          const active = session.active === true;
+          const ringing = session.status === 'ALERT_RINGING' || session.status === 'MIGHT_NEED_ATTENTION';
+          return (
+            <button
+              key={session.id}
+              type="button"
+              disabled={disabled}
+              aria-current={active ? 'page' : undefined}
+              onClick={() => onSelect?.(session.id)}
+              className={clsx(
+                'flex min-h-10 min-w-0 items-center gap-2 rounded px-2 text-left font-mono text-xs transition-colors',
+                'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
+                'disabled:pointer-events-none disabled:opacity-60',
+                active
+                  ? 'bg-header-active-bg text-header-active-fg shadow-[inset_0_0_0_1px_var(--color-focus-ring)]'
+                  : 'bg-surface-raised text-foreground hover:bg-header-inactive-bg',
+              )}
+            >
+              <TerminalWindowIcon size={15} weight={active ? 'bold' : 'regular'} className="shrink-0" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{session.title}</span>
+                {session.secondary ? (
+                  <span className={clsx('block truncate', active ? 'opacity-70' : 'text-muted')}>{session.secondary}</span>
+                ) : null}
+              </span>
+              {session.todo ? (
+                <span className="shrink-0 rounded border border-current px-1 py-px text-[0.55rem] font-semibold leading-none tracking-[0.08em]">
+                  TODO
+                </span>
+              ) : null}
+              {ringing ? (
+                <BellIcon
+                  size={14}
+                  weight="fill"
+                  className={clsx(
+                    'shrink-0',
+                    active ? 'text-alarm-vs-header-active' : 'text-alarm-vs-door',
+                    bellIconClass(session.status ?? 'ALERT_RINGING'),
+                  )}
+                />
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function MobileTerminalUi({
   terminal,
   activeSection,
@@ -301,6 +376,8 @@ export function MobileTerminalUi({
   cursorTouchAvailable = false,
   onSendInput,
   onFocusInput,
+  sessions = [],
+  onSessionSelect,
   interactive = true,
   fillViewport = false,
   className,
@@ -497,7 +574,17 @@ export function MobileTerminalUi({
         onSelect={setKeyboardMode}
       />
 
-      <div className="h-64 shrink-0 bg-app-bg">
+      <div className="h-64 shrink-0 bg-header-inactive-bg text-header-inactive-fg">
+        {keyboardMode === 'sessions' ? (
+          <SessionsPane
+            sessions={sessions}
+            disabled={!interactive}
+            onSelect={(id) => {
+              onSessionSelect?.(id);
+              blurInput();
+            }}
+          />
+        ) : null}
         {keyboardMode === 'recent' ? <WorkInProgressPane label="Recent" /> : null}
         {keyboardMode === 'draft' ? <WorkInProgressPane label="Draft" /> : null}
         {keyboardMode === 'type' ? (
@@ -507,7 +594,7 @@ export function MobileTerminalUi({
             aria-label="Focus terminal input"
             onClick={focusInput}
             className={clsx(
-              'grid h-full w-full place-items-center bg-app-bg text-terminal-fg transition-colors',
+              'grid h-full w-full place-items-center bg-header-inactive-bg text-header-inactive-fg transition-colors',
               'focus-visible:outline focus-visible:outline-1 focus-visible:outline-inset focus-visible:outline-focus-ring',
               'disabled:pointer-events-none disabled:opacity-60',
             )}
