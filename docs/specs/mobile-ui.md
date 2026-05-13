@@ -139,26 +139,28 @@ the four arrow chips use one shared `GAP_CARDINAL_RING` from the select circle
 edge. The two secondary chips sit just outside each arrow. N/S secondary pairs
 use `GAP_CLUSTER` as the horizontal edge-to-edge gap across the axis; E/W
 secondary pairs use the same `GAP_CLUSTER` as the vertical edge-to-edge gap.
-Diagonal groups use a corner-and-tangent layout: the center option's inward
-corner is aligned with the diagonal tick mark at the same ring gap used by the
-cardinal arrow chips, measured on screen as the same horizontal/vertical visual
-gap rather than as a longer diagonal distance. The other two options sit above
-and below it along the perpendicular 45 degree tangent. For example, the SE
-group puts Enter's top-left corner just outside the SE tick, puts Shift+Enter
-above and to the right, and puts `y` below and to the left. The diagonal center
-corner contract is: SE aligns Enter's top-left corner, NE aligns Backspace's
-bottom-left corner, SW aligns Tab's top-right corner, and NW aligns Esc's
-bottom-right corner. Exploded option labels use the square direction anchors
-directly. The root label pack stays close to the select circle, while preserving
-enough room for long labels like Backspace.
+Diagonal groups use a corner-and-stack layout: the center option's inward corner
+is aligned with the diagonal tick mark at the same ring gap used by the cardinal
+arrow chips, measured on screen as the same horizontal/vertical visual gap rather
+than as a longer diagonal distance. The diagonal center corner contract is: SE
+aligns Enter's top-left corner, NE aligns Backspace's bottom-left corner, SW
+aligns Tab's top-right corner, and NW aligns Esc's bottom-right corner. SE and
+SW place their secondary options relative to the center option exactly like the
+S cluster places `j` and `PgDn` relative to `▼`: both below the center, one
+right-aligned to the center axis and one left-aligned to it. NE and NW place
+their secondary options exactly like the N cluster places `k` and `PgUp`
+relative to `▲`: both above the center with the same left/right alignment.
+Exploded option labels use the square direction anchors directly. The root label
+pack stays close to the select circle, while preserving enough room for long
+labels like Backspace.
 
 Each root cluster uses `GAP_CLUSTER = 2px`. The first option in each group is
 the cluster center. For N/S/E/W groups, items to the left are right-aligned to
 the center chip's left edge plus the cluster gap; items to the right are
 left-aligned to the center chip's right edge plus the cluster gap. Vertical
 neighbors use the same edge-and-gap rule above or below the center chip.
-Diagonal groups use the tick-corner and 45 degree tangent rule above instead of
-the cardinal edge-and-gap rule.
+Diagonal groups combine the tick-corner rule above with the same secondary-stack
+rule used by the matching N or S cardinal group.
 
 The radial menu is a two-stage gesture:
 

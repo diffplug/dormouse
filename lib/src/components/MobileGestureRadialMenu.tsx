@@ -30,7 +30,6 @@ const COMPLETE_SCALE = 2.4;
 const SELECT_TICK_INSET = 5;
 const SELECT_TICK_OUTSET = 6;
 const ROOT_DIAGONAL_CORNER_RADIUS = RADIUS_SELECT + SELECT_TICK_OUTSET + GAP_CARDINAL_RING * Math.SQRT1_2;
-const ROOT_DIAGONAL_TANGENT_OFFSET = 18;
 
 const SQUARE_DIRECTION_VECTORS: Record<MobileGestureDirection, { x: number; y: number }> = {
   n: { x: 0, y: -1 },
@@ -65,39 +64,29 @@ const ROOT_DIAGONAL_LAYOUT: Partial<Record<
   MobileGestureDirection,
   {
     centerPlacement: ChipPlacement;
-    options: [
-      { offset: MobileGesturePoint; placement: ChipPlacement },
-      { offset: MobileGesturePoint; placement: ChipPlacement },
-    ];
+    centerHalfWidth: number;
+    secondaryStack: 'above' | 'below';
   }
 >> = {
   ne: {
     centerPlacement: 'bottomLeft',
-    options: [
-      { offset: { x: ROOT_DIAGONAL_TANGENT_OFFSET, y: ROOT_DIAGONAL_TANGENT_OFFSET }, placement: 'topLeft' },
-      { offset: { x: -ROOT_DIAGONAL_TANGENT_OFFSET, y: -ROOT_DIAGONAL_TANGENT_OFFSET }, placement: 'bottomRight' },
-    ],
+    centerHalfWidth: 35,
+    secondaryStack: 'above',
   },
   se: {
     centerPlacement: 'topLeft',
-    options: [
-      { offset: { x: ROOT_DIAGONAL_TANGENT_OFFSET, y: -ROOT_DIAGONAL_TANGENT_OFFSET }, placement: 'bottomLeft' },
-      { offset: { x: -ROOT_DIAGONAL_TANGENT_OFFSET, y: ROOT_DIAGONAL_TANGENT_OFFSET }, placement: 'topRight' },
-    ],
+    centerHalfWidth: 23,
+    secondaryStack: 'below',
   },
   sw: {
     centerPlacement: 'topRight',
-    options: [
-      { offset: { x: -ROOT_DIAGONAL_TANGENT_OFFSET, y: -ROOT_DIAGONAL_TANGENT_OFFSET }, placement: 'bottomRight' },
-      { offset: { x: ROOT_DIAGONAL_TANGENT_OFFSET, y: ROOT_DIAGONAL_TANGENT_OFFSET }, placement: 'topLeft' },
-    ],
+    centerHalfWidth: 17,
+    secondaryStack: 'below',
   },
   nw: {
     centerPlacement: 'bottomRight',
-    options: [
-      { offset: { x: ROOT_DIAGONAL_TANGENT_OFFSET, y: -ROOT_DIAGONAL_TANGENT_OFFSET }, placement: 'bottomLeft' },
-      { offset: { x: -ROOT_DIAGONAL_TANGENT_OFFSET, y: ROOT_DIAGONAL_TANGENT_OFFSET }, placement: 'topRight' },
-    ],
+    centerHalfWidth: 17,
+    secondaryStack: 'above',
   },
 };
 
@@ -132,6 +121,25 @@ function translatedStyle(x: number, y: number, scale = 1, placement: ChipPlaceme
     top: y,
     transform: `${translateForPlacement(placement)} scale(${scale})`,
   };
+}
+
+function centerFromPlacedCorner(
+  corner: MobileGesturePoint,
+  placement: ChipPlacement,
+  halfWidth: number,
+): MobileGesturePoint {
+  switch (placement) {
+    case 'topLeft':
+      return { x: corner.x + halfWidth, y: corner.y + ROOT_CHIP_HALF_HEIGHT };
+    case 'topRight':
+      return { x: corner.x - halfWidth, y: corner.y + ROOT_CHIP_HALF_HEIGHT };
+    case 'bottomLeft':
+      return { x: corner.x + halfWidth, y: corner.y - ROOT_CHIP_HALF_HEIGHT };
+    case 'bottomRight':
+      return { x: corner.x - halfWidth, y: corner.y - ROOT_CHIP_HALF_HEIGHT };
+    default:
+      return corner;
+  }
 }
 
 function directionPoint(
@@ -249,13 +257,18 @@ function rootOptionLayout(
   if (!diagonalLayout || optionIndex === 0) {
     return { point: corner, placement: diagonalLayout?.centerPlacement ?? 'center' };
   }
-  const optionLayout = diagonalLayout.options[optionIndex - 1];
+  const centerPoint = centerFromPlacedCorner(
+    corner,
+    diagonalLayout.centerPlacement,
+    diagonalLayout.centerHalfWidth,
+  );
+  const stackDirection = diagonalLayout.secondaryStack === 'above' ? -1 : 1;
   return {
     point: {
-      x: corner.x + optionLayout.offset.x,
-      y: corner.y + optionLayout.offset.y,
+      x: centerPoint.x + (optionIndex === 1 ? -ROOT_CLUSTER_AXIS_GAP : ROOT_CLUSTER_AXIS_GAP),
+      y: centerPoint.y + stackDirection * ROOT_CHIP_STACK_OFFSET,
     },
-    placement: optionLayout.placement,
+    placement: optionIndex === 1 ? 'left' : 'right',
   };
 }
 
