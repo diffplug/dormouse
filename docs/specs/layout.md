@@ -1,6 +1,6 @@
 # Layout Spec
 
-> See `docs/specs/ontology.md` for canonical state names, layer definitions, and transition verbs. This spec uses the ontology's vocabulary throughout.
+> See `docs/specs/glossary.md` for canonical state names, layer definitions, and transition verbs. This spec uses the glossary's vocabulary throughout.
 
 ## Conceptual model
 

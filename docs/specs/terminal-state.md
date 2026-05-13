@@ -1,6 +1,6 @@
 # Terminal CWD and Command State
 
-> See `docs/specs/ontology.md` for Session vocabulary. This spec defines the per-Session terminal semantic state that layout and grouping consume. Alert/TODO behavior and notification OSCs (OSC 9 / 9;4 / 99 / 777 / BEL) live in `docs/specs/alert.md`. The OSC sequence registry and parsing-location rules live in `docs/specs/OSC.md`.
+> See `docs/specs/glossary.md` for Session vocabulary. This spec defines the per-Session terminal semantic state that layout and grouping consume. Alert/TODO behavior and notification OSCs (OSC 9 / 9;4 / 99 / 777 / BEL) live in `docs/specs/alert.md`. The OSC sequence registry and parsing-location rules live in `docs/specs/OSC.md`.
 
 ## Goal
 

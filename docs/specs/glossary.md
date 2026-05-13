@@ -1,12 +1,12 @@
-# Ontology
+# Glossary
 
-This spec is the canonical vocabulary for states, entities, and transitions in mouseterm. Every other spec defers to this one when naming a state or a verb. When writing code or prose, pick names from here first.
+This glossary is the canonical vocabulary for states, entities, and transitions in mouseterm. Every other spec defers to this one when naming a state or a verb. When writing code or prose, pick names from here first.
 
 ## The core idea
 
 A **Session** is the durable unit. A Session's state lives on six orthogonal axes — change one without touching the others. A caller holding a `SessionId` can reason about each axis independently.
 
-The **Liskov contract**: a Session is substitutable across most operations regardless of which states it currently occupies. `kill` and `rename` work universally. State-gated operations (`write`, `focus`) document their preconditions in ontology terms rather than failing silently.
+The **Liskov contract**: a Session is substitutable across most operations regardless of which states it currently occupies. `kill` and `rename` work universally. State-gated operations (`write`, `focus`) document their preconditions in glossary terms rather than failing silently.
 
 ## Layers
 
@@ -126,7 +126,7 @@ A caller holding a `SessionId` can issue universal operations without branching.
 
 ## Retired / overloaded terms
 
-Use ontology names instead of these. The left column retains a meaning only where noted.
+Use glossary names instead of these. The left column retains a meaning only where noted.
 
 | Term | Status |
 |---|---|
@@ -143,5 +143,5 @@ Use ontology names instead of these. The left column retains a meaning only wher
 - Layer names and state names are `PascalCase` nouns (`Paned`, `Tombstoned`).
 - Verbs are `camelCase` in code and lowercase in prose (`minimize`, not `Minimize`).
 - Event kind strings match the verb: `'minimizeChange'`, not `'detachChange'`.
-- A persisted type is `Persisted<Shape>` where `<Shape>` is the ontology noun (`PersistedPane`, `PersistedDoor`).
+- A persisted type is `Persisted<Shape>` where `<Shape>` is the glossary noun (`PersistedPane`, `PersistedDoor`).
 - A handle type is `<Layer>State` (`ActivityState`, not `SessionUiState`).
