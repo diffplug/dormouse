@@ -149,8 +149,10 @@ function directionPoint(
   };
 }
 
+type ActiveGestureState = Exclude<MobileGestureTrackingState, { phase: 'idle' }>;
+
 function translatedCurrentPoint(
-  state: Exclude<MobileGestureTrackingState, { phase: 'idle' }>,
+  state: ActiveGestureState,
   origin: { x: number; y: number },
   displayOrigin: { x: number; y: number },
 ) {
@@ -158,6 +160,34 @@ function translatedCurrentPoint(
     x: displayOrigin.x + state.currentPoint.x - origin.x,
     y: displayOrigin.y + state.currentPoint.y - origin.y,
   };
+}
+
+function activeRootDirection(state: ActiveGestureState): MobileGestureDirection | undefined {
+  switch (state.phase) {
+    case 'root': return state.highlightedDirection;
+    case 'options':
+    case 'complete': return state.selectedDirection;
+    case 'quit': return state.parentDirection;
+  }
+}
+
+function activeTickDirection(state: ActiveGestureState): MobileGestureDirection | undefined {
+  switch (state.phase) {
+    case 'root':
+      return state.highlightedDirection;
+    case 'options':
+      return state.candidate?.direction
+        ?? (state.highlightedOptionIndex !== undefined
+          ? MOBILE_GESTURE_OPTION_DIRECTIONS[state.selectedDirection][state.highlightedOptionIndex]
+          : undefined);
+    case 'quit':
+      return state.candidate?.direction
+        ?? (state.highlightedOptionIndex !== undefined
+          ? MOBILE_GESTURE_OPTION_DIRECTIONS[state.baseDirection][state.highlightedOptionIndex]
+          : undefined);
+    case 'complete':
+      return state.candidate.direction;
+  }
 }
 
 function OptionChip({
@@ -272,36 +302,11 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
   const phaseOrigin = state.phase === 'root' ? state.origin : state.optionOrigin;
   const phaseDisplayOrigin = state.phase === 'root' ? state.displayOrigin : state.displayOptionOrigin;
   const currentDisplayPoint = translatedCurrentPoint(state, phaseOrigin, phaseDisplayOrigin);
-  const activeRootDirection = state.phase === 'root'
-    ? state.highlightedDirection
-    : state.phase === 'options'
-      ? state.selectedDirection
-      : state.phase === 'complete'
-        ? state.selectedDirection
-        : state.parentDirection;
-  const activeTickDirection = (() => {
-    if (state.phase === 'root') return state.highlightedDirection;
-    if (state.phase === 'options') {
-      return state.candidate?.direction
-        ?? (
-          state.highlightedOptionIndex === undefined
-            ? undefined
-            : MOBILE_GESTURE_OPTION_DIRECTIONS[state.selectedDirection][state.highlightedOptionIndex]
-        );
-    }
-    if (state.phase === 'quit') {
-      return state.candidate?.direction
-        ?? (
-          state.highlightedOptionIndex === undefined
-            ? undefined
-            : MOBILE_GESTURE_OPTION_DIRECTIONS[state.baseDirection][state.highlightedOptionIndex]
-        );
-    }
-    return state.candidate.direction;
-  })();
+  const rootDirection = activeRootDirection(state);
+  const tickDirection = activeTickDirection(state);
   const selectTicks = SELECT_TICK_DIRECTIONS.map((direction) => {
     const vector = MOBILE_GESTURE_DIRECTION_VECTORS[direction];
-    const active = activeTickDirection === direction;
+    const active = tickDirection === direction;
     return (
       <line
         key={direction}
@@ -339,7 +344,7 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
           }
         : rootOptionLayout(direction, index, state.displayOrigin);
       const active = state.phase === 'root'
-        ? activeRootDirection === direction
+        ? rootDirection === direction
         : isCompletingRootOption || (isSelectedGroup && state.phase === 'options' && (
           state.highlightedOptionIndex === optionIndex
           || state.candidate?.optionIndex === optionIndex
