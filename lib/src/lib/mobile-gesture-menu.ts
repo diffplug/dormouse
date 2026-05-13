@@ -56,10 +56,10 @@ export interface MobileGestureGroup {
 }
 
 export interface MobileGestureCandidate {
-  phase: 'root' | 'quit';
+  phase: 'options' | 'quit';
   groupDirection: MobileGestureDirection;
+  direction: MobileGestureDirection;
   optionIndex: MobileGestureOptionIndex;
-  turn: 'center' | 'counterClockwise' | 'clockwise';
   option: MobileGestureOption;
 }
 
@@ -72,7 +72,17 @@ export type MobileGestureTrackingState =
       displayOrigin: MobileGesturePoint;
       currentPoint: MobileGesturePoint;
       highlightedDirection?: MobileGestureDirection;
-      primaryDirection?: MobileGestureDirection;
+    }
+  | {
+      phase: 'options';
+      pointerId: number;
+      origin: MobileGesturePoint;
+      displayOrigin: MobileGesturePoint;
+      currentPoint: MobileGesturePoint;
+      selectedDirection: MobileGestureDirection;
+      optionOrigin: MobileGesturePoint;
+      displayOptionOrigin: MobileGesturePoint;
+      highlightedOptionIndex?: MobileGestureOptionIndex;
       candidate?: MobileGestureCandidate;
     }
   | {
@@ -83,6 +93,9 @@ export type MobileGestureTrackingState =
       currentPoint: MobileGesturePoint;
       parentDirection: MobileGestureDirection;
       baseDirection: MobileGestureDirection;
+      optionOrigin: MobileGesturePoint;
+      displayOptionOrigin: MobileGesturePoint;
+      highlightedOptionIndex?: MobileGestureOptionIndex;
       candidate?: MobileGestureCandidate;
     };
 
@@ -91,14 +104,17 @@ export interface MobileGestureFinishResult {
   action?: MobileGestureAction;
 }
 
+interface MobileGestureOptionState {
+  highlightedOptionIndex?: MobileGestureOptionIndex;
+  candidate?: MobileGestureCandidate;
+}
+
 const DIAGONAL = Math.SQRT1_2;
 
 export const MOBILE_GESTURE_IDLE_STATE: MobileGestureTrackingState = { phase: 'idle' };
 export const RADIUS_LAYOUT = 92;
 export const RADIUS_SELECT = RADIUS_LAYOUT * 0.75;
 export const RADIUS_HIGHLIGHT = RADIUS_SELECT * 0.5;
-export const MOBILE_GESTURE_RETURN_RADIUS = 26;
-export const MOBILE_GESTURE_TURN_THRESHOLD = 0.55;
 export const MOBILE_GESTURE_DISPLAY_MARGIN = 112;
 export const MOBILE_GESTURE_THUMB_OFFSET = 132;
 
@@ -196,6 +212,20 @@ export const MOBILE_GESTURE_GROUP_ORDER: MobileGestureDirection[] = [
   'se',
 ];
 
+export const MOBILE_GESTURE_OPTION_DIRECTIONS: Record<
+  MobileGestureDirection,
+  [MobileGestureDirection, MobileGestureDirection, MobileGestureDirection]
+> = {
+  n: ['s', 'sw', 'se'],
+  ne: ['sw', 's', 'w'],
+  e: ['w', 'nw', 'sw'],
+  se: ['nw', 'n', 'w'],
+  s: ['n', 'ne', 'nw'],
+  sw: ['ne', 'n', 'e'],
+  w: ['e', 'se', 'ne'],
+  nw: ['se', 's', 'e'],
+};
+
 export const MOBILE_GESTURE_QUIT_GROUP: MobileGestureGroup = {
   direction: 'n',
   options: [
@@ -220,47 +250,67 @@ export function directionFromVector(dx: number, dy: number): MobileGestureDirect
   return ANGLE_DIRECTIONS[index];
 }
 
-function candidateForBase(
-  phase: 'root' | 'quit',
+function pointOnRadius(
+  origin: MobileGesturePoint,
+  point: MobileGesturePoint,
+  radius: number,
+): MobileGesturePoint {
+  const dx = point.x - origin.x;
+  const dy = point.y - origin.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist === 0) return origin;
+  const scale = radius / dist;
+  return {
+    x: origin.x + dx * scale,
+    y: origin.y + dy * scale,
+  };
+}
+
+function translatedPoint(
+  displayOrigin: MobileGesturePoint,
+  origin: MobileGesturePoint,
+  point: MobileGesturePoint,
+): MobileGesturePoint {
+  return {
+    x: displayOrigin.x + point.x - origin.x,
+    y: displayOrigin.y + point.y - origin.y,
+  };
+}
+
+function optionIndexForDirection(
+  groupDirection: MobileGestureDirection,
+  direction: MobileGestureDirection | null,
+): MobileGestureOptionIndex | undefined {
+  if (!direction) return undefined;
+  const index = MOBILE_GESTURE_OPTION_DIRECTIONS[groupDirection].indexOf(direction);
+  return index === -1 ? undefined : index as MobileGestureOptionIndex;
+}
+
+function candidateForOptions(
+  phase: 'options' | 'quit',
   groupDirection: MobileGestureDirection,
   options: [MobileGestureOption, MobileGestureOption, MobileGestureOption],
   origin: MobileGesturePoint,
   point: MobileGesturePoint,
-): MobileGestureCandidate | undefined {
+): MobileGestureOptionState {
   const dist = distance(origin, point);
-  if (dist <= MOBILE_GESTURE_RETURN_RADIUS) {
-    return {
+  const direction = dist >= RADIUS_HIGHLIGHT
+    ? directionFromVector(point.x - origin.x, point.y - origin.y)
+    : null;
+  const highlightedOptionIndex = optionIndexForDirection(groupDirection, direction);
+  if (highlightedOptionIndex === undefined) return {};
+  const option = options[highlightedOptionIndex];
+  const result: MobileGestureOptionState = { highlightedOptionIndex };
+  if (dist >= RADIUS_SELECT && direction) {
+    result.candidate = {
       phase,
       groupDirection,
-      optionIndex: 0,
-      turn: 'center',
-      option: options[0],
+      direction,
+      optionIndex: highlightedOptionIndex,
+      option,
     };
   }
-
-  const vector = MOBILE_GESTURE_DIRECTION_VECTORS[groupDirection];
-  const dx = point.x - origin.x;
-  const dy = point.y - origin.y;
-  const normalizedCross = (vector.x * dy - vector.y * dx) / dist;
-  if (normalizedCross <= -MOBILE_GESTURE_TURN_THRESHOLD) {
-    return {
-      phase,
-      groupDirection,
-      optionIndex: 1,
-      turn: 'counterClockwise',
-      option: options[1],
-    };
-  }
-  if (normalizedCross >= MOBILE_GESTURE_TURN_THRESHOLD) {
-    return {
-      phase,
-      groupDirection,
-      optionIndex: 2,
-      turn: 'clockwise',
-      option: options[2],
-    };
-  }
-  return undefined;
+  return result;
 }
 
 export function beginMobileGesture(
@@ -312,48 +362,75 @@ export function updateMobileGesture(
     const closestDirection = movementDistance >= RADIUS_HIGHLIGHT
       ? directionFromVector(point.x - state.origin.x, point.y - state.origin.y) ?? undefined
       : undefined;
-    const primaryDirection = state.primaryDirection
-      ?? (movementDistance >= RADIUS_SELECT ? closestDirection : undefined);
-    const highlightedDirection = primaryDirection ?? closestDirection;
-    const candidate = primaryDirection
-      ? candidateForBase('root', primaryDirection, MOBILE_GESTURE_GROUPS[primaryDirection].options, state.origin, point)
-      : undefined;
-    if (primaryDirection && candidate?.option.action.kind === 'quitMenu') {
-      const baseDirection = directionFromVector(point.x - state.origin.x, point.y - state.origin.y) ?? primaryDirection;
+    if (movementDistance >= RADIUS_SELECT && closestDirection) {
+      const optionOrigin = pointOnRadius(state.origin, point, RADIUS_SELECT);
+      return {
+        phase: 'options',
+        pointerId: state.pointerId,
+        origin: state.origin,
+        displayOrigin: state.displayOrigin,
+        currentPoint: point,
+        selectedDirection: closestDirection,
+        optionOrigin,
+        displayOptionOrigin: translatedPoint(state.displayOrigin, state.origin, optionOrigin),
+      };
+    }
+    return {
+      ...state,
+      currentPoint: point,
+      highlightedDirection: closestDirection,
+    };
+  }
+
+  if (state.phase === 'options') {
+    const optionState = candidateForOptions(
+      'options',
+      state.selectedDirection,
+      MOBILE_GESTURE_GROUPS[state.selectedDirection].options,
+      state.optionOrigin,
+      point,
+    );
+    if (optionState.candidate?.option.action.kind === 'quitMenu') {
+      const quitOrigin = pointOnRadius(state.optionOrigin, point, RADIUS_SELECT);
       return {
         phase: 'quit',
         pointerId: state.pointerId,
         origin: state.origin,
         displayOrigin: state.displayOrigin,
         currentPoint: point,
-        parentDirection: primaryDirection,
-        baseDirection,
+        parentDirection: state.selectedDirection,
+        baseDirection: optionState.candidate.direction,
+        optionOrigin: quitOrigin,
+        displayOptionOrigin: translatedPoint(state.displayOptionOrigin, state.optionOrigin, quitOrigin),
       };
     }
     return {
       ...state,
       currentPoint: point,
-      highlightedDirection,
-      primaryDirection,
-      candidate,
+      highlightedOptionIndex: optionState.highlightedOptionIndex,
+      candidate: optionState.candidate,
     };
   }
 
+  const optionState = candidateForOptions(
+    'quit',
+    state.baseDirection,
+    MOBILE_GESTURE_QUIT_GROUP.options,
+    state.optionOrigin,
+    point,
+  );
   return {
     ...state,
     currentPoint: point,
-    candidate: candidateForBase(
-      'quit',
-      state.baseDirection,
-      MOBILE_GESTURE_QUIT_GROUP.options,
-      state.origin,
-      point,
-    ),
+    highlightedOptionIndex: optionState.highlightedOptionIndex,
+    candidate: optionState.candidate,
   };
 }
 
 export function finishMobileGesture(state: MobileGestureTrackingState): MobileGestureFinishResult {
-  const action = state.phase === 'idle' ? undefined : state.candidate?.option.action;
+  const action = state.phase === 'options' || state.phase === 'quit'
+    ? state.candidate?.option.action
+    : undefined;
   return {
     state: MOBILE_GESTURE_IDLE_STATE,
     action,

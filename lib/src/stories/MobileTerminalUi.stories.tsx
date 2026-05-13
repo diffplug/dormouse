@@ -11,9 +11,14 @@ import {
 } from '../components/MobileGestureRadialMenu';
 import {
   displayOriginAwayFromThumb,
+  MOBILE_GESTURE_DIRECTION_VECTORS,
   MOBILE_GESTURE_IDLE_STATE,
+  MOBILE_GESTURE_OPTION_DIRECTIONS,
   mobileGestureStateFromPoints,
   RADIUS_HIGHLIGHT,
+  RADIUS_SELECT,
+  type MobileGestureDirection,
+  type MobileGestureOptionIndex,
   type MobileGesturePoint,
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
@@ -108,6 +113,61 @@ function gesturePoint(dx: number, dy: number): MobileGesturePoint {
   };
 }
 
+function gesturePointInDirection(
+  origin: MobileGesturePoint,
+  direction: MobileGestureDirection,
+  distance: number,
+): MobileGesturePoint {
+  const vector = MOBILE_GESTURE_DIRECTION_VECTORS[direction];
+  return {
+    x: origin.x + vector.x * distance,
+    y: origin.y + vector.y * distance,
+  };
+}
+
+function gestureRootSelectionPoint(direction: MobileGestureDirection): MobileGesturePoint {
+  return gesturePointInDirection(GESTURE_ORIGIN, direction, RADIUS_SELECT + 1);
+}
+
+function gestureOptionOrigin(direction: MobileGestureDirection): MobileGesturePoint {
+  return gesturePointInDirection(GESTURE_ORIGIN, direction, RADIUS_SELECT);
+}
+
+function gestureOptionSelectionPoint(
+  direction: MobileGestureDirection,
+  optionIndex: MobileGestureOptionIndex,
+): MobileGesturePoint {
+  return gesturePointInDirection(
+    gestureOptionOrigin(direction),
+    MOBILE_GESTURE_OPTION_DIRECTIONS[direction][optionIndex],
+    RADIUS_SELECT + 1,
+  );
+}
+
+function gestureQuitOrigin(
+  direction: MobileGestureDirection,
+  optionIndex: MobileGestureOptionIndex,
+): MobileGesturePoint {
+  return gesturePointInDirection(
+    gestureOptionOrigin(direction),
+    MOBILE_GESTURE_OPTION_DIRECTIONS[direction][optionIndex],
+    RADIUS_SELECT,
+  );
+}
+
+function gestureQuitSelectionPoint(
+  direction: MobileGestureDirection,
+  quitMenuIndex: MobileGestureOptionIndex,
+  optionIndex: MobileGestureOptionIndex,
+): MobileGesturePoint {
+  const quitDirection = MOBILE_GESTURE_OPTION_DIRECTIONS[direction][quitMenuIndex];
+  return gesturePointInDirection(
+    gestureQuitOrigin(direction, quitMenuIndex),
+    MOBILE_GESTURE_OPTION_DIRECTIONS[quitDirection][optionIndex],
+    RADIUS_SELECT + 1,
+  );
+}
+
 function gestureState(points: MobileGesturePoint[]): MobileGestureTrackingState {
   return mobileGestureStateFromPoints(
     points,
@@ -191,19 +251,19 @@ export const GestureEastHighlight: Story = {
 };
 
 export const GesturePrimaryEast: Story = {
-  render: () => <GestureSnapshotFrame state={gestureState([gesturePoint(70, 0)])} />,
+  render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('e')])} />,
 };
 
 export const GestureEastReturnRight: Story = {
-  render: () => <GestureSnapshotFrame state={gestureState([gesturePoint(70, 0), gesturePoint(0, 0)])} />,
+  render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('e'), gestureOptionSelectionPoint('e', 0)])} />,
 };
 
 export const GestureEastTurnUpEnd: Story = {
-  render: () => <GestureSnapshotFrame state={gestureState([gesturePoint(70, 0), gesturePoint(0, -70)])} />,
+  render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('e'), gestureOptionSelectionPoint('e', 1)])} />,
 };
 
 export const GestureEastTurnDownL: Story = {
-  render: () => <GestureSnapshotFrame state={gestureState([gesturePoint(70, 0), gesturePoint(0, 70)])} />,
+  render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('e'), gestureOptionSelectionPoint('e', 2)])} />,
 };
 
 export const GestureCtrlCConfirmation: Story = {
@@ -225,13 +285,13 @@ export const GesturePasteConfirmation: Story = {
 };
 
 export const GestureQuitSubmenu: Story = {
-  render: () => <GestureSnapshotFrame state={gestureState([gesturePoint(-70, -70), gesturePoint(0, -70)])} />,
+  render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('nw'), gestureOptionSelectionPoint('nw', 2)])} />,
 };
 
 export const GestureQuitCtrlXCandidate: Story = {
   render: () => (
     <GestureSnapshotFrame
-      state={gestureState([gesturePoint(-70, -70), gesturePoint(0, -70), gesturePoint(-70, 0)])}
+      state={gestureState([gestureRootSelectionPoint('nw'), gestureOptionSelectionPoint('nw', 2), gestureQuitSelectionPoint('nw', 2, 1)])}
     />
   ),
 };

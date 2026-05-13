@@ -123,23 +123,36 @@ The radial menu is a two-stage gesture:
 1. Touch down to open the menu.
 2. Drag to `RADIUS_HIGHLIGHT` to preview the closest compass point.
 3. Drag to `RADIUS_SELECT` to choose that compass point's group.
-4. Drag in a different direction to choose one of that group's three options.
-5. Release to send the selected terminal input.
+4. The other seven compass groups fade out.
+5. The compass center resets to the point where the user's drag intersected the
+   `RADIUS_SELECT` circle.
+6. The selected group's three options explode out from the reset center in the
+   opposite directions.
+7. Drag from the reset center to `RADIUS_HIGHLIGHT` to preview an option.
+8. Drag from the reset center to `RADIUS_SELECT` to choose that option.
+9. Release to send the selected terminal input.
 
-After the first breakout, the final option is selected this way:
+If the user releases after the first group selection but before choosing one of
+the exploded options, the gesture is cancelled.
 
-| Final movement | Selected option |
+Exploded option directions:
+
+| Selected group | Option directions |
 | --- | --- |
-| Back to center | First option |
-| Visually counter-clockwise from the breakout direction | Second option |
-| Visually clockwise from the breakout direction | Third option |
-| Still in the original breakout direction | Cancel |
+| N | S, SW, SE |
+| NE | SW, S, W |
+| E | W, NW, SW |
+| SE | NW, N, W |
+| S | N, NE, NW |
+| SW | NE, N, E |
+| W | E, SE, NE |
+| NW | SE, S, E |
 
 Examples:
 
-* Right arrow: tap, drag right, drag back to center, release.
-* End: tap, drag right, drag up, release.
-* `l`: tap, drag right, drag down, release.
+* Right arrow: tap, drag right to choose the E group, drag left from the reset center, release.
+* End: tap, drag right to choose the E group, drag up-left from the reset center, release.
+* `l`: tap, drag right to choose the E group, drag down-left from the reset center, release.
 
 Root gesture menu labels use compact key glyphs: `⌃` for Ctrl, `⬆︎` for
 Shift, and `▲`/`▼`/`◀`/`▶` for arrow keys. Enter, Backspace, PgUp, and PgDn
@@ -157,15 +170,14 @@ Tab|⬆︎Tab|Space      ▼|PgDn|j      Enter|⬆︎Enter|y
 
 `⌃C` and `Paste` require an in-pane confirmation modal before they run.
 
-`Quit` enters a second breakout menu instead of sending input immediately:
+`Quit` enters a second exploded-option menu instead of sending input immediately:
 
 ```text
 q | ⌃X | :q↵
 ```
 
-The quit submenu uses the same final movement rule. Returning to center selects
-`q`, visually counter-clockwise selects `⌃X`, and visually clockwise selects
-`:q↵`.
+The quit submenu uses the same reset-center, highlight-radius, and select-radius
+rules as the main option selection.
 
 Gesture action mappings:
 

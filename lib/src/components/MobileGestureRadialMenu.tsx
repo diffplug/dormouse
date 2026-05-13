@@ -4,10 +4,10 @@ import {
   MOBILE_GESTURE_DIRECTION_VECTORS,
   MOBILE_GESTURE_GROUP_ORDER,
   MOBILE_GESTURE_GROUPS,
+  MOBILE_GESTURE_OPTION_DIRECTIONS,
   MOBILE_GESTURE_QUIT_GROUP,
   RADIUS_LAYOUT,
   RADIUS_SELECT,
-  type MobileGestureCandidate,
   type MobileGestureDirection,
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
@@ -34,20 +34,22 @@ function directionPoint(
   };
 }
 
-function translatedCurrentPoint(state: Exclude<MobileGestureTrackingState, { phase: 'idle' }>) {
+function translatedCurrentPoint(
+  state: Exclude<MobileGestureTrackingState, { phase: 'idle' }>,
+  origin: { x: number; y: number },
+  displayOrigin: { x: number; y: number },
+) {
   return {
-    x: state.displayOrigin.x + state.currentPoint.x - state.origin.x,
-    y: state.displayOrigin.y + state.currentPoint.y - state.origin.y,
+    x: displayOrigin.x + state.currentPoint.x - origin.x,
+    y: displayOrigin.y + state.currentPoint.y - origin.y,
   };
 }
 
 function OptionPill({
   labels,
-  candidate,
   active,
 }: {
   labels: [string, string, string];
-  candidate?: MobileGestureCandidate;
   active: boolean;
 }) {
   return (
@@ -63,9 +65,7 @@ function OptionPill({
           className={clsx(
             'min-w-0 px-1.5 py-1',
             index > 0 && 'border-l border-border',
-            candidate?.optionIndex === index
-              ? 'bg-header-active-bg text-header-active-fg'
-              : active && 'text-foreground',
+            active && 'text-foreground',
           )}
         >
           {label}
@@ -75,10 +75,72 @@ function OptionPill({
   );
 }
 
+function OptionChip({
+  label,
+  highlighted,
+  selected,
+}: {
+  label: string;
+  highlighted: boolean;
+  selected: boolean;
+}) {
+  return (
+    <div
+      className={clsx(
+        'rounded border bg-surface-raised px-2 py-1 font-mono text-[10px] leading-none shadow-[0_8px_28px_rgba(0,0,0,0.35)] transition-colors',
+        selected
+          ? 'border-focus-ring bg-header-active-bg text-header-active-fg'
+          : highlighted
+            ? 'border-focus-ring text-foreground'
+            : 'border-border text-muted',
+      )}
+    >
+      {label}
+    </div>
+  );
+}
+
 export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackingState }) {
   if (state.phase === 'idle') return null;
 
-  const translatedPoint = translatedCurrentPoint(state);
+  const phaseOrigin = state.phase === 'root' ? state.origin : state.optionOrigin;
+  const phaseDisplayOrigin = state.phase === 'root' ? state.displayOrigin : state.displayOptionOrigin;
+  const translatedPoint = translatedCurrentPoint(state, phaseOrigin, phaseDisplayOrigin);
+  const activeRootDirection = state.phase === 'root'
+    ? state.highlightedDirection
+    : state.phase === 'options'
+      ? state.selectedDirection
+      : state.parentDirection;
+  const explodedOptions = (() => {
+    if (state.phase === 'root') return null;
+    const group = state.phase === 'options'
+      ? MOBILE_GESTURE_GROUPS[state.selectedDirection]
+      : MOBILE_GESTURE_QUIT_GROUP;
+    const directions = state.phase === 'options'
+      ? MOBILE_GESTURE_OPTION_DIRECTIONS[state.selectedDirection]
+      : MOBILE_GESTURE_OPTION_DIRECTIONS[state.baseDirection];
+    const radius = state.phase === 'quit' ? QUIT_RADIUS : RADIUS_LAYOUT;
+    const highlightedOptionIndex = state.highlightedOptionIndex;
+    const candidateOptionIndex = state.candidate?.optionIndex;
+
+    return group.options.map((option, index) => {
+      const direction = directions[index];
+      const point = directionPoint(direction, phaseDisplayOrigin, radius);
+      return (
+        <div
+          key={`${direction}-${option.label}`}
+          className="absolute transition-[opacity,transform] duration-150"
+          style={translatedStyle(point.x, point.y)}
+        >
+          <OptionChip
+            label={option.label}
+            highlighted={highlightedOptionIndex === index}
+            selected={candidateOptionIndex === index}
+          />
+        </div>
+      );
+    });
+  })();
 
   return (
     <div
@@ -97,8 +159,8 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
           strokeLinecap="round"
         />
         <line
-          x1={state.displayOrigin.x}
-          y1={state.displayOrigin.y}
+          x1={phaseDisplayOrigin.x}
+          y1={phaseDisplayOrigin.y}
           x2={translatedPoint.x}
           y2={translatedPoint.y}
           stroke="var(--color-focus-ring)"
@@ -108,8 +170,8 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
           strokeLinecap="round"
         />
         <circle
-          cx={state.displayOrigin.x}
-          cy={state.displayOrigin.y}
+          cx={phaseDisplayOrigin.x}
+          cy={phaseDisplayOrigin.y}
           r={RADIUS_SELECT}
           fill="none"
           stroke="var(--color-focus-ring)"
@@ -132,8 +194,8 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
           strokeWidth="1"
         />
         <circle
-          cx={state.displayOrigin.x}
-          cy={state.displayOrigin.y}
+          cx={phaseDisplayOrigin.x}
+          cy={phaseDisplayOrigin.y}
           r="7"
           fill="var(--color-header-active-bg)"
           stroke="var(--color-focus-ring)"
@@ -142,20 +204,21 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
       </svg>
 
       {MOBILE_GESTURE_GROUP_ORDER.map((direction) => {
-        if (state.phase === 'quit' && direction === state.baseDirection) return null;
         const group = MOBILE_GESTURE_GROUPS[direction];
         const point = directionPoint(direction, state.displayOrigin, RADIUS_LAYOUT);
-        const candidate = state.phase === 'root' && state.candidate?.groupDirection === direction
-          ? state.candidate
-          : undefined;
-        const active = state.phase === 'root'
-          ? (state.primaryDirection ?? state.highlightedDirection) === direction
-          : state.parentDirection === direction;
+        const active = activeRootDirection === direction;
+        const faded = state.phase !== 'root' && !active;
         return (
-          <div key={direction} className="absolute" style={translatedStyle(point.x, point.y)}>
+          <div
+            key={direction}
+            className={clsx(
+              'absolute transition-opacity duration-150',
+              faded ? 'opacity-0' : state.phase === 'root' ? 'opacity-100' : 'opacity-45',
+            )}
+            style={translatedStyle(point.x, point.y)}
+          >
             <OptionPill
               labels={group.options.map((option) => option.label) as [string, string, string]}
-              candidate={candidate}
               active={active}
             />
           </div>
@@ -164,27 +227,12 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
 
       <div
         className="absolute grid h-8 w-8 place-items-center rounded-full border border-border bg-surface-raised font-mono text-xs text-muted shadow-[0_8px_28px_rgba(0,0,0,0.35)]"
-        style={translatedStyle(state.displayOrigin.x, state.displayOrigin.y)}
+        style={translatedStyle(phaseDisplayOrigin.x, phaseDisplayOrigin.y)}
       >
         o
       </div>
 
-      {state.phase === 'quit' ? (
-        <div
-          className="absolute"
-          style={translatedStyle(
-            directionPoint(state.baseDirection, state.displayOrigin, QUIT_RADIUS).x,
-            directionPoint(state.baseDirection, state.displayOrigin, QUIT_RADIUS).y,
-          )}
-        >
-          <div className="mb-1 text-center font-mono text-[10px] leading-none text-muted">Quit</div>
-          <OptionPill
-            labels={MOBILE_GESTURE_QUIT_GROUP.options.map((option) => option.label) as [string, string, string]}
-            candidate={state.candidate}
-            active
-          />
-        </div>
-      ) : null}
+      {explodedOptions}
     </div>
   );
 }
