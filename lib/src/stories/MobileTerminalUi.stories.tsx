@@ -259,6 +259,14 @@ export const GesturePrimaryEast: Story = {
   render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('e')])} />,
 };
 
+export const GesturePrimarySouth: Story = {
+  render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('s')])} />,
+};
+
+export const GesturePrimaryWest: Story = {
+  render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('w')])} />,
+};
+
 export const GestureEastReturnRight: Story = {
   render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('e'), gestureOptionSelectionPoint('e', 0)])} />,
 };

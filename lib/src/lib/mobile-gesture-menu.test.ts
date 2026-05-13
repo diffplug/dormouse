@@ -98,6 +98,8 @@ describe('mobile gesture menu state machine', () => {
   it('places exploded options opposite the selected direction', () => {
     expect(MOBILE_GESTURE_OPTION_DIRECTIONS.n).toEqual(['s', 'sw', 'se']);
     expect(MOBILE_GESTURE_OPTION_DIRECTIONS.e).toEqual(['w', 'nw', 'sw']);
+    expect(MOBILE_GESTURE_OPTION_DIRECTIONS.s).toEqual(['n', 'nw', 'ne']);
+    expect(MOBILE_GESTURE_OPTION_DIRECTIONS.w).toEqual(['e', 'ne', 'se']);
     expect(MOBILE_GESTURE_OPTION_DIRECTIONS.ne).toEqual(['sw', 's', 'w']);
   });
 
@@ -174,6 +176,16 @@ describe('mobile gesture menu state machine', () => {
 
   it('selects l by breaking east and turning down', () => {
     expect(runGesture([rootSelectionPoint('e'), optionSelectionPoint('e', 2)])).toEqual({ kind: 'text', text: 'l' });
+  });
+
+  it('keeps south secondary options on their root side when exploded', () => {
+    expect(runGesture([rootSelectionPoint('s'), optionSelectionPoint('s', 1)])).toEqual({ kind: 'text', text: 'j' });
+    expect(runGesture([rootSelectionPoint('s'), optionSelectionPoint('s', 2)])).toEqual({ kind: 'input', input: 'pageDown' });
+  });
+
+  it('keeps west secondary options on their root side when exploded', () => {
+    expect(runGesture([rootSelectionPoint('w'), optionSelectionPoint('w', 1)])).toEqual({ kind: 'input', input: 'home' });
+    expect(runGesture([rootSelectionPoint('w'), optionSelectionPoint('w', 2)])).toEqual({ kind: 'text', text: 'h' });
   });
 
   it('cancels when released in the original breakout direction', () => {

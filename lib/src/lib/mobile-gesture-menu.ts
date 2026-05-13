@@ -232,9 +232,9 @@ export const MOBILE_GESTURE_OPTION_DIRECTIONS: Record<
   ne: ['sw', 's', 'w'],
   e: ['w', 'nw', 'sw'],
   se: ['nw', 'n', 'w'],
-  s: ['n', 'ne', 'nw'],
+  s: ['n', 'nw', 'ne'],
   sw: ['ne', 'n', 'e'],
-  w: ['e', 'se', 'ne'],
+  w: ['e', 'ne', 'se'],
   nw: ['se', 's', 'e'],
 };
 

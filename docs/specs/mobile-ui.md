@@ -179,9 +179,9 @@ Exploded option directions:
 | NE | SW, S, W |
 | E | W, NW, SW |
 | SE | NW, N, W |
-| S | N, NE, NW |
+| S | N, NW, NE |
 | SW | NE, N, E |
-| W | E, SE, NE |
+| W | E, NE, SE |
 | NW | SE, S, E |
 
 Examples:
