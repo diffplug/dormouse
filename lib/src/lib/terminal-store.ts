@@ -20,6 +20,7 @@ export interface TerminalEntry {
   notification: ActivityNotification | null;
   attentionDismissedRing: boolean;
   isReplaying: boolean;
+  untouched: boolean;
 }
 
 export interface TerminalOverlayDims {

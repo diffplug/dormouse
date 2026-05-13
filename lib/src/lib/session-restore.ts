@@ -22,6 +22,7 @@ export function restoreSession(platform: PlatformAdapter): RestoredSession | nul
       title: pane.title,
       shell: shellOpts?.shell,
       args: shellOpts?.args,
+      untouched: pane.untouched,
     });
   }
 

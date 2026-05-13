@@ -83,6 +83,23 @@ describe('restoreSession', () => {
       title: 'Pane A',
       shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
       args: ['-NoLogo'],
+      untouched: false,
     });
+  });
+
+  it('seeds restored untouched state', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      layout: { panels: { 'pane-a': {} } },
+      panes: [
+        { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null, untouched: true },
+      ],
+    };
+
+    restoreSession(createPlatform(saved));
+
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith('pane-a', expect.objectContaining({
+      untouched: true,
+    }));
   });
 });

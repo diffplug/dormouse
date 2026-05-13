@@ -1,7 +1,7 @@
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { DockviewApi } from 'dockview-react';
 import type { ConfirmKill } from '../../KillConfirm';
-import type { DooredItem, WallEvent, WallMode, WallSelectionKind } from '../wall-types';
+import type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind } from '../wall-types';
 import type { WallActions } from '../wall-context';
 
 /** Refs + callbacks shared by every keyboard branch. Bundled to avoid 25-arg
@@ -19,13 +19,14 @@ export interface WallKeyboardCtx {
   killInProgressRef: RefObject<boolean>;
   overlayElRef: RefObject<HTMLDivElement | null>;
   wallActionsRef: RefObject<WallActions>;
-  handleReattachRef: RefObject<(item: DooredItem, options?: { enterPassthrough?: boolean; confirmKill?: boolean }) => void>;
+  handleReattachRef: RefObject<(item: DooredItem, options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction }) => void>;
   selectPane: (id: string) => void;
   selectDoor: (id: string) => void;
   enterTerminalMode: (id: string) => void;
   exitTerminalMode: () => void;
   minimizePane: (id: string) => void;
-  acceptKill: (onExit: () => void) => void;
+  killPaneImmediately: (id: string) => void;
+  acceptKill: () => void;
   rejectKill: () => void;
   setConfirmKill: Dispatch<SetStateAction<ConfirmKill | null>>;
   setRenamingPaneId: Dispatch<SetStateAction<string | null>>;

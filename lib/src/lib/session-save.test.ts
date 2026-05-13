@@ -5,12 +5,14 @@ import type { PersistedSession } from './session-types';
 const terminalRegistryMocks = vi.hoisted(() => ({
   getLivePersistedAlertState: vi.fn(),
   getTerminalPaneState: vi.fn(),
+  isUntouched: vi.fn(),
   resolveTerminalSessionId: vi.fn(),
 }));
 
 vi.mock('./terminal-registry', () => ({
   getLivePersistedAlertState: terminalRegistryMocks.getLivePersistedAlertState,
   getTerminalPaneState: terminalRegistryMocks.getTerminalPaneState,
+  isUntouched: terminalRegistryMocks.isUntouched,
   resolveTerminalSessionId: terminalRegistryMocks.resolveTerminalSessionId,
 }));
 
@@ -70,6 +72,7 @@ describe('saveSession', () => {
     terminalRegistryMocks.resolveTerminalSessionId.mockImplementation((id: string) => id);
     terminalRegistryMocks.getLivePersistedAlertState.mockReturnValue(null);
     terminalRegistryMocks.getTerminalPaneState.mockReturnValue({ titleCandidates: {} });
+    terminalRegistryMocks.isUntouched.mockReturnValue(false);
   });
 
   it('persists the live alert state even when the previous snapshot was empty', async () => {
@@ -180,6 +183,25 @@ describe('saveSession', () => {
         expect.objectContaining({
           id: 'pane-a',
           title: 'Production API',
+        }),
+      ],
+    });
+  });
+
+  it('persists untouched state from the live registry entry', async () => {
+    const platform = createPlatform(null);
+    terminalRegistryMocks.isUntouched.mockReturnValue(true);
+
+    await saveSession(platform, { root: true }, [{ id: 'pane-a', title: 'Pane A' }]);
+
+    expect(platform.saveState).toHaveBeenCalledWith({
+      version: 3,
+      layout: { root: true },
+      doors: [],
+      panes: [
+        expect.objectContaining({
+          id: 'pane-a',
+          untouched: true,
         }),
       ],
     });

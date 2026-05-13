@@ -64,15 +64,16 @@ function resumeLiveSessions(platform: PlatformAdapter): Promise<ReconnectResult 
       }
 
       const savedState = platform.getState();
-      const savedTitles = getSavedPaneTitles(savedState, ptyList.map((pty) => pty.id));
+      const savedResumeInfo = getSavedPaneResumeInfo(savedState, ptyList.map((pty) => pty.id));
       const ids: string[] = [];
       for (const pty of ptyList) {
-        const resumeInfo: { alive: boolean; exitCode?: number; title?: string } = {
+        const resumeInfo: { alive: boolean; exitCode?: number; title?: string; untouched?: boolean } = {
           alive: pty.alive,
           exitCode: pty.exitCode,
         };
-        const savedTitle = savedTitles.get(pty.id);
-        if (savedTitle !== undefined) resumeInfo.title = savedTitle;
+        const savedInfo = savedResumeInfo.get(pty.id);
+        if (savedInfo?.title !== undefined) resumeInfo.title = savedInfo.title;
+        if (savedInfo?.untouched) resumeInfo.untouched = true;
         resumeTerminal(pty.id, replayBuffer.get(pty.id) ?? null, resumeInfo);
         ids.push(pty.id);
       }
@@ -94,15 +95,15 @@ function resumeLiveSessions(platform: PlatformAdapter): Promise<ReconnectResult 
   });
 }
 
-function getSavedPaneTitles(savedState: unknown, liveIds: string[]): Map<string, string> {
+function getSavedPaneResumeInfo(savedState: unknown, liveIds: string[]): Map<string, { title: string; untouched: boolean }> {
   const saved = readPersistedSession(savedState);
   if (!saved || !Array.isArray(saved.panes)) return new Map();
 
   const liveSet = new Set(liveIds);
-  const result = new Map<string, string>();
+  const result = new Map<string, { title: string; untouched: boolean }>();
   for (const pane of saved.panes) {
     if (!liveSet.has(pane.id)) continue;
-    result.set(pane.id, pane.title);
+    result.set(pane.id, { title: pane.title, untouched: pane.untouched });
   }
   return result;
 }
