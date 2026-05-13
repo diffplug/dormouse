@@ -1,7 +1,6 @@
 import type { CSSProperties } from 'react';
 import { clsx } from 'clsx';
 import {
-  MOBILE_GESTURE_DIRECTION_VECTORS,
   MOBILE_GESTURE_GROUP_ORDER,
   MOBILE_GESTURE_GROUPS,
   MOBILE_GESTURE_OPTION_DIRECTIONS,
@@ -10,18 +9,84 @@ import {
   RADIUS_SELECT,
   type MobileGestureDirection,
   type MobileGestureOptionIndex,
+  type MobileGesturePoint,
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
 
 const QUIT_RADIUS = 78;
-const ROOT_OPTION_SPACING = 48;
+const GAP_CLUSTER = 2;
+const ROOT_CHIP_HALF_HEIGHT = 9;
 const COMPLETE_SCALE = 2.4;
 
-function translatedStyle(x: number, y: number, scale = 1): CSSProperties {
+const SQUARE_DIRECTION_VECTORS: Record<MobileGestureDirection, { x: number; y: number }> = {
+  n: { x: 0, y: -1 },
+  ne: { x: 1, y: -1 },
+  e: { x: 1, y: 0 },
+  se: { x: 1, y: 1 },
+  s: { x: 0, y: 1 },
+  sw: { x: -1, y: 1 },
+  w: { x: -1, y: 0 },
+  nw: { x: -1, y: -1 },
+};
+
+const ROOT_GROUP_ANCHORS: Record<MobileGestureDirection, MobileGesturePoint> = {
+  n: { x: 18, y: -RADIUS_LAYOUT },
+  ne: { x: 132, y: -RADIUS_LAYOUT },
+  e: { x: 132, y: 24 },
+  se: { x: 132, y: RADIUS_LAYOUT },
+  s: { x: 18, y: RADIUS_LAYOUT },
+  sw: { x: -106, y: RADIUS_LAYOUT },
+  w: { x: -106, y: 24 },
+  nw: { x: -106, y: -RADIUS_LAYOUT },
+};
+
+const ROOT_CENTER_HALF_WIDTHS: Record<MobileGestureDirection, number> = {
+  n: 11,
+  ne: 35,
+  e: 11,
+  se: 23,
+  s: 11,
+  sw: 17,
+  w: 11,
+  nw: 17,
+};
+
+type ChipPlacement = 'center' | 'left' | 'right' | 'above' | 'below';
+
+const ROOT_OPTION_PLACEMENTS: Record<
+  MobileGestureDirection,
+  [ChipPlacement, ChipPlacement, ChipPlacement]
+> = {
+  n: ['center', 'left', 'right'],
+  ne: ['center', 'below', 'left'],
+  e: ['center', 'above', 'below'],
+  se: ['center', 'above', 'left'],
+  s: ['center', 'left', 'right'],
+  sw: ['center', 'above', 'right'],
+  w: ['center', 'above', 'below'],
+  nw: ['center', 'right', 'below'],
+};
+
+function translateForPlacement(placement: ChipPlacement): string {
+  switch (placement) {
+    case 'left':
+      return 'translate(-100%, -50%)';
+    case 'right':
+      return 'translate(0, -50%)';
+    case 'above':
+      return 'translate(-50%, -100%)';
+    case 'below':
+      return 'translate(-50%, 0)';
+    case 'center':
+      return 'translate(-50%, -50%)';
+  }
+}
+
+function translatedStyle(x: number, y: number, scale = 1, placement: ChipPlacement = 'center'): CSSProperties {
   return {
     left: x,
     top: y,
-    transform: `translate(-50%, -50%) scale(${scale})`,
+    transform: `${translateForPlacement(placement)} scale(${scale})`,
   };
 }
 
@@ -30,7 +95,7 @@ function directionPoint(
   center: { x: number; y: number },
   radius: number,
 ): { x: number; y: number } {
-  const vector = MOBILE_GESTURE_DIRECTION_VECTORS[direction];
+  const vector = SQUARE_DIRECTION_VECTORS[direction];
   return {
     x: center.x + vector.x * radius,
     y: center.y + vector.y * radius,
@@ -69,16 +134,23 @@ function OptionChip({
   );
 }
 
-function rootOptionPoint(
+function rootOptionLayout(
   direction: MobileGestureDirection,
   index: number,
   center: { x: number; y: number },
-): { x: number; y: number } {
-  const groupCenter = directionPoint(direction, center, RADIUS_LAYOUT);
-  return {
-    x: groupCenter.x + (index - 1) * ROOT_OPTION_SPACING,
-    y: groupCenter.y,
+): { point: MobileGesturePoint; placement: ChipPlacement } {
+  const optionIndex = index as MobileGestureOptionIndex;
+  const anchor = ROOT_GROUP_ANCHORS[direction];
+  const placement = ROOT_OPTION_PLACEMENTS[direction][optionIndex];
+  const point = {
+    x: center.x + anchor.x,
+    y: center.y + anchor.y,
   };
+  if (placement === 'left') point.x -= ROOT_CENTER_HALF_WIDTHS[direction] + GAP_CLUSTER;
+  if (placement === 'right') point.x += ROOT_CENTER_HALF_WIDTHS[direction] + GAP_CLUSTER;
+  if (placement === 'above') point.y -= ROOT_CHIP_HALF_HEIGHT + GAP_CLUSTER;
+  if (placement === 'below') point.y += ROOT_CHIP_HALF_HEIGHT + GAP_CLUSTER;
+  return { point, placement };
 }
 
 export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackingState }) {
@@ -106,13 +178,16 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
         state.phase === 'options'
         || (state.phase === 'complete' && state.candidate.phase === 'options')
       ) && state.selectedDirection === direction;
-      const point = isSelectedGroup
-        ? directionPoint(
-          MOBILE_GESTURE_OPTION_DIRECTIONS[direction][optionIndex],
-          phaseDisplayOrigin,
-          RADIUS_LAYOUT,
-        )
-        : rootOptionPoint(direction, index, state.displayOrigin);
+      const layout = isSelectedGroup
+        ? {
+            point: directionPoint(
+              MOBILE_GESTURE_OPTION_DIRECTIONS[direction][optionIndex],
+              phaseDisplayOrigin,
+              RADIUS_LAYOUT,
+            ),
+            placement: 'center' as ChipPlacement,
+          }
+        : rootOptionLayout(direction, index, state.displayOrigin);
       const active = state.phase === 'root'
         ? activeRootDirection === direction
         : isCompletingRootOption || (isSelectedGroup && state.phase === 'options' && (
@@ -130,7 +205,12 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
             state.phase === 'complete' ? 'duration-200' : 'duration-150',
             faded ? 'opacity-0' : 'opacity-100',
           )}
-          style={translatedStyle(point.x, point.y, isCompletingRootOption ? COMPLETE_SCALE : 1)}
+          style={translatedStyle(
+            layout.point.x,
+            layout.point.y,
+            isCompletingRootOption ? COMPLETE_SCALE : 1,
+            layout.placement,
+          )}
         >
           <OptionChip label={option.label} active={active} />
         </div>

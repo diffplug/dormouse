@@ -112,7 +112,7 @@ Gesture mode uses these radii:
 
 | Variable | Value | Behavior |
 | --- | --- | --- |
-| `RADIUS_LAYOUT` | `92px` | Distance from the offset compass rose origin to the menu item groups. |
+| `RADIUS_LAYOUT` | `92px` | Base half-side for square direction anchors around the offset compass rose origin. Exploded option labels land on these anchors; root labels are packed around the same square so long labels do not overlap. |
 | `RADIUS_SELECT` | `RADIUS_LAYOUT * 0.75` | Visible circle drawn around the offset compass rose origin. When the mirrored drag reaches this distance, the closest compass direction is selected. |
 | `RADIUS_HIGHLIGHT` | `RADIUS_SELECT * 0.5` | No circle is drawn. When the drag reaches this distance, the closest compass direction is highlighted, but not selected. |
 
@@ -127,6 +127,19 @@ not as one combined pill. When a group is selected, those same three labels twee
 from their root group positions to their exploded positions in the opposite
 directions. They must not fade out and be replaced by newly spawned option
 labels.
+
+Root labels are laid out as a square keypad, not on a circle. N and S groups
+form horizontal rows, E and W groups form vertical columns, and diagonal groups
+form corner L shapes so the diagonal corner still reads as one group without
+compressing all three labels into a line. Exploded option labels use the square
+direction anchors directly.
+
+Each root cluster uses `GAP_CLUSTER = 2px`. The first option in each group is
+the cluster center and is centered on the group's anchor. Items to the left are
+right-aligned to the center chip's left edge plus the cluster gap; items to the
+right are left-aligned to the center chip's right edge plus the cluster gap.
+Vertical neighbors use the same edge-and-gap rule above or below the center
+chip.
 
 The radial menu is a two-stage gesture:
 
@@ -174,11 +187,15 @@ remain spelled out.
 Root gesture menu:
 
 ```text
-Esc ⌃C* Quit**         ▲ PgUp k        Backspace Paste* n
+Esc      ⌃C*             k ▲ PgUp             n Backspace
+Quit**                                                   Paste*
 
-◀ Home h                                 ▶ End l
+Home                                                    End
+◀                                                       ▶
+h                                                       l
 
-Tab ⬆︎Tab Space      ▼ PgDn j      Enter ⬆︎Enter y
+⬆︎Tab                  j ▼ PgDn             y ⬆︎Enter
+Tab Space                                      Enter
 ```
 
 `⌃C` and `Paste` require an in-pane confirmation modal before they run.

@@ -127,7 +127,7 @@ export const RADIUS_LAYOUT = 92;
 export const RADIUS_SELECT = RADIUS_LAYOUT * 0.75;
 export const RADIUS_HIGHLIGHT = RADIUS_SELECT * 0.5;
 export const MOBILE_GESTURE_COMPLETE_MS = 220;
-export const MOBILE_GESTURE_DISPLAY_MARGIN = 112;
+export const MOBILE_GESTURE_DISPLAY_MARGIN = 168;
 export const MOBILE_GESTURE_THUMB_OFFSET = 132;
 
 export const MOBILE_GESTURE_DIRECTION_VECTORS: Record<MobileGestureDirection, MobileGesturePoint> = {
@@ -159,8 +159,8 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
     direction: 'n',
     options: [
       { label: '▲', action: { kind: 'input', input: 'up' } },
-      { label: 'PgUp', action: { kind: 'input', input: 'pageUp' } },
       { label: 'k', action: { kind: 'text', text: 'k' } },
+      { label: 'PgUp', action: { kind: 'input', input: 'pageUp' } },
     ],
   },
   ne: {
@@ -199,8 +199,8 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
     direction: 's',
     options: [
       { label: '▼', action: { kind: 'input', input: 'down' } },
-      { label: 'PgDn', action: { kind: 'input', input: 'pageDown' } },
       { label: 'j', action: { kind: 'text', text: 'j' } },
+      { label: 'PgDn', action: { kind: 'input', input: 'pageDown' } },
     ],
   },
   se: {
