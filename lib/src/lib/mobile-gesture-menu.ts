@@ -37,11 +37,13 @@ export type MobileGestureDirectAction =
 
 export type MobileGestureConfirmableAction = Extract<MobileGestureDirectAction, { kind: 'input' | 'paste' }>;
 
+export type MobileGestureConfirmation = 'ctrlC' | 'paste';
+
 export type MobileGestureAction =
   | MobileGestureDirectAction
   | {
       kind: 'confirm';
-      confirmation: 'ctrlC' | 'paste';
+      confirmation: MobileGestureConfirmation;
       action: MobileGestureConfirmableAction;
     };
 
@@ -256,7 +258,7 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 export function directionFromVector(dx: number, dy: number): MobileGestureDirection | null {
-  if (Math.hypot(dx, dy) === 0) return null;
+  if (dx === 0 && dy === 0) return null;
   const angle = Math.atan2(dy, dx) * 180 / Math.PI;
   const index = ((Math.round(angle / 45) % 8) + 8) % 8;
   return ANGLE_DIRECTIONS[index];

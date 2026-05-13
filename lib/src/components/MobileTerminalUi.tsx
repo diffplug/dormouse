@@ -561,26 +561,20 @@ export function MobileTerminalUi({
       event.preventDefault();
       event.stopPropagation();
       completedGesturePointerIdRef.current = null;
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }
+      event.currentTarget.releasePointerCapture(event.pointerId);
       return;
     }
     if (state.phase === 'idle' && completedGesturePointerIdRef.current === event.pointerId) {
       event.preventDefault();
       event.stopPropagation();
       completedGesturePointerIdRef.current = null;
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }
+      event.currentTarget.releasePointerCapture(event.pointerId);
       return;
     }
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
+    event.currentTarget.releasePointerCapture(event.pointerId);
 
     const nextState = updateMobileGesture(state, localPointerPoint(event));
     const result = finishMobileGesture(nextState);
@@ -599,16 +593,12 @@ export function MobileTerminalUi({
     const state = gestureStateRef.current;
     if (state.phase === 'complete' && state.pointerId === event.pointerId) {
       completedGesturePointerIdRef.current = null;
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }
+      event.currentTarget.releasePointerCapture(event.pointerId);
       return;
     }
     if (completedGesturePointerIdRef.current === event.pointerId) {
       completedGesturePointerIdRef.current = null;
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }
+      event.currentTarget.releasePointerCapture(event.pointerId);
     }
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);
@@ -681,27 +671,15 @@ export function MobileTerminalUi({
           </button>
         ) : null}
         {keyboardMode === 'keys' ? (
-          <div className="grid h-full grid-rows-2 gap-2 p-3">
-            <div className="grid grid-cols-4 gap-2">
-              {TERMINAL_KEYS.slice(0, 4).map((item) => (
-                <KeyButton
-                  key={item.id}
-                  item={item}
-                  disabled={!interactive}
-                  onPress={(id) => sendInput(MOBILE_TERMINAL_KEY_SEQUENCES[id])}
-                />
-              ))}
-            </div>
-            <div className="grid grid-cols-4 gap-2">
-              {TERMINAL_KEYS.slice(4).map((item) => (
-                <KeyButton
-                  key={item.id}
-                  item={item}
-                  disabled={!interactive}
-                  onPress={(id) => sendInput(MOBILE_TERMINAL_KEY_SEQUENCES[id])}
-                />
-              ))}
-            </div>
+          <div className="grid h-full grid-cols-4 grid-rows-2 gap-2 p-3">
+            {TERMINAL_KEYS.map((item) => (
+              <KeyButton
+                key={item.id}
+                item={item}
+                disabled={!interactive}
+                onPress={(id) => sendInput(MOBILE_TERMINAL_KEY_SEQUENCES[id])}
+              />
+            ))}
           </div>
         ) : null}
       </div>

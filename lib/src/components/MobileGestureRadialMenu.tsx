@@ -8,6 +8,7 @@ import {
   MOBILE_GESTURE_QUIT_GROUP,
   RADIUS_LAYOUT,
   RADIUS_SELECT,
+  type MobileGestureConfirmation,
   type MobileGestureDirection,
   type MobileGestureOptionIndex,
   type MobileGesturePoint,
@@ -31,16 +32,10 @@ const SELECT_TICK_INSET = 5;
 const SELECT_TICK_OUTSET = 6;
 const ROOT_DIAGONAL_CORNER_RADIUS = RADIUS_SELECT + SELECT_TICK_OUTSET + GAP_CARDINAL_RING * Math.SQRT1_2;
 
-const SQUARE_DIRECTION_VECTORS: Record<MobileGestureDirection, { x: number; y: number }> = {
-  n: { x: 0, y: -1 },
-  ne: { x: 1, y: -1 },
-  e: { x: 1, y: 0 },
-  se: { x: 1, y: 1 },
-  s: { x: 0, y: 1 },
-  sw: { x: -1, y: 1 },
-  w: { x: -1, y: 0 },
-  nw: { x: -1, y: -1 },
-};
+function squareDirectionVector(direction: MobileGestureDirection): MobileGesturePoint {
+  const vector = MOBILE_GESTURE_DIRECTION_VECTORS[direction];
+  return { x: Math.sign(vector.x), y: Math.sign(vector.y) };
+}
 
 const ROOT_CARDINAL_ANCHORS: Partial<Record<MobileGestureDirection, MobileGesturePoint>> = {
   n: { x: ROOT_LABEL_CENTER_X, y: -ROOT_CARDINAL_Y },
@@ -65,28 +60,28 @@ const ROOT_DIAGONAL_LAYOUT: Partial<Record<
   {
     centerPlacement: ChipPlacement;
     centerHalfWidth: number;
-    secondarySide: 'east' | 'west';
+    secondarySideSign: 1 | -1;
   }
 >> = {
   ne: {
     centerPlacement: 'bottomLeft',
     centerHalfWidth: 35,
-    secondarySide: 'east',
+    secondarySideSign: 1,
   },
   se: {
     centerPlacement: 'topLeft',
     centerHalfWidth: 23,
-    secondarySide: 'east',
+    secondarySideSign: 1,
   },
   sw: {
     centerPlacement: 'topRight',
     centerHalfWidth: 17,
-    secondarySide: 'west',
+    secondarySideSign: -1,
   },
   nw: {
     centerPlacement: 'bottomRight',
     centerHalfWidth: 17,
-    secondarySide: 'west',
+    secondarySideSign: -1,
   },
 };
 
@@ -147,7 +142,7 @@ function directionPoint(
   center: { x: number; y: number },
   radius: number,
 ): { x: number; y: number } {
-  const vector = SQUARE_DIRECTION_VECTORS[direction];
+  const vector = squareDirectionVector(direction);
   return {
     x: center.x + vector.x * radius,
     y: center.y + vector.y * radius,
@@ -262,13 +257,12 @@ function rootOptionLayout(
     diagonalLayout.centerPlacement,
     diagonalLayout.centerHalfWidth,
   );
-  const sideDirection = diagonalLayout.secondarySide === 'east' ? 1 : -1;
   return {
     point: {
-      x: centerPoint.x + sideDirection * (diagonalLayout.centerHalfWidth + GAP_CLUSTER),
+      x: centerPoint.x + diagonalLayout.secondarySideSign * (diagonalLayout.centerHalfWidth + GAP_CLUSTER),
       y: centerPoint.y + (optionIndex === 1 ? -ROOT_SIDE_STACK_OFFSET : ROOT_SIDE_STACK_OFFSET),
     },
-    placement: diagonalLayout.secondarySide === 'east' ? 'right' : 'left',
+    placement: diagonalLayout.secondarySideSign === 1 ? 'right' : 'left',
   };
 }
 
@@ -447,7 +441,7 @@ export function MobileGestureConfirmDialog({
   onCancel,
   onConfirm,
 }: {
-  confirmation: 'ctrlC' | 'paste';
+  confirmation: MobileGestureConfirmation;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
