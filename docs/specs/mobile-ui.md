@@ -89,11 +89,11 @@ Touch modes:
 | --- | --- | --- | --- | --- |
 | Gestures | `Gestures` | `HandPointingIcon` | Always available | Touch drags generate arrow keys. Drag left sends left, drag right sends right, drag up sends up, and drag down sends down. |
 | Text selection | `Select` | `CursorTextIcon` | Always available | Touches are reserved for terminal text selection and copy/paste. If the TUI is capturing mouse events, MouseTerm activates mouse override for the active pane. |
-| Cursor | `Cursor` | `CursorClickIcon` | Only when the active TUI is capturing mouse events | Touches are passed through as terminal mouse/cursor input. |
+| Mouse | `Mouse` | `CursorClickIcon` | Only when the active TUI is capturing mouse events | Touches are passed through as terminal mouse input. |
 
 Default touch mode is **Gestures**.
 
-If Cursor mode is active and the active pane stops capturing mouse events, the
+If Mouse mode is active and the active pane stops capturing mouse events, the
 selector must fall back to Gestures.
 
 ## 5. Keyboard Mode Selector
@@ -106,17 +106,18 @@ Recent | Type | Draft | Keys
 ```
 
 The selector must be self-labeling. It should use a compact left-side `Input`
-label plus segmented text buttons. The label describes the reserve area's
+label plus segmented buttons that include both an icon and a short mode label.
+The label describes the reserve area's
 purpose without adding a longer instruction line.
 
 Keyboard modes:
 
-| Mode | Reserve area content |
-| --- | --- |
-| Recent | The entire reserve area displays `Recent - WIP`. |
-| Type | The reserve area focuses the hidden terminal input. Every typed key is echoed into the terminal as it happens. |
-| Draft | The entire reserve area displays `Draft - WIP`. |
-| Keys | The entire reserve area displays terminal key buttons. |
+| Mode | Button label | Icon | Reserve area content |
+| --- | --- | --- | --- |
+| Recent | `Recent` | `ClockCounterClockwiseIcon` | The entire reserve area displays `Recent - WIP`. |
+| Type | `Type` | `TextTIcon` | The reserve area focuses the hidden terminal input. Every typed key is echoed into the terminal as it happens. |
+| Draft | `Draft` | `ArticleNyTimesIcon` | The entire reserve area displays `Draft - WIP`. |
+| Keys | `Keys` | `KeyboardIcon` | The entire reserve area displays terminal key buttons. |
 
 Default keyboard mode is **Type**.
 
@@ -231,7 +232,7 @@ Required interactions:
 * Tap key buttons in Keys mode.
 * Drag in Gestures mode to send arrow keys.
 * Use Text selection mode for terminal selection and copy/paste.
-* Use Cursor mode for terminal mouse/cursor input when a TUI requests mouse reporting.
+* Use Mouse mode for terminal mouse input when a TUI requests mouse reporting.
 
 Pane-content touches must never open the native keyboard. The pane content area
 may focus the terminal internally for key routing or mouse handling, but the
@@ -270,7 +271,7 @@ Build exactly this:
 * Touch mode selector:
 
 ```text
-Touch  Gestures | Select | Cursor
+Touch  Gestures | Select | Mouse
 ```
 
 * Keyboard mode selector:
@@ -300,7 +301,7 @@ The prototype should answer these questions:
 2. Is the touch mode selector understandable and reachable?
 3. Are gesture arrows usable enough for command history and cursor movement?
 4. Is text selection discoverable and reliable on mobile?
-5. Is Cursor mode useful when a TUI captures mouse events?
+5. Is Mouse mode useful when a TUI captures mouse events?
 6. Does native keyboard Type mode feel acceptable for terminal text entry?
 7. Does the stable keyboard reserve feel better than resizing the whole UI?
 8. Is the UI too cramped in portrait orientation?

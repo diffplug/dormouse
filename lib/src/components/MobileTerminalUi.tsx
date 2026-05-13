@@ -10,15 +10,20 @@ import {
   type ReactNode,
 } from 'react';
 import {
+  ArticleNyTimesIcon,
+  ClockCounterClockwiseIcon,
   CursorClickIcon,
   CursorTextIcon,
   HandPointingIcon,
+  KeyboardIcon,
+  TextTIcon,
 } from '@phosphor-icons/react';
 import { clsx } from 'clsx';
 
 export type MobileTerminalKeyboardMode = 'recent' | 'type' | 'draft' | 'keys';
 export type MobileTerminalSection = MobileTerminalKeyboardMode;
 export type MobileTerminalTouchMode = 'gestures' | 'selection' | 'cursor';
+type PhosphorIcon = ComponentType<{ size?: number; weight?: 'regular' | 'bold' | 'duotone' | 'fill' }>;
 
 export const MOBILE_TERMINAL_KEY_SEQUENCES = {
   ctrlC: '\x03',
@@ -50,11 +55,11 @@ const TERMINAL_KEYS: TerminalKey[] = [
   { id: 'right', label: '\u2192', title: 'Right arrow' },
 ];
 
-const KEYBOARD_MODES: { id: MobileTerminalKeyboardMode; label: string }[] = [
-  { id: 'recent', label: 'Recent' },
-  { id: 'type', label: 'Type' },
-  { id: 'draft', label: 'Draft' },
-  { id: 'keys', label: 'Keys' },
+const KEYBOARD_MODES: Array<{ id: MobileTerminalKeyboardMode; label: string; Icon: PhosphorIcon }> = [
+  { id: 'recent', label: 'Recent', Icon: ClockCounterClockwiseIcon },
+  { id: 'type', label: 'Type', Icon: TextTIcon },
+  { id: 'draft', label: 'Draft', Icon: ArticleNyTimesIcon },
+  { id: 'keys', label: 'Keys', Icon: KeyboardIcon },
 ];
 
 const TOUCH_MODES: Array<{
@@ -62,11 +67,11 @@ const TOUCH_MODES: Array<{
   label: string;
   shortLabel: string;
   title: string;
-  Icon: ComponentType<{ size?: number; weight?: 'regular' | 'bold' | 'duotone' | 'fill' }>;
+  Icon: PhosphorIcon;
 }> = [
   { id: 'gestures', label: 'Gestures', shortLabel: 'Gestures', title: 'Gestures: drags send arrow keys', Icon: HandPointingIcon },
   { id: 'selection', label: 'Text selection', shortLabel: 'Select', title: 'Text selection: touches select terminal text', Icon: CursorTextIcon },
-  { id: 'cursor', label: 'Cursor', shortLabel: 'Cursor', title: 'Cursor: touches send terminal mouse events', Icon: CursorClickIcon },
+  { id: 'cursor', label: 'Mouse', shortLabel: 'Mouse', title: 'Mouse: touches send terminal mouse events', Icon: CursorClickIcon },
 ];
 
 export interface MobileTerminalUiProps {
@@ -148,12 +153,14 @@ function KeyButton({
 function KeyboardModeButton({
   id,
   label,
+  Icon,
   selected,
   disabled,
   onSelect,
 }: {
   id: MobileTerminalKeyboardMode;
   label: string;
+  Icon: PhosphorIcon;
   selected: boolean;
   disabled: boolean;
   onSelect: (mode: MobileTerminalKeyboardMode) => void;
@@ -167,14 +174,17 @@ function KeyboardModeButton({
       aria-current={selected ? 'page' : undefined}
       onClick={() => onSelect(id)}
       className={clsx(
-        'min-w-0 rounded px-1.5 py-1 font-mono text-xs leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
+        'flex min-w-0 items-center justify-center gap-1 rounded px-1.5 py-1 font-mono text-xs leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
         'disabled:pointer-events-none disabled:opacity-60',
         selected
           ? 'bg-header-active-bg text-header-active-fg shadow-[inset_0_0_0_1px_var(--color-focus-ring)]'
           : 'text-muted hover:bg-header-inactive-bg hover:text-foreground',
       )}
     >
-      <span className="truncate">{label}</span>
+      <span aria-hidden="true" className="shrink-0">
+        <Icon size={15} weight={selected ? 'bold' : 'regular'} />
+      </span>
+      <span className="min-w-0 truncate">{label}</span>
     </button>
   );
 }
@@ -258,6 +268,7 @@ function KeyboardModeSelector({
             key={item.id}
             id={item.id}
             label={item.label}
+            Icon={item.Icon}
             selected={item.id === mode}
             disabled={disabled}
             onSelect={onSelect}
