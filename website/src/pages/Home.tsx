@@ -18,8 +18,10 @@ import copyPasteVideoUrl from "../assets/video-copy-paste.mp4";
 import tmuxVideoUrl from "../assets/video-tmux.mp4";
 import visualStudioIconUrl from "../assets/visual-studio-icon.svg";
 import tinyIconUrl from "../assets/icon-tiny-dark.png";
+import phoneMockupUrl from "../assets/phone-mockup.webp";
 import standaloneLatest from "@standalone-latest";
 import { prefersReducedMotion } from "mouseterm-lib/lib/ui-geometry";
+import { NotifySignupForm } from "../components/NotifySignupForm";
 
 export { Home as Component };
 
@@ -876,6 +878,29 @@ function Home() {
                 </div>
               )}
             </div>
+          </div>
+        </section>
+
+        <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
+          <img
+            src={phoneMockupUrl}
+            alt="MouseTerm Tether running on a phone"
+            className="order-2 md:order-1 block w-full max-w-[280px] mx-auto md:max-w-none"
+          />
+          <div className="order-1 md:order-2">
+            <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] mb-6">
+              Walk away. Keep going.
+            </h2>
+            <p className="mb-4 text-lg leading-relaxed opacity-70">
+              Coming next: <a href="/tether" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Tether</a>. Pair a
+              terminal session to your phone over WebRTC and take a stroll, the MouseTerm alert
+              system will buzz you if there's anything to do. A hosted auto-pairing service comes
+              later — just leave and keep working, no "I'm walking away" dance.
+            </p>
+            <p className="mb-4 text-lg leading-relaxed opacity-70">
+              Open source and free to self-host, or pay us a little bit and you can use ours. We'll discount for early adopters, so don't miss out!
+            </p>
+            <NotifySignupForm />
           </div>
         </section>
 
