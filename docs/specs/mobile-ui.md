@@ -132,26 +132,30 @@ Examples:
 * End: tap, drag right, drag up, release.
 * `l`: tap, drag right, drag down, release.
 
+Root gesture menu labels use compact key glyphs: `⌃` for Ctrl, `⬆︎` for
+Shift, and `▲`/`▼`/`◀`/`▶` for arrow keys. Enter, Backspace, PgUp, and PgDn
+remain spelled out.
+
 Root gesture menu:
 
 ```text
-Esc|Ctrl+C*|Quit**         Up|PgUp|k        Backspace|Paste*|n
+Esc|⌃C*|Quit**         ▲|PgUp|k        Backspace|Paste*|n
 
-Left|Home|h                    o            Right|End|l
+◀|Home|h                    o            ▶|End|l
 
-Tab|Shift+Tab|Space      Down|PgDown|j      Enter|Shift+Enter|y
+Tab|⬆︎Tab|Space      ▼|PgDn|j      Enter|⬆︎Enter|y
 ```
 
-`Ctrl+C` and `Paste` require an in-pane confirmation modal before they run.
+`⌃C` and `Paste` require an in-pane confirmation modal before they run.
 
 `Quit` enters a second breakout menu instead of sending input immediately:
 
 ```text
-q | Ctrl+X | :q↵
+q | ⌃X | :q↵
 ```
 
 The quit submenu uses the same final movement rule. Returning to center selects
-`q`, visually counter-clockwise selects `Ctrl+X`, and visually clockwise selects
+`q`, visually counter-clockwise selects `⌃X`, and visually clockwise selects
 `:q↵`.
 
 Gesture action mappings:
@@ -159,30 +163,30 @@ Gesture action mappings:
 | Action | Sequence |
 | --- | --- |
 | Esc | `\x1B` |
-| Ctrl+C | `\x03` |
+| ⌃C | `\x03` |
 | q | `q` |
-| Ctrl+X | `\x18` |
+| ⌃X | `\x18` |
 | `:q↵` | `:q\r` |
-| Up | `\x1B[A` |
+| ▲ | `\x1B[A` |
 | PgUp | `\x1B[5~` |
 | k | `k` |
 | Backspace | `\x7F` |
 | Paste | Existing MouseTerm paste flow for the active pane |
 | n | `n` |
-| Left | `\x1B[D` |
+| ◀ | `\x1B[D` |
 | Home | `\x1B[H` |
 | h | `h` |
-| Right | `\x1B[C` |
+| ▶ | `\x1B[C` |
 | End | `\x1B[F` |
 | l | `l` |
 | Tab | `\x09` |
-| Shift+Tab | `\x1B[Z` |
+| ⬆︎Tab | `\x1B[Z` |
 | Space | ` ` |
-| Down | `\x1B[B` |
-| PgDown | `\x1B[6~` |
+| ▼ | `\x1B[B` |
+| PgDn | `\x1B[6~` |
 | j | `j` |
 | Enter | `\r` |
-| Shift+Enter | `\x1B[13;2u` |
+| ⬆︎Enter | `\x1B[13;2u` |
 | y | `y` |
 
 ## 6. Keyboard Mode Selector
@@ -224,7 +228,7 @@ Keys mode displays exactly these buttons:
 
 ```text
 Esc   Tab   Space   Enter
-←     ↓     ↑       →
+◀     ▼     ▲       ▶
 ```
 
 Mappings:
@@ -235,10 +239,10 @@ Mappings:
 | Tab | `\x09` |
 | Space | ` ` |
 | Enter | `\r` |
-| ← | `\x1B[D` |
-| ↓ | `\x1B[B` |
-| ↑ | `\x1B[A` |
-| → | `\x1B[C` |
+| ◀ | `\x1B[D` |
+| ▼ | `\x1B[B` |
+| ▲ | `\x1B[A` |
+| ▶ | `\x1B[C` |
 
 Tapping a key sends exactly one action. Long-press repeat is not required for v0.
 
@@ -378,7 +382,7 @@ Input  Recent | Type | Draft | Keys
 
 ```text
 Esc   Tab   Space   Enter
-←     ↓     ↑       →
+◀     ▼     ▲       ▶
 ```
 
 * Simple local playground terminal behavior.

@@ -65,10 +65,10 @@ const TERMINAL_KEYS: TerminalKey[] = [
   { id: 'tab', label: 'Tab', title: 'Tab' },
   { id: 'space', label: 'Space', title: 'Space' },
   { id: 'enter', label: 'Enter', title: 'Enter' },
-  { id: 'left', label: '\u2190', title: 'Left arrow' },
-  { id: 'down', label: '\u2193', title: 'Down arrow' },
-  { id: 'up', label: '\u2191', title: 'Up arrow' },
-  { id: 'right', label: '\u2192', title: 'Right arrow' },
+  { id: 'left', label: '\u25c0', title: 'Left arrow' },
+  { id: 'down', label: '\u25bc', title: 'Down arrow' },
+  { id: 'up', label: '\u25b2', title: 'Up arrow' },
+  { id: 'right', label: '\u25b6', title: 'Right arrow' },
 ];
 
 const KEYBOARD_MODES: { id: MobileTerminalKeyboardMode; label: string }[] = [

@@ -118,7 +118,7 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
     options: [
       { label: 'Esc', action: { kind: 'input', input: 'esc' } },
       {
-        label: 'Ctrl+C',
+        label: '⌃C',
         action: { kind: 'confirm', confirmation: 'ctrlC', action: { kind: 'input', input: 'ctrlC' } },
       },
       { label: 'Quit', action: { kind: 'quitMenu' } },
@@ -127,7 +127,7 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
   n: {
     direction: 'n',
     options: [
-      { label: 'Up', action: { kind: 'input', input: 'up' } },
+      { label: '▲', action: { kind: 'input', input: 'up' } },
       { label: 'PgUp', action: { kind: 'input', input: 'pageUp' } },
       { label: 'k', action: { kind: 'text', text: 'k' } },
     ],
@@ -143,7 +143,7 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
   w: {
     direction: 'w',
     options: [
-      { label: 'Left', action: { kind: 'input', input: 'left' } },
+      { label: '◀', action: { kind: 'input', input: 'left' } },
       { label: 'Home', action: { kind: 'input', input: 'home' } },
       { label: 'h', action: { kind: 'text', text: 'h' } },
     ],
@@ -151,7 +151,7 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
   e: {
     direction: 'e',
     options: [
-      { label: 'Right', action: { kind: 'input', input: 'right' } },
+      { label: '▶', action: { kind: 'input', input: 'right' } },
       { label: 'End', action: { kind: 'input', input: 'end' } },
       { label: 'l', action: { kind: 'text', text: 'l' } },
     ],
@@ -160,15 +160,15 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
     direction: 'sw',
     options: [
       { label: 'Tab', action: { kind: 'input', input: 'tab' } },
-      { label: 'Shift+Tab', action: { kind: 'input', input: 'shiftTab' } },
+      { label: '⬆︎Tab', action: { kind: 'input', input: 'shiftTab' } },
       { label: 'Space', action: { kind: 'input', input: 'space' } },
     ],
   },
   s: {
     direction: 's',
     options: [
-      { label: 'Down', action: { kind: 'input', input: 'down' } },
-      { label: 'PgDown', action: { kind: 'input', input: 'pageDown' } },
+      { label: '▼', action: { kind: 'input', input: 'down' } },
+      { label: 'PgDn', action: { kind: 'input', input: 'pageDown' } },
       { label: 'j', action: { kind: 'text', text: 'j' } },
     ],
   },
@@ -176,7 +176,7 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
     direction: 'se',
     options: [
       { label: 'Enter', action: { kind: 'input', input: 'enter' } },
-      { label: 'Shift+Enter', action: { kind: 'input', input: 'shiftEnter' } },
+      { label: '⬆︎Enter', action: { kind: 'input', input: 'shiftEnter' } },
       { label: 'y', action: { kind: 'text', text: 'y' } },
     ],
   },
@@ -197,7 +197,7 @@ export const MOBILE_GESTURE_QUIT_GROUP: MobileGestureGroup = {
   direction: 'n',
   options: [
     { label: 'q', action: { kind: 'text', text: 'q' } },
-    { label: 'Ctrl+X', action: { kind: 'input', input: 'ctrlX' } },
+    { label: '⌃X', action: { kind: 'input', input: 'ctrlX' } },
     { label: ':q\u21b5', action: { kind: 'text', text: ':q\r' } },
   ],
 };

@@ -190,9 +190,9 @@ export function MobileGestureConfirmDialog({
 }) {
   const copy = confirmation === 'ctrlC'
     ? {
-        title: 'Send Ctrl+C?',
+        title: 'Send ⌃C?',
         body: 'Interrupt the running terminal app.',
-        action: 'Send Ctrl+C',
+        action: 'Send ⌃C',
       }
     : {
         title: 'Paste?',
