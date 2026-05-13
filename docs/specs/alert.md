@@ -537,7 +537,7 @@ Alert button:
 - shown in all header tiers, including compact and minimal
 - icon-only control with tooltip and accessible label
 - visual states (pure function of `status`):
-  - `ALERT_DISABLED`: `BellSlashIcon`, muted
+  - `ALERT_DISABLED`: `BellIcon` unfilled, muted
   - `NOTHING_TO_SHOW`: `BellIcon` filled, muted, upright
   - `MIGHT_BE_BUSY`: `BellIcon` filled, muted, tilted slightly (-22.5°)
   - `BUSY`: `BellIcon` filled, muted, tilted 45°

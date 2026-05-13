@@ -7,7 +7,6 @@ import {
   ArrowsInIcon,
   ArrowsOutIcon,
   BellIcon,
-  BellSlashIcon,
   CursorClickIcon,
   SelectionSlashIcon,
   SplitHorizontalIcon,
@@ -271,7 +270,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
         >
           <span className="flex items-center justify-center">
             {activity.status === 'ALERT_DISABLED' ? (
-              <BellSlashIcon size={14} />
+              <BellIcon size={14} />
             ) : (
               <BellIcon size={14} weight="fill" className={bellIconClass(activity.status)} />
             )}
