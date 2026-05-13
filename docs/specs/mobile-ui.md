@@ -87,7 +87,7 @@ Touch modes:
 
 | Mode | Button label | Icon | Availability | Behavior |
 | --- | --- | --- | --- | --- |
-| Gestures | `Gestures` | `HandPointingIcon` | Always available | Pane-content touches open the Gesture mode radial menu. |
+| Gestures | `Gestures` | `HandPointingIcon` | Always available | Pane-content touches, pen presses, and primary mouse/trackpad clicks open the Gesture mode radial menu. |
 | Text selection | `Select` | `CursorTextIcon` | Always available | Touches are reserved for terminal text selection and copy/paste. If the TUI is capturing mouse events, MouseTerm activates mouse override for the active pane. |
 | Cursor | `Cursor` | `CursorClickIcon` | Only when the active TUI is capturing mouse events | Touches are passed through as terminal mouse/cursor input. |
 
@@ -95,6 +95,16 @@ Default touch mode is **Gestures**.
 
 If Cursor mode is active and the active pane stops capturing mouse events, the
 selector must fall back to Gestures.
+
+Gesture mode intentionally consumes primary mouse/trackpad clicks in addition to
+touch input. This keeps the `/tether` prototype usable in desktop browsers,
+narrow desktop viewports, and Storybook without a touchscreen. A primary
+mouse/trackpad click in pane content must start radial gesture handling, call
+`preventDefault()`, stop propagation, and capture that pointer; it is not passed
+through to the embedded `Wall`, xterm, or dockview for focus, selection, or pane
+interaction. Non-primary mouse buttons are ignored by gesture handling so their
+browser or host behavior can continue. Users who want terminal selection or TUI
+mouse input must choose Select or Cursor mode explicitly.
 
 ## 5. Gesture Mode
 
