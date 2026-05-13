@@ -133,9 +133,11 @@ from their root group positions to their exploded positions in the opposite
 directions. They must not fade out and be replaced by newly spawned option
 labels.
 
-Root labels are laid out as a square keypad, not on a circle. N and S groups
-form horizontal rows, E and W groups form vertical columns, and diagonal groups
-form corner L shapes so the diagonal corner still reads as one group without
+Root labels are laid out as a square keypad, not on a circle. N, S, E, and W
+use a hierarchical layout: the arrow chip sits closest to the select circle, and
+the four arrow chips use one shared `GAP_CARDINAL_RING` from the select circle
+edge. The two secondary chips sit just outside each arrow. Diagonal groups keep
+corner L shapes so the diagonal corner still reads as one group without
 compressing all three labels into a line. Exploded option labels use the square
 direction anchors directly. The root label pack stays close to the select
 circle, while preserving enough room for long labels like Backspace.
@@ -193,15 +195,14 @@ remain spelled out.
 Root gesture menu:
 
 ```text
-Esc      ⌃C*             k ▲ PgUp             n Backspace
-Quit**                                                   Paste*
+Esc      ⌃C*             k   PgUp             n Backspace
+Quit**                   ▲                               Paste*
 
-Home                                                    End
-◀                                                       ▶
+Home   ◀                                           ▶   End
 h                                                       l
 
-⬆︎Tab                  j ▼ PgDn             y ⬆︎Enter
-Tab Space                                      Enter
+⬆︎Tab                    ▼                   y ⬆︎Enter
+Tab Space              j   PgDn                Enter
 ```
 
 `⌃C` and `Paste` require an in-pane confirmation modal before they run.
