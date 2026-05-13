@@ -28,6 +28,7 @@ import {
   MOBILE_GESTURE_IDLE_STATE,
   updateMobileGesture,
   type MobileGestureAction,
+  type MobileGestureInputId,
   type MobileGesturePoint,
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
@@ -36,7 +37,7 @@ export type MobileTerminalKeyboardMode = 'recent' | 'type' | 'draft' | 'keys';
 export type MobileTerminalSection = MobileTerminalKeyboardMode;
 export type MobileTerminalTouchMode = 'gestures' | 'selection' | 'cursor';
 
-export const MOBILE_TERMINAL_KEY_SEQUENCES = {
+export const MOBILE_TERMINAL_KEY_SEQUENCES: Record<MobileGestureInputId, string> = {
   ctrlC: '\x03',
   ctrlX: '\x18',
   esc: '\x1b',
@@ -54,10 +55,10 @@ export const MOBILE_TERMINAL_KEY_SEQUENCES = {
   end: '\x1b[F',
   left: '\x1b[D',
   home: '\x1b[H',
-} as const;
+};
 
 interface TerminalKey {
-  id: keyof typeof MOBILE_TERMINAL_KEY_SEQUENCES;
+  id: MobileGestureInputId;
   label: string;
   title: string;
 }
