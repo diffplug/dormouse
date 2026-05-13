@@ -127,9 +127,9 @@ Input modes:
 | Mode | Button label | Icon | Reserve area content |
 | --- | --- | --- | --- |
 | Sessions | `Sessions` | `TerminalWindowIcon` | The reserve area displays mobile session rows with active, alert, and TODO state. Selecting a session makes it the single visible terminal. |
-| Recent | `Recent` | `ClockCounterClockwiseIcon` | The entire reserve area displays `Recent - WIP`. |
-| Type | `Type` | `TextTIcon` | The reserve area focuses the hidden terminal input. Every typed key is echoed into the terminal as it happens. |
-| Draft | `Draft` | `ArticleNyTimesIcon` | The entire reserve area displays `Draft - WIP`. |
+| Recent | `Recent` | `ClockCounterClockwiseIcon` | The entire reserve area displays `WIP - commands you have recently executed will be available here`. |
+| Type | `Type` | `TextTIcon` | The reserve area displays `Onscreen keyboard goes here` and focuses the hidden terminal input. Every typed key is echoed into the terminal as it happens. |
+| Draft | `Draft` | `ArticleNyTimesIcon` | The entire reserve area displays `WIP - this will be a place to draft prompts before pasting into the terminal`. |
 
 Default input mode is **Type**.
 
@@ -204,7 +204,8 @@ The keyboard reserve area has a stable height. It should not be recomputed from
 `visualViewport` while the native keyboard animates.
 
 When the OS keyboard is hidden, the reserve area shows the selected app keyboard
-UI (session list, `Recent - WIP`, Type focus target, or `Draft - WIP`).
+UI: session list, `WIP - commands you have recently executed will be available here`,
+`Onscreen keyboard goes here`, or `WIP - this will be a place to draft prompts before pasting into the terminal`.
 
 When the OS keyboard is visible, the OS keyboard may cover or occupy that same
 physical area. This is preferred over resizing the whole app around the keyboard.
@@ -270,8 +271,8 @@ Sessions | Recent | Type | Draft
 
 * Stable keyboard reserve area.
 * Sessions reserve content: active session rows with alert and TODO state.
-* Recent reserve content: `Recent - WIP`.
-* Draft reserve content: `Draft - WIP`.
+* Recent reserve content: `WIP - commands you have recently executed will be available here`.
+* Draft reserve content: `WIP - this will be a place to draft prompts before pasting into the terminal`.
 * Type mode native mobile keyboard input.
 * Simple local playground terminal behavior.
 

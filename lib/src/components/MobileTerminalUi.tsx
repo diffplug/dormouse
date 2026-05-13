@@ -237,10 +237,16 @@ function KeyboardModeSelector({
   );
 }
 
-function WorkInProgressPane({ label }: { label: 'Recent' | 'Draft' }) {
+const RESERVE_PLACEHOLDER_COPY = {
+  recent: 'WIP - commands you have recently executed will be available here',
+  type: 'Onscreen keyboard goes here',
+  draft: 'WIP - this will be a place to draft prompts before pasting into the terminal',
+} as const;
+
+function WorkInProgressPane({ mode }: { mode: 'recent' | 'draft' }) {
   return (
     <div className="grid h-full place-items-center px-4 text-center font-mono text-sm text-muted">
-      {label} - WIP
+      {RESERVE_PLACEHOLDER_COPY[mode]}
     </div>
   );
 }
@@ -538,8 +544,8 @@ export function MobileTerminalUi({
             }}
           />
         ) : null}
-        {keyboardMode === 'recent' ? <WorkInProgressPane label="Recent" /> : null}
-        {keyboardMode === 'draft' ? <WorkInProgressPane label="Draft" /> : null}
+        {keyboardMode === 'recent' ? <WorkInProgressPane mode="recent" /> : null}
+        {keyboardMode === 'draft' ? <WorkInProgressPane mode="draft" /> : null}
         {keyboardMode === 'type' ? (
           <button
             type="button"
@@ -552,7 +558,7 @@ export function MobileTerminalUi({
               'disabled:pointer-events-none disabled:opacity-60',
             )}
           >
-            <span aria-hidden="true" className="font-mono text-3xl leading-none text-focus-ring">▌</span>
+            <span className="px-4 text-center font-mono text-sm text-muted">{RESERVE_PLACEHOLDER_COPY.type}</span>
           </button>
         ) : null}
       </div>
