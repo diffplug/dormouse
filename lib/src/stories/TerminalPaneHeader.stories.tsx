@@ -42,7 +42,7 @@ function primedState(state: Record<string, unknown>) {
   };
 }
 
-function primedNotificationState(notification: ActivityNotification, status = 'ALERT_DISABLED') {
+function primedNotificationState(notification: ActivityNotification, status = 'WATCHING_DISABLED') {
   return primedState({
     status,
     todo: true,
@@ -190,7 +190,7 @@ type Story = StoryObj<typeof TabStory>;
 
 export const AlertDisabled: Story = {
   parameters: primedState({
-    status: 'ALERT_DISABLED',
+    status: 'WATCHING_DISABLED',
 
     todo: false,
   }),
@@ -246,7 +246,7 @@ export const AlertRightClickDialog: Story = {
 
 export const TodoOnly: Story = {
   parameters: primedState({
-    status: 'ALERT_DISABLED',
+    status: 'WATCHING_DISABLED',
     todo: true,
   }),
 };

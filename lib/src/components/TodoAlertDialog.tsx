@@ -81,7 +81,6 @@ export function TodoAlertDialog({
 }) {
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const activity = activityStates.get(sessionId) ?? DEFAULT_ACTIVITY_STATE;
-  const alertEnabled = activity.status !== 'ALERT_DISABLED';
   const dialogRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<CSSProperties>({
     left: triggerRect.left,
@@ -195,14 +194,14 @@ export function TodoAlertDialog({
           label="TODO"
         />
 
-        {/* Alert row */}
+        {/* WATCHING row */}
         <Shortcut>a</Shortcut>
-        <span className="text-sm font-medium text-foreground">alert</span>
+        <span className="text-sm font-medium text-foreground">WATCHING</span>
         <OnOffSwitch
-          on={alertEnabled}
+          on={activity.watchingEnabled}
           onEnable={() => toggleSessionAlert(sessionId)}
           onDisable={() => disableSessionAlert(sessionId)}
-          label="alert"
+          label="WATCHING"
         />
       </div>
 

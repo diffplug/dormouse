@@ -59,6 +59,7 @@ ptyManager.addCallbacks({
     const parsed = getAlertProtocolParser(id).process(data);
     applyTerminalProtocolEvents(alertManager, id, parsed.events);
     const semanticEvents = collectTerminalSemanticEvents(parsed.events);
+    alertManager.applyTerminalSemanticEvents(id, semanticEvents);
     if (semanticEvents.length > 0) {
       for (const listener of semanticEventsListeners) listener(id, semanticEvents);
     }
@@ -191,6 +192,7 @@ export function attachRouter(
         type: 'alert:state',
         id,
         status: state.status,
+        watchingEnabled: state.watchingEnabled,
         todo: state.todo,
         notification: state.notification,
         attentionDismissedRing: state.attentionDismissedRing,
@@ -358,6 +360,7 @@ export function attachRouter(
             type: 'alert:state',
             id,
             status: alertState.status,
+            watchingEnabled: alertState.watchingEnabled,
             todo: alertState.todo,
             notification: alertState.notification,
             attentionDismissedRing: alertState.attentionDismissedRing,

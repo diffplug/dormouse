@@ -1,18 +1,18 @@
 import { cfg } from '../cfg';
 
-export type VisualSessionStatus =
-  | 'ALERT_DISABLED'
+export type WatchingSessionStatus =
+  | 'WATCHING_DISABLED'
   | 'NOTHING_TO_SHOW'
   | 'MIGHT_BE_BUSY'
   | 'BUSY'
   | 'MIGHT_NEED_ATTENTION'
   | 'ALERT_RINGING';
 
-export type SessionStatus = VisualSessionStatus | 'OSC_NOTIF_BUSY';
+export type SessionStatus = WatchingSessionStatus | 'OSC_NOTIF_BUSY' | 'COMMAND_EXIT_ARMED';
 
 export interface ActivityMonitorOptions {
   hasAttention?: () => boolean;
-  onChange?: (status: VisualSessionStatus, previousStatus: VisualSessionStatus) => void;
+  onChange?: (status: WatchingSessionStatus, previousStatus: WatchingSessionStatus) => void;
 }
 
 const T_BUSY_CANDIDATE_GAP = cfg.alert.busyCandidateGap;
@@ -22,7 +22,7 @@ const T_ALERT_RINGING_CONFIRM = cfg.alert.needsAttentionConfirm;
 const T_RESIZE_DEBOUNCE = cfg.alert.resizeDebounce;
 
 export class ActivityMonitor {
-  private status: VisualSessionStatus = 'NOTHING_TO_SHOW';
+  private status: WatchingSessionStatus = 'NOTHING_TO_SHOW';
   private resizeGrace = false;
   private busyCandidateTimer: ReturnType<typeof setTimeout> | null = null;
   private busyConfirmTimer: ReturnType<typeof setTimeout> | null = null;
@@ -34,14 +34,14 @@ export class ActivityMonitor {
   private lastOutputAt: number | null = null;
   private outputCountSinceAttention = 0;
   private readonly hasAttention: () => boolean;
-  private readonly onChange: ((status: VisualSessionStatus, previousStatus: VisualSessionStatus) => void) | null;
+  private readonly onChange: ((status: WatchingSessionStatus, previousStatus: WatchingSessionStatus) => void) | null;
 
   constructor(options?: ActivityMonitorOptions) {
     this.hasAttention = options?.hasAttention ?? (() => false);
     this.onChange = options?.onChange ?? null;
   }
 
-  getStatus(): VisualSessionStatus {
+  getStatus(): WatchingSessionStatus {
     return this.status;
   }
 
@@ -207,7 +207,7 @@ export class ActivityMonitor {
     this.outputCountSinceAttention = 0;
   }
 
-  private setStatus(status: VisualSessionStatus): void {
+  private setStatus(status: WatchingSessionStatus): void {
     if (this.status === status) return;
     const previousStatus = this.status;
     this.status = status;

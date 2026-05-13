@@ -18,7 +18,7 @@ Supported OSCs are parsed at the PTY data boundary in the platform adapter:
 After parsing, supported sequences are consumed and not re-emitted. Known unsupported iTerm2/clipboard-capable OSCs listed in [Known-unimplemented iTerm2 and clipboard-capable sequences](#known-unimplemented-iterm2-and-clipboard-capable-sequences) are also consumed and ignored. The platform sends two streams to the webview:
 
 - `pty:data` — terminal output with supported OSCs already parsed/stripped. Feeds xterm.js.
-- `terminal:semanticEvents` — normalized semantic events parsed in the platform (CWD, prompt/command boundaries, titles). Feeds `TerminalPaneState`.
+- `terminal:semanticEvents` — normalized semantic events parsed in the platform (CWD, prompt/command boundaries, titles). Feeds `TerminalPaneState`; command boundaries also feed the command-exit alert track defined in `docs/specs/alert.md`.
 - Notification-derived state is delivered through `AlertManager` calls / `alert:state` messages, not through `pty:data`.
 
 For replay (`pty:replay`), the webview re-parses semantic OSCs from the buffered raw stream during reconstruction. Replay must not re-fire alerts, activity-monitor events, or protocol notifications: saved scrollback may contain raw OSC sequences, but replay filtering suppresses all protocol side effects so a resumed Session does not re-ring on every reload.
@@ -42,8 +42,8 @@ Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js c
 | `OSC 9 ; 4 ; <state> [; <progress>] ST` | iTerm2 progress | [alert.md](alert.md#osc-94-progress) |
 | `OSC 9 ; 9 ; <cwd> ST` | CWD (Windows Terminal / ConEmu) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 99 ; <metadata> ; <payload> ST` | kitty desktop notification | [alert.md](alert.md#osc-99) |
-| `OSC 133 ; A/B/C/D [...] ST` | Prompt/command boundaries | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
-| `OSC 633 ; A/B/C/D ST` | VS Code prompt/command boundaries | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
+| `OSC 133 ; A/B/C/D [...] ST` | Prompt/command boundaries; command-exit alert input | [terminal-state.md](terminal-state.md#supported-osc-inputs), [alert.md](alert.md#command-exit-track) |
+| `OSC 633 ; A/B/C/D ST` | VS Code prompt/command boundaries; command-exit alert input | [terminal-state.md](terminal-state.md#supported-osc-inputs), [alert.md](alert.md#command-exit-track) |
 | `OSC 633 ; E ; <commandline> [; <nonce>] ST` | VS Code command line | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 633 ; P ; Cwd=<cwd> ST` | CWD (VS Code) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 777 ; notify ; <title> ; <body> ST` | rxvt/WezTerm notification | [alert.md](alert.md#osc-777) |

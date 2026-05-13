@@ -15,11 +15,11 @@ export interface DoorProps {
 export function Door({
   doorId,
   title,
-  status = 'ALERT_DISABLED',
+  status = 'WATCHING_DISABLED',
   todo = false,
   onClick,
 }: DoorProps) {
-  const alertEnabled = status !== 'ALERT_DISABLED';
+  const showBell = status !== 'WATCHING_DISABLED';
   const alertRinging = status === 'ALERT_RINGING';
   const todoPill = useTodoPillContent(todo);
 
@@ -38,7 +38,7 @@ export function Door({
       <span className="min-w-0 flex-1 truncate">
         {title}
       </span>
-      {(todoPill.visible || alertEnabled) && (
+      {(todoPill.visible || showBell) && (
         <span className="flex shrink-0 items-center gap-1.5">
           {todoPill.visible && (
             <span
@@ -48,7 +48,7 @@ export function Door({
               {todoPill.body}
             </span>
           )}
-          {alertEnabled && (
+          {showBell && (
             <span className={alertRinging ? 'text-alarm-vs-door' : ''}>
               <BellIcon size={11} weight="fill" className={bellIconClass(status)} />
             </span>

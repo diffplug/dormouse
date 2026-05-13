@@ -106,7 +106,7 @@ Message types live in `vscode-ext/src/message-types.ts` (the canonical schema; o
 | `pty:shells` | Available shells list response (matched by requestId) |
 | `mouseterm:flushSessionSave` | Request webview to save state now (host shutdown trigger, matched by requestId) |
 | `mouseterm:openThemeDebugger` | Command-triggered request to open the shared theme debugger dialog |
-| `alert:state` | Alert state change (projected status, todo, notification, attentionDismissedRing) |
+| `alert:state` | Alert state change (projected status, watchingEnabled, todo, notification, attentionDismissedRing) |
 
 The OSC parsing/stripping rules that produce `pty:data` and `terminal:semanticEvents` are specified in `docs/specs/OSC.md`.
 
@@ -131,6 +131,7 @@ interface PersistedPane {
 
 interface PersistedAlertState {
   status: SessionStatus;
+  watchingEnabled?: boolean;
   todo: boolean;
   notification?: ActivityNotification | null;
 }

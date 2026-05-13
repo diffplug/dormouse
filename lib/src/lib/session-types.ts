@@ -4,6 +4,7 @@ import { ACTIVITY_NOTIFICATION_SOURCES, migrateTodoState, type ActivityNotificat
 
 export interface PersistedAlertState {
   status: SessionStatus;
+  watchingEnabled?: boolean;
   todo: TodoState;
   notification?: ActivityNotification | null;
 }
@@ -86,6 +87,7 @@ function isPersistedAlertShape(value: unknown): boolean {
   if (value === null) return true;
   if (!isRecord(value)) return false;
   if (typeof value.status !== 'string') return false;
+  if (value.watchingEnabled !== undefined && typeof value.watchingEnabled !== 'boolean') return false;
   const t = value.todo;
   if (!(typeof t === 'boolean' || typeof t === 'number' || typeof t === 'string')) return false;
   return value.notification === undefined || value.notification === null || isActivityNotificationShape(value.notification);

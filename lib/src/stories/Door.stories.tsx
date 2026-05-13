@@ -26,14 +26,14 @@ const meta: Meta<typeof DoorStory> = {
   component: DoorStory,
   args: {
     title: 'build-server',
-    status: 'ALERT_DISABLED',
+    status: 'WATCHING_DISABLED',
     todo: false,
     width: 260,
     reducedMotion: false,
   },
   argTypes: {
     title: { control: 'text' },
-    status: { control: 'radio', options: ['ALERT_DISABLED', 'NOTHING_TO_SHOW', 'MIGHT_BE_BUSY', 'BUSY', 'MIGHT_NEED_ATTENTION', 'ALERT_RINGING'] },
+    status: { control: 'radio', options: ['WATCHING_DISABLED', 'NOTHING_TO_SHOW', 'MIGHT_BE_BUSY', 'BUSY', 'OSC_NOTIF_BUSY', 'COMMAND_EXIT_ARMED', 'MIGHT_NEED_ATTENTION', 'ALERT_RINGING'] },
     todo: { control: 'boolean' },
     width: { control: 'number' },
     reducedMotion: { control: 'boolean' },
@@ -47,6 +47,8 @@ export const AlertDisabled: Story = {};
 export const AlertEnabled: Story = { args: { status: 'NOTHING_TO_SHOW' } };
 export const AlertMightBeBusy: Story = { args: { status: 'MIGHT_BE_BUSY' } };
 export const AlertBusy: Story = { args: { status: 'BUSY' } };
+export const ProgressBusy: Story = { args: { status: 'OSC_NOTIF_BUSY' } };
+export const CommandExitArmed: Story = { args: { status: 'COMMAND_EXIT_ARMED' } };
 export const AlertMightNeedAttention: Story = { args: { status: 'MIGHT_NEED_ATTENTION' } };
 export const AlertRinging: Story = { args: { status: 'ALERT_RINGING' } };
 export const TodoOnly: Story = { args: { todo: true } };

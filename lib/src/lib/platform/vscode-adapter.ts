@@ -69,6 +69,7 @@ export class VSCodeAdapter implements PlatformAdapter {
           handler({
             id: msg.id,
             status: msg.status,
+            watchingEnabled: msg.watchingEnabled,
             todo: msg.todo,
             notification: msg.notification ?? null,
             attentionDismissedRing: msg.attentionDismissedRing,

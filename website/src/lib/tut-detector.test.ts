@@ -4,13 +4,17 @@ import type { ActivityState } from "mouseterm-lib/lib/terminal-registry";
 import { TutDetector } from "./tut-detector";
 import { TutorialState } from "./tutorial-state";
 
+function activity(status: ActivityState["status"], todo = false): ActivityState {
+  return { status, watchingEnabled: status !== "WATCHING_DISABLED", todo, notification: null };
+}
+
 function makeDetectorHarness() {
   let activePanelListener: ((panel: { id?: string } | undefined) => void) | null = null;
   let activityListener: (() => void) | null = null;
   let mouseListener: (() => void) | null = null;
   let activitySnapshot = new Map<string, ActivityState>();
   let mouseSnapshot = new Map<string, MouseSelectionState>();
-  const onAlertDemoPaneChange = vi.fn();
+  const onWatchingDemoPaneChange = vi.fn();
 
   const state = new TutorialState();
   const detector = new TutDetector(
@@ -33,7 +37,7 @@ function makeDetectorHarness() {
         };
       },
     },
-    { onAlertDemoPaneChange },
+    { onWatchingDemoPaneChange },
   );
 
   detector.attach({
@@ -55,7 +59,7 @@ function makeDetectorHarness() {
       mouseListener?.();
     },
     activePanelChange: (id: string) => activePanelListener?.({ id }),
-    onAlertDemoPaneChange,
+    onWatchingDemoPaneChange,
   };
 }
 
@@ -125,15 +129,15 @@ describe("TutDetector", () => {
     const { state, setActivitySnapshot } = makeDetectorHarness();
 
     setActivitySnapshot(new Map([
-      ["pane-a", { status: "NOTHING_TO_SHOW", todo: false }],
+      ["pane-a", activity("NOTHING_TO_SHOW")],
     ]));
     setActivitySnapshot(new Map([
-      ["pane-a", { status: "BUSY", todo: false }],
+      ["pane-a", activity("BUSY")],
     ]));
     expect(state.isComplete("al-busy")).toBe(true);
 
     setActivitySnapshot(new Map([
-      ["pane-a", { status: "ALERT_RINGING", todo: false }],
+      ["pane-a", activity("ALERT_RINGING")],
     ]));
     expect(state.isComplete("al-ring")).toBe(true);
   });
@@ -142,34 +146,34 @@ describe("TutDetector", () => {
     const { state, setActivitySnapshot } = makeDetectorHarness();
 
     setActivitySnapshot(new Map([
-      ["pane-a", { status: "ALERT_DISABLED", todo: false }],
+      ["pane-a", activity("WATCHING_DISABLED")],
     ]));
     setActivitySnapshot(new Map([
-      ["pane-a", { status: "NOTHING_TO_SHOW", todo: false }],
+      ["pane-a", activity("NOTHING_TO_SHOW")],
     ]));
 
     expect(state.isComplete("al-enable")).toBe(true);
   });
 
-  it("tracks the pane whose alert was enabled for the busy demo", () => {
-    const { onAlertDemoPaneChange, setActivitySnapshot } = makeDetectorHarness();
+  it("tracks the pane whose WATCHING was enabled for the busy demo", () => {
+    const { onWatchingDemoPaneChange, setActivitySnapshot } = makeDetectorHarness();
 
     setActivitySnapshot(new Map([
-      ["pane-a", { status: "ALERT_DISABLED", todo: false }],
-      ["pane-b", { status: "ALERT_DISABLED", todo: false }],
+      ["pane-a", activity("WATCHING_DISABLED")],
+      ["pane-b", activity("WATCHING_DISABLED")],
     ]));
     setActivitySnapshot(new Map([
-      ["pane-a", { status: "ALERT_DISABLED", todo: false }],
-      ["pane-b", { status: "NOTHING_TO_SHOW", todo: false }],
+      ["pane-a", activity("WATCHING_DISABLED")],
+      ["pane-b", activity("NOTHING_TO_SHOW")],
     ]));
 
-    expect(onAlertDemoPaneChange).toHaveBeenLastCalledWith("pane-b");
+    expect(onWatchingDemoPaneChange).toHaveBeenLastCalledWith("pane-b");
 
     setActivitySnapshot(new Map([
-      ["pane-a", { status: "ALERT_DISABLED", todo: false }],
-      ["pane-b", { status: "ALERT_DISABLED", todo: false }],
+      ["pane-a", activity("WATCHING_DISABLED")],
+      ["pane-b", activity("WATCHING_DISABLED")],
     ]));
 
-    expect(onAlertDemoPaneChange).toHaveBeenLastCalledWith(null);
+    expect(onWatchingDemoPaneChange).toHaveBeenLastCalledWith(null);
   });
 });

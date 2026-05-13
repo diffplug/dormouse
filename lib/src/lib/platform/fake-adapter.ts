@@ -348,7 +348,9 @@ export class FakePtyAdapter implements PlatformAdapter {
   private emitPtyData(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
     const parsed = this.getProtocolParser(id).process(data);
     applyTerminalProtocolEvents(this.alertManager, id, parsed.events);
-    applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
+    const semanticEvents = collectTerminalSemanticEvents(parsed.events);
+    this.alertManager.applyTerminalSemanticEvents(id, semanticEvents);
+    applyTerminalSemanticEventsByPtyId(id, semanticEvents);
     const inputHandler = this.inputHandlers.get(id);
     for (const response of collectTerminalProtocolResponses(parsed.events)) {
       inputHandler?.(response);

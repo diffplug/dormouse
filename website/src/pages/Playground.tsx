@@ -93,7 +93,7 @@ function Playground() {
       const tutorialState = new TutorialState();
       stateRef.current = tutorialState;
       const detector = new TutDetector(tutorialState, registry, mouseSelection, {
-        onAlertDemoPaneChange: (id) => {
+        onWatchingDemoPaneChange: (id) => {
           alertDemoPaneIdRef.current = id;
         },
       });

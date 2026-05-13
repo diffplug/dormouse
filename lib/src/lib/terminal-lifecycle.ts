@@ -179,7 +179,8 @@ function setupTerminalEntry(id: string): TerminalEntry {
     fit,
     element,
     cleanup,
-    alertStatus: 'ALERT_DISABLED',
+    alertStatus: 'WATCHING_DISABLED',
+    watchingEnabled: false,
     todo: false,
     notification: null,
     attentionDismissedRing: false,
@@ -189,6 +190,7 @@ function setupTerminalEntry(id: string): TerminalEntry {
   const primed = consumePrimedActivity(id);
   if (primed) {
     if (primed.status !== undefined) entry.alertStatus = primed.status;
+    if (primed.watchingEnabled !== undefined) entry.watchingEnabled = primed.watchingEnabled;
     if (primed.todo !== undefined) entry.todo = primed.todo;
     if (primed.notification !== undefined) entry.notification = primed.notification;
   }

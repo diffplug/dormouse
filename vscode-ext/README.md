@@ -8,10 +8,10 @@ TODO: Hero GIF.
 
 ## Alert System
 
-MouseTerm tracks activity the same way you do — visual motion. When a pane stops changing for two seconds, it marks the task complete and alerts you. Works with any CLI tool that prints to a terminal, no plugins or configuration.
+MouseTerm can WATCH a pane the same way you do — visual motion. When a watched pane stops changing for two seconds, it marks the task complete and alerts you. Apps can also ask for attention with terminal notification protocols, and shell-integrated commands can alert when they finish after you stop paying attention.
 
-- <img width="22" height="22" alt="todo-disabled" src="https://github.com/user-attachments/assets/29178d1e-062f-4e4d-8de8-250e01b73125" /> alerts disabled
-- <img width="22" height="22" alt="todo-enabled" src="https://github.com/user-attachments/assets/1f6dfeb3-7d8e-4724-b777-af6b350cbc80" /> alerts enabled
+- <img width="22" height="22" alt="todo-disabled" src="https://github.com/user-attachments/assets/29178d1e-062f-4e4d-8de8-250e01b73125" /> WATCHING disabled
+- <img width="22" height="22" alt="todo-enabled" src="https://github.com/user-attachments/assets/1f6dfeb3-7d8e-4724-b777-af6b350cbc80" /> WATCHING enabled
 - <img width="22" height="22" alt="todo-armed" src="https://github.com/user-attachments/assets/a02e9b7c-4a48-459d-910a-ef0b0ae2a27f" /> task is running, will send an alert when task completes
 - <img width="22" height="22" alt="todo-ringing" src="https://github.com/user-attachments/assets/55082f42-ddcc-402c-b550-814d84b86630" /> task is finished and needs your attention
 

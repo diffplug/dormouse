@@ -107,7 +107,7 @@ export const MixedDoorStates: Story = {
       todo: false,
     },
     p3: {
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
 
       todo: true,
     },
@@ -135,7 +135,7 @@ export const OverflowWithRingingDoor: Story = {
       todo: false,
     },
     p7: {
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
 
       todo: true,
     },

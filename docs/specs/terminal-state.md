@@ -117,6 +117,8 @@ type TerminalSemanticEvent =
 Feature code consumes `TerminalPaneState` or `TerminalSemanticEvent`, never raw OSC sequences.
 Protocol-derived semantic events are timestamped in stream order before they reach the reducer, so command-start boundaries and title candidates from the same PTY chunk remain comparable even when they were parsed in the same millisecond.
 
+`AlertManager` also consumes command lifecycle semantic events for command-exit alerting. That alert path is specified in `docs/specs/alert.md`: a foreground command can arm an alert only after it was observed while the Session had attention and that attention later expired or was explicitly lost before the same command finished.
+
 ## Supported OSC Inputs
 
 CWD:
@@ -164,6 +166,8 @@ Only the OSC 9 *message* form (`OSC 9 ; <message>`) feeds the title channel. The
 Non-OSC title source:
 
 - `user` — user-pinned title set via the inline rename UI (`setTerminalUserTitle`). Always wins over every other candidate.
+
+The `user_input` command fallback is best effort. It is sufficient for headers and grouping, but command-exit alerting may treat it as lower confidence or ignore it until deeper shell integration exists.
 
 The parser accepts both BEL and ST terminators and handles split chunks. Supported-but-malformed semantic OSCs are consumed without changing state. Unsupported OSC pass-through vs. consume/ignore behavior is defined centrally in `docs/specs/OSC.md`.
 

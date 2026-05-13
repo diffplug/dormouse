@@ -182,7 +182,7 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).todo).toBe(false);
   });
 
-  it('protocol notifications ring and create TODO detail even when visual alerts are disabled', () => {
+  it('protocol notifications ring and create TODO detail even when WATCHING is disabled', () => {
     const id = 'osc-notification';
 
     manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
@@ -195,20 +195,20 @@ describe('AlertManager in isolation', () => {
 
     manager.dismissAlert(id);
     expect(manager.getState(id)).toMatchObject({
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
       todo: true,
       notification: { source: 'OSC 9', title: null, body: 'Build finished' },
     });
 
     manager.clearTodo(id);
     expect(manager.getState(id)).toMatchObject({
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
       todo: false,
       notification: null,
     });
   });
 
-  it('terminal bell notifications ring and create TODO detail even when visual alerts are disabled', () => {
+  it('terminal bell notifications ring and create TODO detail even when WATCHING is disabled', () => {
     const id = 'terminal-bell';
 
     applyTerminalProtocolEvents(manager, id, [
@@ -228,6 +228,7 @@ describe('AlertManager in isolation', () => {
     manager.updateProtocolProgress(id, { state: 'normal', percent: 25 });
     expect(manager.getState(id)).toMatchObject({
       status: 'OSC_NOTIF_BUSY',
+      watchingEnabled: false,
       todo: false,
       notification: null,
     });
@@ -243,6 +244,35 @@ describe('AlertManager in isolation', () => {
     });
   });
 
+  it('opens the bell menu for protocol progress when WATCHING is disabled', () => {
+    const id = 'osc-progress-menu';
+
+    manager.updateProtocolProgress(id, { state: 'normal', percent: 25 });
+
+    expect(manager.dismissOrToggleAlert(id, 'OSC_NOTIF_BUSY')).toBe('menu');
+    expect(manager.getState(id)).toMatchObject({
+      status: 'OSC_NOTIF_BUSY',
+      watchingEnabled: false,
+    });
+  });
+
+  it('disables only WATCHING for protocol progress when WATCHING is enabled', () => {
+    const id = 'osc-progress-disable-watching';
+
+    manager.toggleAlert(id);
+    manager.updateProtocolProgress(id, { state: 'normal', percent: 25 });
+    expect(manager.getState(id)).toMatchObject({
+      status: 'OSC_NOTIF_BUSY',
+      watchingEnabled: true,
+    });
+
+    expect(manager.dismissOrToggleAlert(id, 'OSC_NOTIF_BUSY')).toBe('disabled');
+    expect(manager.getState(id)).toMatchObject({
+      status: 'OSC_NOTIF_BUSY',
+      watchingEnabled: false,
+    });
+  });
+
   it('protocol completion is suppressed while the user has attention', () => {
     const id = 'osc-progress-attention';
 
@@ -252,7 +282,7 @@ describe('AlertManager in isolation', () => {
 
     manager.updateProtocolProgress(id, { state: 'normal', percent: 100 });
     expect(manager.getState(id)).toMatchObject({
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
       todo: false,
       notification: null,
     });
@@ -265,7 +295,7 @@ describe('AlertManager in isolation', () => {
     manager.notifyFromProtocol(id, { source: 'OSC 777', title: 'done', body: 'Build finished' });
 
     expect(manager.getState(id)).toMatchObject({
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
       todo: false,
       notification: null,
     });
@@ -296,9 +326,93 @@ describe('AlertManager in isolation', () => {
     ]);
 
     expect(manager.getState(id)).toMatchObject({
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
       todo: false,
       notification: null,
+    });
+  });
+
+  it('arms and rings when an attended command loses attention before exiting', () => {
+    const id = 'command-exit';
+
+    manager.attend(id);
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'pnpm build' },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+
+    vi.advanceTimersByTime(15_000);
+    expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
+
+    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_RINGING',
+      todo: true,
+      notification: { source: 'COMMAND_EXIT', title: 'Command finished', body: 'pnpm build exited 0' },
+    });
+  });
+
+  it('does not ring command-exit alerts for commands shorter than the attention window', () => {
+    const id = 'quick-command-exit';
+
+    manager.attend(id);
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'git status' },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+    manager.clearAttention(id);
+
+    vi.advanceTimersByTime(1_000);
+    expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
+
+    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'WATCHING_DISABLED',
+      todo: false,
+      notification: null,
+    });
+  });
+
+  it('disarms command-exit alerts when the user returns before finish', () => {
+    const id = 'command-exit-return';
+
+    manager.attend(id);
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'pnpm test' },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+    vi.advanceTimersByTime(15_000);
+    expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
+
+    manager.attend(id);
+    expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
+
+    vi.advanceTimersByTime(1_000);
+    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'WATCHING_DISABLED',
+      todo: false,
+      notification: null,
+    });
+  });
+
+  it('preserves richer protocol detail when protocol and command exit both ring', () => {
+    const id = 'command-exit-protocol-wins';
+
+    manager.attend(id);
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'pnpm build' },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+    vi.advanceTimersByTime(15_000);
+
+    manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
+    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_RINGING',
+      todo: true,
+      notification: { source: 'OSC 9', title: null, body: 'Build finished' },
     });
   });
 });

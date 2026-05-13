@@ -65,15 +65,16 @@ const tabVariant = tv({
 
 type HeaderTier = 'full' | 'compact' | 'minimal';
 
-const ALERT_BUTTON_ENABLED = { aria: 'Disable alert', tooltip: '[a] Disable alerts' };
+const ALERT_BUTTON_ENABLED = { aria: 'Disable watching', tooltip: '[a] Disable WATCHING' };
 const ALERT_BUTTON_LABELS: Record<SessionStatus, { aria: string; tooltip: string }> = {
-  ALERT_DISABLED: { aria: 'Enable alert', tooltip: '[a] Enable alerts' },
+  WATCHING_DISABLED: { aria: 'Enable watching', tooltip: '[a] Enable WATCHING' },
   NOTHING_TO_SHOW: ALERT_BUTTON_ENABLED,
   MIGHT_BE_BUSY: ALERT_BUTTON_ENABLED,
   BUSY: ALERT_BUTTON_ENABLED,
   MIGHT_NEED_ATTENTION: ALERT_BUTTON_ENABLED,
   ALERT_RINGING: { aria: 'Alert ringing', tooltip: 'Alert ringing' },
   OSC_NOTIF_BUSY: { aria: 'Progress active', tooltip: 'Progress active' },
+  COMMAND_EXIT_ARMED: { aria: 'Command running', tooltip: 'Command running' },
 };
 const TODO_PREVIEW_GAP = 6;
 const TODO_PREVIEW_MARGIN = 8;
@@ -152,7 +153,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
 
   const triggerAlertButtonAction = useCallback((displayedStatus: SessionStatus, button: HTMLButtonElement) => {
     const result = actions.onAlertButton(api.id, displayedStatus);
-    if (result === 'dismissed') {
+    if (result === 'dismissed' || result === 'menu') {
       setDialogTriggerRect(button.getBoundingClientRect());
     }
   }, [actions, api.id]);
@@ -269,7 +270,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
           dataAlertButtonFor={api.id}
         >
           <span className="flex items-center justify-center">
-            {activity.status === 'ALERT_DISABLED' ? (
+            {activity.status === 'WATCHING_DISABLED' ? (
               <BellIcon size={14} />
             ) : (
               <BellIcon size={14} weight="fill" className={bellIconClass(activity.status)} />
