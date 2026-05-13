@@ -422,6 +422,8 @@ export function MobileTerminalUi({
         active.blur();
       }
     };
+    // Wall defers xterm focus via rAF, so a single blur can be reverted after we
+    // return; repeat across rAF and a few staggered ticks. See mobile-ui.md §11.
     blurActivePaneInput();
     window.setTimeout(blurActivePaneInput, 0);
     window.setTimeout(blurActivePaneInput, 50);
