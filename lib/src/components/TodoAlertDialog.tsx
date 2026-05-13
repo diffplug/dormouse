@@ -184,7 +184,6 @@ export function TodoAlertDialog({
       </button>
 
       <div className="mb-3 grid w-fit grid-cols-[auto_auto_auto] items-center gap-x-2 gap-y-2">
-        {/* TODO row */}
         <Shortcut>t</Shortcut>
         <span className="text-sm font-medium text-foreground">TODO</span>
         <OnOffSwitch
@@ -194,7 +193,6 @@ export function TodoAlertDialog({
           label="TODO"
         />
 
-        {/* WATCHING row */}
         <Shortcut>a</Shortcut>
         <span className="text-sm font-medium text-foreground">WATCHING</span>
         <OnOffSwitch

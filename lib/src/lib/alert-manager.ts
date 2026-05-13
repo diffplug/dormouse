@@ -38,13 +38,10 @@ interface ActiveProtocolProgress {
 }
 
 interface CommandExitWatch {
-  id: number;
-  rawCommandLine: string | null;
   displayCommand: string;
   source: CommandRunSource;
   startedAt: number;
   seenWithAttentionAt: number | null;
-  attentionLostAt: number | null;
 }
 
 /** Migrate legacy persisted TodoState values (numeric, string, boolean) to a boolean. */
@@ -124,7 +121,6 @@ export class AlertManager {
   private attentionTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<(id: string, state: AlertState) => void>();
   private lastEmitted = new Map<string, AlertState>();
-  private nextCommandExitWatchId = 0;
 
   // --- State change subscription ---
 
@@ -288,19 +284,17 @@ export class AlertManager {
     event: Extract<TerminalSemanticEvent, { type: 'commandStart' }>,
   ): void {
     const raw = entry.pendingCommandLine;
-    const source = event.source === 'osc633_boundaries' && raw
-      ? 'osc633_E'
-      : event.source ?? (raw ? 'osc633_E' : 'osc133_boundaries');
+    let source: CommandRunSource;
+    if (event.source === 'osc633_boundaries' && raw) source = 'osc633_E';
+    else if (event.source) source = event.source;
+    else source = raw ? 'osc633_E' : 'osc133_boundaries';
     entry.pendingCommandLine = null;
-    entry.commandExitStatus = entry.commandExitStatus === 'ALERT_RINGING' ? 'ALERT_RINGING' : 'IDLE';
+    if (entry.commandExitStatus !== 'ALERT_RINGING') entry.commandExitStatus = 'IDLE';
     entry.commandExitWatch = {
-      id: ++this.nextCommandExitWatchId,
-      rawCommandLine: raw,
       displayCommand: raw ? summarizeCommandLine(raw) : DEFAULT_COMMAND_TITLE,
       source,
       startedAt: event.startedAt ?? Date.now(),
       seenWithAttentionAt: this.hasAttention(id) ? Date.now() : null,
-      attentionLostAt: null,
     };
   }
 
@@ -328,33 +322,18 @@ export class AlertManager {
     return true;
   }
 
-  private markCommandExitSeen(entry: AlertEntry): boolean {
+  private markCommandExitSeen(entry: AlertEntry): void {
     const watch = entry.commandExitWatch;
-    if (!watch) return false;
-    let changed = false;
-    if (watch.seenWithAttentionAt === null) {
-      watch.seenWithAttentionAt = Date.now();
-      changed = true;
-    }
-    if (watch.attentionLostAt !== null) {
-      watch.attentionLostAt = null;
-      changed = true;
-    }
-    if (entry.commandExitStatus === 'COMMAND_EXIT_ARMED') {
-      entry.commandExitStatus = 'IDLE';
-      changed = true;
-    }
-    return changed;
+    if (!watch) return;
+    if (watch.seenWithAttentionAt === null) watch.seenWithAttentionAt = Date.now();
+    if (entry.commandExitStatus === 'COMMAND_EXIT_ARMED') entry.commandExitStatus = 'IDLE';
   }
 
   private armCommandExitOnAttentionLoss(id: string): boolean {
     const entry = this.entries.get(id);
     if (!entry?.commandExitWatch) return false;
-    if (entry.commandExitStatus === 'ALERT_RINGING') return false;
-    const watch = entry.commandExitWatch;
-    if (watch.seenWithAttentionAt === null) return false;
-    if (watch.attentionLostAt === null) watch.attentionLostAt = Date.now();
-    if (entry.commandExitStatus === 'COMMAND_EXIT_ARMED') return false;
+    if (entry.commandExitStatus !== 'IDLE') return false;
+    if (entry.commandExitWatch.seenWithAttentionAt === null) return false;
     entry.commandExitStatus = 'COMMAND_EXIT_ARMED';
     entry.attentionDismissedRing = false;
     return true;
@@ -383,6 +362,12 @@ export class AlertManager {
     if (entry.commandExitStatus !== 'ALERT_RINGING') return false;
     entry.commandExitStatus = 'IDLE';
     return true;
+  }
+
+  private clearAllRingsIfActive(entry: AlertEntry): boolean {
+    const p = this.clearProtocolRingIfActive(entry);
+    const c = this.clearCommandExitRingIfActive(entry);
+    return p || c;
   }
 
   // --- Attention tracking ---
@@ -422,23 +407,11 @@ export class AlertManager {
    */
   attend(id: string): void {
     const entry = this.getOrCreateEntry(id);
-    const previousWatchingStatus = entry.monitor?.getStatus();
-    const protocolWasRinging = entry.protocolStatus === 'ALERT_RINGING';
-    const commandExitWasRinging = entry.commandExitStatus === 'ALERT_RINGING';
+    const watchingWasRinging = entry.monitor?.getStatus() === 'ALERT_RINGING';
     this.setAttention(id);
 
-    if (protocolWasRinging) {
-      entry.attentionDismissedRing = true;
-      entry.todo = true;
-      entry.protocolStatus = 'IDLE';
-      entry.progress = null;
-    }
-    if (commandExitWasRinging) {
-      entry.attentionDismissedRing = true;
-      entry.todo = true;
-      entry.commandExitStatus = 'IDLE';
-    }
-    if (previousWatchingStatus === 'ALERT_RINGING') {
+    const dismissed = this.clearAllRingsIfActive(entry) || watchingWasRinging;
+    if (dismissed) {
       entry.attentionDismissedRing = true;
       entry.todo = true;
     }
@@ -504,9 +477,7 @@ export class AlertManager {
     const entry = this.entries.get(id);
     if (!entry) return;
 
-    const dismissedProtocol = this.clearProtocolRingIfActive(entry);
-    const dismissedCommandExit = this.clearCommandExitRingIfActive(entry);
-    const dismissed = dismissedProtocol || dismissedCommandExit;
+    const dismissed = this.clearAllRingsIfActive(entry);
     if (dismissed) entry.todo = true;
 
     if (entry.monitor?.getStatus() === 'ALERT_RINGING') {
@@ -525,7 +496,6 @@ export class AlertManager {
   dismissOrToggleAlert(id: string, displayedStatus: SessionStatus): AlertButtonActionResult {
     const entry = this.entries.get(id);
     if (!entry) {
-      // No entry yet: treat as WATCHING_DISABLED and enable WATCHING.
       this.toggleAlert(id);
       return 'enabled';
     }
@@ -567,14 +537,12 @@ export class AlertManager {
 
     if (!nextTodo) {
       entry.notification = null;
-      this.clearProtocolRingIfActive(entry);
-      this.clearCommandExitRingIfActive(entry);
+      this.clearAllRingsIfActive(entry);
       this.notify(id);
       return;
     }
 
-    this.clearProtocolRingIfActive(entry);
-    this.clearCommandExitRingIfActive(entry);
+    this.clearAllRingsIfActive(entry);
     if (entry.monitor?.getStatus() === 'ALERT_RINGING') {
       entry.monitor.attend();
       return; // onChange fires → notify
@@ -590,8 +558,7 @@ export class AlertManager {
     if (entry.todo && !wasProtocolRinging && !wasCommandExitRinging && !isWatchingRinging) return;
 
     entry.todo = true;
-    this.clearProtocolRingIfActive(entry);
-    this.clearCommandExitRingIfActive(entry);
+    this.clearAllRingsIfActive(entry);
     if (isWatchingRinging) {
       entry.monitor!.attend();
       return; // onChange fires → notify
@@ -604,8 +571,7 @@ export class AlertManager {
     if (!entry.todo) return;
     entry.todo = false;
     entry.notification = null;
-    this.clearProtocolRingIfActive(entry);
-    this.clearCommandExitRingIfActive(entry);
+    this.clearAllRingsIfActive(entry);
     this.notify(id);
   }
 

@@ -15,6 +15,16 @@ export function saveSessionState(context: vscode.ExtensionContext, state: unknow
   return context.workspaceState.update(SESSION_STATE_KEY, state);
 }
 
+function toPersistedAlert(alert: AlertState | undefined, fallback: PersistedAlertState | null | undefined): PersistedAlertState | null {
+  if (!alert) return fallback ?? null;
+  return {
+    status: alert.status,
+    watchingEnabled: alert.watchingEnabled,
+    todo: alert.todo,
+    notification: alert.notification,
+  };
+}
+
 /**
  * Merge current alert states into a session state object from the frontend.
  * Called on every periodic save so alert data is always current in workspaceState,
@@ -25,20 +35,10 @@ export function mergeAlertStates(state: unknown, alertStates: Map<string, AlertS
   if (!parsed || !Array.isArray(parsed.panes)) return state;
   return {
     ...parsed,
-    panes: parsed.panes.map((pane) => {
-      const alert = alertStates.get(pane.id);
-      return {
-        ...pane,
-        alert: alert
-          ? {
-            status: alert.status,
-            watchingEnabled: alert.watchingEnabled,
-            todo: alert.todo,
-            notification: alert.notification,
-          }
-          : pane.alert ?? null,
-      };
-    }),
+    panes: parsed.panes.map((pane) => ({
+      ...pane,
+      alert: toPersistedAlert(alertStates.get(pane.id), pane.alert),
+    })),
   };
 }
 
@@ -57,16 +57,7 @@ export async function refreshSavedSessionStateFromPtys(
 
   const panes = await Promise.all(
     saved.panes.map(async (pane) => {
-      // Capture alert state regardless of PTY liveness
-      const alertState = alertStates?.get(pane.id);
-      const alert: PersistedAlertState | null = alertState
-        ? {
-          status: alertState.status,
-          watchingEnabled: alertState.watchingEnabled,
-          todo: alertState.todo,
-          notification: alertState.notification,
-        }
-        : pane.alert ?? null;
+      const alert = toPersistedAlert(alertStates?.get(pane.id), pane.alert);
 
       if (!ptys.has(pane.id)) {
         log.info(`[session] ${pane.id}: not in live PTYs, keeping saved cwd=${pane.cwd}`);
