@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   beginMobileGesture,
+  completeMobileGesture,
   displayOriginAwayFromThumb,
   finishMobileGesture,
+  MOBILE_GESTURE_COMPLETE_MS,
   MOBILE_GESTURE_DIRECTION_VECTORS,
   MOBILE_GESTURE_OPTION_DIRECTIONS,
   RADIUS_HIGHLIGHT,
@@ -90,6 +92,7 @@ describe('mobile gesture menu state machine', () => {
     expect(RADIUS_LAYOUT).toBe(92);
     expect(RADIUS_SELECT).toBe(RADIUS_LAYOUT * 0.75);
     expect(RADIUS_HIGHLIGHT).toBe(RADIUS_SELECT * 0.5);
+    expect(MOBILE_GESTURE_COMPLETE_MS).toBe(220);
   });
 
   it('places exploded options opposite the selected direction', () => {
@@ -136,6 +139,19 @@ describe('mobile gesture menu state machine', () => {
     expect(state.phase).toBe('options');
     if (state.phase !== 'options') return;
     expect(state.candidate?.option.action).toEqual({ kind: 'input', input: 'right' });
+  });
+
+  it('keeps a complete visual state after the second select radius is crossed', () => {
+    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('e'));
+    state = updateMobileGesture(state, optionSelectionPoint('e', 0));
+    const complete = completeMobileGesture(state);
+
+    expect(complete?.phase).toBe('complete');
+    if (!complete || complete.phase !== 'complete') return;
+    expect(complete.selectedDirection).toBe('e');
+    expect(complete.candidate.optionIndex).toBe(0);
+    expect(complete.candidate.option.action).toEqual({ kind: 'input', input: 'right' });
+    expect(updateMobileGesture(complete, optionSelectionPoint('e', 2))).toBe(complete);
   });
 
   it('selects End by breaking east and turning up', () => {

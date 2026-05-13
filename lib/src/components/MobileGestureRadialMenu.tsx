@@ -15,12 +15,13 @@ import {
 
 const QUIT_RADIUS = 78;
 const ROOT_OPTION_SPACING = 48;
+const COMPLETE_SCALE = 2.4;
 
-function translatedStyle(x: number, y: number): CSSProperties {
+function translatedStyle(x: number, y: number, scale = 1): CSSProperties {
   return {
     left: x,
     top: y,
-    transform: 'translate(-50%, -50%)',
+    transform: `translate(-50%, -50%) scale(${scale})`,
   };
 }
 
@@ -90,12 +91,21 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
     ? state.highlightedDirection
     : state.phase === 'options'
       ? state.selectedDirection
-      : state.parentDirection;
+      : state.phase === 'complete'
+        ? state.selectedDirection
+        : state.parentDirection;
   const rootOptions = MOBILE_GESTURE_GROUP_ORDER.flatMap((direction) => {
     const group = MOBILE_GESTURE_GROUPS[direction];
     return group.options.map((option, index) => {
       const optionIndex = index as MobileGestureOptionIndex;
-      const isSelectedGroup = state.phase === 'options' && state.selectedDirection === direction;
+      const isCompletingRootOption = state.phase === 'complete'
+        && state.candidate.phase === 'options'
+        && state.selectedDirection === direction
+        && state.candidate.optionIndex === optionIndex;
+      const isSelectedGroup = (
+        state.phase === 'options'
+        || (state.phase === 'complete' && state.candidate.phase === 'options')
+      ) && state.selectedDirection === direction;
       const point = isSelectedGroup
         ? directionPoint(
           MOBILE_GESTURE_OPTION_DIRECTIONS[direction][optionIndex],
@@ -105,19 +115,22 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
         : rootOptionPoint(direction, index, state.displayOrigin);
       const active = state.phase === 'root'
         ? activeRootDirection === direction
-        : isSelectedGroup && (
+        : isCompletingRootOption || (isSelectedGroup && state.phase === 'options' && (
           state.highlightedOptionIndex === optionIndex
           || state.candidate?.optionIndex === optionIndex
-        );
-      const faded = state.phase === 'quit' || (state.phase === 'options' && !isSelectedGroup);
+        ));
+      const faded = state.phase === 'quit'
+        || (state.phase === 'options' && !isSelectedGroup)
+        || state.phase === 'complete';
       return (
         <div
           key={`${direction}-${index}`}
           className={clsx(
-            'absolute transition-[left,top,opacity] duration-150 ease-out',
+            'absolute transition-[left,top,opacity,transform] ease-out',
+            state.phase === 'complete' ? 'duration-200' : 'duration-150',
             faded ? 'opacity-0' : 'opacity-100',
           )}
-          style={translatedStyle(point.x, point.y)}
+          style={translatedStyle(point.x, point.y, isCompletingRootOption ? COMPLETE_SCALE : 1)}
         >
           <OptionChip label={option.label} active={active} />
         </div>
@@ -125,20 +138,29 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
     });
   });
   const quitOptions = (() => {
-    if (state.phase !== 'quit') return null;
-    const directions = MOBILE_GESTURE_OPTION_DIRECTIONS[state.baseDirection];
-    const highlightedOptionIndex = state.highlightedOptionIndex;
-    const candidateOptionIndex = state.candidate?.optionIndex;
+    if (state.phase !== 'quit' && !(state.phase === 'complete' && state.candidate.phase === 'quit')) return null;
+    const directions = MOBILE_GESTURE_OPTION_DIRECTIONS[
+      state.phase === 'quit' ? state.baseDirection : state.candidate.groupDirection
+    ];
+    const highlightedOptionIndex = state.phase === 'quit' ? state.highlightedOptionIndex : undefined;
+    const candidateOptionIndex = state.phase === 'quit' ? state.candidate?.optionIndex : state.candidate.optionIndex;
 
     return MOBILE_GESTURE_QUIT_GROUP.options.map((option, index) => {
       const optionIndex = index as MobileGestureOptionIndex;
       const direction = directions[optionIndex];
       const point = directionPoint(direction, phaseDisplayOrigin, QUIT_RADIUS);
+      const isCompletingQuitOption = state.phase === 'complete'
+        && state.candidate.phase === 'quit'
+        && candidateOptionIndex === optionIndex;
       return (
         <div
           key={`${direction}-${option.label}`}
-          className="absolute transition-[left,top,opacity] duration-150 ease-out"
-          style={translatedStyle(point.x, point.y)}
+          className={clsx(
+            'absolute transition-[left,top,opacity,transform] ease-out',
+            state.phase === 'complete' ? 'duration-200' : 'duration-150',
+            state.phase === 'complete' ? 'opacity-0' : 'opacity-100',
+          )}
+          style={translatedStyle(point.x, point.y, isCompletingQuitOption ? COMPLETE_SCALE : 1)}
         >
           <OptionChip
             label={option.label}

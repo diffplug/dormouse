@@ -21,8 +21,10 @@ import {
 } from './MobileGestureRadialMenu';
 import {
   beginMobileGesture,
+  completeMobileGesture,
   displayOriginAwayFromThumb,
   finishMobileGesture,
+  MOBILE_GESTURE_COMPLETE_MS,
   MOBILE_GESTURE_IDLE_STATE,
   updateMobileGesture,
   type MobileGestureAction,
@@ -353,6 +355,7 @@ export function MobileTerminalUi({
   const composingRef = useRef(false);
   const gestureStateRef = useRef<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
   const completedGesturePointerIdRef = useRef<number | null>(null);
+  const gestureCompletionTimerRef = useRef<number | null>(null);
   const [gestureState, setGestureState] = useState<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
   const [pendingGestureConfirmation, setPendingGestureConfirmation] = useState<MobileGestureConfirmationAction | null>(null);
   const [inputValue, setInputValue] = useState('');
@@ -366,6 +369,20 @@ export function MobileTerminalUi({
     gestureStateRef.current = nextState;
     setGestureState(nextState);
   }, []);
+
+  const clearGestureCompletionTimer = useCallback(() => {
+    if (gestureCompletionTimerRef.current === null) return;
+    window.clearTimeout(gestureCompletionTimerRef.current);
+    gestureCompletionTimerRef.current = null;
+  }, []);
+
+  const scheduleGestureCompletionClear = useCallback(() => {
+    clearGestureCompletionTimer();
+    gestureCompletionTimerRef.current = window.setTimeout(() => {
+      gestureCompletionTimerRef.current = null;
+      commitGestureState(MOBILE_GESTURE_IDLE_STATE);
+    }, MOBILE_GESTURE_COMPLETE_MS);
+  }, [clearGestureCompletionTimer, commitGestureState]);
 
   const focusInput = useCallback(() => {
     if (!interactive) return;
@@ -493,9 +510,12 @@ export function MobileTerminalUi({
 
   useEffect(() => {
     if (touchMode === 'gestures' && interactive) return;
+    clearGestureCompletionTimer();
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);
     setPendingGestureConfirmation(null);
-  }, [commitGestureState, interactive, touchMode]);
+  }, [clearGestureCompletionTimer, commitGestureState, interactive, touchMode]);
+
+  useEffect(() => clearGestureCompletionTimer, [clearGestureCompletionTimer]);
 
   const handlePanePointerDownCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     if (isGestureDialogTarget(event.target)) return;
@@ -505,6 +525,7 @@ export function MobileTerminalUi({
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
+    clearGestureCompletionTimer();
     setPendingGestureConfirmation(null);
     completedGesturePointerIdRef.current = null;
 
@@ -514,7 +535,7 @@ export function MobileTerminalUi({
       origin,
       displayOriginAwayFromThumb(origin, event.currentTarget.getBoundingClientRect()),
     ));
-  }, [blurPaneTextInputs, commitGestureState, interactive, touchMode]);
+  }, [blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, touchMode]);
 
   const handlePanePointerMoveCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const state = gestureStateRef.current;
@@ -524,16 +545,27 @@ export function MobileTerminalUi({
     const nextState = updateMobileGesture(state, localPointerPoint(event));
     const result = finishMobileGesture(nextState);
     if (result.action) {
+      const completionState = completeMobileGesture(nextState);
       completedGesturePointerIdRef.current = event.pointerId;
-      commitGestureState(result.state);
+      commitGestureState(completionState ?? result.state);
       executeGestureAction(result.action);
+      if (completionState) scheduleGestureCompletionClear();
       return;
     }
     commitGestureState(nextState);
-  }, [commitGestureState, executeGestureAction]);
+  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear]);
 
   const handlePanePointerUpCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const state = gestureStateRef.current;
+    if (state.phase === 'complete' && state.pointerId === event.pointerId) {
+      event.preventDefault();
+      event.stopPropagation();
+      completedGesturePointerIdRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      return;
+    }
     if (state.phase === 'idle' && completedGesturePointerIdRef.current === event.pointerId) {
       event.preventDefault();
       event.stopPropagation();
@@ -550,10 +582,14 @@ export function MobileTerminalUi({
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
 
-    const result = finishMobileGesture(updateMobileGesture(state, localPointerPoint(event)));
-    commitGestureState(result.state);
+    const nextState = updateMobileGesture(state, localPointerPoint(event));
+    const result = finishMobileGesture(nextState);
+    const completionState = completeMobileGesture(nextState);
+    completedGesturePointerIdRef.current = result.action ? event.pointerId : null;
+    commitGestureState(completionState ?? result.state);
     executeGestureAction(result.action);
-  }, [commitGestureState, executeGestureAction]);
+    if (completionState) scheduleGestureCompletionClear();
+  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear]);
 
   const handlePaneFocusStartCapture = useCallback(() => {
     blurPaneTextInputs();
@@ -561,6 +597,13 @@ export function MobileTerminalUi({
 
   const handlePanePointerCancelCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const state = gestureStateRef.current;
+    if (state.phase === 'complete' && state.pointerId === event.pointerId) {
+      completedGesturePointerIdRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      return;
+    }
     if (completedGesturePointerIdRef.current === event.pointerId) {
       completedGesturePointerIdRef.current = null;
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {

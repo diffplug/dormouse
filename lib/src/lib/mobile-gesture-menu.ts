@@ -97,6 +97,17 @@ export type MobileGestureTrackingState =
       displayOptionOrigin: MobileGesturePoint;
       highlightedOptionIndex?: MobileGestureOptionIndex;
       candidate?: MobileGestureCandidate;
+    }
+  | {
+      phase: 'complete';
+      pointerId: number;
+      origin: MobileGesturePoint;
+      displayOrigin: MobileGesturePoint;
+      currentPoint: MobileGesturePoint;
+      selectedDirection: MobileGestureDirection;
+      optionOrigin: MobileGesturePoint;
+      displayOptionOrigin: MobileGesturePoint;
+      candidate: MobileGestureCandidate;
     };
 
 export interface MobileGestureFinishResult {
@@ -115,6 +126,7 @@ export const MOBILE_GESTURE_IDLE_STATE: MobileGestureTrackingState = { phase: 'i
 export const RADIUS_LAYOUT = 92;
 export const RADIUS_SELECT = RADIUS_LAYOUT * 0.75;
 export const RADIUS_HIGHLIGHT = RADIUS_SELECT * 0.5;
+export const MOBILE_GESTURE_COMPLETE_MS = 220;
 export const MOBILE_GESTURE_DISPLAY_MARGIN = 112;
 export const MOBILE_GESTURE_THUMB_OFFSET = 132;
 
@@ -355,7 +367,7 @@ export function updateMobileGesture(
   state: MobileGestureTrackingState,
   point: MobileGesturePoint,
 ): MobileGestureTrackingState {
-  if (state.phase === 'idle') return state;
+  if (state.phase === 'idle' || state.phase === 'complete') return state;
 
   if (state.phase === 'root') {
     const movementDistance = distance(state.origin, point);
@@ -434,6 +446,22 @@ export function finishMobileGesture(state: MobileGestureTrackingState): MobileGe
   return {
     state: MOBILE_GESTURE_IDLE_STATE,
     action,
+  };
+}
+
+export function completeMobileGesture(state: MobileGestureTrackingState): MobileGestureTrackingState | undefined {
+  if (state.phase !== 'options' && state.phase !== 'quit') return undefined;
+  if (!state.candidate) return undefined;
+  return {
+    phase: 'complete',
+    pointerId: state.pointerId,
+    origin: state.origin,
+    displayOrigin: state.displayOrigin,
+    currentPoint: state.currentPoint,
+    selectedDirection: state.phase === 'options' ? state.selectedDirection : state.parentDirection,
+    optionOrigin: state.optionOrigin,
+    displayOptionOrigin: state.displayOptionOrigin,
+    candidate: state.candidate,
   };
 }
 

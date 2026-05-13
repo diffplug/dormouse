@@ -141,6 +141,9 @@ The radial menu is a two-stage gesture:
 7. Drag from the reset center to `RADIUS_HIGHLIGHT` to preview an option.
 8. Drag from the reset center to `RADIUS_SELECT` to choose and immediately send
    that option. The app must not wait for touch release.
+9. After the option sends, the radial menu remains for a short completion
+   animation: removed labels fade out, and the selected label expands and fades
+   out for positive confirmation before the overlay clears.
 
 If the user releases after the first group selection but before choosing one of
 the exploded options, the gesture is cancelled.
@@ -187,7 +190,8 @@ q | ⌃X | :q↵
 ```
 
 The quit submenu uses the same reset-center, highlight-radius, and select-radius
-rules as the main option selection.
+rules as the main option selection. Its final selected item uses the same
+expand-and-fade completion feedback as the root menu options.
 
 Gesture action mappings:
 

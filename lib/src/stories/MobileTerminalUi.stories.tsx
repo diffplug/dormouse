@@ -10,6 +10,7 @@ import {
   MobileGestureRadialMenu,
 } from '../components/MobileGestureRadialMenu';
 import {
+  completeMobileGesture,
   displayOriginAwayFromThumb,
   MOBILE_GESTURE_DIRECTION_VECTORS,
   MOBILE_GESTURE_IDLE_STATE,
@@ -176,6 +177,11 @@ function gestureState(points: MobileGesturePoint[]): MobileGestureTrackingState 
   );
 }
 
+function gestureCompleteState(points: MobileGesturePoint[]): MobileGestureTrackingState {
+  const state = gestureState(points);
+  return completeMobileGesture(state) ?? state;
+}
+
 function GestureSnapshotFrame({
   state,
   confirmation,
@@ -258,6 +264,10 @@ export const GestureEastReturnRight: Story = {
   render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('e'), gestureOptionSelectionPoint('e', 0)])} />,
 };
 
+export const GestureEastReturnRightComplete: Story = {
+  render: () => <GestureSnapshotFrame state={gestureCompleteState([gestureRootSelectionPoint('e'), gestureOptionSelectionPoint('e', 0)])} />,
+};
+
 export const GestureEastTurnUpEnd: Story = {
   render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('e'), gestureOptionSelectionPoint('e', 1)])} />,
 };
@@ -292,6 +302,14 @@ export const GestureQuitCtrlXCandidate: Story = {
   render: () => (
     <GestureSnapshotFrame
       state={gestureState([gestureRootSelectionPoint('nw'), gestureOptionSelectionPoint('nw', 2), gestureQuitSelectionPoint('nw', 2, 1)])}
+    />
+  ),
+};
+
+export const GestureQuitCtrlXComplete: Story = {
+  render: () => (
+    <GestureSnapshotFrame
+      state={gestureCompleteState([gestureRootSelectionPoint('nw'), gestureOptionSelectionPoint('nw', 2), gestureQuitSelectionPoint('nw', 2, 1)])}
     />
   ),
 };
