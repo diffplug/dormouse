@@ -229,13 +229,13 @@ export const MOBILE_GESTURE_OPTION_DIRECTIONS: Record<
   [MobileGestureDirection, MobileGestureDirection, MobileGestureDirection]
 > = {
   n: ['s', 'sw', 'se'],
-  ne: ['sw', 's', 'w'],
+  ne: ['sw', 'w', 's'],
   e: ['w', 'nw', 'sw'],
   se: ['nw', 'n', 'w'],
   s: ['n', 'nw', 'ne'],
   sw: ['ne', 'n', 'e'],
   w: ['e', 'ne', 'se'],
-  nw: ['se', 's', 'e'],
+  nw: ['se', 'e', 's'],
 };
 
 export const MOBILE_GESTURE_QUIT_GROUP: MobileGestureGroup = {

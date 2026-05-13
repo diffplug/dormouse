@@ -100,7 +100,8 @@ describe('mobile gesture menu state machine', () => {
     expect(MOBILE_GESTURE_OPTION_DIRECTIONS.e).toEqual(['w', 'nw', 'sw']);
     expect(MOBILE_GESTURE_OPTION_DIRECTIONS.s).toEqual(['n', 'nw', 'ne']);
     expect(MOBILE_GESTURE_OPTION_DIRECTIONS.w).toEqual(['e', 'ne', 'se']);
-    expect(MOBILE_GESTURE_OPTION_DIRECTIONS.ne).toEqual(['sw', 's', 'w']);
+    expect(MOBILE_GESTURE_OPTION_DIRECTIONS.ne).toEqual(['sw', 'w', 's']);
+    expect(MOBILE_GESTURE_OPTION_DIRECTIONS.nw).toEqual(['se', 'e', 's']);
   });
 
   it('cancels a tap that never breaks out', () => {

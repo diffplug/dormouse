@@ -186,13 +186,13 @@ Exploded option directions:
 | Selected group | Option directions |
 | --- | --- |
 | N | S, SW, SE |
-| NE | SW, S, W |
+| NE | SW, W, S |
 | E | W, NW, SW |
 | SE | NW, N, W |
 | S | N, NW, NE |
 | SW | NE, N, E |
 | W | E, NE, SE |
-| NW | SE, S, E |
+| NW | SE, E, S |
 
 Examples:
 
