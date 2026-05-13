@@ -8,6 +8,9 @@ import { log } from './log';
 import { mergeAlertStates, refreshSavedSessionStateFromPtys } from './session-state';
 import { readPersistedSession } from '../../lib/src/lib/session-types';
 import { resolveSelectedShell, setSelectedShellPath, getSelectedShellPath } from './shell-selection';
+import type { ExtensionMessage } from './message-types';
+
+type NewTerminalMessage = Extract<ExtensionMessage, { type: 'mouseterm:newTerminal' }>;
 
 let extensionContext: vscode.ExtensionContext | null = null;
 
@@ -70,6 +73,21 @@ export function activate(context: vscode.ExtensionContext) {
     provider.setSelectedShell(shell ? { shell: shell.path, args: shell.args } : null);
   };
 
+  const postNewTerminal = async (message: Omit<NewTerminalMessage, 'type'>) => {
+    await vscode.commands.executeCommand('mouseterm.view.focus');
+    for (const delay of [0, 50, 200]) {
+      if (delay > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      const posted = await provider.postMessage({
+        type: 'mouseterm:newTerminal',
+        ...message,
+      });
+      if (posted) return true;
+    }
+    return false;
+  };
+
   // Warm up shell detection in the background so the picker/+ buttons
   // don't pay the cold-start cost (child fork + WSL probe) when the user
   // first clicks them. Also seeds the view description / webview state
@@ -119,14 +137,16 @@ export function activate(context: vscode.ExtensionContext) {
       void vscode.window.showWarningMessage('MouseTerm: open the MouseTerm view before debugging the theme.');
     }),
     vscode.commands.registerCommand('mouseterm.newTerminal', async () => {
-      await vscode.commands.executeCommand('mouseterm.view.focus');
       const shells = await ptyManager.getAvailableShells();
       const shell = resolveSelectedShell(context, shells);
-      await provider.postMessage({
-        type: 'mouseterm:newTerminal',
+      const posted = await postNewTerminal({
         shell: shell?.path,
         args: shell?.args,
+        name: shell?.name,
       });
+      if (!posted) {
+        void vscode.window.showWarningMessage('MouseTerm: open the MouseTerm view before creating a terminal.');
+      }
     }),
     vscode.commands.registerCommand('mouseterm.selectShell', async () => {
       const shells = await ptyManager.getAvailableShells();
@@ -144,9 +164,10 @@ export function activate(context: vscode.ExtensionContext) {
       }));
       const picked = await vscode.window.showQuickPick(items, {
         title: 'Select default shell for MouseTerm',
-        placeHolder: 'The [+] button will spawn a terminal with this shell.',
+        placeHolder: 'Changing this opens a matching terminal; new panes reuse it.',
       });
       if (!picked) return;
+      const changed = picked.path !== currentPath;
 
       const hasWorkspace = (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
       let scope: 'workspace' | 'global' = 'global';
@@ -163,6 +184,18 @@ export function activate(context: vscode.ExtensionContext) {
       }
       await setSelectedShellPath(context, picked.path, scope);
       applyShell({ name: picked.label, path: picked.path, args: picked.args });
+      if (changed) {
+        const posted = await postNewTerminal({
+          shell: picked.path,
+          args: picked.args,
+          name: picked.label,
+          replaceUntouched: true,
+          announce: true,
+        });
+        if (!posted) {
+          void vscode.window.showWarningMessage('MouseTerm: open the MouseTerm view before changing the active terminal type.');
+        }
+      }
     }),
   );
 }

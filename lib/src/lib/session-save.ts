@@ -1,7 +1,7 @@
 import type { PlatformAdapter } from './platform/types';
 import { readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession } from './session-types';
 import { detectResumeCommand } from './resume-patterns';
-import { getLivePersistedAlertState, getTerminalPaneState, resolveTerminalSessionId } from './terminal-registry';
+import { getLivePersistedAlertState, getTerminalPaneState, isUntouched, resolveTerminalSessionId } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 
 function getPreviousPaneMap(platform: PlatformAdapter): Map<string, PersistedPane> {
@@ -47,6 +47,7 @@ export async function saveSession(
         cwd: cwd ?? previousPane?.cwd ?? null,
         scrollback: resolvedScrollback,
         resumeCommand: resolvedScrollback ? detectResumeCommand(resolvedScrollback) : null,
+        untouched: isUntouched(pane.id),
         alert: liveAlert ?? previousPane?.alert ?? null,
       };
     }),

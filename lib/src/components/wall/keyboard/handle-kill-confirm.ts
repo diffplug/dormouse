@@ -1,4 +1,3 @@
-import { orchestrateKill } from '../../../lib/kill-animation';
 import type { WallKeyboardCtx } from './types';
 
 /**
@@ -15,9 +14,7 @@ export function handleKillConfirm(e: KeyboardEvent, ctx: WallKeyboardCtx): boole
 
   const api = ctx.apiRef.current;
   if (e.key.toLowerCase() === ck.char.toLowerCase() && api) {
-    ctx.acceptKill(() =>
-      orchestrateKill(api, ck.id, ctx.selectPane, ctx.setSelectedId, ctx.killInProgressRef, ctx.overlayElRef),
-    );
+    ctx.acceptKill();
     return true;
   }
   ctx.rejectKill();

@@ -165,3 +165,20 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .animate-copy-flash { animation: none; }
 }
+
+/* --- Shell selection feedback --- */
+
+@keyframes shell-spawn-notice {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+  15%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+  80%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-3px); }
+}
+
+.shell-spawn-notice {
+  animation: shell-spawn-notice 1500ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-spawn-notice { animation: none; }
+}

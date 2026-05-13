@@ -9,6 +9,16 @@ export type WallMode = 'command' | 'passthrough';
 
 export type WallSelectionKind = 'pane' | 'door';
 
+export type DoorAfterRestoreAction =
+  | 'confirm-kill'
+  | 'kill-immediately'
+  | {
+      type: 'replace-terminal';
+      newId: string;
+      shellName: string;
+      announce: boolean;
+    };
+
 export type WallEvent =
   | { type: 'modeChange'; mode: WallMode }
   | { type: 'zoomChange'; zoomed: boolean }

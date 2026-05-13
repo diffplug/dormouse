@@ -194,6 +194,10 @@ function TetherTerminalExperience({
       sessions={sessionItems}
       onSessionSelect={setActivePaneId}
       onSendInput={(data) => adapterRef.current?.writePty(activePaneId, data)}
+      onPaste={async () => {
+        const { doPaste } = await import("mouseterm-lib/lib/clipboard");
+        await doPaste(activePaneId);
+      }}
     />
   );
 }
