@@ -271,7 +271,7 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
 
   const phaseOrigin = state.phase === 'root' ? state.origin : state.optionOrigin;
   const phaseDisplayOrigin = state.phase === 'root' ? state.displayOrigin : state.displayOptionOrigin;
-  const translatedPoint = translatedCurrentPoint(state, phaseOrigin, phaseDisplayOrigin);
+  const currentDisplayPoint = translatedCurrentPoint(state, phaseOrigin, phaseDisplayOrigin);
   const activeRootDirection = state.phase === 'root'
     ? state.highlightedDirection
     : state.phase === 'options'
@@ -410,8 +410,8 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
         <line
           x1={phaseDisplayOrigin.x}
           y1={phaseDisplayOrigin.y}
-          x2={translatedPoint.x}
-          y2={translatedPoint.y}
+          x2={currentDisplayPoint.x}
+          y2={currentDisplayPoint.y}
           stroke="var(--color-focus-ring)"
           strokeOpacity="0.35"
           strokeWidth="2"
