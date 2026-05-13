@@ -41,7 +41,7 @@ Non-goals:
 * Session persistence.
 * Command history storage.
 * A real draft/scratchpad workflow.
-* Advanced gestures.
+* Multi-touch gestures.
 * Production security hardening.
 * Full accessibility implementation.
 
@@ -87,7 +87,7 @@ Touch modes:
 
 | Mode | Button label | Icon | Availability | Behavior |
 | --- | --- | --- | --- | --- |
-| Gestures | `Gestures` | `HandPointingIcon` | Always available | Touch drags generate arrow keys. Drag left sends left, drag right sends right, drag up sends up, and drag down sends down. |
+| Gestures | `Gestures` | `HandPointingIcon` | Always available | Pane-content touches open the Gesture mode radial menu. |
 | Text selection | `Select` | `CursorTextIcon` | Always available | Touches are reserved for terminal text selection and copy/paste. If the TUI is capturing mouse events, MouseTerm activates mouse override for the active pane. |
 | Cursor | `Cursor` | `CursorClickIcon` | Only when the active TUI is capturing mouse events | Touches are passed through as terminal mouse/cursor input. |
 
@@ -96,7 +96,88 @@ Default touch mode is **Gestures**.
 If Cursor mode is active and the active pane stops capturing mouse events, the
 selector must fall back to Gestures.
 
-## 5. Keyboard Mode Selector
+## 5. Gesture Mode
+
+Gesture mode is the default pane-content touch behavior. Tapping the pane content
+opens a radial menu at the touch origin. The center `o` is only the origin
+marker; it is not an action.
+
+The radial menu is a two-stage gesture:
+
+1. Touch down to open the menu.
+2. Drag far enough toward one compass point to choose a group.
+3. Drag in a different direction to choose one of that group's three options.
+4. Release to send the selected terminal input.
+
+After the first breakout, the final option is selected this way:
+
+| Final movement | Selected option |
+| --- | --- |
+| Back to center | First option |
+| Visually counter-clockwise from the breakout direction | Second option |
+| Visually clockwise from the breakout direction | Third option |
+| Still in the original breakout direction | Cancel |
+
+Examples:
+
+* Right arrow: tap, drag right, drag back to center, release.
+* End: tap, drag right, drag up, release.
+* `l`: tap, drag right, drag down, release.
+
+Root gesture menu:
+
+```text
+Esc|Ctrl+C*|Quit**         Up|PgUp|k        Backspace|Paste*|n
+
+Left|Home|h                    o            Right|End|l
+
+Tab|Shift+Tab|Space      Down|PgDown|j      Enter|Shift+Enter|y
+```
+
+`Ctrl+C` and `Paste` require an in-pane confirmation modal before they run.
+
+`Quit` enters a second breakout menu instead of sending input immediately:
+
+```text
+q | Ctrl+X | :q↵
+```
+
+The quit submenu uses the same final movement rule. Returning to center selects
+`q`, visually counter-clockwise selects `Ctrl+X`, and visually clockwise selects
+`:q↵`.
+
+Gesture action mappings:
+
+| Action | Sequence |
+| --- | --- |
+| Esc | `\x1B` |
+| Ctrl+C | `\x03` |
+| q | `q` |
+| Ctrl+X | `\x18` |
+| `:q↵` | `:q\r` |
+| Up | `\x1B[A` |
+| PgUp | `\x1B[5~` |
+| k | `k` |
+| Backspace | `\x7F` |
+| Paste | Existing MouseTerm paste flow for the active pane |
+| n | `n` |
+| Left | `\x1B[D` |
+| Home | `\x1B[H` |
+| h | `h` |
+| Right | `\x1B[C` |
+| End | `\x1B[F` |
+| l | `l` |
+| Tab | `\x09` |
+| Shift+Tab | `\x1B[Z` |
+| Space | ` ` |
+| Down | `\x1B[B` |
+| PgDown | `\x1B[6~` |
+| j | `j` |
+| Enter | `\r` |
+| Shift+Enter | `\x1B[13;2u` |
+| y | `y` |
+
+## 6. Keyboard Mode Selector
 
 The keyboard mode selector controls what appears in the keyboard reserve area.
 It is always visible and has four items:
@@ -129,7 +210,7 @@ the tap/click handler. Do not defer this focus to `requestAnimationFrame` or a
 timer, because mobile browsers may then treat it as no longer user-initiated and
 refuse to open the native keyboard.
 
-## 6. Keys Mode
+## 7. Keys Mode
 
 Keys mode displays exactly these buttons:
 
@@ -153,7 +234,7 @@ Mappings:
 
 Tapping a key sends exactly one action. Long-press repeat is not required for v0.
 
-## 7. Type Mode Input
+## 8. Type Mode Input
 
 Use a hidden or visually minimal input configured for terminal-style typing:
 
@@ -178,7 +259,7 @@ Required behavior:
 * Input supports mobile keyboard behavior and IME composition.
 * The app does not depend only on `keydown` for text input.
 
-## 8. Terminal Playground Behavior
+## 9. Terminal Playground Behavior
 
 A fake shell is acceptable for v0.
 
@@ -209,7 +290,7 @@ tut
 
 The shell only needs enough behavior to test the mobile controls.
 
-## 9. Keyboard Reserve
+## 10. Keyboard Reserve
 
 The keyboard reserve area has a stable height. It should not be recomputed from
 `visualViewport` while the native keyboard animates.
@@ -220,7 +301,7 @@ UI (`Recent - WIP`, Type focus target, `Draft - WIP`, or Keys buttons).
 When the OS keyboard is visible, the OS keyboard may cover or occupy that same
 physical area. This is preferred over resizing the whole app around the keyboard.
 
-## 10. Touch Interactions
+## 11. Touch Interactions
 
 Required interactions:
 
@@ -229,7 +310,8 @@ Required interactions:
 * Tap Type reserve area to focus typing.
 * Type through the native keyboard.
 * Tap key buttons in Keys mode.
-* Drag in Gestures mode to send arrow keys.
+* Use Gesture mode to open the radial menu and send terminal inputs.
+* Confirm sensitive Gesture mode actions before sending `Ctrl+C` or reading the clipboard for Paste.
 * Use Text selection mode for terminal selection and copy/paste.
 * Use Cursor mode for terminal mouse/cursor input when a TUI requests mouse reporting.
 
@@ -250,7 +332,7 @@ Not required for v0:
 * A full command history UI.
 * A real draft editor.
 
-## 11. Copy And Paste
+## 12. Copy And Paste
 
 Keep copy and paste minimal.
 
@@ -261,7 +343,7 @@ Prototype behavior:
 * No custom mobile clipboard manager is required.
 * No multi-line paste review is required.
 
-## 12. Recommended v0 Scope
+## 13. Recommended v0 Scope
 
 Build exactly this:
 
@@ -283,6 +365,7 @@ Input  Recent | Type | Draft | Keys
 * Recent reserve content: `Recent - WIP`.
 * Draft reserve content: `Draft - WIP`.
 * Type mode native mobile keyboard input.
+* Gesture mode radial menu for arrows, navigation keys, Esc, Tab, Enter, simple vim-like keys, confirmed Ctrl+C, confirmed Paste, and Quit breakout.
 * Keys buttons:
 
 ```text
@@ -292,20 +375,20 @@ Esc   Tab   Space   Enter
 
 * Simple local playground terminal behavior.
 
-## 13. Prototype Success Criteria
+## 14. Prototype Success Criteria
 
 The prototype should answer these questions:
 
 1. Does the terminal viewport feel stable when the mobile keyboard opens and closes?
 2. Is the touch mode selector understandable and reachable?
-3. Are gesture arrows usable enough for command history and cursor movement?
+3. Is Gesture mode fast and understandable enough for arrows, navigation keys, and common TUI exits?
 4. Is text selection discoverable and reliable on mobile?
 5. Is Cursor mode useful when a TUI captures mouse events?
 6. Does native keyboard Type mode feel acceptable for terminal text entry?
 7. Does the stable keyboard reserve feel better than resizing the whole UI?
 8. Is the UI too cramped in portrait orientation?
 
-## 14. Future Work
+## 15. Future Work
 
 Potential later additions:
 
@@ -313,9 +396,8 @@ Potential later additions:
 * Draft scratchpad.
 * Dual-pane copy/paste.
 * Pinned snippets.
-* Ctrl+C, Ctrl+D, and Ctrl+Z app-key buttons.
+* Ctrl+D and Ctrl+Z app-key buttons.
 * Alt and modifier behavior.
-* Home, End, PgUp, PgDn.
 * Long-press key repeat.
 * Remote backend PTY.
 * SSH sessions.
@@ -324,7 +406,7 @@ Potential later additions:
 * Multi-session support.
 * Production security model.
 
-## 15. Product Principle
+## 16. Product Principle
 
 The v0 prototype should stay focused:
 

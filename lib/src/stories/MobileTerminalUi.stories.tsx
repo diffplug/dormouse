@@ -5,6 +5,16 @@ import {
   MobileTerminalUi,
   type MobileTerminalUiProps,
 } from '../components/MobileTerminalUi';
+import {
+  MobileGestureConfirmDialog,
+  MobileGestureRadialMenu,
+} from '../components/MobileGestureRadialMenu';
+import {
+  MOBILE_GESTURE_IDLE_STATE,
+  mobileGestureStateFromPoints,
+  type MobileGesturePoint,
+  type MobileGestureTrackingState,
+} from '../lib/mobile-gesture-menu';
 
 const meta: Meta<typeof MobileTerminalUi> = {
   title: 'App/MobileTerminalUi',
@@ -19,15 +29,22 @@ type Story = StoryObj<typeof MobileTerminalUi>;
 
 const SEQUENCE_LABELS = new Map<string, string>([
   [MOBILE_TERMINAL_KEY_SEQUENCES.ctrlC, 'CTRL_C'],
+  [MOBILE_TERMINAL_KEY_SEQUENCES.ctrlX, 'CTRL_X'],
   [MOBILE_TERMINAL_KEY_SEQUENCES.esc, 'ESC'],
   [MOBILE_TERMINAL_KEY_SEQUENCES.tab, 'TAB'],
+  [MOBILE_TERMINAL_KEY_SEQUENCES.shiftTab, 'SHIFT_TAB'],
   [MOBILE_TERMINAL_KEY_SEQUENCES.space, 'SPACE'],
   [MOBILE_TERMINAL_KEY_SEQUENCES.enter, 'ENTER'],
+  [MOBILE_TERMINAL_KEY_SEQUENCES.shiftEnter, 'SHIFT_ENTER'],
   [MOBILE_TERMINAL_KEY_SEQUENCES.backspace, 'BACKSPACE'],
   [MOBILE_TERMINAL_KEY_SEQUENCES.up, 'ARROW_UP'],
+  [MOBILE_TERMINAL_KEY_SEQUENCES.pageUp, 'PAGE_UP'],
   [MOBILE_TERMINAL_KEY_SEQUENCES.down, 'ARROW_DOWN'],
+  [MOBILE_TERMINAL_KEY_SEQUENCES.pageDown, 'PAGE_DOWN'],
   [MOBILE_TERMINAL_KEY_SEQUENCES.right, 'ARROW_RIGHT'],
+  [MOBILE_TERMINAL_KEY_SEQUENCES.end, 'END'],
   [MOBILE_TERMINAL_KEY_SEQUENCES.left, 'ARROW_LEFT'],
+  [MOBILE_TERMINAL_KEY_SEQUENCES.home, 'HOME'],
 ]);
 
 function describeInput(data: string): string {
@@ -70,7 +87,46 @@ function StoryFrame(args: MobileTerminalUiProps) {
           args.onSendInput?.(data);
           setInputLog((entries) => [...entries, describeInput(data)]);
         }}
+        onPaste={() => {
+          void args.onPaste?.();
+          setInputLog((entries) => [...entries, 'PASTE']);
+        }}
       />
+    </div>
+  );
+}
+
+const GESTURE_ORIGIN: MobileGesturePoint = { x: 195, y: 220 };
+
+function gesturePoint(dx: number, dy: number): MobileGesturePoint {
+  return {
+    x: GESTURE_ORIGIN.x + dx,
+    y: GESTURE_ORIGIN.y + dy,
+  };
+}
+
+function gestureState(points: MobileGesturePoint[]): MobileGestureTrackingState {
+  return mobileGestureStateFromPoints(points, GESTURE_ORIGIN);
+}
+
+function GestureSnapshotFrame({
+  state,
+  confirmation,
+}: {
+  state: MobileGestureTrackingState;
+  confirmation?: 'ctrlC' | 'paste';
+}) {
+  return (
+    <div className="relative h-[460px] w-[390px] overflow-hidden border border-border bg-terminal-bg shadow-2xl">
+      <MockTerminal inputLog={[]} />
+      <MobileGestureRadialMenu state={state} />
+      {confirmation ? (
+        <MobileGestureConfirmDialog
+          confirmation={confirmation}
+          onCancel={() => {}}
+          onConfirm={() => {}}
+        />
+      ) : null}
     </div>
   );
 }
@@ -117,4 +173,54 @@ export const CursorTouchAvailable: Story = {
     cursorTouchAvailable: true,
   },
   render: (args) => <StoryFrame {...args} />,
+};
+
+export const GestureMenuOpened: Story = {
+  render: () => <GestureSnapshotFrame state={gestureState([])} />,
+};
+
+export const GesturePrimaryEast: Story = {
+  render: () => <GestureSnapshotFrame state={gestureState([gesturePoint(70, 0)])} />,
+};
+
+export const GestureEastReturnRight: Story = {
+  render: () => <GestureSnapshotFrame state={gestureState([gesturePoint(70, 0), gesturePoint(0, 0)])} />,
+};
+
+export const GestureEastTurnUpEnd: Story = {
+  render: () => <GestureSnapshotFrame state={gestureState([gesturePoint(70, 0), gesturePoint(0, -70)])} />,
+};
+
+export const GestureEastTurnDownL: Story = {
+  render: () => <GestureSnapshotFrame state={gestureState([gesturePoint(70, 0), gesturePoint(0, 70)])} />,
+};
+
+export const GestureCtrlCConfirmation: Story = {
+  render: () => (
+    <GestureSnapshotFrame
+      state={MOBILE_GESTURE_IDLE_STATE}
+      confirmation="ctrlC"
+    />
+  ),
+};
+
+export const GesturePasteConfirmation: Story = {
+  render: () => (
+    <GestureSnapshotFrame
+      state={MOBILE_GESTURE_IDLE_STATE}
+      confirmation="paste"
+    />
+  ),
+};
+
+export const GestureQuitSubmenu: Story = {
+  render: () => <GestureSnapshotFrame state={gestureState([gesturePoint(-70, -70), gesturePoint(0, -70)])} />,
+};
+
+export const GestureQuitCtrlXCandidate: Story = {
+  render: () => (
+    <GestureSnapshotFrame
+      state={gestureState([gesturePoint(-70, -70), gesturePoint(0, -70), gesturePoint(-70, 0)])}
+    />
+  ),
 };
