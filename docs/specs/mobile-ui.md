@@ -105,8 +105,9 @@ area away from the touch point. For example, a lower-right thumb press opens the
 rose up and left; a lower-left thumb press opens it up and right.
 
 As the user drags, the UI draws only the offset guide line inside the visible
-compass rose. It must not draw a line directly under the user's thumb, and it
-must not render a center marker that obscures the offset line.
+compass rose. It must not draw a line directly under the user's thumb. The guide
+line is solid and fully opaque, and the offset rose center renders a small
+fully opaque circle.
 
 Gesture mode uses these radii:
 
@@ -124,13 +125,14 @@ groups and options use active header background/foreground plus an inset
 gesture selection state. Inactive chips should have only a quiet shadow; the
 heavier elevation is reserved for active chips.
 
-The select circle renders subtle ticks at the eight compass directions. The
-current highlighted or selected direction uses a stronger tick so the circle and
-label clusters read as one gesture system.
+The select circle and its eight compass-direction ticks render at full opacity.
+The current highlighted or selected direction uses a stronger tick so the circle
+and label clusters read as one gesture system.
 
-When the rose opens on touch-down, root labels fade in and the select circle
-grows from zero radius to `RADIUS_SELECT`. This is a short state-reveal motion,
-not an ongoing decoration; reduced-motion users get the final state immediately.
+When the rose opens on touch-down, root labels fade in with a subtle scale-in
+and the select circle grows from zero radius to `RADIUS_SELECT`. This is a short
+state-reveal motion, not an ongoing decoration; reduced-motion users get the
+final state immediately.
 
 While the user is still choosing a root group, the root groups fade according to
 the current drag vector only after the drag exceeds `RADIUS_FADE_START`. Before

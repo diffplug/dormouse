@@ -142,19 +142,16 @@ function translatedStyle(x: number, y: number, scale = 1, placement: ChipPlaceme
   };
 }
 
-type GestureChipStyle = CSSProperties & { '--mobile-gesture-target-opacity'?: number };
-
 function translatedChipStyle(
   x: number,
   y: number,
   scale: number,
   placement: ChipPlacement,
   opacity: number,
-): GestureChipStyle {
+): CSSProperties {
   return {
     ...translatedStyle(x, y, scale, placement),
     opacity,
-    '--mobile-gesture-target-opacity': opacity,
   };
 }
 
@@ -334,7 +331,7 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
         x2={phaseDisplayOrigin.x + vector.x * (RADIUS_SELECT + SELECT_TICK_OUTSET)}
         y2={phaseDisplayOrigin.y + vector.y * (RADIUS_SELECT + SELECT_TICK_OUTSET)}
         stroke="var(--color-focus-ring)"
-        strokeOpacity={active ? '0.65' : '0.28'}
+        strokeOpacity="1"
         strokeWidth={active ? '2' : '1.25'}
         strokeLinecap="round"
       />
@@ -378,7 +375,6 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
           className={clsx(
             'absolute transition-[left,top,opacity,transform] ease-out',
             state.phase === 'complete' ? 'duration-200' : 'duration-150',
-            state.phase === 'root' && 'mobile-gesture-chip-spawn',
           )}
           style={translatedChipStyle(
             layout.point.x,
@@ -388,7 +384,9 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
             targetOpacity,
           )}
         >
-          <OptionChip label={option.label} active={active} />
+          <div className={state.phase === 'root' ? 'mobile-gesture-chip-spawn' : undefined}>
+            <OptionChip label={option.label} active={active} />
+          </div>
         </div>
       );
     });
@@ -444,9 +442,8 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
           x2={currentDisplayPoint.x}
           y2={currentDisplayPoint.y}
           stroke="var(--color-focus-ring)"
-          strokeOpacity="0.35"
+          strokeOpacity="1"
           strokeWidth="2"
-          strokeDasharray="4 4"
           strokeLinecap="round"
         />
         <g
@@ -459,10 +456,18 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
             r={RADIUS_SELECT}
             fill="none"
             stroke="var(--color-focus-ring)"
-            strokeOpacity="0.22"
+            strokeOpacity="1"
             strokeWidth="1.5"
           />
           {selectTicks}
+          <circle
+            cx={phaseDisplayOrigin.x}
+            cy={phaseDisplayOrigin.y}
+            r="2.5"
+            fill="var(--color-terminal-bg)"
+            stroke="var(--color-focus-ring)"
+            strokeWidth="1.5"
+          />
         </g>
       </svg>
 
