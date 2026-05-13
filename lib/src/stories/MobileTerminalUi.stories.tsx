@@ -191,7 +191,6 @@ function GestureSnapshotFrame({
 }) {
   return (
     <div className="relative h-[460px] w-[390px] overflow-hidden border border-border bg-terminal-bg shadow-2xl">
-      <MockTerminal inputLog={[]} />
       <MobileGestureRadialMenu state={state} />
       {confirmation ? (
         <MobileGestureConfirmDialog

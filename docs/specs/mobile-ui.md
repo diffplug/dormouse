@@ -120,7 +120,12 @@ Gesture menu item state uses the same palette as pane headers. Idle groups and
 options use inactive header background/foreground. Highlighted or selected
 groups and options use active header background/foreground plus an inset
 `color-focus-ring` ring. Layout-affecting borders must not be used to indicate
-gesture selection state.
+gesture selection state. Inactive chips should have only a quiet shadow; the
+heavier elevation is reserved for active chips.
+
+The select circle renders subtle ticks at the eight compass directions. The
+current highlighted or selected direction uses a stronger tick so the circle and
+label clusters read as one gesture system.
 
 Each root compass group renders as three separate labels placed close together,
 not as one combined pill. When a group is selected, those same three labels tween
@@ -132,7 +137,8 @@ Root labels are laid out as a square keypad, not on a circle. N and S groups
 form horizontal rows, E and W groups form vertical columns, and diagonal groups
 form corner L shapes so the diagonal corner still reads as one group without
 compressing all three labels into a line. Exploded option labels use the square
-direction anchors directly.
+direction anchors directly. The root label pack stays close to the select
+circle, while preserving enough room for long labels like Backspace.
 
 Each root cluster uses `GAP_CLUSTER = 2px`. The first option in each group is
 the cluster center and is centered on the group's anchor. Items to the left are

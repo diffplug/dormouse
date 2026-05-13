@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import { clsx } from 'clsx';
 import {
+  MOBILE_GESTURE_DIRECTION_VECTORS,
   MOBILE_GESTURE_GROUP_ORDER,
   MOBILE_GESTURE_GROUPS,
   MOBILE_GESTURE_OPTION_DIRECTIONS,
@@ -16,7 +17,15 @@ import {
 const QUIT_RADIUS = 78;
 const GAP_CLUSTER = 2;
 const ROOT_CHIP_HALF_HEIGHT = 9;
+const ROOT_LABEL_CENTER_X = 18;
+const ROOT_LABEL_LEFT_X = -96;
+const ROOT_LABEL_RIGHT_X = 116;
+const ROOT_LABEL_TOP_Y = -86;
+const ROOT_LABEL_BOTTOM_Y = 86;
+const ROOT_LABEL_SIDE_CENTER_Y = 22;
 const COMPLETE_SCALE = 2.4;
+const SELECT_TICK_INSET = 5;
+const SELECT_TICK_OUTSET = 6;
 
 const SQUARE_DIRECTION_VECTORS: Record<MobileGestureDirection, { x: number; y: number }> = {
   n: { x: 0, y: -1 },
@@ -30,14 +39,14 @@ const SQUARE_DIRECTION_VECTORS: Record<MobileGestureDirection, { x: number; y: n
 };
 
 const ROOT_GROUP_ANCHORS: Record<MobileGestureDirection, MobileGesturePoint> = {
-  n: { x: 18, y: -RADIUS_LAYOUT },
-  ne: { x: 132, y: -RADIUS_LAYOUT },
-  e: { x: 132, y: 24 },
-  se: { x: 132, y: RADIUS_LAYOUT },
-  s: { x: 18, y: RADIUS_LAYOUT },
-  sw: { x: -106, y: RADIUS_LAYOUT },
-  w: { x: -106, y: 24 },
-  nw: { x: -106, y: -RADIUS_LAYOUT },
+  n: { x: ROOT_LABEL_CENTER_X, y: ROOT_LABEL_TOP_Y },
+  ne: { x: ROOT_LABEL_RIGHT_X, y: ROOT_LABEL_TOP_Y },
+  e: { x: ROOT_LABEL_RIGHT_X, y: ROOT_LABEL_SIDE_CENTER_Y },
+  se: { x: ROOT_LABEL_RIGHT_X, y: ROOT_LABEL_BOTTOM_Y },
+  s: { x: ROOT_LABEL_CENTER_X, y: ROOT_LABEL_BOTTOM_Y },
+  sw: { x: ROOT_LABEL_LEFT_X, y: ROOT_LABEL_BOTTOM_Y },
+  w: { x: ROOT_LABEL_LEFT_X, y: ROOT_LABEL_SIDE_CENTER_Y },
+  nw: { x: ROOT_LABEL_LEFT_X, y: ROOT_LABEL_TOP_Y },
 };
 
 const ROOT_CENTER_HALF_WIDTHS: Record<MobileGestureDirection, number> = {
@@ -66,6 +75,8 @@ const ROOT_OPTION_PLACEMENTS: Record<
   w: ['center', 'above', 'below'],
   nw: ['center', 'right', 'below'],
 };
+
+const SELECT_TICK_DIRECTIONS: MobileGestureDirection[] = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
 
 function translateForPlacement(placement: ChipPlacement): string {
   switch (placement) {
@@ -126,7 +137,7 @@ function OptionChip({
         'rounded px-2 py-1 font-mono text-[10px] leading-none transition-colors',
         active
           ? 'bg-header-active-bg text-header-active-fg shadow-[inset_0_0_0_1px_var(--color-focus-ring),0_8px_28px_rgba(0,0,0,0.35)]'
-          : 'bg-header-inactive-bg text-header-inactive-fg shadow-[0_8px_28px_rgba(0,0,0,0.35)]',
+          : 'bg-header-inactive-bg text-header-inactive-fg shadow-[0_3px_12px_rgba(0,0,0,0.12)]',
       )}
     >
       {label}
@@ -166,6 +177,43 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
       : state.phase === 'complete'
         ? state.selectedDirection
         : state.parentDirection;
+  const activeTickDirection = (() => {
+    if (state.phase === 'root') return state.highlightedDirection;
+    if (state.phase === 'options') {
+      return state.candidate?.direction
+        ?? (
+          state.highlightedOptionIndex === undefined
+            ? undefined
+            : MOBILE_GESTURE_OPTION_DIRECTIONS[state.selectedDirection][state.highlightedOptionIndex]
+        );
+    }
+    if (state.phase === 'quit') {
+      return state.candidate?.direction
+        ?? (
+          state.highlightedOptionIndex === undefined
+            ? undefined
+            : MOBILE_GESTURE_OPTION_DIRECTIONS[state.baseDirection][state.highlightedOptionIndex]
+        );
+    }
+    return state.candidate.direction;
+  })();
+  const selectTicks = SELECT_TICK_DIRECTIONS.map((direction) => {
+    const vector = MOBILE_GESTURE_DIRECTION_VECTORS[direction];
+    const active = activeTickDirection === direction;
+    return (
+      <line
+        key={direction}
+        x1={phaseDisplayOrigin.x + vector.x * (RADIUS_SELECT - SELECT_TICK_INSET)}
+        y1={phaseDisplayOrigin.y + vector.y * (RADIUS_SELECT - SELECT_TICK_INSET)}
+        x2={phaseDisplayOrigin.x + vector.x * (RADIUS_SELECT + SELECT_TICK_OUTSET)}
+        y2={phaseDisplayOrigin.y + vector.y * (RADIUS_SELECT + SELECT_TICK_OUTSET)}
+        stroke="var(--color-focus-ring)"
+        strokeOpacity={active ? '0.65' : '0.28'}
+        strokeWidth={active ? '2' : '1.25'}
+        strokeLinecap="round"
+      />
+    );
+  });
   const rootOptions = MOBILE_GESTURE_GROUP_ORDER.flatMap((direction) => {
     const group = MOBILE_GESTURE_GROUPS[direction];
     return group.options.map((option, index) => {
@@ -274,9 +322,10 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
           r={RADIUS_SELECT}
           fill="none"
           stroke="var(--color-focus-ring)"
-          strokeOpacity="0.28"
+          strokeOpacity="0.22"
           strokeWidth="1.5"
         />
+        {selectTicks}
       </svg>
 
       {rootOptions}
