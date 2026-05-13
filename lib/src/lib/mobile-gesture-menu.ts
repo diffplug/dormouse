@@ -71,6 +71,7 @@ export type MobileGestureTrackingState =
       origin: MobileGesturePoint;
       displayOrigin: MobileGesturePoint;
       currentPoint: MobileGesturePoint;
+      highlightedDirection?: MobileGestureDirection;
       primaryDirection?: MobileGestureDirection;
       candidate?: MobileGestureCandidate;
     }
@@ -93,7 +94,9 @@ export interface MobileGestureFinishResult {
 const DIAGONAL = Math.SQRT1_2;
 
 export const MOBILE_GESTURE_IDLE_STATE: MobileGestureTrackingState = { phase: 'idle' };
-export const MOBILE_GESTURE_BREAKOUT_RADIUS = 44;
+export const RADIUS_LAYOUT = 92;
+export const RADIUS_SELECT = RADIUS_LAYOUT * 0.75;
+export const RADIUS_HIGHLIGHT = RADIUS_SELECT * 0.5;
 export const MOBILE_GESTURE_RETURN_RADIUS = 26;
 export const MOBILE_GESTURE_TURN_THRESHOLD = 0.55;
 export const MOBILE_GESTURE_DISPLAY_MARGIN = 112;
@@ -305,12 +308,13 @@ export function updateMobileGesture(
   if (state.phase === 'idle') return state;
 
   if (state.phase === 'root') {
+    const movementDistance = distance(state.origin, point);
+    const closestDirection = movementDistance >= RADIUS_HIGHLIGHT
+      ? directionFromVector(point.x - state.origin.x, point.y - state.origin.y) ?? undefined
+      : undefined;
     const primaryDirection = state.primaryDirection
-      ?? (
-        distance(state.origin, point) >= MOBILE_GESTURE_BREAKOUT_RADIUS
-          ? directionFromVector(point.x - state.origin.x, point.y - state.origin.y) ?? undefined
-          : undefined
-      );
+      ?? (movementDistance >= RADIUS_SELECT ? closestDirection : undefined);
+    const highlightedDirection = primaryDirection ?? closestDirection;
     const candidate = primaryDirection
       ? candidateForBase('root', primaryDirection, MOBILE_GESTURE_GROUPS[primaryDirection].options, state.origin, point)
       : undefined;
@@ -329,6 +333,7 @@ export function updateMobileGesture(
     return {
       ...state,
       currentPoint: point,
+      highlightedDirection,
       primaryDirection,
       candidate,
     };

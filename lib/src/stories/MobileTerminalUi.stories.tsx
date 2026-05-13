@@ -13,6 +13,7 @@ import {
   displayOriginAwayFromThumb,
   MOBILE_GESTURE_IDLE_STATE,
   mobileGestureStateFromPoints,
+  RADIUS_HIGHLIGHT,
   type MobileGesturePoint,
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
@@ -183,6 +184,10 @@ export const CursorTouchAvailable: Story = {
 
 export const GestureMenuOpened: Story = {
   render: () => <GestureSnapshotFrame state={gestureState([])} />,
+};
+
+export const GestureEastHighlight: Story = {
+  render: () => <GestureSnapshotFrame state={gestureState([gesturePoint(RADIUS_HIGHLIGHT + 6, 0)])} />,
 };
 
 export const GesturePrimaryEast: Story = {

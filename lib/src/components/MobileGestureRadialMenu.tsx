@@ -5,12 +5,13 @@ import {
   MOBILE_GESTURE_GROUP_ORDER,
   MOBILE_GESTURE_GROUPS,
   MOBILE_GESTURE_QUIT_GROUP,
+  RADIUS_LAYOUT,
+  RADIUS_SELECT,
   type MobileGestureCandidate,
   type MobileGestureDirection,
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
 
-const ROOT_RADIUS = 92;
 const QUIT_RADIUS = 78;
 
 function translatedStyle(x: number, y: number): CSSProperties {
@@ -107,6 +108,15 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
           strokeLinecap="round"
         />
         <circle
+          cx={state.displayOrigin.x}
+          cy={state.displayOrigin.y}
+          r={RADIUS_SELECT}
+          fill="none"
+          stroke="var(--color-focus-ring)"
+          strokeOpacity="0.28"
+          strokeWidth="1.5"
+        />
+        <circle
           cx={state.origin.x}
           cy={state.origin.y}
           r="4"
@@ -134,12 +144,12 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
       {MOBILE_GESTURE_GROUP_ORDER.map((direction) => {
         if (state.phase === 'quit' && direction === state.baseDirection) return null;
         const group = MOBILE_GESTURE_GROUPS[direction];
-        const point = directionPoint(direction, state.displayOrigin, ROOT_RADIUS);
+        const point = directionPoint(direction, state.displayOrigin, RADIUS_LAYOUT);
         const candidate = state.phase === 'root' && state.candidate?.groupDirection === direction
           ? state.candidate
           : undefined;
         const active = state.phase === 'root'
-          ? state.primaryDirection === direction
+          ? (state.primaryDirection ?? state.highlightedDirection) === direction
           : state.parentDirection === direction;
         return (
           <div key={direction} className="absolute" style={translatedStyle(point.x, point.y)}>

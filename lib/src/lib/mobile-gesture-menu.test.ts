@@ -3,6 +3,9 @@ import {
   beginMobileGesture,
   displayOriginAwayFromThumb,
   finishMobileGesture,
+  RADIUS_HIGHLIGHT,
+  RADIUS_LAYOUT,
+  RADIUS_SELECT,
   updateMobileGesture,
   type MobileGestureAction,
   type MobileGesturePoint,
@@ -24,8 +27,39 @@ function point(x: number, y: number): MobileGesturePoint {
 }
 
 describe('mobile gesture menu state machine', () => {
+  it('derives highlight and select radii from the layout radius', () => {
+    expect(RADIUS_LAYOUT).toBe(92);
+    expect(RADIUS_SELECT).toBe(RADIUS_LAYOUT * 0.75);
+    expect(RADIUS_HIGHLIGHT).toBe(RADIUS_SELECT * 0.5);
+  });
+
   it('cancels a tap that never breaks out', () => {
     expect(runGesture([])).toBeUndefined();
+  });
+
+  it('does not highlight a direction before the highlight radius', () => {
+    const state = updateMobileGesture(beginMobileGesture(1, ORIGIN), point(RADIUS_HIGHLIGHT - 1, 0));
+    expect(state.phase).toBe('root');
+    if (state.phase !== 'root') return;
+    expect(state.highlightedDirection).toBeUndefined();
+    expect(state.primaryDirection).toBeUndefined();
+  });
+
+  it('highlights the closest direction after the highlight radius without selecting it', () => {
+    const state = updateMobileGesture(beginMobileGesture(1, ORIGIN), point(RADIUS_HIGHLIGHT + 1, 0));
+    expect(state.phase).toBe('root');
+    if (state.phase !== 'root') return;
+    expect(state.highlightedDirection).toBe('e');
+    expect(state.primaryDirection).toBeUndefined();
+    expect(finishMobileGesture(state).action).toBeUndefined();
+  });
+
+  it('selects the closest direction after the select radius', () => {
+    const state = updateMobileGesture(beginMobileGesture(1, ORIGIN), point(RADIUS_SELECT + 1, 0));
+    expect(state.phase).toBe('root');
+    if (state.phase !== 'root') return;
+    expect(state.highlightedDirection).toBe('e');
+    expect(state.primaryDirection).toBe('e');
   });
 
   it('selects Right by breaking east and returning to center', () => {

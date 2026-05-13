@@ -110,12 +110,21 @@ the current thumb position. The offset compass rose may also mirror that motion
 with a lighter guide line so the selected direction remains readable away from
 the thumb.
 
+Gesture mode uses these radii:
+
+| Variable | Value | Behavior |
+| --- | --- | --- |
+| `RADIUS_LAYOUT` | `92px` | Distance from the offset compass rose origin to the menu item groups. |
+| `RADIUS_SELECT` | `RADIUS_LAYOUT * 0.75` | Visible circle drawn around the offset compass rose origin. When the mirrored drag reaches this distance, the closest compass direction is selected. |
+| `RADIUS_HIGHLIGHT` | `RADIUS_SELECT * 0.5` | No circle is drawn. When the drag reaches this distance, the closest compass direction is highlighted, but not selected. |
+
 The radial menu is a two-stage gesture:
 
 1. Touch down to open the menu.
-2. Drag far enough toward one compass point to choose a group.
-3. Drag in a different direction to choose one of that group's three options.
-4. Release to send the selected terminal input.
+2. Drag to `RADIUS_HIGHLIGHT` to preview the closest compass point.
+3. Drag to `RADIUS_SELECT` to choose that compass point's group.
+4. Drag in a different direction to choose one of that group's three options.
+5. Release to send the selected terminal input.
 
 After the first breakout, the final option is selected this way:
 
