@@ -20,6 +20,11 @@ vi.mock('./mouse-selection', () => ({
   getMouseSelectionState: () => ({ bracketedPaste: false }),
 }));
 
+vi.mock('./terminal-registry', () => ({
+  getTerminalInstance: () => null,
+  markSessionTouched: vi.fn(),
+}));
+
 import { doPaste } from './clipboard';
 
 describe('doPaste three-tier fallthrough', () => {

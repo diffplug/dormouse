@@ -1,5 +1,6 @@
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { getPlatform } from './platform';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
 import { attachMouseModeObserver } from './mouse-mode-observer';
@@ -73,6 +74,7 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
 
   const theme = getTerminalTheme();
   const terminal = new Terminal({
+    allowProposedApi: true,
     fontSize: editorFontSize,
     fontFamily: editorFontFamily,
     cursorBlink: true,
@@ -88,6 +90,7 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
     },
   });
 
+  terminal.loadAddon(new UnicodeGraphemesAddon());
   const fit = new FitAddon();
   terminal.loadAddon(fit);
 

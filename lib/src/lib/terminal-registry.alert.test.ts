@@ -12,6 +12,12 @@ vi.mock('@xterm/addon-fit', () => {
   return { FitAddon };
 });
 
+vi.mock('@xterm/addon-unicode-graphemes', () => {
+  class UnicodeGraphemesAddon {}
+
+  return { UnicodeGraphemesAddon };
+});
+
 vi.mock('@xterm/xterm', () => {
   class MockTerminal {
     writes: string[] = [];
