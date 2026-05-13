@@ -25,14 +25,12 @@ const GAP_CARDINAL_RING = 12;
 const ROOT_CARDINAL_X = RADIUS_SELECT + ROOT_CHIP_HALF_WIDTH_ARROW + GAP_CARDINAL_RING;
 const ROOT_CARDINAL_Y = RADIUS_SELECT + ROOT_CHIP_HALF_HEIGHT + GAP_CARDINAL_RING;
 const ROOT_LABEL_CENTER_X = 0;
-const ROOT_LABEL_LEFT_X = -96;
-const ROOT_LABEL_RIGHT_X = 116;
-const ROOT_LABEL_TOP_Y = -86;
-const ROOT_LABEL_BOTTOM_Y = 86;
 const ROOT_LABEL_SIDE_CENTER_Y = 0;
 const COMPLETE_SCALE = 2.4;
 const SELECT_TICK_INSET = 5;
 const SELECT_TICK_OUTSET = 6;
+const ROOT_DIAGONAL_CORNER_RADIUS = RADIUS_SELECT + SELECT_TICK_OUTSET + GAP_CARDINAL_RING * Math.SQRT1_2;
+const ROOT_DIAGONAL_TANGENT_OFFSET = 18;
 
 const SQUARE_DIRECTION_VECTORS: Record<MobileGestureDirection, { x: number; y: number }> = {
   n: { x: 0, y: -1 },
@@ -45,46 +43,65 @@ const SQUARE_DIRECTION_VECTORS: Record<MobileGestureDirection, { x: number; y: n
   nw: { x: -1, y: -1 },
 };
 
-const ROOT_GROUP_ANCHORS: Record<MobileGestureDirection, MobileGesturePoint> = {
+const ROOT_CARDINAL_ANCHORS: Partial<Record<MobileGestureDirection, MobileGesturePoint>> = {
   n: { x: ROOT_LABEL_CENTER_X, y: -ROOT_CARDINAL_Y },
-  ne: { x: ROOT_LABEL_RIGHT_X, y: ROOT_LABEL_TOP_Y },
   e: { x: ROOT_CARDINAL_X, y: ROOT_LABEL_SIDE_CENTER_Y },
-  se: { x: ROOT_LABEL_RIGHT_X, y: ROOT_LABEL_BOTTOM_Y },
   s: { x: ROOT_LABEL_CENTER_X, y: ROOT_CARDINAL_Y },
-  sw: { x: ROOT_LABEL_LEFT_X, y: ROOT_LABEL_BOTTOM_Y },
   w: { x: -ROOT_CARDINAL_X, y: ROOT_LABEL_SIDE_CENTER_Y },
-  nw: { x: ROOT_LABEL_LEFT_X, y: ROOT_LABEL_TOP_Y },
 };
 
-const ROOT_CENTER_HALF_WIDTHS: Record<MobileGestureDirection, number> = {
-  n: 11,
-  ne: 35,
-  e: 11,
-  se: 23,
-  s: 11,
-  sw: 17,
-  w: 11,
-  nw: 17,
-};
+type ChipPlacement =
+  | 'center'
+  | 'left'
+  | 'right'
+  | 'above'
+  | 'below'
+  | 'topLeft'
+  | 'topRight'
+  | 'bottomLeft'
+  | 'bottomRight';
 
-type ChipPlacement = 'center' | 'left' | 'right' | 'above' | 'below';
-
-const ROOT_OPTION_PLACEMENTS: Record<
+const ROOT_DIAGONAL_LAYOUT: Partial<Record<
   MobileGestureDirection,
-  [ChipPlacement, ChipPlacement, ChipPlacement]
-> = {
-  n: ['center', 'left', 'right'],
-  ne: ['center', 'below', 'left'],
-  e: ['center', 'above', 'below'],
-  se: ['center', 'above', 'left'],
-  s: ['center', 'left', 'right'],
-  sw: ['center', 'above', 'right'],
-  w: ['center', 'above', 'below'],
-  nw: ['center', 'right', 'below'],
+  {
+    centerPlacement: ChipPlacement;
+    options: [
+      { offset: MobileGesturePoint; placement: ChipPlacement },
+      { offset: MobileGesturePoint; placement: ChipPlacement },
+    ];
+  }
+>> = {
+  ne: {
+    centerPlacement: 'bottomLeft',
+    options: [
+      { offset: { x: ROOT_DIAGONAL_TANGENT_OFFSET, y: ROOT_DIAGONAL_TANGENT_OFFSET }, placement: 'topLeft' },
+      { offset: { x: -ROOT_DIAGONAL_TANGENT_OFFSET, y: -ROOT_DIAGONAL_TANGENT_OFFSET }, placement: 'bottomRight' },
+    ],
+  },
+  se: {
+    centerPlacement: 'topLeft',
+    options: [
+      { offset: { x: ROOT_DIAGONAL_TANGENT_OFFSET, y: -ROOT_DIAGONAL_TANGENT_OFFSET }, placement: 'bottomLeft' },
+      { offset: { x: -ROOT_DIAGONAL_TANGENT_OFFSET, y: ROOT_DIAGONAL_TANGENT_OFFSET }, placement: 'topRight' },
+    ],
+  },
+  sw: {
+    centerPlacement: 'topRight',
+    options: [
+      { offset: { x: -ROOT_DIAGONAL_TANGENT_OFFSET, y: -ROOT_DIAGONAL_TANGENT_OFFSET }, placement: 'bottomRight' },
+      { offset: { x: ROOT_DIAGONAL_TANGENT_OFFSET, y: ROOT_DIAGONAL_TANGENT_OFFSET }, placement: 'topLeft' },
+    ],
+  },
+  nw: {
+    centerPlacement: 'bottomRight',
+    options: [
+      { offset: { x: ROOT_DIAGONAL_TANGENT_OFFSET, y: -ROOT_DIAGONAL_TANGENT_OFFSET }, placement: 'bottomLeft' },
+      { offset: { x: -ROOT_DIAGONAL_TANGENT_OFFSET, y: ROOT_DIAGONAL_TANGENT_OFFSET }, placement: 'topRight' },
+    ],
+  },
 };
 
 const SELECT_TICK_DIRECTIONS: MobileGestureDirection[] = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
-const CARDINAL_DIRECTIONS = new Set<MobileGestureDirection>(['n', 'e', 's', 'w']);
 
 function translateForPlacement(placement: ChipPlacement): string {
   switch (placement) {
@@ -96,6 +113,14 @@ function translateForPlacement(placement: ChipPlacement): string {
       return 'translate(-50%, -100%)';
     case 'below':
       return 'translate(-50%, 0)';
+    case 'topLeft':
+      return 'translate(0, 0)';
+    case 'topRight':
+      return 'translate(-100%, 0)';
+    case 'bottomLeft':
+      return 'translate(0, -100%)';
+    case 'bottomRight':
+      return 'translate(-100%, -100%)';
     case 'center':
       return 'translate(-50%, -50%)';
   }
@@ -159,11 +184,11 @@ function rootOptionLayout(
   center: { x: number; y: number },
 ): { point: MobileGesturePoint; placement: ChipPlacement } {
   const optionIndex = index as MobileGestureOptionIndex;
-  const anchor = ROOT_GROUP_ANCHORS[direction];
-  if (CARDINAL_DIRECTIONS.has(direction)) {
+  const cardinalAnchor = ROOT_CARDINAL_ANCHORS[direction];
+  if (cardinalAnchor) {
     const point = {
-      x: center.x + anchor.x,
-      y: center.y + anchor.y,
+      x: center.x + cardinalAnchor.x,
+      y: center.y + cardinalAnchor.y,
     };
     if (direction === 'n') {
       if (optionIndex === 1) {
@@ -215,16 +240,23 @@ function rootOptionLayout(
     }
     return { point, placement: 'center' };
   }
-  const placement = ROOT_OPTION_PLACEMENTS[direction][optionIndex];
-  const point = {
-    x: center.x + anchor.x,
-    y: center.y + anchor.y,
+  const diagonalLayout = ROOT_DIAGONAL_LAYOUT[direction];
+  const vector = MOBILE_GESTURE_DIRECTION_VECTORS[direction];
+  const corner = {
+    x: center.x + vector.x * ROOT_DIAGONAL_CORNER_RADIUS,
+    y: center.y + vector.y * ROOT_DIAGONAL_CORNER_RADIUS,
   };
-  if (placement === 'left') point.x -= ROOT_CENTER_HALF_WIDTHS[direction] + GAP_CLUSTER;
-  if (placement === 'right') point.x += ROOT_CENTER_HALF_WIDTHS[direction] + GAP_CLUSTER;
-  if (placement === 'above') point.y -= ROOT_CHIP_HALF_HEIGHT + GAP_CLUSTER;
-  if (placement === 'below') point.y += ROOT_CHIP_HALF_HEIGHT + GAP_CLUSTER;
-  return { point, placement };
+  if (!diagonalLayout || optionIndex === 0) {
+    return { point: corner, placement: diagonalLayout?.centerPlacement ?? 'center' };
+  }
+  const optionLayout = diagonalLayout.options[optionIndex - 1];
+  return {
+    point: {
+      x: corner.x + optionLayout.offset.x,
+      y: corner.y + optionLayout.offset.y,
+    },
+    placement: optionLayout.placement,
+  };
 }
 
 export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackingState }) {
