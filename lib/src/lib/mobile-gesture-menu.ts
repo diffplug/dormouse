@@ -469,7 +469,7 @@ export function completeMobileGesture(state: MobileGestureTrackingState): Mobile
 
 export function mobileGestureStateFromPoints(
   points: MobileGesturePoint[],
-  origin: MobileGesturePoint = { x: 195, y: 220 },
+  origin: MobileGesturePoint,
   displayOrigin: MobileGesturePoint = origin,
 ): MobileGestureTrackingState {
   let state = beginMobileGesture(1, origin, displayOrigin);
