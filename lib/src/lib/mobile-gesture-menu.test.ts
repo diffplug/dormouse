@@ -126,8 +126,16 @@ describe('mobile gesture menu state machine', () => {
     expect(finishMobileGesture(state).action).toBeUndefined();
   });
 
-  it('selects Right by breaking east and returning to center', () => {
+  it('selects Right by breaking east and dragging west from the option origin', () => {
     expect(runGesture([rootSelectionPoint('e'), optionSelectionPoint('e', 0)])).toEqual({ kind: 'input', input: 'right' });
+  });
+
+  it('makes the option action available as soon as the second select radius is crossed', () => {
+    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('e'));
+    state = updateMobileGesture(state, optionSelectionPoint('e', 0));
+    expect(state.phase).toBe('options');
+    if (state.phase !== 'options') return;
+    expect(state.candidate?.option.action).toEqual({ kind: 'input', input: 'right' });
   });
 
   it('selects End by breaking east and turning up', () => {

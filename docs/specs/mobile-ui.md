@@ -133,8 +133,8 @@ The radial menu is a two-stage gesture:
 6. The selected group's three options explode out from the reset center in the
    opposite directions.
 7. Drag from the reset center to `RADIUS_HIGHLIGHT` to preview an option.
-8. Drag from the reset center to `RADIUS_SELECT` to choose that option.
-9. Release to send the selected terminal input.
+8. Drag from the reset center to `RADIUS_SELECT` to choose and immediately send
+   that option. The app must not wait for touch release.
 
 If the user releases after the first group selection but before choosing one of
 the exploded options, the gesture is cancelled.
@@ -154,9 +154,9 @@ Exploded option directions:
 
 Examples:
 
-* Right arrow: tap, drag right to choose the E group, drag left from the reset center, release.
-* End: tap, drag right to choose the E group, drag up-left from the reset center, release.
-* `l`: tap, drag right to choose the E group, drag down-left from the reset center, release.
+* Right arrow: tap, drag right to choose the E group, then drag left from the reset center until it sends.
+* End: tap, drag right to choose the E group, then drag up-left from the reset center until it sends.
+* `l`: tap, drag right to choose the E group, then drag down-left from the reset center until it sends.
 
 Root gesture menu labels use compact key glyphs: `⌃` for Ctrl, `⬆︎` for
 Shift, and `▲`/`▼`/`◀`/`▶` for arrow keys. Enter, Backspace, PgUp, and PgDn
@@ -167,7 +167,7 @@ Root gesture menu:
 ```text
 Esc|⌃C*|Quit**         ▲|PgUp|k        Backspace|Paste*|n
 
-◀|Home|h                    o            ▶|End|l
+◀|Home|h                                 ▶|End|l
 
 Tab|⬆︎Tab|Space      ▼|PgDn|j      Enter|⬆︎Enter|y
 ```

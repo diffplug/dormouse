@@ -352,6 +352,7 @@ export function MobileTerminalUi({
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const composingRef = useRef(false);
   const gestureStateRef = useRef<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
+  const completedGesturePointerIdRef = useRef<number | null>(null);
   const [gestureState, setGestureState] = useState<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
   const [pendingGestureConfirmation, setPendingGestureConfirmation] = useState<MobileGestureConfirmationAction | null>(null);
   const [inputValue, setInputValue] = useState('');
@@ -505,6 +506,7 @@ export function MobileTerminalUi({
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     setPendingGestureConfirmation(null);
+    completedGesturePointerIdRef.current = null;
 
     const origin = localPointerPoint(event);
     commitGestureState(beginMobileGesture(
@@ -519,11 +521,28 @@ export function MobileTerminalUi({
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
-    commitGestureState(updateMobileGesture(state, localPointerPoint(event)));
-  }, [commitGestureState]);
+    const nextState = updateMobileGesture(state, localPointerPoint(event));
+    const result = finishMobileGesture(nextState);
+    if (result.action) {
+      completedGesturePointerIdRef.current = event.pointerId;
+      commitGestureState(result.state);
+      executeGestureAction(result.action);
+      return;
+    }
+    commitGestureState(nextState);
+  }, [commitGestureState, executeGestureAction]);
 
   const handlePanePointerUpCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const state = gestureStateRef.current;
+    if (state.phase === 'idle' && completedGesturePointerIdRef.current === event.pointerId) {
+      event.preventDefault();
+      event.stopPropagation();
+      completedGesturePointerIdRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      return;
+    }
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
@@ -542,6 +561,12 @@ export function MobileTerminalUi({
 
   const handlePanePointerCancelCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const state = gestureStateRef.current;
+    if (completedGesturePointerIdRef.current === event.pointerId) {
+      completedGesturePointerIdRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    }
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);
   }, [commitGestureState]);
