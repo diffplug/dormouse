@@ -9,10 +9,12 @@ import {
   RADIUS_LAYOUT,
   RADIUS_SELECT,
   type MobileGestureDirection,
+  type MobileGestureOptionIndex,
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
 
 const QUIT_RADIUS = 78;
+const ROOT_OPTION_SPACING = 48;
 
 function translatedStyle(x: number, y: number): CSSProperties {
   return {
@@ -45,34 +47,6 @@ function translatedCurrentPoint(
   };
 }
 
-function OptionPill({
-  labels,
-  active,
-}: {
-  labels: [string, string, string];
-  active: boolean;
-}) {
-  return (
-    <div
-      className={clsx(
-        'flex items-center overflow-hidden rounded font-mono text-[10px] leading-none transition-colors',
-        active
-          ? 'bg-header-active-bg text-header-active-fg shadow-[inset_0_0_0_1px_var(--color-focus-ring),0_8px_28px_rgba(0,0,0,0.35)]'
-          : 'bg-header-inactive-bg text-header-inactive-fg shadow-[0_8px_28px_rgba(0,0,0,0.35)]',
-      )}
-    >
-      {labels.map((label, index) => (
-        <span
-          key={`${label}-${index}`}
-          className="min-w-0 px-1.5 py-1"
-        >
-          {label}
-        </span>
-      ))}
-    </div>
-  );
-}
-
 function OptionChip({
   label,
   active,
@@ -94,6 +68,18 @@ function OptionChip({
   );
 }
 
+function rootOptionPoint(
+  direction: MobileGestureDirection,
+  index: number,
+  center: { x: number; y: number },
+): { x: number; y: number } {
+  const groupCenter = directionPoint(direction, center, RADIUS_LAYOUT);
+  return {
+    x: groupCenter.x + (index - 1) * ROOT_OPTION_SPACING,
+    y: groupCenter.y,
+  };
+}
+
 export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackingState }) {
   if (state.phase === 'idle') return null;
 
@@ -105,30 +91,58 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
     : state.phase === 'options'
       ? state.selectedDirection
       : state.parentDirection;
-  const explodedOptions = (() => {
-    if (state.phase === 'root') return null;
-    const group = state.phase === 'options'
-      ? MOBILE_GESTURE_GROUPS[state.selectedDirection]
-      : MOBILE_GESTURE_QUIT_GROUP;
-    const directions = state.phase === 'options'
-      ? MOBILE_GESTURE_OPTION_DIRECTIONS[state.selectedDirection]
-      : MOBILE_GESTURE_OPTION_DIRECTIONS[state.baseDirection];
-    const radius = state.phase === 'quit' ? QUIT_RADIUS : RADIUS_LAYOUT;
+  const rootOptions = MOBILE_GESTURE_GROUP_ORDER.flatMap((direction) => {
+    const group = MOBILE_GESTURE_GROUPS[direction];
+    return group.options.map((option, index) => {
+      const optionIndex = index as MobileGestureOptionIndex;
+      const isSelectedGroup = state.phase === 'options' && state.selectedDirection === direction;
+      const point = isSelectedGroup
+        ? directionPoint(
+          MOBILE_GESTURE_OPTION_DIRECTIONS[direction][optionIndex],
+          phaseDisplayOrigin,
+          RADIUS_LAYOUT,
+        )
+        : rootOptionPoint(direction, index, state.displayOrigin);
+      const active = state.phase === 'root'
+        ? activeRootDirection === direction
+        : isSelectedGroup && (
+          state.highlightedOptionIndex === optionIndex
+          || state.candidate?.optionIndex === optionIndex
+        );
+      const faded = state.phase === 'quit' || (state.phase === 'options' && !isSelectedGroup);
+      return (
+        <div
+          key={`${direction}-${index}`}
+          className={clsx(
+            'absolute transition-[left,top,opacity] duration-150 ease-out',
+            faded ? 'opacity-0' : 'opacity-100',
+          )}
+          style={translatedStyle(point.x, point.y)}
+        >
+          <OptionChip label={option.label} active={active} />
+        </div>
+      );
+    });
+  });
+  const quitOptions = (() => {
+    if (state.phase !== 'quit') return null;
+    const directions = MOBILE_GESTURE_OPTION_DIRECTIONS[state.baseDirection];
     const highlightedOptionIndex = state.highlightedOptionIndex;
     const candidateOptionIndex = state.candidate?.optionIndex;
 
-    return group.options.map((option, index) => {
-      const direction = directions[index];
-      const point = directionPoint(direction, phaseDisplayOrigin, radius);
+    return MOBILE_GESTURE_QUIT_GROUP.options.map((option, index) => {
+      const optionIndex = index as MobileGestureOptionIndex;
+      const direction = directions[optionIndex];
+      const point = directionPoint(direction, phaseDisplayOrigin, QUIT_RADIUS);
       return (
         <div
           key={`${direction}-${option.label}`}
-          className="absolute transition-[opacity,transform] duration-150"
+          className="absolute transition-[left,top,opacity] duration-150 ease-out"
           style={translatedStyle(point.x, point.y)}
         >
           <OptionChip
             label={option.label}
-            active={highlightedOptionIndex === index || candidateOptionIndex === index}
+            active={highlightedOptionIndex === optionIndex || candidateOptionIndex === optionIndex}
           />
         </div>
       );
@@ -163,29 +177,8 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
         />
       </svg>
 
-      {MOBILE_GESTURE_GROUP_ORDER.map((direction) => {
-        const group = MOBILE_GESTURE_GROUPS[direction];
-        const point = directionPoint(direction, state.displayOrigin, RADIUS_LAYOUT);
-        const active = activeRootDirection === direction;
-        const faded = state.phase !== 'root' && !active;
-        return (
-          <div
-            key={direction}
-            className={clsx(
-              'absolute transition-opacity duration-150',
-              faded ? 'opacity-0' : state.phase === 'root' ? 'opacity-100' : 'opacity-45',
-            )}
-            style={translatedStyle(point.x, point.y)}
-          >
-            <OptionPill
-              labels={group.options.map((option) => option.label) as [string, string, string]}
-              active={active}
-            />
-          </div>
-        );
-      })}
-
-      {explodedOptions}
+      {rootOptions}
+      {quitOptions}
     </div>
   );
 }

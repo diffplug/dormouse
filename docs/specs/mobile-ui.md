@@ -122,6 +122,12 @@ groups and options use active header background/foreground plus an inset
 `color-focus-ring` ring. Layout-affecting borders must not be used to indicate
 gesture selection state.
 
+Each root compass group renders as three separate labels placed close together,
+not as one combined pill. When a group is selected, those same three labels tween
+from their root group positions to their exploded positions in the opposite
+directions. They must not fade out and be replaced by newly spawned option
+labels.
+
 The radial menu is a two-stage gesture:
 
 1. Touch down to open the menu.
@@ -165,11 +171,11 @@ remain spelled out.
 Root gesture menu:
 
 ```text
-Esc|⌃C*|Quit**         ▲|PgUp|k        Backspace|Paste*|n
+Esc ⌃C* Quit**         ▲ PgUp k        Backspace Paste* n
 
-◀|Home|h                                 ▶|End|l
+◀ Home h                                 ▶ End l
 
-Tab|⬆︎Tab|Space      ▼|PgDn|j      Enter|⬆︎Enter|y
+Tab ⬆︎Tab Space      ▼ PgDn j      Enter ⬆︎Enter y
 ```
 
 `⌃C` and `Paste` require an in-pane confirmation modal before they run.
