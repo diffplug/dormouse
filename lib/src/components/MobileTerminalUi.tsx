@@ -16,14 +16,13 @@ import {
   CursorClickIcon,
   CursorTextIcon,
   HandPointingIcon,
-  KeyboardIcon,
   TerminalWindowIcon,
   TextTIcon,
 } from '@phosphor-icons/react';
 import { clsx } from 'clsx';
 import { bellIconClass } from './bell-icon-class';
 
-export type MobileTerminalKeyboardMode = 'sessions' | 'recent' | 'type' | 'draft' | 'keys';
+export type MobileTerminalKeyboardMode = 'sessions' | 'recent' | 'type' | 'draft';
 export type MobileTerminalSection = MobileTerminalKeyboardMode;
 export type MobileTerminalTouchMode = 'gestures' | 'selection' | 'cursor';
 type PhosphorIcon = ComponentType<{ size?: number; weight?: 'regular' | 'bold' | 'duotone' | 'fill' }>;
@@ -50,29 +49,11 @@ export const MOBILE_TERMINAL_KEY_SEQUENCES = {
   left: '\x1b[D',
 } as const;
 
-interface TerminalKey {
-  id: keyof typeof MOBILE_TERMINAL_KEY_SEQUENCES;
-  label: string;
-  title: string;
-}
-
-const TERMINAL_KEYS: TerminalKey[] = [
-  { id: 'esc', label: 'Esc', title: 'Escape' },
-  { id: 'tab', label: 'Tab', title: 'Tab' },
-  { id: 'space', label: 'Space', title: 'Space' },
-  { id: 'enter', label: 'Enter', title: 'Enter' },
-  { id: 'left', label: '\u2190', title: 'Left arrow' },
-  { id: 'down', label: '\u2193', title: 'Down arrow' },
-  { id: 'up', label: '\u2191', title: 'Up arrow' },
-  { id: 'right', label: '\u2192', title: 'Right arrow' },
-];
-
 const KEYBOARD_MODES: Array<{ id: MobileTerminalKeyboardMode; label: string; Icon: PhosphorIcon }> = [
   { id: 'sessions', label: 'Sessions', Icon: TerminalWindowIcon },
   { id: 'recent', label: 'Recent', Icon: ClockCounterClockwiseIcon },
   { id: 'type', label: 'Type', Icon: TextTIcon },
   { id: 'draft', label: 'Draft', Icon: ArticleNyTimesIcon },
-  { id: 'keys', label: 'Keys', Icon: KeyboardIcon },
 ];
 
 const TOUCH_MODES: Array<{
@@ -135,34 +116,6 @@ function keyDownSequence(event: KeyboardEvent<HTMLTextAreaElement>): string | nu
     default:
       return null;
   }
-}
-
-function KeyButton({
-  item,
-  disabled,
-  onPress,
-}: {
-  item: TerminalKey;
-  disabled: boolean;
-  onPress: (id: keyof typeof MOBILE_TERMINAL_KEY_SEQUENCES) => void;
-}) {
-  return (
-    <button
-      type="button"
-      title={item.title}
-      disabled={disabled}
-      onPointerDown={(event) => event.preventDefault()}
-      onClick={() => onPress(item.id)}
-      className={clsx(
-        'flex min-w-0 items-center justify-center rounded border border-border bg-surface-raised font-mono text-foreground transition-colors',
-        'hover:bg-header-inactive-bg focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-focus-ring',
-        'disabled:pointer-events-none disabled:opacity-60',
-        'min-h-14 px-2 text-sm',
-      )}
-    >
-      <span className="truncate">{item.label}</span>
-    </button>
-  );
 }
 
 function KeyboardModeButton({
@@ -267,7 +220,7 @@ function KeyboardModeSelector({
       aria-label="Input mode"
       className="flex h-9 shrink-0 items-center border-t border-border bg-header-inactive-bg px-2 text-header-inactive-fg"
     >
-      <nav className="grid min-w-0 flex-1 grid-cols-[1.35fr_repeat(4,minmax(0,1fr))] gap-1 rounded bg-header-inactive-bg p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
+      <nav className="grid min-w-0 flex-1 grid-cols-[1.25fr_repeat(3,minmax(0,1fr))] gap-1 rounded bg-header-inactive-bg p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
         {KEYBOARD_MODES.map((item) => (
           <KeyboardModeButton
             key={item.id}
@@ -601,30 +554,6 @@ export function MobileTerminalUi({
           >
             <span aria-hidden="true" className="font-mono text-3xl leading-none text-focus-ring">▌</span>
           </button>
-        ) : null}
-        {keyboardMode === 'keys' ? (
-          <div className="grid h-full grid-rows-2 gap-2 p-3">
-            <div className="grid grid-cols-4 gap-2">
-              {TERMINAL_KEYS.slice(0, 4).map((item) => (
-                <KeyButton
-                  key={item.id}
-                  item={item}
-                  disabled={!interactive}
-                  onPress={(id) => sendInput(MOBILE_TERMINAL_KEY_SEQUENCES[id])}
-                />
-              ))}
-            </div>
-            <div className="grid grid-cols-4 gap-2">
-              {TERMINAL_KEYS.slice(4).map((item) => (
-                <KeyButton
-                  key={item.id}
-                  item={item}
-                  disabled={!interactive}
-                  onPress={(id) => sendInput(MOBILE_TERMINAL_KEY_SEQUENCES[id])}
-                />
-              ))}
-            </div>
-          </div>
         ) : null}
       </div>
 

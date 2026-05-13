@@ -113,10 +113,10 @@ selector must fall back to Gestures.
 ## 5. Input Mode Selector
 
 The input mode selector controls what appears in the reserve area. It is always
-visible and has five items:
+visible and has four items:
 
 ```text
-Sessions | Recent | Type | Draft | Keys
+Sessions | Recent | Type | Draft
 ```
 
 The selector must be self-labeling through segmented buttons that include both
@@ -130,7 +130,6 @@ Input modes:
 | Recent | `Recent` | `ClockCounterClockwiseIcon` | The entire reserve area displays `Recent - WIP`. |
 | Type | `Type` | `TextTIcon` | The reserve area focuses the hidden terminal input. Every typed key is echoed into the terminal as it happens. |
 | Draft | `Draft` | `ArticleNyTimesIcon` | The entire reserve area displays `Draft - WIP`. |
-| Keys | `Keys` | `KeyboardIcon` | The entire reserve area displays terminal key buttons. |
 
 Default input mode is **Type**.
 
@@ -143,31 +142,7 @@ the tap/click handler. Do not defer this focus to `requestAnimationFrame` or a
 timer, because mobile browsers may then treat it as no longer user-initiated and
 refuse to open the native keyboard.
 
-## 6. Keys Mode
-
-Keys mode displays exactly these buttons:
-
-```text
-Esc   Tab   Space   Enter
-←     ↓     ↑       →
-```
-
-Mappings:
-
-| Button | Sequence |
-| --- | --- |
-| Esc | `\x1B` |
-| Tab | `\x09` |
-| Space | ` ` |
-| Enter | `\r` |
-| ← | `\x1B[D` |
-| ↓ | `\x1B[B` |
-| ↑ | `\x1B[A` |
-| → | `\x1B[C` |
-
-Tapping a key sends exactly one action. Long-press repeat is not required for v0.
-
-## 7. Type Mode Input
+## 6. Type Mode Input
 
 Use a hidden or visually minimal input configured for terminal-style typing:
 
@@ -192,7 +167,7 @@ Required behavior:
 * Input supports mobile keyboard behavior and IME composition.
 * The app does not depend only on `keydown` for text input.
 
-## 8. Terminal Playground Behavior
+## 7. Terminal Playground Behavior
 
 A fake shell is acceptable for v0.
 
@@ -202,7 +177,7 @@ Minimum useful behavior:
 * Maintain a command line buffer.
 * Enter submits the current command.
 * Backspace edits the current command.
-* Arrow keys produce visible behavior.
+* Gesture-generated arrow keys produce visible behavior.
 * Escape and Tab produce visible behavior.
 * When a fake full-screen app such as `ascii-splash`, `splash`, `changelog`, or
   `tut` is running, `Ctrl+C` sends `\x03` to that app; if the app exits, the
@@ -223,19 +198,18 @@ tut
 
 The shell only needs enough behavior to test the mobile controls.
 
-## 9. Keyboard Reserve
+## 8. Keyboard Reserve
 
 The keyboard reserve area has a stable height. It should not be recomputed from
 `visualViewport` while the native keyboard animates.
 
 When the OS keyboard is hidden, the reserve area shows the selected app keyboard
-UI (session list, `Recent - WIP`, Type focus target, `Draft - WIP`, or Keys
-buttons).
+UI (session list, `Recent - WIP`, Type focus target, or `Draft - WIP`).
 
 When the OS keyboard is visible, the OS keyboard may cover or occupy that same
 physical area. This is preferred over resizing the whole app around the keyboard.
 
-## 10. Touch Interactions
+## 9. Touch Interactions
 
 Required interactions:
 
@@ -244,7 +218,6 @@ Required interactions:
 * Switch active sessions through Sessions mode.
 * Tap Type reserve area to focus typing.
 * Type through the native keyboard.
-* Tap key buttons in Keys mode.
 * Drag in Gestures mode to send arrow keys.
 * Use Text selection mode for terminal selection and copy/paste.
 * Use Mouse mode for terminal mouse input when a TUI requests mouse reporting.
@@ -266,7 +239,7 @@ Not required for v0:
 * A full command history UI.
 * A real draft editor.
 
-## 11. Copy And Paste
+## 10. Copy And Paste
 
 Keep copy and paste minimal.
 
@@ -277,7 +250,7 @@ Prototype behavior:
 * No custom mobile clipboard manager is required.
 * No multi-line paste review is required.
 
-## 12. Recommended v0 Scope
+## 11. Recommended v0 Scope
 
 Build exactly this:
 
@@ -292,7 +265,7 @@ Gestures | Select | Mouse
 * Input mode selector:
 
 ```text
-Sessions | Recent | Type | Draft | Keys
+Sessions | Recent | Type | Draft
 ```
 
 * Stable keyboard reserve area.
@@ -300,16 +273,9 @@ Sessions | Recent | Type | Draft | Keys
 * Recent reserve content: `Recent - WIP`.
 * Draft reserve content: `Draft - WIP`.
 * Type mode native mobile keyboard input.
-* Keys buttons:
-
-```text
-Esc   Tab   Space   Enter
-←     ↓     ↑       →
-```
-
 * Simple local playground terminal behavior.
 
-## 13. Prototype Success Criteria
+## 12. Prototype Success Criteria
 
 The prototype should answer these questions:
 
@@ -322,7 +288,7 @@ The prototype should answer these questions:
 7. Does the stable keyboard reserve feel better than resizing the whole UI?
 8. Is the UI too cramped in portrait orientation?
 
-## 14. Future Work
+## 13. Future Work
 
 Potential later additions:
 
@@ -341,7 +307,7 @@ Potential later additions:
 * Multi-session support.
 * Production security model.
 
-## 15. Product Principle
+## 14. Product Principle
 
 The v0 prototype should stay focused:
 

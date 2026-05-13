@@ -153,13 +153,6 @@ export const TypePane: Story = {
   render: (args) => <StoryFrame {...args} />,
 };
 
-export const KeysPane: Story = {
-  args: {
-    defaultSection: 'keys',
-  },
-  render: (args) => <StoryFrame {...args} />,
-};
-
 export const RecentTodoPane: Story = {
   args: {
     defaultSection: 'recent',
@@ -184,7 +177,7 @@ export const NonInteractivePhoneMockup: Story = {
 
 export const CursorTouchAvailable: Story = {
   args: {
-    defaultSection: 'keys',
+    defaultSection: 'type',
     cursorTouchAvailable: true,
   },
   render: (args) => <StoryFrame {...args} />,
