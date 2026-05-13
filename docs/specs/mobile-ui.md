@@ -68,6 +68,8 @@ The mobile UI is split into fixed and flexible regions:
 
 The pane title and pane content come from the embedded `Wall` terminal pane. The
 mobile wrapper owns the two selectors and the fixed-height keyboard reserve.
+The selector block should use one divider between the Touch and Input rows, with
+no divider above Touch and no divider below Input.
 
 The root height must not be recalculated from `window.visualViewport` on every
 keyboard resize. The reserve area is intentionally stable so the terminal region

@@ -191,7 +191,7 @@ function KeyboardModeButton({
 
 function SelectorLabel({ children }: { children: ReactNode }) {
   return (
-    <div className="w-[4.5rem] shrink-0 pl-2 pr-1 font-mono text-xs leading-none text-muted">
+    <div className="w-12 shrink-0 pl-2 pr-1 font-mono text-xs leading-none text-muted">
       {children}
     </div>
   );
@@ -211,7 +211,7 @@ function TouchModeSelector({
   return (
     <section
       aria-label="Touch mode"
-      className="flex h-12 shrink-0 items-center border-t border-border bg-app-bg"
+      className="flex h-9 shrink-0 items-center bg-app-bg"
     >
       <SelectorLabel>Touch</SelectorLabel>
       <div className="mr-2 grid min-w-0 flex-1 grid-cols-3 gap-1 rounded bg-surface-raised p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
@@ -259,7 +259,7 @@ function KeyboardModeSelector({
   return (
     <section
       aria-label="Keyboard mode"
-      className="flex h-12 shrink-0 items-center border-t border-border bg-app-bg"
+      className="flex h-9 shrink-0 items-center border-t border-border bg-app-bg"
     >
       <SelectorLabel>Input</SelectorLabel>
       <nav className="mr-2 grid min-w-0 flex-1 grid-cols-4 gap-1 rounded bg-surface-raised p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
@@ -497,7 +497,7 @@ export function MobileTerminalUi({
         onSelect={setKeyboardMode}
       />
 
-      <div className="h-64 shrink-0 border-t border-border bg-app-bg">
+      <div className="h-64 shrink-0 bg-app-bg">
         {keyboardMode === 'recent' ? <WorkInProgressPane label="Recent" /> : null}
         {keyboardMode === 'draft' ? <WorkInProgressPane label="Draft" /> : null}
         {keyboardMode === 'type' ? (
