@@ -63,6 +63,17 @@ export function pasteFilePaths(terminalId: string, paths: string[]): void {
 }
 
 async function readTextFromClipboard(): Promise<string> {
+  // Prefer the platform's native text read when available — navigator.clipboard.readText()
+  // on macOS WKWebView pops a "Paste from <App>" confirmation menu at the cursor every
+  // time it's invoked from JS, which defeats the point of a paste shortcut.
+  const platform = getPlatform();
+  if (platform.readClipboardText) {
+    try {
+      return (await platform.readClipboardText()) ?? '';
+    } catch {
+      return '';
+    }
+  }
   try {
     if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) return '';
     return await navigator.clipboard.readText();

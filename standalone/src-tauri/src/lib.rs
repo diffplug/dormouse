@@ -290,6 +290,18 @@ fn read_clipboard_image_as_file_path(
 }
 
 #[tauri::command]
+fn read_clipboard_text(
+    state: tauri::State<'_, SidecarState>,
+) -> Result<String, String> {
+    let response =
+        request_from_sidecar_timeout(&state, "clipboard:readText", serde_json::json!({}), Duration::from_secs(5))?;
+    Ok(response
+        .get("text")
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default())
+}
+
+#[tauri::command]
 fn read_update_log() -> Result<String, String> {
     read_log_tail(10_000)
 }
@@ -632,6 +644,7 @@ pub fn run() {
             get_available_shells,
             read_clipboard_file_paths,
             read_clipboard_image_as_file_path,
+            read_clipboard_text,
             read_update_log,
         ])
         .build(tauri::generate_context!())

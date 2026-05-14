@@ -92,6 +92,58 @@ async function readClipboardFilePaths(runtime = {}) {
   return readFilePathsLinux(runtime);
 }
 
+async function readTextMac(runtime) {
+  const exec = runtime.exec || execFileP;
+  try {
+    const { stdout } = await exec('pbpaste', [], { maxBuffer: MAX_BUFFER });
+    return stdout;
+  } catch {
+    return '';
+  }
+}
+
+async function readTextWindows(runtime) {
+  const exec = runtime.exec || execFileP;
+  try {
+    const { stdout } = await exec(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-Command', 'Get-Clipboard -Raw'],
+      { maxBuffer: MAX_BUFFER },
+    );
+    // Get-Clipboard -Raw appends a trailing newline that wasn't on the clipboard.
+    return stdout.replace(/\r?\n$/, '');
+  } catch {
+    return '';
+  }
+}
+
+async function readTextLinux(runtime) {
+  const env = runtime.env || process.env;
+  const exec = runtime.exec || execFileP;
+  const wayland = Boolean(env.WAYLAND_DISPLAY);
+  const attempts = wayland
+    ? [['wl-paste', ['--no-newline']], ['xclip', ['-selection', 'clipboard', '-o']]]
+    : [['xclip', ['-selection', 'clipboard', '-o']], ['wl-paste', ['--no-newline']]];
+
+  for (const [cmd, args] of attempts) {
+    try {
+      const { stdout } = await exec(cmd, args, { maxBuffer: MAX_BUFFER });
+      if (stdout) return stdout;
+    } catch {}
+  }
+  return '';
+}
+
+// Native clipboard text read — bypasses navigator.clipboard.readText(), whose
+// WKWebView implementation pops a "Paste from <App>" confirmation menu at the
+// cursor every time it's called from JS.
+async function readClipboardText(runtime = {}) {
+  const platform = runtime.platform || process.platform;
+  if (platform === 'darwin') return readTextMac(runtime);
+  if (platform === 'win32') return readTextWindows(runtime);
+  return readTextLinux(runtime);
+}
+
 async function readImageMac(out, runtime) {
   const exec = runtime.exec || execFileP;
   const script = [
@@ -211,6 +263,7 @@ async function readClipboardImageAsFilePath(runtime = {}) {
 module.exports = {
   readClipboardFilePaths,
   readClipboardImageAsFilePath,
+  readClipboardText,
   parseUriList,
   splitNonEmptyLines,
 };

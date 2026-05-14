@@ -171,6 +171,12 @@ export class TauriAdapter implements PlatformAdapter {
     } catch { return null; }
   }
 
+  async readClipboardText(): Promise<string | null> {
+    try {
+      return await rawInvoke<string>("read_clipboard_text");
+    } catch { return null; }
+  }
+
   onFilesDropped(handler: (paths: string[]) => void): () => void {
     this.filesDroppedHandlers.add(handler);
     return () => { this.filesDroppedHandlers.delete(handler); };
