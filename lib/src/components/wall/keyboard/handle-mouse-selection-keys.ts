@@ -66,7 +66,11 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
     });
     return true;
   }
-  if (mod && keyLower === 'v') {
+  // Accept either Ctrl+V or Cmd+V for paste on all platforms — matches VSCode's
+  // terminal paste behavior and the muscle memory of users coming from Linux/Windows.
+  // Trade-off: shadows readline's ^V verbatim-insert; not worth surfacing as a
+  // setting until someone asks for it.
+  if ((e.metaKey || e.ctrlKey) && keyLower === 'v') {
     e.preventDefault();
     e.stopImmediatePropagation();
     void doPaste(sid);

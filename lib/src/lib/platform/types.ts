@@ -29,6 +29,10 @@ export interface PlatformAdapter {
   // Clipboard support for file references and raw images.
   readClipboardFilePaths(): Promise<string[] | null>;
   readClipboardImageAsFilePath(): Promise<string | null>;
+  // Optional native clipboard text read. When present, doPaste uses this
+  // instead of navigator.clipboard.readText() so adapters whose webview pops
+  // a "Paste from <App>" confirmation (notably Tauri's WKWebView) can bypass it.
+  readClipboardText?(): Promise<string | null>;
   // Only present on adapters with a native (non-DOM) drag-drop source. Currently inert in Tauri; see diffplug/mouseterm#38 and tauri-apps/tauri#14373.
   onFilesDropped?(handler: (paths: string[]) => void): () => void;
 

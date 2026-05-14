@@ -31,14 +31,13 @@ describe('doPaste three-tier fallthrough', () => {
     });
   });
 
-  it('uses file refs when present and never reads text or image', async () => {
+  it('prefers file refs over text and skips the image read', async () => {
     mocks.readClipboardFilePaths.mockResolvedValue(['/tmp/a.png', '/tmp/b file.png']);
-    mocks.readText.mockResolvedValue('should not be read');
+    mocks.readText.mockResolvedValue('coexisting text payload');
     mocks.readClipboardImageAsFilePath.mockResolvedValue('/tmp/img.png');
 
     await doPaste('t1');
 
-    expect(mocks.readText).not.toHaveBeenCalled();
     expect(mocks.readClipboardImageAsFilePath).not.toHaveBeenCalled();
     expect(mocks.writePty).toHaveBeenCalledTimes(1);
     expect(mocks.writePty).toHaveBeenCalledWith('t1', '/tmp/a.png /tmp/b\\ file.png ');

@@ -53,6 +53,11 @@ rl.on('line', (line) => {
           path: await clipboard.readClipboardImageAsFilePath(),
         }));
         break;
+      case 'clipboard:readText':
+        respondAsync('clipboard:text', data.requestId, async () => ({
+          text: await clipboard.readClipboardText(),
+        }));
+        break;
       default: console.error(`[sidecar] Unknown event: ${event}`);
     }
   } catch (err) {

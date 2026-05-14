@@ -5,6 +5,7 @@ const path = require('node:path');
 const {
   readClipboardFilePaths,
   readClipboardImageAsFilePath,
+  readClipboardText,
   parseUriList,
   splitNonEmptyLines,
 } = require('./clipboard-ops');
@@ -188,6 +189,81 @@ test('readClipboardImageAsFilePath returns null when osascript returns empty', a
   });
   assert.equal(result, null);
   assert.deepEqual(fs.rmdirs, [path.join('/t', 'mouseterm-drops-dir-0')]);
+});
+
+test('readClipboardText on mac shells out to pbpaste', async () => {
+  const calls = [];
+  const text = await readClipboardText({
+    platform: 'darwin',
+    exec: async (cmd, args) => {
+      calls.push([cmd, args]);
+      return { stdout: 'hello clipboard' };
+    },
+  });
+  assert.equal(text, 'hello clipboard');
+  assert.deepEqual(calls, [['pbpaste', []]]);
+});
+
+test('readClipboardText on mac returns empty string when pbpaste fails', async () => {
+  const text = await readClipboardText({
+    platform: 'darwin',
+    exec: async () => { throw new Error('no pbpaste'); },
+  });
+  assert.equal(text, '');
+});
+
+test('readClipboardText on windows strips Get-Clipboard trailing newline', async () => {
+  const text = await readClipboardText({
+    platform: 'win32',
+    exec: async (cmd, args) => {
+      assert.equal(cmd, 'powershell');
+      assert.ok(args.includes('Get-Clipboard -Raw'));
+      return { stdout: 'line1\r\nline2\r\n' };
+    },
+  });
+  assert.equal(text, 'line1\r\nline2');
+});
+
+test('readClipboardText on linux prefers xclip in X11', async () => {
+  const calls = [];
+  const text = await readClipboardText({
+    platform: 'linux',
+    env: {},
+    exec: async (cmd, args) => {
+      calls.push([cmd, args]);
+      if (cmd === 'xclip') return { stdout: 'x11 text' };
+      throw new Error('should not reach');
+    },
+  });
+  assert.equal(text, 'x11 text');
+  assert.equal(calls[0][0], 'xclip');
+});
+
+test('readClipboardText on linux prefers wl-paste under Wayland', async () => {
+  const calls = [];
+  const text = await readClipboardText({
+    platform: 'linux',
+    env: { WAYLAND_DISPLAY: 'wayland-0' },
+    exec: async (cmd, args) => {
+      calls.push([cmd, args]);
+      if (cmd === 'wl-paste') return { stdout: 'wayland text' };
+      throw new Error('should not reach');
+    },
+  });
+  assert.equal(text, 'wayland text');
+  assert.equal(calls[0][0], 'wl-paste');
+});
+
+test('readClipboardText on linux falls back when first tool fails', async () => {
+  const text = await readClipboardText({
+    platform: 'linux',
+    env: {},
+    exec: async (cmd) => {
+      if (cmd === 'xclip') throw new Error('no xclip');
+      return { stdout: 'fallback text' };
+    },
+  });
+  assert.equal(text, 'fallback text');
 });
 
 test('readClipboardImageAsFilePath on linux writes buffer from exec stdout', async () => {
