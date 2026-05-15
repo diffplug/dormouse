@@ -2,9 +2,15 @@
 
 ## Goal
 
-The alert system is an opt-in reminder for a **Session** that may finish work while the user is looking elsewhere. Alert state lives on the Session itself, not on the Pane or Door that currently displays it.
+The alert system is a reminder for a **Session** that may finish work while the user is looking elsewhere. Alert state lives on the Session itself, not on the Pane or Door that currently displays it.
 
-Explicit terminal notification/progress reports are the exception to the opt-in rule. `OSC 9`, `OSC 9;4`, `OSC 99`, `OSC 777`, and standalone terminal `BEL` handling is specified in [Notification protocols](#notification-protocols) below; those protocol signals may cock the bell or force `ALERT_RINGING` even when the activity monitor is disabled. The OSC sequence registry and parsing-location rules live in `docs/specs/OSC.md`.
+There are three independent ways a Session can become alert-worthy:
+
+- **WATCHING**: the user explicitly enables MouseTerm's timer-based watcher, output motion becomes busy, then motion stops while the Session lacks attention.
+- **Explicit protocol notification**: the PTY emits a supported terminal notification/progress report (`OSC 9`, `OSC 9;4`, `OSC 99`, `OSC 777`, or standalone `BEL`) while the Session lacks attention.
+- **Command exit after attention loss**: MouseTerm observes a foreground command running while the Session has attention, attention later expires or is explicitly lost, and that same command exits after running for at least `T_USER_ATTENTION`.
+
+Protocol notification/progress reports and command-exit alerts are not controlled by the WATCHING toggle. The OSC sequence registry and parsing-location rules live in `docs/specs/OSC.md`; command lifecycle state comes from `docs/specs/terminal-state.md`.
 
 This spec uses semantic state names that describe what the Session currently owes the user:
 
@@ -12,6 +18,7 @@ This spec uses semantic state names that describe what the Session currently owe
 - `MIGHT_BE_BUSY`
 - `BUSY`
 - `OSC_NOTIF_BUSY`
+- `COMMAND_EXIT_ARMED`
 - `MIGHT_NEED_ATTENTION`
 - `ALERT_RINGING`
 
@@ -19,9 +26,10 @@ This document is the source of truth for the naming and behavior of this state m
 
 ## Non-goals
 
-- No command sniffing or per-tool heuristics. We do not try to guess whether `vim`, `npm dev`, `claude`, or any other command is "appropriate" for alerts.
+- No per-tool allow/deny heuristics. We do not try to guess whether `vim`, `npm dev`, `claude`, or any other command is "appropriate" for alerts.
 - No sound, native OS notifications, or browser notifications in v1. "Alarm" means MouseTerm's existing `ALERT_RINGING` visual state.
 - No standalone progress bar widget. `OSC 9;4` progress updates `protocolStatus` while active; completion/error creates TODO detail. It does not add a separate progress widget to the Pane header.
+- No process-tree introspection for command-exit alerts in v1. Shell integration (`OSC 133` / `OSC 633`) is the reliable path. Heuristic user-input/prompt fallback may be used as a best-effort source, but deeper shell integration remains an open TODO.
 - No full iTerm2/kitty/rxvt/WezTerm feature parity. Unsupported sequences are ignored unless another spec claims them.
 - No HTML, Markdown, ANSI styling, shell command parsing, or clickable action buttons inside TODO notification previews.
 - No Door-specific alert menu that overrides the existing click-to-reattach behavior from `docs/specs/layout.md`.
@@ -45,24 +53,35 @@ This is guidance only. The system does not auto-enable or auto-disable alerts ba
 
 Each Session owns:
 
-- `status: 'ALERT_DISABLED' | 'NOTHING_TO_SHOW' | 'MIGHT_BE_BUSY' | 'BUSY' | 'OSC_NOTIF_BUSY' | 'MIGHT_NEED_ATTENTION' | 'ALERT_RINGING'`
+- `status: 'WATCHING_DISABLED' | 'NOTHING_TO_SHOW' | 'MIGHT_BE_BUSY' | 'BUSY' | 'OSC_NOTIF_BUSY' | 'COMMAND_EXIT_ARMED' | 'MIGHT_NEED_ATTENTION' | 'ALERT_RINGING'`
   - This is the public projected alert and activity state for the Session.
-  - `ALERT_DISABLED`: visual alert tracking is off and no protocol state is active. Default state.
-  - Stable states: `ALERT_DISABLED`, `NOTHING_TO_SHOW`, `BUSY`, `OSC_NOTIF_BUSY`, `ALERT_RINGING`.
+  - `WATCHING_DISABLED`: WATCHING is off and no stronger protocol or command-exit state is active. Default state.
+  - Stable states: `WATCHING_DISABLED`, `NOTHING_TO_SHOW`, `BUSY`, `OSC_NOTIF_BUSY`, `COMMAND_EXIT_ARMED`, `ALERT_RINGING`.
   - Transitional states: `MIGHT_BE_BUSY`, `MIGHT_NEED_ATTENTION`.
-  - When the user enables the visual alert track, `visualStatus` transitions from `ALERT_DISABLED` to `NOTHING_TO_SHOW` and timer-based activity tracking begins fresh from that moment.
-  - When the user disables the visual alert track, timer-based activity tracking stops and `visualStatus` returns to `ALERT_DISABLED`. Public `status` may still be `OSC_NOTIF_BUSY` or `ALERT_RINGING` if `protocolStatus` is active.
-- `visualStatus: 'ALERT_DISABLED' | 'NOTHING_TO_SHOW' | 'MIGHT_BE_BUSY' | 'BUSY' | 'MIGHT_NEED_ATTENTION' | 'ALERT_RINGING'`
-  - Internal timer-based status owned by the existing visual activity monitor.
+  - When the user enables WATCHING, `watchingStatus` transitions from `WATCHING_DISABLED` to `NOTHING_TO_SHOW` and timer-based activity tracking begins fresh from that moment.
+  - When the user disables WATCHING, timer-based activity tracking stops and `watchingStatus` returns to `WATCHING_DISABLED`. Public `status` may still be `OSC_NOTIF_BUSY`, `COMMAND_EXIT_ARMED`, or `ALERT_RINGING` if another track is active.
+- `watchingStatus: 'WATCHING_DISABLED' | 'NOTHING_TO_SHOW' | 'MIGHT_BE_BUSY' | 'BUSY' | 'MIGHT_NEED_ATTENTION' | 'ALERT_RINGING'`
+  - Internal timer-based status owned by the existing activity monitor.
   - It is driven only by meaningful output, silence timers, and attention.
-  - It may be deleted in a future terminal-report-only implementation without changing the protocol notification model.
+  - Spec prose should use WATCHING terminology for this track.
+- `watchingEnabled: boolean`
+  - Public boolean exposed to UI and persistence so the WATCHING toggle remains accurate while `status` is projected to `OSC_NOTIF_BUSY`, `COMMAND_EXIT_ARMED`, or `ALERT_RINGING`.
+  - This is `true` exactly when the Session owns an active WATCHING monitor.
 - `protocolStatus: 'IDLE' | 'OSC_NOTIF_BUSY' | 'ALERT_RINGING'`
   - Internal terminal-report status owned by parsed terminal reports (see [Notification protocols](#notification-protocols)).
   - It is driven only by terminal reports such as `OSC 9`, `OSC 9;4`, `OSC 99`, `OSC 777`, and standalone `BEL`.
-  - It does not use output/silence timers from the visual activity monitor.
+  - It does not use output/silence timers from the WATCHING activity monitor.
   - It does use the shared attention model. A protocol completion/notification received while the user is actively attending that Session must not ring.
   - `OSC_NOTIF_BUSY` means a terminal report says work is in progress, but there is not yet a notification owed to the user.
   - `ALERT_RINGING` means a terminal report explicitly created a notification or completed/errored a reported progress cycle.
+- `commandExitStatus: 'IDLE' | 'COMMAND_EXIT_ARMED' | 'ALERT_RINGING'`
+  - Internal command-exit status owned by terminal semantic command lifecycle events.
+  - It is driven by `commandStart` / `commandFinish` events from `OSC 133`, `OSC 633`, or equivalent semantic sources.
+  - `COMMAND_EXIT_ARMED` means MouseTerm saw a foreground command while the Session had attention, then the Session lost attention while that same command was still running.
+  - `ALERT_RINGING` means that same command exited after running for at least `T_USER_ATTENTION` and the Session still lacked attention.
+- `commandExitWatch: CommandExitWatch | null`
+  - Latest foreground command eligible for command-exit alerting.
+  - Cleared when the command finishes, another command starts, the user returns before finish, or the Session is destroyed.
 - `todo: boolean`
   - Reminder state for the Session. Default `false`.
   - `false`: no TODO.
@@ -82,7 +101,13 @@ Each Session also owns:
 `ActivityNotification` shape (intentionally small — these are the only fields rendered):
 
 ```ts
-type ActivityNotificationSource = 'OSC 9' | 'OSC 9;4' | 'OSC 99' | 'OSC 777' | 'BEL';
+type ActivityNotificationSource =
+  | 'OSC 9'
+  | 'OSC 9;4'
+  | 'OSC 99'
+  | 'OSC 777'
+  | 'BEL'
+  | 'COMMAND_EXIT';
 
 interface ActivityNotification {
   source: ActivityNotificationSource;
@@ -98,6 +123,7 @@ Per-source mapping rules (full protocol semantics in [Notification protocols](#n
 - `OSC 99` stores `{ source: 'OSC 99', title, body }` after chunk assembly and sanitization.
 - `OSC 9;4` stores nothing while progress is active. On completion/error it generates `{ source: 'OSC 9;4', title, body }`, where `title` is a short summary such as `Progress complete`, `Progress error`, or `Progress warning`, and `body` contains the percent when available.
 - Standalone `BEL` stores `{ source: 'BEL', title: 'Terminal bell', body: null }`.
+- Command exit stores `{ source: 'COMMAND_EXIT', title: 'Command finished', body }`, where `body` contains the display command and exit status when available.
 
 Persistence rules:
 
@@ -115,10 +141,11 @@ The workspace owns:
 Important invariants:
 
 - Alert state is session-scoped and survives Pane <-> Door transitions.
-- `visualStatus` describes what the timer-based track owes the user since the last explicit attention boundary.
-- `protocolStatus` describes what terminal reports say independently of the visual track.
+- `watchingStatus` describes what the timer-based WATCHING track owes the user since the last explicit attention boundary.
+- `protocolStatus` describes what terminal reports say independently of the WATCHING track.
+- `commandExitStatus` describes whether a known foreground command has been armed for exit-based alerting.
 - Public `status` is a projection of those tracks for existing UI.
-- Destroying a Session clears `todo`, `notification`, and `protocolStatus` with it; the activity monitor is disposed.
+- Destroying a Session clears `todo`, `notification`, `protocolStatus`, and `commandExitStatus` with it; the activity monitor is disposed.
 - Re-rendering, theme changes, resize reflow, or remounting a Pane must not create a new alert by themselves.
 
 ## Attention model
@@ -140,34 +167,37 @@ These do **not** count as attention:
 - a Door existing in the baseboard
 - reattaching a Door with `d`, because that restores the Pane but stays in command mode
 
-Attention is cleared when:
+Attention is lost when:
 
 - the user has not explicitly interacted with that Session for `T_USER_ATTENTION`
 - the app loses focus
 - the Session is minimized into a Door while it had attention
 - the Session is destroyed
 
-`T_USER_ATTENTION` is intentionally finite so a user can run a slow command, walk away, and still get a visual alert later even if that Pane remained selected. Start with 15s and tune with real usage.
+`T_USER_ATTENTION` is intentionally finite so a user can run a slow command, walk away, and still get an alert later even if that Pane remained selected. It also acts as the minimum command runtime for command-exit alerts. Start with 15s and tune with real usage.
 
 Doors never directly hold attention. A Door can only regain attention by being restored into a Pane through an action that enters passthrough.
 
 ## State model
 
-There are two independent state models:
+There are three independent state models:
 
-- **Visual track**: the existing timer-based activity monitor. It watches meaningful output, silence, and user attention. Its internal state is `visualStatus`.
+- **WATCHING track**: the existing timer-based activity monitor. It watches meaningful output, silence, and user attention only after the user has enabled WATCHING. Its internal state is `watchingStatus`.
 - **Terminal-report track**: parsed terminal notification/progress reports from the PTY. It relies entirely on terminal reports and never uses the output/silence timers. Its internal state is `protocolStatus`.
+- **Command-exit track**: parsed terminal semantic command lifecycle events. It arms only after the user has seen a foreground command running and later loses attention before that same command exits. Its internal state is `commandExitStatus`.
 
 The public `status` is a projection used by existing UI:
 
 1. If `protocolStatus === 'ALERT_RINGING'`, public `status = ALERT_RINGING`.
-2. Else if `visualStatus === 'ALERT_RINGING'`, public `status = ALERT_RINGING`.
-3. Else if `protocolStatus === 'OSC_NOTIF_BUSY'`, public `status = OSC_NOTIF_BUSY`.
-4. Else public `status = visualStatus`.
+2. Else if `commandExitStatus === 'ALERT_RINGING'`, public `status = ALERT_RINGING`.
+3. Else if `watchingStatus === 'ALERT_RINGING'`, public `status = ALERT_RINGING`.
+4. Else if `protocolStatus === 'OSC_NOTIF_BUSY'`, public `status = OSC_NOTIF_BUSY`.
+5. Else if `commandExitStatus === 'COMMAND_EXIT_ARMED'`, public `status = COMMAND_EXIT_ARMED`.
+6. Else public `status = watchingStatus`.
 
-This projection is deliberate. Deleting the visual track should leave `protocolStatus: IDLE | OSC_NOTIF_BUSY | ALERT_RINGING` plus the same public projection behavior. The terminal-report path must be able to cock the bell and ring without `ActivityMonitor`, silence timers, or meaningful-output heuristics. It still relies on the shared user-attention model.
+This projection is deliberate. No single combined enum should attempt to encode every combination of WATCHING/protocol/command-exit state. The terminal-report and command-exit paths must be able to ring without enabling WATCHING. All three tracks rely on the shared user-attention model.
 
-### Visual track
+### WATCHING track
 
 The point of the state machine is not to model every output blip. It is to answer a narrow question:
 
@@ -208,8 +238,14 @@ All values are configurable via `cfg.alert`. Total silence from last meaningful 
 - `OSC_NOTIF_BUSY`
   - Stable projected state from the terminal-report track.
   - The terminal explicitly reported ongoing progress or a similar protocol-backed busy condition.
-  - It looks the same as `BUSY` in the Pane header and Door, but it does not participate in visual-track timers.
-  - Visual-track silence does not move it to `MIGHT_NEED_ATTENTION`; only a terminal report can clear it or promote it to `ALERT_RINGING`.
+  - It looks the same as `BUSY` in the Pane header and Door, but it does not participate in WATCHING timers.
+  - WATCHING silence does not move it to `MIGHT_NEED_ATTENTION`; only a terminal report can clear it or promote it to `ALERT_RINGING`.
+
+- `COMMAND_EXIT_ARMED`
+  - Stable projected state from the command-exit track.
+  - MouseTerm saw a foreground command running while the Session had attention, and attention later expired or was explicitly lost while that command was still running.
+  - It looks the same as `BUSY` in the Pane header and Door, but it does not participate in WATCHING timers.
+  - Only the same command finishing, the user returning, another command starting, or Session teardown can clear or promote it.
 
 - `MIGHT_NEED_ATTENTION`
   - Transitional state entered when a `BUSY` Session goes quiet.
@@ -237,13 +273,13 @@ All values are configurable via `cfg.alert`. Total silence from last meaningful 
 | `ALERT_RINGING` | new meaningful output and the Session has attention | `MIGHT_BE_BUSY` | A new work cycle may be starting. |
 | `ALERT_RINGING` | new meaningful output but the Session lacks attention | `ALERT_RINGING` | Latch: new output does not silently clear the alert without user awareness. |
 
-These transition rules apply to the visual track only. `OSC_NOTIF_BUSY` is not entered, exited, or promoted by these timers.
+These transition rules apply to the WATCHING track only. `OSC_NOTIF_BUSY` and `COMMAND_EXIT_ARMED` are not entered, exited, or promoted by these timers.
 
 ### Terminal-report track
 
 | Current | Event | Next | Notes |
 |---|---|---|---|
-| `IDLE` | terminal report starts progress (`OSC 9;4` active state) | `OSC_NOTIF_BUSY` | Cock the bell without enabling the visual activity monitor. |
+| `IDLE` | terminal report starts progress (`OSC 9;4` active state) | `OSC_NOTIF_BUSY` | Cock the bell without enabling WATCHING. |
 | `OSC_NOTIF_BUSY` | terminal report updates progress | `OSC_NOTIF_BUSY` | Refresh internal progress state. Public UI remains visually identical to `BUSY`. |
 | `OSC_NOTIF_BUSY` | terminal report completes progress and Session lacks attention | `ALERT_RINGING` | Create `notification`, set `todo = true`, and ring. |
 | `OSC_NOTIF_BUSY` | terminal report completes progress and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
@@ -254,11 +290,33 @@ These transition rules apply to the visual track only. `OSC_NOTIF_BUSY` is not e
 | `IDLE` | explicit progress completion report (`OSC 9;4;1;100`) and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
 | `IDLE` | explicit progress error report (`OSC 9;4;2`) and Session lacks attention | `ALERT_RINGING` | Create generated error `notification`, set `todo = true`, and ring. |
 | `IDLE` | explicit progress error report (`OSC 9;4;2`) and Session has attention | `IDLE` | User already sees it; do not ring or create TODO. |
-| `ALERT_RINGING` | explicit attention boundary / dismiss / TODO clear | `IDLE` | Public status falls back to visual projection after protocol ring clears. |
+| `ALERT_RINGING` | explicit attention boundary / dismiss / TODO clear | `IDLE` | Public status falls back to the command-exit/WATCHING projection after protocol ring clears. |
 | any | direct notification (`OSC 9`, completed `OSC 99`, `OSC 777`, standalone `BEL`) and Session lacks attention | `ALERT_RINGING` | Create `notification`, set `todo = true`, and ring immediately. |
 | any | direct notification (`OSC 9`, completed `OSC 99`, `OSC 777`, standalone `BEL`) and Session has attention | unchanged | User already sees it; suppress that notification only. Do not create TODO, and do not clear unrelated active progress. |
 
 `OSC_NOTIF_BUSY` never auto-rings because of silence. If a program starts progress and never sends completion/error, MouseTerm remains cocked until another terminal report completes/errors the progress cycle or the Session is destroyed.
+
+### Command-exit track
+
+The command-exit track is intentionally stricter than WATCHING. It exists for this case: "I was watching a command run, then I stopped paying attention, then that command exited."
+
+| Current | Event | Next | Notes |
+|---|---|---|---|
+| `IDLE` | command starts while Session has attention | `IDLE` | Store `commandExitWatch` for that command. Do not arm until attention is lost. |
+| `IDLE` | attention becomes active while a command is already running | `IDLE` | Store or update `commandExitWatch.seenWithAttentionAt`. |
+| `IDLE` | watched command is still running and attention expires or is explicitly lost | `COMMAND_EXIT_ARMED` | Store `attentionLostAt`. |
+| `COMMAND_EXIT_ARMED` | same command finishes, runtime is at least `T_USER_ATTENTION`, and Session lacks attention | `ALERT_RINGING` | Create generated command-exit notification, set `todo = true`, and ring. |
+| `COMMAND_EXIT_ARMED` | same command finishes too quickly | `IDLE` | Clear without ringing. |
+| `COMMAND_EXIT_ARMED` | PTY exits before a command-finish semantic event, runtime is at least `T_USER_ATTENTION`, and Session lacks attention | `ALERT_RINGING` | Treat process exit as the fallback finish event for commands such as `exec <long command>` or shells that exit before emitting a finish marker. |
+| `IDLE` | PTY exits before a command-finish semantic event | `IDLE` | Clear any stored `commandExitWatch`; a dead process must not become armed later. |
+| `COMMAND_EXIT_ARMED` | Session regains attention before finish | `IDLE` | Clear the arm; the user is watching again. |
+| any | a different command starts | `IDLE` | Replace the watch with the new command if it is eligible. |
+| `ALERT_RINGING` | explicit attention boundary / dismiss / TODO clear | `IDLE` | Public status falls back to the other tracks. |
+| any | Session destroyed | `IDLE` | Session teardown clears command-exit state. |
+
+Race rule: command-exit alerting is eligible only if attention was lost before the `commandFinish` event for the same command. If command finish and attention loss are observed in the opposite order, do not ring.
+
+Precedence rule: if a direct protocol notification/progress completion and command finish happen in the same parse batch, protocol detail wins. The command-exit track should not overwrite a richer protocol-generated `ActivityNotification`.
 
 ### Meaningful output
 
@@ -272,7 +330,7 @@ The implementation may later learn additional suppressions, but this spec only r
 
 ## Notification protocols
 
-Protocol notifications and standalone terminal bells are explicit application requests for attention. They bypass the normal opt-in activity monitor: a Session may ring even when its alert toggle was disabled. They must not ring while the user is actively attending that Session.
+Protocol notifications and standalone terminal bells are explicit application requests for attention. They bypass the WATCHING toggle: a Session may ring even when WATCHING is disabled. They must not ring while the user is actively attending that Session.
 
 Active/in-progress progress sequences do not ring immediately. They "cock" the alarm bell — MouseTerm treats active progress as an explicit finite-work cycle and exposes `OSC_NOTIF_BUSY`. Explicit completion/error progress reports may ring immediately when the Session lacks attention.
 
@@ -444,12 +502,12 @@ Requirements:
 
 ## Alert trigger
 
-Visual alert logic is driven by transitions in `visualStatus`. Protocol alert logic is driven by transitions in `protocolStatus`. The public `status` projection reflects whichever track currently has the strongest user-facing claim.
+WATCHING alert logic is driven by transitions in `watchingStatus`. Protocol alert logic is driven by transitions in `protocolStatus`. Command-exit alert logic is driven by transitions in `commandExitStatus`. The public `status` projection reflects whichever track currently has the strongest user-facing claim.
 
-### Ringing starts when all of these are true
+### WATCHING ring starts when all of these are true
 
-- the Session has an active visual activity monitor (i.e. `visualStatus !== 'ALERT_DISABLED'`)
-- the Session's `visualStatus` transitions from `MIGHT_NEED_ATTENTION` into `ALERT_RINGING`
+- the Session has WATCHING enabled (i.e. `watchingStatus !== 'WATCHING_DISABLED'`)
+- the Session's `watchingStatus` transitions from `MIGHT_NEED_ATTENTION` into `ALERT_RINGING`
 - the Session does not currently have attention
 
 ### Protocol override
@@ -460,7 +518,7 @@ Supported terminal notification reports (see [Notification protocols](#notificat
 - obey attention suppression because the user may already be typing into or reading that Session
 - set `todo = true` and attach sanitized notification detail
 - do not enable or disable the activity monitor
-- return to `ALERT_DISABLED` after dismissal if no activity monitor was enabled before the protocol ring
+- return to `WATCHING_DISABLED` after dismissal if no activity monitor was enabled before the protocol ring
 
 Implementation surface inside `AlertManager`:
 
@@ -468,24 +526,43 @@ Implementation surface inside `AlertManager`:
 - `OSC 9;4` progress is tracked internally in `AlertManager`, not in public `ActivityState`.
 - `getState(id).status` returns `ALERT_RINGING` while the protocol ring is active.
 - `getState(id).status` returns `OSC_NOTIF_BUSY` while internal protocol progress is active and no stronger state is present.
-- Dismiss/attend clears the protocol ring; status falls back to the visual track or `ALERT_DISABLED` if no `ActivityMonitor` exists.
+- Dismiss/attend clears the protocol ring; status falls back to the command-exit/WATCHING projection or `WATCHING_DISABLED` if no stronger state exists.
 - Completing or erroring a protocol progress cycle creates an `ActivityNotification` and promotes it into a protocol ring only if the Session lacks attention.
 - Methods such as `notifyFromProtocol(id, notification)` and `updateProtocolProgress(id, state, percent)` are exposed through `PlatformAdapter` / VS Code messages.
+
+### Command-exit override
+
+Terminal semantic command lifecycle events may create a command-exit ring. Command-exit rings:
+
+- force public `status = ALERT_RINGING` even when WATCHING is disabled
+- obey attention suppression because the user may already have returned to that Session
+- set `todo = true` and attach generated command-exit detail unless a richer protocol notification is already ringing
+- do not enable or disable WATCHING
+- return to `WATCHING_DISABLED` after dismissal if no WATCHING monitor was enabled and no protocol progress is active
+
+Implementation surface inside `AlertManager`:
+
+- A `commandExitStatus` field independent of `ActivityMonitor` and `protocolStatus`.
+- A `commandExitWatch` record for the current foreground command, storing command id, display command, source, `startedAt`, `seenWithAttentionAt`, and `attentionLostAt`.
+- `getState(id).status` returns `COMMAND_EXIT_ARMED` while command-exit alerting is armed and no stronger state is present.
+- `applyTerminalSemanticEvents(id, events)` consumes normalized command lifecycle events; it must not parse raw OSC directly.
+- Dismiss/attend/TODO-clear clears the command-exit ring; status falls back to protocol or WATCHING projection.
+- Command-exit rings require command runtime `>= T_USER_ATTENTION`.
 
 ### Ringing does not start when any of these are true
 
 - the Session already has attention at the moment it would otherwise enter `ALERT_RINGING`
 - the Session is merely re-rendered or reattached while already `ALERT_RINGING`
 - the only recent output was resize noise already ignored by the completion detector
-- for visual/activity-monitor rings only: the visual alert track is disabled (`visualStatus === 'ALERT_DISABLED'`)
+- for WATCHING rings only: WATCHING is disabled (`watchingStatus === 'WATCHING_DISABLED'`)
 
 This "fresh transition into `ALERT_RINGING` only" rule is critical. It prevents duplicate alerts on remount, theme change, or Pane <-> Door movement.
 
-Resize/activity-monitor suppression rules apply only to visual rings. Attention suppression applies to both visual and protocol rings.
+Resize/activity-monitor suppression rules apply only to WATCHING rings. Attention suppression applies to WATCHING, protocol, and command-exit rings.
 
 ## Alert clearing rules
 
-For activity-monitor rings, the Session leaves `ALERT_RINGING` and returns to `NOTHING_TO_SHOW` when any of these happen:
+For WATCHING rings, the Session leaves `ALERT_RINGING` and returns to `NOTHING_TO_SHOW` when any of these happen:
 
 - the user attends to the Session (clicking into the Pane, typing in passthrough, restoring a Door via click/`Enter`)
 - the user dismisses the alert (clicking the ringing bell, pressing `a`)
@@ -494,13 +571,15 @@ For activity-monitor rings, the Session leaves `ALERT_RINGING` and returns to `N
 
 All attention-based dismissals (the first three above) set `todo = true` if it is not already set. This prevents phantom dismissals where the alert vanishes without a trace. Once the TODO is visible, the user can clear it explicitly from the pill/dialog or by typing `Enter` as passthrough input into that Session's shell (i.e., the keystroke is forwarded to the PTY). The command-mode `Enter` that *switches into* passthrough does not clear the TODO. Synthetic terminal reports (focus events, cursor-position responses) also do not count as user input for clearing.
 
-For protocol rings (see [Notification protocols](#notification-protocols)), clearing the protocol ring sets `protocolStatus = IDLE` and returns public `status` to the projected visual-track state. If no visual activity monitor was enabled before the protocol ring, the Session returns to `ALERT_DISABLED`.
+For protocol rings (see [Notification protocols](#notification-protocols)), clearing the protocol ring sets `protocolStatus = IDLE` and returns public `status` to the projected command-exit/WATCHING state. If no WATCHING monitor was enabled before the protocol ring and no command-exit state is active, the Session returns to `WATCHING_DISABLED`.
 
-The visual track leaves `ALERT_RINGING` and returns to `ALERT_DISABLED` when:
+For command-exit rings, clearing the command-exit ring sets `commandExitStatus = IDLE` and returns public `status` to the projected protocol/WATCHING state. If no WATCHING monitor was enabled and no protocol state is active, the Session returns to `WATCHING_DISABLED`.
 
-- the user disables visual alerts on that Session (disposes the activity monitor)
+The WATCHING track leaves `ALERT_RINGING` and returns to `WATCHING_DISABLED` when:
 
-Disabling visual alerts does not clear `protocolStatus`. If `protocolStatus` is `OSC_NOTIF_BUSY` or `ALERT_RINGING`, public `status` remains protocol-driven.
+- the user disables WATCHING on that Session (disposes the activity monitor)
+
+Disabling WATCHING does not clear `protocolStatus` or `commandExitStatus`. If either stronger track is active, public `status` remains driven by that track.
 
 The Session's alert state is cleared entirely when:
 
@@ -508,9 +587,9 @@ The Session's alert state is cleared entirely when:
 
 If more output arrives later and the Session makes a fresh transition back into `ALERT_RINGING`, the alert rings again.
 
-Marking a Session as TODO resets an activity-monitor alert to `NOTHING_TO_SHOW` and sets `todo = true`, but it does **not** disable future alerts. `todo` and the alert toggle are separate concerns. Protocol rings preserve the same TODO behavior; clearing TODO clears `notification` unless the user explicitly chooses a future "keep details" action.
+Marking a Session as TODO resets a WATCHING alert to `NOTHING_TO_SHOW` and sets `todo = true`, but it does **not** disable future WATCHING. `todo` and the WATCHING toggle are separate concerns. Protocol and command-exit rings preserve the same TODO behavior; clearing TODO clears `notification` unless the user explicitly chooses a future "keep details" action.
 
-Disabling alerts disposes the visual activity monitor and returns `visualStatus` to `ALERT_DISABLED`. Public `status` returns to `ALERT_DISABLED` only when `protocolStatus === 'IDLE'`.
+Disabling WATCHING disposes the activity monitor and returns `watchingStatus` to `WATCHING_DISABLED`. Public `status` returns to `WATCHING_DISABLED` only when `protocolStatus === 'IDLE'` and `commandExitStatus === 'IDLE'`.
 
 ## UI
 
@@ -537,11 +616,12 @@ Alert button:
 - shown in all header tiers, including compact and minimal
 - icon-only control with tooltip and accessible label
 - visual states (pure function of `status`):
-  - `ALERT_DISABLED`: `BellSlashIcon`, muted
+  - `WATCHING_DISABLED`: `BellIcon` unfilled, muted
   - `NOTHING_TO_SHOW`: `BellIcon` filled, muted, upright
   - `MIGHT_BE_BUSY`: `BellIcon` filled, muted, tilted slightly (-22.5°)
   - `BUSY`: `BellIcon` filled, muted, tilted 45°
   - `OSC_NOTIF_BUSY`: same visual treatment as `BUSY`
+  - `COMMAND_EXIT_ARMED`: same visual treatment as `BUSY`
   - `MIGHT_NEED_ATTENTION`: `BellIcon` filled, muted, tilted 60°
   - `ALERT_RINGING`: `BellIcon` filled, warning color, rocking animation (±45° bell-ring keyframe); reduced-motion: static 45° tilt
 - escalation is conveyed by increasing tilt angle, not by a separate badge element
@@ -549,15 +629,16 @@ Alert button:
 
 Interaction (`dismissOrToggleAlert` state machine):
 
-- left-click the bell while `ALERT_DISABLED`: enables the alert (creates activity monitor)
+- left-click the bell while `WATCHING_DISABLED`: enables WATCHING (creates activity monitor)
 - left-click the bell while `ALERT_RINGING`: dismisses the alert, creates a TODO if none exists, then opens the context menu anchored below the button
 - left-click the bell after an attention-based dismissal (`attentionDismissedRing` is set): clears the flag and opens the context menu. This lets the user access TODO/disable options after attending to a ringing Session without requiring a right-click.
-- left-click the bell while `OSC_NOTIF_BUSY`: does not clear protocol progress. If the visual track is enabled, disables only the visual track; if the visual track is disabled, opens the context menu.
-- left-click the bell in any other enabled state: disables the alert (destroys activity monitor)
+- left-click the bell while `OSC_NOTIF_BUSY`: does not clear protocol progress. If WATCHING is enabled, disables only WATCHING; if WATCHING is disabled, opens the context menu.
+- left-click the bell while `COMMAND_EXIT_ARMED`: does not clear the command-exit arm. If WATCHING is enabled, disables only WATCHING; if WATCHING is disabled, opens the context menu.
+- left-click the bell in any other WATCHING-enabled state: disables WATCHING (destroys activity monitor)
 - pressing `a` on a selected Pane in command mode: same as left-click
 - right-click the bell (any state): opens a context menu with:
   - a TODO on/off switch with `[t]` shortcut hint
-  - an alert on/off switch with `[a]` shortcut hint
+  - a WATCHING on/off switch with `[a]` shortcut hint
   - brief description of TODO clearing behavior
 - tooltip includes "Right-click for options" hint
 
@@ -593,11 +674,12 @@ A Door is display-only for alert state in v1. It must not replace the existing D
 
 Door indicators:
 
-- show bell indicator only when `status !== 'ALERT_DISABLED'`
+- show bell indicator only when `status !== 'WATCHING_DISABLED'`
 - show TODO pill when `todo === true`
 - if `status === 'ALERT_RINGING'`, the Door bell icon uses warning color and the same rocking animation as the Pane header
 - the Door bell icon shows the same tilt angles as the Pane header for escalation states
 - `OSC_NOTIF_BUSY` uses the same Door bell treatment as `BUSY`
+- `COMMAND_EXIT_ARMED` uses the same Door bell treatment as `BUSY`
 
 Door interaction:
 
@@ -667,7 +749,7 @@ Consequences:
 
 ### Door rings, user wants to inspect immediately
 
-- User minimizes an alert-enabled Session into a Door.
+- User minimizes a WATCHING-enabled Session into a Door.
 - The Session later transitions into `ALERT_RINGING`.
 - The Door rings.
 - User clicks the Door.
@@ -675,7 +757,7 @@ Consequences:
 
 ### Door rings, user wants to keep command-mode control
 
-- User minimizes an alert-enabled Session into a Door.
+- User minimizes a WATCHING-enabled Session into a Door.
 - The Door starts ringing.
 - User presses `d` on the Door in command mode.
 - The Pane is restored, but the ring remains because the user has not yet explicitly attended to the Session.
@@ -696,13 +778,13 @@ Consequences:
 - User never presses `Enter` into the terminal → TODO persists.
 - User later notices the TODO pill and clicks it to clear it.
 
-### OSC 9 rings with alerts disabled
+### OSC 9 rings with WATCHING disabled
 
-- Session starts with `status = ALERT_DISABLED`, `todo = false`.
+- Session starts with `status = WATCHING_DISABLED`, `todo = false`.
 - PTY emits `OSC 9 ; Build finished ST`.
 - MouseTerm stores body `Build finished`, sets `todo = true`, and reports `ALERT_RINGING`.
 - User clicks into the Pane.
-- Ring clears. Because the activity monitor was disabled, status returns to `ALERT_DISABLED`; TODO remains until explicitly cleared or passthrough `Enter` is sent.
+- Ring clears. Because WATCHING was disabled, status returns to `WATCHING_DISABLED`; TODO remains until explicitly cleared or passthrough `Enter` is sent.
 
 ### OSC 777 preserves title and body
 
@@ -738,6 +820,26 @@ Consequences:
 - PTY emits `OSC 9 ; Build finished ST`.
 - MouseTerm does not ring and does not create a TODO because the user is already attending that Session.
 
+### Command exits after attention expires
+
+- User is typing into a Session in passthrough mode, so the Session has attention.
+- PTY emits `OSC 633 ; E ; pnpm\x20build ST` and `OSC 633 ; C ST`; MouseTerm stores the foreground command as seen with attention.
+- User stops interacting with that Session for at least `T_USER_ATTENTION`; MouseTerm clears attention and sets public `status = COMMAND_EXIT_ARMED`.
+- The same command later emits `OSC 633 ; D ; 0 ST`.
+- MouseTerm rings, sets `todo = true`, and stores a generated `COMMAND_EXIT` notification.
+
+### Quick command exit does not ring
+
+- User starts a command with attention and then immediately switches away.
+- The command finishes before `T_USER_ATTENTION` elapsed since command start.
+- MouseTerm clears the command-exit watch without ringing.
+
+### Returning before command exit disarms
+
+- User starts a command with attention, then attention expires and public `status = COMMAND_EXIT_ARMED`.
+- User clicks back into the Session before the command finishes.
+- MouseTerm clears the command-exit arm. If the command later finishes while the Session still has attention, it does not ring.
+
 ### Restore does not replay old notifications
 
 - A Session receives an OSC notification and saves state with TODO detail.
@@ -746,7 +848,7 @@ Consequences:
 
 ## Verification checklist
 
-Visual track:
+WATCHING track:
 
 - Alert only rings on a fresh transition into `ALERT_RINGING`
 - Single quick responses stay in `NOTHING_TO_SHOW`
@@ -775,13 +877,24 @@ Notification protocols:
 - OSC 99 `d=1` completion rings once with combined title/body.
 - OSC 99 `p=?` is answered and does not ring; `p=close`, `p=alive`, `p=icon`, and `p=buttons` do not ring by themselves.
 - Extra standalone `BEL` in the same parse batch as a richer OSC event does not replace the richer notification detail.
-- Protocol notifications ring with alert disabled.
+- Protocol notifications ring with WATCHING disabled.
 - Protocol notifications do not ring when the Session has attention.
-- Dismissal returns an alert-disabled Session to `ALERT_DISABLED`.
-- Dismissal returns an alert-enabled Session to its monitor-backed state.
+- Dismissal returns a WATCHING-disabled Session to `WATCHING_DISABLED`.
+- Dismissal returns a WATCHING-enabled Session to its monitor-backed state.
 - TODO pill text remains stable under very long notification text.
 - Hover/focus preview wraps long text and does not overflow narrow headers or Doors.
 - Replay/restore does not re-fire notification side effects.
+
+Command-exit track:
+
+- Command start while attended stores a command-exit watch without ringing.
+- Attention expiry while the same command is running sets `COMMAND_EXIT_ARMED`.
+- Explicit attention loss while the same command is running sets `COMMAND_EXIT_ARMED`.
+- Returning to the Session before finish clears `COMMAND_EXIT_ARMED`.
+- The same command finishing after runtime `>= T_USER_ATTENTION` rings only if the Session lacks attention.
+- The same command finishing before runtime `T_USER_ATTENTION` does not ring.
+- A different command start replaces the prior watch.
+- A protocol notification in the same parse batch as command finish wins over generated command-exit detail.
 
 ## References
 

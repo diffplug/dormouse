@@ -1,6 +1,6 @@
 # Layout Spec
 
-> See `docs/specs/ontology.md` for canonical state names, layer definitions, and transition verbs. This spec uses the ontology's vocabulary throughout.
+> See `docs/specs/glossary.md` for canonical state names, layer definitions, and transition verbs. This spec uses the glossary's vocabulary throughout.
 
 ## Conceptual model
 
@@ -297,7 +297,7 @@ On startup, recovery is priority-based:
 
 ### Activity state
 
-Each session carries `ActivityState` with `status: SessionStatus`, `todo: boolean`, and `notification: ActivityNotification | null`. `status` is the projected public status from the timer-based visual track plus the terminal-report protocol track described in `docs/specs/alert.md`; it may be `OSC_NOTIF_BUSY` when OSC progress has cocked the bell. These are synced to React via `useSyncExternalStore`. State that arrives from the platform before a registry entry exists (resume scenario) is held as "primed state" and applied when the registry entry is created.
+Each session carries `ActivityState` with `status: SessionStatus`, `watchingEnabled: boolean`, `todo: boolean`, and `notification: ActivityNotification | null`. `status` is the projected public status from the timer-based WATCHING track, terminal-report protocol track, and command-exit track described in `docs/specs/alert.md`; it may be `OSC_NOTIF_BUSY` when OSC progress has cocked the bell or `COMMAND_EXIT_ARMED` when a watched foreground command is running after attention was lost. `watchingEnabled` keeps the WATCHING toggle accurate when `status` is projected to a stronger protocol or command-exit state. These are synced to React via `useSyncExternalStore`. State that arrives from the platform before a registry entry exists (resume scenario) is held as "primed state" and applied when the registry entry is created.
 
 Each session also carries `TerminalPaneState` from `docs/specs/terminal-state.md`. The frontend store is keyed by the current pane/session id, and PTY-originated semantic events are resolved through `ptyId` so swapped sessions keep their CWD and command state with the terminal content.
 

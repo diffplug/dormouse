@@ -5,6 +5,7 @@ import type { ActivityNotification, TodoState } from './alert-manager';
 
 export interface ActivityState {
   status: SessionStatus;
+  watchingEnabled: boolean;
   todo: TodoState;
   notification: ActivityNotification | null;
 }
@@ -16,6 +17,7 @@ export interface TerminalEntry {
   element: HTMLDivElement;
   cleanup: () => void;
   alertStatus: SessionStatus;
+  watchingEnabled: boolean;
   todo: TodoState;
   notification: ActivityNotification | null;
   attentionDismissedRing: boolean;

@@ -516,7 +516,7 @@ export class TutRunner implements InteractiveProgram {
 
   private write(data: string): void {
     // Runner frames are UI chrome, not task output — skip the activity
-    // tick so enabling alerts on the runner pane doesn't tilt the bell
+    // tick so enabling WATCHING on the runner pane doesn't tilt the bell
     // every time the menu re-renders.
     this.adapter.sendOutput(this.terminalId, data, { skipActivity: true });
   }

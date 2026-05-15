@@ -62,6 +62,7 @@ export type ExtensionMessage =
     type: 'alert:state';
     id: string;
     status: SessionStatus;
+    watchingEnabled: boolean;
     todo: TodoState;
     notification: ActivityNotification | null;
     attentionDismissedRing: boolean;

@@ -23,20 +23,20 @@ interface MouseSelectionModule {
 }
 
 interface TutDetectorOptions {
-  onAlertDemoPaneChange?: (id: string | null) => void;
+  onWatchingDemoPaneChange?: (id: string | null) => void;
 }
 
 export class TutDetector {
   private state: TutorialState;
   private activityStore: ActivityStoreModule;
   private mouseStore: MouseSelectionModule;
-  private onAlertDemoPaneChange?: (id: string | null) => void;
+  private onWatchingDemoPaneChange?: (id: string | null) => void;
   private api: DockviewApi | null = null;
   private currentMode: WallMode = "command";
   private currentPaneId: string | null = null;
   private commandModePanels = new Set<string>();
-  private alertEnabledPaneIds = new Set<string>();
-  private preferredAlertPaneId: string | null = null;
+  private watchingEnabledPaneIds = new Set<string>();
+  private preferredWatchingPaneId: string | null = null;
   private pendingMoveTargetId: string | null = null;
   private prevActivity = new Map<string, ActivityState>();
   private prevMouse = new Map<string, MouseSelectionState>();
@@ -51,7 +51,7 @@ export class TutDetector {
     this.state = state;
     this.activityStore = activityStore;
     this.mouseStore = mouseStore;
-    this.onAlertDemoPaneChange = options.onAlertDemoPaneChange;
+    this.onWatchingDemoPaneChange = options.onWatchingDemoPaneChange;
   }
 
   attach(api: DockviewApi): void {
@@ -63,12 +63,12 @@ export class TutDetector {
     // mis-read as a transition from "nothing".
     for (const [id, s] of this.activityStore.getActivitySnapshot()) {
       this.prevActivity.set(id, { ...s });
-      if (s.status !== "ALERT_DISABLED") {
-        this.alertEnabledPaneIds.add(id);
-        this.preferredAlertPaneId ??= id;
+      if (s.watchingEnabled) {
+        this.watchingEnabledPaneIds.add(id);
+        this.preferredWatchingPaneId ??= id;
       }
     }
-    this.emitAlertDemoPaneChange();
+    this.emitWatchingDemoPaneChange();
     for (const [id, s] of this.mouseStore.getMouseSelectionSnapshot()) {
       this.prevMouse.set(id, { ...s });
     }
@@ -150,23 +150,23 @@ export class TutDetector {
       // First time we see an id (e.g. a pane added after attach()), record
       // its state without firing any transitions — we have no "before" to
       // compare against, so treating undefined as a transition from
-      // ALERT_DISABLED / todo=false would falsely credit work the user
+      // WATCHING_DISABLED / todo=false would falsely credit work the user
       // didn't do (e.g. al-todo-manual when restored state has todo=true).
       if (!prev) {
         this.prevActivity.set(id, { ...current });
         continue;
       }
 
-      if (prev.status === "ALERT_DISABLED" && current.status !== "ALERT_DISABLED") {
+      if (!prev.watchingEnabled && current.watchingEnabled) {
         this.state.markComplete("al-enable");
-        this.alertEnabledPaneIds.add(id);
-        this.preferredAlertPaneId = id;
-        this.emitAlertDemoPaneChange();
-      } else if (prev.status !== "ALERT_DISABLED" && current.status === "ALERT_DISABLED") {
-        this.alertEnabledPaneIds.delete(id);
-        if (this.preferredAlertPaneId === id) {
-          this.preferredAlertPaneId = this.alertEnabledPaneIds.values().next().value ?? null;
-          this.emitAlertDemoPaneChange();
+        this.watchingEnabledPaneIds.add(id);
+        this.preferredWatchingPaneId = id;
+        this.emitWatchingDemoPaneChange();
+      } else if (prev.watchingEnabled && !current.watchingEnabled) {
+        this.watchingEnabledPaneIds.delete(id);
+        if (this.preferredWatchingPaneId === id) {
+          this.preferredWatchingPaneId = this.watchingEnabledPaneIds.values().next().value ?? null;
+          this.emitWatchingDemoPaneChange();
         }
       }
 
@@ -201,10 +201,10 @@ export class TutDetector {
     for (const id of this.prevActivity.keys()) {
       if (!snapshot.has(id)) {
         this.prevActivity.delete(id);
-        this.alertEnabledPaneIds.delete(id);
-        if (this.preferredAlertPaneId === id) {
-          this.preferredAlertPaneId = this.alertEnabledPaneIds.values().next().value ?? null;
-          this.emitAlertDemoPaneChange();
+        this.watchingEnabledPaneIds.delete(id);
+        if (this.preferredWatchingPaneId === id) {
+          this.preferredWatchingPaneId = this.watchingEnabledPaneIds.values().next().value ?? null;
+          this.emitWatchingDemoPaneChange();
         }
       }
     }
@@ -240,7 +240,7 @@ export class TutDetector {
     this.disposables = [];
   }
 
-  private emitAlertDemoPaneChange(): void {
-    this.onAlertDemoPaneChange?.(this.preferredAlertPaneId);
+  private emitWatchingDemoPaneChange(): void {
+    this.onWatchingDemoPaneChange?.(this.preferredWatchingPaneId);
   }
 }

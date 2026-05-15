@@ -58,7 +58,9 @@ export class TauriAdapter implements PlatformAdapter {
         const { id, data } = event.payload;
         const parsed = this.getProtocolParser(id).process(data);
         applyTerminalProtocolEvents(this.alertManager, id, parsed.events);
-        applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
+        const semanticEvents = collectTerminalSemanticEvents(parsed.events);
+        this.alertManager.applyTerminalSemanticEvents(id, semanticEvents);
+        applyTerminalSemanticEventsByPtyId(id, semanticEvents);
         for (const response of collectTerminalProtocolResponses(parsed.events)) {
           invoke("pty_write", { id, data: response });
         }
@@ -73,7 +75,7 @@ export class TauriAdapter implements PlatformAdapter {
 
     this.unlistenFns.push(
       await listen<{ id: string; exitCode: number }>("pty:exit", (event) => {
-        this.alertManager.onExit(event.payload.id);
+        this.alertManager.onExit(event.payload.id, event.payload.exitCode);
         this.protocolParsers.delete(event.payload.id);
         for (const handler of this.exitHandlers) {
           handler(event.payload);

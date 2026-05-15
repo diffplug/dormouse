@@ -13,7 +13,8 @@ import {
 export type { ActivityState } from './terminal-store';
 
 export const DEFAULT_ACTIVITY_STATE: ActivityState = {
-  status: 'ALERT_DISABLED',
+  status: 'WATCHING_DISABLED',
+  watchingEnabled: false,
   todo: false,
   notification: null,
 };
@@ -57,6 +58,7 @@ function readLiveActivity(id: string): ActivityState | null {
 
   return {
     status: entry.alertStatus,
+    watchingEnabled: entry.watchingEnabled,
     todo: entry.todo,
     notification: entry.notification,
   };
@@ -78,6 +80,7 @@ export function getLivePersistedAlertState(id: string): PersistedAlertState | nu
   if (!state) return null;
   return {
     status: state.status,
+    watchingEnabled: state.watchingEnabled,
     todo: state.todo,
     notification: state.notification,
   };
@@ -120,13 +123,19 @@ export function initAlertStateReceiver(): void {
     const entry = getEntryByPtyId(detail.id);
     if (entry) {
       entry.alertStatus = detail.status;
+      entry.watchingEnabled = detail.watchingEnabled;
       entry.todo = detail.todo;
       entry.notification = detail.notification;
       entry.attentionDismissedRing = detail.attentionDismissedRing;
       primedActivityStates.delete(detail.id);
       notifyActivityListeners();
     } else {
-      primeActivity(detail.id, { status: detail.status, todo: detail.todo, notification: detail.notification });
+      primeActivity(detail.id, {
+        status: detail.status,
+        watchingEnabled: detail.watchingEnabled,
+        todo: detail.todo,
+        notification: detail.notification,
+      });
     }
   };
   platform.onAlertState(currentAlertHandler);
@@ -136,14 +145,15 @@ export function dismissOrToggleAlert(id: string, displayedStatus: SessionStatus)
   const entry = registry.get(id);
   let result: AlertButtonActionResult;
   switch (displayedStatus) {
-    case 'ALERT_DISABLED':
+    case 'WATCHING_DISABLED':
       result = 'enabled';
       break;
     case 'ALERT_RINGING':
       result = 'dismissed';
       break;
     case 'OSC_NOTIF_BUSY':
-      result = entry?.attentionDismissedRing ? 'dismissed' : 'noop';
+    case 'COMMAND_EXIT_ARMED':
+      result = entry?.attentionDismissedRing ? 'dismissed' : entry?.watchingEnabled ? 'disabled' : 'menu';
       break;
     default:
       if (entry?.attentionDismissedRing) {

@@ -157,6 +157,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.terminalSizes.delete(id);
     this.inputHandlers.delete(id);
     this.protocolParsers.delete(id);
+    this.alertManager.onExit(id, 0);
     for (const handler of this.exitHandlers) {
       handler({ id, exitCode: 0 });
     }
@@ -321,7 +322,7 @@ export class FakePtyAdapter implements PlatformAdapter {
       const exitTimer = setTimeout(() => {
         if (!this.terminals.has(id)) return;
         this.activeTimers.delete(id);
-        this.alertManager.onExit(id);
+        this.alertManager.onExit(id, scenario.exitCode ?? 0);
         for (const handler of this.exitHandlers) {
           handler({ id, exitCode: scenario.exitCode ?? 0 });
         }
@@ -348,7 +349,9 @@ export class FakePtyAdapter implements PlatformAdapter {
   private emitPtyData(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
     const parsed = this.getProtocolParser(id).process(data);
     applyTerminalProtocolEvents(this.alertManager, id, parsed.events);
-    applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
+    const semanticEvents = collectTerminalSemanticEvents(parsed.events);
+    this.alertManager.applyTerminalSemanticEvents(id, semanticEvents);
+    applyTerminalSemanticEventsByPtyId(id, semanticEvents);
     const inputHandler = this.inputHandlers.get(id);
     for (const response of collectTerminalProtocolResponses(parsed.events)) {
       inputHandler?.(response);

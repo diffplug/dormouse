@@ -471,7 +471,7 @@ describe('terminal-registry alert behavior', () => {
     disableSessionAlert(id);
 
     expect(getActivity(id)).toMatchObject({
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
       todo: false,
     });
 
@@ -480,7 +480,7 @@ describe('terminal-registry alert behavior', () => {
     advance(12_000);
 
     expect(getActivity(id)).toMatchObject({
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
       todo: false,
     });
   });
@@ -645,7 +645,7 @@ describe('terminal-registry alert behavior', () => {
     advance(12_000);
 
     expect(getActivity(id)).toMatchObject({
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
       todo: false,
     });
   });
@@ -794,16 +794,16 @@ describe('terminal-registry alert behavior', () => {
     disableSessionAlert(id);
 
     expect(getActivity(id)).toMatchObject({
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
       todo: false,
     });
   });
 
-  it('alert button enables alerts from ALERT_DISABLED', () => {
+  it('alert button enables alerts from WATCHING_DISABLED', () => {
     const id = 'alert-button-enable';
     createSession(id);
 
-    dismissOrToggleAlert(id, 'ALERT_DISABLED');
+    dismissOrToggleAlert(id, 'WATCHING_DISABLED');
 
     expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
@@ -820,7 +820,7 @@ describe('terminal-registry alert behavior', () => {
     dismissOrToggleAlert(id, 'BUSY');
 
     expect(getActivity(id)).toMatchObject({
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
       todo: false,
     });
   });
@@ -927,7 +927,7 @@ describe('terminal-registry alert behavior', () => {
     emitOutput(alpha, 'more work');
 
     expect(getActivity(alpha)).toMatchObject({
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
       todo: false,
     });
     expect(getActivity(beta)).toMatchObject({
@@ -946,22 +946,22 @@ describe('terminal-registry alert behavior', () => {
     swapTerminals(alpha, beta);
 
     expect(getActivity(alpha)).toMatchObject({
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
       todo: false,
     });
     expect(getActivity(beta)).toMatchObject({
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
       todo: true,
     });
 
     clearSessionTodo(beta);
 
     expect(getActivity(alpha)).toMatchObject({
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
       todo: false,
     });
     expect(getActivity(beta)).toMatchObject({
-      status: 'ALERT_DISABLED',
+      status: 'WATCHING_DISABLED',
       todo: false,
     });
   });
