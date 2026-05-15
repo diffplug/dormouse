@@ -12,7 +12,7 @@ export function Component() {
             Dependencies
           </h1>
           <p className="text-base opacity-70 mb-2">
-            MouseTerm (standalone app and VS Code plugin) has {deps.length} transitive dependencies. Thank you to every author and contributor.
+            Dormouse (standalone app and VS Code plugin) has {deps.length} transitive dependencies. Thank you to every author and contributor.
           </p>
           <p className="text-base opacity-70 mb-10">
             Thanks also to <a href="https://github.com/reowens/ascii-splash" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">ascii-splash</a> and <a href="https://github.com/remix-run/react-router" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">react-router</a> and their transitive dependencies, which we use for this marketing page but are not part of the end-user application.

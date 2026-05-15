@@ -129,15 +129,15 @@ const INSTALL_STEPS: Record<string, { pill: string; title: string; steps: string
     pill: "Mac Silicon",
     title: "Installing on Mac",
     steps: [
-      "Double-click the downloaded .tar.gz to extract MouseTerm.app",
-      "Drag MouseTerm.app to Applications",
+      "Double-click the downloaded .tar.gz to extract Dormouse.app",
+      "Drag Dormouse.app to Applications",
     ],
   },
   "windows-x86_64": {
     pill: "Windows x64",
     title: "Installing on Windows",
     steps: [
-      "Double-click the downloaded MouseTerm-windows-x64-setup.exe",
+      "Double-click the downloaded Dormouse-windows-x64-setup.exe",
       "If SmartScreen appears: More info \u2192 Run anyway",
     ],
   },
@@ -145,7 +145,7 @@ const INSTALL_STEPS: Record<string, { pill: string; title: string; steps: string
     pill: "Linux x64",
     title: "Installing on Linux",
     steps: [
-      "Make executable: chmod +x MouseTerm-linux-x86_64.AppImage",
+      "Make executable: chmod +x Dormouse-linux-x86_64.AppImage",
       "Run from terminal or double-click to launch",
     ],
   },
@@ -707,28 +707,28 @@ function Home() {
           {/* Hook copy — visible on load, fades out on first scroll */}
           <div
             ref={hookRef}
-            className="absolute top-20 md:top-24 left-0 right-0 flex flex-col items-center text-center px-6 font-display text-[clamp(2.5rem,5vw+0.5rem,4rem)] gap-1"
+            className="absolute top-20 md:top-24 left-0 right-0 flex flex-col items-center text-center px-6 font-display text-[clamp(2rem,4vw+0.5rem,3.5rem)] gap-2"
           >
-            <span>Too many terminals.</span>
-            <span>Not enough focus.</span>
+            <span>So many terminals.</span>
+            <span>Which one needs attention?</span>
           </div>
           {/* Hero words — crossfade in place with the hook, just below the header */}
-          <div className="absolute top-20 md:top-24 left-0 right-0 flex flex-col items-center text-center px-6 gap-1 font-display text-[clamp(2.5rem,5vw+0.5rem,4rem)]">
+          <div className="absolute top-20 md:top-24 left-0 right-0 flex flex-col items-center text-center px-6 gap-1 font-display text-[clamp(2rem,4vw+0.5rem,3.5rem)]">
             <span ref={word0Ref} style={{ opacity: 0, transform: "translateY(12px)" }}>
-              Multitasking
+              A <span className="text-[var(--color-caramel)]">dormouse</span>
             </span>
             <span ref={word1Ref} style={{ opacity: 0, transform: "translateY(12px)" }}>
-              Terminal
+              knows when
             </span>
             <span ref={word2Ref} style={{ opacity: 0, transform: "translateY(12px)" }}>
-              <span className="text-[var(--color-caramel)]">for Mice</span>
+              to wake up.
             </span>
             <p
               ref={footnoteRef}
-              className="-mt-1 text-lg"
+              className="mt-3 text-lg"
               style={{ opacity: 0 }}
             >
-              (and hotkey wizards too)
+              Multitasking terminal for mice <span className="opacity-70">(and hotkey wizards too)</span>
             </p>
           </div>
         </div>
@@ -739,7 +739,7 @@ function Home() {
         <section id="features" className={`mx-auto max-w-2xl px-4 md:px-6 ${SECTION_PY}`}>
           <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">Stop watching terminals spin</h2>
           <p className="text-lg leading-relaxed opacity-70 mb-4">
-            MouseTerm tracks activity the same way you do — visual motion. When a
+            Dormouse tracks activity the same way you do — visual motion. When a
             pane stops changing for two seconds, it marks the task complete and
             alerts you.
           </p>
@@ -762,7 +762,7 @@ function Home() {
               doesn't copy; it asks your program to kill itself.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
-              MouseTerm lets you copy paste like a human, not a terminal.
+              Dormouse lets you copy paste like a human, not a terminal.
             </p>
           </div>
           <FeatureVideo src={copyPasteVideoUrl} />
@@ -787,8 +787,8 @@ function Home() {
         </section>
 
         <section id="download" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`} style={downloadAccentStyle}>
-          <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">Get MouseTerm</h2>
-          <p className="mb-4 text-lg leading-relaxed opacity-70">The multitasking terminal for mice.</p>
+          <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">Get Dormouse</h2>
+          <p className="mb-4 text-lg leading-relaxed opacity-70">A dormouse knows when to wake up. Multitasking terminal for mice.</p>
           <DownloadButton
             href="/playground"
             icon={<TerminalIcon size={26} weight="bold" />}
@@ -803,7 +803,7 @@ function Home() {
               <p className="mb-4 text-lg leading-relaxed opacity-70">Also works in Cursor, Windsurf, Antigravity, or any other VS Code fork.</p>
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-3">
                 <DownloadButton
-                  href="https://marketplace.visualstudio.com/items?itemName=diffplug.mouseterm"
+                  href="https://marketplace.visualstudio.com/items?itemName=diffplug.dormouse"
                   icon={<StorefrontIcon size={22} weight="bold" />}
                   peek="marketplace"
                   variant="wide"
@@ -811,7 +811,7 @@ function Home() {
                   Visual Studio Marketplace
                 </DownloadButton>
                 <DownloadButton
-                  href="https://open-vsx.org/extension/diffplug/mouseterm"
+                  href="https://open-vsx.org/extension/diffplug/dormouse"
                   icon={<CubeIcon size={22} weight="bold" />}
                   peek="openVsx"
                   variant="wide"
@@ -884,7 +884,7 @@ function Home() {
         <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
           <img
             src={phoneMockupUrl}
-            alt="MouseTerm Tether running on a phone"
+            alt="Dormouse Pocket running on a phone"
             className="order-2 md:order-1 block w-full max-w-[280px] mx-auto md:max-w-none"
           />
           <div className="order-1 md:order-2">
@@ -892,10 +892,10 @@ function Home() {
               Walk away. Keep going.
             </h2>
             <p className="mb-4 text-lg leading-relaxed opacity-70">
-              Coming next: <a href="/tether" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Tether</a>. Pair a
-              terminal session to your phone over WebRTC and take a stroll, the MouseTerm alert
-              system will buzz you if there's anything to do. A hosted auto-pairing service comes
-              later — just leave and keep working, no "I'm walking away" dance.
+              Coming next: <a href="/pocket" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Dormouse Pocket</a>.
+              Tether a terminal session to your phone over WebRTC and take a stroll — the Dormouse
+              alert system buzzes you if there's anything to do. A hosted auto-pairing service comes
+              later, so you can just leave and keep working, no "I'm walking away" dance.
             </p>
             <p className="mb-4 text-lg leading-relaxed opacity-70">
               Open source and free to self-host, or pay us a little bit and you can use ours. We'll discount for early adopters, so don't miss out!

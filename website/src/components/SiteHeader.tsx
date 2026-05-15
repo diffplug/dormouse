@@ -90,7 +90,7 @@ const SiteHeader = forwardRef<HTMLElement, SiteHeaderProps>(
                   }
             }
           >
-            MouseTerm
+            Dormouse
           </a>
           <div className="ml-auto flex min-w-0 items-center gap-3 md:gap-8">
             {controls ? <div className="min-w-0">{controls}</div> : null}
