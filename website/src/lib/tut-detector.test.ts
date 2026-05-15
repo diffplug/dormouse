@@ -4,15 +4,19 @@ import type { ActivityState } from "mouseterm-lib/lib/terminal-registry";
 import { TutDetector } from "./tut-detector";
 import { TutorialState } from "./tutorial-state";
 
-function activity(status: ActivityState["status"], todo = false): ActivityState {
-  return { status, watchingEnabled: status !== "WATCHING_DISABLED", todo, notification: null };
+function activity(
+  status: ActivityState["status"],
+  todo = false,
+  watchingEnabled = status !== "WATCHING_DISABLED",
+): ActivityState {
+  return { status, watchingEnabled, todo, notification: null };
 }
 
-function makeDetectorHarness() {
+function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityState>()) {
   let activePanelListener: ((panel: { id?: string } | undefined) => void) | null = null;
   let activityListener: (() => void) | null = null;
   let mouseListener: (() => void) | null = null;
-  let activitySnapshot = new Map<string, ActivityState>();
+  let activitySnapshot = initialActivitySnapshot;
   let mouseSnapshot = new Map<string, MouseSelectionState>();
   const onWatchingDemoPaneChange = vi.fn();
 
@@ -117,8 +121,8 @@ describe("TutDetector", () => {
     const { state, setActivitySnapshot } = makeDetectorHarness();
 
     setActivitySnapshot(new Map([
-      ["pane-a", { status: "BUSY", todo: false }],
-      ["pane-b", { status: "ALERT_RINGING", todo: false }],
+      ["pane-a", activity("BUSY")],
+      ["pane-b", activity("ALERT_RINGING")],
     ]));
 
     expect(state.isComplete("al-busy")).toBe(false);
@@ -153,6 +157,43 @@ describe("TutDetector", () => {
     ]));
 
     expect(state.isComplete("al-enable")).toBe(true);
+  });
+
+  it("does not credit al-enable for projected command-exit status while WATCHING is off", () => {
+    const { state, onWatchingDemoPaneChange, setActivitySnapshot } = makeDetectorHarness();
+
+    onWatchingDemoPaneChange.mockClear();
+    setActivitySnapshot(new Map([
+      ["pane-a", activity("WATCHING_DISABLED", false, false)],
+    ]));
+    setActivitySnapshot(new Map([
+      ["pane-a", activity("COMMAND_EXIT_ARMED", false, false)],
+    ]));
+
+    expect(state.isComplete("al-enable")).toBe(false);
+    expect(onWatchingDemoPaneChange).not.toHaveBeenCalled();
+  });
+
+  it("credits al-enable when WATCHING turns on under an existing projected status", () => {
+    const { state, onWatchingDemoPaneChange, setActivitySnapshot } = makeDetectorHarness();
+
+    setActivitySnapshot(new Map([
+      ["pane-a", activity("COMMAND_EXIT_ARMED", false, false)],
+    ]));
+    setActivitySnapshot(new Map([
+      ["pane-a", activity("COMMAND_EXIT_ARMED", false, true)],
+    ]));
+
+    expect(state.isComplete("al-enable")).toBe(true);
+    expect(onWatchingDemoPaneChange).toHaveBeenLastCalledWith("pane-a");
+  });
+
+  it("does not seed the WATCHING demo pane from projected alert status", () => {
+    const { onWatchingDemoPaneChange } = makeDetectorHarness(new Map([
+      ["pane-a", activity("ALERT_RINGING", false, false)],
+    ]));
+
+    expect(onWatchingDemoPaneChange).toHaveBeenLastCalledWith(null);
   });
 
   it("tracks the pane whose WATCHING was enabled for the busy demo", () => {

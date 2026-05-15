@@ -63,7 +63,7 @@ export class TutDetector {
     // mis-read as a transition from "nothing".
     for (const [id, s] of this.activityStore.getActivitySnapshot()) {
       this.prevActivity.set(id, { ...s });
-      if (s.status !== "WATCHING_DISABLED") {
+      if (s.watchingEnabled) {
         this.watchingEnabledPaneIds.add(id);
         this.preferredWatchingPaneId ??= id;
       }
@@ -157,12 +157,12 @@ export class TutDetector {
         continue;
       }
 
-      if (prev.status === "WATCHING_DISABLED" && current.status !== "WATCHING_DISABLED") {
+      if (!prev.watchingEnabled && current.watchingEnabled) {
         this.state.markComplete("al-enable");
         this.watchingEnabledPaneIds.add(id);
         this.preferredWatchingPaneId = id;
         this.emitWatchingDemoPaneChange();
-      } else if (prev.status !== "WATCHING_DISABLED" && current.status === "WATCHING_DISABLED") {
+      } else if (prev.watchingEnabled && !current.watchingEnabled) {
         this.watchingEnabledPaneIds.delete(id);
         if (this.preferredWatchingPaneId === id) {
           this.preferredWatchingPaneId = this.watchingEnabledPaneIds.values().next().value ?? null;
