@@ -611,8 +611,7 @@ export function Wall({
     const ref = id && api.getPanel(id) ? id : null;
     // Carry the currently-selected shell into the split, same as [+].
     const defaults = getDefaultShellOpts();
-    // Inherit the source pane's cwd when known and local (diffplug/mouseterm#4).
-    // Remote cwds (e.g. from OSC 7 over ssh) aren't usable as a local spawn cwd.
+    // Remote cwds (OSC 7 over ssh) name a path on the remote host, not one the local shell can chdir to.
     const sourceCwd = ref ? getTerminalPaneState(ref).cwd : null;
     const inheritedCwd = sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined;
     if (defaults?.shell || inheritedCwd) {

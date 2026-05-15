@@ -36,8 +36,14 @@ export interface TerminalOverlayDims {
   gridTop: number;
 }
 
+export interface PendingShellOpts {
+  shell?: string;
+  args?: string[];
+  cwd?: string;
+}
+
 export const registry = new Map<string, TerminalEntry>();
-export const pendingShellOpts = new Map<string, { shell?: string; args?: string[]; cwd?: string }>();
+export const pendingShellOpts = new Map<string, PendingShellOpts>();
 
 export function getEntryByPtyId(ptyId: string): TerminalEntry | null {
   for (const entry of registry.values()) {

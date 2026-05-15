@@ -12,6 +12,7 @@ import { extractSelectionText } from './selection-text';
 import {
   pendingShellOpts,
   registry,
+  type PendingShellOpts,
   type TerminalEntry,
   type TerminalOverlayDims,
 } from './terminal-store';
@@ -207,7 +208,7 @@ function setupTerminalEntry(id: string, options: { untouched?: boolean } = {}): 
   return entry;
 }
 
-export function setPendingShellOpts(id: string, opts: { shell?: string; args?: string[]; cwd?: string }): void {
+export function setPendingShellOpts(id: string, opts: PendingShellOpts): void {
   pendingShellOpts.set(id, opts);
 }
 

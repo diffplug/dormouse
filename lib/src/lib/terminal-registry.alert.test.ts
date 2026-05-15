@@ -221,37 +221,40 @@ function driveToRingingNeedsAttention(id: string): void {
   expect(getActivity(id).status).toBe('ALERT_RINGING');
 }
 
+function installRegistryTestGlobals(): void {
+  vi.useFakeTimers();
+  fakePlatform.reset();
+  initAlertStateReceiver();
+
+  const documentElement = new MockElement();
+  vi.stubGlobal('document', {
+    createElement: () => new MockElement(),
+    documentElement,
+  });
+  vi.stubGlobal('getComputedStyle', () => ({
+    getPropertyValue: () => '#000000',
+  }));
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    callback(0);
+    return 0;
+  });
+  vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('window', {
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  });
+}
+
+function uninstallRegistryTestGlobals(): void {
+  disposeAllSessions();
+  fakePlatform.reset();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+}
+
 describe('terminal-registry alert behavior', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    fakePlatform.reset();
-    initAlertStateReceiver();
-
-    const documentElement = new MockElement();
-    vi.stubGlobal('document', {
-      createElement: () => new MockElement(),
-      documentElement,
-    });
-    vi.stubGlobal('getComputedStyle', () => ({
-      getPropertyValue: () => '#000000',
-    }));
-    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
-      callback(0);
-      return 0;
-    });
-    vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} });
-    vi.stubGlobal('window', {
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    });
-  });
-
-  afterEach(() => {
-    disposeAllSessions();
-    fakePlatform.reset();
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
-  });
+  beforeEach(installRegistryTestGlobals);
+  afterEach(uninstallRegistryTestGlobals);
 
   it('starts brand-new sessions as untouched', () => {
     const id = 'new-untouched';
@@ -968,35 +971,13 @@ describe('pending shell opts → spawnPty', () => {
   let spawnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    vi.useFakeTimers();
-    fakePlatform.reset();
-    initAlertStateReceiver();
-    const documentElement = new MockElement();
-    vi.stubGlobal('document', {
-      createElement: () => new MockElement(),
-      documentElement,
-    });
-    vi.stubGlobal('getComputedStyle', () => ({
-      getPropertyValue: () => '#000000',
-    }));
-    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
-      callback(0);
-      return 0;
-    });
-    vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} });
-    vi.stubGlobal('window', {
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    });
+    installRegistryTestGlobals();
     spawnSpy = vi.spyOn(fakePlatform, 'spawnPty');
   });
 
   afterEach(() => {
-    disposeAllSessions();
-    fakePlatform.reset();
     spawnSpy.mockRestore();
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
+    uninstallRegistryTestGlobals();
   });
 
   it('forwards a pending cwd to spawnPty (split inherits source pane cwd)', () => {
