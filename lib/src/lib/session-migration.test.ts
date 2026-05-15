@@ -81,6 +81,7 @@ describe('session migration v2 → v3', () => {
     };
     const v3 = migrateSessionV2toV3(v2);
     expect(v3.panes[0].alert?.todo).toBe(true);
+    expect(v3.panes[0].untouched).toBe(false);
     expect(v3.version).toBe(3);
   });
 
@@ -195,17 +196,30 @@ describe('readPersistedSession', () => {
     const v3 = {
       version: 3 as const,
       layout: null,
-      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null }],
+      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null, untouched: true }],
       doors: [],
     };
     expect(readPersistedSession(v3)).toBe(v3);
+  });
+
+  it('defaults missing v3 untouched state to false', () => {
+    const v3 = {
+      version: 3 as const,
+      layout: null,
+      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null }],
+      doors: [],
+    };
+    expect(readPersistedSession(v3)).toEqual({
+      ...v3,
+      panes: [{ ...v3.panes[0], untouched: false }],
+    });
   });
 
   it('reads a JSON-stringified v3 blob', () => {
     const v3 = {
       version: 3 as const,
       layout: null,
-      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, scrollback: 'saved output', resumeCommand: null }],
+      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, scrollback: 'saved output', resumeCommand: null, untouched: true }],
       doors: [],
     };
 
@@ -216,7 +230,7 @@ describe('readPersistedSession', () => {
     const v3 = {
       version: 3 as const,
       layout: null,
-      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, scrollback: '\u001b[31mred', resumeCommand: null }],
+      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, scrollback: '\u001b[31mred', resumeCommand: null, untouched: false }],
       doors: [],
     };
 
@@ -234,6 +248,7 @@ describe('readPersistedSession', () => {
           cwd: null,
           scrollback: null,
           resumeCommand: null,
+          untouched: false,
           alert: {
             status: 'ALERT_RINGING' as const,
             todo: true,

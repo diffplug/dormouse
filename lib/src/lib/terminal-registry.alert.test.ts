@@ -101,13 +101,18 @@ import {
   getOrCreateTerminal,
   getActivity,
   initAlertStateReceiver,
+  isUntouched,
+  markSessionTouched,
   markSessionAttention,
   markSessionTodo,
+  resumeTerminal,
   restoreTerminal,
+  setPendingShellOpts,
   swapTerminals,
   toggleSessionAlert,
   toggleSessionTodo,
 } from './terminal-registry';
+import { pasteFilePaths } from './clipboard';
 
 interface MockTerminalInstance {
   writes: string[];
@@ -216,36 +221,117 @@ function driveToRingingNeedsAttention(id: string): void {
   expect(getActivity(id).status).toBe('ALERT_RINGING');
 }
 
-describe('terminal-registry alert behavior', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    fakePlatform.reset();
-    initAlertStateReceiver();
+function installRegistryTestGlobals(): void {
+  vi.useFakeTimers();
+  fakePlatform.reset();
+  initAlertStateReceiver();
 
-    const documentElement = new MockElement();
-    vi.stubGlobal('document', {
-      createElement: () => new MockElement(),
-      documentElement,
-    });
-    vi.stubGlobal('getComputedStyle', () => ({
-      getPropertyValue: () => '#000000',
-    }));
-    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
-      callback(0);
-      return 0;
-    });
-    vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} });
-    vi.stubGlobal('window', {
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    });
+  const documentElement = new MockElement();
+  vi.stubGlobal('document', {
+    createElement: () => new MockElement(),
+    documentElement,
+  });
+  vi.stubGlobal('getComputedStyle', () => ({
+    getPropertyValue: () => '#000000',
+  }));
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    callback(0);
+    return 0;
+  });
+  vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('window', {
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  });
+}
+
+function uninstallRegistryTestGlobals(): void {
+  disposeAllSessions();
+  fakePlatform.reset();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+}
+
+describe('terminal-registry alert behavior', () => {
+  beforeEach(installRegistryTestGlobals);
+  afterEach(uninstallRegistryTestGlobals);
+
+  it('starts brand-new sessions as untouched', () => {
+    const id = 'new-untouched';
+
+    createSession(id);
+
+    expect(isUntouched(id)).toBe(true);
   });
 
-  afterEach(() => {
-    disposeAllSessions();
-    fakePlatform.reset();
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
+  it('marks a session touched on first real terminal input', () => {
+    const id = 'typed-touched';
+    const entry = createSession(id);
+
+    entry.terminal.emitInput('x');
+
+    expect(isUntouched(id)).toBe(false);
+  });
+
+  it('does not mark synthetic terminal reports as touched', () => {
+    const id = 'synthetic-report-untouched';
+    const entry = createSession(id);
+
+    entry.terminal.emitInput('\x1b[I');
+
+    expect(isUntouched(id)).toBe(true);
+  });
+
+  it('does not mark replay-time terminal reports as touched', () => {
+    const id = 'replay-report-untouched';
+    const entry = restoreTerminal(id, { scrollback: 'saved output', untouched: true }) as TestTerminalEntry;
+
+    entry.terminal.emitInput('\x1b[?1;2c');
+
+    expect(isUntouched(id)).toBe(true);
+  });
+
+  it('marks a replayed session touched for user keyboard CSI input', () => {
+    const id = 'replay-arrow-touched';
+    const entry = restoreTerminal(id, { scrollback: 'saved output', untouched: true }) as TestTerminalEntry;
+
+    entry.terminal.emitInput('\x1b[A');
+
+    expect(isUntouched(id)).toBe(false);
+  });
+
+  it('marks paste and file-drop path insertion as touched', () => {
+    const id = 'paste-touched';
+    createSession(id);
+
+    pasteFilePaths(id, ['/tmp/example file.txt']);
+
+    expect(isUntouched(id)).toBe(false);
+  });
+
+  it('keeps untouched state with session content when swapping panes', () => {
+    const alpha = 'swap-alpha';
+    const beta = 'swap-beta';
+    createSession(alpha);
+    createSession(beta);
+
+    markSessionTouched(alpha);
+    swapTerminals(alpha, beta);
+
+    expect(isUntouched(alpha)).toBe(true);
+    expect(isUntouched(beta)).toBe(false);
+  });
+
+  it('seeds untouched state on resume and restore while defaulting missing state to touched', () => {
+    resumeTerminal('resume-untouched', null, { alive: true, untouched: true });
+    resumeTerminal('resume-legacy', null, { alive: true });
+    restoreTerminal('restore-untouched', { untouched: true });
+    restoreTerminal('restore-legacy', {});
+
+    expect(isUntouched('resume-untouched')).toBe(true);
+    expect(isUntouched('resume-legacy')).toBe(false);
+    expect(isUntouched('restore-untouched')).toBe(true);
+    expect(isUntouched('restore-legacy')).toBe(false);
   });
 
   it('Story 1: quick response never becomes busy', () => {
@@ -878,5 +964,40 @@ describe('terminal-registry alert behavior', () => {
       status: 'WATCHING_DISABLED',
       todo: false,
     });
+  });
+});
+
+describe('pending shell opts → spawnPty', () => {
+  let spawnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    installRegistryTestGlobals();
+    spawnSpy = vi.spyOn(fakePlatform, 'spawnPty');
+  });
+
+  afterEach(() => {
+    spawnSpy.mockRestore();
+    uninstallRegistryTestGlobals();
+  });
+
+  it('forwards a pending cwd to spawnPty (split inherits source pane cwd)', () => {
+    const id = 'split-with-cwd';
+
+    setPendingShellOpts(id, { shell: '/bin/zsh', args: ['-l'], cwd: '/home/user/project' });
+    getOrCreateTerminal(id);
+
+    expect(spawnSpy).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ shell: '/bin/zsh', args: ['-l'], cwd: '/home/user/project' }),
+    );
+  });
+
+  it('omits cwd when no pending opts were set', () => {
+    const id = 'split-without-cwd';
+
+    getOrCreateTerminal(id);
+
+    const options = spawnSpy.mock.calls[0]?.[1] as { cwd?: string } | undefined;
+    expect(options?.cwd).toBeUndefined();
   });
 });

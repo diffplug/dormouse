@@ -105,8 +105,18 @@ function ShellDropdown({ shells }: { shells: ShellEntry[] }) {
     setDefaultShellOpts(selected ? { shell: selected.path, args: selected.args } : null);
   }, [selected]);
 
-  const spawn = useCallback((shell: ShellEntry) => {
-    window.dispatchEvent(new CustomEvent('mouseterm:new-terminal', { detail: { shell: shell.path, args: shell.args } }));
+  const spawn = useCallback((
+    shell: ShellEntry,
+    options: { replaceUntouched?: boolean; announce?: boolean } = {},
+  ) => {
+    window.dispatchEvent(new CustomEvent('mouseterm:new-terminal', {
+      detail: {
+        shell: shell.path,
+        args: shell.args,
+        name: shell.name,
+        ...options,
+      },
+    }));
   }, []);
 
   // Close on click outside
@@ -167,8 +177,10 @@ function ShellDropdown({ shells }: { shells: ShellEntry[] }) {
                 aria-checked={isSelected}
                 className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface-raised"
                 onClick={() => {
-                  setSelected(shell);
                   setOpen(false);
+                  if (isSelected) return;
+                  setSelected(shell);
+                  spawn(shell, { replaceUntouched: true, announce: true });
                 }}
               >
                 <span className="flex w-3.5 shrink-0 items-center justify-center">

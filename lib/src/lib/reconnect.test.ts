@@ -135,6 +135,47 @@ describe('resumeOrRestore', () => {
     });
   });
 
+  it('seeds saved untouched state when resuming live PTYs', async () => {
+    const saved: PersistedSession = {
+      version: 3,
+      layout: { panels: { 'pane-a': {} } },
+      panes: [
+        { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null, untouched: true },
+      ],
+    };
+
+    await resumeOrRestore(createPlatform([
+      { id: 'pane-a', alive: true },
+    ], saved));
+
+    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('pane-a', 'pane-a-replay', {
+      alive: true,
+      exitCode: undefined,
+      title: 'Pane A',
+      untouched: true,
+    });
+  });
+
+  it('defaults missing saved untouched state to touched when resuming live PTYs', async () => {
+    const saved = {
+      version: 3 as const,
+      layout: { panels: { 'pane-a': {} } },
+      panes: [
+        { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null },
+      ],
+    };
+
+    await resumeOrRestore(createPlatform([
+      { id: 'pane-a', alive: true },
+    ], saved as PersistedSession));
+
+    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('pane-a', 'pane-a-replay', {
+      alive: true,
+      exitCode: undefined,
+      title: 'Pane A',
+    });
+  });
+
   it('seeds saved minimized door titles when resuming live PTYs', async () => {
     const saved: PersistedSession = {
       version: 3,

@@ -46,7 +46,14 @@ export type ExtensionMessage =
   | { type: 'pty:shells'; shells: Array<{ name: string; path: string; args: string[] }>; requestId?: string }
   | { type: 'clipboard:files'; paths: string[] | null; requestId: string }
   | { type: 'clipboard:image'; path: string | null; requestId: string }
-  | { type: 'mouseterm:newTerminal'; shell?: string; args?: string[] }
+  | {
+      type: 'mouseterm:newTerminal';
+      shell?: string;
+      args?: string[];
+      name?: string;
+      replaceUntouched?: boolean;
+      announce?: boolean;
+    }
   | { type: 'mouseterm:selectedShell'; shell?: string; args?: string[] }
   | { type: 'mouseterm:openThemeDebugger' }
   | { type: 'mouseterm:flushSessionSave'; requestId: string }

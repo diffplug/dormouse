@@ -7,7 +7,7 @@ This document specifies the `/tether` mobile terminal prototype.
 The prototype tests one core idea:
 
 ```text
-Stable terminal viewport + explicit touch mode + explicit keyboard mode.
+Stable terminal viewport + mobile session viewport + explicit touch mode + explicit input mode.
 ```
 
 The app should feel like a lightweight mobile terminal playground. It does not
@@ -27,7 +27,8 @@ Primary goals:
 
 * Keep the terminal viewport stable when the native phone keyboard opens or closes.
 * Let the user explicitly choose what terminal touches mean.
-* Let the user explicitly choose what appears in the stable keyboard reserve area.
+* Let the user explicitly choose what appears in the stable reserve area.
+* Show one terminal session at a time on mobile, with session switching available from the reserve controls.
 * Test normal mobile text entry using the native phone keyboard.
 * Provide enough terminal behavior to evaluate typing, Enter, Backspace, arrows, Escape, Tab, and app interruption.
 * Keep the implementation small and easy to iterate on.
@@ -41,7 +42,8 @@ Non-goals:
 * Session persistence.
 * Command history storage.
 * A real draft/scratchpad workflow.
-* Advanced gestures.
+* Mobile split-pane layout.
+* Multi-touch gestures.
 * Production security hardening.
 * Full accessibility implementation.
 
@@ -51,23 +53,35 @@ The mobile UI is split into fixed and flexible regions:
 
 ```text
 ┌─────────────────────────┐
-│ Pane title               │ fixed/small
+│ Mobile session header     │ fixed/small
 ├─────────────────────────┤
 │ Pane content             │ flexible terminal area
 ├─────────────────────────┤
-│ Touch mode selector      │ labeled, always visible
+│ Touch mode selector      │ always visible
 ├─────────────────────────┤
-│ Keyboard mode selector   │ labeled, always visible
+│ Reserve mode selector    │ always visible
 ├─────────────────────────┤
-│ Keyboard reserve area    │ stable height
+│ Reserve area             │ stable height
 │                         │
 │ Shows app keyboard UI    │ when OS keyboard hidden
 │ Occupied by OS keyboard  │ when OS keyboard visible
 └─────────────────────────┘
 ```
 
-The pane title and pane content come from the embedded `Wall` terminal pane. The
-mobile wrapper owns the two selectors and the fixed-height keyboard reserve.
+The mobile session header and pane content come from `MobileWall`, a mobile
+composition that displays one active terminal session at a time. Desktop `Wall`
+remains the tiling workspace; mobile does not expose split-pane layout. The
+mobile wrapper owns the two selectors and the fixed-height reserve. The selector
+block should use one divider between the Touch and Input rows, with no divider
+above Touch and no divider below Input. The mobile session header should not use
+the desktop terminal title corner radius; it is a flush mobile bar. The alert
+bell sits immediately after the title before secondary title detail. The mobile
+header keeps a minimize button, and in the `/tether` prototype that action opens
+the Sessions reserve instead of creating a desktop Door. The Touch row and its
+selector tray should sit on `terminal-bg` so they read as part of the terminal
+surface above. The Input row and reserve area should sit on
+`header-inactive-bg` with `header-inactive-fg`, so the lower input controls are
+distinct from the terminal while still following the selected theme.
 
 The root height must not be recalculated from `window.visualViewport` on every
 keyboard resize. The reserve area is intentionally stable so the terminal region
@@ -76,49 +90,241 @@ does not bounce while the OS keyboard animates.
 ## 4. Touch Mode Selector
 
 The touch selector controls what happens when the user touches the pane content
-area. It is always visible between the terminal content and the keyboard mode
+area. It is always visible between the terminal content and the input mode
 selector.
 
-The selector must be self-labeling. It should use a compact left-side `Touch`
-label plus segmented buttons that include both an icon and a short mode label.
-Icon-only touch controls are too hard to discover in this prototype.
+The selector must be self-labeling through segmented buttons that include both
+an icon and a short mode label. Icon-only touch controls are too hard to
+discover in this prototype.
 
 Touch modes:
 
 | Mode | Button label | Icon | Availability | Behavior |
 | --- | --- | --- | --- | --- |
-| Gestures | `Gestures` | `HandPointingIcon` | Always available | Touch drags generate arrow keys. Drag left sends left, drag right sends right, drag up sends up, and drag down sends down. |
+| Gestures | `Gestures` | `HandPointingIcon` | Always available | Pane-content touches, pen presses, and primary mouse/trackpad clicks open the Gesture mode radial menu. |
 | Text selection | `Select` | `CursorTextIcon` | Always available | Touches are reserved for terminal text selection and copy/paste. If the TUI is capturing mouse events, MouseTerm activates mouse override for the active pane. |
-| Cursor | `Cursor` | `CursorClickIcon` | Only when the active TUI is capturing mouse events | Touches are passed through as terminal mouse/cursor input. |
+| Mouse | `Mouse` | `CursorClickIcon` | Only when the active TUI is capturing mouse events | Touches are passed through as terminal mouse input. |
 
 Default touch mode is **Gestures**.
 
-If Cursor mode is active and the active pane stops capturing mouse events, the
+If Mouse mode is active and the active pane stops capturing mouse events, the
 selector must fall back to Gestures.
 
-## 5. Keyboard Mode Selector
+Gesture mode intentionally consumes primary mouse/trackpad clicks in addition to
+touch input. This keeps the `/tether` prototype usable in desktop browsers,
+narrow desktop viewports, and Storybook without a touchscreen. A primary
+mouse/trackpad click in pane content must start radial gesture handling, call
+`preventDefault()`, stop propagation, and capture that pointer; it is not passed
+through to the embedded `Wall`, xterm, or dockview for focus, selection, or pane
+interaction. Non-primary mouse buttons are ignored by gesture handling so their
+browser or host behavior can continue. Users who want terminal selection or TUI
+mouse input must choose Select or Mouse mode explicitly.
 
-The keyboard mode selector controls what appears in the keyboard reserve area.
-It is always visible and has four items:
+## 5. Gesture Mode
+
+Gesture mode is the default pane-content touch behavior. Tapping the pane content
+opens a radial menu offset from the touch origin. The menu should appear in the
+opposite diagonal from the user's thumb so the compass rose fills the visible
+area away from the touch point. For example, a lower-right thumb press opens the
+rose up and left; a lower-left thumb press opens it up and right.
+
+As the user drags, the UI draws only the offset guide line inside the visible
+compass rose. It must not draw a line directly under the user's thumb. The guide
+line is solid and fully opaque, and the offset rose center renders a small
+fully opaque circle.
+
+Gesture mode uses these radii:
+
+| Variable | Value | Behavior |
+| --- | --- | --- |
+| `RADIUS_LAYOUT` | `92px` | Base half-side for square direction anchors around the offset compass rose origin. Exploded option labels land on these anchors; root labels are packed around the same square so long labels do not overlap. |
+| `RADIUS_SELECT` | `RADIUS_LAYOUT * 0.75` | Visible circle drawn around the offset compass rose origin. When the mirrored drag reaches this distance, the closest compass direction is selected. |
+| `RADIUS_FADE_START` | `RADIUS_SELECT * 0.25` | No directional root-group fading happens before this drag distance. |
+| `RADIUS_HIGHLIGHT` | `RADIUS_SELECT * 0.5` | No circle is drawn. When the drag reaches this distance, the closest compass direction is highlighted, but not selected. |
+
+Gesture menu item state uses the same palette as pane headers. Idle groups and
+options use inactive header background/foreground. Highlighted or selected
+groups and options use active header background/foreground plus an inset
+`color-focus-ring` ring. Layout-affecting borders must not be used to indicate
+gesture selection state. Inactive chips should have only a quiet shadow; the
+heavier elevation is reserved for active chips.
+
+The select circle and its eight compass-direction ticks render at full opacity.
+The current highlighted or selected direction uses a stronger tick so the circle
+and label clusters read as one gesture system.
+
+When the rose opens on touch-down, root labels fade in with a subtle scale-in
+and the select circle grows from zero radius to `RADIUS_SELECT`. This is a short
+state-reveal motion, not an ongoing decoration; reduced-motion users get the
+final state immediately.
+
+While the user is still choosing a root group, the root groups fade according to
+the current drag vector only after the drag exceeds `RADIUS_FADE_START`. Before
+that threshold, all root groups render at full opacity. After the threshold,
+define `dragHat = (currentPoint - origin) / RADIUS_SELECT` and `unitToGroup` as
+the unit vector from the origin to the group's compass direction. The root group
+target opacity is `clamp(0.75 + dragHat dot unitToGroup, 0, 1)`. The rendered
+opacity blends smoothly from `1` at `RADIUS_FADE_START` to that target at
+`RADIUS_SELECT` using
+`fadeProgress = clamp((dragDistance - RADIUS_FADE_START) / (RADIUS_SELECT -
+RADIUS_FADE_START), 0, 1)` and
+`opacity = 1 + (targetOpacity - 1) * fadeProgress`.
+
+Each root compass group renders as three separate labels placed close together,
+not as one combined pill. When a group is selected, those same three labels tween
+from their root group positions to their exploded positions in the opposite
+directions. They must not fade out and be replaced by newly spawned option
+labels.
+
+Root labels are laid out as a square keypad, not on a circle. N, S, E, and W
+use a hierarchical layout: the arrow chip sits closest to the select circle, and
+the four arrow chips use one shared `GAP_CARDINAL_RING` from the select circle
+edge. The two secondary chips sit just outside each arrow. N/S secondary pairs
+use `GAP_CLUSTER` as the horizontal edge-to-edge gap across the axis; E/W
+secondary pairs use the same `GAP_CLUSTER` as the vertical edge-to-edge gap.
+Diagonal groups use an EW-dominant corner-and-stack layout: the center option's inward corner
+is aligned with the diagonal tick mark at the same ring gap used by the cardinal
+arrow chips, measured on screen as the same horizontal/vertical visual gap rather
+than as a longer diagonal distance. The diagonal center corner contract is: SE
+aligns Enter's top-left corner, NE aligns Backspace's bottom-left corner, SW
+aligns Tab's top-right corner, and NW aligns Esc's bottom-right corner. NE and
+SE place their secondary options relative to the center option exactly like the
+E cluster places `End` and `l` relative to `▶`: both to the right of the center,
+one above and one below. NW and SW place their secondary options exactly like the
+W cluster places `Home` and `h` relative to `◀`: both to the left of the center,
+one above and one below. Exploded option labels use the square direction anchors
+directly. The root label pack stays close to the select circle, while preserving
+enough room for long labels like Backspace.
+
+Each root cluster uses `GAP_CLUSTER = 2px`. The first option in each group is
+the cluster center. For N/S/E/W groups, items to the left are right-aligned to
+the center chip's left edge plus the cluster gap; items to the right are
+left-aligned to the center chip's right edge plus the cluster gap. Vertical
+neighbors use the same edge-and-gap rule above or below the center chip.
+Diagonal groups combine the tick-corner rule above with the same secondary-stack
+rule used by the matching E or W cardinal group.
+
+The radial menu is a two-stage gesture:
+
+1. Touch down to open the menu.
+2. Drag to `RADIUS_HIGHLIGHT` to preview the closest compass point.
+3. Drag to `RADIUS_SELECT` to choose that compass point's group.
+4. The other seven compass groups fade out.
+5. The compass center resets to the point where the user's drag intersected the
+   `RADIUS_SELECT` circle.
+6. The selected group's three options explode out from the reset center in the
+   opposite directions.
+7. Drag from the reset center to `RADIUS_HIGHLIGHT` to preview an option.
+8. Drag from the reset center to `RADIUS_SELECT` to choose and immediately send
+   that option. The app must not wait for touch release.
+9. After the option sends, the radial menu remains for a short completion
+   animation: removed labels fade out, and the selected label expands and fades
+   out for positive confirmation before the overlay clears.
+
+If the user releases after the first group selection but before choosing one of
+the exploded options, the gesture is cancelled.
+
+Exploded option directions:
+
+| Selected group | Option directions |
+| --- | --- |
+| N | S, SW, SE |
+| NE | SW, W, S |
+| E | W, NW, SW |
+| SE | NW, N, W |
+| S | N, NW, NE |
+| SW | NE, N, E |
+| W | E, NE, SE |
+| NW | SE, E, S |
+
+Examples:
+
+* Right arrow: tap, drag right to choose the E group, then drag left from the reset center until it sends.
+* End: tap, drag right to choose the E group, then drag up-left from the reset center until it sends.
+* `l`: tap, drag right to choose the E group, then drag down-left from the reset center until it sends.
+
+Root gesture menu labels use compact key glyphs: `⌃` for Ctrl, `⬆︎` for
+Shift, and `▲`/`▼`/`◀`/`▶` for arrow keys. Enter, Backspace, PgUp, and PgDn
+remain spelled out.
+
+Root gesture menu:
 
 ```text
-Recent | Type | Draft | Keys
+Esc      ⌃C*             k PgUp             n Backspace
+Quit**                   ▲                               Paste*
+
+Home   ◀                                           ▶   End
+h                                                       l
+
+⬆︎Tab                    ▼                   y ⬆︎Enter
+Tab Space              j PgDn                Enter
 ```
 
-The selector must be self-labeling. It should use a compact left-side `Input`
-label plus segmented text buttons. The label describes the reserve area's
-purpose without adding a longer instruction line.
+`⌃C` and `Paste` require an in-pane confirmation modal before they run.
 
-Keyboard modes:
+`Quit` enters a second exploded-option menu instead of sending input immediately:
 
-| Mode | Reserve area content |
+```text
+q | ⌃X | :q↵
+```
+
+The quit submenu uses the same reset-center, highlight-radius, and select-radius
+rules as the main option selection. Its final selected item uses the same
+expand-and-fade completion feedback as the root menu options.
+
+Gesture action mappings:
+
+| Action | Sequence |
 | --- | --- |
-| Recent | The entire reserve area displays `Recent - WIP`. |
-| Type | The reserve area focuses the hidden terminal input. Every typed key is echoed into the terminal as it happens. |
-| Draft | The entire reserve area displays `Draft - WIP`. |
-| Keys | The entire reserve area displays terminal key buttons. |
+| Esc | `\x1B` |
+| ⌃C | `\x03` |
+| q | `q` |
+| ⌃X | `\x18` |
+| `:q↵` | `:q\r` |
+| ▲ | `\x1B[A` |
+| PgUp | `\x1B[5~` |
+| k | `k` |
+| Backspace | `\x7F` |
+| Paste | Existing MouseTerm paste flow for the active pane |
+| n | `n` |
+| ◀ | `\x1B[D` |
+| Home | `\x1B[H` |
+| h | `h` |
+| ▶ | `\x1B[C` |
+| End | `\x1B[F` |
+| l | `l` |
+| Tab | `\x09` |
+| ⬆︎Tab | `\x1B[Z` |
+| Space | ` ` |
+| ▼ | `\x1B[B` |
+| PgDn | `\x1B[6~` |
+| j | `j` |
+| Enter | `\r` |
+| ⬆︎Enter | `\x1B[13;2u` |
+| y | `y` |
 
-Default keyboard mode is **Type**.
+## 6. Input Mode Selector
+
+The input mode selector controls what appears in the reserve area. It is always
+visible and has four items:
+
+```text
+Sessions | Recent | Type | Draft
+```
+
+The selector must be self-labeling through segmented buttons that include both
+an icon and a short mode label.
+
+Input modes:
+
+| Mode | Button label | Icon | Reserve area content |
+| --- | --- | --- | --- |
+| Sessions | `Sessions` | `TerminalWindowIcon` | The reserve area displays mobile session rows with active, alert, and TODO state. Selecting a session makes it the single visible terminal. |
+| Recent | `Recent` | `ClockCounterClockwiseIcon` | The entire reserve area displays `WIP - commands you have recently executed will be available here`. |
+| Type | `Type` | `TextTIcon` | The reserve area displays `Onscreen keyboard goes here` and focuses the hidden terminal input. Every typed key is echoed into the terminal as it happens. |
+| Draft | `Draft` | `ArticleNyTimesIcon` | The entire reserve area displays `WIP - this will be a place to draft prompts before pasting into the terminal`. |
+
+Default input mode is **Type**.
 
 Switching to Type should focus the hidden input and open the native keyboard
 where browser policy allows. Switching away from Type should blur the hidden
@@ -128,30 +334,6 @@ Tapping the **Type** selector must focus the hidden input synchronously during
 the tap/click handler. Do not defer this focus to `requestAnimationFrame` or a
 timer, because mobile browsers may then treat it as no longer user-initiated and
 refuse to open the native keyboard.
-
-## 6. Keys Mode
-
-Keys mode displays exactly these buttons:
-
-```text
-Esc   Tab   Space   Enter
-←     ↓     ↑       →
-```
-
-Mappings:
-
-| Button | Sequence |
-| --- | --- |
-| Esc | `\x1B` |
-| Tab | `\x09` |
-| Space | ` ` |
-| Enter | `\r` |
-| ← | `\x1B[D` |
-| ↓ | `\x1B[B` |
-| ↑ | `\x1B[A` |
-| → | `\x1B[C` |
-
-Tapping a key sends exactly one action. Long-press repeat is not required for v0.
 
 ## 7. Type Mode Input
 
@@ -188,7 +370,7 @@ Minimum useful behavior:
 * Maintain a command line buffer.
 * Enter submits the current command.
 * Backspace edits the current command.
-* Arrow keys produce visible behavior.
+* Gesture-generated arrow keys produce visible behavior.
 * Escape and Tab produce visible behavior.
 * When a fake full-screen app such as `ascii-splash`, `splash`, `changelog`, or
   `tut` is running, `Ctrl+C` sends `\x03` to that app; if the app exits, the
@@ -215,7 +397,8 @@ The keyboard reserve area has a stable height. It should not be recomputed from
 `visualViewport` while the native keyboard animates.
 
 When the OS keyboard is hidden, the reserve area shows the selected app keyboard
-UI (`Recent - WIP`, Type focus target, `Draft - WIP`, or Keys buttons).
+UI: session list, `WIP - commands you have recently executed will be available here`,
+`Onscreen keyboard goes here`, or `WIP - this will be a place to draft prompts before pasting into the terminal`.
 
 When the OS keyboard is visible, the OS keyboard may cover or occupy that same
 physical area. This is preferred over resizing the whole app around the keyboard.
@@ -224,14 +407,15 @@ physical area. This is preferred over resizing the whole app around the keyboard
 
 Required interactions:
 
-* Tap keyboard mode selector items.
+* Tap input mode selector items.
 * Tap touch mode selector items.
+* Switch active sessions through Sessions mode.
 * Tap Type reserve area to focus typing.
 * Type through the native keyboard.
-* Tap key buttons in Keys mode.
-* Drag in Gestures mode to send arrow keys.
+* Use Gesture mode to open the radial menu and send terminal inputs.
+* Confirm sensitive Gesture mode actions before sending `Ctrl+C` or reading the clipboard for Paste.
 * Use Text selection mode for terminal selection and copy/paste.
-* Use Cursor mode for terminal mouse/cursor input when a TUI requests mouse reporting.
+* Use Mouse mode for terminal mouse input when a TUI requests mouse reporting.
 
 Pane-content touches must never open the native keyboard. The pane content area
 may focus the terminal internally for key routing or mouse handling, but the
@@ -270,26 +454,21 @@ Build exactly this:
 * Touch mode selector:
 
 ```text
-Touch  Gestures | Select | Cursor
+Gestures | Select | Mouse
 ```
 
-* Keyboard mode selector:
+* Input mode selector:
 
 ```text
-Input  Recent | Type | Draft | Keys
+Sessions | Recent | Type | Draft
 ```
 
 * Stable keyboard reserve area.
-* Recent reserve content: `Recent - WIP`.
-* Draft reserve content: `Draft - WIP`.
+* Sessions reserve content: active session rows with alert and TODO state.
+* Recent reserve content: `WIP - commands you have recently executed will be available here`.
+* Draft reserve content: `WIP - this will be a place to draft prompts before pasting into the terminal`.
 * Type mode native mobile keyboard input.
-* Keys buttons:
-
-```text
-Esc   Tab   Space   Enter
-←     ↓     ↑       →
-```
-
+* Gesture mode radial menu for arrows, navigation keys, Esc, Tab, Enter, simple vim-like keys, confirmed Ctrl+C, confirmed Paste, and Quit breakout.
 * Simple local playground terminal behavior.
 
 ## 13. Prototype Success Criteria
@@ -298,9 +477,9 @@ The prototype should answer these questions:
 
 1. Does the terminal viewport feel stable when the mobile keyboard opens and closes?
 2. Is the touch mode selector understandable and reachable?
-3. Are gesture arrows usable enough for command history and cursor movement?
+3. Is Gesture mode fast and understandable enough for arrows, navigation keys, and common TUI exits?
 4. Is text selection discoverable and reliable on mobile?
-5. Is Cursor mode useful when a TUI captures mouse events?
+5. Is Mouse mode useful when a TUI captures mouse events?
 6. Does native keyboard Type mode feel acceptable for terminal text entry?
 7. Does the stable keyboard reserve feel better than resizing the whole UI?
 8. Is the UI too cramped in portrait orientation?
@@ -313,9 +492,8 @@ Potential later additions:
 * Draft scratchpad.
 * Dual-pane copy/paste.
 * Pinned snippets.
-* Ctrl+C, Ctrl+D, and Ctrl+Z app-key buttons.
+* Ctrl+D and Ctrl+Z app-key buttons.
 * Alt and modifier behavior.
-* Home, End, PgUp, PgDn.
 * Long-press key repeat.
 * Remote backend PTY.
 * SSH sessions.
@@ -330,6 +508,6 @@ The v0 prototype should stay focused:
 
 ```text
 Touch modes make pane touches explicit.
-Keyboard modes make the reserve area explicit.
+Input modes make the reserve area explicit.
 Everything else waits.
 ```

@@ -11,16 +11,20 @@ import { Baseboard } from './Baseboard';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import {
   clearSessionAttention,
+  disposeSession,
   dismissOrToggleAlert,
   focusSession,
   markSessionAttention,
   toggleSessionTodo,
   setPendingShellOpts,
   getDefaultShellOpts,
+  getTerminalPaneState,
+  isUntouched,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
   type SessionStatus,
 } from '../lib/terminal-registry';
+import { orchestrateKill } from '../lib/kill-animation';
 import { findReattachNeighbor } from '../lib/spatial-nav';
 import { cloneLayout, getLayoutStructureSignature } from '../lib/layout-snapshot';
 import type { PersistedDoor } from '../lib/session-types';
@@ -46,9 +50,23 @@ import {
   ZoomedContext,
   type WallActions,
 } from './wall/wall-context';
-import type { DooredItem, WallEvent, WallMode, WallSelectionKind, SpawnDirection } from './wall/wall-types';
+import type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind, SpawnDirection } from './wall/wall-types';
 
-export type { DooredItem, WallEvent, WallMode, WallSelectionKind, SpawnDirection } from './wall/wall-types';
+type ShellSpawnRequest = {
+  shell?: string;
+  args?: string[];
+  name?: string;
+  replaceUntouched?: boolean;
+  announce?: boolean;
+};
+
+type ShellSpawnNoticeState = {
+  id: string;
+  text: string;
+  nonce: number;
+};
+
+export type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind, SpawnDirection } from './wall/wall-types';
 export {
   DialogKeyboardContext,
   DoorElementsContext,
@@ -86,6 +104,35 @@ function idsMatch(a: string[], b: string[]): boolean {
 function persistedPanelTitle(title: string | null | undefined): string {
   const trimmed = title?.trim();
   return trimmed || UNNAMED_PANEL_TITLE;
+}
+
+function ShellSpawnNotice({
+  notice,
+  paneElements,
+  version,
+}: {
+  notice: ShellSpawnNoticeState | null;
+  paneElements: Map<string, HTMLElement>;
+  version: number;
+}) {
+  void version;
+  if (!notice) return null;
+  const target = paneElements.get(notice.id);
+  if (!target) return null;
+  const rect = target.getBoundingClientRect();
+  return (
+    <div
+      key={notice.nonce}
+      className="shell-spawn-notice pointer-events-none fixed z-[90] rounded border border-border bg-surface-raised px-2.5 py-1 font-mono text-xs text-foreground shadow-md"
+      style={{
+        top: rect.top + 38,
+        left: rect.left + rect.width / 2,
+        transform: 'translateX(-50%)',
+      }}
+    >
+      {notice.text}
+    </div>
+  );
 }
 
 const components = { terminal: TerminalPanel };
@@ -171,6 +218,9 @@ export function Wall({
   const [renamingPaneId, setRenamingPaneId] = useState<string | null>(null);
   const [doors, setDoors] = useState<DooredItem[]>(() => (initialDoors ?? []) as DooredItem[]);
   const [zoomed, setZoomed] = useState(false);
+  const [shellSpawnNotice, setShellSpawnNotice] = useState<ShellSpawnNoticeState | null>(null);
+  const shellSpawnNoticeCounterRef = useRef(0);
+  const shellSpawnNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Use refs so the capture-phase listener always sees latest state without re-registering
   const modeRef = useRef(mode);
@@ -195,6 +245,7 @@ export function Wall({
   useEffect(() => () => {
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
     if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+    if (shellSpawnNoticeTimerRef.current) clearTimeout(shellSpawnNoticeTimerRef.current);
   }, []);
 
   // --- External event notifications ---
@@ -212,14 +263,6 @@ export function Wall({
     setConfirmKill({ ...ck, exit: 'shake' });
     shakeTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_SHAKE_MS);
   }, []);
-  const acceptKill = useCallback((onExit: () => void) => {
-    const ck = confirmKillRef.current;
-    if (!ck || ck.exit) return;
-    setConfirmKill({ ...ck, exit: 'confirm' });
-    onExit();
-    fireEvent({ type: 'kill', id: ck.id });
-    confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
-  }, [fireEvent]);
 
   useEffect(() => { onEventRef.current?.({ type: 'modeChange', mode }); }, [mode]);
   useEffect(() => { onEventRef.current?.({ type: 'zoomChange', zoomed }); }, [zoomed]);
@@ -237,6 +280,36 @@ export function Wall({
     const panel = apiRef.current?.getPanel(id);
     if (panel) panel.api.setActive();
   }, []);
+
+  const showShellSpawnNotice = useCallback((id: string, text: string) => {
+    if (shellSpawnNoticeTimerRef.current) {
+      clearTimeout(shellSpawnNoticeTimerRef.current);
+    }
+    setShellSpawnNotice({
+      id,
+      text,
+      nonce: ++shellSpawnNoticeCounterRef.current,
+    });
+    shellSpawnNoticeTimerRef.current = setTimeout(() => {
+      setShellSpawnNotice(null);
+      shellSpawnNoticeTimerRef.current = null;
+    }, 1500);
+  }, []);
+
+  const killPaneImmediately = useCallback((id: string) => {
+    const api = apiRef.current;
+    if (!api?.getPanel(id)) return;
+    orchestrateKill(api, id, selectPane, setSelectedId, killInProgressRef, overlayElRef);
+    fireEvent({ type: 'kill', id });
+  }, [fireEvent, selectPane]);
+
+  const acceptKill = useCallback(() => {
+    const ck = confirmKillRef.current;
+    if (!ck || ck.exit) return;
+    setConfirmKill({ ...ck, exit: 'confirm' });
+    killPaneImmediately(ck.id);
+    confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
+  }, [killPaneImmediately]);
 
   /** Select a door in the baseboard */
   const selectDoor = useCallback((id: string) => {
@@ -350,12 +423,12 @@ export function Wall({
 
   const handleReattach = useCallback((
     item: DooredItem,
-    options?: { enterPassthrough?: boolean; confirmKill?: boolean },
+    options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction },
   ) => {
     const api = apiRef.current;
     if (!api) return;
     const enterPassthrough = options?.enterPassthrough ?? true;
-    const confirmKillAfterRestore = options?.confirmKill ?? false;
+    const afterRestore = options?.afterRestore;
 
     const currentLayoutSignature = getLayoutStructureSignature(api.toJSON());
     // Exact reattach is only safe when the layout structure matches AND the
@@ -427,12 +500,30 @@ export function Wall({
         // Guard against panel removal between scheduling and execution
         if (!apiRef.current?.getPanel(item.id)) return;
         focusSession(item.id, false);
-        if (confirmKillAfterRestore) {
+        if (afterRestore === 'kill-immediately') {
+          killPaneImmediately(item.id);
+        } else if (afterRestore === 'confirm-kill') {
           setConfirmKill({ id: item.id, char: randomKillChar() });
+        } else if (typeof afterRestore === 'object' && afterRestore.type === 'replace-terminal') {
+          const panel = apiRef.current?.getPanel(item.id);
+          if (!panel) return;
+          apiRef.current?.addPanel({
+            id: afterRestore.newId,
+            component: 'terminal',
+            tabComponent: 'terminal',
+            title: UNNAMED_PANEL_TITLE,
+            position: { referencePanel: panel, direction: 'within' },
+          });
+          disposeSession(item.id);
+          apiRef.current?.removePanel(panel);
+          selectPane(afterRestore.newId);
+          if (afterRestore.announce) {
+            showShellSpawnNotice(afterRestore.newId, `Switched to ${afterRestore.shellName}`);
+          }
         }
       });
     }
-  }, [selectPane, enterTerminalMode]);
+  }, [selectPane, enterTerminalMode, killPaneImmediately, showShellSpawnNotice]);
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
@@ -441,12 +532,54 @@ export function Wall({
     const handler = (e: Event) => {
       const api = apiRef.current;
       if (!api) return;
-      const detail = (e as CustomEvent).detail;
+      const detail = ((e as CustomEvent<ShellSpawnRequest>).detail ?? {}) as ShellSpawnRequest;
       const newId = generatePaneId();
 
       // Store shell options so getOrCreateTerminal picks them up on mount
       if (detail?.shell) {
         setPendingShellOpts(newId, { shell: detail.shell, args: detail.args });
+      }
+
+      const selectedPaneId = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
+      const selectedPanel = selectedPaneId ? api.getPanel(selectedPaneId) : undefined;
+      const selectedDoor = selectedTypeRef.current === 'door'
+        ? doorsRef.current.find((door) => door.id === selectedIdRef.current)
+        : undefined;
+      const shouldReplaceUntouched =
+        detail.replaceUntouched === true &&
+        !!selectedPaneId &&
+        !!selectedPanel &&
+        isUntouched(selectedPaneId);
+      const shellName = detail.name?.trim() || 'terminal';
+
+      if (shouldReplaceUntouched) {
+        api.addPanel({
+          id: newId,
+          component: 'terminal',
+          tabComponent: 'terminal',
+          title: UNNAMED_PANEL_TITLE,
+          position: { referencePanel: selectedPanel, direction: 'within' },
+        });
+        disposeSession(selectedPaneId);
+        api.removePanel(selectedPanel);
+        selectPane(newId);
+        if (detail.announce) {
+          showShellSpawnNotice(newId, `Switched to ${shellName}`);
+        }
+        return;
+      }
+
+      if (detail.replaceUntouched === true && selectedDoor && isUntouched(selectedDoor.id)) {
+        handleReattachRef.current(selectedDoor, {
+          enterPassthrough: false,
+          afterRestore: {
+            type: 'replace-terminal',
+            newId,
+            shellName,
+            announce: detail.announce === true,
+          },
+        });
+        return;
       }
 
       const active = api.activePanel;
@@ -458,10 +591,13 @@ export function Wall({
         position: active ? { referencePanel: active.id, direction: pickSplitDirection(active) } : undefined,
       });
       selectPane(newId);
+      if (detail.announce) {
+        showShellSpawnNotice(newId, `Opened ${shellName}`);
+      }
     };
     window.addEventListener('mouseterm:new-terminal', handler);
     return () => window.removeEventListener('mouseterm:new-terminal', handler);
-  }, [generatePaneId, selectPane]);
+  }, [generatePaneId, selectPane, showShellSpawnNotice]);
 
   const addSplitPanel = useCallback((
     id: string | null,
@@ -475,8 +611,11 @@ export function Wall({
     const ref = id && api.getPanel(id) ? id : null;
     // Carry the currently-selected shell into the split, same as [+].
     const defaults = getDefaultShellOpts();
-    if (defaults?.shell) {
-      setPendingShellOpts(newId, { shell: defaults.shell, args: defaults.args });
+    // Remote cwds (OSC 7 over ssh) name a path on the remote host, not one the local shell can chdir to.
+    const sourceCwd = ref ? getTerminalPaneState(ref).cwd : null;
+    const inheritedCwd = sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined;
+    if (defaults?.shell || inheritedCwd) {
+      setPendingShellOpts(newId, { shell: defaults?.shell, args: defaults?.args, cwd: inheritedCwd });
     }
     // Horizontal split places the new pane to the right → reveal from its left edge.
     // Vertical split places it below → reveal from its top edge.
@@ -497,6 +636,10 @@ export function Wall({
   const wallActions: WallActions = useMemo(() => ({
     onKill: (id: string) => {
       exitTerminalMode();
+      if (isUntouched(id)) {
+        killPaneImmediately(id);
+        return;
+      }
       const char = randomKillChar();
       setConfirmKill({ id, char });
     },
@@ -549,7 +692,7 @@ export function Wall({
     onCancelRename: () => {
       setRenamingPaneId(null);
     },
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode]);
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately]);
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
 
@@ -572,6 +715,7 @@ export function Wall({
     enterTerminalMode,
     exitTerminalMode,
     minimizePane,
+    killPaneImmediately,
     acceptKill,
     rejectKill,
     setConfirmKill,
@@ -621,6 +765,12 @@ export function Wall({
                 onCancel={() => rejectKill()}
               />
             )}
+
+            <ShellSpawnNotice
+              notice={shellSpawnNotice}
+              paneElements={paneElements}
+              version={paneElementsVersion}
+            />
 
           </div>
           </DialogKeyboardContext.Provider>
