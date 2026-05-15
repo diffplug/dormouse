@@ -107,6 +107,7 @@ import {
   markSessionTodo,
   resumeTerminal,
   restoreTerminal,
+  setPendingShellOpts,
   swapTerminals,
   toggleSessionAlert,
   toggleSessionTodo,
@@ -220,37 +221,40 @@ function driveToRingingNeedsAttention(id: string): void {
   expect(getActivity(id).status).toBe('ALERT_RINGING');
 }
 
+function installRegistryTestGlobals(): void {
+  vi.useFakeTimers();
+  fakePlatform.reset();
+  initAlertStateReceiver();
+
+  const documentElement = new MockElement();
+  vi.stubGlobal('document', {
+    createElement: () => new MockElement(),
+    documentElement,
+  });
+  vi.stubGlobal('getComputedStyle', () => ({
+    getPropertyValue: () => '#000000',
+  }));
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    callback(0);
+    return 0;
+  });
+  vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('window', {
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  });
+}
+
+function uninstallRegistryTestGlobals(): void {
+  disposeAllSessions();
+  fakePlatform.reset();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+}
+
 describe('terminal-registry alert behavior', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    fakePlatform.reset();
-    initAlertStateReceiver();
-
-    const documentElement = new MockElement();
-    vi.stubGlobal('document', {
-      createElement: () => new MockElement(),
-      documentElement,
-    });
-    vi.stubGlobal('getComputedStyle', () => ({
-      getPropertyValue: () => '#000000',
-    }));
-    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
-      callback(0);
-      return 0;
-    });
-    vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} });
-    vi.stubGlobal('window', {
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    });
-  });
-
-  afterEach(() => {
-    disposeAllSessions();
-    fakePlatform.reset();
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
-  });
+  beforeEach(installRegistryTestGlobals);
+  afterEach(uninstallRegistryTestGlobals);
 
   it('starts brand-new sessions as untouched', () => {
     const id = 'new-untouched';
@@ -960,5 +964,40 @@ describe('terminal-registry alert behavior', () => {
       status: 'ALERT_DISABLED',
       todo: false,
     });
+  });
+});
+
+describe('pending shell opts → spawnPty', () => {
+  let spawnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    installRegistryTestGlobals();
+    spawnSpy = vi.spyOn(fakePlatform, 'spawnPty');
+  });
+
+  afterEach(() => {
+    spawnSpy.mockRestore();
+    uninstallRegistryTestGlobals();
+  });
+
+  it('forwards a pending cwd to spawnPty (split inherits source pane cwd)', () => {
+    const id = 'split-with-cwd';
+
+    setPendingShellOpts(id, { shell: '/bin/zsh', args: ['-l'], cwd: '/home/user/project' });
+    getOrCreateTerminal(id);
+
+    expect(spawnSpy).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ shell: '/bin/zsh', args: ['-l'], cwd: '/home/user/project' }),
+    );
+  });
+
+  it('omits cwd when no pending opts were set', () => {
+    const id = 'split-without-cwd';
+
+    getOrCreateTerminal(id);
+
+    const options = spawnSpy.mock.calls[0]?.[1] as { cwd?: string } | undefined;
+    expect(options?.cwd).toBeUndefined();
   });
 });

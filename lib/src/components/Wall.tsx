@@ -18,6 +18,7 @@ import {
   toggleSessionTodo,
   setPendingShellOpts,
   getDefaultShellOpts,
+  getTerminalPaneState,
   isUntouched,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
@@ -610,8 +611,11 @@ export function Wall({
     const ref = id && api.getPanel(id) ? id : null;
     // Carry the currently-selected shell into the split, same as [+].
     const defaults = getDefaultShellOpts();
-    if (defaults?.shell) {
-      setPendingShellOpts(newId, { shell: defaults.shell, args: defaults.args });
+    // Remote cwds (OSC 7 over ssh) name a path on the remote host, not one the local shell can chdir to.
+    const sourceCwd = ref ? getTerminalPaneState(ref).cwd : null;
+    const inheritedCwd = sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined;
+    if (defaults?.shell || inheritedCwd) {
+      setPendingShellOpts(newId, { shell: defaults?.shell, args: defaults?.args, cwd: inheritedCwd });
     }
     // Horizontal split places the new pane to the right → reveal from its left edge.
     // Vertical split places it below → reveal from its top edge.
