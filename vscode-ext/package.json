@@ -1,12 +1,12 @@
 {
-  "name": "mouseterm",
-  "displayName": "MouseTerm",
-  "description": "Multitasking terminal with tmux keybindings, mouse support, and a built-in alert system for completed tasks and prompts.",
+  "name": "dormouse",
+  "displayName": "Dormouse — Terminal Multiplexer",
+  "description": "A persistent multitasking terminal — tmux keybindings, mouse support, and a built-in alert system that buzzes you when builds, agents, or scripts finish.",
   "version": "0.9.1",
   "publisher": "diffplug",
   "license": "FSL-1.1-MIT",
   "icon": "icon.png",
-  "homepage": "https://mouseterm.com/",
+  "homepage": "https://dormouse.sh/",
   "repository": {
     "type": "git",
     "url": "https://github.com/diffplug/mouseterm"
@@ -22,75 +22,77 @@
     "terminal",
     "multiplexer",
     "mouse",
+    "dormouse",
     "ai",
     "agent",
     "alert",
+    "persistent",
     "split",
     "panes",
     "completion"
   ],
   "activationEvents": [
-    "onView:mouseterm.view",
-    "onWebviewPanel:mouseterm"
+    "onView:dormouse.view",
+    "onWebviewPanel:dormouse"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "mouseterm.focus",
-        "title": "MouseTerm: Focus",
+        "command": "dormouse.focus",
+        "title": "Dormouse: Focus",
         "icon": {
           "light": "icon-tiny-light.png",
           "dark": "icon-tiny-dark.png"
         }
       },
       {
-        "command": "mouseterm.open",
-        "title": "MouseTerm: Open in Editor"
+        "command": "dormouse.open",
+        "title": "Dormouse: Open in Editor"
       },
       {
-        "command": "mouseterm.debugTheme",
-        "title": "MouseTerm: Debug Theme"
+        "command": "dormouse.debugTheme",
+        "title": "Dormouse: Debug Theme"
       },
       {
-        "command": "mouseterm.newTerminal",
-        "title": "MouseTerm: New Terminal",
+        "command": "dormouse.newTerminal",
+        "title": "Dormouse: New Terminal",
         "icon": "$(add)"
       },
       {
-        "command": "mouseterm.selectShell",
-        "title": "MouseTerm: Select Shell",
+        "command": "dormouse.selectShell",
+        "title": "Dormouse: Select Shell",
         "icon": "$(gear)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "mouseterm.selectShell",
+          "command": "dormouse.selectShell",
           "group": "navigation@1",
-          "when": "view == mouseterm.view"
+          "when": "view == dormouse.view"
         },
         {
-          "command": "mouseterm.newTerminal",
+          "command": "dormouse.newTerminal",
           "group": "navigation@2",
-          "when": "view == mouseterm.view"
+          "when": "view == dormouse.view"
         }
       ]
     },
     "viewsContainers": {
       "panel": [
         {
-          "id": "mouseterm-panel",
-          "title": "MouseTerm",
+          "id": "dormouse-panel",
+          "title": "Dormouse",
           "icon": "$(terminal)"
         }
       ]
     },
     "views": {
-      "mouseterm-panel": [
+      "dormouse-panel": [
         {
-          "id": "mouseterm.view",
-          "name": "MouseTerm",
+          "id": "dormouse.view",
+          "name": "Dormouse",
           "type": "webview"
         }
       ]
@@ -101,8 +103,8 @@
     "build:frontend": "vite build --config vite.config.ts",
     "build": "esbuild src/extension.ts --bundle --outdir=dist --external:vscode --external:node-pty --format=cjs --platform=node && esbuild src/pty-host.js --bundle --outfile=dist/pty-host.js --external:node-pty --format=cjs --platform=node && cp -RL node_modules/node-pty dist/node-pty",
     "watch": "pnpm build --watch",
-    "package": "vsce package --no-dependencies --out mouseterm.vsix",
-    "dogfood": "pnpm package && code --install-extension mouseterm.vsix --force && rm -f mouseterm.vsix && echo '\\n✦ Reload VSCode window (Cmd+Shift+P → Reload Window) to pick up the new extension.'",
+    "package": "vsce package --no-dependencies --out dormouse.vsix",
+    "dogfood": "pnpm package && code --install-extension dormouse.vsix --force && rm -f dormouse.vsix && echo '\\n✦ Reload VSCode window (Cmd+Shift+P → Reload Window) to pick up the new extension.'",
     "publish:marketplace": "vsce publish --no-dependencies",
     "publish:openvsx": "ovsx publish --no-dependencies"
   },

@@ -8,7 +8,7 @@ import {
   type VscodeThemeVarTraceOrigin,
 } from '../lib/themes';
 
-export const OPEN_THEME_DEBUGGER_EVENT = 'mouseterm:openThemeDebugger';
+export const OPEN_THEME_DEBUGGER_EVENT = 'dormouse:openThemeDebugger';
 
 export function openThemeDebugger(): void {
   window.dispatchEvent(new CustomEvent(OPEN_THEME_DEBUGGER_EVENT));

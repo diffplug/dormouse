@@ -3,8 +3,8 @@ import type { MouseTermTheme } from './types';
 import _bundledThemes from './bundled.json';
 const bundledThemes = _bundledThemes as unknown as MouseTermTheme[];
 
-const INSTALLED_KEY = 'mouseterm:installed-themes';
-const ACTIVE_KEY = 'mouseterm:active-theme';
+const INSTALLED_KEY = 'dormouse:installed-themes';
+const ACTIVE_KEY = 'dormouse:active-theme';
 
 function getStorage(): Storage | null {
   const storage = globalThis.localStorage;

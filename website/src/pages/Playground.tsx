@@ -84,7 +84,7 @@ function Playground() {
 
       adapter.setDefaultScenario(scenarios.SCENARIO_SHELL_PROMPT);
       // Each runner-owned pane suppresses the default shell-prompt scenario,
-      // otherwise spawnPty queues a delayed `user@mouseterm:~$` write that
+      // otherwise spawnPty queues a delayed `user@dormouse:~$` write that
       // would land in the runner's alt-screen and corrupt its output.
       for (const pane of panes) {
         adapter.setScenario(pane.id, { name: "none", chunks: [] });

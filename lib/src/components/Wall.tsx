@@ -595,8 +595,8 @@ export function Wall({
         showShellSpawnNotice(newId, `Opened ${shellName}`);
       }
     };
-    window.addEventListener('mouseterm:new-terminal', handler);
-    return () => window.removeEventListener('mouseterm:new-terminal', handler);
+    window.addEventListener('dormouse:new-terminal', handler);
+    return () => window.removeEventListener('dormouse:new-terminal', handler);
   }, [generatePaneId, selectPane, showShellSpawnNotice]);
 
   const addSplitPanel = useCallback((
