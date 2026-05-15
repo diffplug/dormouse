@@ -38,6 +38,7 @@ import {
   type MobileGesturePoint,
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
+import type { SessionStatus } from '../lib/terminal-registry';
 
 export type MobileTerminalKeyboardMode = 'sessions' | 'recent' | 'type' | 'draft';
 export type MobileTerminalSection = MobileTerminalKeyboardMode;
@@ -49,7 +50,7 @@ export interface MobileTerminalSessionItem {
   title: string;
   secondary?: string | null;
   active?: boolean;
-  status?: 'ALERT_DISABLED' | 'NOTHING_TO_SHOW' | 'MIGHT_BE_BUSY' | 'BUSY' | 'MIGHT_NEED_ATTENTION' | 'ALERT_RINGING' | 'OSC_NOTIF_BUSY';
+  status?: SessionStatus;
   todo?: boolean;
 }
 

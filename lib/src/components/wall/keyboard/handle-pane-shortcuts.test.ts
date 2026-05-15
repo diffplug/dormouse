@@ -7,7 +7,7 @@ import type { WallKeyboardCtx } from './types';
 
 const terminalRegistryMocks = vi.hoisted(() => ({
   dismissOrToggleAlert: vi.fn(),
-  getActivity: vi.fn(() => ({ status: 'ALERT_DISABLED' })),
+  getActivity: vi.fn(() => ({ status: 'WATCHING_DISABLED' })),
   isUntouched: vi.fn(),
   swapTerminals: vi.fn(),
   toggleSessionTodo: vi.fn(),

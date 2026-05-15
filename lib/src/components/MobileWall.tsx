@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import {
   ArrowLineDownIcon,
   BellIcon,
-  BellSlashIcon,
   XIcon,
 } from '@phosphor-icons/react';
 import { HeaderActionButton } from './HeaderActionButton';
@@ -50,13 +49,14 @@ export interface MobileWallProps {
 const DEFAULT_MOBILE_SESSION: MobileWallSession = { id: 'mobile-pane' };
 
 const ALERT_BUTTON_LABELS: Record<SessionStatus, { aria: string; tooltip: string }> = {
-  ALERT_DISABLED: { aria: 'Enable alert', tooltip: 'Enable alerts' },
-  NOTHING_TO_SHOW: { aria: 'Disable alert', tooltip: 'Disable alerts' },
-  MIGHT_BE_BUSY: { aria: 'Disable alert', tooltip: 'Disable alerts' },
-  BUSY: { aria: 'Disable alert', tooltip: 'Disable alerts' },
-  MIGHT_NEED_ATTENTION: { aria: 'Disable alert', tooltip: 'Disable alerts' },
+  WATCHING_DISABLED: { aria: 'Enable watching', tooltip: 'Enable watching' },
+  NOTHING_TO_SHOW: { aria: 'Disable watching', tooltip: 'Disable watching' },
+  MIGHT_BE_BUSY: { aria: 'Disable watching', tooltip: 'Disable watching' },
+  BUSY: { aria: 'Disable watching', tooltip: 'Disable watching' },
+  MIGHT_NEED_ATTENTION: { aria: 'Disable watching', tooltip: 'Disable watching' },
   ALERT_RINGING: { aria: 'Alert ringing', tooltip: 'Alert ringing' },
   OSC_NOTIF_BUSY: { aria: 'Progress active', tooltip: 'Progress active' },
+  COMMAND_EXIT_ARMED: { aria: 'Command running', tooltip: 'Command running' },
 };
 
 export function useMobileWallSessionItems(
@@ -178,7 +178,7 @@ function MobileWallHeader({
   onMinimize: () => void;
   onKill: () => void;
 }) {
-  const status = session.status ?? 'ALERT_DISABLED';
+  const status = session.status ?? 'WATCHING_DISABLED';
   const todoPill = useTodoPillContent(session.todo === true);
   const alertButtonLabels = ALERT_BUTTON_LABELS[status];
   const showTodoPill = todoPill.visible;
@@ -199,8 +199,8 @@ function MobileWallHeader({
           dataAlertButtonFor={session.id}
         >
           <span className="flex items-center justify-center">
-            {status === 'ALERT_DISABLED' ? (
-              <BellSlashIcon size={14} />
+            {status === 'WATCHING_DISABLED' ? (
+              <BellIcon size={14} />
             ) : (
               <BellIcon size={14} weight="fill" className={bellIconClass(status)} />
             )}
