@@ -352,6 +352,45 @@ describe('AlertManager in isolation', () => {
     });
   });
 
+  it('finishes an armed command-exit watch when the PTY exits without commandFinish', () => {
+    const id = 'command-exit-pty-exit';
+
+    manager.attend(id);
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'exec pnpm build' },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+
+    vi.advanceTimersByTime(15_000);
+    expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
+
+    manager.onExit(id, 1);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_RINGING',
+      todo: true,
+      notification: { source: 'COMMAND_EXIT', title: 'Command finished', body: 'exec pnpm build exited 1' },
+    });
+  });
+
+  it('clears an unarmed command-exit watch when the PTY exits before attention loss', () => {
+    const id = 'command-exit-pty-exit-unarmed';
+
+    manager.attend(id);
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'exec true' },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+
+    manager.onExit(id, 0);
+    vi.advanceTimersByTime(15_000);
+
+    expect(manager.getState(id)).toMatchObject({
+      status: 'WATCHING_DISABLED',
+      todo: false,
+      notification: null,
+    });
+  });
+
   it('does not ring command-exit alerts for commands shorter than the attention window', () => {
     const id = 'quick-command-exit';
 

@@ -307,6 +307,8 @@ The command-exit track is intentionally stricter than WATCHING. It exists for th
 | `IDLE` | watched command is still running and attention expires or is explicitly lost | `COMMAND_EXIT_ARMED` | Store `attentionLostAt`. |
 | `COMMAND_EXIT_ARMED` | same command finishes, runtime is at least `T_USER_ATTENTION`, and Session lacks attention | `ALERT_RINGING` | Create generated command-exit notification, set `todo = true`, and ring. |
 | `COMMAND_EXIT_ARMED` | same command finishes too quickly | `IDLE` | Clear without ringing. |
+| `COMMAND_EXIT_ARMED` | PTY exits before a command-finish semantic event, runtime is at least `T_USER_ATTENTION`, and Session lacks attention | `ALERT_RINGING` | Treat process exit as the fallback finish event for commands such as `exec <long command>` or shells that exit before emitting a finish marker. |
+| `IDLE` | PTY exits before a command-finish semantic event | `IDLE` | Clear any stored `commandExitWatch`; a dead process must not become armed later. |
 | `COMMAND_EXIT_ARMED` | Session regains attention before finish | `IDLE` | Clear the arm; the user is watching again. |
 | any | a different command starts | `IDLE` | Replace the watch with the new command if it is eligible. |
 | `ALERT_RINGING` | explicit attention boundary / dismiss / TODO clear | `IDLE` | Public status falls back to the other tracks. |

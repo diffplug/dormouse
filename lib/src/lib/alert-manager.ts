@@ -136,9 +136,11 @@ export class AlertManager {
     entry?.monitor?.onData();
   }
 
-  // Intentional no-op: the monitor detects silence and transitions naturally,
-  // and we keep the entry so alert/todo state survives the PTY exit.
-  onExit(_id: string): void {}
+  onExit(id: string, exitCode?: number): void {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    if (this.finishCommandExitWatch(id, entry, exitCode)) this.notify(id);
+  }
 
   onResize(id: string): void {
     const entry = this.entries.get(id);

@@ -75,9 +75,9 @@ ptyManager.addCallbacks({
       log.info(`[alert-feed] ${id}: ${before} → ${after}`);
     }
   },
-  onExit(id: string) {
+  onExit(id: string, exitCode: number) {
     log.info(`[alert-feed] ${id}: PTY exited`);
-    alertManager.onExit(id);
+    alertManager.onExit(id, exitCode);
     alertProtocolParsers.delete(id);
   },
 });

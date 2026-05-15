@@ -75,7 +75,7 @@ export class TauriAdapter implements PlatformAdapter {
 
     this.unlistenFns.push(
       await listen<{ id: string; exitCode: number }>("pty:exit", (event) => {
-        this.alertManager.onExit(event.payload.id);
+        this.alertManager.onExit(event.payload.id, event.payload.exitCode);
         this.protocolParsers.delete(event.payload.id);
         for (const handler of this.exitHandlers) {
           handler(event.payload);
