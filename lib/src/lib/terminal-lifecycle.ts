@@ -207,7 +207,7 @@ function setupTerminalEntry(id: string, options: { untouched?: boolean } = {}): 
   return entry;
 }
 
-export function setPendingShellOpts(id: string, opts: { shell?: string; args?: string[] }): void {
+export function setPendingShellOpts(id: string, opts: { shell?: string; args?: string[]; cwd?: string }): void {
   pendingShellOpts.set(id, opts);
 }
 

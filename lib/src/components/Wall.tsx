@@ -18,6 +18,7 @@ import {
   toggleSessionTodo,
   setPendingShellOpts,
   getDefaultShellOpts,
+  getTerminalPaneState,
   isUntouched,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
@@ -610,8 +611,12 @@ export function Wall({
     const ref = id && api.getPanel(id) ? id : null;
     // Carry the currently-selected shell into the split, same as [+].
     const defaults = getDefaultShellOpts();
-    if (defaults?.shell) {
-      setPendingShellOpts(newId, { shell: defaults.shell, args: defaults.args });
+    // Inherit the source pane's cwd when known and local (diffplug/mouseterm#4).
+    // Remote cwds (e.g. from OSC 7 over ssh) aren't usable as a local spawn cwd.
+    const sourceCwd = ref ? getTerminalPaneState(ref).cwd : null;
+    const inheritedCwd = sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined;
+    if (defaults?.shell || inheritedCwd) {
+      setPendingShellOpts(newId, { shell: defaults?.shell, args: defaults?.args, cwd: inheritedCwd });
     }
     // Horizontal split places the new pane to the right → reveal from its left edge.
     // Vertical split places it below → reveal from its top edge.
