@@ -36,7 +36,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 // --- Helpers ---
 
-const STORAGE_KEY = 'mouseterm:update-result';
+const STORAGE_KEY = 'dormouse:update-result';
 
 function makeUpdate(version = '0.5.0') {
   return {
@@ -269,7 +269,7 @@ describe('updater', () => {
       openChangelog();
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(mocks.shellOpen).toHaveBeenCalledWith('https://mouseterm.com/changelog/after/0.4.0');
+      expect(mocks.shellOpen).toHaveBeenCalledWith('https://dormouse.sh/changelog/after/0.4.0');
     });
   });
 

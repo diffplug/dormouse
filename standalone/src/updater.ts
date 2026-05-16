@@ -15,7 +15,7 @@ function openUrl(url: string, context: string): void {
 
 // --- State ---
 
-const STORAGE_KEY = 'mouseterm:update-result';
+const STORAGE_KEY = 'dormouse:update-result';
 
 let state: UpdateBannerState = { status: 'idle' };
 let availableUpdate: Update | null = null;
@@ -65,7 +65,7 @@ export function openChangelog(): void {
 
 async function openCurrentVersionChangelog(): Promise<void> {
   const version = (await getVersion()).trim();
-  openUrl(`https://mouseterm.com/changelog/after/${encodeURIComponent(version)}`, 'changelog');
+  openUrl(`https://dormouse.sh/changelog/after/${encodeURIComponent(version)}`, 'changelog');
 }
 
 export async function buildDebugReport(error: string, toVersion: string): Promise<string> {

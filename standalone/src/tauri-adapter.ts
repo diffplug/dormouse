@@ -107,7 +107,7 @@ export class TauriAdapter implements PlatformAdapter {
 
     // Inert while dragDropEnabled=false in tauri.conf.json. See diffplug/mouseterm#38 and tauri-apps/tauri#14373.
     this.unlistenFns.push(
-      await listen<{ paths: string[] }>("mouseterm://files-dropped", (event) => {
+      await listen<{ paths: string[] }>("dormouse://files-dropped", (event) => {
         const paths = event.payload.paths ?? [];
         if (paths.length === 0) return;
         for (const handler of this.filesDroppedHandlers) handler(paths);
@@ -282,7 +282,7 @@ export class TauriAdapter implements PlatformAdapter {
 
   // --- State persistence ---
 
-  private static STATE_KEY = 'mouseterm.session';
+  private static STATE_KEY = 'dormouse.session';
 
   saveState(state: unknown): void {
     try {

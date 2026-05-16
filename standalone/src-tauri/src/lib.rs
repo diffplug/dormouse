@@ -54,11 +54,11 @@ fn default_log_path() -> PathBuf {
     #[cfg(target_os = "windows")]
     if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
         return PathBuf::from(local_app_data)
-            .join("MouseTerm")
-            .join("mouseterm.log");
+            .join("Dormouse")
+            .join("dormouse.log");
     }
 
-    env::temp_dir().join("mouseterm.log")
+    env::temp_dir().join("dormouse.log")
 }
 
 fn log_path() -> &'static Path {
@@ -100,7 +100,7 @@ fn init_log() {
     {
         let _ = writeln!(
             file,
-            "[{}] MouseTerm log started at {}",
+            "[{}] Dormouse log started at {}",
             log_timestamp(),
             path.display()
         );
@@ -606,7 +606,7 @@ pub fn run() {
                     .iter()
                     .map(|p| p.to_string_lossy().into_owned())
                     .collect();
-                let _ = window.emit("mouseterm://files-dropped", serde_json::json!({ "paths": payload }));
+                let _ = window.emit("dormouse://files-dropped", serde_json::json!({ "paths": payload }));
             }
         })
         .setup(|app| {
@@ -648,7 +648,7 @@ pub fn run() {
             read_update_log,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building MouseTerm")
+        .expect("error while building Dormouse")
         .run(|app, event| {
             if let RunEvent::Exit = event {
                 if let Some(state) = app.try_state::<SidecarState>() {
@@ -674,7 +674,7 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .expect("system time before unix epoch")
                 .as_nanos();
-            let path = std::env::temp_dir().join(format!("mouseterm-{name}-{suffix}"));
+            let path = std::env::temp_dir().join(format!("dormouse-{name}-{suffix}"));
             fs::create_dir_all(&path).expect("failed to create temp dir");
             TempDir(path)
         }
@@ -737,24 +737,24 @@ mod tests {
     #[test]
     fn strips_windows_verbatim_prefix_for_node_main_script() {
         let path = strip_windows_verbatim_prefix(
-            r"\\?\C:\Users\EdgarTwigg\AppData\Local\MouseTerm\_up_\sidecar\main.js",
+            r"\\?\C:\Users\EdgarTwigg\AppData\Local\Dormouse\_up_\sidecar\main.js",
         )
         .expect("expected verbatim path to be stripped");
 
         assert_eq!(
             path,
-            PathBuf::from(r"C:\Users\EdgarTwigg\AppData\Local\MouseTerm\_up_\sidecar\main.js")
+            PathBuf::from(r"C:\Users\EdgarTwigg\AppData\Local\Dormouse\_up_\sidecar\main.js")
         );
     }
 
     #[test]
     fn strips_windows_verbatim_unc_prefix_for_node_main_script() {
-        let path = strip_windows_verbatim_prefix(r"\\?\UNC\server\share\MouseTerm\sidecar\main.js")
+        let path = strip_windows_verbatim_prefix(r"\\?\UNC\server\share\Dormouse\sidecar\main.js")
             .expect("expected verbatim UNC path to be stripped");
 
         assert_eq!(
             path,
-            PathBuf::from(r"\\server\share\MouseTerm\sidecar\main.js")
+            PathBuf::from(r"\\server\share\Dormouse\sidecar\main.js")
         );
     }
 
