@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import SiteHeader from "../components/SiteHeader";
 import { PlaceToPaste } from "../components/PlaceToPaste";
-import { ThemePicker } from "mouseterm-lib/components/ThemePicker";
+import { ThemePicker } from "dormouse-lib/components/ThemePicker";
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
 import { TutorialState } from "../lib/tutorial-state";
 import { TutDetector } from "../lib/tut-detector";
@@ -14,8 +14,8 @@ const PANE_MAIN = "tut-main";
 const PANE_BOXED = "tut-boxed";
 const PANE_SPLASH = "tut-splash";
 
-type FakePtyAdapter = import("mouseterm-lib/lib/platform/fake-adapter").FakePtyAdapter;
-type WallEvent = import("mouseterm-lib/components/Wall").WallEvent;
+type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
+type WallEvent = import("dormouse-lib/components/Wall").WallEvent;
 type DockviewDisposable = { dispose: () => void };
 
 // Tailwind's md breakpoint — matches the header's `md:top-20` so the pane
@@ -69,13 +69,13 @@ function Playground() {
           { id: PANE_SPLASH, command: "ascii-splash" },
         ];
     async function loadWall() {
-      const platform = await import("mouseterm-lib/lib/platform");
-      const registry = await import("mouseterm-lib/lib/terminal-registry");
-      const mouseSelection = await import("mouseterm-lib/lib/mouse-selection");
-      const wall = await import("mouseterm-lib/components/Wall");
-      const scenarios = await import("mouseterm-lib/lib/platform/fake-scenarios");
+      const platform = await import("dormouse-lib/lib/platform");
+      const registry = await import("dormouse-lib/lib/terminal-registry");
+      const mouseSelection = await import("dormouse-lib/lib/mouse-selection");
+      const wall = await import("dormouse-lib/components/Wall");
+      const scenarios = await import("dormouse-lib/lib/platform/fake-scenarios");
       const asciiSplash = await import("../lib/ascii-splash-runner");
-      await import("mouseterm-lib/index.css");
+      await import("dormouse-lib/index.css");
       if (cancelled) return;
 
       const adapter = platform.initPlatform("fake");

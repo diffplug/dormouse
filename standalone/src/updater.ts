@@ -4,7 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { getVersion } from '@tauri-apps/api/app';
 import { open } from '@tauri-apps/plugin-shell';
 import { invoke } from '@tauri-apps/api/core';
-import { PLATFORM_STRING } from 'mouseterm-lib/lib/platform';
+import { PLATFORM_STRING } from 'dormouse-lib/lib/platform';
 import type { UpdateBannerState } from './UpdateBanner';
 
 const GITHUB_REPO_URL = 'https://github.com/diffplug/mouseterm';

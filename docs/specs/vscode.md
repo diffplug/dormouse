@@ -204,7 +204,7 @@ connect-src ${webview.cspSource};
 
 ```
 pnpm build:vscode =
-  1. pnpm --filter mouseterm-lib build    (TypeScript compile)
+  1. pnpm --filter dormouse-lib build    (TypeScript compile)
   2. pnpm --filter dormouse build:frontend (Vite: lib -> vscode-ext/media/)
   3. pnpm --filter dormouse build          (esbuild: extension.ts + pty-host.js -> dist/,
                                              copy node-pty prebuilds -> dist/node-pty)

@@ -20,7 +20,7 @@ import visualStudioIconUrl from "../assets/visual-studio-icon.svg";
 import tinyIconUrl from "../assets/icon-tiny-dark.png";
 import phoneMockupUrl from "../assets/phone-mockup.webp";
 import standaloneLatest from "@standalone-latest";
-import { prefersReducedMotion } from "mouseterm-lib/lib/ui-geometry";
+import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import { NotifySignupForm } from "../components/NotifySignupForm";
 
 export { Home as Component };

@@ -109,7 +109,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Test lib
-        run: pnpm --filter mouseterm-lib test
+        run: pnpm --filter dormouse-lib test
 
       - name: Build frontend for VSCode
         run: pnpm --filter dormouse build:frontend

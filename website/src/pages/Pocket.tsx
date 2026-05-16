@@ -2,15 +2,15 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { ShareIcon } from "@phosphor-icons/react";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import { NotifySignupForm } from "../components/NotifySignupForm";
-import { MobileTerminalUi, type MobileTerminalKeyboardMode, type MobileTerminalTouchMode } from "mouseterm-lib/components/MobileTerminalUi";
-import { MobileWall, useMobileWallSessionItems, type MobileWallSession } from "mouseterm-lib/components/MobileWall";
-import { ThemePicker } from "mouseterm-lib/components/ThemePicker";
-import { restoreActiveTheme } from "mouseterm-lib/lib/themes";
+import { MobileTerminalUi, type MobileTerminalKeyboardMode, type MobileTerminalTouchMode } from "dormouse-lib/components/MobileTerminalUi";
+import { MobileWall, useMobileWallSessionItems, type MobileWallSession } from "dormouse-lib/components/MobileWall";
+import { ThemePicker } from "dormouse-lib/components/ThemePicker";
+import { restoreActiveTheme } from "dormouse-lib/lib/themes";
 import {
   getMouseSelectionSnapshot,
   setOverride as setMouseOverride,
   subscribeToMouseSelection,
-} from "mouseterm-lib/lib/mouse-selection";
+} from "dormouse-lib/lib/mouse-selection";
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
 import { TutorialState } from "../lib/tutorial-state";
 import { BUSY_DEMO_DURATION_MS, BUSY_DEMO_INTERVAL_MS, TutRunner } from "../lib/tut-runner";
@@ -18,7 +18,7 @@ import { ChangelogRunner } from "../lib/changelog-runner";
 
 export { Pocket as Component };
 
-type FakePtyAdapter = import("mouseterm-lib/lib/platform/fake-adapter").FakePtyAdapter;
+type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
 
 const POCKET_PANE = "pocket-ascii-splash";
 const POCKET_THEME_ID = "vscode.theme-kimbie-dark.kimbie-dark";
@@ -86,11 +86,11 @@ function PocketTerminalExperience({
     let cancelled = false;
 
     async function loadWall() {
-      const platform = await import("mouseterm-lib/lib/platform");
-      const registry = await import("mouseterm-lib/lib/terminal-registry");
-      const scenarios = await import("mouseterm-lib/lib/platform/fake-scenarios");
+      const platform = await import("dormouse-lib/lib/platform");
+      const registry = await import("dormouse-lib/lib/terminal-registry");
+      const scenarios = await import("dormouse-lib/lib/platform/fake-scenarios");
       const asciiSplash = await import("../lib/ascii-splash-runner");
-      await import("mouseterm-lib/index.css");
+      await import("dormouse-lib/index.css");
       if (cancelled) return;
 
       const adapter = platform.initPlatform("fake");
@@ -195,7 +195,7 @@ function PocketTerminalExperience({
       onSessionSelect={setActivePaneId}
       onSendInput={(data) => adapterRef.current?.writePty(activePaneId, data)}
       onPaste={async () => {
-        const { doPaste } = await import("mouseterm-lib/lib/clipboard");
+        const { doPaste } = await import("dormouse-lib/lib/clipboard");
         await doPaste(activePaneId);
       }}
     />

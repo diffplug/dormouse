@@ -7,7 +7,7 @@ At the `/playground` route on the website. Interactive TUI: each item starts pen
 Three browser-side pieces in `website/src/lib/`, mirroring the pattern in `website/src/lib/ascii-splash-runner.ts` (xterm alt-screen + `FakePtyAdapter` boundary, no Node `terminal-kit` package):
 
 - **`tut-runner.ts`** (`TutRunner`) — alt-screen TUI. Subscribes to `TutorialState` and re-renders whenever progress changes. Routes input bytes via `FakePtyAdapter.writePty(id, …)`.
-- **`tut-detector.ts`** (`TutDetector`) — wires app events to `TutorialState.markComplete(id)`. Subscribes to `DockviewApi.onDidActivePanelChange`, the `WallEvent` stream, the `subscribeToActivity` store from `mouseterm-lib/lib/terminal-registry`, and the `subscribeToMouseSelection` store from `mouseterm-lib/lib/mouse-selection`.
+- **`tut-detector.ts`** (`TutDetector`) — wires app events to `TutorialState.markComplete(id)`. Subscribes to `DockviewApi.onDidActivePanelChange`, the `WallEvent` stream, the `subscribeToActivity` store from `dormouse-lib/lib/terminal-registry`, and the `subscribeToMouseSelection` store from `dormouse-lib/lib/mouse-selection`.
 - **`tutorial-state.ts`** (`TutorialState`) — single in-memory progress store, persisted as a JSON array of completed item ids under the `mouseterm-tut-v3` localStorage key.
 - **`tut-items.ts`** — section + item definitions (titles, hints) shared by runner and detector. Item ids are stable; they are the localStorage key suffixes.
 
@@ -105,9 +105,9 @@ While the Copy paste section is open, pressing `p` toggles the **Place To Paste*
 
 ## Theme Picker
 
-Implemented in `mouseterm-lib/lib/themes` and `mouseterm-lib/components/ThemePicker`.
+Implemented in `dormouse-lib/lib/themes` and `dormouse-lib/components/ThemePicker`.
 
-Bundled themes are provided by `mouseterm-lib/lib/themes` and include only GitHub variants. Users can install additional themes from OpenVSX through the dropdown footer action.
+Bundled themes are provided by `dormouse-lib/lib/themes` and include only GitHub variants. Users can install additional themes from OpenVSX through the dropdown footer action.
 
 The picker appears only on `/playground`, inside `SiteHeader`, labeled `Theme:`. The trigger opens a dropdown of bundled and installed themes. The dropdown footer is always `Install theme from OpenVSX`, which opens the theme store dialog. Installed theme rows include an `X` delete control; deletion requires browser confirmation before removing the theme from localStorage. If the active installed theme is deleted, the picker falls back to the first bundled theme and applies it immediately.
 

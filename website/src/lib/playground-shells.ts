@@ -1,4 +1,4 @@
-import type { FakePtyAdapter } from "mouseterm-lib/lib/platform/fake-adapter";
+import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import { TutorialShell, type InteractiveProgram } from "./tutorial-shell";
 
 export type StartPlaygroundProgram = (

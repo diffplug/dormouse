@@ -1,4 +1,4 @@
-import { cfg } from "mouseterm-lib/cfg";
+import { cfg } from "dormouse-lib/cfg";
 
 const USER_ATTENTION_SECS = Math.round(cfg.alert.userAttention / 1000);
 

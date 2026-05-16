@@ -29,11 +29,11 @@ if [[ "${1:-}" == "--install" ]]; then
   case "$(uname -s)" in
     Darwin) BUNDLE_ARGS=(--bundles app) ;;
   esac
-  pnpm --filter mouseterm-standalone tauri build \
+  pnpm --filter dormouse-standalone tauri build \
     -c '{"bundle":{"createUpdaterArtifacts":false}}' "${BUNDLE_ARGS[@]}"
 else
   # Fast build: skip bundling entirely since we just need the exe
-  pnpm --filter mouseterm-standalone tauri build --no-bundle
+  pnpm --filter dormouse-standalone tauri build --no-bundle
 fi
 
 if [[ "${1:-}" == "--install" ]]; then

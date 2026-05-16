@@ -10,8 +10,8 @@ import {
   MOUSE_ENABLE,
   RESET,
   fg,
-} from "mouseterm-lib/lib/ansi";
-import type { FakePtyAdapter } from "mouseterm-lib/lib/platform/fake-adapter";
+} from "dormouse-lib/lib/ansi";
+import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import type { InteractiveProgram } from "./tutorial-shell";
 import changelogData from "../data/changelog.json";
 

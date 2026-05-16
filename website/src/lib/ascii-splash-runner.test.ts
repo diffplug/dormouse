@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FakePtyAdapter } from "mouseterm-lib/lib/platform/fake-adapter";
+import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import { AsciiSplashRunner } from "./ascii-splash-runner";
 
 function createHarness(args: string[] = []) {

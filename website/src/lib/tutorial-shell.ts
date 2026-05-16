@@ -1,4 +1,4 @@
-import { CLEAR_LINE, PROMPT, RESET, fg } from 'mouseterm-lib/lib/ansi';
+import { CLEAR_LINE, PROMPT, RESET, fg } from 'dormouse-lib/lib/ansi';
 
 export type SendOutput = (data: string) => void;
 

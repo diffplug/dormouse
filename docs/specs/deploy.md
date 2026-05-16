@@ -87,7 +87,7 @@ Each matrix leg:
 Runs on `ubuntu-latest`:
 1. Checkout, setup Node 22, pnpm 10
 2. `pnpm install --frozen-lockfile` at the repo root
-3. `pnpm --filter mouseterm-lib test`
+3. `pnpm --filter dormouse-lib test`
 4. `pnpm --filter dormouse build:frontend && pnpm --filter dormouse build`
 5. `npx vsce package --no-dependencies`
 6. Upload `.vsix` as artifact
@@ -203,8 +203,8 @@ Note: the update manifest URLs include the version in the *path* (`/v0.1.0/`) bu
 A single `CHANGELOG.md` at the repo root, following [Keep a Changelog](https://keepachangelog.com/) format. The `[Unreleased]` section is promoted to `[X.Y.Z]` at release time. The release notes include both standalone and VSCode changes in one entry.
 
 The website changelog page imports generated data from `website/src/data/changelog.json`, but `CHANGELOG.md` is the source of truth and the JSON is gitignored. You do not normally run `website/scripts/generate-changelog.js` by hand:
-- `pnpm --filter mouseterm-website build` runs it through the website `prebuild` script before Vite bundles the static site.
-- `pnpm --filter mouseterm-website dev` and `pnpm --filter mouseterm-website test` also regenerate it through lifecycle scripts so clean checkouts work locally.
+- `pnpm --filter dormouse-website build` runs it through the website `prebuild` script before Vite bundles the static site.
+- `pnpm --filter dormouse-website dev` and `pnpm --filter dormouse-website test` also regenerate it through lifecycle scripts so clean checkouts work locally.
 
 If you edit `CHANGELOG.md` manually outside `/release-notes` and want to preview the generated data immediately, run `node website/scripts/generate-changelog.js`. Do not commit `website/src/data/changelog.json`.
 

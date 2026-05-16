@@ -1,16 +1,16 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AlertStateDetail, PlatformAdapter, PtyInfo } from "mouseterm-lib/lib/platform/types";
-import { AlertManager, type SessionStatus } from "mouseterm-lib/lib/alert-manager";
+import type { AlertStateDetail, PlatformAdapter, PtyInfo } from "dormouse-lib/lib/platform/types";
+import { AlertManager, type SessionStatus } from "dormouse-lib/lib/alert-manager";
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
-} from "mouseterm-lib/lib/terminal-protocol";
+} from "dormouse-lib/lib/terminal-protocol";
 import {
   applyTerminalSemanticEventsByPtyId,
-} from "mouseterm-lib/lib/terminal-state-store";
+} from "dormouse-lib/lib/terminal-state-store";
 
 function invoke(cmd: string, args?: Record<string, unknown>): void {
   rawInvoke(cmd, args).catch((err) =>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FakePtyAdapter } from "mouseterm-lib/lib/platform/fake-adapter";
+import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import { SECTIONS, type ItemId } from "./tut-items";
 import { TutRunner } from "./tut-runner";
 import { TutorialState } from "./tutorial-state";
