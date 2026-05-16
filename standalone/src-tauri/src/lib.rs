@@ -37,7 +37,7 @@ struct SidecarState {
     child: SharedChild,
 }
 
-const LOG_FILE_ENV: &str = "MOUSETERM_LOG_FILE";
+const LOG_FILE_ENV: &str = "DORMOUSE_LOG_FILE";
 
 fn log_timestamp() -> u64 {
     SystemTime::now()

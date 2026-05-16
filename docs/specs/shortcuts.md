@@ -1,8 +1,8 @@
 # Keyboard Shortcuts
 
-Complete reference for mouseterm's keyboard shortcuts. Shortcuts are grouped by the mode/context in which they apply.
+Complete reference for Dormouse's keyboard shortcuts. Shortcuts are grouped by the mode/context in which they apply.
 
-mouseterm has two modes:
+Dormouse has two modes:
 - **Workspace mode** (a.k.a. "command" mode internally) — keys drive pane layout.
 - **Terminal mode** (a.k.a. "passthrough" mode) — keys go to the running program, except copy/paste and the mode-switch gesture.
 

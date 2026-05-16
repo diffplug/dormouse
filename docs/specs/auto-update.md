@@ -48,7 +48,7 @@ Update status appears as a text notice on the right side of the Baseboard (the a
 | `post-update-success` | "Updated to v0.5.0 — from v0.4.0" | "Changelog" | 10 seconds |
 | `post-update-failure` | "Update failed" | "Click here to debug" | No |
 
-The "Install when I quit" action is the user's approval to download the update now and install it when they quit. The inline "Changelog" action calls Tauri's `getVersion()` and opens `https://mouseterm.com/changelog/after/<current-version>`.
+The "Install when I quit" action is the user's approval to download the update now and install it when they quit. The inline "Changelog" action calls Tauri's `getVersion()` and opens `https://dormouse.sh/changelog/after/<current-version>`.
 When a notice has follow-up actions, it uses ` · ` as the separator between the message and action labels.
 
 All states are dismissible via [×]. Dismissing an unapproved `available` notice means no update is downloaded or installed in that session. Dismissing a `downloading` or `downloaded` notice hides it for the session only — it does not cancel an already-approved download/install.
@@ -72,7 +72,7 @@ Windows uses `"installMode": "passive"` (configured in `tauri.conf.json` under `
 
 ## localStorage
 
-Single key: `mouseterm:update-result`
+Single key: `dormouse:update-result`
 
 | Scenario | Value written | When cleared |
 |----------|--------------|--------------|
@@ -99,7 +99,7 @@ In `standalone/src-tauri/tauri.conf.json`:
 "plugins": {
   "updater": {
     "pubkey": "<ed25519 public key>",
-    "endpoints": ["https://mouseterm.com/standalone-latest.json"],
+    "endpoints": ["https://dormouse.sh/standalone-latest.json"],
     "windows": { "installMode": "passive" }
   }
 }
@@ -117,7 +117,7 @@ The Rust side registers the plugin with `tauri_plugin_updater::Builder::new().bu
 
 ## Design decisions
 
-**Why install on quit after approval, not immediately?** MouseTerm is a terminal app with running processes. A mid-session relaunch would kill all sessions. By installing at quit time, the user has already decided to close their terminals.
+**Why install on quit after approval, not immediately?** Dormouse is a terminal app with running processes. A mid-session relaunch would kill all sessions. By installing at quit time, the user has already decided to close their terminals.
 
 **Why no silent download?** Update bundles can be large, can fail for environment-specific reasons, and may surprise users who did not opt into changing the app. The launch probe is silent, but download/install only begins after explicit approval.
 

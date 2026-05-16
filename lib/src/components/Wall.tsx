@@ -84,7 +84,7 @@ export { TerminalPaneHeader } from './wall/TerminalPaneHeader';
 
 // --- Theme ---
 
-const mousetermTheme: DockviewTheme = {
+const dormouseTheme: DockviewTheme = {
   ...themeAbyss,
   name: 'mouseterm',
   gap: 6,
@@ -745,7 +745,7 @@ export function Wall({
                   components={components}
                   tabComponents={tabComponents}
                   onReady={handleReady}
-                  theme={mousetermTheme}
+                  theme={dormouseTheme}
                   singleTabMode="fullwidth"
                 />
                 <WorkspaceSelectionOverlay apiRef={apiRef} selectedId={selectedId} selectedType={selectedType} mode={mode} overlayElRef={overlayElRef} />

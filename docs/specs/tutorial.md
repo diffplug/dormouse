@@ -1,6 +1,6 @@
 # Playground Tutorial
 
-At the `/playground` route on the website. Interactive TUI: each item starts pending, the first incomplete item is marked as active, and completed items become green checks when MouseTerm detects the corresponding action.
+At the `/playground` route on the website. Interactive TUI: each item starts pending, the first incomplete item is marked as active, and completed items become green checks when Dormouse detects the corresponding action.
 
 ## Architecture
 
@@ -66,7 +66,7 @@ The detector subscribes to `subscribeToActivity()` and tracks per-id `(status, w
 | `al-todo-clear` | Press passthrough Enter to clear the TODO | `todo` transitions `true → false` |
 | `al-todo-manual` | Manually add a TODO (`t` or right-click) | `todo` transitions `false → true` while previous status was NOT `ALERT_RINGING` |
 
-The detector remembers the most recent pane whose `watchingEnabled` flag is true, even when projected `status` is currently owned by protocol or command-exit alert tracks. The Alert section view shows a runner-local instruction: "Press `s` here to start a fake busy task." `s` is **not** a real MouseTerm shortcut; it is intercepted by `TutRunner` only while the Alert section is open. When pressed, the runner does two things:
+The detector remembers the most recent pane whose `watchingEnabled` flag is true, even when projected `status` is currently owned by protocol or command-exit alert tracks. The Alert section view shows a runner-local instruction: "Press `s` here to start a fake busy task." `s` is **not** a real Dormouse shortcut; it is intercepted by `TutRunner` only while the Alert section is open. When pressed, the runner does two things:
 
 1. Resolves that pane to its current PTY session id, then calls `adapter.pumpActivity(sessionId, BUSY_DEMO_DURATION_MS, 800)` — drives the alert-manager's activity monitor on the same WATCHING-enabled session with **no text output**, so the bell tilts to BUSY without scrolling any scenario text. The session id is resolved at trigger time so `Cmd/Ctrl+Arrow` swaps do not leave the tutorial pumping an old pane id. If no WATCHING-enabled pane is known, the runner falls back to `PANE_BOXED` (the changelog pane). `BUSY_DEMO_DURATION_MS` is `cfg.alert.userAttention + 250` so silence begins after the attention idle window has expired, with a small scheduler-jitter guard; otherwise the "user is looking at this pane" check inside `ActivityMonitor.startNeedsAttentionConfirmTimer` would suppress the ring rather than let it fire.
 2. Animates a countdown in-place where the "Press s…" hint was: `⠋ Fake task will finish in N seconds.` ticking down to 1, then a static `✓ Fake task finished. Press s to start another one.` once the activity stops. Detection is purely timing-based via the existing `ActivityMonitor`, so no shell integration is required.

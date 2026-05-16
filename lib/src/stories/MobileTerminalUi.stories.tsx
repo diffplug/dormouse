@@ -44,11 +44,11 @@ const meta: Meta<typeof MobileTerminalUi> = {
 export default meta;
 type Story = StoryObj<typeof MobileTerminalUi>;
 
-const TETHER_WALL_PANE = 'storybook-tether-wall';
-const TETHER_WALL_SESSIONS: MobileWallSession[] = [{ id: TETHER_WALL_PANE, title: 'ascii-splash' }];
+const POCKET_WALL_PANE = 'storybook-pocket-wall';
+const POCKET_WALL_SESSIONS: MobileWallSession[] = [{ id: POCKET_WALL_PANE, title: 'ascii-splash' }];
 
-const TETHER_WALL_SCENARIO: FakeScenario = {
-  name: 'tether-wall-ascii-splash',
+const POCKET_WALL_SCENARIO: FakeScenario = {
+  name: 'pocket-wall-ascii-splash',
   chunks: [{
     delay: 0,
     data: [
@@ -137,14 +137,14 @@ function StoryFrame(args: MobileTerminalUiProps) {
   );
 }
 
-function TetherWallFrame(args: MobileTerminalUiProps) {
+function PocketWallFrame(args: MobileTerminalUiProps) {
   const adapterRef = useRef<FakePtyAdapter | null>(null);
   if (!adapterRef.current) adapterRef.current = initPlatform('fake');
-  const [activePaneId, setActivePaneId] = useState(TETHER_WALL_PANE);
+  const [activePaneId, setActivePaneId] = useState(POCKET_WALL_PANE);
   const [keyboardMode, setKeyboardMode] = useState<MobileTerminalKeyboardMode>(
     args.activeKeyboardMode ?? args.activeSection ?? args.defaultKeyboardMode ?? args.defaultSection ?? 'type',
   );
-  const sessionItems = useMobileWallSessionItems(TETHER_WALL_SESSIONS, activePaneId);
+  const sessionItems = useMobileWallSessionItems(POCKET_WALL_SESSIONS, activePaneId);
 
   return (
     <main className="fixed inset-0 bg-black">
@@ -153,7 +153,7 @@ function TetherWallFrame(args: MobileTerminalUiProps) {
         fillViewport
         terminal={(
           <MobileWall
-            sessions={TETHER_WALL_SESSIONS}
+            sessions={POCKET_WALL_SESSIONS}
             activeSessionId={activePaneId}
             onActiveSessionChange={setActivePaneId}
             onSessionMinimize={() => setKeyboardMode('sessions')}
@@ -315,15 +315,15 @@ export const CursorTouchAvailable: Story = {
   render: (args) => <StoryFrame {...args} />,
 };
 
-export const TetherWall: Story = {
+export const PocketWall: Story = {
   args: {
     defaultSection: 'type',
   },
   parameters: {
     layout: 'fullscreen',
-    fakePty: { scenario: flattenScenario(TETHER_WALL_SCENARIO) },
+    fakePty: { scenario: flattenScenario(POCKET_WALL_SCENARIO) },
   },
-  render: (args) => <TetherWallFrame {...args} />,
+  render: (args) => <PocketWallFrame {...args} />,
 };
 
 export const GestureMenuOpened: Story = {

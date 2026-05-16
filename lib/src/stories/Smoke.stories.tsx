@@ -130,7 +130,7 @@ function ThemeCheck() {
         <header className="grid gap-1">
           <h1 className="text-lg font-semibold">Storybook Theme Smoke Test</h1>
           <p className="max-w-3xl text-sm text-muted">
-            Verifies the resolved VSCode host variables, MouseTerm semantic tokens, and dynamic
+            Verifies the resolved VSCode host variables, Dormouse semantic tokens, and dynamic
             palette picks that Storybook injects for isolated stories.
           </p>
         </header>
@@ -180,7 +180,7 @@ function ThemeCheck() {
             <VarTable rows={HOST_VARS} />
           </div>
           <div className="grid content-start gap-3">
-            <h2 className="text-sm font-semibold">MouseTerm Tokens</h2>
+            <h2 className="text-sm font-semibold">Dormouse Tokens</h2>
             <VarTable rows={SEMANTIC_VARS} />
           </div>
         </section>
