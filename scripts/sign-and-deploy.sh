@@ -47,9 +47,9 @@ TSA_URL="http://ts.ssl.com"
 GITHUB_REPO="diffplug/mouseterm"
 
 # Stable filenames for release assets (update bundles only)
-FNAME_WIN="MouseTerm-windows-x64-setup.exe"
-FNAME_MAC="MouseTerm-macos-aarch64.tar.gz"
-FNAME_LINUX="MouseTerm-linux-x86_64.AppImage"
+FNAME_WIN="Dormouse-windows-x64-setup.exe"
+FNAME_MAC="Dormouse-macos-aarch64.tar.gz"
+FNAME_LINUX="Dormouse-linux-x86_64.AppImage"
 
 # =============================================================================
 # Helper Functions
@@ -496,7 +496,7 @@ notarize_macos() {
         # COPYFILE_DISABLE=1 stops macOS's tar from writing ._* AppleDouble
         # sidecar files (resource-fork metadata) into the archive. Without
         # this the Tauri updater's extraction fails with
-        # `failed to unpack ._MouseTerm.app`.
+        # `failed to unpack ._Dormouse.app`.
         COPYFILE_DISABLE=1 tar -czf "$SIGN_DIR/$FNAME_MAC" -C "$(dirname "$app")" "$app_name"
 
         # Defense in depth: if any ._* slipped in anyway, fail loudly here
@@ -521,7 +521,7 @@ sign_windows() {
 
     # Find the inner exe
     local exe_path
-    exe_path=$(find "$SIGN_DIR/standalone-win-x64" \( -name "MouseTerm.exe" -o -name "mouseterm.exe" \) -not -name "*setup*" -not -name "*install*" | head -1)
+    exe_path=$(find "$SIGN_DIR/standalone-win-x64" \( -name "Dormouse.exe" -o -name "dormouse.exe" \) -not -name "*setup*" -not -name "*install*" | head -1)
     [[ -n "$exe_path" ]] || error "Windows executable not found"
 
     log "Signing inner executable: $exe_path"
