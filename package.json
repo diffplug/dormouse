@@ -8,10 +8,10 @@
     "dev:lib": "pnpm --filter mouseterm-lib dev",
     "dev:standalone": "pnpm --filter mouseterm-standalone tauri dev",
     "dev:website": "pnpm --filter mouseterm-website dev",
-    "build:vscode": "pnpm --filter mouseterm-lib build && pnpm --filter mouseterm build:frontend && pnpm --filter mouseterm build",
+    "build:vscode": "pnpm --filter mouseterm-lib build && pnpm --filter dormouse build:frontend && pnpm --filter dormouse build",
     "build:standalone": "pnpm --filter mouseterm-standalone tauri build",
     "build:website": "pnpm --filter mouseterm-website build",
-    "dogfood:vscode": "pnpm run build:vscode && pnpm --filter mouseterm dogfood",
+    "dogfood:vscode": "pnpm run build:vscode && pnpm --filter dormouse dogfood",
     "dogfood:standalone": "bash standalone/scripts/dogfood.sh",
     "storybook": "pnpm --filter mouseterm-lib storybook",
     "bundle-themes": "node lib/scripts/bundle-themes.mjs"
