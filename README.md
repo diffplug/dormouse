@@ -1,18 +1,19 @@
-# MouseTerm
+# Dormouse
 
-**Multitasking terminal for the mouse, tmux-compatible.**
+**A dormouse knows when to wake up. Multitasking terminal for mice (and hotkey wizards too).**
 
-Run multiple terminals side-by-side, click to split, drag to resize.
-When a pane stops outputting for two seconds, it's marked done — works
-with any CLI tool, no plugins or config.
+So many terminals — which one needs attention? Dormouse tracks activity the
+way you do: visual motion. When a pane stops changing for two seconds,
+it's marked done. Works with any CLI tool that prints to a terminal —
+no plugins, no configuration.
 
-![MouseTerm hero](website/src/assets/video-climb-blink-and-stare.webp)
+![Dormouse hero](website/src/assets/video-climb-blink-and-stare.webp)
 
 ## Try it
 
-- **[Playground](https://mouseterm.com/playground)** — try in your browser, no install
-- **[Demo videos and downloads](https://mouseterm.com)** — Mac, Windows, Linux
-- **[Marketplace](https://marketplace.visualstudio.com/items?itemName=diffplug.mouseterm)** / **[Open VSX](https://open-vsx.org/extension/diffplug/mouseterm)** — VS Code extension (also works in Cursor, Windsurf, Antigravity)
+- **[Playground](https://dormouse.sh/playground)** — try in your browser, no install
+- **[Demo videos and downloads](https://dormouse.sh)** — Mac, Windows, Linux
+- **[Marketplace](https://marketplace.visualstudio.com/items?itemName=diffplug.dormouse)** / **[Open VSX](https://open-vsx.org/extension/diffplug/dormouse)** — VS Code extension (also works in Cursor, Windsurf, Antigravity)
 
 ## Features
 
@@ -22,6 +23,7 @@ with any CLI tool, no plugins or config.
 - **Copy-paste that works.** Click and drag selects text the way you'd expect, even in mouse-aware TUIs that normally swallow it as escape codes. Ctrl+C copies; killing the program is a separate gesture.
 - **Sleep/wake panes.** Minimize a terminal to a compact status indicator. It keeps running and you can still see whether its task finished.
 - **Dual distribution.** Standalone desktop app (Mac/Windows/Linux) or VS Code extension.
+- **Pocket (coming soon).** Tether your sessions to your phone over WebRTC — walk away, keep working.
 
 ## Development
 
@@ -49,7 +51,7 @@ pnpm test         # runs all tests
 | Path | Description |
 |------|-------------|
 | `lib/` | Shared terminal library |
-| `website/` | mouseterm.com (including playground) |
+| `website/` | dormouse.sh (including playground) |
 | `standalone/` | Tauri desktop app |
 | `vscode-ext/` | VSCode extension |
 
@@ -61,4 +63,4 @@ This project was built with a combination of Claude, Codex, and Devin. Recommend
 
 [FSL-1.1-MIT](LICENSE) — Copyright 2026 DiffPlug LLC
 
-[Production dependencies](https://mouseterm.com/dependencies)
+[Production dependencies](https://dormouse.sh/dependencies)
