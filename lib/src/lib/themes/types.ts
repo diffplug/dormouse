@@ -1,4 +1,4 @@
-export interface MouseTermTheme {
+export interface DormouseTheme {
   /** Stable unique ID, e.g. "GitHub.github-vscode-theme.github-dark-default" */
   id: string;
   /** Human-readable label from the VSCode theme */

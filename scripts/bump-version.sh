@@ -5,7 +5,7 @@ set -euo pipefail
 # Bump version across all release artifacts and sync Cargo.lock.
 # =============================================================================
 # Edits the four version files in lockstep, then runs cargo so Cargo.lock's
-# `mouseterm` entry follows along. Print a diff stat for review.
+# `dormouse` entry follows along. Print a diff stat for review.
 #
 # Usage: ./scripts/bump-version.sh <version>
 #   Example: ./scripts/bump-version.sh 0.9.0
@@ -53,7 +53,7 @@ for f in "$TAURI_CONF" "$VSCODE_PKG" "$LIB_PKG"; do
 done
 
 # Sync Cargo.lock by running cargo. `cargo check` is idempotent and updates
-# the lockfile's mouseterm entry to match the bumped Cargo.toml. Without this,
+# the lockfile's dormouse entry to match the bumped Cargo.toml. Without this,
 # Cargo.lock keeps the old version and ships out of sync with the binary.
 echo "Syncing Cargo.lock (cargo check)…"
 ( cd standalone/src-tauri && cargo check --offline >/dev/null )

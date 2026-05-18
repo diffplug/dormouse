@@ -20,7 +20,7 @@ import visualStudioIconUrl from "../assets/visual-studio-icon.svg";
 import tinyIconUrl from "../assets/icon-tiny-dark.png";
 import phoneMockupUrl from "../assets/phone-mockup.webp";
 import standaloneLatest from "@standalone-latest";
-import { prefersReducedMotion } from "mouseterm-lib/lib/ui-geometry";
+import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import { NotifySignupForm } from "../components/NotifySignupForm";
 
 export { Home as Component };
@@ -34,10 +34,17 @@ const RUNWAY_VH = 300 * HERO_SLOMO_FACTOR;
 
 /** Scroll thresholds within the pinned runway (0–1) */
 const ICON_INITIAL_HIDE_FRAC = 0.67; // Fraction of icon's rendered height hidden at load — leaves top third visible
-const HOOK_FADE_REMAINING = 0.10;    // Hook begins fading when bottom 10% of icon enters viewport
+const HOOK_CROSSFADE_START = 0.05;
+const HOOK_CROSSFADE_DURATION = 0.08;
 const WORD_THRESHOLDS = [0.25, 0.40, 0.55] as const;
 const FOOTNOTE_THRESHOLD = 0.65;
 const HEADER_REVEAL_LEAD = 0.04;
+/** Runway fractions over which the dormouse line fades out. The dormouse
+ *  line fades IN crossfaded with lines 1+2 (shared hookFadeProgress),
+ *  then keeps carrying the brand alone until "Multitasking" pops in at
+ *  WORD_THRESHOLDS[0] — this range governs that final exit. */
+const DORMOUSE_LINE_FADE_OUT_START = 0.17;
+const DORMOUSE_LINE_FADE_OUT_END = WORD_THRESHOLDS[0];
 
 /** Fraction of runway where the hero text unpins and scrolls away (0–1).
  *  The video keeps scrubbing underneath. */
@@ -56,6 +63,12 @@ const SECTION_PY = "py-8";
 
 /** Clamp a value to 0–1. */
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+/** Snap a 0..1 progress to crisp 0/1 endpoints when within `eps`. The scroll
+ *  smoother settles asymptotically, so opacity values can land at e.g. 0.004
+ *  near a threshold — visually a ghost, and worse, it disables the browser's
+ *  `opacity: 0` compositor fast-path. Snapping makes the endpoints exact. */
+const snapProgress = (p: number, eps = 0.005): number =>
+  p < eps ? 0 : p > 1 - eps ? 1 : p;
 const useClientLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 const downloadAccentStyle = {
@@ -129,15 +142,15 @@ const INSTALL_STEPS: Record<string, { pill: string; title: string; steps: string
     pill: "Mac Silicon",
     title: "Installing on Mac",
     steps: [
-      "Double-click the downloaded .tar.gz to extract MouseTerm.app",
-      "Drag MouseTerm.app to Applications",
+      "Double-click the downloaded .tar.gz to extract Dormouse.app",
+      "Drag Dormouse.app to Applications",
     ],
   },
   "windows-x86_64": {
     pill: "Windows x64",
     title: "Installing on Windows",
     steps: [
-      "Double-click the downloaded MouseTerm-windows-x64-setup.exe",
+      "Double-click the downloaded Dormouse-windows-x64-setup.exe",
       "If SmartScreen appears: More info \u2192 Run anyway",
     ],
   },
@@ -145,7 +158,7 @@ const INSTALL_STEPS: Record<string, { pill: string; title: string; steps: string
     pill: "Linux x64",
     title: "Installing on Linux",
     steps: [
-      "Make executable: chmod +x MouseTerm-linux-x86_64.AppImage",
+      "Make executable: chmod +x Dormouse-linux-x86_64.AppImage",
       "Run from terminal or double-click to launch",
     ],
   },
@@ -272,6 +285,7 @@ function Home() {
   const headerRef = useRef<HTMLElement>(null);
   const headerBrandRef = useRef<HTMLAnchorElement>(null);
   const hookRef = useRef<HTMLDivElement>(null);
+  const dormouseLineRef = useRef<HTMLSpanElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [installGuide, setInstallGuide] = useState<string | null>(null);
   const [heroVideoSrc, setHeroVideoSrc] = useState<string | undefined>();
@@ -497,21 +511,21 @@ function Home() {
         const progress = clamp01(
           (fraction - WORD_THRESHOLDS[i]) / 0.08
         );
-        el.style.opacity = String(progress);
+        el.style.opacity = String(snapProgress(progress));
         el.style.transform = `translateY(${(1 - progress) * 12}px)`;
       }
 
       // Footnote
-      const footnoteProgress = clamp01(
+      const footnoteProgress = snapProgress(clamp01(
         (fraction - FOOTNOTE_THRESHOLD) / 0.08
-      );
+      ));
       if (footnoteRef.current) footnoteRef.current.style.opacity = String(footnoteProgress * 0.7);
 
       // Header: reveal brand + background just before the tmux-shortcuts
       // footnote appears, so it reads as dark once the line is visible.
-      const headerProgress = clamp01(
+      const headerProgress = snapProgress(clamp01(
         (fraction - (FOOTNOTE_THRESHOLD - HEADER_REVEAL_LEAD)) / HEADER_REVEAL_LEAD
-      );
+      ));
       if (headerBrandRef.current) {
         headerBrandRef.current.style.opacity = String(headerProgress);
       }
@@ -536,14 +550,31 @@ function Home() {
       video.style.transform = mediaTransform;
       poster.style.transform = mediaTransform;
 
-      // Hook text: visible until the icon nearly finishes rising, then fades out.
+      // Hook text: visible on load, then fades out early in the runway.
+      // hookFadeProgress: 0 = fully visible, 1 = fully gone. Shared with the
+      // dormouse line so its fade-in crossfades exactly with this fade-out.
+      const hookFadeProgress = clamp01(
+        (fraction - HOOK_CROSSFADE_START) / HOOK_CROSSFADE_DURATION
+      );
       if (hookRef.current) {
-        const remainingHidden = iconHeight > 0 ? iconCurrentOffset / iconHeight : 0;
-        const fadeProgress = iconCurrentOffset === 0
-          ? 1
-          : clamp01(1 - remainingHidden / HOOK_FADE_REMAINING);
-        hookRef.current.style.opacity = String(1 - fadeProgress);
-        hookRef.current.style.transform = `translateY(${-fadeProgress * 24}px)`;
+        hookRef.current.style.opacity = String(snapProgress(1 - hookFadeProgress));
+        hookRef.current.style.transform = `translateY(${-hookFadeProgress * 24}px)`;
+      }
+
+      // Dormouse line ("A dormouse knows when to wake."): fades in exactly as
+      // lines 1+2 are leaving (shared hookFadeProgress = a true crossfade),
+      // holds while the icon settles, then fades out before "Multitasking" pops in.
+      if (dormouseLineRef.current) {
+        const fadeIn = hookFadeProgress;
+        const fadeOut = clamp01(
+          (fraction - DORMOUSE_LINE_FADE_OUT_START)
+            / (DORMOUSE_LINE_FADE_OUT_END - DORMOUSE_LINE_FADE_OUT_START)
+        );
+        dormouseLineRef.current.style.opacity = String(snapProgress(fadeIn * (1 - fadeOut)));
+        // (1-fadeIn) lifts it into place from below as it appears; fadeOut
+        // lifts it further out as it leaves, matching the hook's exit motion.
+        const translateY = (1 - fadeIn) * 8 + fadeOut * -20;
+        dormouseLineRef.current.style.transform = `translateY(${translateY.toFixed(2)}px)`;
       }
 
       // Hero: cap so it stops at unstick (fraction = 1); natural scroll takes over.
@@ -704,13 +735,22 @@ function Home() {
       {/* ── Pinned scroll runway: hero text overlay ── */}
       <div ref={runwayRef} style={{ height: `${RUNWAY_VH}vh` }}>
         <div ref={heroRef} className="sticky top-0 flex flex-col items-center z-[1] will-change-transform" style={{ height: "100vh" }}>
-          {/* Hook copy — visible on load, fades out on first scroll */}
-          <div
-            ref={hookRef}
-            className="absolute top-20 md:top-24 left-0 right-0 flex flex-col items-center text-center px-6 font-display text-[clamp(2.5rem,5vw+0.5rem,4rem)] gap-1"
-          >
-            <span>Too many terminals.</span>
-            <span>Not enough focus.</span>
+          {/* Hook copy — lines 1+2 visible on load and fade out as the icon
+              nears the top. The dormouse line is a sibling, not a child of
+              hookRef, so its opacity is driven independently and it can
+              linger after lines 1+2 are gone. */}
+          <div className="absolute top-20 md:top-24 left-0 right-0 flex flex-col items-center text-center px-6 font-display text-[clamp(2rem,4vw+0.5rem,3.5rem)] leading-tight gap-3">
+            <div ref={hookRef} className="flex flex-col items-center gap-3 will-change-transform">
+              <span>So many terminals.</span>
+              <span>Which ones need attention?</span>
+            </div>
+            <span
+              ref={dormouseLineRef}
+              className="will-change-transform"
+              style={{ opacity: 0, transform: "translateY(8px)" }}
+            >
+              A <span className="text-[var(--color-caramel)]">dormouse</span> knows when to wake.
+            </span>
           </div>
           {/* Hero words — crossfade in place with the hook, just below the header */}
           <div className="absolute top-20 md:top-24 left-0 right-0 flex flex-col items-center text-center px-6 gap-1 font-display text-[clamp(2.5rem,5vw+0.5rem,4rem)]">
@@ -718,10 +758,10 @@ function Home() {
               Multitasking
             </span>
             <span ref={word1Ref} style={{ opacity: 0, transform: "translateY(12px)" }}>
-              Terminal
+              terminal
             </span>
             <span ref={word2Ref} style={{ opacity: 0, transform: "translateY(12px)" }}>
-              <span className="text-[var(--color-caramel)]">for Mice</span>
+              <span className="text-[var(--color-caramel)]">for mice</span>
             </span>
             <p
               ref={footnoteRef}
@@ -736,59 +776,68 @@ function Home() {
 
       {/* ── Content sections — pulled up to appear as video starts scrolling ── */}
       <div ref={contentRef} className="relative z-10 bg-[var(--color-bg)]" style={{ marginTop: `-${(1 - UNPIN_THRESHOLD) * RUNWAY_VH}vh` }}>
-        <section id="features" className={`mx-auto max-w-2xl px-4 md:px-6 ${SECTION_PY}`}>
-          <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">Stop watching terminals spin</h2>
-          <p className="text-lg leading-relaxed opacity-70 mb-4">
-            MouseTerm tracks activity the same way you do — visual motion. When a
-            pane stops changing for two seconds, it marks the task complete and
-            alerts you.
-          </p>
-          <p className="text-lg leading-relaxed opacity-70">
-            Works with any CLI tool that prints to a terminal — no plugins, no
-            configuration.
-          </p>
-          <FeatureVideo src={alertVideoUrl} variant="intrinsic" className="mt-8" />
-        </section>
-
-        {/* Section 2: text left, image right */}
-        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
-          <div>
-            <h2 className="font-display text-xl mb-6">Copy paste like you meant</h2>
+        {/* Section 1: narrow text over a full-width video — lead with the tmux story */}
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`}>
+          <div className="mx-auto max-w-2xl">
+            <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">Soft as a mouse, sharp as a tmux</h2>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
-              Click and drag in a "mouse conformant" terminal doesn't select text;
-              it sends escape code{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">{"\\e[<0;x;yM"}</code>.
-              And <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">Ctrl+C</code>{" "}
-              doesn't copy; it asks your program to kill itself.
-            </p>
-            <p className="text-lg leading-relaxed opacity-70">
-              MouseTerm lets you copy paste like a human, not a terminal.
-            </p>
-          </div>
-          <FeatureVideo src={copyPasteVideoUrl} />
-        </section>
-
-        {/* Section 3: image left, text right */}
-        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[3fr_2fr] gap-8 md:gap-12 items-start`}>
-          <FeatureVideo src={tmuxVideoUrl} className="order-2 md:order-1" />
-          <div className="order-1 md:order-2">
-            <h2 className="font-display text-xl mb-6">Soft as a mouse, sharp as tmux</h2>
-            <p className="text-lg leading-relaxed opacity-70 mb-4">
-              Run builds, agents, servers, and scripts side by side. Minimize the
-              ones you're not watching to a compact status indicator. Every pane
-              keeps running and every alert still fires whether you can see it or
-              not.
+              Upgrade your VS Code or native terminal with a flexible multipane
+              layout. Sleep the tasks you're not watching down to a compact
+              status indicator.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
               Do it all with the mouse, or keep your hands on the keyboard with
               tmux keybinds.
             </p>
           </div>
+          <FeatureVideo src={tmuxVideoUrl} variant="intrinsic" className="mt-8" />
+        </section>
+
+        {/* Section 2: image left, text right */}
+        <section id="features" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[3fr_2fr] gap-8 md:gap-12 items-start`}>
+          <FeatureVideo src={alertVideoUrl} className="order-2 md:order-1" />
+          <div className="order-1 md:order-2">
+            <h2 className="font-display text-xl mb-6">Stop watching terminals spin</h2>
+            <p className="text-lg leading-relaxed opacity-70 mb-4">
+              Dormouse tracks activity the same way you do — visual motion. When a
+              pane stops changing for two seconds, it marks the task complete and
+              alerts you.
+            </p>
+            <p className="text-lg leading-relaxed opacity-70">
+              Works with any CLI tool that prints to a terminal — no plugins, no
+              configuration. Also supports{" "}
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">BEL</code>{" "}
+              and{" "}
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">OSC 9/99/777</code>{" "}
+              for native TUI integration.
+            </p>
+          </div>
+        </section>
+
+        {/* Section 3: text left, image right */}
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
+          <div>
+            <h2 className="font-display text-xl mb-6">Newlines and copy paste like you meant</h2>
+            <p className="text-lg leading-relaxed opacity-70 mb-4">
+              You're used to{" "}
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">Shift+Enter</code>{" "}
+              for a newline in the browser — but it's broken in your terminal?
+              Not anymore. Dormouse works the way you'd expect, no arcane
+              terminal knowledge required.
+            </p>
+            <p className="text-lg leading-relaxed opacity-70">
+              Click and drag in a "mouse conformant" terminal doesn't select text;
+              it sends escape code{" "}
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">{"\\e[<0;x;yM"}</code>.
+              Dormouse lets you copy-paste like a human, not a terminal.
+            </p>
+          </div>
+          <FeatureVideo src={copyPasteVideoUrl} />
         </section>
 
         <section id="download" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`} style={downloadAccentStyle}>
-          <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">Get MouseTerm</h2>
-          <p className="mb-4 text-lg leading-relaxed opacity-70">The multitasking terminal for mice.</p>
+          <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">Get Dormouse</h2>
+          <p className="mb-4 text-lg leading-relaxed opacity-70">A dormouse knows when to wake up. Multitasking terminal for mice.</p>
           <DownloadButton
             href="/playground"
             icon={<TerminalIcon size={26} weight="bold" />}
@@ -803,7 +852,7 @@ function Home() {
               <p className="mb-4 text-lg leading-relaxed opacity-70">Also works in Cursor, Windsurf, Antigravity, or any other VS Code fork.</p>
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-3">
                 <DownloadButton
-                  href="https://marketplace.visualstudio.com/items?itemName=diffplug.mouseterm"
+                  href="https://marketplace.visualstudio.com/items?itemName=diffplug.dormouse"
                   icon={<StorefrontIcon size={22} weight="bold" />}
                   peek="marketplace"
                   variant="wide"
@@ -811,7 +860,7 @@ function Home() {
                   Visual Studio Marketplace
                 </DownloadButton>
                 <DownloadButton
-                  href="https://open-vsx.org/extension/diffplug/mouseterm"
+                  href="https://open-vsx.org/extension/diffplug/dormouse"
                   icon={<CubeIcon size={22} weight="bold" />}
                   peek="openVsx"
                   variant="wide"
@@ -822,7 +871,7 @@ function Home() {
             </div>
             <div>
               <DownloadGroupHeader icon={<DesktopIcon size={24} weight="bold" />}>Standalone App</DownloadGroupHeader>
-              <p className="mb-4 text-lg leading-relaxed opacity-70">Don't settle for your operating system's built-in terminal, get a nice one!</p>
+              <p className="mb-4 text-lg leading-relaxed opacity-70">Don't settle for your operating system's built-in terminal. Get a nice one.</p>
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-3">
                 <DownloadButton
                   href={standaloneLatest.platforms["darwin-aarch64"].url}
@@ -852,7 +901,7 @@ function Home() {
                   {INSTALL_STEPS["linux-x86_64"].pill}
                 </DownloadButton>
                 <DownloadButton
-                  href="https://github.com/diffplug/mouseterm/issues/8"
+                  href="https://github.com/diffplug/dormouse/issues/8"
                   icon={<DotsThreeOutlineIcon size={22} weight="fill" />}
                   peek="other"
                   variant="compact"
@@ -884,7 +933,7 @@ function Home() {
         <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
           <img
             src={phoneMockupUrl}
-            alt="MouseTerm Tether running on a phone"
+            alt="Dormouse Pocket running on a phone"
             className="order-2 md:order-1 block w-full max-w-[280px] mx-auto md:max-w-none"
           />
           <div className="order-1 md:order-2">
@@ -892,13 +941,13 @@ function Home() {
               Walk away. Keep going.
             </h2>
             <p className="mb-4 text-lg leading-relaxed opacity-70">
-              Coming next: <a href="/tether" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Tether</a>. Pair a
-              terminal session to your phone over WebRTC and take a stroll, the MouseTerm alert
-              system will buzz you if there's anything to do. A hosted auto-pairing service comes
-              later — just leave and keep working, no "I'm walking away" dance.
+              Coming next: <a href="/pocket" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Dormouse Pocket</a>.
+              Tether a terminal session to your phone over WebRTC and take a stroll — Dormouse
+              buzzes your phone when something needs attention. A hosted auto-pairing service comes
+              later, so you can close the laptop and walk away, no setup dance.
             </p>
             <p className="mb-4 text-lg leading-relaxed opacity-70">
-              Open source and free to self-host, or pay us a little bit and you can use ours. We'll discount for early adopters, so don't miss out!
+              Open source and free to self-host, or pay a small monthly fee for our hosted version. Early adopters get a launch discount.
             </p>
             <NotifySignupForm />
           </div>
@@ -907,7 +956,7 @@ function Home() {
         <footer className="border-t border-[var(--color-text)]/20 py-10">
           <div className="mx-auto max-w-5xl px-4 md:px-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-base text-center opacity-50">
             <a href="/dependencies" className="underline hover:opacity-100">Dependencies</a>
-            <a href="https://github.com/diffplug/mouseterm/issues" className="underline hover:opacity-100">Report an issue</a>
+            <a href="https://github.com/diffplug/dormouse/issues" className="underline hover:opacity-100">Report an issue</a>
             <p>
               Built by{" "}
               <a href="https://nedshed.dev" className="underline hover:opacity-100">nedshed.dev</a>{" "}

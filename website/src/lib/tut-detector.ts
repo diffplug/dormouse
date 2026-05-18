@@ -1,4 +1,4 @@
-import { DEFAULT_MOUSE_SELECTION_STATE } from "mouseterm-lib/lib/mouse-selection";
+import { DEFAULT_MOUSE_SELECTION_STATE } from "dormouse-lib/lib/mouse-selection";
 import type { TutorialState } from "./tutorial-state";
 
 interface DockviewApi {
@@ -7,10 +7,10 @@ interface DockviewApi {
     listener: (panel: { id?: string } | undefined) => void,
   ) => { dispose: () => void };
 }
-type WallEvent = import("mouseterm-lib/components/Wall").WallEvent;
-type WallMode = import("mouseterm-lib/components/Wall").WallMode;
-type ActivityState = import("mouseterm-lib/lib/terminal-registry").ActivityState;
-type MouseSelectionState = import("mouseterm-lib/lib/mouse-selection").MouseSelectionState;
+type WallEvent = import("dormouse-lib/components/Wall").WallEvent;
+type WallMode = import("dormouse-lib/components/Wall").WallMode;
+type ActivityState = import("dormouse-lib/lib/terminal-registry").ActivityState;
+type MouseSelectionState = import("dormouse-lib/lib/mouse-selection").MouseSelectionState;
 
 interface ActivityStoreModule {
   subscribeToActivity: (listener: () => void) => () => void;

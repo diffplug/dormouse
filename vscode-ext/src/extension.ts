@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as ptyManager from './pty-manager';
-import { MouseTermViewProvider } from './webview-view-provider';
+import { DormouseViewProvider } from './webview-view-provider';
 import { attachRouter, flushAllSessions, getAlertStates } from './message-router';
 import { getWebviewHtml } from './webview-html';
 import { log } from './log';
@@ -10,7 +10,7 @@ import { readPersistedSession } from '../../lib/src/lib/session-types';
 import { resolveSelectedShell, setSelectedShellPath, getSelectedShellPath } from './shell-selection';
 import type { ExtensionMessage } from './message-types';
 
-type NewTerminalMessage = Extract<ExtensionMessage, { type: 'mouseterm:newTerminal' }>;
+type NewTerminalMessage = Extract<ExtensionMessage, { type: 'dormouse:newTerminal' }>;
 
 let extensionContext: vscode.ExtensionContext | null = null;
 
@@ -19,7 +19,7 @@ let extensionContext: vscode.ExtensionContext | null = null;
  *
  * @param savedState Per-panel state. For `deserializeWebviewPanel` this is the
  *   state VS Code preserved from the panel's `vscode.setState()`; for a fresh
- *   panel opened via `mouseterm.open` this is `undefined`.
+ *   panel opened via `dormouse.open` this is `undefined`.
  */
 function setupPanel(
   context: vscode.ExtensionContext,
@@ -63,7 +63,7 @@ export function activate(context: vscode.ExtensionContext) {
   extensionContext = context;
   ptyManager.setExtensionPath(context.extensionPath);
 
-  const provider = new MouseTermViewProvider(context);
+  const provider = new DormouseViewProvider(context);
 
   // Updates the shell-derived state in one place: the view header (shell
   // name appears next to the title via description) and the webview's
@@ -74,13 +74,13 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   const postNewTerminal = async (message: Omit<NewTerminalMessage, 'type'>) => {
-    await vscode.commands.executeCommand('mouseterm.view.focus');
+    await vscode.commands.executeCommand('dormouse.view.focus');
     for (const delay of [0, 50, 200]) {
       if (delay > 0) {
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
       const posted = await provider.postMessage({
-        type: 'mouseterm:newTerminal',
+        type: 'dormouse:newTerminal',
         ...message,
       });
       if (posted) return true;
@@ -97,25 +97,25 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('mouseterm.view', provider, {
+    vscode.window.registerWebviewViewProvider('dormouse.view', provider, {
       // Keep the webview script + xterm DOM alive when the Panel is hidden
       // (close/toggle), so PTYs and scrollback are preserved across re-show
       // without going through the reconnect dance.
       webviewOptions: { retainContextWhenHidden: true },
     }),
-    vscode.window.registerWebviewPanelSerializer('mouseterm', {
+    vscode.window.registerWebviewPanelSerializer('dormouse', {
       async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: unknown) {
         setupPanel(context, panel, state, () => provider.getSelectedShell());
       },
     }),
-    vscode.commands.registerCommand('mouseterm.focus', () => {
-      vscode.commands.executeCommand('mouseterm.view.focus');
+    vscode.commands.registerCommand('dormouse.focus', () => {
+      vscode.commands.executeCommand('dormouse.view.focus');
     }),
-    vscode.commands.registerCommand('mouseterm.open', () => {
+    vscode.commands.registerCommand('dormouse.open', () => {
       const mediaPath = path.join(context.extensionPath, 'media');
       const panel = vscode.window.createWebviewPanel(
-        'mouseterm',
-        'MouseTerm',
+        'dormouse',
+        'Dormouse',
         vscode.ViewColumn.Active,
         {
           enableScripts: true,
@@ -125,18 +125,18 @@ export function activate(context: vscode.ExtensionContext) {
       );
       setupPanel(context, panel, undefined, () => provider.getSelectedShell());
     }),
-    vscode.commands.registerCommand('mouseterm.debugTheme', async () => {
-      await vscode.commands.executeCommand('mouseterm.view.focus');
+    vscode.commands.registerCommand('dormouse.debugTheme', async () => {
+      await vscode.commands.executeCommand('dormouse.view.focus');
       for (const delay of [0, 50, 200]) {
         if (delay > 0) {
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
-        const posted = await provider.postMessage({ type: 'mouseterm:openThemeDebugger' });
+        const posted = await provider.postMessage({ type: 'dormouse:openThemeDebugger' });
         if (posted) return;
       }
-      void vscode.window.showWarningMessage('MouseTerm: open the MouseTerm view before debugging the theme.');
+      void vscode.window.showWarningMessage('Dormouse: open the Dormouse view before debugging the theme.');
     }),
-    vscode.commands.registerCommand('mouseterm.newTerminal', async () => {
+    vscode.commands.registerCommand('dormouse.newTerminal', async () => {
       const shells = await ptyManager.getAvailableShells();
       const shell = resolveSelectedShell(context, shells);
       const posted = await postNewTerminal({
@@ -145,13 +145,13 @@ export function activate(context: vscode.ExtensionContext) {
         name: shell?.name,
       });
       if (!posted) {
-        void vscode.window.showWarningMessage('MouseTerm: open the MouseTerm view before creating a terminal.');
+        void vscode.window.showWarningMessage('Dormouse: open the Dormouse view before creating a terminal.');
       }
     }),
-    vscode.commands.registerCommand('mouseterm.selectShell', async () => {
+    vscode.commands.registerCommand('dormouse.selectShell', async () => {
       const shells = await ptyManager.getAvailableShells();
       if (shells.length === 0) {
-        void vscode.window.showWarningMessage('MouseTerm: no shells detected.');
+        void vscode.window.showWarningMessage('Dormouse: no shells detected.');
         return;
       }
       const currentPath = getSelectedShellPath(context) ?? shells[0].path;
@@ -163,7 +163,7 @@ export function activate(context: vscode.ExtensionContext) {
         args: s.args,
       }));
       const picked = await vscode.window.showQuickPick(items, {
-        title: 'Select default shell for MouseTerm',
+        title: 'Select default shell for Dormouse',
         placeHolder: 'Changing this opens a matching terminal; new panes reuse it.',
       });
       if (!picked) return;
@@ -193,7 +193,7 @@ export function activate(context: vscode.ExtensionContext) {
           announce: true,
         });
         if (!posted) {
-          void vscode.window.showWarningMessage('MouseTerm: open the MouseTerm view before changing the active terminal type.');
+          void vscode.window.showWarningMessage('Dormouse: open the Dormouse view before changing the active terminal type.');
         }
       }
     }),

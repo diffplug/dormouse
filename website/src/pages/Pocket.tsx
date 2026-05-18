@@ -2,27 +2,27 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { ShareIcon } from "@phosphor-icons/react";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import { NotifySignupForm } from "../components/NotifySignupForm";
-import { MobileTerminalUi, type MobileTerminalKeyboardMode, type MobileTerminalTouchMode } from "mouseterm-lib/components/MobileTerminalUi";
-import { MobileWall, useMobileWallSessionItems, type MobileWallSession } from "mouseterm-lib/components/MobileWall";
-import { ThemePicker } from "mouseterm-lib/components/ThemePicker";
-import { restoreActiveTheme } from "mouseterm-lib/lib/themes";
+import { MobileTerminalUi, type MobileTerminalKeyboardMode, type MobileTerminalTouchMode } from "dormouse-lib/components/MobileTerminalUi";
+import { MobileWall, useMobileWallSessionItems, type MobileWallSession } from "dormouse-lib/components/MobileWall";
+import { ThemePicker } from "dormouse-lib/components/ThemePicker";
+import { restoreActiveTheme } from "dormouse-lib/lib/themes";
 import {
   getMouseSelectionSnapshot,
   setOverride as setMouseOverride,
   subscribeToMouseSelection,
-} from "mouseterm-lib/lib/mouse-selection";
+} from "dormouse-lib/lib/mouse-selection";
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
 import { TutorialState } from "../lib/tutorial-state";
 import { BUSY_DEMO_DURATION_MS, BUSY_DEMO_INTERVAL_MS, TutRunner } from "../lib/tut-runner";
 import { ChangelogRunner } from "../lib/changelog-runner";
 
-export { Tether as Component };
+export { Pocket as Component };
 
-type FakePtyAdapter = import("mouseterm-lib/lib/platform/fake-adapter").FakePtyAdapter;
+type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
 
-const TETHER_PANE = "tether-ascii-splash";
-const TETHER_THEME_ID = "vscode.theme-kimbie-dark.kimbie-dark";
-const TETHER_SESSIONS: MobileWallSession[] = [{ id: TETHER_PANE, title: "ascii-splash" }];
+const POCKET_PANE = "pocket-ascii-splash";
+const POCKET_THEME_ID = "vscode.theme-kimbie-dark.kimbie-dark";
+const POCKET_SESSIONS: MobileWallSession[] = [{ id: POCKET_PANE, title: "ascii-splash" }];
 
 function useIsMobileViewport() {
   const [isMobile, setIsMobile] = useState(false);
@@ -38,32 +38,32 @@ function useIsMobileViewport() {
   return isMobile;
 }
 
-function useTetherTheme() {
+function usePocketTheme() {
   const restoredRef = useRef(false);
   if (!restoredRef.current) {
-    restoreActiveTheme(TETHER_THEME_ID);
+    restoreActiveTheme(POCKET_THEME_ID);
     restoredRef.current = true;
   }
 }
 
-function TetherTerminalExperience({
+function PocketTerminalExperience({
   interactive,
   fillViewport = false,
 }: {
   interactive: boolean;
   fillViewport?: boolean;
 }) {
-  useTetherTheme();
+  usePocketTheme();
   const [terminalReady, setTerminalReady] = useState(false);
   const adapterRef = useRef<FakePtyAdapter | null>(null);
   const shellRegistryRef = useRef<PlaygroundShellRegistry | null>(null);
   const autoStartedRef = useRef<Set<string>>(new Set());
   const spawnUnsubRef = useRef<(() => void) | null>(null);
   const busyDemoDisposeRef = useRef<(() => void) | null>(null);
-  const [activePaneId, setActivePaneId] = useState(TETHER_PANE);
+  const [activePaneId, setActivePaneId] = useState(POCKET_PANE);
   const [touchMode, setTouchMode] = useState<MobileTerminalTouchMode>("gestures");
   const [keyboardMode, setKeyboardMode] = useState<MobileTerminalKeyboardMode>("type");
-  const sessionItems = useMobileWallSessionItems(TETHER_SESSIONS, activePaneId);
+  const sessionItems = useMobileWallSessionItems(POCKET_SESSIONS, activePaneId);
   const mouseStates = useSyncExternalStore(
     subscribeToMouseSelection,
     getMouseSelectionSnapshot,
@@ -74,7 +74,7 @@ function TetherTerminalExperience({
     && activeMouseState.mouseReporting !== "none";
 
   const tryAutoStart = useCallback((id: string) => {
-    if (id !== TETHER_PANE) return;
+    if (id !== POCKET_PANE) return;
     if (autoStartedRef.current.has(id)) return;
     const shellRegistry = shellRegistryRef.current;
     if (!shellRegistry) return;
@@ -86,11 +86,11 @@ function TetherTerminalExperience({
     let cancelled = false;
 
     async function loadWall() {
-      const platform = await import("mouseterm-lib/lib/platform");
-      const registry = await import("mouseterm-lib/lib/terminal-registry");
-      const scenarios = await import("mouseterm-lib/lib/platform/fake-scenarios");
+      const platform = await import("dormouse-lib/lib/platform");
+      const registry = await import("dormouse-lib/lib/terminal-registry");
+      const scenarios = await import("dormouse-lib/lib/platform/fake-scenarios");
       const asciiSplash = await import("../lib/ascii-splash-runner");
-      await import("mouseterm-lib/index.css");
+      await import("dormouse-lib/index.css");
       if (cancelled) return;
 
       const adapter = platform.initPlatform("fake");
@@ -99,7 +99,7 @@ function TetherTerminalExperience({
       registry.initAlertStateReceiver();
       adapterRef.current = adapter;
       adapter.setDefaultScenario(scenarios.SCENARIO_SHELL_PROMPT);
-      adapter.setScenario(TETHER_PANE, { name: "none", chunks: [] });
+      adapter.setScenario(POCKET_PANE, { name: "none", chunks: [] });
 
       const tutorialState = new TutorialState();
       const shellRegistry = new PlaygroundShellRegistry(
@@ -137,13 +137,13 @@ function TetherTerminalExperience({
         },
       );
       shellRegistryRef.current = shellRegistry;
-      shellRegistry.ensureShell(TETHER_PANE);
+      shellRegistry.ensureShell(POCKET_PANE);
 
       spawnUnsubRef.current = adapter.onPtySpawn(({ id }) => {
         shellRegistry.ensureShell(id);
         tryAutoStart(id);
       });
-      if (adapter.hasPty(TETHER_PANE)) tryAutoStart(TETHER_PANE);
+      if (adapter.hasPty(POCKET_PANE)) tryAutoStart(POCKET_PANE);
 
       setTerminalReady(true);
     }
@@ -177,7 +177,7 @@ function TetherTerminalExperience({
       terminal={
         terminalReady ? (
           <MobileWall
-            sessions={TETHER_SESSIONS}
+            sessions={POCKET_SESSIONS}
             activeSessionId={activePaneId}
             onActiveSessionChange={setActivePaneId}
             onSessionMinimize={() => setKeyboardMode("sessions")}
@@ -195,19 +195,19 @@ function TetherTerminalExperience({
       onSessionSelect={setActivePaneId}
       onSendInput={(data) => adapterRef.current?.writePty(activePaneId, data)}
       onPaste={async () => {
-        const { doPaste } = await import("mouseterm-lib/lib/clipboard");
+        const { doPaste } = await import("dormouse-lib/lib/clipboard");
         await doPaste(activePaneId);
       }}
     />
   );
 }
 
-function MobileTetherPage() {
+function MobilePocketPage() {
   return (
     <main className="fixed inset-0 bg-black">
-      <TetherTerminalExperience interactive fillViewport />
+      <PocketTerminalExperience interactive fillViewport />
       <div className="absolute right-2 top-10 z-30 rounded border border-[var(--vscode-panel-border)] bg-[var(--vscode-editorWidget-background)]/95 px-1.5 py-1 text-[var(--vscode-editor-foreground)] shadow-lg">
-        <ThemePicker variant="standalone-appbar" defaultThemeId={TETHER_THEME_ID} />
+        <ThemePicker variant="standalone-appbar" defaultThemeId={POCKET_THEME_ID} />
       </div>
     </main>
   );
@@ -220,7 +220,7 @@ function ShareUrlButton() {
     const url = window.location.href;
     if (navigator.share) {
       try {
-        await navigator.share({ url, title: "MouseTerm Tether" });
+        await navigator.share({ url, title: "Dormouse Pocket" });
         return;
       } catch (err) {
         if ((err as DOMException)?.name === "AbortError") return;
@@ -248,13 +248,13 @@ function ShareUrlButton() {
   );
 }
 
-function DesktopTetherPage() {
+function DesktopPocketPage() {
   return (
     <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
       <SiteHeader
-        activePath="/tether"
+        activePath="/pocket"
         style={STATIC_PAGE_HEADER_STYLE}
-        controls={<ThemePicker variant="standalone-appbar" defaultThemeId={TETHER_THEME_ID} />}
+        controls={<ThemePicker variant="standalone-appbar" defaultThemeId={POCKET_THEME_ID} />}
       />
       <main className="mx-auto grid min-h-screen max-w-6xl items-center gap-10 px-4 pb-10 pt-24 md:grid-cols-[minmax(0,1fr)_minmax(320px,390px)] md:px-8 md:pt-28">
         <section className="max-w-2xl">
@@ -267,22 +267,22 @@ function DesktopTetherPage() {
             to try it out! (WIP)
           </p>
           <p className="mb-4 text-lg leading-relaxed opacity-70">
-            Pair a terminal session to your phone over WebRTC and take a stroll, the MouseTerm alert
-            system will buzz you if there's anything to do. A hosted auto-pairing service comes
-            later — just leave and keep working, no "I'm walking away" dance.
+            Tether a terminal session to your phone over WebRTC and take a stroll — Dormouse
+            buzzes your phone when something needs attention. A hosted auto-pairing service comes
+            later, so you can close the laptop and walk away, no setup dance.
           </p>
           <p className="mb-4 text-lg leading-relaxed opacity-70">
-            Open source and free to self-host, or pay us a little bit and you can use ours. We'll discount for early adopters, so don't miss out!
+            Open source and free to self-host, or pay a small monthly fee for our hosted version. Early adopters get a launch discount.
           </p>
           <NotifySignupForm />
         </section>
 
-        <section aria-label="MouseTerm Tether phone preview" className="mx-auto w-full max-w-[390px]">
+        <section aria-label="Dormouse Pocket phone preview" className="mx-auto w-full max-w-[390px]">
           <div className="rounded-[2.4rem] border border-white/15 bg-neutral-950 p-3 shadow-[0_24px_90px_rgba(0,0,0,0.55)]">
             <div className="mx-auto mb-2 h-1.5 w-24 rounded-full bg-white/20" />
             <div className="aspect-[390/812] overflow-hidden rounded-[1.8rem] border border-white/10 bg-black">
               <div className="h-full pointer-events-none" aria-hidden="true" inert>
-                <TetherTerminalExperience interactive={false} />
+                <PocketTerminalExperience interactive={false} />
               </div>
             </div>
           </div>
@@ -292,14 +292,14 @@ function DesktopTetherPage() {
   );
 }
 
-function Tether() {
+function Pocket() {
   const isMobile = useIsMobileViewport();
 
   useEffect(() => {
-    const className = isMobile ? "tether-terminal-body" : "tether-marketing-body";
+    const className = isMobile ? "pocket-terminal-body" : "pocket-marketing-body";
     document.body.classList.add(className);
     return () => document.body.classList.remove(className);
   }, [isMobile]);
 
-  return isMobile ? <MobileTetherPage /> : <DesktopTetherPage />;
+  return isMobile ? <MobilePocketPage /> : <DesktopPocketPage />;
 }

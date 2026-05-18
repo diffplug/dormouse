@@ -4,7 +4,7 @@
 
 ## Goal
 
-MouseTerm models terminal panes by:
+Dormouse models terminal panes by:
 
 - latest reported working directory
 - current command line

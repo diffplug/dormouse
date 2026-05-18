@@ -84,9 +84,9 @@ export { TerminalPaneHeader } from './wall/TerminalPaneHeader';
 
 // --- Theme ---
 
-const mousetermTheme: DockviewTheme = {
+const dormouseTheme: DockviewTheme = {
   ...themeAbyss,
-  name: 'mouseterm',
+  name: 'dormouse',
   gap: 6,
   dndOverlayMounting: 'absolute',
   dndPanelOverlay: 'group',
@@ -595,8 +595,8 @@ export function Wall({
         showShellSpawnNotice(newId, `Opened ${shellName}`);
       }
     };
-    window.addEventListener('mouseterm:new-terminal', handler);
-    return () => window.removeEventListener('mouseterm:new-terminal', handler);
+    window.addEventListener('dormouse:new-terminal', handler);
+    return () => window.removeEventListener('dormouse:new-terminal', handler);
   }, [generatePaneId, selectPane, showShellSpawnNotice]);
 
   const addSplitPanel = useCallback((
@@ -745,7 +745,7 @@ export function Wall({
                   components={components}
                   tabComponents={tabComponents}
                   onReady={handleReady}
-                  theme={mousetermTheme}
+                  theme={dormouseTheme}
                   singleTabMode="fullwidth"
                 />
                 <WorkspaceSelectionOverlay apiRef={apiRef} selectedId={selectedId} selectedType={selectedType} mode={mode} overlayElRef={overlayElRef} />

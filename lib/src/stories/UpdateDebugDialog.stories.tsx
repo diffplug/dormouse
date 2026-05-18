@@ -24,7 +24,7 @@ function UpdateDebugDialogStory({ failure, body }: StoryArgs) {
   );
 }
 
-const ERROR = 'EACCES: permission denied at /Applications/MouseTerm.app';
+const ERROR = 'EACCES: permission denied at /Applications/Dormouse.app';
 
 const BODY = [
   '**App version**: 0.7.0 → 0.8.0',

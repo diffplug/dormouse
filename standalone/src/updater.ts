@@ -4,10 +4,10 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { getVersion } from '@tauri-apps/api/app';
 import { open } from '@tauri-apps/plugin-shell';
 import { invoke } from '@tauri-apps/api/core';
-import { PLATFORM_STRING } from 'mouseterm-lib/lib/platform';
+import { PLATFORM_STRING } from 'dormouse-lib/lib/platform';
 import type { UpdateBannerState } from './UpdateBanner';
 
-const GITHUB_REPO_URL = 'https://github.com/diffplug/mouseterm';
+const GITHUB_REPO_URL = 'https://github.com/diffplug/dormouse';
 
 function openUrl(url: string, context: string): void {
   open(url).catch((e) => console.error(`[updater] Failed to open ${context}:`, e));
@@ -15,7 +15,7 @@ function openUrl(url: string, context: string): void {
 
 // --- State ---
 
-const STORAGE_KEY = 'mouseterm:update-result';
+const STORAGE_KEY = 'dormouse:update-result';
 
 let state: UpdateBannerState = { status: 'idle' };
 let availableUpdate: Update | null = null;
@@ -65,7 +65,7 @@ export function openChangelog(): void {
 
 async function openCurrentVersionChangelog(): Promise<void> {
   const version = (await getVersion()).trim();
-  openUrl(`https://mouseterm.com/changelog/after/${encodeURIComponent(version)}`, 'changelog');
+  openUrl(`https://dormouse.sh/changelog/after/${encodeURIComponent(version)}`, 'changelog');
 }
 
 export async function buildDebugReport(error: string, toVersion: string): Promise<string> {

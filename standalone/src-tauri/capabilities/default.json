@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capability set for MouseTerm",
+  "description": "Default capability set for Dormouse",
   "windows": ["main"],
   "permissions": [
     "core:app:allow-version",

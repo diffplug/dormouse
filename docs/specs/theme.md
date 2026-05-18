@@ -1,15 +1,15 @@
 # Theme Spec
 
-MouseTerm's theme contract is intentionally small: render the terminal chrome
+Dormouse's theme contract is intentionally small: render the terminal chrome
 with VSCode-appropriate surfaces, and render terminal content with
 theme-appropriate xterm.js colors.
 
 VSCode extension mode gets `--vscode-*` variables from VSCode. Standalone and
 website mode apply the same shape of variables to `document.body` with
-`applyTheme()` from a bundled or installed MouseTerm theme. Both paths run the
+`applyTheme()` from a bundled or installed Dormouse theme. Both paths run the
 same consumed-token resolver from `lib/src/lib/themes/vscode-color-resolver.ts`
 so omitted theme JSON keys behave like VSCode registry defaults before
-MouseTerm renders.
+Dormouse renders.
 
 ## Surface hierarchy
 
@@ -48,7 +48,7 @@ That is accepted; terminal content still uses the theme's terminal palette.
 
 ## Runtime model
 
-MouseTerm has two theme layers:
+Dormouse has two theme layers:
 
 1. `--vscode-*` variables hold imported or host-provided VSCode color data.
 2. `--color-*` variables in `lib/src/theme.css` provide semantic Tailwind
@@ -58,7 +58,7 @@ MouseTerm has two theme layers:
 missing consumed variables through the VSCode resolver, and adds either
 `vscode-light` or `vscode-dark` for consumers that need the theme type. In real
 VSCode webviews, `installVscodeThemeVarResolver()` runs before React renders;
-it reads host-provided variables, materializes only missing MouseTerm-consumed
+it reads host-provided variables, materializes only missing Dormouse-consumed
 variables on `body.style`, and removes stale materialized variables when the
 host starts providing a real value.
 
@@ -69,10 +69,10 @@ declarations as the runtime source of truth.
 
 `theme.css` must not contain hardcoded color defaults or `var(..., fallback)`
 chains. Runtime hosts plus the shared resolver are responsible for providing
-the consumed `--vscode-*` variables before MouseTerm renders.
+the consumed `--vscode-*` variables before Dormouse renders.
 
 VSCode color IDs with `null` registry defaults need component-equivalent
-materialization because MouseTerm consumes them through direct CSS variables.
+materialization because Dormouse consumes them through direct CSS variables.
 Important cases:
 
 - `list.inactiveSelectionForeground` resolves to normal foreground
@@ -81,7 +81,7 @@ Important cases:
   where an inactive selected row does not force active-selection white text.
 - Null foregrounds inherit the nearest normal foreground.
 - Null backgrounds inherit the relevant surface.
-- Null border colors materialize as `transparent` so MouseTerm's existing
+- Null border colors materialize as `transparent` so Dormouse's existing
   border geometry does not accidentally draw in `currentColor`.
 
 ## Terminal color contract
@@ -106,7 +106,7 @@ terminals. `terminal-registry.ts` remains the public facade for callers.
 
 ## Theme data
 
-Bundled and installed themes are represented by `MouseTermTheme` objects in
+Bundled and installed themes are represented by `DormouseTheme` objects in
 `lib/src/lib/themes/`. A theme's `vars` map contains only consumed
 `--vscode-*` variables plus resolver dependencies. `convertVscodeThemeColors()`
 filters imported VSCode theme JSON to `CONSUMED_VSCODE_KEYS`; themes used
@@ -134,15 +134,15 @@ rings outside a full Wall instance.
 
 ## Theme debugger
 
-MouseTerm includes a diagnostic-only Theme Debugger shared by VSCode,
+Dormouse includes a diagnostic-only Theme Debugger shared by VSCode,
 standalone, and the website playground. It never mutates theme storage or
 terminal colors. It captures the current DOM-visible theme state and shows:
 
-- active MouseTerm theme metadata when `applyTheme()` is the source
+- active Dormouse theme metadata when `applyTheme()` is the source
   (standalone/playground); real VSCode webviews show only the inferred VSCode
   theme kind because VSCode exposes CSS variables, not raw built-in theme JSON.
 - visible `--vscode-*` variables, marked as host/theme-provided or
-  MouseTerm-materialized.
+  Dormouse-materialized.
 - resolver traces for every resolvable consumed variable: provided value,
   registry default for the current kind, null-default fallback path, final
   resolved value, and origin.
@@ -156,8 +156,8 @@ Standalone, playground, and the website `/tether` prototype expose the debugger
 as `Debug current theme` in the `ThemePicker` menu. `/tether` uses the same
 picker in the desktop page header and as a floating control above the mobile
 terminal prototype, both with the Kimbie Dark default theme fallback. VSCode
-opens it through the `mouseterm.debugTheme` command and the
-`mouseterm:openThemeDebugger` extension-to-webview message. The debugger's
+opens it through the `dormouse.debugTheme` command and the
+`dormouse:openThemeDebugger` extension-to-webview message. The debugger's
 copied report is a shareable text dump of the same snapshot.
 
 ## Maintainer checklist
@@ -171,7 +171,7 @@ When changing theme behavior:
   dependency used by chrome, terminal rendering, selection UI, theme-picker
   inline styles, or resolver fallback paths.
 - Keep xterm.js terminal colors sourced from `--vscode-terminal-*` variables,
-  not from MouseTerm chrome tokens.
+  not from Dormouse chrome tokens.
 - Keep debugger dynamic-pick reporting and runtime dynamic-palette picks sharing
   `pickDoorPair()` and `pickFocusRing()`; do not fork those rules in UI code.
 - Do not add hardcoded color defaults or CSS variable fallback chains to

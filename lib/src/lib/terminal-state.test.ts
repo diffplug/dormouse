@@ -142,13 +142,13 @@ describe('terminal command state reducer', () => {
     let state = createTerminalPaneState();
     state = reduceTerminalState(state, { type: 'title', title: { title: 'zsh', source: 'osc0', updatedAt: 1 } });
     state = reduceTerminalState(state, { type: 'title', title: { title: 'vim', source: 'osc2', updatedAt: 2 } });
-    state = reduceTerminalState(state, { type: 'title', title: { title: 'mouseterm', source: 'osc0', updatedAt: 3 } });
+    state = reduceTerminalState(state, { type: 'title', title: { title: 'dormouse', source: 'osc0', updatedAt: 3 } });
 
-    expect(state.title).toEqual({ title: 'mouseterm', source: 'osc0', updatedAt: 3 });
-    expect(state.titleCandidates.osc0).toEqual({ title: 'mouseterm', source: 'osc0', updatedAt: 3 });
+    expect(state.title).toEqual({ title: 'dormouse', source: 'osc0', updatedAt: 3 });
+    expect(state.titleCandidates.osc0).toEqual({ title: 'dormouse', source: 'osc0', updatedAt: 3 });
     expect(state.titleCandidates.osc2).toEqual({ title: 'vim', source: 'osc2', updatedAt: 2 });
     expect(titleCandidatesForDisplay(state).map((candidate) => [candidate.source, candidate.title])).toEqual([
-      ['osc0', 'mouseterm'],
+      ['osc0', 'dormouse'],
       ['osc2', 'vim'],
     ]);
   });
@@ -256,11 +256,11 @@ describe('header and grouping derivation', () => {
   it('lets fresh app-sent terminal titles override running command labels', () => {
     const pane = reduceTerminalState(
       runningPane('/repo/app', 'lazygit'),
-      { type: 'title', title: { title: 'lazygit: mouseterm', source: 'osc0', updatedAt: 2 } },
+      { type: 'title', title: { title: 'lazygit: dormouse', source: 'osc0', updatedAt: 2 } },
     );
 
     expect(deriveHeader(pane, [pane])).toEqual({
-      primary: 'lazygit: mouseterm',
+      primary: 'lazygit: dormouse',
     });
   });
 
@@ -358,23 +358,23 @@ describe('header and grouping derivation', () => {
 
   it('uses the in-run app-sent title as `<idle> ${LAST_TITLE}`', () => {
     let pane = runningPane('/repo/app', 'lazygit');
-    pane = reduceTerminalState(pane, { type: 'title', title: { title: 'lazygit: mouseterm', source: 'osc0', updatedAt: 2 } });
+    pane = reduceTerminalState(pane, { type: 'title', title: { title: 'lazygit: dormouse', source: 'osc0', updatedAt: 2 } });
     pane = reduceTerminalState(pane, { type: 'commandFinish', exitCode: 0 }, { now: () => 3 });
 
     expect(deriveHeader(pane, [pane])).toEqual({
-      primary: `${DEFAULT_IDLE_TITLE} lazygit: mouseterm`,
+      primary: `${DEFAULT_IDLE_TITLE} lazygit: dormouse`,
     });
   });
 
   it('ignores titles emitted after the last command finished when deriving LAST_TITLE', () => {
     let pane = runningPane('/repo/app', 'lazygit');
-    pane = reduceTerminalState(pane, { type: 'title', title: { title: 'lazygit: mouseterm', source: 'osc0', updatedAt: 2 } });
+    pane = reduceTerminalState(pane, { type: 'title', title: { title: 'lazygit: dormouse', source: 'osc0', updatedAt: 2 } });
     pane = reduceTerminalState(pane, { type: 'commandFinish', exitCode: 0 }, { now: () => 3 });
     // Shell sets the title back to its default after the command exits.
     pane = reduceTerminalState(pane, { type: 'title', title: { title: 'zsh', source: 'osc0', updatedAt: 4 } });
 
     expect(deriveHeader(pane, [pane])).toEqual({
-      primary: `${DEFAULT_IDLE_TITLE} lazygit: mouseterm`,
+      primary: `${DEFAULT_IDLE_TITLE} lazygit: dormouse`,
     });
   });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FakePtyAdapter } from "mouseterm-lib/lib/platform/fake-adapter";
+import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import { SECTIONS, type ItemId } from "./tut-items";
 import { TutRunner } from "./tut-runner";
 import { TutorialState } from "./tutorial-state";
@@ -83,7 +83,7 @@ describe("TutRunner snapshots", () => {
     sendKeys("\r");
 
     sendKeys("q");
-    expect(lastFrame()).toContain("MouseTerm Playground Tutorial");
+    expect(lastFrame()).toContain("Dormouse Playground Tutorial");
     expect(exitCount()).toBe(0);
 
     sendKeys("q");

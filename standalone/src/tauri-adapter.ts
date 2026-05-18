@@ -1,18 +1,18 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
-import type { AlertStateDetail, PlatformAdapter, PtyInfo } from "mouseterm-lib/lib/platform/types";
-import { AlertManager, type SessionStatus } from "mouseterm-lib/lib/alert-manager";
-import { normalizeExternalUri } from "mouseterm-lib/lib/external-links";
+import type { AlertStateDetail, PlatformAdapter, PtyInfo } from "dormouse-lib/lib/platform/types";
+import { AlertManager, type SessionStatus } from "dormouse-lib/lib/alert-manager";
+import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
-} from "mouseterm-lib/lib/terminal-protocol";
+} from "dormouse-lib/lib/terminal-protocol";
 import {
   applyTerminalSemanticEventsByPtyId,
-} from "mouseterm-lib/lib/terminal-state-store";
+} from "dormouse-lib/lib/terminal-state-store";
 
 function invoke(cmd: string, args?: Record<string, unknown>): void {
   rawInvoke(cmd, args).catch((err) =>
@@ -107,9 +107,9 @@ export class TauriAdapter implements PlatformAdapter {
       }),
     );
 
-    // Inert while dragDropEnabled=false in tauri.conf.json. See diffplug/mouseterm#38 and tauri-apps/tauri#14373.
+    // Inert while dragDropEnabled=false in tauri.conf.json. See diffplug/dormouse#38 and tauri-apps/tauri#14373.
     this.unlistenFns.push(
-      await listen<{ paths: string[] }>("mouseterm://files-dropped", (event) => {
+      await listen<{ paths: string[] }>("dormouse://files-dropped", (event) => {
         const paths = event.payload.paths ?? [];
         if (paths.length === 0) return;
         for (const handler of this.filesDroppedHandlers) handler(paths);
@@ -292,7 +292,7 @@ export class TauriAdapter implements PlatformAdapter {
 
   // --- State persistence ---
 
-  private static STATE_KEY = 'mouseterm.session';
+  private static STATE_KEY = 'dormouse.session';
 
   saveState(state: unknown): void {
     try {

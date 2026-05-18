@@ -18,7 +18,7 @@ const config: StorybookConfig = {
       '@tauri-apps/api/core': stub,
       '@tauri-apps/plugin-shell': stub,
       '@tauri-apps/plugin-updater': stub,
-      'mouseterm-lib': path.resolve(here, '..', 'src'),
+      'dormouse-lib': path.resolve(here, '..', 'src'),
     };
     return config;
   },

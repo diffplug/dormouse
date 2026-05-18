@@ -2,7 +2,7 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "build-mouseterm-vscode",
+      "label": "build-dormouse-vscode",
       "type": "shell",
       "command": "pnpm build:vscode",
       "group": "build",

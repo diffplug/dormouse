@@ -1,10 +1,10 @@
 ---
 name: release-notes
-description: Draft release notes, recommend and apply a version bump, and update CHANGELOG.md for the next mouseterm release by analyzing all merge commits and squash-merged PRs since the last release tag. Used as step 2 of the release checklist in docs/specs/deploy.md.
+description: Draft release notes, recommend and apply a version bump, and update CHANGELOG.md for the next dormouse release by analyzing all merge commits and squash-merged PRs since the last release tag. Used as step 2 of the release checklist in docs/specs/deploy.md.
 user-invocable: true
 ---
 
-You are drafting release notes, recommending and applying a version bump, and updating CHANGELOG.md for the next mouseterm release.
+You are drafting release notes, recommending and applying a version bump, and updating CHANGELOG.md for the next dormouse release.
 
 ## 1. Gather context
 
@@ -26,7 +26,7 @@ Also read the current version from `standalone/src-tauri/tauri.conf.json` so you
 
 ## 2. Decide the version bump
 
-mouseterm uses **breaking.added.bugfix** semantics (semver-shaped, but named for what each segment means here):
+dormouse uses **breaking.added.bugfix** semantics (semver-shaped, but named for what each segment means here):
 
 - **breaking** (major) — bump if any change breaks behavior users rely on, removes a feature, or changes a VSCode extension contribution point in an incompatible way
 - **added** (minor) — bump if any change adds a new user-facing feature, with no breaking changes
@@ -50,7 +50,7 @@ _Recommended bump: **<breaking|added|bugfix>** — <one-sentence justification n
 ### Added
 - Summary that affects both artifacts (no leading emoji) ...
 - 🔌 VS Code-only summary ...
-- 🖥️ Standalone-only user-facing summary ([#123](https://github.com/diffplug/mouseterm/pull/123)).
+- 🖥️ Standalone-only user-facing summary ([#123](https://github.com/diffplug/dormouse/pull/123)).
 
 ### Changed
 - ...
@@ -63,7 +63,7 @@ Rules for the entries:
 - One line per PR, written in user-facing terms (not "refactored X" — say what the user sees)
 - Lead each entry with the artifact emoji from the header at the top of `CHANGELOG.md`: 🖥️ for standalone-only, 🔌 for VS Code plugin-only, no emoji for changes that ship in both. Decide based on whether the user-visible behavior actually surfaces in each artifact — a PR that touches `lib/` is *both* only if both artifacts consume that code path; otherwise it's whichever one ships it.
 - Within each of Added / Changed / Fixed, sort entries by artifact: items that affect both (no emoji) first, then VS Code-only (🔌), then standalone-only (🖥️).
-- Link the PR using `https://github.com/diffplug/mouseterm/pull/<N>`. For direct-push commits with no PR, link the commit instead: `https://github.com/diffplug/mouseterm/commit/<sha>`
+- Link the PR using `https://github.com/diffplug/dormouse/pull/<N>`. For direct-push commits with no PR, link the commit instead: `https://github.com/diffplug/dormouse/commit/<sha>`
 - Omit any of Added / Changed / Fixed if it would be empty
 - Use today's date (`YYYY-MM-DD`) and the recommended `X.Y.Z`
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { FakePtyAdapter } from "mouseterm-lib/lib/platform/fake-adapter";
+import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import { PlaygroundShellRegistry } from "./playground-shells";
 import type { InteractiveProgram } from "./tutorial-shell";
 

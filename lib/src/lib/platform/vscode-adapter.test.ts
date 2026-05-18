@@ -75,7 +75,7 @@ describe('VSCodeAdapter PTY exit handling', () => {
     adapter.openExternal('https://example.com/docs');
 
     expect(postMessage).toHaveBeenCalledWith({
-      type: 'mouseterm:openExternal',
+      type: 'dormouse:openExternal',
       uri: 'https://example.com/docs',
     });
   });
@@ -153,14 +153,14 @@ describe('VSCodeAdapter PTY exit handling', () => {
 
   it('forwards shell replacement requests from the extension host', () => {
     const requests: unknown[] = [];
-    windowTarget.addEventListener('mouseterm:new-terminal', (event) => {
+    windowTarget.addEventListener('dormouse:new-terminal', (event) => {
       requests.push((event as CustomEvent).detail);
     });
 
     new VSCodeAdapter();
     windowTarget.dispatchEvent(new MessageEvent('message', {
       data: {
-        type: 'mouseterm:newTerminal',
+        type: 'dormouse:newTerminal',
         shell: '/bin/zsh',
         args: ['-l'],
         name: 'zsh',

@@ -1,7 +1,7 @@
 [package]
-name = "mouseterm"
+name = "dormouse"
 version = "0.9.1"
-description = "Mouse-friendly multitasking terminal"
+description = "Persistent multitasking terminal for mice (and hotkey wizards too)"
 authors = ["DiffPlug"]
 license = "FSL-1.1-MIT"
 edition = "2021"
@@ -10,7 +10,7 @@ edition = "2021"
 global-min-publish-age = "14 days"
 
 [lib]
-name = "mouseterm_lib"
+name = "dormouse_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]
