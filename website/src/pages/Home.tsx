@@ -66,6 +66,12 @@ const SECTION_PY = "py-8";
 
 /** Clamp a value to 0–1. */
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+/** Snap a 0..1 progress to crisp 0/1 endpoints when within `eps`. The scroll
+ *  smoother settles asymptotically, so opacity values can land at e.g. 0.004
+ *  near a threshold — visually a ghost, and worse, it disables the browser's
+ *  `opacity: 0` compositor fast-path. Snapping makes the endpoints exact. */
+const snapProgress = (p: number, eps = 0.005): number =>
+  p < eps ? 0 : p > 1 - eps ? 1 : p;
 const useClientLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 const downloadAccentStyle = {
@@ -508,21 +514,21 @@ function Home() {
         const progress = clamp01(
           (fraction - WORD_THRESHOLDS[i]) / 0.08
         );
-        el.style.opacity = String(progress);
+        el.style.opacity = String(snapProgress(progress));
         el.style.transform = `translateY(${(1 - progress) * 12}px)`;
       }
 
       // Footnote
-      const footnoteProgress = clamp01(
+      const footnoteProgress = snapProgress(clamp01(
         (fraction - FOOTNOTE_THRESHOLD) / 0.08
-      );
+      ));
       if (footnoteRef.current) footnoteRef.current.style.opacity = String(footnoteProgress * 0.7);
 
       // Header: reveal brand + background just before the tmux-shortcuts
       // footnote appears, so it reads as dark once the line is visible.
-      const headerProgress = clamp01(
+      const headerProgress = snapProgress(clamp01(
         (fraction - (FOOTNOTE_THRESHOLD - HEADER_REVEAL_LEAD)) / HEADER_REVEAL_LEAD
-      );
+      ));
       if (headerBrandRef.current) {
         headerBrandRef.current.style.opacity = String(headerProgress);
       }
@@ -553,7 +559,7 @@ function Home() {
         const fadeProgress = iconCurrentOffset === 0
           ? 1
           : clamp01(1 - remainingHidden / HOOK_FADE_REMAINING);
-        hookRef.current.style.opacity = String(1 - fadeProgress);
+        hookRef.current.style.opacity = String(snapProgress(1 - fadeProgress));
         hookRef.current.style.transform = `translateY(${-fadeProgress * 24}px)`;
       }
 
@@ -572,7 +578,7 @@ function Home() {
           (fraction - DORMOUSE_LINE_FADE_OUT_START)
             / (DORMOUSE_LINE_FADE_OUT_END - DORMOUSE_LINE_FADE_OUT_START)
         );
-        dormouseLineRef.current.style.opacity = String(fadeIn * (1 - fadeOut));
+        dormouseLineRef.current.style.opacity = String(snapProgress(fadeIn * (1 - fadeOut)));
         // (1-fadeIn) lifts it into place from below as it appears; fadeOut
         // lifts it further out as it leaves, matching the hook's exit motion.
         const translateY = (1 - fadeIn) * 8 + fadeOut * -20;
