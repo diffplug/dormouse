@@ -1,6 +1,6 @@
 # Terminal CWD and Command State
 
-> See `docs/specs/glossary.md` for Session vocabulary. This spec defines the per-Session terminal semantic state that layout and grouping consume. Alert/TODO behavior and notification OSCs (OSC 9 / 9;4 / 99 / 777 / BEL) live in `docs/specs/alert.md`. The OSC sequence registry and parsing-location rules live in `docs/specs/OSC.md`.
+> See `docs/specs/glossary.md` for Session vocabulary. This spec defines the per-Session terminal semantic state that layout and grouping consume. Alert/TODO behavior and notification OSCs (OSC 9 / 9;4 / 99 / 777 / BEL) live in `docs/specs/alert.md`. The escape-sequence registry and parsing-location rules live in `docs/specs/terminal-escapes.md`.
 
 ## Goal
 
@@ -169,7 +169,7 @@ Non-OSC title source:
 
 The `user_input` command fallback is best effort. It is sufficient for headers and grouping, but command-exit alerting may treat it as lower confidence or ignore it until deeper shell integration exists.
 
-The parser accepts both BEL and ST terminators and handles split chunks. Supported-but-malformed semantic OSCs are consumed without changing state. Unsupported OSC pass-through vs. consume/ignore behavior is defined centrally in `docs/specs/OSC.md`.
+The parser accepts both BEL and ST terminators and handles split chunks. Supported-but-malformed semantic OSCs are consumed without changing state. Unsupported OSC pass-through vs. consume/ignore behavior is defined centrally in `docs/specs/terminal-escapes.md`.
 
 ## Reducer
 

@@ -110,7 +110,7 @@ Message types live in `vscode-ext/src/message-types.ts` (the canonical schema; o
 | `mouseterm:openThemeDebugger` | Command-triggered request to open the shared theme debugger dialog |
 | `alert:state` | Alert state change (projected status, watchingEnabled, todo, notification, attentionDismissedRing) |
 
-The OSC parsing/stripping rules that produce `pty:data` and `terminal:semanticEvents` are specified in `docs/specs/OSC.md`.
+The OSC parsing/stripping rules that produce `pty:data` and `terminal:semanticEvents` are specified in `docs/specs/terminal-escapes.md`.
 
 ## Persisted session types
 
