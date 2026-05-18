@@ -118,7 +118,7 @@ jobs:
         run: pnpm --filter mouseterm build
 
       - name: Package extension
-        run: cd vscode-ext && npx vsce package --no-dependencies
+        run: pnpm --dir vscode-ext exec vsce package --no-dependencies
 
       - name: Upload .vsix
         uses: actions/upload-artifact@v4
@@ -156,7 +156,7 @@ jobs:
         working-directory: vscode-ext
         run: |
           for i in 1 2 3; do
-            npx vsce publish --packagePath *.vsix --no-dependencies && exit 0
+            pnpm exec vsce publish --packagePath *.vsix --no-dependencies && exit 0
             echo "Attempt $i failed, retrying in 10s..."
             sleep 10
           done
@@ -168,7 +168,7 @@ jobs:
         working-directory: vscode-ext
         run: |
           for i in 1 2 3; do
-            npx ovsx publish --packagePath *.vsix --no-dependencies && exit 0
+            pnpm exec ovsx publish --packagePath *.vsix --no-dependencies && exit 0
             echo "Attempt $i failed, retrying in 10s..."
             sleep 10
           done

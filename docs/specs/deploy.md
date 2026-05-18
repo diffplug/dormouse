@@ -89,15 +89,15 @@ Runs on `ubuntu-latest`:
 2. `pnpm install --frozen-lockfile` at the repo root
 3. `pnpm --filter mouseterm-lib test`
 4. `pnpm --filter mouseterm build:frontend && pnpm --filter mouseterm build`
-5. `npx vsce package --no-dependencies`
+5. `pnpm --dir vscode-ext exec vsce package --no-dependencies`
 6. Upload `.vsix` as artifact
 
 ### Job: `publish-vscode`
 
 Runs after `build-vscode` succeeds:
 1. Download `.vsix` artifact
-2. `npx vsce publish --packagePath *.vsix --no-dependencies`
-3. `npx ovsx publish --packagePath *.vsix --no-dependencies`
+2. `pnpm exec vsce publish --packagePath *.vsix --no-dependencies`
+3. `pnpm exec ovsx publish --packagePath *.vsix --no-dependencies`
 
 This runs in CI because VSCode Marketplace publishing uses PAT tokens (no hardware key needed).
 
@@ -113,7 +113,8 @@ This runs in CI because VSCode Marketplace publishing uses PAT tokens (no hardwa
 brew install gh jsign
 gh auth login
 xcode-select --install
-tauri signer generate  # creates the Tauri update signing keypair
+pnpm install --frozen-lockfile
+pnpm --dir standalone exec tauri signer generate  # creates the Tauri update signing keypair
 ```
 
 ### Two signing layers
