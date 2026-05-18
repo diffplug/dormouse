@@ -10,6 +10,9 @@ on:
     paths:
       - 'lib/**'
 
+permissions:
+  contents: read
+
 jobs:
   chromatic:
     name: Visual Regression Tests

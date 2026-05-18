@@ -57,6 +57,15 @@ Stage 2: Local (sign-and-deploy.sh)
 
 Triggered by tag push `v*`. Three parallel jobs:
 
+The workflow defaults `GITHUB_TOKEN` to read-only repository access with:
+
+```yaml
+permissions:
+  contents: read
+```
+
+No release job currently requests `id-token: write`; add that only if a job starts verifying or publishing with OIDC-backed provenance.
+
 ### Job: `build-standalone` (matrix)
 
 Runs on `ubuntu-22.04` (linux), `macos-latest` (mac), and `windows-latest` (win). Uses `tauri-apps/tauri-action@v0`.
