@@ -40,10 +40,6 @@ The parser also classifies each PTY data chunk for activity-monitor purposes:
 
 Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js can handle standard terminal behavior MouseTerm does not model. Security-sensitive or iTerm2-identity-triggered OSCs must not rely on xterm.js defaults: if they are not in [Supported OSCs](#supported-oscs), MouseTerm consumes and ignores them without visible terminal garbage, clipboard access, file access, focus changes, or other side effects.
 
-### OSC 8 hyperlinks
-
-`OSC 8 ; <params> ; <URI> ST` starts a hyperlink region and `OSC 8 ; ; ST` closes it. `params` may be empty or include `id=<group-id>` for multi-line/shared link regions. MouseTerm does not parse the `params` or URI at the PTY boundary; it passes the sequence through to xterm.js. `terminal-lifecycle.ts` sets xterm.js's `linkHandler` so activation normalizes the URI through `normalizeExternalUri()`, allowing only `http:`, `https:`, and `mailto:` before calling the platform adapter's external-open path. VS Code revalidates in the extension host before `vscode.env.openExternal`; standalone and fake adapters also revalidate before opening.
-
 ## Supported OSCs
 
 | Sequence | Purpose | Spec |
@@ -65,6 +61,10 @@ Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js c
 | `OSC 1337 ; CurrentDir=<cwd> ST` | CWD (iTerm2 compatibility) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 
 Some sequences are dual-purpose. The notification rows for `OSC 9 ; <message> ST`, `OSC 99` (`p=title`/`p=body`), and `OSC 777 ; notify` also feed the title-candidate channel in `terminal-state.md` — see its [Title candidate diagnostics](terminal-state.md#supported-osc-inputs) table. Only the OSC 9 *message* form can become a header/door label; OSC 99 and OSC 777 candidates are stored for the diagnostic popup only. The OSC 9 *progress* form (`OSC 9 ; 4`) carries no text and never contributes a title candidate.
+
+### OSC 8 hyperlinks
+
+`OSC 8 ; <params> ; <URI> ST` starts a hyperlink region and `OSC 8 ; ; ST` closes it. `params` may be empty or include `id=<group-id>` for multi-line/shared link regions. MouseTerm does not parse the `params` or URI at the PTY boundary; it passes the sequence through to xterm.js. `terminal-lifecycle.ts` sets xterm.js's `linkHandler` so activation normalizes the URI through `normalizeExternalUri()`, allowing only `http:`, `https:`, and `mailto:` before calling the platform adapter's external-open path. VS Code revalidates in the extension host before `vscode.env.openExternal`; standalone and fake adapters also revalidate before opening.
 
 ## Supported CSI
 
