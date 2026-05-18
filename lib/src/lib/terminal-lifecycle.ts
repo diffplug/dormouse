@@ -1,7 +1,7 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { getPlatform } from './platform';
-import { normalizeExternalUri } from './external-links';
+import { requestExternalLinkConfirmation } from './external-link-confirmation';
 import { attachMouseModeObserver } from './mouse-mode-observer';
 import {
   bumpRenderTick,
@@ -59,9 +59,7 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
     linkHandler: {
       activate: (event, uri) => {
         event.preventDefault();
-        const normalized = normalizeExternalUri(uri);
-        if (!normalized) return;
-        getPlatform().openExternal?.(normalized);
+        requestExternalLinkConfirmation(uri);
       },
       allowNonHttpProtocols: true,
     },

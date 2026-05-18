@@ -8,6 +8,7 @@ import {
 } from 'dockview-react';
 import 'dockview-react/dist/styles/dockview.css';
 import { Baseboard } from './Baseboard';
+import { ExternalLinkDialogHost } from './ExternalLinkDialogHost';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import {
   clearSessionAttention,
@@ -771,6 +772,8 @@ export function Wall({
               paneElements={paneElements}
               version={paneElementsVersion}
             />
+
+            <ExternalLinkDialogHost onKeyboardActiveChange={setDialogKeyboardActive} />
 
           </div>
           </DialogKeyboardContext.Provider>
