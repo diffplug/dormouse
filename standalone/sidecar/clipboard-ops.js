@@ -239,7 +239,7 @@ async function readClipboardImageAsFilePath(runtime = {}) {
   let dir = null;
   let out = null;
   try {
-    dir = await fsp.mkdtemp(path.join(osModule.tmpdir(), 'mouseterm-drops-'));
+    dir = await fsp.mkdtemp(path.join(osModule.tmpdir(), 'dormouse-drops-'));
     await fsp.chmod?.(dir, 0o700);
     out = path.join(dir, `${cryptoModule.randomUUID()}-clipboard.png`);
     const ok = platform === 'darwin' ? await readImageMac(out, runtime)

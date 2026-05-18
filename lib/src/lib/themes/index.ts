@@ -1,4 +1,4 @@
-export type { MouseTermTheme, BundledOrigin, InstalledOrigin } from './types';
+export type { DormouseTheme, BundledOrigin, InstalledOrigin } from './types';
 export { CONSUMED_VSCODE_KEYS, convertVscodeThemeColors, uiThemeToType } from './convert';
 export { applyTheme, getAppliedThemeSnapshot, restoreActiveTheme } from './apply';
 export type { AppliedThemeSnapshot } from './apply';

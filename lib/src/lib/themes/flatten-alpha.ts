@@ -1,6 +1,6 @@
 /* Composite a translucent CSS color over an opaque base, returning an opaque
  * hex result. Used to flatten VSCode tokens that carry alpha (e.g. Selenized
- * Dark's list.activeSelectionBackground = #0096f588) when MouseTerm applies
+ * Dark's list.activeSelectionBackground = #0096f588) when Dormouse applies
  * them as solid surface fills — the AppBar, dockview tabs, etc. all expect a
  * fully opaque color, but VSCode authors selection tints with alpha because
  * VSCode itself renders them as overlays on the sidebar background. */
@@ -59,7 +59,7 @@ export function flattenAlpha(value: string, base: string): string {
   });
 }
 
-/* VSCode tokens that MouseTerm uses as solid surface fills but whose theme
+/* VSCode tokens that Dormouse uses as solid surface fills but whose theme
  * authors commonly carry alpha. Flattened against sideBar.background — the
  * surface VSCode itself composites the file-tree selection over. */
 const FLATTEN_OVER_SIDEBAR: readonly string[] = [

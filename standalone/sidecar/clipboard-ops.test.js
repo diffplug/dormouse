@@ -159,10 +159,10 @@ test('readClipboardImageAsFilePath on mac returns temp path on success', async (
       return { stdout: 'ok\n' };
     },
   });
-  const expected = path.join('/t', 'mouseterm-drops-dir-0', 'uuid-I-clipboard.png');
+  const expected = path.join('/t', 'dormouse-drops-dir-0', 'uuid-I-clipboard.png');
   assert.equal(result, expected);
   assert.deepEqual(fs.chmods, [
-    [path.join('/t', 'mouseterm-drops-dir-0'), 0o700],
+    [path.join('/t', 'dormouse-drops-dir-0'), 0o700],
     [expected, 0o600],
   ]);
   // Cleanup was scheduled, but not yet run: the temp file still exists.
@@ -175,7 +175,7 @@ test('readClipboardImageAsFilePath on mac returns temp path on success', async (
   await new Promise((r) => setImmediate(r));
   await new Promise((r) => setImmediate(r));
   assert.deepEqual(fs.unlinks, [expected]);
-  assert.deepEqual(fs.rmdirs, [path.join('/t', 'mouseterm-drops-dir-0')]);
+  assert.deepEqual(fs.rmdirs, [path.join('/t', 'dormouse-drops-dir-0')]);
 });
 
 test('readClipboardImageAsFilePath returns null when osascript returns empty', async () => {
@@ -188,7 +188,7 @@ test('readClipboardImageAsFilePath returns null when osascript returns empty', a
     exec: async () => ({ stdout: '' }),
   });
   assert.equal(result, null);
-  assert.deepEqual(fs.rmdirs, [path.join('/t', 'mouseterm-drops-dir-0')]);
+  assert.deepEqual(fs.rmdirs, [path.join('/t', 'dormouse-drops-dir-0')]);
 });
 
 test('readClipboardText on mac shells out to pbpaste', async () => {
@@ -279,7 +279,7 @@ test('readClipboardImageAsFilePath on linux writes buffer from exec stdout', asy
       throw new Error('no tool');
     },
   });
-  assert.equal(result, path.join('/t', 'mouseterm-drops-dir-0', 'uuid-L-clipboard.png'));
+  assert.equal(result, path.join('/t', 'dormouse-drops-dir-0', 'uuid-L-clipboard.png'));
   assert.equal(fs.writes.length, 1);
   assert.deepEqual(fs.writes[0][2], { mode: 0o600 });
 });

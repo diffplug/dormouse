@@ -1,18 +1,18 @@
 {
   "version": "0.9.1",
-  "notes": "See https://github.com/diffplug/mouseterm/releases/tag/v0.9.1",
+  "notes": "See https://github.com/diffplug/dormouse/releases/tag/v0.9.1",
   "pub_date": "2026-05-01T22:02:25Z",
   "platforms": {
     "darwin-aarch64": {
-      "url": "https://github.com/diffplug/mouseterm/releases/download/v0.9.1/MouseTerm-macos-aarch64.tar.gz",
+      "url": "https://github.com/diffplug/dormouse/releases/download/v0.9.1/Dormouse-macos-aarch64.tar.gz",
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYlpCcFVqWDVhckMvSXc5aXd0TXNFdEUwcmVxOUpvZG53SmdZQ0ZhYlhDcUQ2WU1LWlF1eGx2bG15NHJEa3phK1ZVcjFIaWVGNGUwS3BqKzFXMmNPUWlmem1wMUJBSGdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc3NjcyOTQ0CWZpbGU6TW91c2VUZXJtLW1hY29zLWFhcmNoNjQudGFyLmd6ClE3OWlndURTdkI5Mm9FeXM0U1Q4RGxYbFFtU2xIN1RsN095VmhlZTJqQ215U01yRFphNE5jYnNvcTZjUGI5Q0dObHgyMTJieE1pK2ZwdXJFTFZMb0JBPT0K"
     },
     "windows-x86_64": {
-      "url": "https://github.com/diffplug/mouseterm/releases/download/v0.9.1/MouseTerm-windows-x64-setup.exe",
+      "url": "https://github.com/diffplug/dormouse/releases/download/v0.9.1/Dormouse-windows-x64-setup.exe",
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYlpCcFVqWDVhckdQRmYzS1dnRnYzUzBiUUMzanNINFpzLzZTemtwNTM4L3NmOUN0SGxVcEZFcG5yOGxOS1JGRzY1Skw0RGRXenlQMHlmNlB6ZkRLYTNLeE9hWVB0U3dZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc3NjcyOTQ0CWZpbGU6TW91c2VUZXJtLXdpbmRvd3MteDY0LXNldHVwLmV4ZQp5ZU9XbGlSNFFNTVd0NFdZWi9YQW9KU1pxZWtDS3gyYWY4OUJ4eHZ4YkN0UkNicVZ5OXBFakdWWktOcmd6R29LZHRMeHlReCswa3d5VTgvbTNEK0xBQT09Cg=="
     },
     "linux-x86_64": {
-      "url": "https://github.com/diffplug/mouseterm/releases/download/v0.9.1/MouseTerm-linux-x86_64.AppImage",
+      "url": "https://github.com/diffplug/dormouse/releases/download/v0.9.1/Dormouse-linux-x86_64.AppImage",
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYlpCcFVqWDVhckdvR3lCT3ZHQW51b1gxUWVVbGNNVlFMK0ZDNmdKdE5zYURXaHliaDFodHdoOFJabHB4UjVsalB1QWpTQ2NCNmlqOER5bGRpdXlCY0p2VHRCZEVWK3dBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc3NjcyOTQ1CWZpbGU6TW91c2VUZXJtLWxpbnV4LXg4Nl82NC5BcHBJbWFnZQoza240b1AyVWw2T3VKUmhFUXdRanRlNVVaVGRvUUUxL1VqZ3FCTmJrQmpzNmxPVnRpd3BxRzJwN3NyRnB1YmZoUUIxK2E3WG9ZbmlJUnFYK0J6Uk1EZz09Cg=="
     }
   }

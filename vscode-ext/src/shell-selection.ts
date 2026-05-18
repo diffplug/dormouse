@@ -6,7 +6,7 @@ export interface ShellEntry {
   args: string[];
 }
 
-const KEY = 'mouseterm.selectedShellPath';
+const KEY = 'dormouse.selectedShellPath';
 
 export function getSelectedShellPath(context: vscode.ExtensionContext): string | undefined {
   return context.workspaceState.get<string>(KEY) ?? context.globalState.get<string>(KEY);

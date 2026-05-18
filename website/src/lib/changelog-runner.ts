@@ -10,8 +10,8 @@ import {
   MOUSE_ENABLE,
   RESET,
   fg,
-} from "mouseterm-lib/lib/ansi";
-import type { FakePtyAdapter } from "mouseterm-lib/lib/platform/fake-adapter";
+} from "dormouse-lib/lib/ansi";
+import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import type { InteractiveProgram } from "./tutorial-shell";
 import changelogData from "../data/changelog.json";
 
@@ -307,7 +307,7 @@ export class ChangelogRunner implements InteractiveProgram {
     const detailLines = this.getDetailLines();
 
     let frame = `${CURSOR_HOME}${CLEAR_SCREEN}`;
-    frame += `${BOLD}MouseTerm changelog${RESET}  ${DIM}${RELEASES.length} releases · \`q\` to quit · ↑↓ select · wheel scrolls${RESET}\r\n`;
+    frame += `${BOLD}Dormouse changelog${RESET}  ${DIM}${RELEASES.length} releases · \`q\` to quit · ↑↓ select · wheel scrolls${RESET}\r\n`;
     frame += "\r\n";
 
     for (let r = 0; r < bodyH; r++) {

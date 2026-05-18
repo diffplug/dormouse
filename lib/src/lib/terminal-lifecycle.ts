@@ -54,6 +54,7 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
     fontFamily: editorFontFamily,
     cursorBlink: true,
     theme,
+    vtExtensions: { kittyKeyboard: true },
   });
 
   const fit = new FitAddon();

@@ -1,10 +1,10 @@
-# MouseTerm VS Code Integration Spec
+# Dormouse VS Code Integration Spec
 
 > See `docs/specs/transport.md` for the PTY lifecycle, message protocol, persisted-session types, and adapter-agnostic invariants that VS Code shares with the standalone and fake adapters. This spec covers the VS Code-specific layer: panel/view registration, persistence APIs, theme integration, CSP, build, and dream-architecture commands.
 
 ## What's built
 
-MouseTerm has two hosting modes: a `WebviewView` in the bottom panel (alongside Terminal, Problems, Output) and `WebviewPanel` editor tabs (via `mouseterm.open`, supports multiple instances). Both restore across "Developer: Reload Window". PTY lifecycle is fully decoupled from the webview — PTYs live in the extension host via `pty-manager.ts`, survive panel visibility toggling, and replay buffered output on **resume**. Session persistence works across cold **restore**: pane layout, CWD, scrollback, alert state (enabled/disabled + todo), and resume commands are saved and restored on cold start. The view uses `workspaceState` for persistence; editor panels use VS Code's per-panel `vscode.setState()` so multiple panels don't clobber each other. Alert state is merged into every periodic save (not just deactivate) so it survives even if VS Code kills the extension host before deactivate completes. A `WebviewPanelSerializer` handles editor tab restoration; `onWebviewPanel:mouseterm` activation event ensures the extension activates early enough. Theme integration uses VSCode `--vscode-*` tokens plus MouseTerm semantic `--color-*` tokens, with a small resolver that materializes missing consumed VSCode colors from registry defaults. CSP is strict with nonce-gated scripts.
+Dormouse has two hosting modes: a `WebviewView` in the bottom panel (alongside Terminal, Problems, Output) and `WebviewPanel` editor tabs (via `dormouse.open`, supports multiple instances). Both restore across "Developer: Reload Window". PTY lifecycle is fully decoupled from the webview — PTYs live in the extension host via `pty-manager.ts`, survive panel visibility toggling, and replay buffered output on **resume**. Session persistence works across cold **restore**: pane layout, CWD, scrollback, alert state (enabled/disabled + todo), and resume commands are saved and restored on cold start. The view uses `workspaceState` for persistence; editor panels use VS Code's per-panel `vscode.setState()` so multiple panels don't clobber each other. Alert state is merged into every periodic save (not just deactivate) so it survives even if VS Code kills the extension host before deactivate completes. A `WebviewPanelSerializer` handles editor tab restoration; `onWebviewPanel:dormouse` activation event ensures the extension activates early enough. Theme integration uses VSCode `--vscode-*` tokens plus Dormouse semantic `--color-*` tokens, with a small resolver that materializes missing consumed VSCode colors from registry defaults. CSP is strict with nonce-gated scripts.
 
 **Architecture:**
 
@@ -70,43 +70,43 @@ Universal PTY/transport invariants live in `docs/specs/transport.md`. The rules 
 - **PTY ownership tracking.** Each router tracks its PTYs in `ownedPtyIds`. A module-level `globalOwnedPtyIds` set prevents a resuming router from stealing PTYs owned by another webview.
 - **mergeAlertStates on every save path.** Both the frontend periodic save (`onSaveState` callback) and the backend deactivate refresh (`refreshSavedSessionStateFromPtys`) must merge current alert states. Missing this causes alert state to revert on restore.
 - **retainContextWhenHidden.** Set on both `WebviewPanel` (editor tabs) and `WebviewView` (bottom panel) so that xterm.js DOM, scrollback, and PTY subscriptions survive panel hide/show without going through a resume.
-- **Two save sources.** Session state is saved from two places: the frontend (debounced 500ms + 30s interval via `mouseterm:saveState`) and the backend (deactivate flushes webviews then refreshes from live PTYs). Both paths must produce consistent state.
+- **Two save sources.** Session state is saved from two places: the frontend (debounced 500ms + 30s interval via `dormouse:saveState`) and the backend (deactivate flushes webviews then refreshes from live PTYs). Both paths must produce consistent state.
 
 ### Extension manifest (current)
 
 ```jsonc
 {
   "activationEvents": [
-    "onView:mouseterm.view",
-    "onWebviewPanel:mouseterm"
+    "onView:dormouse.view",
+    "onWebviewPanel:dormouse"
   ],
   "contributes": {
     "commands": [
-      { "command": "mouseterm.focus", "title": "MouseTerm: Focus",
+      { "command": "dormouse.focus", "title": "Dormouse: Focus",
         "icon": { "light": "icon-tiny-light.png", "dark": "icon-tiny-dark.png" } },
-      { "command": "mouseterm.open", "title": "MouseTerm: Open in Editor" },
-      { "command": "mouseterm.debugTheme", "title": "MouseTerm: Debug Theme" },
-      { "command": "mouseterm.newTerminal", "title": "MouseTerm: New Terminal",
+      { "command": "dormouse.open", "title": "Dormouse: Open in Editor" },
+      { "command": "dormouse.debugTheme", "title": "Dormouse: Debug Theme" },
+      { "command": "dormouse.newTerminal", "title": "Dormouse: New Terminal",
         "icon": "$(add)" },
-      { "command": "mouseterm.selectShell", "title": "MouseTerm: Select Shell",
+      { "command": "dormouse.selectShell", "title": "Dormouse: Select Shell",
         "icon": "$(gear)" }
     ],
     "menus": {
       "view/title": [
-        { "command": "mouseterm.selectShell", "group": "navigation@1",
-          "when": "view == mouseterm.view" },
-        { "command": "mouseterm.newTerminal", "group": "navigation@2",
-          "when": "view == mouseterm.view" }
+        { "command": "dormouse.selectShell", "group": "navigation@1",
+          "when": "view == dormouse.view" },
+        { "command": "dormouse.newTerminal", "group": "navigation@2",
+          "when": "view == dormouse.view" }
       ]
     },
     "viewsContainers": {
       "panel": [
-        { "id": "mouseterm-panel", "title": "MouseTerm", "icon": "$(terminal)" }
+        { "id": "dormouse-panel", "title": "Dormouse", "icon": "$(terminal)" }
       ]
     },
     "views": {
-      "mouseterm-panel": [
-        { "id": "mouseterm.view", "name": "MouseTerm", "type": "webview" }
+      "dormouse-panel": [
+        { "id": "dormouse.view", "name": "Dormouse", "type": "webview" }
       ]
     }
   }
@@ -124,16 +124,16 @@ Extension Host (always running while extension is active)
 │   ├── pty-2 (Process: Live)
 │   └── pty-3 (Process: Exited)
 │
-├── WebviewView "MouseTerm" (bottom panel)
+├── WebviewView "Dormouse" (bottom panel)
 │   └── message-router: owns pty-1, pty-2
 │
-└── WebviewPanel "MouseTerm" (editor tab, optional)
+└── WebviewPanel "Dormouse" (editor tab, optional)
     └── message-router: owns pty-3
 ```
 
 VS Code-specific consequences:
 
-- Hiding the MouseTerm panel doesn't kill its PTYs.
+- Hiding the Dormouse panel doesn't kill its PTYs.
 - VS Code toggling the panel visibility doesn't destroy sessions.
 - Multiple VS Code windows each get their own extension host process, and therefore their own pty-host child process.
 
@@ -141,23 +141,23 @@ PTY lifecycle, buffering, the reconnection sequence, and the full message protoc
 
 ### Shell selection
 
-The VS Code view title contributes `MouseTerm: Select Shell` and `MouseTerm: New Terminal`. The selected shell name is mirrored into the `WebviewView.description`, and `mouseterm:selectedShell` keeps the webview's default-shell slot current for split/spawn/restore paths.
+The VS Code view title contributes `Dormouse: Select Shell` and `Dormouse: New Terminal`. The selected shell name is mirrored into the `WebviewView.description`, and `dormouse:selectedShell` keeps the webview's default-shell slot current for split/spawn/restore paths.
 
-`mouseterm.newTerminal` focuses the MouseTerm view and posts `mouseterm:newTerminal` with the currently selected shell. `mouseterm.selectShell` opens a QuickPick, saves the shell path globally or per workspace, applies the description/default-shell update, and, when the picked shell differs from the previous selection, focuses the view and posts `mouseterm:newTerminal` with `replaceUntouched: true` and `announce: true`. The shared `Wall` logic then replaces only a selected untouched terminal in-place; touched terminals cause an additional pane to be spawned instead.
+`dormouse.newTerminal` focuses the Dormouse view and posts `dormouse:newTerminal` with the currently selected shell. `dormouse.selectShell` opens a QuickPick, saves the shell path globally or per workspace, applies the description/default-shell update, and, when the picked shell differs from the previous selection, focuses the view and posts `dormouse:newTerminal` with `replaceUntouched: true` and `announce: true`. The shared `Wall` logic then replaces only a selected untouched terminal in-place; touched terminals cause an additional pane to be spawned instead.
 
 ### Serialization and restore
 
 `WebviewPanelSerializer` is registered so VS Code can restore editor panels after restart:
 
 ```
-activationEvents: ["onWebviewPanel:mouseterm"]
+activationEvents: ["onWebviewPanel:dormouse"]
 ```
 
 The persisted-session shape (`PersistedSession` / `PersistedPane` / `PersistedAlertState` / `PersistedDoor`) lives in `docs/specs/transport.md`; it is shared with the standalone and fake adapters.
 
 **VS Code persistence flow:**
 
-1. Frontend saves state periodically (debounced 500ms + 30s interval) via `mouseterm:saveState` message.
+1. Frontend saves state periodically (debounced 500ms + 30s interval) via `dormouse:saveState` message.
 2. Router's `onSaveState` callback merges in current alert states via `mergeAlertStates()`.
 3. WebviewView writes to `workspaceState`; WebviewPanels persist via `vscode.setState()` (per-panel, no clobbering).
 4. On deactivate: flush all sessions from webviews (1s timeout), then refresh from live PTYs (queries CWD + scrollback while processes are still alive).
@@ -166,7 +166,7 @@ The persisted-session shape (`PersistedSession` / `PersistedPane` / `PersistedAl
 
 ### Theme integration
 
-Two-layer CSS variable system: VS Code injects `--vscode-*` tokens; `lib/src/theme.css` maps them directly to semantic `--color-*` tokens for use in Tailwind utility classes. The webview entry point installs `installVscodeThemeVarResolver()` before React renders. That resolver reads VSCode-provided variables, materializes only missing MouseTerm-consumed variables on `body.style`, and watches `body`/`html` class and style mutations so theme changes recompute those materialized values.
+Two-layer CSS variable system: VS Code injects `--vscode-*` tokens; `lib/src/theme.css` maps them directly to semantic `--color-*` tokens for use in Tailwind utility classes. The webview entry point installs `installVscodeThemeVarResolver()` before React renders. That resolver reads VSCode-provided variables, materializes only missing Dormouse-consumed variables on `body.style`, and watches `body`/`html` class and style mutations so theme changes recompute those materialized values.
 
 Example of the pattern:
 ```css
@@ -176,14 +176,14 @@ Example of the pattern:
 --color-header-inactive-fg: var(--vscode-list-inactiveSelectionForeground);
 ```
 
-`theme.css` intentionally has no hardcoded color defaults or CSS variable fallback chains. The resolver duplicates VSCode registry defaults for the MouseTerm-consumed color IDs, including `null` default behavior where MouseTerm needs a concrete CSS variable. In particular, `list.inactiveSelectionForeground` resolves to normal foreground inheritance, not `list.activeSelectionForeground`; this matches VSCode's list/tree selected-row behavior for built-in Light.
+`theme.css` intentionally has no hardcoded color defaults or CSS variable fallback chains. The resolver duplicates VSCode registry defaults for the Dormouse-consumed color IDs, including `null` default behavior where Dormouse needs a concrete CSS variable. In particular, `list.inactiveSelectionForeground` resolves to normal foreground inheritance, not `list.activeSelectionForeground`; this matches VSCode's list/tree selected-row behavior for built-in Light.
 
 A `MutationObserver` in `lib/src/lib/terminal-theme.ts` watches for VS Code theme changes on `body`/`html` (class and style attribute mutations) and live-updates all xterm.js instances. The `terminal-registry.ts` facade still exposes the public lifecycle APIs. The theme resolver has its own observer on the same attributes so derived `--vscode-*` variables stay in sync before xterm rereads the terminal palette.
 
-`mouseterm.debugTheme` focuses the MouseTerm WebviewView and posts
-`mouseterm:openThemeDebugger` to the webview. `VSCodeAdapter` converts that
+`dormouse.debugTheme` focuses the Dormouse WebviewView and posts
+`dormouse:openThemeDebugger` to the webview. `VSCodeAdapter` converts that
 message into the browser event consumed by the shared Theme Debugger. The
-debugger traces VSCode-exposed `--vscode-*` variables and MouseTerm
+debugger traces VSCode-exposed `--vscode-*` variables and Dormouse
 materialized fallbacks, but it does not attempt to read raw built-in VSCode
 theme files.
 
@@ -204,16 +204,16 @@ connect-src ${webview.cspSource};
 
 ```
 pnpm build:vscode =
-  1. pnpm --filter mouseterm-lib build    (TypeScript compile)
-  2. pnpm --filter mouseterm build:frontend (Vite: lib -> vscode-ext/media/)
-  3. pnpm --filter mouseterm build          (esbuild: extension.ts + pty-host.js -> dist/,
+  1. pnpm --filter dormouse-lib build    (TypeScript compile)
+  2. pnpm --filter dormouse build:frontend (Vite: lib -> vscode-ext/media/)
+  3. pnpm --filter dormouse build          (esbuild: extension.ts + pty-host.js -> dist/,
                                              copy node-pty prebuilds -> dist/node-pty)
 
 pnpm dogfood:vscode = build + package VSIX + install locally
   (then: Cmd+Shift+P -> "Developer: Reload Window" to pick up changes)
 
 F5 in VS Code = launch Extension Development Host (see .vscode/launch.json)
-  (runs preLaunchTask "build-mouseterm-vscode" from .vscode/tasks.json,
+  (runs preLaunchTask "build-dormouse-vscode" from .vscode/tasks.json,
    which just calls `pnpm build:vscode`, then opens a new VS Code window
    with the extension loaded)
 ```
@@ -226,37 +226,37 @@ The Vite config for the extension (`vscode-ext/vite.config.ts`) sets `root: ../l
 
 ### Context keys
 
-Set context keys so menus and extensions can target MouseTerm state:
+Set context keys so menus and extensions can target Dormouse state:
 
 ```typescript
-// Set when any MouseTerm webview has focus
-vscode.commands.executeCommand('setContext', 'mouseterm.active', true);
+// Set when any Dormouse webview has focus
+vscode.commands.executeCommand('setContext', 'dormouse.active', true);
 
-// Set when MouseTerm is in passthrough/terminal mode (keys go to PTY)
-vscode.commands.executeCommand('setContext', 'mouseterm.mode', 'terminal');
+// Set when Dormouse is in passthrough/terminal mode (keys go to PTY)
+vscode.commands.executeCommand('setContext', 'dormouse.mode', 'terminal');
 
-// Set when MouseTerm is in normal/navigation mode (keys go to MouseTerm UI)
-vscode.commands.executeCommand('setContext', 'mouseterm.mode', 'normal');
+// Set when Dormouse is in normal/navigation mode (keys go to Dormouse UI)
+vscode.commands.executeCommand('setContext', 'dormouse.mode', 'normal');
 ```
 
 ### Commands
 
 | Command | Description |
 |---------|-------------|
-| `mouseterm.focus` | Focus the MouseTerm panel view |
-| `mouseterm.newPane` | Split a new pane in MouseTerm |
-| `mouseterm.closePane` | Close the focused pane |
-| `mouseterm.nextPane` | Focus next pane |
-| `mouseterm.prevPane` | Focus previous pane |
-| `mouseterm.enterTerminalMode` | Switch to passthrough mode |
-| `mouseterm.enterNormalMode` | Switch to navigation mode |
-| `mouseterm.listSessions` | Show QuickPick of all live PTY sessions |
-| `mouseterm.reattach` | Reattach a minimized PTY to a pane |
+| `dormouse.focus` | Focus the Dormouse panel view |
+| `dormouse.newPane` | Split a new pane in Dormouse |
+| `dormouse.closePane` | Close the focused pane |
+| `dormouse.nextPane` | Focus next pane |
+| `dormouse.prevPane` | Focus previous pane |
+| `dormouse.enterTerminalMode` | Switch to passthrough mode |
+| `dormouse.enterNormalMode` | Switch to navigation mode |
+| `dormouse.listSessions` | Show QuickPick of all live PTY sessions |
+| `dormouse.reattach` | Reattach a minimized PTY to a pane |
 
 ### Not yet implemented
 
-- `TerminalProfileProvider` not registered — MouseTerm doesn't appear in the terminal `+` dropdown
-- Context keys not set (`mouseterm.active`, `mouseterm.mode`) — needed for conditional keybindings
-- Commands not registered: `mouseterm.newPane`, `closePane`, `nextPane`, `prevPane`, `enterTerminalMode`, `enterNormalMode`, `listSessions`, `reattach`
+- `TerminalProfileProvider` not registered — Dormouse doesn't appear in the terminal `+` dropdown
+- Context keys not set (`dormouse.active`, `dormouse.mode`) — needed for conditional keybindings
+- Commands not registered: `dormouse.newPane`, `closePane`, `nextPane`, `prevPane`, `enterTerminalMode`, `enterNormalMode`, `listSessions`, `reattach`
 - No status bar item showing active session count
 - No QuickPick for listing/reattaching PTY sessions

@@ -98,7 +98,7 @@ export function useSessionPersistence({
     platform.onRequestSessionFlush(handleSessionFlushRequest);
     window.addEventListener('pagehide', handlePageHide);
 
-    // Inert in Tauri standalone today; see diffplug/mouseterm#38 and tauri-apps/tauri#14373.
+    // Inert in Tauri standalone today; see diffplug/dormouse#38 and tauri-apps/tauri#14373.
     const unsubFilesDropped = platform.onFilesDropped?.((paths) => {
       if (paths.length === 0) return;
       const sid = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;

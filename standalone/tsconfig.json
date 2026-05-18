@@ -16,7 +16,7 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "mouseterm-lib/*": ["../lib/src/*"]
+      "dormouse-lib/*": ["../lib/src/*"]
     }
   },
   "include": ["src"]

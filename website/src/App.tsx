@@ -10,8 +10,8 @@ export const routes: RouteRecord[] = [
     lazy: () => import("./pages/Playground"),
   },
   {
-    path: "/tether",
-    lazy: () => import("./pages/Tether"),
+    path: "/pocket",
+    lazy: () => import("./pages/Pocket"),
   },
   {
     path: "/changelog",

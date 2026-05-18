@@ -1,10 +1,10 @@
-import type { MouseTermTheme } from './types';
+import type { DormouseTheme } from './types';
 // JSON import types are inferred too narrowly — cast at the boundary.
 import _bundledThemes from './bundled.json';
-const bundledThemes = _bundledThemes as unknown as MouseTermTheme[];
+const bundledThemes = _bundledThemes as unknown as DormouseTheme[];
 
-const INSTALLED_KEY = 'mouseterm:installed-themes';
-const ACTIVE_KEY = 'mouseterm:active-theme';
+const INSTALLED_KEY = 'dormouse:installed-themes';
+const ACTIVE_KEY = 'dormouse:active-theme';
 
 function getStorage(): Storage | null {
   const storage = globalThis.localStorage;
@@ -18,30 +18,30 @@ function getStorage(): Storage | null {
   return storage;
 }
 
-export function getBundledThemes(): MouseTermTheme[] {
+export function getBundledThemes(): DormouseTheme[] {
   return bundledThemes;
 }
 
-export function getInstalledThemes(): MouseTermTheme[] {
+export function getInstalledThemes(): DormouseTheme[] {
   const storage = getStorage();
   if (!storage) return [];
   try {
     const raw = storage.getItem(INSTALLED_KEY);
-    return raw ? (JSON.parse(raw) as MouseTermTheme[]) : [];
+    return raw ? (JSON.parse(raw) as DormouseTheme[]) : [];
   } catch {
     return [];
   }
 }
 
-export function getAllThemes(): MouseTermTheme[] {
+export function getAllThemes(): DormouseTheme[] {
   return [...getBundledThemes(), ...getInstalledThemes()];
 }
 
-export function getTheme(id: string): MouseTermTheme | undefined {
+export function getTheme(id: string): DormouseTheme | undefined {
   return getAllThemes().find((t) => t.id === id);
 }
 
-export function addInstalledTheme(theme: MouseTermTheme): void {
+export function addInstalledTheme(theme: DormouseTheme): void {
   const storage = getStorage();
   if (!storage) return;
   const installed = getInstalledThemes().filter((t) => t.id !== theme.id);

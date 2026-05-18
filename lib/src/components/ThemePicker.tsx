@@ -1,6 +1,6 @@
 import { useCallback, useId, useRef, useState } from 'react';
 import { CaretDownIcon } from '@phosphor-icons/react';
-import type { MouseTermTheme } from '../lib/themes';
+import type { DormouseTheme } from '../lib/themes';
 import {
   applyTheme,
   getAllThemes,
@@ -32,7 +32,7 @@ export function ThemePicker({ variant, className = '', defaultThemeId }: ThemePi
   // the first paint already has --vscode-* on body — eliminates the flash of
   // unstyled chrome on the website playground where ThemePicker mounts before
   // any other entry point has a chance to apply a theme.
-  const initialState = useRef<{ themes: MouseTermTheme[]; activeId: string }>(null);
+  const initialState = useRef<{ themes: DormouseTheme[]; activeId: string }>(null);
   if (initialState.current === null) {
     const restored = restoreActiveTheme(defaultThemeId);
     const themes = getAllThemes();
@@ -66,7 +66,7 @@ export function ThemePicker({ variant, className = '', defaultThemeId }: ThemePi
     setOpen(false);
   };
 
-  const deleteTheme = (theme: MouseTermTheme) => {
+  const deleteTheme = (theme: DormouseTheme) => {
     if (theme.origin.kind !== 'installed') return;
     const confirmed = window.confirm(`Delete "${theme.label}"?`);
     if (!confirmed) return;

@@ -12,9 +12,9 @@ export type WebviewMessage =
   | { type: 'pty:getShells'; requestId?: string }
   | { type: 'clipboard:readFiles'; requestId: string }
   | { type: 'clipboard:readImage'; requestId: string }
-  | { type: 'mouseterm:init' }
-  | { type: 'mouseterm:saveState'; state: unknown }
-  | { type: 'mouseterm:flushSessionSaveDone'; requestId: string }
+  | { type: 'dormouse:init' }
+  | { type: 'dormouse:saveState'; state: unknown }
+  | { type: 'dormouse:flushSessionSaveDone'; requestId: string }
   // Alert actions
   | { type: 'alert:remove'; id: string }
   | { type: 'alert:toggle'; id: string }
@@ -47,16 +47,16 @@ export type ExtensionMessage =
   | { type: 'clipboard:files'; paths: string[] | null; requestId: string }
   | { type: 'clipboard:image'; path: string | null; requestId: string }
   | {
-      type: 'mouseterm:newTerminal';
+      type: 'dormouse:newTerminal';
       shell?: string;
       args?: string[];
       name?: string;
       replaceUntouched?: boolean;
       announce?: boolean;
     }
-  | { type: 'mouseterm:selectedShell'; shell?: string; args?: string[] }
-  | { type: 'mouseterm:openThemeDebugger' }
-  | { type: 'mouseterm:flushSessionSave'; requestId: string }
+  | { type: 'dormouse:selectedShell'; shell?: string; args?: string[] }
+  | { type: 'dormouse:openThemeDebugger' }
+  | { type: 'dormouse:flushSessionSave'; requestId: string }
   // Alert state updates
   | {
     type: 'alert:state';

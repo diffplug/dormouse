@@ -1,6 +1,6 @@
 # Glossary
 
-This glossary is the canonical vocabulary for states, entities, and transitions in mouseterm. Every other spec defers to this one when naming a state or a verb. When writing code or prose, pick names from here first.
+This glossary is the canonical vocabulary for states, entities, and transitions in Dormouse. Every other spec defers to this one when naming a state or a verb. When writing code or prose, pick names from here first.
 
 ## The core idea
 

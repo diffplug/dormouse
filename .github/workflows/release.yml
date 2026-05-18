@@ -80,7 +80,7 @@ jobs:
         with:
           name: ${{ matrix.artifact-name }}
           path: |
-            standalone/src-tauri/target/${{ matrix.target }}/release/mouseterm.exe
+            standalone/src-tauri/target/${{ matrix.target }}/release/dormouse.exe
             standalone/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
             standalone/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
             standalone/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
@@ -109,13 +109,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Test lib
-        run: pnpm --filter mouseterm-lib test
+        run: pnpm --filter dormouse-lib test
 
       - name: Build frontend for VSCode
-        run: pnpm --filter mouseterm build:frontend
+        run: pnpm --filter dormouse build:frontend
 
       - name: Build extension
-        run: pnpm --filter mouseterm build
+        run: pnpm --filter dormouse build
 
       - name: Package extension
         run: cd vscode-ext && npx vsce package --no-dependencies

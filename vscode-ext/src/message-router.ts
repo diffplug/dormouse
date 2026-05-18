@@ -118,7 +118,7 @@ export function attachRouter(
   let disposed = false;
 
   // Webview-facing subscriptions — only active when the webview has live content.
-  // Subscribed on mouseterm:init, unsubscribed when webview content is gone.
+  // Subscribed on dormouse:init, unsubscribed when webview content is gone.
   let disconnectWebview: (() => void) | null = null;
 
   function claim(id: string): void {
@@ -160,13 +160,13 @@ export function attachRouter(
         timeout,
       });
 
-      void webview.postMessage({ type: 'mouseterm:flushSessionSave', requestId } satisfies ExtensionMessage);
+      void webview.postMessage({ type: 'dormouse:flushSessionSave', requestId } satisfies ExtensionMessage);
     });
   }
 
   /**
    * Subscribe PTY data and alert state forwarding to the webview.
-   * Called when the webview sends mouseterm:init (proving it has live content).
+   * Called when the webview sends dormouse:init (proving it has live content).
    * Returns a cleanup function that unsubscribes everything.
    */
   function connectWebview(): () => void {
@@ -270,7 +270,7 @@ export function attachRouter(
             webview.postMessage({ type: 'clipboard:image', path: null, requestId: msg.requestId } satisfies ExtensionMessage);
           });
         break;
-      case 'mouseterm:init': {
+      case 'dormouse:init': {
         // Webview has (re-)initialized — subscribe to live events.
         // Tear down previous subscriptions first (webview was destroyed and recreated).
         disconnectWebview?.();
@@ -281,7 +281,7 @@ export function attachRouter(
         const selected = options?.getSelectedShell?.();
         if (selected) {
           webview.postMessage({
-            type: 'mouseterm:selectedShell',
+            type: 'dormouse:selectedShell',
             shell: selected.shell,
             args: selected.args,
           } satisfies ExtensionMessage);
@@ -368,10 +368,10 @@ export function attachRouter(
         }
         break;
       }
-      case 'mouseterm:flushSessionSaveDone':
+      case 'dormouse:flushSessionSaveDone':
         resolveFlushRequest(msg.requestId);
         break;
-      case 'mouseterm:saveState':
+      case 'dormouse:saveState':
         options?.onSaveState?.(msg.state);
         break;
 

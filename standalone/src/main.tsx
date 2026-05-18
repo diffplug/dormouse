@@ -1,12 +1,12 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
-import { setPlatform } from "mouseterm-lib/lib/platform";
-import { resumeOrRestore } from "mouseterm-lib/lib/reconnect";
-import { setDefaultShellOpts } from "mouseterm-lib/lib/shell-defaults";
-import { restoreActiveTheme } from "mouseterm-lib/lib/themes";
-import App from "mouseterm-lib/App";
-import "mouseterm-lib/index.css";
+import { setPlatform } from "dormouse-lib/lib/platform";
+import { resumeOrRestore } from "dormouse-lib/lib/reconnect";
+import { setDefaultShellOpts } from "dormouse-lib/lib/shell-defaults";
+import { restoreActiveTheme } from "dormouse-lib/lib/themes";
+import App from "dormouse-lib/App";
+import "dormouse-lib/index.css";
 import { TauriAdapter } from "./tauri-adapter";
 import { UpdateBanner } from "./UpdateBanner";
 import { UpdateDebugDialog } from "./UpdateDebugDialog";
@@ -73,7 +73,7 @@ function ConnectedUpdateBanner() {
 // Await init() first to register event listeners before reconnecting
 async function bootstrap() {
   await platform.init();
-  const { initAlertStateReceiver } = await import("mouseterm-lib/lib/terminal-registry");
+  const { initAlertStateReceiver } = await import("dormouse-lib/lib/terminal-registry");
   initAlertStateReceiver();
   restoreActiveTheme();
 

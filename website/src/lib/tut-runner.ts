@@ -9,9 +9,9 @@ import {
   LEAVE_ALT_SCREEN,
   RESET,
   fg,
-} from "mouseterm-lib/lib/ansi";
-import { cfg } from "mouseterm-lib/cfg";
-import type { FakePtyAdapter } from "mouseterm-lib/lib/platform/fake-adapter";
+} from "dormouse-lib/lib/ansi";
+import { cfg } from "dormouse-lib/cfg";
+import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import type { InteractiveProgram } from "./tutorial-shell";
 import { SECTIONS, type Item } from "./tut-items";
 import type { TutorialState } from "./tutorial-state";
@@ -319,7 +319,7 @@ export class TutRunner implements InteractiveProgram {
     const total = this.state.totalProgress();
     const lines: string[] = [];
     lines.push("");
-    lines.push(`  ${BOLD}MouseTerm Playground Tutorial${RESET}`);
+    lines.push(`  ${BOLD}Dormouse Playground Tutorial${RESET}`);
     lines.push(
       `  ${DIM}${total.done}/${total.total} complete · \`Esc\`/\`q\` to exit · \`Enter\` to open · \`↑↓\` to navigate${RESET}`,
     );

@@ -1,10 +1,10 @@
 # OSC Sequence Registry
 
-> Single registry of OSC sequences MouseTerm parses. Behavioral details live in `docs/specs/alert.md` (notifications) and `docs/specs/terminal-state.md` (CWD, prompt/command, title fallback). This file also documents iTerm2 self-identification because the same identity is what causes most of these sequences to be emitted at us.
+> Single registry of OSC sequences Dormouse parses. Behavioral details live in `docs/specs/alert.md` (notifications) and `docs/specs/terminal-state.md` (CWD, prompt/command, title fallback). This file also documents iTerm2 self-identification because the same identity is what causes most of these sequences to be emitted at us.
 
 ## Goal
 
-MouseTerm parses a small set of OSC (Operating System Command) escape sequences from PTY output to drive alerts, terminal state, and titles. This document is the index — every supported OSC has one row in the table below pointing to the spec that defines its full behavior.
+Dormouse parses a small set of OSC (Operating System Command) escape sequences from PTY output to drive alerts, terminal state, and titles. This document is the index — every supported OSC has one row in the table below pointing to the spec that defines its full behavior.
 
 ## Parsing location
 
@@ -28,7 +28,7 @@ The parser also classifies each PTY data chunk for activity-monitor purposes:
 - A chunk that contains only notification/progress OSCs after parsing must not be fed to the activity monitor's `onData()` as generic meaningful output.
 - A chunk that contains visible output plus notification/progress OSCs still counts visible output as activity.
 
-Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js can handle standard terminal behavior MouseTerm does not model. Security-sensitive or iTerm2-identity-triggered OSCs must not rely on xterm.js defaults: if they are not in [Supported OSCs](#supported-oscs), MouseTerm consumes and ignores them without visible terminal garbage, clipboard access, file access, focus changes, or other side effects.
+Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js can handle standard terminal behavior Dormouse does not model. Security-sensitive or iTerm2-identity-triggered OSCs must not rely on xterm.js defaults: if they are not in [Supported OSCs](#supported-oscs), Dormouse consumes and ignores them without visible terminal garbage, clipboard access, file access, focus changes, or other side effects.
 
 ## Supported OSCs
 
@@ -53,14 +53,14 @@ Some sequences are dual-purpose. The notification rows for `OSC 9 ; <message> ST
 
 ## iTerm2 identity
 
-MouseTerm reports an iTerm2-compatible identity so that tools (shells, build systems, agent clients) emit the iTerm2-style escape codes that this spec set supports.
+Dormouse reports an iTerm2-compatible identity so that tools (shells, build systems, agent clients) emit the iTerm2-style escape codes that this spec set supports.
 
 Environment for spawned PTYs:
 
 | Variable | Value |
 |---|---|
 | `TERM_PROGRAM` | `iTerm.app` |
-| `TERM_PROGRAM_VERSION` | MouseTerm's chosen iTerm2 compatibility version, not the package version |
+| `TERM_PROGRAM_VERSION` | Dormouse's chosen iTerm2 compatibility version, not the package version |
 | `LC_TERMINAL` | `iTerm2` only if needed by real-world shell integrations |
 | `LC_TERMINAL_VERSION` | same compatibility version as `TERM_PROGRAM_VERSION` |
 
@@ -70,16 +70,16 @@ Device/version query:
 - Use a single compatibility version across env and device responses.
 - Do not advertise feature-specific support until the relevant behavior exists.
 
-Because this identity can cause tools to emit more iTerm2 escape codes than MouseTerm implements, **unsupported escape codes must fail inertly**: consume or ignore them without visible terminal garbage, privilege escalation, clipboard access, file access, or focus stealing.
+Because this identity can cause tools to emit more iTerm2 escape codes than Dormouse implements, **unsupported escape codes must fail inertly**: consume or ignore them without visible terminal garbage, privilege escalation, clipboard access, file access, or focus stealing.
 
 ## Known-unimplemented iTerm2 and clipboard-capable sequences
 
-MouseTerm intentionally does not implement the following sequences. They are mostly iTerm2-proprietary; `OSC 50` (font) and `OSC 52` (clipboard) are standard xterm extensions included here because the iTerm2 identity prompts tools to emit them and they have security implications. All of them must fail inertly per the rule above, which means they are consumed/ignored rather than forwarded to xterm.js.
+Dormouse intentionally does not implement the following sequences. They are mostly iTerm2-proprietary; `OSC 50` (font) and `OSC 52` (clipboard) are standard xterm extensions included here because the iTerm2 identity prompts tools to emit them and they have security implications. All of them must fail inertly per the rule above, which means they are consumed/ignored rather than forwarded to xterm.js.
 
 | Sequence | Purpose | Reason for non-support |
 |---|---|---|
-| `OSC 1337 ; SetMark` | Pin a navigable scrollback mark | No mark UI in MouseTerm. |
-| `OSC 1337 ; CursorShape=...` | Cursor shape override | Cursor shape comes from MouseTerm settings, not the PTY. |
+| `OSC 1337 ; SetMark` | Pin a navigable scrollback mark | No mark UI in Dormouse. |
+| `OSC 1337 ; CursorShape=...` | Cursor shape override | Cursor shape comes from Dormouse settings, not the PTY. |
 | `OSC 1337 ; SetBadgeFormat=...` | Display a badge string in the terminal | No badge UI. |
 | `OSC 1337 ; ClearScrollback` | Clear scrollback buffer | xterm.js handles native clear-screen sequences. |
 | `OSC 1337 ; CopyToClipboard=...` / `EndCopy` | Programmatic clipboard write | Security: untrusted PTY output cannot write the user's clipboard. See `docs/specs/mouse-and-clipboard.md`. |
@@ -89,7 +89,7 @@ MouseTerm intentionally does not implement the following sequences. They are mos
 | `OSC 50 ; <font> ST` | Set font dynamically | Font is host-controlled. |
 | `OSC 52 ; <selection> ; <data> ST` | Programmatic clipboard write | Security: same rationale as `CopyToClipboard`. |
 
-This list is non-exhaustive. Any iTerm2-compatibility OSC family that MouseTerm can identify and that is not in the [Supported OSCs](#supported-oscs) table is ignored.
+This list is non-exhaustive. Any iTerm2-compatibility OSC family that Dormouse can identify and that is not in the [Supported OSCs](#supported-oscs) table is ignored.
 
 ## References
 

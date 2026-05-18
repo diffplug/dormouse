@@ -60,7 +60,7 @@ export class VSCodeAdapter implements PlatformAdapter {
         }
       } else if (msg.type === 'terminal:semanticEvents') {
         applyTerminalSemanticEventsByPtyId(msg.id, msg.events ?? []);
-      } else if (msg.type === 'mouseterm:flushSessionSave') {
+      } else if (msg.type === 'dormouse:flushSessionSave') {
         for (const handler of this.flushRequestHandlers) {
           handler({ requestId: msg.requestId });
         }
@@ -75,8 +75,8 @@ export class VSCodeAdapter implements PlatformAdapter {
             attentionDismissedRing: msg.attentionDismissedRing,
           });
         }
-      } else if (msg.type === 'mouseterm:newTerminal') {
-        window.dispatchEvent(new CustomEvent('mouseterm:new-terminal', {
+      } else if (msg.type === 'dormouse:newTerminal') {
+        window.dispatchEvent(new CustomEvent('dormouse:new-terminal', {
           detail: {
             shell: msg.shell,
             args: msg.args,
@@ -85,10 +85,10 @@ export class VSCodeAdapter implements PlatformAdapter {
             announce: msg.announce,
           },
         }));
-      } else if (msg.type === 'mouseterm:selectedShell') {
+      } else if (msg.type === 'dormouse:selectedShell') {
         setDefaultShellOpts(msg.shell ? { shell: msg.shell, args: msg.args } : null);
-      } else if (msg.type === 'mouseterm:openThemeDebugger') {
-        window.dispatchEvent(new CustomEvent('mouseterm:openThemeDebugger'));
+      } else if (msg.type === 'dormouse:openThemeDebugger') {
+        window.dispatchEvent(new CustomEvent('dormouse:openThemeDebugger'));
       }
     });
   }
@@ -194,7 +194,7 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   requestInit(): void {
-    this.vscode.postMessage({ type: 'mouseterm:init' });
+    this.vscode.postMessage({ type: 'dormouse:init' });
   }
 
   onPtyList(handler: (detail: { ptys: PtyInfo[] }) => void): void {
@@ -222,7 +222,7 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   notifySessionFlushComplete(requestId: string): void {
-    this.vscode.postMessage({ type: 'mouseterm:flushSessionSaveDone', requestId });
+    this.vscode.postMessage({ type: 'dormouse:flushSessionSaveDone', requestId });
   }
 
   // --- Alert management (proxied to extension host) ---
@@ -284,7 +284,7 @@ export class VSCodeAdapter implements PlatformAdapter {
   saveState(state: unknown): void {
     this.hostState = state;
     this.vscode.setState(state);
-    this.vscode.postMessage({ type: 'mouseterm:saveState', state });
+    this.vscode.postMessage({ type: 'dormouse:saveState', state });
   }
 
   getState(): unknown {

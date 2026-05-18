@@ -52,7 +52,7 @@ Both are capped at 1M chars per PTY. When the cap is reached, oldest chunks are 
 
 ```
 1. Webview becomes visible (or panel deserializes).
-2. Webview sends: { type: 'mouseterm:init' }.
+2. Webview sends: { type: 'dormouse:init' }.
 3. Host responds with:
    - { type: 'pty:list', ptys: [{ id, alive, exitCode }] }   // all owned PTYs
    - { type: 'pty:replay', id, data }                         // buffered output per PTY
@@ -60,7 +60,7 @@ Both are capped at 1M chars per PTY. When the cap is reached, oldest chunks are 
 5. If the saved session covers those live PTYs, the frontend uses the saved dockview layout when its visible panels match and reattaches saved minimized doors; minimized PTYs are registered but remain doors instead of visible panes.
 ```
 
-For cold restore (no live PTYs), the webview falls back to saved session state: spawns new PTYs in saved CWDs using the currently selected MouseTerm shell, injects saved scrollback (with trailing newline to avoid the zsh `%` artifact), and restores dockview layout. The entry module (`reconnect.ts`) uses a 500ms timeout when waiting for the PTY list.
+For cold restore (no live PTYs), the webview falls back to saved session state: spawns new PTYs in saved CWDs using the currently selected Dormouse shell, injects saved scrollback (with trailing newline to avoid the zsh `%` artifact), and restores dockview layout. The entry module (`reconnect.ts`) uses a 500ms timeout when waiting for the PTY list.
 
 ## Message protocol
 
@@ -77,9 +77,9 @@ Message types live in `vscode-ext/src/message-types.ts` (the canonical schema; o
 | `pty:getCwd` | Query PTY working directory (request-response via requestId) |
 | `pty:getScrollback` | Query PTY scrollback buffer (request-response via requestId) |
 | `pty:getShells` | Query available shells (request-response via requestId) |
-| `mouseterm:init` | Trigger resume: get PTY list + replay data |
-| `mouseterm:saveState` | Frontend persisting session state |
-| `mouseterm:flushSessionSaveDone` | Ack for host-triggered flush (matched by requestId) |
+| `dormouse:init` | Trigger resume: get PTY list + replay data |
+| `dormouse:saveState` | Frontend persisting session state |
+| `dormouse:flushSessionSaveDone` | Ack for host-triggered flush (matched by requestId) |
 | `alert:toggle` | Toggle alert enabled/disabled for a PTY |
 | `alert:disable` | Disable alert for a PTY |
 | `alert:dismiss` | Dismiss ringing alert |
@@ -99,15 +99,15 @@ Message types live in `vscode-ext/src/message-types.ts` (the canonical schema; o
 | `pty:data` | PTY output after supported OSC sequences have been parsed/stripped (routed only to owning router) |
 | `pty:exit` | PTY process exited (with exitCode) |
 | `terminal:semanticEvents` | Normalized CWD/title/prompt/command events parsed in the host from live PTY data |
-| `pty:list` | List of all resumable PTYs (response to `mouseterm:init`) |
-| `pty:replay` | Buffered raw output since spawn (response to `mouseterm:init`); the webview parses semantic OSCs during replay reconstruction without triggering alerts |
+| `pty:list` | List of all resumable PTYs (response to `dormouse:init`) |
+| `pty:replay` | Buffered raw output since spawn (response to `dormouse:init`); the webview parses semantic OSCs during replay reconstruction without triggering alerts |
 | `pty:cwd` | CWD query response (matched by requestId) |
 | `pty:scrollback` | Scrollback query response (matched by requestId) |
 | `pty:shells` | Available shells list response (matched by requestId) |
-| `mouseterm:newTerminal` | Host/UI request to spawn a terminal. Payload may include `shell`, `args`, display `name`, `replaceUntouched`, and `announce`; the webview replaces the selected untouched terminal in-place only when `replaceUntouched` is true, otherwise it spawns a new pane. |
-| `mouseterm:selectedShell` | Update the webview's default shell options for later split/spawn/restore paths. |
-| `mouseterm:flushSessionSave` | Request webview to save state now (host shutdown trigger, matched by requestId) |
-| `mouseterm:openThemeDebugger` | Command-triggered request to open the shared theme debugger dialog |
+| `dormouse:newTerminal` | Host/UI request to spawn a terminal. Payload may include `shell`, `args`, display `name`, `replaceUntouched`, and `announce`; the webview replaces the selected untouched terminal in-place only when `replaceUntouched` is true, otherwise it spawns a new pane. |
+| `dormouse:selectedShell` | Update the webview's default shell options for later split/spawn/restore paths. |
+| `dormouse:flushSessionSave` | Request webview to save state now (host shutdown trigger, matched by requestId) |
+| `dormouse:openThemeDebugger` | Command-triggered request to open the shared theme debugger dialog |
 | `alert:state` | Alert state change (projected status, watchingEnabled, todo, notification, attentionDismissedRing) |
 
 The OSC parsing/stripping rules that produce `pty:data` and `terminal:semanticEvents` are specified in `docs/specs/OSC.md`.

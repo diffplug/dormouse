@@ -19,7 +19,7 @@ my $content = do { local $/; <$fh> };
 close $fh;
 
 # Extract CI checkout root from MAINBINARYSRCPATH.
-# The path looks like: "D:\a\mouseterm\mouseterm\standalone\src-tauri\target\...\mouseterm.exe"
+# The path looks like: "D:\a\dormouse\dormouse\standalone\src-tauri\target\...\dormouse.exe"
 # We want everything before \src-tauri\ (including \standalone) because
 # actions/upload-artifact strips the common ancestor (standalone/) from paths.
 my $ci_root;
