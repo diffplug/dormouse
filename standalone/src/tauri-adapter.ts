@@ -105,7 +105,7 @@ export class TauriAdapter implements PlatformAdapter {
       }),
     );
 
-    // Inert while dragDropEnabled=false in tauri.conf.json. See diffplug/mouseterm#38 and tauri-apps/tauri#14373.
+    // Inert while dragDropEnabled=false in tauri.conf.json. See diffplug/dormouse#38 and tauri-apps/tauri#14373.
     this.unlistenFns.push(
       await listen<{ paths: string[] }>("dormouse://files-dropped", (event) => {
         const paths = event.payload.paths ?? [];

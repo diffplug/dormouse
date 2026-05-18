@@ -7,7 +7,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { PLATFORM_STRING } from 'dormouse-lib/lib/platform';
 import type { UpdateBannerState } from './UpdateBanner';
 
-const GITHUB_REPO_URL = 'https://github.com/diffplug/mouseterm';
+const GITHUB_REPO_URL = 'https://github.com/diffplug/dormouse';
 
 function openUrl(url: string, context: string): void {
   open(url).catch((e) => console.error(`[updater] Failed to open ${context}:`, e));

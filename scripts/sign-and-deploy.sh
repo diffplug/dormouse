@@ -44,7 +44,7 @@ JSIGN_ALIAS="AUTHENTICATION"
 TSA_URL="http://ts.ssl.com"
 
 # GitHub repo
-GITHUB_REPO="diffplug/mouseterm"
+GITHUB_REPO="diffplug/dormouse"
 
 # Stable filenames for release assets (update bundles only)
 FNAME_WIN="Dormouse-windows-x64-setup.exe"

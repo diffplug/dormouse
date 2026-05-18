@@ -852,7 +852,7 @@ function Home() {
                   {INSTALL_STEPS["linux-x86_64"].pill}
                 </DownloadButton>
                 <DownloadButton
-                  href="https://github.com/diffplug/mouseterm/issues/8"
+                  href="https://github.com/diffplug/dormouse/issues/8"
                   icon={<DotsThreeOutlineIcon size={22} weight="fill" />}
                   peek="other"
                   variant="compact"
@@ -907,7 +907,7 @@ function Home() {
         <footer className="border-t border-[var(--color-text)]/20 py-10">
           <div className="mx-auto max-w-5xl px-4 md:px-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-base text-center opacity-50">
             <a href="/dependencies" className="underline hover:opacity-100">Dependencies</a>
-            <a href="https://github.com/diffplug/mouseterm/issues" className="underline hover:opacity-100">Report an issue</a>
+            <a href="https://github.com/diffplug/dormouse/issues" className="underline hover:opacity-100">Report an issue</a>
             <p>
               Built by{" "}
               <a href="https://nedshed.dev" className="underline hover:opacity-100">nedshed.dev</a>{" "}

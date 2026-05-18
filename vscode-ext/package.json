@@ -9,7 +9,7 @@
   "homepage": "https://dormouse.sh/",
   "repository": {
     "type": "git",
-    "url": "https://github.com/diffplug/mouseterm"
+    "url": "https://github.com/diffplug/dormouse"
   },
   "engines": {
     "vscode": "^1.85.0"

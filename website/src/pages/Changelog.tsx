@@ -131,7 +131,7 @@ function ReleaseArticle({ release }: { release: ChangelogRelease }) {
           ) : null}
         </div>
         <a
-          href={`https://github.com/diffplug/mouseterm/releases/tag/${release.tag}`}
+          href={`https://github.com/diffplug/dormouse/releases/tag/${release.tag}`}
           className="text-sm text-[var(--color-caramel)] hover:underline"
           target="_blank"
           rel="noopener noreferrer"

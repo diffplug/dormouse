@@ -81,5 +81,5 @@ TODO: GIF showing Dormouse in various areas
 
 - Prefer a standalone terminal app? Self-updating installers available for Win, Mac and Linux at [dormouse.sh](https://dormouse.sh/#download)
 - You can try it in a [browser playground](https://dormouse.sh/playground)
-- [GitHub](https://github.com/diffplug/mouseterm)
+- [GitHub](https://github.com/diffplug/dormouse)
 - Brought to you by [DiffPlug](https://www.diffplug.com/)
