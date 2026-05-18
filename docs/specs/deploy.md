@@ -95,7 +95,7 @@ strategy:
 ```
 
 Each matrix leg:
-1. Checkout, setup Node 22, pnpm 11.0.4, Rust stable
+1. Checkout, setup Node 22, pnpm 11.0.6, Rust stable
 2. Install workspace dependencies once from the repo root with `pnpm install --frozen-lockfile`
 3. Install system deps (Linux: libgtk, libwebkit, etc.)
 4. Generate an ephemeral, per-job Tauri updater key with `pnpm --dir standalone exec tauri signer generate --ci --write-keys "$RUNNER_TEMP/tauri-ci-updater.key" --force`
@@ -111,7 +111,7 @@ The CI updater key exists only so Tauri emits updater-shaped artifacts during un
 ### Job: `build-vscode`
 
 Runs on `ubuntu-latest`:
-1. Checkout, setup Node 22, pnpm 11.0.4
+1. Checkout, setup Node 22, pnpm 11.0.6
 2. `pnpm install --frozen-lockfile` at the repo root
 3. `pnpm --filter dormouse-lib test`
 4. `pnpm --filter dormouse build:frontend && pnpm --filter dormouse build`

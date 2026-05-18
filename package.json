@@ -2,7 +2,7 @@
   "name": "dormouse-root",
   "private": true,
   "license": "FSL-1.1-MIT",
-  "packageManager": "pnpm@11.0.4",
+  "packageManager": "pnpm@11.0.6",
   "scripts": {
     "build": "pnpm run build:vscode && pnpm --filter dormouse-website build",
     "test": "pnpm -r run test",
