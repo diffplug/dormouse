@@ -783,8 +783,8 @@ function Home() {
             <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">Soft as a mouse, sharp as a tmux</h2>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
               Upgrade your VS Code or native terminal with a flexible multipane
-              layout. Minimize the tasks you're not watching to a compact status
-              indicator.
+              layout. Sleep the tasks you're not watching down to a compact
+              status indicator.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
               Do it all with the mouse, or keep your hands on the keyboard with
@@ -810,7 +810,7 @@ function Home() {
               <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">BEL</code>{" "}
               and{" "}
               <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">OSC 9/99/777</code>{" "}
-              for seamless integration with TUI-forward applications.
+              for native TUI integration.
             </p>
           </div>
         </section>
@@ -820,18 +820,17 @@ function Home() {
           <div>
             <h2 className="font-display text-xl mb-6">Newlines and copy paste like you meant</h2>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
-              You're used to doing{" "}
+              You're used to{" "}
               <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">Shift+Enter</code>{" "}
-              to get a newline in the browser, but it's broken in your terminal?
-              Not anymore. Dormouse works the way a user would expect, no arcane
-              terminal knowledge required!
+              for a newline in the browser — but it's broken in your terminal?
+              Not anymore. Dormouse works the way you'd expect, no arcane
+              terminal knowledge required.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
               Click and drag in a "mouse conformant" terminal doesn't select text;
               it sends escape code{" "}
               <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">{"\\e[<0;x;yM"}</code>.
-              And <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">Ctrl+C</code>{" "}
-              doesn't copy; it asks your program to kill itself.
+              Dormouse lets you copy-paste like a human, not a terminal.
             </p>
           </div>
           <FeatureVideo src={copyPasteVideoUrl} />
@@ -873,7 +872,7 @@ function Home() {
             </div>
             <div>
               <DownloadGroupHeader icon={<DesktopIcon size={24} weight="bold" />}>Standalone App</DownloadGroupHeader>
-              <p className="mb-4 text-lg leading-relaxed opacity-70">Don't settle for your operating system's built-in terminal, get a nice one!</p>
+              <p className="mb-4 text-lg leading-relaxed opacity-70">Don't settle for your operating system's built-in terminal. Get a nice one.</p>
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-3">
                 <DownloadButton
                   href={standaloneLatest.platforms["darwin-aarch64"].url}
@@ -944,12 +943,12 @@ function Home() {
             </h2>
             <p className="mb-4 text-lg leading-relaxed opacity-70">
               Coming next: <a href="/pocket" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Dormouse Pocket</a>.
-              Tether a terminal session to your phone over WebRTC and take a stroll — the Dormouse
-              alert system buzzes you if there's anything to do. A hosted auto-pairing service comes
-              later, so you can just leave and keep working, no "I'm walking away" dance.
+              Tether a terminal session to your phone over WebRTC and take a stroll — Dormouse
+              buzzes your phone when something needs attention. A hosted auto-pairing service comes
+              later, so you can close the laptop and walk away, no setup dance.
             </p>
             <p className="mb-4 text-lg leading-relaxed opacity-70">
-              Open source and free to self-host, or pay us a little bit and you can use ours. We'll discount for early adopters, so don't miss out!
+              Open source and free to self-host, or pay a small monthly fee for our hosted version. Early adopters get a launch discount.
             </p>
             <NotifySignupForm />
           </div>

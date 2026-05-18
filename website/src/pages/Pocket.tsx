@@ -267,12 +267,12 @@ function DesktopPocketPage() {
             to try it out! (WIP)
           </p>
           <p className="mb-4 text-lg leading-relaxed opacity-70">
-            Tether a terminal session to your phone over WebRTC and take a stroll — the Dormouse
-            alert system buzzes you if there's anything to do. A hosted auto-pairing service comes
-            later, so you can just leave and keep working, no "I'm walking away" dance.
+            Tether a terminal session to your phone over WebRTC and take a stroll — Dormouse
+            buzzes your phone when something needs attention. A hosted auto-pairing service comes
+            later, so you can close the laptop and walk away, no setup dance.
           </p>
           <p className="mb-4 text-lg leading-relaxed opacity-70">
-            Open source and free to self-host, or pay us a little bit and you can use ours. We'll discount for early adopters, so don't miss out!
+            Open source and free to self-host, or pay a small monthly fee for our hosted version. Early adopters get a launch discount.
           </p>
           <NotifySignupForm />
         </section>
