@@ -38,14 +38,10 @@ const HOOK_FADE_REMAINING = 0.10;    // Hook begins fading when bottom 10% of ic
 const WORD_THRESHOLDS = [0.25, 0.40, 0.55] as const;
 const FOOTNOTE_THRESHOLD = 0.65;
 const HEADER_REVEAL_LEAD = 0.04;
-/** Fractions of the icon rise during which the 3rd hook line ("A dormouse knows…")
- *  fades in. Lines 1+2 of the hook are visible at load; line 3 is revealed
- *  partway through the climb. */
-const DORMOUSE_LINE_REVEAL_START = 0.25;
-const DORMOUSE_LINE_REVEAL_END = 0.55;
-/** Runway fractions over which the dormouse line fades out. Lines 1+2 have
- *  already dropped (with the icon's last 10% climb); the dormouse line keeps
- *  carrying the brand alone until "Multitasking" pops in at WORD_THRESHOLDS[0]. */
+/** Runway fractions over which the dormouse line fades out. The dormouse
+ *  line fades IN crossfaded with lines 1+2 (shared HOOK_FADE_REMAINING),
+ *  then keeps carrying the brand alone until "Multitasking" pops in at
+ *  WORD_THRESHOLDS[0] — this range governs that final exit. */
 const DORMOUSE_LINE_FADE_OUT_START = 0.17;
 const DORMOUSE_LINE_FADE_OUT_END = WORD_THRESHOLDS[0];
 
@@ -554,26 +550,23 @@ function Home() {
       poster.style.transform = mediaTransform;
 
       // Hook text: visible until the icon nearly finishes rising, then fades out.
+      // hookFadeProgress: 0 = fully visible, 1 = fully gone. Tied to the
+      // icon's last `HOOK_FADE_REMAINING` of climb. Shared with the dormouse
+      // line so its fade-in crossfades exactly with this fade-out.
+      const remainingHidden = iconHeight > 0 ? iconCurrentOffset / iconHeight : 0;
+      const hookFadeProgress = iconCurrentOffset === 0
+        ? 1
+        : clamp01(1 - remainingHidden / HOOK_FADE_REMAINING);
       if (hookRef.current) {
-        const remainingHidden = iconHeight > 0 ? iconCurrentOffset / iconHeight : 0;
-        const fadeProgress = iconCurrentOffset === 0
-          ? 1
-          : clamp01(1 - remainingHidden / HOOK_FADE_REMAINING);
-        hookRef.current.style.opacity = String(snapProgress(1 - fadeProgress));
-        hookRef.current.style.transform = `translateY(${-fadeProgress * 24}px)`;
+        hookRef.current.style.opacity = String(snapProgress(1 - hookFadeProgress));
+        hookRef.current.style.transform = `translateY(${-hookFadeProgress * 24}px)`;
       }
 
-      // Dormouse line ("A dormouse knows when to wake."): fades in partway
-      // through the icon climb, holds while lines 1+2 fade out and the icon
-      // settles, then fades out just before "Multitasking" pops in.
+      // Dormouse line ("A dormouse knows when to wake."): fades in exactly as
+      // lines 1+2 are leaving (shared hookFadeProgress = a true crossfade),
+      // holds while the icon settles, then fades out before "Multitasking" pops in.
       if (dormouseLineRef.current) {
-        const iconRiseProgress = iconHidePx > 0
-          ? clamp01(1 - iconCurrentOffset / iconHidePx)
-          : 0;
-        const fadeIn = clamp01(
-          (iconRiseProgress - DORMOUSE_LINE_REVEAL_START)
-            / (DORMOUSE_LINE_REVEAL_END - DORMOUSE_LINE_REVEAL_START)
-        );
+        const fadeIn = hookFadeProgress;
         const fadeOut = clamp01(
           (fraction - DORMOUSE_LINE_FADE_OUT_START)
             / (DORMOUSE_LINE_FADE_OUT_END - DORMOUSE_LINE_FADE_OUT_START)
@@ -749,8 +742,8 @@ function Home() {
               linger after lines 1+2 are gone. */}
           <div className="absolute top-20 md:top-24 left-0 right-0 flex flex-col items-center text-center px-6 font-display text-[clamp(2rem,4vw+0.5rem,3.5rem)] leading-tight gap-3">
             <div ref={hookRef} className="flex flex-col items-center gap-3 will-change-transform">
-              <span className="opacity-80">So many terminals.</span>
-              <span className="opacity-80">Which ones need attention?</span>
+              <span>So many terminals.</span>
+              <span>Which ones need attention?</span>
             </div>
             <span
               ref={dormouseLineRef}
@@ -784,54 +777,64 @@ function Home() {
 
       {/* ── Content sections — pulled up to appear as video starts scrolling ── */}
       <div ref={contentRef} className="relative z-10 bg-[var(--color-bg)]" style={{ marginTop: `-${(1 - UNPIN_THRESHOLD) * RUNWAY_VH}vh` }}>
-        <section id="features" className={`mx-auto max-w-2xl px-4 md:px-6 ${SECTION_PY}`}>
-          <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">Stop watching terminals spin</h2>
-          <p className="text-lg leading-relaxed opacity-70 mb-4">
-            Dormouse tracks activity the same way you do — visual motion. When a
-            pane stops changing for two seconds, it marks the task complete and
-            alerts you.
-          </p>
-          <p className="text-lg leading-relaxed opacity-70">
-            Works with any CLI tool that prints to a terminal — no plugins, no
-            configuration.
-          </p>
-          <FeatureVideo src={alertVideoUrl} variant="intrinsic" className="mt-8" />
-        </section>
-
-        {/* Section 2: text left, image right */}
-        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
-          <div>
-            <h2 className="font-display text-xl mb-6">Copy paste like you meant</h2>
+        {/* Section 1: narrow text over a full-width video — lead with the tmux story */}
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`}>
+          <div className="mx-auto max-w-2xl">
+            <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">Soft as a mouse, sharp as a tmux</h2>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
-              Click and drag in a "mouse conformant" terminal doesn't select text;
-              it sends escape code{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">{"\\e[<0;x;yM"}</code>.
-              And <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">Ctrl+C</code>{" "}
-              doesn't copy; it asks your program to kill itself.
-            </p>
-            <p className="text-lg leading-relaxed opacity-70">
-              Dormouse lets you copy paste like a human, not a terminal.
-            </p>
-          </div>
-          <FeatureVideo src={copyPasteVideoUrl} />
-        </section>
-
-        {/* Section 3: image left, text right */}
-        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[3fr_2fr] gap-8 md:gap-12 items-start`}>
-          <FeatureVideo src={tmuxVideoUrl} className="order-2 md:order-1" />
-          <div className="order-1 md:order-2">
-            <h2 className="font-display text-xl mb-6">Soft as a mouse, sharp as tmux</h2>
-            <p className="text-lg leading-relaxed opacity-70 mb-4">
-              Run builds, agents, servers, and scripts side by side. Minimize the
-              ones you're not watching to a compact status indicator. Every pane
-              keeps running and every alert still fires whether you can see it or
-              not.
+              Upgrade your VS Code or native terminal with a flexible multipane
+              layout. Minimize the tasks you're not watching to a compact status
+              indicator.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
               Do it all with the mouse, or keep your hands on the keyboard with
               tmux keybinds.
             </p>
           </div>
+          <FeatureVideo src={tmuxVideoUrl} variant="intrinsic" className="mt-8" />
+        </section>
+
+        {/* Section 2: image left, text right */}
+        <section id="features" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[3fr_2fr] gap-8 md:gap-12 items-start`}>
+          <FeatureVideo src={alertVideoUrl} className="order-2 md:order-1" />
+          <div className="order-1 md:order-2">
+            <h2 className="font-display text-xl mb-6">Stop watching terminals spin</h2>
+            <p className="text-lg leading-relaxed opacity-70 mb-4">
+              Dormouse tracks activity the same way you do — visual motion. When a
+              pane stops changing for two seconds, it marks the task complete and
+              alerts you.
+            </p>
+            <p className="text-lg leading-relaxed opacity-70">
+              Works with any CLI tool that prints to a terminal — no plugins, no
+              configuration. Also supports{" "}
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">BEL</code>{" "}
+              and{" "}
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">OSC 9/99/777</code>{" "}
+              for seamless integration with TUI-forward applications.
+            </p>
+          </div>
+        </section>
+
+        {/* Section 3: text left, image right */}
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
+          <div>
+            <h2 className="font-display text-xl mb-6">Newlines and copy paste like you meant</h2>
+            <p className="text-lg leading-relaxed opacity-70 mb-4">
+              You're used to doing{" "}
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">Shift+Enter</code>{" "}
+              to get a newline in the browser, but it's broken in your terminal?
+              Not anymore. Dormouse works the way a user would expect, no arcane
+              terminal knowledge required!
+            </p>
+            <p className="text-lg leading-relaxed opacity-70">
+              Click and drag in a "mouse conformant" terminal doesn't select text;
+              it sends escape code{" "}
+              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">{"\\e[<0;x;yM"}</code>.
+              And <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">Ctrl+C</code>{" "}
+              doesn't copy; it asks your program to kill itself.
+            </p>
+          </div>
+          <FeatureVideo src={copyPasteVideoUrl} />
         </section>
 
         <section id="download" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`} style={downloadAccentStyle}>
