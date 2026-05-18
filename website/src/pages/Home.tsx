@@ -40,9 +40,14 @@ const FOOTNOTE_THRESHOLD = 0.65;
 const HEADER_REVEAL_LEAD = 0.04;
 /** Fractions of the icon rise during which the 3rd hook line ("A dormouse knows…")
  *  fades in. Lines 1+2 of the hook are visible at load; line 3 is revealed
- *  partway through the climb, before the whole hook fades out. */
+ *  partway through the climb. */
 const DORMOUSE_LINE_REVEAL_START = 0.25;
 const DORMOUSE_LINE_REVEAL_END = 0.55;
+/** Runway fractions over which the dormouse line fades out. Lines 1+2 have
+ *  already dropped (with the icon's last 10% climb); the dormouse line keeps
+ *  carrying the brand alone until "Multitasking" pops in at WORD_THRESHOLDS[0]. */
+const DORMOUSE_LINE_FADE_OUT_START = 0.17;
+const DORMOUSE_LINE_FADE_OUT_END = WORD_THRESHOLDS[0];
 
 /** Fraction of runway where the hero text unpins and scrolls away (0–1).
  *  The video keeps scrubbing underneath. */
@@ -552,18 +557,26 @@ function Home() {
         hookRef.current.style.transform = `translateY(${-fadeProgress * 24}px)`;
       }
 
-      // Third hook line ("A dormouse knows when to wake.") fades in partway
-      // through the icon climb so it lands before the whole hook fades out.
+      // Dormouse line ("A dormouse knows when to wake."): fades in partway
+      // through the icon climb, holds while lines 1+2 fade out and the icon
+      // settles, then fades out just before "Multitasking" pops in.
       if (dormouseLineRef.current) {
         const iconRiseProgress = iconHidePx > 0
           ? clamp01(1 - iconCurrentOffset / iconHidePx)
           : 0;
-        const dormouseProgress = clamp01(
+        const fadeIn = clamp01(
           (iconRiseProgress - DORMOUSE_LINE_REVEAL_START)
             / (DORMOUSE_LINE_REVEAL_END - DORMOUSE_LINE_REVEAL_START)
         );
-        dormouseLineRef.current.style.opacity = String(dormouseProgress);
-        dormouseLineRef.current.style.transform = `translateY(${(1 - dormouseProgress) * 8}px)`;
+        const fadeOut = clamp01(
+          (fraction - DORMOUSE_LINE_FADE_OUT_START)
+            / (DORMOUSE_LINE_FADE_OUT_END - DORMOUSE_LINE_FADE_OUT_START)
+        );
+        dormouseLineRef.current.style.opacity = String(fadeIn * (1 - fadeOut));
+        // (1-fadeIn) lifts it into place from below as it appears; fadeOut
+        // lifts it further out as it leaves, matching the hook's exit motion.
+        const translateY = (1 - fadeIn) * 8 + fadeOut * -20;
+        dormouseLineRef.current.style.transform = `translateY(${translateY.toFixed(2)}px)`;
       }
 
       // Hero: cap so it stops at unstick (fraction = 1); natural scroll takes over.
@@ -724,17 +737,18 @@ function Home() {
       {/* ── Pinned scroll runway: hero text overlay ── */}
       <div ref={runwayRef} style={{ height: `${RUNWAY_VH}vh` }}>
         <div ref={heroRef} className="sticky top-0 flex flex-col items-center z-[1] will-change-transform" style={{ height: "100vh" }}>
-          {/* Hook copy — lines 1+2 visible on load; line 3 reveals partway
-              through the icon climb; the whole block fades out as the icon
-              nears the top. */}
-          <div
-            ref={hookRef}
-            className="absolute top-20 md:top-24 left-0 right-0 flex flex-col items-center text-center px-6 font-display text-[clamp(2rem,4vw+0.5rem,3.5rem)] leading-tight gap-3"
-          >
-            <span className="opacity-80">So many terminals.</span>
-            <span className="opacity-80">Which ones need attention?</span>
+          {/* Hook copy — lines 1+2 visible on load and fade out as the icon
+              nears the top. The dormouse line is a sibling, not a child of
+              hookRef, so its opacity is driven independently and it can
+              linger after lines 1+2 are gone. */}
+          <div className="absolute top-20 md:top-24 left-0 right-0 flex flex-col items-center text-center px-6 font-display text-[clamp(2rem,4vw+0.5rem,3.5rem)] leading-tight gap-3">
+            <div ref={hookRef} className="flex flex-col items-center gap-3 will-change-transform">
+              <span className="opacity-80">So many terminals.</span>
+              <span className="opacity-80">Which ones need attention?</span>
+            </div>
             <span
               ref={dormouseLineRef}
+              className="will-change-transform"
               style={{ opacity: 0, transform: "translateY(8px)" }}
             >
               A <span className="text-[var(--color-caramel)]">dormouse</span> knows when to wake.
