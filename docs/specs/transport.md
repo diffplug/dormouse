@@ -77,7 +77,7 @@ Message types live in `vscode-ext/src/message-types.ts` (the canonical schema; o
 | `pty:getCwd` | Query PTY working directory (request-response via requestId) |
 | `pty:getScrollback` | Query PTY scrollback buffer (request-response via requestId) |
 | `pty:getShells` | Query available shells (request-response via requestId) |
-| `dormouse:openExternal` | Request the host to open an already-sanitized external URI from an OSC 8 hyperlink. Hosts must revalidate and only allow `http:`, `https:`, and `mailto:`. |
+| `dormouse:openExternal` | Request the host to open a user-confirmed external URI from an OSC 8 hyperlink. Hosts must revalidate and reject malformed, control-character-bearing, or blocked pseudo-scheme targets (`javascript:`, `data:`, `blob:`, `about:`). |
 | `dormouse:init` | Trigger resume: get PTY list + replay data |
 | `dormouse:saveState` | Frontend persisting session state |
 | `dormouse:flushSessionSaveDone` | Ack for host-triggered flush (matched by requestId) |

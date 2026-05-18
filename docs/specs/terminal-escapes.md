@@ -25,7 +25,7 @@ State-driving and security-sensitive OSCs are parsed at the PTY data boundary in
 - VS Code: in the extension host (`message-router.ts` / `pty-manager.ts`), before `pty:data` is forwarded to the webview.
 - Standalone and fake adapters: in the frontend adapter, before xterm.js sees the bytes.
 
-After parsing, state-driving supported sequences are consumed and not re-emitted. `OSC 8` hyperlinks are the exception: the parser leaves them in `pty:data` so xterm.js owns hyperlink regions and hover rendering, while Dormouse supplies the activation handler. Known unsupported iTerm2/clipboard-capable OSCs listed in [Known-unimplemented iTerm2 and clipboard-capable sequences](#known-unimplemented-iterm2-and-clipboard-capable-sequences) are also consumed and ignored. The platform sends two streams to the webview:
+After parsing, state-driving supported sequences are consumed and not re-emitted. `OSC 8` hyperlinks are the exception: the parser leaves them in `pty:data` so xterm.js owns hyperlink regions and hover rendering, while Dormouse supplies the activation-confirmation handler. Known unsupported iTerm2/clipboard-capable OSCs listed in [Known-unimplemented iTerm2 and clipboard-capable sequences](#known-unimplemented-iterm2-and-clipboard-capable-sequences) are also consumed and ignored. The platform sends two streams to the webview:
 
 - `pty:data` — terminal output with state-driving supported OSCs already parsed/stripped and `OSC 8` hyperlinks preserved. Feeds xterm.js.
 - `terminal:semanticEvents` — normalized semantic events parsed in the platform (CWD, prompt/command boundaries, titles). Feeds `TerminalPaneState`; command boundaries also feed the command-exit alert track defined in `docs/specs/alert.md`.
@@ -48,7 +48,7 @@ Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js c
 | `OSC 0 ; <title> ST` | Window/icon title | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 2 ; <title> ST` | Window title | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 7 ; file://host/path ST` | CWD (xterm-style URI) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
-| `OSC 8 ; <params> ; <URI> ST ... OSC 8 ; ; ST` | Explicit hyperlink region; passed through to xterm.js for rendering and opened through Dormouse's external-link allowlist (`http:`, `https:`, `mailto:`). | This spec |
+| `OSC 8 ; <params> ; <URI> ST ... OSC 8 ; ; ST` | Explicit hyperlink region; passed through to xterm.js for rendering, then opened only after Dormouse shows the real target in a confirmation dialog. | This spec |
 | `OSC 9 ; <message> ST` | iTerm2 legacy notification | [alert.md](alert.md#osc-9) |
 | `OSC 9 ; 4 ; <state> [; <progress>] ST` | iTerm2 progress | [alert.md](alert.md#osc-94-progress) |
 | `OSC 9 ; 9 ; <cwd> ST` | CWD (Windows Terminal / ConEmu) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
@@ -64,7 +64,17 @@ Some sequences are dual-purpose. The notification rows for `OSC 9 ; <message> ST
 
 ### OSC 8 hyperlinks
 
-`OSC 8 ; <params> ; <URI> ST` starts a hyperlink region and `OSC 8 ; ; ST` closes it. `params` may be empty or include `id=<group-id>` for multi-line/shared link regions. Dormouse does not parse the `params` or URI at the PTY boundary; it passes the sequence through to xterm.js. `terminal-lifecycle.ts` sets xterm.js's `linkHandler` so activation normalizes the URI through `normalizeExternalUri()`, allowing only `http:`, `https:`, and `mailto:` before calling the platform adapter's external-open path. VS Code revalidates in the extension host before `vscode.env.openExternal`; standalone and fake adapters also revalidate before opening.
+`OSC 8 ; <params> ; <URI> ST` starts a hyperlink region and `OSC 8 ; ; ST` closes it. `params` may be empty or include `id=<group-id>` for multi-line/shared link regions. Dormouse does not parse the `params` or URI at the PTY boundary; it passes the sequence through to xterm.js.
+
+`terminal-lifecycle.ts` sets xterm.js's `linkHandler` so activation never opens directly. Every click opens Dormouse's external-link confirmation dialog first. The dialog must show the full target URI from the OSC sequence, the URI scheme, and a primary `Open URL` action plus a cancel action. Cancel is the safe default. Long targets wrap and scroll instead of truncating so users can inspect deceptive link text.
+
+URI policy:
+
+- Openable after confirmation: any absolute URI with a scheme, including `http:`, `https:`, `mailto:`, `file:`, and custom app schemes such as `vscode:`.
+- Blocked: malformed URIs, control-character-bearing targets, and browser-executable or opaque pseudo-schemes (`javascript:`, `data:`, `blob:`, `about:`).
+- Blocked targets are not silently dropped. They still open the dialog in a non-openable state with the full target and reason visible, and `Open URL` disabled.
+
+VS Code revalidates in the extension host before `vscode.env.openExternal`; standalone and fake adapters also revalidate before opening. The frontend dialog is a user-consent affordance, not the security boundary.
 
 ## Supported CSI
 
