@@ -1,5 +1,5 @@
 /*
- * Browser adapter for ascii-splash@0.3.0 in the MouseTerm website playground.
+ * Browser adapter for ascii-splash@0.5.0 in the MouseTerm website playground.
  *
  * This file is not the upstream CLI entrypoint. It imports upstream internals
  * from ascii-splash/dist through the website's `ascii-splash-internal` Vite
@@ -31,6 +31,7 @@ import { Buffer as SplashBuffer } from "ascii-splash-internal/renderer/Buffer.js
 import { HelpOverlay } from "ascii-splash-internal/ui/HelpOverlay.js";
 import { StatusBar } from "ascii-splash-internal/ui/StatusBar.js";
 import { ToastManager } from "ascii-splash-internal/ui/ToastManager.js";
+import { Mulberry32, randomSeed } from "ascii-splash-internal/utils/random.js";
 import { AquariumPattern } from "ascii-splash-internal/patterns/AquariumPattern.js";
 import { CampfirePattern } from "ascii-splash-internal/patterns/CampfirePattern.js";
 import { DNAPattern } from "ascii-splash-internal/patterns/DNAPattern.js";
@@ -98,7 +99,7 @@ interface KeyInput {
   data: { isCharacter: boolean; codepoint?: number };
 }
 
-const VERSION = "0.3.0";
+const VERSION = "0.5.0";
 
 const PATTERN_NAMES = [
   "waves",
@@ -249,6 +250,8 @@ function parseArgs(args: string[]): ParsedOptions {
 }
 
 function createPatternsFromConfig(config: SplashConfig, theme: Theme): Pattern[] {
+  const rng = () => new Mulberry32(randomSeed());
+
   return [
     new WavePattern(theme, {
       layers: config.patterns?.waves?.layers,
@@ -256,31 +259,31 @@ function createPatternsFromConfig(config: SplashConfig, theme: Theme): Pattern[]
       speed: config.patterns?.waves?.speed,
       frequency: config.patterns?.waves?.frequency,
     }),
-    new StarfieldPattern(theme, {
+    new StarfieldPattern(theme, rng(), {
       starCount: config.patterns?.starfield?.starCount,
       speed: config.patterns?.starfield?.speed,
     }),
-    new MatrixPattern(theme, {
+    new MatrixPattern(theme, rng(), {
       density: config.patterns?.matrix?.columnDensity,
       speed: config.patterns?.matrix?.speed,
     }),
-    new RainPattern(theme, {
+    new RainPattern(theme, rng(), {
       density: config.patterns?.rain?.dropCount ? config.patterns.rain.dropCount / 500 : undefined,
       speed: config.patterns?.rain?.speed,
     }),
-    new QuicksilverPattern(theme, {
+    new QuicksilverPattern(theme, rng(), {
       speed: config.patterns?.quicksilver?.speed,
       flowIntensity: config.patterns?.quicksilver?.viscosity,
       noiseScale: 0.05,
     }),
-    new ParticlePattern(theme, {
+    new ParticlePattern(theme, rng(), {
       particleCount: config.patterns?.particles?.particleCount,
       speed: config.patterns?.particles?.speed,
       gravity: config.patterns?.particles?.gravity,
       mouseForce: config.patterns?.particles?.mouseForce,
       spawnRate: config.patterns?.particles?.spawnRate,
     }),
-    new SpiralPattern(theme, {
+    new SpiralPattern(theme, rng(), {
       armCount: config.patterns?.spiral?.armCount,
       particleCount: config.patterns?.spiral?.particleCount,
       spiralTightness: config.patterns?.spiral?.spiralTightness,
@@ -290,12 +293,12 @@ function createPatternsFromConfig(config: SplashConfig, theme: Theme): Pattern[]
       direction: config.patterns?.spiral?.direction,
       pulseEffect: config.patterns?.spiral?.pulseEffect,
     }),
-    new PlasmaPattern(theme, {
+    new PlasmaPattern(theme, rng(), {
       frequency: config.patterns?.plasma?.frequency,
       speed: config.patterns?.plasma?.speed,
       complexity: config.patterns?.plasma?.complexity,
     }),
-    new TunnelPattern(theme, {
+    new TunnelPattern(theme, rng(), {
       shape: config.patterns?.tunnel?.shape,
       ringCount: config.patterns?.tunnel?.ringCount,
       speed: config.patterns?.tunnel?.speed,
@@ -307,14 +310,14 @@ function createPatternsFromConfig(config: SplashConfig, theme: Theme): Pattern[]
       rotationSpeed: config.patterns?.tunnel?.rotationSpeed,
       radius: config.patterns?.tunnel?.radius,
     }),
-    new LightningPattern(theme, {
+    new LightningPattern(theme, rng(), {
       branchProbability: config.patterns?.lightning?.branchProbability,
       fadeTime: config.patterns?.lightning?.fadeTime,
       strikeInterval: config.patterns?.lightning?.strikeInterval,
       mainPathJaggedness: config.patterns?.lightning?.mainPathJaggedness,
       branchSpread: config.patterns?.lightning?.branchSpread,
     }),
-    new FireworksPattern(theme, {
+    new FireworksPattern(theme, rng(), {
       burstSize: config.patterns?.fireworks?.burstSize,
       launchSpeed: config.patterns?.fireworks?.launchSpeed,
       gravity: config.patterns?.fireworks?.gravity,
@@ -322,7 +325,7 @@ function createPatternsFromConfig(config: SplashConfig, theme: Theme): Pattern[]
       spawnInterval: config.patterns?.fireworks?.spawnInterval,
       trailLength: config.patterns?.fireworks?.trailLength,
     }),
-    new MazePattern(theme, {
+    new MazePattern(theme, rng(), {
       algorithm: config.patterns?.maze?.algorithm,
       cellSize: config.patterns?.maze?.cellSize,
       generationSpeed: config.patterns?.maze?.generationSpeed,
@@ -330,7 +333,7 @@ function createPatternsFromConfig(config: SplashConfig, theme: Theme): Pattern[]
       pathChar: config.patterns?.maze?.pathChar,
       animateGeneration: config.patterns?.maze?.animateGeneration,
     }),
-    new LifePattern(theme, {
+    new LifePattern(theme, rng(), {
       cellSize: config.patterns?.life?.cellSize,
       updateSpeed: config.patterns?.life?.updateSpeed,
       wrapEdges: config.patterns?.life?.wrapEdges,
@@ -339,14 +342,14 @@ function createPatternsFromConfig(config: SplashConfig, theme: Theme): Pattern[]
       randomDensity: config.patterns?.life?.randomDensity,
       initialPattern: config.patterns?.life?.initialPattern,
     }),
-    new DNAPattern(theme, {
+    new DNAPattern(theme, rng(), {
       rotationSpeed: config.patterns?.dna?.rotationSpeed,
       helixRadius: config.patterns?.dna?.helixRadius,
       basePairDensity: config.patterns?.dna?.basePairSpacing ? 1 / config.patterns.dna.basePairSpacing : undefined,
       twistRate: config.patterns?.dna?.twistRate,
       showLabels: true,
     }),
-    new LavaLampPattern(theme, {
+    new LavaLampPattern(theme, rng(), {
       blobCount: config.patterns?.lavaLamp?.blobCount,
       minRadius: config.patterns?.lavaLamp?.minRadius,
       maxRadius: config.patterns?.lavaLamp?.maxRadius,
@@ -357,7 +360,7 @@ function createPatternsFromConfig(config: SplashConfig, theme: Theme): Pattern[]
       turbulence: config.patterns?.lavaLamp?.turbulence,
       gravity: config.patterns?.lavaLamp?.gravity,
     }),
-    new SmokePattern(theme, {
+    new SmokePattern(theme, rng(), {
       plumeCount: config.patterns?.smoke?.plumeCount,
       particleCount: config.patterns?.smoke?.particleCount,
       riseSpeed: config.patterns?.smoke?.riseSpeed,
@@ -367,7 +370,7 @@ function createPatternsFromConfig(config: SplashConfig, theme: Theme): Pattern[]
       windStrength: config.patterns?.smoke?.windStrength,
       mouseBlowForce: config.patterns?.smoke?.mouseBlowForce,
     }),
-    new SnowPattern(theme, {
+    new SnowPattern(theme, rng(), {
       particleCount: config.patterns?.snow?.particleCount,
       fallSpeed: config.patterns?.snow?.fallSpeed,
       windStrength: config.patterns?.snow?.windStrength,
@@ -377,12 +380,12 @@ function createPatternsFromConfig(config: SplashConfig, theme: Theme): Pattern[]
       accumulation: config.patterns?.snow?.accumulation,
       mouseWindForce: config.patterns?.snow?.mouseWindForce,
     }),
-    new OceanBeachPattern(theme, {}),
-    new CampfirePattern(theme, {}),
-    new NightSkyPattern(theme, {}),
-    new AquariumPattern(theme, {}),
-    new SnowfallParkPattern(theme, {}),
-    new MetaballPattern(theme, {}),
+    new OceanBeachPattern(theme, rng(), {}),
+    new CampfirePattern(theme, rng(), {}),
+    new NightSkyPattern(theme, rng(), {}),
+    new AquariumPattern(theme, rng(), {}),
+    new SnowfallParkPattern(theme, rng(), {}),
+    new MetaballPattern(theme, rng(), {}),
   ];
 }
 

@@ -18,7 +18,7 @@ jobs:
 
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
-          version: 11.0.4
+          version: 11.0.6
 
       - name: Install dependencies
         run: pnpm install
@@ -41,7 +41,7 @@ jobs:
 
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
-          version: 11.0.4
+          version: 11.0.6
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 

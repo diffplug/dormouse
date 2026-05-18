@@ -8,7 +8,7 @@
   },
   {
     "name": "@tauri-apps/api",
-    "version": "2.10.1",
+    "version": "2.11.0",
     "license": "MIT OR Apache-2.0",
     "author": "Tauri Apps Contributors",
     "homepage": "https://github.com/tauri-apps/tauri#readme"
@@ -18,62 +18,62 @@
     "version": "2.3.5",
     "license": "MIT OR Apache-2.0",
     "author": "Tauri Apps Contributors",
-    "homepage": "https://github.com/tauri-apps/plugins-workspace#readme"
+    "homepage": "https://github.com/tauri-apps/plugins-workspace"
   },
   {
     "name": "@tauri-apps/plugin-updater",
     "version": "2.10.1",
     "license": "MIT OR Apache-2.0",
     "author": "Tauri Apps Contributors",
-    "homepage": "https://github.com/tauri-apps/plugins-workspace#readme"
+    "homepage": "https://github.com/tauri-apps/plugins-workspace"
   },
   {
     "name": "@xterm/addon-fit",
     "version": "0.11.0",
     "license": "MIT",
     "author": "The xterm.js authors",
-    "homepage": "https://github.com/xtermjs/xterm.js/tree/master#readme"
+    "homepage": "https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit"
   },
   {
     "name": "@xterm/xterm",
     "version": "6.0.0",
     "license": "MIT",
     "author": "Christopher Jeffrey, SourceLair Private Company, xterm.js authors",
-    "homepage": "https://github.com/xtermjs/xterm.js#readme"
+    "homepage": "https://github.com/xtermjs/xterm.js"
   },
   {
     "name": "clsx",
     "version": "2.1.1",
     "license": "MIT",
     "author": "Luke Edwards",
-    "homepage": "https://github.com/lukeed/clsx#readme"
+    "homepage": "https://github.com/lukeed/clsx"
   },
   {
     "name": "dockview",
-    "version": "5.1.0",
+    "version": "6.3.0",
     "license": "MIT",
     "author": "https://github.com/mathuo",
     "homepage": "https://github.com/mathuo/dockview"
   },
   {
     "name": "dockview-core",
-    "version": "5.1.0",
+    "version": "6.3.0",
     "license": "MIT",
     "author": "https://github.com/mathuo",
     "homepage": "https://github.com/mathuo/dockview"
   },
   {
     "name": "dockview-react",
-    "version": "5.1.0",
+    "version": "6.3.0",
     "license": "MIT",
     "author": "https://github.com/mathuo",
     "homepage": "https://github.com/mathuo/dockview"
   },
   {
     "name": "fflate",
-    "version": "0.8.2",
+    "version": "0.8.3",
     "license": "MIT",
-    "author": "Arjun Barrett",
+    "author": "Arjun Barrett <arjunbarrett@gmail.com>",
     "homepage": "https://101arrowz.github.io/fflate"
   },
   {
@@ -81,7 +81,7 @@
     "version": "3.3.1",
     "license": "MIT",
     "author": "Microsoft Corporation",
-    "homepage": "https://github.com/microsoft/node-jsonc-parser#readme"
+    "homepage": "https://github.com/microsoft/node-jsonc-parser"
   },
   {
     "name": "node-addon-api",
@@ -99,14 +99,14 @@
   },
   {
     "name": "react",
-    "version": "19.2.4",
+    "version": "19.2.6",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
   },
   {
     "name": "react-dom",
-    "version": "19.2.4",
+    "version": "19.2.6",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
@@ -127,7 +127,7 @@
   },
   {
     "name": "tailwind-merge",
-    "version": "3.5.0",
+    "version": "3.6.0",
     "license": "MIT",
     "author": "Dany Castillo",
     "homepage": "https://github.com/dcastil/tailwind-merge"
@@ -136,15 +136,8 @@
     "name": "tailwind-variants",
     "version": "3.2.2",
     "license": "MIT",
-    "author": "Junior Garcia",
-    "homepage": "https://github.com/heroui-inc/tailwind-variants#readme"
-  },
-  {
-    "name": "tailwindcss",
-    "version": "4.2.2",
-    "license": "MIT",
-    "author": "Tailwind Labs, Inc.",
-    "homepage": "https://tailwindcss.com"
+    "author": "Junior Garcia <jrgarciadev@gmail.com>",
+    "homepage": "https://github.com/heroui-inc/tailwind-variants"
   },
   {
     "name": "VS Code built-in themes",

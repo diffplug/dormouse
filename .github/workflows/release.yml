@@ -30,7 +30,7 @@ jobs:
 
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
-          version: 11.0.4
+          version: 11.0.6
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
@@ -103,7 +103,7 @@ jobs:
 
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
-          version: 11.0.4
+          version: 11.0.6
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
@@ -141,7 +141,7 @@ jobs:
 
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
-          version: 11.0.4
+          version: 11.0.6
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile

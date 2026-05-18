@@ -10,4 +10,9 @@ allowBuilds:
   esbuild: true
   keytar: false
   node-pty: true
+  sharp: true
+peerDependencyRules:
+  allowedVersions:
+    "react-helmet-async>react": ^19.0.0
+    "react-helmet-async>react-dom": ^19.0.0
 minimumReleaseAge: 1440
