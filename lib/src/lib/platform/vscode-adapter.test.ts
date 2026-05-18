@@ -69,6 +69,17 @@ describe('VSCodeAdapter PTY exit handling', () => {
     expect(postMessage).toHaveBeenCalledWith({ type: 'pty:kill', id: 'pane-1' });
   });
 
+  it('posts external hyperlink open requests to the extension host', () => {
+    const adapter = new VSCodeAdapter();
+
+    adapter.openExternal('https://example.com/docs');
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'mouseterm:openExternal',
+      uri: 'https://example.com/docs',
+    });
+  });
+
   it('parses replay buffers into semantic events and strips OSCs before forwarding', () => {
     const adapter = new VSCodeAdapter();
     const replays: Array<{ id: string; data: string }> = [];

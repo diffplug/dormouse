@@ -36,6 +36,10 @@ export interface PlatformAdapter {
   // Only present on adapters with a native (non-DOM) drag-drop source. Currently inert in Tauri; see diffplug/mouseterm#38 and tauri-apps/tauri#14373.
   onFilesDropped?(handler: (paths: string[]) => void): () => void;
 
+  // Open a sanitized external URI. Implementations must revalidate because
+  // terminal output is untrusted.
+  openExternal?(uri: string): void;
+
   // PTY event listeners
   onPtyData(handler: (detail: { id: string; data: string }) => void): void;
   offPtyData(handler: (detail: { id: string; data: string }) => void): void;

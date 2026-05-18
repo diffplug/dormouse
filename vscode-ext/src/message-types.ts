@@ -12,6 +12,7 @@ export type WebviewMessage =
   | { type: 'pty:getShells'; requestId?: string }
   | { type: 'clipboard:readFiles'; requestId: string }
   | { type: 'clipboard:readImage'; requestId: string }
+  | { type: 'mouseterm:openExternal'; uri: string }
   | { type: 'mouseterm:init' }
   | { type: 'mouseterm:saveState'; state: unknown }
   | { type: 'mouseterm:flushSessionSaveDone'; requestId: string }

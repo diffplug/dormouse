@@ -1,7 +1,9 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-shell";
 import type { AlertStateDetail, PlatformAdapter, PtyInfo } from "mouseterm-lib/lib/platform/types";
 import { AlertManager, type SessionStatus } from "mouseterm-lib/lib/alert-manager";
+import { normalizeExternalUri } from "mouseterm-lib/lib/external-links";
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
@@ -177,6 +179,14 @@ export class TauriAdapter implements PlatformAdapter {
     try {
       return await rawInvoke<string>("read_clipboard_text");
     } catch { return null; }
+  }
+
+  openExternal(uri: string): void {
+    const normalized = normalizeExternalUri(uri);
+    if (!normalized) return;
+    open(normalized).catch((err) =>
+      console.error("[tauri-adapter] openExternal failed:", err),
+    );
   }
 
   onFilesDropped(handler: (paths: string[]) => void): () => void {

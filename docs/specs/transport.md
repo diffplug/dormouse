@@ -77,6 +77,7 @@ Message types live in `vscode-ext/src/message-types.ts` (the canonical schema; o
 | `pty:getCwd` | Query PTY working directory (request-response via requestId) |
 | `pty:getScrollback` | Query PTY scrollback buffer (request-response via requestId) |
 | `pty:getShells` | Query available shells (request-response via requestId) |
+| `mouseterm:openExternal` | Request the host to open an already-sanitized external URI from an OSC 8 hyperlink. Hosts must revalidate and only allow `http:`, `https:`, and `mailto:`. |
 | `mouseterm:init` | Trigger resume: get PTY list + replay data |
 | `mouseterm:saveState` | Frontend persisting session state |
 | `mouseterm:flushSessionSaveDone` | Ack for host-triggered flush (matched by requestId) |
@@ -96,7 +97,7 @@ Message types live in `vscode-ext/src/message-types.ts` (the canonical schema; o
 
 | Message | Purpose |
 |---------|---------|
-| `pty:data` | PTY output after supported OSC sequences have been parsed/stripped (routed only to owning router) |
+| `pty:data` | PTY output after state-driving supported OSC sequences have been parsed/stripped; `OSC 8` hyperlinks are preserved for xterm.js (routed only to owning router) |
 | `pty:exit` | PTY process exited (with exitCode) |
 | `terminal:semanticEvents` | Normalized CWD/title/prompt/command events parsed in the host from live PTY data |
 | `pty:list` | List of all resumable PTYs (response to `mouseterm:init`) |

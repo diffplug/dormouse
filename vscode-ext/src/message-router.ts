@@ -7,6 +7,7 @@ import {
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
 } from '../../lib/src/lib/terminal-protocol';
+import { normalizeExternalUri } from '../../lib/src/lib/external-links';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { PersistedSession } from '../../lib/src/lib/session-types';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
@@ -270,6 +271,17 @@ export function attachRouter(
             webview.postMessage({ type: 'clipboard:image', path: null, requestId: msg.requestId } satisfies ExtensionMessage);
           });
         break;
+      case 'mouseterm:openExternal': {
+        const uri = normalizeExternalUri(msg.uri);
+        if (!uri) break;
+        void vscode.env.openExternal(vscode.Uri.parse(uri, true)).then(
+          (opened) => {
+            if (!opened) log.info(`[external-link] openExternal declined: ${uri}`);
+          },
+          (err) => log.info(`[external-link] openExternal failed: ${err?.message ?? err}`),
+        );
+        break;
+      }
       case 'mouseterm:init': {
         // Webview has (re-)initialized — subscribe to live events.
         // Tear down previous subscriptions first (webview was destroyed and recreated).

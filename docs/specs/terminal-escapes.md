@@ -20,14 +20,14 @@ Rule of thumb: CSI talks to the screen, OSC talks to the application hosting the
 
 OSC sequences are introduced by `ESC ]` and terminated by either `BEL` (`\x07`) or `ST` (`ESC \`). A `BEL` that terminates an OSC is part of that OSC sequence, not a standalone bell notification. Both terminators are accepted across all supported sequences, and the parser handles split chunks across PTY reads.
 
-Supported OSCs are parsed at the PTY data boundary in the platform adapter:
+State-driving and security-sensitive OSCs are parsed at the PTY data boundary in the platform adapter:
 
 - VS Code: in the extension host (`message-router.ts` / `pty-manager.ts`), before `pty:data` is forwarded to the webview.
 - Standalone and fake adapters: in the frontend adapter, before xterm.js sees the bytes.
 
-After parsing, supported sequences are consumed and not re-emitted. Known unsupported iTerm2/clipboard-capable OSCs listed in [Known-unimplemented iTerm2 and clipboard-capable sequences](#known-unimplemented-iterm2-and-clipboard-capable-sequences) are also consumed and ignored. The platform sends two streams to the webview:
+After parsing, state-driving supported sequences are consumed and not re-emitted. `OSC 8` hyperlinks are the exception: the parser leaves them in `pty:data` so xterm.js owns hyperlink regions and hover rendering, while MouseTerm supplies the activation handler. Known unsupported iTerm2/clipboard-capable OSCs listed in [Known-unimplemented iTerm2 and clipboard-capable sequences](#known-unimplemented-iterm2-and-clipboard-capable-sequences) are also consumed and ignored. The platform sends two streams to the webview:
 
-- `pty:data` — terminal output with supported OSCs already parsed/stripped. Feeds xterm.js.
+- `pty:data` — terminal output with state-driving supported OSCs already parsed/stripped and `OSC 8` hyperlinks preserved. Feeds xterm.js.
 - `terminal:semanticEvents` — normalized semantic events parsed in the platform (CWD, prompt/command boundaries, titles). Feeds `TerminalPaneState`; command boundaries also feed the command-exit alert track defined in `docs/specs/alert.md`.
 - Notification-derived state is delivered through `AlertManager` calls / `alert:state` messages, not through `pty:data`.
 
@@ -40,6 +40,10 @@ The parser also classifies each PTY data chunk for activity-monitor purposes:
 
 Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js can handle standard terminal behavior MouseTerm does not model. Security-sensitive or iTerm2-identity-triggered OSCs must not rely on xterm.js defaults: if they are not in [Supported OSCs](#supported-oscs), MouseTerm consumes and ignores them without visible terminal garbage, clipboard access, file access, focus changes, or other side effects.
 
+### OSC 8 hyperlinks
+
+`OSC 8 ; <params> ; <URI> ST` starts a hyperlink region and `OSC 8 ; ; ST` closes it. `params` may be empty or include `id=<group-id>` for multi-line/shared link regions. MouseTerm does not parse the `params` or URI at the PTY boundary; it passes the sequence through to xterm.js. `terminal-lifecycle.ts` sets xterm.js's `linkHandler` so activation normalizes the URI through `normalizeExternalUri()`, allowing only `http:`, `https:`, and `mailto:` before calling the platform adapter's external-open path. VS Code revalidates in the extension host before `vscode.env.openExternal`; standalone and fake adapters also revalidate before opening.
+
 ## Supported OSCs
 
 | Sequence | Purpose | Spec |
@@ -48,6 +52,7 @@ Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js c
 | `OSC 0 ; <title> ST` | Window/icon title | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 2 ; <title> ST` | Window title | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 7 ; file://host/path ST` | CWD (xterm-style URI) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
+| `OSC 8 ; <params> ; <URI> ST ... OSC 8 ; ; ST` | Explicit hyperlink region; passed through to xterm.js for rendering and opened through MouseTerm's external-link allowlist (`http:`, `https:`, `mailto:`). | This spec |
 | `OSC 9 ; <message> ST` | iTerm2 legacy notification | [alert.md](alert.md#osc-9) |
 | `OSC 9 ; 4 ; <state> [; <progress>] ST` | iTerm2 progress | [alert.md](alert.md#osc-94-progress) |
 | `OSC 9 ; 9 ; <cwd> ST` | CWD (Windows Terminal / ConEmu) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
@@ -135,6 +140,7 @@ This list is non-exhaustive. Any iTerm2-compatibility OSC family that MouseTerm 
 - xterm control sequences (OSC 0 / 2 / 7): https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
 - VS Code shell integration sequences (OSC 633): https://code.visualstudio.com/docs/terminal/shell-integration
 - Windows Terminal CWD OSC 9;9: https://learn.microsoft.com/en-us/windows/terminal/tutorials/new-tab-same-directory
+- xterm.js OSC 8 link handling: https://xtermjs.org/docs/guides/link-handling/
 - kitty desktop notifications (OSC 99): https://sw.kovidgoyal.net/kitty/desktop-notifications/
 - kitty keyboard protocol: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
 - WezTerm escape sequences (OSC 777): https://wezterm.org/escape-sequences.html
