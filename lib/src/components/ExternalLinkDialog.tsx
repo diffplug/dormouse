@@ -1,6 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { XIcon } from '@phosphor-icons/react';
 import type { ExternalUriDecision } from '../lib/external-links';
+import {
+  ModalOverlay,
+  ModalSurface,
+  modalActionButton,
+  modalIconButton,
+  useModalFocusTrap,
+} from './design';
 
 export interface ExternalLinkDialogRequest {
   uri: string;
@@ -23,48 +30,17 @@ export function ExternalLinkDialog({
   const scheme = request.decision.scheme ?? 'invalid';
   const displayUri = request.decision.displayUri || request.uri;
 
-  useEffect(() => {
-    cancelRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const dialog = dialogRef.current;
-      if (!dialog) return;
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        onCancel();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-
-      const focusables = Array.from(
-        dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex]:not([tabindex="-1"])'),
-      );
-      if (focusables.length === 0) return;
-
-      const currentIndex = focusables.findIndex((item) => item === document.activeElement);
-      const nextIndex = currentIndex === -1
-        ? 0
-        : (currentIndex + (event.shiftKey ? -1 : 1) + focusables.length) % focusables.length;
-
-      event.preventDefault();
-      focusables[nextIndex]?.focus();
-    };
-
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [onCancel]);
+  useModalFocusTrap(dialogRef, { initialFocusRef: cancelRef, onEscape: onCancel });
 
   return (
-    <div className="fixed inset-0 z-[9999] grid place-items-center bg-app-bg/55 px-4 py-6">
-      <div
+    <ModalOverlay zIndex={9999} backdrop="strong" className="px-4 py-6">
+      <ModalSurface
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="external-link-dialog-title"
-        className="w-full max-w-[34rem] rounded-lg border border-border bg-surface-raised p-4 font-mono text-foreground shadow-2xl"
+        elevation="modal"
+        className="w-full max-w-[34rem]"
       >
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
@@ -78,7 +54,7 @@ export function ExternalLinkDialog({
           <button
             type="button"
             aria-label="Cancel"
-            className="shrink-0 rounded p-0.5 text-muted transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring"
+            className={modalIconButton()}
             onClick={onCancel}
           >
             <XIcon size={13} weight="bold" />
@@ -108,7 +84,7 @@ export function ExternalLinkDialog({
             ref={cancelRef}
             type="button"
             onClick={onCancel}
-            className="rounded border border-border px-2 py-1.5 text-muted transition-colors hover:bg-header-inactive-bg hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring"
+            className={modalActionButton({ tone: 'secondary' })}
           >
             Cancel
           </button>
@@ -116,12 +92,12 @@ export function ExternalLinkDialog({
             type="button"
             onClick={onConfirm}
             disabled={!openable}
-            className="rounded bg-header-active-bg px-2 py-1.5 text-header-active-fg transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-45"
+            className={modalActionButton({ tone: 'primary' })}
           >
             Open URL
           </button>
         </div>
-      </div>
-    </div>
+      </ModalSurface>
+    </ModalOverlay>
   );
 }
