@@ -2,6 +2,7 @@
   "name": "mouseterm-root",
   "private": true,
   "license": "FSL-1.1-MIT",
+  "packageManager": "pnpm@11.0.4",
   "scripts": {
     "build": "pnpm run build:vscode && pnpm --filter mouseterm-website build",
     "test": "pnpm -r run test",
@@ -15,12 +16,5 @@
     "dogfood:standalone": "bash standalone/scripts/dogfood.sh",
     "storybook": "pnpm --filter mouseterm-lib storybook",
     "bundle-themes": "node lib/scripts/bundle-themes.mjs"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@swc/core",
-      "esbuild",
-      "node-pty"
-    ]
   }
 }

@@ -74,7 +74,7 @@ strategy:
 ```
 
 Each matrix leg:
-1. Checkout, setup Node 22, pnpm 10, Rust stable
+1. Checkout, setup Node 22, pnpm 11.0.4, Rust stable
 2. Install workspace dependencies once from the repo root with `pnpm install --frozen-lockfile`
 3. Install system deps (Linux: libgtk, libwebkit, etc.)
 4. Build via `tauri-action` — but **skip signing** (no `APPLE_SIGNING_IDENTITY`, no `TAURI_SIGNING_PRIVATE_KEY`)
@@ -85,7 +85,7 @@ Each matrix leg:
 ### Job: `build-vscode`
 
 Runs on `ubuntu-latest`:
-1. Checkout, setup Node 22, pnpm 10
+1. Checkout, setup Node 22, pnpm 11.0.4
 2. `pnpm install --frozen-lockfile` at the repo root
 3. `pnpm --filter mouseterm-lib test`
 4. `pnpm --filter mouseterm build:frontend && pnpm --filter mouseterm build`
