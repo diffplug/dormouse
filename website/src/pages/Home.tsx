@@ -38,6 +38,11 @@ const HOOK_FADE_REMAINING = 0.10;    // Hook begins fading when bottom 10% of ic
 const WORD_THRESHOLDS = [0.25, 0.40, 0.55] as const;
 const FOOTNOTE_THRESHOLD = 0.65;
 const HEADER_REVEAL_LEAD = 0.04;
+/** Fractions of the icon rise during which the 3rd hook line ("A dormouse knows…")
+ *  fades in. Lines 1+2 of the hook are visible at load; line 3 is revealed
+ *  partway through the climb, before the whole hook fades out. */
+const DORMOUSE_LINE_REVEAL_START = 0.25;
+const DORMOUSE_LINE_REVEAL_END = 0.55;
 
 /** Fraction of runway where the hero text unpins and scrolls away (0–1).
  *  The video keeps scrubbing underneath. */
@@ -272,6 +277,7 @@ function Home() {
   const headerRef = useRef<HTMLElement>(null);
   const headerBrandRef = useRef<HTMLAnchorElement>(null);
   const hookRef = useRef<HTMLDivElement>(null);
+  const dormouseLineRef = useRef<HTMLSpanElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [installGuide, setInstallGuide] = useState<string | null>(null);
   const [heroVideoSrc, setHeroVideoSrc] = useState<string | undefined>();
@@ -546,6 +552,20 @@ function Home() {
         hookRef.current.style.transform = `translateY(${-fadeProgress * 24}px)`;
       }
 
+      // Third hook line ("A dormouse knows when to wake.") fades in partway
+      // through the icon climb so it lands before the whole hook fades out.
+      if (dormouseLineRef.current) {
+        const iconRiseProgress = iconHidePx > 0
+          ? clamp01(1 - iconCurrentOffset / iconHidePx)
+          : 0;
+        const dormouseProgress = clamp01(
+          (iconRiseProgress - DORMOUSE_LINE_REVEAL_START)
+            / (DORMOUSE_LINE_REVEAL_END - DORMOUSE_LINE_REVEAL_START)
+        );
+        dormouseLineRef.current.style.opacity = String(dormouseProgress);
+        dormouseLineRef.current.style.transform = `translateY(${(1 - dormouseProgress) * 8}px)`;
+      }
+
       // Hero: cap so it stops at unstick (fraction = 1); natural scroll takes over.
       const maxHeroOffset = runway.offsetHeight * (1 - UNPIN_THRESHOLD);
       const heroOffset = Math.min(slideAmount, maxHeroOffset);
@@ -704,31 +724,40 @@ function Home() {
       {/* ── Pinned scroll runway: hero text overlay ── */}
       <div ref={runwayRef} style={{ height: `${RUNWAY_VH}vh` }}>
         <div ref={heroRef} className="sticky top-0 flex flex-col items-center z-[1] will-change-transform" style={{ height: "100vh" }}>
-          {/* Hook copy — visible on load, fades out on first scroll */}
+          {/* Hook copy — lines 1+2 visible on load; line 3 reveals partway
+              through the icon climb; the whole block fades out as the icon
+              nears the top. */}
           <div
             ref={hookRef}
             className="absolute top-20 md:top-24 left-0 right-0 flex flex-col items-center text-center px-6 font-display text-[clamp(2rem,4vw+0.5rem,3.5rem)] gap-2"
           >
-            <span>So many terminals.</span>
-            <span>Which one needs attention?</span>
+            <span>So many busy terminals.</span>
+            <span>Which needs attention?</span>
+            <span
+              ref={dormouseLineRef}
+              className="mt-2"
+              style={{ opacity: 0, transform: "translateY(8px)" }}
+            >
+              A <span className="text-[var(--color-caramel)]">dormouse</span> knows when to wake.
+            </span>
           </div>
           {/* Hero words — crossfade in place with the hook, just below the header */}
-          <div className="absolute top-20 md:top-24 left-0 right-0 flex flex-col items-center text-center px-6 gap-1 font-display text-[clamp(2rem,4vw+0.5rem,3.5rem)]">
+          <div className="absolute top-20 md:top-24 left-0 right-0 flex flex-col items-center text-center px-6 gap-1 font-display text-[clamp(2.5rem,5vw+0.5rem,4rem)]">
             <span ref={word0Ref} style={{ opacity: 0, transform: "translateY(12px)" }}>
-              A <span className="text-[var(--color-caramel)]">dormouse</span>
+              Multitasking
             </span>
             <span ref={word1Ref} style={{ opacity: 0, transform: "translateY(12px)" }}>
-              knows when
+              terminal
             </span>
             <span ref={word2Ref} style={{ opacity: 0, transform: "translateY(12px)" }}>
-              to wake up.
+              <span className="text-[var(--color-caramel)]">for mice</span>
             </span>
             <p
               ref={footnoteRef}
-              className="mt-3 text-lg"
+              className="-mt-1 text-lg"
               style={{ opacity: 0 }}
             >
-              Multitasking terminal for mice <span className="opacity-70">(and hotkey wizards too)</span>
+              (and hotkey wizards too)
             </p>
           </div>
         </div>
