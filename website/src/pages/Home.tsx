@@ -729,13 +729,12 @@ function Home() {
               nears the top. */}
           <div
             ref={hookRef}
-            className="absolute top-20 md:top-24 left-0 right-0 flex flex-col items-center text-center px-6 font-display text-[clamp(2rem,4vw+0.5rem,3.5rem)] gap-2"
+            className="absolute top-20 md:top-24 left-0 right-0 flex flex-col items-center text-center px-6 font-display text-[clamp(2rem,4vw+0.5rem,3.5rem)] leading-tight gap-3"
           >
-            <span>So many busy terminals.</span>
-            <span>Which needs attention?</span>
+            <span className="opacity-80">So many terminals.</span>
+            <span className="opacity-80">Which ones need attention?</span>
             <span
               ref={dormouseLineRef}
-              className="mt-2"
               style={{ opacity: 0, transform: "translateY(8px)" }}
             >
               A <span className="text-[var(--color-caramel)]">dormouse</span> knows when to wake.
