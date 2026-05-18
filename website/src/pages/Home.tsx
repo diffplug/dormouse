@@ -34,12 +34,13 @@ const RUNWAY_VH = 300 * HERO_SLOMO_FACTOR;
 
 /** Scroll thresholds within the pinned runway (0–1) */
 const ICON_INITIAL_HIDE_FRAC = 0.67; // Fraction of icon's rendered height hidden at load — leaves top third visible
-const HOOK_FADE_REMAINING = 0.10;    // Hook begins fading when bottom 10% of icon enters viewport
+const HOOK_CROSSFADE_START = 0.05;
+const HOOK_CROSSFADE_DURATION = 0.08;
 const WORD_THRESHOLDS = [0.25, 0.40, 0.55] as const;
 const FOOTNOTE_THRESHOLD = 0.65;
 const HEADER_REVEAL_LEAD = 0.04;
 /** Runway fractions over which the dormouse line fades out. The dormouse
- *  line fades IN crossfaded with lines 1+2 (shared HOOK_FADE_REMAINING),
+ *  line fades IN crossfaded with lines 1+2 (shared hookFadeProgress),
  *  then keeps carrying the brand alone until "Multitasking" pops in at
  *  WORD_THRESHOLDS[0] — this range governs that final exit. */
 const DORMOUSE_LINE_FADE_OUT_START = 0.17;
@@ -549,14 +550,12 @@ function Home() {
       video.style.transform = mediaTransform;
       poster.style.transform = mediaTransform;
 
-      // Hook text: visible until the icon nearly finishes rising, then fades out.
-      // hookFadeProgress: 0 = fully visible, 1 = fully gone. Tied to the
-      // icon's last `HOOK_FADE_REMAINING` of climb. Shared with the dormouse
-      // line so its fade-in crossfades exactly with this fade-out.
-      const remainingHidden = iconHeight > 0 ? iconCurrentOffset / iconHeight : 0;
-      const hookFadeProgress = iconCurrentOffset === 0
-        ? 1
-        : clamp01(1 - remainingHidden / HOOK_FADE_REMAINING);
+      // Hook text: visible on load, then fades out early in the runway.
+      // hookFadeProgress: 0 = fully visible, 1 = fully gone. Shared with the
+      // dormouse line so its fade-in crossfades exactly with this fade-out.
+      const hookFadeProgress = clamp01(
+        (fraction - HOOK_CROSSFADE_START) / HOOK_CROSSFADE_DURATION
+      );
       if (hookRef.current) {
         hookRef.current.style.opacity = String(snapProgress(1 - hookFadeProgress));
         hookRef.current.style.transform = `translateY(${-hookFadeProgress * 24}px)`;
