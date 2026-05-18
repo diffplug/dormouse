@@ -4,4 +4,10 @@ packages:
   - standalone/sidecar
   - vscode-ext
   - website
+allowBuilds:
+  "@swc/core": true
+  "@vscode/vsce-sign": false
+  esbuild: true
+  keytar: false
+  node-pty: true
 minimumReleaseAge: 1440
