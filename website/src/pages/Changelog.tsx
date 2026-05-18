@@ -183,7 +183,7 @@ export function Component() {
               Changelog
             </h1>
             <p className="text-base leading-relaxed text-[var(--color-text)]/60">
-              Release notes for MouseTerm.
+              Release notes for Dormouse.
             </p>
           </div>
 

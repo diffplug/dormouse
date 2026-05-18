@@ -32,7 +32,7 @@ exports[`TutRunner snapshots > renders Copy paste with all items incomplete 1`] 
   [2mPress [36mp[39m to toggle the Place To Paste.[0m
 
   [2mSome terminal programs trap the cursor, and some do not. This tutorial pane[0m
-  [2mdoes not trap the cursor, so MouseTerm does not show a cursor icon. The[0m
+  [2mdoes not trap the cursor, so Dormouse does not show a cursor icon. The[0m
   [2m[36mascii-splash[39m and [36mchangelog[39m programs trap the cursor — that is how they are[0m
   [2mable to respond to mouse movement. [36mlazygit[39m is an excellent and popular program[0m
   [2mwhich traps the cursor.[0m
@@ -78,7 +78,7 @@ exports[`TutRunner snapshots > renders Keyboard navigation with all items incomp
 
 exports[`TutRunner snapshots > renders the top-level menu 1`] = `
 "[H[2J
-  [1mMouseTerm Playground Tutorial[0m
+  [1mDormouse Playground Tutorial[0m
   [2m0/17 complete · [36mEsc[39m/[36mq[39m to exit · [36mEnter[39m to open · [36m↑↓[39m to navigate[0m
 
   [36m❯[0m [1mKeyboard navigation[0m  [2m[0/7 complete][0m

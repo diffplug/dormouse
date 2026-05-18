@@ -83,7 +83,7 @@ describe("TutRunner snapshots", () => {
     sendKeys("\r");
 
     sendKeys("q");
-    expect(lastFrame()).toContain("MouseTerm Playground Tutorial");
+    expect(lastFrame()).toContain("Dormouse Playground Tutorial");
     expect(exitCount()).toBe(0);
 
     sendKeys("q");

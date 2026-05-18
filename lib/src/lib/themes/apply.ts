@@ -1,4 +1,4 @@
-import type { MouseTermTheme } from './types';
+import type { DormouseTheme } from './types';
 import { getAllThemes, getStoredActiveThemeId, setActiveThemeId } from './store';
 import { completeThemeVars } from './vscode-color-resolver';
 import { flattenSelectionAlpha } from './flatten-alpha';
@@ -6,7 +6,7 @@ import { flattenSelectionAlpha } from './flatten-alpha';
 let appliedThemeSnapshot: AppliedThemeSnapshot | null = null;
 
 export interface AppliedThemeSnapshot {
-  theme: MouseTermTheme;
+  theme: DormouseTheme;
   providedVars: Record<string, string>;
   resolvedVars: Record<string, string>;
 }
@@ -19,7 +19,7 @@ const HOST_TYPOGRAPHY_VARS: Record<string, string> = {
     "'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
 };
 
-export function applyTheme(theme: MouseTermTheme): void {
+export function applyTheme(theme: DormouseTheme): void {
   if (typeof document === 'undefined') return;
   if (theme === appliedThemeSnapshot?.theme) return;
 
@@ -34,7 +34,7 @@ export function applyTheme(theme: MouseTermTheme): void {
   const providedVars = { ...HOST_TYPOGRAPHY_VARS, ...theme.vars };
   const vars = completeThemeVars(providedVars, theme.type);
   // Theme authors give list.*SelectionBackground alpha because VSCode renders
-  // it as an overlay on the sidebar. MouseTerm uses it as a solid AppBar /
+  // it as an overlay on the sidebar. Dormouse uses it as a solid AppBar /
   // tab fill, so flatten the alpha over sideBar.background here — otherwise
   // whatever sits behind the surface bleeds through (Selenized Dark's bright
   // cyan AppBar, for instance).
@@ -58,7 +58,7 @@ export function applyTheme(theme: MouseTermTheme): void {
  *  first bundled theme. Idempotent and safe to call before render so the
  *  first paint already has --vscode-* set on body. Returns the theme that was
  *  applied, or null when no themes are available (e.g. SSR). */
-export function restoreActiveTheme(defaultThemeId?: string): MouseTermTheme | null {
+export function restoreActiveTheme(defaultThemeId?: string): DormouseTheme | null {
   const all = getAllThemes();
   const find = (id: string | null | undefined) => (id ? all.find((t) => t.id === id) : undefined);
   const theme = find(getStoredActiveThemeId()) ?? find(defaultThemeId) ?? all[0];

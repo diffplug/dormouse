@@ -247,7 +247,7 @@ function formatTrace(trace: VscodeThemeVarTrace): string {
 
 function buildReport(snapshot: Omit<ThemeDiagnosticSnapshot, 'report'>): string {
   const lines: string[] = [];
-  lines.push('MouseTerm theme diagnostic');
+  lines.push('Dormouse theme diagnostic');
   lines.push(`capturedAt: ${snapshot.capturedAt}`);
   lines.push(`themeKind: ${snapshot.themeKind}`);
   lines.push(`activeTheme: ${snapshot.activeTheme ? `${snapshot.activeTheme.label} (${snapshot.activeTheme.origin})` : 'VSCode host theme'}`);

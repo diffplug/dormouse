@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "generatedAt": "2026-05-11T00:00:00Z",
-  "title": "Design System: MouseTerm",
+  "title": "Design System: Dormouse",
   "extensions": {
     "colorMeta": {
       "app-bg": {
@@ -236,7 +236,7 @@
   ],
   "narrative": {
     "northStar": "The Native Tenant",
-    "overview": "MouseTerm is a tenant in someone else's house. The house is VSCode. The user picked the furniture (their theme), the lighting (their mode), the typography (their editor font). MouseTerm moves in, multiplies what the user can do with their terminals, and leaves the decor alone. The system is intentionally minimal and bg-only. Chrome recedes; terminals are the content. Hierarchy is conveyed through background shifts between header-active-bg and header-inactive-bg, not through borders, shadows, or accent stripes. Status is conveyed through shape and position and through the active terminal palette's own ANSI red/green/yellow, not through a separate design-system palette.",
+    "overview": "Dormouse is a tenant in someone else's house. The house is VSCode. The user picked the furniture (their theme), the lighting (their mode), the typography (their editor font). Dormouse moves in, multiplies what the user can do with their terminals, and leaves the decor alone. The system is intentionally minimal and bg-only. Chrome recedes; terminals are the content. Hierarchy is conveyed through background shifts between header-active-bg and header-inactive-bg, not through borders, shadows, or accent stripes. Status is conveyed through shape and position and through the active terminal palette's own ANSI red/green/yellow, not through a separate design-system palette.",
     "keyCharacteristics": [
       "Host-theme-driven palette: every color is a var(--vscode-*) passthrough.",
       "Bg-only chrome: no decorative borders, no resting shadows, no accent stripes.",

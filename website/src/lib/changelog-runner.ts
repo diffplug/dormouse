@@ -307,7 +307,7 @@ export class ChangelogRunner implements InteractiveProgram {
     const detailLines = this.getDetailLines();
 
     let frame = `${CURSOR_HOME}${CLEAR_SCREEN}`;
-    frame += `${BOLD}MouseTerm changelog${RESET}  ${DIM}${RELEASES.length} releases · \`q\` to quit · ↑↓ select · wheel scrolls${RESET}\r\n`;
+    frame += `${BOLD}Dormouse changelog${RESET}  ${DIM}${RELEASES.length} releases · \`q\` to quit · ↑↓ select · wheel scrolls${RESET}\r\n`;
     frame += "\r\n";
 
     for (let r = 0; r < bodyH; r++) {

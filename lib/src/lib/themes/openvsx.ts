@@ -2,12 +2,12 @@
  * Runtime OpenVSX theme installer.
  *
  * Searches for theme extensions, downloads VSIX files, extracts theme
- * JSONs in the browser, and converts them to MouseTermTheme objects.
+ * JSONs in the browser, and converts them to DormouseTheme objects.
  *
  * fflate is dynamically imported so it doesn't affect initial bundle size.
  */
 
-import type { MouseTermTheme } from './types';
+import type { DormouseTheme } from './types';
 import { convertVscodeThemeColors, uiThemeToType } from './convert';
 
 const OPENVSX_API = 'https://open-vsx.org/api';
@@ -56,12 +56,12 @@ function slugify(label: string): string {
 
 /**
  * Download a theme extension from OpenVSX and return all theme variants
- * as MouseTermTheme objects ready for installation.
+ * as DormouseTheme objects ready for installation.
  */
 export async function fetchExtensionThemes(
   namespace: string,
   name: string,
-): Promise<MouseTermTheme[]> {
+): Promise<DormouseTheme[]> {
   // 1. Get latest version metadata
   const metaRes = await fetch(`${OPENVSX_API}/${namespace}/${name}/latest`);
   if (!metaRes.ok) throw new Error(`OpenVSX metadata failed: ${metaRes.status}`);
@@ -108,7 +108,7 @@ export async function fetchExtensionThemes(
   const { parse: parseJsonc } = await import('jsonc-parser');
 
   // 6. Convert each theme variant
-  const themes: MouseTermTheme[] = [];
+  const themes: DormouseTheme[] = [];
   for (const contrib of themeContribs) {
     const themePath = `extension/${contrib.path.replace(/^\.\//, '')}`;
     const themeData = entries[themePath];

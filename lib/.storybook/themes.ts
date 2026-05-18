@@ -3,10 +3,10 @@
  * applyTheme(), so isolated stories receive VSCode registry defaults too.
  */
 import _bundled from '../src/lib/themes/bundled.json';
-import type { MouseTermTheme } from '../src/lib/themes/types';
+import type { DormouseTheme } from '../src/lib/themes/types';
 import { completeThemeVars } from '../src/lib/themes/vscode-color-resolver';
 
-const bundled = _bundled as unknown as MouseTermTheme[];
+const bundled = _bundled as unknown as DormouseTheme[];
 
 const STORYBOOK_HOST_TYPOGRAPHY_VARS: Record<string, string> = {
   '--vscode-font-size': '13px',
@@ -17,7 +17,7 @@ const STORYBOOK_HOST_TYPOGRAPHY_VARS: Record<string, string> = {
 };
 
 export const VSCODE_THEMES: Record<string, Record<string, string>> = {};
-export const VSCODE_THEME_TYPES: Record<string, MouseTermTheme['type']> = {};
+export const VSCODE_THEME_TYPES: Record<string, DormouseTheme['type']> = {};
 for (const theme of bundled) {
   VSCODE_THEME_TYPES[theme.label] = theme.type;
   VSCODE_THEMES[theme.label] = completeThemeVars(

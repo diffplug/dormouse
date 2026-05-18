@@ -99,7 +99,7 @@ export const SECTIONS: readonly Section[] = [
         id: 'al-ring',
         title: 'Bell rings when the task completes',
         hint:
-          `Don't type! If you type, MouseTerm will think you are paying attention to this task and the bell will not ring. The bell only rings if (a) the pane is not selected or (b) you have not interacted with the pane for the past ${USER_ATTENTION_SECS} seconds.`,
+          `Don't type! If you type, Dormouse will think you are paying attention to this task and the bell will not ring. The bell only rings if (a) the pane is not selected or (b) you have not interacted with the pane for the past ${USER_ATTENTION_SECS} seconds.`,
       },
       {
         id: 'al-todo-auto',
@@ -145,7 +145,7 @@ export const SECTIONS: readonly Section[] = [
       },
     ],
     prose: [
-      'Some terminal programs trap the cursor, and some do not. This tutorial pane does not trap the cursor, so MouseTerm does not show a cursor icon. The `ascii-splash` and `changelog` programs trap the cursor — that is how they are able to respond to mouse movement. `lazygit` is an excellent and popular program which traps the cursor.',
+      'Some terminal programs trap the cursor, and some do not. This tutorial pane does not trap the cursor, so Dormouse does not show a cursor icon. The `ascii-splash` and `changelog` programs trap the cursor — that is how they are able to respond to mouse movement. `lazygit` is an excellent and popular program which traps the cursor.',
     ],
   },
 ];

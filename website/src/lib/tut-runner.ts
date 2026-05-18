@@ -319,7 +319,7 @@ export class TutRunner implements InteractiveProgram {
     const total = this.state.totalProgress();
     const lines: string[] = [];
     lines.push("");
-    lines.push(`  ${BOLD}MouseTerm Playground Tutorial${RESET}`);
+    lines.push(`  ${BOLD}Dormouse Playground Tutorial${RESET}`);
     lines.push(
       `  ${DIM}${total.done}/${total.total} complete · \`Esc\`/\`q\` to exit · \`Enter\` to open · \`↑↓\` to navigate${RESET}`,
     );
