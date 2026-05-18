@@ -562,6 +562,10 @@ sign_updates() {
 
     log "Signing update bundles with Tauri key..."
 
+    check_command pnpm "Install pnpm with corepack: corepack enable pnpm"
+    pnpm --dir "$REPO_ROOT/standalone" exec tauri --version &>/dev/null \
+        || error "Tauri CLI not found in workspace dependencies. Run 'pnpm install --frozen-lockfile' before signing updates."
+
     prompt_secret_multiline TAURI_SIGNING_PRIVATE_KEY "Enter Tauri signing private key"
 
     local release_dir="$WORK_DIR/release-assets"
@@ -602,7 +606,7 @@ sign_updates() {
             # Use tauri signer to sign the bundle
             TAURI_SIGNING_PRIVATE_KEY="$TAURI_SIGNING_PRIVATE_KEY" \
             TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" \
-                npx --prefix "$REPO_ROOT/standalone" tauri signer sign \
+                pnpm --dir "$REPO_ROOT/standalone" exec tauri signer sign \
                     --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
                     "$bundle"
         fi
