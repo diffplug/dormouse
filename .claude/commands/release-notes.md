@@ -1,10 +1,10 @@
 ---
 name: release-notes
-description: Draft release notes, recommend and apply a version bump, and update CHANGELOG.md for the next mouseterm release by analyzing all merge commits and squash-merged PRs since the last release tag. Used as step 2 of the release checklist in docs/specs/deploy.md.
+description: Draft release notes, recommend and apply a version bump, and update CHANGELOG.md for the next dormouse release by analyzing all merge commits and squash-merged PRs since the last release tag. Used as step 2 of the release checklist in docs/specs/deploy.md.
 user-invocable: true
 ---
 
-You are drafting release notes, recommending and applying a version bump, and updating CHANGELOG.md for the next mouseterm release.
+You are drafting release notes, recommending and applying a version bump, and updating CHANGELOG.md for the next dormouse release.
 
 ## 1. Gather context
 
@@ -26,7 +26,7 @@ Also read the current version from `standalone/src-tauri/tauri.conf.json` so you
 
 ## 2. Decide the version bump
 
-mouseterm uses **breaking.added.bugfix** semantics (semver-shaped, but named for what each segment means here):
+dormouse uses **breaking.added.bugfix** semantics (semver-shaped, but named for what each segment means here):
 
 - **breaking** (major) — bump if any change breaks behavior users rely on, removes a feature, or changes a VSCode extension contribution point in an incompatible way
 - **added** (minor) — bump if any change adds a new user-facing feature, with no breaking changes

@@ -74,7 +74,7 @@ export const CwdSourcesAndPathKinds: Story = storyFor([
   caseState('cwd-osc99-drive', 'OSC 9;9 drive', idle({ cwd: osc99('C:\\Users\\me\\repo') }), 'Windows drive-letter path'),
   caseState('cwd-osc99-unc', 'OSC 9;9 UNC', idle({ cwd: osc99('\\\\server\\share\\repo') }), 'Windows UNC path'),
   caseState('cwd-osc99-wsl', 'OSC 9;9 WSL-like', idle({ cwd: osc99('/mnt/c/Users/me/repo') }), 'Unknown path kind by design'),
-  caseState('cwd-osc633', 'OSC 633 Cwd', idle({ cwd: osc633('/workspaces/mouseterm') }), 'VS Code shell integration CWD'),
+  caseState('cwd-osc633', 'OSC 633 Cwd', idle({ cwd: osc633('/workspaces/dormouse') }), 'VS Code shell integration CWD'),
   caseState('cwd-osc1337', 'OSC 1337 CurrentDir', idle({ cwd: osc1337('/Users/me/iterm-app') }), 'iTerm2 CurrentDir compatibility'),
 ]);
 
@@ -369,7 +369,7 @@ function titleCandidateState(): TerminalPaneState {
   const pane = running('/repo/app', 'npm run dev');
   const candidates = {
     user: terminalTitleAt('Pinned production API', 'user', BASE_TIME + 6_000),
-    osc0: terminalTitleAt('mouseterm', 'osc0', BASE_TIME + 1_000),
+    osc0: terminalTitleAt('dormouse', 'osc0', BASE_TIME + 1_000),
     osc2: terminalTitleAt('zsh', 'osc2', BASE_TIME + 2_000),
     osc9: terminalTitleAt('Build finished', 'osc9', BASE_TIME + 5_000),
     osc99: terminalTitleAt('Codex waiting', 'osc99', BASE_TIME + 4_000),

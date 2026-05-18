@@ -45,7 +45,7 @@ export function paintTerminalHost(element: HTMLDivElement, terminal: Terminal, b
   const hosts = element.querySelectorAll<HTMLElement>(XTERM_HOST_SELECTOR);
   if (hosts.length === 0 && xtermElement && !xtermSelectorWarned) {
     xtermSelectorWarned = true;
-    console.warn(`[mouseterm] paintTerminalHost: no elements matched ${XTERM_HOST_SELECTOR} - xterm DOM may have changed.`);
+    console.warn(`[dormouse] paintTerminalHost: no elements matched ${XTERM_HOST_SELECTOR} - xterm DOM may have changed.`);
     return;
   }
   hosts.forEach((el) => {

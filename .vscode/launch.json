@@ -7,7 +7,7 @@
       "request": "launch",
       "args": ["--extensionDevelopmentPath=${workspaceFolder}/vscode-ext"],
       "outFiles": ["${workspaceFolder}/vscode-ext/dist/**/*.js"],
-      "preLaunchTask": "build-mouseterm-vscode"
+      "preLaunchTask": "build-dormouse-vscode"
     }
   ]
 }

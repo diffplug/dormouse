@@ -86,7 +86,7 @@ export { TerminalPaneHeader } from './wall/TerminalPaneHeader';
 
 const dormouseTheme: DockviewTheme = {
   ...themeAbyss,
-  name: 'mouseterm',
+  name: 'dormouse',
   gap: 6,
   dndOverlayMounting: 'absolute',
   dndPanelOverlay: 'group',

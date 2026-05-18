@@ -8,7 +8,7 @@ Three browser-side pieces in `website/src/lib/`, mirroring the pattern in `websi
 
 - **`tut-runner.ts`** (`TutRunner`) — alt-screen TUI. Subscribes to `TutorialState` and re-renders whenever progress changes. Routes input bytes via `FakePtyAdapter.writePty(id, …)`.
 - **`tut-detector.ts`** (`TutDetector`) — wires app events to `TutorialState.markComplete(id)`. Subscribes to `DockviewApi.onDidActivePanelChange`, the `WallEvent` stream, the `subscribeToActivity` store from `dormouse-lib/lib/terminal-registry`, and the `subscribeToMouseSelection` store from `dormouse-lib/lib/mouse-selection`.
-- **`tutorial-state.ts`** (`TutorialState`) — single in-memory progress store, persisted as a JSON array of completed item ids under the `mouseterm-tut-v3` localStorage key.
+- **`tutorial-state.ts`** (`TutorialState`) — single in-memory progress store, persisted as a JSON array of completed item ids under the `dormouse-tut-v3` localStorage key.
 - **`tut-items.ts`** — section + item definitions (titles, hints) shared by runner and detector. Item ids are stable; they are the localStorage key suffixes.
 
 ## Layout
@@ -100,8 +100,8 @@ While the Copy paste section is open, pressing `p` toggles the **Place To Paste*
 
 ## Storage
 
-- Completion: `localStorage["mouseterm-tut-v3"] = JSON.stringify([...completedItemIds])`. Removed on `TutorialState.reset()`. Unknown ids in a stored payload are filtered out on load, so renaming an id is a one-way reset for that item.
-- Legacy keys `mouseterm-tutorial-step-N` and `mouseterm-tut-v2-*` from previous designs are not read; new playground sessions get a fresh start.
+- Completion: `localStorage["dormouse-tut-v3"] = JSON.stringify([...completedItemIds])`. Removed on `TutorialState.reset()`. Unknown ids in a stored payload are filtered out on load, so renaming an id is a one-way reset for that item.
+- Legacy keys `dormouse-tutorial-step-N` and `dormouse-tut-v2-*` from previous designs are not read; new playground sessions get a fresh start.
 
 ## Theme Picker
 

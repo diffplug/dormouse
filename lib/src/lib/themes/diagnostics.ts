@@ -11,7 +11,7 @@ import {
   type VscodeThemeVarTrace,
 } from './vscode-color-resolver';
 
-export type VisibleVarOrigin = 'host-provided' | 'mouseterm-materialized' | 'missing';
+export type VisibleVarOrigin = 'host-provided' | 'dormouse-materialized' | 'missing';
 
 export interface ThemeMetadataSnapshot {
   id: string;
@@ -152,9 +152,9 @@ function captureVisibleVars(
     let origin: VisibleVarOrigin = value ? 'host-provided' : 'missing';
 
     if (value && materialized.get(name) === value) {
-      origin = 'mouseterm-materialized';
+      origin = 'dormouse-materialized';
     } else if (value && applied && !applied.theme.vars[name] && applied.resolvedVars[name] === value) {
-      origin = 'mouseterm-materialized';
+      origin = 'dormouse-materialized';
     }
 
     return {

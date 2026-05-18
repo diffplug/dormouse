@@ -213,7 +213,7 @@ pnpm dogfood:vscode = build + package VSIX + install locally
   (then: Cmd+Shift+P -> "Developer: Reload Window" to pick up changes)
 
 F5 in VS Code = launch Extension Development Host (see .vscode/launch.json)
-  (runs preLaunchTask "build-mouseterm-vscode" from .vscode/tasks.json,
+  (runs preLaunchTask "build-dormouse-vscode" from .vscode/tasks.json,
    which just calls `pnpm build:vscode`, then opens a new VS Code window
    with the extension loaded)
 ```
@@ -230,13 +230,13 @@ Set context keys so menus and extensions can target Dormouse state:
 
 ```typescript
 // Set when any Dormouse webview has focus
-vscode.commands.executeCommand('setContext', 'mouseterm.active', true);
+vscode.commands.executeCommand('setContext', 'dormouse.active', true);
 
 // Set when Dormouse is in passthrough/terminal mode (keys go to PTY)
-vscode.commands.executeCommand('setContext', 'mouseterm.mode', 'terminal');
+vscode.commands.executeCommand('setContext', 'dormouse.mode', 'terminal');
 
 // Set when Dormouse is in normal/navigation mode (keys go to Dormouse UI)
-vscode.commands.executeCommand('setContext', 'mouseterm.mode', 'normal');
+vscode.commands.executeCommand('setContext', 'dormouse.mode', 'normal');
 ```
 
 ### Commands
@@ -244,19 +244,19 @@ vscode.commands.executeCommand('setContext', 'mouseterm.mode', 'normal');
 | Command | Description |
 |---------|-------------|
 | `dormouse.focus` | Focus the Dormouse panel view |
-| `mouseterm.newPane` | Split a new pane in Dormouse |
-| `mouseterm.closePane` | Close the focused pane |
-| `mouseterm.nextPane` | Focus next pane |
-| `mouseterm.prevPane` | Focus previous pane |
-| `mouseterm.enterTerminalMode` | Switch to passthrough mode |
-| `mouseterm.enterNormalMode` | Switch to navigation mode |
-| `mouseterm.listSessions` | Show QuickPick of all live PTY sessions |
-| `mouseterm.reattach` | Reattach a minimized PTY to a pane |
+| `dormouse.newPane` | Split a new pane in Dormouse |
+| `dormouse.closePane` | Close the focused pane |
+| `dormouse.nextPane` | Focus next pane |
+| `dormouse.prevPane` | Focus previous pane |
+| `dormouse.enterTerminalMode` | Switch to passthrough mode |
+| `dormouse.enterNormalMode` | Switch to navigation mode |
+| `dormouse.listSessions` | Show QuickPick of all live PTY sessions |
+| `dormouse.reattach` | Reattach a minimized PTY to a pane |
 
 ### Not yet implemented
 
 - `TerminalProfileProvider` not registered — Dormouse doesn't appear in the terminal `+` dropdown
-- Context keys not set (`mouseterm.active`, `mouseterm.mode`) — needed for conditional keybindings
-- Commands not registered: `mouseterm.newPane`, `closePane`, `nextPane`, `prevPane`, `enterTerminalMode`, `enterNormalMode`, `listSessions`, `reattach`
+- Context keys not set (`dormouse.active`, `dormouse.mode`) — needed for conditional keybindings
+- Commands not registered: `dormouse.newPane`, `closePane`, `nextPane`, `prevPane`, `enterTerminalMode`, `enterNormalMode`, `listSessions`, `reattach`
 - No status bar item showing active session count
 - No QuickPick for listing/reattaching PTY sessions

@@ -8,9 +8,9 @@ const repoRoot = resolve(__dirname, "../..");
 const outPath = resolve(__dirname, "../src/data/dependencies.json");
 const themeExtensionsPath = resolve(repoRoot, "lib/src/lib/themes/bundled-extensions.json");
 const productDependencyFilters = [
-  "mouseterm",
-  "mouseterm-standalone",
-  "mouseterm-lib",
+  "dormouse",
+  "dormouse-standalone",
+  "dormouse-lib",
 ];
 
 function getInstalledStoreDir() {

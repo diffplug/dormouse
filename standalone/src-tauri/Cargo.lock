@@ -1943,7 +1943,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mouseterm"
+name = "dormouse"
 version = "0.9.1"
 dependencies = [
  "process-wrap",
