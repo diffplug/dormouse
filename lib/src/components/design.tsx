@@ -116,6 +116,55 @@ export const modalActionButton = tv({
 
 export type ModalActionButtonVariants = VariantProps<typeof modalActionButton>;
 
+export const modalReviewBlock = tv({
+  base: 'block rounded border border-border bg-app-bg font-mono text-foreground',
+  variants: {
+    density: {
+      compact: 'p-2 text-xs',
+      default: 'px-2.5 py-2 text-sm leading-relaxed',
+    },
+    overflow: {
+      short: 'max-h-32 overflow-auto',
+      medium: 'max-h-40 overflow-auto',
+      textarea: 'h-48 w-full resize-y',
+    },
+    wrap: {
+      breakAll: 'whitespace-pre-wrap break-all',
+      breakWords: 'whitespace-pre-wrap break-words',
+      normal: '',
+    },
+    focusable: {
+      true: 'focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring',
+      false: '',
+    },
+  },
+  defaultVariants: {
+    density: 'default',
+    overflow: 'medium',
+    wrap: 'breakWords',
+    focusable: false,
+  },
+});
+
+export type ModalReviewBlockVariants = VariantProps<typeof modalReviewBlock>;
+export type ModalReviewBlockProps = HTMLAttributes<HTMLDivElement> & ModalReviewBlockVariants;
+
+export function ModalReviewBlock({
+  density,
+  overflow,
+  wrap,
+  focusable,
+  className,
+  ...props
+}: ModalReviewBlockProps) {
+  return (
+    <div
+      className={clsx(modalReviewBlock({ density, overflow, wrap, focusable }), className)}
+      {...props}
+    />
+  );
+}
+
 export const modalIconButton = tv({
   base: 'shrink-0 rounded p-0.5 text-muted transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring',
 });

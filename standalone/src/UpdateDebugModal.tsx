@@ -3,6 +3,7 @@ import {
   ModalCloseButton,
   ModalFrame,
   modalActionButton,
+  modalReviewBlock,
   useModalFocusTrap,
 } from '../../lib/src/components/design';
 import { openIssueSearch } from './updater';
@@ -75,7 +76,7 @@ export function UpdateDebugModal({ open, onClose, failure, body }: UpdateDebugMo
           <p className="text-sm">
             We couldn't install v{failure.version}. The error was:
           </p>
-          <pre className="max-h-32 overflow-auto rounded border border-border bg-app-bg p-2 text-xs font-mono whitespace-pre-wrap break-words">
+          <pre className={modalReviewBlock({ density: 'compact', overflow: 'short' })}>
             {errorPreview || '(no error captured)'}
           </pre>
         </div>
@@ -113,7 +114,12 @@ export function UpdateDebugModal({ open, onClose, failure, body }: UpdateDebugMo
           <textarea
             readOnly
             value={body ?? 'Gathering diagnostic info...'}
-            className="block h-48 w-full resize-y rounded border border-border bg-app-bg p-2 text-xs font-mono text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring"
+            className={modalReviewBlock({
+              density: 'compact',
+              overflow: 'textarea',
+              wrap: 'normal',
+              focusable: true,
+            })}
             onFocus={(e) => e.currentTarget.select()}
           />
         </div>

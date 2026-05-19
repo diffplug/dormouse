@@ -4,6 +4,7 @@ import type { DisplayMatchVerdict, ExternalUriDecision } from '../lib/external-l
 import {
   ModalCloseButton,
   ModalFrame,
+  ModalReviewBlock,
   modalActionButton,
   useModalFocusTrap,
 } from './design';
@@ -104,9 +105,9 @@ export function ExternalLinkModal({
           in DESIGN.md. The URL is the literal artifact the user is being
           asked to scrutinize, and a framed box reads better than a bare
           bg-shift in this high-stakes context. */}
-      <div className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-app-bg px-2.5 py-2 text-sm leading-relaxed text-foreground">
+      <ModalReviewBlock className="mt-3" wrap="breakAll">
         {displayUri}
-      </div>
+      </ModalReviewBlock>
 
       <div className="mt-4 flex justify-end gap-2 text-xs">
         {isDeceptive ? (
