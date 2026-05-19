@@ -8,6 +8,10 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/). Release checklist in [deploy.md](docs/specs/deploy.md).
 
+## [0.10.2] - 2026-05-19
+### Changed
+- Internal refactor unifying modal primitives and renaming dialog components to modals; Storybook entries reorganized to match ([#78](https://github.com/diffplug/dormouse/pull/78)).
+
 ## [0.10.1] - 2026-05-19
 ### Changed
 - Refreshed dependencies ([#76](https://github.com/diffplug/dormouse/pull/76)).

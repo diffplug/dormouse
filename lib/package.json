@@ -1,6 +1,6 @@
 {
   "name": "dormouse-lib",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "license": "FSL-1.1-MIT",
   "private": true,
   "type": "module",
