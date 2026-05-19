@@ -112,10 +112,34 @@ describe("TutRunner snapshots", () => {
     const { state, sendKeys, dispose } = mountRunner(["kb-mode"]);
     state.resolveStarPrompt();
 
-    sendKeys("\x1b[B\x1b[B\x1b[B\x1b[B\rreset\r");
+    sendKeys("\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\rreset\r");
 
     expect(state.isComplete("kb-mode")).toBe(false);
     expect(state.isStarPromptResolved()).toBe(false);
+    dispose();
+  });
+
+  it("keeps the Burrow locked until every tutorial task is complete", () => {
+    const { sendKeys, lastFrame, dispose } = mountRunner();
+
+    sendKeys("\x1b[B\x1b[B\x1b[B\x1b[B\r");
+
+    expect(lastFrame()).toContain("🧀 ??? 🧀");
+    expect(lastFrame()).toContain("[LOCKED 0/17]");
+    expect(lastFrame()).toContain("Dormouse Playground Tutorial");
+    dispose();
+  });
+
+  it("opens and exits the Burrow after every tutorial task is complete", () => {
+    const allItemIds = SECTIONS.flatMap((section) => section.items.map((i) => i.id));
+    const { sendKeys, lastFrame, dispose } = mountRunner(allItemIds);
+
+    sendKeys("\x1b[B\x1b[B\x1b[B\x1b[B\r");
+    expect(lastFrame()).toContain("🧀 The Burrow 🧀");
+    expect(lastFrame()).toContain("__/--\\__");
+
+    sendKeys("\x1b");
+    expect(lastFrame()).toContain("Dormouse Playground Tutorial");
     dispose();
   });
 });

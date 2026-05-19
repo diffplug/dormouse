@@ -80,10 +80,7 @@ export class TutorialState {
   }
 
   totalProgress(): { done: number; total: number } {
-    return {
-      done: this.completed.size + (this.starPromptResolved ? 1 : 0),
-      total: ALL_ITEM_IDS.length + 1,
-    };
+    return { done: this.completed.size, total: ALL_ITEM_IDS.length };
   }
 
   private notify(): void {

@@ -54,6 +54,8 @@ const SPINNER_INTERVAL_MS = 100;
  */
 const ACTIVE_ITEM_GLYPH = "●";
 const STAR_PROMPT_TITLE = "Starred on GitHub";
+const BURROW_LOCKED_TITLE = "🧀 ??? 🧀";
+const BURROW_UNLOCKED_TITLE = "🧀 The Burrow 🧀";
 
 interface TutRunnerOptions {
   adapter: FakePtyAdapter;
@@ -68,7 +70,7 @@ interface TutRunnerOptions {
   onOpenGithub?: () => void;
 }
 
-type Screen = "menu" | "section" | "reset";
+type Screen = "menu" | "section" | "reset" | "burrow";
 
 const RESET_CONFIRM_WORD = "reset";
 
@@ -88,6 +90,8 @@ export class TutRunner implements InteractiveProgram {
   private resetMismatch = false;
   private spinnerFrame = 0;
   private spinnerTimer: ReturnType<typeof setInterval> | null = null;
+  private burrowFrame = 0;
+  private burrowTimer: ReturnType<typeof setInterval> | null = null;
   private stateUnsub: (() => void) | null = null;
   private resizeUnsub: (() => void) | null = null;
   private busyDemoStart: number | null = null;
@@ -130,6 +134,20 @@ export class TutRunner implements InteractiveProgram {
     if (!this.spinnerTimer) return;
     clearInterval(this.spinnerTimer);
     this.spinnerTimer = null;
+  }
+
+  private startBurrowTicks(): void {
+    if (this.burrowTimer) return;
+    this.burrowTimer = setInterval(() => {
+      this.burrowFrame = (this.burrowFrame + 1) % 12;
+      this.render();
+    }, 180);
+  }
+
+  private stopBurrowTicks(): void {
+    if (!this.burrowTimer) return;
+    clearInterval(this.burrowTimer);
+    this.burrowTimer = null;
   }
 
   handleInput(data: string): void {
@@ -210,16 +228,20 @@ export class TutRunner implements InteractiveProgram {
   // --- Input ---
 
   private menuLength(): number {
-    // SECTIONS + the GitHub star prompt + the trailing "Reset progress" entry
-    return SECTIONS.length + 2;
+    // SECTIONS + GitHub star + Burrow + the trailing "Reset progress" entry
+    return SECTIONS.length + 3;
   }
 
   private starPromptIndex(): number {
     return SECTIONS.length;
   }
 
-  private resetIndex(): number {
+  private burrowIndex(): number {
     return SECTIONS.length + 1;
+  }
+
+  private resetIndex(): number {
+    return SECTIONS.length + 2;
   }
 
   private handleArrow(letter: string): void {
@@ -248,6 +270,18 @@ export class TutRunner implements InteractiveProgram {
         const changed = this.state.resolveStarPrompt();
         this.onOpenGithub?.();
         if (!changed) this.render();
+        return;
+      }
+      if (this.menuIndex === this.burrowIndex()) {
+        const { done, total } = this.state.totalProgress();
+        if (done !== total) {
+          this.render();
+          return;
+        }
+        this.screen = "burrow";
+        this.burrowFrame = 0;
+        this.startBurrowTicks();
+        this.render();
         return;
       }
       const section = SECTIONS[this.menuIndex];
@@ -297,6 +331,12 @@ export class TutRunner implements InteractiveProgram {
       this.render();
       return;
     }
+    if (this.screen === "burrow") {
+      this.stopBurrowTicks();
+      this.screen = "menu";
+      this.render();
+      return;
+    }
     this.exit();
   }
 
@@ -326,6 +366,8 @@ export class TutRunner implements InteractiveProgram {
         ? this.renderMenu()
         : this.screen === "reset"
         ? this.renderReset()
+        : this.screen === "burrow"
+        ? this.renderBurrow()
         : this.renderSection();
     let out = `${CURSOR_HOME}${CLEAR_SCREEN}`;
     for (const line of lines) {
@@ -340,7 +382,7 @@ export class TutRunner implements InteractiveProgram {
     lines.push("");
     lines.push(`  ${BOLD}Dormouse Playground Tutorial${RESET}`);
     lines.push(
-      `  ${DIM}${total.done}/${total.total} complete · \`Esc\`/\`q\` to exit · \`Enter\` to open · \`↑↓\` to navigate${RESET}`,
+      `  ${DIM}\`Esc\`/\`q\` to exit · \`Enter\` to open · \`↑↓\` to navigate${RESET}`,
     );
     lines.push("");
     SECTIONS.forEach((section, index) => {
@@ -368,6 +410,19 @@ export class TutRunner implements InteractiveProgram {
       : `${DIM}[not yet]${RESET}`;
     lines.push(`  ${starMarker} ${starLabel}  ${starStatus}`);
 
+    const burrowIndex = this.burrowIndex();
+    const burrowUnlocked = total.done === total.total;
+    const burrowMarker = this.menuIndex === burrowIndex ? `${fg(36)}❯${RESET}` : " ";
+    const burrowTitle = burrowUnlocked ? BURROW_UNLOCKED_TITLE : BURROW_LOCKED_TITLE;
+    const burrowLabel =
+      this.menuIndex === burrowIndex
+        ? `${BOLD}${burrowTitle}${RESET}`
+        : burrowTitle;
+    const burrowStatus = burrowUnlocked
+      ? ""
+      : `  ${DIM}[LOCKED ${total.done}/${total.total}]${RESET}`;
+    lines.push(`  ${burrowMarker} ${burrowLabel}${burrowStatus}`);
+
     const resetIndex = this.resetIndex();
     const resetMarker = this.menuIndex === resetIndex ? `${fg(36)}❯${RESET}` : " ";
     const resetLabel =
@@ -378,6 +433,22 @@ export class TutRunner implements InteractiveProgram {
     lines.push(`  ${resetMarker} ${resetLabel}`);
     lines.push("");
     return lines;
+  }
+
+  private renderBurrow(): string[] {
+    const glint = "·".repeat((this.burrowFrame % 4) + 1);
+    const offset = this.burrowFrame % 6;
+    const path = `${" ".repeat(offset)}*${" ".repeat(5 - offset)}`;
+    return [
+      "",
+      `  ${BOLD}${BURROW_UNLOCKED_TITLE}${RESET}`,
+      `  ${DIM}\`Esc\` to go back${RESET}`,
+      "",
+      `        ${fg(33)}${glint}${RESET}`,
+      `     __/--\\__`,
+      `  __/  ${fg(36)}${path}${RESET}  \\__`,
+      ` /________________\\`,
+    ];
   }
 
   private renderReset(): string[] {
@@ -536,6 +607,7 @@ export class TutRunner implements InteractiveProgram {
     if (this.disposed) return;
     this.disposed = true;
     this.stopSpinnerTicks();
+    this.stopBurrowTicks();
     this.busyDemoStart = null;
     this.stateUnsub?.();
     this.stateUnsub = null;

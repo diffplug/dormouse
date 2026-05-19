@@ -29,7 +29,11 @@ Every playground pane gets a `TutorialShell` input handler through `PlaygroundSh
 
 ## Tutorial Sections
 
-The runner shows a top-level menu first. Selecting a section drills into its item list. Each section shows `[N/M complete]` next to its title. The top-level menu also includes `Starred on GitHub`, which participates in the overall progress total but not in any section count, sits directly below `Copy paste` without a blank spacer, and shows `[not yet]` until selected and `[thanks ⭐]` after it has been resolved. Pressing Enter on that row calls `onOpenGithub`, which `/playground` and the mobile tether page wire to `window.open("https://github.com/diffplug/dormouse", "_blank", "noopener,noreferrer")`.
+The runner shows a top-level menu first. Selecting a section drills into its item list. Each section shows `[N/M complete]` next to its title. The menu helper below `Dormouse Playground Tutorial` shows only navigation shortcuts, not overall completion.
+
+The top-level menu also includes `Starred on GitHub`, which sits directly below `Copy paste` without a blank spacer, and shows `[not yet]` until selected and `[thanks ⭐]` after it has been resolved. Pressing Enter on that row calls `onOpenGithub`, which `/playground` and the mobile tether page wire to `window.open("https://github.com/diffplug/dormouse", "_blank", "noopener,noreferrer")`.
+
+After `Starred on GitHub`, the top-level menu shows the mystery row. It is `🧀 ??? 🧀` with `[LOCKED N/M]` while any section task is incomplete. `N/M` is computed from section checklist items only; `Starred on GitHub` and the mystery row do not count. When all section tasks are complete, the row becomes `🧀 The Burrow 🧀`. Pressing Enter on the unlocked row opens a short runner-local animation; `Esc` returns to the top-level menu.
 
 Inside a section, items render as one of:
 
