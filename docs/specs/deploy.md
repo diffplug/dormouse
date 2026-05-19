@@ -213,7 +213,7 @@ Note: the update manifest URLs include the version in the *path* (`/v0.1.0/`) bu
 A single `CHANGELOG.md` at the repo root, following [Keep a Changelog](https://keepachangelog.com/) format. The `[Unreleased]` section is promoted to `[X.Y.Z]` at release time. The release notes include both standalone and VSCode changes in one entry.
 
 The website changelog page imports generated data from `website/src/data/changelog.json`, but `CHANGELOG.md` is the source of truth and the JSON is gitignored. You do not normally run `website/scripts/generate-changelog.js` by hand:
-- `pnpm --filter mouseterm-website build` runs it through the website `prebuild` script before Vite bundles the static site.
+- `pnpm --filter mouseterm-website build` runs it through the website `prebuild` script before React Router prerenders the Vite static site.
 - `pnpm --filter mouseterm-website dev` and `pnpm --filter mouseterm-website test` also regenerate it through lifecycle scripts so clean checkouts work locally.
 
 If you edit `CHANGELOG.md` manually outside `/release-notes` and want to preview the generated data immediately, run `node website/scripts/generate-changelog.js`. Do not commit `website/src/data/changelog.json`.

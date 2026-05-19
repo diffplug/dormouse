@@ -1,7 +1,7 @@
 import deps from "../data/dependencies.json";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 
-export function Component() {
+export default function Dependencies() {
   return (
     <>
       <SiteHeader activePath="/dependencies" style={STATIC_PAGE_HEADER_STYLE} />

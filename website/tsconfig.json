@@ -11,7 +11,9 @@
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
+    "rootDirs": [".", "./.react-router/types"],
     "paths": {
       "ascii-splash-internal/*": ["node_modules/ascii-splash/dist/*"],
       "mouseterm-lib/*": ["../lib/src/*"]
@@ -21,5 +23,5 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src", ".react-router/types/**/*"]
 }

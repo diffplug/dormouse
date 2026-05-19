@@ -16,7 +16,7 @@ import { TutorialState } from "../lib/tutorial-state";
 import { BUSY_DEMO_DURATION_MS, BUSY_DEMO_INTERVAL_MS, TutRunner } from "../lib/tut-runner";
 import { ChangelogRunner } from "../lib/changelog-runner";
 
-export { Tether as Component };
+export default Tether;
 
 type FakePtyAdapter = import("mouseterm-lib/lib/platform/fake-adapter").FakePtyAdapter;
 

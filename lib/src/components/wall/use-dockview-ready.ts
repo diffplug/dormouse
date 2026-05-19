@@ -13,6 +13,7 @@ import { pickSplitDirection, swapPanelTitles } from './dockview-helpers';
 
 export function useDockviewReady({
   apiRef,
+  dockviewReadyInitializedRef,
   initialPaneIdsRef,
   restoredLayoutRef,
   initialDoorsRef,
@@ -31,6 +32,7 @@ export function useDockviewReady({
   onApiReady,
 }: {
   apiRef: RefObject<DockviewApi | null>;
+  dockviewReadyInitializedRef: RefObject<boolean>;
   initialPaneIdsRef: RefObject<string[] | undefined>;
   restoredLayoutRef: RefObject<unknown>;
   initialDoorsRef: RefObject<DooredItem[]>;
@@ -51,13 +53,12 @@ export function useDockviewReady({
   return useCallback((e: DockviewReadyEvent) => {
     apiRef.current = e.api;
     setDockviewApi(e.api);
+    if (dockviewReadyInitializedRef.current && e.api.totalPanels > 0) return;
+    dockviewReadyInitializedRef.current = true;
 
     const restored = initialPaneIdsRef.current;
     const layout = restoredLayoutRef.current;
     const restoredDoors = initialDoorsRef.current;
-    initialPaneIdsRef.current = undefined;
-    restoredLayoutRef.current = undefined;
-    initialDoorsRef.current = [];
     doorsRef.current = restoredDoors;
     setDoors(restoredDoors);
 
@@ -163,6 +164,7 @@ export function useDockviewReady({
     onApiReady?.(e.api);
   }, [
     apiRef,
+    dockviewReadyInitializedRef,
     doorsRef,
     enterTerminalModeRef,
     freshlySpawnedRef,

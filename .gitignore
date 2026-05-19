@@ -29,6 +29,7 @@ standalone/node_modules/
 
 # Website
 website/dist/
+website/.react-router/
 website/node_modules/
 website/src/data/changelog.json
 

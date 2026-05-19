@@ -1,10 +1,13 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react-swc";
+import { reactRouter } from "@react-router/dev/vite";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    ...(process.env.VITEST ? [] : [reactRouter()]),
+    tailwindcss(),
+  ],
   resolve: {
     alias: {
       "mouseterm-lib": path.resolve(__dirname, "../lib/src"),
@@ -20,5 +23,8 @@ export default defineConfig({
   },
   server: {
     host: true,
+  },
+  ssr: {
+    noExternal: ["@xterm/xterm", "@xterm/addon-fit"],
   },
 });

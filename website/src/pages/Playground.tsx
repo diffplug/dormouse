@@ -8,7 +8,7 @@ import { TutDetector } from "../lib/tut-detector";
 import { BUSY_DEMO_DURATION_MS, BUSY_DEMO_INTERVAL_MS, TutRunner } from "../lib/tut-runner";
 import { ChangelogRunner } from "../lib/changelog-runner";
 
-export { Playground as Component };
+export default Playground;
 
 const PANE_MAIN = "tut-main";
 const PANE_BOXED = "tut-boxed";
@@ -26,6 +26,7 @@ const isPhoneAtMount = () =>
 
 interface PaneSpec {
   id: string;
+  title: string;
   command: string;
 }
 
@@ -43,6 +44,7 @@ function Playground() {
   const detectorRef = useRef<TutDetector | null>(null);
   const stateRef = useRef<TutorialState | null>(null);
   const dockviewDisposablesRef = useRef<DockviewDisposable[]>([]);
+  const dockviewSetupDoneRef = useRef(false);
   const autoStartedRef = useRef<Set<string>>(new Set());
   const spawnUnsubRef = useRef<(() => void) | null>(null);
   const busyDemoDisposeRef = useRef<(() => void) | null>(null);
@@ -60,13 +62,13 @@ function Playground() {
     let cancelled = false;
     const panes: PaneSpec[] = isPhone
       ? [
-          { id: PANE_MAIN, command: "tut" },
-          { id: PANE_SPLASH, command: "ascii-splash" },
+          { id: PANE_MAIN, title: "tutorial", command: "tut" },
+          { id: PANE_SPLASH, title: "ascii-splash", command: "ascii-splash" },
         ]
       : [
-          { id: PANE_MAIN, command: "tut" },
-          { id: PANE_BOXED, command: "changelog" },
-          { id: PANE_SPLASH, command: "ascii-splash" },
+          { id: PANE_MAIN, title: "tutorial", command: "tut" },
+          { id: PANE_BOXED, title: "changelog", command: "changelog" },
+          { id: PANE_SPLASH, title: "ascii-splash", command: "ascii-splash" },
         ];
     async function loadWall() {
       const platform = await import("mouseterm-lib/lib/platform");
@@ -137,7 +139,10 @@ function Playground() {
       );
       shellRegistryRef.current = shellRegistry;
 
-      for (const pane of panes) shellRegistry.ensureShell(pane.id);
+      for (const pane of panes) {
+        registry.setTerminalUserTitle(pane.id, pane.title);
+        shellRegistry.ensureShell(pane.id);
+      }
 
       const paneById = new Map(panes.map((p) => [p.id, p]));
       // Subscribe before Wall mounts so the spawn fired by TerminalPane's
@@ -145,10 +150,16 @@ function Playground() {
       // the time we get here, fire immediately.
       spawnUnsubRef.current = adapter.onPtySpawn(({ id }) => {
         const pane = paneById.get(id);
-        if (pane) tryAutoStart(pane);
+        if (pane) {
+          registry.setTerminalUserTitle(pane.id, pane.title);
+          tryAutoStart(pane);
+        }
       });
       for (const pane of panes) {
-        if (adapter.hasPty(pane.id)) tryAutoStart(pane);
+        if (adapter.hasPty(pane.id)) {
+          registry.setTerminalUserTitle(pane.id, pane.title);
+          tryAutoStart(pane);
+        }
       }
 
       setWallModule({ Wall: wall.Wall });
@@ -161,6 +172,7 @@ function Playground() {
         disposable.dispose();
       }
       dockviewDisposablesRef.current = [];
+      dockviewSetupDoneRef.current = false;
       detectorRef.current?.dispose();
       detectorRef.current = null;
       shellRegistryRef.current?.disposeAll();
@@ -179,33 +191,44 @@ function Playground() {
     const shellRegistry = shellRegistryRef.current;
     shellRegistry?.ensureShell(PANE_MAIN);
 
-    const addDisposable = api.onDidAddPanel((panel: { id?: string } | undefined) => {
-      if (panel?.id) shellRegistryRef.current?.ensureShell(panel.id);
-    });
-    dockviewDisposablesRef.current.push(addDisposable);
+    const isFirstApiReady = !dockviewSetupDoneRef.current;
+    if (isFirstApiReady) {
+      dockviewSetupDoneRef.current = true;
+      const addDisposable = api.onDidAddPanel((panel: { id?: string } | undefined) => {
+        if (panel?.id) shellRegistryRef.current?.ensureShell(panel.id);
+      });
+      dockviewDisposablesRef.current.push(addDisposable);
+    }
 
-    if (isPhone) {
+    const ensurePanel = (
+      id: string,
+      title: string,
+      position?: { referencePanel: string; direction: "below" | "right" },
+    ) => {
+      if (api.getPanel(id)) return;
       api.addPanel({
-        id: PANE_SPLASH,
+        id,
         component: "terminal",
         tabComponent: "terminal",
-        title: "ascii-splash",
-        position: { referencePanel: PANE_MAIN, direction: "below" },
+        title,
+        position,
+      });
+    };
+
+    ensurePanel(PANE_MAIN, "tutorial");
+    if (isPhone) {
+      ensurePanel(PANE_SPLASH, "ascii-splash", {
+        referencePanel: PANE_MAIN,
+        direction: "below",
       });
     } else {
-      api.addPanel({
-        id: PANE_BOXED,
-        component: "terminal",
-        tabComponent: "terminal",
-        title: "changelog",
-        position: { referencePanel: PANE_MAIN, direction: "right" },
+      ensurePanel(PANE_BOXED, "changelog", {
+        referencePanel: PANE_MAIN,
+        direction: "right",
       });
-      api.addPanel({
-        id: PANE_SPLASH,
-        component: "terminal",
-        tabComponent: "terminal",
-        title: "ascii-splash",
-        position: { referencePanel: PANE_BOXED, direction: "below" },
+      ensurePanel(PANE_SPLASH, "ascii-splash", {
+        referencePanel: PANE_BOXED,
+        direction: "below",
       });
     }
 
@@ -215,7 +238,9 @@ function Playground() {
       mainPanel.api.setActive();
     }
 
-    detectorRef.current?.attach(api);
+    if (isFirstApiReady) {
+      detectorRef.current?.attach(api);
+    }
   }, [isPhone]);
 
   const handleWallEvent = useCallback((event: WallEvent) => {

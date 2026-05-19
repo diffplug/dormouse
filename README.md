@@ -33,7 +33,7 @@ The terminal is currently hosted by `node-pty`, but we plan on switching to a Ru
 
 ```sh
 pnpm install
-pnpm dev:website    # vite hotreload at http://localhost:5173/playground
+pnpm dev:website    # React Router dev server at http://localhost:5173/playground
 pnpm dev:standalone # tauri hotreload
 
 pnpm dogfood:vscode # builds the VSCode extension and installs it into your local VSCode

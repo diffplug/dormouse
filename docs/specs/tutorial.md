@@ -23,9 +23,9 @@ Three browser-side pieces in `website/src/lib/`, mirroring the pattern in `websi
   - **Phone (< 768px)** — two stacked panes; the changelog is dropped because the screen is too narrow to host it usefully:
     - **`tut-main`** (top, ~50%) — same as desktop.
     - **`tut-splash`** (bottom, ~50%) — same as desktop.
-- Side panes are added in `onApiReady` with `position: { referencePanel, direction }` after Wall creates the initial main pane.
+- Side panes are idempotently ensured in `onApiReady` with `position: { referencePanel, direction }` after Wall creates the initial main pane.
 
-Every playground pane gets a `TutorialShell` input handler through `PlaygroundShellRegistry`. Newly split or spawned fake terminals use `SCENARIO_SHELL_PROMPT` by default. The shell dispatches by command name to a `startProgram` factory provided by the page; the factory wires `tut` → `TutRunner` and `ascii-splash` / `splash` → `AsciiSplashRunner`.
+Every playground pane gets a `TutorialShell` input handler through `PlaygroundShellRegistry`. The built-in tutorial panes are seeded with user-pinned semantic titles (`tutorial`, `changelog`, `ascii-splash`) so the shared terminal header renderer shows stable demo labels while the fake terminals are idle. Newly split or spawned fake terminals use `SCENARIO_SHELL_PROMPT` by default. The shell dispatches by command name to a `startProgram` factory provided by the page; the factory wires `tut` → `TutRunner` and `ascii-splash` / `splash` → `AsciiSplashRunner`.
 
 ## Tutorial Sections
 

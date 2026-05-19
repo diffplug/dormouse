@@ -185,7 +185,10 @@ export function Wall({
     dialogKeyboardActiveRef.current = active;
   }, []);
 
-  // Consumed once in handleReady to restore existing sessions
+  // Baseline layout inputs for Dockview ready setup. The ready hook may need
+  // them more than once if a dev/hydration path replaces Dockview with a fresh
+  // empty API after an earlier ready callback.
+  const dockviewReadyInitializedRef = useRef(false);
   const initialPaneIdsRef = useRef(initialPaneIds);
   const restoredLayoutRef = useRef(restoredLayout);
   const initialDoorsRef = useRef((initialDoors ?? []) as DooredItem[]);
@@ -392,6 +395,7 @@ export function Wall({
 
   const handleReady = useDockviewReady({
     apiRef,
+    dockviewReadyInitializedRef,
     initialPaneIdsRef,
     restoredLayoutRef,
     initialDoorsRef,

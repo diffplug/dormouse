@@ -57,6 +57,8 @@ Wall
 
 The content area is a tiling layout of panes, powered by dockview. Each pane occupies its own group (no tab stacking). Panes are separated by a 6px gap. DockviewReact uses `singleTabMode="fullwidth"` so tabs stretch to fill the header.
 
+Dockview ready setup is idempotent per populated Dockview API. `onReady` may fire more than once in React dev/hydration paths; repeated callbacks against an API that already has panels only refresh the current API ref. A later callback with a fresh empty API can still seed from the original initial layout inputs. This prevents duplicate fallback panes without leaving a replaced Dockview instance blank.
+
 ### Tiling constraints
 
 **One session per group.** Dockview supports multiple panels per group (tabs), but we enforce one-panel-per-group to behave like a tiling window manager.

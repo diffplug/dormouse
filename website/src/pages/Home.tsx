@@ -23,7 +23,7 @@ import standaloneLatest from "@standalone-latest";
 import { prefersReducedMotion } from "mouseterm-lib/lib/ui-geometry";
 import { NotifySignupForm } from "../components/NotifySignupForm";
 
-export { Home as Component };
+export default Home;
 
 /** Multiplier on scroll required to drive the hero animation.
  *  1 = baseline, 2 = half as sensitive, 0.5 = twice as sensitive. */
