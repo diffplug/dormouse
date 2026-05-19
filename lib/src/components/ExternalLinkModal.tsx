@@ -3,8 +3,7 @@ import { ProhibitIcon, WarningOctagonIcon } from '@phosphor-icons/react';
 import type { DisplayMatchVerdict, ExternalUriDecision } from '../lib/external-links';
 import {
   ModalCloseButton,
-  ModalOverlay,
-  ModalSurface,
+  ModalFrame,
   modalActionButton,
   useModalFocusTrap,
 } from './design';
@@ -76,91 +75,90 @@ export function ExternalLinkModal({
   };
 
   return (
-    <ModalOverlay zIndex={9999} backdrop="strong" className="px-4 py-6">
-      <ModalSurface
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="external-link-modal-title"
-        elevation="modal"
-        className="w-full max-w-[34rem]"
-      >
-        <div className="flex items-start gap-3">
-          <h2
-            id="external-link-modal-title"
-            className="min-w-0 flex-1 text-sm leading-5 text-foreground"
-          >
-            {isDeceptive ? (
-              <DeceptiveTitle displayText={request.displayText} />
-            ) : blockedDecision ? (
-              <BlockedTitle reason={blockedDecision.reason} />
-            ) : (
-              <OpenTitle verdict={verdict} displayText={request.displayText} />
-            )}
-          </h2>
-          <ModalCloseButton onClick={onCancel} />
-        </div>
-
-        {/* Bordered nested box: explicit exception to the bg-only chrome rule
-            in DESIGN.md. The URL is the literal artifact the user is being
-            asked to scrutinize, and a framed box reads better than a bare
-            bg-shift in this high-stakes context. */}
-        <div className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-app-bg px-2.5 py-2 text-sm leading-relaxed text-foreground">
-          {displayUri}
-        </div>
-
-        <div className="mt-4 flex justify-end gap-2 text-xs">
+    <ModalFrame
+      ref={dialogRef}
+      titleId="external-link-modal-title"
+      zIndex={9999}
+      backdrop="strong"
+      elevation="modal"
+      overlayClassName="px-4 py-6"
+      className="w-full max-w-[34rem]"
+    >
+      <div className="flex items-start gap-3">
+        <h2
+          id="external-link-modal-title"
+          className="min-w-0 flex-1 text-sm leading-5 text-foreground"
+        >
           {isDeceptive ? (
-            <>
-              <button
-                ref={secondaryButtonRef}
-                type="button"
-                onClick={onCancel}
-                className={`${modalActionButton({ tone: 'secondary' })} min-w-[5rem]`}
-              >
-                Close
-              </button>
-              <button
-                ref={primaryButtonRef}
-                type="button"
-                onClick={handleCopy}
-                className={modalActionButton({ tone: 'primary' })}
-              >
-                Copy deceptive URL to clipboard
-              </button>
-            </>
-          ) : openableDecision ? (
-            <>
-              <button
-                ref={secondaryButtonRef}
-                type="button"
-                onClick={onCancel}
-                className={`${modalActionButton({ tone: 'secondary' })} min-w-[5rem]`}
-              >
-                Cancel
-              </button>
-              <button
-                ref={primaryButtonRef}
-                type="button"
-                onClick={onConfirm}
-                className={`${modalActionButton({ tone: 'primary' })} min-w-[5rem]`}
-              >
-                {'Open '}{buttonNoun}
-              </button>
-            </>
+            <DeceptiveTitle displayText={request.displayText} />
+          ) : blockedDecision ? (
+            <BlockedTitle reason={blockedDecision.reason} />
           ) : (
+            <OpenTitle verdict={verdict} displayText={request.displayText} />
+          )}
+        </h2>
+        <ModalCloseButton onClick={onCancel} />
+      </div>
+
+      {/* Bordered nested box: explicit exception to the bg-only chrome rule
+          in DESIGN.md. The URL is the literal artifact the user is being
+          asked to scrutinize, and a framed box reads better than a bare
+          bg-shift in this high-stakes context. */}
+      <div className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-app-bg px-2.5 py-2 text-sm leading-relaxed text-foreground">
+        {displayUri}
+      </div>
+
+      <div className="mt-4 flex justify-end gap-2 text-xs">
+        {isDeceptive ? (
+          <>
             <button
               ref={secondaryButtonRef}
               type="button"
               onClick={onCancel}
-              className={`${modalActionButton({ tone: 'primary' })} min-w-[6rem]`}
+              className={`${modalActionButton({ tone: 'secondary' })} min-w-[5rem]`}
             >
               Close
             </button>
-          )}
-        </div>
-      </ModalSurface>
-    </ModalOverlay>
+            <button
+              ref={primaryButtonRef}
+              type="button"
+              onClick={handleCopy}
+              className={modalActionButton({ tone: 'primary' })}
+            >
+              Copy deceptive URL to clipboard
+            </button>
+          </>
+        ) : openableDecision ? (
+          <>
+            <button
+              ref={secondaryButtonRef}
+              type="button"
+              onClick={onCancel}
+              className={`${modalActionButton({ tone: 'secondary' })} min-w-[5rem]`}
+            >
+              Cancel
+            </button>
+            <button
+              ref={primaryButtonRef}
+              type="button"
+              onClick={onConfirm}
+              className={`${modalActionButton({ tone: 'primary' })} min-w-[5rem]`}
+            >
+              {'Open '}{buttonNoun}
+            </button>
+          </>
+        ) : (
+          <button
+            ref={secondaryButtonRef}
+            type="button"
+            onClick={onCancel}
+            className={`${modalActionButton({ tone: 'primary' })} min-w-[6rem]`}
+          >
+            Close
+          </button>
+        )}
+      </div>
+    </ModalFrame>
   );
 }
 

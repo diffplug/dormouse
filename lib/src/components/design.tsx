@@ -233,6 +233,54 @@ export const ModalSurface = forwardRef<HTMLDivElement, ModalSurfaceProps>(functi
   );
 });
 
+export type ModalFrameProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVariants & {
+  titleId: string;
+  targetElement?: HTMLElement | null;
+  zIndex?: number;
+  backdrop?: ModalOverlayVariants['backdrop'];
+  overlayClassName?: string;
+  overlayStyle?: CSSProperties;
+};
+
+export const ModalFrame = forwardRef<HTMLDivElement, ModalFrameProps>(function ModalFrame({
+  children,
+  titleId,
+  targetElement,
+  zIndex,
+  backdrop,
+  overlayClassName,
+  overlayStyle,
+  padding,
+  align,
+  elevation,
+  className,
+  ...props
+}, ref) {
+  return (
+    <ModalOverlay
+      targetElement={targetElement}
+      zIndex={zIndex}
+      backdrop={backdrop}
+      className={overlayClassName}
+      style={overlayStyle}
+    >
+      <ModalSurface
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        padding={padding}
+        align={align}
+        elevation={elevation}
+        className={className}
+        {...props}
+      >
+        {children}
+      </ModalSurface>
+    </ModalOverlay>
+  );
+});
+
 const MODAL_FOCUSABLE_SELECTOR = [
   'a[href]',
   'button:not([disabled])',

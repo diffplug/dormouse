@@ -1,5 +1,5 @@
 import { resolvePaneElement } from '../lib/spatial-nav';
-import { ModalOverlay, ModalSurface, Shortcut } from './design';
+import { ModalFrame, Shortcut } from './design';
 
 export type KillExit = 'shake' | 'confirm';
 
@@ -18,16 +18,9 @@ export function randomKillChar(): string {
   return KILL_CONFIRM_CHARS[Math.floor(Math.random() * KILL_CONFIRM_CHARS.length)];
 }
 
-export function KillConfirmCard({ char, onCancel, exit }: { char: string; onCancel?: () => void; exit?: KillExit }) {
+function KillConfirmContent({ char, onCancel, exit }: { char: string; onCancel?: () => void; exit?: KillExit }) {
   return (
-    <ModalSurface
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="kill-confirm-title"
-      padding="spacious"
-      align="center"
-      className={exit === 'shake' ? 'motion-safe:animate-shake-x' : undefined}
-    >
+    <>
       <h2 id="kill-confirm-title" className="text-base font-bold mb-3 text-foreground">
         Confirm kill
       </h2>
@@ -47,7 +40,34 @@ export function KillConfirmCard({ char, onCancel, exit }: { char: string; onCanc
           <span className="justify-self-start group-hover:text-foreground transition-colors">to cancel</span>
         </button>
       </div>
-    </ModalSurface>
+    </>
+  );
+}
+
+export function KillConfirmModal({
+  char,
+  onCancel,
+  exit,
+  targetElement,
+  overlayClassName,
+}: {
+  char: string;
+  onCancel?: () => void;
+  exit?: KillExit;
+  targetElement?: HTMLElement | null;
+  overlayClassName?: string;
+}) {
+  return (
+    <ModalFrame
+      titleId="kill-confirm-title"
+      targetElement={targetElement}
+      padding="spacious"
+      align="center"
+      className={exit === 'shake' ? 'motion-safe:animate-shake-x' : undefined}
+      overlayClassName={overlayClassName}
+    >
+      <KillConfirmContent char={char} onCancel={onCancel} exit={exit} />
+    </ModalFrame>
   );
 }
 
@@ -58,11 +78,12 @@ export function KillConfirmOverlay({ confirmKill, paneElements, onCancel }: {
 }) {
   const panelEl = resolvePaneElement(paneElements.get(confirmKill.id));
   return (
-    <ModalOverlay
+    <KillConfirmModal
+      char={confirmKill.char}
+      onCancel={onCancel}
+      exit={confirmKill.exit}
       targetElement={panelEl}
-      className={confirmKill.exit === 'confirm' ? 'kill-overlay-confirm' : undefined}
-    >
-      <KillConfirmCard char={confirmKill.char} onCancel={onCancel} exit={confirmKill.exit} />
-    </ModalOverlay>
+      overlayClassName={confirmKill.exit === 'confirm' ? 'kill-overlay-confirm' : undefined}
+    />
   );
 }

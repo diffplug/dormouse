@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ModalCloseButton,
-  ModalOverlay,
-  ModalSurface,
+  ModalFrame,
   modalActionButton,
   useModalFocusTrap,
 } from '../../lib/src/components/design';
@@ -54,72 +53,71 @@ export function UpdateDebugModal({ open, onClose, failure, body }: UpdateDebugMo
   if (!open) return null;
 
   return (
-    <ModalOverlay zIndex={50} backdrop="strong" className="px-4 py-6">
-      <ModalSurface
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="update-debug-modal-title"
-        elevation="modal"
-        padding="none"
-        className="flex max-h-[80vh] w-full max-w-[35rem] flex-col overflow-hidden"
-      >
-        <div className="flex shrink-0 items-center justify-between border-b border-border bg-surface-raised px-4 py-3">
-          <h2 id="update-debug-modal-title" className="text-sm font-medium">
-            Update failed
-          </h2>
-          <ModalCloseButton ref={closeButtonRef} onClick={onClose} />
+    <ModalFrame
+      ref={dialogRef}
+      titleId="update-debug-modal-title"
+      zIndex={50}
+      backdrop="strong"
+      elevation="modal"
+      padding="none"
+      overlayClassName="px-4 py-6"
+      className="flex max-h-[80vh] w-full max-w-[35rem] flex-col overflow-hidden"
+    >
+      <div className="flex shrink-0 items-center justify-between border-b border-border bg-surface-raised px-4 py-3">
+        <h2 id="update-debug-modal-title" className="text-sm font-medium">
+          Update failed
+        </h2>
+        <ModalCloseButton ref={closeButtonRef} onClick={onClose} />
+      </div>
+
+      <div className="space-y-4 overflow-y-auto px-4 py-3">
+        <div className="space-y-1">
+          <p className="text-sm">
+            We couldn't install v{failure.version}. The error was:
+          </p>
+          <pre className="max-h-32 overflow-auto rounded border border-border bg-app-bg p-2 text-xs font-mono whitespace-pre-wrap break-words">
+            {errorPreview || '(no error captured)'}
+          </pre>
         </div>
 
-        <div className="space-y-4 overflow-y-auto px-4 py-3">
-          <div className="space-y-1">
-            <p className="text-sm">
-              We couldn't install v{failure.version}. The error was:
-            </p>
-            <pre className="max-h-32 overflow-auto rounded border border-border bg-app-bg p-2 text-xs font-mono whitespace-pre-wrap break-words">
-              {errorPreview || '(no error captured)'}
-            </pre>
-          </div>
+        <div className="space-y-1">
+          <p className="text-sm font-medium">1. Search existing reports</p>
+          <p className="text-xs text-muted">
+            Someone may have already hit this. A quick search saves a duplicate report.
+          </p>
+          <button
+            type="button"
+            onClick={() => openIssueSearch(errorPreview)}
+            className={modalActionButton({ tone: 'secondary' })}
+          >
+            Search GitHub issues
+          </button>
+        </div>
 
-          <div className="space-y-1">
-            <p className="text-sm font-medium">1. Search existing reports</p>
-            <p className="text-xs text-muted">
-              Someone may have already hit this. A quick search saves a duplicate report.
-            </p>
+        <div className="space-y-1">
+          <p className="text-sm font-medium">2. File a new bug</p>
+          <p className="text-xs text-muted">
+            If you can't find an existing bug, copy this report and paste it into a new issue.
+          </p>
+          <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => openIssueSearch(errorPreview)}
+              onClick={handleCopy}
+              disabled={!body}
               className={modalActionButton({ tone: 'secondary' })}
             >
-              Search GitHub issues
+              Copy report
             </button>
+            {copied && <span className="text-xs text-foreground">Copied</span>}
           </div>
-
-          <div className="space-y-1">
-            <p className="text-sm font-medium">2. File a new bug</p>
-            <p className="text-xs text-muted">
-              If you can't find an existing bug, copy this report and paste it into a new issue.
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleCopy}
-                disabled={!body}
-                className={modalActionButton({ tone: 'secondary' })}
-              >
-                Copy report
-              </button>
-              {copied && <span className="text-xs text-foreground">Copied</span>}
-            </div>
-            <textarea
-              readOnly
-              value={body ?? 'Gathering diagnostic info...'}
-              className="block h-48 w-full resize-y rounded border border-border bg-app-bg p-2 text-xs font-mono text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring"
-              onFocus={(e) => e.currentTarget.select()}
-            />
-          </div>
+          <textarea
+            readOnly
+            value={body ?? 'Gathering diagnostic info...'}
+            className="block h-48 w-full resize-y rounded border border-border bg-app-bg p-2 text-xs font-mono text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring"
+            onFocus={(e) => e.currentTarget.select()}
+          />
         </div>
-      </ModalSurface>
-    </ModalOverlay>
+      </div>
+    </ModalFrame>
   );
 }

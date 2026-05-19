@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
-import { KillConfirmCard, type KillExit } from '../components/KillConfirm';
-import { ModalOverlay } from '../components/design';
+import { KillConfirmModal, type KillExit } from '../components/KillConfirm';
 
 function KillModal({ char = 'G', onCancel, exit }: { char?: string; onCancel?: () => void; exit?: KillExit }) {
   const [frameEl, setFrameEl] = useState<HTMLDivElement | null>(null);
@@ -12,9 +11,7 @@ function KillModal({ char = 'G', onCancel, exit }: { char?: string; onCancel?: (
         <div>user@dormouse:~$ npm run build</div>
         <div className="text-muted">Building project...</div>
       </div>
-      <ModalOverlay targetElement={frameEl}>
-        <KillConfirmCard char={char} onCancel={onCancel} exit={exit} />
-      </ModalOverlay>
+      <KillConfirmModal char={char} onCancel={onCancel} exit={exit} targetElement={frameEl} />
     </div>
   );
 }
