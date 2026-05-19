@@ -4,7 +4,6 @@ import {
   ModalFrame,
   modalActionButton,
   modalReviewBlock,
-  useModalFocusTrap,
 } from '../../lib/src/components/design';
 import { openIssueSearch } from './updater';
 
@@ -16,18 +15,8 @@ interface UpdateDebugModalProps {
 }
 
 export function UpdateDebugModal({ open, onClose, failure, body }: UpdateDebugModalProps) {
-  const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [copied, setCopied] = useState(false);
-
-  useModalFocusTrap(dialogRef, {
-    initialFocusRef: closeButtonRef,
-    onEscape: onClose,
-  });
-
-  useEffect(() => {
-    if (open) closeButtonRef.current?.focus();
-  }, [open]);
 
   useEffect(() => {
     if (!copied) return;
@@ -55,7 +44,6 @@ export function UpdateDebugModal({ open, onClose, failure, body }: UpdateDebugMo
 
   return (
     <ModalFrame
-      ref={dialogRef}
       titleId="update-debug-modal-title"
       zIndex={50}
       backdrop="strong"
@@ -63,6 +51,8 @@ export function UpdateDebugModal({ open, onClose, failure, body }: UpdateDebugMo
       padding="none"
       overlayClassName="px-4 py-6"
       className="flex max-h-[80vh] w-full max-w-[35rem] flex-col overflow-hidden"
+      initialFocusRef={closeButtonRef}
+      onEscape={onClose}
     >
       <div className="flex shrink-0 items-center justify-between border-b border-border bg-surface-raised px-4 py-3">
         <h2 id="update-debug-modal-title" className="text-sm font-medium">

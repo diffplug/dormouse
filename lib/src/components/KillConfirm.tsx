@@ -1,3 +1,4 @@
+import { useRef, type RefObject } from 'react';
 import { resolvePaneElement } from '../lib/spatial-nav';
 import { ModalFrame, Shortcut } from './design';
 
@@ -18,7 +19,17 @@ export function randomKillChar(): string {
   return KILL_CONFIRM_CHARS[Math.floor(Math.random() * KILL_CONFIRM_CHARS.length)];
 }
 
-function KillConfirmContent({ char, onCancel, exit }: { char: string; onCancel?: () => void; exit?: KillExit }) {
+function KillConfirmContent({
+  char,
+  onCancel,
+  exit,
+  cancelRef,
+}: {
+  char: string;
+  onCancel?: () => void;
+  exit?: KillExit;
+  cancelRef?: RefObject<HTMLButtonElement | null>;
+}) {
   return (
     <>
       <h2 id="kill-confirm-title" className="text-base font-bold mb-3 text-foreground">
@@ -35,7 +46,12 @@ function KillConfirmContent({ char, onCancel, exit }: { char: string; onCancel?:
       <div className="text-sm text-muted leading-relaxed grid grid-cols-[auto_auto] gap-x-2 justify-center">
         <Shortcut className="justify-self-end">{char}</Shortcut>
         <span className="justify-self-start">to confirm</span>
-        <button type="button" onClick={onCancel} className="contents group cursor-pointer">
+        <button
+          ref={cancelRef}
+          type="button"
+          onClick={onCancel}
+          className="contents group cursor-pointer"
+        >
           <Shortcut className="justify-self-end group-hover:text-foreground transition-colors">Esc</Shortcut>
           <span className="justify-self-start group-hover:text-foreground transition-colors">to cancel</span>
         </button>
@@ -57,6 +73,7 @@ export function KillConfirmModal({
   targetElement?: HTMLElement | null;
   overlayClassName?: string;
 }) {
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
   return (
     <ModalFrame
       titleId="kill-confirm-title"
@@ -65,8 +82,15 @@ export function KillConfirmModal({
       align="center"
       className={exit === 'shake' ? 'motion-safe:animate-shake-x' : undefined}
       overlayClassName={overlayClassName}
+      initialFocusRef={cancelButtonRef}
+      onEscape={onCancel}
     >
-      <KillConfirmContent char={char} onCancel={onCancel} exit={exit} />
+      <KillConfirmContent
+        char={char}
+        onCancel={onCancel}
+        exit={exit}
+        cancelRef={cancelButtonRef}
+      />
     </ModalFrame>
   );
 }

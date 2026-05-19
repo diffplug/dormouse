@@ -1,7 +1,7 @@
 import { clsx } from 'clsx';
 import { tv, type VariantProps } from 'tailwind-variants';
 import { XIcon } from '@phosphor-icons/react';
-import { forwardRef, useEffect, useLayoutEffect, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode, RefObject } from 'react';
 
 // App-wide type scale, color strategy, and chrome conventions: see
@@ -289,6 +289,9 @@ export type ModalFrameProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVaria
   backdrop?: ModalOverlayVariants['backdrop'];
   overlayClassName?: string;
   overlayStyle?: CSSProperties;
+  initialFocusRef?: RefObject<HTMLElement | null>;
+  onEscape?: () => void;
+  trapFocus?: boolean;
 };
 
 export const ModalFrame = forwardRef<HTMLDivElement, ModalFrameProps>(function ModalFrame({
@@ -299,12 +302,23 @@ export const ModalFrame = forwardRef<HTMLDivElement, ModalFrameProps>(function M
   backdrop,
   overlayClassName,
   overlayStyle,
+  initialFocusRef,
+  onEscape,
+  trapFocus = true,
   padding,
   align,
   elevation,
   className,
   ...props
 }, ref) {
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  useImperativeHandle(ref, () => surfaceRef.current as HTMLDivElement);
+  useModalFocusTrap(surfaceRef, {
+    active: trapFocus,
+    initialFocusRef,
+    onEscape,
+  });
+
   return (
     <ModalOverlay
       targetElement={targetElement}
@@ -314,7 +328,7 @@ export const ModalFrame = forwardRef<HTMLDivElement, ModalFrameProps>(function M
       style={overlayStyle}
     >
       <ModalSurface
-        ref={ref}
+        ref={surfaceRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -342,18 +356,23 @@ const MODAL_FOCUSABLE_SELECTOR = [
 export function useModalFocusTrap<TDialog extends HTMLElement, TInitial extends HTMLElement>(
   dialogRef: RefObject<TDialog | null>,
   {
+    active = true,
     initialFocusRef,
     onEscape,
   }: {
+    active?: boolean;
     initialFocusRef?: RefObject<TInitial | null>;
     onEscape?: () => void;
   } = {},
 ): void {
   useEffect(() => {
+    if (!active) return;
     initialFocusRef?.current?.focus();
-  }, [initialFocusRef]);
+  }, [active, initialFocusRef]);
 
   useEffect(() => {
+    if (!active) return;
+
     const handleKeyDown = (event: KeyboardEvent) => {
       const dialog = dialogRef.current;
       if (!dialog) return;
@@ -383,7 +402,7 @@ export function useModalFocusTrap<TDialog extends HTMLElement, TInitial extends 
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [dialogRef, onEscape]);
+  }, [active, dialogRef, onEscape]);
 }
 
 // Chrome buttons: icon-only and labeled triggers used in the standalone app

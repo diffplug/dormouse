@@ -6,7 +6,6 @@ import {
   ModalFrame,
   ModalReviewBlock,
   modalActionButton,
-  useModalFocusTrap,
 } from './design';
 
 export interface ExternalLinkModalRequest {
@@ -50,7 +49,6 @@ export function ExternalLinkModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
   const primaryButtonRef = useRef<HTMLButtonElement>(null);
   const secondaryButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -63,13 +61,6 @@ export function ExternalLinkModal({
     ? pickOpenButtonNoun(openableDecision.scheme, openableDecision.uri)
     : 'URL';
 
-  useModalFocusTrap(dialogRef, {
-    // Deceptive case: focus the copy action so a default Enter doesn't dismiss
-    // silently. Everywhere else: focus the safe affordance (Cancel/Close).
-    initialFocusRef: isDeceptive ? primaryButtonRef : secondaryButtonRef,
-    onEscape: onCancel,
-  });
-
   const handleCopy = () => {
     void navigator.clipboard.writeText(request.uri);
     onCancel();
@@ -77,13 +68,16 @@ export function ExternalLinkModal({
 
   return (
     <ModalFrame
-      ref={dialogRef}
       titleId="external-link-modal-title"
       zIndex={9999}
       backdrop="strong"
       elevation="modal"
       overlayClassName="px-4 py-6"
       className="w-full max-w-[34rem]"
+      // Deceptive case: focus the copy action so a default Enter doesn't dismiss
+      // silently. Everywhere else: focus the safe affordance (Cancel/Close).
+      initialFocusRef={isDeceptive ? primaryButtonRef : secondaryButtonRef}
+      onEscape={onCancel}
     >
       <div className="flex items-start gap-3">
         <h2
