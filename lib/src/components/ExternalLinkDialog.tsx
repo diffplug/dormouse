@@ -118,7 +118,11 @@ export function ExternalLinkDialog({
           </button>
         </div>
 
-        <div className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-app-bg px-2.5 py-2 text-sm leading-relaxed text-foreground">
+        {/* Bordered nested box: explicit exception to the bg-only chrome rule
+            in DESIGN.md. The URL is the literal artifact the user is being
+            asked to scrutinize, and a framed box reads better than a bare
+            bg-shift in this high-stakes context. */}
+        <div className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-app-bg px-2.5 py-2 text-sm leading-relaxed text-foreground">
           {displayUri}
         </div>
 
