@@ -8,7 +8,7 @@
   },
   {
     "name": "@tauri-apps/api",
-    "version": "2.10.1",
+    "version": "2.11.0",
     "license": "MIT OR Apache-2.0",
     "author": "Tauri Apps Contributors",
     "homepage": "https://github.com/tauri-apps/tauri#readme"
@@ -29,14 +29,14 @@
   },
   {
     "name": "@xterm/addon-fit",
-    "version": "0.11.0",
+    "version": "0.12.0-beta.219",
     "license": "MIT",
     "author": "The xterm.js authors",
     "homepage": "https://github.com/xtermjs/xterm.js/tree/master#readme"
   },
   {
     "name": "@xterm/xterm",
-    "version": "6.0.0",
+    "version": "6.1.0-beta.219",
     "license": "MIT",
     "author": "Christopher Jeffrey, SourceLair Private Company, xterm.js authors",
     "homepage": "https://github.com/xtermjs/xterm.js#readme"
@@ -71,7 +71,7 @@
   },
   {
     "name": "fflate",
-    "version": "0.8.2",
+    "version": "0.8.3",
     "license": "MIT",
     "author": "Arjun Barrett",
     "homepage": "https://101arrowz.github.io/fflate"
@@ -92,21 +92,21 @@
   },
   {
     "name": "node-pty",
-    "version": "1.2.0-beta.12",
+    "version": "1.2.0-beta.13",
     "license": "MIT",
     "author": "Microsoft Corporation",
     "homepage": "https://github.com/microsoft/node-pty"
   },
   {
     "name": "react",
-    "version": "19.2.4",
+    "version": "19.2.6",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
   },
   {
     "name": "react-dom",
-    "version": "19.2.4",
+    "version": "19.2.6",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
@@ -127,7 +127,7 @@
   },
   {
     "name": "tailwind-merge",
-    "version": "3.5.0",
+    "version": "3.6.0",
     "license": "MIT",
     "author": "Dany Castillo",
     "homepage": "https://github.com/dcastil/tailwind-merge"
@@ -141,7 +141,7 @@
   },
   {
     "name": "tailwindcss",
-    "version": "4.2.2",
+    "version": "4.3.0",
     "license": "MIT",
     "author": "Tailwind Labs, Inc.",
     "homepage": "https://tailwindcss.com"

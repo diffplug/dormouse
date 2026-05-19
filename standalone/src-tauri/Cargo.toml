@@ -6,9 +6,6 @@ authors = ["DiffPlug"]
 license = "FSL-1.1-MIT"
 edition = "2021"
 
-[registry]
-global-min-publish-age = "14 days"
-
 [lib]
 name = "dormouse_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
