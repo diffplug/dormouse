@@ -150,11 +150,13 @@ The local script must also select release artifacts by strict expected paths ins
 | macOS app bundle | `standalone-mac-aarch64/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Dormouse.app` |
 | Windows app executable | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/dormouse.exe` |
 | Windows installer | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/Dormouse_X.Y.Z_x64-setup.exe` |
-| NSIS script | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/installer.nsi` |
+| NSIS script | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/nsis/x64/installer.nsi` |
 | NSIS plugin | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/nsis/x64/plugins/nsis_tauri_utils.dll` |
 | Linux AppImage | `standalone-linux-x64/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/Dormouse_X.Y.Z_amd64.AppImage` |
 
 Release upload likewise uses only the three stable output filenames (`Dormouse-macos-aarch64.tar.gz`, `Dormouse-windows-x64-setup.exe`, `Dormouse-linux-x86_64.AppImage`) and fails if `release-signed/release-assets` contains any other files.
+
+When rebuilding the Windows installer locally, the script patches the Tauri-generated NSIS `ADDITIONALPLUGINSPATH` and `OUTFILE` values to the expected local plugin directory and installer path before running `makensis`.
 
 ### One-time setup
 

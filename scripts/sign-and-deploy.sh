@@ -193,7 +193,7 @@ linux_appimage_path() {
 nsis_script_path() {
     require_file \
         "NSIS script" \
-        "$(windows_release_dir)/bundle/nsis/installer.nsi"
+        "$(windows_release_dir)/nsis/x64/installer.nsi"
 }
 
 nsis_plugin_path() {
@@ -299,6 +299,8 @@ rebuild_windows_installer() {
 
     local installer_name
     installer_name="$(basename "$installer_path")"
+
+    sed -i '' "s|^!define OUTFILE .*|!define OUTFILE \"$installer_path\"|" "$script_path"
 
     rm -f "$installer_path"
     log "Rebuilding NSIS installer: $installer_name"
