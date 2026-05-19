@@ -1,7 +1,8 @@
 import { clsx } from 'clsx';
 import { tv, type VariantProps } from 'tailwind-variants';
+import { XIcon } from '@phosphor-icons/react';
 import { forwardRef, useEffect, useLayoutEffect, useState } from 'react';
-import type { CSSProperties, HTMLAttributes, ReactNode, RefObject } from 'react';
+import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode, RefObject } from 'react';
 
 // App-wide type scale, color strategy, and chrome conventions: see
 // docs/specs/theme.md and AGENTS.md.
@@ -83,6 +84,7 @@ export const modalSurface = tv({
   base: 'rounded-lg border border-border bg-surface-raised font-mono text-foreground shadow-lg',
   variants: {
     padding: {
+      none: 'p-0',
       compact: 'p-3',
       default: 'p-4',
       spacious: 'px-6 py-4',
@@ -117,6 +119,30 @@ export type ModalActionButtonVariants = VariantProps<typeof modalActionButton>;
 export const modalIconButton = tv({
   base: 'shrink-0 rounded p-0.5 text-muted transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring',
 });
+
+export type ModalCloseButtonProps = ButtonHTMLAttributes<HTMLButtonElement>;
+
+export const ModalCloseButton = forwardRef<HTMLButtonElement, ModalCloseButtonProps>(
+  function ModalCloseButton({
+    children,
+    className,
+    type = 'button',
+    ...props
+  }, ref) {
+    const ariaLabel = props['aria-label'] ?? 'Close';
+    return (
+      <button
+        ref={ref}
+        type={type}
+        {...props}
+        aria-label={ariaLabel}
+        className={clsx(modalIconButton(), className)}
+      >
+        {children ?? <XIcon size={13} weight="bold" />}
+      </button>
+    );
+  },
+);
 
 export function useMeasuredElementRect(element: HTMLElement | null): ModalRect | null {
   const [rect, setRect] = useState<ModalRect | null>(null);

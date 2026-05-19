@@ -20,8 +20,17 @@ export function randomKillChar(): string {
 
 export function KillConfirmCard({ char, onCancel, exit }: { char: string; onCancel?: () => void; exit?: KillExit }) {
   return (
-    <ModalSurface padding="spacious" align="center" className={exit === 'shake' ? 'motion-safe:animate-shake-x' : undefined}>
-      <h2 className="text-base font-bold mb-3 text-foreground">Confirm kill</h2>
+    <ModalSurface
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="kill-confirm-title"
+      padding="spacious"
+      align="center"
+      className={exit === 'shake' ? 'motion-safe:animate-shake-x' : undefined}
+    >
+      <h2 id="kill-confirm-title" className="text-base font-bold mb-3 text-foreground">
+        Confirm kill
+      </h2>
       <div className="bg-app-bg py-2 px-6 rounded border border-border inline-block mb-2">
         <span
           className={`text-xl font-bold${exit === 'confirm' ? ' kill-letter-flash' : ''}`}
@@ -57,4 +66,3 @@ export function KillConfirmOverlay({ confirmKill, paneElements, onCancel }: {
     </ModalOverlay>
   );
 }
-

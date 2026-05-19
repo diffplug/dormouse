@@ -1,18 +1,20 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { useState } from 'react';
 import { KillConfirmCard, type KillExit } from '../components/KillConfirm';
+import { ModalOverlay } from '../components/design';
 
 function KillModal({ char = 'G', onCancel, exit }: { char?: string; onCancel?: () => void; exit?: KillExit }) {
+  const [frameEl, setFrameEl] = useState<HTMLDivElement | null>(null);
   return (
-    <div className="relative bg-app-bg" style={{ width: 600, height: 400 }}>
+    <div ref={setFrameEl} className="relative bg-app-bg" style={{ width: 600, height: 400 }}>
       {/* Simulated terminal content behind the overlay */}
       <div className="p-4 font-mono text-sm text-terminal-fg">
         <div>user@dormouse:~$ npm run build</div>
         <div className="text-muted">Building project...</div>
       </div>
-      {/* Kill confirmation overlay — positioned over the pane */}
-      <div className="absolute inset-0 flex items-center justify-center bg-app-bg/50 rounded">
+      <ModalOverlay targetElement={frameEl}>
         <KillConfirmCard char={char} onCancel={onCancel} exit={exit} />
-      </div>
+      </ModalOverlay>
     </div>
   );
 }

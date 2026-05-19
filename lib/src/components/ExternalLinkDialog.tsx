@@ -1,11 +1,11 @@
 import { useRef } from 'react';
-import { ProhibitIcon, WarningOctagonIcon, XIcon } from '@phosphor-icons/react';
+import { ProhibitIcon, WarningOctagonIcon } from '@phosphor-icons/react';
 import type { DisplayMatchVerdict, ExternalUriDecision } from '../lib/external-links';
 import {
+  ModalCloseButton,
   ModalOverlay,
   ModalSurface,
   modalActionButton,
-  modalIconButton,
   useModalFocusTrap,
 } from './design';
 
@@ -98,14 +98,7 @@ export function ExternalLinkDialog({
               <OpenTitle verdict={verdict} displayText={request.displayText} />
             )}
           </h2>
-          <button
-            type="button"
-            aria-label="Close"
-            className={modalIconButton()}
-            onClick={onCancel}
-          >
-            <XIcon size={13} weight="bold" />
-          </button>
+          <ModalCloseButton onClick={onCancel} />
         </div>
 
         {/* Bordered nested box: explicit exception to the bg-only chrome rule
