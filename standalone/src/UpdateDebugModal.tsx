@@ -8,14 +8,14 @@ import {
 } from '../../lib/src/components/design';
 import { openIssueSearch } from './updater';
 
-interface UpdateDebugDialogProps {
+interface UpdateDebugModalProps {
   open: boolean;
   onClose: () => void;
   failure: { version: string; error?: string };
   body: string | null;
 }
 
-export function UpdateDebugDialog({ open, onClose, failure, body }: UpdateDebugDialogProps) {
+export function UpdateDebugModal({ open, onClose, failure, body }: UpdateDebugModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [copied, setCopied] = useState(false);
@@ -59,13 +59,13 @@ export function UpdateDebugDialog({ open, onClose, failure, body }: UpdateDebugD
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="update-debug-dialog-title"
+        aria-labelledby="update-debug-modal-title"
         elevation="modal"
         padding="none"
         className="flex max-h-[80vh] w-full max-w-[35rem] flex-col overflow-hidden"
       >
         <div className="flex shrink-0 items-center justify-between border-b border-border bg-surface-raised px-4 py-3">
-          <h2 id="update-debug-dialog-title" className="text-sm font-medium">
+          <h2 id="update-debug-modal-title" className="text-sm font-medium">
             Update failed
           </h2>
           <ModalCloseButton ref={closeButtonRef} onClick={onClose} />

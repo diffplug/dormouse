@@ -9,7 +9,7 @@ import App from "dormouse-lib/App";
 import "dormouse-lib/index.css";
 import { TauriAdapter } from "./tauri-adapter";
 import { UpdateBanner } from "./UpdateBanner";
-import { UpdateDebugDialog } from "./UpdateDebugDialog";
+import { UpdateDebugModal } from "./UpdateDebugModal";
 import { AppBar, type ShellEntry } from "./AppBar";
 import {
   startUpdateCheck,
@@ -56,7 +56,7 @@ function ConnectedUpdateBanner() {
         }}
       />
       {snapshot && (
-        <UpdateDebugDialog
+        <UpdateDebugModal
           open={true}
           onClose={() => {
             setSnapshot(null);

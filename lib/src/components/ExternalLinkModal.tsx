@@ -9,7 +9,7 @@ import {
   useModalFocusTrap,
 } from './design';
 
-export interface ExternalLinkDialogRequest {
+export interface ExternalLinkModalRequest {
   uri: string;
   displayText: string;
   verdict: DisplayMatchVerdict;
@@ -41,12 +41,12 @@ function schemePrefix(scheme: string, uri: string): string {
   return uri.slice(scheme.length + 1).startsWith('//') ? `${scheme}://` : `${scheme}:`;
 }
 
-export function ExternalLinkDialog({
+export function ExternalLinkModal({
   request,
   onCancel,
   onConfirm,
 }: {
-  request: ExternalLinkDialogRequest;
+  request: ExternalLinkModalRequest;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -81,13 +81,13 @@ export function ExternalLinkDialog({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="external-link-dialog-title"
+        aria-labelledby="external-link-modal-title"
         elevation="modal"
         className="w-full max-w-[34rem]"
       >
         <div className="flex items-start gap-3">
           <h2
-            id="external-link-dialog-title"
+            id="external-link-modal-title"
             className="min-w-0 flex-1 text-sm leading-5 text-foreground"
           >
             {isDeceptive ? (
