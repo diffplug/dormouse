@@ -15,7 +15,6 @@ function UpdateDebugModalStory({ failure, body }: StoryArgs) {
     <div className="bg-app-bg" style={{ width: 800, height: 600, position: 'relative' }}>
       <UpdateDebugModal
         key={tick}
-        open={true}
         onClose={() => setTick((t) => t + 1)}
         failure={failure}
         body={body}

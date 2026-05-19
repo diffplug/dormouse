@@ -1,4 +1,4 @@
-import { useRef, type RefObject } from 'react';
+import { useRef } from 'react';
 import { resolvePaneElement } from '../lib/spatial-nav';
 import { ModalFrame, Shortcut } from './design';
 
@@ -19,19 +19,29 @@ export function randomKillChar(): string {
   return KILL_CONFIRM_CHARS[Math.floor(Math.random() * KILL_CONFIRM_CHARS.length)];
 }
 
-function KillConfirmContent({
+export function KillConfirmModal({
   char,
   onCancel,
   exit,
-  cancelRef,
+  targetElement,
 }: {
   char: string;
   onCancel?: () => void;
   exit?: KillExit;
-  cancelRef?: RefObject<HTMLButtonElement | null>;
+  targetElement?: HTMLElement | null;
 }) {
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
   return (
-    <>
+    <ModalFrame
+      titleId="kill-confirm-title"
+      targetElement={targetElement}
+      padding="spacious"
+      align="center"
+      className={exit === 'shake' ? 'motion-safe:animate-shake-x' : undefined}
+      overlayClassName={exit === 'confirm' ? 'kill-overlay-confirm' : undefined}
+      initialFocusRef={cancelButtonRef}
+      onEscape={onCancel}
+    >
       <h2 id="kill-confirm-title" className="text-base font-bold mb-3 text-foreground">
         Confirm kill
       </h2>
@@ -47,7 +57,7 @@ function KillConfirmContent({
         <Shortcut className="justify-self-end">{char}</Shortcut>
         <span className="justify-self-start">to confirm</span>
         <button
-          ref={cancelRef}
+          ref={cancelButtonRef}
           type="button"
           onClick={onCancel}
           className="contents group cursor-pointer"
@@ -56,41 +66,6 @@ function KillConfirmContent({
           <span className="justify-self-start group-hover:text-foreground transition-colors">to cancel</span>
         </button>
       </div>
-    </>
-  );
-}
-
-export function KillConfirmModal({
-  char,
-  onCancel,
-  exit,
-  targetElement,
-  overlayClassName,
-}: {
-  char: string;
-  onCancel?: () => void;
-  exit?: KillExit;
-  targetElement?: HTMLElement | null;
-  overlayClassName?: string;
-}) {
-  const cancelButtonRef = useRef<HTMLButtonElement>(null);
-  return (
-    <ModalFrame
-      titleId="kill-confirm-title"
-      targetElement={targetElement}
-      padding="spacious"
-      align="center"
-      className={exit === 'shake' ? 'motion-safe:animate-shake-x' : undefined}
-      overlayClassName={overlayClassName}
-      initialFocusRef={cancelButtonRef}
-      onEscape={onCancel}
-    >
-      <KillConfirmContent
-        char={char}
-        onCancel={onCancel}
-        exit={exit}
-        cancelRef={cancelButtonRef}
-      />
     </ModalFrame>
   );
 }
@@ -107,7 +82,6 @@ export function KillConfirmOverlay({ confirmKill, paneElements, onCancel }: {
       onCancel={onCancel}
       exit={confirmKill.exit}
       targetElement={panelEl}
-      overlayClassName={confirmKill.exit === 'confirm' ? 'kill-overlay-confirm' : undefined}
     />
   );
 }

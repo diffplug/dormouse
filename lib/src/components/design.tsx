@@ -1,7 +1,7 @@
 import { clsx } from 'clsx';
 import { tv, type VariantProps } from 'tailwind-variants';
 import { XIcon } from '@phosphor-icons/react';
-import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode, RefObject } from 'react';
 
 // App-wide type scale, color strategy, and chrome conventions: see
@@ -125,7 +125,7 @@ export const modalActionButton = tv({
 export type ModalActionButtonVariants = VariantProps<typeof modalActionButton>;
 
 export const modalReviewBlock = tv({
-  base: 'block rounded border border-border bg-app-bg font-mono text-foreground',
+  base: 'block rounded border border-border bg-app-bg font-mono text-foreground whitespace-pre-wrap',
   variants: {
     density: {
       compact: 'p-2 text-xs',
@@ -134,23 +134,16 @@ export const modalReviewBlock = tv({
     overflow: {
       short: 'max-h-32 overflow-auto',
       medium: 'max-h-40 overflow-auto',
-      textarea: 'h-48 w-full resize-y',
     },
     wrap: {
-      breakAll: 'whitespace-pre-wrap break-all',
-      breakWords: 'whitespace-pre-wrap break-words',
-      normal: '',
-    },
-    focusable: {
-      true: 'focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring',
-      false: '',
+      breakAll: 'break-all',
+      breakWords: 'break-words',
     },
   },
   defaultVariants: {
     density: 'default',
     overflow: 'medium',
     wrap: 'breakWords',
-    focusable: false,
   },
 });
 
@@ -161,13 +154,12 @@ export function ModalReviewBlock({
   density,
   overflow,
   wrap,
-  focusable,
   className,
   ...props
 }: ModalReviewBlockProps) {
   return (
     <div
-      className={clsx(modalReviewBlock({ density, overflow, wrap, focusable }), className)}
+      className={clsx(modalReviewBlock({ density, overflow, wrap }), className)}
       {...props}
     />
   );
@@ -297,49 +289,36 @@ export type ModalFrameProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVaria
   titleId: string;
   targetElement?: HTMLElement | null;
   layer?: ModalLayer;
-  zIndex?: number;
   backdrop?: ModalOverlayVariants['backdrop'];
   overlayClassName?: string;
-  overlayStyle?: CSSProperties;
   initialFocusRef?: RefObject<HTMLElement | null>;
   onEscape?: () => void;
-  trapFocus?: boolean;
 };
 
-export const ModalFrame = forwardRef<HTMLDivElement, ModalFrameProps>(function ModalFrame({
+export function ModalFrame({
   children,
   titleId,
   targetElement,
   layer,
-  zIndex,
   backdrop,
   overlayClassName,
-  overlayStyle,
   initialFocusRef,
   onEscape,
-  trapFocus = true,
   padding,
   align,
   elevation,
   className,
   ...props
-}, ref) {
+}: ModalFrameProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
-  useImperativeHandle(ref, () => surfaceRef.current as HTMLDivElement);
-  useModalFocusTrap(surfaceRef, {
-    active: trapFocus,
-    initialFocusRef,
-    onEscape,
-  });
+  useModalFocusTrap(surfaceRef, { initialFocusRef, onEscape });
 
   return (
     <ModalOverlay
       targetElement={targetElement}
       layer={layer}
-      zIndex={zIndex}
       backdrop={backdrop}
       className={overlayClassName}
-      style={overlayStyle}
     >
       <ModalSurface
         ref={surfaceRef}
@@ -356,7 +335,7 @@ export const ModalFrame = forwardRef<HTMLDivElement, ModalFrameProps>(function M
       </ModalSurface>
     </ModalOverlay>
   );
-});
+}
 
 const MODAL_FOCUSABLE_SELECTOR = [
   'a[href]',
@@ -367,26 +346,21 @@ const MODAL_FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
-export function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElement>(
+function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElement>(
   modalRef: RefObject<TModal | null>,
   {
-    active = true,
     initialFocusRef,
     onEscape,
   }: {
-    active?: boolean;
     initialFocusRef?: RefObject<TInitial | null>;
     onEscape?: () => void;
   } = {},
 ): void {
   useEffect(() => {
-    if (!active) return;
     initialFocusRef?.current?.focus();
-  }, [active, initialFocusRef]);
+  }, [initialFocusRef]);
 
   useEffect(() => {
-    if (!active) return;
-
     const handleKeyDown = (event: KeyboardEvent) => {
       const modal = modalRef.current;
       if (!modal) return;
@@ -416,7 +390,7 @@ export function useModalFocusTrap<TModal extends HTMLElement, TInitial extends H
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [active, modalRef, onEscape]);
+  }, [modalRef, onEscape]);
 }
 
 // Chrome buttons: icon-only and labeled triggers used in the standalone app

@@ -57,7 +57,6 @@ function ConnectedUpdateBanner() {
       />
       {snapshot && (
         <UpdateDebugModal
-          open={true}
           onClose={() => {
             setSnapshot(null);
             setBody(null);

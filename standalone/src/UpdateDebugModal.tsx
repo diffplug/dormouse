@@ -8,13 +8,12 @@ import {
 import { openIssueSearch } from './updater';
 
 interface UpdateDebugModalProps {
-  open: boolean;
   onClose: () => void;
   failure: { version: string; error?: string };
   body: string | null;
 }
 
-export function UpdateDebugModal({ open, onClose, failure, body }: UpdateDebugModalProps) {
+export function UpdateDebugModal({ onClose, failure, body }: UpdateDebugModalProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [copied, setCopied] = useState(false);
 
@@ -23,10 +22,6 @@ export function UpdateDebugModal({ open, onClose, failure, body }: UpdateDebugMo
     const id = setTimeout(() => setCopied(false), 2_000);
     return () => clearTimeout(id);
   }, [copied]);
-
-  useEffect(() => {
-    if (!open) setCopied(false);
-  }, [open]);
 
   const handleCopy = async () => {
     if (!body) return;
@@ -39,8 +34,6 @@ export function UpdateDebugModal({ open, onClose, failure, body }: UpdateDebugMo
   };
 
   const errorPreview = failure.error ?? '';
-
-  if (!open) return null;
 
   return (
     <ModalFrame
@@ -104,12 +97,7 @@ export function UpdateDebugModal({ open, onClose, failure, body }: UpdateDebugMo
           <textarea
             readOnly
             value={body ?? 'Gathering diagnostic info...'}
-            className={modalReviewBlock({
-              density: 'compact',
-              overflow: 'textarea',
-              wrap: 'normal',
-              focusable: true,
-            })}
+            className="block h-48 w-full resize-y rounded border border-border bg-app-bg p-2 font-mono text-xs text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring"
             onFocus={(e) => e.currentTarget.select()}
           />
         </div>
