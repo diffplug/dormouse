@@ -102,6 +102,8 @@ export function ExternalLinkDialog({
           >
             {isDeceptive ? (
               <DeceptiveTitle displayText={request.displayText} />
+            ) : blockedDecision ? (
+              <BlockedTitle reason={blockedDecision.reason} />
             ) : (
               <OpenTitle noun={noun?.title ?? 'URL'} verdict={verdict} displayText={request.displayText} />
             )}
@@ -119,16 +121,6 @@ export function ExternalLinkDialog({
         <div className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-app-bg px-2.5 py-2 text-sm leading-relaxed text-foreground">
           {displayUri}
         </div>
-
-        {blockedDecision && !isDeceptive && (
-          <div className="mt-3 flex items-start gap-1.5 text-xs leading-snug">
-            <ProhibitIcon size={13} weight="bold" className="mt-px shrink-0 text-error" aria-hidden />
-            <span className="text-foreground">
-              <span className="font-semibold">Blocked.</span>{' '}
-              <span className="text-muted">{blockedDecision.reason}</span>
-            </span>
-          </div>
-        )}
 
         <div className="mt-4 flex justify-end gap-2 text-xs">
           {isDeceptive ? (
@@ -216,6 +208,18 @@ function DeceptiveTitle({ displayText }: { displayText: string }) {
       <span className="leading-snug">
         Deceptive link text was{' '}
         <span className="text-muted">&quot;{displayText.trim()}&quot;</span>, URL was:
+      </span>
+    </span>
+  );
+}
+
+function BlockedTitle({ reason }: { reason: string }) {
+  return (
+    <span className="flex items-start gap-1.5">
+      <ProhibitIcon size={14} weight="bold" className="mt-px shrink-0 text-error" aria-hidden />
+      <span className="leading-snug">
+        Blocked.{' '}
+        <span className="text-muted">{reason}</span>
       </span>
     </span>
   );
