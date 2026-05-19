@@ -63,6 +63,14 @@ export interface ModalRect {
   height: number;
 }
 
+export const MODAL_LAYERS = {
+  app: 50,
+  pane: 100,
+  critical: 9999,
+} as const;
+
+export type ModalLayer = keyof typeof MODAL_LAYERS;
+
 export const modalOverlay = tv({
   base: 'flex items-center justify-center',
   variants: {
@@ -228,16 +236,19 @@ export function useMeasuredElementRect(element: HTMLElement | null): ModalRect |
 export function ModalOverlay({
   children,
   targetElement,
-  zIndex = 100,
+  layer = 'pane',
+  zIndex,
   backdrop = 'standard',
   className,
   style,
   ...props
 }: HTMLAttributes<HTMLDivElement> & ModalOverlayVariants & {
   targetElement?: HTMLElement | null;
+  layer?: ModalLayer;
   zIndex?: number;
 }) {
   const rect = useMeasuredElementRect(targetElement ?? null);
+  const resolvedZIndex = zIndex ?? MODAL_LAYERS[layer];
   const overlayStyle: CSSProperties = rect
     ? {
         position: 'fixed',
@@ -245,10 +256,10 @@ export function ModalOverlay({
         left: rect.left,
         width: rect.width,
         height: rect.height,
-        zIndex,
+        zIndex: resolvedZIndex,
         ...style,
       }
-    : { zIndex, ...style };
+    : { zIndex: resolvedZIndex, ...style };
 
   return (
     <div
@@ -285,6 +296,7 @@ export const ModalSurface = forwardRef<HTMLDivElement, ModalSurfaceProps>(functi
 export type ModalFrameProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVariants & {
   titleId: string;
   targetElement?: HTMLElement | null;
+  layer?: ModalLayer;
   zIndex?: number;
   backdrop?: ModalOverlayVariants['backdrop'];
   overlayClassName?: string;
@@ -298,6 +310,7 @@ export const ModalFrame = forwardRef<HTMLDivElement, ModalFrameProps>(function M
   children,
   titleId,
   targetElement,
+  layer,
   zIndex,
   backdrop,
   overlayClassName,
@@ -322,6 +335,7 @@ export const ModalFrame = forwardRef<HTMLDivElement, ModalFrameProps>(function M
   return (
     <ModalOverlay
       targetElement={targetElement}
+      layer={layer}
       zIndex={zIndex}
       backdrop={backdrop}
       className={overlayClassName}

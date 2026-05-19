@@ -45,7 +45,7 @@ export function UpdateDebugModal({ open, onClose, failure, body }: UpdateDebugMo
   return (
     <ModalFrame
       titleId="update-debug-modal-title"
-      zIndex={50}
+      layer="app"
       backdrop="strong"
       elevation="modal"
       padding="none"

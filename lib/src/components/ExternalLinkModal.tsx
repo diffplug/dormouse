@@ -69,7 +69,7 @@ export function ExternalLinkModal({
   return (
     <ModalFrame
       titleId="external-link-modal-title"
-      zIndex={9999}
+      layer="critical"
       backdrop="strong"
       elevation="modal"
       overlayClassName="px-4 py-6"
