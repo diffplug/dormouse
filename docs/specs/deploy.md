@@ -42,7 +42,8 @@ Code signing for Windows requires a physical USB hardware key (EV cert via PIV).
 ```
 Stage 1: CI (GitHub Actions)
   → Build unsigned Tauri apps (win, mac, linux)
-  → Build + publish VSCode extension
+  → Build VSCode extension
+  → Publish VSCode extension after protected environment approval
   → Upload unsigned Tauri artifacts
 
 Stage 2: Local (sign-and-deploy.sh)
@@ -104,11 +105,12 @@ Runs on `ubuntu-latest`:
 ### Job: `publish-vscode`
 
 Runs after `build-vscode` succeeds:
-1. Download `.vsix` artifact
-2. `pnpm exec vsce publish --packagePath *.vsix --no-dependencies`
-3. `pnpm exec ovsx publish --packagePath *.vsix --no-dependencies`
+1. Enter the `vscode-extension-publish` GitHub environment
+2. Download `.vsix` artifact
+3. `pnpm exec vsce publish --packagePath *.vsix --no-dependencies`
+4. `pnpm exec ovsx publish --packagePath *.vsix --no-dependencies`
 
-This runs in CI because VSCode Marketplace publishing uses PAT tokens (no hardware key needed).
+This runs in CI because VSCode Marketplace publishing uses PAT tokens (no hardware key needed). The `vscode-extension-publish` environment must require reviewer approval and allow deployments only from `v*` tags. Store `VSCE_PAT` and `OVSX_PAT` as environment secrets there, not broad repository secrets.
 
 **Migration note:** This replaces the existing `.github/workflows/publish-vscode.yml`, which was triggered by `vscode-ext/v*` tags and has never been run. That workflow should be deleted when the unified release workflow is created. Fixes from the old workflow: use `ubuntu-latest` instead of `macos-latest`, upgrade to Node 22, and unify under the `v*` tag convention.
 
@@ -222,8 +224,8 @@ If you edit `CHANGELOG.md` manually outside `/release-notes` and want to preview
 
 | Secret | Where | Purpose |
 |--------|-------|---------|
-| `VSCE_PAT` | GitHub Actions secret | VS Code Marketplace publish |
-| `OVSX_PAT` | GitHub Actions secret | OpenVSX publish |
+| `VSCE_PAT` | `vscode-extension-publish` GitHub environment secret | VS Code Marketplace publish |
+| `OVSX_PAT` | `vscode-extension-publish` GitHub environment secret | OpenVSX publish |
 | `GITHUB_TOKEN` | GitHub Actions (automatic) | Artifact upload |
 | `APPLE_SIGNING_IDENTITY` | Local keychain | macOS codesign |
 | `APPLE_ID` | Local env / prompted | Notarization |
