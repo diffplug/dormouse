@@ -99,7 +99,7 @@ Each matrix leg:
 2. Install workspace dependencies once from the repo root with `pnpm install --frozen-lockfile`
 3. Install system deps (Linux: libgtk, libwebkit, etc.)
 4. Generate an ephemeral, per-job Tauri updater key with `pnpm --dir standalone exec tauri signer generate --ci --write-keys "$RUNNER_TEMP/tauri-ci-updater.key" --force`
-5. Build via `tauri-action` with `TAURI_SIGNING_PRIVATE_KEY_PATH` pointing at that ephemeral key, but **no real updater signing secret** and no `APPLE_SIGNING_IDENTITY`
+5. Build via `tauri-action` with `TAURI_SIGNING_PRIVATE_KEY` pointing at that ephemeral key, but **no real updater signing secret** and no `APPLE_SIGNING_IDENTITY`
 6. Generate `artifact-manifest.sha256` with SHA-256 hashes for the files that will be uploaded
 7. Publish a GitHub artifact attestation for the manifest
 8. Upload the manifest plus artifacts (installers + bundles) via `actions/upload-artifact`
