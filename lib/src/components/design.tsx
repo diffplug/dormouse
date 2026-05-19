@@ -102,11 +102,11 @@ export const modalSurface = tv({
       center: 'text-center',
     },
     elevation: {
-      dialog: 'shadow-lg',
+      raised: 'shadow-lg',
       modal: 'shadow-2xl',
     },
   },
-  defaultVariants: { padding: 'default', align: 'start', elevation: 'dialog' },
+  defaultVariants: { padding: 'default', align: 'start', elevation: 'raised' },
 });
 
 export type ModalSurfaceVariants = VariantProps<typeof modalSurface>;
@@ -367,8 +367,8 @@ const MODAL_FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
-export function useModalFocusTrap<TDialog extends HTMLElement, TInitial extends HTMLElement>(
-  dialogRef: RefObject<TDialog | null>,
+export function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElement>(
+  modalRef: RefObject<TModal | null>,
   {
     active = true,
     initialFocusRef,
@@ -388,8 +388,8 @@ export function useModalFocusTrap<TDialog extends HTMLElement, TInitial extends 
     if (!active) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      const dialog = dialogRef.current;
-      if (!dialog) return;
+      const modal = modalRef.current;
+      if (!modal) return;
 
       if (event.key === 'Escape') {
         if (onEscape) {
@@ -402,7 +402,7 @@ export function useModalFocusTrap<TDialog extends HTMLElement, TInitial extends 
 
       if (event.key !== 'Tab') return;
 
-      const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR));
+      const focusables = Array.from(modal.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR));
       if (focusables.length === 0) return;
 
       const currentIndex = focusables.findIndex((item) => item === document.activeElement);
@@ -416,7 +416,7 @@ export function useModalFocusTrap<TDialog extends HTMLElement, TInitial extends 
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [active, dialogRef, onEscape]);
+  }, [active, modalRef, onEscape]);
 }
 
 // Chrome buttons: icon-only and labeled triggers used in the standalone app
