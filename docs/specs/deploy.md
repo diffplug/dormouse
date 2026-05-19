@@ -98,12 +98,15 @@ Each matrix leg:
 1. Checkout, setup Node 22, pnpm 10, Rust stable
 2. Install workspace dependencies once from the repo root with `pnpm install --frozen-lockfile`
 3. Install system deps (Linux: libgtk, libwebkit, etc.)
-4. Build via `tauri-action` — but **skip signing** (no `APPLE_SIGNING_IDENTITY`, no `TAURI_SIGNING_PRIVATE_KEY`)
-5. Generate `artifact-manifest.sha256` with SHA-256 hashes for the files that will be uploaded
-6. Publish a GitHub artifact attestation for the manifest
-7. Upload the manifest plus artifacts (installers + bundles) via `actions/upload-artifact`
+4. Generate an ephemeral, per-job Tauri updater key with `pnpm --dir standalone exec tauri signer generate --ci --write-keys "$RUNNER_TEMP/tauri-ci-updater.key" --force`
+5. Build via `tauri-action` with `TAURI_SIGNING_PRIVATE_KEY_PATH` pointing at that ephemeral key, but **no real updater signing secret** and no `APPLE_SIGNING_IDENTITY`
+6. Generate `artifact-manifest.sha256` with SHA-256 hashes for the files that will be uploaded
+7. Publish a GitHub artifact attestation for the manifest
+8. Upload the manifest plus artifacts (installers + bundles) via `actions/upload-artifact`
 
 **Note:** We do NOT use `tauri-action`'s built-in GitHub Release creation. We create the release locally after signing.
+
+The CI updater key exists only so Tauri emits updater-shaped artifacts during unsigned builds. It is generated inside the runner, is not stored in source control or GitHub Secrets, and its public key is not the public key trusted by shipped apps. The final release bundles are re-signed locally by `scripts/sign-and-deploy.sh` with the production Tauri updater key before upload.
 
 ### Job: `build-vscode`
 
