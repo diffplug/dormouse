@@ -10,11 +10,11 @@ Developers ranging from terminal beginners (non-developers using Claude Code for
 ### Brand Personality
 **Focused. Approachable. Capable.**
 
-MouseTerm should feel like focused efficiency that cares about beginners and onboarding, without sacrificing anything that even the most extreme power user might want eventually. The interface should communicate: "everything is under control" — no clutter, no distraction, just the information you need when you need it.
+Dormouse should feel like focused efficiency that cares about beginners and onboarding, without sacrificing anything that even the most extreme power user might want eventually. The interface should communicate: "everything is under control" — no clutter, no distraction, just the information you need when you need it.
 
 ### Aesthetic Direction
 
-**Primary constraint: Feel native inside VSCode.** The current Catppuccin Mocha design is throwaway — built to get things running. The first design priority is making MouseTerm feel completely native within VSCode, respecting whatever theme the user has chosen. This means:
+**Primary constraint: Feel native inside VSCode.** The current Catppuccin Mocha design is throwaway — built to get things running. The first design priority is making Dormouse feel completely native within VSCode, respecting whatever theme the user has chosen. This means:
 - Use VSCode's CSS variables and theme tokens, not hardcoded colors
 - Match VSCode's spacing, typography, and interaction patterns
 - Light mode and dark mode support from the start (inherited from user's VSCode theme)
@@ -23,7 +23,7 @@ MouseTerm should feel like focused efficiency that cares about beginners and onb
 **After VSCode-native is achieved**, figure out the standalone terminal's visual identity separately.
 
 **References:**
-- VSCode itself — the gold standard for how MouseTerm should feel as an extension
+- VSCode itself — the gold standard for how Dormouse should feel as an extension
 - The tool should feel like a natural part of the editor, not a foreign embed
 
 **Anti-references:**
@@ -34,7 +34,7 @@ MouseTerm should feel like focused efficiency that cares about beginners and onb
 
 ### Design Principles
 
-1. **Native first** — Inside VSCode, MouseTerm should be indistinguishable from a built-in feature. Use the host's theme tokens, spacing, and conventions. Never fight the environment.
+1. **Native first** — Inside VSCode, Dormouse should be indistinguishable from a built-in feature. Use the host's theme tokens, spacing, and conventions. Never fight the environment.
 
 2. **Information density without intimidation** — Power users want dense layouts with many terminals visible. Beginners need to not feel overwhelmed. Solve this with progressive disclosure: simple by default, powerful when you explore.
 

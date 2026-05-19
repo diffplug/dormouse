@@ -1,6 +1,6 @@
 import { ALL_ITEM_IDS, ITEM_IDS, SECTIONS, type ItemId } from "./tut-items";
 
-const STORAGE_KEY = "mouseterm-tut-v3";
+const STORAGE_KEY = "dormouse-tut-v3";
 const KNOWN_IDS: ReadonlySet<ItemId> = new Set(ITEM_IDS);
 
 export class TutorialState {

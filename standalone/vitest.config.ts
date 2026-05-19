@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     alias: {
-      'mouseterm-lib': path.resolve(__dirname, '../lib/src'),
+      'dormouse-lib': path.resolve(__dirname, '../lib/src'),
     },
   },
   test: {

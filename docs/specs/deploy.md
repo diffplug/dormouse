@@ -21,7 +21,7 @@ Human-driven steps, in order:
 4. **Push** — `git push && git push origin vX.Y.Z`. This triggers CI (Stage 1).
 5. **Set environment variables** — copy the relevant secrets into the terminal from your password manager (see [Environment / secrets](#environment--secrets) for the list).
 6. **Run local signing** — plug in the PIV USB key, then `./scripts/sign-and-deploy.sh all X.Y.Z`. The script waits for CI, downloads unsigned artifacts, signs macOS + Windows, generates the Tauri update manifest into `website/public/standalone-latest.json`, and creates the GitHub Release. Run `./scripts/sign-and-deploy.sh --help` for resume-after-failure subcommands.
-7. **Deploy website** — commit the updated `website/public/standalone-latest.json` and deploy mouseterm.com so the updater endpoint is live.
+7. **Deploy website** — commit the updated `website/public/standalone-latest.json` and deploy dormouse.sh so the updater endpoint is live.
 8. **Verify the release**
    - Check GitHub Release assets are correct
    - On a Mac: extract the `.tar.gz`, open the `.app`, confirm no Gatekeeper warnings
@@ -42,11 +42,14 @@ Code signing for Windows requires a physical USB hardware key (EV cert via PIV).
 ```
 Stage 1: CI (GitHub Actions)
   → Build unsigned Tauri apps (win, mac, linux)
-  → Build + publish VSCode extension
+  → Build VSCode extension
+  → Generate and attest artifact manifests
+  → Publish VSCode extension after protected environment approval
   → Upload unsigned Tauri artifacts
 
 Stage 2: Local (sign-and-deploy.sh)
   → Download CI artifacts
+  → Verify artifact attestations and hashes
   → Sign macOS (codesign + notarize)
   → Sign Windows (jsign + PIV hardware key)
   → Generate Tauri update manifest with signatures
@@ -56,6 +59,24 @@ Stage 2: Local (sign-and-deploy.sh)
 ## Stage 1: CI workflow
 
 Triggered by tag push `v*`. Three parallel jobs:
+
+The workflow defaults `GITHUB_TOKEN` to read-only repository access with:
+
+```yaml
+permissions:
+  contents: read
+```
+
+Only the build jobs request additional permissions, and only for provenance:
+
+```yaml
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+```
+
+The publish job stays on the workflow read-only default and is separately gated by the `vscode-extension-publish` environment.
 
 ### Job: `build-standalone` (matrix)
 
@@ -77,29 +98,37 @@ Each matrix leg:
 1. Checkout, setup Node 22, pnpm 10, Rust stable
 2. Install workspace dependencies once from the repo root with `pnpm install --frozen-lockfile`
 3. Install system deps (Linux: libgtk, libwebkit, etc.)
-4. Build via `tauri-action` — but **skip signing** (no `APPLE_SIGNING_IDENTITY`, no `TAURI_SIGNING_PRIVATE_KEY`)
-5. Upload artifacts (installers + bundles) via `actions/upload-artifact`
+4. Generate an ephemeral, per-job Tauri updater key with `pnpm --dir standalone exec tauri signer generate --ci --write-keys "$RUNNER_TEMP/tauri-ci-updater.key" --force`
+5. Build via `tauri-action` with `TAURI_SIGNING_PRIVATE_KEY_PATH` pointing at that ephemeral key, but **no real updater signing secret** and no `APPLE_SIGNING_IDENTITY`
+6. Generate `artifact-manifest.sha256` with SHA-256 hashes for the files that will be uploaded
+7. Publish a GitHub artifact attestation for the manifest
+8. Upload the manifest plus artifacts (installers + bundles) via `actions/upload-artifact`
 
 **Note:** We do NOT use `tauri-action`'s built-in GitHub Release creation. We create the release locally after signing.
+
+The CI updater key exists only so Tauri emits updater-shaped artifacts during unsigned builds. It is generated inside the runner, is not stored in source control or GitHub Secrets, and its public key is not the public key trusted by shipped apps. The final release bundles are re-signed locally by `scripts/sign-and-deploy.sh` with the production Tauri updater key before upload.
 
 ### Job: `build-vscode`
 
 Runs on `ubuntu-latest`:
 1. Checkout, setup Node 22, pnpm 10
 2. `pnpm install --frozen-lockfile` at the repo root
-3. `pnpm --filter mouseterm-lib test`
-4. `pnpm --filter mouseterm build:frontend && pnpm --filter mouseterm build`
-5. `npx vsce package --no-dependencies`
-6. Upload `.vsix` as artifact
+3. `pnpm --filter dormouse-lib test`
+4. `pnpm --filter dormouse build:frontend && pnpm --filter dormouse build`
+5. `pnpm --dir vscode-ext exec vsce package --no-dependencies`
+6. Generate `artifact-manifest.sha256` for the `.vsix`
+7. Publish a GitHub artifact attestation for the manifest
+8. Upload the manifest plus `.vsix` as artifact
 
 ### Job: `publish-vscode`
 
 Runs after `build-vscode` succeeds:
-1. Download `.vsix` artifact
-2. `npx vsce publish --packagePath *.vsix --no-dependencies`
-3. `npx ovsx publish --packagePath *.vsix --no-dependencies`
+1. Enter the `vscode-extension-publish` GitHub environment
+2. Download `.vsix` artifact
+3. `pnpm exec vsce publish --packagePath *.vsix --no-dependencies`
+4. `pnpm exec ovsx publish --packagePath *.vsix --no-dependencies`
 
-This runs in CI because VSCode Marketplace publishing uses PAT tokens (no hardware key needed).
+This runs in CI because VSCode Marketplace publishing uses PAT tokens (no hardware key needed). The `vscode-extension-publish` environment must require reviewer approval and allow deployments only from `v*` tags. Store `VSCE_PAT` and `OVSX_PAT` as environment secrets there, not broad repository secrets.
 
 **Migration note:** This replaces the existing `.github/workflows/publish-vscode.yml`, which was triggered by `vscode-ext/v*` tags and has never been run. That workflow should be deleted when the unified release workflow is created. Fixes from the old workflow: use `ubuntu-latest` instead of `macos-latest`, upgrade to Node 22, and unify under the `v*` tag convention.
 
@@ -107,13 +136,34 @@ This runs in CI because VSCode Marketplace publishing uses PAT tokens (no hardwa
 
 `scripts/sign-and-deploy.sh` is the source of truth for the local pipeline (download, sign, notarize, package, release). Run with no args or `--help` to see subcommands.
 
+Before any local signing step runs, downloaded CI artifacts must pass two checks:
+
+1. `gh attestation verify` must prove the artifact manifest was attested by `.github/workflows/release.yml` in `diffplug/dormouse`, for `refs/tags/vX.Y.Z`, at the exact commit SHA resolved by the local tag.
+2. `sha256sum -c` or `shasum -a 256 -c` must prove every downloaded file listed in `artifact-manifest.sha256` still has the hash CI recorded before upload.
+
+The manifest itself is the attested subject, not the final signed app. This closes the gap between CI artifact production and the local machine that holds signing credentials: stale cached artifacts, wrong-tag artifacts, and tampered downloads are rejected before codesign, jsign, notarization, Tauri signing, or release upload can run.
+
+The local script must also select release artifacts by strict expected paths instead of broad `find | head` matches. Release signing fails closed unless the expected files exist at the expected locations:
+
+| Artifact | Expected local path under `release-signed/work` |
+|----------|-------------------------------------------------|
+| macOS app bundle | `standalone-mac-aarch64/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Dormouse.app` |
+| Windows app executable | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/dormouse.exe` |
+| Windows installer | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/Dormouse_X.Y.Z_x64-setup.exe` |
+| NSIS script | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/installer.nsi` |
+| NSIS plugin | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/nsis/x64/plugins/nsis_tauri_utils.dll` |
+| Linux AppImage | `standalone-linux-x64/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/Dormouse_X.Y.Z_amd64.AppImage` |
+
+Release upload likewise uses only the three stable output filenames (`Dormouse-macos-aarch64.tar.gz`, `Dormouse-windows-x64-setup.exe`, `Dormouse-linux-x86_64.AppImage`) and fails if `release-signed/release-assets` contains any other files.
+
 ### One-time setup
 
 ```bash
 brew install gh jsign
 gh auth login
 xcode-select --install
-tauri signer generate  # creates the Tauri update signing keypair
+pnpm install --frozen-lockfile
+pnpm --dir standalone exec tauri signer generate  # creates the Tauri update signing keypair
 ```
 
 ### Two signing layers
@@ -136,29 +186,29 @@ codesign/jsign the executable
 
 ### Packaged app logging
 
-Windows release builds use the GUI subsystem, so launching `mouseterm.exe` from a terminal returns immediately and does not stream stdout/stderr. The Tauri backend writes sidecar diagnostics to `%LOCALAPPDATA%\MouseTerm\mouseterm.log` on Windows, or to `$TMPDIR/mouseterm.log` on other platforms. Set `MOUSETERM_LOG_FILE` to override the path.
+Windows release builds use the GUI subsystem, so launching `dormouse.exe` from a terminal returns immediately and does not stream stdout/stderr. The Tauri backend writes sidecar diagnostics to `%LOCALAPPDATA%\Dormouse\dormouse.log` on Windows, or to `$TMPDIR/dormouse.log` on other platforms. Set `DORMOUSE_LOG_FILE` to override the path.
 
 ## Artifact filenames
 
-All release assets use **stable filenames** (no version in the name). This allows hotlinking directly from mouseterm.com via GitHub's `/latest/download/` redirect, which always resolves to the most recent release.
+All release assets use **stable filenames** (no version in the name). This allows hotlinking directly from dormouse.sh via GitHub's `/latest/download/` redirect, which always resolves to the most recent release.
 
 | Asset | Filename | Purpose |
 |-------|----------|---------|
-| Windows | `MouseTerm-windows-x64-setup.exe` | Download + Tauri updater |
-| macOS | `MouseTerm-macos-aarch64.tar.gz` | Download + Tauri updater |
-| Linux | `MouseTerm-linux-x86_64.AppImage` | Download + Tauri updater |
+| Windows | `Dormouse-windows-x64-setup.exe` | Download + Tauri updater |
+| macOS | `Dormouse-macos-aarch64.tar.gz` | Download + Tauri updater |
+| Linux | `Dormouse-linux-x86_64.AppImage` | Download + Tauri updater |
 
 ### Download hotlinks
 
-The mouseterm.com download page can link directly to the latest release with no server-side logic:
+The dormouse.sh download page can link directly to the latest release with no server-side logic:
 
 ```
-https://github.com/diffplug/mouseterm/releases/latest/download/MouseTerm-windows-x64-setup.exe
-https://github.com/diffplug/mouseterm/releases/latest/download/MouseTerm-macos-aarch64.tar.gz
-https://github.com/diffplug/mouseterm/releases/latest/download/MouseTerm-linux-x86_64.AppImage
+https://github.com/diffplug/dormouse/releases/latest/download/Dormouse-windows-x64-setup.exe
+https://github.com/diffplug/dormouse/releases/latest/download/Dormouse-macos-aarch64.tar.gz
+https://github.com/diffplug/dormouse/releases/latest/download/Dormouse-linux-x86_64.AppImage
 ```
 
-These can later be migrated to `mouseterm.com/download/...` URLs backed by Cloudflare R2 (for analytics) without changing anything in the app — only the website links and the updater endpoint URL in `tauri.conf.json` would change.
+These can later be migrated to `dormouse.sh/download/...` URLs backed by Cloudflare R2 (for analytics) without changing anything in the app — only the website links and the updater endpoint URL in `tauri.conf.json` would change.
 
 ## Tauri auto-updater
 
@@ -172,7 +222,7 @@ Design notes that aren't obvious from the files:
 
 ### Update manifest (`standalone-latest.json`)
 
-Generated by the local script after signing. The script writes it to `website/public/standalone-latest.json` so it's served from `mouseterm.com/standalone-latest.json` via Cloudflare Pages. This gives us request analytics on update checks.
+Generated by the local script after signing. The script writes it to `website/public/standalone-latest.json` so it's served from `dormouse.sh/standalone-latest.json` via Cloudflare Pages. This gives us request analytics on update checks.
 
 ```json
 {
@@ -181,30 +231,30 @@ Generated by the local script after signing. The script writes it to `website/pu
   "pub_date": "2026-03-25T12:00:00Z",
   "platforms": {
     "windows-x86_64": {
-      "url": "https://github.com/diffplug/mouseterm/releases/download/v0.1.0/MouseTerm-windows-x64-setup.exe",
+      "url": "https://github.com/diffplug/dormouse/releases/download/v0.1.0/Dormouse-windows-x64-setup.exe",
       "signature": "<contents of .sig file>"
     },
     "darwin-aarch64": {
-      "url": "https://github.com/diffplug/mouseterm/releases/download/v0.1.0/MouseTerm-macos-aarch64.tar.gz",
+      "url": "https://github.com/diffplug/dormouse/releases/download/v0.1.0/Dormouse-macos-aarch64.tar.gz",
       "signature": "<contents of .sig file>"
     },
     "linux-x86_64": {
-      "url": "https://github.com/diffplug/mouseterm/releases/download/v0.1.0/MouseTerm-linux-x86_64.AppImage",
+      "url": "https://github.com/diffplug/dormouse/releases/download/v0.1.0/Dormouse-linux-x86_64.AppImage",
       "signature": "<contents of .sig file>"
     }
   }
 }
 ```
 
-Note: the update manifest URLs include the version in the *path* (`/v0.1.0/`) but the *filenames* are stable. The manifest itself is served from `mouseterm.com/standalone-latest.json` — Cloudflare Pages analytics tracks every update check.
+Note: the update manifest URLs include the version in the *path* (`/v0.1.0/`) but the *filenames* are stable. The manifest itself is served from `dormouse.sh/standalone-latest.json` — Cloudflare Pages analytics tracks every update check.
 
 ## Changelog
 
 A single `CHANGELOG.md` at the repo root, following [Keep a Changelog](https://keepachangelog.com/) format. The `[Unreleased]` section is promoted to `[X.Y.Z]` at release time. The release notes include both standalone and VSCode changes in one entry.
 
 The website changelog page imports generated data from `website/src/data/changelog.json`, but `CHANGELOG.md` is the source of truth and the JSON is gitignored. You do not normally run `website/scripts/generate-changelog.js` by hand:
-- `pnpm --filter mouseterm-website build` runs it through the website `prebuild` script before Vite bundles the static site.
-- `pnpm --filter mouseterm-website dev` and `pnpm --filter mouseterm-website test` also regenerate it through lifecycle scripts so clean checkouts work locally.
+- `pnpm --filter dormouse-website build` runs it through the website `prebuild` script before Vite bundles the static site.
+- `pnpm --filter dormouse-website dev` and `pnpm --filter dormouse-website test` also regenerate it through lifecycle scripts so clean checkouts work locally.
 
 If you edit `CHANGELOG.md` manually outside `/release-notes` and want to preview the generated data immediately, run `node website/scripts/generate-changelog.js`. Do not commit `website/src/data/changelog.json`.
 
@@ -212,8 +262,8 @@ If you edit `CHANGELOG.md` manually outside `/release-notes` and want to preview
 
 | Secret | Where | Purpose |
 |--------|-------|---------|
-| `VSCE_PAT` | GitHub Actions secret | VS Code Marketplace publish |
-| `OVSX_PAT` | GitHub Actions secret | OpenVSX publish |
+| `VSCE_PAT` | `vscode-extension-publish` GitHub environment secret | VS Code Marketplace publish |
+| `OVSX_PAT` | `vscode-extension-publish` GitHub environment secret | OpenVSX publish |
 | `GITHUB_TOKEN` | GitHub Actions (automatic) | Artifact upload |
 | `APPLE_SIGNING_IDENTITY` | Local keychain | macOS codesign |
 | `APPLE_ID` | Local env / prompted | Notarization |

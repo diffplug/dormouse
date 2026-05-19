@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_MOUSE_SELECTION_STATE, type MouseSelectionState } from "mouseterm-lib/lib/mouse-selection";
-import type { ActivityState } from "mouseterm-lib/lib/terminal-registry";
+import { DEFAULT_MOUSE_SELECTION_STATE, type MouseSelectionState } from "dormouse-lib/lib/mouse-selection";
+import type { ActivityState } from "dormouse-lib/lib/terminal-registry";
 import { TutDetector } from "./tut-detector";
 import { TutorialState } from "./tutorial-state";
 

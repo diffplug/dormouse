@@ -5,9 +5,16 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+
 jobs:
   build-standalone:
     name: Build Standalone (${{ matrix.target }})
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       matrix:
         include:
@@ -22,25 +29,25 @@ jobs:
             artifact-name: standalone-win-x64
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 22
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           targets: ${{ matrix.target }}
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: standalone/src-tauri
 
@@ -50,13 +57,23 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
+      - name: Generate ephemeral Tauri updater key
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          key_path="$RUNNER_TEMP/tauri-ci-updater.key"
+          pnpm --dir standalone exec tauri signer generate \
+            --ci \
+            --write-keys "$key_path" \
+            --force
+
+          echo "TAURI_SIGNING_PRIVATE_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Dummy key so Tauri generates updater artifacts; real signing happens locally
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: standalone
           tauriScript: pnpm tauri
@@ -75,12 +92,52 @@ jobs:
              standalone/src-tauri/target/${{ matrix.target }}/release/nsis/x64/plugins/
         shell: bash
 
+      - name: Generate artifact manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd standalone
+          release_dir="src-tauri/target/${{ matrix.target }}/release"
+          manifest="artifact-manifest.sha256"
+
+          {
+            [[ -f "$release_dir/dormouse.exe" ]] && printf '%s\n' "$release_dir/dormouse.exe"
+            if [[ -d "$release_dir/bundle" ]]; then
+              find -L "$release_dir/bundle" -type f \( \
+                -name "*.exe" -o \
+                -name "*.msi" -o \
+                -name "*.dmg" -o \
+                -path "*.app/*" -o \
+                -name "*.AppImage" -o \
+                -path "*/nsis/*" \
+              \) -print
+            fi
+            [[ -d "$release_dir/nsis" ]] && find -L "$release_dir/nsis" -type f -print
+            [[ -d sidecar ]] && find -L sidecar -type f -print
+            [[ -d src-tauri/binaries ]] && find -L src-tauri/binaries -type f -print
+          } | sort -u | while IFS= read -r file; do
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$file"
+            else
+              shasum -a 256 "$file"
+            fi
+          done > "$manifest"
+
+          [[ -s "$manifest" ]]
+
+      - name: Attest artifact manifest
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: standalone/artifact-manifest.sha256
+
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.artifact-name }}
           path: |
-            standalone/src-tauri/target/${{ matrix.target }}/release/mouseterm.exe
+            standalone/artifact-manifest.sha256
+            standalone/src-tauri/target/${{ matrix.target }}/release/dormouse.exe
             standalone/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
             standalone/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
             standalone/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
@@ -94,14 +151,18 @@ jobs:
   build-vscode:
     name: Build VSCode Extension
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 22
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10
 
@@ -109,22 +170,53 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Test lib
-        run: pnpm --filter mouseterm-lib test
+        run: pnpm --filter dormouse-lib test
 
       - name: Build frontend for VSCode
-        run: pnpm --filter mouseterm build:frontend
+        run: pnpm --filter dormouse build:frontend
 
       - name: Build extension
-        run: pnpm --filter mouseterm build
+        run: pnpm --filter dormouse build
 
       - name: Package extension
-        run: cd vscode-ext && npx vsce package --no-dependencies
+        run: pnpm --dir vscode-ext exec vsce package --no-dependencies
+
+      - name: Generate artifact manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          cd vscode-ext
+          manifest="artifact-manifest.sha256"
+          files=(*.vsix)
+
+          {
+            for path in "${files[@]}"; do
+              [[ -f "$path" ]] && printf '%s\n' "$path"
+            done
+          } | sort -u | while IFS= read -r file; do
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$file"
+            else
+              shasum -a 256 "$file"
+            fi
+          done > "$manifest"
+
+          [[ -s "$manifest" ]]
+
+      - name: Attest artifact manifest
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: vscode-ext/artifact-manifest.sha256
 
       - name: Upload .vsix
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: vscode-extension
-          path: vscode-ext/*.vsix
+          path: |
+            vscode-ext/*.vsix
+            vscode-ext/artifact-manifest.sha256
 
   publish-vscode:
     name: Publish VSCode Extension
@@ -132,14 +224,16 @@ jobs:
       - build-standalone
       - build-vscode
     runs-on: ubuntu-latest
+    environment:
+      name: vscode-extension-publish
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 22
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10
 
@@ -147,7 +241,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Download .vsix
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: vscode-extension
           path: vscode-ext
@@ -156,7 +250,7 @@ jobs:
         working-directory: vscode-ext
         run: |
           for i in 1 2 3; do
-            npx vsce publish --packagePath *.vsix --no-dependencies && exit 0
+            pnpm exec vsce publish --packagePath *.vsix --no-dependencies && exit 0
             echo "Attempt $i failed, retrying in 10s..."
             sleep 10
           done
@@ -168,7 +262,7 @@ jobs:
         working-directory: vscode-ext
         run: |
           for i in 1 2 3; do
-            npx ovsx publish --packagePath *.vsix --no-dependencies && exit 0
+            pnpm exec ovsx publish --packagePath *.vsix --no-dependencies && exit 0
             echo "Attempt $i failed, retrying in 10s..."
             sleep 10
           done

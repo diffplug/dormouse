@@ -8,7 +8,7 @@ import * as ptyManager from './pty-manager';
 import { resolveSelectedShell } from './shell-selection';
 import { log } from './log';
 
-export class MouseTermViewProvider implements vscode.WebviewViewProvider {
+export class DormouseViewProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private routerDisposable: vscode.Disposable | undefined;
   private description: string | undefined;
@@ -28,7 +28,7 @@ export class MouseTermViewProvider implements vscode.WebviewViewProvider {
   setSelectedShell(opts: { shell?: string; args?: string[] } | null): void {
     this.selectedShell = opts;
     void this.postMessage({
-      type: 'mouseterm:selectedShell',
+      type: 'dormouse:selectedShell',
       shell: opts?.shell,
       args: opts?.args,
     });

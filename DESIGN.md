@@ -1,5 +1,5 @@
 ---
-name: MouseTerm
+name: Dormouse
 description: A mouse-friendly multitasking terminal that feels native inside VSCode.
 colors:
   app-bg: "var(--vscode-sideBar-background)"
@@ -85,13 +85,13 @@ components:
     padding: "16px 24px"
 ---
 
-# Design System: MouseTerm
+# Design System: Dormouse
 
 ## 1. Overview
 
 **Creative North Star: "The Native Tenant"**
 
-MouseTerm is a tenant in someone else's house. The house is VSCode. The user picked the furniture (their theme), the lighting (their mode), the typography (their editor font). MouseTerm moves in, multiplies what the user can do with their terminals, and leaves the decor alone. The interface should be indistinguishable from a built-in panel: not because it imitates VSCode, but because it inherits from VSCode. Every color, every font, every surface is a passthrough of the host's tokens.
+Dormouse is a tenant in someone else's house. The house is VSCode. The user picked the furniture (their theme), the lighting (their mode), the typography (their editor font). Dormouse moves in, multiplies what the user can do with their terminals, and leaves the decor alone. The interface should be indistinguishable from a built-in panel: not because it imitates VSCode, but because it inherits from VSCode. Every color, every font, every surface is a passthrough of the host's tokens.
 
 The system is intentionally minimal and bg-only. Chrome recedes; terminals are the content. Hierarchy is conveyed through background shifts between `header-active-bg` and `header-inactive-bg`, not through borders, shadows, or accent stripes. Status is conveyed through shape and position (a bell icon, a door's alert state) and through the active terminal palette's own ANSI red/green/yellow, not through a separate design-system palette.
 
@@ -107,7 +107,7 @@ The system explicitly rejects: rounded SaaS cards, gradient accents, hacker-aest
 
 ## 2. Colors
 
-The palette has no fixed values. Every semantic token resolves to a `--vscode-*` variable at runtime. Inside VSCode, those variables are injected by the host. Outside VSCode (standalone, website playground), `applyTheme()` materializes the same variable shape on `document.body` from a bundled MouseTerm theme.
+The palette has no fixed values. Every semantic token resolves to a `--vscode-*` variable at runtime. Inside VSCode, those variables are injected by the host. Outside VSCode (standalone, website playground), `applyTheme()` materializes the same variable shape on `document.body` from a bundled Dormouse theme.
 
 ### Primary
 This system has no "primary" accent in the brand sense. The closest analogue is the **focused-header pair**:
@@ -152,7 +152,7 @@ This system has no "primary" accent in the brand sense. The closest analogue is 
 **Body Font:** `var(--vscode-editor-font-family)`.
 **Label/Mono Font:** same as body. Sans and mono resolve to the same VSCode editor font.
 
-**Character:** monospace, the user's own editor face. The system has no opinion about Cascadia vs. SF Mono vs. JetBrains Mono vs. Fira Code; whatever is set in the editor is what MouseTerm uses, including ligature settings. This is the typographic equivalent of the host-theme rule.
+**Character:** monospace, the user's own editor face. The system has no opinion about Cascadia vs. SF Mono vs. JetBrains Mono vs. Fira Code; whatever is set in the editor is what Dormouse uses, including ligature settings. This is the typographic equivalent of the host-theme rule.
 
 ### Hierarchy
 - **Body** (weight 500, `text-sm` = 0.75rem / 12px, line-height 1rem): pane headers, doors, popup contents, button labels. The single most-used step.

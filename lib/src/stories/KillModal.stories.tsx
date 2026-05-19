@@ -6,7 +6,7 @@ function KillModal({ char = 'G', onCancel, exit }: { char?: string; onCancel?: (
     <div className="relative bg-app-bg" style={{ width: 600, height: 400 }}>
       {/* Simulated terminal content behind the overlay */}
       <div className="p-4 font-mono text-sm text-terminal-fg">
-        <div>user@mouseterm:~$ npm run build</div>
+        <div>user@dormouse:~$ npm run build</div>
         <div className="text-muted">Building project...</div>
       </div>
       {/* Kill confirmation overlay — positioned over the pane */}

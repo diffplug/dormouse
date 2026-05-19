@@ -13,7 +13,7 @@ export default defineConfig({
   resolve: {
     dedupe: ["react", "react-dom"],
     alias: {
-      "mouseterm-lib": path.resolve(libDir, "src"),
+      "dormouse-lib": path.resolve(libDir, "src"),
     },
   },
   // Tauri expects a fixed port; fail if that port is not available

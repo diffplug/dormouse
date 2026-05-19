@@ -14,7 +14,7 @@
     "baseUrl": ".",
     "paths": {
       "ascii-splash-internal/*": ["node_modules/ascii-splash/dist/*"],
-      "mouseterm-lib/*": ["../lib/src/*"]
+      "dormouse-lib/*": ["../lib/src/*"]
     },
     "strict": true,
     "noUnusedLocals": true,

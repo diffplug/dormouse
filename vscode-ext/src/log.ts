@@ -5,7 +5,7 @@ let channel: vscode.OutputChannel | null = null;
 export const log = {
   init() {
     if (!channel) {
-      channel = vscode.window.createOutputChannel('MouseTerm');
+      channel = vscode.window.createOutputChannel('Dormouse');
     }
   },
   info(...args: unknown[]) {

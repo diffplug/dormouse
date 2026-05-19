@@ -1,5 +1,5 @@
 {
-  "name": "mouseterm-standalone",
+  "name": "dormouse-standalone",
   "private": true,
   "version": "0.1.0",
   "license": "FSL-1.1-MIT",
@@ -18,7 +18,7 @@
     "@xterm/addon-fit": "0.12.0-beta.216",
     "@xterm/xterm": "6.1.0-beta.216",
     "dockview-react": "^5.1.0",
-    "mouseterm-lib": "workspace:*",
+    "dormouse-lib": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-variants": "^3.2.2"

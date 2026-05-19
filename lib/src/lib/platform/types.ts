@@ -33,7 +33,7 @@ export interface PlatformAdapter {
   // instead of navigator.clipboard.readText() so adapters whose webview pops
   // a "Paste from <App>" confirmation (notably Tauri's WKWebView) can bypass it.
   readClipboardText?(): Promise<string | null>;
-  // Only present on adapters with a native (non-DOM) drag-drop source. Currently inert in Tauri; see diffplug/mouseterm#38 and tauri-apps/tauri#14373.
+  // Only present on adapters with a native (non-DOM) drag-drop source. Currently inert in Tauri; see diffplug/dormouse#38 and tauri-apps/tauri#14373.
   onFilesDropped?(handler: (paths: string[]) => void): () => void;
 
   // PTY event listeners

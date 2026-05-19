@@ -14,7 +14,7 @@ The app should feel like a lightweight mobile terminal playground. It does not
 need remote sessions, SSH, user accounts, or production infrastructure.
 
 The website `/tether` prototype exposes a small floating theme switcher above
-the terminal. It uses the shared MouseTerm `ThemePicker`.
+the terminal. It uses the shared Dormouse `ThemePicker`.
 
 `/tether` uses the same fake playground terminal stack as `/playground`:
 `PlaygroundShellRegistry` attaches a `TutorialShell` to every spawned pane, the
@@ -102,7 +102,7 @@ Touch modes:
 | Mode | Button label | Icon | Availability | Behavior |
 | --- | --- | --- | --- | --- |
 | Gestures | `Gestures` | `HandPointingIcon` | Always available | Pane-content touches, pen presses, and primary mouse/trackpad clicks open the Gesture mode radial menu. |
-| Text selection | `Select` | `CursorTextIcon` | Always available | Touches are reserved for terminal text selection and copy/paste. If the TUI is capturing mouse events, MouseTerm activates mouse override for the active pane. |
+| Text selection | `Select` | `CursorTextIcon` | Always available | Touches are reserved for terminal text selection and copy/paste. If the TUI is capturing mouse events, Dormouse activates mouse override for the active pane. |
 | Mouse | `Mouse` | `CursorClickIcon` | Only when the active TUI is capturing mouse events | Touches are passed through as terminal mouse input. |
 
 Default touch mode is **Gestures**.
@@ -285,7 +285,7 @@ Gesture action mappings:
 | PgUp | `\x1B[5~` |
 | k | `k` |
 | Backspace | `\x7F` |
-| Paste | Existing MouseTerm paste flow for the active pane |
+| Paste | Existing Dormouse paste flow for the active pane |
 | n | `n` |
 | ◀ | `\x1B[D` |
 | Home | `\x1B[H` |
@@ -450,7 +450,7 @@ Prototype behavior:
 Build exactly this:
 
 * One terminal playground screen.
-* Floating theme switcher using the shared MouseTerm theme picker.
+* Floating theme switcher using the shared Dormouse theme picker.
 * Touch mode selector:
 
 ```text

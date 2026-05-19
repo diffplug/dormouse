@@ -1,4 +1,4 @@
-/* MouseTerm Theme System
+/* Dormouse Theme System
  *
  * Two-layer CSS variable strategy:
  *   @theme --color-* tokens -> var(--vscode-*)
@@ -8,7 +8,7 @@
  *
  * This file intentionally does not provide hardcoded color defaults. Runtime
  * hosts must provide real VSCode variables, either from VSCode itself or from
- * a bundled/installed MouseTerm theme.
+ * a bundled/installed Dormouse theme.
  *
  * Two consumers read --vscode-* variables:
  *   1. @theme/body bindings below — for UI colors (surfaces, tabs, etc.)

@@ -109,7 +109,7 @@ function ShellDropdown({ shells }: { shells: ShellEntry[] }) {
     shell: ShellEntry,
     options: { replaceUntouched?: boolean; announce?: boolean } = {},
   ) => {
-    window.dispatchEvent(new CustomEvent('mouseterm:new-terminal', {
+    window.dispatchEvent(new CustomEvent('dormouse:new-terminal', {
       detail: {
         shell: shell.path,
         args: shell.args,

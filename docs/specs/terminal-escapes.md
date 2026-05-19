@@ -1,17 +1,17 @@
 # Terminal Escape Sequence Registry
 
-> Single registry of the terminal escape sequences MouseTerm parses or responds to — OSC (Operating System Command) for out-of-band metadata, and the CSI/DCS sequences MouseTerm handles directly rather than delegating to xterm.js. Behavioral details for OSCs live in `docs/specs/alert.md` (notifications) and `docs/specs/terminal-state.md` (CWD, prompt/command, title fallback). This file also documents iTerm2 self-identification because the same identity is what causes most of these sequences to be emitted at us.
+> Single registry of the terminal escape sequences Dormouse parses or responds to — OSC (Operating System Command) for out-of-band metadata, and the CSI/DCS sequences Dormouse handles directly rather than delegating to xterm.js. Behavioral details for OSCs live in `docs/specs/alert.md` (notifications) and `docs/specs/terminal-state.md` (CWD, prompt/command, title fallback). This file also documents iTerm2 self-identification because the same identity is what causes most of these sequences to be emitted at us.
 
 ## Goal
 
-MouseTerm parses a small set of escape sequences from PTY output to drive alerts, terminal state, titles, and identity responses. Most terminal control is delegated to xterm.js; MouseTerm intervenes only where it must — OSCs that drive product state, CSI/DCS that MouseTerm answers itself or that need observation, and the security-sensitive sequences the iTerm2 identity provokes. This document is the index — every supported sequence has one row in the tables below pointing to the spec that defines its full behavior.
+Dormouse parses a small set of escape sequences from PTY output to drive alerts, terminal state, titles, and identity responses. Most terminal control is delegated to xterm.js; Dormouse intervenes only where it must — OSCs that drive product state, CSI/DCS that Dormouse answers itself or that need observation, and the security-sensitive sequences the iTerm2 identity provokes. This document is the index — every supported sequence has one row in the tables below pointing to the spec that defines its full behavior.
 
 ## CSI vs OSC vs DCS
 
 These are the three escape-sequence families that show up in this spec:
 
-- **CSI** (`ESC [`, "Control Sequence Introducer") — terminal *control*: cursor movement, colors/SGR, scrolling, mode switches, key-input encoding. Numeric/short parameters, terminated by a final letter. Most CSIs are handled by xterm.js; MouseTerm only intervenes where noted in [Supported CSI](#supported-csi).
-- **OSC** (`ESC ]`, "Operating System Command") — *out-of-band metadata* to the terminal emulator itself: titles, CWD, notifications, hyperlinks, clipboard, prompt markers. String-shaped payloads, terminated by `BEL` or `ST`. MouseTerm parses these at the PTY data boundary; see [Supported OSCs](#supported-oscs).
+- **CSI** (`ESC [`, "Control Sequence Introducer") — terminal *control*: cursor movement, colors/SGR, scrolling, mode switches, key-input encoding. Numeric/short parameters, terminated by a final letter. Most CSIs are handled by xterm.js; Dormouse only intervenes where noted in [Supported CSI](#supported-csi).
+- **OSC** (`ESC ]`, "Operating System Command") — *out-of-band metadata* to the terminal emulator itself: titles, CWD, notifications, hyperlinks, clipboard, prompt markers. String-shaped payloads, terminated by `BEL` or `ST`. Dormouse parses these at the PTY data boundary; see [Supported OSCs](#supported-oscs).
 - **DCS** (`ESC P`, "Device Control String") — longer payloads, currently relevant only as the response shape for `CSI > q` (iTerm2 extended device attributes).
 
 Rule of thumb: CSI talks to the screen, OSC talks to the application hosting the screen, DCS is the response channel for richer queries.
@@ -38,7 +38,7 @@ The parser also classifies each PTY data chunk for activity-monitor purposes:
 - A chunk that contains only notification/progress OSCs after parsing must not be fed to the activity monitor's `onData()` as generic meaningful output.
 - A chunk that contains visible output plus notification/progress OSCs still counts visible output as activity.
 
-Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js can handle standard terminal behavior MouseTerm does not model. Security-sensitive or iTerm2-identity-triggered OSCs must not rely on xterm.js defaults: if they are not in [Supported OSCs](#supported-oscs), MouseTerm consumes and ignores them without visible terminal garbage, clipboard access, file access, focus changes, or other side effects.
+Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js can handle standard terminal behavior Dormouse does not model. Security-sensitive or iTerm2-identity-triggered OSCs must not rely on xterm.js defaults: if they are not in [Supported OSCs](#supported-oscs), Dormouse consumes and ignores them without visible terminal garbage, clipboard access, file access, focus changes, or other side effects.
 
 ## Supported OSCs
 
@@ -63,18 +63,18 @@ Some sequences are dual-purpose. The notification rows for `OSC 9 ; <message> ST
 
 ## Supported CSI
 
-The vast majority of CSI handling is delegated to xterm.js. MouseTerm only intervenes in the cases below — either to answer a query itself (so the response shape is under our control), to observe a state change xterm.js processes, to enable an xterm.js feature, or to filter replay output.
+The vast majority of CSI handling is delegated to xterm.js. Dormouse only intervenes in the cases below — either to answer a query itself (so the response shape is under our control), to observe a state change xterm.js processes, to enable an xterm.js feature, or to filter replay output.
 
 | Sequence | Role | Disposition | Where |
 |---|---|---|---|
-| `CSI > q` | iTerm2 extended device-attributes query | MouseTerm answers with `DCS > \| iTerm2 [version] ST` at the PTY boundary; not forwarded to xterm.js. | [iTerm2 identity](#iterm2-identity) |
+| `CSI > q` | iTerm2 extended device-attributes query | Dormouse answers with `DCS > \| iTerm2 [version] ST` at the PTY boundary; not forwarded to xterm.js. | [iTerm2 identity](#iterm2-identity) |
 | `CSI ? ... h` (DECSET) | Private-mode set, including mouse tracking and bracketed paste | Observed via an xterm.js parser hook that returns false (xterm still handles the sequence); the mouse-selection store reads `terminal.modes` in a microtask. | `docs/specs/mouse-and-clipboard.md` |
 | `CSI ? ... l` (DECRST) | Private-mode reset, including mouse tracking and bracketed paste | Same observation pattern as DECSET. | `docs/specs/mouse-and-clipboard.md` |
 | Kitty keyboard protocol | Disambiguated key-event reporting (CSI u with modifiers, e.g. Shift+Enter distinguishable from Enter) | Enabled by passing `vtExtensions: { kittyKeyboard: true }` to the xterm.js `Terminal` constructor; xterm.js handles the push/pop (`CSI > u` / `CSI < u`) and the modified key reports. | `lib/src/lib/terminal-lifecycle.ts` |
 
 ### Replay-time CSI filtering
 
-During `pty:replay`, MouseTerm reconstructs scrollback by replaying saved bytes through xterm.js. Apps in that scrollback often left behind cursor-position reports, device-attribute responses, focus reports, and similar terminal-generated replies. xterm.js may re-emit those during replay; routing them into the new shell would corrupt its input buffer. MouseTerm's reply filter (`lib/src/lib/terminal-report-filter.ts`) drops replay-time CSI replies of the following shapes:
+During `pty:replay`, Dormouse reconstructs scrollback by replaying saved bytes through xterm.js. Apps in that scrollback often left behind cursor-position reports, device-attribute responses, focus reports, and similar terminal-generated replies. xterm.js may re-emit those during replay; routing them into the new shell would corrupt its input buffer. Dormouse's reply filter (`lib/src/lib/terminal-report-filter.ts`) drops replay-time CSI replies of the following shapes:
 
 - Cursor-position / device-status (`CSI [?]\d+;\d+ R/n`)
 - Primary/secondary/tertiary device attributes (`CSI [?>=]\d* c`)
@@ -87,18 +87,18 @@ This filter is limited to *terminal-generated reports*. User keyboard escape seq
 
 ### Pass-through and fail-inertly
 
-Unknown CSI sequences pass through to xterm.js so it can handle standard terminal behavior MouseTerm does not model. The same fail-inertly rule that applies to OSCs (see [iTerm2 identity](#iterm2-identity)) applies to CSIs: any sequence that xterm.js does not recognize must be consumed silently — no visible terminal garbage, no clipboard or file access, no focus changes, no other side effects.
+Unknown CSI sequences pass through to xterm.js so it can handle standard terminal behavior Dormouse does not model. The same fail-inertly rule that applies to OSCs (see [iTerm2 identity](#iterm2-identity)) applies to CSIs: any sequence that xterm.js does not recognize must be consumed silently — no visible terminal garbage, no clipboard or file access, no focus changes, no other side effects.
 
 ## iTerm2 identity
 
-MouseTerm reports an iTerm2-compatible identity so that tools (shells, build systems, agent clients) emit the iTerm2-style escape codes that this spec set supports.
+Dormouse reports an iTerm2-compatible identity so that tools (shells, build systems, agent clients) emit the iTerm2-style escape codes that this spec set supports.
 
 Environment for spawned PTYs:
 
 | Variable | Value |
 |---|---|
 | `TERM_PROGRAM` | `iTerm.app` |
-| `TERM_PROGRAM_VERSION` | MouseTerm's chosen iTerm2 compatibility version, not the package version |
+| `TERM_PROGRAM_VERSION` | Dormouse's chosen iTerm2 compatibility version, not the package version |
 | `LC_TERMINAL` | `iTerm2` only if needed by real-world shell integrations |
 | `LC_TERMINAL_VERSION` | same compatibility version as `TERM_PROGRAM_VERSION` |
 
@@ -108,16 +108,16 @@ Device/version query:
 - Use a single compatibility version across env and device responses.
 - Do not advertise feature-specific support until the relevant behavior exists.
 
-Because this identity can cause tools to emit more iTerm2 escape codes than MouseTerm implements, **unsupported escape codes must fail inertly**: consume or ignore them without visible terminal garbage, privilege escalation, clipboard access, file access, or focus stealing. This rule applies to both OSC and CSI sequences (see [Known-unimplemented iTerm2 and clipboard-capable sequences](#known-unimplemented-iterm2-and-clipboard-capable-sequences) for OSCs and the [Pass-through and fail-inertly](#pass-through-and-fail-inertly) note under CSI).
+Because this identity can cause tools to emit more iTerm2 escape codes than Dormouse implements, **unsupported escape codes must fail inertly**: consume or ignore them without visible terminal garbage, privilege escalation, clipboard access, file access, or focus stealing. This rule applies to both OSC and CSI sequences (see [Known-unimplemented iTerm2 and clipboard-capable sequences](#known-unimplemented-iterm2-and-clipboard-capable-sequences) for OSCs and the [Pass-through and fail-inertly](#pass-through-and-fail-inertly) note under CSI).
 
 ## Known-unimplemented iTerm2 and clipboard-capable sequences
 
-MouseTerm intentionally does not implement the following sequences. They are mostly iTerm2-proprietary; `OSC 50` (font) and `OSC 52` (clipboard) are standard xterm extensions included here because the iTerm2 identity prompts tools to emit them and they have security implications. All of them must fail inertly per the rule above, which means they are consumed/ignored rather than forwarded to xterm.js.
+Dormouse intentionally does not implement the following sequences. They are mostly iTerm2-proprietary; `OSC 50` (font) and `OSC 52` (clipboard) are standard xterm extensions included here because the iTerm2 identity prompts tools to emit them and they have security implications. All of them must fail inertly per the rule above, which means they are consumed/ignored rather than forwarded to xterm.js.
 
 | Sequence | Purpose | Reason for non-support |
 |---|---|---|
-| `OSC 1337 ; SetMark` | Pin a navigable scrollback mark | No mark UI in MouseTerm. |
-| `OSC 1337 ; CursorShape=...` | Cursor shape override | Cursor shape comes from MouseTerm settings, not the PTY. |
+| `OSC 1337 ; SetMark` | Pin a navigable scrollback mark | No mark UI in Dormouse. |
+| `OSC 1337 ; CursorShape=...` | Cursor shape override | Cursor shape comes from Dormouse settings, not the PTY. |
 | `OSC 1337 ; SetBadgeFormat=...` | Display a badge string in the terminal | No badge UI. |
 | `OSC 1337 ; ClearScrollback` | Clear scrollback buffer | xterm.js handles native clear-screen sequences. |
 | `OSC 1337 ; CopyToClipboard=...` / `EndCopy` | Programmatic clipboard write | Security: untrusted PTY output cannot write the user's clipboard. See `docs/specs/mouse-and-clipboard.md`. |
@@ -127,7 +127,7 @@ MouseTerm intentionally does not implement the following sequences. They are mos
 | `OSC 50 ; <font> ST` | Set font dynamically | Font is host-controlled. |
 | `OSC 52 ; <selection> ; <data> ST` | Programmatic clipboard write | Security: same rationale as `CopyToClipboard`. |
 
-This list is non-exhaustive. Any iTerm2-compatibility OSC family that MouseTerm can identify and that is not in the [Supported OSCs](#supported-oscs) table is ignored.
+This list is non-exhaustive. Any iTerm2-compatibility OSC family that Dormouse can identify and that is not in the [Supported OSCs](#supported-oscs) table is ignored.
 
 ## References
 

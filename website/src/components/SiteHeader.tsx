@@ -8,7 +8,7 @@ export const STATIC_PAGE_HEADER_STYLE: React.CSSProperties = {
 const NAV_LINKS: readonly { href: string; label: string; external?: boolean; hideOnMobile?: boolean }[] = [
   { href: "/playground", label: "Playground", hideOnMobile: true },
   { href: "/#download", label: "Download", hideOnMobile: true },
-  { href: "https://github.com/diffplug/mouseterm", label: "GitHub", external: true },
+  { href: "https://github.com/diffplug/dormouse", label: "GitHub", external: true },
 ];
 
 const CHROME_INACTIVE_BG = "var(--color-header-inactive-bg)";
@@ -90,7 +90,7 @@ const SiteHeader = forwardRef<HTMLElement, SiteHeaderProps>(
                   }
             }
           >
-            MouseTerm
+            Dormouse
           </a>
           <div className="ml-auto flex min-w-0 items-center gap-3 md:gap-8">
             {controls ? <div className="min-w-0">{controls}</div> : null}

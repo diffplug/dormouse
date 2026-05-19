@@ -36,19 +36,19 @@ html body {
   height: auto;
 }
 
-html body.tether-marketing-body {
+html body.pocket-marketing-body {
   overflow: auto;
 }
 
-body.tether-marketing-body #root {
+body.pocket-marketing-body #root {
   height: auto;
 }
 
-html body.tether-terminal-body {
+html body.pocket-terminal-body {
   overflow: hidden;
 }
 
-body.tether-terminal-body #root {
+body.pocket-terminal-body #root {
   height: 100vh;
 }
 

@@ -44,12 +44,12 @@ JSIGN_ALIAS="AUTHENTICATION"
 TSA_URL="http://ts.ssl.com"
 
 # GitHub repo
-GITHUB_REPO="diffplug/mouseterm"
+GITHUB_REPO="diffplug/dormouse"
 
 # Stable filenames for release assets (update bundles only)
-FNAME_WIN="MouseTerm-windows-x64-setup.exe"
-FNAME_MAC="MouseTerm-macos-aarch64.tar.gz"
-FNAME_LINUX="MouseTerm-linux-x86_64.AppImage"
+FNAME_WIN="Dormouse-windows-x64-setup.exe"
+FNAME_MAC="Dormouse-macos-aarch64.tar.gz"
+FNAME_LINUX="Dormouse-linux-x86_64.AppImage"
 
 # =============================================================================
 # Helper Functions
@@ -99,6 +99,107 @@ EOF
 
 check_command() {
     command -v "$1" &>/dev/null || error "Required command not found: $1. Install with: $2"
+}
+
+check_gh_attestation_support() {
+    gh attestation verify --help &>/dev/null \
+        || error "GitHub CLI does not support 'gh attestation verify'. Upgrade gh before signing release artifacts."
+}
+
+require_file() {
+    local description="$1"
+    local path="$2"
+
+    [[ -f "$path" ]] || error "$description not found at expected path: $path"
+    printf '%s\n' "$path"
+}
+
+require_directory() {
+    local description="$1"
+    local path="$2"
+
+    [[ -d "$path" ]] || error "$description not found at expected path: $path"
+    printf '%s\n' "$path"
+}
+
+require_single_find_match() {
+    local description="$1"
+    local root="$2"
+    shift 2
+
+    [[ -d "$root" ]] || error "$description search root not found: $root"
+
+    local matches=()
+    while IFS= read -r match; do
+        [[ -n "$match" ]] && matches+=("$match")
+    done < <(find "$root" "$@" -print | sort)
+
+    if [[ "${#matches[@]}" -eq 1 ]]; then
+        printf '%s\n' "${matches[0]}"
+        return
+    fi
+
+    {
+        echo "[ERROR] $description: expected exactly one match, found ${#matches[@]}"
+        echo "Search root: $root"
+        if [[ "${#matches[@]}" -gt 0 ]]; then
+            echo "Matches:"
+            printf '  %s\n' "${matches[@]}"
+        fi
+    } >&2
+    exit 1
+}
+
+mac_app_path() {
+    require_directory \
+        "macOS app bundle" \
+        "$SIGN_DIR/standalone-mac-aarch64/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Dormouse.app"
+}
+
+windows_release_dir() {
+    printf '%s\n' "$SIGN_DIR/standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release"
+}
+
+windows_exe_path() {
+    require_file \
+        "Windows app executable" \
+        "$(windows_release_dir)/dormouse.exe"
+}
+
+windows_installer_path() {
+    local version="${1:-}"
+    local pattern="Dormouse_*_x64-setup.exe"
+    if [[ -n "$version" ]]; then
+        pattern="Dormouse_${version}_x64-setup.exe"
+    fi
+
+    require_single_find_match \
+        "Windows NSIS installer" \
+        "$(windows_release_dir)/bundle/nsis" \
+        -type f \
+        -name "$pattern"
+}
+
+linux_appimage_path() {
+    local version="$1"
+
+    require_single_find_match \
+        "Linux AppImage" \
+        "$SIGN_DIR/standalone-linux-x64/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage" \
+        -type f \
+        -name "Dormouse_${version}_amd64.AppImage"
+}
+
+nsis_script_path() {
+    require_file \
+        "NSIS script" \
+        "$(windows_release_dir)/bundle/nsis/installer.nsi"
+}
+
+nsis_plugin_path() {
+    require_file \
+        "NSIS Tauri plugin" \
+        "$(windows_release_dir)/nsis/x64/plugins/nsis_tauri_utils.dll"
 }
 
 # Returns 0 if a specific artifact has already been downloaded
@@ -173,13 +274,6 @@ prepare_sign_dir() {
     done
 }
 
-find_nsis_script() {
-    find "$SIGN_DIR/standalone-win-x64" \
-        -name "installer.nsi" \
-        -print \
-        | head -1
-}
-
 rebuild_windows_installer() {
     local signed_exe="$1"
     local installer_path="$2"
@@ -187,8 +281,7 @@ rebuild_windows_installer() {
     check_command makensis "Install NSIS: brew install makensis"
 
     local script_path
-    script_path=$(find_nsis_script)
-    [[ -n "$script_path" ]] || error "NSIS script not found in downloaded artifacts; ensure release.yml uploads the nsis staging directory."
+    script_path=$(nsis_script_path)
 
     local script_dir
     script_dir="$(cd "$(dirname "$script_path")" && pwd)"
@@ -199,16 +292,10 @@ rebuild_windows_installer() {
     artifact_dir="$(cd "$SIGN_DIR/standalone-win-x64" && pwd)"
     perl "$SCRIPT_DIR/patch-nsis-paths.pl" "$script_path" "$artifact_dir"
 
-    # Patch ADDITIONALPLUGINSPATH separately — it is outside the checkout tree.
+    # Patch ADDITIONALPLUGINSPATH separately; it is outside the checkout tree.
     local plugin_dir
-    plugin_dir=$(find "$SIGN_DIR/standalone-win-x64" -name "nsis_tauri_utils.dll" -exec dirname {} \; | head -1)
-    if [[ -n "$plugin_dir" ]]; then
-        local abs_plugin_dir
-        abs_plugin_dir="$(cd "$plugin_dir" && pwd)"
-        sed -i '' "s|^!define ADDITIONALPLUGINSPATH .*|!define ADDITIONALPLUGINSPATH \"$abs_plugin_dir\"|" "$script_path"
-    else
-        warn "nsis_tauri_utils.dll not found in artifacts; makensis may fail"
-    fi
+    plugin_dir="$(cd "$(dirname "$(nsis_plugin_path)")" && pwd)"
+    sed -i '' "s|^!define ADDITIONALPLUGINSPATH .*|!define ADDITIONALPLUGINSPATH \"$plugin_dir\"|" "$script_path"
 
     local installer_name
     installer_name="$(basename "$installer_path")"
@@ -220,12 +307,9 @@ rebuild_windows_installer() {
         makensis -NOCD "$(basename "$script_path")"
     )
 
-    # makensis outputs whatever filename the .nsi defines; find it
-    local output_exe
-    output_exe=$(find "$script_dir" -maxdepth 1 -name "*.exe" -newer "$script_path" | head -1)
-    [[ -n "$output_exe" ]] || error "NSIS rebuild did not produce an installer"
-    log "NSIS produced: $(basename "$output_exe")"
-    mv "$output_exe" "$installer_path"
+    [[ -f "$installer_path" ]] \
+        || error "NSIS rebuild did not produce expected installer: $installer_path"
+    log "NSIS produced: $(basename "$installer_path")"
 }
 
 resolve_tag_sha() {
@@ -254,6 +338,78 @@ find_release_run_id() {
         | head -1
 }
 
+validate_sha256_manifest_paths() {
+    local manifest="$1"
+
+    awk '
+        NF < 2 { exit 1 }
+        {
+            path = $0
+            sub(/^[0-9a-fA-F]+[[:space:]]+[* ]?/, "", path)
+            if (path == "" || path ~ /^\// || path ~ /(^|\/)\.\.($|\/)/) {
+                exit 1
+            }
+        }
+    ' "$manifest"
+}
+
+check_sha256_manifest() {
+    local artifact_dir="$1"
+    local manifest_rel="$2"
+
+    if command -v sha256sum &>/dev/null; then
+        (cd "$artifact_dir" && sha256sum -c "$manifest_rel" >/dev/null)
+    elif command -v shasum &>/dev/null; then
+        (cd "$artifact_dir" && shasum -a 256 -c "$manifest_rel" >/dev/null)
+    else
+        error "Required command not found: sha256sum or shasum"
+    fi
+}
+
+verify_downloaded_artifact() {
+    local name="$1"
+    local tag="$2"
+    local tag_sha="$3"
+    local artifact_dir="$DOWNLOAD_DIR/$name"
+
+    [[ -d "$artifact_dir" ]] || error "$name: artifact directory not found at $artifact_dir"
+
+    local manifest
+    manifest=$(require_single_find_match "$name artifact manifest" "$artifact_dir" -type f -name artifact-manifest.sha256)
+    [[ -s "$manifest" ]] || error "$name: artifact-manifest.sha256 is empty"
+
+    local manifest_rel="${manifest#"$artifact_dir"/}"
+    [[ "$manifest_rel" != "$manifest" ]] || error "$name: could not resolve manifest path relative to artifact directory"
+
+    validate_sha256_manifest_paths "$manifest" \
+        || error "$name: artifact manifest contains an absolute or parent-relative path"
+
+    local identity="https://github.com/$GITHUB_REPO/.github/workflows/release.yml@refs/tags/$tag"
+
+    log "  $name: verifying artifact attestation"
+    gh attestation verify "$manifest" \
+        --repo "$GITHUB_REPO" \
+        --cert-identity "$identity" \
+        --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
+        --source-ref "refs/tags/$tag" \
+        --source-digest "$tag_sha" >/dev/null \
+        || error "$name: artifact manifest attestation failed"
+
+    log "  $name: verifying artifact hashes"
+    check_sha256_manifest "$artifact_dir" "$manifest_rel" \
+        || error "$name: downloaded artifact hash verification failed"
+}
+
+verify_downloaded_artifacts() {
+    local tag="$1"
+    local tag_sha="$2"
+
+    log "Verifying artifact attestations and hashes..."
+    for name in "${ARTIFACT_NAMES[@]}"; do
+        verify_downloaded_artifact "$name" "$tag" "$tag_sha"
+    done
+}
+
 # =============================================================================
 # Download CI Artifacts (per-artifact caching)
 # =============================================================================
@@ -262,23 +418,29 @@ find_release_run_id() {
 # Artifacts are stored in $DOWNLOAD_DIR and NEVER modified after download.
 download_artifacts_from_run() {
     local run_id="$1"
+    local tag="$2"
+    local tag_sha="$3"
 
     mkdir -p "$DOWNLOAD_DIR"
 
     for name in "${ARTIFACT_NAMES[@]}"; do
         if artifact_downloaded "$name"; then
-            log "  $name: already downloaded, skipping"
+            log "  $name: already downloaded, verifying"
+            verify_downloaded_artifact "$name" "$tag" "$tag_sha"
             continue
         fi
 
         log "  $name: downloading..."
+        rm -rf "$DOWNLOAD_DIR/$name"
         if gh run download "$run_id" \
             --repo "$GITHUB_REPO" \
             --name "$name" \
             --dir "$DOWNLOAD_DIR/$name"; then
+            verify_downloaded_artifact "$name" "$tag" "$tag_sha"
             touch "$DOWNLOAD_DIR/.downloaded-$name"
             log "  $name: done"
         else
+            rm -rf "$DOWNLOAD_DIR/$name"
             warn "  $name: download failed (will retry on next run)"
         fi
     done
@@ -294,17 +456,19 @@ download_artifacts() {
     local version="$1"
     local tag="v$version"
 
-    if all_artifacts_downloaded; then
-        log "All artifacts already downloaded, skipping"
-        return
-    fi
-
     local tag_sha
     tag_sha=$(resolve_tag_sha "$tag")
 
     log "Finding workflow run for tag $tag ($tag_sha)..."
 
     check_command gh "brew install gh && gh auth login"
+    check_gh_attestation_support
+
+    if all_artifacts_downloaded; then
+        log "All artifacts already downloaded, verifying cache"
+        verify_downloaded_artifacts "$tag" "$tag_sha"
+        return
+    fi
 
     local run_id=""
     local attempts=0
@@ -330,17 +494,12 @@ download_artifacts() {
 
     log "Workflow completed successfully!"
     log "Downloading artifacts..."
-    download_artifacts_from_run "$run_id"
+    download_artifacts_from_run "$run_id" "$tag" "$tag_sha"
 }
 
 resume_download() {
     local version="$1"
     local tag="v$version"
-
-    if all_artifacts_downloaded; then
-        log "All artifacts already downloaded, skipping"
-        return
-    fi
 
     local tag_sha
     tag_sha=$(resolve_tag_sha "$tag")
@@ -348,6 +507,13 @@ resume_download() {
     log "Finding completed workflow run for tag $tag ($tag_sha)..."
 
     check_command gh "brew install gh && gh auth login"
+    check_gh_attestation_support
+
+    if all_artifacts_downloaded; then
+        log "All artifacts already downloaded, verifying cache"
+        verify_downloaded_artifacts "$tag" "$tag_sha"
+        return
+    fi
 
     local run_id=""
     run_id=$(find_release_run_id "$tag" "$tag_sha")
@@ -362,7 +528,7 @@ resume_download() {
 
     log "Found completed workflow run: $run_id"
     log "Downloading artifacts..."
-    download_artifacts_from_run "$run_id"
+    download_artifacts_from_run "$run_id" "$tag" "$tag_sha"
 }
 
 # =============================================================================
@@ -439,9 +605,9 @@ sign_macos() {
     log "Starting macOS code signing..."
 
     local app
-    app=$(find "$SIGN_DIR/standalone-mac-aarch64" -name "*.app" -type d | head -1)
+    app=$(mac_app_path)
 
-    [[ -n "$app" ]] && sign_macos_app "$app" "aarch64"
+    sign_macos_app "$app" "aarch64"
 
     log "All macOS signing complete"
 }
@@ -483,27 +649,25 @@ notarize_macos() {
     prompt_secret APPLE_SIGN_PASS "Enter Apple ID password (or app-specific password)"
 
     local app
-    app=$(find "$SIGN_DIR/standalone-mac-aarch64" -name "*.app" -type d | head -1)
+    app=$(mac_app_path)
 
-    [[ -n "$app" ]] && notarize_macos_app "$app" "aarch64"
+    notarize_macos_app "$app" "aarch64"
 
     # Re-package signed+notarized app into .dmg and .tar.gz
-    if [[ -n "$app" ]]; then
-        local app_name
-        app_name=$(basename "$app")
+    local app_name
+    app_name=$(basename "$app")
 
-        log "Creating $FNAME_MAC..."
-        # COPYFILE_DISABLE=1 stops macOS's tar from writing ._* AppleDouble
-        # sidecar files (resource-fork metadata) into the archive. Without
-        # this the Tauri updater's extraction fails with
-        # `failed to unpack ._MouseTerm.app`.
-        COPYFILE_DISABLE=1 tar -czf "$SIGN_DIR/$FNAME_MAC" -C "$(dirname "$app")" "$app_name"
+    log "Creating $FNAME_MAC..."
+    # COPYFILE_DISABLE=1 stops macOS's tar from writing ._* AppleDouble
+    # sidecar files (resource-fork metadata) into the archive. Without
+    # this the Tauri updater's extraction fails with
+    # `failed to unpack ._Dormouse.app`.
+    COPYFILE_DISABLE=1 tar -czf "$SIGN_DIR/$FNAME_MAC" -C "$(dirname "$app")" "$app_name"
 
-        # Defense in depth: if any ._* slipped in anyway, fail loudly here
-        # rather than shipping a tarball the updater can't unpack.
-        if tar -tzf "$SIGN_DIR/$FNAME_MAC" | grep -E '(^|/)\._' >/dev/null; then
-            error "$FNAME_MAC contains AppleDouble (._*) entries — macOS metadata leaked into the archive"
-        fi
+    # Defense in depth: if any ._* slipped in anyway, fail loudly here
+    # rather than shipping a tarball the updater can't unpack.
+    if tar -tzf "$SIGN_DIR/$FNAME_MAC" | grep -E '(^|/)\._' >/dev/null; then
+        error "$FNAME_MAC contains AppleDouble (._*) entries — macOS metadata leaked into the archive"
     fi
 
     log "All macOS notarization and packaging complete"
@@ -514,15 +678,15 @@ notarize_macos() {
 # =============================================================================
 
 sign_windows() {
+    local version="${1:-}"
+
     log "Starting Windows code signing..."
 
     check_command jsign "brew install jsign"
     prompt_secret EV_SIGN_PIN "Enter PIV PIN for Windows signing"
 
-    # Find the inner exe
     local exe_path
-    exe_path=$(find "$SIGN_DIR/standalone-win-x64" \( -name "MouseTerm.exe" -o -name "mouseterm.exe" \) -not -name "*setup*" -not -name "*install*" | head -1)
-    [[ -n "$exe_path" ]] || error "Windows executable not found"
+    exe_path=$(windows_exe_path)
 
     log "Signing inner executable: $exe_path"
     jsign \
@@ -533,22 +697,19 @@ sign_windows() {
         --tsmode RFC3161 \
         "$exe_path"
 
-    # Find the NSIS installer
     local installer_path
-    installer_path=$(find "$SIGN_DIR/standalone-win-x64" -name "*setup*.exe" -o -name "*install*.exe" | head -1)
+    installer_path=$(windows_installer_path "$version")
 
-    if [[ -n "$installer_path" ]]; then
-        rebuild_windows_installer "$exe_path" "$installer_path"
-        log "Signing installer: $installer_path"
-        jsign \
-            --storetype PIV \
-            --storepass "$EV_SIGN_PIN" \
-            --alias "$JSIGN_ALIAS" \
-            --tsaurl "$TSA_URL" \
-            --tsmode RFC3161 \
-            "$installer_path"
+    rebuild_windows_installer "$exe_path" "$installer_path"
+    log "Signing installer: $installer_path"
+    jsign \
+        --storetype PIV \
+        --storepass "$EV_SIGN_PIN" \
+        --alias "$JSIGN_ALIAS" \
+        --tsaurl "$TSA_URL" \
+        --tsmode RFC3161 \
+        "$installer_path"
 
-    fi
 
     log "Windows signing complete"
 }
@@ -561,6 +722,10 @@ sign_updates() {
     local version="$1"
 
     log "Signing update bundles with Tauri key..."
+
+    check_command pnpm "Install pnpm with corepack: corepack enable pnpm"
+    pnpm --dir "$REPO_ROOT/standalone" exec tauri --version &>/dev/null \
+        || error "Tauri CLI not found in workspace dependencies. Run 'pnpm install --frozen-lockfile' before signing updates."
 
     prompt_secret_multiline TAURI_SIGNING_PRIVATE_KEY "Enter Tauri signing private key"
 
@@ -576,21 +741,13 @@ sign_updates() {
     # Windows NSIS installer. With Tauri v2 createUpdaterArtifacts=true,
     # the installer itself is the updater bundle; there is no .nsis.zip.
     local signed_setup
-    signed_setup=$(find "$SIGN_DIR/standalone-win-x64" \
-        -path "*/release/bundle/nsis/*setup*.exe" \
-        -type f \
-        | head -1)
-    [[ -n "$signed_setup" ]] || error "Windows NSIS installer not found. Run Windows signing first."
+    signed_setup=$(windows_installer_path "$version")
     cp "$signed_setup" "$release_dir/$FNAME_WIN"
 
     # Linux AppImage. With Tauri v2 createUpdaterArtifacts=true,
     # the AppImage itself is the updater bundle; there is no .AppImage.tar.gz.
     local linux_update
-    linux_update=$(find "$SIGN_DIR/standalone-linux-x64" \
-        -path "*/release/bundle/appimage/*.AppImage" \
-        -type f \
-        | head -1)
-    [[ -n "$linux_update" ]] || error "Linux AppImage not found in signed work directory."
+    linux_update=$(linux_appimage_path "$version")
     cp "$linux_update" "$release_dir/$FNAME_LINUX"
 
     # Generate .sig files for update bundles using Tauri CLI
@@ -602,7 +759,7 @@ sign_updates() {
             # Use tauri signer to sign the bundle
             TAURI_SIGNING_PRIVATE_KEY="$TAURI_SIGNING_PRIVATE_KEY" \
             TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" \
-                npx --prefix "$REPO_ROOT/standalone" tauri signer sign \
+                pnpm --dir "$REPO_ROOT/standalone" exec tauri signer sign \
                     --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
                     "$bundle"
         fi
@@ -659,15 +816,37 @@ create_release() {
     local version="$1"
     local tag="v$version"
     local release_dir="$WORK_DIR/release-assets"
+    local release_assets=(
+        "$release_dir/$FNAME_MAC"
+        "$release_dir/$FNAME_WIN"
+        "$release_dir/$FNAME_LINUX"
+    )
 
     log "Creating GitHub Release $tag..."
 
     check_command gh "brew install gh && gh auth login"
 
     [[ -d "$release_dir" ]] || error "Release assets not found at $release_dir. Run signing steps first."
-    for asset in "$FNAME_MAC" "$FNAME_WIN" "$FNAME_LINUX"; do
-        [[ -f "$release_dir/$asset" ]] || error "Release asset missing: $release_dir/$asset. Run sign-updates first."
+    for asset in "${release_assets[@]}"; do
+        [[ -f "$asset" ]] || error "Release asset missing: $asset. Run sign-updates first."
     done
+
+    local unexpected_assets=()
+    while IFS= read -r asset; do
+        [[ -n "$asset" ]] && unexpected_assets+=("$asset")
+    done < <(find "$release_dir" -type f \
+        ! -name "$FNAME_MAC" \
+        ! -name "$FNAME_WIN" \
+        ! -name "$FNAME_LINUX" \
+        -print | sort)
+
+    if [[ "${#unexpected_assets[@]}" -gt 0 ]]; then
+        {
+            echo "[ERROR] Release asset directory contains unexpected files:"
+            printf '  %s\n' "${unexpected_assets[@]}"
+        } >&2
+        exit 1
+    fi
 
     # Extract changelog for this version
     local notes_file="$WORK_DIR/release-notes.md"
@@ -690,7 +869,7 @@ create_release() {
         gh release upload "$tag" \
             --repo "$GITHUB_REPO" \
             --clobber \
-            "$release_dir"/*
+            "${release_assets[@]}"
         gh release edit "$tag" \
             --repo "$GITHUB_REPO" \
             --title "$tag" \
@@ -703,7 +882,7 @@ create_release() {
             --title "$tag" \
             --verify-tag \
             --notes-file "$notes_file" \
-            "$release_dir"/*
+            "${release_assets[@]}"
     fi
 
     rm -f "$notes_file"
@@ -724,7 +903,7 @@ Commands:
     resume VERSION      Resume: download completed CI artifacts, sign, release
     sign-mac            Re-sign macOS app bundles
     notarize            Re-notarize macOS apps
-    sign-win            Re-sign Windows executable
+    sign-win VERSION    Re-sign Windows executable and installer
     sign-updates VER    Re-generate Tauri update signatures and manifest from existing signed work
     release VERSION     Re-create GitHub Release from existing signed assets
 
@@ -738,6 +917,7 @@ Examples:
     $(basename "$0") all 0.1.0       # Full pipeline
     $(basename "$0") resume 0.1.0    # Resume after CI completed
     $(basename "$0") sign-mac        # Re-sign macOS only
+    $(basename "$0") sign-win 0.1.0  # Re-sign Windows only
     $(basename "$0") sign-updates 0.1.0 # Re-sign update bundles only
     $(basename "$0") release 0.1.0   # Re-create GitHub Release
 EOF
@@ -766,7 +946,7 @@ main() {
             prepare_sign_dir
             sign_macos
             notarize_macos
-            sign_windows
+            sign_windows "$version"
             sign_updates "$version"
             create_release "$version"
             ;;
@@ -779,7 +959,7 @@ main() {
             prepare_sign_dir
             sign_macos
             notarize_macos
-            sign_windows
+            sign_windows "$version"
             sign_updates "$version"
             create_release "$version"
             ;;
@@ -792,8 +972,11 @@ main() {
             notarize_macos
             ;;
         sign-win)
+            local version="${2:-}"
+            [[ -z "$version" ]] && error "Usage: $(basename "$0") sign-win <version>"
+            ensure_version "$version"
             prepare_sign_dir
-            sign_windows
+            sign_windows "$version"
             ;;
         sign-updates)
             local version="${2:-}"

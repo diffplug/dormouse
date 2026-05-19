@@ -6,7 +6,7 @@
  *   2. getTerminalTheme() in terminal-theme.ts — ANSI, cursor, selection
  */
 
-/** VSCode theme color keys consumed by MouseTerm. Derived from theme.css,
+/** VSCode theme color keys consumed by Dormouse. Derived from theme.css,
  *  useDynamicPalette, ThemePicker inline styles, SelectionOverlay,
  *  terminal-theme, and the VSCode fallback resolver. */
 export const CONSUMED_VSCODE_KEYS: readonly string[] = [

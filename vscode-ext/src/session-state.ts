@@ -4,7 +4,7 @@ import type { AlertState } from '../../lib/src/lib/alert-manager';
 import { readPersistedSession, type PersistedAlertState, type PersistedPane, type PersistedSession } from '../../lib/src/lib/session-types';
 import { log } from './log';
 
-const SESSION_STATE_KEY = 'mouseterm.session';
+const SESSION_STATE_KEY = 'dormouse.session';
 
 export function getSavedSessionState(context: vscode.ExtensionContext): PersistedSession | null {
   const saved = readPersistedSession(context.workspaceState.get<unknown>(SESSION_STATE_KEY));

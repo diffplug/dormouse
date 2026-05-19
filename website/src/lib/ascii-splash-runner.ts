@@ -1,5 +1,5 @@
 /*
- * Browser adapter for ascii-splash@0.3.0 in the MouseTerm website playground.
+ * Browser adapter for ascii-splash@0.3.0 in the Dormouse website playground.
  *
  * This file is not the upstream CLI entrypoint. It imports upstream internals
  * from ascii-splash/dist through the website's `ascii-splash-internal` Vite
@@ -14,7 +14,7 @@
  * - BrowserTerminalRenderer writes ANSI output through FakePtyAdapter.sendOutput.
  * - Keyboard bytes and SGR mouse sequences are decoded from writePty input.
  * - Alt-screen, cursor, mouse-reporting, resize, start, and cleanup lifecycle
- *   are handled for xterm.js inside MouseTerm.
+ *   are handled for xterm.js inside Dormouse.
  * - UI overlays/transitions are instantiated per runner instead of using
  *   upstream singleton getters so multiple panes can run independently.
  * - Config persistence is intentionally omitted; upstream commands that need a
@@ -60,8 +60,8 @@ import {
   LEAVE_ALT_SCREEN,
   MOUSE_DISABLE,
   MOUSE_ENABLE,
-} from "mouseterm-lib/lib/ansi";
-import type { FakePtyAdapter } from "mouseterm-lib/lib/platform/fake-adapter";
+} from "dormouse-lib/lib/ansi";
+import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import type { InteractiveProgram } from "./tutorial-shell";
 
 type QualityPreset = "low" | "medium" | "high";

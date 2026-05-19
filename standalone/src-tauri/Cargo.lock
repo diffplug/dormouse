@@ -668,6 +668,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dormouse"
+version = "0.9.1"
+dependencies = [
+ "process-wrap",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-shell",
+ "tauri-plugin-updater",
+ "windows 0.62.2",
+]
+
+[[package]]
 name = "dpi"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1940,20 +1954,6 @@ dependencies = [
  "libc",
  "wasi 0.11.1+wasi-snapshot-preview1",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "mouseterm"
-version = "0.9.1"
-dependencies = [
- "process-wrap",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-shell",
- "tauri-plugin-updater",
- "windows 0.62.2",
 ]
 
 [[package]]
