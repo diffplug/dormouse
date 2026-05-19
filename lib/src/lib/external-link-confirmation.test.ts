@@ -16,6 +16,8 @@ describe('external link confirmation store', () => {
     requestExternalLinkConfirmation('vscode://file/Users/dev/project/app.ts');
     expect(getExternalLinkConfirmationSnapshot()).toMatchObject({
       uri: 'vscode://file/Users/dev/project/app.ts',
+      displayText: '',
+      verdict: 'match',
       decision: {
         status: 'openable',
         scheme: 'vscode',
@@ -27,5 +29,21 @@ describe('external link confirmation store', () => {
     expect(updates).toBe(2);
 
     unsubscribe();
+  });
+
+  it('classifies the link via displayText when provided', () => {
+    requestExternalLinkConfirmation('https://evil.com/phish', 'goog1e.com');
+    expect(getExternalLinkConfirmationSnapshot()).toMatchObject({
+      verdict: 'deceptive',
+      displayText: 'goog1e.com',
+    });
+    clearExternalLinkConfirmation();
+
+    requestExternalLinkConfirmation('https://ci.example.com/x', 'see the report');
+    expect(getExternalLinkConfirmationSnapshot()).toMatchObject({
+      verdict: 'plain',
+      displayText: 'see the report',
+    });
+    clearExternalLinkConfirmation();
   });
 });

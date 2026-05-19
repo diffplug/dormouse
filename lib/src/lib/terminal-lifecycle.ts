@@ -1,4 +1,4 @@
-import { Terminal } from '@xterm/xterm';
+import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { getPlatform } from './platform';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
@@ -44,6 +44,28 @@ function seedProcessCwdAfterSpawn(id: string): void {
   void getPlatform().getCwd(id).then((cwd) => fillTerminalProcessCwdByPtyId(id, cwd));
 }
 
+// Reconstructs the visible text from an OSC 8 hyperlink's buffer range. xterm
+// passes the URL as the second arg to linkHandler.activate but not the rendered
+// link text; we read it ourselves so the dialog can tell the user whether the
+// label they clicked matched the URL. Wrapped lines concatenate without a
+// separator (the wrap is visual, not a semantic break).
+function readDisplayTextFromBuffer(terminal: Terminal, range: IBufferRange): string {
+  try {
+    const buffer = terminal.buffer.active;
+    let text = '';
+    for (let y = range.start.y; y <= range.end.y; y++) {
+      const line = buffer.getLine(y - 1);
+      if (!line) continue;
+      const startCol = y === range.start.y ? range.start.x - 1 : 0;
+      const endCol = y === range.end.y ? range.end.x : undefined;
+      text += line.translateToString(true, startCol, endCol);
+    }
+    return text.trim();
+  } catch {
+    return '';
+  }
+}
+
 function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDivElement } {
   const styles = getComputedStyle(document.body);
   const editorFontSize = parseInt(styles.getPropertyValue('--vscode-editor-font-size'), 10) || 12;
@@ -56,14 +78,14 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
     cursorBlink: true,
     theme,
     vtExtensions: { kittyKeyboard: true },
-    linkHandler: {
-      activate: (event, uri) => {
-        event.preventDefault();
-        requestExternalLinkConfirmation(uri);
-      },
-      allowNonHttpProtocols: true,
-    },
   });
+  terminal.options.linkHandler = {
+    activate: (event, uri, range) => {
+      event.preventDefault();
+      requestExternalLinkConfirmation(uri, readDisplayTextFromBuffer(terminal, range));
+    },
+    allowNonHttpProtocols: true,
+  };
 
   const fit = new FitAddon();
   terminal.loadAddon(fit);
