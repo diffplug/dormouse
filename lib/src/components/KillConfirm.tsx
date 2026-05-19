@@ -1,5 +1,6 @@
+import { useRef } from 'react';
 import { resolvePaneElement } from '../lib/spatial-nav';
-import { ModalOverlay, ModalSurface, Shortcut } from './design';
+import { ModalFrame, Shortcut } from './design';
 
 export type KillExit = 'shake' | 'confirm';
 
@@ -18,10 +19,32 @@ export function randomKillChar(): string {
   return KILL_CONFIRM_CHARS[Math.floor(Math.random() * KILL_CONFIRM_CHARS.length)];
 }
 
-export function KillConfirmCard({ char, onCancel, exit }: { char: string; onCancel?: () => void; exit?: KillExit }) {
+export function KillConfirmModal({
+  char,
+  onCancel,
+  exit,
+  targetElement,
+}: {
+  char: string;
+  onCancel?: () => void;
+  exit?: KillExit;
+  targetElement?: HTMLElement | null;
+}) {
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
   return (
-    <ModalSurface padding="spacious" align="center" className={exit === 'shake' ? 'motion-safe:animate-shake-x' : undefined}>
-      <h2 className="text-base font-bold mb-3 text-foreground">Confirm kill</h2>
+    <ModalFrame
+      titleId="kill-confirm-title"
+      targetElement={targetElement}
+      padding="spacious"
+      align="center"
+      className={exit === 'shake' ? 'motion-safe:animate-shake-x' : undefined}
+      overlayClassName={exit === 'confirm' ? 'kill-overlay-confirm' : undefined}
+      initialFocusRef={cancelButtonRef}
+      onEscape={onCancel}
+    >
+      <h2 id="kill-confirm-title" className="text-base font-bold mb-3 text-foreground">
+        Confirm kill
+      </h2>
       <div className="bg-app-bg py-2 px-6 rounded border border-border inline-block mb-2">
         <span
           className={`text-xl font-bold${exit === 'confirm' ? ' kill-letter-flash' : ''}`}
@@ -33,12 +56,17 @@ export function KillConfirmCard({ char, onCancel, exit }: { char: string; onCanc
       <div className="text-sm text-muted leading-relaxed grid grid-cols-[auto_auto] gap-x-2 justify-center">
         <Shortcut className="justify-self-end">{char}</Shortcut>
         <span className="justify-self-start">to confirm</span>
-        <button type="button" onClick={onCancel} className="contents group cursor-pointer">
+        <button
+          ref={cancelButtonRef}
+          type="button"
+          onClick={onCancel}
+          className="contents group cursor-pointer"
+        >
           <Shortcut className="justify-self-end group-hover:text-foreground transition-colors">Esc</Shortcut>
           <span className="justify-self-start group-hover:text-foreground transition-colors">to cancel</span>
         </button>
       </div>
-    </ModalSurface>
+    </ModalFrame>
   );
 }
 
@@ -49,12 +77,11 @@ export function KillConfirmOverlay({ confirmKill, paneElements, onCancel }: {
 }) {
   const panelEl = resolvePaneElement(paneElements.get(confirmKill.id));
   return (
-    <ModalOverlay
+    <KillConfirmModal
+      char={confirmKill.char}
+      onCancel={onCancel}
+      exit={confirmKill.exit}
       targetElement={panelEl}
-      className={confirmKill.exit === 'confirm' ? 'kill-overlay-confirm' : undefined}
-    >
-      <KillConfirmCard char={confirmKill.char} onCancel={onCancel} exit={confirmKill.exit} />
-    </ModalOverlay>
+    />
   );
 }
-

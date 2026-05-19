@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
-import { ExternalLinkDialog } from './ExternalLinkDialog';
+import { ExternalLinkModal } from './ExternalLinkModal';
 import {
   clearExternalLinkConfirmation,
   getExternalLinkConfirmationSnapshot,
@@ -7,7 +7,7 @@ import {
 } from '../lib/external-link-confirmation';
 import { getPlatform } from '../lib/platform';
 
-export function ExternalLinkDialogHost({
+export function ExternalLinkModalHost({
   onKeyboardActiveChange,
 }: {
   onKeyboardActiveChange: (active: boolean) => void;
@@ -37,7 +37,7 @@ export function ExternalLinkDialogHost({
   if (!pending) return null;
 
   return (
-    <ExternalLinkDialog
+    <ExternalLinkModal
       request={{
         uri: pending.uri,
         displayText: pending.displayText,

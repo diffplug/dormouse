@@ -1,21 +1,20 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
-import { UpdateDebugDialog } from '../../../standalone/src/UpdateDebugDialog';
+import { UpdateDebugModal } from '../../../standalone/src/UpdateDebugModal';
 
 interface StoryArgs {
   failure: { version: string; error?: string };
   body: string | null;
 }
 
-function UpdateDebugDialogStory({ failure, body }: StoryArgs) {
-  // Bumping `key` on close re-mounts the dialog so the story stays interactive
+function UpdateDebugModalStory({ failure, body }: StoryArgs) {
+  // Bumping `key` on close re-mounts the modal so the story stays interactive
   // after the user dismisses it (otherwise the canvas goes blank).
   const [tick, setTick] = useState(0);
   return (
     <div className="bg-app-bg" style={{ width: 800, height: 600, position: 'relative' }}>
-      <UpdateDebugDialog
+      <UpdateDebugModal
         key={tick}
-        open={true}
         onClose={() => setTick((t) => t + 1)}
         failure={failure}
         body={body}
@@ -41,13 +40,13 @@ const BODY = [
   '',
 ].join('\n');
 
-const meta: Meta<typeof UpdateDebugDialogStory> = {
-  title: 'Components/UpdateDebugDialog',
-  component: UpdateDebugDialogStory,
+const meta: Meta<typeof UpdateDebugModalStory> = {
+  title: 'Modals/UpdateDebugModal',
+  component: UpdateDebugModalStory,
 };
 
 export default meta;
-type Story = StoryObj<typeof UpdateDebugDialogStory>;
+type Story = StoryObj<typeof UpdateDebugModalStory>;
 
 export const Default: Story = {
   args: {

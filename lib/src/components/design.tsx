@@ -1,7 +1,8 @@
 import { clsx } from 'clsx';
 import { tv, type VariantProps } from 'tailwind-variants';
-import { forwardRef, useEffect, useLayoutEffect, useState } from 'react';
-import type { CSSProperties, HTMLAttributes, ReactNode, RefObject } from 'react';
+import { XIcon } from '@phosphor-icons/react';
+import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode, RefObject } from 'react';
 
 // App-wide type scale, color strategy, and chrome conventions: see
 // docs/specs/theme.md and AGENTS.md.
@@ -62,6 +63,14 @@ export interface ModalRect {
   height: number;
 }
 
+export const MODAL_LAYERS = {
+  app: 50,
+  pane: 100,
+  critical: 9999,
+} as const;
+
+export type ModalLayer = keyof typeof MODAL_LAYERS;
+
 export const modalOverlay = tv({
   base: 'flex items-center justify-center',
   variants: {
@@ -83,6 +92,7 @@ export const modalSurface = tv({
   base: 'rounded-lg border border-border bg-surface-raised font-mono text-foreground shadow-lg',
   variants: {
     padding: {
+      none: 'p-0',
       compact: 'p-3',
       default: 'p-4',
       spacious: 'px-6 py-4',
@@ -92,11 +102,11 @@ export const modalSurface = tv({
       center: 'text-center',
     },
     elevation: {
-      dialog: 'shadow-lg',
+      raised: 'shadow-lg',
       modal: 'shadow-2xl',
     },
   },
-  defaultVariants: { padding: 'default', align: 'start', elevation: 'dialog' },
+  defaultVariants: { padding: 'default', align: 'start', elevation: 'raised' },
 });
 
 export type ModalSurfaceVariants = VariantProps<typeof modalSurface>;
@@ -114,9 +124,74 @@ export const modalActionButton = tv({
 
 export type ModalActionButtonVariants = VariantProps<typeof modalActionButton>;
 
+export const modalReviewBlock = tv({
+  base: 'block rounded border border-border bg-app-bg font-mono text-foreground whitespace-pre-wrap',
+  variants: {
+    density: {
+      compact: 'p-2 text-xs',
+      default: 'px-2.5 py-2 text-sm leading-relaxed',
+    },
+    overflow: {
+      short: 'max-h-32 overflow-auto',
+      medium: 'max-h-40 overflow-auto',
+    },
+    wrap: {
+      breakAll: 'break-all',
+      breakWords: 'break-words',
+    },
+  },
+  defaultVariants: {
+    density: 'default',
+    overflow: 'medium',
+    wrap: 'breakWords',
+  },
+});
+
+export type ModalReviewBlockVariants = VariantProps<typeof modalReviewBlock>;
+export type ModalReviewBlockProps = HTMLAttributes<HTMLDivElement> & ModalReviewBlockVariants;
+
+export function ModalReviewBlock({
+  density,
+  overflow,
+  wrap,
+  className,
+  ...props
+}: ModalReviewBlockProps) {
+  return (
+    <div
+      className={clsx(modalReviewBlock({ density, overflow, wrap }), className)}
+      {...props}
+    />
+  );
+}
+
 export const modalIconButton = tv({
   base: 'shrink-0 rounded p-0.5 text-muted transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring',
 });
+
+export type ModalCloseButtonProps = ButtonHTMLAttributes<HTMLButtonElement>;
+
+export const ModalCloseButton = forwardRef<HTMLButtonElement, ModalCloseButtonProps>(
+  function ModalCloseButton({
+    children,
+    className,
+    type = 'button',
+    ...props
+  }, ref) {
+    const ariaLabel = props['aria-label'] ?? 'Close';
+    return (
+      <button
+        ref={ref}
+        type={type}
+        {...props}
+        aria-label={ariaLabel}
+        className={clsx(modalIconButton(), className)}
+      >
+        {children ?? <XIcon size={13} weight="bold" />}
+      </button>
+    );
+  },
+);
 
 export function useMeasuredElementRect(element: HTMLElement | null): ModalRect | null {
   const [rect, setRect] = useState<ModalRect | null>(null);
@@ -153,16 +228,19 @@ export function useMeasuredElementRect(element: HTMLElement | null): ModalRect |
 export function ModalOverlay({
   children,
   targetElement,
-  zIndex = 100,
+  layer = 'pane',
+  zIndex,
   backdrop = 'standard',
   className,
   style,
   ...props
 }: HTMLAttributes<HTMLDivElement> & ModalOverlayVariants & {
   targetElement?: HTMLElement | null;
+  layer?: ModalLayer;
   zIndex?: number;
 }) {
   const rect = useMeasuredElementRect(targetElement ?? null);
+  const resolvedZIndex = zIndex ?? MODAL_LAYERS[layer];
   const overlayStyle: CSSProperties = rect
     ? {
         position: 'fixed',
@@ -170,10 +248,10 @@ export function ModalOverlay({
         left: rect.left,
         width: rect.width,
         height: rect.height,
-        zIndex,
+        zIndex: resolvedZIndex,
         ...style,
       }
-    : { zIndex, ...style };
+    : { zIndex: resolvedZIndex, ...style };
 
   return (
     <div
@@ -207,6 +285,58 @@ export const ModalSurface = forwardRef<HTMLDivElement, ModalSurfaceProps>(functi
   );
 });
 
+export type ModalFrameProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVariants & {
+  titleId: string;
+  targetElement?: HTMLElement | null;
+  layer?: ModalLayer;
+  backdrop?: ModalOverlayVariants['backdrop'];
+  overlayClassName?: string;
+  initialFocusRef?: RefObject<HTMLElement | null>;
+  onEscape?: () => void;
+};
+
+export function ModalFrame({
+  children,
+  titleId,
+  targetElement,
+  layer,
+  backdrop,
+  overlayClassName,
+  initialFocusRef,
+  onEscape,
+  padding,
+  align,
+  elevation,
+  className,
+  ...props
+}: ModalFrameProps) {
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  useModalFocusTrap(surfaceRef, { initialFocusRef, onEscape });
+
+  return (
+    <ModalOverlay
+      targetElement={targetElement}
+      layer={layer}
+      backdrop={backdrop}
+      className={overlayClassName}
+    >
+      <ModalSurface
+        ref={surfaceRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        padding={padding}
+        align={align}
+        elevation={elevation}
+        className={className}
+        {...props}
+      >
+        {children}
+      </ModalSurface>
+    </ModalOverlay>
+  );
+}
+
 const MODAL_FOCUSABLE_SELECTOR = [
   'a[href]',
   'button:not([disabled])',
@@ -216,8 +346,8 @@ const MODAL_FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
-export function useModalFocusTrap<TDialog extends HTMLElement, TInitial extends HTMLElement>(
-  dialogRef: RefObject<TDialog | null>,
+function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElement>(
+  modalRef: RefObject<TModal | null>,
   {
     initialFocusRef,
     onEscape,
@@ -232,8 +362,8 @@ export function useModalFocusTrap<TDialog extends HTMLElement, TInitial extends 
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      const dialog = dialogRef.current;
-      if (!dialog) return;
+      const modal = modalRef.current;
+      if (!modal) return;
 
       if (event.key === 'Escape') {
         if (onEscape) {
@@ -246,7 +376,7 @@ export function useModalFocusTrap<TDialog extends HTMLElement, TInitial extends 
 
       if (event.key !== 'Tab') return;
 
-      const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR));
+      const focusables = Array.from(modal.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR));
       if (focusables.length === 0) return;
 
       const currentIndex = focusables.findIndex((item) => item === document.activeElement);
@@ -260,7 +390,7 @@ export function useModalFocusTrap<TDialog extends HTMLElement, TInitial extends 
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [dialogRef, onEscape]);
+  }, [modalRef, onEscape]);
 }
 
 // Chrome buttons: icon-only and labeled triggers used in the standalone app
