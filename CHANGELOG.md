@@ -8,6 +8,10 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/). Release checklist in [deploy.md](docs/specs/deploy.md).
 
+## [0.10.1] - 2026-05-19
+### Changed
+- Refreshed dependencies ([#76](https://github.com/diffplug/dormouse/pull/76)).
+
 ## [0.10.0] - 2026-05-18
 ### Added
 - OSC 8 hyperlinks emitted by terminal programs are now clickable, with a confirmation dialog before opening external URLs ([#75](https://github.com/diffplug/dormouse/pull/75)).
