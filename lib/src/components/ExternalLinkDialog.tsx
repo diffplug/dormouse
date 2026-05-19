@@ -98,7 +98,7 @@ export function ExternalLinkDialog({
         <div className="flex items-start gap-3">
           <h2
             id="external-link-dialog-title"
-            className="min-w-0 flex-1 text-sm font-semibold leading-5 text-foreground"
+            className="min-w-0 flex-1 text-sm leading-5 text-foreground"
           >
             {isDeceptive ? (
               <DeceptiveTitle displayText={request.displayText} />
@@ -193,7 +193,7 @@ function OpenTitle({
   if (verdict === 'plain' && displayText.trim()) {
     return (
       <>
-        Open {noun}: <span className="text-muted">&quot;{displayText.trim()}&quot;</span>?
+        Open {noun}: <span className="font-semibold">{displayText.trim()}</span>?
       </>
     );
   }
@@ -211,7 +211,7 @@ function DeceptiveTitle({ displayText }: { displayText: string }) {
       />
       <span className="leading-snug">
         Deceptive link text was{' '}
-        <span className="text-muted">&quot;{displayText.trim()}&quot;</span>, URL was:
+        <span className="font-semibold">{displayText.trim()}</span>, URL was:
       </span>
     </span>
   );
