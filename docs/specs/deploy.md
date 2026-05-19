@@ -140,6 +140,19 @@ Before any local signing step runs, downloaded CI artifacts must pass two checks
 
 The manifest itself is the attested subject, not the final signed app. This closes the gap between CI artifact production and the local machine that holds signing credentials: stale cached artifacts, wrong-tag artifacts, and tampered downloads are rejected before codesign, jsign, notarization, Tauri signing, or release upload can run.
 
+The local script must also select release artifacts by strict expected paths instead of broad `find | head` matches. Release signing fails closed unless the expected files exist at the expected locations:
+
+| Artifact | Expected local path under `release-signed/work` |
+|----------|-------------------------------------------------|
+| macOS app bundle | `standalone-mac-aarch64/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Dormouse.app` |
+| Windows app executable | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/dormouse.exe` |
+| Windows installer | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/Dormouse_X.Y.Z_x64-setup.exe` |
+| NSIS script | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/installer.nsi` |
+| NSIS plugin | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/nsis/x64/plugins/nsis_tauri_utils.dll` |
+| Linux AppImage | `standalone-linux-x64/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/Dormouse_X.Y.Z_amd64.AppImage` |
+
+Release upload likewise uses only the three stable output filenames (`Dormouse-macos-aarch64.tar.gz`, `Dormouse-windows-x64-setup.exe`, `Dormouse-linux-x86_64.AppImage`) and fails if `release-signed/release-assets` contains any other files.
+
 ### One-time setup
 
 ```bash
