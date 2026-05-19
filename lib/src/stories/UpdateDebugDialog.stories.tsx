@@ -42,7 +42,7 @@ const BODY = [
 ].join('\n');
 
 const meta: Meta<typeof UpdateDebugDialogStory> = {
-  title: 'Components/UpdateDebugDialog',
+  title: 'Modals/UpdateDebugDialog',
   component: UpdateDebugDialogStory,
 };
 

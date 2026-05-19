@@ -18,7 +18,7 @@ function KillModal({ char = 'G', onCancel, exit }: { char?: string; onCancel?: (
 }
 
 const meta: Meta<typeof KillModal> = {
-  title: 'Components/KillModal',
+  title: 'Modals/KillModal',
   component: KillModal,
   argTypes: {
     char: { control: 'text' },

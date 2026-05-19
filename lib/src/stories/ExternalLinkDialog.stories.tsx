@@ -24,7 +24,7 @@ function DialogStory({ uri, displayText }: { uri: string; displayText: string })
 }
 
 const meta: Meta<typeof DialogStory> = {
-  title: 'Components/ExternalLinkDialog',
+  title: 'Modals/ExternalLinkDialog',
   component: DialogStory,
   argTypes: {
     uri: { control: 'text' },
