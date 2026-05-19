@@ -78,14 +78,15 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
     cursorBlink: true,
     theme,
     vtExtensions: { kittyKeyboard: true },
-  });
-  terminal.options.linkHandler = {
-    activate: (event, uri, range) => {
-      event.preventDefault();
-      requestExternalLinkConfirmation(uri, readDisplayTextFromBuffer(terminal, range));
+    linkHandler: {
+      activate: (event, uri, range) => {
+        event.preventDefault();
+        // Closure capture: `terminal` is defined by the time a click fires.
+        requestExternalLinkConfirmation(uri, readDisplayTextFromBuffer(terminal, range));
+      },
+      allowNonHttpProtocols: true,
     },
-    allowNonHttpProtocols: true,
-  };
+  });
 
   const fit = new FitAddon();
   terminal.loadAddon(fit);
