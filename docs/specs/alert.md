@@ -68,7 +68,7 @@ Public `status` is a projection:
 3. `COMMAND_EXIT_ARMED` if command-exit alerting is armed.
 4. Otherwise `watchingStatus`.
 
-Persist `status`, `watchingEnabled`, `todo`, and sanitized `notification`. Restore `todo` and `notification`, then restart WATCHING only if `watchingEnabled` is true. Restore must not recreate protocol progress, command-exit arms, or a fresh ring; replay filtering in `docs/specs/OSC.md` prevents old terminal output from firing notification side effects again.
+Persist `status`, `watchingEnabled`, `todo`, and sanitized `notification`. Restore `todo` and `notification`, then restart WATCHING only if `watchingEnabled` is true. Restore must not recreate protocol progress, command-exit arms, or a fresh ring; replay filtering in `docs/specs/terminal-escapes.md` prevents old terminal output from firing notification side effects again.
 
 Legacy TODO values migrate to boolean: `2`, numeric soft buckets `[0, 1]`, `'soft'`, and `'hard'` become `true`; `false`, `-1`, and unknown values become `false`.
 
