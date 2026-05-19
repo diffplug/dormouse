@@ -53,6 +53,7 @@ const SPINNER_INTERVAL_MS = 100;
  * silence. A static glyph keeps the pane quiet between user actions.
  */
 const ACTIVE_ITEM_GLYPH = "●";
+const STAR_PROMPT_TITLE = "Starred on GitHub";
 
 interface TutRunnerOptions {
   adapter: FakePtyAdapter;
@@ -63,6 +64,8 @@ interface TutRunnerOptions {
   onTriggerBusyDemo?: () => void;
   /** Called when the user presses `p` inside the Copy paste section. */
   onTogglePlaceToPaste?: () => void;
+  /** Called when the user presses `Enter` on the GitHub star prompt. */
+  onOpenGithub?: () => void;
 }
 
 type Screen = "menu" | "section" | "reset";
@@ -76,6 +79,7 @@ export class TutRunner implements InteractiveProgram {
   private onExit: () => void;
   private onTriggerBusyDemo?: () => void;
   private onTogglePlaceToPaste?: () => void;
+  private onOpenGithub?: () => void;
 
   private screen: Screen = "menu";
   private menuIndex = 0;
@@ -96,6 +100,7 @@ export class TutRunner implements InteractiveProgram {
     this.onExit = options.onExit;
     this.onTriggerBusyDemo = options.onTriggerBusyDemo;
     this.onTogglePlaceToPaste = options.onTogglePlaceToPaste;
+    this.onOpenGithub = options.onOpenGithub;
   }
 
   start(): void {
@@ -205,7 +210,15 @@ export class TutRunner implements InteractiveProgram {
   // --- Input ---
 
   private menuLength(): number {
-    // SECTIONS + the trailing "Reset progress" entry
+    // SECTIONS + the GitHub star prompt + the trailing "Reset progress" entry
+    return SECTIONS.length + 2;
+  }
+
+  private starPromptIndex(): number {
+    return SECTIONS.length;
+  }
+
+  private resetIndex(): number {
     return SECTIONS.length + 1;
   }
 
@@ -224,11 +237,17 @@ export class TutRunner implements InteractiveProgram {
 
   private handleEnter(): void {
     if (this.screen === "menu") {
-      if (this.menuIndex === SECTIONS.length) {
+      if (this.menuIndex === this.resetIndex()) {
         this.screen = "reset";
         this.resetBuffer = "";
         this.resetMismatch = false;
         this.render();
+        return;
+      }
+      if (this.menuIndex === this.starPromptIndex()) {
+        const changed = this.state.resolveStarPrompt();
+        this.onOpenGithub?.();
+        if (!changed) this.render();
         return;
       }
       const section = SECTIONS[this.menuIndex];
@@ -337,7 +356,19 @@ export class TutRunner implements InteractiveProgram {
       lines.push(`  ${marker} ${label}  ${progress}`);
     });
 
-    const resetIndex = SECTIONS.length;
+    const starIndex = this.starPromptIndex();
+    const starResolved = this.state.isStarPromptResolved();
+    const starMarker = this.menuIndex === starIndex ? `${fg(36)}❯${RESET}` : " ";
+    const starLabel =
+      this.menuIndex === starIndex
+        ? `${BOLD}${STAR_PROMPT_TITLE}${RESET}`
+        : STAR_PROMPT_TITLE;
+    const starStatus = starResolved
+      ? `${fg(32)}[thanks ⭐]${RESET}`
+      : `${DIM}[not yet]${RESET}`;
+    lines.push(`  ${starMarker} ${starLabel}  ${starStatus}`);
+
+    const resetIndex = this.resetIndex();
     const resetMarker = this.menuIndex === resetIndex ? `${fg(36)}❯${RESET}` : " ";
     const resetLabel =
       this.menuIndex === resetIndex
@@ -356,7 +387,7 @@ export class TutRunner implements InteractiveProgram {
     lines.push(`  ${DIM}\`Esc\` to cancel${RESET}`);
     lines.push("");
     lines.push(
-      `  This will clear all checkmarks across every section.`,
+      `  This will clear all checkmarks and the GitHub star prompt.`,
     );
     lines.push(
       `  ${DIM}Type \`reset\` and press \`Enter\` to confirm.${RESET}`,

@@ -8,7 +8,7 @@ Three browser-side pieces in `website/src/lib/`, mirroring the pattern in `websi
 
 - **`tut-runner.ts`** (`TutRunner`) — alt-screen TUI. Subscribes to `TutorialState` and re-renders whenever progress changes. Routes input bytes via `FakePtyAdapter.writePty(id, …)`.
 - **`tut-detector.ts`** (`TutDetector`) — wires app events to `TutorialState.markComplete(id)`. Subscribes to `DockviewApi.onDidActivePanelChange`, the `WallEvent` stream, the `subscribeToActivity` store from `dormouse-lib/lib/terminal-registry`, and the `subscribeToMouseSelection` store from `dormouse-lib/lib/mouse-selection`.
-- **`tutorial-state.ts`** (`TutorialState`) — single in-memory progress store, persisted as a JSON array of completed item ids under the `dormouse-tut-v3` localStorage key.
+- **`tutorial-state.ts`** (`TutorialState`) — single in-memory progress store, persisted as a JSON array of completed item ids under the `dormouse-tut-v3` localStorage key. The top-level GitHub star prompt persists separately under `dormouse-tut-star-v1`.
 - **`tut-items.ts`** — section + item definitions (titles, hints) shared by runner and detector. Item ids are stable; they are the localStorage key suffixes.
 
 ## Layout
@@ -29,7 +29,9 @@ Every playground pane gets a `TutorialShell` input handler through `PlaygroundSh
 
 ## Tutorial Sections
 
-The runner shows a top-level menu first. Selecting a section drills into its item list. Each section shows `[N/M complete]` next to its title. Inside a section, items render as one of:
+The runner shows a top-level menu first. Selecting a section drills into its item list. Each section shows `[N/M complete]` next to its title. The top-level menu also includes `Starred on GitHub`, which participates in the overall progress total but not in any section count, sits directly below `Copy paste` without a blank spacer, and shows `[not yet]` until selected and `[thanks ⭐]` after it has been resolved. Pressing Enter on that row calls `onOpenGithub`, which `/playground` and the mobile tether page wire to `window.open("https://github.com/diffplug/dormouse", "_blank", "noopener,noreferrer")`.
+
+Inside a section, items render as one of:
 
 - `✓` (green) — complete
 - `●` (yellow active marker) — first incomplete item, with hint text shown below. This marker is intentionally static so runner re-renders do not feed the activity monitor.
@@ -101,6 +103,7 @@ While the Copy paste section is open, pressing `p` toggles the **Place To Paste*
 ## Storage
 
 - Completion: `localStorage["dormouse-tut-v3"] = JSON.stringify([...completedItemIds])`. Removed on `TutorialState.reset()`. Unknown ids in a stored payload are filtered out on load, so renaming an id is a one-way reset for that item.
+- GitHub star prompt: `localStorage["dormouse-tut-star-v1"] = "true"` after the user selects `Starred on GitHub`. Removed on `TutorialState.reset()`.
 - Legacy keys `dormouse-tutorial-step-N` and `dormouse-tut-v2-*` from previous designs are not read; new playground sessions get a fresh start.
 
 ## Theme Picker

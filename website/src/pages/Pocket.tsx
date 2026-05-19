@@ -73,6 +73,14 @@ function PocketTerminalExperience({
   const cursorTouchAvailable = activeMouseState?.mouseReporting !== undefined
     && activeMouseState.mouseReporting !== "none";
 
+  const handleOpenGithub = useCallback(() => {
+    window.open(
+      "https://github.com/diffplug/dormouse",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }, []);
+
   const tryAutoStart = useCallback((id: string) => {
     if (id !== POCKET_PANE) return;
     if (autoStartedRef.current.has(id)) return;
@@ -120,6 +128,7 @@ function PocketTerminalExperience({
                 );
               },
               onTogglePlaceToPaste: () => {},
+              onOpenGithub: handleOpenGithub,
             });
           }
           if (name === "ascii-splash" || name === "splash") {
@@ -161,7 +170,7 @@ function PocketTerminalExperience({
       autoStartedRef.current.clear();
       adapterRef.current = null;
     };
-  }, [tryAutoStart]);
+  }, [handleOpenGithub, tryAutoStart]);
 
   useEffect(() => {
     const reporting = activeMouseState?.mouseReporting ?? "none";

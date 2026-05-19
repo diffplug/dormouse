@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import { SECTIONS, type ItemId } from "./tut-items";
 import { TutRunner } from "./tut-runner";
@@ -6,7 +6,10 @@ import { TutorialState } from "./tutorial-state";
 
 const FRAME_RESET = "\x1b[H\x1b[2J";
 
-function mountRunner(completedIds: ItemId[] = []) {
+function mountRunner(
+  completedIds: ItemId[] = [],
+  options: { onOpenGithub?: () => void } = {},
+) {
   const adapter = new FakePtyAdapter();
   const id = "test-pane";
   adapter.spawnPty(id);
@@ -25,6 +28,7 @@ function mountRunner(completedIds: ItemId[] = []) {
     onExit: () => {
       exitCount += 1;
     },
+    onOpenGithub: options.onOpenGithub,
   });
   adapter.setInputHandler(id, (data) => runner.handleInput(data));
   runner.start();
@@ -88,6 +92,30 @@ describe("TutRunner snapshots", () => {
 
     sendKeys("q");
     expect(exitCount()).toBe(1);
+    dispose();
+  });
+
+  it("opens GitHub and resolves the star prompt from the menu", () => {
+    const onOpenGithub = vi.fn();
+    const { state, sendKeys, lastFrame, dispose } = mountRunner([], { onOpenGithub });
+
+    sendKeys("\x1b[B\x1b[B\x1b[B\r");
+
+    expect(onOpenGithub).toHaveBeenCalledTimes(1);
+    expect(state.isStarPromptResolved()).toBe(true);
+    expect(lastFrame()).toContain("[thanks ⭐]");
+    expect(lastFrame()).not.toContain("star the repo");
+    dispose();
+  });
+
+  it("clears the star prompt when reset progress is confirmed", () => {
+    const { state, sendKeys, dispose } = mountRunner(["kb-mode"]);
+    state.resolveStarPrompt();
+
+    sendKeys("\x1b[B\x1b[B\x1b[B\x1b[B\rreset\r");
+
+    expect(state.isComplete("kb-mode")).toBe(false);
+    expect(state.isStarPromptResolved()).toBe(false);
     dispose();
   });
 });
