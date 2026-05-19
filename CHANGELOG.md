@@ -8,6 +8,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/). Release checklist in [deploy.md](docs/specs/deploy.md).
 
+## [0.10.0] - 2026-05-18
+### Added
+- OSC 8 hyperlinks emitted by terminal programs are now clickable, with a confirmation dialog before opening external URLs ([#75](https://github.com/diffplug/dormouse/pull/75)).
+- Kitty keyboard protocol is enabled so TUIs like Claude Code can distinguish Shift+Enter from Enter ([#71](https://github.com/diffplug/dormouse/pull/71)).
+- Per-pane shell CWD tracking, plus an inline warning popover when a terminal program attempts an illegal rename ([#59](https://github.com/diffplug/dormouse/pull/59)).
+- iTerm2-style OSC notifications and terminal bells are now recognized and surfaced as alerts ([#57](https://github.com/diffplug/dormouse/pull/57)).
+- New panes inherit the working directory of the source pane when splitting ([#66](https://github.com/diffplug/dormouse/pull/66), closes [#4](https://github.com/diffplug/dormouse/issues/4)).
+- Panes whose shell is still untouched skip the kill-confirmation prompt ([#61](https://github.com/diffplug/dormouse/pull/61)).
+
+### Changed
+- **BREAKING** Rebranded from MouseTerm to Dormouse — new VS Code extension (`diffplug.dormouse`), new standalone bundle identifier (`sh.dormouse.standalone`), and new home at [dormouse.sh](https://dormouse.sh). Existing MouseTerm installs will not auto-update; install Dormouse fresh ([#70](https://github.com/diffplug/dormouse/pull/70)).
+- Alert model reworked to unify our existing "watching" model with OSC 9/99/777 and command-exit ([#67](https://github.com/diffplug/dormouse/pull/67)).
+- 🖥️ Auto-update banner now requires explicit approval before downloading, and "What's new" links are pinned to the target version ([#48](https://github.com/diffplug/dormouse/pull/48)).
+
+### Fixed
+- Mouse events no longer leak through to the PTY while the mouse-override modifier is held ([#55](https://github.com/diffplug/dormouse/pull/55)).
+- 🖥️ Ctrl+V no longer triggers the macOS WKWebView paste permission prompt on standalone ([#65](https://github.com/diffplug/dormouse/pull/65)).
+
 ## [0.9.1] - 2026-05-01
 ### Changed
 - 🖥️ Drop-to-paste from the OS file explorer is temporarily inert on standalone while we wait on upstream Tauri ([tauri#14373](https://github.com/tauri-apps/tauri/issues/14373)) to allow native drag-drop without blocking HTML5 drag events ([#39](https://github.com/diffplug/dormouse/pull/39)).
