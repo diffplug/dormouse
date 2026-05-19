@@ -1,6 +1,7 @@
 import { clsx } from 'clsx';
 import { tv, type VariantProps } from 'tailwind-variants';
-import type { HTMLAttributes, ReactNode } from 'react';
+import { forwardRef, useEffect, useLayoutEffect, useState } from 'react';
+import type { CSSProperties, HTMLAttributes, ReactNode, RefObject } from 'react';
 
 // App-wide type scale, color strategy, and chrome conventions: see
 // docs/specs/theme.md and AGENTS.md.
@@ -53,6 +54,214 @@ export const popupButton = tv({
 });
 
 export type PopupButtonVariants = VariantProps<typeof popupButton>;
+
+export interface ModalRect {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+export const modalOverlay = tv({
+  base: 'flex items-center justify-center',
+  variants: {
+    scope: {
+      viewport: 'fixed inset-0',
+      target: 'rounded',
+    },
+    backdrop: {
+      standard: 'bg-app-bg/50',
+      strong: 'bg-app-bg/55',
+    },
+  },
+  defaultVariants: { scope: 'viewport', backdrop: 'standard' },
+});
+
+export type ModalOverlayVariants = VariantProps<typeof modalOverlay>;
+
+export const modalSurface = tv({
+  base: 'rounded-lg border border-border bg-surface-raised font-mono text-foreground shadow-lg',
+  variants: {
+    padding: {
+      compact: 'p-3',
+      default: 'p-4',
+      spacious: 'px-6 py-4',
+    },
+    align: {
+      start: 'text-left',
+      center: 'text-center',
+    },
+    elevation: {
+      dialog: 'shadow-lg',
+      modal: 'shadow-2xl',
+    },
+  },
+  defaultVariants: { padding: 'default', align: 'start', elevation: 'dialog' },
+});
+
+export type ModalSurfaceVariants = VariantProps<typeof modalSurface>;
+
+export const modalActionButton = tv({
+  base: 'rounded px-2 py-1.5 text-xs transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-45',
+  variants: {
+    tone: {
+      primary: 'bg-header-active-bg text-header-active-fg',
+      secondary: 'border border-border text-muted hover:bg-header-inactive-bg hover:text-foreground',
+    },
+  },
+  defaultVariants: { tone: 'secondary' },
+});
+
+export type ModalActionButtonVariants = VariantProps<typeof modalActionButton>;
+
+export const modalIconButton = tv({
+  base: 'shrink-0 rounded p-0.5 text-muted transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring',
+});
+
+export function useMeasuredElementRect(element: HTMLElement | null): ModalRect | null {
+  const [rect, setRect] = useState<ModalRect | null>(null);
+
+  useLayoutEffect(() => {
+    if (!element) {
+      setRect(null);
+      return;
+    }
+
+    const update = () => {
+      const next = element.getBoundingClientRect();
+      setRect({
+        top: next.top,
+        left: next.left,
+        width: next.width,
+        height: next.height,
+      });
+    };
+
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(element);
+    window.addEventListener('resize', update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [element]);
+
+  return rect;
+}
+
+export function ModalOverlay({
+  children,
+  targetElement,
+  zIndex = 100,
+  backdrop = 'standard',
+  className,
+  style,
+  ...props
+}: HTMLAttributes<HTMLDivElement> & ModalOverlayVariants & {
+  targetElement?: HTMLElement | null;
+  zIndex?: number;
+}) {
+  const rect = useMeasuredElementRect(targetElement ?? null);
+  const overlayStyle: CSSProperties = rect
+    ? {
+        position: 'fixed',
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+        zIndex,
+        ...style,
+      }
+    : { zIndex, ...style };
+
+  return (
+    <div
+      className={clsx(modalOverlay({ scope: rect ? 'target' : 'viewport', backdrop }), className)}
+      style={overlayStyle}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+export type ModalSurfaceProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVariants;
+
+export const ModalSurface = forwardRef<HTMLDivElement, ModalSurfaceProps>(function ModalSurface({
+  children,
+  padding,
+  align,
+  elevation,
+  className,
+  ...props
+}, ref) {
+  return (
+    <div
+      ref={ref}
+      className={clsx(modalSurface({ padding, align, elevation }), className)}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+});
+
+const MODAL_FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+export function useModalFocusTrap<TDialog extends HTMLElement, TInitial extends HTMLElement>(
+  dialogRef: RefObject<TDialog | null>,
+  {
+    initialFocusRef,
+    onEscape,
+  }: {
+    initialFocusRef?: RefObject<TInitial | null>;
+    onEscape?: () => void;
+  } = {},
+): void {
+  useEffect(() => {
+    initialFocusRef?.current?.focus();
+  }, [initialFocusRef]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+
+      if (event.key === 'Escape') {
+        if (onEscape) {
+          event.preventDefault();
+          event.stopPropagation();
+          onEscape();
+        }
+        return;
+      }
+
+      if (event.key !== 'Tab') return;
+
+      const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR));
+      if (focusables.length === 0) return;
+
+      const currentIndex = focusables.findIndex((item) => item === document.activeElement);
+      const nextIndex = currentIndex === -1
+        ? 0
+        : (currentIndex + (event.shiftKey ? -1 : 1) + focusables.length) % focusables.length;
+
+      event.preventDefault();
+      focusables[nextIndex]?.focus();
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [dialogRef, onEscape]);
+}
 
 // Chrome buttons: icon-only and labeled triggers used in the standalone app
 // bar, plus the Windows/Linux native-style window controls. All inherit text

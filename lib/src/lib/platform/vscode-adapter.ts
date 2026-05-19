@@ -177,6 +177,10 @@ export class VSCodeAdapter implements PlatformAdapter {
     );
   }
 
+  openExternal(uri: string): void {
+    this.vscode.postMessage({ type: 'dormouse:openExternal', uri });
+  }
+
   onPtyData(handler: (detail: { id: string; data: string }) => void): void {
     this.dataHandlers.add(handler);
   }

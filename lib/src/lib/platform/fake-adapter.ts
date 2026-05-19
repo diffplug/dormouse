@@ -1,5 +1,6 @@
 import type { AlertStateDetail, PlatformAdapter, PtyInfo } from './types';
 import { AlertManager, type SessionStatus } from '../alert-manager';
+import { normalizeExternalUri } from '../external-links';
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
@@ -198,6 +199,11 @@ export class FakePtyAdapter implements PlatformAdapter {
 
   async readClipboardFilePaths(): Promise<string[] | null> { return null; }
   async readClipboardImageAsFilePath(): Promise<string | null> { return null; }
+  openExternal(uri: string): void {
+    const normalized = normalizeExternalUri(uri);
+    if (!normalized || typeof window === 'undefined') return;
+    window.open(normalized, '_blank', 'noopener,noreferrer');
+  }
 
   requestInit(): void {}
   onPtyList(_handler: (detail: { ptys: PtyInfo[] }) => void): void {}
