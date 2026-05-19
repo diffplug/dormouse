@@ -16,38 +16,24 @@ export interface ExternalLinkDialogRequest {
   decision: ExternalUriDecision;
 }
 
-interface OpenNoun {
-  // The noun phrase that follows "Open " in titles and buttons (e.g. "URL",
-  // "file"). For custom protocols this is JSX so we can render the scheme
-  // prefix as inline code.
-  title: React.ReactNode;
-  // The button label noun. May differ from the title noun for compactness
-  // (e.g. custom protocol uses just the prefix without "custom protocol").
-  button: React.ReactNode;
-}
-
-function pickOpenNoun(scheme: string, uri: string): OpenNoun {
+// "Open ___" button label suffix. The title is uniformly "Confirm open" and
+// doesn't vary with scheme; the button is the only place the scheme noun
+// appears, so the user sees what they're committing to next to their cursor.
+function pickOpenButtonNoun(scheme: string, uri: string): React.ReactNode {
   switch (scheme) {
     case 'http':
     case 'https':
-      return { title: 'URL', button: 'URL' };
+      return 'URL';
     case 'file':
-      return { title: 'file', button: 'file' };
+      return 'file';
     case 'mailto':
-      return { title: 'email', button: 'email' };
+      return 'email';
     case 'tel':
-      return { title: 'phone app', button: 'phone app' };
+      return 'phone app';
     case 'sms':
-      return { title: 'SMS app', button: 'SMS app' };
-    default: {
-      // Title stays generic ("URL"); the scheme prefix lives in the URL block
-      // and the button ("Open vscode://"). No need to duplicate it up top.
-      const prefix = schemePrefix(scheme, uri);
-      return {
-        title: 'URL',
-        button: <code className="font-mono">{prefix}</code>,
-      };
-    }
+      return 'SMS app';
+    default:
+      return <code className="font-mono">{schemePrefix(scheme, uri)}</code>;
   }
 }
 
@@ -73,7 +59,9 @@ export function ExternalLinkDialog({
   const displayUri = request.decision.displayUri || request.uri;
   const verdict = request.verdict;
   const isDeceptive = verdict === 'deceptive';
-  const noun = openableDecision ? pickOpenNoun(openableDecision.scheme, openableDecision.uri) : null;
+  const buttonNoun = openableDecision
+    ? pickOpenButtonNoun(openableDecision.scheme, openableDecision.uri)
+    : 'URL';
 
   useModalFocusTrap(dialogRef, {
     // Deceptive case: focus the copy action so a default Enter doesn't dismiss
@@ -107,7 +95,7 @@ export function ExternalLinkDialog({
             ) : blockedDecision ? (
               <BlockedTitle reason={blockedDecision.reason} />
             ) : (
-              <OpenTitle noun={noun?.title ?? 'URL'} verdict={verdict} displayText={request.displayText} />
+              <OpenTitle verdict={verdict} displayText={request.displayText} />
             )}
           </h2>
           <button
@@ -164,7 +152,7 @@ export function ExternalLinkDialog({
                 onClick={onConfirm}
                 className={`${modalActionButton({ tone: 'primary' })} min-w-[5rem]`}
               >
-                {'Open '}{noun?.button ?? 'URL'}
+                {'Open '}{buttonNoun}
               </button>
             </>
           ) : (
@@ -184,22 +172,20 @@ export function ExternalLinkDialog({
 }
 
 function OpenTitle({
-  noun,
   verdict,
   displayText,
 }: {
-  noun: React.ReactNode;
   verdict: DisplayMatchVerdict;
   displayText: string;
 }) {
   if (verdict === 'plain' && displayText.trim()) {
     return (
       <>
-        Open {noun}: <span className="font-semibold">{displayText.trim()}</span>?
+        Confirm open: <span className="font-semibold">{displayText.trim()}</span>
       </>
     );
   }
-  return <>Open {noun}?</>;
+  return <>Confirm open</>;
 }
 
 function DeceptiveTitle({ displayText }: { displayText: string }) {
