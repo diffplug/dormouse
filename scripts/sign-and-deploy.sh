@@ -101,6 +101,11 @@ check_command() {
     command -v "$1" &>/dev/null || error "Required command not found: $1. Install with: $2"
 }
 
+check_gh_attestation_support() {
+    gh attestation verify --help &>/dev/null \
+        || error "GitHub CLI does not support 'gh attestation verify'. Upgrade gh before signing release artifacts."
+}
+
 # Returns 0 if a specific artifact has already been downloaded
 artifact_downloaded() {
     local name="$1"
@@ -254,6 +259,83 @@ find_release_run_id() {
         | head -1
 }
 
+validate_sha256_manifest_paths() {
+    local manifest="$1"
+
+    awk '
+        NF < 2 { exit 1 }
+        {
+            path = $0
+            sub(/^[0-9a-fA-F]+[[:space:]]+[* ]?/, "", path)
+            if (path == "" || path ~ /^\// || path ~ /(^|\/)\.\.($|\/)/) {
+                exit 1
+            }
+        }
+    ' "$manifest"
+}
+
+check_sha256_manifest() {
+    local artifact_dir="$1"
+    local manifest_rel="$2"
+
+    if command -v sha256sum &>/dev/null; then
+        (cd "$artifact_dir" && sha256sum -c "$manifest_rel" >/dev/null)
+    elif command -v shasum &>/dev/null; then
+        (cd "$artifact_dir" && shasum -a 256 -c "$manifest_rel" >/dev/null)
+    else
+        error "Required command not found: sha256sum or shasum"
+    fi
+}
+
+verify_downloaded_artifact() {
+    local name="$1"
+    local tag="$2"
+    local tag_sha="$3"
+    local artifact_dir="$DOWNLOAD_DIR/$name"
+
+    [[ -d "$artifact_dir" ]] || error "$name: artifact directory not found at $artifact_dir"
+
+    local manifest_count
+    manifest_count=$(find "$artifact_dir" -name artifact-manifest.sha256 -type f | wc -l | tr -d '[:space:]')
+    [[ "$manifest_count" == "1" ]] \
+        || error "$name: expected exactly one artifact-manifest.sha256, found $manifest_count"
+
+    local manifest
+    manifest=$(find "$artifact_dir" -name artifact-manifest.sha256 -type f -print | head -1)
+    [[ -s "$manifest" ]] || error "$name: artifact-manifest.sha256 is empty"
+
+    local manifest_rel="${manifest#"$artifact_dir"/}"
+    [[ "$manifest_rel" != "$manifest" ]] || error "$name: could not resolve manifest path relative to artifact directory"
+
+    validate_sha256_manifest_paths "$manifest" \
+        || error "$name: artifact manifest contains an absolute or parent-relative path"
+
+    local identity="https://github.com/$GITHUB_REPO/.github/workflows/release.yml@refs/tags/$tag"
+
+    log "  $name: verifying artifact attestation"
+    gh attestation verify "$manifest" \
+        --repo "$GITHUB_REPO" \
+        --cert-identity "$identity" \
+        --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
+        --source-ref "refs/tags/$tag" \
+        --source-digest "$tag_sha" >/dev/null \
+        || error "$name: artifact manifest attestation failed"
+
+    log "  $name: verifying artifact hashes"
+    check_sha256_manifest "$artifact_dir" "$manifest_rel" \
+        || error "$name: downloaded artifact hash verification failed"
+}
+
+verify_downloaded_artifacts() {
+    local tag="$1"
+    local tag_sha="$2"
+
+    log "Verifying artifact attestations and hashes..."
+    for name in "${ARTIFACT_NAMES[@]}"; do
+        verify_downloaded_artifact "$name" "$tag" "$tag_sha"
+    done
+}
+
 # =============================================================================
 # Download CI Artifacts (per-artifact caching)
 # =============================================================================
@@ -262,23 +344,29 @@ find_release_run_id() {
 # Artifacts are stored in $DOWNLOAD_DIR and NEVER modified after download.
 download_artifacts_from_run() {
     local run_id="$1"
+    local tag="$2"
+    local tag_sha="$3"
 
     mkdir -p "$DOWNLOAD_DIR"
 
     for name in "${ARTIFACT_NAMES[@]}"; do
         if artifact_downloaded "$name"; then
-            log "  $name: already downloaded, skipping"
+            log "  $name: already downloaded, verifying"
+            verify_downloaded_artifact "$name" "$tag" "$tag_sha"
             continue
         fi
 
         log "  $name: downloading..."
+        rm -rf "$DOWNLOAD_DIR/$name"
         if gh run download "$run_id" \
             --repo "$GITHUB_REPO" \
             --name "$name" \
             --dir "$DOWNLOAD_DIR/$name"; then
+            verify_downloaded_artifact "$name" "$tag" "$tag_sha"
             touch "$DOWNLOAD_DIR/.downloaded-$name"
             log "  $name: done"
         else
+            rm -rf "$DOWNLOAD_DIR/$name"
             warn "  $name: download failed (will retry on next run)"
         fi
     done
@@ -294,17 +382,19 @@ download_artifacts() {
     local version="$1"
     local tag="v$version"
 
-    if all_artifacts_downloaded; then
-        log "All artifacts already downloaded, skipping"
-        return
-    fi
-
     local tag_sha
     tag_sha=$(resolve_tag_sha "$tag")
 
     log "Finding workflow run for tag $tag ($tag_sha)..."
 
     check_command gh "brew install gh && gh auth login"
+    check_gh_attestation_support
+
+    if all_artifacts_downloaded; then
+        log "All artifacts already downloaded, verifying cache"
+        verify_downloaded_artifacts "$tag" "$tag_sha"
+        return
+    fi
 
     local run_id=""
     local attempts=0
@@ -330,17 +420,12 @@ download_artifacts() {
 
     log "Workflow completed successfully!"
     log "Downloading artifacts..."
-    download_artifacts_from_run "$run_id"
+    download_artifacts_from_run "$run_id" "$tag" "$tag_sha"
 }
 
 resume_download() {
     local version="$1"
     local tag="v$version"
-
-    if all_artifacts_downloaded; then
-        log "All artifacts already downloaded, skipping"
-        return
-    fi
 
     local tag_sha
     tag_sha=$(resolve_tag_sha "$tag")
@@ -348,6 +433,13 @@ resume_download() {
     log "Finding completed workflow run for tag $tag ($tag_sha)..."
 
     check_command gh "brew install gh && gh auth login"
+    check_gh_attestation_support
+
+    if all_artifacts_downloaded; then
+        log "All artifacts already downloaded, verifying cache"
+        verify_downloaded_artifacts "$tag" "$tag_sha"
+        return
+    fi
 
     local run_id=""
     run_id=$(find_release_run_id "$tag" "$tag_sha")
@@ -362,7 +454,7 @@ resume_download() {
 
     log "Found completed workflow run: $run_id"
     log "Downloading artifacts..."
-    download_artifacts_from_run "$run_id"
+    download_artifacts_from_run "$run_id" "$tag" "$tag_sha"
 }
 
 # =============================================================================

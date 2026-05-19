@@ -11,6 +11,10 @@ permissions:
 jobs:
   build-standalone:
     name: Build Standalone (${{ matrix.target }})
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       matrix:
         include:
@@ -78,11 +82,51 @@ jobs:
              standalone/src-tauri/target/${{ matrix.target }}/release/nsis/x64/plugins/
         shell: bash
 
+      - name: Generate artifact manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd standalone
+          release_dir="src-tauri/target/${{ matrix.target }}/release"
+          manifest="artifact-manifest.sha256"
+
+          {
+            [[ -f "$release_dir/mouseterm.exe" ]] && printf '%s\n' "$release_dir/mouseterm.exe"
+            if [[ -d "$release_dir/bundle" ]]; then
+              find -L "$release_dir/bundle" -type f \( \
+                -name "*.exe" -o \
+                -name "*.msi" -o \
+                -name "*.dmg" -o \
+                -path "*.app/*" -o \
+                -name "*.AppImage" -o \
+                -path "*/nsis/*" \
+              \) -print
+            fi
+            [[ -d "$release_dir/nsis" ]] && find -L "$release_dir/nsis" -type f -print
+            [[ -d sidecar ]] && find -L sidecar -type f -print
+            [[ -d src-tauri/binaries ]] && find -L src-tauri/binaries -type f -print
+          } | sort -u | while IFS= read -r file; do
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$file"
+            else
+              shasum -a 256 "$file"
+            fi
+          done > "$manifest"
+
+          [[ -s "$manifest" ]]
+
+      - name: Attest artifact manifest
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: standalone/artifact-manifest.sha256
+
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact-name }}
           path: |
+            standalone/artifact-manifest.sha256
             standalone/src-tauri/target/${{ matrix.target }}/release/mouseterm.exe
             standalone/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
             standalone/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
@@ -97,6 +141,10 @@ jobs:
   build-vscode:
     name: Build VSCode Extension
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -123,11 +171,42 @@ jobs:
       - name: Package extension
         run: pnpm --dir vscode-ext exec vsce package --no-dependencies
 
+      - name: Generate artifact manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          cd vscode-ext
+          manifest="artifact-manifest.sha256"
+          files=(*.vsix)
+
+          {
+            for path in "${files[@]}"; do
+              [[ -f "$path" ]] && printf '%s\n' "$path"
+            done
+          } | sort -u | while IFS= read -r file; do
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$file"
+            else
+              shasum -a 256 "$file"
+            fi
+          done > "$manifest"
+
+          [[ -s "$manifest" ]]
+
+      - name: Attest artifact manifest
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: vscode-ext/artifact-manifest.sha256
+
       - name: Upload .vsix
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: vscode-extension
-          path: vscode-ext/*.vsix
+          path: |
+            vscode-ext/*.vsix
+            vscode-ext/artifact-manifest.sha256
 
   publish-vscode:
     name: Publish VSCode Extension

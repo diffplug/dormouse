@@ -43,11 +43,13 @@ Code signing for Windows requires a physical USB hardware key (EV cert via PIV).
 Stage 1: CI (GitHub Actions)
   → Build unsigned Tauri apps (win, mac, linux)
   → Build VSCode extension
+  → Generate and attest artifact manifests
   → Publish VSCode extension after protected environment approval
   → Upload unsigned Tauri artifacts
 
 Stage 2: Local (sign-and-deploy.sh)
   → Download CI artifacts
+  → Verify artifact attestations and hashes
   → Sign macOS (codesign + notarize)
   → Sign Windows (jsign + PIV hardware key)
   → Generate Tauri update manifest with signatures
@@ -65,7 +67,16 @@ permissions:
   contents: read
 ```
 
-No release job currently requests `id-token: write`; add that only if a job starts verifying or publishing with OIDC-backed provenance.
+Only the build jobs request additional permissions, and only for provenance:
+
+```yaml
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+```
+
+The publish job stays on the workflow read-only default and is separately gated by the `vscode-extension-publish` environment.
 
 ### Job: `build-standalone` (matrix)
 
@@ -88,7 +99,9 @@ Each matrix leg:
 2. Install workspace dependencies once from the repo root with `pnpm install --frozen-lockfile`
 3. Install system deps (Linux: libgtk, libwebkit, etc.)
 4. Build via `tauri-action` — but **skip signing** (no `APPLE_SIGNING_IDENTITY`, no `TAURI_SIGNING_PRIVATE_KEY`)
-5. Upload artifacts (installers + bundles) via `actions/upload-artifact`
+5. Generate `artifact-manifest.sha256` with SHA-256 hashes for the files that will be uploaded
+6. Publish a GitHub artifact attestation for the manifest
+7. Upload the manifest plus artifacts (installers + bundles) via `actions/upload-artifact`
 
 **Note:** We do NOT use `tauri-action`'s built-in GitHub Release creation. We create the release locally after signing.
 
@@ -100,7 +113,9 @@ Runs on `ubuntu-latest`:
 3. `pnpm --filter mouseterm-lib test`
 4. `pnpm --filter mouseterm build:frontend && pnpm --filter mouseterm build`
 5. `pnpm --dir vscode-ext exec vsce package --no-dependencies`
-6. Upload `.vsix` as artifact
+6. Generate `artifact-manifest.sha256` for the `.vsix`
+7. Publish a GitHub artifact attestation for the manifest
+8. Upload the manifest plus `.vsix` as artifact
 
 ### Job: `publish-vscode`
 
@@ -117,6 +132,13 @@ This runs in CI because VSCode Marketplace publishing uses PAT tokens (no hardwa
 ## Stage 2: Local script
 
 `scripts/sign-and-deploy.sh` is the source of truth for the local pipeline (download, sign, notarize, package, release). Run with no args or `--help` to see subcommands.
+
+Before any local signing step runs, downloaded CI artifacts must pass two checks:
+
+1. `gh attestation verify` must prove the artifact manifest was attested by `.github/workflows/release.yml` in `diffplug/mouseterm`, for `refs/tags/vX.Y.Z`, at the exact commit SHA resolved by the local tag.
+2. `sha256sum -c` or `shasum -a 256 -c` must prove every downloaded file listed in `artifact-manifest.sha256` still has the hash CI recorded before upload.
+
+The manifest itself is the attested subject, not the final signed app. This closes the gap between CI artifact production and the local machine that holds signing credentials: stale cached artifacts, wrong-tag artifacts, and tampered downloads are rejected before codesign, jsign, notarization, Tauri signing, or release upload can run.
 
 ### One-time setup
 
