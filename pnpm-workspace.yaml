@@ -4,4 +4,4 @@ packages:
   - standalone/sidecar
   - vscode-ext
   - website
-minimumReleaseAge: 20160
+minimumReleaseAge: 1440
