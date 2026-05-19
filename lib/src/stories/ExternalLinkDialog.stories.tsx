@@ -47,6 +47,12 @@ export const FileUrl: Story = {
   },
 };
 
+export const VeryLongUrl: Story = {
+  args: {
+    uri: 'https://ci.example.com/builds/dormouse/kitty-keyboard/jobs/terminal-osc-8-hyperlink-confirmation/artifacts/reports/playwright/index.html?runId=2026-05-18T23%3A41%3A02.441Z&attempt=7&sha=d96cc07f9f66ff72b7f89433cf571e9a13d4c081680&path=packages%2Flib%2Fsrc%2Fcomponents%2FExternalLinkDialog.tsx&label=the-terminal-output-rendered-this-link-with-a-short-friendly-label-but-the-real-url-is-intentionally-extremely-long-to-verify-wrapping-scrolling-and-full-target-review-before-opening&token=eyJhbGciOiJub25lIiwidHlwIjoiSldUIiwiZGVtb19vbmx5Ijp0cnVlLCJwdXJwb3NlIjoic3Rvcnlib29rLWxvbmdfdXJsLXZpc3VhbC1jYXNlIn0',
+  },
+};
+
 export const Blocked: Story = {
   args: {
     uri: 'javascript:alert(document.cookie)',
