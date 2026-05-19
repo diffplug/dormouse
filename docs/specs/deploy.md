@@ -42,11 +42,14 @@ Code signing for Windows requires a physical USB hardware key (EV cert via PIV).
 ```
 Stage 1: CI (GitHub Actions)
   → Build unsigned Tauri apps (win, mac, linux)
-  → Build + publish VSCode extension
+  → Build VSCode extension
+  → Generate and attest artifact manifests
+  → Publish VSCode extension after protected environment approval
   → Upload unsigned Tauri artifacts
 
 Stage 2: Local (sign-and-deploy.sh)
   → Download CI artifacts
+  → Verify artifact attestations and hashes
   → Sign macOS (codesign + notarize)
   → Sign Windows (jsign + PIV hardware key)
   → Generate Tauri update manifest with signatures
@@ -56,6 +59,24 @@ Stage 2: Local (sign-and-deploy.sh)
 ## Stage 1: CI workflow
 
 Triggered by tag push `v*`. Three parallel jobs:
+
+The workflow defaults `GITHUB_TOKEN` to read-only repository access with:
+
+```yaml
+permissions:
+  contents: read
+```
+
+Only the build jobs request additional permissions, and only for provenance:
+
+```yaml
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+```
+
+The publish job stays on the workflow read-only default and is separately gated by the `vscode-extension-publish` environment.
 
 ### Job: `build-standalone` (matrix)
 
@@ -77,10 +98,15 @@ Each matrix leg:
 1. Checkout, setup Node 22, pnpm 10, Rust stable
 2. Install workspace dependencies once from the repo root with `pnpm install --frozen-lockfile`
 3. Install system deps (Linux: libgtk, libwebkit, etc.)
-4. Build via `tauri-action` — but **skip signing** (no `APPLE_SIGNING_IDENTITY`, no `TAURI_SIGNING_PRIVATE_KEY`)
-5. Upload artifacts (installers + bundles) via `actions/upload-artifact`
+4. Generate an ephemeral, per-job Tauri updater key with `pnpm --dir standalone exec tauri signer generate --ci --write-keys "$RUNNER_TEMP/tauri-ci-updater.key" --force`
+5. Build via `tauri-action` with `TAURI_SIGNING_PRIVATE_KEY_PATH` pointing at that ephemeral key, but **no real updater signing secret** and no `APPLE_SIGNING_IDENTITY`
+6. Generate `artifact-manifest.sha256` with SHA-256 hashes for the files that will be uploaded
+7. Publish a GitHub artifact attestation for the manifest
+8. Upload the manifest plus artifacts (installers + bundles) via `actions/upload-artifact`
 
 **Note:** We do NOT use `tauri-action`'s built-in GitHub Release creation. We create the release locally after signing.
+
+The CI updater key exists only so Tauri emits updater-shaped artifacts during unsigned builds. It is generated inside the runner, is not stored in source control or GitHub Secrets, and its public key is not the public key trusted by shipped apps. The final release bundles are re-signed locally by `scripts/sign-and-deploy.sh` with the production Tauri updater key before upload.
 
 ### Job: `build-vscode`
 
@@ -89,17 +115,20 @@ Runs on `ubuntu-latest`:
 2. `pnpm install --frozen-lockfile` at the repo root
 3. `pnpm --filter dormouse-lib test`
 4. `pnpm --filter dormouse build:frontend && pnpm --filter dormouse build`
-5. `npx vsce package --no-dependencies`
-6. Upload `.vsix` as artifact
+5. `pnpm --dir vscode-ext exec vsce package --no-dependencies`
+6. Generate `artifact-manifest.sha256` for the `.vsix`
+7. Publish a GitHub artifact attestation for the manifest
+8. Upload the manifest plus `.vsix` as artifact
 
 ### Job: `publish-vscode`
 
 Runs after `build-vscode` succeeds:
-1. Download `.vsix` artifact
-2. `npx vsce publish --packagePath *.vsix --no-dependencies`
-3. `npx ovsx publish --packagePath *.vsix --no-dependencies`
+1. Enter the `vscode-extension-publish` GitHub environment
+2. Download `.vsix` artifact
+3. `pnpm exec vsce publish --packagePath *.vsix --no-dependencies`
+4. `pnpm exec ovsx publish --packagePath *.vsix --no-dependencies`
 
-This runs in CI because VSCode Marketplace publishing uses PAT tokens (no hardware key needed).
+This runs in CI because VSCode Marketplace publishing uses PAT tokens (no hardware key needed). The `vscode-extension-publish` environment must require reviewer approval and allow deployments only from `v*` tags. Store `VSCE_PAT` and `OVSX_PAT` as environment secrets there, not broad repository secrets.
 
 **Migration note:** This replaces the existing `.github/workflows/publish-vscode.yml`, which was triggered by `vscode-ext/v*` tags and has never been run. That workflow should be deleted when the unified release workflow is created. Fixes from the old workflow: use `ubuntu-latest` instead of `macos-latest`, upgrade to Node 22, and unify under the `v*` tag convention.
 
@@ -107,13 +136,34 @@ This runs in CI because VSCode Marketplace publishing uses PAT tokens (no hardwa
 
 `scripts/sign-and-deploy.sh` is the source of truth for the local pipeline (download, sign, notarize, package, release). Run with no args or `--help` to see subcommands.
 
+Before any local signing step runs, downloaded CI artifacts must pass two checks:
+
+1. `gh attestation verify` must prove the artifact manifest was attested by `.github/workflows/release.yml` in `diffplug/dormouse`, for `refs/tags/vX.Y.Z`, at the exact commit SHA resolved by the local tag.
+2. `sha256sum -c` or `shasum -a 256 -c` must prove every downloaded file listed in `artifact-manifest.sha256` still has the hash CI recorded before upload.
+
+The manifest itself is the attested subject, not the final signed app. This closes the gap between CI artifact production and the local machine that holds signing credentials: stale cached artifacts, wrong-tag artifacts, and tampered downloads are rejected before codesign, jsign, notarization, Tauri signing, or release upload can run.
+
+The local script must also select release artifacts by strict expected paths instead of broad `find | head` matches. Release signing fails closed unless the expected files exist at the expected locations:
+
+| Artifact | Expected local path under `release-signed/work` |
+|----------|-------------------------------------------------|
+| macOS app bundle | `standalone-mac-aarch64/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Dormouse.app` |
+| Windows app executable | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/dormouse.exe` |
+| Windows installer | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/Dormouse_X.Y.Z_x64-setup.exe` |
+| NSIS script | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/installer.nsi` |
+| NSIS plugin | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/nsis/x64/plugins/nsis_tauri_utils.dll` |
+| Linux AppImage | `standalone-linux-x64/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/Dormouse_X.Y.Z_amd64.AppImage` |
+
+Release upload likewise uses only the three stable output filenames (`Dormouse-macos-aarch64.tar.gz`, `Dormouse-windows-x64-setup.exe`, `Dormouse-linux-x86_64.AppImage`) and fails if `release-signed/release-assets` contains any other files.
+
 ### One-time setup
 
 ```bash
 brew install gh jsign
 gh auth login
 xcode-select --install
-tauri signer generate  # creates the Tauri update signing keypair
+pnpm install --frozen-lockfile
+pnpm --dir standalone exec tauri signer generate  # creates the Tauri update signing keypair
 ```
 
 ### Two signing layers
@@ -212,8 +262,8 @@ If you edit `CHANGELOG.md` manually outside `/release-notes` and want to preview
 
 | Secret | Where | Purpose |
 |--------|-------|---------|
-| `VSCE_PAT` | GitHub Actions secret | VS Code Marketplace publish |
-| `OVSX_PAT` | GitHub Actions secret | OpenVSX publish |
+| `VSCE_PAT` | `vscode-extension-publish` GitHub environment secret | VS Code Marketplace publish |
+| `OVSX_PAT` | `vscode-extension-publish` GitHub environment secret | OpenVSX publish |
 | `GITHUB_TOKEN` | GitHub Actions (automatic) | Artifact upload |
 | `APPLE_SIGNING_IDENTITY` | Local keychain | macOS codesign |
 | `APPLE_ID` | Local env / prompted | Notarization |
