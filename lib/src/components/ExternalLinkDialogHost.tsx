@@ -38,7 +38,12 @@ export function ExternalLinkDialogHost({
 
   return (
     <ExternalLinkDialog
-      request={pending}
+      request={{
+        uri: pending.uri,
+        displayText: pending.displayText,
+        verdict: pending.verdict,
+        decision: pending.decision,
+      }}
       onCancel={close}
       onConfirm={confirm}
     />

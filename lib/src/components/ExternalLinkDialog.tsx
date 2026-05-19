@@ -1,15 +1,6 @@
 import { useRef } from 'react';
-import {
-  AppWindowIcon,
-  ArrowSquareOutIcon,
-  EnvelopeIcon,
-  FileTextIcon,
-  PhoneIcon,
-  ProhibitIcon,
-  XIcon,
-  type Icon,
-} from '@phosphor-icons/react';
-import type { ExternalUriDecision } from '../lib/external-links';
+import { ProhibitIcon, WarningOctagonIcon, XIcon } from '@phosphor-icons/react';
+import type { DisplayMatchVerdict, ExternalUriDecision } from '../lib/external-links';
 import {
   ModalOverlay,
   ModalSurface,
@@ -20,29 +11,46 @@ import {
 
 export interface ExternalLinkDialogRequest {
   uri: string;
+  displayText: string;
+  verdict: DisplayMatchVerdict;
   decision: ExternalUriDecision;
 }
 
-interface SchemeAction {
-  Icon: Icon;
-  label: string;
+interface OpenNoun {
+  // The noun phrase that follows "Open " in titles and buttons (e.g. "URL",
+  // "file"). For custom protocols this is JSX so we can render the scheme
+  // prefix as inline code.
+  title: React.ReactNode;
+  // The button label noun. May differ from the title noun for compactness
+  // (e.g. custom protocol uses just the prefix without "custom protocol").
+  button: React.ReactNode;
 }
 
-function describeOpenable(scheme: string): SchemeAction {
+function pickOpenNoun(scheme: string, uri: string): OpenNoun {
   switch (scheme) {
     case 'http':
     case 'https':
-      return { Icon: ArrowSquareOutIcon, label: 'Opens in your browser' };
+      return { title: 'URL', button: 'URL' };
     case 'file':
-      return { Icon: FileTextIcon, label: 'Opens a local file' };
+      return { title: 'file', button: 'file' };
     case 'mailto':
-      return { Icon: EnvelopeIcon, label: 'Opens your email app' };
+      return { title: 'email', button: 'email' };
     case 'tel':
+      return { title: 'phone app', button: 'phone app' };
     case 'sms':
-      return { Icon: PhoneIcon, label: 'Opens your phone app' };
-    default:
-      return { Icon: AppWindowIcon, label: `Opens with your ${scheme}: handler` };
+      return { title: 'SMS app', button: 'SMS app' };
+    default: {
+      const prefix = schemePrefix(scheme, uri);
+      return {
+        title: <>custom protocol <code className="font-mono">{prefix}</code></>,
+        button: <code className="font-mono">{prefix}</code>,
+      };
+    }
   }
+}
+
+function schemePrefix(scheme: string, uri: string): string {
+  return uri.slice(scheme.length + 1).startsWith('//') ? `${scheme}://` : `${scheme}:`;
 }
 
 export function ExternalLinkDialog({
@@ -55,18 +63,27 @@ export function ExternalLinkDialog({
   onConfirm: () => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  const cancelButtonRef = useRef<HTMLButtonElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const primaryButtonRef = useRef<HTMLButtonElement>(null);
+  const secondaryButtonRef = useRef<HTMLButtonElement>(null);
+
   const openableDecision = request.decision.status === 'openable' ? request.decision : null;
   const blockedDecision = request.decision.status === 'blocked' ? request.decision : null;
-  const openable = openableDecision !== null;
   const displayUri = request.decision.displayUri || request.uri;
-  const action = openableDecision ? describeOpenable(openableDecision.scheme) : null;
+  const verdict = request.verdict;
+  const isDeceptive = verdict === 'deceptive';
+  const noun = openableDecision ? pickOpenNoun(openableDecision.scheme, openableDecision.uri) : null;
 
   useModalFocusTrap(dialogRef, {
-    initialFocusRef: openable ? cancelButtonRef : closeButtonRef,
+    // Deceptive case: focus the copy action so a default Enter doesn't dismiss
+    // silently. Everywhere else: focus the safe affordance (Cancel/Close).
+    initialFocusRef: isDeceptive ? primaryButtonRef : secondaryButtonRef,
     onEscape: onCancel,
   });
+
+  const handleCopy = () => {
+    void navigator.clipboard.writeText(request.uri);
+    onCancel();
+  };
 
   return (
     <ModalOverlay zIndex={9999} backdrop="strong" className="px-4 py-6">
@@ -75,45 +92,20 @@ export function ExternalLinkDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="external-link-dialog-title"
-        aria-describedby="external-link-dialog-status"
         elevation="modal"
         className="w-full max-w-[34rem]"
       >
         <div className="flex items-start gap-3">
-          <div className="min-w-0 flex-1">
-            <h2
-              id="external-link-dialog-title"
-              className="text-sm font-semibold leading-5 text-foreground"
-            >
-              Open URL?
-            </h2>
-            <div id="external-link-dialog-status" className="mt-1 flex items-start gap-1.5 text-xs leading-snug">
-              {action ? (
-                <>
-                  <action.Icon
-                    size={13}
-                    weight="regular"
-                    className="mt-px shrink-0 text-muted"
-                    aria-hidden
-                  />
-                  <span className="text-muted">{action.label}</span>
-                </>
-              ) : (
-                <>
-                  <ProhibitIcon
-                    size={13}
-                    weight="bold"
-                    className="mt-px shrink-0 text-error"
-                    aria-hidden
-                  />
-                  <span className="text-foreground">
-                    <span className="font-semibold">Blocked.</span>{' '}
-                    <span className="text-muted">{blockedDecision?.reason}</span>
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
+          <h2
+            id="external-link-dialog-title"
+            className="min-w-0 flex-1 text-sm font-semibold leading-5 text-foreground"
+          >
+            {isDeceptive ? (
+              <DeceptiveTitle displayText={request.displayText} />
+            ) : (
+              <OpenTitle noun={noun?.title ?? 'URL'} verdict={verdict} displayText={request.displayText} />
+            )}
+          </h2>
           <button
             type="button"
             aria-label="Close"
@@ -128,41 +120,103 @@ export function ExternalLinkDialog({
           {displayUri}
         </div>
 
-        <p className="mt-3 text-xs leading-snug text-muted">
-          Terminal output can hide a different target behind link text.
-        </p>
-
-        {openable ? (
-          <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-            <button
-              ref={cancelButtonRef}
-              type="button"
-              onClick={onCancel}
-              className={modalActionButton({ tone: 'secondary' })}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={onConfirm}
-              className={modalActionButton({ tone: 'primary' })}
-            >
-              Open URL
-            </button>
+        {blockedDecision && !isDeceptive && (
+          <div className="mt-3 flex items-start gap-1.5 text-xs leading-snug">
+            <ProhibitIcon size={13} weight="bold" className="mt-px shrink-0 text-error" aria-hidden />
+            <span className="text-foreground">
+              <span className="font-semibold">Blocked.</span>{' '}
+              <span className="text-muted">{blockedDecision.reason}</span>
+            </span>
           </div>
-        ) : (
-          <div className="mt-4 flex justify-end text-xs">
+        )}
+
+        <div className="mt-4 flex justify-end gap-2 text-xs">
+          {isDeceptive ? (
+            <>
+              <button
+                ref={secondaryButtonRef}
+                type="button"
+                onClick={onCancel}
+                className={`${modalActionButton({ tone: 'secondary' })} min-w-[5rem]`}
+              >
+                Close
+              </button>
+              <button
+                ref={primaryButtonRef}
+                type="button"
+                onClick={handleCopy}
+                className={modalActionButton({ tone: 'primary' })}
+              >
+                Copy deceptive URL to clipboard
+              </button>
+            </>
+          ) : openableDecision ? (
+            <>
+              <button
+                ref={secondaryButtonRef}
+                type="button"
+                onClick={onCancel}
+                className={`${modalActionButton({ tone: 'secondary' })} min-w-[5rem]`}
+              >
+                Cancel
+              </button>
+              <button
+                ref={primaryButtonRef}
+                type="button"
+                onClick={onConfirm}
+                className={`${modalActionButton({ tone: 'primary' })} min-w-[5rem]`}
+              >
+                {'Open '}{noun?.button ?? 'URL'}
+              </button>
+            </>
+          ) : (
             <button
-              ref={closeButtonRef}
+              ref={secondaryButtonRef}
               type="button"
               onClick={onCancel}
               className={`${modalActionButton({ tone: 'primary' })} min-w-[6rem]`}
             >
               Close
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </ModalSurface>
     </ModalOverlay>
+  );
+}
+
+function OpenTitle({
+  noun,
+  verdict,
+  displayText,
+}: {
+  noun: React.ReactNode;
+  verdict: DisplayMatchVerdict;
+  displayText: string;
+}) {
+  if (verdict === 'plain' && displayText.trim()) {
+    return (
+      <>
+        Open {noun}: <span className="text-muted">&quot;{displayText.trim()}&quot;</span>?
+      </>
+    );
+  }
+  return <>Open {noun}?</>;
+}
+
+function DeceptiveTitle({ displayText }: { displayText: string }) {
+  return (
+    <span className="flex items-start gap-1.5">
+      <WarningOctagonIcon
+        size={14}
+        weight="fill"
+        className="mt-px shrink-0 text-error"
+        aria-hidden
+      />
+      <span className="leading-snug">
+        Deceptive link text was{' '}
+        <span className="text-muted">&quot;{displayText.trim()}&quot;</span>, URL was:
+      </span>
+    </span>
   );
 }
