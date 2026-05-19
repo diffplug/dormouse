@@ -12,6 +12,7 @@ export type WebviewMessage =
   | { type: 'pty:getShells'; requestId?: string }
   | { type: 'clipboard:readFiles'; requestId: string }
   | { type: 'clipboard:readImage'; requestId: string }
+  | { type: 'dormouse:openExternal'; uri: string }
   | { type: 'dormouse:init' }
   | { type: 'dormouse:saveState'; state: unknown }
   | { type: 'dormouse:flushSessionSaveDone'; requestId: string }

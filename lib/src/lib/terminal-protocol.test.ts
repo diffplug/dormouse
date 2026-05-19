@@ -150,6 +150,15 @@ describe('TerminalProtocolParser', () => {
     expect(result.events).toEqual([]);
   });
 
+  it('passes OSC 8 hyperlinks through to xterm for rendering', () => {
+    const parser = new TerminalProtocolParser();
+    const hyperlink = '\x1b]8;id=docs;https://example.com/docs\x1b\\docs\x1b]8;;\x1b\\';
+    const result = parser.process(`see ${hyperlink} now`);
+
+    expect(result.visibleData).toBe(`see ${hyperlink} now`);
+    expect(result.events).toEqual([]);
+  });
+
   it('strips known unsupported iTerm2 and clipboard OSC sequences', () => {
     const parser = new TerminalProtocolParser();
     const result = parser.process('a\x1b]52;c;SGVsbG8=\x07b\x1b]50;Monaco\x07c');

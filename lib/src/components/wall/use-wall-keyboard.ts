@@ -31,6 +31,7 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       if (!c.apiRef.current) return;
       if (c.renamingRef.current) return;
       if (handleKillConfirm(e, c)) return;
+      if (c.dialogKeyboardActiveRef.current) return;
       if (handlePaneShortcuts(e, c, navHistory)) return;
       handlePaneNavigation(e, c, navHistory);
     };
