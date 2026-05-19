@@ -40,9 +40,11 @@ function pickOpenNoun(scheme: string, uri: string): OpenNoun {
     case 'sms':
       return { title: 'SMS app', button: 'SMS app' };
     default: {
+      // Title stays generic ("URL"); the scheme prefix lives in the URL block
+      // and the button ("Open vscode://"). No need to duplicate it up top.
       const prefix = schemePrefix(scheme, uri);
       return {
-        title: <>custom protocol <code className="font-mono">{prefix}</code></>,
+        title: 'URL',
         button: <code className="font-mono">{prefix}</code>,
       };
     }
