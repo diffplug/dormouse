@@ -119,24 +119,38 @@ describe("TutRunner snapshots", () => {
     dispose();
   });
 
-  it("keeps the Burrow locked until every tutorial task is complete", () => {
+  it("keeps Flappy Term locked until every tutorial task is complete", () => {
     const { sendKeys, lastFrame, dispose } = mountRunner();
 
     sendKeys("\x1b[B\x1b[B\x1b[B\x1b[B\r");
 
-    expect(lastFrame()).toContain("🧀 ??? 🧀");
+    expect(lastFrame()).toContain("🐭 ??? 🐭");
     expect(lastFrame()).toContain("[LOCKED 0/17]");
     expect(lastFrame()).toContain("Dormouse Playground Tutorial");
     dispose();
   });
 
-  it("opens and exits the Burrow after every tutorial task is complete", () => {
+  it("shows the unlocked Flappy Term entry with a high-score readout", () => {
+    const allItemIds = SECTIONS.flatMap((section) => section.items.map((i) => i.id));
+    const { state, sendKeys, lastFrame, dispose } = mountRunner(allItemIds);
+    state.recordFlappyScore(7);
+
+    // Navigate to (but don't enter) the Flappy Term row.
+    sendKeys("\x1b[B\x1b[B\x1b[B\x1b[B");
+    expect(lastFrame()).toContain("🐭 Flappy Term 🐭");
+    expect(lastFrame()).toContain("[High score: 7]");
+    dispose();
+  });
+
+  it("opens Flappy Term, shows the start hint, and exits back to the menu", () => {
     const allItemIds = SECTIONS.flatMap((section) => section.items.map((i) => i.id));
     const { sendKeys, lastFrame, dispose } = mountRunner(allItemIds);
 
     sendKeys("\x1b[B\x1b[B\x1b[B\x1b[B\r");
-    expect(lastFrame()).toContain("🧀 The Burrow 🧀");
-    expect(lastFrame()).toContain("__/--\\__");
+    const frame = lastFrame();
+    expect(frame).toContain("Score: 0");
+    expect(frame).toContain("Best:");
+    expect(frame).toContain("Space / Up to flap");
 
     sendKeys("\x1b");
     expect(lastFrame()).toContain("Dormouse Playground Tutorial");
