@@ -1,0 +1,133 @@
+name: security-audit
+
+# Audits this repo against SECURITY.md. Reusable: runs nightly via the
+# schedule trigger, on-demand via workflow_dispatch, and is called from
+# release.yml as a precondition to publishing.
+
+on:
+  schedule:
+    - cron: "21 4 * * *"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        with:
+          version: 11.0.6
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit against SECURITY.md
+        uses: anthropics/claude-code-action@4481e6d3c7bbb88db2a928ca3444c536f589c7c1 # v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are auditing this repository against SECURITY.md. The
+            specifications are concrete `FAIL IF` lines plus the
+            explicit clause that the list is not exhaustive — any code
+            change that creates a security hole or reveals an existing
+            one should fail this job.
+
+            Process:
+              1. Read SECURITY.md.
+              2. For each `FAIL IF` line, identify the mechanical check
+                 (gh api, grep, file presence, running a script) and
+                 execute it. Record PASS or FAIL with concrete evidence
+                 — file path and line number, API response excerpt, or
+                 command output.
+              3. After the FAIL IF list is exhausted, do a qualitative
+                 pass. Inspect `.github/workflows/`, `.config/tend.yaml`,
+                 `.github/dependabot.yml`, `scripts/`, and any code that
+                 references secrets, for security holes the specs don't
+                 cover.
+
+            Produce a Markdown report with three sections:
+              - `## FAIL IF results` — one line per check with PASS/FAIL
+                and concrete evidence
+              - `## Qualitative findings` — free-form findings with
+                severity (BLOCKER / WARNING / INFO)
+              - `## Summary` — overall PASS or FAIL with a one-paragraph
+                rationale
+
+            Write the report to `audit-report.md` in the workspace.
+            Write `PASS` or `FAIL` (no other text, no newline required)
+            to `audit-status.txt`. Status is FAIL if any `FAIL IF` is
+            violated or any qualitative finding is BLOCKER severity.
+            Do not call `exit`; the next workflow step inspects the
+            status file and surfaces the result.
+
+            Available environment: `$GH_TOKEN` is the workflow's
+            GitHub token (read repo, write issues), `$GITHUB_REPOSITORY`
+            is `owner/name`. Use `gh api` for GitHub configuration
+            queries (rulesets, secrets, environments, collaborators).
+
+      - name: Surface result, file or close issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eo pipefail
+
+          STATUS=$(tr -d '[:space:]' < audit-status.txt 2>/dev/null || echo "FAIL")
+          DATE=$(date -u +%Y-%m-%dT%H:%MZ)
+          RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+          # Idempotent label creation; ignore "already exists" errors.
+          gh label create security-audit-failure \
+            --color B60205 --description "Security audit failure" 2>/dev/null || true
+
+          if [ "$STATUS" = "PASS" ]; then
+            # Auto-close any open audit-failure issues so the issue
+            # tracker reflects the live state.
+            for n in $(gh issue list --label security-audit-failure \
+                         --state open --json number --jq '.[].number'); do
+              gh issue close "$n" --comment "Audit passed at $DATE. [Run]($RUN_URL)"
+            done
+            echo "Audit passed."
+            exit 0
+          fi
+
+          if [ ! -s audit-report.md ]; then
+            printf '%s\n' \
+              "Audit step produced no \`audit-report.md\`. See workflow run logs." \
+              > audit-report.md
+          fi
+
+          {
+            echo "Audit failed at $DATE. [Run]($RUN_URL)"
+            echo
+            cat audit-report.md
+          } > audit-comment.md
+
+          EXISTING=$(gh issue list --label security-audit-failure \
+                       --state open --json number --jq '.[0].number' || true)
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body-file audit-comment.md
+            echo "Appended re-audit failure to issue #$EXISTING"
+          else
+            gh issue create \
+              --title "[security-audit] FAIL on $(date -u +%Y-%m-%d)" \
+              --label security-audit-failure \
+              --body-file audit-comment.md
+          fi
+          exit 1

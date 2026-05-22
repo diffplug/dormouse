@@ -45,7 +45,7 @@ When updating code covered by a spec, update the spec to match. When the two spe
 
 ## Design
 
-See [.impeccable.md](.impeccable.md) for full design context. Key principles:
+See [DESIGN.md](DESIGN.md) for full design context. Key principles:
 
 1. **Native first** — Inside VSCode, feel indistinguishable from a built-in feature. Use the host's theme tokens.
 2. **Information density without intimidation** — Dense for power users, approachable for beginners. Progressive disclosure.
