@@ -724,7 +724,7 @@ export class TutRunner implements InteractiveProgram {
       out += this.flappyCenteredAt(
         COLS,
         r + 8,
-        "Checkout dormouse.sh/pocket to play on your phone  [p]",
+        "Read about Dormouse Pocket  [p]",
         fg256(C.text),
       );
     } else if (!g.started) {

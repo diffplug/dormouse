@@ -152,11 +152,12 @@ terminal colors. It captures the current DOM-visible theme state and shows:
 - dynamic door/focus-ring picks from the same `pickDoorPair()` and
   `pickFocusRing()` helpers used by Wall's `computeDynamicPalette()`.
 
-Standalone, playground, and the website `/tether` prototype expose the debugger
-as `Debug current theme` in the `ThemePicker` menu. `/tether` uses the same
-picker in the desktop page header and as a floating control above the mobile
-terminal prototype, both with the Kimbie Dark default theme fallback. VSCode
-opens it through the `dormouse.debugTheme` command and the
+Standalone, playground, `/pocket`, and the website `/playground/pocket`
+prototype expose the debugger as `Debug current theme` in the `ThemePicker`
+menu. `/playground/pocket` uses the same picker in the desktop share page header
+and as a floating control above the mobile terminal prototype, both with the
+Kimbie Dark default theme fallback. VSCode opens it through the
+`dormouse.debugTheme` command and the
 `dormouse:openThemeDebugger` extension-to-webview message. The debugger's
 copied report is a shareable text dump of the same snapshot.
 

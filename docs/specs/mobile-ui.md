@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-This document specifies the `/tether` mobile terminal prototype.
+This document specifies the `/playground/pocket` mobile terminal prototype.
 
 The prototype tests one core idea:
 
@@ -13,13 +13,16 @@ Stable terminal viewport + mobile session viewport + explicit touch mode + expli
 The app should feel like a lightweight mobile terminal playground. It does not
 need remote sessions, SSH, user accounts, or production infrastructure.
 
-The website `/tether` prototype exposes a small floating theme switcher above
-the terminal. It uses the shared Dormouse `ThemePicker`.
+The website `/playground/pocket` prototype exposes a small floating theme
+switcher above the terminal. It uses the shared Dormouse `ThemePicker`. On
+desktop, `/playground/pocket` shows a share-to-phone page instead of the
+interactive terminal. The `/pocket` route is the product/feature page and must
+not be used as the fake playground URL.
 
-`/tether` uses the same fake playground terminal stack as `/playground`:
-`PlaygroundShellRegistry` attaches a `TutorialShell` to every spawned pane, the
-same fake commands dispatch to browser-side runners, and the first pane simply
-auto-runs `ascii-splash` as its initial command.
+`/playground/pocket` uses the same fake playground terminal stack as
+`/playground/desktop`: `PlaygroundShellRegistry` attaches a `TutorialShell` to
+every spawned pane, the same fake commands dispatch to browser-side runners, and
+the first pane simply auto-runs `ascii-splash` as its initial command.
 
 ## 2. Prototype Goals
 
@@ -76,10 +79,10 @@ block should use one divider between the Touch and Input rows, with no divider
 above Touch and no divider below Input. The mobile session header should not use
 the desktop terminal title corner radius; it is a flush mobile bar. The alert
 bell sits immediately after the title before secondary title detail. The mobile
-header keeps a minimize button, and in the `/tether` prototype that action opens
-the Sessions reserve instead of creating a desktop Door. The Touch row and its
-selector tray should sit on `terminal-bg` so they read as part of the terminal
-surface above. The Input row and reserve area should sit on
+header keeps a minimize button, and in the `/playground/pocket` prototype that
+action opens the Sessions reserve instead of creating a desktop Door. The Touch
+row and its selector tray should sit on `terminal-bg` so they read as part of
+the terminal surface above. The Input row and reserve area should sit on
 `header-inactive-bg` with `header-inactive-fg`, so the lower input controls are
 distinct from the terminal while still following the selected theme.
 
@@ -111,8 +114,8 @@ If Mouse mode is active and the active pane stops capturing mouse events, the
 selector must fall back to Gestures.
 
 Gesture mode intentionally consumes primary mouse/trackpad clicks in addition to
-touch input. This keeps the `/tether` prototype usable in desktop browsers,
-narrow desktop viewports, and Storybook without a touchscreen. A primary
+touch input. This keeps the `/playground/pocket` prototype usable in desktop
+browsers, narrow desktop viewports, and Storybook without a touchscreen. A primary
 mouse/trackpad click in pane content must start radial gesture handling, call
 `preventDefault()`, stop propagation, and capture that pointer; it is not passed
 through to the embedded `Wall`, xterm, or dockview for focus, selection, or pane
@@ -376,7 +379,7 @@ Minimum useful behavior:
   `tut` is running, `Ctrl+C` sends `\x03` to that app; if the app exits, the
   terminal returns to the fake shell prompt instead of restarting the app.
 * New panes created from the wall get the same fake shell behavior and prompt as
-  regular `/playground` panes.
+  regular `/playground/desktop` panes.
 
 Example commands:
 

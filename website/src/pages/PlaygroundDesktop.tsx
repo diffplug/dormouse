@@ -1,0 +1,274 @@
+import { useState, useEffect, useCallback, useRef } from "react";
+import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
+import { PlaceToPaste } from "../components/PlaceToPaste";
+import { ThemePicker } from "dormouse-lib/components/ThemePicker";
+import { PlaygroundShellRegistry } from "../lib/playground-shells";
+import { TutorialState } from "../lib/tutorial-state";
+import { TutDetector } from "../lib/tut-detector";
+import { BUSY_DEMO_DURATION_MS, BUSY_DEMO_INTERVAL_MS, TutRunner } from "../lib/tut-runner";
+import { ChangelogRunner } from "../lib/changelog-runner";
+import { POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
+
+export { PlaygroundDesktop as Component };
+
+const PANE_MAIN = "tut-main";
+const PANE_BOXED = "tut-boxed";
+const PANE_SPLASH = "tut-splash";
+const DESKTOP_PANES: PaneSpec[] = [
+  { id: PANE_MAIN, command: "tut" },
+  { id: PANE_BOXED, command: "changelog" },
+  { id: PANE_SPLASH, command: "ascii-splash" },
+];
+
+type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
+type WallEvent = import("dormouse-lib/components/Wall").WallEvent;
+type DockviewDisposable = { dispose: () => void };
+
+interface PaneSpec {
+  id: string;
+  command: string;
+}
+
+function DesktopPlaygroundUnavailable() {
+  return (
+    <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
+      <SiteHeader activePath="/playground" style={STATIC_PAGE_HEADER_STYLE} />
+      <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-4 pb-10 pt-24 md:px-8 md:pt-28">
+        <h1 className="mb-4 font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">
+          Desktop playground
+        </h1>
+        <p className="text-lg leading-relaxed opacity-80">
+          This screen is too small to run the desktop playground, but it is perfect for trying the{" "}
+          <a
+            href={POCKET_PLAYGROUND_PATH}
+            className="text-[var(--color-caramel)] underline-offset-2 hover:underline"
+          >
+            Pocket playground
+          </a>
+          .
+        </p>
+      </main>
+    </div>
+  );
+}
+
+function PlaygroundDesktopExperience() {
+  const [WallModule, setWallModule] = useState<{
+    Wall: React.ComponentType<any>;
+  } | null>(null);
+  const [placeToPasteOpen, setPlaceToPasteOpen] = useState(false);
+
+  const adapterRef = useRef<FakePtyAdapter | null>(null);
+  const shellRegistryRef = useRef<PlaygroundShellRegistry | null>(null);
+  const detectorRef = useRef<TutDetector | null>(null);
+  const stateRef = useRef<TutorialState | null>(null);
+  const dockviewDisposablesRef = useRef<DockviewDisposable[]>([]);
+  const autoStartedRef = useRef<Set<string>>(new Set());
+  const spawnUnsubRef = useRef<(() => void) | null>(null);
+  const busyDemoDisposeRef = useRef<(() => void) | null>(null);
+  const alertDemoPaneIdRef = useRef<string | null>(null);
+
+  const handleOpenGithub = useCallback(() => {
+    window.open(
+      "https://github.com/diffplug/dormouse",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }, []);
+
+  const handleOpenPocket = useCallback(() => {
+    window.open("/pocket", "_blank", "noopener,noreferrer");
+  }, []);
+
+  const tryAutoStart = useCallback((pane: PaneSpec) => {
+    if (autoStartedRef.current.has(pane.id)) return;
+    const shellRegistry = shellRegistryRef.current;
+    if (!shellRegistry) return;
+    autoStartedRef.current.add(pane.id);
+    shellRegistry.ensureShell(pane.id).runCommand(pane.command);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadWall() {
+      const platform = await import("dormouse-lib/lib/platform");
+      const registry = await import("dormouse-lib/lib/terminal-registry");
+      const mouseSelection = await import("dormouse-lib/lib/mouse-selection");
+      const wall = await import("dormouse-lib/components/Wall");
+      const scenarios = await import("dormouse-lib/lib/platform/fake-scenarios");
+      const asciiSplash = await import("../lib/ascii-splash-runner");
+      await import("dormouse-lib/index.css");
+      if (cancelled) return;
+
+      const adapter = platform.initPlatform("fake");
+      registry.initAlertStateReceiver();
+      adapterRef.current = adapter;
+
+      adapter.setDefaultScenario(scenarios.SCENARIO_SHELL_PROMPT);
+      // Each runner-owned pane suppresses the default shell-prompt scenario,
+      // otherwise spawnPty queues a delayed `user@dormouse:~$` write that
+      // would land in the runner's alt-screen and corrupt its output.
+      for (const pane of DESKTOP_PANES) {
+        adapter.setScenario(pane.id, { name: "none", chunks: [] });
+      }
+
+      const tutorialState = new TutorialState();
+      stateRef.current = tutorialState;
+      const detector = new TutDetector(tutorialState, registry, mouseSelection, {
+        onWatchingDemoPaneChange: (id) => {
+          alertDemoPaneIdRef.current = id;
+        },
+      });
+      detectorRef.current = detector;
+
+      const shellRegistry = new PlaygroundShellRegistry(
+        adapter,
+        (terminalId, name, args, onExit) => {
+          if (name === "tut") {
+            return new TutRunner({
+              adapter,
+              terminalId,
+              state: tutorialState,
+              onExit,
+              onTriggerBusyDemo: () => {
+                const paneId = alertDemoPaneIdRef.current ?? PANE_BOXED;
+                const sessionId = registry.resolveTerminalSessionId(paneId);
+                busyDemoDisposeRef.current?.();
+                busyDemoDisposeRef.current = adapter.pumpActivity(
+                  sessionId,
+                  BUSY_DEMO_DURATION_MS,
+                  BUSY_DEMO_INTERVAL_MS,
+                );
+              },
+              onTogglePlaceToPaste: () => setPlaceToPasteOpen((open) => !open),
+              onOpenGithub: handleOpenGithub,
+              onOpenPocket: handleOpenPocket,
+            });
+          }
+          if (name === "ascii-splash" || name === "splash") {
+            return new asciiSplash.AsciiSplashRunner({
+              adapter,
+              terminalId,
+              args,
+              onExit,
+            });
+          }
+          if (name === "changelog") {
+            return new ChangelogRunner({ adapter, terminalId, onExit });
+          }
+          return null;
+        },
+      );
+      shellRegistryRef.current = shellRegistry;
+
+      for (const pane of DESKTOP_PANES) shellRegistry.ensureShell(pane.id);
+
+      const paneById = new Map(DESKTOP_PANES.map((p) => [p.id, p]));
+      // Subscribe before Wall mounts so the spawn fired by TerminalPane's
+      // mount effect doesn't race past us. If the pty already exists by
+      // the time we get here, fire immediately.
+      spawnUnsubRef.current = adapter.onPtySpawn(({ id }) => {
+        const pane = paneById.get(id);
+        if (pane) tryAutoStart(pane);
+      });
+      for (const pane of DESKTOP_PANES) {
+        if (adapter.hasPty(pane.id)) tryAutoStart(pane);
+      }
+
+      setWallModule({ Wall: wall.Wall });
+    }
+    loadWall();
+
+    return () => {
+      cancelled = true;
+      for (const disposable of dockviewDisposablesRef.current) {
+        disposable.dispose();
+      }
+      dockviewDisposablesRef.current = [];
+      detectorRef.current?.dispose();
+      detectorRef.current = null;
+      shellRegistryRef.current?.disposeAll();
+      shellRegistryRef.current = null;
+      stateRef.current = null;
+      autoStartedRef.current.clear();
+      alertDemoPaneIdRef.current = null;
+      spawnUnsubRef.current?.();
+      spawnUnsubRef.current = null;
+      busyDemoDisposeRef.current?.();
+      busyDemoDisposeRef.current = null;
+    };
+  }, [handleOpenGithub, handleOpenPocket, tryAutoStart]);
+
+  const handleApiReady = useCallback((api: any) => {
+    const shellRegistry = shellRegistryRef.current;
+    shellRegistry?.ensureShell(PANE_MAIN);
+
+    const addDisposable = api.onDidAddPanel((panel: { id?: string } | undefined) => {
+      if (panel?.id) shellRegistryRef.current?.ensureShell(panel.id);
+    });
+    dockviewDisposablesRef.current.push(addDisposable);
+
+    api.addPanel({
+      id: PANE_BOXED,
+      component: "terminal",
+      tabComponent: "terminal",
+      title: "changelog",
+      position: { referencePanel: PANE_MAIN, direction: "right" },
+    });
+    api.addPanel({
+      id: PANE_SPLASH,
+      component: "terminal",
+      tabComponent: "terminal",
+      title: "ascii-splash",
+      position: { referencePanel: PANE_BOXED, direction: "below" },
+    });
+
+    const mainPanel = api.getPanel(PANE_MAIN);
+    if (mainPanel) {
+      mainPanel.api.setTitle("tutorial");
+      mainPanel.api.setActive();
+    }
+
+    detectorRef.current?.attach(api);
+  }, []);
+
+  const handleWallEvent = useCallback((event: WallEvent) => {
+    detectorRef.current?.handleWallEvent(event);
+  }, []);
+
+  return (
+    <>
+      <SiteHeader
+        activePath="/playground"
+        themeAware
+        controls={
+          <ThemePicker
+            variant="playground-header"
+            defaultThemeId="vscode.theme-kimbie-dark.kimbie-dark"
+          />
+        }
+      />
+
+      <main className="fixed top-16 right-0 bottom-0 left-0 flex min-h-0 md:top-20">
+        {WallModule ? (
+          <WallModule.Wall
+            initialPaneIds={[PANE_MAIN]}
+            initialMode="passthrough"
+            onApiReady={handleApiReady}
+            onEvent={handleWallEvent}
+          />
+        ) : null}
+      </main>
+      {placeToPasteOpen ? (
+        <PlaceToPaste onClose={() => setPlaceToPasteOpen(false)} />
+      ) : null}
+    </>
+  );
+}
+
+function PlaygroundDesktop() {
+  const preferred = usePreferredPlayground();
+  if (preferred === null) return null;
+  if (preferred === "pocket") return <DesktopPlaygroundUnavailable />;
+  return <PlaygroundDesktopExperience />;
+}

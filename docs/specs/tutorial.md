@@ -1,6 +1,13 @@
 # Playground Tutorial
 
-At the `/playground` route on the website. Interactive TUI: each item starts pending, the first incomplete item is marked as active, and completed items become green checks when Dormouse detects the corresponding action.
+The website playground has canonical device-specific routes:
+
+- `/playground` is a client-side dispatcher. It uses `(max-width: 767px), (pointer: coarse)` to replace the history entry with either `/playground/desktop` or `/playground/pocket`.
+- `/playground/desktop` hosts the desktop tiling tutorial. On small or coarse-pointer screens it does not mount `Wall`; it shows a message that the screen is too small for the desktop playground and links to `/playground/pocket`.
+- `/playground/pocket` hosts the mobile Pocket playground. On desktop it shows a marketing/share page that prompts the user to send `/playground/pocket` to a phone and links to the `/pocket` product page.
+- `/pocket` is the Pocket product/feature page. It is not the real tethering environment and is not the playground URL; the future real tethering surface should stay separate from the playground URL.
+
+The interactive desktop TUI lives at `/playground/desktop`. Each item starts pending, the first incomplete item is marked as active, and completed items become green checks when Dormouse detects the corresponding action.
 
 ## Architecture
 
@@ -13,16 +20,12 @@ Three browser-side pieces in `website/src/lib/`, mirroring the pattern in `websi
 
 ## Layout
 
-- `SiteHeader` at top with the `Theme:` dropdown control on `/playground` (other routes do not render it). Header is `themeAware` so `--vscode-*` variables drive its background, border, text, and banner colors.
+- `SiteHeader` at top with the `Theme:` dropdown control on `/playground/desktop`. Header is `themeAware` so `--vscode-*` variables drive its background, border, text, and banner colors.
 - `<main>` is a flex container so Wall's `flex-1 min-h-0` root gets a real height.
-- `Wall` runs `FakePtyAdapter` with `initialMode="passthrough"`. The pane layout branches at mount on `window.innerWidth < 768` (Tailwind's `md` breakpoint, locked at mount; not reactive to resize):
-  - **Desktop (≥ 768px)** — three panes:
-    - **`tut-main`** (left, ~50%) — auto-launches `TutRunner` via `mainShell.runCommand("tut")`.
-    - **`tut-boxed`** (right-top, ~25%) — titled "changelog". Auto-launches `ChangelogRunner` via `boxedShell.runCommand("changelog")`. Doubles as the Copy Rewrapped target — its wrapped lines exercise the rewrap path.
-    - **`tut-splash`** (right-bottom, ~25%) — titled "ascii-splash". Auto-launches `AsciiSplashRunner` via `splashShell.runCommand("ascii-splash")`.
-  - **Phone (< 768px)** — two stacked panes; the changelog is dropped because the screen is too narrow to host it usefully:
-    - **`tut-main`** (top, ~50%) — same as desktop.
-    - **`tut-splash`** (bottom, ~50%) — same as desktop.
+- `Wall` runs `FakePtyAdapter` with `initialMode="passthrough"` on `/playground/desktop`. The route uses the desktop three-pane layout only:
+  - **`tut-main`** (left, ~50%) — auto-launches `TutRunner` via `mainShell.runCommand("tut")`.
+  - **`tut-boxed`** (right-top, ~25%) — titled "changelog". Auto-launches `ChangelogRunner` via `boxedShell.runCommand("changelog")`. Doubles as the Copy Rewrapped target — its wrapped lines exercise the rewrap path.
+  - **`tut-splash`** (right-bottom, ~25%) — titled "ascii-splash". Auto-launches `AsciiSplashRunner` via `splashShell.runCommand("ascii-splash")`.
 - Side panes are added in `onApiReady` with `position: { referencePanel, direction }` after Wall creates the initial main pane.
 
 Every playground pane gets a `TutorialShell` input handler through `PlaygroundShellRegistry`. Newly split or spawned fake terminals use `SCENARIO_SHELL_PROMPT` by default. The shell dispatches by command name to a `startProgram` factory provided by the page; the factory wires `tut` → `TutRunner` and `ascii-splash` / `splash` → `AsciiSplashRunner`.
@@ -31,9 +34,9 @@ Every playground pane gets a `TutorialShell` input handler through `PlaygroundSh
 
 The runner shows a top-level menu first. Selecting a section drills into its item list. Each section shows `[N/M complete]` next to its title. The menu helper below `Dormouse Playground Tutorial` shows only navigation shortcuts, not overall completion.
 
-The top-level menu also includes `Starred on GitHub`, which sits directly below `Copy paste` without a blank spacer, and shows `[not yet]` until selected and `[thanks ⭐]` after it has been resolved. Pressing Enter on that row calls `onOpenGithub`, which `/playground` and the mobile tether page wire to `window.open("https://github.com/diffplug/dormouse", "_blank", "noopener,noreferrer")`.
+The top-level menu also includes `Starred on GitHub`, which sits directly below `Copy paste` without a blank spacer, and shows `[not yet]` until selected and `[thanks ⭐]` after it has been resolved. Pressing Enter on that row calls `onOpenGithub`, which `/playground/desktop` and the Pocket playground wire to `window.open("https://github.com/diffplug/dormouse", "_blank", "noopener,noreferrer")`.
 
-After `Starred on GitHub`, the top-level menu shows the mystery row. It is `🐭 ??? 🐭` with `[LOCKED N/M]` while any section task is incomplete. `N/M` is computed from section checklist items only; `Starred on GitHub` and the mystery row do not count. When all section tasks are complete, the row becomes `🐭 Flappy Term 🐭` with a `[High score: N]` readout. Pressing Enter on the unlocked row opens Flappy Term, a runner-local mini-game: `Space`/`Up`/`Enter` flaps the bird, scoring persists as the high score, and `Esc` returns to the top-level menu. On the game-over screen, `Enter` restarts and `p` calls `onOpenPocket`, which `/playground` and the mobile tether page wire to `window.open("https://dormouse.sh/pocket", "_blank", "noopener,noreferrer")`.
+After `Starred on GitHub`, the top-level menu shows the mystery row. It is `🐭 ??? 🐭` with `[LOCKED N/M]` while any section task is incomplete. `N/M` is computed from section checklist items only; `Starred on GitHub` and the mystery row do not count. When all section tasks are complete, the row becomes `🐭 Flappy Term 🐭` with a `[High score: N]` readout. Pressing Enter on the unlocked row opens Flappy Term, a runner-local mini-game: `Space`/`Up`/`Enter` flaps the bird, scoring persists as the high score, and `Esc` returns to the top-level menu. On the game-over screen, `Enter` restarts and `p` calls `onOpenPocket`, which `/playground/desktop` and the Pocket playground wire to `window.open("/pocket", "_blank", "noopener,noreferrer")`. The game-over prompt reads `Read about Dormouse Pocket  [p]`.
 
 Inside a section, items render as one of:
 
@@ -117,14 +120,14 @@ Implemented in `dormouse-lib/lib/themes` and `dormouse-lib/components/ThemePicke
 
 Bundled themes are provided by `dormouse-lib/lib/themes` and include only GitHub variants. Users can install additional themes from OpenVSX through the dropdown footer action.
 
-The picker appears only on `/playground`, inside `SiteHeader`, labeled `Theme:`. The trigger opens a dropdown of bundled and installed themes. The dropdown footer is always `Install theme from OpenVSX`, which opens the theme store dialog. Installed theme rows include an `X` delete control; deletion requires browser confirmation before removing the theme from localStorage. If the active installed theme is deleted, the picker falls back to the first bundled theme and applies it immediately.
+The picker appears on `/playground/desktop`, `/playground/pocket`, and `/pocket`, labeled `Theme:`. On `/playground/desktop` it is inside the theme-aware `SiteHeader`; on `/playground/pocket` mobile it floats over the terminal; on the Pocket marketing pages it uses the standalone appbar variant. The trigger opens a dropdown of bundled and installed themes. The dropdown footer is always `Install theme from OpenVSX`, which opens the theme store dialog. Installed theme rows include an `X` delete control; deletion requires browser confirmation before removing the theme from localStorage. If the active installed theme is deleted, the picker falls back to the first bundled theme and applies it immediately.
 
 Each theme is defined as a map of `--vscode-*` CSS variable overrides. `applyTheme()` applies the active theme, which:
 1. Cascades into `--color-*` variables (via `var(--vscode-*, fallback)` in `theme.css`)
 2. Triggers the `MutationObserver` in `lib/src/lib/terminal-theme.ts` to re-read `getTerminalTheme()` for all xterm.js terminals
 3. Updates Dockview/Tailwind token colors
 
-The picker restores the persisted active theme on mount. The playground header is `themeAware`, so the same active theme also affects the site header chrome while the picker remains hidden on non-playground routes.
+The picker restores the persisted active theme on mount. The desktop playground header is `themeAware`, so the same active theme also affects that route's site header chrome.
 
 ## Mouse and Clipboard Feature Coverage
 
