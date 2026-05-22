@@ -46,7 +46,8 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
 - FAIL IF the repository ruleset named `Tag operations` is missing, doesn't target `~ALL` tags, doesn't block both `creation` and `update`, or doesn't have admin-only bypass.
 - FAIL IF `dormouse-bot` holds a permission higher than `push` on this repository.
 - FAIL IF `OVSX_PAT` or `VSCE_PAT` appears as a repo-level secret. They must live only in the `vscode-extension-publish` environment.
-- FAIL IF the `vscode-extension-publish` environment's deployment-branch-policies allow any ref pattern that is not admin-gated by the `Tag operations` or `Merge access` rulesets.
+- FAIL IF any GitHub environment's deployment-branch-policies admit a ref that is not admin-gated by the `Tag operations` or `Merge access` rulesets. Today this covers `vscode-extension-publish` (`v*` tag, admin-only via `Tag operations`) and `security-audit` (`main` admin-only via `Merge access`, plus `v*` tag).
+- FAIL IF `AUDIT_PAT` exists at the repo level. If the secret is provisioned at all, it must live in the `security-audit` environment so a bot-pushed feature branch cannot reach it.
 - FAIL IF `CHROMATIC_PROJECT_TOKEN` is missing from `secrets.allowed` in `.config/tend.yaml`. The allowlist entry is an explicit acknowledgment that the bot can read this token.
 - FAIL IF `.github/workflows/workflow-audit.yaml` is missing, disabled, or has not produced a successful run in the last 48 hours.
 - FAIL IF any `tend-*.yaml` workflow uses an unpinned action reference (e.g. `@main`, no version). Inside `tend-*.yaml`, both tag pins (`@v6`, `@0.0.25`) and SHA pins are accepted because the file is owned by the upstream generator (`max-sixty/tend`), which currently uses tag pins. All actions in every other workflow — including `workflow-audit.yaml` and `security-audit.yaml` — must follow the SHA-pin rule in "GitHub Actions Policies".
@@ -72,6 +73,8 @@ Desktop releases are not fully automated. GitHub Actions builds unsigned artifac
 ## CI Validation Contract
 
 The `security-audit` workflow at `.github/workflows/security-audit.yaml` enforces this document. It runs nightly and is a required dependency of the VS Code publish job in `release.yml`, so no release ships without a passing audit. The audit reads SECURITY.md, executes each `FAIL IF` as a mechanical check, and also does a qualitative pass for security holes the specs don't cover. On any `FAIL IF` violation or BLOCKER-severity finding, the workflow opens (or updates) an issue labeled `security-audit-failure` with the full audit report, and exits non-zero. When a subsequent audit passes, the open failure issue is auto-closed so the tracker matches the live state.
+
+The audit job declares `environment: security-audit`, whose deployment-branch-policy admits only `main` and `v*` tags. Both ref classes are admin-only by §3's rulesets, so a write-scoped bot cannot reach the env's secrets (most importantly `AUDIT_PAT`, when provisioned) by pushing a workflow file to a feature branch.
 
 - FAIL IF `.github/workflows/security-audit.yaml` is missing, disabled, or no longer invoked from `release.yml`'s publish path.
 - FAIL IF the audit has been weakened — e.g. the prompt no longer requires the qualitative pass, a `FAIL IF` can be ignored, or the failure-reporting step that opens a `security-audit-failure` issue and exits non-zero has been removed.

@@ -20,6 +20,15 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The AUDIT_PAT (read-only Administration + Secrets + Environments)
+    # lives in this environment, whose deployment-branch-policy admits
+    # only `main` and `v*` tags — refs that the §3 rulesets reserve to
+    # admins. A bot-pushed feature branch cannot reach this job at all
+    # (GitHub rejects the run before any step starts), so the PAT
+    # cannot be exfiltrated through a hand-authored workflow on a
+    # non-admin-gated ref.
+    environment:
+      name: security-audit
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
