@@ -5,7 +5,7 @@ export const POCKET_PLAYGROUND_PATH = "/playground/pocket";
 
 export type PreferredPlayground = "desktop" | "pocket";
 
-const POCKET_PLAYGROUND_QUERY = "(max-width: 767px), (pointer: coarse)";
+const POCKET_PLAYGROUND_QUERY = "(max-width: 700px), (pointer: coarse)";
 
 function getPreferredPlayground(): PreferredPlayground {
   if (typeof window === "undefined") return "desktop";

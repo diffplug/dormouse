@@ -4,6 +4,7 @@ import {
   POCKET_THEME_ID,
   PocketTerminalExperience,
 } from "../components/PocketTerminalExperience";
+import { NotifySignupForm } from "../components/NotifySignupForm";
 import { ShareUrlButton } from "../components/ShareUrlButton";
 import { ThemePicker } from "dormouse-lib/components/ThemePicker";
 import { POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
@@ -32,23 +33,23 @@ function DesktopPocketPlaygroundPage() {
       <main className="mx-auto grid min-h-screen max-w-6xl items-center gap-10 px-4 pb-10 pt-24 md:grid-cols-[minmax(0,1fr)_minmax(320px,390px)] md:px-8 md:pt-28">
         <section className="max-w-2xl">
           <h1 className="mb-4 font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">
-            Pocket playground
+            Walk away. Keep going.
           </h1>
           <p className="mb-6 font-display text-lg text-[var(--color-caramel)]">
-            This playground is built for phone-sized touch controls. Share it to your phone{" "}
-            <ShareUrlButton path={POCKET_PLAYGROUND_PATH} title="Dormouse Pocket playground" />.
+            Come back on mobile{" "}
+            <ShareUrlButton path={POCKET_PLAYGROUND_PATH} title="Dormouse Pocket" />{" "}
+            to try it out! (WIP)
           </p>
           <p className="mb-4 text-lg leading-relaxed opacity-70">
-            It teaches the mobile interface for Dormouse Pocket. It is not the real tethering
-            environment; that future product surface will stay separate from the playground URL.
+            Tether a terminal session to your phone over WebRTC and take a stroll. Dormouse
+            buzzes your phone when something needs attention. A hosted auto-pairing service comes
+            later, so you can close the laptop and walk away, no setup dance.
           </p>
-          <p className="text-lg leading-relaxed opacity-70">
-            Want the product details instead?{" "}
-            <a href="/pocket" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">
-              Read about Dormouse Pocket
-            </a>
-            .
+          <p className="mb-4 text-lg leading-relaxed opacity-70">
+            Open source and free to self-host, or pay a small monthly fee for our hosted version.
+            Early adopters get a launch discount.
           </p>
+          <NotifySignupForm />
         </section>
 
         <section aria-label="Dormouse Pocket phone preview" className="mx-auto w-full max-w-[390px]">

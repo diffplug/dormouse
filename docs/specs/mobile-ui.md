@@ -16,8 +16,9 @@ need remote sessions, SSH, user accounts, or production infrastructure.
 The website `/playground/pocket` prototype exposes a small floating theme
 switcher above the terminal. It uses the shared Dormouse `ThemePicker`. On
 desktop, `/playground/pocket` shows a share-to-phone page instead of the
-interactive terminal. The `/pocket` route is the product/feature page and must
-not be used as the fake playground URL.
+interactive terminal. The `/pocket` route temporarily redirects to
+`/playground/pocket`; this is a launch-state redirect, not the future real
+tethering environment.
 
 `/playground/pocket` uses the same fake playground terminal stack as
 `/playground/desktop`: `PlaygroundShellRegistry` attaches a `TutorialShell` to

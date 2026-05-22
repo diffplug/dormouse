@@ -1,61 +1,24 @@
 import { useEffect } from "react";
-import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
-import { NotifySignupForm } from "../components/NotifySignupForm";
-import {
-  POCKET_THEME_ID,
-  PocketTerminalExperience,
-} from "../components/PocketTerminalExperience";
-import { ShareUrlButton } from "../components/ShareUrlButton";
-import { ThemePicker } from "dormouse-lib/components/ThemePicker";
+import { useNavigate } from "react-router-dom";
 import { POCKET_PLAYGROUND_PATH } from "../lib/playground-routing";
 
 export { Pocket as Component };
 
 function Pocket() {
+  const navigate = useNavigate();
+
   useEffect(() => {
-    document.body.classList.add("pocket-marketing-body");
-    return () => document.body.classList.remove("pocket-marketing-body");
-  }, []);
+    navigate(
+      {
+        pathname: POCKET_PLAYGROUND_PATH,
+        search: window.location.search,
+        hash: window.location.hash,
+      },
+      { replace: true },
+    );
+  }, [navigate]);
 
   return (
-    <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
-      <SiteHeader
-        activePath="/pocket"
-        style={STATIC_PAGE_HEADER_STYLE}
-        controls={<ThemePicker variant="standalone-appbar" defaultThemeId={POCKET_THEME_ID} />}
-      />
-      <main className="mx-auto grid min-h-screen max-w-6xl items-center gap-10 px-4 pb-10 pt-24 md:grid-cols-[minmax(0,1fr)_minmax(320px,390px)] md:px-8 md:pt-28">
-        <section className="max-w-2xl">
-          <h1 className="mb-4 font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">
-            Walk away. Keep going.
-          </h1>
-          <p className="mb-6 font-display text-lg text-[var(--color-caramel)]">
-            Pocket tethering is coming soon. Try the mobile playground now{" "}
-            <ShareUrlButton path={POCKET_PLAYGROUND_PATH} title="Dormouse Pocket playground" />.
-          </p>
-          <p className="mb-4 text-lg leading-relaxed opacity-70">
-            Tether a terminal session to your phone over WebRTC and take a stroll. Dormouse
-            buzzes your phone when something needs attention. A hosted auto-pairing service comes
-            later, so you can close the laptop and walk away, no setup dance.
-          </p>
-          <p className="mb-4 text-lg leading-relaxed opacity-70">
-            The Pocket playground is a tutorial for the mobile controls, not the real tethering
-            environment. Open source self-hosting and a small hosted plan are planned for launch.
-          </p>
-          <NotifySignupForm />
-        </section>
-
-        <section aria-label="Dormouse Pocket phone preview" className="mx-auto w-full max-w-[390px]">
-          <div className="rounded-[2.4rem] border border-white/15 bg-neutral-950 p-3 shadow-[0_24px_90px_rgba(0,0,0,0.55)]">
-            <div className="mx-auto mb-2 h-1.5 w-24 rounded-full bg-white/20" />
-            <div className="aspect-[390/812] overflow-hidden rounded-[1.8rem] border border-white/10 bg-black">
-              <div className="h-full pointer-events-none" aria-hidden="true" inert>
-                <PocketTerminalExperience interactive={false} />
-              </div>
-            </div>
-          </div>
-        </section>
-      </main>
-    </div>
+    <main className="fixed inset-0 bg-[var(--color-bg)] text-[var(--color-text)]" />
   );
 }

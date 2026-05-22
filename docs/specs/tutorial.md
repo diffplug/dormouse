@@ -2,10 +2,10 @@
 
 The website playground has canonical device-specific routes:
 
-- `/playground` is a client-side dispatcher. It uses `(max-width: 767px), (pointer: coarse)` to replace the history entry with either `/playground/desktop` or `/playground/pocket`.
-- `/playground/desktop` hosts the desktop tiling tutorial. On small or coarse-pointer screens it does not mount `Wall`; it shows a message that the screen is too small for the desktop playground and links to `/playground/pocket`.
-- `/playground/pocket` hosts the mobile Pocket playground. On desktop it shows a marketing/share page that prompts the user to send `/playground/pocket` to a phone and links to the `/pocket` product page.
-- `/pocket` is the Pocket product/feature page. It is not the real tethering environment and is not the playground URL; the future real tethering surface should stay separate from the playground URL.
+- `/playground` is a client-side dispatcher. It uses `(max-width: 249px), (pointer: coarse)` to replace the history entry with either `/playground/desktop` or `/playground/pocket`. A coarse pointer always prefers Pocket; non-coarse pointers can run the desktop playground at 250px and wider.
+- `/playground/desktop` hosts the desktop tiling tutorial. On screens narrower than 250px or on coarse-pointer devices it does not mount `Wall`; it shows a message that the screen is too small for the desktop playground and links to `/playground/pocket`.
+- `/playground/pocket` hosts the mobile Pocket playground. On desktop it shows the temporary Pocket marketing/share page from the old `/pocket` route, including the phone preview and notify signup form.
+- `/pocket` temporarily redirects to `/playground/pocket`. This is a temporary launch-state redirect; the future real tethering surface should stay separate from the playground URL when it exists.
 
 The interactive desktop TUI lives at `/playground/desktop`. Each item starts pending, the first incomplete item is marked as active, and completed items become green checks when Dormouse detects the corresponding action.
 
@@ -120,7 +120,7 @@ Implemented in `dormouse-lib/lib/themes` and `dormouse-lib/components/ThemePicke
 
 Bundled themes are provided by `dormouse-lib/lib/themes` and include only GitHub variants. Users can install additional themes from OpenVSX through the dropdown footer action.
 
-The picker appears on `/playground/desktop`, `/playground/pocket`, and `/pocket`, labeled `Theme:`. On `/playground/desktop` it is inside the theme-aware `SiteHeader`; on `/playground/pocket` mobile it floats over the terminal; on the Pocket marketing pages it uses the standalone appbar variant. The trigger opens a dropdown of bundled and installed themes. The dropdown footer is always `Install theme from OpenVSX`, which opens the theme store dialog. Installed theme rows include an `X` delete control; deletion requires browser confirmation before removing the theme from localStorage. If the active installed theme is deleted, the picker falls back to the first bundled theme and applies it immediately.
+The picker appears on `/playground/desktop` and `/playground/pocket`, labeled `Theme:`. On `/playground/desktop` it is inside the theme-aware `SiteHeader`; on `/playground/pocket` mobile it floats over the terminal; on the desktop Pocket playground page it uses the standalone appbar variant. `/pocket` redirects before rendering a picker. The trigger opens a dropdown of bundled and installed themes. The dropdown footer is always `Install theme from OpenVSX`, which opens the theme store dialog. Installed theme rows include an `X` delete control; deletion requires browser confirmation before removing the theme from localStorage. If the active installed theme is deleted, the picker falls back to the first bundled theme and applies it immediately.
 
 Each theme is defined as a map of `--vscode-*` CSS variable overrides. `applyTheme()` applies the active theme, which:
 1. Cascades into `--color-*` variables (via `var(--vscode-*, fallback)` in `theme.css`)

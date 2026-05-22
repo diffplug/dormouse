@@ -37,8 +37,8 @@ function DesktopPlaygroundUnavailable() {
         <h1 className="mb-4 font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">
           Desktop playground
         </h1>
-        <p className="text-lg leading-relaxed opacity-80">
-          This screen is too small to run the desktop playground, but it is perfect for trying the{" "}
+        <p className="text-lg leading-relaxed opacity-80 mb-4">
+          This screen is too small to run the desktop playground. Make it at least 250px wide, but it is perfect for trying the{" "}
           <a
             href={POCKET_PLAYGROUND_PATH}
             className="text-[var(--color-caramel)] underline-offset-2 hover:underline"
@@ -46,6 +46,9 @@ function DesktopPlaygroundUnavailable() {
             Pocket playground
           </a>
           .
+        </p>
+        <p className="text-lg leading-relaxed opacity-80">
+          Alternatively, make the window at least 250px wide and the playground will pop into view.
         </p>
       </main>
     </div>
