@@ -1,0 +1,82 @@
+name: workflow-audit
+
+# Nightly audit of every commit touching .github/workflows/. Surfaces
+# changes from feature branches and direct pushes, not just the main
+# branch — so a bot push that adds a new workflow file gets a visible
+# issue even if it never opens a PR.
+#
+# Gap-resistant: the "since" lower bound comes from the previous
+# successful run's API timestamp, so a failed run pushes the window
+# forward rather than skipping commits.
+
+on:
+  schedule:
+    - cron: "13 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch all branches
+        run: git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+
+      - name: Audit workflow file changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          SINCE=$(gh api \
+            "/repos/$GITHUB_REPOSITORY/actions/workflows/workflow-audit.yaml/runs?status=success&per_page=1" \
+            --jq '.workflow_runs[0].created_at // ""')
+          if [ -z "$SINCE" ]; then
+            SINCE=$(date -u -d '25 hours ago' --iso-8601=seconds)
+          fi
+          echo "Auditing commits since: $SINCE"
+
+          COMMITS=$(git log --all --since="$SINCE" --pretty=format:'%H' \
+            -- .github/workflows/ | sort -u)
+
+          if [ -z "$COMMITS" ]; then
+            echo "No workflow file changes since $SINCE."
+            exit 0
+          fi
+
+          COUNT=$(echo "$COMMITS" | wc -l | tr -d ' ')
+          REPORT=$(mktemp)
+          {
+            echo "$COUNT commit(s) touching \`.github/workflows/\` since \`$SINCE\`:"
+            echo ""
+            for sha in $COMMITS; do
+              AUTHOR=$(git show -s --format='%an <%ae>' "$sha")
+              DATE=$(git show -s --format='%ci' "$sha")
+              SUBJECT=$(git show -s --format='%s' "$sha")
+              REFS=$(git branch -a --contains "$sha" 2>/dev/null \
+                | grep -v 'HEAD ->' | head -10 \
+                | sed 's/^[[:space:]]*//' | paste -sd ', ' -)
+              FILES=$(git show --name-only --pretty='' "$sha" -- .github/workflows/)
+              echo "### \`${sha:0:7}\` — $SUBJECT"
+              echo ""
+              echo "- **Author:** $AUTHOR"
+              echo "- **Date:** $DATE"
+              echo "- **Refs:** $REFS"
+              echo "- **Files:**"
+              echo "$FILES" | sed 's|^|  - `|; s|$|`|'
+              echo "- [View diff](https://github.com/$GITHUB_REPOSITORY/commit/$sha)"
+              echo ""
+            done
+          } > "$REPORT"
+
+          TITLE="[workflow-audit] $COUNT change(s) on $(date -u +%Y-%m-%d)"
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "$TITLE" --body-file "$REPORT"
