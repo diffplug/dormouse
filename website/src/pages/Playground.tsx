@@ -56,6 +56,10 @@ function Playground() {
     );
   }, []);
 
+  const handleOpenPocket = useCallback(() => {
+    window.open("https://dormouse.sh/pocket", "_blank", "noopener,noreferrer");
+  }, []);
+
   const tryAutoStart = useCallback((pane: PaneSpec) => {
     if (autoStartedRef.current.has(pane.id)) return;
     const shellRegistry = shellRegistryRef.current;
@@ -128,6 +132,7 @@ function Playground() {
               },
               onTogglePlaceToPaste: () => setPlaceToPasteOpen((open) => !open),
               onOpenGithub: handleOpenGithub,
+              onOpenPocket: handleOpenPocket,
             });
           }
           if (name === "ascii-splash" || name === "splash") {

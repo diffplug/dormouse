@@ -114,6 +114,8 @@ interface TutRunnerOptions {
   onTogglePlaceToPaste?: () => void;
   /** Called when the user presses `Enter` on the GitHub star prompt. */
   onOpenGithub?: () => void;
+  /** Called when the user presses `p` on the Flappy Term game-over screen. */
+  onOpenPocket?: () => void;
 }
 
 type Screen = "menu" | "section" | "reset" | "flappy";
@@ -128,6 +130,7 @@ export class TutRunner implements InteractiveProgram {
   private onTriggerBusyDemo?: () => void;
   private onTogglePlaceToPaste?: () => void;
   private onOpenGithub?: () => void;
+  private onOpenPocket?: () => void;
 
   private screen: Screen = "menu";
   private menuIndex = 0;
@@ -151,6 +154,7 @@ export class TutRunner implements InteractiveProgram {
     this.onTriggerBusyDemo = options.onTriggerBusyDemo;
     this.onTogglePlaceToPaste = options.onTogglePlaceToPaste;
     this.onOpenGithub = options.onOpenGithub;
+    this.onOpenPocket = options.onOpenPocket;
   }
 
   start(): void {
@@ -335,6 +339,16 @@ export class TutRunner implements InteractiveProgram {
       }
       if (this.screen === "flappy" && ch === " ") {
         this.flap();
+        i += 1;
+        continue;
+      }
+      if (
+        this.screen === "flappy" &&
+        this.flappy &&
+        !this.flappy.alive &&
+        (ch === "p" || ch === "P")
+      ) {
+        this.onOpenPocket?.();
         i += 1;
         continue;
       }
@@ -696,7 +710,7 @@ export class TutRunner implements InteractiveProgram {
     out += moveTo(1, Math.max(2, COLS - bestStr.length - 1)) + fg256(C.dim) + bestStr + RESET;
 
     if (!g.alive) {
-      const r = Math.max(1, Math.floor(ROWS / 2) - 2);
+      const r = Math.max(1, Math.floor(ROWS / 2) - 3);
       out += this.flappyCenteredAt(COLS, r,     "+--------------------+", fg256(C.red) + BOLD);
       out += this.flappyCenteredAt(COLS, r + 1, "|     GAME OVER      |", fg256(C.red) + BOLD);
       out += this.flappyCenteredAt(COLS, r + 2, "+--------------------+", fg256(C.red) + BOLD);
@@ -707,6 +721,12 @@ export class TutRunner implements InteractiveProgram {
         fg256(C.text),
       );
       out += this.flappyCenteredAt(COLS, r + 6, "[ Enter to restart · Esc to exit ]", fg256(C.dim));
+      out += this.flappyCenteredAt(
+        COLS,
+        r + 8,
+        "Checkout dormouse.sh/pocket to play on your phone  [p]",
+        fg256(C.text),
+      );
     } else if (!g.started) {
       const r = Math.min(ROWS, Math.floor(ROWS / 2) + 2);
       out += this.flappyCenteredAt(COLS, r, "[ Space / Up to flap · Esc to exit ]", fg256(C.dim));

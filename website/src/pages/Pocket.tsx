@@ -81,6 +81,10 @@ function PocketTerminalExperience({
     );
   }, []);
 
+  const handleOpenPocket = useCallback(() => {
+    window.open("https://dormouse.sh/pocket", "_blank", "noopener,noreferrer");
+  }, []);
+
   const tryAutoStart = useCallback((id: string) => {
     if (id !== POCKET_PANE) return;
     if (autoStartedRef.current.has(id)) return;
@@ -129,6 +133,7 @@ function PocketTerminalExperience({
               },
               onTogglePlaceToPaste: () => {},
               onOpenGithub: handleOpenGithub,
+              onOpenPocket: handleOpenPocket,
             });
           }
           if (name === "ascii-splash" || name === "splash") {
