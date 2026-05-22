@@ -218,11 +218,17 @@ jobs:
             vscode-ext/*.vsix
             vscode-ext/artifact-manifest.sha256
 
+  security-audit:
+    name: Security audit
+    uses: ./.github/workflows/security-audit.yaml
+    secrets: inherit
+
   publish-vscode:
     name: Publish VSCode Extension
     needs:
       - build-standalone
       - build-vscode
+      - security-audit
     runs-on: ubuntu-latest
     environment:
       name: vscode-extension-publish
