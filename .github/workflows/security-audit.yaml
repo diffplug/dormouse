@@ -39,7 +39,13 @@ jobs:
       - name: Audit against SECURITY.md
         uses: anthropics/claude-code-action@4481e6d3c7bbb88db2a928ca3444c536f589c7c1 # v1
         env:
-          GH_TOKEN: ${{ github.token }}
+          # Prefer AUDIT_PAT (fine-grained, read-only Administration +
+          # Secrets + Environments) so checks against /rulesets,
+          # /actions/secrets, and /environments succeed; fall back to
+          # the default workflow token so the audit still runs (with
+          # UNVERIFIABLE results on those endpoints) if AUDIT_PAT is
+          # absent.
+          GH_TOKEN: ${{ secrets.AUDIT_PAT || github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Without an explicit allowlist the action defaults to a
@@ -68,15 +74,17 @@ jobs:
                  references secrets, for security holes the specs don't
                  cover.
 
-            The workflow's `$GH_TOKEN` is a default `GITHUB_TOKEN` with
-            limited scopes — it cannot read repository administration
-            endpoints. If `gh api` returns 403 / "Resource not
-            accessible by integration" on a check (typically `/rulesets`,
-            `/environments/*`, or `/actions/secrets`), record the check
-            as `UNVERIFIABLE` (not `FAIL`) with a note that the audit
-            needs an `AUDIT_PAT` secret with `Administration: read` to
-            cover it. `UNVERIFIABLE` checks do not flip the overall
-            status to FAIL on their own.
+            `$GH_TOKEN` is either an `AUDIT_PAT` (fine-grained, read-only
+            Administration + Secrets + Environments) when the repo has
+            that secret configured, or a default `GITHUB_TOKEN` otherwise.
+            If `gh api` returns 403 / "Resource not accessible by
+            integration" on a check (typically `/rulesets`,
+            `/environments/*`, or `/actions/secrets`), the deployment is
+            running without `AUDIT_PAT`; record the check as
+            `UNVERIFIABLE` (not `FAIL`) with a note that minting
+            `AUDIT_PAT` (Administration + Secrets + Environments, all
+            read-only) would cover it. `UNVERIFIABLE` checks do not flip
+            the overall status to FAIL on their own.
 
             Produce a Markdown report with three sections:
               - `## FAIL IF results` — one line per check with PASS/FAIL
