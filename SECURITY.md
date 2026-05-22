@@ -23,7 +23,7 @@ New npm package versions are not adopted immediately. The workspace uses pnpm's 
 
 GitHub Actions are always pinned by commit hash, not version tag. Dependabot will update the hashes as necessary.
 
-The agent-managed workflows (`tend-*.yaml` and `workflow-audit.yaml`) are exempt from the two rules below because the maintainer agent's job requires modifying issues, PRs, and code. Their scope is bounded separately in the "Automated Maintainer" section.
+The agent-managed workflows (`tend-*.yaml`, `workflow-audit.yaml`, and `security-audit.yaml`) are exempt from the two rules below because they run Claude-powered automation that requires modifying issues, PRs, or code, or fetching an OIDC token. Their scope is bounded separately in the "Automated Maintainer" section.
 
 - FAIL IF `pull_request_target` appears in any `.github/workflows/**` file other than `tend-*.yaml`.
 - FAIL IF a non-agent-managed workflow grants write permissions other than the explicitly scoped release provenance permissions `id-token: write` and `attestations: write`.
@@ -50,7 +50,7 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
 - FAIL IF `CHROMATIC_PROJECT_TOKEN` is missing from `secrets.allowed` in `.config/tend.yaml`. The allowlist entry is an explicit acknowledgment that the bot can read this token.
 - FAIL IF `.github/workflows/workflow-audit.yaml` is missing, disabled, or has not produced a successful run in the last 48 hours.
 - FAIL IF any `tend-*.yaml` workflow references `max-sixty/tend` with anything other than a pinned version tag matching a published release (e.g. `@0.0.25`). The other actions inside tend's workflows must still be SHA-pinned per the rule above. The tag-pin exception for `max-sixty/tend` itself is accepted because that reference is owned by the upstream generator.
-- FAIL IF any agent-managed workflow (`tend-*.yaml`, `workflow-audit.yaml`) grants a permission beyond `contents: write`, `pull-requests: write`, `issues: write`, `id-token: write`, `actions: read`, or any `read` permission.
+- FAIL IF any agent-managed workflow (`tend-*.yaml`, `workflow-audit.yaml`, `security-audit.yaml`) grants a permission beyond `contents: write`, `pull-requests: write`, `issues: write`, `id-token: write`, `actions: read`, or any `read` permission.
 
 ## VS Code Extension Releases
 
