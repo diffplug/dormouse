@@ -2,8 +2,8 @@
 
 The website playground has canonical device-specific routes:
 
-- `/playground` is a client-side dispatcher. It uses `(max-width: 249px), (pointer: coarse)` to replace the history entry with either `/playground/desktop` or `/playground/pocket`. A coarse pointer always prefers Pocket; non-coarse pointers can run the desktop playground at 250px and wider.
-- `/playground/desktop` hosts the desktop tiling tutorial. On screens narrower than 250px or on coarse-pointer devices it does not mount `Wall`; it shows a message that the screen is too small for the desktop playground and links to `/playground/pocket`.
+- `/playground` is a client-side dispatcher. It picks Pocket for coarse-pointer devices or narrow viewports and Desktop otherwise, then replaces the history entry with `/playground/desktop` or `/playground/pocket`. The exact media query lives in `website/src/lib/playground-routing.ts`.
+- `/playground/desktop` hosts the desktop tiling tutorial. When the dispatcher would have picked Pocket (coarse pointer or narrow viewport) it does not mount `Wall`; it shows a message that the screen is too small for the desktop playground and links to `/playground/pocket`.
 - `/playground/pocket` hosts the mobile Pocket playground. On desktop it shows the temporary Pocket marketing/share page from the old `/pocket` route, including the phone preview and notify signup form.
 - `/pocket` temporarily redirects to `/playground/pocket`. This is a temporary launch-state redirect; the future real tethering surface should stay separate from the playground URL when it exists.
 
