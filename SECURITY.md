@@ -76,5 +76,13 @@ The `security-audit` workflow at `.github/workflows/security-audit.yaml` enforce
 
 The audit job declares `environment: security-audit`, whose deployment-branch-policy admits only `main` and `v*` tags. Both ref classes are admin-only by §3's rulesets, so a write-scoped bot cannot reach the env's secrets (most importantly `AUDIT_PAT`, when provisioned) by pushing a workflow file to a feature branch.
 
+As a consequence of that env-gating, audit changes are iterated on `main` directly. A `workflow_dispatch` from any other ref is rejected by the environment's deployment-policy before any step runs. To experiment on a branch, widen the env's policy temporarily and revert after.
+
+`AUDIT_PAT` itself is optional. Without it, the audit's `gh` queries against `/rulesets`, `/actions/secrets`, and `/environments/*` return 403 and the affected checks are recorded as `UNVERIFIABLE` rather than `FAIL`. To upgrade them to `PASS`, mint a fine-grained PAT on an admin's account with read-only `Administration` + `Secrets` + `Environments` scoped to `diffplug/dormouse` only, then store it env-scoped:
+
+```bash
+gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'github_pat_…'
+```
+
 - FAIL IF `.github/workflows/security-audit.yaml` is missing, disabled, or no longer invoked from `release.yml`'s publish path.
 - FAIL IF the audit has been weakened — e.g. the prompt no longer requires the qualitative pass, a `FAIL IF` can be ignored, or the failure-reporting step that opens a `security-audit-failure` issue and exits non-zero has been removed.
