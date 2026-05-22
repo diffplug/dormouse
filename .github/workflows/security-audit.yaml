@@ -49,27 +49,10 @@ jobs:
         env:
           AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
         run: |
-          if [ -n "$AUDIT_PAT" ]; then
-            echo "AUDIT_PAT present."
-            exit 0
-          fi
+          [ -n "$AUDIT_PAT" ] && exit 0
           echo "FAIL" > audit-status.txt
-          cat > audit-report.md <<'EOF'
-          ## Summary
-
-          **Overall status: FAIL.** `AUDIT_PAT` is not present in the
-          `security-audit` environment.
-
-          The audit refuses to run without `AUDIT_PAT`. It needs read-only
-          `Administration`, `Secrets`, and `Environments` access to
-          verify the ruleset, secret, and environment FAIL IFs.
-
-          Provision per `SECURITY.md` > CI Validation Contract: mint a
-          fine-grained PAT scoped to this repository only, then run
-          `gh secret set AUDIT_PAT --env security-audit --repo
-          diffplug/dormouse`.
-          EOF
-          echo "::error::AUDIT_PAT secret is not set in the security-audit environment."
+          echo "**FAIL** — \`AUDIT_PAT\` is not present in the \`security-audit\` environment. See [SECURITY.md > CI Validation Contract](https://github.com/$GITHUB_REPOSITORY/blob/main/SECURITY.md#ci-validation-contract) for provisioning." > audit-report.md
+          echo "::error::AUDIT_PAT secret is not set."
           exit 1
 
       - name: Audit against SECURITY.md
@@ -89,56 +72,37 @@ jobs:
           # writing audit-status.txt.
           claude_args: '--allowed-tools "Read,Write,Edit,Bash,Grep,Glob"'
           prompt: |
-            You are auditing this repository against SECURITY.md. The
-            specifications are concrete `FAIL IF` lines plus the
-            explicit clause that the list is not exhaustive — any code
-            change that creates a security hole or reveals an existing
-            one should fail this job.
+            Audit this repository against SECURITY.md. The `FAIL IF`
+            lines are concrete checks; the spec also says the list is
+            not exhaustive, so flag any other security hole you find.
 
-            Process:
-              1. Read SECURITY.md.
-              2. For each `FAIL IF` line, identify the mechanical check
-                 (gh api, grep, file presence, running a script) and
-                 execute it. Record PASS or FAIL with concrete evidence
-                 — file path and line number, API response excerpt, or
-                 command output.
-              3. After the FAIL IF list is exhausted, do a qualitative
-                 pass. Inspect `.github/workflows/`, `.config/tend.yaml`,
-                 `.github/dependabot.yml`, `scripts/`, and any code that
-                 references secrets, for security holes the specs don't
-                 cover.
+            For each `FAIL IF`, run the mechanical check (`gh api`,
+            grep, file presence, or a script) and record PASS or FAIL
+            with concrete evidence — file path and line number, API
+            response excerpt, or command output. Then do a qualitative
+            pass over `.github/workflows/`, `.config/tend.yaml`,
+            `.github/dependabot.yml`, `scripts/`, and any code that
+            touches secrets.
 
-            `$GH_TOKEN` is the `AUDIT_PAT` — a fine-grained,
-            read-only PAT scoped to Administration + Secrets +
-            Environments. A previous workflow step has already verified
-            the token is present, so you can assume it is. If `gh api`
-            returns 403 / "Resource not accessible by integration" on
-            any check, record that check as `FAIL` with a note that
-            `AUDIT_PAT`'s scope has drifted from what SECURITY.md
-            specifies — do not treat it as `UNVERIFIABLE`. Reserve
-            `UNVERIFIABLE` for the rare case where an endpoint is
-            genuinely indeterminable (e.g. a transient network error),
-            and note explicitly why in the report.
+            `$GH_TOKEN` is the `AUDIT_PAT` — a fine-grained, read-only
+            PAT covering Administration + Secrets + Environments,
+            guaranteed present by the previous step. If `gh api`
+            returns 403 on any check, record FAIL with the note "PAT
+            scope drifted from SECURITY.md"; reserve `UNVERIFIABLE`
+            only for genuinely indeterminable cases (e.g. a transient
+            network error) and explain why.
 
-            Produce a Markdown report with three sections:
+            Write `audit-report.md` with three sections:
               - `## FAIL IF results` — one line per check with PASS/FAIL
-                and concrete evidence
-              - `## Qualitative findings` — free-form findings with
-                severity (BLOCKER / WARNING / INFO)
+                and evidence
+              - `## Qualitative findings` — severity BLOCKER / WARNING / INFO
               - `## Summary` — overall PASS or FAIL with a one-paragraph
                 rationale
 
-            Write the report to `audit-report.md` in the workspace.
-            Write `PASS` or `FAIL` (no other text, no newline required)
-            to `audit-status.txt`. Status is FAIL if any `FAIL IF` is
-            violated or any qualitative finding is BLOCKER severity.
-            Do not call `exit`; the next workflow step inspects the
-            status file and surfaces the result.
-
-            Available environment: `$GH_TOKEN` is the workflow's
-            GitHub token (read repo, write issues), `$GITHUB_REPOSITORY`
-            is `owner/name`. Use `gh api` for GitHub configuration
-            queries (rulesets, secrets, environments, collaborators).
+            Write `PASS` or `FAIL` (no other text) to `audit-status.txt`.
+            Status is FAIL if any `FAIL IF` is violated or any
+            qualitative finding is BLOCKER. Do not call `exit` — the
+            workflow inspects the status file.
 
       - name: Surface result, file or close issue
         if: always()
