@@ -48,6 +48,18 @@ function Playground() {
   const busyDemoDisposeRef = useRef<(() => void) | null>(null);
   const alertDemoPaneIdRef = useRef<string | null>(null);
 
+  const handleOpenGithub = useCallback(() => {
+    window.open(
+      "https://github.com/diffplug/dormouse",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }, []);
+
+  const handleOpenPocket = useCallback(() => {
+    window.open("https://dormouse.sh/pocket", "_blank", "noopener,noreferrer");
+  }, []);
+
   const tryAutoStart = useCallback((pane: PaneSpec) => {
     if (autoStartedRef.current.has(pane.id)) return;
     const shellRegistry = shellRegistryRef.current;
@@ -119,6 +131,8 @@ function Playground() {
                 );
               },
               onTogglePlaceToPaste: () => setPlaceToPasteOpen((open) => !open),
+              onOpenGithub: handleOpenGithub,
+              onOpenPocket: handleOpenPocket,
             });
           }
           if (name === "ascii-splash" || name === "splash") {
@@ -173,7 +187,7 @@ function Playground() {
       busyDemoDisposeRef.current?.();
       busyDemoDisposeRef.current = null;
     };
-  }, [isPhone, tryAutoStart]);
+  }, [handleOpenGithub, isPhone, tryAutoStart]);
 
   const handleApiReady = useCallback((api: any) => {
     const shellRegistry = shellRegistryRef.current;
