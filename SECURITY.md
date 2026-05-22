@@ -1,8 +1,8 @@
 # Security
 
-Dormouse is a terminal, so users trust it with shells, source trees, credentials, and local files. The dependency graph and release pipeline is part of the product's security boundary.
+> **Audited automatically.** This spec is checked against the repository by [`security-audit.yaml`](.github/workflows/security-audit.yaml) on a 24-hour schedule (04:21 UTC) and as a required gate before every VS Code release. Each failure is filed as an issue labeled [`security-audit-failure`](https://github.com/diffplug/dormouse/issues?q=is%3Aissue+label%3Asecurity-audit-failure) — open ones are live, closed ones are the historical record of what tripped past audits and what changed to clear them.
 
-The policies described in this document are enforced on every PR.
+Dormouse is a terminal, so users trust it with shells, source trees, credentials, and local files. The dependency graph and release pipeline is part of the product's security boundary.
 
 ## Dependency Supply Chain
 
@@ -23,7 +23,7 @@ New npm package versions are not adopted immediately. The workspace uses pnpm's 
 
 GitHub Actions are always pinned by commit hash, not version tag. Dependabot will update the hashes as necessary.
 
-The agent-managed workflows (`tend-*.yaml`, `workflow-audit.yaml`, and `security-audit.yaml`) are exempt from the two rules below because they run Claude-powered automation that requires modifying issues, PRs, or code, or fetching an OIDC token. Their scope is bounded separately in the "Automated Maintainer" section.
+**Agent-managed workflows** are `tend-*.yaml`, `workflow-audit.yaml`, and `security-audit.yaml`. They implement the repo's automation and self-audit infrastructure, and are exempt from the two rules below because they need to modify issues, PRs, or code, or fetch an OIDC token. Their bounded scope is defined in the "Automated Maintainer" section.
 
 - FAIL IF `pull_request_target` appears in any `.github/workflows/**` file other than `tend-*.yaml`.
 - FAIL IF a non-agent-managed workflow grants write permissions other than the explicitly scoped release provenance permissions `id-token: write` and `attestations: write`.
@@ -40,17 +40,18 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
 
 **Upstream compromise.** Tend's action is pinned by commit SHA (`max-sixty/tend@<sha>`) in every generated workflow, so silent updates to the running setup are not possible. `uvx tend@latest` runs only at install and during nightly regen; a compromise of that path would affect the next re-run, not the in-flight workflows.
 
-**Audit visibility.** `workflow-audit.yaml` is a nightly job that walks every commit touching `.github/workflows/` since its previous successful run (using the GitHub API's timestamp as the lower bound, so a failed run pushes the window forward rather than dropping commits). It opens an issue summarizing each commit's author, refs, and changed files. A bot push that adds a new workflow file is visible in the next successful audit even if the bot tries to silently modify the audit workflow — the modification itself appears in the audit.
+**Audit visibility.** `workflow-audit.yaml` is a nightly job that walks every commit touching `.github/workflows/` since its previous successful run, opening an issue summarizing each. A bot push that disables or modifies the audit itself is caught in the next successful run's diff window.
 
 - FAIL IF the repository ruleset named `Merge access` is missing, doesn't target `~DEFAULT_BRANCH`, blocks anything other than `update`, or doesn't have admin (`RepositoryRole` actor `5`) as its sole bypass actor.
 - FAIL IF the repository ruleset named `Tag operations` is missing, doesn't target `~ALL` tags, doesn't block both `creation` and `update`, or doesn't have admin-only bypass.
 - FAIL IF `dormouse-bot` holds a permission higher than `push` on this repository.
 - FAIL IF `OVSX_PAT` or `VSCE_PAT` appears as a repo-level secret. They must live only in the `vscode-extension-publish` environment.
-- FAIL IF the `vscode-extension-publish` environment's deployment-branch-policies allow any ref pattern that is not admin-gated by the `Tag operations` or `Merge access` rulesets.
+- FAIL IF any GitHub environment's deployment-branch-policies admit a ref that is not admin-gated by the `Tag operations` or `Merge access` rulesets. Today this covers `vscode-extension-publish` (`v*` tag, admin-only via `Tag operations`) and `security-audit` (`main` admin-only via `Merge access`, plus `v*` tag).
+- FAIL IF `AUDIT_PAT` is missing from the `security-audit` environment, or is present at the repo level instead. The audit refuses to run without it, and it must be env-scoped so a bot-pushed feature branch cannot reach it.
 - FAIL IF `CHROMATIC_PROJECT_TOKEN` is missing from `secrets.allowed` in `.config/tend.yaml`. The allowlist entry is an explicit acknowledgment that the bot can read this token.
 - FAIL IF `.github/workflows/workflow-audit.yaml` is missing, disabled, or has not produced a successful run in the last 48 hours.
-- FAIL IF any `tend-*.yaml` workflow uses an unpinned action reference (e.g. `@main`, no version). Inside `tend-*.yaml`, both tag pins (`@v6`, `@0.0.25`) and SHA pins are accepted because the file is owned by the upstream generator (`max-sixty/tend`), which currently uses tag pins. All actions in every other workflow — including `workflow-audit.yaml` and `security-audit.yaml` — must follow the SHA-pin rule in "GitHub Actions Policies".
-- FAIL IF any agent-managed workflow (`tend-*.yaml`, `workflow-audit.yaml`, `security-audit.yaml`) grants a permission beyond `contents: write`, `pull-requests: write`, `issues: write`, `id-token: write`, `actions: read`, or any `read` permission.
+- FAIL IF any `tend-*.yaml` workflow uses an unpinned action reference (e.g. `@main`, no version). Tag pins are accepted inside `tend-*.yaml` because the file is owned by the upstream generator; every other workflow — agent-managed or not — must SHA-pin per the rule above.
+- FAIL IF any agent-managed workflow grants a permission beyond `contents: write`, `pull-requests: write`, `issues: write`, `id-token: write`, `actions: read`, or any `read` permission.
 
 ## VS Code Extension Releases
 
@@ -73,5 +74,15 @@ Desktop releases are not fully automated. GitHub Actions builds unsigned artifac
 
 The `security-audit` workflow at `.github/workflows/security-audit.yaml` enforces this document. It runs nightly and is a required dependency of the VS Code publish job in `release.yml`, so no release ships without a passing audit. The audit reads SECURITY.md, executes each `FAIL IF` as a mechanical check, and also does a qualitative pass for security holes the specs don't cover. On any `FAIL IF` violation or BLOCKER-severity finding, the workflow opens (or updates) an issue labeled `security-audit-failure` with the full audit report, and exits non-zero. When a subsequent audit passes, the open failure issue is auto-closed so the tracker matches the live state.
 
+The audit job declares `environment: security-audit`, whose deployment-branch-policy admits only `main` and `v*` tags. Both ref classes are admin-only by §3's rulesets, so a write-scoped bot cannot reach the env's secrets (most importantly `AUDIT_PAT`, when provisioned) by pushing a workflow file to a feature branch.
+
+As a consequence of that env-gating, audit changes are iterated on `main` directly. A `workflow_dispatch` from any other ref is rejected by the environment's deployment-policy before any step runs. To experiment on a branch, widen the env's policy temporarily and revert after.
+
+`AUDIT_PAT` is **required**. The audit's first step verifies the secret is present and refuses to run otherwise — without it the audit cannot read the administration endpoints needed to verify ruleset bypass actors, repo-level secret listing, and environment policies, so the spec it claims to enforce would be unenforceable in its key sections. Mint a fine-grained PAT on an admin's account with read-only `Administration` + `Secrets` + `Environments` scoped to `diffplug/dormouse` only, then store it env-scoped:
+
+```bash
+gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'github_pat_…'
+```
+
 - FAIL IF `.github/workflows/security-audit.yaml` is missing, disabled, or no longer invoked from `release.yml`'s publish path.
-- FAIL IF the audit has been weakened — e.g. the prompt no longer requires the qualitative pass, a `FAIL IF` can be ignored, or the failure-reporting step that opens a `security-audit-failure` issue and exits non-zero has been removed.
+- FAIL IF the audit has been weakened — e.g. the prompt no longer requires the qualitative pass, a `FAIL IF` can be ignored, the failure-reporting step that opens a `security-audit-failure` issue and exits non-zero has been removed, or the `AUDIT_PAT` pre-check is removed or bypassed.

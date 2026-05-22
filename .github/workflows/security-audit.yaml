@@ -20,6 +20,15 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The AUDIT_PAT (read-only Administration + Secrets + Environments)
+    # lives in this environment, whose deployment-branch-policy admits
+    # only `main` and `v*` tags — refs that the §3 rulesets reserve to
+    # admins. A bot-pushed feature branch cannot reach this job at all
+    # (GitHub rejects the run before any step starts), so the PAT
+    # cannot be exfiltrated through a hand-authored workflow on a
+    # non-admin-gated ref.
+    environment:
+      name: security-audit
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -36,10 +45,24 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify AUDIT_PAT is provisioned
+        env:
+          AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
+        run: |
+          [ -n "$AUDIT_PAT" ] && exit 0
+          echo "FAIL" > audit-status.txt
+          echo "**FAIL** — \`AUDIT_PAT\` is not present in the \`security-audit\` environment. See [SECURITY.md > CI Validation Contract](https://github.com/$GITHUB_REPOSITORY/blob/main/SECURITY.md#ci-validation-contract) for provisioning." > audit-report.md
+          echo "::error::AUDIT_PAT secret is not set."
+          exit 1
+
       - name: Audit against SECURITY.md
         uses: anthropics/claude-code-action@4481e6d3c7bbb88db2a928ca3444c536f589c7c1 # v1
         env:
-          GH_TOKEN: ${{ github.token }}
+          # AUDIT_PAT is fine-grained, read-only Administration +
+          # Secrets + Environments. Required (the previous step
+          # refuses to proceed without it), so no fallback to
+          # github.token.
+          GH_TOKEN: ${{ secrets.AUDIT_PAT }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Without an explicit allowlist the action defaults to a
@@ -49,54 +72,37 @@ jobs:
           # writing audit-status.txt.
           claude_args: '--allowed-tools "Read,Write,Edit,Bash,Grep,Glob"'
           prompt: |
-            You are auditing this repository against SECURITY.md. The
-            specifications are concrete `FAIL IF` lines plus the
-            explicit clause that the list is not exhaustive — any code
-            change that creates a security hole or reveals an existing
-            one should fail this job.
+            Audit this repository against SECURITY.md. The `FAIL IF`
+            lines are concrete checks; the spec also says the list is
+            not exhaustive, so flag any other security hole you find.
 
-            Process:
-              1. Read SECURITY.md.
-              2. For each `FAIL IF` line, identify the mechanical check
-                 (gh api, grep, file presence, running a script) and
-                 execute it. Record PASS or FAIL with concrete evidence
-                 — file path and line number, API response excerpt, or
-                 command output.
-              3. After the FAIL IF list is exhausted, do a qualitative
-                 pass. Inspect `.github/workflows/`, `.config/tend.yaml`,
-                 `.github/dependabot.yml`, `scripts/`, and any code that
-                 references secrets, for security holes the specs don't
-                 cover.
+            For each `FAIL IF`, run the mechanical check (`gh api`,
+            grep, file presence, or a script) and record PASS or FAIL
+            with concrete evidence — file path and line number, API
+            response excerpt, or command output. Then do a qualitative
+            pass over `.github/workflows/`, `.config/tend.yaml`,
+            `.github/dependabot.yml`, `scripts/`, and any code that
+            touches secrets.
 
-            The workflow's `$GH_TOKEN` is a default `GITHUB_TOKEN` with
-            limited scopes — it cannot read repository administration
-            endpoints. If `gh api` returns 403 / "Resource not
-            accessible by integration" on a check (typically `/rulesets`,
-            `/environments/*`, or `/actions/secrets`), record the check
-            as `UNVERIFIABLE` (not `FAIL`) with a note that the audit
-            needs an `AUDIT_PAT` secret with `Administration: read` to
-            cover it. `UNVERIFIABLE` checks do not flip the overall
-            status to FAIL on their own.
+            `$GH_TOKEN` is the `AUDIT_PAT` — a fine-grained, read-only
+            PAT covering Administration + Secrets + Environments,
+            guaranteed present by the previous step. If `gh api`
+            returns 403 on any check, record FAIL with the note "PAT
+            scope drifted from SECURITY.md"; reserve `UNVERIFIABLE`
+            only for genuinely indeterminable cases (e.g. a transient
+            network error) and explain why.
 
-            Produce a Markdown report with three sections:
+            Write `audit-report.md` with three sections:
               - `## FAIL IF results` — one line per check with PASS/FAIL
-                and concrete evidence
-              - `## Qualitative findings` — free-form findings with
-                severity (BLOCKER / WARNING / INFO)
+                and evidence
+              - `## Qualitative findings` — severity BLOCKER / WARNING / INFO
               - `## Summary` — overall PASS or FAIL with a one-paragraph
                 rationale
 
-            Write the report to `audit-report.md` in the workspace.
-            Write `PASS` or `FAIL` (no other text, no newline required)
-            to `audit-status.txt`. Status is FAIL if any `FAIL IF` is
-            violated or any qualitative finding is BLOCKER severity.
-            Do not call `exit`; the next workflow step inspects the
-            status file and surfaces the result.
-
-            Available environment: `$GH_TOKEN` is the workflow's
-            GitHub token (read repo, write issues), `$GITHUB_REPOSITORY`
-            is `owner/name`. Use `gh api` for GitHub configuration
-            queries (rulesets, secrets, environments, collaborators).
+            Write `PASS` or `FAIL` (no other text) to `audit-status.txt`.
+            Status is FAIL if any `FAIL IF` is violated or any
+            qualitative finding is BLOCKER. Do not call `exit` — the
+            workflow inspects the status file.
 
       - name: Surface result, file or close issue
         if: always()
