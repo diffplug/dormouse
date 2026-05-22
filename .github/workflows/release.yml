@@ -221,7 +221,9 @@ jobs:
   security-audit:
     name: Security audit
     uses: ./.github/workflows/security-audit.yaml
-    secrets: inherit
+    secrets:
+      AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
   publish-vscode:
     name: Publish VSCode Extension

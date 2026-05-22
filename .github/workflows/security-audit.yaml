@@ -9,6 +9,11 @@ on:
     - cron: "21 4 * * *"
   workflow_dispatch:
   workflow_call:
+    secrets:
+      AUDIT_PAT:
+        required: true
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
 
 permissions:
   contents: read
@@ -58,11 +63,12 @@ jobs:
       - name: Audit against SECURITY.md
         uses: anthropics/claude-code-action@4481e6d3c7bbb88db2a928ca3444c536f589c7c1 # v1
         env:
-          # AUDIT_PAT is fine-grained, read-only Administration +
-          # Secrets + Environments. Required (the previous step
-          # refuses to proceed without it), so no fallback to
-          # github.token.
-          GH_TOKEN: ${{ secrets.AUDIT_PAT }}
+          # `claude-code-action` resets `GH_TOKEN` to its own internal
+          # workflow token, so setting `GH_TOKEN` at this scope is
+          # silently overridden. Expose AUDIT_PAT under its own name
+          # and have the prompt instruct Claude to prefix `gh api`
+          # calls with `GH_TOKEN=$AUDIT_PAT`.
+          AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Without an explicit allowlist the action defaults to a
@@ -84,13 +90,21 @@ jobs:
             `.github/dependabot.yml`, `scripts/`, and any code that
             touches secrets.
 
-            `$GH_TOKEN` is the `AUDIT_PAT` — a fine-grained, read-only
-            PAT covering Administration + Secrets + Environments,
-            guaranteed present by the previous step. If `gh api`
-            returns 403 on any check, record FAIL with the note "PAT
-            scope drifted from SECURITY.md"; reserve `UNVERIFIABLE`
-            only for genuinely indeterminable cases (e.g. a transient
-            network error) and explain why.
+            The default `$GH_TOKEN` in this step is a workflow
+            `GITHUB_TOKEN` and does NOT have admin scope. For checks
+            that need admin access (rulesets bypass actors, repo or
+            environment secret listings, environment policy details),
+            prefix `gh api` with `GH_TOKEN=$AUDIT_PAT`. Example:
+
+              GH_TOKEN=$AUDIT_PAT gh api repos/$GITHUB_REPOSITORY/rulesets/16757376
+
+            `$AUDIT_PAT` is a fine-grained, read-only PAT covering
+            Administration + Secrets + Environments, guaranteed
+            present by the previous step. If a prefixed call still
+            returns 403, record FAIL with the note "PAT scope drifted
+            from SECURITY.md". Reserve `UNVERIFIABLE` only for
+            genuinely indeterminable cases (e.g. a transient network
+            error) and explain why.
 
             Write `audit-report.md` with three sections:
               - `## FAIL IF results` — one line per check with PASS/FAIL
