@@ -49,7 +49,7 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
 - FAIL IF the `vscode-extension-publish` environment's deployment-branch-policies allow any ref pattern that is not admin-gated by the `Tag operations` or `Merge access` rulesets.
 - FAIL IF `CHROMATIC_PROJECT_TOKEN` is missing from `secrets.allowed` in `.config/tend.yaml`. The allowlist entry is an explicit acknowledgment that the bot can read this token.
 - FAIL IF `.github/workflows/workflow-audit.yaml` is missing, disabled, or has not produced a successful run in the last 48 hours.
-- FAIL IF any `tend-*.yaml` workflow references `max-sixty/tend` with anything other than a pinned version tag matching a published release (e.g. `@0.0.25`). The other actions inside tend's workflows must still be SHA-pinned per the rule above. The tag-pin exception for `max-sixty/tend` itself is accepted because that reference is owned by the upstream generator.
+- FAIL IF any `tend-*.yaml` workflow uses an unpinned action reference (e.g. `@main`, no version). Inside `tend-*.yaml`, both tag pins (`@v6`, `@0.0.25`) and SHA pins are accepted because the file is owned by the upstream generator (`max-sixty/tend`), which currently uses tag pins. All actions in every other workflow — including `workflow-audit.yaml` and `security-audit.yaml` — must follow the SHA-pin rule in "GitHub Actions Policies".
 - FAIL IF any agent-managed workflow (`tend-*.yaml`, `workflow-audit.yaml`, `security-audit.yaml`) grants a permission beyond `contents: write`, `pull-requests: write`, `issues: write`, `id-token: write`, `actions: read`, or any `read` permission.
 
 ## VS Code Extension Releases
