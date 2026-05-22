@@ -13,7 +13,7 @@ function getPreferredPlayground(): PreferredPlayground {
 }
 
 export function usePreferredPlayground() {
-  const [preferred, setPreferred] = useState<PreferredPlayground | null>(null);
+  const [preferred, setPreferred] = useState<PreferredPlayground>(getPreferredPlayground);
 
   useEffect(() => {
     const media = window.matchMedia(POCKET_PLAYGROUND_QUERY);

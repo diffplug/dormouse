@@ -13,7 +13,6 @@ function PlaygroundRedirect() {
   const preferred = usePreferredPlayground();
 
   useEffect(() => {
-    if (preferred === null) return;
     navigate(
       {
         pathname: preferred === "pocket"

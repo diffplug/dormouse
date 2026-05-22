@@ -11,6 +11,7 @@ import { PlaygroundShellRegistry } from "../lib/playground-shells";
 import { TutorialState } from "../lib/tutorial-state";
 import { BUSY_DEMO_DURATION_MS, BUSY_DEMO_INTERVAL_MS, TutRunner } from "../lib/tut-runner";
 import { ChangelogRunner } from "../lib/changelog-runner";
+import { POCKET_PLAYGROUND_PATH } from "../lib/playground-routing";
 
 export const POCKET_THEME_ID = "vscode.theme-kimbie-dark.kimbie-dark";
 
@@ -63,7 +64,7 @@ export function PocketTerminalExperience({
   }, []);
 
   const handleOpenPocket = useCallback(() => {
-    window.open("/pocket", "_blank", "noopener,noreferrer");
+    window.open(POCKET_PLAYGROUND_PATH, "_blank", "noopener,noreferrer");
   }, []);
 
   const tryAutoStart = useCallback((id: string) => {

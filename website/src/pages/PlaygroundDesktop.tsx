@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { Link } from "react-router-dom";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import { PlaceToPaste } from "../components/PlaceToPaste";
+import { POCKET_THEME_ID } from "../components/PocketTerminalExperience";
 import { ThemePicker } from "dormouse-lib/components/ThemePicker";
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
 import { TutorialState } from "../lib/tutorial-state";
@@ -38,17 +40,17 @@ function DesktopPlaygroundUnavailable() {
           Desktop playground
         </h1>
         <p className="text-lg leading-relaxed opacity-80 mb-4">
-          This screen is too small to run the desktop playground. Make it at least 250px wide, but it is perfect for trying the{" "}
-          <a
-            href={POCKET_PLAYGROUND_PATH}
+          This screen is too small to run the desktop playground, but it is perfect for trying the{" "}
+          <Link
+            to={POCKET_PLAYGROUND_PATH}
             className="text-[var(--color-caramel)] underline-offset-2 hover:underline"
           >
             Pocket playground
-          </a>
+          </Link>
           .
         </p>
         <p className="text-lg leading-relaxed opacity-80">
-          Alternatively, make the window at least 250px wide and the playground will pop into view.
+          Alternatively, widen the window to fit the desktop playground and it will pop into view.
         </p>
       </main>
     </div>
@@ -80,7 +82,7 @@ function PlaygroundDesktopExperience() {
   }, []);
 
   const handleOpenPocket = useCallback(() => {
-    window.open("/pocket", "_blank", "noopener,noreferrer");
+    window.open(POCKET_PLAYGROUND_PATH, "_blank", "noopener,noreferrer");
   }, []);
 
   const tryAutoStart = useCallback((pane: PaneSpec) => {
@@ -247,7 +249,7 @@ function PlaygroundDesktopExperience() {
         controls={
           <ThemePicker
             variant="playground-header"
-            defaultThemeId="vscode.theme-kimbie-dark.kimbie-dark"
+            defaultThemeId={POCKET_THEME_ID}
           />
         }
       />
@@ -271,7 +273,6 @@ function PlaygroundDesktopExperience() {
 
 function PlaygroundDesktop() {
   const preferred = usePreferredPlayground();
-  if (preferred === null) return null;
   if (preferred === "pocket") return <DesktopPlaygroundUnavailable />;
   return <PlaygroundDesktopExperience />;
 }

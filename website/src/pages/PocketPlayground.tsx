@@ -26,7 +26,7 @@ function DesktopPocketPlaygroundPage() {
   return (
     <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
       <SiteHeader
-        activePath="/playground"
+        activePath="/pocket"
         style={STATIC_PAGE_HEADER_STYLE}
         controls={<ThemePicker variant="standalone-appbar" defaultThemeId={POCKET_THEME_ID} />}
       />
@@ -71,12 +71,10 @@ function PocketPlayground() {
   const preferred = usePreferredPlayground();
 
   useEffect(() => {
-    if (preferred === null) return;
     const className = preferred === "pocket" ? "pocket-terminal-body" : "pocket-marketing-body";
     document.body.classList.add(className);
     return () => document.body.classList.remove(className);
   }, [preferred]);
 
-  if (preferred === null) return null;
   return preferred === "pocket" ? <MobilePocketPlaygroundPage /> : <DesktopPocketPlaygroundPage />;
 }
