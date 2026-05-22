@@ -1,8 +1,8 @@
 # Security
 
-Dormouse is a terminal, so users trust it with shells, source trees, credentials, and local files. The dependency graph and release pipeline is part of the product's security boundary.
+> **Audited automatically.** This spec is checked against the repository by [`security-audit.yaml`](.github/workflows/security-audit.yaml) on a 24-hour schedule (07:13 UTC) and as a required gate before every VS Code release. Each failure is filed as an issue labeled [`security-audit-failure`](https://github.com/diffplug/dormouse/issues?q=is%3Aissue+label%3Asecurity-audit-failure) — open ones are live, closed ones are the historical record of what tripped past audits and what changed to clear them.
 
-The policies described in this document are enforced on every PR.
+Dormouse is a terminal, so users trust it with shells, source trees, credentials, and local files. The dependency graph and release pipeline is part of the product's security boundary.
 
 ## Dependency Supply Chain
 
