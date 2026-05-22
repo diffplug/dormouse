@@ -42,6 +42,7 @@ MACOS_NODE_ENTITLEMENTS="$REPO_ROOT/standalone/src-tauri/entitlements-macos-node
 # Windows Signing (jsign with PIV)
 JSIGN_ALIAS="AUTHENTICATION"
 TSA_URL="http://ts.ssl.com"
+# HTTP is acceptable for `ts.ssl.com` because RFC 3161 protects against MITM (also https is not available)
 
 # GitHub repo
 GITHUB_REPO="diffplug/dormouse"
