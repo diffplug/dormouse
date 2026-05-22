@@ -33,7 +33,7 @@ The runner shows a top-level menu first. Selecting a section drills into its ite
 
 The top-level menu also includes `Starred on GitHub`, which sits directly below `Copy paste` without a blank spacer, and shows `[not yet]` until selected and `[thanks ⭐]` after it has been resolved. Pressing Enter on that row calls `onOpenGithub`, which `/playground` and the mobile tether page wire to `window.open("https://github.com/diffplug/dormouse", "_blank", "noopener,noreferrer")`.
 
-After `Starred on GitHub`, the top-level menu shows the mystery row. It is `🧀 ??? 🧀` with `[LOCKED N/M]` while any section task is incomplete. `N/M` is computed from section checklist items only; `Starred on GitHub` and the mystery row do not count. When all section tasks are complete, the row becomes `🧀 The Burrow 🧀`. Pressing Enter on the unlocked row opens a short runner-local animation; `Esc` returns to the top-level menu.
+After `Starred on GitHub`, the top-level menu shows the mystery row. It is `🐭 ??? 🐭` with `[LOCKED N/M]` while any section task is incomplete. `N/M` is computed from section checklist items only; `Starred on GitHub` and the mystery row do not count. When all section tasks are complete, the row becomes `🐭 Flappy Term 🐭` with a `[High score: N]` readout. Pressing Enter on the unlocked row opens Flappy Term, a runner-local mini-game: `Space`/`Up`/`Enter` flaps the bird, scoring persists as the high score, and `Esc` returns to the top-level menu. On the game-over screen, `Enter` restarts and `p` calls `onOpenPocket`, which `/playground` and the mobile tether page wire to `window.open("https://dormouse.sh/pocket", "_blank", "noopener,noreferrer")`.
 
 Inside a section, items render as one of:
 
@@ -108,6 +108,7 @@ While the Copy paste section is open, pressing `p` toggles the **Place To Paste*
 
 - Completion: `localStorage["dormouse-tut-v3"] = JSON.stringify([...completedItemIds])`. Removed on `TutorialState.reset()`. Unknown ids in a stored payload are filtered out on load, so renaming an id is a one-way reset for that item.
 - GitHub star prompt: `localStorage["dormouse-tut-star-v1"] = "true"` after the user selects `Starred on GitHub`. Removed on `TutorialState.reset()`.
+- Flappy Term high score: `localStorage["dormouse-flappy-high-v1"] = String(score)` after each new high score. Removed on `TutorialState.reset()`.
 - Legacy keys `dormouse-tutorial-step-N` and `dormouse-tut-v2-*` from previous designs are not read; new playground sessions get a fresh start.
 
 ## Theme Picker

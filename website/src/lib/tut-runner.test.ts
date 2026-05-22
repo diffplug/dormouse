@@ -104,7 +104,7 @@ describe("TutRunner snapshots", () => {
     expect(onOpenGithub).toHaveBeenCalledTimes(1);
     expect(state.isStarPromptResolved()).toBe(true);
     expect(lastFrame()).toContain("[thanks ⭐]");
-    expect(lastFrame()).not.toContain("star the repo");
+    expect(lastFrame()).not.toContain("[not yet]");
     dispose();
   });
 
