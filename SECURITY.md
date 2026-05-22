@@ -71,7 +71,7 @@ Desktop releases are not fully automated. GitHub Actions builds unsigned artifac
 
 ## CI Validation Contract
 
-The `security-audit` workflow at `.github/workflows/security-audit.yaml` enforces this document. It runs nightly and is a required dependency of the VS Code publish job in `release.yml`, so no release ships without a passing audit. The audit reads SECURITY.md, executes each `FAIL IF` as a mechanical check, and also does a qualitative pass for security holes the specs don't cover. It fails the workflow on any `FAIL IF` violation or BLOCKER-severity finding.
+The `security-audit` workflow at `.github/workflows/security-audit.yaml` enforces this document. It runs nightly and is a required dependency of the VS Code publish job in `release.yml`, so no release ships without a passing audit. The audit reads SECURITY.md, executes each `FAIL IF` as a mechanical check, and also does a qualitative pass for security holes the specs don't cover. On any `FAIL IF` violation or BLOCKER-severity finding, the workflow opens (or updates) an issue labeled `security-audit-failure` with the full audit report, and exits non-zero. When a subsequent audit passes, the open failure issue is auto-closed so the tracker matches the live state.
 
 - FAIL IF `.github/workflows/security-audit.yaml` is missing, disabled, or no longer invoked from `release.yml`'s publish path.
-- FAIL IF the audit's prompt has been weakened to skip the qualitative pass or to allow any `FAIL IF` to be ignored.
+- FAIL IF the audit has been weakened — e.g. the prompt no longer requires the qualitative pass, a `FAIL IF` can be ignored, or the failure-reporting step that opens a `security-audit-failure` issue and exits non-zero has been removed.
