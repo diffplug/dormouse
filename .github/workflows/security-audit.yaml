@@ -45,16 +45,41 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify AUDIT_PAT is provisioned
+        env:
+          AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
+        run: |
+          if [ -n "$AUDIT_PAT" ]; then
+            echo "AUDIT_PAT present."
+            exit 0
+          fi
+          echo "FAIL" > audit-status.txt
+          cat > audit-report.md <<'EOF'
+          ## Summary
+
+          **Overall status: FAIL.** `AUDIT_PAT` is not present in the
+          `security-audit` environment.
+
+          The audit refuses to run without `AUDIT_PAT`. It needs read-only
+          `Administration`, `Secrets`, and `Environments` access to
+          verify the ruleset, secret, and environment FAIL IFs.
+
+          Provision per `SECURITY.md` > CI Validation Contract: mint a
+          fine-grained PAT scoped to this repository only, then run
+          `gh secret set AUDIT_PAT --env security-audit --repo
+          diffplug/dormouse`.
+          EOF
+          echo "::error::AUDIT_PAT secret is not set in the security-audit environment."
+          exit 1
+
       - name: Audit against SECURITY.md
         uses: anthropics/claude-code-action@4481e6d3c7bbb88db2a928ca3444c536f589c7c1 # v1
         env:
-          # Prefer AUDIT_PAT (fine-grained, read-only Administration +
-          # Secrets + Environments) so checks against /rulesets,
-          # /actions/secrets, and /environments succeed; fall back to
-          # the default workflow token so the audit still runs (with
-          # UNVERIFIABLE results on those endpoints) if AUDIT_PAT is
-          # absent.
-          GH_TOKEN: ${{ secrets.AUDIT_PAT || github.token }}
+          # AUDIT_PAT is fine-grained, read-only Administration +
+          # Secrets + Environments. Required (the previous step
+          # refuses to proceed without it), so no fallback to
+          # github.token.
+          GH_TOKEN: ${{ secrets.AUDIT_PAT }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Without an explicit allowlist the action defaults to a
@@ -83,17 +108,17 @@ jobs:
                  references secrets, for security holes the specs don't
                  cover.
 
-            `$GH_TOKEN` is either an `AUDIT_PAT` (fine-grained, read-only
-            Administration + Secrets + Environments) when the repo has
-            that secret configured, or a default `GITHUB_TOKEN` otherwise.
-            If `gh api` returns 403 / "Resource not accessible by
-            integration" on a check (typically `/rulesets`,
-            `/environments/*`, or `/actions/secrets`), the deployment is
-            running without `AUDIT_PAT`; record the check as
-            `UNVERIFIABLE` (not `FAIL`) with a note that minting
-            `AUDIT_PAT` (Administration + Secrets + Environments, all
-            read-only) would cover it. `UNVERIFIABLE` checks do not flip
-            the overall status to FAIL on their own.
+            `$GH_TOKEN` is the `AUDIT_PAT` — a fine-grained,
+            read-only PAT scoped to Administration + Secrets +
+            Environments. A previous workflow step has already verified
+            the token is present, so you can assume it is. If `gh api`
+            returns 403 / "Resource not accessible by integration" on
+            any check, record that check as `FAIL` with a note that
+            `AUDIT_PAT`'s scope has drifted from what SECURITY.md
+            specifies — do not treat it as `UNVERIFIABLE`. Reserve
+            `UNVERIFIABLE` for the rare case where an endpoint is
+            genuinely indeterminable (e.g. a transient network error),
+            and note explicitly why in the report.
 
             Produce a Markdown report with three sections:
               - `## FAIL IF results` — one line per check with PASS/FAIL

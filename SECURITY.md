@@ -47,7 +47,7 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
 - FAIL IF `dormouse-bot` holds a permission higher than `push` on this repository.
 - FAIL IF `OVSX_PAT` or `VSCE_PAT` appears as a repo-level secret. They must live only in the `vscode-extension-publish` environment.
 - FAIL IF any GitHub environment's deployment-branch-policies admit a ref that is not admin-gated by the `Tag operations` or `Merge access` rulesets. Today this covers `vscode-extension-publish` (`v*` tag, admin-only via `Tag operations`) and `security-audit` (`main` admin-only via `Merge access`, plus `v*` tag).
-- FAIL IF `AUDIT_PAT` exists at the repo level. If the secret is provisioned at all, it must live in the `security-audit` environment so a bot-pushed feature branch cannot reach it.
+- FAIL IF `AUDIT_PAT` is missing from the `security-audit` environment, or is present at the repo level instead. The audit refuses to run without it, and it must be env-scoped so a bot-pushed feature branch cannot reach it.
 - FAIL IF `CHROMATIC_PROJECT_TOKEN` is missing from `secrets.allowed` in `.config/tend.yaml`. The allowlist entry is an explicit acknowledgment that the bot can read this token.
 - FAIL IF `.github/workflows/workflow-audit.yaml` is missing, disabled, or has not produced a successful run in the last 48 hours.
 - FAIL IF any `tend-*.yaml` workflow uses an unpinned action reference (e.g. `@main`, no version). Inside `tend-*.yaml`, both tag pins (`@v6`, `@0.0.25`) and SHA pins are accepted because the file is owned by the upstream generator (`max-sixty/tend`), which currently uses tag pins. All actions in every other workflow — including `workflow-audit.yaml` and `security-audit.yaml` — must follow the SHA-pin rule in "GitHub Actions Policies".
@@ -78,11 +78,11 @@ The audit job declares `environment: security-audit`, whose deployment-branch-po
 
 As a consequence of that env-gating, audit changes are iterated on `main` directly. A `workflow_dispatch` from any other ref is rejected by the environment's deployment-policy before any step runs. To experiment on a branch, widen the env's policy temporarily and revert after.
 
-`AUDIT_PAT` itself is optional. Without it, the audit's `gh` queries against `/rulesets`, `/actions/secrets`, and `/environments/*` return 403 and the affected checks are recorded as `UNVERIFIABLE` rather than `FAIL`. To upgrade them to `PASS`, mint a fine-grained PAT on an admin's account with read-only `Administration` + `Secrets` + `Environments` scoped to `diffplug/dormouse` only, then store it env-scoped:
+`AUDIT_PAT` is **required**. The audit's first step verifies the secret is present and refuses to run otherwise — without it the audit cannot read the administration endpoints needed to verify ruleset bypass actors, repo-level secret listing, and environment policies, so the spec it claims to enforce would be unenforceable in its key sections. Mint a fine-grained PAT on an admin's account with read-only `Administration` + `Secrets` + `Environments` scoped to `diffplug/dormouse` only, then store it env-scoped:
 
 ```bash
 gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'github_pat_…'
 ```
 
 - FAIL IF `.github/workflows/security-audit.yaml` is missing, disabled, or no longer invoked from `release.yml`'s publish path.
-- FAIL IF the audit has been weakened — e.g. the prompt no longer requires the qualitative pass, a `FAIL IF` can be ignored, or the failure-reporting step that opens a `security-audit-failure` issue and exits non-zero has been removed.
+- FAIL IF the audit has been weakened — e.g. the prompt no longer requires the qualitative pass, a `FAIL IF` can be ignored, the failure-reporting step that opens a `security-audit-failure` issue and exits non-zero has been removed, or the `AUDIT_PAT` pre-check is removed or bypassed.
