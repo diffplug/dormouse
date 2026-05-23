@@ -138,6 +138,23 @@ struct PtySpawnOptions {
     args: Option<Vec<String>>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct DorControlResponse {
+    request_id: String,
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<JsonValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DorCliPaths {
+    bin_dir: PathBuf,
+    entrypoint: PathBuf,
+}
+
 fn send_to_sidecar(state: &SidecarState, line: String) {
     let _ = state.tx.send(line);
 }
@@ -240,6 +257,15 @@ fn pty_kill(state: tauri::State<'_, SidecarState>, id: String) {
 #[tauri::command]
 fn pty_request_init(state: tauri::State<'_, SidecarState>) {
     let msg = serde_json::json!({ "event": "pty:requestInit" });
+    send_to_sidecar(&state, msg.to_string());
+}
+
+#[tauri::command]
+fn dor_control_response(state: tauri::State<'_, SidecarState>, response: DorControlResponse) {
+    let msg = serde_json::json!({
+        "event": "dor:controlResponse",
+        "data": response,
+    });
     send_to_sidecar(&state, msg.to_string());
 }
 
@@ -393,13 +419,60 @@ fn find_node_binary(dir: &Path, target_triple: &str) -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
+fn dor_control_socket_path() -> String {
+    let pid = std::process::id();
+    #[cfg(windows)]
+    {
+        format!(r"\\.\pipe\dormouse-{pid}-dor")
+    }
+    #[cfg(not(windows))]
+    {
+        env::temp_dir()
+            .join(format!("dormouse-{pid}-dor.sock"))
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
+fn dor_control_token() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("{}-{nanos}", std::process::id())
+}
+
+fn dor_cli_paths_from_root(root: PathBuf) -> DorCliPaths {
+    DorCliPaths {
+        bin_dir: root.join("bin"),
+        entrypoint: root.join("dist").join("dor.js"),
+    }
+}
+
+fn resolve_dor_cli_paths(sidecar_path: &Path, manifest_dir: &Path) -> DorCliPaths {
+    if let Some(sidecar_dir) = sidecar_path.parent() {
+        let bundled = dor_cli_paths_from_root(sidecar_dir.join("dor-cli"));
+        if bundled.entrypoint.is_file() {
+            return bundled;
+        }
+    }
+
+    let staged = dor_cli_paths_from_root(manifest_dir.join("..").join("sidecar").join("dor-cli"));
+    if staged.entrypoint.is_file() {
+        return staged;
+    }
+
+    dor_cli_paths_from_root(manifest_dir.join("..").join("..").join("dor"))
+}
+
 fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
-    let sidecar_path = resolve_sidecar_path(
-        app.path().resource_dir().ok(),
-        Path::new(env!("CARGO_MANIFEST_DIR")),
-    );
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let sidecar_path = resolve_sidecar_path(app.path().resource_dir().ok(), manifest_dir);
     let sidecar_arg_path = sidecar_script_arg_path(&sidecar_path);
     let node_path = resolve_node_binary_path()?;
+    let dor_cli_paths = resolve_dor_cli_paths(&sidecar_path, manifest_dir);
+    let dor_control_socket = dor_control_socket_path();
+    let dor_control_token = dor_control_token();
     append_log(format!(
         "[sidecar] resolved script: {}",
         sidecar_path.display()
@@ -409,9 +482,23 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
         sidecar_arg_path.display()
     ));
     append_log(format!("[sidecar] node binary: {}", node_path.display()));
+    append_log(format!(
+        "[dor] CLI bin dir: {}",
+        dor_cli_paths.bin_dir.display()
+    ));
+    append_log(format!(
+        "[dor] CLI entrypoint: {}",
+        dor_cli_paths.entrypoint.display()
+    ));
+    append_log(format!("[dor] control socket: {dor_control_socket}"));
 
     let mut wrap = CommandWrap::with_new(&node_path, |c| {
         c.arg(&sidecar_arg_path)
+            .env("DORMOUSE_NODE", &node_path)
+            .env("DORMOUSE_CLI_BIN", &dor_cli_paths.bin_dir)
+            .env("DORMOUSE_CLI_JS", &dor_cli_paths.entrypoint)
+            .env("DORMOUSE_CONTROL_SOCKET", &dor_control_socket)
+            .env("DORMOUSE_CONTROL_TOKEN", &dor_control_token)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -640,6 +727,7 @@ pub fn run() {
             pty_get_cwd,
             pty_get_scrollback,
             pty_request_init,
+            dor_control_response,
             kill_sidecar_now,
             get_available_shells,
             read_clipboard_file_paths,
@@ -661,7 +749,10 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_node_binary, resolve_sidecar_path, strip_windows_verbatim_prefix};
+    use super::{
+        find_node_binary, resolve_dor_cli_paths, resolve_sidecar_path,
+        strip_windows_verbatim_prefix,
+    };
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -787,5 +878,40 @@ mod tests {
         let dir = TempDir::new("node-missing");
 
         assert!(find_node_binary(dir.path(), "x86_64-pc-windows-msvc").is_none());
+    }
+
+    #[test]
+    fn resolves_staged_dor_cli_next_to_sidecar() {
+        let resource_dir = TempDir::new("dor-cli-resource");
+        let sidecar_dir = resource_dir.path().join("sidecar");
+        let sidecar_path = sidecar_dir.join("main.js");
+        let dor_root = sidecar_dir.join("dor-cli");
+        let dor_entrypoint = dor_root.join("dist").join("dor.js");
+
+        fs::create_dir_all(dor_entrypoint.parent().unwrap()).expect("failed to create dor dist");
+        fs::create_dir_all(dor_root.join("bin")).expect("failed to create dor bin");
+        fs::write(&sidecar_path, "console.log('sidecar');").expect("failed to create sidecar");
+        fs::write(&dor_entrypoint, "console.log('dor');").expect("failed to create dor entrypoint");
+
+        let resolved =
+            resolve_dor_cli_paths(&sidecar_path, Path::new("/repo/standalone/src-tauri"));
+
+        assert_eq!(resolved.bin_dir, dor_root.join("bin"));
+        assert_eq!(resolved.entrypoint, dor_entrypoint);
+    }
+
+    #[test]
+    fn resolves_repo_dor_cli_when_staged_copy_is_missing() {
+        let sidecar_dir = TempDir::new("dor-cli-missing");
+        let sidecar_path = sidecar_dir.path().join("main.js");
+        let manifest_dir = Path::new("/repo/standalone/src-tauri");
+
+        fs::write(&sidecar_path, "console.log('sidecar');").expect("failed to create sidecar");
+
+        let resolved = resolve_dor_cli_paths(&sidecar_path, manifest_dir);
+
+        let dor_root = manifest_dir.join("..").join("..").join("dor");
+        assert_eq!(resolved.bin_dir, dor_root.join("bin"));
+        assert_eq!(resolved.entrypoint, dor_root.join("dist").join("dor.js"));
     }
 }

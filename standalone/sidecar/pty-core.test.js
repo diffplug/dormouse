@@ -1,7 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { create, getCwdForPid, parseCwdFromLsof, resolveSpawnConfig, detectAvailableShells } = require('./pty-core');
+const {
+  create,
+  detectAvailableShells,
+  getCwdForPid,
+  parseCwdFromLsof,
+  resolveSpawnConfig,
+  withPrependedPath,
+} = require('./pty-core');
 
 test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
   const config = resolveSpawnConfig(undefined, {
@@ -23,6 +30,39 @@ test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
   assert.equal(config.env.LC_TERMINAL, 'iTerm2');
   assert.equal(config.env.LC_TERMINAL_VERSION, '3.5.0');
   assert.deepEqual(config.shellArgs, ['-l']);
+});
+
+test('resolveSpawnConfig prepends dor CLI bin and injects surface id', () => {
+  const config = resolveSpawnConfig(
+    { surfaceId: 'pane-1' },
+    {
+      platform: 'linux',
+      env: {
+        PATH: '/usr/bin',
+        DORMOUSE_CLI_BIN: '/Applications/Dormouse/dor-cli/bin',
+      },
+      osModule: {
+        homedir: () => '/home/tester',
+        tmpdir: () => '/tmp/fallback',
+      },
+    },
+  );
+
+  assert.equal(config.env.PATH, '/Applications/Dormouse/dor-cli/bin:/usr/bin');
+  assert.equal(config.env.DORMOUSE_CLI_BIN, undefined);
+  assert.equal(config.env.DORMOUSE_SURFACE_ID, 'pane-1');
+});
+
+test('withPrependedPath preserves Windows Path casing', () => {
+  const env = withPrependedPath(
+    { Path: 'C:\\Windows\\System32' },
+    'C:\\Dormouse\\dor-cli\\bin',
+    'win32',
+  );
+
+  assert.deepEqual(env, {
+    Path: 'C:\\Dormouse\\dor-cli\\bin;C:\\Windows\\System32',
+  });
 });
 
 test('resolveSpawnConfig uses Windows shell and profile defaults', () => {

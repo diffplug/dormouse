@@ -20,11 +20,19 @@ import {
   setPendingShellOpts,
   getDefaultShellOpts,
   getTerminalPaneState,
+  getTerminalPaneStateSnapshot,
+  getActivitySnapshot,
   isUntouched,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
   type SessionStatus,
 } from '../lib/terminal-registry';
+import {
+  buildAppTitleResolver,
+  createTerminalPaneState,
+  deriveHeader,
+  resolveDisplayPrimary,
+} from '../lib/terminal-state';
 import { orchestrateKill } from '../lib/kill-animation';
 import { findReattachNeighbor } from '../lib/spatial-nav';
 import { cloneLayout, getLayoutStructureSignature } from '../lib/layout-snapshot';
@@ -67,6 +75,38 @@ type ShellSpawnNoticeState = {
   nonce: number;
 };
 
+type DorControlParams = {
+  pane?: string;
+  workspace?: string;
+  window?: string;
+};
+
+type DorControlResponse = {
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+};
+
+type DorControlRequest = {
+  requestId: string;
+  method: string;
+  params?: DorControlParams;
+  respond: (response: DorControlResponse) => void;
+};
+
+type DorSurface = {
+  id: string;
+  ref: string;
+  paneRef: string;
+  type: 'terminal';
+  title: string;
+  focused: boolean;
+  index: number;
+  indexInPane: number;
+  requestedWorkingDirectory: string | null;
+  selectedInPane: boolean;
+};
+
 export type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind, SpawnDirection } from './wall/wall-types';
 export {
   DialogKeyboardContext,
@@ -105,6 +145,23 @@ function idsMatch(a: string[], b: string[]): boolean {
 function persistedPanelTitle(title: string | null | undefined): string {
   const trimmed = title?.trim();
   return trimmed || UNNAMED_PANEL_TITLE;
+}
+
+function isSingletonWorkspaceTarget(target: string | undefined): boolean {
+  return !target || target === 'workspace:1' || target === '1';
+}
+
+function isSingletonWindowTarget(target: string | undefined): boolean {
+  return !target || target === 'window:1' || target === '1';
+}
+
+function matchesDorPaneTarget(target: string | undefined, surface: DorSurface): boolean {
+  if (!target) return true;
+  if (target === 'focused' || target === 'current') return surface.focused;
+  if (target === surface.id || target === surface.ref || target === surface.paneRef) return true;
+
+  const numeric = Number(target);
+  return Number.isInteger(numeric) && numeric >= 1 && surface.index === numeric - 1;
 }
 
 function ShellSpawnNotice({
@@ -599,6 +656,72 @@ export function Wall({
     window.addEventListener('dormouse:new-terminal', handler);
     return () => window.removeEventListener('dormouse:new-terminal', handler);
   }, [generatePaneId, selectPane, showShellSpawnNotice]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<DorControlRequest>).detail;
+      if (!detail) return;
+
+      if (detail.method !== 'surface.list') {
+        detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
+        return;
+      }
+
+      const params = detail.params ?? {};
+      if (!isSingletonWorkspaceTarget(params.workspace)) {
+        detail.respond({ ok: false, error: `unsupported workspace target '${params.workspace}'` });
+        return;
+      }
+      if (!isSingletonWindowTarget(params.window)) {
+        detail.respond({ ok: false, error: `unsupported window target '${params.window}'` });
+        return;
+      }
+
+      const api = apiRef.current;
+      if (!api) {
+        detail.respond({ ok: false, error: 'Dormouse layout is not ready yet' });
+        return;
+      }
+
+      const panels = api.panels;
+      const activeId = api.activePanel?.id ?? (selectedTypeRef.current === 'pane' ? selectedIdRef.current : null);
+      const terminalStates = getTerminalPaneStateSnapshot();
+      const activityStates = getActivitySnapshot();
+      const appTitleForPane = buildAppTitleResolver(terminalStates, activityStates);
+      const panelStates = panels.map((panel) => terminalStates.get(panel.id) ?? createTerminalPaneState());
+
+      const surfaces: DorSurface[] = panels.map((panel, index) => {
+        const state = panelStates[index] ?? createTerminalPaneState();
+        const derived = deriveHeader(state, panelStates, { appTitleForPane });
+        const title = resolveDisplayPrimary(derived.primary, panel.title ?? panel.id);
+
+        return {
+          id: panel.id,
+          ref: `surface:${index + 1}`,
+          paneRef: `pane:${index + 1}`,
+          type: 'terminal',
+          title,
+          focused: panel.id === activeId,
+          index,
+          indexInPane: 0,
+          requestedWorkingDirectory: state.cwd?.path ?? null,
+          selectedInPane: true,
+        };
+      });
+
+      detail.respond({
+        ok: true,
+        result: {
+          surfaces: surfaces.filter((surface) => matchesDorPaneTarget(params.pane, surface)),
+          workspaceRef: 'workspace:1',
+          windowRef: 'window:1',
+        },
+      });
+    };
+
+    window.addEventListener('dormouse:control-request', handler);
+    return () => window.removeEventListener('dormouse:control-request', handler);
+  }, []);
 
   const addSplitPanel = useCallback((
     id: string | null,

@@ -55,8 +55,29 @@ function directoryExists(cwd, fsModule = fs) {
   }
 }
 
+function pathEnvKey(env) {
+  return Object.prototype.hasOwnProperty.call(env, 'Path') ? 'Path' : 'PATH';
+}
+
+function withPrependedPath(env, dir, platform = process.platform) {
+  if (!dir) return env;
+  const key = platform === 'win32' ? pathEnvKey(env) : 'PATH';
+  const delimiter = platform === 'win32' ? ';' : ':';
+  const existing = env[key] || '';
+  return {
+    ...env,
+    [key]: existing ? `${dir}${delimiter}${existing}` : dir,
+  };
+}
+
+function withoutInternalDormouseEnv(env) {
+  const next = { ...env };
+  delete next.DORMOUSE_CLI_BIN;
+  return next;
+}
+
 function resolveSpawnConfig(options, runtime = {}) {
-  const { cols = 80, rows = 30, cwd, shell: explicitShell, args: explicitArgs } = options || {};
+  const { cols = 80, rows = 30, cwd, shell: explicitShell, args: explicitArgs, surfaceId } = options || {};
   const env = runtime.env || process.env;
   const platform = runtime.platform || process.platform;
   const osModule = runtime.osModule || os;
@@ -70,17 +91,20 @@ function resolveSpawnConfig(options, runtime = {}) {
     ? explicitArgs
     : resolveLoginArg(shell, platform);
 
+  const envWithCliPath = withoutInternalDormouseEnv(withPrependedPath(env, env.DORMOUSE_CLI_BIN, platform));
+
   return {
     cols,
     rows,
     cwd: missingExplicitCwd ? defaultCwd : (cwd || defaultCwd),
     cwdWarning: missingExplicitCwd ? `unable to restore because directory ${cwd} was removed` : null,
     env: {
-      ...env,
+      ...envWithCliPath,
       TERM_PROGRAM: 'iTerm.app',
       TERM_PROGRAM_VERSION: ITERM2_COMPAT_VERSION,
       LC_TERMINAL: 'iTerm2',
       LC_TERMINAL_VERSION: ITERM2_COMPAT_VERSION,
+      DORMOUSE_SURFACE_ID: surfaceId || options?.id || '',
     },
     shell,
     shellArgs,
@@ -88,6 +112,7 @@ function resolveSpawnConfig(options, runtime = {}) {
 }
 
 module.exports.resolveSpawnConfig = resolveSpawnConfig;
+module.exports.withPrependedPath = withPrependedPath;
 
 // ── Shell detection ────────────────────────────────────────────────────────
 
@@ -315,7 +340,7 @@ module.exports.create = function create(send, ptyModule) {
   }
 
   function spawn(id, options) {
-    const config = resolveSpawnConfig(options);
+    const config = resolveSpawnConfig({ ...options, id, surfaceId: id });
 
     let p;
     try {

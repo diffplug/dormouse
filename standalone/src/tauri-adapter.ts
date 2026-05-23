@@ -20,6 +20,18 @@ function invoke(cmd: string, args?: Record<string, unknown>): void {
   );
 }
 
+type DorControlRequestPayload = {
+  requestId: string;
+  method: string;
+  params?: Record<string, unknown>;
+};
+
+type DorControlResponse = {
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+};
+
 /**
  * Platform adapter for the Tauri standalone app.
  *
@@ -113,6 +125,31 @@ export class TauriAdapter implements PlatformAdapter {
         const paths = event.payload.paths ?? [];
         if (paths.length === 0) return;
         for (const handler of this.filesDroppedHandlers) handler(paths);
+      }),
+    );
+
+    this.unlistenFns.push(
+      await listen<DorControlRequestPayload>("dor:controlRequest", (event) => {
+        const payload = event.payload;
+        const respond = (response: DorControlResponse) => {
+          rawInvoke("dor_control_response", {
+            response: {
+              requestId: payload.requestId,
+              ...response,
+            },
+          }).catch((err) =>
+            console.error("[tauri-adapter] dor_control_response failed:", err),
+          );
+        };
+
+        window.dispatchEvent(new CustomEvent("dormouse:control-request", {
+          detail: {
+            requestId: payload.requestId,
+            method: payload.method,
+            params: payload.params ?? {},
+            respond,
+          },
+        }));
       }),
     );
   }

@@ -67,6 +67,26 @@ available outside Dormouse-launched shells, but the bundled PATH-injected CLI is
 the supported default. The bundled CLI must remain version-matched to the running
 host.
 
+## Standalone implementation
+
+The standalone Tauri app stages the workspace `dor` package into
+`standalone/sidecar/dor-cli` before dev/build. Tauri includes that staged
+directory through the existing sidecar resource bundle.
+
+At app startup, Rust starts the Node.js sidecar with absolute paths for
+`DORMOUSE_NODE`, the staged CLI entrypoint, and a private control socket/token.
+The sidecar prepends the staged `bin` directory to each spawned PTY's `PATH` and
+sets the public PTY environment described above. The sidecar may use an internal
+`DORMOUSE_CLI_BIN` value while spawning PTYs, but terminal sessions should rely
+on `PATH` rather than that internal variable.
+
+`dor` talks to the standalone app over a JSON-lines Node `net` socket. The
+sidecar validates the token, forwards the request to Rust as `dor:controlRequest`,
+Rust emits that to the webview, and `Wall` answers from current Dockview and
+terminal-state snapshots. Responses travel back through Rust to the sidecar,
+then to the `dor` process. The socket protocol is an implementation detail; the
+public API is the CLI.
+
 ## cmux compatibility
 
 We try to be compatible with [the public cmux API](https://cmux.com/docs/api) so that it is easy for users and agents to move back and forth between the two applications. Some key differences:

@@ -6,8 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
-    "tauri": "tauri",
+    "build": "pnpm stage:dor-cli && tsc -b && vite build",
+    "stage:dor-cli": "pnpm --filter dor build && node scripts/stage-dor-cli.mjs",
+    "tauri": "pnpm stage:dor-cli && tauri",
     "test": "vitest run"
   },
   "dependencies": {

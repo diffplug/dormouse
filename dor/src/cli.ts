@@ -1,3 +1,5 @@
+import { SocketControlClient } from './control-client.js';
+
 export type IdFormat = 'refs' | 'uuids' | 'both';
 
 export interface Surface {
@@ -229,11 +231,10 @@ function resolveControlClient(options: CliOptions): ParseResult<ControlClient> {
   if (!endpointCheck.ok) return endpointCheck;
   return {
     ok: true,
-    value: {
-      async listSurfaces(): Promise<ListSurfacesResponse> {
-        throw new Error('Dormouse control transport is not implemented yet');
-      },
-    },
+    value: new SocketControlClient({
+      socketPath: options.env!.DORMOUSE_CONTROL_SOCKET!,
+      token: options.env!.DORMOUSE_CONTROL_TOKEN!,
+    }),
   };
 }
 
