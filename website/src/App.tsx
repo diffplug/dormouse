@@ -30,7 +30,7 @@ export const routes: RouteRecord[] = [
     lazy: () => import("./pages/Changelog"),
   },
   {
-    path: "/dependencies",
+    path: "/supply-chain",
     lazy: () => import("./pages/Dependencies"),
   },
 ];

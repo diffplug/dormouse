@@ -8,7 +8,7 @@ Dormouse is a terminal, so users trust it with shells, source trees, credentials
 
 Dormouse keeps its runtime dependency surface intentionally small. We add dependencies only when they are necessary, and we expect dependency changes to justify their value against their supply-chain risk.
 
-Every production transitive npm dependency shipped in the end-user application is listed at <https://dormouse.sh/dependencies>. The generated website data also includes `website/src/data/dependencies-cargo.json`, which separates the standalone app's direct Cargo dependencies from the Cargo transitive graph.
+Every production transitive npm dependency shipped in the end-user application is listed at <https://dormouse.sh/supply-chain>. The generated website data also includes `website/src/data/dependencies-cargo.json`, which separates the standalone app's direct Cargo dependencies from the Cargo transitive graph.
 
 Those dependency snapshots are generated from the lockfiles and reviewed as part of release work. If a production dependency is added, removed, or upgraded, the dependency lists must be regenerated and committed.
 
