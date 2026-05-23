@@ -14,12 +14,18 @@ crate-type = ["lib", "cdylib", "staticlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-shell = "2"
-tauri-plugin-updater = "2"
+tauri = { version = "2", default-features = false, features = ["wry"] }
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-process-wrap = { version = "9", features = ["std"] }
+open = { version = "5", features = ["shellexecute-on-windows"] }
+process-wrap = { version = "9", default-features = false, features = [
+    "creation-flags",
+    "job-object",
+    "process-group",
+    "std",
+] }
+url = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Win32_System_Threading"] }

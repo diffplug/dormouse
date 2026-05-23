@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   getVersion: vi.fn(),
   onCloseRequested: vi.fn(),
   windowClose: vi.fn(),
-  shellOpen: vi.fn(),
   invoke: vi.fn(),
 }));
 
@@ -24,10 +23,6 @@ vi.mock('@tauri-apps/api/window', () => ({
     onCloseRequested: mocks.onCloseRequested,
     close: mocks.windowClose,
   }),
-}));
-
-vi.mock('@tauri-apps/plugin-shell', () => ({
-  open: mocks.shellOpen,
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -65,7 +60,6 @@ describe('updater', () => {
     mocks.check.mockResolvedValue(null);
     mocks.onCloseRequested.mockResolvedValue(vi.fn());
     mocks.windowClose.mockResolvedValue(undefined);
-    mocks.shellOpen.mockResolvedValue(undefined);
     mocks.invoke.mockResolvedValue('');
   });
 
@@ -269,7 +263,9 @@ describe('updater', () => {
       openChangelog();
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(mocks.shellOpen).toHaveBeenCalledWith('https://dormouse.sh/changelog/after/0.4.0');
+      expect(mocks.invoke).toHaveBeenCalledWith('open_external_url', {
+        url: 'https://dormouse.sh/changelog/after/0.4.0',
+      });
     });
   });
 

@@ -14,13 +14,6 @@
     "homepage": "https://github.com/tauri-apps/tauri#readme"
   },
   {
-    "name": "@tauri-apps/plugin-shell",
-    "version": "2.3.5",
-    "license": "MIT OR Apache-2.0",
-    "author": "Tauri Apps Contributors",
-    "homepage": "https://github.com/tauri-apps/plugins-workspace"
-  },
-  {
     "name": "@tauri-apps/plugin-updater",
     "version": "2.10.1",
     "license": "MIT OR Apache-2.0",

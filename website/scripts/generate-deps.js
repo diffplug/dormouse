@@ -201,7 +201,6 @@ const missingLicense = {
 };
 const missingAuthor = {
   "@tauri-apps/api": "Tauri Apps Contributors",
-  "@tauri-apps/plugin-shell": "Tauri Apps Contributors",
   "@tauri-apps/plugin-updater": "Tauri Apps Contributors",
   "@xterm/xterm": "Christopher Jeffrey, SourceLair Private Company, xterm.js authors",
   "atomically": "Fabio Spampinato",

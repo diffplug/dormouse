@@ -306,6 +306,31 @@ fn read_update_log() -> Result<String, String> {
     read_log_tail(10_000)
 }
 
+fn normalize_external_url(raw_url: &str) -> Result<String, String> {
+    let trimmed = raw_url.trim();
+    if trimmed.is_empty() {
+        return Err("No URL was provided.".to_string());
+    }
+    if trimmed.chars().any(char::is_control) {
+        return Err("The URL contains control characters.".to_string());
+    }
+
+    let parsed = url::Url::parse(trimmed).map_err(|_| "The URL is not valid.".to_string())?;
+    match parsed.scheme().to_ascii_lowercase().as_str() {
+        "javascript" | "data" | "blob" | "about" => Err(format!(
+            "{}: URLs cannot be opened from terminal output.",
+            parsed.scheme()
+        )),
+        _ => Ok(parsed.into()),
+    }
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let normalized = normalize_external_url(&url)?;
+    open::that_detached(&normalized).map_err(|err| format!("failed to open external URL: {err}"))
+}
+
 #[tauri::command]
 fn kill_sidecar_now(state: tauri::State<'_, SidecarState>) {
     kill_sidecar(&state.child);
@@ -553,7 +578,6 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         // Replace Tauri's default menu, which binds Cmd+V to a native Paste
         // action that fights with the webview's DOM keydown handler. The
@@ -646,6 +670,7 @@ pub fn run() {
             read_clipboard_image_as_file_path,
             read_clipboard_text,
             read_update_log,
+            open_external_url,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Dormouse")
@@ -661,7 +686,10 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_node_binary, resolve_sidecar_path, strip_windows_verbatim_prefix};
+    use super::{
+        find_node_binary, normalize_external_url, resolve_sidecar_path,
+        strip_windows_verbatim_prefix,
+    };
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -686,6 +714,37 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn external_url_validation_allows_absolute_safe_schemes() {
+        assert_eq!(
+            normalize_external_url(" https://example.com/docs?q=mouse ").unwrap(),
+            "https://example.com/docs?q=mouse"
+        );
+        assert_eq!(
+            normalize_external_url("mailto:support@example.com").unwrap(),
+            "mailto:support@example.com"
+        );
+        assert_eq!(
+            normalize_external_url("file:///Users/dev/report.html").unwrap(),
+            "file:///Users/dev/report.html"
+        );
+        assert_eq!(
+            normalize_external_url("vscode://file/Users/dev/project/src/App.tsx:4:2").unwrap(),
+            "vscode://file/Users/dev/project/src/App.tsx:4:2"
+        );
+    }
+
+    #[test]
+    fn external_url_validation_rejects_blocked_or_malformed_urls() {
+        assert!(normalize_external_url("javascript:alert(1)").is_err());
+        assert!(normalize_external_url("data:text/html,hello").is_err());
+        assert!(normalize_external_url("blob:https://example.com/id").is_err());
+        assert!(normalize_external_url("about:blank").is_err());
+        assert!(normalize_external_url("not a url").is_err());
+        assert!(normalize_external_url("https://example.com/\nnext").is_err());
+        assert!(normalize_external_url("").is_err());
     }
 
     #[test]

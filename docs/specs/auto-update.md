@@ -112,8 +112,8 @@ The Rust side registers the plugin with `tauri_plugin_updater::Builder::new().bu
 - `@tauri-apps/plugin-updater` — update check, download, install
 - `@tauri-apps/api/window` — `getCurrentWindow()`, `onCloseRequested`
 - `@tauri-apps/api/app` — `getVersion()` for the "from" version in markers
-- `@tauri-apps/plugin-shell` — `open()` for the changelog link
-- `tauri-plugin-updater` Rust crate — registered in `Cargo.toml` and `lib.rs`
+- `open_external_url` Tauri command — opens the changelog/debug links after Rust-side revalidation using the same blocked-scheme rules as `transport.md`
+- `tauri-plugin-updater` Rust crate — registered in `Cargo.toml` and `lib.rs` with `rustls-tls` only; zip archive support is disabled because the release pipeline serves `.exe` and `.AppImage` updater bundles directly
 
 ## Design decisions
 
