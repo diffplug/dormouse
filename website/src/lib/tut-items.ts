@@ -77,7 +77,7 @@ const GESTURE_NAVIGATION_SECTION: Section = {
     {
       id: 'gn-arrows',
       title: 'Use Gestures to send an arrow key',
-      hint: 'Drag to an arrow group, then choose its arrow option.',
+      hint: 'Drag directly up, down, left, or right past the circle.',
     },
     {
       id: 'gn-enter',

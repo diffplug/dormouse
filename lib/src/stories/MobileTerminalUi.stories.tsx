@@ -366,20 +366,24 @@ export const GesturePrimaryNorthwest: Story = {
   render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('nw')])} />,
 };
 
-export const GestureEastReturnRight: Story = {
-  render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('e'), gestureOptionSelectionPoint('e', 0)])} />,
+export const GestureEastArrowComplete: Story = {
+  render: () => <GestureSnapshotFrame state={gestureCompleteState([gestureRootSelectionPoint('e')])} />,
 };
 
-export const GestureEastReturnRightComplete: Story = {
-  render: () => <GestureSnapshotFrame state={gestureCompleteState([gestureRootSelectionPoint('e'), gestureOptionSelectionPoint('e', 0)])} />,
+export const GestureSoutheastReturnEnter: Story = {
+  render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('se'), gestureOptionSelectionPoint('se', 0)])} />,
 };
 
-export const GestureEastTurnUpEnd: Story = {
-  render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('e'), gestureOptionSelectionPoint('e', 1)])} />,
+export const GestureSoutheastReturnEnterComplete: Story = {
+  render: () => <GestureSnapshotFrame state={gestureCompleteState([gestureRootSelectionPoint('se'), gestureOptionSelectionPoint('se', 0)])} />,
 };
 
-export const GestureEastTurnDownL: Story = {
-  render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('e'), gestureOptionSelectionPoint('e', 2)])} />,
+export const GestureSoutheastTurnUpShiftEnter: Story = {
+  render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('se'), gestureOptionSelectionPoint('se', 1)])} />,
+};
+
+export const GestureSoutheastTurnLeftY: Story = {
+  render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('se'), gestureOptionSelectionPoint('se', 2)])} />,
 };
 
 export const GestureCtrlCConfirmation: Story = {
