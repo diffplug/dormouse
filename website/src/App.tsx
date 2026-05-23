@@ -31,6 +31,6 @@ export const routes: RouteRecord[] = [
   },
   {
     path: "/supply-chain",
-    lazy: () => import("./pages/Dependencies"),
+    lazy: () => import("./pages/SupplyChain"),
   },
 ];
