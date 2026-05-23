@@ -8,13 +8,13 @@ Dormouse is a terminal, so users trust it with shells, source trees, credentials
 
 Dormouse keeps its runtime dependency surface intentionally small. We add dependencies only when they are necessary, and we expect dependency changes to justify their value against their supply-chain risk.
 
-Every production transitive dependency shipped in the end-user application is listed at <https://dormouse.sh/dependencies>
+Every production transitive npm dependency shipped in the end-user application is listed at <https://dormouse.sh/dependencies>. The generated website data also includes `website/src/data/cargo-dependencies.json`, which separates the standalone app's direct Cargo dependencies from the Cargo transitive graph.
 
-That page is generated from the lockfile and reviewed as part of release work. If a production dependency is added, removed, or upgraded, the dependency list must be regenerated and committed.
+Those dependency snapshots are generated from the lockfiles and reviewed as part of release work. If a production dependency is added, removed, or upgraded, the dependency lists must be regenerated and committed.
 
 New npm package versions are not adopted immediately. The workspace uses pnpm's package maturity gate so newly published npm versions have time to be reported, yanked, or investigated before Dormouse resolves them into the lockfile. Dependabot also applies cooldown windows for npm and Cargo updates so routine dependency PRs do not chase brand-new releases unnecessarily.
 
-- FAIL IF `node website/scripts/generate-deps.js` changes `website/src/data/dependencies.json` when run from a clean checkout.
+- FAIL IF `node website/scripts/generate-deps.js` changes `website/src/data/dependencies.json` or `website/src/data/cargo-dependencies.json` when run from a clean checkout.
 - FAIL IF `pnpm-workspace.yaml` is missing `minimumReleaseAge: 1440`.
 - FAIL IF `.github/dependabot.yml` is missing npm coverage for `/` or Cargo coverage for `/standalone/src-tauri`.
 - FAIL IF `.github/dependabot.yml` is missing dependency cooldown windows.

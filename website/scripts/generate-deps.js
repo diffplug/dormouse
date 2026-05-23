@@ -1,10 +1,13 @@
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../..");
-const outPath = resolve(__dirname, "../src/data/dependencies.json");
+const npmOutPath = resolve(__dirname, "../src/data/dependencies.json");
+const cargoOutPath = resolve(__dirname, "../src/data/cargo-dependencies.json");
+const cargoManifestPath = resolve(repoRoot, "standalone/src-tauri/Cargo.toml");
 const themeExtensionsPath = resolve(repoRoot, "lib/src/lib/themes/bundled-extensions.json");
 const productDependencyFilters = [
   "dormouse",
@@ -162,6 +165,7 @@ for (const packageName of productDependencyFilters) {
 
 const licenseAliases = {
   "Apache-2.0 OR MIT": "MIT OR Apache-2.0",
+  "MIT/Apache-2.0": "MIT OR Apache-2.0",
 };
 
 const deps = [...externalPackages.values()].map((pkg) => ({
@@ -235,5 +239,100 @@ for (const dep of deps) {
 
 deps.sort((a, b) => a.name.localeCompare(b.name));
 
-writeFileSync(outPath, JSON.stringify(deps, null, 2) + "\n");
+function normalizeLicense(license) {
+  return license ? (licenseAliases[license] ?? license) : null;
+}
+
+function cargoDepKindLabel(kind) {
+  if (kind === "build") return "build";
+  if (kind === "dev") return "dev";
+  return "normal";
+}
+
+function getCargoHomepage(pkg) {
+  return pkg.homepage || pkg.repository || pkg.documentation || null;
+}
+
+function formatCargoAuthor(authors) {
+  if (!authors || authors.length === 0) return null;
+  return authors.join(", ");
+}
+
+function cargoPackageEntry(pkg) {
+  return {
+    name: pkg.name,
+    version: pkg.version,
+    license: normalizeLicense(pkg.license),
+    author: formatCargoAuthor(pkg.authors),
+    homepage: getCargoHomepage(pkg),
+  };
+}
+
+function compareDependencyEntries(a, b) {
+  return a.name.localeCompare(b.name) || a.version.localeCompare(b.version);
+}
+
+function getCargoMetadata() {
+  return JSON.parse(
+    execFileSync("cargo", [
+      "metadata",
+      "--format-version",
+      "1",
+      "--locked",
+      "--manifest-path",
+      cargoManifestPath,
+    ], {
+      cwd: repoRoot,
+      encoding: "utf-8",
+      maxBuffer: 1024 * 1024 * 64,
+    }),
+  );
+}
+
+function getManifestDependencyByName(manifestDependencies, name) {
+  return manifestDependencies.find((dep) => (dep.rename || dep.name).replaceAll("-", "_") === name);
+}
+
+function getCargoDependencies() {
+  const metadata = getCargoMetadata();
+  const rootPackage = metadata.packages.find((pkg) => pkg.id === metadata.resolve.root);
+  const rootNode = metadata.resolve.nodes.find((node) => node.id === metadata.resolve.root);
+  if (!rootPackage || !rootNode) {
+    throw new Error("Could not find root package in Cargo metadata");
+  }
+
+  const packagesById = new Map(metadata.packages.map((pkg) => [pkg.id, pkg]));
+  const directIds = new Set(rootNode.deps.map((dep) => dep.pkg));
+
+  const direct = rootNode.deps.map((dep) => {
+    const pkg = packagesById.get(dep.pkg);
+    if (!pkg) throw new Error(`Could not find Cargo package ${dep.pkg}`);
+
+    const manifestDep = getManifestDependencyByName(rootPackage.dependencies, dep.name);
+    return {
+      ...cargoPackageEntry(pkg),
+      declaredName: manifestDep?.rename || manifestDep?.name || dep.name.replaceAll("_", "-"),
+      requirement: manifestDep?.req ?? null,
+      kinds: [...new Set(dep.dep_kinds.map((depKind) => cargoDepKindLabel(depKind.kind)))].sort(),
+      targets: [...new Set(dep.dep_kinds.map((depKind) => depKind.target).filter(Boolean))].sort(),
+      defaultFeatures: manifestDep?.uses_default_features ?? null,
+      features: [...(manifestDep?.features ?? [])].sort(),
+    };
+  }).sort(compareDependencyEntries);
+
+  const transitive = metadata.packages
+    .filter((pkg) => pkg.id !== metadata.resolve.root && !directIds.has(pkg.id))
+    .map(cargoPackageEntry)
+    .sort(compareDependencyEntries);
+
+  return { direct, transitive };
+}
+
+const cargoDeps = getCargoDependencies();
+
+writeFileSync(npmOutPath, JSON.stringify(deps, null, 2) + "\n");
+writeFileSync(cargoOutPath, JSON.stringify(cargoDeps, null, 2) + "\n");
 console.log(`Wrote ${deps.length} dependencies to src/data/dependencies.json`);
+console.log(
+  `Wrote ${cargoDeps.direct.length} direct and ${cargoDeps.transitive.length} transitive Cargo dependencies to src/data/cargo-dependencies.json`,
+);
