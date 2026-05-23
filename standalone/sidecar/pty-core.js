@@ -78,7 +78,10 @@ function withoutInternalDormouseEnv(env) {
 
 function resolveSpawnConfig(options, runtime = {}) {
   const { cols = 80, rows = 30, cwd, shell: explicitShell, args: explicitArgs, surfaceId } = options || {};
-  const env = runtime.env || process.env;
+  const env = {
+    ...(runtime.env || process.env),
+    ...(options?.env || {}),
+  };
   const platform = runtime.platform || process.platform;
   const osModule = runtime.osModule || os;
   const fsModule = runtime.fsModule || fs;

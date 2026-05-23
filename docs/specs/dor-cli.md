@@ -99,7 +99,9 @@ The extension host starts `pty-host.js` with the same `DORMOUSE_NODE`,
 `DORMOUSE_CLI_JS`, private control socket, and token shape used by standalone.
 The forked PTY host runs the same control server module as standalone and uses
 the shared PTY core to prepend the staged `bin` directory to each spawned PTY's
-`PATH` while setting `DORMOUSE_SURFACE_ID`.
+`PATH` while setting `DORMOUSE_SURFACE_ID`. VS Code also sends the Dormouse CLI
+environment explicitly on each PTY spawn, so the spawned shell does not depend on
+ambient extension-host or PTY-host process environment state.
 
 Because VS Code can host multiple Dormouse webviews in one extension host, `dor`
 requests include the invoking `DORMOUSE_SURFACE_ID` as socket metadata. The PTY

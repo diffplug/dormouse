@@ -53,6 +53,39 @@ test('resolveSpawnConfig prepends dor CLI bin and injects surface id', () => {
   assert.equal(config.env.DORMOUSE_SURFACE_ID, 'pane-1');
 });
 
+test('resolveSpawnConfig applies per-spawn dor CLI env overrides', () => {
+  const config = resolveSpawnConfig(
+    {
+      surfaceId: 'pane-1',
+      env: {
+        DORMOUSE_CLI_BIN: '/extension/dor-cli/bin',
+        DORMOUSE_CLI_JS: '/extension/dor-cli/dist/dor.js',
+        DORMOUSE_CONTROL_SOCKET: '/tmp/dor.sock',
+        DORMOUSE_CONTROL_TOKEN: 'token',
+        DORMOUSE_NODE: '/usr/bin/node',
+      },
+    },
+    {
+      platform: 'linux',
+      env: {
+        PATH: '/usr/bin',
+      },
+      osModule: {
+        homedir: () => '/home/tester',
+        tmpdir: () => '/tmp/fallback',
+      },
+    },
+  );
+
+  assert.equal(config.env.PATH, '/extension/dor-cli/bin:/usr/bin');
+  assert.equal(config.env.DORMOUSE_CLI_BIN, undefined);
+  assert.equal(config.env.DORMOUSE_CLI_JS, '/extension/dor-cli/dist/dor.js');
+  assert.equal(config.env.DORMOUSE_CONTROL_SOCKET, '/tmp/dor.sock');
+  assert.equal(config.env.DORMOUSE_CONTROL_TOKEN, 'token');
+  assert.equal(config.env.DORMOUSE_NODE, '/usr/bin/node');
+  assert.equal(config.env.DORMOUSE_SURFACE_ID, 'pane-1');
+});
+
 test('withPrependedPath preserves Windows Path casing', () => {
   const env = withPrependedPath(
     { Path: 'C:\\Windows\\System32' },

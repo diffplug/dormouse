@@ -10,6 +10,14 @@ export interface PtyCallbacks {
   onExit(id: string, exitCode: number): void;
 }
 
+export interface PtySpawnOptions {
+  cols?: number;
+  rows?: number;
+  cwd?: string;
+  shell?: string;
+  args?: string[];
+}
+
 export interface DorControlRequest {
   requestId: string;
   surfaceId?: string;
@@ -117,6 +125,27 @@ const dorControlToken = randomBytes(24).toString('hex');
 const dorControlSocket = process.platform === 'win32'
   ? `\\\\.\\pipe\\dormouse-vscode-${process.pid}-dor`
   : path.join(os.tmpdir(), `dormouse-vscode-${process.pid}-dor.sock`);
+let loggedDorRuntimeEnv = false;
+
+function getDorRuntimeEnv(extensionPath: string): Record<string, string> {
+  const nodePath = findSystemNode();
+  const dorCliRoot = path.join(extensionPath, 'dor-cli');
+  return {
+    DORMOUSE_NODE: nodePath,
+    DORMOUSE_CLI_BIN: path.join(dorCliRoot, 'bin'),
+    DORMOUSE_CLI_JS: path.join(dorCliRoot, 'dist', 'dor.js'),
+    DORMOUSE_CONTROL_SOCKET: dorControlSocket,
+    DORMOUSE_CONTROL_TOKEN: dorControlToken,
+  };
+}
+
+function logDorRuntimeEnv(env: Record<string, string>): void {
+  if (loggedDorRuntimeEnv) return;
+  loggedDorRuntimeEnv = true;
+  log.info(`[dor] CLI bin: ${env.DORMOUSE_CLI_BIN} (exists=${fs.existsSync(env.DORMOUSE_CLI_BIN)})`);
+  log.info(`[dor] CLI entrypoint: ${env.DORMOUSE_CLI_JS} (exists=${fs.existsSync(env.DORMOUSE_CLI_JS)})`);
+  log.info(`[dor] control socket: ${env.DORMOUSE_CONTROL_SOCKET}`);
+}
 
 function findSystemNode(): string {
   if (cachedNodePath) return cachedNodePath;
@@ -165,8 +194,9 @@ function ensureChild(extensionPath: string): ChildProcess {
   if (child && child.connected) return child;
 
   const hostScript = path.join(extensionPath, 'dist', 'pty-host.js');
-  const nodePath = findSystemNode();
-  const dorCliRoot = path.join(extensionPath, 'dor-cli');
+  const dorEnv = getDorRuntimeEnv(extensionPath);
+  const nodePath = dorEnv.DORMOUSE_NODE;
+  logDorRuntimeEnv(dorEnv);
 
   child = fork(hostScript, [], {
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
@@ -174,11 +204,7 @@ function ensureChild(extensionPath: string): ChildProcess {
     execArgv: [], // clear --inspect flags inherited from VSCode debug
     env: {
       ...process.env,
-      DORMOUSE_NODE: nodePath,
-      DORMOUSE_CLI_BIN: path.join(dorCliRoot, 'bin'),
-      DORMOUSE_CLI_JS: path.join(dorCliRoot, 'dist', 'dor.js'),
-      DORMOUSE_CONTROL_SOCKET: dorControlSocket,
-      DORMOUSE_CONTROL_TOKEN: dorControlToken,
+      ...dorEnv,
     },
   });
 
@@ -257,10 +283,21 @@ function sendToChild(msg: any): void {
   }
 }
 
-export function spawn(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[] }): void {
+export function spawn(id: string, options?: PtySpawnOptions): void {
   killedPtyIds.delete(id);
   ptyBuffers.set(id, createBufferEntry(true));
-  sendToChild({ type: 'spawn', id, cols: options?.cols || 80, rows: options?.rows || 30, cwd: options?.cwd, shell: options?.shell, args: options?.args });
+  const dorEnv = getDorRuntimeEnv(extensionPath_);
+  logDorRuntimeEnv(dorEnv);
+  sendToChild({
+    type: 'spawn',
+    id,
+    cols: options?.cols || 80,
+    rows: options?.rows || 30,
+    cwd: options?.cwd,
+    shell: options?.shell,
+    args: options?.args,
+    env: dorEnv,
+  });
 }
 
 export interface ShellEntry {
