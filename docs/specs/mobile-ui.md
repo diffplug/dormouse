@@ -159,6 +159,10 @@ The select circle and its eight compass-direction ticks render at full opacity.
 The current highlighted or selected direction uses a stronger tick so the circle
 and label clusters read as one gesture system.
 
+Because the mobile composition does not mount the desktop `Wall`,
+`MobileTerminalUi` must publish the shared dynamic palette variables, including
+`--color-focus-ring`, before rendering gesture UI that depends on those tokens.
+
 When the rose opens on touch-down, root labels fade in with a subtle scale-in
 and the select circle grows from zero radius to `RADIUS_SELECT`. This is a short
 state-reveal motion, not an ongoing decoration; reduced-motion users get the

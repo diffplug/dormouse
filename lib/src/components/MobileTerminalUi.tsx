@@ -38,6 +38,7 @@ import {
   type MobileGesturePoint,
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
+import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import type { SessionStatus } from '../lib/terminal-registry';
 
 export type MobileTerminalKeyboardMode = 'sessions' | 'recent' | 'type' | 'draft';
@@ -396,6 +397,7 @@ export function MobileTerminalUi({
   terminalClassName,
   style,
 }: MobileTerminalUiProps) {
+  useDynamicPalette();
   const resolvedDefaultKeyboardMode = defaultKeyboardMode ?? defaultSection;
   const [internalKeyboardMode, setInternalKeyboardMode] = useState<MobileTerminalKeyboardMode>(resolvedDefaultKeyboardMode);
   const [internalTouchMode, setInternalTouchMode] = useState<MobileTerminalTouchMode>(defaultTouchMode);
