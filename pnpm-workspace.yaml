@@ -1,4 +1,5 @@
 packages:
+  - dor
   - lib
   - standalone
   - standalone/sidecar

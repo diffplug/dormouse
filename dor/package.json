@@ -1,0 +1,20 @@
+{
+  "name": "dor",
+  "version": "0.0.0",
+  "license": "FSL-1.1-MIT",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "dor": "./dist/dor.js"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}
