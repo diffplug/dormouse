@@ -24,9 +24,10 @@ html {
 }
 
 /* Override lib's terminal-app styles (body overflow:hidden, #root height:100vh,
-   body font-family system font) which Vite loads globally. The Playground page
-   re-applies them when it mounts. Higher specificity (html body) is required so
-   we beat the lib's `body` rule which loads after ours on /playground. */
+   body font-family system font) which Vite loads globally. The terminal
+   playground routes re-apply them when they mount. Higher specificity
+   (html body) is required so we beat the lib's `body` rule after those routes
+   import dormouse-lib/index.css. */
 html body {
   overflow: auto;
   font-family: var(--font-body);
