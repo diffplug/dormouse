@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../..");
-const npmOutPath = resolve(__dirname, "../src/data/dependencies.json");
-const cargoOutPath = resolve(__dirname, "../src/data/cargo-dependencies.json");
+const npmOutPath = resolve(__dirname, "../src/data/dependencies-npm.json");
+const cargoOutPath = resolve(__dirname, "../src/data/dependencies-cargo.json");
 const cargoManifestPath = resolve(repoRoot, "standalone/src-tauri/Cargo.toml");
 const themeExtensionsPath = resolve(repoRoot, "lib/src/lib/themes/bundled-extensions.json");
 const productDependencyFilters = [
@@ -332,7 +332,7 @@ const cargoDeps = getCargoDependencies();
 
 writeFileSync(npmOutPath, JSON.stringify(deps, null, 2) + "\n");
 writeFileSync(cargoOutPath, JSON.stringify(cargoDeps, null, 2) + "\n");
-console.log(`Wrote ${deps.length} dependencies to src/data/dependencies.json`);
+console.log(`Wrote ${deps.length} dependencies to src/data/dependencies-npm.json`);
 console.log(
-  `Wrote ${cargoDeps.direct.length} direct and ${cargoDeps.transitive.length} transitive Cargo dependencies to src/data/cargo-dependencies.json`,
+  `Wrote ${cargoDeps.direct.length} direct and ${cargoDeps.transitive.length} transitive Cargo dependencies to src/data/dependencies-cargo.json`,
 );
