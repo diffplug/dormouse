@@ -210,7 +210,7 @@ pnpm build:vscode =
                                              + pty-host.js -> dist/, copy
                                              node-pty prebuilds -> dist/node-pty)
 
-pnpm dogfood:vscode = build + package VSIX + install locally
+pnpm dogfood:vscode = uninstall legacy diffplug.mouseterm + build + package VSIX + install locally
   (then: Cmd+Shift+P -> "Developer: Reload Window" to pick up changes)
 
 F5 in VS Code = launch Extension Development Host (see .vscode/launch.json)
