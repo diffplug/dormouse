@@ -50,6 +50,8 @@ The terminal makes the current regime visible in the pane header, provides a way
 Activated by clicking the Mouse icon. While the temporary override is active:
 
 - Mouse events are handled by the terminal, not forwarded to the inside program.
+- Wheel events are also suppressed so xterm cannot translate scroll input into
+  mouse reports or alternate-screen arrow-key input for the inside program.
 - The Mouse icon is replaced with the No-Mouse icon.
 - A banner appears below the No-Mouse icon reading `Temporary mouse override until mouse-up.` followed by two buttons: **Make sticky** and **Cancel**.
 - The override persists until the **next mouse-up event inside the terminal content area** (live region or scrollback) that is paired with a prior mouse-down in the same area. This includes plain clicks (a mouse-down/up pair that never crossed the drag threshold) as well as completed drags. The click on the No-Mouse icon itself, the banner's buttons, and any "orphan" mouse-up from a drag that started outside the terminal do **not** count as that mouse-up.
@@ -60,6 +62,8 @@ Activated by clicking the Mouse icon. While the temporary override is active:
 - Clicking **Make sticky** in the banner converts the temporary override into a sticky one.
 - The banner is dismissed.
 - The No-Mouse icon remains visible with its "click to restore" hover text.
+- Mouse and wheel events continue to be handled by the terminal rather than the
+  inside program.
 - The override persists until the user clicks the No-Mouse icon, or until the inside program stops requesting mouse reporting.
 
 ### 2.3 Canceling the Temporary Override

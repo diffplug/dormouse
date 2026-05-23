@@ -14,7 +14,7 @@ import { detectTokenAt } from './smart-token';
 import { extractSelectionText } from './selection-text';
 import type { TerminalOverlayDims } from './terminal-store';
 
-const OVERRIDE_MOUSE_EVENTS = ['mousemove', 'mouseup', 'click', 'dblclick', 'auxclick', 'contextmenu'] as const;
+const OVERRIDE_MOUSE_EVENTS = ['mousemove', 'mouseup', 'wheel', 'click', 'dblclick', 'auxclick', 'contextmenu'] as const;
 
 function consumeMouseEvent(ev: MouseEvent, stopImmediate = false): void {
   ev.preventDefault();

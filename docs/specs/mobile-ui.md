@@ -116,6 +116,11 @@ Default touch mode is **Gestures**.
 If Mouse mode is active and the active pane stops capturing mouse events, the
 selector must fall back to Gestures.
 
+Wheel, trackpad-scroll, and touchmove events in the pane content are terminal
+input only in Mouse mode. Gestures and Select mode must suppress those
+scroll-like events before xterm can translate them into mouse reports,
+alternate-screen arrow keys, or scrollback motion.
+
 Gesture mode intentionally consumes primary mouse/trackpad clicks in addition to
 touch input. This keeps the `/playground/pocket` prototype usable in desktop
 browsers, narrow desktop viewports, and Storybook without a touchscreen. A primary

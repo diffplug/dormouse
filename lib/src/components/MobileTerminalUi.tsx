@@ -373,6 +373,12 @@ function isGestureDialogTarget(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('[data-mobile-gesture-dialog]') !== null;
 }
 
+function consumeScrollLikeTerminalEvent(event: Event): void {
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+}
+
 export function MobileTerminalUi({
   terminal,
   activeSection,
@@ -554,6 +560,19 @@ export function MobileTerminalUi({
   }, [cursorTouchAvailable, setTouchMode, touchMode]);
 
   useEffect(() => {
+    if (!interactive || touchMode === 'cursor') return;
+    const host = terminalHostRef.current;
+    if (!host) return;
+    const options: AddEventListenerOptions = { capture: true, passive: false };
+    host.addEventListener('wheel', consumeScrollLikeTerminalEvent, options);
+    host.addEventListener('touchmove', consumeScrollLikeTerminalEvent, options);
+    return () => {
+      host.removeEventListener('wheel', consumeScrollLikeTerminalEvent, options);
+      host.removeEventListener('touchmove', consumeScrollLikeTerminalEvent, options);
+    };
+  }, [interactive, touchMode]);
+
+  useEffect(() => {
     const host = terminalHostRef.current;
     if (!host) return;
     configurePaneTextInputs();
@@ -675,7 +694,7 @@ export function MobileTerminalUi({
         ref={terminalHostRef}
         className={clsx(
           'relative min-h-0 flex-1 overflow-hidden bg-terminal-bg',
-          touchMode === 'gestures' ? 'touch-none' : 'touch-auto',
+          touchMode === 'cursor' ? 'touch-auto' : 'touch-none',
           terminalClassName,
         )}
         onPointerDownCapture={handlePanePointerDownCapture}

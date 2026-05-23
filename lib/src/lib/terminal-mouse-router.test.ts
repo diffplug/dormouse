@@ -167,4 +167,18 @@ describe('terminal-mouse-router: override suppression', () => {
     expect(getMouseSelectionState('t1').override).toBe('permanent');
     cleanup();
   });
+
+  it('suppresses wheel while an override is active', () => {
+    const { cleanup, element } = createHarness(windowHost);
+    setMouseReporting('t1', 'vt200');
+    setOverride('t1', 'permanent');
+
+    const wheel = mouseEvent();
+    element.emit('wheel', wheel);
+
+    expect(wheel.preventDefault).toHaveBeenCalledOnce();
+    expect(wheel.stopPropagation).toHaveBeenCalledOnce();
+    expect(wheel.stopImmediatePropagation).toHaveBeenCalledOnce();
+    cleanup();
+  });
 });
