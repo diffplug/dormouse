@@ -1,4 +1,4 @@
-import { ALL_ITEM_IDS, ITEM_IDS, SECTIONS, type ItemId } from "./tut-items";
+import { ITEM_IDS, SECTIONS, type ItemId, type Section } from "./tut-items";
 
 const STORAGE_KEY = "dormouse-tut-v3";
 const STAR_STORAGE_KEY = "dormouse-tut-star-v1";
@@ -11,8 +11,10 @@ export class TutorialState {
   private flappyHighScore = 0;
   private listeners = new Set<() => void>();
   private storage = typeof localStorage !== "undefined" ? localStorage : null;
+  private sections: readonly Section[];
 
-  constructor() {
+  constructor(sections: readonly Section[] = SECTIONS) {
+    this.sections = sections;
     this.starPromptResolved = this.storage?.getItem(STAR_STORAGE_KEY) === "true";
 
     const high = this.storage?.getItem(FLAPPY_HIGH_SCORE_KEY);
@@ -95,7 +97,7 @@ export class TutorialState {
   }
 
   sectionProgress(sectionId: string): { done: number; total: number } {
-    const section = SECTIONS.find((s) => s.id === sectionId);
+    const section = this.sections.find((s) => s.id === sectionId);
     if (!section) return { done: 0, total: 0 };
     let done = 0;
     for (const item of section.items) {
@@ -105,7 +107,15 @@ export class TutorialState {
   }
 
   totalProgress(): { done: number; total: number } {
-    return { done: this.completed.size, total: ALL_ITEM_IDS.length };
+    let done = 0;
+    let total = 0;
+    for (const section of this.sections) {
+      for (const item of section.items) {
+        total++;
+        if (this.completed.has(item.id)) done++;
+      }
+    }
+    return { done, total };
   }
 
   private notify(): void {

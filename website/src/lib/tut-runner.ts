@@ -13,7 +13,11 @@ import {
 import { cfg } from "dormouse-lib/cfg";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import type { InteractiveProgram } from "./tutorial-shell";
-import { SECTIONS, type Item } from "./tut-items";
+import {
+  DESKTOP_TUTORIAL_PROFILE,
+  type Item,
+  type TutorialProfile,
+} from "./tut-items";
 import type { TutorialState } from "./tutorial-state";
 
 /**
@@ -107,6 +111,7 @@ interface TutRunnerOptions {
   adapter: FakePtyAdapter;
   terminalId: string;
   state: TutorialState;
+  profile?: TutorialProfile;
   onExit: () => void;
   /** Called when the user presses `s` inside the Alert section. */
   onTriggerBusyDemo?: () => void;
@@ -126,6 +131,7 @@ export class TutRunner implements InteractiveProgram {
   private adapter: FakePtyAdapter;
   private terminalId: string;
   private state: TutorialState;
+  private profile: TutorialProfile;
   private onExit: () => void;
   private onTriggerBusyDemo?: () => void;
   private onTogglePlaceToPaste?: () => void;
@@ -150,11 +156,16 @@ export class TutRunner implements InteractiveProgram {
     this.adapter = options.adapter;
     this.terminalId = options.terminalId;
     this.state = options.state;
+    this.profile = options.profile ?? DESKTOP_TUTORIAL_PROFILE;
     this.onExit = options.onExit;
     this.onTriggerBusyDemo = options.onTriggerBusyDemo;
     this.onTogglePlaceToPaste = options.onTogglePlaceToPaste;
     this.onOpenGithub = options.onOpenGithub;
     this.onOpenPocket = options.onOpenPocket;
+    if (this.profile.initialSectionId) {
+      this.sectionId = this.profile.initialSectionId;
+      this.screen = "section";
+    }
   }
 
   start(): void {
@@ -388,20 +399,20 @@ export class TutRunner implements InteractiveProgram {
   // --- Input ---
 
   private menuLength(): number {
-    // SECTIONS + GitHub star + Flappy Term + the trailing "Reset progress" entry
-    return SECTIONS.length + 3;
+    // Sections + GitHub star + Flappy Term + the trailing "Reset progress" entry
+    return this.profile.sections.length + 3;
   }
 
   private starPromptIndex(): number {
-    return SECTIONS.length;
+    return this.profile.sections.length;
   }
 
   private flappyIndex(): number {
-    return SECTIONS.length + 1;
+    return this.profile.sections.length + 1;
   }
 
   private resetIndex(): number {
-    return SECTIONS.length + 2;
+    return this.profile.sections.length + 2;
   }
 
   private handleArrow(letter: string): void {
@@ -461,7 +472,7 @@ export class TutRunner implements InteractiveProgram {
         this.render();
         return;
       }
-      const section = SECTIONS[this.menuIndex];
+      const section = this.profile.sections[this.menuIndex];
       if (!section) return;
       this.sectionId = section.id;
       this.screen = "section";
@@ -560,12 +571,12 @@ export class TutRunner implements InteractiveProgram {
     const total = this.state.totalProgress();
     const lines: string[] = [];
     lines.push("");
-    lines.push(`  ${BOLD}Dormouse Playground Tutorial${RESET}`);
+    lines.push(`  ${BOLD}${this.profile.title}${RESET}`);
     lines.push(
       `  ${DIM}\`Esc\`/\`q\` to exit · \`Enter\` to open · \`↑↓\` to navigate${RESET}`,
     );
     lines.push("");
-    SECTIONS.forEach((section, index) => {
+    this.profile.sections.forEach((section, index) => {
       const { done, total: t } = this.state.sectionProgress(section.id);
       const marker = index === this.menuIndex ? `${fg(36)}❯${RESET}` : " ";
       const label = index === this.menuIndex
@@ -762,7 +773,7 @@ export class TutRunner implements InteractiveProgram {
   }
 
   private renderSection(): string[] {
-    const section = SECTIONS.find((s) => s.id === this.sectionId);
+    const section = this.profile.sections.find((s) => s.id === this.sectionId);
     if (!section) {
       throw new Error(`renderSection: unknown sectionId ${this.sectionId}`);
     }
@@ -778,7 +789,7 @@ export class TutRunner implements InteractiveProgram {
       lines.push(...this.renderItem(item, index, activeIndex));
     });
 
-    if (section.id === "copy") {
+    if (section.id === "copy" && this.onTogglePlaceToPaste) {
       lines.push("");
       const indent = "  ";
       const text = "Press `p` to toggle the Place To Paste.";

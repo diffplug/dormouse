@@ -22,8 +22,10 @@ tethering environment.
 
 `/playground/pocket` uses the same fake playground terminal stack as
 `/playground/desktop`: `PlaygroundShellRegistry` attaches a `TutorialShell` to
-every spawned pane, the same fake commands dispatch to browser-side runners, and
-the first pane simply auto-runs `ascii-splash` as its initial command.
+every spawned pane, and the same fake commands dispatch to browser-side runners.
+The first mobile session auto-runs `tut` with the Pocket tutorial profile; a
+second `changelog` session auto-runs `changelog` for the tutorial's copy/paste
+coverage.
 
 ## 2. Prototype Goals
 
@@ -453,7 +455,7 @@ Prototype behavior:
 
 Build exactly this:
 
-* One terminal playground screen.
+* One mobile terminal playground screen with one visible session at a time.
 * Floating theme switcher using the shared Dormouse theme picker.
 * Touch mode selector:
 
@@ -473,6 +475,7 @@ Sessions | Recent | Type | Draft
 * Draft reserve content: `WIP - this will be a place to draft prompts before pasting into the terminal`.
 * Type mode native mobile keyboard input.
 * Gesture mode radial menu for arrows, navigation keys, Esc, Tab, Enter, simple vim-like keys, confirmed Ctrl+C, confirmed Paste, and Quit breakout.
+* Pocket `tut` starts directly in the Gesture navigation section, uses the title `Dormouse Pocket Tutorial`, and credits gesture items from radial-menu input callbacks rather than from native keyboard input.
 * Simple local playground terminal behavior.
 
 ## 13. Prototype Success Criteria

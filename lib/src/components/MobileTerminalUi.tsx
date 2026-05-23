@@ -106,6 +106,7 @@ export interface MobileTerminalUiProps {
   onTouchModeChange?: (mode: MobileTerminalTouchMode) => void;
   cursorTouchAvailable?: boolean;
   onSendInput?: (data: string) => void;
+  onGestureInput?: (input: MobileGestureInputId, data: string) => void;
   onPaste?: () => void | Promise<void>;
   onFocusInput?: () => void;
   sessions?: MobileTerminalSessionItem[];
@@ -384,6 +385,7 @@ export function MobileTerminalUi({
   onTouchModeChange,
   cursorTouchAvailable = false,
   onSendInput,
+  onGestureInput,
   onPaste,
   onFocusInput,
   sessions = [],
@@ -506,7 +508,9 @@ export function MobileTerminalUi({
   const executeGestureAction = useCallback((action: MobileGestureAction | undefined) => {
     if (!action) return;
     if (action.kind === 'input') {
-      sendInput(MOBILE_TERMINAL_KEY_SEQUENCES[action.input]);
+      const data = MOBILE_TERMINAL_KEY_SEQUENCES[action.input];
+      sendInput(data);
+      onGestureInput?.(action.input, data);
       return;
     }
     if (action.kind === 'text') {
@@ -520,7 +524,7 @@ export function MobileTerminalUi({
     if (action.kind === 'confirm') {
       setPendingGestureConfirmation(action);
     }
-  }, [onPaste, sendInput]);
+  }, [onGestureInput, onPaste, sendInput]);
 
   const confirmPendingGestureAction = useCallback(() => {
     if (!pendingGestureConfirmation) return;

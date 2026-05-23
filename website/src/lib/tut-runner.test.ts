@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
-import { SECTIONS, type ItemId } from "./tut-items";
+import {
+  POCKET_TUTORIAL_PROFILE,
+  SECTIONS,
+  type ItemId,
+  type TutorialProfile,
+} from "./tut-items";
 import { TutRunner } from "./tut-runner";
 import { TutorialState } from "./tutorial-state";
 
@@ -8,7 +13,7 @@ const FRAME_RESET = "\x1b[H\x1b[2J";
 
 function mountRunner(
   completedIds: ItemId[] = [],
-  options: { onOpenGithub?: () => void } = {},
+  options: { onOpenGithub?: () => void; profile?: TutorialProfile } = {},
 ) {
   const adapter = new FakePtyAdapter();
   const id = "test-pane";
@@ -18,16 +23,19 @@ function mountRunner(
   let exitCount = 0;
   adapter.onPtyData(({ data }) => frames.push(data));
 
-  const state = new TutorialState();
+  const profile = options.profile;
+  const state = new TutorialState(profile?.sections);
   for (const itemId of completedIds) state.markComplete(itemId);
 
   const runner = new TutRunner({
     adapter,
     terminalId: id,
     state,
+    profile,
     onExit: () => {
       exitCount += 1;
     },
+    onTogglePlaceToPaste: profile?.id === "pocket" ? undefined : () => {},
     onOpenGithub: options.onOpenGithub,
   });
   adapter.setInputHandler(id, (data) => runner.handleInput(data));
@@ -71,6 +79,33 @@ describe("TutRunner snapshots", () => {
     const { sendKeys, lastFrame, dispose } = mountRunner();
     sendKeys("\x1b[B\x1b[B\r");
     expect(lastFrame()).toMatchSnapshot();
+    dispose();
+  });
+
+  it("starts the Pocket tutorial inside Gesture navigation", () => {
+    const { lastFrame, dispose } = mountRunner([], {
+      profile: POCKET_TUTORIAL_PROFILE,
+    });
+
+    expect(lastFrame()).toContain("Gesture navigation");
+    expect(lastFrame()).toContain("Switch between Select and Gestures");
+    expect(lastFrame()).not.toContain("Dormouse Pocket Tutorial");
+    dispose();
+  });
+
+  it("shows the Pocket title and section list after backing out", () => {
+    const { sendKeys, lastFrame, dispose } = mountRunner([], {
+      profile: POCKET_TUTORIAL_PROFILE,
+    });
+
+    sendKeys("\x1b");
+
+    expect(lastFrame()).toContain("Dormouse Pocket Tutorial");
+    expect(lastFrame()).toContain("Gesture navigation");
+    expect(lastFrame()).toContain("Copy paste");
+    expect(lastFrame()).not.toContain("Keyboard navigation");
+    expect(lastFrame()).not.toContain("Alert and TODO");
+    expect(lastFrame()).toContain("[LOCKED 0/8]");
     dispose();
   });
 

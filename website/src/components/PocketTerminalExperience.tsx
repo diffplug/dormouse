@@ -9,16 +9,34 @@ import {
 } from "dormouse-lib/lib/mouse-selection";
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
 import { TutorialState } from "../lib/tutorial-state";
-import { BUSY_DEMO_DURATION_MS, BUSY_DEMO_INTERVAL_MS, TutRunner } from "../lib/tut-runner";
+import { TutDetector } from "../lib/tut-detector";
+import { TutRunner } from "../lib/tut-runner";
+import { POCKET_TUTORIAL_PROFILE, type ItemId } from "../lib/tut-items";
 import { ChangelogRunner } from "../lib/changelog-runner";
 import { POCKET_PLAYGROUND_PATH } from "../lib/playground-routing";
 
 export const POCKET_THEME_ID = "vscode.theme-kimbie-dark.kimbie-dark";
 
 type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
+type MobileGestureInputId = import("dormouse-lib/lib/mobile-gesture-menu").MobileGestureInputId;
 
-const POCKET_PANE = "pocket-ascii-splash";
-const POCKET_SESSIONS: MobileWallSession[] = [{ id: POCKET_PANE, title: "ascii-splash" }];
+const POCKET_TUTORIAL_PANE = "pocket-tut";
+const POCKET_CHANGELOG_PANE = "pocket-changelog";
+const POCKET_SESSIONS: MobileWallSession[] = [
+  { id: POCKET_TUTORIAL_PANE, title: "tutorial" },
+  { id: POCKET_CHANGELOG_PANE, title: "changelog" },
+];
+const POCKET_AUTOSTART_COMMANDS = new Map<string, string>([
+  [POCKET_TUTORIAL_PANE, "tut"],
+  [POCKET_CHANGELOG_PANE, "changelog"],
+]);
+
+const GESTURE_ARROW_INPUTS = new Set<MobileGestureInputId>([
+  "up",
+  "down",
+  "left",
+  "right",
+]);
 
 function usePocketTheme() {
   const restoredRef = useRef(false);
@@ -39,10 +57,12 @@ export function PocketTerminalExperience({
   const [terminalReady, setTerminalReady] = useState(false);
   const adapterRef = useRef<FakePtyAdapter | null>(null);
   const shellRegistryRef = useRef<PlaygroundShellRegistry | null>(null);
+  const detectorRef = useRef<TutDetector | null>(null);
+  const tutorialStateRef = useRef<TutorialState | null>(null);
   const autoStartedRef = useRef<Set<string>>(new Set());
   const spawnUnsubRef = useRef<(() => void) | null>(null);
-  const busyDemoDisposeRef = useRef<(() => void) | null>(null);
-  const [activePaneId, setActivePaneId] = useState(POCKET_PANE);
+  const sawSelectionTouchModeRef = useRef(false);
+  const [activePaneId, setActivePaneId] = useState(POCKET_TUTORIAL_PANE);
   const [touchMode, setTouchMode] = useState<MobileTerminalTouchMode>("gestures");
   const [keyboardMode, setKeyboardMode] = useState<MobileTerminalKeyboardMode>("type");
   const sessionItems = useMobileWallSessionItems(POCKET_SESSIONS, activePaneId);
@@ -67,13 +87,40 @@ export function PocketTerminalExperience({
     window.open(POCKET_PLAYGROUND_PATH, "_blank", "noopener,noreferrer");
   }, []);
 
+  const markPocketItemComplete = useCallback((id: ItemId) => {
+    tutorialStateRef.current?.markComplete(id);
+  }, []);
+
+  const handleTouchModeChange = useCallback((nextMode: MobileTerminalTouchMode) => {
+    setTouchMode(nextMode);
+    if (nextMode === "selection") {
+      sawSelectionTouchModeRef.current = true;
+      return;
+    }
+    if (nextMode === "gestures" && sawSelectionTouchModeRef.current) {
+      sawSelectionTouchModeRef.current = false;
+      markPocketItemComplete("gn-touch-mode");
+    }
+  }, [markPocketItemComplete]);
+
+  const handleGestureInput = useCallback((input: MobileGestureInputId) => {
+    if (GESTURE_ARROW_INPUTS.has(input)) {
+      markPocketItemComplete("gn-arrows");
+    } else if (input === "enter") {
+      markPocketItemComplete("gn-enter");
+    } else if (input === "esc") {
+      markPocketItemComplete("gn-esc");
+    }
+  }, [markPocketItemComplete]);
+
   const tryAutoStart = useCallback((id: string) => {
-    if (id !== POCKET_PANE) return;
+    const command = POCKET_AUTOSTART_COMMANDS.get(id);
+    if (!command) return;
     if (autoStartedRef.current.has(id)) return;
     const shellRegistry = shellRegistryRef.current;
     if (!shellRegistry) return;
     autoStartedRef.current.add(id);
-    shellRegistry.ensureShell(id).runCommand("ascii-splash");
+    shellRegistry.ensureShell(id).runCommand(command);
   }, []);
 
   useEffect(() => {
@@ -82,6 +129,7 @@ export function PocketTerminalExperience({
     async function loadWall() {
       const platform = await import("dormouse-lib/lib/platform");
       const registry = await import("dormouse-lib/lib/terminal-registry");
+      const mouseSelection = await import("dormouse-lib/lib/mouse-selection");
       const scenarios = await import("dormouse-lib/lib/platform/fake-scenarios");
       const asciiSplash = await import("../lib/ascii-splash-runner");
       await import("dormouse-lib/index.css");
@@ -93,9 +141,18 @@ export function PocketTerminalExperience({
       registry.initAlertStateReceiver();
       adapterRef.current = adapter;
       adapter.setDefaultScenario(scenarios.SCENARIO_SHELL_PROMPT);
-      adapter.setScenario(POCKET_PANE, { name: "none", chunks: [] });
+      for (const session of POCKET_SESSIONS) {
+        adapter.setScenario(session.id, { name: "none", chunks: [] });
+      }
 
-      const tutorialState = new TutorialState();
+      const tutorialState = new TutorialState(POCKET_TUTORIAL_PROFILE.sections);
+      tutorialStateRef.current = tutorialState;
+      const detector = new TutDetector(tutorialState, registry, mouseSelection);
+      detector.attach({
+        activePanel: { id: POCKET_TUTORIAL_PANE },
+        onDidActivePanelChange: () => ({ dispose: () => {} }),
+      });
+      detectorRef.current = detector;
       const shellRegistry = new PlaygroundShellRegistry(
         adapter,
         (terminalId, name, args, onExit) => {
@@ -104,16 +161,8 @@ export function PocketTerminalExperience({
               adapter,
               terminalId,
               state: tutorialState,
+              profile: POCKET_TUTORIAL_PROFILE,
               onExit,
-              onTriggerBusyDemo: () => {
-                busyDemoDisposeRef.current?.();
-                busyDemoDisposeRef.current = adapter.pumpActivity(
-                  terminalId,
-                  BUSY_DEMO_DURATION_MS,
-                  BUSY_DEMO_INTERVAL_MS,
-                );
-              },
-              onTogglePlaceToPaste: () => {},
               onOpenGithub: handleOpenGithub,
               onOpenPocket: handleOpenPocket,
             });
@@ -133,13 +182,15 @@ export function PocketTerminalExperience({
         },
       );
       shellRegistryRef.current = shellRegistry;
-      shellRegistry.ensureShell(POCKET_PANE);
+      for (const session of POCKET_SESSIONS) shellRegistry.ensureShell(session.id);
 
       spawnUnsubRef.current = adapter.onPtySpawn(({ id }) => {
         shellRegistry.ensureShell(id);
         tryAutoStart(id);
       });
-      if (adapter.hasPty(POCKET_PANE)) tryAutoStart(POCKET_PANE);
+      for (const session of POCKET_SESSIONS) {
+        if (adapter.hasPty(session.id)) tryAutoStart(session.id);
+      }
 
       setTerminalReady(true);
     }
@@ -150,11 +201,13 @@ export function PocketTerminalExperience({
       cancelled = true;
       spawnUnsubRef.current?.();
       spawnUnsubRef.current = null;
-      busyDemoDisposeRef.current?.();
-      busyDemoDisposeRef.current = null;
+      detectorRef.current?.dispose();
+      detectorRef.current = null;
       shellRegistryRef.current?.disposeAll();
       shellRegistryRef.current = null;
+      tutorialStateRef.current = null;
       autoStartedRef.current.clear();
+      sawSelectionTouchModeRef.current = false;
       adapterRef.current = null;
     };
   }, [handleOpenGithub, handleOpenPocket, tryAutoStart]);
@@ -183,13 +236,14 @@ export function PocketTerminalExperience({
       interactive={interactive}
       fillViewport={fillViewport}
       activeTouchMode={touchMode}
-      onTouchModeChange={setTouchMode}
+      onTouchModeChange={handleTouchModeChange}
       activeKeyboardMode={keyboardMode}
       onKeyboardModeChange={setKeyboardMode}
       cursorTouchAvailable={cursorTouchAvailable}
       sessions={sessionItems}
       onSessionSelect={setActivePaneId}
       onSendInput={(data) => adapterRef.current?.writePty(activePaneId, data)}
+      onGestureInput={handleGestureInput}
       onPaste={async () => {
         const { doPaste } = await import("dormouse-lib/lib/clipboard");
         await doPaste(activePaneId);

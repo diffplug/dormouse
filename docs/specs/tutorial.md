@@ -7,16 +7,21 @@ The website playground has canonical device-specific routes:
 - `/playground/pocket` hosts the mobile Pocket playground. On desktop it shows the temporary Pocket marketing/share page from the old `/pocket` route, including the phone preview and notify signup form.
 - `/pocket` temporarily redirects to `/playground/pocket`. This is a temporary launch-state redirect; the future real tethering surface should stay separate from the playground URL when it exists.
 
-The interactive desktop TUI lives at `/playground/desktop`. Each item starts pending, the first incomplete item is marked as active, and completed items become green checks when Dormouse detects the corresponding action.
+The `tut` TUI has device-specific profiles:
+
+- **Desktop** (`/playground/desktop`) uses `Dormouse Playground Tutorial`, starts at the top-level menu, and includes Keyboard navigation, Alert and TODO, and Copy paste.
+- **Pocket** (`/playground/pocket` mobile) uses `Dormouse Pocket Tutorial`, starts directly inside Gesture navigation, removes Keyboard navigation and Alert and TODO, and includes Gesture navigation plus Copy paste.
+
+Each item starts pending, the first incomplete item is marked as active, and completed items become green checks when Dormouse detects the corresponding action.
 
 ## Architecture
 
 Three browser-side pieces in `website/src/lib/`, mirroring the pattern in `website/src/lib/ascii-splash-runner.ts` (xterm alt-screen + `FakePtyAdapter` boundary, no Node `terminal-kit` package):
 
-- **`tut-runner.ts`** (`TutRunner`) — alt-screen TUI. Subscribes to `TutorialState` and re-renders whenever progress changes. Routes input bytes via `FakePtyAdapter.writePty(id, …)`.
+- **`tut-runner.ts`** (`TutRunner`) — profile-aware alt-screen TUI. Subscribes to `TutorialState` and re-renders whenever progress changes. Routes input bytes via `FakePtyAdapter.writePty(id, …)`.
 - **`tut-detector.ts`** (`TutDetector`) — wires app events to `TutorialState.markComplete(id)`. Subscribes to `DockviewApi.onDidActivePanelChange`, the `WallEvent` stream, the `subscribeToActivity` store from `dormouse-lib/lib/terminal-registry`, and the `subscribeToMouseSelection` store from `dormouse-lib/lib/mouse-selection`.
-- **`tutorial-state.ts`** (`TutorialState`) — single in-memory progress store, persisted as a JSON array of completed item ids under the `dormouse-tut-v3` localStorage key. The top-level GitHub star prompt persists separately under `dormouse-tut-star-v1`.
-- **`tut-items.ts`** — section + item definitions (titles, hints) shared by runner and detector. Item ids are stable; they are the localStorage key suffixes.
+- **`tutorial-state.ts`** (`TutorialState`) — single in-memory progress store, persisted as a JSON array of completed item ids under the `dormouse-tut-v3` localStorage key. Progress totals are computed from the active profile's section list. The top-level GitHub star prompt persists separately under `dormouse-tut-star-v1`.
+- **`tut-items.ts`** — section + item definitions (titles, hints) plus `DESKTOP_TUTORIAL_PROFILE` and `POCKET_TUTORIAL_PROFILE`, shared by runner and detector. Item ids are stable; they are the localStorage key suffixes.
 
 ## Layout
 
@@ -30,9 +35,16 @@ Three browser-side pieces in `website/src/lib/`, mirroring the pattern in `websi
 
 Every playground pane gets a `TutorialShell` input handler through `PlaygroundShellRegistry`. Newly split or spawned fake terminals use `SCENARIO_SHELL_PROMPT` by default. The shell dispatches by command name to a `startProgram` factory provided by the page; the factory wires `tut` → `TutRunner` and `ascii-splash` / `splash` → `AsciiSplashRunner`.
 
+On `/playground/pocket`, `MobileWall` starts with two sessions:
+
+- **`pocket-tut`** — titled "tutorial", auto-launches `TutRunner` with `POCKET_TUTORIAL_PROFILE`, and is the active session.
+- **`pocket-changelog`** — titled "changelog", auto-launches `ChangelogRunner` so the Copy paste section has wrapped text and a mouse-capturing TUI target.
+
+The Pocket page attaches `TutDetector` with the shared activity and mouse-selection stores so Copy paste detections work without desktop `Wall` events. Pocket-specific Gesture navigation detections are wired in `PocketTerminalExperience`: touch-mode changes complete `gn-touch-mode`, and `MobileTerminalUi.onGestureInput` completes `gn-arrows`, `gn-enter`, and `gn-esc` only for radial-menu generated inputs.
+
 ## Tutorial Sections
 
-The runner shows a top-level menu first. Selecting a section drills into its item list. Each section shows `[N/M complete]` next to its title. The menu helper below `Dormouse Playground Tutorial` shows only navigation shortcuts, not overall completion.
+The desktop runner shows a top-level menu first. The Pocket runner starts directly inside `Gesture navigation`; pressing Esc returns to its top-level menu. Selecting a section drills into its item list. Each section shows `[N/M complete]` next to its title. The menu helper below the profile title shows only navigation shortcuts, not overall completion.
 
 The top-level menu also includes `Starred on GitHub`, which sits directly below `Copy paste` without a blank spacer, and shows `[not yet]` until selected and `[thanks ⭐]` after it has been resolved. Pressing Enter on that row calls `onOpenGithub`, which `/playground/desktop` and the Pocket playground wire to `window.open("https://github.com/diffplug/dormouse", "_blank", "noopener,noreferrer")`.
 
@@ -46,7 +58,7 @@ Inside a section, items render as one of:
 
 Esc / `q` / Ctrl+C pops back one screen (section → menu → exit). Exiting the runner returns the pane to the shell prompt; running `tut` re-enters.
 
-### Section 1 — Keyboard navigation (7 items)
+### Desktop Section 1 — Keyboard navigation (7 items)
 
 | ID | Title | Detection |
 |---|---|---|
@@ -62,7 +74,7 @@ Prose under the section: "tmux shortcuts also work — `% " d x`."
 
 Note: `-` produces a `direction: 'vertical'` split (panes stack top/bottom = horizontal divider); `|` produces `direction: 'horizontal'` (panes side by side = vertical divider). The detector maps event direction → user-facing item accordingly.
 
-### Section 2 — Alert and TODO (6 items)
+### Desktop Section 2 — Alert and TODO (6 items)
 
 The detector subscribes to `subscribeToActivity()` and tracks per-id `(status, watchingEnabled, todo)` transitions.
 
@@ -80,7 +92,7 @@ The detector remembers the most recent pane whose `watchingEnabled` flag is true
 1. Resolves that pane to its current PTY session id, then calls `adapter.pumpActivity(sessionId, BUSY_DEMO_DURATION_MS, 800)` — drives the alert-manager's activity monitor on the same WATCHING-enabled session with **no text output**, so the bell tilts to BUSY without scrolling any scenario text. The session id is resolved at trigger time so `Cmd/Ctrl+Arrow` swaps do not leave the tutorial pumping an old pane id. If no WATCHING-enabled pane is known, the runner falls back to `PANE_BOXED` (the changelog pane). `BUSY_DEMO_DURATION_MS` is `cfg.alert.userAttention + 250` so silence begins after the attention idle window has expired, with a small scheduler-jitter guard; otherwise the "user is looking at this pane" check inside `ActivityMonitor.startNeedsAttentionConfirmTimer` would suppress the ring rather than let it fire.
 2. Animates a countdown in-place where the "Press s…" hint was: `⠋ Fake task will finish in N seconds.` ticking down to 1, then a static `✓ Fake task finished. Press s to start another one.` once the activity stops. Detection is purely timing-based via the existing `ActivityMonitor`, so no shell integration is required.
 
-### Section 3 — Copy paste (4 items)
+### Shared Section — Copy paste (4 items)
 
 The detector subscribes to `subscribeToMouseSelection()` and tracks per-id transitions on `selection`, `copyFlash`, and `override`.
 
@@ -89,7 +101,7 @@ The detector subscribes to `subscribeToMouseSelection()` and tracks per-id trans
 | `cp-select` | Drag-select text in any pane | `selection` transitions `null → non-null` |
 | `cp-raw` | Click Copy Raw | `copyFlash` transitions to `'raw'` (set by `flashCopy()` after the popup button fires) |
 | `cp-rewrap` | Click Copy Rewrapped on wrapped text in the changelog pane | `copyFlash` transitions to `'rewrapped'` |
-| `cp-override` | Run `ascii-splash`, then click its cursor icon | `override` transitions `'off' → 'temporary' \| 'permanent'` |
+| `cp-override` | Click the cursor icon in `changelog` | `override` transitions `'off' → 'temporary' \| 'permanent'` |
 
 Prose:
 - "Some programs trap the mouse — the cursor icon lets you override."
@@ -97,19 +109,33 @@ Prose:
 
 The Copy Rewrapped step uses the wrapped item lines `ChangelogRunner` produces in the `tut-boxed` pane. The runner word-wraps each item to fit the pane width, so Rewrapped joins those lines back together while Raw preserves the wrap; clipboard contents visibly differ. The user must override mouse capture first (the `cp-override` step) before drag-selecting inside the changelog pane, since the runner enables SGR mouse-reporting.
 
+Pocket uses the same Copy paste item ids with mobile-specific wording: the user switches to the `changelog` session through the Sessions reserve instead of using a desktop tab.
+
 While the Copy paste section is open, pressing `p` toggles the **Place To Paste** modal — a draggable scratch box with eight pointer-event resize handles (four edges + four corners), rendered by `website/src/components/PlaceToPaste.tsx` and mounted at the page level. `TutRunner` intercepts `p`/`P` (mirroring the Alert section's `s` busy-demo intercept) and calls `onTogglePlaceToPaste`; `Playground` flips a `placeToPasteOpen` flag so the modal is portal-free and overlays the wall. The runner renders a persistent `Press \`p\` to toggle the Place To Paste …` line above the section's prose paragraph so the prompt is visible regardless of which item is active. Users paste copied text into the modal's single textarea and resize it to see whether the text reflows (Rewrapped) or stays line-broken (Raw).
+
+The Place To Paste prompt appears only when the runner receives an `onTogglePlaceToPaste` callback. Desktop passes the callback; Pocket does not.
+
+### Pocket Section 1 — Gesture navigation (4 items)
+
+| ID | Title | Detection |
+|---|---|---|
+| `gn-touch-mode` | Switch between Select and Gestures | Pocket touch-mode selector visits Select, then returns to Gestures |
+| `gn-arrows` | Use Gestures to send an arrow key | `MobileTerminalUi.onGestureInput` fires for `up`, `down`, `left`, or `right` |
+| `gn-enter` | Use Gestures to press Enter | `MobileTerminalUi.onGestureInput` fires for `enter` |
+| `gn-esc` | Use Gestures to press Esc | `MobileTerminalUi.onGestureInput` fires for `esc`; the runner then handles Esc normally and returns to the menu |
 
 ## Lib changes added for this tutorial
 
 - **`WallEvent.kill`** and **`WallEvent.move`** — new discriminants on the `WallEvent` union (`lib/src/components/wall/wall-types.ts`). `kill` fires from `acceptKill` in `Wall.tsx`. `move` fires from `handle-pane-shortcuts.ts` after the Cmd/Ctrl-Arrow swap, via a new `fireEvent` callback added to `WallKeyboardCtx`.
 - **`FakePtyAdapter.pumpActivity(id, durationMs, intervalMs)`** — drives the alert-manager for a fixed duration with no data output. The runner uses this so the bell on the demo pane tilts/rings while the visible "task running" animation lives entirely inside the tutorial pane.
 - **`FakePtyAdapter.sendOutput(id, data)`** — pushes data through the data handlers as if the PTY produced it, also driving `alertManager.onData()`. Used by `TutRunner` and `AsciiSplashRunner` so browser-side echoes still feed the activity monitor.
+- **`MobileTerminalUi.onGestureInput(input, data)`** — optional callback fired only for radial-menu input actions after the corresponding terminal byte sequence is sent. Pocket uses it to credit gesture tutorial items without confusing native keyboard input for gestures.
 
 `SCENARIO_TUTORIAL_MOTD` was removed — the runner now owns the main pane's screen.
 
 ## Storage
 
-- Completion: `localStorage["dormouse-tut-v3"] = JSON.stringify([...completedItemIds])`. Removed on `TutorialState.reset()`. Unknown ids in a stored payload are filtered out on load, so renaming an id is a one-way reset for that item.
+- Completion: `localStorage["dormouse-tut-v3"] = JSON.stringify([...completedItemIds])`. Removed on `TutorialState.reset()`. Unknown ids in a stored payload are filtered out on load, so renaming an id is a one-way reset for that item. The same key stores both desktop and Pocket item ids; profile totals count only items in that profile's sections.
 - GitHub star prompt: `localStorage["dormouse-tut-star-v1"] = "true"` after the user selects `Starred on GitHub`. Removed on `TutorialState.reset()`.
 - Flappy Term high score: `localStorage["dormouse-flappy-high-v1"] = String(score)` after each new high score. Removed on `TutorialState.reset()`.
 - Legacy keys `dormouse-tutorial-step-N` and `dormouse-tut-v2-*` from previous designs are not read; new playground sessions get a fresh start.
