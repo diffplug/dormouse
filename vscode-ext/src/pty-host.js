@@ -20,7 +20,7 @@ const dorControl = createDorControlServer({
 
 process.on('message', (msg) => {
   switch (msg.type) {
-    case 'spawn':   mgr.spawn(msg.id, { cols: msg.cols, rows: msg.rows, cwd: msg.cwd, shell: msg.shell, args: msg.args, env: msg.env, forceEnvWrapper: msg.forceEnvWrapper }); break;
+    case 'spawn':   mgr.spawn(msg.id, { cols: msg.cols, rows: msg.rows, cwd: msg.cwd, shell: msg.shell, args: msg.args, env: msg.env }); break;
     case 'input':   mgr.write(msg.id, msg.data); break;
     case 'resize':  mgr.resize(msg.id, msg.cols, msg.rows); break;
     case 'kill':    mgr.kill(msg.id); break;

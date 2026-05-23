@@ -86,41 +86,6 @@ test('resolveSpawnConfig applies per-spawn dor CLI env overrides', () => {
   assert.equal(config.env.DORMOUSE_SURFACE_ID, 'pane-1');
 });
 
-test('resolveSpawnConfig can wrap POSIX shell with explicit dor env exports', () => {
-  const config = resolveSpawnConfig(
-    {
-      shell: '/bin/zsh',
-      surfaceId: 'pane-1',
-      forceEnvWrapper: true,
-      env: {
-        DORMOUSE_CLI_BIN: '/extension/dor-cli/bin',
-        DORMOUSE_CLI_JS: '/extension/dor-cli/dist/dor.js',
-        DORMOUSE_CONTROL_SOCKET: '/tmp/dor.sock',
-        DORMOUSE_CONTROL_TOKEN: 'token',
-        DORMOUSE_NODE: '/usr/bin/node',
-      },
-    },
-    {
-      platform: 'linux',
-      env: {
-        PATH: '/usr/bin',
-      },
-      osModule: {
-        homedir: () => '/home/tester',
-        tmpdir: () => '/tmp/fallback',
-      },
-    },
-  );
-
-  assert.equal(config.shell, '/bin/sh');
-  assert.deepEqual(config.shellArgs.slice(0, 3), [
-    '-c',
-    "export PATH='/extension/dor-cli/bin:/usr/bin' DORMOUSE_NODE='/usr/bin/node' DORMOUSE_CLI_JS='/extension/dor-cli/dist/dor.js' DORMOUSE_CONTROL_SOCKET='/tmp/dor.sock' DORMOUSE_CONTROL_TOKEN='token' DORMOUSE_SURFACE_ID='pane-1'; exec \"$@\"",
-    'dormouse-env',
-  ]);
-  assert.deepEqual(config.shellArgs.slice(3), ['/bin/zsh', '-l']);
-});
-
 test('withPrependedPath preserves Windows Path casing', () => {
   const env = withPrependedPath(
     { Path: 'C:\\Windows\\System32' },
