@@ -1,7 +1,10 @@
 const fs = require('node:fs');
 const net = require('node:net');
 
-function createDorControlServer({ socketPath, token, send, timeoutMs = 5000 }) {
+// The server timeout outlasts the dor client's own 5s deadline so the client
+// always controls the outcome; this timer only exists to release a pending
+// entry when the webview never answers at all.
+function createDorControlServer({ socketPath, token, send, timeoutMs = 10000 }) {
   if (!socketPath || !token) return null;
 
   const pending = new Map();
@@ -14,6 +17,11 @@ function createDorControlServer({ socketPath, token, send, timeoutMs = 5000 }) {
   const server = net.createServer((socket) => {
     socket.setEncoding('utf8');
     let buffer = '';
+
+    // A `dor` client that times out destroys its socket; without this handler
+    // the resulting ECONNRESET would surface as an uncaught exception and take
+    // down the long-lived sidecar/pty-host.
+    socket.on('error', () => {});
 
     socket.on('data', (chunk) => {
       buffer += chunk;
@@ -115,7 +123,14 @@ function createDorControlServer({ socketPath, token, send, timeoutMs = 5000 }) {
 }
 
 function writeResponse(socket, response) {
-  socket.end(`${JSON.stringify(response)}\n`);
+  // The peer may have already gone away (client timeout/Ctrl-C destroyed the
+  // socket) by the time a late webview response or the server timeout fires.
+  if (socket.destroyed || socket.writableEnded) return;
+  try {
+    socket.end(`${JSON.stringify(response)}\n`);
+  } catch {
+    // Socket closed underneath us; nothing to deliver.
+  }
 }
 
 module.exports = { createDorControlServer };

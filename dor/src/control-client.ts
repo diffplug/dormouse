@@ -20,6 +20,11 @@ export class SocketControlClient implements ControlClient {
   private readonly surfaceId: string | undefined;
   private readonly timeoutMs: number;
   private nextRequestId = 0;
+  // Each `dor` invocation is its own short-lived process, so a plain counter
+  // would emit `dor-1` for every concurrent call and collide in the server's
+  // pending map. Mix in a per-process random base so request ids stay unique
+  // across simultaneous invocations.
+  private readonly idBase = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
   constructor(options: SocketControlClientOptions) {
     this.socketPath = options.socketPath;
@@ -33,7 +38,7 @@ export class SocketControlClient implements ControlClient {
   }
 
   private request<T>(method: string, params: unknown): Promise<T> {
-    const requestId = `dor-${++this.nextRequestId}`;
+    const requestId = `dor-${this.idBase}-${++this.nextRequestId}`;
     return new Promise((resolve, reject) => {
       const socket = createConnection({ path: this.socketPath });
       let responseBuffer = '';
