@@ -297,6 +297,7 @@ export function spawn(id: string, options?: PtySpawnOptions): void {
     shell: options?.shell,
     args: options?.args,
     env: dorEnv,
+    forceEnvWrapper: true,
   });
 }
 

@@ -101,7 +101,10 @@ The forked PTY host runs the same control server module as standalone and uses
 the shared PTY core to prepend the staged `bin` directory to each spawned PTY's
 `PATH` while setting `DORMOUSE_SURFACE_ID`. VS Code also sends the Dormouse CLI
 environment explicitly on each PTY spawn, so the spawned shell does not depend on
-ambient extension-host or PTY-host process environment state.
+ambient extension-host or PTY-host process environment state. On POSIX, VS Code
+spawns through a tiny `/bin/sh -c` env wrapper that exports the Dormouse CLI env
+and then `exec`s the selected user shell; this preserves the user's shell while
+avoiding host-specific env propagation surprises.
 
 Because VS Code can host multiple Dormouse webviews in one extension host, `dor`
 requests include the invoking `DORMOUSE_SURFACE_ID` as socket metadata. The PTY

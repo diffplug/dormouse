@@ -76,8 +76,39 @@ function withoutInternalDormouseEnv(env) {
   return next;
 }
 
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function withPosixEnvWrapper(config, platform) {
+  if (platform === 'win32' || !config.forceEnvWrapper) {
+    return config;
+  }
+
+  const env = config.env || {};
+  const exports = [
+    'PATH',
+    'DORMOUSE_NODE',
+    'DORMOUSE_CLI_JS',
+    'DORMOUSE_CONTROL_SOCKET',
+    'DORMOUSE_CONTROL_TOKEN',
+    'DORMOUSE_SURFACE_ID',
+  ]
+    .filter((key) => env[key])
+    .map((key) => `${key}=${shellQuote(env[key])}`)
+    .join(' ');
+
+  if (!exports) return config;
+
+  return {
+    ...config,
+    shell: '/bin/sh',
+    shellArgs: ['-c', `export ${exports}; exec "$@"`, 'dormouse-env', config.shell, ...config.shellArgs],
+  };
+}
+
 function resolveSpawnConfig(options, runtime = {}) {
-  const { cols = 80, rows = 30, cwd, shell: explicitShell, args: explicitArgs, surfaceId } = options || {};
+  const { cols = 80, rows = 30, cwd, shell: explicitShell, args: explicitArgs, surfaceId, forceEnvWrapper = false } = options || {};
   const env = {
     ...(runtime.env || process.env),
     ...(options?.env || {}),
@@ -96,7 +127,7 @@ function resolveSpawnConfig(options, runtime = {}) {
 
   const envWithCliPath = withoutInternalDormouseEnv(withPrependedPath(env, env.DORMOUSE_CLI_BIN, platform));
 
-  return {
+  return withPosixEnvWrapper({
     cols,
     rows,
     cwd: missingExplicitCwd ? defaultCwd : (cwd || defaultCwd),
@@ -111,7 +142,8 @@ function resolveSpawnConfig(options, runtime = {}) {
     },
     shell,
     shellArgs,
-  };
+    forceEnvWrapper,
+  }, platform);
 }
 
 module.exports.resolveSpawnConfig = resolveSpawnConfig;
