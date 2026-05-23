@@ -1,0 +1,6 @@
+exitCode: 0
+stdout:
+Usage: dor list-surfaces [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--window <id|ref|index>] [--pane <id|ref|index>]
+
+stderr:
+

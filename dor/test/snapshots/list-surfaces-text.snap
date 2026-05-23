@@ -1,0 +1,7 @@
+exitCode: 0
+stdout:
+* surface:1  terminal  [focused]  "build"
+  surface:2  terminal  "repo \"watch\""
+
+stderr:
+

@@ -1,0 +1,6 @@
+exitCode: 0
+stdout:
+Usage: dor new-split <left|right|up|down> [--surface <id|ref|index>] [--panel <id|ref|index>] [--focus <true|false>] [--workspace <id|ref|index>] [--window <id|ref|index>]
+
+stderr:
+

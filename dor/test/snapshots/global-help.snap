@@ -1,0 +1,18 @@
+exitCode: 0
+stdout:
+dor - control Dormouse from a terminal
+
+Usage:
+  dor <command> [options]
+
+Commands:
+  new-split <left|right|up|down>
+  list-surfaces
+  focus-surface <surface>
+
+Aliases:
+  list-panels, list-pane-surfaces
+  focus-panel
+
+stderr:
+

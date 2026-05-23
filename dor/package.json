@@ -12,7 +12,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "test": "pnpm run build && node --test test/*.test.mjs"
   },
   "devDependencies": {
     "typescript": "^6.0.3"
