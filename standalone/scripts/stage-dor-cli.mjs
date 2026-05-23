@@ -1,4 +1,4 @@
-import { chmod, cp, mkdir, rm } from 'node:fs/promises';
+import { chmod, cp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,6 +11,17 @@ await rm(targetRoot, { recursive: true, force: true });
 await mkdir(targetRoot, { recursive: true });
 await cp(resolve(sourceRoot, 'bin'), resolve(targetRoot, 'bin'), { recursive: true });
 await cp(resolve(sourceRoot, 'dist'), resolve(targetRoot, 'dist'), { recursive: true });
+await writeFile(
+  resolve(targetRoot, 'package.json'),
+  `${JSON.stringify({
+    name: 'dor',
+    private: true,
+    type: 'module',
+    bin: {
+      dor: './dist/dor.js',
+    },
+  }, null, 2)}\n`,
+);
 
 if (process.platform !== 'win32') {
   await chmod(resolve(targetRoot, 'bin', 'dor'), 0o755);

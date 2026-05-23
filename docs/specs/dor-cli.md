@@ -26,6 +26,8 @@ The bundled CLI directory contains:
 - `dor` — POSIX launcher script.
 - `dor.cmd` — Windows launcher script for `cmd.exe` and PowerShell.
 - `dor.js` — compiled TypeScript CLI entrypoint.
+- `package.json` — package metadata declaring `"type": "module"` so Node runs
+  the compiled ESM entrypoint without falling back to parent sidecar metadata.
 
 The launcher scripts are intentionally tiny wrappers around the bundled
 JavaScript entrypoint. They must use environment variables injected by the host,
