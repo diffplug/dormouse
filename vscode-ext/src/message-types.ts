@@ -16,6 +16,7 @@ export type WebviewMessage =
   | { type: 'dormouse:init' }
   | { type: 'dormouse:saveState'; state: unknown }
   | { type: 'dormouse:flushSessionSaveDone'; requestId: string }
+  | { type: 'dor:controlResponse'; requestId: string; ok: boolean; result?: unknown; error?: string }
   // Alert actions
   | { type: 'alert:remove'; id: string }
   | { type: 'alert:toggle'; id: string }
@@ -58,6 +59,7 @@ export type ExtensionMessage =
   | { type: 'dormouse:selectedShell'; shell?: string; args?: string[] }
   | { type: 'dormouse:openThemeDebugger' }
   | { type: 'dormouse:flushSessionSave'; requestId: string }
+  | { type: 'dor:controlRequest'; requestId: string; surfaceId?: string; method: string; params?: Record<string, unknown> }
   // Alert state updates
   | {
     type: 'alert:state';

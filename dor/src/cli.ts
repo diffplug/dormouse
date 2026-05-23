@@ -234,6 +234,7 @@ function resolveControlClient(options: CliOptions): ParseResult<ControlClient> {
     value: new SocketControlClient({
       socketPath: options.env!.DORMOUSE_CONTROL_SOCKET!,
       token: options.env!.DORMOUSE_CONTROL_TOKEN!,
+      surfaceId: options.env!.DORMOUSE_SURFACE_ID,
     }),
   };
 }

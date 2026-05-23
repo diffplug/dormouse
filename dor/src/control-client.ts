@@ -4,6 +4,7 @@ import type { ControlClient, ListSurfacesRequest, ListSurfacesResponse } from '.
 export interface SocketControlClientOptions {
   socketPath: string;
   token: string;
+  surfaceId?: string;
   timeoutMs?: number;
 }
 
@@ -16,12 +17,14 @@ interface SocketResponse<T> {
 export class SocketControlClient implements ControlClient {
   private readonly socketPath: string;
   private readonly token: string;
+  private readonly surfaceId: string | undefined;
   private readonly timeoutMs: number;
   private nextRequestId = 0;
 
   constructor(options: SocketControlClientOptions) {
     this.socketPath = options.socketPath;
     this.token = options.token;
+    this.surfaceId = options.surfaceId;
     this.timeoutMs = options.timeoutMs ?? 5000;
   }
 
@@ -53,6 +56,7 @@ export class SocketControlClient implements ControlClient {
         socket.write(`${JSON.stringify({
           requestId,
           token: this.token,
+          surfaceId: this.surfaceId,
           method,
           params,
         })}\n`);

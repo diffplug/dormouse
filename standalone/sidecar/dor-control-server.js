@@ -52,6 +52,7 @@ function createDorControlServer({ socketPath, token, send, timeoutMs = 5000 }) {
     pending.set(request.requestId, { socket, timeout });
     send('dor:controlRequest', {
       requestId: request.requestId,
+      surfaceId: typeof request.surfaceId === 'string' ? request.surfaceId : undefined,
       method: request.method,
       params: request.params ?? {},
     });

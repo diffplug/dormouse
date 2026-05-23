@@ -1,11 +1,27 @@
 import { fork, ChildProcess, execFileSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
+import { randomBytes } from 'crypto';
 import { log } from './log';
 
 export interface PtyCallbacks {
   onData(id: string, data: string): void;
   onExit(id: string, exitCode: number): void;
+}
+
+export interface DorControlRequest {
+  requestId: string;
+  surfaceId?: string;
+  method: string;
+  params?: Record<string, unknown>;
+}
+
+export interface DorControlResponse {
+  requestId: string;
+  ok: boolean;
+  result?: unknown;
+  error?: string;
 }
 
 interface PtyBufferEntry {
@@ -95,7 +111,12 @@ let child: ChildProcess | null = null;
 let childReady = false;
 let pendingMessages: any[] = [];
 const callbackSet = new Set<PtyCallbacks>();
+const dorControlRequestListeners = new Set<(request: DorControlRequest) => void>();
 let cachedNodePath: string | null = null;
+const dorControlToken = randomBytes(24).toString('hex');
+const dorControlSocket = process.platform === 'win32'
+  ? `\\\\.\\pipe\\dormouse-vscode-${process.pid}-dor`
+  : path.join(os.tmpdir(), `dormouse-vscode-${process.pid}-dor.sock`);
 
 function findSystemNode(): string {
   if (cachedNodePath) return cachedNodePath;
@@ -145,12 +166,20 @@ function ensureChild(extensionPath: string): ChildProcess {
 
   const hostScript = path.join(extensionPath, 'dist', 'pty-host.js');
   const nodePath = findSystemNode();
+  const dorCliRoot = path.join(extensionPath, 'dor-cli');
 
   child = fork(hostScript, [], {
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     execPath: nodePath,
     execArgv: [], // clear --inspect flags inherited from VSCode debug
-    env: process.env,
+    env: {
+      ...process.env,
+      DORMOUSE_NODE: nodePath,
+      DORMOUSE_CLI_BIN: path.join(dorCliRoot, 'bin'),
+      DORMOUSE_CLI_JS: path.join(dorCliRoot, 'dist', 'dor.js'),
+      DORMOUSE_CONTROL_SOCKET: dorControlSocket,
+      DORMOUSE_CONTROL_TOKEN: dorControlToken,
+    },
   });
 
   childReady = false;
@@ -171,6 +200,15 @@ function ensureChild(extensionPath: string): ChildProcess {
       for (const cb of callbackSet) cb.onExit(msg.id, msg.exitCode);
     } else if (msg.type === 'error') {
       log.error(`PTY error for ${msg.id}:`, msg.message);
+    } else if (msg.type === 'dor:controlRequest') {
+      for (const listener of dorControlRequestListeners) {
+        listener({
+          requestId: msg.requestId,
+          surfaceId: msg.surfaceId,
+          method: msg.method,
+          params: msg.params,
+        });
+      }
     }
   });
 
@@ -198,6 +236,16 @@ export function setExtensionPath(p: string): void {
 export function addCallbacks(cb: PtyCallbacks): () => void {
   callbackSet.add(cb);
   return () => { callbackSet.delete(cb); };
+}
+
+export function onDorControlRequest(listener: (request: DorControlRequest) => void): () => void {
+  dorControlRequestListeners.add(listener);
+  return () => { dorControlRequestListeners.delete(listener); };
+}
+
+export function respondDorControl(response: DorControlResponse): void {
+  if (!child?.connected) return;
+  child.send({ type: 'dor:controlResponse', ...response });
 }
 
 function sendToChild(msg: any): void {

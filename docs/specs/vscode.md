@@ -206,8 +206,9 @@ connect-src ${webview.cspSource};
 pnpm build:vscode =
   1. pnpm --filter dormouse-lib build    (TypeScript compile)
   2. pnpm --filter dormouse build:frontend (Vite: lib -> vscode-ext/media/)
-  3. pnpm --filter dormouse build          (esbuild: extension.ts + pty-host.js -> dist/,
-                                             copy node-pty prebuilds -> dist/node-pty)
+  3. pnpm --filter dormouse build          (stage dor-cli, esbuild extension.ts
+                                             + pty-host.js -> dist/, copy
+                                             node-pty prebuilds -> dist/node-pty)
 
 pnpm dogfood:vscode = build + package VSIX + install locally
   (then: Cmd+Shift+P -> "Developer: Reload Window" to pick up changes)

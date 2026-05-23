@@ -12,6 +12,7 @@ lib/.vite/
 
 # VSCode extension
 vscode-ext/dist/
+vscode-ext/dor-cli/
 vscode-ext/media/
 vscode-ext/node_modules/
 vscode-ext/*.vsix

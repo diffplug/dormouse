@@ -8,6 +8,12 @@ import {
   applyTerminalSemanticEventsByPtyId,
 } from '../terminal-state-store';
 
+type DorControlResponse = {
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+};
+
 export class VSCodeAdapter implements PlatformAdapter {
   private vscode: ReturnType<typeof acquireVsCodeApi>;
   private hostState: unknown = (globalThis as typeof globalThis & { __MOUSETERM_HOST_STATE__?: unknown }).__MOUSETERM_HOST_STATE__ ?? null;
@@ -89,6 +95,24 @@ export class VSCodeAdapter implements PlatformAdapter {
         setDefaultShellOpts(msg.shell ? { shell: msg.shell, args: msg.args } : null);
       } else if (msg.type === 'dormouse:openThemeDebugger') {
         window.dispatchEvent(new CustomEvent('dormouse:openThemeDebugger'));
+      } else if (msg.type === 'dor:controlRequest') {
+        const respond = (response: DorControlResponse) => {
+          this.vscode.postMessage({
+            type: 'dor:controlResponse',
+            requestId: msg.requestId,
+            ...response,
+          });
+        };
+
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            requestId: msg.requestId,
+            surfaceId: msg.surfaceId,
+            method: msg.method,
+            params: msg.params ?? {},
+            respond,
+          },
+        }));
       }
     });
   }

@@ -59,6 +59,7 @@ test('dor control server forwards valid requests and writes responses', async ()
     const responsePromise = sendSocketRequest(socketPath, {
       requestId: 'request-1',
       token: 'secret',
+      surfaceId: 'pane-1',
       method: 'surface.list',
       params: { pane: 'focused' },
     });
@@ -69,6 +70,7 @@ test('dor control server forwards valid requests and writes responses', async ()
       event: 'dor:controlRequest',
       data: {
         requestId: 'request-1',
+        surfaceId: 'pane-1',
         method: 'surface.list',
         params: { pane: 'focused' },
       },
