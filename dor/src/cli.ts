@@ -248,6 +248,7 @@ function requireControlEndpoint(options: CliOptions): ParseResult<void> {
 }
 
 function renderSurfacesText(surfaces: Surface[], idFormat: IdFormat): string {
+  if (surfaces.length === 0) return '';
   return `${surfaces.map((surface) => renderSurfaceTextLine(surface, idFormat)).join('\n')}\n`;
 }
 
