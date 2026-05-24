@@ -257,8 +257,10 @@ Note: the update manifest URLs include the version in the *path* (`/v0.1.0/`) bu
 A single `CHANGELOG.md` at the repo root, following [Keep a Changelog](https://keepachangelog.com/) format. The `[Unreleased]` section is promoted to `[X.Y.Z]` at release time. The release notes include both standalone and VSCode changes in one entry.
 
 The website changelog page imports generated data from `website/src/data/changelog.json`, but `CHANGELOG.md` is the source of truth and the JSON is gitignored. You do not normally run `website/scripts/generate-changelog.js` by hand:
-- `pnpm --filter dormouse-website build` runs it through the website `prebuild` script before Vite bundles the static site.
+- `pnpm --filter dormouse-website build` runs it through the website `prebuild` script before `react-router build` prerenders the static site.
 - `pnpm --filter dormouse-website dev` and `pnpm --filter dormouse-website test` also regenerate it through lifecycle scripts so clean checkouts work locally.
+
+The website uses React Router Framework Mode with `ssr: false` and a prerender list in `website/react-router.config.ts`. The changelog filter route is prerendered for both `0.9.0` and `v0.9.0` style version paths derived from the generated changelog data, so update links such as `/changelog/after/0.4.0` and shareable browser URLs such as `/changelog/after/v0.9.0` have static HTML. React Router writes the client build to `website/dist/client`; the website `postbuild` script flattens that client output back into `website/dist` because Cloudflare Pages deploys that directory.
 
 If you edit `CHANGELOG.md` manually outside `/release-notes` and want to preview the generated data immediately, run `node website/scripts/generate-changelog.js`. Do not commit `website/src/data/changelog.json`.
 
