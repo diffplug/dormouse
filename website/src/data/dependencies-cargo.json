@@ -1,23 +1,6 @@
 {
   "direct": [
     {
-      "name": "open",
-      "version": "5.3.5",
-      "license": "MIT",
-      "author": "Sebastian Thiel <byronimo@gmail.com>",
-      "homepage": "https://github.com/Byron/open-rs",
-      "declaredName": "open",
-      "requirement": "^5",
-      "kinds": [
-        "normal"
-      ],
-      "targets": [],
-      "defaultFeatures": true,
-      "features": [
-        "shellexecute-on-windows"
-      ]
-    },
-    {
       "name": "process-wrap",
       "version": "9.1.0",
       "license": "MIT OR Apache-2.0",
@@ -29,11 +12,8 @@
         "normal"
       ],
       "targets": [],
-      "defaultFeatures": false,
+      "defaultFeatures": true,
       "features": [
-        "creation-flags",
-        "job-object",
-        "process-group",
         "std"
       ]
     },
@@ -81,10 +61,8 @@
         "normal"
       ],
       "targets": [],
-      "defaultFeatures": false,
-      "features": [
-        "wry"
-      ]
+      "defaultFeatures": true,
+      "features": []
     },
     {
       "name": "tauri-build",
@@ -102,29 +80,27 @@
       "features": []
     },
     {
+      "name": "tauri-plugin-shell",
+      "version": "2.3.5",
+      "license": "MIT OR Apache-2.0",
+      "author": "Tauri Programme within The Commons Conservancy",
+      "homepage": "https://github.com/tauri-apps/plugins-workspace",
+      "declaredName": "tauri-plugin-shell",
+      "requirement": "^2",
+      "kinds": [
+        "normal"
+      ],
+      "targets": [],
+      "defaultFeatures": true,
+      "features": []
+    },
+    {
       "name": "tauri-plugin-updater",
       "version": "2.10.1",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
       "declaredName": "tauri-plugin-updater",
-      "requirement": "^2",
-      "kinds": [
-        "normal"
-      ],
-      "targets": [],
-      "defaultFeatures": false,
-      "features": [
-        "rustls-tls"
-      ]
-    },
-    {
-      "name": "url",
-      "version": "2.5.8",
-      "license": "MIT OR Apache-2.0",
-      "author": "The rust-url developers",
-      "homepage": "https://github.com/servo/rust-url",
-      "declaredName": "url",
       "requirement": "^2",
       "kinds": [
         "normal"
@@ -169,6 +145,20 @@
       "homepage": "https://github.com/BurntSushi/aho-corasick"
     },
     {
+      "name": "alloc-no-stdlib",
+      "version": "2.0.4",
+      "license": "BSD-3-Clause",
+      "author": "Daniel Reiter Horn <danielrh@dropbox.com>",
+      "homepage": "https://github.com/dropbox/rust-alloc-no-stdlib"
+    },
+    {
+      "name": "alloc-stdlib",
+      "version": "0.2.2",
+      "license": "BSD-3-Clause",
+      "author": "Daniel Reiter Horn <danielrh@dropbox.com>",
+      "homepage": "https://github.com/dropbox/rust-alloc-no-stdlib"
+    },
+    {
       "name": "android_system_properties",
       "version": "0.1.5",
       "license": "MIT OR Apache-2.0",
@@ -181,6 +171,13 @@
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
       "homepage": "https://github.com/dtolnay/anyhow"
+    },
+    {
+      "name": "arbitrary",
+      "version": "1.4.2",
+      "license": "MIT OR Apache-2.0",
+      "author": "The Rust-Fuzz Project Developers, Nick Fitzgerald <fitzgen@gmail.com>, Manish Goregaokar <manishsmail@gmail.com>, Simonas Kazlauskas <arbitrary@kazlauskas.me>, Brian L. Troutwine <brian@troutwine.us>, Corey Farwell <coreyf@rwell.org>",
+      "homepage": "https://github.com/rust-fuzz/arbitrary/"
     },
     {
       "name": "atk",
@@ -265,6 +262,20 @@
       "license": "MIT",
       "author": "Mads Marquart <mads@marquart.dk>",
       "homepage": "https://github.com/madsmtm/objc2"
+    },
+    {
+      "name": "brotli",
+      "version": "8.0.2",
+      "license": "BSD-3-Clause AND MIT",
+      "author": "Daniel Reiter Horn <danielrh@dropbox.com>, The Brotli Authors",
+      "homepage": "https://github.com/dropbox/rust-brotli"
+    },
+    {
+      "name": "brotli-decompressor",
+      "version": "5.0.0",
+      "license": "BSD-3-Clause/MIT",
+      "author": "Daniel Reiter Horn <danielrh@dropbox.com>, The Brotli Authors",
+      "homepage": "https://github.com/dropbox/rust-brotli-decompressor"
     },
     {
       "name": "bs58",
@@ -519,11 +530,25 @@
       "homepage": "https://github.com/TedDriggs/darling"
     },
     {
+      "name": "dbus",
+      "version": "0.9.11",
+      "license": "Apache-2.0/MIT",
+      "author": "David Henningsson <diwic@ubuntu.com>",
+      "homepage": "https://github.com/diwic/dbus-rs"
+    },
+    {
       "name": "deranged",
       "version": "0.5.8",
       "license": "MIT OR Apache-2.0",
       "author": "Jacob Pratt <jacob@jhpratt.dev>",
       "homepage": "https://github.com/jhpratt/deranged"
+    },
+    {
+      "name": "derive_arbitrary",
+      "version": "1.4.2",
+      "license": "MIT OR Apache-2.0",
+      "author": "The Rust-Fuzz Project Developers, Nick Fitzgerald <fitzgen@gmail.com>, Manish Goregaokar <manishsmail@gmail.com>, Andre Bogus <bogusandre@gmail.com>, Corey Farwell <coreyf@rwell.org>",
+      "homepage": "https://github.com/rust-fuzz/arbitrary"
     },
     {
       "name": "derive_more",
@@ -657,6 +682,13 @@
       "license": "MIT",
       "author": "наб <nabijaczleweli@nabijaczleweli.xyz>, Cat Plus Plus <piotrlegnica@piotrl.pl>, Liigo <liigo@qq.com>, azyobuzin <azyobuzin@users.sourceforge.jp>, Peter Atashian <retep998@gmail.com>, pravic <ehysta@gmail.com>, Gabriel Majeri <gabriel.majeri6@gmail.com>, SonnyX, Johan Andersson <repi@repi.se>, Jordan Poles <jpdev.noreply@gmail.com>, MSxDOS <melcodos@gmail.com>, Jim McGrath <jimmc2@gmail.com>, roblabla <unfiltered@roblab.la>, Jasper Bekkers <jasper@traverseresearch.nl>, Richard Markiewicz <rmarkiewicz@devolutions.net>, Emerson de Freitas Barcelos <emersonfxbx@gmail.com>, Li Keqing <me@kaze.ai>, Alexis Bourget <alexis.bourget@gmail.com>, Michael Farrell <micolous+git@gmail.com>, Jacob Okamoto <oko@oko.io>, Marijn Suijten <marijn@traverseresearch.nl>, Lucas Nogueira <lucas@tauri.app>, CharlesChen0823 <yongchen0823@gmail.com>, Daniel Schaefer <dhs@frame.work>, Rene Leonhardt, ssrlive, Kan-Ru Chen <kanru@kanru.info>, Tony <legendmastertony@gmail.com>",
       "homepage": "https://github.com/nabijaczleweli/rust-embed-resource"
+    },
+    {
+      "name": "encoding_rs",
+      "version": "0.8.35",
+      "license": "(Apache-2.0 OR MIT) AND BSD-3-Clause",
+      "author": "Henri Sivonen <hsivonen@hsivonen.fi>",
+      "homepage": "https://docs.rs/encoding_rs/"
     },
     {
       "name": "equivalent",
@@ -856,6 +888,20 @@
     },
     {
       "name": "gdkwayland-sys",
+      "version": "0.18.2",
+      "license": "MIT",
+      "author": "The gtk-rs Project Developers",
+      "homepage": "https://gtk-rs.org/"
+    },
+    {
+      "name": "gdkx11",
+      "version": "0.18.2",
+      "license": "MIT",
+      "author": "The gtk-rs Project Developers",
+      "homepage": "https://gtk-rs.org/"
+    },
+    {
+      "name": "gdkx11-sys",
       "version": "0.18.2",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
@@ -1296,11 +1342,39 @@
       "homepage": "https://github.com/bluk/leb128fmt"
     },
     {
+      "name": "libappindicator",
+      "version": "0.9.0",
+      "license": "MIT OR Apache-2.0",
+      "author": null,
+      "homepage": null
+    },
+    {
+      "name": "libappindicator-sys",
+      "version": "0.9.0",
+      "license": "MIT OR Apache-2.0",
+      "author": null,
+      "homepage": null
+    },
+    {
       "name": "libc",
       "version": "0.2.186",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust Project Developers",
       "homepage": "https://github.com/rust-lang/libc"
+    },
+    {
+      "name": "libdbus-sys",
+      "version": "0.2.7",
+      "license": "Apache-2.0/MIT",
+      "author": "David Henningsson <diwic@ubuntu.com>",
+      "homepage": "https://github.com/diwic/dbus-rs"
+    },
+    {
+      "name": "libloading",
+      "version": "0.7.4",
+      "license": "ISC",
+      "author": "Simonas Kazlauskas <libloading@kazlauskas.me>",
+      "homepage": "https://github.com/nagisa/rust_libloading/"
     },
     {
       "name": "libredox",
@@ -1583,6 +1657,13 @@
       "homepage": "https://github.com/matklad/once_cell"
     },
     {
+      "name": "open",
+      "version": "5.3.5",
+      "license": "MIT",
+      "author": "Sebastian Thiel <byronimo@gmail.com>",
+      "homepage": "https://github.com/Byron/open-rs"
+    },
+    {
       "name": "openssl-probe",
       "version": "0.2.1",
       "license": "MIT OR Apache-2.0",
@@ -1595,6 +1676,13 @@
       "license": "MPL-2.0",
       "author": "Simon Ochsenreither <simon@ochsenreither.de>",
       "homepage": "https://github.com/soc/option-ext"
+    },
+    {
+      "name": "os_pipe",
+      "version": "1.2.3",
+      "license": "MIT",
+      "author": "Jack O'Connor",
+      "homepage": "https://github.com/oconnor663/os_pipe.rs"
     },
     {
       "name": "osakit",
@@ -2122,11 +2210,39 @@
       "homepage": "https://github.com/RustCrypto/hashes"
     },
     {
+      "name": "shared_child",
+      "version": "1.1.1",
+      "license": "MIT",
+      "author": "jacko",
+      "homepage": "https://github.com/oconnor663/shared_child.rs"
+    },
+    {
       "name": "shlex",
       "version": "1.3.0",
       "license": "MIT OR Apache-2.0",
       "author": "comex <comexk@gmail.com>, Fenhl <fenhl@fenhl.net>, Adrian Taylor <adetaylor@chromium.org>, Alex Touchet <alextouchet@outlook.com>, Daniel Parks <dp+git@oxidized.org>, Garrett Berg <googberg@gmail.com>",
       "homepage": "https://github.com/comex/rust-shlex"
+    },
+    {
+      "name": "sigchld",
+      "version": "0.2.4",
+      "license": "MIT",
+      "author": "Jack O'Connor",
+      "homepage": "https://github.com/oconnor663/sigchld.rs"
+    },
+    {
+      "name": "signal-hook",
+      "version": "0.3.18",
+      "license": "Apache-2.0/MIT",
+      "author": "Michal 'vorner' Vaner <vorner@vorner.cz>, Thomas Himmelstoss <thimm@posteo.de>",
+      "homepage": "https://github.com/vorner/signal-hook"
+    },
+    {
+      "name": "signal-hook-registry",
+      "version": "1.4.8",
+      "license": "MIT OR Apache-2.0",
+      "author": "Michal 'vorner' Vaner <vorner@vorner.cz>, Masaki Hara <ackie.h.gmai@gmail.com>",
+      "homepage": "https://github.com/vorner/signal-hook"
     },
     {
       "name": "simd_cesu8",
@@ -2570,11 +2686,25 @@
       "homepage": "https://tokio.rs"
     },
     {
+      "name": "tracing-attributes",
+      "version": "0.1.31",
+      "license": "MIT",
+      "author": "Tokio Contributors <team@tokio.rs>, Eliza Weisman <eliza@buoyant.io>, David Barsky <dbarsky@amazon.com>",
+      "homepage": "https://tokio.rs"
+    },
+    {
       "name": "tracing-core",
       "version": "0.1.36",
       "license": "MIT",
       "author": "Tokio Contributors <team@tokio.rs>",
       "homepage": "https://tokio.rs"
+    },
+    {
+      "name": "tray-icon",
+      "version": "0.23.1",
+      "license": "MIT OR Apache-2.0",
+      "author": null,
+      "homepage": "https://github.com/tauri-apps/tray-icon"
     },
     {
       "name": "try-lock",
@@ -2659,6 +2789,13 @@
       "license": "ISC",
       "author": "Brian Smith <brian@briansmith.org>",
       "homepage": "https://github.com/briansmith/untrusted"
+    },
+    {
+      "name": "url",
+      "version": "2.5.8",
+      "license": "MIT OR Apache-2.0",
+      "author": "The rust-url developers",
+      "homepage": "https://github.com/servo/rust-url"
     },
     {
       "name": "urlpattern",
@@ -3354,6 +3491,20 @@
       "homepage": "https://github.com/tauri-apps/wry"
     },
     {
+      "name": "x11",
+      "version": "2.21.0",
+      "license": "MIT",
+      "author": "daggerbot <daggerbot@gmail.com>, Erle Pereira <erle@erlepereira.com>, AltF02 <contact@altf2.dev>",
+      "homepage": "https://github.com/AltF02/x11-rs.git"
+    },
+    {
+      "name": "x11-dl",
+      "version": "2.21.0",
+      "license": "MIT",
+      "author": "daggerbot <daggerbot@gmail.com>, Erle Pereira <erle@erlepereira.com>, AltF02 <contact@altf2.dev>",
+      "homepage": "https://github.com/AltF02/x11-rs.git"
+    },
+    {
       "name": "xattr",
       "version": "1.6.1",
       "license": "MIT OR Apache-2.0",
@@ -3415,6 +3566,13 @@
       "license": "Unicode-3.0",
       "author": "Manish Goregaokar <manishsmail@gmail.com>",
       "homepage": "https://github.com/unicode-org/icu4x"
+    },
+    {
+      "name": "zip",
+      "version": "4.6.1",
+      "license": "MIT",
+      "author": "Mathijs van de Nes <git@mathijs.vd-nes.nl>, Marli Frost <marli@frost.red>, Ryan Levick <ryan.levick@gmail.com>, Chris Hennick <hennickc@amazon.com>",
+      "homepage": "https://github.com/zip-rs/zip2.git"
     },
     {
       "name": "zmij",

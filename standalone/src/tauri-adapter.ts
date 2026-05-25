@@ -1,9 +1,9 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-shell";
 import type { AlertStateDetail, PlatformAdapter, PtyInfo } from "dormouse-lib/lib/platform/types";
 import { AlertManager, type SessionStatus } from "dormouse-lib/lib/alert-manager";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
-import { openExternalUrl } from "./open-external";
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
@@ -184,7 +184,9 @@ export class TauriAdapter implements PlatformAdapter {
   openExternal(uri: string): void {
     const normalized = normalizeExternalUri(uri);
     if (!normalized) return;
-    openExternalUrl(normalized, "external URL");
+    open(normalized).catch((err) =>
+      console.error("[tauri-adapter] openExternal failed:", err),
+    );
   }
 
   onFilesDropped(handler: (paths: string[]) => void): () => void {

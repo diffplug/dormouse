@@ -2,15 +2,15 @@ import { useSyncExternalStore } from 'react';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { getVersion } from '@tauri-apps/api/app';
+import { open } from '@tauri-apps/plugin-shell';
 import { invoke } from '@tauri-apps/api/core';
 import { PLATFORM_STRING } from 'dormouse-lib/lib/platform';
 import type { UpdateBannerState } from './UpdateBanner';
-import { openExternalUrl } from './open-external';
 
 const GITHUB_REPO_URL = 'https://github.com/diffplug/dormouse';
 
 function openUrl(url: string, context: string): void {
-  openExternalUrl(url, context);
+  open(url).catch((e) => console.error(`[updater] Failed to open ${context}:`, e));
 }
 
 // --- State ---
