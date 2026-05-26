@@ -261,6 +261,18 @@ for (const dep of deps) {
 
 deps.sort((a, b) => a.name.localeCompare(b.name));
 
+// Manual overrides for Cargo crates whose published Cargo.toml omits author or
+// homepage metadata. Keyed by crate name. libappindicator{,-sys} ship empty
+// `authors`/`homepage`/`repository`, so cargo metadata yields null for both.
+const cargoMissingAuthor = {
+  "libappindicator": "Tauri Apps Contributors",
+  "libappindicator-sys": "Tauri Apps Contributors",
+};
+const cargoMissingHomepage = {
+  "libappindicator": "https://github.com/tauri-apps/libappindicator-rs",
+  "libappindicator-sys": "https://github.com/tauri-apps/libappindicator-rs",
+};
+
 function getCargoHomepage(pkg) {
   return pkg.homepage || pkg.repository || pkg.documentation || null;
 }
@@ -275,8 +287,8 @@ function cargoPackageEntry(pkg) {
     name: pkg.name,
     version: pkg.version,
     license: normalizeLicense(pkg.license),
-    author: formatCargoAuthor(pkg.authors),
-    homepage: getCargoHomepage(pkg),
+    author: formatCargoAuthor(pkg.authors) ?? cargoMissingAuthor[pkg.name] ?? null,
+    homepage: getCargoHomepage(pkg) ?? cargoMissingHomepage[pkg.name] ?? null,
   };
 }
 

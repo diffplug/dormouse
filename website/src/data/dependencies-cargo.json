@@ -1281,15 +1281,15 @@
       "name": "libappindicator",
       "version": "0.9.0",
       "license": "MIT OR Apache-2.0",
-      "author": null,
-      "homepage": null
+      "author": "Tauri Apps Contributors",
+      "homepage": "https://github.com/tauri-apps/libappindicator-rs"
     },
     {
       "name": "libappindicator-sys",
       "version": "0.9.0",
       "license": "MIT OR Apache-2.0",
-      "author": null,
-      "homepage": null
+      "author": "Tauri Apps Contributors",
+      "homepage": "https://github.com/tauri-apps/libappindicator-rs"
     },
     {
       "name": "libc",

@@ -119,23 +119,23 @@ function DependencySection({
   title,
   count,
   description,
-  unit = "packages",
   children,
 }: {
   title: string;
   count: number;
   description: string;
-  unit?: string;
   children: ReactNode;
 }) {
   return (
     <section className="mt-12">
       <div className="mb-4 flex flex-col gap-1 border-b border-[var(--color-text)]/10 pb-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h2 className="font-display text-xl">{title}</h2>
-          <p className="text-sm opacity-60">{description}</p>
+          <div className="flex items-baseline gap-2">
+            <h2 className="font-display text-xl">{title}</h2>
+            <div className="font-mono text-md opacity-50">({count})</div>
+          </div>
+          <p className="text-sm opacity-60 whitespace-pre-line">{description}</p>
         </div>
-        <div className="font-mono text-sm opacity-50">{count} {count === 1 ? unit.replace(/s$/, "") : unit}</div>
       </div>
       {children}
     </section>
@@ -154,7 +154,7 @@ export function Component() {
           </h1>
           <p className="text-base text-[var(--color-text)]/70 mb-2">
             Dormouse is a terminal, so users trust it with shells, source trees, credentials, and
-            local files. Our security procedures are documented in full (and audited nightly) in{" "}
+            local files. Our security procedures are documented in full (and audited nightly and immediately before every release) in{" "}
             <a
               href={securityPolicyUrl}
               className={link()}
@@ -162,32 +162,22 @@ export function Component() {
               rel="noopener noreferrer"
             >
               SECURITY.md
-            </a>. Here's how we protect that trust:
+            </a>, here is a summary:
           </p>
           <ul className="text-base text-[var(--color-text)]/70 mb-2 list-disc space-y-1 pl-5">
             <li>
-              We wait at least a day before adopting any newly published dependency, giving scanners
-              and registries time to catch and pull malicious releases before they reach our build.
+              We wait at least 24 hours before adopting any newly published dependency.
             </li>
             <li>
-              Publishing secrets for the VS Code extension are gated in a CI environment that
-              requires two separate maintainer accounts to approve a release.
+              Signing and auto-update secrets for the Standalone app are stored offline, never in CI.
             </li>
             <li>
-              Signing and auto-update secrets for the Standalone app are stored offline,
-              never in CI.
+              Publishing secrets for the VS Code extension are stored in CI locked by two separate maintainer accounts.
             </li>
           </ul>
 
           <p className="text-base text-[var(--color-text)]/70 mb-2">
-            The Standalone app also bundles a Node.js runtime, pinned to an exact version and verified
-            against the shipped binary at build time. The npm dependencies below ship in both the VS Code extension and the
-            Standalone app; the Cargo crates belong to the Standalone app alone and cover its full locked build graph,
-            including build-time and platform-specific crates that aren't all linked into the final binary. Thank you to every
-            author and contributor below.
-          </p>
-
-          <p className="text-base text-[var(--color-text)]/70 mb-10">
+            All bundled libraries are listed below. Thank you to every author and contributor.
             Thanks also to{" "}
             <a
               href="https://github.com/reowens/ascii-splash"
@@ -226,8 +216,7 @@ export function Component() {
           <DependencySection
             title="Bundled Runtime"
             count={runtimeDeps.length}
-            unit="runtimes"
-            description="The Node.js runtime shipped as a Tauri sidecar with the Standalone app, pinned exactly in standalone/.node-version and verified against the bundled binary at build time, so this version provably matches what ships. Node bundles V8, OpenSSL, and other components under their own licenses. The VS Code extension bundles no runtime — it runs on the editor's own Electron Node, the same runtime VS Code uses for its integrated terminal."
+            description={"The Standalone app ships a bundled NodeJS, which bundles other components under their own licenses.\nThe VS Code extension bundles no runtime — it runs on the editor's own Electron Node."}
           >
             <PackageTable deps={runtimeDeps} />
           </DependencySection>
@@ -235,7 +224,7 @@ export function Component() {
           <DependencySection
             title="npm Dependencies"
             count={npmDeps.length}
-            description="Runtime npm packages used by the standalone app, VS Code extension, and shared terminal UI."
+            description="Runtime npm packages used by both the Standalone app and the VS Code extension."
           >
             <PackageTable deps={npmDeps} />
           </DependencySection>
