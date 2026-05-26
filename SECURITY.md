@@ -11,11 +11,16 @@ Dormouse keeps its runtime dependency surface intentionally small. We add depend
 Every dependency shipped in the end-user application is listed at <https://dormouse.sh/supply-chain>. This includes:
 
 - every npm dependency (direct and transitive)
-- every cargo dependency (direct is listed separately from transitive) 
+- every cargo dependency (direct is listed separately from transitive)
+- the Node.js runtime bundled as a Tauri sidecar in the standalone app
 
 Those dependency snapshots are generated from the lockfiles and reviewed as part of release work. If a production dependency is added, removed, or upgraded, the dependency lists must be regenerated and committed.
 
-- FAIL IF `node website/scripts/generate-deps.js` changes `website/src/data/dependencies-npm.json` or `website/src/data/dependencies-cargo.json` when run from a clean checkout.
+The standalone app ships a Node.js runtime binary (`standalone/src-tauri/build.rs` copies it into the bundle as a Tauri sidecar). Its version is pinned exactly in `.nvmrc`, which is the single source of truth shared by CI (every `actions/setup-node` step reads it via `node-version-file`) and the bundling build step, so the runtime that users receive is reproducible rather than whatever floated latest at build time.
+
+- FAIL IF `node website/scripts/generate-deps.js` changes `website/src/data/dependencies-npm.json`, `website/src/data/dependencies-cargo.json`, or `website/src/data/dependencies-runtime.json` when run from a clean checkout.
+- FAIL IF `.nvmrc` is missing or does not pin an exact Node.js version (a bare major such as `22` is not acceptable; it must be `MAJOR.MINOR.PATCH`).
+- FAIL IF any `.github/workflows/**` `actions/setup-node` step pins the Node version inline with `node-version:` instead of reading `node-version-file: .nvmrc`, so the pin stays single-sourced.
 - FAIL IF `pnpm-workspace.yaml` is missing `minimumReleaseAge: 1440`.
 - FAIL IF `.github/dependabot.yml` is missing npm coverage for `/` or Cargo coverage for `/standalone/src-tauri`.
 - FAIL IF `.github/dependabot.yml` is missing dependency cooldown windows.

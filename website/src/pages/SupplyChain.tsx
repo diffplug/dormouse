@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { tv } from "tailwind-variants";
 import cargoDeps from "../data/dependencies-cargo.json";
 import npmDeps from "../data/dependencies-npm.json";
+import runtimeDeps from "../data/dependencies-runtime.json";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 
 // Single source of truth for caramel links, so links in body copy render at
@@ -26,7 +27,8 @@ type DirectCargoDependency = PackageDependency & {
 
 const securityPolicyUrl = "https://github.com/diffplug/dormouse/blob/main/SECURITY.md";
 
-const totalDependencyCount = npmDeps.length + cargoDeps.direct.length + cargoDeps.transitive.length;
+const totalDependencyCount =
+  runtimeDeps.length + npmDeps.length + cargoDeps.direct.length + cargoDeps.transitive.length;
 
 function DependencyName({ dep }: { dep: PackageDependency }) {
   if (!dep.homepage) return dep.name;
@@ -120,11 +122,13 @@ function DependencySection({
   title,
   count,
   description,
+  unit = "packages",
   children,
 }: {
   title: string;
   count: number;
   description: string;
+  unit?: string;
   children: ReactNode;
 }) {
   return (
@@ -134,7 +138,7 @@ function DependencySection({
           <h2 className="font-display text-xl">{title}</h2>
           <p className="text-sm opacity-60">{description}</p>
         </div>
-        <div className="font-mono text-sm opacity-50">{count} packages</div>
+        <div className="font-mono text-sm opacity-50">{count} {count === 1 ? unit.replace(/s$/, "") : unit}</div>
       </div>
       {children}
     </section>
@@ -179,9 +183,10 @@ export function Component() {
           </ul>
 
           <p className="text-base text-[var(--color-text)]/70 mb-2">
-            The npm dependencies below ship in both the VS Code extension and the Standalone app;
-            the Cargo dependencies ship only in the Standalone app. Thank you to every author and
-            contributor below.
+            The Standalone app also bundles a Node.js runtime, pinned to an exact version and shipped
+            as a sidecar binary. The npm dependencies below ship in both the VS Code extension and the
+            Standalone app; the Cargo dependencies ship only in the Standalone app. Thank you to every
+            author and contributor below.
           </p>
 
           <p className="text-base text-[var(--color-text)]/70 mb-10">
@@ -219,6 +224,15 @@ export function Component() {
               <div className="opacity-60">Cargo crates (transitive)</div>
             </div>
           </div>
+
+          <DependencySection
+            title="Bundled Runtime"
+            count={runtimeDeps.length}
+            unit="runtimes"
+            description="The Node.js runtime shipped as a Tauri sidecar with the Standalone app, pinned exactly via .nvmrc. Node bundles V8, OpenSSL, and other components under their own licenses. The VS Code extension bundles no runtime — it runs on the Node.js already present in the editor (VS Code's Electron runtime on Windows, the system Node.js on macOS and Linux)."
+          >
+            <PackageTable deps={runtimeDeps} />
+          </DependencySection>
 
           <DependencySection
             title="npm Dependencies"
