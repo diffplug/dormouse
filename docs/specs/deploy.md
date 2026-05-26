@@ -15,7 +15,7 @@ Every release produces three artifact groups under one version and changelog:
 
 Human-driven steps, in order:
 
-1. **Update dependencies page** — run `node website/scripts/generate-deps.js` and review the diff in `website/src/data/dependencies.json`. Commit if changed.
+1. **Update dependency snapshots** — run `node website/scripts/generate-deps.js` and review the diffs in `website/src/data/dependencies-npm.json` and `website/src/data/dependencies-cargo.json`. Commit if changed.
 2. **Draft release notes and bump version** — run `/release-notes` in Claude Code at the repo root. The slash command (defined in [.claude/commands/release-notes.md](../../.claude/commands/release-notes.md)) walks the merge commits and squash-merged PRs since the last tag, recommends a `breaking.added.bugfix` version bump, runs `./scripts/bump-version.sh X.Y.Z`, and edits `CHANGELOG.md` for the same version. Review and edit the resulting diff if needed.
 3. **Commit and tag** — `git commit -am "Release vX.Y.Z"` then `git tag vX.Y.Z`.
 4. **Push** — `git push && git push origin vX.Y.Z`. This triggers CI (Stage 1).

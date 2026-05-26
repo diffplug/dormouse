@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite-react-ssg dev",
     "predev": "node scripts/generate-changelog.js",
-    "prebuild": "node scripts/generate-deps.js && node scripts/generate-changelog.js",
+    "prebuild": "node scripts/generate-changelog.js",
     "build": "vite-react-ssg build",
     "preview": "vite preview",
     "pretest": "node scripts/generate-changelog.js",
@@ -19,7 +19,8 @@
     "dormouse-lib": "workspace:*",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "react-router-dom": "^6.30.3"
+    "react-router-dom": "^6.30.3",
+    "tailwind-variants": "^3.2.2"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
