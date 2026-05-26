@@ -161,26 +161,27 @@ export function Component() {
               rel="noopener noreferrer"
             >
               SECURITY.md
-            </a>. Here's a brief overview:
+            </a>. Here's how we protect that trust:
           </p>
           <ul className="text-base text-[var(--color-text)]/70 mb-2 list-disc space-y-1 pl-5">
             <li>
-              We use dependency cooldowns to allow security scanner to report maliciously published packages.
+              We wait at least a day before adopting any newly published dependency, giving scanners
+              and registries time to catch and pull malicious releases before they reach our build.
             </li>
             <li>
-              The VS Code extension keeps its publishing secrets in a gated CI environment that
+              Publishing secrets for the VS Code extension are gated in a CI environment that
               requires two separate maintainer accounts to approve a release.
             </li>
             <li>
-              Signing and auto-update secrets for the Standalone application are stored offline,
+              Signing and auto-update secrets for the Standalone app are stored offline,
               never in CI.
             </li>
           </ul>
 
           <p className="text-base text-[var(--color-text)]/70 mb-2">
-            The npm dependencies below ship in both the VS Code and Standalone applications; the
-            Cargo dependencies ship only in the Standalone. Thank you to every author and
-            contributor listed here.
+            The npm dependencies below ship in both the VS Code extension and the Standalone app;
+            the Cargo dependencies ship only in the Standalone app. Thank you to every author and
+            contributor below.
           </p>
 
           <p className="text-base text-[var(--color-text)]/70 mb-10">
@@ -202,20 +203,20 @@ export function Component() {
             >
               react-router
             </a>{" "}
-            and their transitive dependencies, which we use for this marketing page but are not part of the end-user application, so are not listed here.
+            and their transitive dependencies, which power this marketing site but don't ship in the app, so they're not listed below.
           </p>
           <div className="grid gap-3 border-y border-[var(--color-text)]/10 py-4 text-sm md:grid-cols-3">
             <div>
               <div className="font-mono text-2xl">{npmDeps.length}</div>
-              <div className="opacity-60">npm packages</div>
+              <div className="opacity-60">npm packages (direct and transitive)</div>
             </div>
             <div>
               <div className="font-mono text-2xl">{cargoDeps.direct.length}</div>
-              <div className="opacity-60">direct Cargo crates</div>
+              <div className="opacity-60">Cargo crates (direct)</div>
             </div>
             <div>
-              <div className="font-mono text-2xl">{totalDependencyCount}</div>
-              <div className="opacity-60">total listed dependencies</div>
+              <div className="font-mono text-2xl">{cargoDeps.transitive.length}</div>
+              <div className="opacity-60">Cargo crates (transitive)</div>
             </div>
           </div>
 
