@@ -163,15 +163,34 @@ for (const packageName of productDependencyFilters) {
   scanWorkspacePackage(packageName);
 }
 
-const licenseAliases = {
-  "Apache-2.0 OR MIT": "MIT OR Apache-2.0",
-  "MIT/Apache-2.0": "MIT OR Apache-2.0",
-};
+// Within a single "A OR B OR ..." choice, move MIT to the front so the
+// listing reads consistently (MIT is the license we expect most often).
+function moveMitFirstInOrGroup(orExpression) {
+  const choices = orExpression.split(/\s+OR\s+/);
+  const mitIndex = choices.indexOf("MIT");
+  if (mitIndex <= 0) return orExpression;
+  choices.unshift(choices.splice(mitIndex, 1)[0]);
+  return choices.join(" OR ");
+}
+
+function normalizeLicense(license) {
+  if (!license) return null;
+  // Legacy dual-license syntax uses "/" to mean "OR" (e.g. "Apache-2.0/MIT").
+  const normalized = license.replace(/\s*\/\s*/g, " OR ");
+  // Reorder OR choices, both standalone and inside parenthesized groups
+  // (e.g. "(Apache-2.0 OR MIT) AND BSD-3-Clause"). AND expressions are
+  // conjunctive, so their operand order is left untouched.
+  if (normalized.includes("(")) {
+    return normalized.replace(/\(([^()]+)\)/g, (_, inner) => `(${moveMitFirstInOrGroup(inner)})`);
+  }
+  if (normalized.includes(" AND ")) return normalized;
+  return moveMitFirstInOrGroup(normalized);
+}
 
 const deps = [...externalPackages.values()].map((pkg) => ({
   name: pkg.name,
   version: [...pkg.versions].sort().join(", "),
-  license: pkg.license ? (licenseAliases[pkg.license] ?? pkg.license) : null,
+  license: normalizeLicense(pkg.license),
   author: pkg.author,
   homepage: pkg.homepage,
 }));
@@ -239,10 +258,6 @@ for (const dep of deps) {
 }
 
 deps.sort((a, b) => a.name.localeCompare(b.name));
-
-function normalizeLicense(license) {
-  return license ? (licenseAliases[license] ?? license) : null;
-}
 
 function getCargoHomepage(pkg) {
   return pkg.homepage || pkg.repository || pkg.documentation || null;
