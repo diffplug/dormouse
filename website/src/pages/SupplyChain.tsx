@@ -182,7 +182,8 @@ export function Component() {
           <p className="text-base text-[var(--color-text)]/70 mb-2">
             The Standalone app also bundles a Node.js runtime, pinned to an exact version and verified
             against the shipped binary at build time. The npm dependencies below ship in both the VS Code extension and the
-            Standalone app; the Cargo dependencies ship only in the Standalone app. Thank you to every
+            Standalone app; the Cargo crates belong to the Standalone app alone and cover its full locked build graph,
+            including build-time and platform-specific crates that aren't all linked into the final binary. Thank you to every
             author and contributor below.
           </p>
 
@@ -250,7 +251,7 @@ export function Component() {
           <DependencySection
             title="Transitive Cargo Dependencies"
             count={cargoDeps.transitive.length}
-            description="Crates pulled in by the direct Cargo dependencies in the locked Tauri build graph."
+            description="Every crate the direct dependencies pull into the locked Tauri build graph, including build-time and platform-specific crates that aren't all linked into the final binary."
           >
             <PackageTable deps={cargoDeps.transitive} />
           </DependencySection>
