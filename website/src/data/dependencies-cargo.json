@@ -6,16 +6,7 @@
       "license": "MIT OR Apache-2.0",
       "author": "Félix Saparelli <felix@passcod.name>",
       "homepage": "https://github.com/watchexec/process-wrap",
-      "declaredName": "process-wrap",
-      "requirement": "^9",
-      "kinds": [
-        "normal"
-      ],
-      "targets": [],
-      "defaultFeatures": true,
-      "features": [
-        "std"
-      ]
+      "declaredName": "process-wrap"
     },
     {
       "name": "serde",
@@ -23,16 +14,7 @@
       "license": "MIT OR Apache-2.0",
       "author": "Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>",
       "homepage": "https://serde.rs",
-      "declaredName": "serde",
-      "requirement": "^1",
-      "kinds": [
-        "normal"
-      ],
-      "targets": [],
-      "defaultFeatures": true,
-      "features": [
-        "derive"
-      ]
+      "declaredName": "serde"
     },
     {
       "name": "serde_json",
@@ -40,14 +22,7 @@
       "license": "MIT OR Apache-2.0",
       "author": "Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>",
       "homepage": "https://github.com/serde-rs/json",
-      "declaredName": "serde_json",
-      "requirement": "^1",
-      "kinds": [
-        "normal"
-      ],
-      "targets": [],
-      "defaultFeatures": true,
-      "features": []
+      "declaredName": "serde_json"
     },
     {
       "name": "tauri",
@@ -55,14 +30,7 @@
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
-      "declaredName": "tauri",
-      "requirement": "^2",
-      "kinds": [
-        "normal"
-      ],
-      "targets": [],
-      "defaultFeatures": true,
-      "features": []
+      "declaredName": "tauri"
     },
     {
       "name": "tauri-build",
@@ -70,14 +38,7 @@
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
-      "declaredName": "tauri-build",
-      "requirement": "^2",
-      "kinds": [
-        "build"
-      ],
-      "targets": [],
-      "defaultFeatures": true,
-      "features": []
+      "declaredName": "tauri-build"
     },
     {
       "name": "tauri-plugin-shell",
@@ -85,14 +46,7 @@
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
-      "declaredName": "tauri-plugin-shell",
-      "requirement": "^2",
-      "kinds": [
-        "normal"
-      ],
-      "targets": [],
-      "defaultFeatures": true,
-      "features": []
+      "declaredName": "tauri-plugin-shell"
     },
     {
       "name": "tauri-plugin-updater",
@@ -100,14 +54,7 @@
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
-      "declaredName": "tauri-plugin-updater",
-      "requirement": "^2",
-      "kinds": [
-        "normal"
-      ],
-      "targets": [],
-      "defaultFeatures": true,
-      "features": []
+      "declaredName": "tauri-plugin-updater"
     },
     {
       "name": "windows",
@@ -115,18 +62,7 @@
       "license": "MIT OR Apache-2.0",
       "author": null,
       "homepage": "https://github.com/microsoft/windows-rs",
-      "declaredName": "windows",
-      "requirement": "^0.62",
-      "kinds": [
-        "normal"
-      ],
-      "targets": [
-        "cfg(windows)"
-      ],
-      "defaultFeatures": true,
-      "features": [
-        "Win32_System_Threading"
-      ]
+      "declaredName": "windows"
     }
   ],
   "transitive": [

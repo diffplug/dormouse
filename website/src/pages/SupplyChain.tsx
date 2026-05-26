@@ -13,11 +13,6 @@ type PackageDependency = {
 
 type DirectCargoDependency = PackageDependency & {
   declaredName: string;
-  requirement: string | null;
-  kinds: string[];
-  targets: string[];
-  defaultFeatures: boolean | null;
-  features: string[];
 };
 
 const securityPolicyUrl = "https://github.com/diffplug/dormouse/blob/main/SECURITY.md";
@@ -79,50 +74,29 @@ function PackageTable({ deps }: { deps: PackageDependency[] }) {
 function DirectCargoTable({ deps }: { deps: DirectCargoDependency[] }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[920px] text-sm">
+      <table className="w-full min-w-[760px] text-sm">
         <thead>
           <tr className="text-left border-b border-[var(--color-text)]/10">
             <th className="pb-2 pr-4 opacity-70">Crate</th>
-            <th className="pb-2 pr-4 opacity-70">Requirement</th>
             <th className="pb-2 pr-4 opacity-70">Resolved</th>
-            <th className="pb-2 pr-4 opacity-70">Scope</th>
-            <th className="pb-2 pr-4 opacity-70">Features</th>
             <th className="pb-2 opacity-70">License</th>
           </tr>
         </thead>
         <tbody>
-          {deps.map((dep) => {
-            const scope = [
-              dep.kinds.join(", "),
-              dep.targets.length > 0 ? dep.targets.join(", ") : null,
-            ].filter(Boolean).join(" / ");
-            const features = [
-              dep.defaultFeatures === false ? "default-features=false" : null,
-              ...dep.features,
-            ].filter(Boolean).join(", ");
-
-            return (
-              <tr key={`${dep.name}@${dep.version}`} className="border-b border-[var(--color-text)]/5">
-                <td className="py-1.5 pr-4">
-                  <DependencyName dep={dep} />
-                  {dep.declaredName !== dep.name ? (
-                    <div className="font-mono text-xs opacity-45">{dep.declaredName}</div>
-                  ) : null}
-                </td>
-                <td className="py-1.5 pr-4 opacity-50 font-mono whitespace-nowrap">
-                  <EmptyAwareText value={dep.requirement} />
-                </td>
-                <td className="py-1.5 pr-4 opacity-50 font-mono whitespace-nowrap">{dep.version}</td>
-                <td className="py-1.5 pr-4 opacity-50 whitespace-nowrap">{scope}</td>
-                <td className="py-1.5 pr-4 opacity-50 font-mono">
-                  {features || <span className="opacity-45">none</span>}
-                </td>
-                <td className="py-1.5 opacity-50 whitespace-nowrap">
-                  <EmptyAwareText value={dep.license} />
-                </td>
-              </tr>
-            );
-          })}
+          {deps.map((dep) => (
+            <tr key={`${dep.name}@${dep.version}`} className="border-b border-[var(--color-text)]/5">
+              <td className="py-1.5 pr-4">
+                <DependencyName dep={dep} />
+                {dep.declaredName !== dep.name ? (
+                  <div className="font-mono text-xs opacity-45">{dep.declaredName}</div>
+                ) : null}
+              </td>
+              <td className="py-1.5 pr-4 opacity-50 font-mono whitespace-nowrap">{dep.version}</td>
+              <td className="py-1.5 opacity-50 whitespace-nowrap">
+                <EmptyAwareText value={dep.license} />
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
@@ -165,7 +139,8 @@ export function Component() {
             Supply Chain
           </h1>
           <p className="text-base opacity-70 mb-2">
-            Dormouse publishes generated dependency snapshots for the end-user application: {npmDeps.length} npm packages, {cargoDeps.direct.length} directly declared Cargo crates, and {cargoDeps.transitive.length} transitive Cargo crates.
+            Dormouse is a terminal, so users trust it with shells, source trees, credentials, and local files.
+            The dependency graph and release pipeline is part of the product's security boundary.
           </p>
           <p className="text-base opacity-70 mb-2">
             The dependency policy is documented in{" "}

@@ -244,12 +244,6 @@ function normalizeLicense(license) {
   return license ? (licenseAliases[license] ?? license) : null;
 }
 
-function cargoDepKindLabel(kind) {
-  if (kind === "build") return "build";
-  if (kind === "dev") return "dev";
-  return "normal";
-}
-
 function getCargoHomepage(pkg) {
   return pkg.homepage || pkg.repository || pkg.documentation || null;
 }
@@ -313,11 +307,6 @@ function getCargoDependencies() {
     return {
       ...cargoPackageEntry(pkg),
       declaredName: manifestDep?.rename || manifestDep?.name || dep.name.replaceAll("_", "-"),
-      requirement: manifestDep?.req ?? null,
-      kinds: [...new Set(dep.dep_kinds.map((depKind) => cargoDepKindLabel(depKind.kind)))].sort(),
-      targets: [...new Set(dep.dep_kinds.map((depKind) => depKind.target).filter(Boolean))].sort(),
-      defaultFeatures: manifestDep?.uses_default_features ?? null,
-      features: [...(manifestDep?.features ?? [])].sort(),
     };
   }).sort(compareDependencyEntries);
 
