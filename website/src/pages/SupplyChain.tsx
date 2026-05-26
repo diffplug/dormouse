@@ -1,7 +1,16 @@
 import type { ReactNode } from "react";
+import { tv } from "tailwind-variants";
 import cargoDeps from "../data/dependencies-cargo.json";
 import npmDeps from "../data/dependencies-npm.json";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
+
+// Single source of truth for caramel links, so links in body copy render at
+// the same full brightness as links in the dependency tables. Body copy is
+// dimmed with a text-color alpha (text-[…]/70) rather than `opacity`, since
+// `opacity` would composite the link along with the surrounding text.
+const link = tv({
+  base: "text-[var(--color-caramel)] underline-offset-2 hover:underline",
+});
 
 type PackageDependency = {
   name: string;
@@ -25,7 +34,7 @@ function DependencyName({ dep }: { dep: PackageDependency }) {
   return (
     <a
       href={dep.homepage}
-      className="text-[var(--color-caramel)] hover:underline"
+      className={link()}
       target="_blank"
       rel="noopener noreferrer"
     >
@@ -142,26 +151,43 @@ export function Component() {
           <h1 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-2">
             Supply Chain
           </h1>
-          <p className="text-base opacity-70 mb-2">
-            Dormouse is a terminal, so users trust it with shells, source trees, credentials, and local files.
-            The dependency graph and release pipeline is part of the product's security boundary.
-          </p>
-          <p className="text-base opacity-70 mb-2">
-            The dependency policy is documented in{" "}
+          <p className="text-base text-[var(--color-text)]/70 mb-2">
+            Dormouse is a terminal, so users trust it with shells, source trees, credentials, and
+            local files. Our security procedures are documented in full (and audited nightly) in{" "}
             <a
               href={securityPolicyUrl}
-              className="text-[var(--color-caramel)] underline-offset-2 hover:underline"
+              className={link()}
               target="_blank"
               rel="noopener noreferrer"
             >
               SECURITY.md
-            </a>. Thank you to every author and contributor.
+            </a>. Here's a brief overview:
           </p>
-          <p className="text-base opacity-70 mb-10">
+          <ul className="text-base text-[var(--color-text)]/70 mb-2 list-disc space-y-1 pl-5">
+            <li>
+              We use dependency cooldowns to allow security scanner to report maliciously published packages.
+            </li>
+            <li>
+              The VS Code extension keeps its publishing secrets in a gated CI environment that
+              requires two separate maintainer accounts to approve a release.
+            </li>
+            <li>
+              Signing and auto-update secrets for the Standalone application are stored offline,
+              never in CI.
+            </li>
+          </ul>
+
+          <p className="text-base text-[var(--color-text)]/70 mb-2">
+            The npm dependencies below ship in both the VS Code and Standalone applications; the
+            Cargo dependencies ship only in the Standalone. Thank you to every author and
+            contributor listed here.
+          </p>
+
+          <p className="text-base text-[var(--color-text)]/70 mb-10">
             Thanks also to{" "}
             <a
               href="https://github.com/reowens/ascii-splash"
-              className="text-[var(--color-caramel)] underline-offset-2 hover:underline"
+              className={link()}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -170,13 +196,13 @@ export function Component() {
             and{" "}
             <a
               href="https://github.com/remix-run/react-router"
-              className="text-[var(--color-caramel)] underline-offset-2 hover:underline"
+              className={link()}
               target="_blank"
               rel="noopener noreferrer"
             >
               react-router
             </a>{" "}
-            and their transitive dependencies, which we use for this marketing page but are not part of the end-user application.
+            and their transitive dependencies, which we use for this marketing page but are not part of the end-user application, so are not listed here.
           </p>
           <div className="grid gap-3 border-y border-[var(--color-text)]/10 py-4 text-sm md:grid-cols-3">
             <div>
