@@ -27,9 +27,6 @@ type DirectCargoDependency = PackageDependency & {
 
 const securityPolicyUrl = "https://github.com/diffplug/dormouse/blob/main/SECURITY.md";
 
-const totalDependencyCount =
-  runtimeDeps.length + npmDeps.length + cargoDeps.direct.length + cargoDeps.transitive.length;
-
 function DependencyName({ dep }: { dep: PackageDependency }) {
   if (!dep.homepage) return dep.name;
 
