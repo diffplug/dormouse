@@ -229,7 +229,7 @@ export function Component() {
             title="Bundled Runtime"
             count={runtimeDeps.length}
             unit="runtimes"
-            description="The Node.js runtime shipped as a Tauri sidecar with the Standalone app, pinned exactly via .nvmrc. Node bundles V8, OpenSSL, and other components under their own licenses. The VS Code extension bundles no runtime — it runs on the Node.js already present in the editor (VS Code's Electron runtime on Windows, the system Node.js on macOS and Linux)."
+            description="The Node.js runtime shipped as a Tauri sidecar with the Standalone app, pinned exactly via .nvmrc. Node bundles V8, OpenSSL, and other components under their own licenses. The VS Code extension bundles no runtime — it runs on the editor's own Electron Node, the same runtime VS Code uses for its integrated terminal."
           >
             <PackageTable deps={runtimeDeps} />
           </DependencySection>

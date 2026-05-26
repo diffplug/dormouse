@@ -1,6 +1,5 @@
-import { fork, ChildProcess, execFileSync } from 'child_process';
+import { fork, ChildProcess } from 'child_process';
 import * as path from 'path';
-import * as fs from 'fs';
 import { log } from './log';
 
 export interface PtyCallbacks {
@@ -95,56 +94,22 @@ let child: ChildProcess | null = null;
 let childReady = false;
 let pendingMessages: any[] = [];
 const callbackSet = new Set<PtyCallbacks>();
-let cachedNodePath: string | null = null;
-
-function findSystemNode(): string {
-  if (cachedNodePath) return cachedNodePath;
-
-  // On Windows, use the host's execPath (Electron's Node). VSCode's own
-  // integrated terminal uses node-pty against Electron, so this works for us
-  // too — and avoids the bogus Unix-path fallback below that was causing
-  // multi-second fork stalls.
-  if (process.platform === 'win32') {
-    cachedNodePath = process.execPath;
-    return cachedNodePath;
-  }
-
-  // Try common locations first (avoids shell invocation)
-  const candidates = [
-    process.env.NVM_BIN && path.join(process.env.NVM_BIN, 'node'),
-    '/usr/local/bin/node',
-    '/usr/bin/node',
-    '/opt/homebrew/bin/node',
-  ].filter(Boolean) as string[];
-
-  for (const p of candidates) {
-    try {
-      if (fs.statSync(p).isFile()) {
-        cachedNodePath = p;
-        return p;
-      }
-    } catch { /* not found, try next */ }
-  }
-
-  // Fall back to PATH lookup via env (portable, no 'which' dependency)
-  try {
-    cachedNodePath = execFileSync('/usr/bin/env', ['node', '-e', 'process.stdout.write(process.execPath)'], {
-      encoding: 'utf-8',
-      timeout: 3000,
-    }).trim();
-    return cachedNodePath;
-  } catch {
-    // Last resort
-    cachedNodePath = '/usr/local/bin/node';
-    return cachedNodePath;
-  }
+// Always run the pty host under the editor's own Node — Electron's bundled
+// runtime (process.execPath, re-execed as Node via ELECTRON_RUN_AS_NODE, which
+// is inherited through `env` at the fork site). VSCode's integrated terminal
+// drives node-pty against Electron the same way, and node-pty ships N-API
+// prebuilds that load across runtimes, so there's no need to hunt for a
+// user-installed system Node — which was unreliable and, on Windows, caused
+// multi-second fork stalls.
+function resolveNodeBinary(): string {
+  return process.execPath;
 }
 
 function ensureChild(extensionPath: string): ChildProcess {
   if (child && child.connected) return child;
 
   const hostScript = path.join(extensionPath, 'dist', 'pty-host.js');
-  const nodePath = findSystemNode();
+  const nodePath = resolveNodeBinary();
 
   child = fork(hostScript, [], {
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
