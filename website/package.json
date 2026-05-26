@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite-react-ssg dev",
     "predev": "node scripts/generate-changelog.js",
-    "prebuild": "node scripts/generate-deps.js && node scripts/generate-changelog.js",
+    "prebuild": "node scripts/generate-changelog.js",
     "build": "vite-react-ssg build",
     "preview": "vite preview",
     "pretest": "node scripts/generate-changelog.js",
