@@ -29,6 +29,13 @@ fn bundle_node_runtime() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed={}", node_source.display());
     validate_node_binary(&node_source, &target)?;
 
+    // The supply-chain page (website/src/data/dependencies-runtime.json) discloses
+    // an exact Node.js version. Fail the build if the binary we're about to bundle
+    // doesn't match standalone/.node-version, so the disclosed version provably
+    // equals what ships. CI installs the pin via setup-node's node-version-file.
+    let pinned_version = read_pinned_node_version(&manifest_dir)?;
+    verify_node_version(&node_source, &host, &target, &pinned_version)?;
+
     let binaries_dir = manifest_dir.join("binaries");
     fs::create_dir_all(&binaries_dir)?;
 
@@ -77,6 +84,70 @@ fn reject_macos_dynamic_node(node_source: &Path) -> Result<(), Box<dyn Error>> {
         return Err(format!(
             "{} depends on @rpath/libnode*.dylib and cannot be copied as a self-contained Tauri sidecar. Use a standalone Node.js binary, or set MOUSETERM_NODE_BINARY to one.",
             node_source.display()
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
+fn read_pinned_node_version(manifest_dir: &Path) -> Result<String, Box<dyn Error>> {
+    let pin_path = manifest_dir
+        .parent()
+        .ok_or("manifest dir has no parent")?
+        .join(".node-version");
+    println!("cargo:rerun-if-changed={}", pin_path.display());
+
+    let raw = fs::read_to_string(&pin_path)
+        .map_err(|err| format!("failed to read {}: {err}", pin_path.display()))?;
+    let version = raw.trim().trim_start_matches('v').to_owned();
+
+    let is_exact = version.split('.').count() == 3
+        && version
+            .split('.')
+            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()));
+    if !is_exact {
+        return Err(format!(
+            "{} must pin an exact Node.js version (MAJOR.MINOR.PATCH), found {version:?}",
+            pin_path.display()
+        )
+        .into());
+    }
+
+    Ok(version)
+}
+
+fn verify_node_version(
+    node_source: &Path,
+    host: &str,
+    target: &str,
+    pinned: &str,
+) -> Result<(), Box<dyn Error>> {
+    if host != target {
+        // Can't execute a foreign-arch binary; the operator supplied it via
+        // MOUSETERM_NODE_BINARY and is responsible for matching the pin.
+        println!(
+            "cargo:warning=skipping Node.js version check when cross-compiling to {target}; \
+             ensure the bundled runtime is v{pinned}"
+        );
+        return Ok(());
+    }
+
+    let output = Command::new(node_source).arg("--version").output()?;
+    if !output.status.success() {
+        return Err(format!("failed to run `{} --version`", node_source.display()).into());
+    }
+
+    let actual = String::from_utf8(output.stdout)?
+        .trim()
+        .trim_start_matches('v')
+        .to_owned();
+    if actual != pinned {
+        return Err(format!(
+            "bundled Node.js {actual} does not match the standalone/.node-version pin {pinned}. \
+             Install the pinned version (CI uses actions/setup-node with \
+             node-version-file: standalone/.node-version) or update the pin and regenerate \
+             website/src/data/dependencies-runtime.json."
         )
         .into());
     }

@@ -16,11 +16,12 @@ Every dependency shipped in the end-user application is listed at <https://dormo
 
 Those dependency snapshots are generated from the lockfiles and reviewed as part of release work. If a production dependency is added, removed, or upgraded, the dependency lists must be regenerated and committed.
 
-The standalone app ships a Node.js runtime binary (`standalone/src-tauri/build.rs` copies it into the bundle as a Tauri sidecar). Its version is pinned exactly in `.nvmrc`, which is the single source of truth shared by CI (every `actions/setup-node` step reads it via `node-version-file`) and the bundling build step, so the runtime that users receive is reproducible rather than whatever floated latest at build time.
+The standalone app ships a Node.js runtime binary (`standalone/src-tauri/build.rs` copies it into the bundle as a Tauri sidecar). Its version is pinned exactly in `standalone/.node-version`, and the build is the authority: `build.rs` runs `--version` on the binary it is about to bundle and fails the build unless it matches the pin. The supply-chain page reads the same pin, so the version disclosed there provably equals the runtime users receive — it cannot drift to whatever Node happened to be on the build machine's PATH. The version is a deliberate, manual pin (no Dependabot ecosystem tracks it); the workflows that do not bundle the runtime are free to track the latest `22`.
 
 - FAIL IF `node website/scripts/generate-deps.js` changes `website/src/data/dependencies-npm.json`, `website/src/data/dependencies-cargo.json`, or `website/src/data/dependencies-runtime.json` when run from a clean checkout.
-- FAIL IF `.nvmrc` is missing or does not pin an exact Node.js version (a bare major such as `22` is not acceptable; it must be `MAJOR.MINOR.PATCH`).
-- FAIL IF any `.github/workflows/**` `actions/setup-node` step pins the Node version inline with `node-version:` instead of reading `node-version-file: .nvmrc`, so the pin stays single-sourced.
+- FAIL IF `standalone/.node-version` is missing or does not pin an exact Node.js version (a bare major such as `22` is not acceptable; it must be `MAJOR.MINOR.PATCH`).
+- FAIL IF `standalone/src-tauri/build.rs` no longer verifies that the bundled Node.js binary matches `standalone/.node-version` (this verification is what makes the disclosed runtime version provable).
+- FAIL IF the `build-standalone` job in `.github/workflows/release.yml` does not install the pinned runtime via `actions/setup-node` with `node-version-file: standalone/.node-version` (other jobs may pin `node-version` inline since their interpreter is never bundled).
 - FAIL IF `pnpm-workspace.yaml` is missing `minimumReleaseAge: 1440`.
 - FAIL IF `.github/dependabot.yml` is missing npm coverage for `/` or Cargo coverage for `/standalone/src-tauri`.
 - FAIL IF `.github/dependabot.yml` is missing dependency cooldown windows.

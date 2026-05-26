@@ -9,7 +9,7 @@ const npmOutPath = resolve(__dirname, "../src/data/dependencies-npm.json");
 const cargoOutPath = resolve(__dirname, "../src/data/dependencies-cargo.json");
 const runtimeOutPath = resolve(__dirname, "../src/data/dependencies-runtime.json");
 const cargoManifestPath = resolve(repoRoot, "standalone/src-tauri/Cargo.toml");
-const nvmrcPath = resolve(repoRoot, ".nvmrc");
+const nodePinPath = resolve(repoRoot, "standalone/.node-version");
 const themeExtensionsPath = resolve(repoRoot, "lib/src/lib/themes/bundled-extensions.json");
 const productDependencyFilters = [
   "dormouse",
@@ -338,14 +338,15 @@ function getCargoDependencies() {
 const cargoDeps = getCargoDependencies();
 
 // Bundled runtime: the standalone app ships a Node.js binary as a Tauri
-// sidecar (see standalone/src-tauri/build.rs). Its version is pinned exactly
-// in .nvmrc, the single source of truth shared with CI's setup-node, so this
-// snapshot stays deterministic on a clean checkout.
+// sidecar (see standalone/src-tauri/build.rs). Its version is pinned exactly in
+// standalone/.node-version, and build.rs fails the build unless the bundled
+// binary matches that pin — so the version disclosed here provably equals what
+// ships. Reading the committed pin keeps this snapshot deterministic.
 function getBundledRuntimeDependencies() {
-  const nodeVersion = readFileSync(nvmrcPath, "utf-8").trim().replace(/^v/, "");
+  const nodeVersion = readFileSync(nodePinPath, "utf-8").trim().replace(/^v/, "");
   if (!/^\d+\.\d+\.\d+$/.test(nodeVersion)) {
     console.error(
-      `ERROR: .nvmrc must pin an exact Node.js version (e.g. 22.17.1), found "${nodeVersion}"`,
+      `ERROR: standalone/.node-version must pin an exact Node.js version (e.g. 22.17.1), found "${nodeVersion}"`,
     );
     process.exit(1);
   }

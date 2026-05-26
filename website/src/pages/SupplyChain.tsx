@@ -180,8 +180,8 @@ export function Component() {
           </ul>
 
           <p className="text-base text-[var(--color-text)]/70 mb-2">
-            The Standalone app also bundles a Node.js runtime, pinned to an exact version and shipped
-            as a sidecar binary. The npm dependencies below ship in both the VS Code extension and the
+            The Standalone app also bundles a Node.js runtime, pinned to an exact version and verified
+            against the shipped binary at build time. The npm dependencies below ship in both the VS Code extension and the
             Standalone app; the Cargo dependencies ship only in the Standalone app. Thank you to every
             author and contributor below.
           </p>
@@ -226,7 +226,7 @@ export function Component() {
             title="Bundled Runtime"
             count={runtimeDeps.length}
             unit="runtimes"
-            description="The Node.js runtime shipped as a Tauri sidecar with the Standalone app, pinned exactly via .nvmrc. Node bundles V8, OpenSSL, and other components under their own licenses. The VS Code extension bundles no runtime — it runs on the editor's own Electron Node, the same runtime VS Code uses for its integrated terminal."
+            description="The Node.js runtime shipped as a Tauri sidecar with the Standalone app, pinned exactly in standalone/.node-version and verified against the bundled binary at build time, so this version provably matches what ships. Node bundles V8, OpenSSL, and other components under their own licenses. The VS Code extension bundles no runtime — it runs on the editor's own Electron Node, the same runtime VS Code uses for its integrated terminal."
           >
             <PackageTable deps={runtimeDeps} />
           </DependencySection>
