@@ -78,8 +78,9 @@ function DirectCargoTable({ deps }: { deps: DirectCargoDependency[] }) {
         <thead>
           <tr className="text-left border-b border-[var(--color-text)]/10">
             <th className="pb-2 pr-4 opacity-70">Crate</th>
-            <th className="pb-2 pr-4 opacity-70">Resolved</th>
-            <th className="pb-2 opacity-70">License</th>
+            <th className="pb-2 pr-4 opacity-70">Version</th>
+            <th className="pb-2 pr-4 opacity-70">License</th>
+            <th className="pb-2 opacity-70">Author</th>
           </tr>
         </thead>
         <tbody>
@@ -92,8 +93,11 @@ function DirectCargoTable({ deps }: { deps: DirectCargoDependency[] }) {
                 ) : null}
               </td>
               <td className="py-1.5 pr-4 opacity-50 font-mono whitespace-nowrap">{dep.version}</td>
-              <td className="py-1.5 opacity-50 whitespace-nowrap">
+              <td className="py-1.5 pr-4 opacity-50 whitespace-nowrap">
                 <EmptyAwareText value={dep.license} />
+              </td>
+              <td className="py-1.5 opacity-50">
+                <EmptyAwareText value={dep.author} />
               </td>
             </tr>
           ))}
