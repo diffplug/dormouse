@@ -11,7 +11,7 @@ import { POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playgroun
 
 function MobilePocketPlaygroundPage() {
   return (
-    <main className="fixed inset-0 bg-black">
+    <main className="fixed inset-0 bg-[var(--color-app-bg)] text-[var(--color-app-fg)]">
       <PocketTerminalExperience interactive fillViewport />
       <div className="absolute right-2 top-10 z-30 rounded border border-[var(--vscode-panel-border)] bg-[var(--vscode-editorWidget-background)]/95 px-1.5 py-1 text-[var(--vscode-editor-foreground)] shadow-lg">
         <ThemePicker variant="standalone-appbar" defaultThemeId={POCKET_THEME_ID} />

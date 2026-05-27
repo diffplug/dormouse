@@ -1,4 +1,4 @@
-import { useCallback, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { CaretDownIcon } from '@phosphor-icons/react';
 import type { DormouseTheme } from '../lib/themes';
 import {
@@ -26,6 +26,8 @@ export interface ThemePickerProps {
   defaultThemeId?: string;
 }
 
+const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+
 export function ThemePicker({ variant, className = '', defaultThemeId }: ThemePickerProps) {
   const currentId = useId();
   // Apply the persisted theme during render initialization, before commit, so
@@ -47,6 +49,13 @@ export function ThemePicker({ variant, className = '', defaultThemeId }: ThemePi
 
   const isPlayground = variant === 'playground-header';
   const activeTheme = themes.find((theme) => theme.id === activeId) ?? themes[0];
+
+  // React Router document hydration can reconcile <body> after render-time
+  // theme application; repeat once after commit so xterm sees real colors.
+  useBrowserLayoutEffect(() => {
+    const theme = restoreActiveTheme(defaultThemeId);
+    if (theme) setActiveId(theme.id);
+  }, [defaultThemeId]);
 
   const closeDropdown = useCallback(() => setOpen(false), []);
   useCloseOnOutsideAndEscape(open, rootRef, closeDropdown);

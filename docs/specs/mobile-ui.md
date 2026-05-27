@@ -108,7 +108,7 @@ Touch modes:
 | Mode | Button label | Icon | Availability | Behavior |
 | --- | --- | --- | --- | --- |
 | Gestures | `Gestures` | `HandPointingIcon` | Always available | Pane-content touches, pen presses, and primary mouse/trackpad clicks open the Gesture mode radial menu. |
-| Text selection | `Select` | `CursorTextIcon` | Always available | Touches are reserved for terminal text selection and copy/paste. If the TUI is capturing mouse events, Dormouse activates mouse override for the active pane. |
+| Text selection | `Select` | `CursorTextIcon` | Always available | Pane-content touch, pen, and primary mouse/trackpad drags use the same terminal text selection and copy/paste behavior as desktop. If the TUI is capturing mouse events, Dormouse activates mouse override for the active pane. |
 | Mouse | `Mouse` | `CursorClickIcon` | Only when the active TUI is capturing mouse events | Touches are passed through as terminal mouse input. |
 
 Default touch mode is **Gestures**.
@@ -120,6 +120,11 @@ Wheel, trackpad-scroll, and touchmove events in the pane content are terminal
 input only in Mouse mode. Gestures and Select mode must suppress those
 scroll-like events before xterm can translate them into mouse reports,
 alternate-screen arrow keys, or scrollback motion.
+
+Select mode must route touch and pen drags through the shared terminal
+mouse-selection router, not through a mobile-only selection implementation, so
+selection geometry, smart token extension, copy popups, rewrapped copy, and TUI
+mouse-capture override rules match desktop behavior.
 
 Gesture mode intentionally consumes primary mouse/trackpad clicks in addition to
 touch input. This keeps the `/playground/pocket` prototype usable in desktop

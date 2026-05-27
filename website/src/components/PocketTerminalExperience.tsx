@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { MobileTerminalUi, type MobileTerminalKeyboardMode, type MobileTerminalTouchMode } from "dormouse-lib/components/MobileTerminalUi";
 import { MobileWall, useMobileWallSessionItems, type MobileWallSession } from "dormouse-lib/components/MobileWall";
 import { restoreActiveTheme } from "dormouse-lib/lib/themes";
@@ -38,12 +38,19 @@ const GESTURE_ARROW_INPUTS = new Set<MobileGestureInputId>([
   "right",
 ]);
 
+const useBrowserLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
 function usePocketTheme() {
   const restoredRef = useRef(false);
   if (!restoredRef.current) {
     restoreActiveTheme(POCKET_THEME_ID);
     restoredRef.current = true;
   }
+  // Repeat after document hydration so MobileWall initializes from real
+  // Kimbie variables even if React reconciled away render-time body styles.
+  useBrowserLayoutEffect(() => {
+    restoreActiveTheme(POCKET_THEME_ID);
+  }, []);
 }
 
 export function PocketTerminalExperience({

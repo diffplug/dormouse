@@ -92,6 +92,8 @@ Selection is available whenever the terminal is handling mouse events — that i
 ### 3.1 Initiating a Selection
 
 - A click-and-drag in the terminal content area begins a selection. A small movement threshold (~4px) separates a plain click (which only shifts pane focus) from a drag (which begins a selection).
+- On touch or pen surfaces, a primary pointer tap-and-drag follows the same
+  terminal selection path as mouse drag. Non-primary touch pointers are ignored.
 - The selection is rendered by the terminal in a compositor layer **above** the cell grid, not by writing into the grid. This avoids conflicts with programs redrawing the screen.
 - The selection rectangle is drawn as a single perimeter outline tracing the union of selected cells. Color is taken from `--vscode-focusBorder` with fallbacks to terminal foreground and selection background.
 
