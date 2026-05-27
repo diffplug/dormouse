@@ -274,16 +274,42 @@ function detectReturnedShellPrompt(output: string): string | null {
   // prompt may be the whole buffer with no leading newline, so accept that too.
   const newlineIndex = text.lastIndexOf('\n');
   const lastLine = (newlineIndex === -1 ? text : text.slice(newlineIndex + 1)).trimStart();
-  if (lastLine.length < 3 || lastLine.length > 200) return null;
+  if (lastLine.length > 200) return null;
   // PowerShell `PS C:\path>` (with optional trailing space).
   if (/^PS\s+\S.*>\s?$/.test(lastLine)) return lastLine;
+  // cmd.exe `C:\path>` — a drive-letter path ending in `>`, and (unlike every
+  // other shell here) with no trailing space.
+  if (/^[A-Za-z]:\\.*>\s?$/.test(lastLine)) return lastLine;
   // Arrow-style prompts (oh-my-zsh, starship, fish defaults).
   if (/^[➜❯λ]\s+\S/.test(lastLine) && lastLine.endsWith(' ')) return lastLine;
-  // Generic shell prompts: require a path/user context signal AND a trailing
-  // prompt char + space. The context check rejects lines like "step 1: done"
-  // or "loading 95% complete" that happen to end in a punctuation mark.
+  // Multi-line prompts whose final line is just the terminator (e.g. Git Bash's
+  // `$ ` beneath a `user@host MINGW64 /path` line). Accept only when the
+  // preceding non-blank line carries prompt context, so stray output ending in
+  // `$ ` doesn't match.
+  if (/^[$#%]\s*$/.test(lastLine)) {
+    return precedingLineHasPromptContext(text, newlineIndex) ? lastLine : null;
+  }
+  // Generic single-line prompts: require a path/user context signal AND a
+  // trailing prompt char + space. The context check rejects lines like
+  // "step 1: done" or "loading 95% complete".
+  if (lastLine.length < 3) return null;
   if (!/[\/~@:]/.test(lastLine)) return null;
   return /[$#%>]\s$/.test(lastLine) ? lastLine : null;
+}
+
+// Whether the non-blank line preceding `lastNewlineIndex` looks like prompt
+// context (carries a `/`, `~`, `@`, or `:`). Used to validate a bare-terminator
+// final line in a multi-line prompt.
+function precedingLineHasPromptContext(text: string, lastNewlineIndex: number): boolean {
+  let end = lastNewlineIndex;
+  while (end > 0) {
+    const start = text.lastIndexOf('\n', end - 1);
+    const line = text.slice(start + 1, end).trim();
+    if (line) return /[\/~@:]/.test(line);
+    if (start < 0) break;
+    end = start;
+  }
+  return false;
 }
 
 function stripAltScreenSpans(input: string): string {
