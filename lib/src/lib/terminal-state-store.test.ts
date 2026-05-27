@@ -11,6 +11,7 @@ import {
   recordTerminalUserInputByPtyId,
   removeTerminalPaneState,
   resetTerminalPaneState,
+  seedPromptShapeFromScrollback,
   seedTerminalManualCwd,
   setTerminalUserTitle,
 } from './terminal-state-store';
@@ -204,6 +205,22 @@ describe('terminal command input via rendered buffer', () => {
   it('does not submit on a newline pasted inside a bracketed paste', () => {
     recordTerminalOutput('pane', PROMPT);
     recordTerminalUserInput('pane', '\x1b[200~line one\nline two\x1b[201~', lineReader(`${PROMPT}line one`));
+
+    expect(getTerminalPaneState('pane').currentCommand).toBeNull();
+  });
+
+  it('seeds the shape from restored scrollback so the first command is titled', () => {
+    // Reconnect to a live pty: the shell won't re-emit its prompt, so the shape
+    // must come from the replayed scrollback that ends at the idle prompt.
+    seedPromptShapeFromScrollback('pane', `earlier output\r\n${PROMPT}`);
+    recordTerminalUserInput('pane', 'pnpm build\r', lineReader(`${PROMPT}pnpm build`));
+
+    expect(getTerminalPaneState('pane').currentCommand?.rawCommandLine).toBe('pnpm build');
+  });
+
+  it('does not seed a shape when scrollback ends mid-output', () => {
+    seedPromptShapeFromScrollback('pane', 'building ~/app...\r\n[1234/5678] compiling');
+    recordTerminalUserInput('pane', 'pnpm build\r', lineReader(`${PROMPT}pnpm build`));
 
     expect(getTerminalPaneState('pane').currentCommand).toBeNull();
   });

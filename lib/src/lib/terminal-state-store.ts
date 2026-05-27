@@ -152,6 +152,20 @@ export function recordTerminalOutputByPtyId(ptyId: string, output: string): void
   recordTerminalOutput(resolvePaneStateIdByPtyId(ptyId), output);
 }
 
+// Pre-seed the prompt shape from restored scrollback. On reconnect to a live
+// pty the shell won't re-emit its prompt, so without this the first command
+// after a restore has no shape to strip and goes untitled until the next
+// prompt. The scrollback ends at whatever was on screen: if that's an idle
+// prompt we learn the shape, otherwise we no-op and wait for the next live
+// prompt. Learn-only — fires no idle transition.
+export function seedPromptShapeFromScrollback(id: string, scrollback: string): void {
+  if (!scrollback) return;
+  const promptLine = detectReturnedShellPrompt(scrollback.slice(-1024));
+  if (!promptLine) return;
+  const shape = derivePromptShape(promptLine);
+  if (shape) promptShapes.set(id, shape);
+}
+
 export type SetTerminalUserTitleResult =
   | { accepted: true }
   | { accepted: false; reason: 'empty' | 'reserved' };

@@ -35,6 +35,7 @@ import {
   recordTerminalUserInputByPtyId,
   removeTerminalPaneState,
   resetTerminalPaneState,
+  seedPromptShapeFromScrollback,
   seedTerminalManualCwd,
   setTerminalUserTitle,
   swapTerminalPaneStates,
@@ -306,6 +307,7 @@ export function resumeTerminal(
 
   if (replayData) {
     writeReplay(entry, replayData);
+    seedPromptShapeFromScrollback(id, replayData);
   }
   if (exitInfo && !exitInfo.alive) {
     entry.terminal.write(`\r\n[Process exited with code ${exitInfo.exitCode ?? -1}]\r\n`);
@@ -335,6 +337,7 @@ export function restoreTerminal(
 
   if (opts.scrollback) {
     writeReplay(entry, opts.scrollback, '\r\n');
+    seedPromptShapeFromScrollback(id, opts.scrollback);
   }
   if (opts.cwdWarning) {
     entry.terminal.write(`\r\n\x1b[33m${opts.cwdWarning}\x1b[0m\r\n`);
