@@ -236,14 +236,18 @@ export function PocketTerminalExperience({
     };
   }, [getPocketTouchMode, handleNotifyPocket, handleOpenGithub, subscribeToPocketTouchMode, tryAutoStart]);
 
+  // Touch mode is a single global UI state, so each pane's mouse override is a
+  // pure function of (touch mode) × (that pane's own reporting) — not of which
+  // pane happens to be active. Configuring every pane prevents a pane the user
+  // switched away from being left stuck in a stale override (e.g. a
+  // mouse-reporting pane left "permanent" after leaving Select mode).
   useEffect(() => {
-    const reporting = activeMouseState?.mouseReporting ?? "none";
-    if (touchMode === "selection" && reporting !== "none") {
-      setMouseOverride(activePaneId, "permanent");
-    } else {
-      setMouseOverride(activePaneId, "off");
+    for (const session of POCKET_SESSIONS) {
+      const reporting = mouseStates.get(session.id)?.mouseReporting ?? "none";
+      const override = touchMode === "selection" && reporting !== "none" ? "permanent" : "off";
+      setMouseOverride(session.id, override);
     }
-  }, [activeMouseState?.mouseReporting, activePaneId, touchMode]);
+  }, [mouseStates, touchMode]);
 
   return (
     <MobileTerminalUi
