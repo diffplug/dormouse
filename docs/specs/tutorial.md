@@ -46,7 +46,7 @@ The Pocket page attaches `TutDetector` with the shared activity and mouse-select
 
 The desktop runner shows a top-level menu first. The Pocket runner starts directly inside `Gesture navigation`; pressing Esc returns to its top-level menu. Selecting a section drills into its item list. Each section shows `[N/M complete]` next to its title. The menu helper below the profile title shows only navigation shortcuts, not overall completion.
 
-The top-level menu also includes `Starred on GitHub`, which sits directly below `Copy paste` without a blank spacer, and shows `[not yet]` until selected and `[thanks ⭐]` after it has been resolved. Pressing Enter on that row calls `onOpenGithub`, which `/playground/desktop` and the Pocket playground wire to `window.open("https://github.com/diffplug/dormouse", "_blank", "noopener,noreferrer")`.
+The top-level menu also includes `Starred on GitHub`, which sits directly below `Copy paste` without a blank spacer, and shows `[not yet]` until selected and `[thanks ⭐]` after it has been resolved. Pressing Enter on that row calls `onOpenGithub`; `/playground/desktop` wires it to `window.open("https://github.com/diffplug/dormouse", "_blank", "noopener,noreferrer")`, while the Pocket playground uses `window.location.assign("https://github.com/diffplug/dormouse")` so mobile browsers do not block the navigation as a popup.
 
 After `Starred on GitHub`, the top-level menu shows `🐭 FlappyTerm 🐭`.
 It shows `[LOCKED N/M]` while any section task is incomplete. `N/M` is
@@ -55,10 +55,13 @@ row do not count. When all section tasks are complete, the row shows a
 `[High score: N]` readout. Pressing Enter on the unlocked row opens Flappy
 Term, a runner-local mini-game: `Space`/`Up`/`Enter` flaps the bird, scoring
 persists as the high score, and `Esc` returns to the top-level menu. On the
-game-over screen, `Enter` restarts and `p` calls `onOpenPocket`, which
-`/playground/desktop` and the Pocket playground wire to
-`window.open("/playground/pocket", "_blank", "noopener,noreferrer")`. The
-game-over prompt reads `Read about Dormouse Pocket  [p]`.
+desktop game-over screen, `Enter` restarts and `p` calls `onOpenPocket`, which
+`/playground/desktop` wires to
+`window.open("/playground/pocket", "_blank", "noopener,noreferrer")`; the prompt
+reads `Read about Dormouse Pocket  [p]`. On the Pocket game-over screen,
+`Enter` restarts and `n` calls `onNotifyPocket`, which the Pocket playground
+wires to `window.location.assign("https://nedshed.dev/about")`;
+the prompt reads `Notify me when Pocket ships [n]`.
 
 Inside a section, items render as one of:
 

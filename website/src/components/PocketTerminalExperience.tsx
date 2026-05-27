@@ -13,7 +13,6 @@ import { TutDetector } from "../lib/tut-detector";
 import { TutRunner } from "../lib/tut-runner";
 import { POCKET_TUTORIAL_PROFILE, type ItemId } from "../lib/tut-items";
 import { ChangelogRunner } from "../lib/changelog-runner";
-import { POCKET_PLAYGROUND_PATH } from "../lib/playground-routing";
 
 export const POCKET_THEME_ID = "vscode.theme-kimbie-dark.kimbie-dark";
 
@@ -37,6 +36,8 @@ const GESTURE_ARROW_INPUTS = new Set<MobileGestureInputId>([
   "left",
   "right",
 ]);
+const GITHUB_URL = "https://github.com/diffplug/dormouse";
+const POCKET_NOTIFY_URL = "https://nedshed.dev/about";
 
 const useBrowserLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
@@ -85,15 +86,11 @@ export function PocketTerminalExperience({
     && activeMouseState.mouseReporting !== "none";
 
   const handleOpenGithub = useCallback(() => {
-    window.open(
-      "https://github.com/diffplug/dormouse",
-      "_blank",
-      "noopener,noreferrer",
-    );
+    window.location.assign(GITHUB_URL);
   }, []);
 
-  const handleOpenPocket = useCallback(() => {
-    window.open(POCKET_PLAYGROUND_PATH, "_blank", "noopener,noreferrer");
+  const handleNotifyPocket = useCallback(() => {
+    window.location.assign(POCKET_NOTIFY_URL);
   }, []);
 
   const markPocketItemComplete = useCallback((id: ItemId) => {
@@ -188,7 +185,7 @@ export function PocketTerminalExperience({
               profile: POCKET_TUTORIAL_PROFILE,
               onExit,
               onOpenGithub: handleOpenGithub,
-              onOpenPocket: handleOpenPocket,
+              onNotifyPocket: handleNotifyPocket,
               getPocketTouchMode,
               subscribeToPocketTouchMode,
             });
@@ -237,7 +234,7 @@ export function PocketTerminalExperience({
       touchModeListenersRef.current.clear();
       adapterRef.current = null;
     };
-  }, [getPocketTouchMode, handleOpenGithub, handleOpenPocket, subscribeToPocketTouchMode, tryAutoStart]);
+  }, [getPocketTouchMode, handleNotifyPocket, handleOpenGithub, subscribeToPocketTouchMode, tryAutoStart]);
 
   useEffect(() => {
     const reporting = activeMouseState?.mouseReporting ?? "none";

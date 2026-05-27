@@ -59,6 +59,8 @@ const SPINNER_INTERVAL_MS = 100;
 const ACTIVE_ITEM_GLYPH = "●";
 const STAR_PROMPT_TITLE = "Starred on GitHub";
 const FLAPPY_TITLE = "🐭 FlappyTerm 🐭";
+const FLAPPY_DESKTOP_GAME_OVER_PROMPT = "Read about Dormouse Pocket  [p]";
+const FLAPPY_POCKET_GAME_OVER_PROMPT = "Notify me when Pocket ships [n]";
 
 // --- Flappy Term game constants (ported from flappy-term.html) ---
 const FLAPPY_TICK_MS = 60;
@@ -120,6 +122,8 @@ interface TutRunnerOptions {
   onOpenGithub?: () => void;
   /** Called when the user presses `p` on the Flappy Term game-over screen. */
   onOpenPocket?: () => void;
+  /** Called when the user presses `n` on Pocket's Flappy Term game-over screen. */
+  onNotifyPocket?: () => void;
   /** Current Pocket touch mode, used for live non-progress tutorial prompts. */
   getPocketTouchMode?: () => PocketTutorialTouchMode;
   subscribeToPocketTouchMode?: (listener: () => void) => () => void;
@@ -140,6 +144,7 @@ export class TutRunner implements InteractiveProgram {
   private onTogglePlaceToPaste?: () => void;
   private onOpenGithub?: () => void;
   private onOpenPocket?: () => void;
+  private onNotifyPocket?: () => void;
   private getPocketTouchMode?: () => PocketTutorialTouchMode;
   private subscribeToPocketTouchMode?: (listener: () => void) => () => void;
 
@@ -168,6 +173,7 @@ export class TutRunner implements InteractiveProgram {
     this.onTogglePlaceToPaste = options.onTogglePlaceToPaste;
     this.onOpenGithub = options.onOpenGithub;
     this.onOpenPocket = options.onOpenPocket;
+    this.onNotifyPocket = options.onNotifyPocket;
     this.getPocketTouchMode = options.getPocketTouchMode;
     this.subscribeToPocketTouchMode = options.subscribeToPocketTouchMode;
     this.returnToInitialScreen();
@@ -362,12 +368,17 @@ export class TutRunner implements InteractiveProgram {
       if (
         this.screen === "flappy" &&
         this.flappy &&
-        !this.flappy.alive &&
-        (ch === "p" || ch === "P")
+        !this.flappy.alive
       ) {
-        this.onOpenPocket?.();
-        i += 1;
-        continue;
+        if (this.profile.id === "pocket" && (ch === "n" || ch === "N")) {
+          this.onNotifyPocket?.();
+          i += 1;
+          continue;
+        } else if (this.profile.id === "desktop" && (ch === "p" || ch === "P")) {
+          this.onOpenPocket?.();
+          i += 1;
+          continue;
+        }
       }
       if (ch === "q" || ch === "Q") {
         this.handleEscape();
@@ -746,7 +757,9 @@ export class TutRunner implements InteractiveProgram {
       out += this.flappyCenteredAt(
         COLS,
         r + 8,
-        "Read about Dormouse Pocket  [p]",
+        this.profile.id === "pocket"
+          ? FLAPPY_POCKET_GAME_OVER_PROMPT
+          : FLAPPY_DESKTOP_GAME_OVER_PROMPT,
         fg256(C.text),
       );
     } else if (!g.started) {

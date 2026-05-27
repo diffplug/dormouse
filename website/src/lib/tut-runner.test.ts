@@ -15,6 +15,8 @@ function mountRunner(
   completedIds: ItemId[] = [],
   options: {
     onOpenGithub?: () => void;
+    onOpenPocket?: () => void;
+    onNotifyPocket?: () => void;
     pocketTouchMode?: "gestures" | "selection" | "cursor";
     profile?: TutorialProfile;
   } = {},
@@ -43,6 +45,8 @@ function mountRunner(
     },
     onTogglePlaceToPaste: profile?.id === "pocket" ? undefined : () => {},
     onOpenGithub: options.onOpenGithub,
+    onOpenPocket: options.onOpenPocket,
+    onNotifyPocket: options.onNotifyPocket,
     getPocketTouchMode: () => pocketTouchMode,
     subscribeToPocketTouchMode: (listener) => {
       pocketTouchModeListeners.add(listener);
@@ -242,5 +246,54 @@ describe("TutRunner snapshots", () => {
     sendKeys("\x1b");
     expect(lastFrame()).toContain("Dormouse Playground Tutorial");
     dispose();
+  });
+
+  it("keeps the desktop Flappy game-over prompt on p", () => {
+    vi.useFakeTimers();
+    const allItemIds = SECTIONS.flatMap((section) => section.items.map((i) => i.id));
+    const onOpenPocket = vi.fn();
+    const { sendKeys, lastFrame, dispose } = mountRunner(allItemIds, { onOpenPocket });
+
+    try {
+      sendKeys("\x1b[B\x1b[B\x1b[B\x1b[B\r ");
+      vi.advanceTimersByTime(3000);
+
+      expect(lastFrame()).toContain("GAME OVER");
+      expect(lastFrame()).toContain("Read about Dormouse Pocket  [p]");
+      expect(lastFrame()).not.toContain("Notify me when Pocket ships");
+
+      sendKeys("p");
+      expect(onOpenPocket).toHaveBeenCalledTimes(1);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses the Pocket Flappy game-over prompt and opens notify on n", () => {
+    vi.useFakeTimers();
+    const allPocketItemIds = POCKET_TUTORIAL_PROFILE.sections.flatMap((section) => (
+      section.items.map((i) => i.id)
+    ));
+    const onNotifyPocket = vi.fn();
+    const { sendKeys, lastFrame, dispose } = mountRunner(allPocketItemIds, {
+      profile: POCKET_TUTORIAL_PROFILE,
+      onNotifyPocket,
+    });
+
+    try {
+      sendKeys("\x1b\x1b[B\x1b[B\x1b[B\r ");
+      vi.advanceTimersByTime(3000);
+
+      expect(lastFrame()).toContain("GAME OVER");
+      expect(lastFrame()).toContain("Notify me when Pocket ships [n]");
+      expect(lastFrame()).not.toContain("Read about Dormouse Pocket");
+
+      sendKeys("n");
+      expect(onNotifyPocket).toHaveBeenCalledTimes(1);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
   });
 });
