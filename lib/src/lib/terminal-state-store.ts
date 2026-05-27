@@ -10,14 +10,16 @@ import {
   type TerminalTitle,
 } from './terminal-state';
 import {
-  createPromptCommandInputState,
-  updatePromptCommandInput,
-  type PromptCommandInputState,
+  createPromptSubmitState,
+  detectPromptSubmit,
+  type PromptSubmitState,
 } from './terminal-command-input';
+import { derivePromptShape, extractCommand, type PromptShape } from './terminal-prompt-shape';
 import { getSessionIdByPtyId } from './terminal-store';
 
 const paneStates = new Map<string, TerminalPaneState>();
-const promptInputStates = new Map<string, PromptCommandInputState>();
+const promptSubmitStates = new Map<string, PromptSubmitState>();
+const promptShapes = new Map<string, PromptShape>();
 const promptOutputBuffers = new Map<string, string>();
 const listeners = new Set<() => void>();
 let cachedSnapshot: Map<string, TerminalPaneState> | null = null;
@@ -49,14 +51,16 @@ export function ensureTerminalPaneState(id: string, initial?: Partial<TerminalPa
 }
 
 export function resetTerminalPaneState(id: string, initial?: Partial<TerminalPaneState>): void {
-  promptInputStates.delete(id);
+  promptSubmitStates.delete(id);
+  promptShapes.delete(id);
   promptOutputBuffers.delete(id);
   paneStates.set(id, createTerminalPaneState(initial));
   notifyTerminalPaneStateListeners();
 }
 
 export function removeTerminalPaneState(id: string): void {
-  promptInputStates.delete(id);
+  promptSubmitStates.delete(id);
+  promptShapes.delete(id);
   promptOutputBuffers.delete(id);
   if (!paneStates.delete(id)) return;
   notifyTerminalPaneStateListeners();
@@ -70,8 +74,10 @@ export function applyTerminalSemanticEventsByPtyId(ptyId: string, events: Termin
 export function applyTerminalSemanticEvents(id: string, events: TerminalSemanticEvent[]): void {
   if (events.length === 0) return;
   if (events.some((event) => event.type === 'promptStart' || event.type === 'promptEnd' || event.type === 'commandStart')) {
-    promptInputStates.delete(id);
+    promptSubmitStates.delete(id);
     promptOutputBuffers.delete(id);
+    // promptShapes intentionally survives — the prompt shape is stable across
+    // commands and we want it ready for the next one.
   }
   const prev = paneStates.get(id) ?? createTerminalPaneState();
   let next = prev;
@@ -83,38 +89,63 @@ export function applyTerminalSemanticEvents(id: string, events: TerminalSemantic
   notifyTerminalPaneStateListeners();
 }
 
-export function recordTerminalUserInput(id: string, input: string): void {
+// Reads the cursor's full rendered logical line (`prompt + command`) from the
+// terminal buffer at submit time. The store strips the prompt off the front
+// using the learned prompt shape.
+export interface PromptLineReader {
+  readLine(): string | null;
+}
+
+export function recordTerminalUserInput(id: string, input: string, reader?: PromptLineReader): void {
   if (!input) return;
   const state = paneStates.get(id) ?? createTerminalPaneState();
   if (state.currentCommand || state.activity.kind === 'running' || state.activity.kind === 'finished') return;
 
-  const promptInputState = promptInputStates.get(id) ?? createPromptCommandInputState();
-  const next = updatePromptCommandInput(promptInputState, input);
-  promptInputStates.set(id, next.state);
+  const submitState = promptSubmitStates.get(id) ?? createPromptSubmitState();
+  const next = detectPromptSubmit(submitState, input);
+  promptSubmitStates.set(id, next.state);
 
-  if (next.submittedCommandLine) {
+  if (!next.submitted) return;
+
+  // Read the rendered `prompt + command` line and strip the prompt using the
+  // shape we learned from a recent bare prompt. This sees history recall, paste,
+  // and autosuggest because it reads what's actually on screen.
+  const renderedLine = reader?.readLine() ?? null;
+  const shape = promptShapes.get(id) ?? null;
+  const commandLine = renderedLine && shape ? extractCommand(renderedLine, shape) : null;
+  if (commandLine) {
     applyTerminalSemanticEvents(id, [
-      { type: 'commandLine', commandLine: next.submittedCommandLine },
+      { type: 'commandLine', commandLine },
       { type: 'commandStart', source: 'user_input' },
     ]);
   }
 }
 
-export function recordTerminalUserInputByPtyId(ptyId: string, input: string): void {
-  recordTerminalUserInput(resolvePaneStateIdByPtyId(ptyId), input);
+export function recordTerminalUserInputByPtyId(ptyId: string, input: string, reader?: PromptLineReader): void {
+  recordTerminalUserInput(resolvePaneStateIdByPtyId(ptyId), input, reader);
 }
 
 export function recordTerminalOutput(id: string, output: string): void {
   if (!output) return;
-  const state = paneStates.get(id);
-  if (state?.currentCommand?.source !== 'user_input') return;
 
   const buffer = `${promptOutputBuffers.get(id) ?? ''}${output}`.slice(-1024);
   promptOutputBuffers.set(id, buffer);
-  if (!looksLikeReturnedShellPrompt(buffer)) return;
-
+  const promptLine = detectReturnedShellPrompt(buffer);
+  if (!promptLine) return;
   promptOutputBuffers.delete(id);
-  applyTerminalSemanticEvents(id, [{ type: 'promptStart' }, { type: 'promptEnd' }]);
+
+  // Learn/refresh the prompt shape from every prompt we see — including the
+  // shell's very first prompt at spawn — so command extraction works from the
+  // first command, recall included.
+  const shape = derivePromptShape(promptLine);
+  if (shape) promptShapes.set(id, shape);
+
+  // The idle transition only applies while a keystroke-submitted command is
+  // running; OSC-tracked shells drive their own boundaries.
+  const state = paneStates.get(id);
+  if (state?.currentCommand?.source === 'user_input') {
+    applyTerminalSemanticEvents(id, [{ type: 'promptStart' }, { type: 'promptEnd' }]);
+  }
 }
 
 export function recordTerminalOutputByPtyId(ptyId: string, output: string): void {
@@ -177,19 +208,25 @@ export function fillTerminalProcessCwdByPtyId(ptyId: string, path: string | null
 export function swapTerminalPaneStates(idA: string, idB: string): void {
   const stateA = paneStates.get(idA);
   const stateB = paneStates.get(idB);
-  const inputA = promptInputStates.get(idA);
-  const inputB = promptInputStates.get(idB);
+  const inputA = promptSubmitStates.get(idA);
+  const inputB = promptSubmitStates.get(idB);
+  const shapeA = promptShapes.get(idA);
+  const shapeB = promptShapes.get(idB);
   const outputA = promptOutputBuffers.get(idA);
   const outputB = promptOutputBuffers.get(idB);
-  if (!stateA && !stateB && !inputA && !inputB && !outputA && !outputB) return;
+  if (!stateA && !stateB && !inputA && !inputB && !shapeA && !shapeB && !outputA && !outputB) return;
   if (stateB) paneStates.set(idA, stateB);
   else paneStates.delete(idA);
   if (stateA) paneStates.set(idB, stateA);
   else paneStates.delete(idB);
-  if (inputB) promptInputStates.set(idA, inputB);
-  else promptInputStates.delete(idA);
-  if (inputA) promptInputStates.set(idB, inputA);
-  else promptInputStates.delete(idB);
+  if (inputB) promptSubmitStates.set(idA, inputB);
+  else promptSubmitStates.delete(idA);
+  if (inputA) promptSubmitStates.set(idB, inputA);
+  else promptSubmitStates.delete(idB);
+  if (shapeB) promptShapes.set(idA, shapeB);
+  else promptShapes.delete(idA);
+  if (shapeA) promptShapes.set(idB, shapeA);
+  else promptShapes.delete(idB);
   if (outputB) promptOutputBuffers.set(idA, outputB);
   else promptOutputBuffers.delete(idA);
   if (outputA) promptOutputBuffers.set(idB, outputA);
@@ -210,31 +247,29 @@ function resolvePaneStateIdByPtyId(ptyId: string): string {
   return getSessionIdByPtyId(ptyId) ?? ptyId;
 }
 
-// Best-effort heuristic for shells without OSC 133/633 integration. Used only
-// when currentCommand.source === 'user_input' to detect "command finished and
-// the shell is prompting again." Custom prompts that lack the path/user context
-// signal (`/`, `~`, `@`, `:`) or a recognized terminator (`$`, `#`, `%`, `>`)
-// will not match — that's intentional, since false positives would prematurely
-// flip a running command back to idle. Shells that emit OSC 133/633 take the
-// fast path and never reach this code.
-function looksLikeReturnedShellPrompt(output: string): boolean {
+// Detect a returned/idle shell prompt for shells without OSC 133/633
+// integration, returning the prompt line (for shape learning) or null. Custom
+// prompts that lack the path/user context signal (`/`, `~`, `@`, `:`) or a
+// recognized terminator (`$`, `#`, `%`, `>`) won't match — intentional, since
+// false positives would prematurely flip a running command back to idle.
+function detectReturnedShellPrompt(output: string): string | null {
   const visible = stripAltScreenSpans(output);
   const text = stripTerminalControls(visible).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  // Real prompts come on a fresh line. Requiring a leading newline rejects
-  // arbitrary command output that happens to end with a prompt-like character.
+  // Prompts usually come on a fresh line; that rejects arbitrary command output
+  // that happens to end with a prompt-like character. The spawn-time first
+  // prompt may be the whole buffer with no leading newline, so accept that too.
   const newlineIndex = text.lastIndexOf('\n');
-  if (newlineIndex === -1) return false;
-  const lastLine = text.slice(newlineIndex + 1).trimStart();
-  if (lastLine.length < 3 || lastLine.length > 200) return false;
+  const lastLine = (newlineIndex === -1 ? text : text.slice(newlineIndex + 1)).trimStart();
+  if (lastLine.length < 3 || lastLine.length > 200) return null;
   // PowerShell `PS C:\path>` (with optional trailing space).
-  if (/^PS\s+\S.*>\s?$/.test(lastLine)) return true;
+  if (/^PS\s+\S.*>\s?$/.test(lastLine)) return lastLine;
   // Arrow-style prompts (oh-my-zsh, starship, fish defaults).
-  if (/^[➜❯λ]\s+\S/.test(lastLine) && lastLine.endsWith(' ')) return true;
+  if (/^[➜❯λ]\s+\S/.test(lastLine) && lastLine.endsWith(' ')) return lastLine;
   // Generic shell prompts: require a path/user context signal AND a trailing
   // prompt char + space. The context check rejects lines like "step 1: done"
   // or "loading 95% complete" that happen to end in a punctuation mark.
-  if (!/[\/~@:]/.test(lastLine)) return false;
-  return /[$#%>]\s$/.test(lastLine);
+  if (!/[\/~@:]/.test(lastLine)) return null;
+  return /[$#%>]\s$/.test(lastLine) ? lastLine : null;
 }
 
 function stripAltScreenSpans(input: string): string {

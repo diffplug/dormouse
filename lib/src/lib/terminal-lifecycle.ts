@@ -38,8 +38,31 @@ import {
   seedTerminalManualCwd,
   setTerminalUserTitle,
   swapTerminalPaneStates,
+  type PromptLineReader,
 } from './terminal-state-store';
+import { readLogicalLineFromBuffer, type BufferLike } from './terminal-buffer-read';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
+
+function makePromptLineReader(terminal: Terminal): PromptLineReader {
+  return {
+    readLine() {
+      const buffer = terminal.buffer?.active;
+      if (!buffer) return null;
+      const cursorAbsRow = buffer.baseY + buffer.cursorY;
+      const bufferLike: BufferLike = {
+        getLine(index) {
+          const line = buffer.getLine(index);
+          if (!line) return undefined;
+          return {
+            isWrapped: line.isWrapped,
+            translateToString: (trimRight) => line.translateToString(trimRight),
+          };
+        },
+      };
+      return readLogicalLineFromBuffer(bufferLike, cursorAbsRow);
+    },
+  };
+}
 
 function seedProcessCwdAfterSpawn(id: string): void {
   void getPlatform().getCwd(id).then((cwd) => fillTerminalProcessCwdByPtyId(id, cwd));
@@ -149,7 +172,7 @@ function wireXtermHandlers(
     const isSyntheticTerminalReport = inputIsSyntheticTerminalReport(input);
 
     if (!isSyntheticTerminalReport) {
-      recordTerminalUserInputByPtyId(id, input);
+      recordTerminalUserInputByPtyId(id, input, makePromptLineReader(terminal));
       const entry = registry.get(id);
       const hadTodo = entry?.todo === true;
       getPlatform().alertAttend(id);
