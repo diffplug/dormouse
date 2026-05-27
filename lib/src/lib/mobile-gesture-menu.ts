@@ -140,6 +140,9 @@ export const RADIUS_HIGHLIGHT = RADIUS_SELECT * 0.5;
 export const MOBILE_GESTURE_COMPLETE_MS = 220;
 export const MOBILE_GESTURE_DISPLAY_MARGIN = 168;
 export const MOBILE_GESTURE_THUMB_OFFSET = 132;
+// Per-move outward distance below which the overshoot drag counts as settling rather
+// than still pushing out — the point where the compass is allowed to expand.
+export const OPTION_EXPAND_RELEASE = 2;
 
 export const MOBILE_GESTURE_DIRECTION_VECTORS: Record<MobileGestureDirection, MobileGesturePoint> = {
   n: { x: 0, y: -1 },
@@ -307,7 +310,12 @@ function advanceOptionOrigin(
   const direction = MOBILE_GESTURE_DIRECTION_VECTORS[selectionDirection];
   const overshoot = (point.x - optionOrigin.x) * direction.x + (point.y - optionOrigin.y) * direction.y;
   if (overshoot <= 0) return { optionOrigin, displayOptionOrigin, advancing: false };
+  // Still ratchet the origin out to track the finger, but only call it "advancing"
+  // (which keeps the compass collapsed) while the outward push is brisk. Once the drag
+  // slows to a settle, advancing drops so the compass can expand without waiting for a
+  // deliberate move back in the chosen direction.
   return {
+    advancing: overshoot > OPTION_EXPAND_RELEASE,
     optionOrigin: {
       x: optionOrigin.x + direction.x * overshoot,
       y: optionOrigin.y + direction.y * overshoot,
@@ -316,7 +324,6 @@ function advanceOptionOrigin(
       x: displayOptionOrigin.x + direction.x * overshoot,
       y: displayOptionOrigin.y + direction.y * overshoot,
     },
-    advancing: true,
   };
 }
 

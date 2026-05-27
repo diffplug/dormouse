@@ -7,6 +7,7 @@ import {
   MOBILE_GESTURE_COMPLETE_MS,
   MOBILE_GESTURE_DIRECTION_VECTORS,
   MOBILE_GESTURE_OPTION_DIRECTIONS,
+  OPTION_EXPAND_RELEASE,
   RADIUS_HIGHLIGHT,
   RADIUS_LAYOUT,
   RADIUS_SELECT,
@@ -207,6 +208,17 @@ describe('mobile gesture menu state machine', () => {
 
     // Pushing back out in the wrong direction does not collapse it again.
     state = updateMobileGesture(state, pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 5));
+    expect(state.phase === 'options' && state.expanded).toBe(true);
+  });
+
+  it('expands once the overshoot drag settles, without a deliberate move back', () => {
+    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('se'));
+    // Brisk overshoot keeps it collapsed.
+    state = updateMobileGesture(state, pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3));
+    expect(state.phase === 'options' && state.expanded).toBe(false);
+    // A tiny continued nudge in the same direction (a settle, not a hard push) expands it.
+    const overshoot = pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3);
+    state = updateMobileGesture(state, pointInDirection(overshoot, 'se', OPTION_EXPAND_RELEASE - 1));
     expect(state.phase === 'options' && state.expanded).toBe(true);
   });
 
