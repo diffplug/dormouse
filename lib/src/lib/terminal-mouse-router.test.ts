@@ -236,6 +236,64 @@ describe('terminal-mouse-router: override suppression', () => {
     cleanup();
   });
 
+  it('starts a block selection from a double-tap-then-drag on touch', () => {
+    const { cleanup, element } = createHarness(windowHost);
+
+    // First tap: a quick press and release with no drag — leaves no selection.
+    element.emit('pointerdown', pointerEvent({ clientX: 5, clientY: 5 }));
+    windowHost.emit('pointerup', pointerEvent({ clientX: 5, clientY: 5 }));
+    expect(getMouseSelectionState('t1').selection).toBeNull();
+
+    // Second tap immediately after, in the same spot, then drag → block shape.
+    element.emit('pointerdown', pointerEvent({ clientX: 5, clientY: 5 }));
+    windowHost.emit('pointermove', pointerEvent({ clientX: 25, clientY: 15 }));
+
+    expect(getMouseSelectionState('t1').selection).toMatchObject({
+      shape: 'block',
+      dragging: true,
+    });
+    cleanup();
+  });
+
+  it('keeps a single touch drag linewise when the taps are too far apart in time', () => {
+    let now = 1000;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { cleanup, element } = createHarness(windowHost);
+
+    element.emit('pointerdown', pointerEvent({ clientX: 5, clientY: 5 }));
+    windowHost.emit('pointerup', pointerEvent({ clientX: 5, clientY: 5 }));
+
+    now += 1000; // well beyond the double-tap window
+    element.emit('pointerdown', pointerEvent({ clientX: 5, clientY: 5 }));
+    windowHost.emit('pointermove', pointerEvent({ clientX: 25, clientY: 15 }));
+
+    expect(getMouseSelectionState('t1').selection).toMatchObject({
+      shape: 'linewise',
+      dragging: true,
+    });
+    nowSpy.mockRestore();
+    cleanup();
+  });
+
+  it('does not treat two quick consecutive drags as a double-tap', () => {
+    const { cleanup, element } = createHarness(windowHost);
+
+    // First interaction is a DRAG (not a tap), so it must not arm block mode.
+    element.emit('pointerdown', pointerEvent({ clientX: 5, clientY: 5 }));
+    windowHost.emit('pointermove', pointerEvent({ clientX: 25, clientY: 15 }));
+    windowHost.emit('pointerup', pointerEvent({ clientX: 25, clientY: 15 }));
+
+    // A second drag right after, nearby, stays linewise.
+    element.emit('pointerdown', pointerEvent({ clientX: 5, clientY: 5 }));
+    windowHost.emit('pointermove', pointerEvent({ clientX: 25, clientY: 15 }));
+
+    expect(getMouseSelectionState('t1').selection).toMatchObject({
+      shape: 'linewise',
+      dragging: true,
+    });
+    cleanup();
+  });
+
   it('suppresses compatibility mouse events after a touch selection starts', () => {
     const { cleanup, element } = createHarness(windowHost);
 
