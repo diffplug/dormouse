@@ -46,21 +46,25 @@ function renderMobileTerminal({
 }: {
   touchMode: MobileTerminalTouchMode;
   onMouseEvent: (event: MouseEvent) => void;
-}): { terminal: HTMLDivElement } {
+}): { terminal: HTMLDivElement; setTouchMode: (mode: MobileTerminalTouchMode) => void } {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
   roots.push(root);
 
-  act(() => {
-    root.render(
-      <MobileTerminalUi
-        activeTouchMode={touchMode}
-        cursorTouchAvailable
-        terminal={<div data-testid="terminal" />}
-      />,
-    );
-  });
+  const renderWith = (mode: MobileTerminalTouchMode) => {
+    act(() => {
+      root.render(
+        <MobileTerminalUi
+          activeTouchMode={mode}
+          cursorTouchAvailable
+          terminal={<div data-testid="terminal" />}
+        />,
+      );
+    });
+  };
+
+  renderWith(touchMode);
 
   const terminal = container.querySelector<HTMLDivElement>('[data-testid="terminal"]');
   if (!terminal) throw new Error('missing terminal test node');
@@ -68,7 +72,7 @@ function renderMobileTerminal({
   terminal.addEventListener('mousemove', onMouseEvent);
   terminal.addEventListener('mouseup', onMouseEvent);
 
-  return { terminal };
+  return { terminal, setTouchMode: renderWith };
 }
 
 let roots: Root[] = [];
@@ -138,6 +142,31 @@ describe('MobileTerminalUi touch modes', () => {
       'mousemove:0:1:18:20',
       'mouseup:0:0:18:20',
     ]);
+  });
+
+  it('keeps synthesizing the full mouse sequence after switching into Mouse mode at runtime', () => {
+    const received: string[] = [];
+    const { terminal, setTouchMode } = renderMobileTerminal({
+      touchMode: 'gestures',
+      onMouseEvent: (event) => {
+        received.push(`${event.type}:${event.button}:${event.buttons}:${event.clientX}:${event.clientY}`);
+      },
+    });
+    mockElementFromPoint(terminal);
+
+    // User switches Gestures -> Mouse after the handlers were first created.
+    setTouchMode('cursor');
+
+    terminal.dispatchEvent(pointerEvent('pointerdown'));
+    terminal.dispatchEvent(pointerEvent('pointermove', { clientX: 18, clientY: 20 }));
+    terminal.dispatchEvent(pointerEvent('pointerup', { clientX: 18, clientY: 20 }));
+
+    expect(received).toEqual([
+      'mousedown:0:1:10:12',
+      'mousemove:0:1:18:20',
+      'mouseup:0:0:18:20',
+    ]);
+    expect(releasePointerCapture).toHaveBeenCalledWith(7);
   });
 
   it('sends a mouse release when a Mouse mode touch is cancelled', () => {

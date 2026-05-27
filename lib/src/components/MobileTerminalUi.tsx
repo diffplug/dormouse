@@ -694,7 +694,7 @@ export function MobileTerminalUi({
       return;
     }
     commitGestureState(nextState);
-  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear]);
+  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear, touchMode]);
 
   const handlePanePointerUpCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     if (touchMode === 'cursor' && cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {
@@ -734,7 +734,7 @@ export function MobileTerminalUi({
     commitGestureState(completionState ?? result.state);
     executeGestureAction(result.action);
     if (completionState) scheduleGestureCompletionClear();
-  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear]);
+  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear, touchMode]);
 
   const handlePaneFocusStartCapture = useCallback(() => {
     blurPaneTextInputs();
