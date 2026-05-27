@@ -108,10 +108,15 @@ Touch modes:
 | Mode | Button label | Icon | Availability | Behavior |
 | --- | --- | --- | --- | --- |
 | Gestures | `Gestures` | `HandPointingIcon` | Always available | Pane-content touches, pen presses, and primary mouse/trackpad clicks open the Gesture mode radial menu. |
-| Text selection | `Select` | `CursorTextIcon` | Always available | Pane-content touch, pen, and primary mouse/trackpad drags use the same terminal text selection and copy/paste behavior as desktop. If the TUI is capturing mouse events, Dormouse activates mouse override for the active pane. |
+| Text selection | `Select` | `CursorTextIcon` | Always available | Pane-content touch, pen, and primary mouse/trackpad drags use the same terminal text selection and copy/paste behavior as desktop. If a mounted pane's TUI is capturing mouse events, Dormouse activates mouse override for that pane. |
 | Mouse | `Mouse` | `CursorClickIcon` | Only when the active TUI is capturing mouse events | Touches are passed through as terminal mouse input. |
 
 Default touch mode is **Gestures**.
+
+Touch mode is a global mobile UI state. Select mode derives each mounted pane's
+mouse override from that global touch mode and the pane's own mouse-reporting
+state, so switching sessions cannot leave an inactive pane stuck in a stale
+override.
 
 If Mouse mode is active and the active pane stops capturing mouse events, the
 selector must fall back to Gestures.
