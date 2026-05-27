@@ -856,7 +856,7 @@ export class TutRunner implements InteractiveProgram {
     if (mode === "selection") {
       return [
         `   ${fg(32)}${ACTIVE_ITEM_GLYPH}${RESET}  ${BOLD}Select is active — drag-to-copy is enabled${RESET}`,
-        `        ${ITALIC}Tap \`Gestures\` when you want arrow, Enter, and Esc gestures.${RESET}`,
+        ``,
       ];
     }
     return [
