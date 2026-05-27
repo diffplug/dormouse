@@ -120,6 +120,7 @@ describe("TutRunner snapshots", () => {
     expect(lastFrame()).toContain("Dormouse Pocket Tutorial");
     expect(lastFrame()).toContain("Gesture navigation");
     expect(lastFrame()).toContain("Copy paste");
+    expect(lastFrame()).toContain("🐭 FlappyTerm 🐭");
     expect(lastFrame()).not.toContain("Keyboard navigation");
     expect(lastFrame()).not.toContain("Alert and TODO");
     expect(lastFrame()).toContain("[LOCKED 0/7]");
@@ -209,7 +210,8 @@ describe("TutRunner snapshots", () => {
 
     sendKeys("\x1b[B\x1b[B\x1b[B\x1b[B\r");
 
-    expect(lastFrame()).toContain("🐭 ??? 🐭");
+    expect(lastFrame()).toContain("🐭 FlappyTerm 🐭");
+    expect(lastFrame()).not.toContain("???");
     expect(lastFrame()).toContain("[LOCKED 0/17]");
     expect(lastFrame()).toContain("Dormouse Playground Tutorial");
     dispose();
@@ -222,7 +224,7 @@ describe("TutRunner snapshots", () => {
 
     // Navigate to (but don't enter) the Flappy Term row.
     sendKeys("\x1b[B\x1b[B\x1b[B\x1b[B");
-    expect(lastFrame()).toContain("🐭 Flappy Term 🐭");
+    expect(lastFrame()).toContain("🐭 FlappyTerm 🐭");
     expect(lastFrame()).toContain("[High score: 7]");
     dispose();
   });

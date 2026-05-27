@@ -58,8 +58,7 @@ const SPINNER_INTERVAL_MS = 100;
  */
 const ACTIVE_ITEM_GLYPH = "●";
 const STAR_PROMPT_TITLE = "Starred on GitHub";
-const FLAPPY_LOCKED_TITLE = "🐭 ??? 🐭";
-const FLAPPY_UNLOCKED_TITLE = "🐭 Flappy Term 🐭";
+const FLAPPY_TITLE = "🐭 FlappyTerm 🐭";
 
 // --- Flappy Term game constants (ported from flappy-term.html) ---
 const FLAPPY_TICK_MS = 60;
@@ -617,11 +616,10 @@ export class TutRunner implements InteractiveProgram {
     const flappyIndex = this.flappyIndex();
     const flappyUnlocked = total.done === total.total;
     const flappyMarker = this.menuIndex === flappyIndex ? `${fg(36)}❯${RESET}` : " ";
-    const flappyTitle = flappyUnlocked ? FLAPPY_UNLOCKED_TITLE : FLAPPY_LOCKED_TITLE;
     const flappyLabel =
       this.menuIndex === flappyIndex
-        ? `${BOLD}${flappyTitle}${RESET}`
-        : flappyTitle;
+        ? `${BOLD}${FLAPPY_TITLE}${RESET}`
+        : FLAPPY_TITLE;
     const flappyStatus = flappyUnlocked
       ? `  ${fg(32)}[High score: ${this.state.getFlappyHighScore()}]${RESET}`
       : `  ${DIM}[LOCKED ${total.done}/${total.total}]${RESET}`;
