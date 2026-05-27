@@ -1,10 +1,8 @@
 import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { POCKET_PLAYGROUND_PATH } from "../lib/playground-routing";
 
-export { Pocket as Component };
-
-function Pocket() {
+export default function Pocket() {
   const navigate = useNavigate();
 
   useEffect(() => {

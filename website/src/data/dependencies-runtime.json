@@ -1,0 +1,9 @@
+[
+  {
+    "name": "Node.js",
+    "version": "22.22.3",
+    "license": "MIT and bundled component licenses",
+    "author": "OpenJS Foundation and Node.js contributors",
+    "homepage": "https://github.com/nodejs/node"
+  }
+]

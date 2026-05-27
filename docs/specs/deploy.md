@@ -15,7 +15,7 @@ Every release produces three artifact groups under one version and changelog:
 
 Human-driven steps, in order:
 
-1. **Update dependencies page** — run `node website/scripts/generate-deps.js` and review the diff in `website/src/data/dependencies.json`. Commit if changed.
+1. **Update dependency snapshots** — run `node website/scripts/generate-deps.js` and review the diffs in `website/src/data/dependencies-npm.json` and `website/src/data/dependencies-cargo.json`. Commit if changed.
 2. **Draft release notes and bump version** — run `/release-notes` in Claude Code at the repo root. The slash command (defined in [.claude/commands/release-notes.md](../../.claude/commands/release-notes.md)) walks the merge commits and squash-merged PRs since the last tag, recommends a `breaking.added.bugfix` version bump, runs `./scripts/bump-version.sh X.Y.Z`, and edits `CHANGELOG.md` for the same version. Review and edit the resulting diff if needed.
 3. **Commit and tag** — `git commit -am "Release vX.Y.Z"` then `git tag vX.Y.Z`.
 4. **Push** — `git push && git push origin vX.Y.Z`. This triggers CI (Stage 1).
@@ -58,7 +58,7 @@ Stage 2: Local (sign-and-deploy.sh)
 
 ## Stage 1: CI workflow
 
-Triggered by tag push `v*`. Three parallel jobs:
+Triggered by tag push `v*`. Three jobs run in parallel — `build-standalone`, `build-vscode`, and `security-audit` — and `publish-vscode` runs after all three succeed:
 
 The workflow defaults `GITHUB_TOKEN` to read-only repository access with:
 
@@ -120,17 +120,19 @@ Runs on `ubuntu-latest`:
 7. Publish a GitHub artifact attestation for the manifest
 8. Upload the manifest plus `.vsix` as artifact
 
+### Job: `security-audit`
+
+Calls the reusable `security-audit.yaml` workflow, which audits the repo against `SECURITY.md` (the same audit that runs nightly via schedule). `publish-vscode` is gated on it, so a failing security audit blocks the VS Code Marketplace publish.
+
 ### Job: `publish-vscode`
 
-Runs after `build-vscode` succeeds:
+Runs after `build-standalone`, `build-vscode`, and `security-audit` succeed:
 1. Enter the `vscode-extension-publish` GitHub environment
 2. Download `.vsix` artifact
 3. `pnpm exec vsce publish --packagePath *.vsix --no-dependencies`
 4. `pnpm exec ovsx publish --packagePath *.vsix --no-dependencies`
 
 This runs in CI because VSCode Marketplace publishing uses PAT tokens (no hardware key needed). The `vscode-extension-publish` environment must require reviewer approval and allow deployments only from `v*` tags. Store `VSCE_PAT` and `OVSX_PAT` as environment secrets there, not broad repository secrets.
-
-**Migration note:** This replaces the existing `.github/workflows/publish-vscode.yml`, which was triggered by `vscode-ext/v*` tags and has never been run. That workflow should be deleted when the unified release workflow is created. Fixes from the old workflow: use `ubuntu-latest` instead of `macos-latest`, upgrade to Node 22, and unify under the `v*` tag convention.
 
 ## Stage 2: Local script
 
@@ -156,7 +158,7 @@ The local script must also select release artifacts by strict expected paths ins
 
 Release upload likewise uses only the three stable output filenames (`Dormouse-macos-aarch64.tar.gz`, `Dormouse-windows-x64-setup.exe`, `Dormouse-linux-x86_64.AppImage`) and fails if `release-signed/release-assets` contains any other files.
 
-When rebuilding the Windows installer locally, the script patches the Tauri-generated NSIS `ADDITIONALPLUGINSPATH` and `OUTFILE` values to the expected local plugin directory and installer path before running `makensis`.
+When rebuilding the Windows installer locally, the script rewrites the absolute CI-runner paths baked into the Tauri-generated NSIS `.nsi` script (via `scripts/patch-nsis-paths.pl`) and patches the `ADDITIONALPLUGINSPATH` and `OUTFILE` defines to the expected local plugin directory and installer path before running `makensis`.
 
 ### One-time setup
 

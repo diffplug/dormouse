@@ -6,15 +6,22 @@ Dormouse is a terminal, so users trust it with shells, source trees, credentials
 
 ## Dependency Supply Chain
 
-Dormouse keeps its runtime dependency surface intentionally small. We add dependencies only when they are necessary, and we expect dependency changes to justify their value against their supply-chain risk.
+Dormouse keeps its runtime dependency surface intentionally small. We add dependencies only when they are necessary, and we expect dependency changes to justify their value against their supply-chain risk. We use maturity gating inside our pnpm configuration and also inside our [dependabot configuration](.github/dependabot.yml).
 
-Every production transitive dependency shipped in the end-user application is listed at <https://dormouse.sh/dependencies>
+Every dependency shipped in the end-user application is listed at <https://dormouse.sh/supply-chain>. This includes:
 
-That page is generated from the lockfile and reviewed as part of release work. If a production dependency is added, removed, or upgraded, the dependency list must be regenerated and committed.
+- every npm dependency (direct and transitive)
+- every cargo dependency (direct is listed separately from transitive)
+- the Node.js runtime bundled as a Tauri sidecar in the standalone app
 
-New npm package versions are not adopted immediately. The workspace uses pnpm's package maturity gate so newly published npm versions have time to be reported, yanked, or investigated before Dormouse resolves them into the lockfile. Dependabot also applies cooldown windows for npm and Cargo updates so routine dependency PRs do not chase brand-new releases unnecessarily.
+Those dependency snapshots are generated from the lockfiles and reviewed as part of release work. If a production dependency is added, removed, or upgraded, the dependency lists must be regenerated and committed.
 
-- FAIL IF `node website/scripts/generate-deps.js` changes `website/src/data/dependencies.json` when run from a clean checkout.
+The standalone app ships a Node.js runtime binary (`standalone/src-tauri/build.rs` copies it into the bundle as a Tauri sidecar). Its version is pinned exactly in `standalone/.node-version`, and the build is the authority: `build.rs` runs `--version` on the binary it is about to bundle and fails the build unless it matches the pin. The supply-chain page reads the same pin, so the version disclosed there provably equals the runtime users receive — it cannot drift to whatever Node happened to be on the build machine's PATH. The version is a deliberate, manual pin (no Dependabot ecosystem tracks it); the workflows that do not bundle the runtime are free to track the latest `22`.
+
+- FAIL IF `node website/scripts/generate-deps.js` changes `website/src/data/dependencies-npm.json`, `website/src/data/dependencies-cargo.json`, or `website/src/data/dependencies-runtime.json` when run from a clean checkout.
+- FAIL IF `standalone/.node-version` is missing or does not pin an exact Node.js version (a bare major such as `22` is not acceptable; it must be `MAJOR.MINOR.PATCH`).
+- FAIL IF `standalone/src-tauri/build.rs` no longer verifies that the bundled Node.js binary matches `standalone/.node-version` (this verification is what makes the disclosed runtime version provable).
+- FAIL IF the `build-standalone` job in `.github/workflows/release.yml` does not install the pinned runtime via `actions/setup-node` with `node-version-file: standalone/.node-version` (other jobs may pin `node-version` inline since their interpreter is never bundled).
 - FAIL IF `pnpm-workspace.yaml` is missing `minimumReleaseAge: 1440`.
 - FAIL IF `.github/dependabot.yml` is missing npm coverage for `/` or Cargo coverage for `/standalone/src-tauri`.
 - FAIL IF `.github/dependabot.yml` is missing dependency cooldown windows.
@@ -30,7 +37,13 @@ GitHub Actions are always pinned by commit hash, not version tag. Dependabot wil
 
 ## Automated Maintainer (tend)
 
-This repository runs the [tend](https://github.com/max-sixty/tend) agent harness as the GitHub user `dormouse-bot`. tend reviews PRs, triages issues, fixes CI failures, regenerates its own workflow files on a nightly schedule, and responds to mentions. The agent expands the project's attack surface. The boundaries we accept are codified below.
+This repository runs the [tend](https://github.com/max-sixty/tend) agent harness as the GitHub user `dormouse-bot`. tend reviews PRs, triages issues, fixes CI failures, regenerates its own workflow files on a nightly schedule, and responds to mentions. The agent expands the project's attack surface.
+
+An attacker who lands a prompt injection in tend's harness can reach three secrets. None of them escalates directly into malicious content on the `main` branch or into any deployment-related secret — those paths stay admin-gated. The boundaries we accept are codified below.
+
+- `TEND_BOT_TOKEN` (worst case): full `repo` + `workflow` write access *as a trusted collaborator*. Direct uses are issue/PR spam, force-pushing or deleting feature branches, and persistent compromise by authoring new workflows (persistent compromise mitigated by [`workflow-audit.yaml`](.github/workflows/workflow-audit.yaml)). Authoring a workflow is also the mechanism by which `CHROMATIC_PROJECT_TOKEN` is reached. and the bot's trusted identity. **It cannot itself merge to `main`, push tags, or reach env-scoped secrets, but the bot's trusted identity can be used to social-engineer an admin toward a `main` merge.**
+- `CLAUDE_CODE_OAUTH_TOKEN`: bounded Anthropic API-credit abuse, capped by the bot account's spend limit.
+- `CHROMATIC_PROJECT_TOKEN`: lets the attacker corrupt snapshot testing; mitigated by rotation, and any abuse is visible in Chromatic's own dashboard.
 
 **Prompt-injection through user-supplied content.** tend's harness reads PR descriptions, code diffs, issue text, comments, and CI logs — all attacker-influenceable surfaces. A malicious prompt could direct the harness to push a workflow that references a repo-level secret to an external URL. The bot cannot merge to `main` or push tags, so admin-gated release paths stay sealed, but a workflow on a bot-pushed feature branch will still execute with repo-level secrets in scope.
 

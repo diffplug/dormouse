@@ -56,4 +56,4 @@ This project was built with a combination of Claude, Codex, and Devin. We make h
 
 [FSL-1.1-MIT](LICENSE) — Copyright 2026 DiffPlug LLC
 
-[Production dependencies](https://dormouse.sh/dependencies)
+[Supply chain](https://dormouse.sh/supply-chain)
