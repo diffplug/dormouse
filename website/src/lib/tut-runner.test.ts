@@ -13,7 +13,11 @@ const FRAME_RESET = "\x1b[H\x1b[2J";
 
 function mountRunner(
   completedIds: ItemId[] = [],
-  options: { onOpenGithub?: () => void; profile?: TutorialProfile } = {},
+  options: {
+    onOpenGithub?: () => void;
+    pocketTouchMode?: "gestures" | "selection" | "cursor";
+    profile?: TutorialProfile;
+  } = {},
 ) {
   const adapter = new FakePtyAdapter();
   const id = "test-pane";
@@ -26,6 +30,8 @@ function mountRunner(
   const profile = options.profile;
   const state = new TutorialState(profile?.sections);
   for (const itemId of completedIds) state.markComplete(itemId);
+  let pocketTouchMode = options.pocketTouchMode ?? "gestures";
+  const pocketTouchModeListeners = new Set<() => void>();
 
   const runner = new TutRunner({
     adapter,
@@ -37,6 +43,13 @@ function mountRunner(
     },
     onTogglePlaceToPaste: profile?.id === "pocket" ? undefined : () => {},
     onOpenGithub: options.onOpenGithub,
+    getPocketTouchMode: () => pocketTouchMode,
+    subscribeToPocketTouchMode: (listener) => {
+      pocketTouchModeListeners.add(listener);
+      return () => {
+        pocketTouchModeListeners.delete(listener);
+      };
+    },
   });
   adapter.setInputHandler(id, (data) => runner.handleInput(data));
   runner.start();
@@ -48,6 +61,10 @@ function mountRunner(
       const all = frames.join("");
       const i = all.lastIndexOf(FRAME_RESET);
       return i >= 0 ? all.slice(i) : all;
+    },
+    setPocketTouchMode: (mode: "gestures" | "selection" | "cursor") => {
+      pocketTouchMode = mode;
+      for (const listener of pocketTouchModeListeners) listener();
     },
     exitCount: () => exitCount,
     dispose: () => runner.dispose(),
@@ -105,7 +122,24 @@ describe("TutRunner snapshots", () => {
     expect(lastFrame()).toContain("Copy paste");
     expect(lastFrame()).not.toContain("Keyboard navigation");
     expect(lastFrame()).not.toContain("Alert and TODO");
-    expect(lastFrame()).toContain("[LOCKED 0/8]");
+    expect(lastFrame()).toContain("[LOCKED 0/7]");
+    dispose();
+  });
+
+  it("renders Pocket copy paste with a live Select mode prompt", () => {
+    const { sendKeys, setPocketTouchMode, lastFrame, dispose } = mountRunner([], {
+      profile: POCKET_TUTORIAL_PROFILE,
+    });
+
+    sendKeys("\x1b\x1b[B\r");
+    expect(lastFrame()).toContain("Copy paste");
+    expect(lastFrame()).toContain("0/3 complete");
+    expect(lastFrame()).toContain('Tap "Select" to enable drag-to-copy');
+    expect(lastFrame()).not.toContain("Click the cursor icon");
+
+    setPocketTouchMode("selection");
+    expect(lastFrame()).toContain("Select is active");
+    expect(lastFrame()).not.toContain("✓");
     dispose();
   });
 

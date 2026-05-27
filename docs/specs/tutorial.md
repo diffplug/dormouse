@@ -92,9 +92,11 @@ The detector remembers the most recent pane whose `watchingEnabled` flag is true
 1. Resolves that pane to its current PTY session id, then calls `adapter.pumpActivity(sessionId, BUSY_DEMO_DURATION_MS, 800)` — drives the alert-manager's activity monitor on the same WATCHING-enabled session with **no text output**, so the bell tilts to BUSY without scrolling any scenario text. The session id is resolved at trigger time so `Cmd/Ctrl+Arrow` swaps do not leave the tutorial pumping an old pane id. If no WATCHING-enabled pane is known, the runner falls back to `PANE_BOXED` (the changelog pane). `BUSY_DEMO_DURATION_MS` is `cfg.alert.userAttention + 250` so silence begins after the attention idle window has expired, with a small scheduler-jitter guard; otherwise the "user is looking at this pane" check inside `ActivityMonitor.startNeedsAttentionConfirmTimer` would suppress the ring rather than let it fire.
 2. Animates a countdown in-place where the "Press s…" hint was: `⠋ Fake task will finish in N seconds.` ticking down to 1, then a static `✓ Fake task finished. Press s to start another one.` once the activity stops. Detection is purely timing-based via the existing `ActivityMonitor`, so no shell integration is required.
 
-### Shared Section — Copy paste (4 items)
+### Desktop Section 3 / Shared Behaviors — Copy paste
 
 The detector subscribes to `subscribeToMouseSelection()` and tracks per-id transitions on `selection`, `copyFlash`, and `override`.
+
+Desktop shows four checklist items:
 
 | ID | Title | Detection |
 |---|---|---|
@@ -107,9 +109,9 @@ Prose:
 - "Some programs trap the mouse — the cursor icon lets you override."
 - "`ascii-splash` redraws every frame, so it cancels selections: looks cool, undragable."
 
-The Copy Rewrapped step uses the wrapped item lines `ChangelogRunner` produces in the `tut-boxed` pane. The runner word-wraps each item to fit the pane width, so Rewrapped joins those lines back together while Raw preserves the wrap; clipboard contents visibly differ. The user must override mouse capture first (the `cp-override` step) before drag-selecting inside the changelog pane, since the runner enables SGR mouse-reporting.
+The Copy Rewrapped step uses the wrapped item lines `ChangelogRunner` produces in the `tut-boxed` pane. The runner word-wraps each item to fit the pane width, so Rewrapped joins those lines back together while Raw preserves the wrap; clipboard contents visibly differ. On desktop, the user must override mouse capture first (the `cp-override` step) before drag-selecting inside the changelog pane, since the runner enables SGR mouse-reporting.
 
-Pocket uses the same Copy paste item ids with mobile-specific wording: the user switches to the `changelog` session through the Sessions reserve instead of using a desktop tab.
+Pocket uses the same `cp-select`, `cp-raw`, and `cp-rewrap` checklist item ids, but removes `cp-override`. It renders a non-progress live prompt before the checklist: `Tap "Select" to enable drag-to-copy` while the current touch mode is Gestures or Mouse, and `Select is active — drag-to-copy is enabled` while the current touch mode is Select. This row is not stored, not checkmarked, and not counted in section or total completion. In Select mode, Pocket sets mouse override for the active mouse-capturing pane automatically, so the tutorial does not ask the user to click the cursor icon in `changelog`.
 
 While the Copy paste section is open, pressing `p` toggles the **Place To Paste** modal — a draggable scratch box with eight pointer-event resize handles (four edges + four corners), rendered by `website/src/components/PlaceToPaste.tsx` and mounted at the page level. `TutRunner` intercepts `p`/`P` (mirroring the Alert section's `s` busy-demo intercept) and calls `onTogglePlaceToPaste`; `Playground` flips a `placeToPasteOpen` flag so the modal is portal-free and overlays the wall. The runner renders a persistent `Press \`p\` to toggle the Place To Paste …` line above the section's prose paragraph so the prompt is visible regardless of which item is active. Users paste copied text into the modal's single textarea and resize it to see whether the text reflows (Rewrapped) or stays line-broken (Raw).
 

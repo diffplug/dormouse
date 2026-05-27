@@ -121,9 +121,13 @@ interface TutRunnerOptions {
   onOpenGithub?: () => void;
   /** Called when the user presses `p` on the Flappy Term game-over screen. */
   onOpenPocket?: () => void;
+  /** Current Pocket touch mode, used for live non-progress tutorial prompts. */
+  getPocketTouchMode?: () => PocketTutorialTouchMode;
+  subscribeToPocketTouchMode?: (listener: () => void) => () => void;
 }
 
 type Screen = "menu" | "section" | "reset" | "flappy";
+type PocketTutorialTouchMode = "gestures" | "selection" | "cursor";
 
 const RESET_CONFIRM_WORD = "reset";
 
@@ -137,6 +141,8 @@ export class TutRunner implements InteractiveProgram {
   private onTogglePlaceToPaste?: () => void;
   private onOpenGithub?: () => void;
   private onOpenPocket?: () => void;
+  private getPocketTouchMode?: () => PocketTutorialTouchMode;
+  private subscribeToPocketTouchMode?: (listener: () => void) => () => void;
 
   private screen: Screen = "menu";
   private menuIndex = 0;
@@ -148,6 +154,7 @@ export class TutRunner implements InteractiveProgram {
   private flappyTimer: ReturnType<typeof setInterval> | null = null;
   private flappy: FlappyGameState | null = null;
   private stateUnsub: (() => void) | null = null;
+  private pocketTouchModeUnsub: (() => void) | null = null;
   private resizeUnsub: (() => void) | null = null;
   private busyDemoStart: number | null = null;
   private disposed = false;
@@ -162,6 +169,8 @@ export class TutRunner implements InteractiveProgram {
     this.onTogglePlaceToPaste = options.onTogglePlaceToPaste;
     this.onOpenGithub = options.onOpenGithub;
     this.onOpenPocket = options.onOpenPocket;
+    this.getPocketTouchMode = options.getPocketTouchMode;
+    this.subscribeToPocketTouchMode = options.subscribeToPocketTouchMode;
     if (this.profile.initialSectionId) {
       this.sectionId = this.profile.initialSectionId;
       this.screen = "section";
@@ -171,6 +180,7 @@ export class TutRunner implements InteractiveProgram {
   start(): void {
     this.write(ENTER_ALT_SCREEN);
     this.stateUnsub = this.state.subscribe(() => this.render());
+    this.pocketTouchModeUnsub = this.subscribeToPocketTouchMode?.(() => this.render()) ?? null;
     this.resizeUnsub = this.adapter.onPtyResize((d) => {
       if (d.id === this.terminalId) this.render();
     });
@@ -784,6 +794,10 @@ export class TutRunner implements InteractiveProgram {
     lines.push(`  ${DIM}\`Esc\` to go back${RESET}`);
     lines.push("");
 
+    if (this.profile.id === "pocket" && section.id === "copy") {
+      lines.push(...this.renderPocketCopyModePrompt());
+    }
+
     const activeIndex = section.items.findIndex((i) => !this.state.isComplete(i.id));
     section.items.forEach((item, index) => {
       lines.push(...this.renderItem(item, index, activeIndex));
@@ -821,6 +835,20 @@ export class TutRunner implements InteractiveProgram {
     }
 
     return lines;
+  }
+
+  private renderPocketCopyModePrompt(): string[] {
+    const mode = this.getPocketTouchMode?.() ?? "gestures";
+    if (mode === "selection") {
+      return [
+        `   ${fg(36)}${ACTIVE_ITEM_GLYPH}${RESET}  ${BOLD}Select is active — drag-to-copy is enabled${RESET}`,
+        `        ${ITALIC}Tap \`Gestures\` when you want arrow, Enter, and Esc gestures.${RESET}`,
+      ];
+    }
+    return [
+      `   ${fg(33)}${ACTIVE_ITEM_GLYPH}${RESET}  ${BOLD}Tap "Select" to enable drag-to-copy${RESET}`,
+      `        ${ITALIC}Current touch mode is \`${mode === "cursor" ? "Mouse" : "Gestures"}\`.${RESET}`,
+    ];
   }
 
   private renderBusyDemoLines(): string[] {
@@ -912,6 +940,8 @@ export class TutRunner implements InteractiveProgram {
     this.busyDemoStart = null;
     this.stateUnsub?.();
     this.stateUnsub = null;
+    this.pocketTouchModeUnsub?.();
+    this.pocketTouchModeUnsub = null;
     this.resizeUnsub?.();
     this.resizeUnsub = null;
     this.write(LEAVE_ALT_SCREEN);

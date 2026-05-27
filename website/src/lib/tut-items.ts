@@ -126,15 +126,9 @@ const COPY_PASTE_SECTION: Section = {
 
 const POCKET_COPY_PASTE_SECTION: Section = {
   ...COPY_PASTE_SECTION,
-  items: COPY_PASTE_SECTION.items.map((item) => item.id === 'cp-override'
-    ? {
-        ...item,
-        hint:
-          'Open the Sessions reserve, switch to `changelog`, then try to drag-select there. The changelog TUI traps the cursor, so use the cursor icon in its header to disable mouse tracking long enough for a drag-select.',
-      }
-    : item),
+  items: COPY_PASTE_SECTION.items.filter((item) => item.id !== 'cp-override'),
   prose: [
-    'Some terminal programs trap the cursor, and some do not. The `changelog` session traps the cursor — that is how it responds to mouse movement. `lazygit` is an excellent and popular program which traps the cursor.',
+    'Some terminal programs trap the cursor, and some do not. In Pocket, Select mode takes over drag-to-copy even for sessions like `changelog` that normally trap the cursor. Switch back to Gestures when you want arrow, Enter, and Esc gestures again.',
   ],
 };
 

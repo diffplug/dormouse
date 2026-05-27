@@ -69,6 +69,8 @@ export function PocketTerminalExperience({
   const autoStartedRef = useRef<Set<string>>(new Set());
   const spawnUnsubRef = useRef<(() => void) | null>(null);
   const sawSelectionTouchModeRef = useRef(false);
+  const touchModeRef = useRef<MobileTerminalTouchMode>("gestures");
+  const touchModeListenersRef = useRef(new Set<() => void>());
   const [activePaneId, setActivePaneId] = useState(POCKET_TUTORIAL_PANE);
   const [touchMode, setTouchMode] = useState<MobileTerminalTouchMode>("gestures");
   const [keyboardMode, setKeyboardMode] = useState<MobileTerminalKeyboardMode>("type");
@@ -98,7 +100,22 @@ export function PocketTerminalExperience({
     tutorialStateRef.current?.markComplete(id);
   }, []);
 
+  const getPocketTouchMode = useCallback(() => touchModeRef.current, []);
+
+  const subscribeToPocketTouchMode = useCallback((listener: () => void) => {
+    touchModeListenersRef.current.add(listener);
+    return () => {
+      touchModeListenersRef.current.delete(listener);
+    };
+  }, []);
+
+  const publishTouchMode = useCallback((nextMode: MobileTerminalTouchMode) => {
+    touchModeRef.current = nextMode;
+    for (const listener of touchModeListenersRef.current) listener();
+  }, []);
+
   const handleTouchModeChange = useCallback((nextMode: MobileTerminalTouchMode) => {
+    publishTouchMode(nextMode);
     setTouchMode(nextMode);
     if (nextMode === "selection") {
       sawSelectionTouchModeRef.current = true;
@@ -108,7 +125,7 @@ export function PocketTerminalExperience({
       sawSelectionTouchModeRef.current = false;
       markPocketItemComplete("gn-touch-mode");
     }
-  }, [markPocketItemComplete]);
+  }, [markPocketItemComplete, publishTouchMode]);
 
   const handleGestureInput = useCallback((input: MobileGestureInputId) => {
     if (GESTURE_ARROW_INPUTS.has(input)) {
@@ -172,6 +189,8 @@ export function PocketTerminalExperience({
               onExit,
               onOpenGithub: handleOpenGithub,
               onOpenPocket: handleOpenPocket,
+              getPocketTouchMode,
+              subscribeToPocketTouchMode,
             });
           }
           if (name === "ascii-splash" || name === "splash") {
@@ -215,9 +234,10 @@ export function PocketTerminalExperience({
       tutorialStateRef.current = null;
       autoStartedRef.current.clear();
       sawSelectionTouchModeRef.current = false;
+      touchModeListenersRef.current.clear();
       adapterRef.current = null;
     };
-  }, [handleOpenGithub, handleOpenPocket, tryAutoStart]);
+  }, [getPocketTouchMode, handleOpenGithub, handleOpenPocket, subscribeToPocketTouchMode, tryAutoStart]);
 
   useEffect(() => {
     const reporting = activeMouseState?.mouseReporting ?? "none";
