@@ -190,6 +190,26 @@ describe('mobile gesture menu state machine', () => {
     expect(state.optionOrigin).toEqual(pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3));
   });
 
+  it('keeps the compass collapsed through overshoot, then latches expanded for good', () => {
+    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('se'));
+    expect(state.phase === 'options' && state.expanded).toBe(false);
+
+    // Still dragging in the opening direction (overshoot) — stays collapsed.
+    state = updateMobileGesture(state, pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 2));
+    expect(state.phase === 'options' && state.expanded).toBe(false);
+    state = updateMobileGesture(state, pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3));
+    expect(state.phase === 'options' && state.expanded).toBe(false);
+
+    // Turning back toward an option latches expanded.
+    const overshoot = pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3);
+    state = updateMobileGesture(state, pointInDirection(overshoot, 'nw', RADIUS_HIGHLIGHT));
+    expect(state.phase === 'options' && state.expanded).toBe(true);
+
+    // Pushing back out in the wrong direction does not collapse it again.
+    state = updateMobileGesture(state, pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 5));
+    expect(state.phase === 'options' && state.expanded).toBe(true);
+  });
+
   it('selects the back option after an overshoot without undoing the whole overshoot', () => {
     // Drive past the southeast selection, keep dragging southeast, then reverse just
     // far enough to break out toward the back ("Enter") option.

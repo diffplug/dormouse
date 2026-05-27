@@ -88,6 +88,9 @@ export type MobileGestureTrackingState =
       selectedDirection: MobileGestureDirection;
       optionOrigin: MobileGesturePoint;
       displayOptionOrigin: MobileGesturePoint;
+      // Latches true once the drag stops pushing further in the opening direction, so
+      // the compass can expand and stay expanded until the final selection.
+      expanded: boolean;
       highlightedOptionIndex?: MobileGestureOptionIndex;
       candidate?: MobileGestureCandidate;
     }
@@ -101,6 +104,7 @@ export type MobileGestureTrackingState =
       baseDirection: MobileGestureDirection;
       optionOrigin: MobileGesturePoint;
       displayOptionOrigin: MobileGesturePoint;
+      expanded: boolean;
       highlightedOptionIndex?: MobileGestureOptionIndex;
       candidate?: MobileGestureCandidate;
     }
@@ -299,10 +303,10 @@ function advanceOptionOrigin(
   optionOrigin: MobileGesturePoint,
   displayOptionOrigin: MobileGesturePoint,
   point: MobileGesturePoint,
-): { optionOrigin: MobileGesturePoint; displayOptionOrigin: MobileGesturePoint } {
+): { optionOrigin: MobileGesturePoint; displayOptionOrigin: MobileGesturePoint; advancing: boolean } {
   const direction = MOBILE_GESTURE_DIRECTION_VECTORS[selectionDirection];
   const overshoot = (point.x - optionOrigin.x) * direction.x + (point.y - optionOrigin.y) * direction.y;
-  if (overshoot <= 0) return { optionOrigin, displayOptionOrigin };
+  if (overshoot <= 0) return { optionOrigin, displayOptionOrigin, advancing: false };
   return {
     optionOrigin: {
       x: optionOrigin.x + direction.x * overshoot,
@@ -312,6 +316,7 @@ function advanceOptionOrigin(
       x: displayOptionOrigin.x + direction.x * overshoot,
       y: displayOptionOrigin.y + direction.y * overshoot,
     },
+    advancing: true,
   };
 }
 
@@ -426,6 +431,7 @@ export function updateMobileGesture(
         selectedDirection: closestDirection,
         optionOrigin,
         displayOptionOrigin: translatedPoint(state.displayOrigin, state.origin, optionOrigin),
+        expanded: false,
       };
     }
     return {
@@ -439,7 +445,7 @@ export function updateMobileGesture(
   if (state.phase === 'options') {
     const group = MOBILE_GESTURE_GROUPS[state.selectedDirection];
     if (group.options.length !== 3) return state;
-    const { optionOrigin, displayOptionOrigin } = advanceOptionOrigin(
+    const { optionOrigin, displayOptionOrigin, advancing } = advanceOptionOrigin(
       state.selectedDirection,
       state.optionOrigin,
       state.displayOptionOrigin,
@@ -464,6 +470,7 @@ export function updateMobileGesture(
         baseDirection: optionState.candidate.direction,
         optionOrigin: quitOrigin,
         displayOptionOrigin: translatedPoint(displayOptionOrigin, optionOrigin, quitOrigin),
+        expanded: false,
       };
     }
     return {
@@ -471,12 +478,13 @@ export function updateMobileGesture(
       currentPoint: point,
       optionOrigin,
       displayOptionOrigin,
+      expanded: state.expanded || !advancing,
       highlightedOptionIndex: optionState.highlightedOptionIndex,
       candidate: optionState.candidate,
     };
   }
 
-  const { optionOrigin, displayOptionOrigin } = advanceOptionOrigin(
+  const { optionOrigin, displayOptionOrigin, advancing } = advanceOptionOrigin(
     state.baseDirection,
     state.optionOrigin,
     state.displayOptionOrigin,
@@ -494,6 +502,7 @@ export function updateMobileGesture(
     currentPoint: point,
     optionOrigin,
     displayOptionOrigin,
+    expanded: state.expanded || !advancing,
     highlightedOptionIndex: optionState.highlightedOptionIndex,
     candidate: optionState.candidate,
   };

@@ -386,6 +386,10 @@ export const GestureSoutheastTurnLeftY: Story = {
   render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('se'), gestureOptionSelectionPoint('se', 2)])} />,
 };
 
+export const GestureSoutheastOvershoot: Story = {
+  render: () => <GestureSnapshotFrame state={gestureState([gestureRootSelectionPoint('se'), gesturePointInDirection(GESTURE_ORIGIN, 'se', RADIUS_SELECT * 3)])} />,
+};
+
 export const GestureCtrlCConfirmation: Story = {
   render: () => (
     <GestureSnapshotFrame
