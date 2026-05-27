@@ -140,10 +140,13 @@ describe("TutRunner snapshots", () => {
     expect(lastFrame()).toContain("Copy paste");
     expect(lastFrame()).toContain("0/3 complete");
     expect(lastFrame()).toContain('Tap "Select" to enable drag-to-copy');
+    expect(lastFrame()).toContain("\x1b[33m●");
     expect(lastFrame()).not.toContain("Click the cursor icon");
 
     setPocketTouchMode("selection");
     expect(lastFrame()).toContain("Select is active");
+    expect(lastFrame()).toContain("\x1b[32m●");
+    expect(lastFrame()).not.toContain("\x1b[36m●");
     expect(lastFrame()).not.toContain("✓");
     dispose();
   });

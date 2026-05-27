@@ -855,7 +855,7 @@ export class TutRunner implements InteractiveProgram {
     const mode = this.getPocketTouchMode?.() ?? "gestures";
     if (mode === "selection") {
       return [
-        `   ${fg(36)}${ACTIVE_ITEM_GLYPH}${RESET}  ${BOLD}Select is active — drag-to-copy is enabled${RESET}`,
+        `   ${fg(32)}${ACTIVE_ITEM_GLYPH}${RESET}  ${BOLD}Select is active — drag-to-copy is enabled${RESET}`,
         `        ${ITALIC}Tap \`Gestures\` when you want arrow, Enter, and Esc gestures.${RESET}`,
       ];
     }
