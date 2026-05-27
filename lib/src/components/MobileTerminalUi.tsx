@@ -39,6 +39,7 @@ import {
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
+import { TouchUiContext } from './touch-ui-context';
 import type { SessionStatus } from '../lib/terminal-registry';
 
 export type MobileTerminalKeyboardMode = 'sessions' | 'recent' | 'type' | 'draft';
@@ -766,6 +767,7 @@ export function MobileTerminalUi({
   }, [commitGestureState]);
 
   return (
+    <TouchUiContext.Provider value={true}>
     <div
       data-mobile-terminal-ui
       className={clsx(
@@ -879,5 +881,6 @@ export function MobileTerminalUi({
         className="absolute left-0 top-0 h-px w-px resize-none overflow-hidden border-0 bg-transparent p-0 opacity-0 outline-none"
       />
     </div>
+    </TouchUiContext.Provider>
   );
 }

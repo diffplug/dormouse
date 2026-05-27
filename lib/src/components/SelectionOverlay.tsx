@@ -1,4 +1,4 @@
-import { useSyncExternalStore, type CSSProperties } from 'react';
+import { useContext, useSyncExternalStore, type CSSProperties } from 'react';
 import {
   DEFAULT_MOUSE_SELECTION_STATE,
   getMouseSelectionSnapshot,
@@ -11,6 +11,7 @@ import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { IS_MAC } from '../lib/platform';
 import { useFocusRingColor } from '../lib/themes/use-focus-ring-color';
 import { PopupButtonRow } from './design';
+import { TouchUiContext } from './touch-ui-context';
 
 interface Props {
   terminalId: string;
@@ -21,6 +22,7 @@ interface Props {
  * Re-measures on every render tick (scroll, resize, output).
  */
 export function SelectionOverlay({ terminalId }: Props) {
+  const touchUi = useContext(TouchUiContext);
   const states = useSyncExternalStore(subscribeToMouseSelection, getMouseSelectionSnapshot);
   // Subscribe to render tick so we re-render whenever xterm scrolls or resizes.
   useSyncExternalStore(subscribeToRenderTick, getRenderTick);
@@ -65,7 +67,12 @@ export function SelectionOverlay({ terminalId }: Props) {
     if (endViewportRow >= 0 && endViewportRow < dims.rows) {
       const draggedDown = selection.endRow >= selection.startRow;
       const left = Math.min(dims.elementWidth - 180, Math.max(4, gridLeft + selection.endCol * cellWidth));
-      if (draggedDown) {
+      if (touchUi) {
+        // Mobile: always sit above the selection so the dragging thumb doesn't cover it.
+        const topViewportRow = Math.min(selection.startRow, selection.endRow) - dims.viewportY;
+        const y = Math.max(gridTop + (topViewportRow - 1) * cellHeight - 4, 28);
+        hint = { left, bottom: dims.elementHeight - y };
+      } else if (draggedDown) {
         const top = Math.min(
           gridTop + (endViewportRow + 2) * cellHeight + 4,
           dims.elementHeight - 24,
@@ -108,7 +115,11 @@ export function SelectionOverlay({ terminalId }: Props) {
           style={{ left: hint.left, top: hint.top, bottom: hint.bottom }}
         >
           <div className="flex flex-col gap-0.5 leading-none text-muted">
-            <div>Hold {IS_MAC ? 'Opt' : 'Alt'} for block selection</div>
+            <div>
+              {touchUi
+                ? 'Start drag with double-tap for block selection'
+                : `Hold ${IS_MAC ? 'Opt' : 'Alt'} for block selection`}
+            </div>
             {state.hintToken && (
               <div>
                 Press <span className="text-foreground">e</span> to select the full{' '}
