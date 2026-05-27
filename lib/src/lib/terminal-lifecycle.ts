@@ -55,11 +55,12 @@ function makePromptLineReader(terminal: Terminal): PromptLineReader {
           if (!line) return undefined;
           return {
             isWrapped: line.isWrapped,
-            translateToString: (trimRight) => line.translateToString(trimRight),
+            translateToString: (trimRight, startColumn, endColumn) =>
+              line.translateToString(trimRight, startColumn, endColumn),
           };
         },
       };
-      return readLogicalLineFromBuffer(bufferLike, cursorAbsRow);
+      return readLogicalLineFromBuffer(bufferLike, cursorAbsRow, buffer.cursorX);
     },
   };
 }
