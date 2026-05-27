@@ -5,11 +5,12 @@
   "license": "FSL-1.1-MIT",
   "type": "module",
   "scripts": {
-    "dev": "vite-react-ssg dev",
+    "dev": "react-router dev",
     "predev": "node scripts/generate-changelog.js",
     "prebuild": "node scripts/generate-changelog.js",
-    "build": "vite-react-ssg build",
-    "preview": "vite preview",
+    "build": "react-router build",
+    "postbuild": "node scripts/flatten-react-router-build.js",
+    "preview": "vite preview --outDir dist --mode test",
     "pretest": "node scripts/generate-changelog.js",
     "test": "vitest run"
   },
@@ -19,18 +20,17 @@
     "dormouse-lib": "workspace:*",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "react-router-dom": "^6.30.3",
+    "react-router": "^7.15.1",
     "tailwind-variants": "^3.2.2"
   },
   "devDependencies": {
+    "@react-router/dev": "^7.15.1",
     "@tailwindcss/vite": "^4.3.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react-swc": "^4.3.1",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
-    "vite": "^7.3.3",
-    "vite-react-ssg": "0.9.1-beta.1",
+    "vite": "^8.0.14",
     "vitest": "^4.1.6"
   }
 }

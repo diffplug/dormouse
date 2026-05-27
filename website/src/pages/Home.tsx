@@ -23,8 +23,6 @@ import standaloneLatest from "@standalone-latest";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import { NotifySignupForm } from "../components/NotifySignupForm";
 
-export { Home as Component };
-
 /** Multiplier on scroll required to drive the hero animation.
  *  1 = baseline, 2 = half as sensitive, 0.5 = twice as sensitive. */
 const HERO_SLOMO_FACTOR = 2;
@@ -273,7 +271,7 @@ function DownloadGroupHeader({
   );
 }
 
-function Home() {
+export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const posterRef = useRef<HTMLImageElement>(null);
   const runwayRef = useRef<HTMLDivElement>(null);

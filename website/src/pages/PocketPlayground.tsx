@@ -9,8 +9,6 @@ import { ShareUrlButton } from "../components/ShareUrlButton";
 import { ThemePicker } from "dormouse-lib/components/ThemePicker";
 import { POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
 
-export { PocketPlayground as Component };
-
 function MobilePocketPlaygroundPage() {
   return (
     <main className="fixed inset-0 bg-black">
@@ -67,7 +65,7 @@ function DesktopPocketPlaygroundPage() {
   );
 }
 
-function PocketPlayground() {
+export default function PocketPlayground() {
   const preferred = usePreferredPlayground();
 
   useEffect(() => {

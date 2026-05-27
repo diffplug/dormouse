@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import { PlaceToPaste } from "../components/PlaceToPaste";
 import { POCKET_THEME_ID } from "../components/PocketTerminalExperience";
@@ -10,8 +10,6 @@ import { TutDetector } from "../lib/tut-detector";
 import { BUSY_DEMO_DURATION_MS, BUSY_DEMO_INTERVAL_MS, TutRunner } from "../lib/tut-runner";
 import { ChangelogRunner } from "../lib/changelog-runner";
 import { POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
-
-export { PlaygroundDesktop as Component };
 
 const PANE_MAIN = "tut-main";
 const PANE_BOXED = "tut-boxed";
@@ -271,7 +269,7 @@ function PlaygroundDesktopExperience() {
   );
 }
 
-function PlaygroundDesktop() {
+export default function PlaygroundDesktop() {
   const preferred = usePreferredPlayground();
   if (preferred === "pocket") return <DesktopPlaygroundUnavailable />;
   return <PlaygroundDesktopExperience />;

@@ -1,14 +1,12 @@
 import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import {
   DESKTOP_PLAYGROUND_PATH,
   POCKET_PLAYGROUND_PATH,
   usePreferredPlayground,
 } from "../lib/playground-routing";
 
-export { PlaygroundRedirect as Component };
-
-function PlaygroundRedirect() {
+export default function PlaygroundRedirect() {
   const navigate = useNavigate();
   const preferred = usePreferredPlayground();
 

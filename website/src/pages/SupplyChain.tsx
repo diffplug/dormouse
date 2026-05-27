@@ -142,7 +142,7 @@ function DependencySection({
   );
 }
 
-export function Component() {
+export default function SupplyChain() {
   return (
     <>
       <SiteHeader activePath="/supply-chain" style={STATIC_PAGE_HEADER_STYLE} />
