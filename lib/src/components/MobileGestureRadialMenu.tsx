@@ -34,11 +34,6 @@ const SELECT_TICK_INSET = 5;
 const SELECT_TICK_OUTSET = 6;
 const ROOT_DIAGONAL_CORNER_RADIUS = RADIUS_SELECT + SELECT_TICK_OUTSET + GAP_CARDINAL_RING * Math.SQRT1_2;
 
-function squareDirectionVector(direction: MobileGestureDirection): MobileGesturePoint {
-  const vector = MOBILE_GESTURE_DIRECTION_VECTORS[direction];
-  return { x: Math.sign(vector.x), y: Math.sign(vector.y) };
-}
-
 const ROOT_CARDINAL_ANCHORS: Partial<Record<MobileGestureDirection, MobileGesturePoint>> = {
   n: { x: ROOT_LABEL_CENTER_X, y: -ROOT_CARDINAL_Y },
   e: { x: ROOT_CARDINAL_X, y: ROOT_LABEL_SIDE_CENTER_Y },
@@ -188,7 +183,7 @@ function directionPoint(
   center: { x: number; y: number },
   radius: number,
 ): { x: number; y: number } {
-  const vector = squareDirectionVector(direction);
+  const vector = MOBILE_GESTURE_DIRECTION_VECTORS[direction];
   return {
     x: center.x + vector.x * radius,
     y: center.y + vector.y * radius,
