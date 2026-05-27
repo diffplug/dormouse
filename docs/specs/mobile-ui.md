@@ -121,6 +121,13 @@ input only in Mouse mode. Gestures and Select mode must suppress those
 scroll-like events before xterm can translate them into mouse reports,
 alternate-screen arrow keys, or scrollback motion.
 
+In Mouse mode, primary touch and pen pointers synthesize left-button terminal
+mouse input: pointerdown emits a mouse press, pointermove emits mouse motion,
+and pointerup or pointercancel emits a mouse release. The wrapper suppresses
+the native touch gesture while emitting those mouse events so a tap or drag is
+seen by the TUI, not by browser panning, browser selection, or xterm's native
+touch-scroll fallback.
+
 Select mode must route touch and pen drags through the shared terminal
 mouse-selection router, not through a mobile-only selection implementation, so
 selection geometry, smart token extension, copy popups, rewrapped copy, and TUI
