@@ -278,6 +278,16 @@ describe('header and grouping derivation', () => {
     });
   });
 
+  it('strips cmd.exe\'s interpreter prefix, leaving the command', () => {
+    // cmd.exe sets its console title to "<path>\cmd.exe - <command>"; show the command.
+    const pane = reduceTerminalState(
+      runningPane('/repo/app', 'pnpm dev:website'),
+      { type: 'title', title: { title: 'C:\\WINDOWS\\system32\\cmd.exe - pnpm dev:website', source: 'osc0', updatedAt: 2 } },
+    );
+
+    expect(deriveHeader(pane, [pane])).toEqual({ primary: 'pnpm dev:website' });
+  });
+
   it('keeps the command when the title is a bare shell name', () => {
     const pane = reduceTerminalState(
       runningPane('/repo/app', 'pnpm dev:website'),

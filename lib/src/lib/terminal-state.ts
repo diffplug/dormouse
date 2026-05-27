@@ -826,15 +826,30 @@ function isGenericProcessTitle(title: string): boolean {
   return GENERIC_PROCESS_TITLE_NAMES.has(basename.toLowerCase()); // bare shell/interpreter name
 }
 
+// Reduce a raw OSC title to its meaningful part, or null when there's nothing
+// useful. Drops bare interpreter paths/names, and strips cmd.exe's
+// `<path>\cmd.exe - <command>` prefix (cmd announces its own path alongside the
+// command it's running) so the command shows rather than the interpreter path.
+function meaningfulTerminalTitle(title: string): string | null {
+  const trimmed = title.trim();
+  if (!trimmed || isGenericProcessTitle(trimmed)) return null;
+  const separator = trimmed.indexOf(' - ');
+  if (separator > 0 && isGenericProcessTitle(trimmed.slice(0, separator))) {
+    const rest = trimmed.slice(separator + 3).trim();
+    return rest.length > 0 ? rest : null;
+  }
+  return trimmed;
+}
+
 function terminalTitleForCommand(pane: TerminalPaneState, command: CommandRun): string | null {
   // For finished commands the live `titleCandidates` map may have been overwritten by post-finish
   // events (e.g. the shell resetting OSC 0 to `zsh`), so trust the snapshot taken at commandFinish.
   if (command.finishedAt !== undefined && command.finalTerminalTitle) {
-    const snapshot = command.finalTerminalTitle.title.trim();
-    if (snapshot && !isGenericProcessTitle(snapshot)) return snapshot;
+    const snapshot = meaningfulTerminalTitle(command.finalTerminalTitle.title);
+    if (snapshot) return snapshot;
   }
-  const inRun = findInRunTerminalTitle(pane, command)?.title.trim();
-  return inRun && !isGenericProcessTitle(inRun) ? inRun : null;
+  const inRun = findInRunTerminalTitle(pane, command)?.title;
+  return inRun ? meaningfulTerminalTitle(inRun) : null;
 }
 
 function snapshotInRunTerminalTitle(
