@@ -289,6 +289,32 @@ export function translatedPoint(
   };
 }
 
+// As the user keeps dragging past a selection in the direction that opened the
+// submenu, slide the reference origin out to track that overshoot. Otherwise the
+// user would have to drag all the way back through the overshoot before a move in
+// any other direction could register. Only advances outward (a ratchet), so as soon
+// as the drag reverses the pulled-back distance counts toward the intended option.
+function advanceOptionOrigin(
+  selectionDirection: MobileGestureDirection,
+  optionOrigin: MobileGesturePoint,
+  displayOptionOrigin: MobileGesturePoint,
+  point: MobileGesturePoint,
+): { optionOrigin: MobileGesturePoint; displayOptionOrigin: MobileGesturePoint } {
+  const direction = MOBILE_GESTURE_DIRECTION_VECTORS[selectionDirection];
+  const overshoot = (point.x - optionOrigin.x) * direction.x + (point.y - optionOrigin.y) * direction.y;
+  if (overshoot <= 0) return { optionOrigin, displayOptionOrigin };
+  return {
+    optionOrigin: {
+      x: optionOrigin.x + direction.x * overshoot,
+      y: optionOrigin.y + direction.y * overshoot,
+    },
+    displayOptionOrigin: {
+      x: displayOptionOrigin.x + direction.x * overshoot,
+      y: displayOptionOrigin.y + direction.y * overshoot,
+    },
+  };
+}
+
 function optionIndexForDirection(
   groupDirection: MobileGestureDirection,
   direction: MobileGestureDirection | null,
@@ -413,15 +439,21 @@ export function updateMobileGesture(
   if (state.phase === 'options') {
     const group = MOBILE_GESTURE_GROUPS[state.selectedDirection];
     if (group.options.length !== 3) return state;
+    const { optionOrigin, displayOptionOrigin } = advanceOptionOrigin(
+      state.selectedDirection,
+      state.optionOrigin,
+      state.displayOptionOrigin,
+      point,
+    );
     const optionState = candidateForOptions(
       'options',
       state.selectedDirection,
       group.options,
-      state.optionOrigin,
+      optionOrigin,
       point,
     );
     if (optionState.candidate?.option.action.kind === 'quitMenu') {
-      const quitOrigin = pointOnRadius(state.optionOrigin, point, RADIUS_SELECT);
+      const quitOrigin = pointOnRadius(optionOrigin, point, RADIUS_SELECT);
       return {
         phase: 'quit',
         pointerId: state.pointerId,
@@ -431,27 +463,37 @@ export function updateMobileGesture(
         parentDirection: state.selectedDirection,
         baseDirection: optionState.candidate.direction,
         optionOrigin: quitOrigin,
-        displayOptionOrigin: translatedPoint(state.displayOptionOrigin, state.optionOrigin, quitOrigin),
+        displayOptionOrigin: translatedPoint(displayOptionOrigin, optionOrigin, quitOrigin),
       };
     }
     return {
       ...state,
       currentPoint: point,
+      optionOrigin,
+      displayOptionOrigin,
       highlightedOptionIndex: optionState.highlightedOptionIndex,
       candidate: optionState.candidate,
     };
   }
 
+  const { optionOrigin, displayOptionOrigin } = advanceOptionOrigin(
+    state.baseDirection,
+    state.optionOrigin,
+    state.displayOptionOrigin,
+    point,
+  );
   const optionState = candidateForOptions(
     'quit',
     state.baseDirection,
     MOBILE_GESTURE_QUIT_GROUP.options,
-    state.optionOrigin,
+    optionOrigin,
     point,
   );
   return {
     ...state,
     currentPoint: point,
+    optionOrigin,
+    displayOptionOrigin,
     highlightedOptionIndex: optionState.highlightedOptionIndex,
     candidate: optionState.candidate,
   };

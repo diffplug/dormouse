@@ -181,6 +181,26 @@ describe('mobile gesture menu state machine', () => {
     expect(updateMobileGesture(complete, optionSelectionPoint('se', 2))).toBe(complete);
   });
 
+  it('tracks the reference origin while the drag overshoots the opening direction', () => {
+    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('se'));
+    state = updateMobileGesture(state, pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3));
+    expect(state.phase).toBe('options');
+    if (state.phase !== 'options') return;
+    // The reference origin slid out to meet the overshooting finger.
+    expect(state.optionOrigin).toEqual(pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3));
+  });
+
+  it('selects the back option after an overshoot without undoing the whole overshoot', () => {
+    // Drive past the southeast selection, keep dragging southeast, then reverse just
+    // far enough to break out toward the back ("Enter") option.
+    const overshoot = pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3);
+    const backOption = pointInDirection(overshoot, 'nw', RADIUS_SELECT + 1);
+    expect(runGesture([rootSelectionPoint('se'), overshoot, backOption])).toEqual({
+      kind: 'input',
+      input: 'enter',
+    });
+  });
+
   it('clears the option highlight when the drag moves back inside the highlight radius', () => {
     let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('se'));
     state = updateMobileGesture(state, pointInDirection(optionOrigin('se'), 'n', RADIUS_HIGHLIGHT + 1));
