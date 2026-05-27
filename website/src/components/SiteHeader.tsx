@@ -6,7 +6,7 @@ export const STATIC_PAGE_HEADER_STYLE: React.CSSProperties = {
 };
 
 const NAV_LINKS: readonly { href: string; label: string; external?: boolean; hideOnMobile?: boolean }[] = [
-  { href: "/playground", label: "Playground", hideOnMobile: true },
+  { href: "/playground", label: "Playground" },
   { href: "/#download", label: "Download", hideOnMobile: true },
   { href: "https://github.com/diffplug/dormouse", label: "GitHub", external: true },
 ];
