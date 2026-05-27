@@ -264,6 +264,39 @@ describe('header and grouping derivation', () => {
     });
   });
 
+  it('keeps the command when ConPTY broadcasts a child process path as the title', () => {
+    // pnpm's script shell on Windows is cmd.exe, whose console title (its own
+    // image path) ConPTY relays as OSC 0 — no command meaning, so the detected
+    // command must stand.
+    const pane = reduceTerminalState(
+      runningPane('/repo/app', 'pnpm dev:website'),
+      { type: 'title', title: { title: 'C:\\WINDOWS\\system32\\cmd.exe', source: 'osc0', updatedAt: 2 } },
+    );
+
+    expect(deriveHeader(pane, [pane])).toEqual({
+      primary: 'pnpm dev:website',
+    });
+  });
+
+  it('strips cmd.exe\'s interpreter prefix, leaving the command', () => {
+    // cmd.exe sets its console title to "<path>\cmd.exe - <command>"; show the command.
+    const pane = reduceTerminalState(
+      runningPane('/repo/app', 'pnpm dev:website'),
+      { type: 'title', title: { title: 'C:\\WINDOWS\\system32\\cmd.exe - pnpm dev:website', source: 'osc0', updatedAt: 2 } },
+    );
+
+    expect(deriveHeader(pane, [pane])).toEqual({ primary: 'pnpm dev:website' });
+  });
+
+  it('keeps the command when the title is a bare shell name', () => {
+    const pane = reduceTerminalState(
+      runningPane('/repo/app', 'pnpm dev:website'),
+      { type: 'title', title: { title: 'pwsh', source: 'osc0', updatedAt: 2 } },
+    );
+
+    expect(deriveHeader(pane, [pane])).toEqual({ primary: 'pnpm dev:website' });
+  });
+
   it('ignores stale shell titles from before a command started', () => {
     const pane = reduceTerminalState(
       runningPane('/repo/app', 'lazygit'),

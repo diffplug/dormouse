@@ -806,14 +806,50 @@ function idleLabel(pane: TerminalPaneState): string {
 
 const HEADER_APP_TITLE_SOURCES: TerminalTitleSource[] = ['osc0', 'osc2', 'osc9'];
 
+// Under Windows ConPTY an OSC 0/2 title is frequently just the child process's
+// image path (e.g. `C:\WINDOWS\system32\cmd.exe`, which pnpm's script shell
+// broadcasts) rather than a name the app meaningfully chose — ConPTY relays the
+// console title for every process whether or not it set one. A bare executable
+// path or shell name carries no command information, so we don't let it override
+// the command we detected. Descriptive titles (anything carrying arguments or
+// text, e.g. `lazygit: dormouse` or `README.md - VIM`) are kept.
+const GENERIC_PROCESS_TITLE_NAMES = new Set([
+  'cmd', 'powershell', 'pwsh', 'bash', 'sh', 'zsh', 'fish', 'dash', 'ksh', 'csh', 'tcsh', 'wsl', 'conhost',
+]);
+
+function isGenericProcessTitle(title: string): boolean {
+  const trimmed = title.trim();
+  if (!trimmed) return false;
+  const basename = trimmed.split(/[\\/]/).pop() ?? trimmed;
+  if (/\s/.test(basename)) return false; // carries arguments/description → meaningful
+  if (/\.(?:exe|com|bat|cmd|ps1)$/i.test(basename)) return true; // bare executable path
+  return GENERIC_PROCESS_TITLE_NAMES.has(basename.toLowerCase()); // bare shell/interpreter name
+}
+
+// Reduce a raw OSC title to its meaningful part, or null when there's nothing
+// useful. Drops bare interpreter paths/names, and strips cmd.exe's
+// `<path>\cmd.exe - <command>` prefix (cmd announces its own path alongside the
+// command it's running) so the command shows rather than the interpreter path.
+function meaningfulTerminalTitle(title: string): string | null {
+  const trimmed = title.trim();
+  if (!trimmed || isGenericProcessTitle(trimmed)) return null;
+  const separator = trimmed.indexOf(' - ');
+  if (separator > 0 && isGenericProcessTitle(trimmed.slice(0, separator))) {
+    const rest = trimmed.slice(separator + 3).trim();
+    return rest.length > 0 ? rest : null;
+  }
+  return trimmed;
+}
+
 function terminalTitleForCommand(pane: TerminalPaneState, command: CommandRun): string | null {
   // For finished commands the live `titleCandidates` map may have been overwritten by post-finish
   // events (e.g. the shell resetting OSC 0 to `zsh`), so trust the snapshot taken at commandFinish.
   if (command.finishedAt !== undefined && command.finalTerminalTitle) {
-    const snapshot = command.finalTerminalTitle.title.trim();
+    const snapshot = meaningfulTerminalTitle(command.finalTerminalTitle.title);
     if (snapshot) return snapshot;
   }
-  return findInRunTerminalTitle(pane, command)?.title.trim() || null;
+  const inRun = findInRunTerminalTitle(pane, command)?.title;
+  return inRun ? meaningfulTerminalTitle(inRun) : null;
 }
 
 function snapshotInRunTerminalTitle(

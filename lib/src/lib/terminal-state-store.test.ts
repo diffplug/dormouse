@@ -218,6 +218,27 @@ describe('terminal command input via rendered buffer', () => {
     expect(getTerminalPaneState('pane').currentCommand?.rawCommandLine).toBe('pnpm build');
   });
 
+  it('detects a cmd.exe prompt (terminator with no trailing space) and titles the command', () => {
+    recordTerminalOutput('pane', 'C:\\Users\\ntwigg>');
+    recordTerminalUserInput('pane', 'claude\r', lineReader('C:\\Users\\ntwigg>claude'));
+
+    expect(getTerminalPaneState('pane').currentCommand?.rawCommandLine).toBe('claude');
+  });
+
+  it('detects a Git Bash two-line prompt (bare `$ ` under a context line)', () => {
+    recordTerminalOutput('pane', 'ntwigg@PC MINGW64 /c/proj (main)\r\n$ ');
+    recordTerminalUserInput('pane', 'claude\r', lineReader('$ claude'));
+
+    expect(getTerminalPaneState('pane').currentCommand?.rawCommandLine).toBe('claude');
+  });
+
+  it('does not treat a bare `$ ` line without preceding context as a prompt', () => {
+    recordTerminalOutput('pane', 'just some output\r\n$ ');
+    recordTerminalUserInput('pane', 'claude\r', lineReader('$ claude'));
+
+    expect(getTerminalPaneState('pane').currentCommand).toBeNull();
+  });
+
   it('does not seed a shape when scrollback ends mid-output', () => {
     seedPromptShapeFromScrollback('pane', 'building ~/app...\r\n[1234/5678] compiling');
     recordTerminalUserInput('pane', 'pnpm build\r', lineReader(`${PROMPT}pnpm build`));
