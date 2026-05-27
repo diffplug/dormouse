@@ -188,6 +188,22 @@ describe("TutRunner snapshots", () => {
     dispose();
   });
 
+  it("returns the Pocket tutorial to Gesture navigation after reset progress", () => {
+    const { state, sendKeys, lastFrame, dispose } = mountRunner(["gn-arrows"], {
+      profile: POCKET_TUTORIAL_PROFILE,
+    });
+    state.resolveStarPrompt();
+
+    sendKeys("\x1b\x1b[B\x1b[B\x1b[B\x1b[B\rreset\r");
+
+    expect(state.isComplete("gn-arrows")).toBe(false);
+    expect(state.isStarPromptResolved()).toBe(false);
+    expect(lastFrame()).toContain("Gesture navigation");
+    expect(lastFrame()).toContain("Switch between Select and Gestures");
+    expect(lastFrame()).not.toContain("Dormouse Pocket Tutorial");
+    dispose();
+  });
+
   it("keeps Flappy Term locked until every tutorial task is complete", () => {
     const { sendKeys, lastFrame, dispose } = mountRunner();
 

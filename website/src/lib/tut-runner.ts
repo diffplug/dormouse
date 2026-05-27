@@ -171,10 +171,7 @@ export class TutRunner implements InteractiveProgram {
     this.onOpenPocket = options.onOpenPocket;
     this.getPocketTouchMode = options.getPocketTouchMode;
     this.subscribeToPocketTouchMode = options.subscribeToPocketTouchMode;
-    if (this.profile.initialSectionId) {
-      this.sectionId = this.profile.initialSectionId;
-      this.screen = "section";
-    }
+    this.returnToInitialScreen();
   }
 
   start(): void {
@@ -425,6 +422,12 @@ export class TutRunner implements InteractiveProgram {
     return this.profile.sections.length + 2;
   }
 
+  private returnToInitialScreen(): void {
+    this.menuIndex = 0;
+    this.sectionId = this.profile.initialSectionId ?? null;
+    this.screen = this.sectionId ? "section" : "menu";
+  }
+
   private handleArrow(letter: string): void {
     if (this.screen === "flappy") {
       if (letter === "A") this.flap();
@@ -500,7 +503,7 @@ export class TutRunner implements InteractiveProgram {
         this.state.reset();
         this.resetBuffer = "";
         this.resetMismatch = false;
-        this.screen = "menu";
+        this.returnToInitialScreen();
         this.render();
       } else {
         this.resetBuffer = "";

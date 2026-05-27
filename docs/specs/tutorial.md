@@ -58,6 +58,10 @@ Inside a section, items render as one of:
 
 Esc / `q` / Ctrl+C pops back one screen (section → menu → exit). Exiting the runner returns the pane to the shell prompt; running `tut` re-enters.
 
+Confirming `Reset progress` returns the runner to that profile's initial screen:
+Desktop returns to the top-level menu, while Pocket returns directly to
+`Gesture navigation`.
+
 ### Desktop Section 1 — Keyboard navigation (7 items)
 
 | ID | Title | Detection |
