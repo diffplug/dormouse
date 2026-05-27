@@ -38,6 +38,7 @@ import {
   type MobileGesturePoint,
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
+import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import type { SessionStatus } from '../lib/terminal-registry';
 
 export type MobileTerminalKeyboardMode = 'sessions' | 'recent' | 'type' | 'draft';
@@ -106,6 +107,7 @@ export interface MobileTerminalUiProps {
   onTouchModeChange?: (mode: MobileTerminalTouchMode) => void;
   cursorTouchAvailable?: boolean;
   onSendInput?: (data: string) => void;
+  onGestureInput?: (input: MobileGestureInputId, data: string) => void;
   onPaste?: () => void | Promise<void>;
   onFocusInput?: () => void;
   sessions?: MobileTerminalSessionItem[];
@@ -371,6 +373,45 @@ function isGestureDialogTarget(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('[data-mobile-gesture-dialog]') !== null;
 }
 
+function consumeNativeTouchOrScrollEvent(event: Event): void {
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+}
+
+function isTouchLikePrimaryPointer(event: PointerEvent<HTMLElement>): boolean {
+  return event.pointerType !== 'mouse' && event.isPrimary;
+}
+
+function targetAtPointer(event: PointerEvent<HTMLElement>): EventTarget {
+  const doc = event.currentTarget.ownerDocument;
+  return doc.elementFromPoint(event.clientX, event.clientY) ?? event.target;
+}
+
+function dispatchMouseFromPointer(
+  type: 'mousedown' | 'mousemove' | 'mouseup',
+  pointerEvent: PointerEvent<HTMLElement>,
+  target: EventTarget,
+): void {
+  const doc = pointerEvent.currentTarget.ownerDocument;
+  const view = doc.defaultView ?? window;
+  const mouseEvent = new view.MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    button: 0,
+    buttons: type === 'mouseup' ? 0 : 1,
+    clientX: pointerEvent.clientX,
+    clientY: pointerEvent.clientY,
+    screenX: pointerEvent.screenX,
+    screenY: pointerEvent.screenY,
+    ctrlKey: pointerEvent.ctrlKey,
+    shiftKey: pointerEvent.shiftKey,
+    altKey: pointerEvent.altKey,
+    metaKey: pointerEvent.metaKey,
+  });
+  target.dispatchEvent(mouseEvent);
+}
+
 export function MobileTerminalUi({
   terminal,
   activeSection,
@@ -384,6 +425,7 @@ export function MobileTerminalUi({
   onTouchModeChange,
   cursorTouchAvailable = false,
   onSendInput,
+  onGestureInput,
   onPaste,
   onFocusInput,
   sessions = [],
@@ -394,6 +436,7 @@ export function MobileTerminalUi({
   terminalClassName,
   style,
 }: MobileTerminalUiProps) {
+  useDynamicPalette();
   const resolvedDefaultKeyboardMode = defaultKeyboardMode ?? defaultSection;
   const [internalKeyboardMode, setInternalKeyboardMode] = useState<MobileTerminalKeyboardMode>(resolvedDefaultKeyboardMode);
   const [internalTouchMode, setInternalTouchMode] = useState<MobileTerminalTouchMode>(defaultTouchMode);
@@ -405,6 +448,8 @@ export function MobileTerminalUi({
   const gestureStateRef = useRef<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
   const completedGesturePointerIdRef = useRef<number | null>(null);
   const gestureCompletionTimerRef = useRef<number | null>(null);
+  const cursorPointerIdRef = useRef<number | null>(null);
+  const cursorPointerTargetRef = useRef<EventTarget | null>(null);
   const [gestureState, setGestureState] = useState<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
   const [pendingGestureConfirmation, setPendingGestureConfirmation] = useState<MobileGestureConfirmationAction | null>(null);
   const [inputValue, setInputValue] = useState('');
@@ -506,7 +551,9 @@ export function MobileTerminalUi({
   const executeGestureAction = useCallback((action: MobileGestureAction | undefined) => {
     if (!action) return;
     if (action.kind === 'input') {
-      sendInput(MOBILE_TERMINAL_KEY_SEQUENCES[action.input]);
+      const data = MOBILE_TERMINAL_KEY_SEQUENCES[action.input];
+      sendInput(data);
+      onGestureInput?.(action.input, data);
       return;
     }
     if (action.kind === 'text') {
@@ -520,7 +567,7 @@ export function MobileTerminalUi({
     if (action.kind === 'confirm') {
       setPendingGestureConfirmation(action);
     }
-  }, [onPaste, sendInput]);
+  }, [onGestureInput, onPaste, sendInput]);
 
   const confirmPendingGestureAction = useCallback(() => {
     if (!pendingGestureConfirmation) return;
@@ -548,6 +595,31 @@ export function MobileTerminalUi({
   }, [cursorTouchAvailable, setTouchMode, touchMode]);
 
   useEffect(() => {
+    if (!interactive) return;
+    const host = terminalHostRef.current;
+    if (!host) return;
+    const options: AddEventListenerOptions = { capture: true, passive: false };
+    if (touchMode === 'cursor') {
+      host.addEventListener('touchstart', consumeNativeTouchOrScrollEvent, options);
+      host.addEventListener('touchmove', consumeNativeTouchOrScrollEvent, options);
+      host.addEventListener('touchend', consumeNativeTouchOrScrollEvent, options);
+      host.addEventListener('touchcancel', consumeNativeTouchOrScrollEvent, options);
+      return () => {
+        host.removeEventListener('touchstart', consumeNativeTouchOrScrollEvent, options);
+        host.removeEventListener('touchmove', consumeNativeTouchOrScrollEvent, options);
+        host.removeEventListener('touchend', consumeNativeTouchOrScrollEvent, options);
+        host.removeEventListener('touchcancel', consumeNativeTouchOrScrollEvent, options);
+      };
+    }
+    host.addEventListener('wheel', consumeNativeTouchOrScrollEvent, options);
+    host.addEventListener('touchmove', consumeNativeTouchOrScrollEvent, options);
+    return () => {
+      host.removeEventListener('wheel', consumeNativeTouchOrScrollEvent, options);
+      host.removeEventListener('touchmove', consumeNativeTouchOrScrollEvent, options);
+    };
+  }, [interactive, touchMode]);
+
+  useEffect(() => {
     const host = terminalHostRef.current;
     if (!host) return;
     configurePaneTextInputs();
@@ -571,6 +643,15 @@ export function MobileTerminalUi({
   const handlePanePointerDownCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     if (isGestureDialogTarget(event.target)) return;
     blurPaneTextInputs();
+    if (interactive && touchMode === 'cursor' && isTouchLikePrimaryPointer(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      cursorPointerIdRef.current = event.pointerId;
+      cursorPointerTargetRef.current = targetAtPointer(event);
+      event.currentTarget.setPointerCapture(event.pointerId);
+      dispatchMouseFromPointer('mousedown', event, cursorPointerTargetRef.current);
+      return;
+    }
     if (!interactive || touchMode !== 'gestures') return;
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     event.preventDefault();
@@ -589,6 +670,15 @@ export function MobileTerminalUi({
   }, [blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, touchMode]);
 
   const handlePanePointerMoveCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (touchMode === 'cursor' && cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      const target = targetAtPointer(event);
+      cursorPointerTargetRef.current = target;
+      dispatchMouseFromPointer('mousemove', event, target);
+      return;
+    }
+
     const state = gestureStateRef.current;
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     event.preventDefault();
@@ -604,9 +694,19 @@ export function MobileTerminalUi({
       return;
     }
     commitGestureState(nextState);
-  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear]);
+  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear, touchMode]);
 
   const handlePanePointerUpCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (touchMode === 'cursor' && cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      dispatchMouseFromPointer('mouseup', event, cursorPointerTargetRef.current ?? targetAtPointer(event));
+      cursorPointerIdRef.current = null;
+      cursorPointerTargetRef.current = null;
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      return;
+    }
+
     const state = gestureStateRef.current;
     if (state.phase === 'complete' && state.pointerId === event.pointerId) {
       event.preventDefault();
@@ -634,13 +734,23 @@ export function MobileTerminalUi({
     commitGestureState(completionState ?? result.state);
     executeGestureAction(result.action);
     if (completionState) scheduleGestureCompletionClear();
-  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear]);
+  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear, touchMode]);
 
   const handlePaneFocusStartCapture = useCallback(() => {
     blurPaneTextInputs();
   }, [blurPaneTextInputs]);
 
   const handlePanePointerCancelCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      dispatchMouseFromPointer('mouseup', event, cursorPointerTargetRef.current ?? targetAtPointer(event));
+      cursorPointerIdRef.current = null;
+      cursorPointerTargetRef.current = null;
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      return;
+    }
+
     const state = gestureStateRef.current;
     if (state.phase === 'complete' && state.pointerId === event.pointerId) {
       completedGesturePointerIdRef.current = null;
@@ -669,7 +779,7 @@ export function MobileTerminalUi({
         ref={terminalHostRef}
         className={clsx(
           'relative min-h-0 flex-1 overflow-hidden bg-terminal-bg',
-          touchMode === 'gestures' ? 'touch-none' : 'touch-auto',
+          'touch-none',
           terminalClassName,
         )}
         onPointerDownCapture={handlePanePointerDownCapture}

@@ -3,7 +3,14 @@ import { cfg } from "dormouse-lib/cfg";
 const USER_ATTENTION_SECS = Math.round(cfg.alert.userAttention / 1000);
 
 // Item ids are the persistence key — keep them stable across releases.
-export const ITEM_IDS = [
+const GESTURE_ITEM_IDS = [
+  "gn-touch-mode",
+  "gn-arrows",
+  "gn-enter",
+  "gn-esc",
+] as const;
+
+const KEYBOARD_ITEM_IDS = [
   "kb-mode",
   "kb-split-h",
   "kb-arrows",
@@ -11,16 +18,29 @@ export const ITEM_IDS = [
   "kb-min",
   "kb-kill",
   "kb-move",
+] as const;
+
+const ALERT_ITEM_IDS = [
   "al-enable",
   "al-busy",
   "al-ring",
   "al-todo-auto",
   "al-todo-clear",
   "al-todo-manual",
+] as const;
+
+const COPY_ITEM_IDS = [
   "cp-select",
   "cp-raw",
   "cp-rewrap",
   "cp-override",
+] as const;
+
+export const ITEM_IDS = [
+  ...GESTURE_ITEM_IDS,
+  ...KEYBOARD_ITEM_IDS,
+  ...ALERT_ITEM_IDS,
+  ...COPY_ITEM_IDS,
 ] as const;
 
 export type ItemId = (typeof ITEM_IDS)[number];
@@ -38,7 +58,81 @@ export interface Section {
   prose?: string[];
 }
 
-export const SECTIONS: readonly Section[] = [
+export interface TutorialProfile {
+  id: "desktop" | "pocket";
+  title: string;
+  sections: readonly Section[];
+  initialSectionId?: string;
+}
+
+const GESTURE_NAVIGATION_SECTION: Section = {
+  id: 'gesture',
+  title: 'Gesture navigation',
+  items: [
+    {
+      id: 'gn-touch-mode',
+      title: 'Switch between Select and Gestures',
+      hint: 'Tap `Select`, then tap `Gestures` again.',
+    },
+    {
+      id: 'gn-arrows',
+      title: 'Use Gestures to send an arrow key',
+      hint: 'Drag directly up, down, left, or right past the circle.',
+    },
+    {
+      id: 'gn-enter',
+      title: 'Use Gestures to press Enter',
+      hint: 'Drag toward `Enter`, then choose `Enter`.',
+    },
+    {
+      id: 'gn-esc',
+      title: 'Use Gestures to press Esc',
+      hint: 'Drag toward `Esc`, then choose `Esc`.',
+    },
+  ],
+};
+
+const COPY_PASTE_SECTION: Section = {
+  id: 'copy',
+  title: 'Copy paste',
+  items: [
+    {
+      id: 'cp-select',
+      title: 'Drag-select some text',
+      hint: 'The paragraph below is a good example — "Some terminal programs..."',
+    },
+    {
+      id: 'cp-raw',
+      title: 'Copy-paste it somewhere else with "Copy Raw"',
+      hint: 'When you paste, notice how it keeps all the line-breaks. Gross!',
+    },
+    {
+      id: 'cp-rewrap',
+      title: 'Copy-paste it somewhere else with "Copy Rewrapped"',
+      hint:
+        'When you paste, notice how the line-breaks were removed, and the text rewraps neatly wherever you paste it?',
+    },
+    {
+      id: 'cp-override',
+      title: 'Click the cursor icon in `changelog`',
+      hint:
+        'Try to click and drag in the changelog tab - you can\'t! That\'s because you can click the versions - the Terminal User Interface traps the mouse which breaks copy-paste. Click the cursor icon in its header, which disables the mouse tracking long enough for you to do a drag-select.',
+    },
+  ],
+  prose: [
+    'Some terminal programs trap the cursor, and some do not. This tutorial pane does not trap the cursor, so Dormouse does not show a cursor icon. The `ascii-splash` and `changelog` programs trap the cursor — that is how they are able to respond to mouse movement. `lazygit` is an excellent and popular program which traps the cursor.',
+  ],
+};
+
+const POCKET_COPY_PASTE_SECTION: Section = {
+  ...COPY_PASTE_SECTION,
+  items: COPY_PASTE_SECTION.items.filter((item) => item.id !== 'cp-override'),
+  prose: [
+    'Some terminal programs trap the cursor, and some do not. In Pocket, Select mode takes over drag-to-copy even for sessions like `changelog` that normally trap the cursor. Switch back to Gestures when you want arrow, Enter, and Esc gestures again.',
+  ],
+};
+
+export const DESKTOP_SECTIONS: readonly Section[] = [
   {
     id: 'keyboard',
     title: 'Keyboard navigation',
@@ -117,41 +211,34 @@ export const SECTIONS: readonly Section[] = [
       },
     ],
   },
-  {
-    id: 'copy',
-    title: 'Copy paste',
-    items: [
-      {
-        id: 'cp-select',
-        title: 'Drag-select some text',
-        hint: 'The paragraph below is a good example — "Some terminal programs..."',
-      },
-      {
-        id: 'cp-raw',
-        title: 'Copy-paste it somewhere else with "Copy Raw"',
-        hint: 'When you paste, notice how it keeps all the line-breaks. Gross!',
-      },
-      {
-        id: 'cp-rewrap',
-        title: 'Copy-paste it somewhere else with "Copy Rewrapped"',
-        hint:
-          'When you paste, notice how the line-breaks were removed, and the text rewraps neatly wherever you paste it?',
-      },
-      {
-        id: 'cp-override',
-        title: 'Click the cursor icon in `changelog`',
-        hint:
-          'Try to click and drag in the changelog tab - you can\'t! That\'s because you can click the versions - the Terminal User Interface traps the mouse which breaks copy-paste. Click the cursor icon in its header, which disables the mouse tracking long enough for you to do a drag-select.',
-      },
-    ],
-    prose: [
-      'Some terminal programs trap the cursor, and some do not. This tutorial pane does not trap the cursor, so Dormouse does not show a cursor icon. The `ascii-splash` and `changelog` programs trap the cursor — that is how they are able to respond to mouse movement. `lazygit` is an excellent and popular program which traps the cursor.',
-    ],
-  },
+  COPY_PASTE_SECTION,
 ];
+
+export const POCKET_SECTIONS: readonly Section[] = [
+  GESTURE_NAVIGATION_SECTION,
+  POCKET_COPY_PASTE_SECTION,
+];
+
+export const DESKTOP_TUTORIAL_PROFILE: TutorialProfile = {
+  id: "desktop",
+  title: "Dormouse Playground Tutorial",
+  sections: DESKTOP_SECTIONS,
+};
+
+export const POCKET_TUTORIAL_PROFILE: TutorialProfile = {
+  id: "pocket",
+  title: "Dormouse Pocket Tutorial",
+  sections: POCKET_SECTIONS,
+  initialSectionId: "gesture",
+};
+
+export const SECTIONS = DESKTOP_SECTIONS;
 
 export const ALL_ITEM_IDS: readonly ItemId[] = ITEM_IDS;
 
-export function itemSection(id: ItemId): Section | undefined {
-  return SECTIONS.find((s) => s.items.some((i) => i.id === id));
+export function itemSection(
+  id: ItemId,
+  sections: readonly Section[] = SECTIONS,
+): Section | undefined {
+  return sections.find((s) => s.items.some((i) => i.id === id));
 }

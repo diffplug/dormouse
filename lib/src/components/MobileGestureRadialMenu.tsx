@@ -293,8 +293,9 @@ function rootOptionLayout(
 export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackingState }) {
   if (state.phase === 'idle') return null;
 
-  const phaseOrigin = state.phase === 'root' ? state.origin : state.optionOrigin;
-  const phaseDisplayOrigin = state.phase === 'root' ? state.displayOrigin : state.displayOptionOrigin;
+  const directRootComplete = state.phase === 'complete' && state.candidate.phase === 'root';
+  const phaseOrigin = state.phase === 'root' || directRootComplete ? state.origin : state.optionOrigin;
+  const phaseDisplayOrigin = state.phase === 'root' || directRootComplete ? state.displayOrigin : state.displayOptionOrigin;
   const currentDisplayPoint = translatedPoint(phaseDisplayOrigin, phaseOrigin, state.currentPoint);
   const rootDirection = activeRootDirection(state);
   const tickDirection = activeTickDirection(state);
@@ -320,9 +321,12 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
     return group.options.map((option, index) => {
       const optionIndex = index as MobileGestureOptionIndex;
       const isCompletingRootOption = state.phase === 'complete'
-        && state.candidate.phase === 'options'
         && state.selectedDirection === direction
-        && state.candidate.optionIndex === optionIndex;
+        && state.candidate.optionIndex === optionIndex
+        && (
+          state.candidate.phase === 'root'
+          || state.candidate.phase === 'options'
+        );
       const isSelectedGroup = (
         state.phase === 'options'
         || (state.phase === 'complete' && state.candidate.phase === 'options')

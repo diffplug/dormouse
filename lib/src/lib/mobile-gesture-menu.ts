@@ -52,13 +52,16 @@ export interface MobileGestureOption {
   action: MobileGestureAction;
 }
 
+export type MobileGestureOptionTriple = readonly [MobileGestureOption, MobileGestureOption, MobileGestureOption];
+export type MobileGestureOptions = readonly [MobileGestureOption] | MobileGestureOptionTriple;
+
 export interface MobileGestureGroup {
   direction: MobileGestureDirection;
-  options: [MobileGestureOption, MobileGestureOption, MobileGestureOption];
+  options: MobileGestureOptions;
 }
 
 export interface MobileGestureCandidate {
-  phase: 'options' | 'quit';
+  phase: 'root' | 'options' | 'quit';
   groupDirection: MobileGestureDirection;
   direction: MobileGestureDirection;
   optionIndex: MobileGestureOptionIndex;
@@ -74,6 +77,7 @@ export type MobileGestureTrackingState =
       displayOrigin: MobileGesturePoint;
       currentPoint: MobileGesturePoint;
       highlightedDirection?: MobileGestureDirection;
+      candidate?: MobileGestureCandidate;
     }
   | {
       phase: 'options';
@@ -145,6 +149,7 @@ export const MOBILE_GESTURE_DIRECTION_VECTORS: Record<MobileGestureDirection, Mo
 };
 
 const ANGLE_DIRECTIONS: MobileGestureDirection[] = ['e', 'se', 's', 'sw', 'w', 'nw', 'n', 'ne'];
+const MOBILE_GESTURE_DIRECT_DIRECTIONS = new Set<MobileGestureDirection>(['n', 'e', 's', 'w']);
 
 export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGestureGroup> = {
   nw: {
@@ -162,8 +167,6 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
     direction: 'n',
     options: [
       { label: '▲', action: { kind: 'input', input: 'up' } },
-      { label: 'k', action: { kind: 'text', text: 'k' } },
-      { label: 'PgUp', action: { kind: 'input', input: 'pageUp' } },
     ],
   },
   ne: {
@@ -178,16 +181,12 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
     direction: 'w',
     options: [
       { label: '◀', action: { kind: 'input', input: 'left' } },
-      { label: 'Home', action: { kind: 'input', input: 'home' } },
-      { label: 'h', action: { kind: 'text', text: 'h' } },
     ],
   },
   e: {
     direction: 'e',
     options: [
       { label: '▶', action: { kind: 'input', input: 'right' } },
-      { label: 'End', action: { kind: 'input', input: 'end' } },
-      { label: 'l', action: { kind: 'text', text: 'l' } },
     ],
   },
   sw: {
@@ -202,8 +201,6 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
     direction: 's',
     options: [
       { label: '▼', action: { kind: 'input', input: 'down' } },
-      { label: 'j', action: { kind: 'text', text: 'j' } },
-      { label: 'PgDn', action: { kind: 'input', input: 'pageDown' } },
     ],
   },
   se: {
@@ -241,7 +238,7 @@ export const MOBILE_GESTURE_OPTION_DIRECTIONS: Record<
   nw: ['se', 'e', 's'],
 };
 
-export const MOBILE_GESTURE_QUIT_GROUP: MobileGestureGroup = {
+export const MOBILE_GESTURE_QUIT_GROUP: { direction: MobileGestureDirection; options: MobileGestureOptionTriple } = {
   direction: 'n',
   options: [
     { label: 'q', action: { kind: 'text', text: 'q' } },
@@ -304,7 +301,7 @@ function optionIndexForDirection(
 function candidateForOptions(
   phase: 'options' | 'quit',
   groupDirection: MobileGestureDirection,
-  options: [MobileGestureOption, MobileGestureOption, MobileGestureOption],
+  options: MobileGestureOptionTriple,
   origin: MobileGesturePoint,
   point: MobileGesturePoint,
 ): MobileGestureOptionState {
@@ -378,6 +375,21 @@ export function updateMobileGesture(
       ? directionFromVector(point.x - state.origin.x, point.y - state.origin.y) ?? undefined
       : undefined;
     if (movementDistance >= RADIUS_SELECT && closestDirection) {
+      if (MOBILE_GESTURE_DIRECT_DIRECTIONS.has(closestDirection)) {
+        const option = MOBILE_GESTURE_GROUPS[closestDirection].options[0];
+        return {
+          ...state,
+          currentPoint: point,
+          highlightedDirection: closestDirection,
+          candidate: {
+            phase: 'root',
+            groupDirection: closestDirection,
+            direction: closestDirection,
+            optionIndex: 0,
+            option,
+          },
+        };
+      }
       const optionOrigin = pointOnRadius(state.origin, point, RADIUS_SELECT);
       return {
         phase: 'options',
@@ -394,14 +406,17 @@ export function updateMobileGesture(
       ...state,
       currentPoint: point,
       highlightedDirection: closestDirection,
+      candidate: undefined,
     };
   }
 
   if (state.phase === 'options') {
+    const group = MOBILE_GESTURE_GROUPS[state.selectedDirection];
+    if (group.options.length !== 3) return state;
     const optionState = candidateForOptions(
       'options',
       state.selectedDirection,
-      MOBILE_GESTURE_GROUPS[state.selectedDirection].options,
+      group.options,
       state.optionOrigin,
       point,
     );
@@ -443,7 +458,7 @@ export function updateMobileGesture(
 }
 
 export function finishMobileGesture(state: MobileGestureTrackingState): MobileGestureFinishResult {
-  const action = state.phase === 'options' || state.phase === 'quit'
+  const action = state.phase === 'root' || state.phase === 'options' || state.phase === 'quit'
     ? state.candidate?.option.action
     : undefined;
   return {
@@ -453,7 +468,7 @@ export function finishMobileGesture(state: MobileGestureTrackingState): MobileGe
 }
 
 export function completeMobileGesture(state: MobileGestureTrackingState): MobileGestureTrackingState | undefined {
-  if (state.phase !== 'options' && state.phase !== 'quit') return undefined;
+  if (state.phase !== 'root' && state.phase !== 'options' && state.phase !== 'quit') return undefined;
   if (!state.candidate) return undefined;
   return {
     phase: 'complete',
@@ -461,9 +476,13 @@ export function completeMobileGesture(state: MobileGestureTrackingState): Mobile
     origin: state.origin,
     displayOrigin: state.displayOrigin,
     currentPoint: state.currentPoint,
-    selectedDirection: state.phase === 'options' ? state.selectedDirection : state.parentDirection,
-    optionOrigin: state.optionOrigin,
-    displayOptionOrigin: state.displayOptionOrigin,
+    selectedDirection: state.phase === 'root'
+      ? state.candidate.groupDirection
+      : state.phase === 'options'
+        ? state.selectedDirection
+        : state.parentDirection,
+    optionOrigin: state.phase === 'root' ? state.origin : state.optionOrigin,
+    displayOptionOrigin: state.phase === 'root' ? state.displayOrigin : state.displayOptionOrigin,
     candidate: state.candidate,
   };
 }

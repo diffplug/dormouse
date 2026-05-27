@@ -13,7 +13,11 @@ import {
 import { cfg } from "dormouse-lib/cfg";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import type { InteractiveProgram } from "./tutorial-shell";
-import { SECTIONS, type Item } from "./tut-items";
+import {
+  DESKTOP_TUTORIAL_PROFILE,
+  type Item,
+  type TutorialProfile,
+} from "./tut-items";
 import type { TutorialState } from "./tutorial-state";
 
 /**
@@ -54,8 +58,9 @@ const SPINNER_INTERVAL_MS = 100;
  */
 const ACTIVE_ITEM_GLYPH = "●";
 const STAR_PROMPT_TITLE = "Starred on GitHub";
-const FLAPPY_LOCKED_TITLE = "🐭 ??? 🐭";
-const FLAPPY_UNLOCKED_TITLE = "🐭 Flappy Term 🐭";
+const FLAPPY_TITLE = "🐭 FlappyTerm 🐭";
+const FLAPPY_DESKTOP_GAME_OVER_PROMPT = "Read about Dormouse Pocket  [p]";
+const FLAPPY_POCKET_GAME_OVER_PROMPT = "Notify me when Pocket ships [n]";
 
 // --- Flappy Term game constants (ported from flappy-term.html) ---
 const FLAPPY_TICK_MS = 60;
@@ -107,6 +112,7 @@ interface TutRunnerOptions {
   adapter: FakePtyAdapter;
   terminalId: string;
   state: TutorialState;
+  profile?: TutorialProfile;
   onExit: () => void;
   /** Called when the user presses `s` inside the Alert section. */
   onTriggerBusyDemo?: () => void;
@@ -116,9 +122,15 @@ interface TutRunnerOptions {
   onOpenGithub?: () => void;
   /** Called when the user presses `p` on the Flappy Term game-over screen. */
   onOpenPocket?: () => void;
+  /** Called when the user presses `n` on Pocket's Flappy Term game-over screen. */
+  onNotifyPocket?: () => void;
+  /** Current Pocket touch mode, used for live non-progress tutorial prompts. */
+  getPocketTouchMode?: () => PocketTutorialTouchMode;
+  subscribeToPocketTouchMode?: (listener: () => void) => () => void;
 }
 
 type Screen = "menu" | "section" | "reset" | "flappy";
+type PocketTutorialTouchMode = "gestures" | "selection" | "cursor";
 
 const RESET_CONFIRM_WORD = "reset";
 
@@ -126,11 +138,15 @@ export class TutRunner implements InteractiveProgram {
   private adapter: FakePtyAdapter;
   private terminalId: string;
   private state: TutorialState;
+  private profile: TutorialProfile;
   private onExit: () => void;
   private onTriggerBusyDemo?: () => void;
   private onTogglePlaceToPaste?: () => void;
   private onOpenGithub?: () => void;
   private onOpenPocket?: () => void;
+  private onNotifyPocket?: () => void;
+  private getPocketTouchMode?: () => PocketTutorialTouchMode;
+  private subscribeToPocketTouchMode?: (listener: () => void) => () => void;
 
   private screen: Screen = "menu";
   private menuIndex = 0;
@@ -142,6 +158,7 @@ export class TutRunner implements InteractiveProgram {
   private flappyTimer: ReturnType<typeof setInterval> | null = null;
   private flappy: FlappyGameState | null = null;
   private stateUnsub: (() => void) | null = null;
+  private pocketTouchModeUnsub: (() => void) | null = null;
   private resizeUnsub: (() => void) | null = null;
   private busyDemoStart: number | null = null;
   private disposed = false;
@@ -150,16 +167,22 @@ export class TutRunner implements InteractiveProgram {
     this.adapter = options.adapter;
     this.terminalId = options.terminalId;
     this.state = options.state;
+    this.profile = options.profile ?? DESKTOP_TUTORIAL_PROFILE;
     this.onExit = options.onExit;
     this.onTriggerBusyDemo = options.onTriggerBusyDemo;
     this.onTogglePlaceToPaste = options.onTogglePlaceToPaste;
     this.onOpenGithub = options.onOpenGithub;
     this.onOpenPocket = options.onOpenPocket;
+    this.onNotifyPocket = options.onNotifyPocket;
+    this.getPocketTouchMode = options.getPocketTouchMode;
+    this.subscribeToPocketTouchMode = options.subscribeToPocketTouchMode;
+    this.returnToInitialScreen();
   }
 
   start(): void {
     this.write(ENTER_ALT_SCREEN);
     this.stateUnsub = this.state.subscribe(() => this.render());
+    this.pocketTouchModeUnsub = this.subscribeToPocketTouchMode?.(() => this.render()) ?? null;
     this.resizeUnsub = this.adapter.onPtyResize((d) => {
       if (d.id === this.terminalId) this.render();
     });
@@ -345,12 +368,17 @@ export class TutRunner implements InteractiveProgram {
       if (
         this.screen === "flappy" &&
         this.flappy &&
-        !this.flappy.alive &&
-        (ch === "p" || ch === "P")
+        !this.flappy.alive
       ) {
-        this.onOpenPocket?.();
-        i += 1;
-        continue;
+        if (this.profile.id === "pocket" && (ch === "n" || ch === "N")) {
+          this.onNotifyPocket?.();
+          i += 1;
+          continue;
+        } else if (this.profile.id === "desktop" && (ch === "p" || ch === "P")) {
+          this.onOpenPocket?.();
+          i += 1;
+          continue;
+        }
       }
       if (ch === "q" || ch === "Q") {
         this.handleEscape();
@@ -388,20 +416,26 @@ export class TutRunner implements InteractiveProgram {
   // --- Input ---
 
   private menuLength(): number {
-    // SECTIONS + GitHub star + Flappy Term + the trailing "Reset progress" entry
-    return SECTIONS.length + 3;
+    // Sections + GitHub star + Flappy Term + the trailing "Reset progress" entry
+    return this.profile.sections.length + 3;
   }
 
   private starPromptIndex(): number {
-    return SECTIONS.length;
+    return this.profile.sections.length;
   }
 
   private flappyIndex(): number {
-    return SECTIONS.length + 1;
+    return this.profile.sections.length + 1;
   }
 
   private resetIndex(): number {
-    return SECTIONS.length + 2;
+    return this.profile.sections.length + 2;
+  }
+
+  private returnToInitialScreen(): void {
+    this.menuIndex = 0;
+    this.sectionId = this.profile.initialSectionId ?? null;
+    this.screen = this.sectionId ? "section" : "menu";
   }
 
   private handleArrow(letter: string): void {
@@ -461,7 +495,7 @@ export class TutRunner implements InteractiveProgram {
         this.render();
         return;
       }
-      const section = SECTIONS[this.menuIndex];
+      const section = this.profile.sections[this.menuIndex];
       if (!section) return;
       this.sectionId = section.id;
       this.screen = "section";
@@ -479,7 +513,7 @@ export class TutRunner implements InteractiveProgram {
         this.state.reset();
         this.resetBuffer = "";
         this.resetMismatch = false;
-        this.screen = "menu";
+        this.returnToInitialScreen();
         this.render();
       } else {
         this.resetBuffer = "";
@@ -560,12 +594,12 @@ export class TutRunner implements InteractiveProgram {
     const total = this.state.totalProgress();
     const lines: string[] = [];
     lines.push("");
-    lines.push(`  ${BOLD}Dormouse Playground Tutorial${RESET}`);
+    lines.push(`  ${BOLD}${this.profile.title}${RESET}`);
     lines.push(
       `  ${DIM}\`Esc\`/\`q\` to exit · \`Enter\` to open · \`↑↓\` to navigate${RESET}`,
     );
     lines.push("");
-    SECTIONS.forEach((section, index) => {
+    this.profile.sections.forEach((section, index) => {
       const { done, total: t } = this.state.sectionProgress(section.id);
       const marker = index === this.menuIndex ? `${fg(36)}❯${RESET}` : " ";
       const label = index === this.menuIndex
@@ -593,11 +627,10 @@ export class TutRunner implements InteractiveProgram {
     const flappyIndex = this.flappyIndex();
     const flappyUnlocked = total.done === total.total;
     const flappyMarker = this.menuIndex === flappyIndex ? `${fg(36)}❯${RESET}` : " ";
-    const flappyTitle = flappyUnlocked ? FLAPPY_UNLOCKED_TITLE : FLAPPY_LOCKED_TITLE;
     const flappyLabel =
       this.menuIndex === flappyIndex
-        ? `${BOLD}${flappyTitle}${RESET}`
-        : flappyTitle;
+        ? `${BOLD}${FLAPPY_TITLE}${RESET}`
+        : FLAPPY_TITLE;
     const flappyStatus = flappyUnlocked
       ? `  ${fg(32)}[High score: ${this.state.getFlappyHighScore()}]${RESET}`
       : `  ${DIM}[LOCKED ${total.done}/${total.total}]${RESET}`;
@@ -724,7 +757,9 @@ export class TutRunner implements InteractiveProgram {
       out += this.flappyCenteredAt(
         COLS,
         r + 8,
-        "Read about Dormouse Pocket  [p]",
+        this.profile.id === "pocket"
+          ? FLAPPY_POCKET_GAME_OVER_PROMPT
+          : FLAPPY_DESKTOP_GAME_OVER_PROMPT,
         fg256(C.text),
       );
     } else if (!g.started) {
@@ -762,7 +797,7 @@ export class TutRunner implements InteractiveProgram {
   }
 
   private renderSection(): string[] {
-    const section = SECTIONS.find((s) => s.id === this.sectionId);
+    const section = this.profile.sections.find((s) => s.id === this.sectionId);
     if (!section) {
       throw new Error(`renderSection: unknown sectionId ${this.sectionId}`);
     }
@@ -773,12 +808,16 @@ export class TutRunner implements InteractiveProgram {
     lines.push(`  ${DIM}\`Esc\` to go back${RESET}`);
     lines.push("");
 
+    if (this.profile.id === "pocket" && section.id === "copy") {
+      lines.push(...this.renderPocketCopyModePrompt());
+    }
+
     const activeIndex = section.items.findIndex((i) => !this.state.isComplete(i.id));
     section.items.forEach((item, index) => {
       lines.push(...this.renderItem(item, index, activeIndex));
     });
 
-    if (section.id === "copy") {
+    if (section.id === "copy" && this.onTogglePlaceToPaste) {
       lines.push("");
       const indent = "  ";
       const text = "Press `p` to toggle the Place To Paste.";
@@ -810,6 +849,20 @@ export class TutRunner implements InteractiveProgram {
     }
 
     return lines;
+  }
+
+  private renderPocketCopyModePrompt(): string[] {
+    const mode = this.getPocketTouchMode?.() ?? "gestures";
+    if (mode === "selection") {
+      return [
+        `   ${fg(32)}${ACTIVE_ITEM_GLYPH}${RESET}  ${BOLD}Select is active — drag-to-copy is enabled${RESET}`,
+        `        ${ITALIC}Tap \`Gestures\` when you want arrow, Enter, and Esc gestures.${RESET}`,
+      ];
+    }
+    return [
+      `   ${fg(33)}${ACTIVE_ITEM_GLYPH}${RESET}  ${BOLD}Tap "Select" to enable drag-to-copy${RESET}`,
+      `        ${ITALIC}Current touch mode is \`${mode === "cursor" ? "Mouse" : "Gestures"}\`.${RESET}`,
+    ];
   }
 
   private renderBusyDemoLines(): string[] {
@@ -901,6 +954,8 @@ export class TutRunner implements InteractiveProgram {
     this.busyDemoStart = null;
     this.stateUnsub?.();
     this.stateUnsub = null;
+    this.pocketTouchModeUnsub?.();
+    this.pocketTouchModeUnsub = null;
     this.resizeUnsub?.();
     this.resizeUnsub = null;
     this.write(LEAVE_ALT_SCREEN);

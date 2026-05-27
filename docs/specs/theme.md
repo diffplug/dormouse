@@ -62,10 +62,22 @@ it reads host-provided variables, materializes only missing Dormouse-consumed
 variables on `body.style`, and removes stale materialized variables when the
 host starts providing a real value.
 
+Website routes may be hydrated as a full React Router document, so React can
+reconcile the server `<body>` and remove render-time `body.style` and class
+side effects. `applyTheme()` treats a same-theme call as a no-op only when the
+expected inline `--vscode-*` variables and `vscode-light` / `vscode-dark` class
+are still visible on `document.body`. ThemePicker also performs a browser
+layout-effect restore after mount so website hydration cannot leave the picker
+state saying a theme is active while xterm.js sees fallback colors.
+
 `theme.css` declares the theme-dependent `--color-*` tokens on `body` because
 `--vscode-*` variables also live there. Keep the parallel `@theme`
 declarations so Tailwind can generate utility classes, but treat the body-level
 declarations as the runtime source of truth.
+Dynamic palette tokens (`--color-door-bg`, `--color-door-fg`, and
+`--color-focus-ring`) also have body-level baseline bindings matching the
+`@theme` declarations, so direct CSS-var consumers such as the mobile gesture
+SVG render visibly before `useDynamicPalette()` publishes refined values.
 
 `theme.css` must not contain hardcoded color defaults or `var(..., fallback)`
 chains. Runtime hosts plus the shared resolver are responsible for providing
