@@ -35,11 +35,36 @@ import {
   recordTerminalUserInputByPtyId,
   removeTerminalPaneState,
   resetTerminalPaneState,
+  seedPromptShapeFromScrollback,
   seedTerminalManualCwd,
   setTerminalUserTitle,
   swapTerminalPaneStates,
+  type PromptLineReader,
 } from './terminal-state-store';
+import { readLogicalLineFromBuffer, type BufferLike } from './terminal-buffer-read';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
+
+function makePromptLineReader(terminal: Terminal): PromptLineReader {
+  return {
+    readLine() {
+      const buffer = terminal.buffer?.active;
+      if (!buffer) return null;
+      const cursorAbsRow = buffer.baseY + buffer.cursorY;
+      const bufferLike: BufferLike = {
+        getLine(index) {
+          const line = buffer.getLine(index);
+          if (!line) return undefined;
+          return {
+            isWrapped: line.isWrapped,
+            translateToString: (trimRight, startColumn, endColumn) =>
+              line.translateToString(trimRight, startColumn, endColumn),
+          };
+        },
+      };
+      return readLogicalLineFromBuffer(bufferLike, cursorAbsRow, buffer.cursorX);
+    },
+  };
+}
 
 function seedProcessCwdAfterSpawn(id: string): void {
   void getPlatform().getCwd(id).then((cwd) => fillTerminalProcessCwdByPtyId(id, cwd));
@@ -149,7 +174,7 @@ function wireXtermHandlers(
     const isSyntheticTerminalReport = inputIsSyntheticTerminalReport(input);
 
     if (!isSyntheticTerminalReport) {
-      recordTerminalUserInputByPtyId(id, input);
+      recordTerminalUserInputByPtyId(id, input, makePromptLineReader(terminal));
       const entry = registry.get(id);
       const hadTodo = entry?.todo === true;
       getPlatform().alertAttend(id);
@@ -282,6 +307,7 @@ export function resumeTerminal(
 
   if (replayData) {
     writeReplay(entry, replayData);
+    seedPromptShapeFromScrollback(id, replayData);
   }
   if (exitInfo && !exitInfo.alive) {
     entry.terminal.write(`\r\n[Process exited with code ${exitInfo.exitCode ?? -1}]\r\n`);
@@ -311,6 +337,7 @@ export function restoreTerminal(
 
   if (opts.scrollback) {
     writeReplay(entry, opts.scrollback, '\r\n');
+    seedPromptShapeFromScrollback(id, opts.scrollback);
   }
   if (opts.cwdWarning) {
     entry.terminal.write(`\r\n\x1b[33m${opts.cwdWarning}\x1b[0m\r\n`);
