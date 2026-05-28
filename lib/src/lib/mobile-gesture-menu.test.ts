@@ -96,6 +96,19 @@ describe('mobile gesture menu state machine', () => {
     expect(MOBILE_GESTURE_COMPLETE_MS).toBe(220);
   });
 
+  it('treats the layout radius as a circular radius for direction vectors', () => {
+    for (const vector of Object.values(MOBILE_GESTURE_DIRECTION_VECTORS)) {
+      expect(Math.hypot(vector.x * RADIUS_LAYOUT, vector.y * RADIUS_LAYOUT)).toBeCloseTo(
+        RADIUS_LAYOUT,
+        6,
+      );
+    }
+    expect(MOBILE_GESTURE_DIRECTION_VECTORS.ne.x * RADIUS_LAYOUT).toBeCloseTo(
+      RADIUS_LAYOUT * Math.SQRT1_2,
+      6,
+    );
+  });
+
   it('places exploded options opposite the selected direction', () => {
     expect(MOBILE_GESTURE_OPTION_DIRECTIONS.n).toEqual(['s', 'sw', 'se']);
     expect(MOBILE_GESTURE_OPTION_DIRECTIONS.e).toEqual(['w', 'nw', 'sw']);

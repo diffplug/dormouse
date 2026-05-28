@@ -165,7 +165,7 @@ Gesture mode uses these radii:
 
 | Variable | Value | Behavior |
 | --- | --- | --- |
-| `RADIUS_LAYOUT` | `92px` | Base half-side for square direction anchors around the offset compass rose origin. Exploded option labels land on these anchors; root labels are packed around the same square so long labels do not overlap. |
+| `RADIUS_LAYOUT` | `92px` | Base circular radius for exploded option anchors around the offset compass rose origin. Diagonal exploded labels use normalized compass vectors, so their x/y offsets are `RADIUS_LAYOUT * Math.SQRT1_2`. Root labels use separate packed square-keypad geometry so long labels do not overlap. |
 | `RADIUS_SELECT` | `RADIUS_LAYOUT * 0.75` | Visible circle drawn around the offset compass rose origin. When the mirrored drag reaches this distance, the closest compass direction is selected. |
 | `RADIUS_FADE_START` | `RADIUS_SELECT * 0.25` | No directional root-group fading happens before this drag distance. |
 | `RADIUS_HIGHLIGHT` | `RADIUS_SELECT * 0.5` | No circle is drawn. When the drag reaches this distance, the closest compass direction is highlighted, but not selected. |
@@ -223,9 +223,9 @@ bottom-left corner, SW aligns Tab's top-right corner, and NW aligns Esc's
 bottom-right corner. NE and SE place their secondary options to the right of the
 center option, one above and one below. NW and SW place their secondary options
 to the left of the center option, one above and one below. Exploded option
-labels use the square direction anchors directly. The root label pack stays
-close to the select circle, while preserving enough room for long labels like
-Backspace.
+labels use circular direction anchors at `RADIUS_LAYOUT` from the reset center.
+The root label pack stays close to the select circle, while preserving enough
+room for long labels like Backspace.
 
 Each diagonal root cluster uses `GAP_CLUSTER = 2px`. The first option in each
 diagonal group is the cluster center. Secondary options use the same edge-and-gap
