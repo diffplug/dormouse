@@ -7,6 +7,7 @@ import {
 import {
   applyTerminalSemanticEventsByPtyId,
 } from '../terminal-state-store';
+import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 
 export class VSCodeAdapter implements PlatformAdapter {
   private vscode: ReturnType<typeof acquireVsCodeApi>;
@@ -179,6 +180,10 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   openExternal(uri: string): void {
     this.vscode.postMessage({ type: 'dormouse:openExternal', uri });
+  }
+
+  runWorkbenchCommand(command: VSCodeWorkbenchCommand): void {
+    this.vscode.postMessage({ type: 'dormouse:runWorkbenchCommand', command });
   }
 
   onPtyData(handler: (detail: { id: string; data: string }) => void): void {

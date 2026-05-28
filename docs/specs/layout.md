@@ -140,6 +140,7 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 ### Passthrough mode
 - All keyboard input routes to the active session's xterm.js instance
 - Only the mode-exit gesture (LCmd → RCmd) is intercepted
+- In the VS Code host, selected workbench chords are mirrored: xterm still processes the key, and Dormouse also asks the extension host to run the matching VS Code command. See [the VS Code host spec](vscode.md) for the allowlist.
 - Selection overlay shows 2px solid border with glow
 - Terminal has DOM focus
 
@@ -375,6 +376,7 @@ The deferred spawn also only calls `selectPane` if selection is null. The kill h
 | `lib/src/components/wall/MouseOverrideBanner.tsx` | Temporary mouse override banner shown from the header icon |
 | `lib/src/components/wall/use-dockview-ready.ts` | Dockview ready/setup handler: restore/create panels, DnD swap wiring, active panel sync, auto-spawn |
 | `lib/src/components/wall/use-wall-keyboard.ts` | Capture-phase keyboard dispatch for mode switching, pane/door commands, copy/paste, selection drag keys |
+| `lib/src/lib/vscode-keybindings.ts` | VS Code-hosted workbench chord mirror allowlist |
 | `lib/src/components/wall/use-session-persistence.ts` | Debounced layout/session save, flush requests, pagehide, PTY exit, file-drop paste routing |
 | `lib/src/components/wall/use-window-focused.ts` | Window focus tracking hook for header and selection overlay dimming |
 | `lib/src/components/Baseboard.tsx` | Always-visible bottom strip with door components, overflow arrows, and shortcut hints |

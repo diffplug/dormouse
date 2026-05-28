@@ -75,6 +75,8 @@ Source of truth:
 
 Non-obvious message contracts:
 
+VS Code-only workbench chord mirroring uses `dormouse:runWorkbenchCommand` from webview to host. The host validates the requested command against the allowlist in `lib/src/lib/vscode-keybindings.ts` (see [the VS Code host spec](vscode.md)) before calling `vscode.commands.executeCommand`; generic command execution over the webview boundary is not allowed.
+
 | Direction | Message | Source type | Contract |
 | --- | --- | --- | --- |
 | Webview → host | `dormouse:openExternal` | `WebviewMessage` | Request the host to open a user-confirmed external URI from an OSC 8 hyperlink. Hosts must revalidate and reject malformed, control-character-bearing, or blocked pseudo-scheme targets (`javascript:`, `data:`, `blob:`, `about:`). |

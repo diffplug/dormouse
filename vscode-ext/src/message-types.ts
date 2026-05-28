@@ -1,5 +1,6 @@
 import type { ActivityNotification, SessionStatus, TodoState } from '../../lib/src/lib/alert-manager';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
+import type { VSCodeWorkbenchCommand } from '../../lib/src/lib/vscode-keybindings';
 
 // Messages from webview → extension host
 export type WebviewMessage =
@@ -13,6 +14,7 @@ export type WebviewMessage =
   | { type: 'clipboard:readFiles'; requestId: string }
   | { type: 'clipboard:readImage'; requestId: string }
   | { type: 'dormouse:openExternal'; uri: string }
+  | { type: 'dormouse:runWorkbenchCommand'; command: VSCodeWorkbenchCommand }
   | { type: 'dormouse:init' }
   | { type: 'dormouse:saveState'; state: unknown }
   | { type: 'dormouse:flushSessionSaveDone'; requestId: string }
