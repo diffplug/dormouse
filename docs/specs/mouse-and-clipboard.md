@@ -25,62 +25,32 @@ The terminal makes the current regime visible in the pane header, provides a way
 
 ## 1. The Mouse Icon (Header Indicator)
 
-### 1.1 Visibility
+**Visibility.** No icon when the inside program has not requested mouse reporting; a **Mouse icon** (Phosphor `CursorClickIcon`) when it has; replaced by a **No-Mouse icon** (Phosphor `SelectionSlashIcon`) in the same header location while the user has activated an override.
 
-- When the inside program has **not** requested mouse reporting: no icon is shown.
-- When the inside program **has** requested mouse reporting: a **Mouse icon** (Phosphor `CursorClickIcon`) is shown in the terminal header.
-- When the user has activated an override: the Mouse icon is replaced by a **No-Mouse icon** (Phosphor `SelectionSlashIcon`) in the same header location.
-
-### 1.2 Hover Text
+**Click.** Clicking the Mouse icon activates a **temporary override** (see §2). Clicking the No-Mouse icon ends the override immediately and restores mouse reporting to the inside program.
 
 Source of truth: `lib/src/components/wall/TerminalPaneHeader.tsx` defines hover text for both icons.
-
-### 1.3 Click Behavior
-
-- Clicking the **Mouse icon** activates a **temporary override** (see §2).
-- Clicking the **No-Mouse icon** ends the override immediately and restores mouse reporting to the inside program.
 
 ---
 
 ## 2. Override State
 
-### 2.1 Temporary Override
+There are two override modes: temporary (the default) and sticky.
 
-Activated by clicking the Mouse icon. While the temporary override is active:
+**Temporary override.** Activated by clicking the Mouse icon. While active:
 
 - Mouse events are handled by the terminal, not forwarded to the inside program.
-- Wheel events are also suppressed so xterm cannot translate scroll input into
-  mouse reports or alternate-screen arrow-key input for the inside program.
+- Wheel events are also suppressed so xterm cannot translate scroll input into mouse reports or alternate-screen arrow-key input for the inside program.
 - The Mouse icon is replaced with the No-Mouse icon.
 - A banner appears below the No-Mouse icon reading `Temporary mouse override until mouse-up.` followed by two buttons: **Make sticky** and **Cancel**.
-- The override persists until the **next mouse-up event inside the terminal content area** (live region or scrollback) that is paired with a prior mouse-down in the same area. This includes plain clicks (a mouse-down/up pair that never crossed the drag threshold) as well as completed drags. The click on the No-Mouse icon itself, the banner's buttons, and any "orphan" mouse-up from a drag that started outside the terminal do **not** count as that mouse-up.
-- After that mouse-up, the override automatically ends: mouse reporting is restored to the inside program, the banner is dismissed, and the icon reverts to the Mouse icon.
 
-### 2.2 Making the Override Sticky
+The temporary override ends on the **next mouse-up event inside the terminal content area** (live region or scrollback) that is paired with a prior mouse-down in the same area. This includes plain clicks (a mouse-down/up pair that never crossed the drag threshold) and completed drags; it excludes clicks on the No-Mouse icon, the banner buttons, and any "orphan" mouse-up from a drag that started outside the terminal. After that mouse-up, mouse reporting is restored, the banner is dismissed, and the icon reverts to the Mouse icon. Clicking **Cancel** in the banner ends the override immediately with the same outcome. If the user activates an override and never performs a mouse action, it remains in place indefinitely; there is no timeout.
 
-- Clicking **Make sticky** in the banner converts the temporary override into a sticky one.
-- The banner is dismissed.
-- The No-Mouse icon remains visible with its "click to restore" hover text.
-- Mouse and wheel events continue to be handled by the terminal rather than the
-  inside program.
-- The override persists until the user clicks the No-Mouse icon, or until the inside program stops requesting mouse reporting.
+**Sticky override.** Clicking **Make sticky** in the banner converts the temporary override into a sticky one. The banner is dismissed; the No-Mouse icon remains visible with its "click to restore" hover text; mouse and wheel events continue to be handled by the terminal rather than the inside program. The sticky override persists until the user clicks the No-Mouse icon, or until the inside program stops requesting mouse reporting.
 
-### 2.3 Canceling the Temporary Override
+**Auto-clear on reporting off.** If the inside program stops requesting mouse reporting (e.g. exits or sends DECRST `?1000l`/`?1002l`/`?1003l`) while either override is active, the override is cleared. The icon and banner are removed because there is no longer anything to override.
 
-- Clicking **Cancel** in the banner ends the override immediately.
-- The banner is dismissed, mouse reporting is restored, and the icon reverts to the Mouse icon.
-
-### 2.4 No Keyboard Activation
-
-The mouse icon, No-Mouse icon, and banner buttons are mouse-only. They are not keyboard-activatable.
-
-### 2.5 Edge Case: No Drag After Override
-
-If the user activates an override and then never performs a mouse action, the override remains in place indefinitely. There is no timeout.
-
-### 2.6 Auto-Cleared on Reporting Off
-
-If the inside program stops requesting mouse reporting (e.g. exits or explicitly sends DECRST `?1000l`/`?1002l`/`?1003l`) while an override is active, the override is cleared. The icon and banner are removed because there is no longer anything to override.
+**No keyboard activation.** The Mouse icon, No-Mouse icon, and banner buttons are mouse-only. They are not keyboard-activatable.
 
 ---
 
