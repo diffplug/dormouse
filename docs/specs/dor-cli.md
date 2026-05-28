@@ -174,15 +174,19 @@ Behavior:
 - `--pane` filters by surface id, surface ref, or pane ref. Because Dormouse has
   one surface per Pane, the command currently returns zero or one surface.
 - Text output marks the selected surface with `*`, prints the surface handle,
-  display title, and optional `[selected]`.
+  a CWD-style surface label, and optional `[selected]`.
 - `--json` returns `pane_ref`, `surfaces`, `workspace_ref`, and `window_ref`.
   Surface entries use cmux field names for index, selected state, title, and
   type.
+- The `title` field for this command prefers `requested_working_directory`
+  formatted as a short trailing path, falling back to the surface display title
+  only when no CWD is known. This avoids showing the transient
+  `dor list-pane-surfaces` command as the selected surface title.
 
 Text shape:
 
 ```text
-* surface:1  build  [selected]
+* surface:1  …/worktrees/0cbc/mouseterm  [selected]
 ```
 
 ### `dor list-panels`

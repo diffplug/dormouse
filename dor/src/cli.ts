@@ -338,7 +338,7 @@ function renderPaneSurfaceTextLine(surface: Surface, idFormat: IdFormat): string
   const prefix = surface.selectedInPane ? '*' : ' ';
   const handle = renderSurfaceHandle(surface, idFormat);
   const selected = surface.selectedInPane ? '  [selected]' : '';
-  return `${prefix} ${handle}  ${surface.title}${selected}`;
+  return `${prefix} ${handle}  ${renderPaneSurfaceTitle(surface)}${selected}`;
 }
 
 function renderSurfacesText(surfaces: Surface[], idFormat: IdFormat): string {
@@ -416,9 +416,36 @@ function renderPaneSurfaceJson(surface: Surface, idFormat: IdFormat): Record<str
     index: surface.indexInPane,
     ...(idFormat === 'refs' || idFormat === 'both' ? { ref: surface.ref } : {}),
     selected: surface.selectedInPane,
-    title: surface.title,
+    title: renderPaneSurfaceTitle(surface),
     type: surface.type,
   };
+}
+
+function renderPaneSurfaceTitle(surface: Surface): string {
+  return surface.requestedWorkingDirectory
+    ? formatPaneSurfaceWorkingDirectory(surface.requestedWorkingDirectory)
+    : surface.title;
+}
+
+function formatPaneSurfaceWorkingDirectory(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed) return path;
+
+  if (isWindowsPath(trimmed)) {
+    return formatTailPath(trimmed.replace(/\//g, '\\'), '\\');
+  }
+  return formatTailPath(trimmed, '/');
+}
+
+function isWindowsPath(path: string): boolean {
+  return /^[A-Za-z]:(?:[\\/]|$)/.test(path) || path.startsWith('\\\\') || path.startsWith('//');
+}
+
+function formatTailPath(path: string, separator: '/' | '\\'): string {
+  const segments = path.split(separator).filter(Boolean);
+  if (segments.length === 0) return path;
+  const tail = segments.slice(-3).join(separator);
+  return segments.length > 3 ? `…${separator}${tail}` : tail;
 }
 
 function renderSurfacesJson(response: ListSurfacesResponse, idFormat: IdFormat): string {

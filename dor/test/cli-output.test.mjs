@@ -15,11 +15,11 @@ const fixtureSurfaces = [
     ref: 'surface:1',
     paneRef: 'pane:1',
     type: 'terminal',
-    title: 'build',
+    title: 'dor list-pane-surfaces',
     focused: true,
     index: 0,
     indexInPane: 0,
-    requestedWorkingDirectory: '/workspace/app',
+    requestedWorkingDirectory: '/Users/example/.codex/worktrees/0cbc/mouseterm',
     selectedInPane: true,
   },
   {

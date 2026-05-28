@@ -8,9 +8,9 @@ stdout:
       "index_in_pane": 0,
       "pane_ref": "pane:1",
       "ref": "surface:1",
-      "requested_working_directory": "/workspace/app",
+      "requested_working_directory": "/Users/example/.codex/worktrees/0cbc/mouseterm",
       "selected_in_pane": true,
-      "title": "build",
+      "title": "dor list-pane-surfaces",
       "type": "terminal"
     },
     {
