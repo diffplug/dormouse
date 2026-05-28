@@ -25,7 +25,7 @@ export function vscodeWorkbenchCommandForKeydown(
   if (event.type !== 'keydown') return null;
   if (event.isComposing) return null;
 
-  if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key === 'F1') {
+  if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key === 'F1') {
     return 'workbench.action.showCommands';
   }
 
