@@ -3,10 +3,14 @@ type KeyboardEventLike = Pick<
   'altKey' | 'code' | 'ctrlKey' | 'isComposing' | 'key' | 'metaKey' | 'shiftKey' | 'type'
 >;
 
-export type VSCodeWorkbenchCommand =
-  | 'workbench.action.quickOpen'
-  | 'workbench.action.showCommands'
-  | 'workbench.action.toggleSidebarVisibility';
+/** The workbench commands the VS Code host is allowed to run on the webview's behalf. */
+export const VSCODE_WORKBENCH_COMMANDS = [
+  'workbench.action.quickOpen',
+  'workbench.action.showCommands',
+  'workbench.action.toggleSidebarVisibility',
+] as const;
+
+export type VSCodeWorkbenchCommand = (typeof VSCODE_WORKBENCH_COMMANDS)[number];
 
 /**
  * Xterm keyboard handling changes when foreground apps enable enhanced

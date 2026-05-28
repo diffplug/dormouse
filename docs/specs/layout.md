@@ -140,7 +140,7 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 ### Passthrough mode
 - All keyboard input routes to the active session's xterm.js instance
 - Only the mode-exit gesture (LCmd → RCmd) is intercepted
-- In the VS Code host, selected workbench chords are mirrored: xterm still processes the key, and Dormouse also asks the extension host to run the matching VS Code command. The allowlist is `Ctrl/Cmd+P` (Quick Open), `Ctrl/Cmd+Shift+P` / `F1` (Command Palette), and `Ctrl/Cmd+B` (toggle sidebar).
+- In the VS Code host, selected workbench chords are mirrored: xterm still processes the key, and Dormouse also asks the extension host to run the matching VS Code command. See [the VS Code host spec](vscode.md) for the allowlist.
 - Selection overlay shows 2px solid border with glow
 - Terminal has DOM focus
 

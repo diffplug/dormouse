@@ -8,6 +8,7 @@ import {
   TerminalProtocolParser,
 } from '../../lib/src/lib/terminal-protocol';
 import { normalizeExternalUri } from '../../lib/src/lib/external-links';
+import { VSCODE_WORKBENCH_COMMANDS } from '../../lib/src/lib/vscode-keybindings';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { PersistedSession } from '../../lib/src/lib/session-types';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
@@ -23,11 +24,7 @@ const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
 const globalOwnedPtyIds = new Set<string>();
 const activeRouters = new Set<{ flushSessionSave(timeoutMs?: number): Promise<void> }>();
 let nextFlushRequestId = 0;
-const ALLOWED_WORKBENCH_COMMANDS = new Set([
-  'workbench.action.quickOpen',
-  'workbench.action.showCommands',
-  'workbench.action.toggleSidebarVisibility',
-]);
+const ALLOWED_WORKBENCH_COMMANDS = new Set<string>(VSCODE_WORKBENCH_COMMANDS);
 
 // Shared alert manager — survives router disposal so alert state persists
 // across webview collapse/expand cycles.
