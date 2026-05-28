@@ -45,8 +45,6 @@ When updating code covered by a spec, update the spec to match. When the two spe
 
 When editing specs, keep them concise but do not replace invariants or edge cases with only a code pointer. Use `Source of truth:` for implementation references, and include direction/scope for protocols, command orchestration, and cross-package boundaries. For docs-only compression, spot-check referenced symbols, message directions, and root-vs-package script ownership against code before committing.
 
-Wire-protocol and external-interface specs are themselves the contract: `terminal-escapes.md`, the message-protocol tables in `transport.md`, the OSC 9 / 9;4 / 99 / 777 / BEL sequence rules in `alert.md`, and the artifact-filename and signing-path tables in `deploy.md` document bytes-on-the-wire and files-we-ship that are not derivable from code. These sections must keep the full specification — sequences, fields, named files, signing inputs — even when a parser or script implements them. Use `Source of truth:` only for the implementation pointer alongside the contract, never as a replacement for it.
-
 Every spec that uses Session / Pane / Door / baseboard / passthrough vocabulary leads with a `> See \`docs/specs/glossary.md\` for ...` blockquote (see `layout.md`, `alert.md`, `terminal-state.md`). When introducing glossary vocabulary into a spec that lacks the callout, add it in the same edit.
 
 ## Design
