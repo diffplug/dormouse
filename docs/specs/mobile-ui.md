@@ -306,8 +306,9 @@ rules as the main option selection. Its final selected item uses the same
 expand-and-fade completion feedback as the root menu options.
 
 Action-to-byte-sequence mapping is canonical in `MOBILE_TERMINAL_KEY_SEQUENCES`
-(`lib/src/components/MobileTerminalUi.tsx`); the text/paste actions come from
-`MOBILE_GESTURE_GROUPS` (`lib/src/lib/mobile-gesture-menu.ts`).
+(`lib/src/components/MobileTerminalUi.tsx`). Root gesture text/paste actions
+come from `MOBILE_GESTURE_GROUPS`, and quit submenu actions come from
+`MOBILE_GESTURE_QUIT_GROUP` (`lib/src/lib/mobile-gesture-menu.ts`).
 
 ## 6. Input Mode Selector
 
