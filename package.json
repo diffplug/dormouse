@@ -23,5 +23,6 @@
     "dogfood:standalone": "bash standalone/scripts/dogfood.sh",
     "storybook": "pnpm --filter dormouse-lib storybook",
     "bundle-themes": "node lib/scripts/bundle-themes.mjs"
-  }
+  },
+  "devDependencies": {}
 }
