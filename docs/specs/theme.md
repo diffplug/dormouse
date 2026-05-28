@@ -17,14 +17,13 @@ The chrome is anchored on VSCode's file-tree styling because those colors are
 designed to read clearly inside the sidebar host area. Use bg-only chrome for
 panes and doors; do not add borders to make the hierarchy work.
 
-Source of truth: `lib/src/theme.css` defines token→VSCode-key bindings. The runtime-picked `--color-door-bg` and `--color-focus-ring` are computed by `computeDynamicPalette()`.
-
-Door colors and the focus ring are chosen at runtime by
-`computeDynamicPalette()` in `lib/src/lib/themes/dynamic-palette.ts`, using
-OKLab distance/chroma helpers from `lib/src/lib/color-contrast.ts`.
+Source of truth: `lib/src/theme.css` defines token→VSCode-key bindings. The
+runtime-picked `--color-door-bg` and `--color-focus-ring` are computed by
+`computeDynamicPalette()` in `lib/src/lib/themes/dynamic-palette.ts` using OKLab
+distance/chroma helpers from `lib/src/lib/color-contrast.ts`;
 `useDynamicPalette()` in `lib/src/lib/themes/use-dynamic-palette.ts` publishes
-the chosen variables on `document.body`. Public theme helpers are exported
-from `lib/src/lib/themes/index.ts`.
+the chosen variables on `document.body`. Public theme helpers are exported from
+`lib/src/lib/themes/index.ts`. The pick rules:
 
 - Door bg/fg chooses whichever pair, inactive-header or terminal bg/fg, has
   stronger perceptual separation from
