@@ -33,8 +33,7 @@ The terminal makes the current regime visible in the pane header, provides a way
 
 ### 1.2 Hover Text
 
-- Mouse icon hover text: `TUI is intercepting mouse commands. Click to override.`
-- No-Mouse icon hover text: `You're overriding the TUI's mouse capture. Click to restore.`
+Hover text for both icons is defined in `lib/src/components/wall/TerminalPaneHeader.tsx`.
 
 ### 1.3 Click Behavior
 
@@ -105,14 +104,11 @@ Selection is available whenever the terminal is handling mouse events — that i
 
 ### 3.3 Selection Hint Text
 
-While a drag is in progress, a small hint is displayed adjacent to the selection (below when dragging downward, above when dragging upward):
-
-- `Hold Alt for block selection` on Windows and Linux.
-- `Hold Opt for block selection` on macOS.
+While a drag is in progress, a small hint is displayed adjacent to the selection (below when dragging downward, above when dragging upward). The exact hint strings (mouse vs. touch, block-selection, and the URL/path extension hint) live in `lib/src/components/SelectionOverlay.tsx`.
 
 The hint is always shown during an active drag. It does not fade with use.
 
-When a URL or path token is detected near the current drag position, an additional extension hint (`Press e to select the full URL` / `Press e to select the full path`) is shown alongside it. See §5 for full details.
+When a URL or path token is detected near the current drag position, an additional extension hint is shown alongside it. See §5 for full details.
 
 ### 3.4 Selection Follows Content
 
@@ -148,12 +144,7 @@ When a selection is finalized, a popup appears adjacent to the selection (on the
 
 ### 4.1 Copy Buttons
 
-The popup shows two copy buttons:
-
-- `[Cmd+C] Copy Raw`
-- `[Cmd+Shift+C] Copy Rewrapped`
-
-On non-macOS platforms, the labels show `Ctrl` and `Ctrl+Shift` respectively.
+The two buttons (Copy Raw, Copy Rewrapped) and their platform-dependent shortcut labels are defined in `lib/src/components/SelectionPopup.tsx`.
 
 #### 4.1.1 Copy Raw
 
@@ -195,21 +186,13 @@ Smart extension is offered **mid-drag**, in parallel with the Alt block-selectio
 
 ### 5.1 Detection
 
-A token is whitespace-delimited and matches one of (in priority order, see `lib/src/lib/smart-token.ts`):
-
-- A URL: `https?://...`, `file://...`.
-- An error location: `<path>:line` or `<path>:line:col`. (Matched first so it beats the generic path patterns; trailing `:line` digits are preserved.)
-- An absolute path beginning with `~/`, `/`, `./`, or `../`.
-- A Windows-style path (`C:\...`).
+A token is whitespace-delimited. Detected shapes (in priority order) are the `PATTERNS` in `lib/src/lib/smart-token.ts`. Error locations (`<path>:line` or `<path>:line:col`) are matched first so they beat the generic path patterns, and their trailing `:line` digits are preserved.
 
 For all kinds **except** error locations, trailing characters that are unlikely to be part of the token — `.`, `,`, `;`, `:`, `!`, `?`, single quotes, double quotes — are stripped from the detected token's end. Unmatched closing brackets (`)`, `]`, `}`, `>`) are also stripped, but matched pairs are preserved (e.g. `https://en.wikipedia.org/wiki/Foo_(bar)` keeps its trailing `)`).
 
 ### 5.2 Mid-Drag Hint
 
-When a qualifying token is detected during a drag, a hint is shown alongside the existing `Hold Alt for block selection` hint:
-
-- `Press e to select the full URL` (for URLs)
-- `Press e to select the full path` (for paths and error locations)
+When a qualifying token is detected during a drag, a hint is shown alongside the existing block-selection hint (the exact strings live in `lib/src/components/SelectionOverlay.tsx`).
 
 The hint appears and disappears live as the drag moves into and out of qualifying tokens. If no qualifying token is present at the current drag position, no extension hint is shown.
 

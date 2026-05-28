@@ -303,11 +303,12 @@ Each session also carries `TerminalPaneState` from `docs/specs/terminal-state.md
 
 ## Theme
 
-Custom `dormouseTheme` extends dockview's `themeAbyss`:
-- `gap: 6` — 6px between groups in both directions
-- `dndOverlayMounting: 'absolute'`, `dndPanelOverlay: 'group'`
-- Pane header height: `--dv-tabs-and-actions-container-height: 30px`
-- 6px top/sides inset and 2px bottom inset around the dockview area (`px-1.5 pt-1.5 pb-0.5` on wrapper, `inset-x-1.5 top-1.5 bottom-0.5` on container)
+Custom `dormouseTheme` extends dockview's `themeAbyss`. The `dormouseTheme`
+object (gap, dnd overlay settings) is canonical in `lib/src/components/Wall.tsx`;
+the dockview CSS-var overrides (e.g. pane header height) are in
+`lib/src/index.css`. The dockview area uses a 6px top/sides inset and 2px bottom
+inset (`px-1.5 pt-1.5 pb-0.5` on wrapper, `inset-x-1.5 top-1.5 bottom-0.5` on
+container).
 
 Colors use a two-layer CSS variable strategy: `@theme --color-*` tokens → `var(--vscode-*)`. VSCode provides host theme variables in extension mode; standalone and website mode apply bundled or installed theme variables before rendering. Tailwind v4 `@theme` block registers `--color-*` tokens as Tailwind colors (e.g., `bg-app-bg`, `text-app-fg`, `border-border`). See `theme.css` for the full token map.
 

@@ -68,88 +68,24 @@ Message types live in `vscode-ext/src/message-types.ts` (the canonical schema; o
 
 **Webview → host:**
 
-| Message | Purpose |
-|---------|---------|
-| `pty:spawn` | Create new PTY (id, optional cols/rows/cwd/shell/args) |
-| `pty:input` | Write data to PTY |
-| `pty:resize` | Resize PTY dimensions |
-| `pty:kill` | Kill PTY and release ownership |
-| `pty:getCwd` | Query PTY working directory (request-response via requestId) |
-| `pty:getScrollback` | Query PTY scrollback buffer (request-response via requestId) |
-| `pty:getShells` | Query available shells (request-response via requestId) |
-| `dormouse:openExternal` | Request the host to open a user-confirmed external URI from an OSC 8 hyperlink. Hosts must revalidate and reject malformed, control-character-bearing, or blocked pseudo-scheme targets (`javascript:`, `data:`, `blob:`, `about:`). |
-| `dormouse:init` | Trigger resume: get PTY list + replay data |
-| `dormouse:saveState` | Frontend persisting session state |
-| `dormouse:flushSessionSaveDone` | Ack for host-triggered flush (matched by requestId) |
-| `alert:toggle` | Toggle alert enabled/disabled for a PTY |
-| `alert:disable` | Disable alert for a PTY |
-| `alert:dismiss` | Dismiss ringing alert |
-| `alert:dismissOrToggle` | Context-dependent: dismiss if ringing, else toggle |
-| `alert:attend` | Mark user as attending to a PTY |
-| `alert:remove` | Remove alert state entirely |
-| `alert:resize` | Notify alert of terminal resize (debounce noise) |
-| `alert:clearAttention` | Clear attention timer |
-| `alert:toggleTodo` | Toggle TODO (`false` ↔ `true`) |
-| `alert:markTodo` | Set TODO to `true` |
-| `alert:clearTodo` | Remove TODO |
+Webview → host message types: see the `WebviewMessage` union in `vscode-ext/src/message-types.ts`. The ones with non-obvious contracts:
+
+- `dormouse:openExternal` — request the host to open a user-confirmed external URI from an OSC 8 hyperlink. Hosts must revalidate and reject malformed, control-character-bearing, or blocked pseudo-scheme targets (`javascript:`, `data:`, `blob:`, `about:`).
+- `dormouse:newTerminal` — the webview replaces the selected untouched terminal in-place only when `replaceUntouched` is true, otherwise it spawns a new pane.
 
 **Host → webview:**
 
-| Message | Purpose |
-|---------|---------|
-| `pty:data` | PTY output after state-driving supported OSC sequences have been parsed/stripped; `OSC 8` hyperlinks are preserved for xterm.js (routed only to owning router) |
-| `pty:exit` | PTY process exited (with exitCode) |
-| `terminal:semanticEvents` | Normalized CWD/title/prompt/command events parsed in the host from live PTY data |
-| `pty:list` | List of all resumable PTYs (response to `dormouse:init`) |
-| `pty:replay` | Buffered raw output since spawn (response to `dormouse:init`); the webview parses semantic OSCs during replay reconstruction without triggering alerts |
-| `pty:cwd` | CWD query response (matched by requestId) |
-| `pty:scrollback` | Scrollback query response (matched by requestId) |
-| `pty:shells` | Available shells list response (matched by requestId) |
-| `dormouse:newTerminal` | Host/UI request to spawn a terminal. Payload may include `shell`, `args`, display `name`, `replaceUntouched`, and `announce`; the webview replaces the selected untouched terminal in-place only when `replaceUntouched` is true, otherwise it spawns a new pane. |
-| `dormouse:selectedShell` | Update the webview's default shell options for later split/spawn/restore paths. |
-| `dormouse:flushSessionSave` | Request webview to save state now (host shutdown trigger, matched by requestId) |
-| `dormouse:openThemeDebugger` | Command-triggered request to open the shared theme debugger dialog |
-| `alert:state` | Alert state change (projected status, watchingEnabled, todo, notification, attentionDismissedRing) |
+Host → webview message types: see the `ExtensionMessage` union in `vscode-ext/src/message-types.ts`. The ones with non-obvious contracts:
+
+- `pty:data` — PTY output after state-driving supported OSC sequences have been parsed/stripped; `OSC 8` hyperlinks are preserved for xterm.js (routed only to owning router).
+- `pty:replay` — buffered raw output since spawn; the webview parses semantic OSCs during replay reconstruction without triggering alerts (must not re-fire alerts).
+- `dormouse:newTerminal` — payload may include `shell`, `args`, display `name`, `replaceUntouched`, and `announce`; the webview replaces the selected untouched terminal in-place only when `replaceUntouched` is true, otherwise it spawns a new pane.
 
 The OSC parsing/stripping rules that produce `pty:data` and `terminal:semanticEvents` are specified in `docs/specs/terminal-escapes.md`.
 
 ## Persisted session types
 
-```typescript
-interface PersistedSession {
-  version: 3;
-  panes: PersistedPane[];
-  doors?: PersistedDoor[];
-  layout: unknown; // SerializedDockview
-}
-
-interface PersistedPane {
-  id: string;
-  cwd: string | null;
-  title: string;
-  scrollback: string | null;
-  resumeCommand: string | null;
-  untouched: boolean;
-  alert?: PersistedAlertState | null;
-}
-
-interface PersistedAlertState {
-  status: SessionStatus;
-  watchingEnabled?: boolean;
-  todo: boolean;
-  notification?: ActivityNotification | null;
-}
-
-interface PersistedDoor {
-  id: string;
-  title: string;
-  neighborId: string | null;
-  direction: DoorDirection;
-  remainingPaneIds: string[];
-  layoutAtMinimize: unknown;
-  layoutAtMinimizeSignature: string;
-}
-```
+The persisted-session interfaces (`PersistedSession` v3, `PersistedPane`, `PersistedAlertState`, `PersistedDoor`) and their v1→v2→v3 migrations live in `lib/src/lib/session-types.ts`.
 
 Every saved-session entry point must pass through `readPersistedSession()`. That reader accepts both the canonical parsed object and a JSON-stringified session blob before validating/migrating; this covers host state APIs that may hand back the inner serialized JSON string.
 

@@ -74,44 +74,7 @@ Universal PTY/transport invariants live in `docs/specs/transport.md`. The rules 
 
 ### Extension manifest (current)
 
-```jsonc
-{
-  "activationEvents": [
-    "onView:dormouse.view",
-    "onWebviewPanel:dormouse"
-  ],
-  "contributes": {
-    "commands": [
-      { "command": "dormouse.focus", "title": "Dormouse: Focus",
-        "icon": { "light": "icon-tiny-light.png", "dark": "icon-tiny-dark.png" } },
-      { "command": "dormouse.open", "title": "Dormouse: Open in Editor" },
-      { "command": "dormouse.debugTheme", "title": "Dormouse: Debug Theme" },
-      { "command": "dormouse.newTerminal", "title": "Dormouse: New Terminal",
-        "icon": "$(add)" },
-      { "command": "dormouse.selectShell", "title": "Dormouse: Select Shell",
-        "icon": "$(gear)" }
-    ],
-    "menus": {
-      "view/title": [
-        { "command": "dormouse.selectShell", "group": "navigation@1",
-          "when": "view == dormouse.view" },
-        { "command": "dormouse.newTerminal", "group": "navigation@2",
-          "when": "view == dormouse.view" }
-      ]
-    },
-    "viewsContainers": {
-      "panel": [
-        { "id": "dormouse-panel", "title": "Dormouse", "icon": "$(terminal)" }
-      ]
-    },
-    "views": {
-      "dormouse-panel": [
-        { "id": "dormouse.view", "name": "Dormouse", "type": "webview" }
-      ]
-    }
-  }
-}
-```
+The activation events and `contributes` block (commands with titles/icons, menus, view container, webview view) are defined in `vscode-ext/package.json`.
 
 ### Webview hosting
 
@@ -189,34 +152,13 @@ theme files.
 
 ### CSP policy
 
-```
-default-src 'none';
-style-src ${webview.cspSource} 'unsafe-inline';
-script-src 'nonce-${nonce}';
-font-src ${webview.cspSource};
-img-src ${webview.cspSource} data: blob:;
-connect-src ${webview.cspSource};
-```
+The CSP directives are assembled in `vscode-ext/src/webview-html.ts` (`getNonce()` + the directive list).
 
 `unsafe-inline` for styles is needed because VS Code injects theme CSS variables via inline styles on the body element. Scripts remain nonce-gated (32-char random alphanumeric nonce). The webview HTML is built by Vite from the `lib` package, then at runtime `webview-html.ts` rewrites asset URLs to webview URIs, injects the CSP meta tag, applies nonces to all script tags, and injects initial state via a nonce-gated inline script.
 
 ### Build and development
 
-```
-pnpm build:vscode =
-  1. pnpm --filter dormouse-lib build    (TypeScript compile)
-  2. pnpm --filter dormouse build:frontend (Vite: lib -> vscode-ext/media/)
-  3. pnpm --filter dormouse build          (esbuild: extension.ts + pty-host.js -> dist/,
-                                             copy node-pty prebuilds -> dist/node-pty)
-
-pnpm dogfood:vscode = build + package VSIX + install locally
-  (then: Cmd+Shift+P -> "Developer: Reload Window" to pick up changes)
-
-F5 in VS Code = launch Extension Development Host (see .vscode/launch.json)
-  (runs preLaunchTask "build-dormouse-vscode" from .vscode/tasks.json,
-   which just calls `pnpm build:vscode`, then opens a new VS Code window
-   with the extension loaded)
-```
+Build/dogfood commands and their exact steps live in `vscode-ext/package.json` scripts (`build:frontend`, `build`, `dogfood`); the F5 launch chain is in `.vscode/launch.json` + `.vscode/tasks.json`.
 
 **Dogfooding vs Extension Development Host:** Day-to-day development uses `pnpm dogfood:vscode` to install the extension into your real VS Code instance. This catches real-world issues since you're running with your actual settings, extensions, and workspaces. The F5 Extension Development Host workflow exists for when you need **breakpoint debugging** of extension host code (`extension.ts`, `message-router.ts`, `pty-manager.ts`, etc.) — it launches a separate VS Code window where the debugger can attach to the extension host process.
 
