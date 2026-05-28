@@ -1,256 +1,266 @@
 # Dor CLI
 
-Dormouse ships with a `dor` CLI. The goal of the CLI is to allow programmatic control of Dormouse features while staying compatible with the useful parts of the public `cmux` CLI/API contract where the models overlap.
+> See `docs/specs/glossary.md` for canonical Session and Pane vocabulary. This
+> spec uses `surface` for the CLI handle model because `dor` intentionally
+> mirrors cmux terminology at the command boundary.
 
-## Handle model
+Dormouse bundles a `dor` CLI into every terminal it launches. The CLI is the
+public API; any socket used underneath it is private host plumbing.
 
-Dormouse has a single window/workspace model for now, and each visible pane has exactly one surface. The CLI still uses `surface` terminology for cmux compatibility because cmux users and agents target terminal tabs/surfaces through that handle.
+Source of truth:
 
-Handle rules:
+| Scope | Source |
+| --- | --- |
+| CLI parser, command help, output rendering, current command support | `dor/src/cli.ts` |
+| Socket client and request envelope | `dor/src/control-client.ts` |
+| POSIX / Windows launchers | `dor/bin/dor`, `dor/bin/dor.cmd` |
+| Snapshot tests for CLI output | `dor/test/cli-output.test.mjs`, `dor/test/snapshots/` |
+| Shared staging script | `scripts/stage-dor-cli.mjs` |
+| Standalone staging/runtime env | `standalone/package.json`, `standalone/src-tauri/src/lib.rs`, `standalone/sidecar/pty-core.js`, `standalone/sidecar/main.js` |
+| VS Code staging/runtime env | `vscode-ext/package.json`, `vscode-ext/src/pty-manager.ts`, `vscode-ext/src/pty-host.js` |
+| Control request routing into the webview | `standalone/src/tauri-adapter.ts`, `vscode-ext/src/message-router.ts`, `lib/src/lib/platform/vscode-adapter.ts` |
+| Implemented webview control handler | `lib/src/components/Wall.tsx` |
 
-- Commands accept stable ids and short refs where a surface is accepted.
-- Short refs use cmux-style names such as `surface:1`, `pane:2`, `workspace:1`, and `window:1`.
-- Output defaults to short refs. Commands that list handles also accept `--id-format refs|uuids|both`; `refs` is the default.
-- `DORMOUSE_SURFACE_ID` is the stable id for the invoking terminal surface. It is the default source surface for commands such as `new-split`.
-- Dormouse does not support multiple windows or workspaces yet. `--workspace workspace:1` and `--window window:1` are accepted as no-op compatibility flags; any other workspace/window target is rejected with a clear error.
+## Bundling And PATH
 
-## Shim and path prepending
+`dor` must work without `npm i -g`. Both hosts stage the workspace `dor` package
+before build/dev and prepend the staged `bin` directory to every spawned PTY's
+`PATH`.
 
-Dormouse must make `dor` available in every terminal session it launches without
-requiring a global install such as `npm i -g`. The CLI is bundled with both the
-VS Code extension and the standalone app, and every spawned PTY receives a
-Dormouse-controlled CLI directory prepended to `PATH`.
+Staged package contents:
 
-The bundled CLI directory contains:
+- `bin/dor` and `bin/dor.cmd` are tiny launchers.
+- `dist/dor.js` is the compiled TypeScript entrypoint.
+- `package.json` declares `"type": "module"` so Node runs the staged ESM file
+  without depending on parent package metadata.
 
-- `dor` — POSIX launcher script.
-- `dor.cmd` — Windows launcher script for `cmd.exe` and PowerShell.
-- `dor.js` — compiled TypeScript CLI entrypoint.
-- `package.json` — package metadata declaring `"type": "module"` so Node runs
-  the compiled ESM entrypoint without falling back to parent sidecar metadata.
-
-The launcher scripts are intentionally tiny wrappers around the bundled
-JavaScript entrypoint. They must use environment variables injected by the host,
-not `#!/usr/bin/env node`, because standalone users may not have `node` on their
-global `PATH`.
-
-POSIX launcher shape:
+The launchers prefer the host-provided runtime:
 
 ```sh
-#!/bin/sh
 exec "$DORMOUSE_NODE" "$DORMOUSE_CLI_JS" "$@"
 ```
 
-Windows launcher shape:
-
 ```bat
-@echo off
 "%DORMOUSE_NODE%" "%DORMOUSE_CLI_JS%" %*
 ```
 
-At PTY spawn time, the host injects:
+They may fall back to `node` for developer/manual use, but Dormouse-launched
+terminals must rely on injected env rather than a globally installed Node.
 
-- `DORMOUSE_NODE` — absolute path to the Node.js runtime Dormouse will use for
-  `dor`.
-- `DORMOUSE_CLI_JS` — absolute path to the bundled `dor.js` entrypoint.
-- `DORMOUSE_SURFACE_ID` — stable PTY/session id for commands that need to act
-  relative to the invoking terminal.
-- `DORMOUSE_CONTROL_SOCKET` / `DORMOUSE_CONTROL_TOKEN` when the control socket is
-  available.
+Public PTY env:
 
-The host also prepends the bundled CLI directory to `PATH`, so `dor new-split left`
-works from any Dormouse-launched shell. This path only needs to be stable for the
-lifetime of the spawned PTY; it is acceptable for the VS Code extension install
-path or standalone app resource path to change across app upgrades because new
-PTYs receive a freshly computed path.
+- `DORMOUSE_NODE` — Node runtime used by the launcher.
+- `DORMOUSE_CLI_JS` — absolute path to staged `dist/dor.js`.
+- `DORMOUSE_SURFACE_ID` — stable invoking Session/surface id.
+- `DORMOUSE_CONTROL_SOCKET` and `DORMOUSE_CONTROL_TOKEN` — private control
+  endpoint credentials.
 
-The same CLI package may also be published to npm for users who want `dor`
-available outside Dormouse-launched shells, but the bundled PATH-injected CLI is
-the supported default. The bundled CLI must remain version-matched to the running
-host.
+`DORMOUSE_CLI_BIN` is host-internal spawn configuration. Terminals should rely
+on `PATH`, not on that variable.
 
-## Standalone implementation
+## Host Plumbing
 
-The standalone Tauri app stages the workspace `dor` package into
-`standalone/sidecar/dor-cli` before dev/build. Tauri includes that staged
-directory through the existing sidecar resource bundle.
+### Standalone
 
-At app startup, Rust starts the Node.js sidecar with absolute paths for
-`DORMOUSE_NODE`, the staged CLI entrypoint, and a private control socket/token.
-The sidecar prepends the staged `bin` directory to each spawned PTY's `PATH` and
-sets the public PTY environment described above. The sidecar may use an internal
-`DORMOUSE_CLI_BIN` value while spawning PTYs, but terminal sessions should rely
-on `PATH` rather than that internal variable.
+`standalone/package.json` runs `pnpm stage:dor-cli` before Tauri dev/build.
+Rust resolves the staged/bundled CLI paths, starts the Node sidecar with
+`DORMOUSE_NODE`, `DORMOUSE_CLI_BIN`, `DORMOUSE_CLI_JS`,
+`DORMOUSE_CONTROL_SOCKET`, and `DORMOUSE_CONTROL_TOKEN`, then the shared PTY
+core prepends `DORMOUSE_CLI_BIN` and sets `DORMOUSE_SURFACE_ID` per PTY.
 
-`dor` talks to the standalone app over a JSON-lines Node `net` socket. The
-sidecar validates the token, forwards the request to Rust as `dor:controlRequest`,
-Rust emits that to the webview, and `Wall` answers from current Dockview and
-terminal-state snapshots. Responses travel back through Rust to the sidecar,
-then to the `dor` process. The socket protocol is an implementation detail; the
-public API is the CLI.
+Control direction:
 
-## VS Code implementation
+```text
+dor process
+  -> standalone sidecar JSON-lines net socket
+  -> Rust command/event bridge
+  -> TauriAdapter CustomEvent("dormouse:control-request")
+  -> Wall handler
+  -> Rust
+  -> sidecar
+  -> dor process
+```
 
-The VS Code extension stages the same workspace `dor` package into
-`vscode-ext/dor-cli` before the extension-host build. Packaged VSIX files include
-that staged directory alongside `dist/` and `media/`.
+### VS Code
 
-The extension host starts `pty-host.js` with the same `DORMOUSE_CLI_JS`, private
-control socket, and token shape used by standalone. `DORMOUSE_NODE` points at
-VS Code's own runtime (`process.execPath`, re-execed as Node through VS Code's
-extension-host environment) rather than searching for a user-installed Node.
-The forked PTY host runs the same control server module as standalone and uses
-the shared PTY core to prepend the staged `bin` directory to each spawned PTY's
-`PATH` while setting `DORMOUSE_SURFACE_ID`. VS Code also sends the Dormouse CLI
-environment explicitly on each PTY spawn, so the spawned shell does not depend on
-ambient extension-host or PTY-host process environment state.
+`vscode-ext/package.json` runs `pnpm stage:dor-cli` before bundling the
+extension host and `pty-host.js`. The extension host computes the staged CLI
+paths under `context.extensionPath/dor-cli`, starts `pty-host.js`, and sends the
+same dor env on each PTY spawn.
 
-Because VS Code can host multiple Dormouse webviews in one extension host, `dor`
-requests include the invoking `DORMOUSE_SURFACE_ID` as socket metadata. The PTY
-host forwards the request over child-process IPC, the extension router sends it
-to the webview that owns that surface, and the shared `Wall` handler answers from
-Dockview and terminal-state snapshots. Responses travel back through the router
-to the PTY host and finally to the `dor` process.
+`DORMOUSE_NODE` points at VS Code's own runtime (`process.execPath`, re-execed
+as Node by VS Code's extension-host environment), not a user-installed Node.
 
-## cmux compatibility
+Control direction:
 
-We try to be compatible with [the public cmux API](https://cmux.com/docs/api) so that it is easy for users and agents to move back and forth between the two applications. Some key differences:
+```text
+dor process
+  -> pty-host JSON-lines net socket
+  -> extension-host child-process IPC
+  -> message-router
+  -> VSCodeAdapter CustomEvent("dormouse:control-request")
+  -> Wall handler
+  -> message-router
+  -> pty-host
+  -> dor process
+```
 
-- cmux allows multiple tabs within a split, Dormouse allows only a single tab. cmux calls a given split a "Pane", and a tab within that split a "Surface". Our CLI uses the `surface` terminology for compatibility with cmux, and we support the `--surface` argument.
-- cmux has multiple workspaces. Dormouse has one, so `--workspace workspace:1` is accepted as a compatibility no-op and other workspace targets are rejected.
-- cmux allows multiple windows. Dormouse does not support cutting across VS Code and the standalone, so `--window window:1` is accepted as a compatibility no-op and other window targets are rejected.
-- cmux has a CLI tool and a public socket API. Dormouse exposes only the CLI as public API; any socket used by `dor` is an implementation detail.
+Because VS Code can host multiple Dormouse webviews in one extension host, the
+request includes `DORMOUSE_SURFACE_ID`; `message-router.ts` routes to the webview
+that owns that surface when one is available.
 
-Current cmux exposes surface operations under a mix of names. In the installed cmux version used to derive this spec, `cmux list-surfaces` and `cmux focus-surface` are not CLI commands. The equivalent CLI commands are `cmux list-panels` and `cmux focus-panel`, while the socket capabilities are named `surface.list` and `surface.focus`.
+## Handle Model
 
-Dormouse's canonical command names use `surface`; it also accepts the current cmux `panel` aliases where they map cleanly.
+Dormouse currently exposes one workspace and one window. Each visible Pane has
+one terminal surface. The CLI still uses `surface` terminology for cmux
+compatibility and accepts `pane` aliases where cmux does.
 
-## Commands
+Invariants:
 
-### `dor new-split`
+- Stable ids and short refs are accepted where a surface/pane target is
+  accepted.
+- Short refs use cmux-style names: `surface:1`, `pane:2`, `workspace:1`,
+  `window:1`.
+- List output defaults to refs; commands that list handles accept
+  `--id-format refs|uuids|both`.
+- `DORMOUSE_SURFACE_ID` is the default source for future source-relative
+  commands.
+- `--workspace workspace:1` / `--window window:1` and bare `1` are compatibility
+  no-ops. Any other workspace/window target is rejected before host mutation.
+
+## Current Commands
+
+All implemented list commands call the private `surface.list` control method.
+`Wall.tsx` derives the response from current Dockview panels plus terminal
+state/activity snapshots, then returns `workspace:1` and `window:1`.
+
+### `dor list-panes`
 
 Usage:
 
 ```text
-dor new-split <left|right|up|down> [--surface <id|ref|index>] [--panel <id|ref|index>] [--focus <true|false>] [--workspace <id|ref|index>] [--window <id|ref|index>]
+dor list-panes [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--window <id|ref|index>]
 ```
 
 Behavior:
 
-- Splits from the source surface in the requested direction.
-- The source surface defaults to `DORMOUSE_SURFACE_ID`.
-- `--panel` is an alias for `--surface`.
-- `--focus` defaults to `false`; when false, focus remains on the original surface. When true, focus moves to the new surface.
-- The new split creates a new Dormouse pane with one terminal surface.
-- Success prints `OK surface:<n> workspace:1` and exits `0`, matching cmux's text output shape.
+- Implemented cmux-compatible command.
+- Lists visible Panes, grouped by `paneRef` in the `surface.list` response.
+- Text output marks the focused Pane with `*`, prints the pane handle,
+  `[N surface]` / `[N surfaces]`, and optional `[focused]`.
+- `--json` returns `panes`, `workspace_ref`, and `window_ref`. Pane entries use
+  cmux field names for focus, index, selected surface, and surface refs/ids.
+- Dormouse currently has one terminal surface per Pane, so runtime
+  `surface_count` is `1` for each Pane.
 
-Observed cmux output:
+Text shape:
 
 ```text
-$ cmux new-split right --focus false
-OK surface:2 workspace:1
+* pane:1  [1 surface]  [focused]
 ```
 
-After that command, `cmux tree` showed a new `pane:2` containing `surface:2`, while the caller remained focused because `--focus false`.
-
-### `dor list-surfaces`
-
-Aliases:
-
-- `dor list-panels`
-- `dor list-pane-surfaces` with cmux's pane-scoped default
+### `dor list-pane-surfaces`
 
 Usage:
 
 ```text
-dor list-surfaces [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--window <id|ref|index>] [--pane <id|ref|index>]
+dor list-pane-surfaces [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--pane <id|ref|index>] [--window <id|ref|index>]
 ```
 
 Behavior:
 
-- Lists terminal surfaces in the current workspace.
-- `--pane` restricts the list to a pane. Because Dormouse has one surface per pane, this returns either one surface or no surfaces.
-- `dor list-pane-surfaces` defaults `--pane` to the focused/current pane when `--pane` is omitted, matching cmux. `dor list-surfaces` and `dor list-panels` list all surfaces in the current workspace when `--pane` is omitted.
-- Text output marks the focused surface with `*`.
-- Text output includes the surface ref, type (`terminal`), `[focused]` when applicable, and the display title.
-- `--id-format both` prints the stable id after the short ref.
-- `--json` returns structured data with `surfaces`, `workspace_ref`, and `window_ref`.
+- Implemented cmux-compatible command.
+- Defaults missing `--pane` to `focused`.
+- `--pane` filters by surface id, surface ref, or pane ref. Because Dormouse has
+  one surface per Pane, the command currently returns zero or one surface.
+- Text output marks the selected surface with `*`, prints the surface handle,
+  display title, and optional `[selected]`.
+- `--json` returns `pane_ref`, `surfaces`, `workspace_ref`, and `window_ref`.
+  Surface entries use cmux field names for index, selected state, title, and
+  type.
 
-Observed cmux text output shape:
-
-```text
-$ cmux list-panels
-* surface:1  terminal  [focused]  "build"
-  surface:2  terminal  "repo"
-```
-
-Observed cmux `--id-format both` output shape:
+Text shape:
 
 ```text
-$ cmux list-panels --id-format both
-  surface:1 11111111-1111-4111-8111-111111111111  terminal  "build"
-* surface:2 22222222-2222-4222-8222-222222222222  terminal  [focused]  "repo"
+* surface:1  build  [selected]
 ```
 
-Observed cmux JSON shape:
-
-```json
-{
-  "surfaces": [
-    {
-      "focused": true,
-      "index": 0,
-      "index_in_pane": 0,
-      "pane_ref": "pane:1",
-      "ref": "surface:1",
-      "requested_working_directory": "/path/to/project",
-      "selected_in_pane": true,
-      "title": "build",
-      "type": "terminal"
-    }
-  ],
-  "window_ref": "window:1",
-  "workspace_ref": "workspace:1"
-}
-```
-
-### `dor focus-surface`
+### `dor list-panels`
 
 Alias:
 
-- `dor focus-panel`
+- `dor list-surfaces`
 
 Usage:
 
 ```text
-dor focus-surface (--surface <id|ref|index> | --panel <id|ref|index>) [--workspace <id|ref|index>] [--window <id|ref|index>]
-dor focus-surface <id|ref|index>
+dor list-panels [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--window <id|ref|index>]
 ```
 
 Behavior:
 
-- Focuses the requested surface.
-- `--panel` is an alias for `--surface`.
-- The target is required unless passed positionally.
-- Success prints `OK surface:<n> workspace:1` and exits `0`, matching cmux's current `focus-panel` output shape.
+- Implemented legacy cmux-compatible command.
+- Lists visible terminal surfaces across the current workspace.
+- Text output marks the focused surface with `*`, prints handle, `terminal`,
+  optional `[focused]`, and a JSON-escaped title.
+- `--json` returns `surfaces`, `workspace_ref`, and `window_ref`. Surface
+  entries preserve the legacy surface-list fields: `focused`, `index`,
+  `index_in_pane`, `pane_ref`, `requested_working_directory`,
+  `selected_in_pane`, `title`, and `type`.
+- `dor list-surfaces` is a Dormouse compatibility alias. It is not a current
+  cmux command.
 
-Observed cmux output:
+Text shape:
 
 ```text
-$ cmux focus-panel --panel surface:2
-OK surface:2 workspace:1
+* surface:1  terminal  [focused]  "build"
 ```
 
-After that command, `cmux identify` reported the caller as `surface:1` and the focused surface as `surface:2`, so Dormouse should preserve the distinction between the invoking surface and the app's focused surface.
+### Reserved Commands
+
+These commands are recognized for help and cmux-shaped UX, but current runtime
+execution returns `Error: command '<name>' is not implemented yet` after
+confirming the control endpoint exists:
+
+- `dor new-split <left|right|up|down>`
+- `dor focus-surface <surface>`
+- `dor focus-panel <surface>`
+
+Their help/output snapshots live with the implemented command snapshots. When
+implemented, they must preserve the singleton workspace/window validation above
+and avoid partial layout mutation on argument-validation failure.
+
+## cmux Compatibility
+
+Dormouse tracks the public cmux CLI/API shape only where it maps cleanly:
+
+- cmux has Pane + Surface; Dormouse currently has one terminal surface per Pane.
+- cmux supports multiple workspaces/windows; Dormouse accepts only the singleton
+  compatibility targets.
+- cmux exposes both a CLI and socket API; Dormouse exposes only the CLI.
+- In the cmux version used to derive this contract on 2026-05-28, the relevant
+  CLI commands are `list-panes`, `list-pane-surfaces`, and the legacy
+  `list-panels`. The socket capabilities are named `surface.list` and
+  `surface.focus`.
+- `dor list-panes` and `dor list-pane-surfaces` are the canonical commands for
+  new code that wants cmux compatibility. `dor list-panels` is kept for cmux's
+  legacy surface-list output, and `dor list-surfaces` is kept only for existing
+  Dormouse callers.
+- Dormouse omits cmux JSON geometry fields such as `container_frame`,
+  `pixel_frame`, rows/columns, and cell dimensions until those fields are part
+  of the Dormouse control response.
+- Dormouse also omits workspace/window UUID fields until the host exposes stable
+  workspace/window ids distinct from the singleton refs.
 
 ## Errors
 
-Successful commands exit `0`. Failed commands exit non-zero and print `Error: <message>` to stderr. A command must not perform a partial layout mutation when argument validation fails.
+Successful commands exit `0`. Failed commands exit non-zero and print
+`Error: <message>` to stderr.
 
 Common failures:
 
-- Missing or stale control socket.
-- Missing target for `focus-surface`.
-- Unknown source or target surface.
+- Missing or stale control endpoint.
+- Unknown option or invalid flag value.
 - Unsupported workspace/window target.
-- Invalid direction for `new-split`.
+- Unsupported private control method.
+- Layout not ready when the webview has not mounted.

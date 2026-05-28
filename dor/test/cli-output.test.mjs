@@ -41,8 +41,14 @@ function fixtureClient() {
     requests: [],
     async listSurfaces(request) {
       this.requests.push(request);
-      const surfaces = request.pane && request.pane !== 'focused'
-        ? fixtureSurfaces.filter((surface) => surface.paneRef === request.pane)
+      const focusedPaneRef = fixtureSurfaces.find((surface) => surface.focused)?.paneRef;
+      const paneTarget = request.pane === 'focused' ? focusedPaneRef : request.pane;
+      const surfaces = paneTarget
+        ? fixtureSurfaces.filter((surface) => (
+          surface.paneRef === paneTarget ||
+          surface.ref === paneTarget ||
+          surface.id === paneTarget
+        ))
         : fixtureSurfaces;
       return {
         surfaces,
@@ -95,26 +101,56 @@ test('list-surfaces help output', async () => {
   await snapshot('list-surfaces-help', await runCli(['list-surfaces', '--help']));
 });
 
-test('list-surfaces text output', async () => {
-  await snapshot('list-surfaces-text', await runCli(['list-surfaces'], { client: fixtureClient() }));
+test('list-panes help output', async () => {
+  await snapshot('list-panes-help', await runCli(['list-panes', '--help']));
 });
 
-test('list-surfaces id-format both output', async () => {
+test('list-pane-surfaces help output', async () => {
+  await snapshot('list-pane-surfaces-help', await runCli(['list-pane-surfaces', '--help']));
+});
+
+test('list-panels help output', async () => {
+  await snapshot('list-panels-help', await runCli(['list-panels', '--help']));
+});
+
+test('list-panes text output', async () => {
+  await snapshot('list-panes-text', await runCli(['list-panes'], { client: fixtureClient() }));
+});
+
+test('list-panes id-format both output', async () => {
   await snapshot(
-    'list-surfaces-id-format-both',
-    await runCli(['list-surfaces', '--id-format', 'both'], { client: fixtureClient() }),
+    'list-panes-id-format-both',
+    await runCli(['list-panes', '--id-format', 'both'], { client: fixtureClient() }),
   );
 });
 
-test('list-surfaces json output', async () => {
+test('list-panes json output', async () => {
   await snapshot(
-    'list-surfaces-json',
-    await runCli(['list-surfaces', '--json'], { client: fixtureClient() }),
+    'list-panes-json',
+    await runCli(['list-panes', '--json'], { client: fixtureClient() }),
   );
 });
 
-test('list-panels alias output', async () => {
+test('list-surfaces legacy alias output', async () => {
+  await snapshot('list-surfaces-alias', await runCli(['list-surfaces'], { client: fixtureClient() }));
+});
+
+test('list-panels text output', async () => {
   await snapshot('list-panels-alias', await runCli(['list-panels'], { client: fixtureClient() }));
+});
+
+test('list-panels id-format both output', async () => {
+  await snapshot(
+    'list-panels-id-format-both',
+    await runCli(['list-panels', '--id-format', 'both'], { client: fixtureClient() }),
+  );
+});
+
+test('list-panels json output', async () => {
+  await snapshot(
+    'list-panels-json',
+    await runCli(['list-panels', '--json'], { client: fixtureClient() }),
+  );
 });
 
 test('list-pane-surfaces pane-scoped alias output', async () => {
@@ -122,6 +158,20 @@ test('list-pane-surfaces pane-scoped alias output', async () => {
   const result = await runCli(['list-pane-surfaces'], { client });
   assert.deepEqual(client.requests, [{ pane: 'focused', workspace: undefined, window: undefined }]);
   await snapshot('list-pane-surfaces-alias', result);
+});
+
+test('list-pane-surfaces id-format both output', async () => {
+  await snapshot(
+    'list-pane-surfaces-id-format-both',
+    await runCli(['list-pane-surfaces', '--id-format', 'both'], { client: fixtureClient() }),
+  );
+});
+
+test('list-pane-surfaces json output', async () => {
+  await snapshot(
+    'list-pane-surfaces-json',
+    await runCli(['list-pane-surfaces', '--json'], { client: fixtureClient() }),
+  );
 });
 
 test('focus-surface help output', async () => {

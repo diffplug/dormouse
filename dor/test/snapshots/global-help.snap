@@ -7,11 +7,13 @@ Usage:
 
 Commands:
   new-split <left|right|up|down>
-  list-surfaces
+  list-panes
+  list-pane-surfaces
+  list-panels
   focus-surface <surface>
 
 Aliases:
-  list-panels, list-pane-surfaces
+  list-surfaces
   focus-panel
 
 stderr:
