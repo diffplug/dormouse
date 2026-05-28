@@ -36,20 +36,20 @@ const fixtureSurfaces = [
   },
 ];
 
-function fixtureClient() {
+function fixtureClient(surfacesFixture = fixtureSurfaces) {
   return {
     requests: [],
     async listSurfaces(request) {
       this.requests.push(request);
-      const focusedPaneRef = fixtureSurfaces.find((surface) => surface.focused)?.paneRef;
+      const focusedPaneRef = surfacesFixture.find((surface) => surface.focused)?.paneRef;
       const paneTarget = request.pane === 'focused' ? focusedPaneRef : request.pane;
       const surfaces = paneTarget
-        ? fixtureSurfaces.filter((surface) => (
+        ? surfacesFixture.filter((surface) => (
           surface.paneRef === paneTarget ||
           surface.ref === paneTarget ||
           surface.id === paneTarget
         ))
-        : fixtureSurfaces;
+        : surfacesFixture;
       return {
         surfaces,
         windowRef: 'window:1',
@@ -171,6 +171,24 @@ test('list-pane-surfaces json output', async () => {
   await snapshot(
     'list-pane-surfaces-json',
     await runCli(['list-pane-surfaces', '--json'], { client: fixtureClient() }),
+  );
+});
+
+test('list-pane-surfaces unknown cwd output', async () => {
+  await snapshot(
+    'list-pane-surfaces-unknown-cwd',
+    await runCli(['list-pane-surfaces'], {
+      client: fixtureClient([{ ...fixtureSurfaces[0], requestedWorkingDirectory: null }]),
+    }),
+  );
+});
+
+test('list-pane-surfaces unknown cwd json output', async () => {
+  await snapshot(
+    'list-pane-surfaces-unknown-cwd-json',
+    await runCli(['list-pane-surfaces', '--json'], {
+      client: fixtureClient([{ ...fixtureSurfaces[0], requestedWorkingDirectory: null }]),
+    }),
   );
 });
 

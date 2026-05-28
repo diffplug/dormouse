@@ -69,6 +69,8 @@ type ParseResult<T> =
   | { ok: true; value: T }
   | { ok: false; message: string };
 
+const CWD_UNKNOWN_LABEL = '<cwd unknown>';
+
 const COMMANDS = new Set([
   'new-split',
   'list-panes',
@@ -422,9 +424,8 @@ function renderPaneSurfaceJson(surface: Surface, idFormat: IdFormat): Record<str
 }
 
 function renderPaneSurfaceTitle(surface: Surface): string {
-  return surface.requestedWorkingDirectory
-    ? formatPaneSurfaceWorkingDirectory(surface.requestedWorkingDirectory)
-    : surface.title;
+  const cwd = surface.requestedWorkingDirectory?.trim();
+  return cwd ? formatPaneSurfaceWorkingDirectory(cwd) : CWD_UNKNOWN_LABEL;
 }
 
 function formatPaneSurfaceWorkingDirectory(path: string): string {

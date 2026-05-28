@@ -179,9 +179,9 @@ Behavior:
   Surface entries use cmux field names for index, selected state, title, and
   type.
 - The `title` field for this command prefers `requested_working_directory`
-  formatted as a short trailing path, falling back to the surface display title
-  only when no CWD is known. This avoids showing the transient
-  `dor list-pane-surfaces` command as the selected surface title.
+  formatted as a short trailing path. When no CWD is known, it prints
+  `<cwd unknown>` rather than falling back to the transient running command
+  title.
 
 Text shape:
 
