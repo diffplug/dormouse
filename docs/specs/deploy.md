@@ -123,7 +123,7 @@ codesign/jsign the executable
 
 ### Packaged app logging
 
-Windows release builds use the GUI subsystem, so launching `dormouse.exe` from a terminal returns immediately and does not stream stdout/stderr. The Tauri backend writes sidecar diagnostics to `%LOCALAPPDATA%\Dormouse\dormouse.log` on Windows, or to `$TMPDIR/dormouse.log` on other platforms. Set `DORMOUSE_LOG_FILE` to override the path.
+Windows release builds use the GUI subsystem, so launching `dormouse.exe` from a terminal returns immediately and does not stream stdout/stderr. The Tauri backend writes sidecar diagnostics to `%LOCALAPPDATA%\Dormouse Terminal\dormouse.log` on Windows, or to `$TMPDIR/dormouse.log` on other platforms. Set `DORMOUSE_LOG_FILE` to override the path.
 
 ## Artifact filenames
 

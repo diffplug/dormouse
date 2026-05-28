@@ -140,8 +140,8 @@ const INSTALL_STEPS: Record<string, { pill: string; title: string; steps: string
     pill: "Mac Silicon",
     title: "Installing on Mac",
     steps: [
-      "Double-click the downloaded .tar.gz to extract Dormouse.app",
-      "Drag Dormouse.app to Applications",
+      "Double-click the downloaded .tar.gz to extract Dormouse Terminal.app",
+      "Drag Dormouse Terminal.app to Applications",
     ],
   },
   "windows-x86_64": {
