@@ -128,24 +128,6 @@ test('list-pane-surfaces json output', async () => {
   );
 });
 
-test('list-pane-surfaces unknown cwd output', async () => {
-  await snapshot(
-    'list-pane-surfaces-unknown-cwd',
-    await runCli(['list-pane-surfaces'], {
-      client: fixtureClient([{ ...fixtureSurfaces[0], requestedWorkingDirectory: null }]),
-    }),
-  );
-});
-
-test('list-pane-surfaces unknown cwd json output', async () => {
-  await snapshot(
-    'list-pane-surfaces-unknown-cwd-json',
-    await runCli(['list-pane-surfaces', '--json'], {
-      client: fixtureClient([{ ...fixtureSurfaces[0], requestedWorkingDirectory: null }]),
-    }),
-  );
-});
-
 test('unknown command output', async () => {
   await snapshot('unknown-command', await runCli(['wat']));
 });

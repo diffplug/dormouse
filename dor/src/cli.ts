@@ -69,8 +69,6 @@ type ParseResult<T> =
   | { ok: true; value: T }
   | { ok: false; message: string };
 
-const CWD_UNKNOWN_LABEL = '<cwd unknown>';
-
 const COMMANDS = new Set([
   'list-panes',
   'list-pane-surfaces',
@@ -380,27 +378,5 @@ function renderPaneSurfaceJson(surface: Surface, idFormat: IdFormat): Record<str
 }
 
 function renderPaneSurfaceTitle(surface: Surface): string {
-  const cwd = surface.requestedWorkingDirectory?.trim();
-  return cwd ? formatPaneSurfaceWorkingDirectory(cwd) : CWD_UNKNOWN_LABEL;
-}
-
-function formatPaneSurfaceWorkingDirectory(path: string): string {
-  const trimmed = path.trim();
-  if (!trimmed) return path;
-
-  if (isWindowsPath(trimmed)) {
-    return formatTailPath(trimmed.replace(/\//g, '\\'), '\\');
-  }
-  return formatTailPath(trimmed, '/');
-}
-
-function isWindowsPath(path: string): boolean {
-  return /^[A-Za-z]:(?:[\\/]|$)/.test(path) || path.startsWith('\\\\') || path.startsWith('//');
-}
-
-function formatTailPath(path: string, separator: '/' | '\\'): string {
-  const segments = path.split(separator).filter(Boolean);
-  if (segments.length === 0) return path;
-  const tail = segments.slice(-3).join(separator);
-  return segments.length > 3 ? `…${separator}${tail}` : tail;
+  return surface.title;
 }
