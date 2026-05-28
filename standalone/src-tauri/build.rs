@@ -94,6 +94,17 @@ fn force_windows_gui_subsystem(path: &Path) -> Result<(), Box<dyn Error>> {
     }
     bytes[subsystem_offset..subsystem_offset + 2]
         .copy_from_slice(&IMAGE_SUBSYSTEM_WINDOWS_GUI.to_le_bytes());
+
+    // fs::copy preserves the source's read-only attribute. When the runtime
+    // comes from pnpm's content-addressable store (devEngines `onFail:
+    // "download"`), the source node.exe is typically read-only, so the
+    // destination would be too — and fs::write would fail with "access
+    // denied". Clear it defensively before writing the patched bytes back.
+    let mut perms = fs::metadata(path)?.permissions();
+    if perms.readonly() {
+        perms.set_readonly(false);
+        fs::set_permissions(path, perms)?;
+    }
     fs::write(path, &bytes)?;
     Ok(())
 }
