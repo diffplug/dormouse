@@ -9,6 +9,7 @@ lib/dist/
 
 # Vite cache
 lib/.vite/
+.react-router/
 
 # VSCode extension
 vscode-ext/dist/

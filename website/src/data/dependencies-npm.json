@@ -35,6 +35,13 @@
     "homepage": "https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit"
   },
   {
+    "name": "@xterm/addon-unicode-graphemes",
+    "version": "0.5.0-beta.219",
+    "license": "MIT",
+    "author": "The xterm.js authors",
+    "homepage": "https://github.com/xtermjs/xterm.js/tree/master/addons/addon-unicode-graphemes"
+  },
+  {
     "name": "@xterm/xterm",
     "version": "6.1.0-beta.219",
     "license": "MIT",

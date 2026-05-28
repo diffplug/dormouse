@@ -33,11 +33,8 @@ const COMPLETE_SCALE = 2.4;
 const SELECT_TICK_INSET = 5;
 const SELECT_TICK_OUTSET = 6;
 const ROOT_DIAGONAL_CORNER_RADIUS = RADIUS_SELECT + SELECT_TICK_OUTSET + GAP_CARDINAL_RING * Math.SQRT1_2;
-
-function squareDirectionVector(direction: MobileGestureDirection): MobileGesturePoint {
-  const vector = MOBILE_GESTURE_DIRECTION_VECTORS[direction];
-  return { x: Math.sign(vector.x), y: Math.sign(vector.y) };
-}
+const MIN_CIRCLE_SCALE = 0.3;
+const CIRCLE_TWEEN = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
 const ROOT_CARDINAL_ANCHORS: Partial<Record<MobileGestureDirection, MobileGesturePoint>> = {
   n: { x: ROOT_LABEL_CENTER_X, y: -ROOT_CARDINAL_Y },
@@ -188,7 +185,7 @@ function directionPoint(
   center: { x: number; y: number },
   radius: number,
 ): { x: number; y: number } {
-  const vector = squareDirectionVector(direction);
+  const vector = MOBILE_GESTURE_DIRECTION_VECTORS[direction];
   return {
     x: center.x + vector.x * radius,
     y: center.y + vector.y * radius,
@@ -290,12 +287,41 @@ function rootOptionLayout(
   };
 }
 
+function circleTransform(
+  state: ActiveGestureState,
+  phaseDisplayOrigin: MobileGesturePoint,
+): { scale: number; opacity: number; origin: MobileGesturePoint; durationMs: number } {
+  if (state.phase === 'complete') {
+    // Collapse toward the chosen item.
+    return {
+      scale: 0,
+      opacity: 0,
+      origin: directionPoint(state.candidate.direction, phaseDisplayOrigin, RADIUS_SELECT),
+      durationMs: 200,
+    };
+  }
+  if (state.phase === 'options' || state.phase === 'quit') {
+    // Collapsed while the drag keeps pushing in the opening direction (overshoot); once
+    // it stops or turns toward an option, `expanded` latches and the compass stays full
+    // size until the final selection.
+    return {
+      scale: state.expanded ? 1 : MIN_CIRCLE_SCALE,
+      opacity: 1,
+      origin: phaseDisplayOrigin,
+      durationMs: 150,
+    };
+  }
+  return { scale: 1, opacity: 1, origin: phaseDisplayOrigin, durationMs: 150 };
+}
+
 export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackingState }) {
   if (state.phase === 'idle') return null;
 
-  const phaseOrigin = state.phase === 'root' ? state.origin : state.optionOrigin;
-  const phaseDisplayOrigin = state.phase === 'root' ? state.displayOrigin : state.displayOptionOrigin;
+  const directRootComplete = state.phase === 'complete' && state.candidate.phase === 'root';
+  const phaseOrigin = state.phase === 'root' || directRootComplete ? state.origin : state.optionOrigin;
+  const phaseDisplayOrigin = state.phase === 'root' || directRootComplete ? state.displayOrigin : state.displayOptionOrigin;
   const currentDisplayPoint = translatedPoint(phaseDisplayOrigin, phaseOrigin, state.currentPoint);
+  const circle = circleTransform(state, phaseDisplayOrigin);
   const rootDirection = activeRootDirection(state);
   const tickDirection = activeTickDirection(state);
   const selectTicks = SELECT_TICK_DIRECTIONS.map((direction) => {
@@ -320,9 +346,12 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
     return group.options.map((option, index) => {
       const optionIndex = index as MobileGestureOptionIndex;
       const isCompletingRootOption = state.phase === 'complete'
-        && state.candidate.phase === 'options'
         && state.selectedDirection === direction
-        && state.candidate.optionIndex === optionIndex;
+        && state.candidate.optionIndex === optionIndex
+        && (
+          state.candidate.phase === 'root'
+          || state.candidate.phase === 'options'
+        );
       const isSelectedGroup = (
         state.phase === 'options'
         || (state.phase === 'complete' && state.candidate.phase === 'options')
@@ -420,13 +449,22 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
           x2={currentDisplayPoint.x}
           y2={currentDisplayPoint.y}
           stroke="var(--color-focus-ring)"
-          strokeOpacity="1"
+          strokeOpacity={state.phase === 'complete' ? 0 : 1}
           strokeWidth="2"
           strokeLinecap="round"
+          style={{ transition: 'stroke-opacity 200ms ease-out' }}
         />
         <g
           className={state.phase === 'root' ? 'mobile-gesture-circle-spawn' : undefined}
-          style={{ transformOrigin: `${phaseDisplayOrigin.x}px ${phaseDisplayOrigin.y}px` }}
+          style={{
+            transformBox: 'view-box',
+            transformOrigin: `${circle.origin.x}px ${circle.origin.y}px`,
+            transform: `scale(${circle.scale})`,
+            opacity: circle.opacity,
+            transition: state.phase === 'root'
+              ? undefined
+              : `transform ${circle.durationMs}ms ${CIRCLE_TWEEN}, opacity ${circle.durationMs}ms ease-out`,
+          }}
         >
           <circle
             cx={phaseDisplayOrigin.x}

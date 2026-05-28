@@ -1,6 +1,5 @@
-import { fork, ChildProcess, execFileSync } from 'child_process';
+import { fork, ChildProcess } from 'child_process';
 import * as path from 'path';
-import * as fs from 'fs';
 import * as os from 'os';
 import { randomBytes } from 'crypto';
 import { log } from './log';
@@ -120,14 +119,24 @@ let childReady = false;
 let pendingMessages: any[] = [];
 const callbackSet = new Set<PtyCallbacks>();
 const dorControlRequestListeners = new Set<(request: DorControlRequest) => void>();
-let cachedNodePath: string | null = null;
 const dorControlToken = randomBytes(24).toString('hex');
 const dorControlSocket = process.platform === 'win32'
   ? `\\\\.\\pipe\\dormouse-vscode-${process.pid}-dor`
   : path.join(os.tmpdir(), `dormouse-vscode-${process.pid}-dor.sock`);
 
+// Always run the pty host under the editor's own Node — Electron's bundled
+// runtime (process.execPath, re-execed as Node via ELECTRON_RUN_AS_NODE, which
+// is inherited through `env` at the fork site). VSCode's integrated terminal
+// drives node-pty against Electron the same way, and node-pty ships N-API
+// prebuilds that load across runtimes, so there's no need to hunt for a
+// user-installed system Node — which was unreliable and, on Windows, caused
+// multi-second fork stalls.
+function resolveNodeBinary(): string {
+  return process.execPath;
+}
+
 function getDorRuntimeEnv(extensionPath: string): Record<string, string> {
-  const nodePath = findSystemNode();
+  const nodePath = resolveNodeBinary();
   const dorCliRoot = path.join(extensionPath, 'dor-cli');
   return {
     DORMOUSE_NODE: nodePath,
@@ -136,49 +145,6 @@ function getDorRuntimeEnv(extensionPath: string): Record<string, string> {
     DORMOUSE_CONTROL_SOCKET: dorControlSocket,
     DORMOUSE_CONTROL_TOKEN: dorControlToken,
   };
-}
-
-function findSystemNode(): string {
-  if (cachedNodePath) return cachedNodePath;
-
-  // On Windows, use the host's execPath (Electron's Node). VSCode's own
-  // integrated terminal uses node-pty against Electron, so this works for us
-  // too — and avoids the bogus Unix-path fallback below that was causing
-  // multi-second fork stalls.
-  if (process.platform === 'win32') {
-    cachedNodePath = process.execPath;
-    return cachedNodePath;
-  }
-
-  // Try common locations first (avoids shell invocation)
-  const candidates = [
-    process.env.NVM_BIN && path.join(process.env.NVM_BIN, 'node'),
-    '/usr/local/bin/node',
-    '/usr/bin/node',
-    '/opt/homebrew/bin/node',
-  ].filter(Boolean) as string[];
-
-  for (const p of candidates) {
-    try {
-      if (fs.statSync(p).isFile()) {
-        cachedNodePath = p;
-        return p;
-      }
-    } catch { /* not found, try next */ }
-  }
-
-  // Fall back to PATH lookup via env (portable, no 'which' dependency)
-  try {
-    cachedNodePath = execFileSync('/usr/bin/env', ['node', '-e', 'process.stdout.write(process.execPath)'], {
-      encoding: 'utf-8',
-      timeout: 3000,
-    }).trim();
-    return cachedNodePath;
-  } catch {
-    // Last resort
-    cachedNodePath = '/usr/local/bin/node';
-    return cachedNodePath;
-  }
 }
 
 function ensureChild(extensionPath: string): ChildProcess {

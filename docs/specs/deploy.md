@@ -15,7 +15,7 @@ Every release produces three artifact groups under one version and changelog:
 
 Human-driven steps, in order:
 
-1. **Update dependencies page** — run `node website/scripts/generate-deps.js` and review the diff in `website/src/data/dependencies.json`. Commit if changed.
+1. **Update dependency snapshots** — run `node website/scripts/generate-deps.js` and review the diffs in `website/src/data/dependencies-npm.json` and `website/src/data/dependencies-cargo.json`. Commit if changed.
 2. **Draft release notes and bump version** — run `/release-notes` in Claude Code at the repo root. The slash command (defined in [.claude/commands/release-notes.md](../../.claude/commands/release-notes.md)) walks the merge commits and squash-merged PRs since the last tag, recommends a `breaking.added.bugfix` version bump, runs `./scripts/bump-version.sh X.Y.Z`, and edits `CHANGELOG.md` for the same version. Review and edit the resulting diff if needed.
 3. **Commit and tag** — `git commit -am "Release vX.Y.Z"` then `git tag vX.Y.Z`.
 4. **Push** — `git push && git push origin vX.Y.Z`. This triggers CI (Stage 1).
@@ -58,79 +58,23 @@ Stage 2: Local (sign-and-deploy.sh)
 
 ## Stage 1: CI workflow
 
-Triggered by tag push `v*`. Three parallel jobs:
+Triggered by tag push `v*`. Three jobs run in parallel — `build-standalone`, `build-vscode`, and `security-audit` — and `publish-vscode` runs after all three succeed.
 
-The workflow defaults `GITHUB_TOKEN` to read-only repository access with:
+Jobs, matrix targets, pnpm/Node versions, and step ordering are defined in [.github/workflows/release.yml](../../.github/workflows/release.yml).
 
-```yaml
-permissions:
-  contents: read
-```
-
-Only the build jobs request additional permissions, and only for provenance:
-
-```yaml
-permissions:
-  contents: read
-  id-token: write
-  attestations: write
-```
-
-The publish job stays on the workflow read-only default and is separately gated by the `vscode-extension-publish` environment.
-
-### Job: `build-standalone` (matrix)
-
-Runs on `ubuntu-22.04` (linux), `macos-latest` (mac), and `windows-latest` (win). Uses `tauri-apps/tauri-action@v0`.
-
-```yaml
-strategy:
-  matrix:
-    include:
-      - platform: ubuntu-22.04
-        target: x86_64-unknown-linux-gnu
-      - platform: macos-latest
-        target: aarch64-apple-darwin
-      - platform: windows-latest
-        target: x86_64-pc-windows-msvc
-```
-
-Each matrix leg:
-1. Checkout, setup Node 22, pnpm 11.0.6, Rust stable
-2. Install workspace dependencies once from the repo root with `pnpm install --frozen-lockfile`
-3. Install system deps (Linux: libgtk, libwebkit, etc.)
-4. Generate an ephemeral, per-job Tauri updater key with `pnpm --dir standalone exec tauri signer generate --ci --write-keys "$RUNNER_TEMP/tauri-ci-updater.key" --force`
-5. Build via `tauri-action` with `TAURI_SIGNING_PRIVATE_KEY` pointing at that ephemeral key, but **no real updater signing secret** and no `APPLE_SIGNING_IDENTITY`
-6. Generate `artifact-manifest.sha256` with SHA-256 hashes for the files that will be uploaded
-7. Publish a GitHub artifact attestation for the manifest
-8. Upload the manifest plus artifacts (installers + bundles) via `actions/upload-artifact`
+The workflow defaults `GITHUB_TOKEN` to read-only repository access (`contents: read`). Only the build jobs request additional permissions, and only for provenance (`id-token: write` + `attestations: write`). The publish job stays on the workflow read-only default and is separately gated by the `vscode-extension-publish` environment.
 
 **Note:** We do NOT use `tauri-action`'s built-in GitHub Release creation. We create the release locally after signing.
 
 The CI updater key exists only so Tauri emits updater-shaped artifacts during unsigned builds. It is generated inside the runner, is not stored in source control or GitHub Secrets, and its public key is not the public key trusted by shipped apps. The final release bundles are re-signed locally by `scripts/sign-and-deploy.sh` with the production Tauri updater key before upload.
 
-### Job: `build-vscode`
+### Job: `security-audit`
 
-Runs on `ubuntu-latest`:
-1. Checkout, setup Node 22, pnpm 11.0.6
-2. `pnpm install --frozen-lockfile` at the repo root
-3. `pnpm --filter dormouse-lib test`
-4. `pnpm --filter dormouse build:frontend && pnpm --filter dormouse build`
-5. `pnpm --dir vscode-ext exec vsce package --no-dependencies`
-6. Generate `artifact-manifest.sha256` for the `.vsix`
-7. Publish a GitHub artifact attestation for the manifest
-8. Upload the manifest plus `.vsix` as artifact
+Calls the reusable `security-audit.yaml` workflow, which audits the repo against `SECURITY.md` (the same audit that runs nightly via schedule). `publish-vscode` is gated on it, so a failing security audit blocks the VS Code Marketplace publish.
 
 ### Job: `publish-vscode`
 
-Runs after `build-vscode` succeeds:
-1. Enter the `vscode-extension-publish` GitHub environment
-2. Download `.vsix` artifact
-3. `pnpm exec vsce publish --packagePath *.vsix --no-dependencies`
-4. `pnpm exec ovsx publish --packagePath *.vsix --no-dependencies`
-
 This runs in CI because VSCode Marketplace publishing uses PAT tokens (no hardware key needed). The `vscode-extension-publish` environment must require reviewer approval and allow deployments only from `v*` tags. Store `VSCE_PAT` and `OVSX_PAT` as environment secrets there, not broad repository secrets.
-
-**Migration note:** This replaces the existing `.github/workflows/publish-vscode.yml`, which was triggered by `vscode-ext/v*` tags and has never been run. That workflow should be deleted when the unified release workflow is created. Fixes from the old workflow: use `ubuntu-latest` instead of `macos-latest`, upgrade to Node 22, and unify under the `v*` tag convention.
 
 ## Stage 2: Local script
 
@@ -143,20 +87,11 @@ Before any local signing step runs, downloaded CI artifacts must pass two checks
 
 The manifest itself is the attested subject, not the final signed app. This closes the gap between CI artifact production and the local machine that holds signing credentials: stale cached artifacts, wrong-tag artifacts, and tampered downloads are rejected before codesign, jsign, notarization, Tauri signing, or release upload can run.
 
-The local script must also select release artifacts by strict expected paths instead of broad `find | head` matches. Release signing fails closed unless the expected files exist at the expected locations:
+The local script must also select release artifacts by strict expected paths instead of broad `find | head` matches. Release signing fails closed unless the expected files exist at the expected locations. The exact expected paths are enforced in `scripts/sign-and-deploy.sh`.
 
-| Artifact | Expected local path under `release-signed/work` |
-|----------|-------------------------------------------------|
-| macOS app bundle | `standalone-mac-aarch64/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Dormouse.app` |
-| Windows app executable | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/dormouse.exe` |
-| Windows installer | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/Dormouse_X.Y.Z_x64-setup.exe` |
-| NSIS script | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/nsis/x64/installer.nsi` |
-| NSIS plugin | `standalone-win-x64/src-tauri/target/x86_64-pc-windows-msvc/release/nsis/x64/plugins/nsis_tauri_utils.dll` |
-| Linux AppImage | `standalone-linux-x64/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/Dormouse_X.Y.Z_amd64.AppImage` |
+Release upload likewise uses only the three stable output filenames (the `FNAME_*` constants in `scripts/sign-and-deploy.sh`) and fails if `release-signed/release-assets` contains any other files.
 
-Release upload likewise uses only the three stable output filenames (`Dormouse-macos-aarch64.tar.gz`, `Dormouse-windows-x64-setup.exe`, `Dormouse-linux-x86_64.AppImage`) and fails if `release-signed/release-assets` contains any other files.
-
-When rebuilding the Windows installer locally, the script patches the Tauri-generated NSIS `ADDITIONALPLUGINSPATH` and `OUTFILE` values to the expected local plugin directory and installer path before running `makensis`.
+When rebuilding the Windows installer locally, the script rewrites the absolute CI-runner paths baked into the Tauri-generated NSIS `.nsi` script (via `scripts/patch-nsis-paths.pl`) and patches the `ADDITIONALPLUGINSPATH` and `OUTFILE` defines to the expected local plugin directory and installer path before running `makensis`.
 
 ### One-time setup
 
@@ -192,22 +127,14 @@ Windows release builds use the GUI subsystem, so launching `dormouse.exe` from a
 
 ## Artifact filenames
 
-All release assets use **stable filenames** (no version in the name). This allows hotlinking directly from dormouse.sh via GitHub's `/latest/download/` redirect, which always resolves to the most recent release.
-
-| Asset | Filename | Purpose |
-|-------|----------|---------|
-| Windows | `Dormouse-windows-x64-setup.exe` | Download + Tauri updater |
-| macOS | `Dormouse-macos-aarch64.tar.gz` | Download + Tauri updater |
-| Linux | `Dormouse-linux-x86_64.AppImage` | Download + Tauri updater |
+All release assets use **stable filenames** (no version in the name). This allows hotlinking directly from dormouse.sh via GitHub's `/latest/download/` redirect, which always resolves to the most recent release. Stable output filenames are the `FNAME_*` constants in `scripts/sign-and-deploy.sh`.
 
 ### Download hotlinks
 
-The dormouse.sh download page can link directly to the latest release with no server-side logic:
+The dormouse.sh download page can link directly to the latest release with no server-side logic, e.g.:
 
 ```
-https://github.com/diffplug/dormouse/releases/latest/download/Dormouse-windows-x64-setup.exe
 https://github.com/diffplug/dormouse/releases/latest/download/Dormouse-macos-aarch64.tar.gz
-https://github.com/diffplug/dormouse/releases/latest/download/Dormouse-linux-x86_64.AppImage
 ```
 
 These can later be migrated to `dormouse.sh/download/...` URLs backed by Cloudflare R2 (for analytics) without changing anything in the app — only the website links and the updater endpoint URL in `tauri.conf.json` would change.

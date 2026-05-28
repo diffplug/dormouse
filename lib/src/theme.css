@@ -113,6 +113,9 @@ body {
   --color-header-active-fg: var(--vscode-list-activeSelectionForeground);
   --color-header-inactive-bg: var(--vscode-list-inactiveSelectionBackground);
   --color-header-inactive-fg: var(--vscode-list-inactiveSelectionForeground);
+  --color-door-bg: var(--color-header-inactive-bg);
+  --color-door-fg: var(--color-header-inactive-fg);
+  --color-focus-ring: var(--vscode-focusBorder);
   --color-terminal-bg: var(--vscode-terminal-background);
   --color-terminal-fg: var(--vscode-terminal-foreground);
   --color-error: var(--vscode-terminal-ansiRed);

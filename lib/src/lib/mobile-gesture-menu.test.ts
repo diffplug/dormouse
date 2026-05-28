@@ -7,6 +7,7 @@ import {
   MOBILE_GESTURE_COMPLETE_MS,
   MOBILE_GESTURE_DIRECTION_VECTORS,
   MOBILE_GESTURE_OPTION_DIRECTIONS,
+  OPTION_EXPAND_RELEASE,
   RADIUS_HIGHLIGHT,
   RADIUS_LAYOUT,
   RADIUS_SELECT,
@@ -95,6 +96,19 @@ describe('mobile gesture menu state machine', () => {
     expect(MOBILE_GESTURE_COMPLETE_MS).toBe(220);
   });
 
+  it('treats the layout radius as a circular radius for direction vectors', () => {
+    for (const vector of Object.values(MOBILE_GESTURE_DIRECTION_VECTORS)) {
+      expect(Math.hypot(vector.x * RADIUS_LAYOUT, vector.y * RADIUS_LAYOUT)).toBeCloseTo(
+        RADIUS_LAYOUT,
+        6,
+      );
+    }
+    expect(MOBILE_GESTURE_DIRECTION_VECTORS.ne.x * RADIUS_LAYOUT).toBeCloseTo(
+      RADIUS_LAYOUT * Math.SQRT1_2,
+      6,
+    );
+  });
+
   it('places exploded options opposite the selected direction', () => {
     expect(MOBILE_GESTURE_OPTION_DIRECTIONS.n).toEqual(['s', 'sw', 'se']);
     expect(MOBILE_GESTURE_OPTION_DIRECTIONS.e).toEqual(['w', 'nw', 'sw']);
@@ -123,74 +137,131 @@ describe('mobile gesture menu state machine', () => {
     expect(finishMobileGesture(state).action).toBeUndefined();
   });
 
-  it('opens the option phase after the select radius', () => {
-    const state = updateMobileGesture(beginMobileGesture(1, ORIGIN), point(RADIUS_SELECT + 1, 0));
+  it('opens the option phase for diagonals after the select radius', () => {
+    const state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('se'));
     expect(state.phase).toBe('options');
     if (state.phase !== 'options') return;
-    expect(state.selectedDirection).toBe('e');
-    expect(state.optionOrigin).toEqual(point(RADIUS_SELECT, 0));
+    expect(state.selectedDirection).toBe('se');
+    expect(state.optionOrigin).toEqual(optionOrigin('se'));
     expect(finishMobileGesture(state).action).toBeUndefined();
   });
 
-  it('selects Right by breaking east and dragging west from the option origin', () => {
-    expect(runGesture([rootSelectionPoint('e'), optionSelectionPoint('e', 0)])).toEqual({ kind: 'input', input: 'right' });
+  it('selects cardinal arrows directly at the root select radius', () => {
+    expect(runGesture([rootSelectionPoint('n')])).toEqual({ kind: 'input', input: 'up' });
+    expect(runGesture([rootSelectionPoint('e')])).toEqual({ kind: 'input', input: 'right' });
+    expect(runGesture([rootSelectionPoint('s')])).toEqual({ kind: 'input', input: 'down' });
+    expect(runGesture([rootSelectionPoint('w')])).toEqual({ kind: 'input', input: 'left' });
   });
 
-  it('makes the option action available as soon as the second select radius is crossed', () => {
-    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('e'));
-    state = updateMobileGesture(state, optionSelectionPoint('e', 0));
-    expect(state.phase).toBe('options');
-    if (state.phase !== 'options') return;
+  it('makes the direct cardinal action available as soon as the root select radius is crossed', () => {
+    const state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('e'));
+    expect(state.phase).toBe('root');
+    if (state.phase !== 'root') return;
     expect(state.candidate?.option.action).toEqual({ kind: 'input', input: 'right' });
   });
 
-  it('keeps a complete visual state after the second select radius is crossed', () => {
-    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('e'));
-    state = updateMobileGesture(state, optionSelectionPoint('e', 0));
+  it('keeps a complete visual state after a direct cardinal action is chosen', () => {
+    const state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('e'));
     const complete = completeMobileGesture(state);
 
     expect(complete?.phase).toBe('complete');
     if (!complete || complete.phase !== 'complete') return;
     expect(complete.selectedDirection).toBe('e');
+    expect(complete.candidate.phase).toBe('root');
     expect(complete.candidate.optionIndex).toBe(0);
     expect(complete.candidate.option.action).toEqual({ kind: 'input', input: 'right' });
     expect(updateMobileGesture(complete, optionSelectionPoint('e', 2))).toBe(complete);
   });
 
-  it('selects End by breaking east and turning up', () => {
-    expect(runGesture([rootSelectionPoint('e'), optionSelectionPoint('e', 1)])).toEqual({ kind: 'input', input: 'end' });
+  it('makes the option action available as soon as the second select radius is crossed', () => {
+    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('se'));
+    state = updateMobileGesture(state, optionSelectionPoint('se', 0));
+    expect(state.phase).toBe('options');
+    if (state.phase !== 'options') return;
+    expect(state.candidate?.option.action).toEqual({ kind: 'input', input: 'enter' });
+  });
+
+  it('keeps a complete visual state after the second select radius is crossed', () => {
+    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('se'));
+    state = updateMobileGesture(state, optionSelectionPoint('se', 0));
+    const complete = completeMobileGesture(state);
+
+    expect(complete?.phase).toBe('complete');
+    if (!complete || complete.phase !== 'complete') return;
+    expect(complete.selectedDirection).toBe('se');
+    expect(complete.candidate.phase).toBe('options');
+    expect(complete.candidate.optionIndex).toBe(0);
+    expect(complete.candidate.option.action).toEqual({ kind: 'input', input: 'enter' });
+    expect(updateMobileGesture(complete, optionSelectionPoint('se', 2))).toBe(complete);
+  });
+
+  it('tracks the reference origin while the drag overshoots the opening direction', () => {
+    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('se'));
+    state = updateMobileGesture(state, pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3));
+    expect(state.phase).toBe('options');
+    if (state.phase !== 'options') return;
+    // The reference origin slid out to meet the overshooting finger.
+    expect(state.optionOrigin).toEqual(pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3));
+  });
+
+  it('keeps the compass collapsed through overshoot, then latches expanded for good', () => {
+    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('se'));
+    expect(state.phase === 'options' && state.expanded).toBe(false);
+
+    // Still dragging in the opening direction (overshoot) — stays collapsed.
+    state = updateMobileGesture(state, pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 2));
+    expect(state.phase === 'options' && state.expanded).toBe(false);
+    state = updateMobileGesture(state, pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3));
+    expect(state.phase === 'options' && state.expanded).toBe(false);
+
+    // Turning back toward an option latches expanded.
+    const overshoot = pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3);
+    state = updateMobileGesture(state, pointInDirection(overshoot, 'nw', RADIUS_HIGHLIGHT));
+    expect(state.phase === 'options' && state.expanded).toBe(true);
+
+    // Pushing back out in the wrong direction does not collapse it again.
+    state = updateMobileGesture(state, pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 5));
+    expect(state.phase === 'options' && state.expanded).toBe(true);
+  });
+
+  it('expands once the overshoot drag settles, without a deliberate move back', () => {
+    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('se'));
+    // Brisk overshoot keeps it collapsed.
+    state = updateMobileGesture(state, pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3));
+    expect(state.phase === 'options' && state.expanded).toBe(false);
+    // A tiny continued nudge in the same direction (a settle, not a hard push) expands it.
+    const overshoot = pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3);
+    state = updateMobileGesture(state, pointInDirection(overshoot, 'se', OPTION_EXPAND_RELEASE - 1));
+    expect(state.phase === 'options' && state.expanded).toBe(true);
+  });
+
+  it('selects the back option after an overshoot without undoing the whole overshoot', () => {
+    // Drive past the southeast selection, keep dragging southeast, then reverse just
+    // far enough to break out toward the back ("Enter") option.
+    const overshoot = pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3);
+    const backOption = pointInDirection(overshoot, 'nw', RADIUS_SELECT + 1);
+    expect(runGesture([rootSelectionPoint('se'), overshoot, backOption])).toEqual({
+      kind: 'input',
+      input: 'enter',
+    });
   });
 
   it('clears the option highlight when the drag moves back inside the highlight radius', () => {
-    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('e'));
-    state = updateMobileGesture(state, pointInDirection(optionOrigin('e'), 'nw', RADIUS_HIGHLIGHT + 1));
+    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('se'));
+    state = updateMobileGesture(state, pointInDirection(optionOrigin('se'), 'n', RADIUS_HIGHLIGHT + 1));
     expect(state.phase).toBe('options');
     if (state.phase !== 'options') return;
     expect(state.highlightedOptionIndex).toBe(1);
 
-    state = updateMobileGesture(state, optionOrigin('e'));
+    state = updateMobileGesture(state, optionOrigin('se'));
     expect(state.phase).toBe('options');
     if (state.phase !== 'options') return;
     expect(state.highlightedOptionIndex).toBeUndefined();
     expect(state.candidate).toBeUndefined();
   });
 
-  it('selects l by breaking east and turning down', () => {
-    expect(runGesture([rootSelectionPoint('e'), optionSelectionPoint('e', 2)])).toEqual({ kind: 'text', text: 'l' });
-  });
-
-  it('keeps south secondary options on their root side when exploded', () => {
-    expect(runGesture([rootSelectionPoint('s'), optionSelectionPoint('s', 1)])).toEqual({ kind: 'text', text: 'j' });
-    expect(runGesture([rootSelectionPoint('s'), optionSelectionPoint('s', 2)])).toEqual({ kind: 'input', input: 'pageDown' });
-  });
-
-  it('keeps west secondary options on their root side when exploded', () => {
-    expect(runGesture([rootSelectionPoint('w'), optionSelectionPoint('w', 1)])).toEqual({ kind: 'input', input: 'home' });
-    expect(runGesture([rootSelectionPoint('w'), optionSelectionPoint('w', 2)])).toEqual({ kind: 'text', text: 'h' });
-  });
-
-  it('cancels when released in the original breakout direction', () => {
-    expect(runGesture([rootSelectionPoint('e')])).toBeUndefined();
+  it('cancels diagonal groups when released in the original breakout direction', () => {
+    expect(runGesture([rootSelectionPoint('ne')])).toBeUndefined();
   });
 
   it('opens Ctrl+C confirmation from the northwest group', () => {

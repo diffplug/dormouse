@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import changelog from "../data/changelog.json";
 
@@ -158,7 +158,7 @@ function FilterNotice({ children }: { children: ReactNode }) {
   );
 }
 
-export function Component() {
+export default function Changelog() {
   const { version: versionParam } = useParams();
   const requestedVersion = versionParam ? normalizeVersionParam(versionParam) : null;
   const baselineIndex = requestedVersion

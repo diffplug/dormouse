@@ -1,5 +1,7 @@
 # Alert Spec
 
+> See `docs/specs/glossary.md` for Session / Pane / Door vocabulary. This spec uses it throughout.
+
 Alert state belongs to the **Session** Activity layer. It survives Pane <-> Door movement and is destroyed with the Session.
 
 Dormouse can owe the user attention in three ways:
@@ -20,48 +22,9 @@ Terminal-report and command-exit alerts do not require WATCHING to be enabled. A
 
 ## Public State
 
-The public Activity state is:
+Source of truth: `AlertState` / `ActivityNotification` in `lib/src/lib/alert-manager.ts` and `SessionStatus` in `lib/src/lib/activity-monitor.ts` define the public Activity state. Internal state is deliberately split into independent tracks (`watchingStatus`, `protocolStatus`, `commandExitStatus`, plus `progress` and `commandExitWatch` companion state) so each axis evolves without entangling the others.
 
-```ts
-type WatchingSessionStatus =
-  | 'WATCHING_DISABLED'
-  | 'NOTHING_TO_SHOW'
-  | 'MIGHT_BE_BUSY'
-  | 'BUSY'
-  | 'MIGHT_NEED_ATTENTION'
-  | 'ALERT_RINGING';
-
-type SessionStatus =
-  | WatchingSessionStatus
-  | 'OSC_NOTIF_BUSY'
-  | 'COMMAND_EXIT_ARMED';
-
-type TodoState = boolean;
-
-interface ActivityNotification {
-  source: 'OSC 9' | 'OSC 9;4' | 'OSC 99' | 'OSC 777' | 'BEL' | 'COMMAND_EXIT';
-  title: string | null;
-  body: string | null;
-}
-
-interface AlertState {
-  status: SessionStatus;
-  watchingEnabled: boolean;
-  todo: TodoState;
-  notification: ActivityNotification | null;
-  attentionDismissedRing: boolean;
-}
-```
-
-Internal state is deliberately split into independent tracks:
-
-- `watchingStatus`: `WatchingSessionStatus`, or `WATCHING_DISABLED` when no `ActivityMonitor` exists.
-- `protocolStatus`: `IDLE | OSC_NOTIF_BUSY | ALERT_RINGING`.
-- `commandExitStatus`: `IDLE | COMMAND_EXIT_ARMED | ALERT_RINGING`.
-- `progress`: active `OSC 9;4` progress, if any.
-- `commandExitWatch`: the current foreground command eligible for command-exit alerting, if any.
-
-Public `status` is a projection:
+Public `status` is a projection — first match wins:
 
 1. `ALERT_RINGING` if `protocolStatus`, `commandExitStatus`, or `watchingStatus` is ringing, in that order.
 2. `OSC_NOTIF_BUSY` if protocol progress is active.
@@ -70,7 +33,7 @@ Public `status` is a projection:
 
 Persist `status`, `watchingEnabled`, `todo`, and sanitized `notification`. Restore `todo` and `notification`, then restart WATCHING only if `watchingEnabled` is true. Restore must not recreate protocol progress, command-exit arms, or a fresh ring; replay filtering in `docs/specs/terminal-escapes.md` prevents old terminal output from firing notification side effects again.
 
-Legacy TODO values migrate to boolean: `2`, numeric soft buckets `[0, 1]`, `'soft'`, and `'hard'` become `true`; `false`, `-1`, and unknown values become `false`.
+Source of truth: `migrateTodoState` in `lib/src/lib/alert-manager.ts` defines the legacy-TODO-value migration to boolean.
 
 ## Attention
 
@@ -83,7 +46,7 @@ Legacy TODO values migrate to boolean: `2`, numeric soft buckets `[0, 1]`, `'sof
 
 These do not count as attention: mere visibility, command-mode selection, hover, a Door existing in the baseboard, or reattaching a Door with `d` into command mode.
 
-Attention is lost when the attention timer expires, the app loses focus, the attended Session is minimized or destroyed, or another Session becomes attended. `T_USER_ATTENTION` is 15 seconds by default and also acts as the minimum runtime for command-exit alerts.
+Attention is lost when the attention timer expires, the app loses focus, the attended Session is minimized or destroyed, or another Session becomes attended. `T_USER_ATTENTION` also acts as the minimum runtime for command-exit alerts.
 
 ## WATCHING Track
 
@@ -98,28 +61,15 @@ WATCHING is the user-controlled output/silence monitor. It starts fresh when ena
 | `MIGHT_NEED_ATTENTION` | A busy Session went quiet. Debounce state. |
 | `ALERT_RINGING` | WATCHING observed likely completion while the Session lacked attention. |
 
-Timers live in `cfg.alert`:
+Source of truth: `cfg.alert` in `lib/src/cfg.ts` defines timer defaults and their purpose.
 
-| Timer | Default | Purpose |
-|---|---:|---|
-| `busyCandidateGap` | 1500 ms | elapsed output window before busy is plausible |
-| `busyConfirmGap` | 500 ms | confirmation window for `MIGHT_BE_BUSY` |
-| `mightNeedAttention` | 2000 ms | silence after `BUSY` before possible completion |
-| `needsAttentionConfirm` | 3000 ms | additional silence before ringing |
-| `resizeDebounce` | 500 ms | ignore resize redraw output |
-| `userAttention` | 15000 ms | attention idle expiry and command-exit minimum runtime |
+Source of truth: `ActivityMonitor` in `lib/src/lib/activity-monitor.ts` implements the transitions. The invariants the implementation must honor:
 
-WATCHING transitions:
-
-- First output in `NOTHING_TO_SHOW` starts candidate tracking but stays `NOTHING_TO_SHOW`.
-- Continued output across `busyCandidateGap` enters `MIGHT_BE_BUSY`; more output confirms `BUSY`, while no confirmation returns to `NOTHING_TO_SHOW`.
-- Output in `BUSY` restarts the silence timer.
-- Silence moves `BUSY -> MIGHT_NEED_ATTENTION -> ALERT_RINGING`, unless the Session has attention at confirmation time; if attended, reset to `NOTHING_TO_SHOW`.
-- Output in `MIGHT_NEED_ATTENTION` returns to `BUSY`.
-- `ALERT_RINGING` latches. New output without attention does not clear it; new output with attention starts a new `MIGHT_BE_BUSY` cycle.
+- Output drives the monitor up the chain `NOTHING_TO_SHOW` -> `MIGHT_BE_BUSY` -> `BUSY`; silence drives it down `BUSY` -> `MIGHT_NEED_ATTENTION` -> `ALERT_RINGING`. The `MIGHT_*` states are debounce windows in both directions.
+- First output starts candidate tracking without changing status; unconfirmed `MIGHT_BE_BUSY` returns to `NOTHING_TO_SHOW`; `ALERT_RINGING` ignores new output until the Session has attention.
+- Attention at confirmation time suppresses the ring and resets to `NOTHING_TO_SHOW`. `ALERT_RINGING` otherwise latches; new output with attention starts a fresh `MIGHT_BE_BUSY` cycle.
 - Attending or dismissing a WATCHING ring resets the monitor to `NOTHING_TO_SHOW`.
-
-Rings must be caused by a fresh transition into `ALERT_RINGING`, never by rerender, theme change, remount, minimize, or reattach.
+- Rings must be caused by a fresh transition into `ALERT_RINGING`, never by rerender, theme change, remount, minimize, or reattach.
 
 ## Protocol Track
 
@@ -131,21 +81,13 @@ Protocol rings set `todo = true`, store the latest sanitized `ActivityNotificati
 
 ### Standalone BEL
 
-A `BEL` byte outside an OSC sequence is stripped from visible output and creates:
-
-```ts
-{ source: 'BEL', title: 'Terminal bell', body: null }
-```
+A `BEL` byte outside an OSC sequence is stripped from visible output and creates the BEL notification (`TERMINAL_BELL_NOTIFICATION` in `lib/src/lib/terminal-protocol.ts`).
 
 If a parse batch also contains a richer OSC notification/progress event, drop the generic `BEL` detail so it cannot overwrite useful preview text. Multiple standalone bells in one batch collapse to one notification.
 
 ### OSC 9
 
-`OSC 9 ; <message> ST` creates:
-
-```ts
-{ source: 'OSC 9', title: null, body: message }
-```
+`OSC 9 ; <message> ST` creates an OSC 9 notification with the message as body (title null); see `parseOsc9` in `lib/src/lib/terminal-protocol.ts`.
 
 Empty sanitized messages are ignored. OSC 9 also feeds title-candidate derivation in `docs/specs/terminal-state.md`; that does not change alert behavior.
 
@@ -167,18 +109,14 @@ Rules:
 - `state=1, progress=100` rings as completion if unattended.
 - `state=2` rings as error if unattended.
 - Clear rings as completion only if there was an active progress cycle; otherwise ignore it.
-- Warning progress does not ring by itself, but completion of a warning cycle uses the generated title `Progress warning`.
+- Warning progress does not ring by itself, but completion of a warning cycle rings with a generated warning title.
 - Invalid states, missing required percents for states `1` and `4`, and out-of-range percents are ignored.
 
-Generated notifications use source `OSC 9;4`, title `Progress complete`, `Progress warning`, or `Progress error`, and body `Progress <n>%` when a percent is known.
+Source of truth: `ringOrSuppressProtocolProgress` / `completeProtocolProgress` in `lib/src/lib/alert-manager.ts` produce generated titles/bodies for these rings.
 
 ### OSC 777
 
-`OSC 777 ; notify ; <title> ; <body> ST` creates:
-
-```ts
-{ source: 'OSC 777', title, body }
-```
+`OSC 777 ; notify ; <title> ; <body> ST` creates an OSC 777 notification; see `parseOsc777` in `lib/src/lib/terminal-protocol.ts`.
 
 Only `notify` is supported. The first field after `notify` is the title; everything after the next semicolon is body, preserving additional semicolons there. Unsupported subcommands and empty sanitized notifications are ignored.
 
@@ -199,10 +137,10 @@ Supported keys:
 
 Management payloads do not ring:
 
-- `p=?` sends a support response advertising `o=always:p=title,body`.
+- `p=?` sends a support response advertising the support payload defined in `lib/src/lib/terminal-protocol.ts` (`OSC99_SUPPORT_PAYLOAD`).
 - `p=close`, `p=alive`, `p=icon`, and `p=buttons` are consumed or ignored without creating notification UI.
 
-Pending OSC 99 chunks expire after 60 seconds, and at most 64 pending ids are retained per parser.
+Source of truth: `lib/src/lib/terminal-protocol.ts` defines the pending OSC 99 chunk TTL and max-pending-id cap.
 
 ## Command-exit Track
 
@@ -214,7 +152,7 @@ Rules:
 - If the user attends while a command is already running, mark that command as seen.
 - If attention is later lost while that same seen command is still running, set `commandExitStatus = COMMAND_EXIT_ARMED`.
 - If the same command finishes, or the PTY exits before a finish event, ring only when all are true: it was armed, the Session still lacks attention, and runtime is at least `T_USER_ATTENTION`.
-- A command-exit ring sets `todo = true` and stores `{ source: 'COMMAND_EXIT', title: 'Command finished', body }`, where body is the summarized command plus exit code when known.
+- A command-exit ring sets `todo = true` and stores the COMMAND_EXIT notification built by `setCommandExitRinging` / `formatCommandExitBody` in `lib/src/lib/alert-manager.ts` (title "Command finished", body = summarized command + exit code).
 - Returning to the Session before finish disarms the watch. A quick finish, a different command start, or Session destruction clears it without ringing.
 - Race rule: attention must be lost before the finish event is observed.
 - Precedence rule: a protocol ring must keep its richer `ActivityNotification`; command-exit must not overwrite it.
@@ -246,18 +184,7 @@ The header shows:
 - a hover/focus notification preview when TODO has `notification`
 - a dialog from right-click or some left-click actions, containing TODO and WATCHING switches plus notification detail
 
-Bell visual state is a pure function of public `status`:
-
-| Status | Visual |
-|---|---|
-| `WATCHING_DISABLED` | outline bell, muted |
-| `NOTHING_TO_SHOW` | filled bell, muted, upright |
-| `MIGHT_BE_BUSY` | filled bell, muted, -22.5 degree tilt |
-| `BUSY` | filled bell, muted, 45 degree tilt |
-| `OSC_NOTIF_BUSY` | same as `BUSY` |
-| `COMMAND_EXIT_ARMED` | same as `BUSY` |
-| `MIGHT_NEED_ATTENTION` | filled bell, muted, 60 degree tilt |
-| `ALERT_RINGING` | filled bell, warning color, rocking animation; reduced motion uses static 45 degree tilt |
+Bell visual state is a pure function of public status. Source of truth: `bellIconClass` in `lib/src/components/bell-icon-class.ts` defines the tilt/animation mapping.
 
 Tilt and animation must not change layout size. Long titles truncate before alert/TODO controls disappear.
 
@@ -294,7 +221,7 @@ Sanitization and limits:
 - Treat all text as plain text.
 - Strip C0/C1 controls after protocol parsing, collapse whitespace controls to spaces, and trim.
 - Do not interpret ANSI, OSC, HTML, Markdown, URLs, paths, or emoji shortcodes as markup.
-- Store at most 256 Unicode code points for title and 4096 for body.
+- Store at most the `TITLE_LIMIT` / `BODY_LIMIT` Unicode code points defined in `lib/src/lib/terminal-protocol.ts`.
 - Store only the latest `ActivityNotification`, not unbounded history.
 - Cap and expire incomplete OSC 99 parser state as described above.
 
@@ -312,23 +239,6 @@ Security requirements:
 - Ringing must not rely on color alone, and `prefers-reduced-motion` must be respected.
 - Bell, TODO, preview, and dialog controls must remain keyboard reachable; dialogs trap focus and support `Escape`.
 - Tooltips, dialog copy, and future localized TODO labels must wrap in narrow layouts.
-
-## Verification Checklist
-
-- WATCHING rings only on a fresh unattended transition into `ALERT_RINGING`.
-- Quick output stays in `NOTHING_TO_SHOW`; pauses in busy output debounce through `MIGHT_NEED_ATTENTION`.
-- Resize noise cannot cause a WATCHING ring.
-- Alert/TODO state survives Pane <-> Door transitions.
-- Door click/`Enter` clears a ring; Door `d` does not.
-- Protocol notifications ring with WATCHING disabled, but not while the Session has attention.
-- `OSC 9;4` active progress shows `OSC_NOTIF_BUSY`; completion, error, and active-progress clear ring only when unattended.
-- Standalone `BEL` does not replace richer OSC detail in the same parse batch.
-- OSC 99 chunking, base64, support query, and management payloads behave as specified.
-- Command-exit arms only after a seen command loses attention and rings only on the same command after the minimum runtime.
-- Protocol detail wins over generated command-exit detail.
-- Dismiss/attend creates TODO; passthrough `Enter` clears TODO.
-- Restore/replay does not refire old notification side effects.
-- Long titles and notification text do not overflow fixed header or Door controls.
 
 ## References
 

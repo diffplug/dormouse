@@ -9,20 +9,20 @@ import {
 import type { TerminalOverlayDims } from './terminal-store';
 
 class ListenerHost {
-  private readonly listeners = new Map<string, Array<(ev: MouseEvent) => void>>();
+  private readonly listeners = new Map<string, Array<(ev: MouseEvent | PointerEvent) => void>>();
 
-  addEventListener(type: string, listener: (ev: MouseEvent) => void): void {
+  addEventListener(type: string, listener: (ev: MouseEvent | PointerEvent) => void): void {
     const listeners = this.listeners.get(type) ?? [];
     listeners.push(listener);
     this.listeners.set(type, listeners);
   }
 
-  removeEventListener(type: string, listener: (ev: MouseEvent) => void): void {
+  removeEventListener(type: string, listener: (ev: MouseEvent | PointerEvent) => void): void {
     const listeners = this.listeners.get(type) ?? [];
     this.listeners.set(type, listeners.filter((l) => l !== listener));
   }
 
-  emit(type: string, ev: FakeMouseEvent): void {
+  emit(type: string, ev: FakeMouseEvent | FakePointerEvent): void {
     for (const listener of [...(this.listeners.get(type) ?? [])]) {
       listener(ev);
     }
@@ -30,6 +30,9 @@ class ListenerHost {
 }
 
 class FakeElement extends ListenerHost {
+  setPointerCapture = vi.fn();
+  releasePointerCapture = vi.fn();
+
   getBoundingClientRect(): Pick<DOMRect, 'left' | 'top'> {
     return { left: 0, top: 0 };
   }
@@ -40,6 +43,8 @@ type FakeMouseEvent = MouseEvent & {
   stopPropagation: ReturnType<typeof vi.fn>;
   stopImmediatePropagation: ReturnType<typeof vi.fn>;
 };
+
+type FakePointerEvent = PointerEvent & FakeMouseEvent;
 
 function mouseEvent(overrides: Partial<MouseEvent> = {}): FakeMouseEvent {
   return {
@@ -52,6 +57,16 @@ function mouseEvent(overrides: Partial<MouseEvent> = {}): FakeMouseEvent {
     stopImmediatePropagation: vi.fn(),
     ...overrides,
   } as FakeMouseEvent;
+}
+
+function pointerEvent(overrides: Partial<PointerEvent> = {}): FakePointerEvent {
+  return {
+    ...mouseEvent(overrides),
+    pointerId: 1,
+    pointerType: 'touch',
+    isPrimary: true,
+    ...overrides,
+  } as FakePointerEvent;
 }
 
 const dims: TerminalOverlayDims = {
@@ -165,6 +180,154 @@ describe('terminal-mouse-router: override suppression', () => {
 
     await Promise.resolve();
     expect(getMouseSelectionState('t1').override).toBe('permanent');
+    cleanup();
+  });
+
+  it('suppresses wheel while an override is active', () => {
+    const { cleanup, element } = createHarness(windowHost);
+    setMouseReporting('t1', 'vt200');
+    setOverride('t1', 'permanent');
+
+    const wheel = mouseEvent();
+    element.emit('wheel', wheel);
+
+    expect(wheel.preventDefault).toHaveBeenCalledOnce();
+    expect(wheel.stopPropagation).toHaveBeenCalledOnce();
+    expect(wheel.stopImmediatePropagation).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it('selects text from a touch pointer drag using the terminal selection path', () => {
+    const { cleanup, element, terminal } = createHarness(windowHost);
+
+    const down = pointerEvent({ clientX: 5, clientY: 5 });
+    element.emit('pointerdown', down);
+    expect(down.preventDefault).toHaveBeenCalledOnce();
+    expect(down.stopImmediatePropagation).toHaveBeenCalledOnce();
+    expect(element.setPointerCapture).toHaveBeenCalledWith(1);
+    expect(terminal.focus).toHaveBeenCalledOnce();
+
+    const move = pointerEvent({ clientX: 25, clientY: 15 });
+    windowHost.emit('pointermove', move);
+    expect(move.preventDefault).toHaveBeenCalledOnce();
+    expect(terminal.clearSelection).toHaveBeenCalledOnce();
+
+    const dragging = getMouseSelectionState('t1').selection;
+    expect(dragging).toMatchObject({
+      startRow: 0,
+      startCol: 0,
+      endRow: 1,
+      endCol: 2,
+      dragging: true,
+    });
+
+    const up = pointerEvent({ clientX: 25, clientY: 15 });
+    windowHost.emit('pointerup', up);
+    expect(up.preventDefault).toHaveBeenCalledOnce();
+    expect(element.releasePointerCapture).toHaveBeenCalledWith(1);
+
+    expect(getMouseSelectionState('t1').selection).toMatchObject({
+      startRow: 0,
+      startCol: 0,
+      endRow: 1,
+      endCol: 2,
+      dragging: false,
+    });
+    cleanup();
+  });
+
+  it('starts a block selection from a double-tap-then-drag on touch', () => {
+    const { cleanup, element } = createHarness(windowHost);
+
+    // First tap: a quick press and release with no drag — leaves no selection.
+    element.emit('pointerdown', pointerEvent({ clientX: 5, clientY: 5 }));
+    windowHost.emit('pointerup', pointerEvent({ clientX: 5, clientY: 5 }));
+    expect(getMouseSelectionState('t1').selection).toBeNull();
+
+    // Second tap immediately after, in the same spot, then drag → block shape.
+    element.emit('pointerdown', pointerEvent({ clientX: 5, clientY: 5 }));
+    windowHost.emit('pointermove', pointerEvent({ clientX: 25, clientY: 15 }));
+
+    expect(getMouseSelectionState('t1').selection).toMatchObject({
+      shape: 'block',
+      dragging: true,
+    });
+    cleanup();
+  });
+
+  it('keeps a single touch drag linewise when the taps are too far apart in time', () => {
+    let now = 1000;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { cleanup, element } = createHarness(windowHost);
+
+    element.emit('pointerdown', pointerEvent({ clientX: 5, clientY: 5 }));
+    windowHost.emit('pointerup', pointerEvent({ clientX: 5, clientY: 5 }));
+
+    now += 1000; // well beyond the double-tap window
+    element.emit('pointerdown', pointerEvent({ clientX: 5, clientY: 5 }));
+    windowHost.emit('pointermove', pointerEvent({ clientX: 25, clientY: 15 }));
+
+    expect(getMouseSelectionState('t1').selection).toMatchObject({
+      shape: 'linewise',
+      dragging: true,
+    });
+    nowSpy.mockRestore();
+    cleanup();
+  });
+
+  it('does not treat two quick consecutive drags as a double-tap', () => {
+    const { cleanup, element } = createHarness(windowHost);
+
+    // First interaction is a DRAG (not a tap), so it must not arm block mode.
+    element.emit('pointerdown', pointerEvent({ clientX: 5, clientY: 5 }));
+    windowHost.emit('pointermove', pointerEvent({ clientX: 25, clientY: 15 }));
+    windowHost.emit('pointerup', pointerEvent({ clientX: 25, clientY: 15 }));
+
+    // A second drag right after, nearby, stays linewise.
+    element.emit('pointerdown', pointerEvent({ clientX: 5, clientY: 5 }));
+    windowHost.emit('pointermove', pointerEvent({ clientX: 25, clientY: 15 }));
+
+    expect(getMouseSelectionState('t1').selection).toMatchObject({
+      shape: 'linewise',
+      dragging: true,
+    });
+    cleanup();
+  });
+
+  it('suppresses compatibility mouse events after a touch selection starts', () => {
+    const { cleanup, element } = createHarness(windowHost);
+
+    element.emit('pointerdown', pointerEvent());
+    const mouseDown = mouseEvent();
+    element.emit('mousedown', mouseDown);
+
+    expect(mouseDown.preventDefault).toHaveBeenCalledOnce();
+    expect(mouseDown.stopImmediatePropagation).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it('does not select from non-primary touch pointers', () => {
+    const { cleanup, element } = createHarness(windowHost);
+
+    const down = pointerEvent({ isPrimary: false });
+    element.emit('pointerdown', down);
+    windowHost.emit('pointermove', pointerEvent({ clientX: 25, clientY: 15 }));
+
+    expect(down.preventDefault).not.toHaveBeenCalled();
+    expect(getMouseSelectionState('t1').selection).toBeNull();
+    cleanup();
+  });
+
+  it('does not steal touch pointer drags from a mouse-reporting TUI without override', () => {
+    const { cleanup, element } = createHarness(windowHost);
+    setMouseReporting('t1', 'vt200');
+
+    const down = pointerEvent();
+    element.emit('pointerdown', down);
+    windowHost.emit('pointermove', pointerEvent({ clientX: 25, clientY: 15 }));
+
+    expect(down.preventDefault).not.toHaveBeenCalled();
+    expect(getMouseSelectionState('t1').selection).toBeNull();
     cleanup();
   });
 });

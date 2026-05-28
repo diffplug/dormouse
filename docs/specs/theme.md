@@ -17,21 +17,13 @@ The chrome is anchored on VSCode's file-tree styling because those colors are
 designed to read clearly inside the sidebar host area. Use bg-only chrome for
 panes and doors; do not add borders to make the hierarchy work.
 
-| Token | VSCode key | Where used |
-| --- | --- | --- |
-| `--color-terminal-bg` / `-fg` | `terminal.background` / `terminal.foreground` | terminal container and xterm defaults |
-| `--color-app-bg` / `--color-app-fg` | `sideBar.background` / `sideBar.foreground` | baseboard, dockview gutters, gaps around panes |
-| `--color-header-inactive-bg` / `-fg` | `list.inactiveSelectionBackground` / `list.inactiveSelectionForeground` | unfocused pane headers |
-| `--color-header-active-bg` / `-fg` | `list.activeSelectionBackground` / `list.activeSelectionForeground` | focused pane header |
-| `--color-door-bg` / `-fg` | runtime pick from inactive header vs terminal bg/fg | baseboard doors |
-| `--color-focus-ring` | runtime pick from `focusBorder` and active header background | marching-ants ring and terminal text-selection border |
-
-Door colors and the focus ring are chosen at runtime by
-`computeDynamicPalette()` in `lib/src/lib/themes/dynamic-palette.ts`, using
-OKLab distance/chroma helpers from `lib/src/lib/color-contrast.ts`.
+Source of truth: `lib/src/theme.css` defines token→VSCode-key bindings. The
+runtime-picked `--color-door-bg` and `--color-focus-ring` are computed by
+`computeDynamicPalette()` in `lib/src/lib/themes/dynamic-palette.ts` using OKLab
+distance/chroma helpers from `lib/src/lib/color-contrast.ts`;
 `useDynamicPalette()` in `lib/src/lib/themes/use-dynamic-palette.ts` publishes
-the chosen variables on `document.body`. Public theme helpers are exported
-from `lib/src/lib/themes/index.ts`.
+the chosen variables on `document.body`. Public theme helpers are exported from
+`lib/src/lib/themes/index.ts`. The pick rules:
 
 - Door bg/fg chooses whichever pair, inactive-header or terminal bg/fg, has
   stronger perceptual separation from
@@ -62,10 +54,22 @@ it reads host-provided variables, materializes only missing Dormouse-consumed
 variables on `body.style`, and removes stale materialized variables when the
 host starts providing a real value.
 
+Website routes may be hydrated as a full React Router document, so React can
+reconcile the server `<body>` and remove render-time `body.style` and class
+side effects. `applyTheme()` treats a same-theme call as a no-op only when the
+expected inline `--vscode-*` variables and `vscode-light` / `vscode-dark` class
+are still visible on `document.body`. ThemePicker also performs a browser
+layout-effect restore after mount so website hydration cannot leave the picker
+state saying a theme is active while xterm.js sees fallback colors.
+
 `theme.css` declares the theme-dependent `--color-*` tokens on `body` because
 `--vscode-*` variables also live there. Keep the parallel `@theme`
 declarations so Tailwind can generate utility classes, but treat the body-level
 declarations as the runtime source of truth.
+Dynamic palette tokens (`--color-door-bg`, `--color-door-fg`, and
+`--color-focus-ring`) also have body-level baseline bindings matching the
+`@theme` declarations, so direct CSS-var consumers such as the mobile gesture
+SVG render visibly before `useDynamicPalette()` publishes refined values.
 
 `theme.css` must not contain hardcoded color defaults or `var(..., fallback)`
 chains. Runtime hosts plus the shared resolver are responsible for providing
@@ -123,9 +127,10 @@ Storybook simulates VSCode themes through `lib/.storybook/themes.ts`. It must
 also run bundled theme vars through `completeThemeVars()` (with the same host
 typography defaults as `applyTheme()`) before injecting them, so isolated
 component stories see the same materialized `--vscode-*` token set as the app.
-Storybook's default simulated host theme is `Light (Visual Studio)`, with a
-first-bundled-theme fallback so a renamed or removed bundle cannot leave stories
-without theme vars.
+Source of truth: `PREFERRED_STORYBOOK_THEME` in `lib/.storybook/preview.ts`
+defines Storybook's default simulated host theme, with fallback to the first
+bundled theme so a renamed or removed bundle cannot leave stories without theme
+vars.
 The Storybook preview decorator also computes and publishes the dynamic palette
 vars (`--color-door-bg`, `--color-door-fg`, `--color-focus-ring`) through the
 shared `computeDynamicPalette()` helper, matching the runtime
@@ -152,11 +157,13 @@ terminal colors. It captures the current DOM-visible theme state and shows:
 - dynamic door/focus-ring picks from the same `pickDoorPair()` and
   `pickFocusRing()` helpers used by Wall's `computeDynamicPalette()`.
 
-Standalone, playground, and the website `/tether` prototype expose the debugger
-as `Debug current theme` in the `ThemePicker` menu. `/tether` uses the same
-picker in the desktop page header and as a floating control above the mobile
-terminal prototype, both with the Kimbie Dark default theme fallback. VSCode
-opens it through the `dormouse.debugTheme` command and the
+Standalone, playground, and the website `/playground/pocket` prototype expose
+the debugger as `Debug current theme` in the `ThemePicker` menu.
+`/playground/pocket` uses the same picker in the desktop share page header and
+as a floating control above the mobile terminal prototype, both with the Kimbie
+Dark default theme fallback. `/pocket` redirects before rendering a picker.
+VSCode opens it through the
+`dormouse.debugTheme` command and the
 `dormouse:openThemeDebugger` extension-to-webview message. The debugger's
 copied report is a shareable text dump of the same snapshot.
 

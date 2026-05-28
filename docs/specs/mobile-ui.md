@@ -1,8 +1,10 @@
 # Mobile Terminal Website Prototype Spec
 
+> See `docs/specs/glossary.md` for Session / Pane / Door vocabulary. This spec uses it throughout.
+
 ## 1. Overview
 
-This document specifies the `/tether` mobile terminal prototype.
+This document specifies the `/playground/pocket` mobile terminal prototype.
 
 The prototype tests one core idea:
 
@@ -13,13 +15,19 @@ Stable terminal viewport + mobile session viewport + explicit touch mode + expli
 The app should feel like a lightweight mobile terminal playground. It does not
 need remote sessions, SSH, user accounts, or production infrastructure.
 
-The website `/tether` prototype exposes a small floating theme switcher above
-the terminal. It uses the shared Dormouse `ThemePicker`.
+The website `/playground/pocket` prototype exposes a small floating theme
+switcher above the terminal. It uses the shared Dormouse `ThemePicker`. On
+desktop, `/playground/pocket` shows a share-to-phone page instead of the
+interactive terminal. The `/pocket` route temporarily redirects to
+`/playground/pocket`; this is a launch-state redirect, not the future real
+tethering environment.
 
-`/tether` uses the same fake playground terminal stack as `/playground`:
-`PlaygroundShellRegistry` attaches a `TutorialShell` to every spawned pane, the
-same fake commands dispatch to browser-side runners, and the first pane simply
-auto-runs `ascii-splash` as its initial command.
+`/playground/pocket` uses the same fake playground terminal stack as
+`/playground/desktop`: `PlaygroundShellRegistry` attaches a `TutorialShell` to
+every spawned pane, and the same fake commands dispatch to browser-side runners.
+The first mobile session auto-runs `tut` with the Pocket tutorial profile; a
+second `changelog` session auto-runs `changelog` for the tutorial's copy/paste
+coverage.
 
 ## 2. Prototype Goals
 
@@ -76,10 +84,10 @@ block should use one divider between the Touch and Input rows, with no divider
 above Touch and no divider below Input. The mobile session header should not use
 the desktop terminal title corner radius; it is a flush mobile bar. The alert
 bell sits immediately after the title before secondary title detail. The mobile
-header keeps a minimize button, and in the `/tether` prototype that action opens
-the Sessions reserve instead of creating a desktop Door. The Touch row and its
-selector tray should sit on `terminal-bg` so they read as part of the terminal
-surface above. The Input row and reserve area should sit on
+header keeps a minimize button, and in the `/playground/pocket` prototype that
+action opens the Sessions reserve instead of creating a desktop Door. The Touch
+row and its selector tray should sit on `terminal-bg` so they read as part of
+the terminal surface above. The Input row and reserve area should sit on
 `header-inactive-bg` with `header-inactive-fg`, so the lower input controls are
 distinct from the terminal while still following the selected theme.
 
@@ -97,22 +105,45 @@ The selector must be self-labeling through segmented buttons that include both
 an icon and a short mode label. Icon-only touch controls are too hard to
 discover in this prototype.
 
-Touch modes:
+Source of truth: `TOUCH_MODES` in `lib/src/components/MobileTerminalUi.tsx`
+defines touch-mode button labels and icons.
 
-| Mode | Button label | Icon | Availability | Behavior |
-| --- | --- | --- | --- | --- |
-| Gestures | `Gestures` | `HandPointingIcon` | Always available | Pane-content touches, pen presses, and primary mouse/trackpad clicks open the Gesture mode radial menu. |
-| Text selection | `Select` | `CursorTextIcon` | Always available | Touches are reserved for terminal text selection and copy/paste. If the TUI is capturing mouse events, Dormouse activates mouse override for the active pane. |
-| Mouse | `Mouse` | `CursorClickIcon` | Only when the active TUI is capturing mouse events | Touches are passed through as terminal mouse input. |
+| Mode | Availability | Behavior |
+| --- | --- | --- |
+| Gestures | Always available | Pane-content touches, pen presses, and primary mouse/trackpad clicks open the Gesture mode radial menu. |
+| Text selection | Always available | Pane-content touch, pen, and primary mouse/trackpad drags use the same terminal text selection and copy/paste behavior as desktop. If a mounted pane's TUI is capturing mouse events, Dormouse activates mouse override for that pane. |
+| Mouse | Only when the active TUI is capturing mouse events | Touches are passed through as terminal mouse input. |
 
 Default touch mode is **Gestures**.
+
+Touch mode is a global mobile UI state. Select mode derives each mounted pane's
+mouse override from that global touch mode and the pane's own mouse-reporting
+state, so switching sessions cannot leave an inactive pane stuck in a stale
+override.
 
 If Mouse mode is active and the active pane stops capturing mouse events, the
 selector must fall back to Gestures.
 
+Wheel, trackpad-scroll, and touchmove events in the pane content are terminal
+input only in Mouse mode. Gestures and Select mode must suppress those
+scroll-like events before xterm can translate them into mouse reports,
+alternate-screen arrow keys, or scrollback motion.
+
+In Mouse mode, primary touch and pen pointers synthesize left-button terminal
+mouse input: pointerdown emits a mouse press, pointermove emits mouse motion,
+and pointerup or pointercancel emits a mouse release. The wrapper suppresses
+the native touch gesture while emitting those mouse events so a tap or drag is
+seen by the TUI, not by browser panning, browser selection, or xterm's native
+touch-scroll fallback.
+
+Select mode must route touch and pen drags through the shared terminal
+mouse-selection router, not through a mobile-only selection implementation, so
+selection geometry, smart token extension, copy popups, rewrapped copy, and TUI
+mouse-capture override rules match desktop behavior.
+
 Gesture mode intentionally consumes primary mouse/trackpad clicks in addition to
-touch input. This keeps the `/tether` prototype usable in desktop browsers,
-narrow desktop viewports, and Storybook without a touchscreen. A primary
+touch input. This keeps the `/playground/pocket` prototype usable in desktop
+browsers, narrow desktop viewports, and Storybook without a touchscreen. A primary
 mouse/trackpad click in pane content must start radial gesture handling, call
 `preventDefault()`, stop propagation, and capture that pointer; it is not passed
 through to the embedded `Wall`, xterm, or dockview for focus, selection, or pane
@@ -133,14 +164,16 @@ compass rose. It must not draw a line directly under the user's thumb. The guide
 line is solid and fully opaque, and the offset rose center renders a small
 fully opaque circle.
 
-Gesture mode uses these radii:
+Source of truth: `RADIUS_LAYOUT`, `RADIUS_SELECT`, `RADIUS_FADE_START`, and
+`RADIUS_HIGHLIGHT` in `lib/src/lib/mobile-gesture-menu.ts` define the radii
+used below.
 
-| Variable | Value | Behavior |
-| --- | --- | --- |
-| `RADIUS_LAYOUT` | `92px` | Base half-side for square direction anchors around the offset compass rose origin. Exploded option labels land on these anchors; root labels are packed around the same square so long labels do not overlap. |
-| `RADIUS_SELECT` | `RADIUS_LAYOUT * 0.75` | Visible circle drawn around the offset compass rose origin. When the mirrored drag reaches this distance, the closest compass direction is selected. |
-| `RADIUS_FADE_START` | `RADIUS_SELECT * 0.25` | No directional root-group fading happens before this drag distance. |
-| `RADIUS_HIGHLIGHT` | `RADIUS_SELECT * 0.5` | No circle is drawn. When the drag reaches this distance, the closest compass direction is highlighted, but not selected. |
+| Variable | Behavior |
+| --- | --- |
+| `RADIUS_LAYOUT` | Base circular radius for exploded option anchors around the offset compass rose origin. Diagonal exploded labels use normalized compass vectors, so their x/y offsets are `RADIUS_LAYOUT * Math.SQRT1_2`. Root labels use separate packed square-keypad geometry so long labels do not overlap. |
+| `RADIUS_SELECT` | Visible circle drawn around the offset compass rose origin. When the mirrored drag reaches this distance, the closest compass direction is selected. |
+| `RADIUS_FADE_START` | No directional root-group fading happens before this drag distance. |
+| `RADIUS_HIGHLIGHT` | No circle is drawn. When the drag reaches this distance, the closest compass direction is highlighted, but not selected. |
 
 Gesture menu item state uses the same palette as pane headers. Idle groups and
 options use inactive header background/foreground. Highlighted or selected
@@ -153,62 +186,68 @@ The select circle and its eight compass-direction ticks render at full opacity.
 The current highlighted or selected direction uses a stronger tick so the circle
 and label clusters read as one gesture system.
 
+Because the mobile composition does not mount the desktop `Wall`,
+`MobileTerminalUi` must publish the shared dynamic palette variables, including
+`--color-focus-ring`, before rendering gesture UI that depends on those tokens.
+
 When the rose opens on touch-down, root labels fade in with a subtle scale-in
 and the select circle grows from zero radius to `RADIUS_SELECT`. This is a short
 state-reveal motion, not an ongoing decoration; reduced-motion users get the
 final state immediately.
 
-While the user is still choosing a root group, the root groups fade according to
-the current drag vector only after the drag exceeds `RADIUS_FADE_START`. Before
-that threshold, all root groups render at full opacity. After the threshold,
-define `dragHat = (currentPoint - origin) / RADIUS_SELECT` and `unitToGroup` as
-the unit vector from the origin to the group's compass direction. The root group
-target opacity is `clamp(0.75 + dragHat dot unitToGroup, 0, 1)`. The rendered
-opacity blends smoothly from `1` at `RADIUS_FADE_START` to that target at
-`RADIUS_SELECT` using
-`fadeProgress = clamp((dragDistance - RADIUS_FADE_START) / (RADIUS_SELECT -
-RADIUS_FADE_START), 0, 1)` and
-`opacity = 1 + (targetOpacity - 1) * fadeProgress`.
+While the user is still choosing a root group, all root groups stay fully
+opaque until the drag exceeds `RADIUS_FADE_START`; past that threshold each
+group fades by its alignment with the drag vector (the group the user is
+moving toward stays brightest, the rest dim toward a floor), reaching the
+full per-direction opacity at `RADIUS_SELECT`. Source of truth:
+`rootGroupOpacity()` in `lib/src/components/MobileGestureRadialMenu.tsx`.
 
-Each root compass group renders as three separate labels placed close together,
-not as one combined pill. When a group is selected, those same three labels tween
-from their root group positions to their exploded positions in the opposite
-directions. They must not fade out and be replaced by newly spawned option
-labels.
+N, S, E, and W root labels render as single arrow chips. Dragging to
+`RADIUS_SELECT` in one of those four cardinal directions immediately sends the
+matching arrow key; there is no second-swipe confirmation.
 
-Root labels are laid out as a square keypad, not on a circle. N, S, E, and W
-use a hierarchical layout: the arrow chip sits closest to the select circle, and
-the four arrow chips use one shared `GAP_CARDINAL_RING` from the select circle
-edge. The two secondary chips sit just outside each arrow. N/S secondary pairs
-use `GAP_CLUSTER` as the horizontal edge-to-edge gap across the axis; E/W
-secondary pairs use the same `GAP_CLUSTER` as the vertical edge-to-edge gap.
-Diagonal groups use an EW-dominant corner-and-stack layout: the center option's inward corner
-is aligned with the diagonal tick mark at the same ring gap used by the cardinal
-arrow chips, measured on screen as the same horizontal/vertical visual gap rather
-than as a longer diagonal distance. The diagonal center corner contract is: SE
-aligns Enter's top-left corner, NE aligns Backspace's bottom-left corner, SW
-aligns Tab's top-right corner, and NW aligns Esc's bottom-right corner. NE and
-SE place their secondary options relative to the center option exactly like the
-E cluster places `End` and `l` relative to `▶`: both to the right of the center,
-one above and one below. NW and SW place their secondary options exactly like the
-W cluster places `Home` and `h` relative to `◀`: both to the left of the center,
-one above and one below. Exploded option labels use the square direction anchors
-directly. The root label pack stays close to the select circle, while preserving
-enough room for long labels like Backspace.
+Diagonal root compass groups render as three separate labels placed close
+together, not as one combined pill. When a diagonal group is selected, those
+same three labels tween from their root group positions to their exploded
+positions in the opposite directions. They must not fade out and be replaced by
+newly spawned option labels.
 
-Each root cluster uses `GAP_CLUSTER = 2px`. The first option in each group is
-the cluster center. For N/S/E/W groups, items to the left are right-aligned to
-the center chip's left edge plus the cluster gap; items to the right are
-left-aligned to the center chip's right edge plus the cluster gap. Vertical
-neighbors use the same edge-and-gap rule above or below the center chip.
-Diagonal groups combine the tick-corner rule above with the same secondary-stack
-rule used by the matching E or W cardinal group.
+Root labels are laid out as a square keypad, not on a circle. The four cardinal
+arrow chips use one shared `GAP_CARDINAL_RING` from the select circle edge.
+Source of truth: `GAP_CARDINAL_RING` and `GAP_CLUSTER` in
+`lib/src/components/MobileGestureRadialMenu.tsx`.
+Diagonal groups use an EW-dominant corner-and-stack layout: the center option's
+inward corner is aligned with the diagonal tick mark at the same ring gap used
+by the cardinal arrow chips, measured on screen as the same horizontal/vertical
+visual gap rather than as a longer diagonal distance. The diagonal center corner
+contract is: SE aligns Enter's top-left corner, NE aligns Backspace's
+bottom-left corner, SW aligns Tab's top-right corner, and NW aligns Esc's
+bottom-right corner. NE and SE place their secondary options to the right of the
+center option, one above and one below. NW and SW place their secondary options
+to the left of the center option, one above and one below. Exploded option
+labels use circular direction anchors at `RADIUS_LAYOUT` from the reset center.
+The root label pack stays close to the select circle, while preserving enough
+room for long labels like Backspace.
 
-The radial menu is a two-stage gesture:
+Each diagonal root cluster uses the shared `GAP_CLUSTER` spacing. The first
+option in each diagonal group is the cluster center. Secondary options use the
+same edge-and-gap rule above or below the center chip.
+
+For cardinal directions, the radial menu is a one-stage gesture:
 
 1. Touch down to open the menu.
 2. Drag to `RADIUS_HIGHLIGHT` to preview the closest compass point.
-3. Drag to `RADIUS_SELECT` to choose that compass point's group.
+3. Drag to `RADIUS_SELECT` on N, S, E, or W to immediately send the matching
+   arrow key. The app must not wait for touch release.
+4. After the arrow sends, the radial menu remains for a short completion
+   animation: removed labels fade out, and the selected arrow label expands and
+   fades out for positive confirmation before the overlay clears.
+
+For diagonal directions, the radial menu is a two-stage gesture:
+
+1. Touch down to open the menu.
+2. Drag to `RADIUS_HIGHLIGHT` to preview the closest compass point.
+3. Drag to `RADIUS_SELECT` to choose that diagonal compass point's group.
 4. The other seven compass groups fade out.
 5. The compass center resets to the point where the user's drag intersected the
    `RADIUS_SELECT` circle.
@@ -224,40 +263,32 @@ The radial menu is a two-stage gesture:
 If the user releases after the first group selection but before choosing one of
 the exploded options, the gesture is cancelled.
 
-Exploded option directions:
-
-| Selected group | Option directions |
-| --- | --- |
-| N | S, SW, SE |
-| NE | SW, W, S |
-| E | W, NW, SW |
-| SE | NW, N, W |
-| S | N, NW, NE |
-| SW | NE, N, E |
-| W | E, NE, SE |
-| NW | SE, E, S |
+Source of truth: `MOBILE_GESTURE_OPTION_DIRECTIONS` in
+`lib/src/lib/mobile-gesture-menu.ts` defines exploded-option directions per
+diagonal group.
 
 Examples:
 
-* Right arrow: tap, drag right to choose the E group, then drag left from the reset center until it sends.
-* End: tap, drag right to choose the E group, then drag up-left from the reset center until it sends.
-* `l`: tap, drag right to choose the E group, then drag down-left from the reset center until it sends.
+* Right arrow: tap, drag right to `RADIUS_SELECT`; it sends immediately.
+* Enter: tap, drag down-right to choose the SE group, then drag up-left from
+  the reset center until it sends.
+* Shift+Enter: tap, drag down-right to choose the SE group, then drag up from
+  the reset center until it sends.
 
 Root gesture menu labels use compact key glyphs: `⌃` for Ctrl, `⬆︎` for
-Shift, and `▲`/`▼`/`◀`/`▶` for arrow keys. Enter, Backspace, PgUp, and PgDn
-remain spelled out.
+Shift, and `▲`/`▼`/`◀`/`▶` for arrow keys. Enter and Backspace remain spelled
+out.
 
 Root gesture menu:
 
 ```text
-Esc      ⌃C*             k PgUp             n Backspace
-Quit**                   ▲                               Paste*
+Esc      ⌃C*               ▲                n Backspace
+Quit**                                                     Paste*
 
-Home   ◀                                           ▶   End
-h                                                       l
+                           ◀                ▶
 
-⬆︎Tab                    ▼                   y ⬆︎Enter
-Tab Space              j PgDn                Enter
+⬆︎Tab                     ▼                  y ⬆︎Enter
+Tab Space                                   Enter
 ```
 
 `⌃C` and `Paste` require an in-pane confirmation modal before they run.
@@ -272,36 +303,10 @@ The quit submenu uses the same reset-center, highlight-radius, and select-radius
 rules as the main option selection. Its final selected item uses the same
 expand-and-fade completion feedback as the root menu options.
 
-Gesture action mappings:
-
-| Action | Sequence |
-| --- | --- |
-| Esc | `\x1B` |
-| ⌃C | `\x03` |
-| q | `q` |
-| ⌃X | `\x18` |
-| `:q↵` | `:q\r` |
-| ▲ | `\x1B[A` |
-| PgUp | `\x1B[5~` |
-| k | `k` |
-| Backspace | `\x7F` |
-| Paste | Existing Dormouse paste flow for the active pane |
-| n | `n` |
-| ◀ | `\x1B[D` |
-| Home | `\x1B[H` |
-| h | `h` |
-| ▶ | `\x1B[C` |
-| End | `\x1B[F` |
-| l | `l` |
-| Tab | `\x09` |
-| ⬆︎Tab | `\x1B[Z` |
-| Space | ` ` |
-| ▼ | `\x1B[B` |
-| PgDn | `\x1B[6~` |
-| j | `j` |
-| Enter | `\r` |
-| ⬆︎Enter | `\x1B[13;2u` |
-| y | `y` |
+Source of truth: `MOBILE_TERMINAL_KEY_SEQUENCES` in
+`lib/src/components/MobileTerminalUi.tsx` defines action-to-byte-sequence
+mapping; `MOBILE_GESTURE_GROUPS` and `MOBILE_GESTURE_QUIT_GROUP` in
+`lib/src/lib/mobile-gesture-menu.ts` define root and quit submenu actions.
 
 ## 6. Input Mode Selector
 
@@ -315,14 +320,16 @@ Sessions | Recent | Type | Draft
 The selector must be self-labeling through segmented buttons that include both
 an icon and a short mode label.
 
-Input modes:
+Source of truth: `KEYBOARD_MODES` and `RESERVE_PLACEHOLDER_COPY` in
+`lib/src/components/MobileTerminalUi.tsx` define input-mode button labels,
+icons, and placeholder copy.
 
-| Mode | Button label | Icon | Reserve area content |
-| --- | --- | --- | --- |
-| Sessions | `Sessions` | `TerminalWindowIcon` | The reserve area displays mobile session rows with active, alert, and TODO state. Selecting a session makes it the single visible terminal. |
-| Recent | `Recent` | `ClockCounterClockwiseIcon` | The entire reserve area displays `WIP - commands you have recently executed will be available here`. |
-| Type | `Type` | `TextTIcon` | The reserve area displays `Onscreen keyboard goes here` and focuses the hidden terminal input. Every typed key is echoed into the terminal as it happens. |
-| Draft | `Draft` | `ArticleNyTimesIcon` | The entire reserve area displays `WIP - this will be a place to draft prompts before pasting into the terminal`. |
+| Mode | Reserve area content |
+| --- | --- |
+| Sessions | The reserve area displays mobile session rows with active, alert, and TODO state. Selecting a session makes it the single visible terminal. |
+| Recent | The entire reserve area displays the Recent reserve placeholder copy. |
+| Type | The reserve area displays the Type reserve placeholder copy and focuses the hidden terminal input. Every typed key is echoed into the terminal as it happens. |
+| Draft | The entire reserve area displays the Draft reserve placeholder copy. |
 
 Default input mode is **Type**.
 
@@ -376,7 +383,7 @@ Minimum useful behavior:
   `tut` is running, `Ctrl+C` sends `\x03` to that app; if the app exits, the
   terminal returns to the fake shell prompt instead of restarting the app.
 * New panes created from the wall get the same fake shell behavior and prompt as
-  regular `/playground` panes.
+  regular `/playground/desktop` panes.
 
 Example commands:
 
@@ -397,8 +404,7 @@ The keyboard reserve area has a stable height. It should not be recomputed from
 `visualViewport` while the native keyboard animates.
 
 When the OS keyboard is hidden, the reserve area shows the selected app keyboard
-UI: session list, `WIP - commands you have recently executed will be available here`,
-`Onscreen keyboard goes here`, or `WIP - this will be a place to draft prompts before pasting into the terminal`.
+UI: session list, or the Recent/Type/Draft reserve placeholder copy.
 
 When the OS keyboard is visible, the OS keyboard may cover or occupy that same
 physical area. This is preferred over resizing the whole app around the keyboard.
@@ -449,7 +455,7 @@ Prototype behavior:
 
 Build exactly this:
 
-* One terminal playground screen.
+* One mobile terminal playground screen with one visible session at a time.
 * Floating theme switcher using the shared Dormouse theme picker.
 * Touch mode selector:
 
@@ -465,10 +471,11 @@ Sessions | Recent | Type | Draft
 
 * Stable keyboard reserve area.
 * Sessions reserve content: active session rows with alert and TODO state.
-* Recent reserve content: `WIP - commands you have recently executed will be available here`.
-* Draft reserve content: `WIP - this will be a place to draft prompts before pasting into the terminal`.
+* Recent reserve content: the Recent reserve placeholder copy.
+* Draft reserve content: the Draft reserve placeholder copy.
 * Type mode native mobile keyboard input.
 * Gesture mode radial menu for arrows, navigation keys, Esc, Tab, Enter, simple vim-like keys, confirmed Ctrl+C, confirmed Paste, and Quit breakout.
+* Pocket `tut` starts directly in the Gesture navigation section, uses the title `Dormouse Pocket Tutorial`, and credits gesture items from radial-menu input callbacks rather than from native keyboard input.
 * Simple local playground terminal behavior.
 
 ## 13. Prototype Success Criteria

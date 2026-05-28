@@ -13,7 +13,11 @@ import {
 import { cfg } from "dormouse-lib/cfg";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import type { InteractiveProgram } from "./tutorial-shell";
-import { SECTIONS, type Item } from "./tut-items";
+import {
+  DESKTOP_TUTORIAL_PROFILE,
+  type Item,
+  type TutorialProfile,
+} from "./tut-items";
 import type { TutorialState } from "./tutorial-state";
 
 /**
@@ -53,19 +57,80 @@ const SPINNER_INTERVAL_MS = 100;
  * silence. A static glyph keeps the pane quiet between user actions.
  */
 const ACTIVE_ITEM_GLYPH = "●";
+const STAR_PROMPT_TITLE = "Starred on GitHub";
+const FLAPPY_TITLE = "🐭 FlappyTerm 🐭";
+const FLAPPY_DESKTOP_GAME_OVER_PROMPT = "Read about Dormouse Pocket  [p]";
+const FLAPPY_POCKET_GAME_OVER_PROMPT = "Notify me when Pocket ships [n]";
+
+// --- Flappy Term game constants (ported from flappy-term.html) ---
+const FLAPPY_TICK_MS = 60;
+const FLAPPY_GRAVITY = 0.18;
+const FLAPPY_FLAP_V = -1.1;
+const FLAPPY_MAX_VY = 1.3;
+const FLAPPY_PIPE_SPACING_MIN = 18;
+const FLAPPY_PIPE_GAP = 8;
+const FLAPPY_MAX_GAP_DELTA = 8;
+const FLAPPY_PIPE_W = 4;
+const FLAPPY_GROUND_H = 2;
+
+const fg256 = (n: number) => `\x1b[38;5;${n}m`;
+const bg256 = (n: number) => `\x1b[48;5;${n}m`;
+const moveTo = (row: number, col: number) => `\x1b[${row};${col}H`;
+
+const FLAPPY_COLORS = {
+  bird: 226,
+  birdO: 208,
+  pipe: 34,
+  pipeD: 22,
+  ground: 94,
+  grass: 40,
+  text: 231,
+  dim: 245,
+  red: 196,
+};
+
+interface FlappyPipe {
+  x: number;
+  gapY: number;
+  gapH: number;
+  scored: boolean;
+}
+
+interface FlappyGameState {
+  birdX: number;
+  birdY: number;
+  birdVY: number;
+  pipes: FlappyPipe[];
+  score: number;
+  alive: boolean;
+  started: boolean;
+  frame: number;
+  nextPipeIn: number;
+}
 
 interface TutRunnerOptions {
   adapter: FakePtyAdapter;
   terminalId: string;
   state: TutorialState;
+  profile?: TutorialProfile;
   onExit: () => void;
   /** Called when the user presses `s` inside the Alert section. */
   onTriggerBusyDemo?: () => void;
   /** Called when the user presses `p` inside the Copy paste section. */
   onTogglePlaceToPaste?: () => void;
+  /** Called when the user presses `Enter` on the GitHub star prompt. */
+  onOpenGithub?: () => void;
+  /** Called when the user presses `p` on the Flappy Term game-over screen. */
+  onOpenPocket?: () => void;
+  /** Called when the user presses `n` on Pocket's Flappy Term game-over screen. */
+  onNotifyPocket?: () => void;
+  /** Current Pocket touch mode, used for live non-progress tutorial prompts. */
+  getPocketTouchMode?: () => PocketTutorialTouchMode;
+  subscribeToPocketTouchMode?: (listener: () => void) => () => void;
 }
 
-type Screen = "menu" | "section" | "reset";
+type Screen = "menu" | "section" | "reset" | "flappy";
+type PocketTutorialTouchMode = "gestures" | "selection" | "cursor";
 
 const RESET_CONFIRM_WORD = "reset";
 
@@ -73,9 +138,15 @@ export class TutRunner implements InteractiveProgram {
   private adapter: FakePtyAdapter;
   private terminalId: string;
   private state: TutorialState;
+  private profile: TutorialProfile;
   private onExit: () => void;
   private onTriggerBusyDemo?: () => void;
   private onTogglePlaceToPaste?: () => void;
+  private onOpenGithub?: () => void;
+  private onOpenPocket?: () => void;
+  private onNotifyPocket?: () => void;
+  private getPocketTouchMode?: () => PocketTutorialTouchMode;
+  private subscribeToPocketTouchMode?: (listener: () => void) => () => void;
 
   private screen: Screen = "menu";
   private menuIndex = 0;
@@ -84,7 +155,10 @@ export class TutRunner implements InteractiveProgram {
   private resetMismatch = false;
   private spinnerFrame = 0;
   private spinnerTimer: ReturnType<typeof setInterval> | null = null;
+  private flappyTimer: ReturnType<typeof setInterval> | null = null;
+  private flappy: FlappyGameState | null = null;
   private stateUnsub: (() => void) | null = null;
+  private pocketTouchModeUnsub: (() => void) | null = null;
   private resizeUnsub: (() => void) | null = null;
   private busyDemoStart: number | null = null;
   private disposed = false;
@@ -93,14 +167,22 @@ export class TutRunner implements InteractiveProgram {
     this.adapter = options.adapter;
     this.terminalId = options.terminalId;
     this.state = options.state;
+    this.profile = options.profile ?? DESKTOP_TUTORIAL_PROFILE;
     this.onExit = options.onExit;
     this.onTriggerBusyDemo = options.onTriggerBusyDemo;
     this.onTogglePlaceToPaste = options.onTogglePlaceToPaste;
+    this.onOpenGithub = options.onOpenGithub;
+    this.onOpenPocket = options.onOpenPocket;
+    this.onNotifyPocket = options.onNotifyPocket;
+    this.getPocketTouchMode = options.getPocketTouchMode;
+    this.subscribeToPocketTouchMode = options.subscribeToPocketTouchMode;
+    this.returnToInitialScreen();
   }
 
   start(): void {
     this.write(ENTER_ALT_SCREEN);
     this.stateUnsub = this.state.subscribe(() => this.render());
+    this.pocketTouchModeUnsub = this.subscribeToPocketTouchMode?.(() => this.render()) ?? null;
     this.resizeUnsub = this.adapter.onPtyResize((d) => {
       if (d.id === this.terminalId) this.render();
     });
@@ -125,6 +207,115 @@ export class TutRunner implements InteractiveProgram {
     if (!this.spinnerTimer) return;
     clearInterval(this.spinnerTimer);
     this.spinnerTimer = null;
+  }
+
+  private startFlappyTicks(): void {
+    if (this.flappyTimer) return;
+    this.flappyTimer = setInterval(() => {
+      this.stepFlappy();
+      this.render();
+    }, FLAPPY_TICK_MS);
+  }
+
+  private stopFlappyTicks(): void {
+    if (!this.flappyTimer) return;
+    clearInterval(this.flappyTimer);
+    this.flappyTimer = null;
+  }
+
+  private resetFlappyGame(): void {
+    const { cols, rows } = this.adapter.getPtySize(this.terminalId);
+    const playH = Math.max(6, rows - FLAPPY_GROUND_H);
+    this.flappy = {
+      birdX: Math.max(2, Math.floor(cols * 0.25)),
+      birdY: Math.floor(playH / 2),
+      birdVY: 0,
+      pipes: [],
+      score: 0,
+      alive: true,
+      started: false,
+      frame: 0,
+      nextPipeIn: 10,
+    };
+  }
+
+  private flap(): void {
+    const g = this.flappy;
+    if (!g || !g.alive) return;
+    g.started = true;
+    g.birdVY = FLAPPY_FLAP_V;
+  }
+
+  private spawnFlappyPipe(cols: number, playH: number): void {
+    const g = this.flappy;
+    if (!g) return;
+    const minGapY = 3;
+    const maxGapY = playH - FLAPPY_PIPE_GAP - 3;
+    let lo = minGapY;
+    let hi = maxGapY;
+    const last = g.pipes[g.pipes.length - 1];
+    if (last) {
+      lo = Math.max(lo, last.gapY - FLAPPY_MAX_GAP_DELTA);
+      hi = Math.min(hi, last.gapY + FLAPPY_MAX_GAP_DELTA);
+    }
+    if (hi < lo) hi = lo;
+    const gapY = Math.floor(lo + Math.random() * (hi - lo + 1));
+    g.pipes.push({
+      x: cols + 1,
+      gapY,
+      gapH: FLAPPY_PIPE_GAP,
+      scored: false,
+    });
+  }
+
+  private stepFlappy(): void {
+    const g = this.flappy;
+    if (!g || !g.alive) return;
+    const { cols, rows } = this.adapter.getPtySize(this.terminalId);
+    const playH = Math.max(6, rows - FLAPPY_GROUND_H);
+
+    g.frame++;
+    if (!g.started) return;
+
+    g.birdVY += FLAPPY_GRAVITY;
+    if (g.birdVY > FLAPPY_MAX_VY) g.birdVY = FLAPPY_MAX_VY;
+    g.birdY += g.birdVY;
+
+    for (const p of g.pipes) p.x -= 1;
+    g.pipes = g.pipes.filter((p) => p.x + FLAPPY_PIPE_W > 0);
+
+    g.nextPipeIn--;
+    if (g.nextPipeIn <= 0) {
+      this.spawnFlappyPipe(cols, playH);
+      g.nextPipeIn = FLAPPY_PIPE_SPACING_MIN;
+    }
+
+    const bx = Math.round(g.birdX);
+    for (const p of g.pipes) {
+      if (!p.scored && p.x + FLAPPY_PIPE_W - 1 < bx) {
+        p.scored = true;
+        g.score++;
+        this.state.recordFlappyScore(g.score);
+      }
+    }
+
+    const by = Math.round(g.birdY);
+    if (by >= playH) {
+      g.birdY = playH - 1;
+      g.alive = false;
+    } else if (by < 0) {
+      // Bonk the ceiling but don't die — feels better than instant death.
+      g.birdY = 0;
+      g.birdVY = 0.2;
+    }
+
+    for (const p of g.pipes) {
+      if (bx >= p.x && bx < p.x + FLAPPY_PIPE_W) {
+        if (by < p.gapY || by >= p.gapY + p.gapH) {
+          g.alive = false;
+        }
+      }
+    }
   }
 
   handleInput(data: string): void {
@@ -169,6 +360,26 @@ export class TutRunner implements InteractiveProgram {
         i += 1;
         continue;
       }
+      if (this.screen === "flappy" && ch === " ") {
+        this.flap();
+        i += 1;
+        continue;
+      }
+      if (
+        this.screen === "flappy" &&
+        this.flappy &&
+        !this.flappy.alive
+      ) {
+        if (this.profile.id === "pocket" && (ch === "n" || ch === "N")) {
+          this.onNotifyPocket?.();
+          i += 1;
+          continue;
+        } else if (this.profile.id === "desktop" && (ch === "p" || ch === "P")) {
+          this.onOpenPocket?.();
+          i += 1;
+          continue;
+        }
+      }
       if (ch === "q" || ch === "Q") {
         this.handleEscape();
         return;
@@ -205,11 +416,33 @@ export class TutRunner implements InteractiveProgram {
   // --- Input ---
 
   private menuLength(): number {
-    // SECTIONS + the trailing "Reset progress" entry
-    return SECTIONS.length + 1;
+    // Sections + GitHub star + Flappy Term + the trailing "Reset progress" entry
+    return this.profile.sections.length + 3;
+  }
+
+  private starPromptIndex(): number {
+    return this.profile.sections.length;
+  }
+
+  private flappyIndex(): number {
+    return this.profile.sections.length + 1;
+  }
+
+  private resetIndex(): number {
+    return this.profile.sections.length + 2;
+  }
+
+  private returnToInitialScreen(): void {
+    this.menuIndex = 0;
+    this.sectionId = this.profile.initialSectionId ?? null;
+    this.screen = this.sectionId ? "section" : "menu";
   }
 
   private handleArrow(letter: string): void {
+    if (this.screen === "flappy") {
+      if (letter === "A") this.flap();
+      return;
+    }
     if (this.screen !== "menu") return;
     const len = this.menuLength();
     if (letter === "A") {
@@ -223,15 +456,46 @@ export class TutRunner implements InteractiveProgram {
   }
 
   private handleEnter(): void {
+    if (this.screen === "flappy") {
+      if (this.flappy && !this.flappy.alive) {
+        this.resetFlappyGame();
+        this.render();
+      } else {
+        this.flap();
+      }
+      return;
+    }
     if (this.screen === "menu") {
-      if (this.menuIndex === SECTIONS.length) {
+      if (this.menuIndex === this.resetIndex()) {
         this.screen = "reset";
         this.resetBuffer = "";
         this.resetMismatch = false;
         this.render();
         return;
       }
-      const section = SECTIONS[this.menuIndex];
+      if (this.menuIndex === this.starPromptIndex()) {
+        const changed = this.state.resolveStarPrompt();
+        this.onOpenGithub?.();
+        if (!changed) this.render();
+        return;
+      }
+      if (this.menuIndex === this.flappyIndex()) {
+        const { done, total } = this.state.totalProgress();
+        if (done !== total) {
+          this.render();
+          return;
+        }
+        this.screen = "flappy";
+        this.resetFlappyGame();
+        // One full clear when entering the game so leftover menu chrome
+        // doesn't peek through the diff-style game frames (which only
+        // CURSOR_HOME between ticks to avoid flicker).
+        this.write(CLEAR_SCREEN + CURSOR_HOME);
+        this.startFlappyTicks();
+        this.render();
+        return;
+      }
+      const section = this.profile.sections[this.menuIndex];
       if (!section) return;
       this.sectionId = section.id;
       this.screen = "section";
@@ -249,7 +513,7 @@ export class TutRunner implements InteractiveProgram {
         this.state.reset();
         this.resetBuffer = "";
         this.resetMismatch = false;
-        this.screen = "menu";
+        this.returnToInitialScreen();
         this.render();
       } else {
         this.resetBuffer = "";
@@ -278,6 +542,13 @@ export class TutRunner implements InteractiveProgram {
       this.render();
       return;
     }
+    if (this.screen === "flappy") {
+      this.stopFlappyTicks();
+      this.flappy = null;
+      this.screen = "menu";
+      this.render();
+      return;
+    }
     this.exit();
   }
 
@@ -302,6 +573,10 @@ export class TutRunner implements InteractiveProgram {
 
   private render(): void {
     if (this.disposed) return;
+    if (this.screen === "flappy") {
+      this.renderFlappy();
+      return;
+    }
     const lines =
       this.screen === "menu"
         ? this.renderMenu()
@@ -319,12 +594,12 @@ export class TutRunner implements InteractiveProgram {
     const total = this.state.totalProgress();
     const lines: string[] = [];
     lines.push("");
-    lines.push(`  ${BOLD}Dormouse Playground Tutorial${RESET}`);
+    lines.push(`  ${BOLD}${this.profile.title}${RESET}`);
     lines.push(
-      `  ${DIM}${total.done}/${total.total} complete · \`Esc\`/\`q\` to exit · \`Enter\` to open · \`↑↓\` to navigate${RESET}`,
+      `  ${DIM}\`Esc\`/\`q\` to exit · \`Enter\` to open · \`↑↓\` to navigate${RESET}`,
     );
     lines.push("");
-    SECTIONS.forEach((section, index) => {
+    this.profile.sections.forEach((section, index) => {
       const { done, total: t } = this.state.sectionProgress(section.id);
       const marker = index === this.menuIndex ? `${fg(36)}❯${RESET}` : " ";
       const label = index === this.menuIndex
@@ -337,7 +612,31 @@ export class TutRunner implements InteractiveProgram {
       lines.push(`  ${marker} ${label}  ${progress}`);
     });
 
-    const resetIndex = SECTIONS.length;
+    const starIndex = this.starPromptIndex();
+    const starResolved = this.state.isStarPromptResolved();
+    const starMarker = this.menuIndex === starIndex ? `${fg(36)}❯${RESET}` : " ";
+    const starLabel =
+      this.menuIndex === starIndex
+        ? `${BOLD}${STAR_PROMPT_TITLE}${RESET}`
+        : STAR_PROMPT_TITLE;
+    const starStatus = starResolved
+      ? `${fg(32)}[thanks ⭐]${RESET}`
+      : `${DIM}[not yet]${RESET}`;
+    lines.push(`  ${starMarker} ${starLabel}  ${starStatus}`);
+
+    const flappyIndex = this.flappyIndex();
+    const flappyUnlocked = total.done === total.total;
+    const flappyMarker = this.menuIndex === flappyIndex ? `${fg(36)}❯${RESET}` : " ";
+    const flappyLabel =
+      this.menuIndex === flappyIndex
+        ? `${BOLD}${FLAPPY_TITLE}${RESET}`
+        : FLAPPY_TITLE;
+    const flappyStatus = flappyUnlocked
+      ? `  ${fg(32)}[High score: ${this.state.getFlappyHighScore()}]${RESET}`
+      : `  ${DIM}[LOCKED ${total.done}/${total.total}]${RESET}`;
+    lines.push(`  ${flappyMarker} ${flappyLabel}${flappyStatus}`);
+
+    const resetIndex = this.resetIndex();
     const resetMarker = this.menuIndex === resetIndex ? `${fg(36)}❯${RESET}` : " ";
     const resetLabel =
       this.menuIndex === resetIndex
@@ -349,6 +648,133 @@ export class TutRunner implements InteractiveProgram {
     return lines;
   }
 
+  private renderFlappy(): void {
+    const g = this.flappy;
+    if (!g) return;
+    const { cols, rows } = this.adapter.getPtySize(this.terminalId);
+    const COLS = cols;
+    const ROWS = rows;
+    const playH = Math.max(6, ROWS - FLAPPY_GROUND_H);
+    const C = FLAPPY_COLORS;
+
+    // Use CURSOR_HOME (no CLEAR_SCREEN) per-frame to avoid the blank
+    // flash xterm would otherwise paint between frames; the full grid
+    // overwrites every cell so leftover content can't show through.
+    let out = CURSOR_HOME;
+
+    for (let r = 0; r < ROWS; r++) {
+      let row = "";
+      let currentColor = "";
+      const setColor = (color: string) => {
+        if (color !== currentColor) {
+          row += color;
+          currentColor = color;
+        }
+      };
+
+      for (let c = 0; c < COLS; c++) {
+        // Ground area
+        if (r >= playH) {
+          if (r === playH) {
+            setColor(RESET + fg256(C.grass));
+            row += "^";
+          } else {
+            setColor(RESET + fg256(C.ground));
+            row += "~";
+          }
+          continue;
+        }
+
+        // Pipes
+        let drewPipe = false;
+        for (const p of g.pipes) {
+          if (c >= p.x && c < p.x + FLAPPY_PIPE_W) {
+            const inGap = r >= p.gapY && r < p.gapY + p.gapH;
+            if (!inGap) {
+              const isEdge = c === p.x || c === p.x + FLAPPY_PIPE_W - 1;
+              const isCapTop = r === p.gapY - 1;
+              const isCapBot = r === p.gapY + p.gapH;
+              if (isCapTop || isCapBot) {
+                setColor(fg256(C.pipeD) + bg256(C.pipe));
+                row += "=";
+              } else if (isEdge) {
+                setColor(fg256(C.pipeD) + bg256(C.pipe));
+                row += "|";
+              } else {
+                setColor(bg256(C.pipe) + fg256(C.pipeD));
+                row += " ";
+              }
+              drewPipe = true;
+              break;
+            }
+          }
+        }
+        if (drewPipe) continue;
+
+        // Bird
+        const bx = Math.round(g.birdX);
+        const by = Math.round(g.birdY);
+        if (r === by && c === bx) {
+          setColor(RESET + fg256(C.bird) + BOLD);
+          let glyph = ">";
+          if (g.birdVY < -0.3) glyph = "^";
+          else if (g.birdVY > 0.4) glyph = "v";
+          row += glyph;
+          continue;
+        }
+        if (r === by && c === bx + 1) {
+          setColor(RESET + fg256(C.birdO) + BOLD);
+          row += ">";
+          continue;
+        }
+
+        setColor(RESET);
+        row += " ";
+      }
+
+      out += row + RESET;
+      if (r < ROWS - 1) out += "\r\n";
+    }
+
+    // Overlays (absolute-positioned over the grid)
+    const scoreStr = `Score: ${g.score}`;
+    const bestStr = `Best: ${this.state.getFlappyHighScore()}`;
+    out += moveTo(1, 2) + RESET + fg256(C.text) + BOLD + scoreStr + RESET;
+    out += moveTo(1, Math.max(2, COLS - bestStr.length - 1)) + fg256(C.dim) + bestStr + RESET;
+
+    if (!g.alive) {
+      const r = Math.max(1, Math.floor(ROWS / 2) - 3);
+      out += this.flappyCenteredAt(COLS, r,     "+--------------------+", fg256(C.red) + BOLD);
+      out += this.flappyCenteredAt(COLS, r + 1, "|     GAME OVER      |", fg256(C.red) + BOLD);
+      out += this.flappyCenteredAt(COLS, r + 2, "+--------------------+", fg256(C.red) + BOLD);
+      out += this.flappyCenteredAt(
+        COLS,
+        r + 4,
+        `Score: ${g.score}   Best: ${this.state.getFlappyHighScore()}`,
+        fg256(C.text),
+      );
+      out += this.flappyCenteredAt(COLS, r + 6, "[ Enter to restart · Esc to exit ]", fg256(C.dim));
+      out += this.flappyCenteredAt(
+        COLS,
+        r + 8,
+        this.profile.id === "pocket"
+          ? FLAPPY_POCKET_GAME_OVER_PROMPT
+          : FLAPPY_DESKTOP_GAME_OVER_PROMPT,
+        fg256(C.text),
+      );
+    } else if (!g.started) {
+      const r = Math.min(ROWS, Math.floor(ROWS / 2) + 2);
+      out += this.flappyCenteredAt(COLS, r, "[ Space / Up to flap · Esc to exit ]", fg256(C.dim));
+    }
+
+    this.write(out);
+  }
+
+  private flappyCenteredAt(cols: number, row: number, text: string, color: string): string {
+    const c = Math.max(1, Math.floor((cols - text.length) / 2) + 1);
+    return moveTo(row, c) + color + text + RESET;
+  }
+
   private renderReset(): string[] {
     const lines: string[] = [];
     lines.push("");
@@ -356,7 +782,7 @@ export class TutRunner implements InteractiveProgram {
     lines.push(`  ${DIM}\`Esc\` to cancel${RESET}`);
     lines.push("");
     lines.push(
-      `  This will clear all checkmarks across every section.`,
+      `  This will clear all checkmarks and the GitHub star prompt.`,
     );
     lines.push(
       `  ${DIM}Type \`reset\` and press \`Enter\` to confirm.${RESET}`,
@@ -371,7 +797,7 @@ export class TutRunner implements InteractiveProgram {
   }
 
   private renderSection(): string[] {
-    const section = SECTIONS.find((s) => s.id === this.sectionId);
+    const section = this.profile.sections.find((s) => s.id === this.sectionId);
     if (!section) {
       throw new Error(`renderSection: unknown sectionId ${this.sectionId}`);
     }
@@ -382,12 +808,16 @@ export class TutRunner implements InteractiveProgram {
     lines.push(`  ${DIM}\`Esc\` to go back${RESET}`);
     lines.push("");
 
+    if (this.profile.id === "pocket" && section.id === "copy") {
+      lines.push(...this.renderPocketCopyModePrompt());
+    }
+
     const activeIndex = section.items.findIndex((i) => !this.state.isComplete(i.id));
     section.items.forEach((item, index) => {
       lines.push(...this.renderItem(item, index, activeIndex));
     });
 
-    if (section.id === "copy") {
+    if (section.id === "copy" && this.onTogglePlaceToPaste) {
       lines.push("");
       const indent = "  ";
       const text = "Press `p` to toggle the Place To Paste.";
@@ -419,6 +849,20 @@ export class TutRunner implements InteractiveProgram {
     }
 
     return lines;
+  }
+
+  private renderPocketCopyModePrompt(): string[] {
+    const mode = this.getPocketTouchMode?.() ?? "gestures";
+    if (mode === "selection") {
+      return [
+        `   ${fg(32)}${ACTIVE_ITEM_GLYPH}${RESET}  ${BOLD}Select is active — drag-to-copy is enabled${RESET}`,
+        ``,
+      ];
+    }
+    return [
+      `   ${fg(33)}${ACTIVE_ITEM_GLYPH}${RESET}  ${BOLD}Tap "Select" to enable drag-to-copy${RESET}`,
+      `        ${ITALIC}Current touch mode is \`${mode === "cursor" ? "Mouse" : "Gestures"}\`.${RESET}`,
+    ];
   }
 
   private renderBusyDemoLines(): string[] {
@@ -505,9 +949,13 @@ export class TutRunner implements InteractiveProgram {
     if (this.disposed) return;
     this.disposed = true;
     this.stopSpinnerTicks();
+    this.stopFlappyTicks();
+    this.flappy = null;
     this.busyDemoStart = null;
     this.stateUnsub?.();
     this.stateUnsub = null;
+    this.pocketTouchModeUnsub?.();
+    this.pocketTouchModeUnsub = null;
     this.resizeUnsub?.();
     this.resizeUnsub = null;
     this.write(LEAVE_ALT_SCREEN);

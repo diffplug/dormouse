@@ -179,13 +179,14 @@ The parser accepts both BEL and ST terminators and handles split chunks. Support
 - `promptStart` sets `{ kind: "prompt" }`, clears `currentCommand`, and clears `pendingCommandLine`. Any pending input that was not yet consumed by a `commandStart` is dropped — a fresh prompt is the unambiguous signal that no command is in flight.
 - `promptEnd` sets `{ kind: "editing" }`, clears `currentCommand`, and clears `pendingCommandLine` for the same reason.
 - `commandLine` stores `pendingCommandLine`.
-- User-entered prompt input may also store `pendingCommandLine` as an explicit fallback before an OSC 133/633 command-start boundary. This fallback is only used while the shell is idle/editing; foreground-program input is ignored. If the submitted line is non-empty, the input fallback may create a `currentCommand` immediately with `source: "user_input"` so shells without command-start integration still show the active command.
-- The typed-command fallback resolves the current Session id from the PTY id before recording input or prompt-looking output, so drag-to-swap moves the fallback state with the visible pane.
+- For shells without OSC 133/633 integration, the command is read from what is on screen rather than reconstructed from keystrokes. The store learns a cwd-invariant prompt **shape** — the prompt's trailing terminator character (`%`, `$`, `#`, `>`, `❯`, `➜`, `λ`) plus how many times that character already appears earlier in the prompt — from every detected idle prompt, including the shell's first prompt at spawn. On submit (an Enter that is not inside a bracketed paste) it reads the cursor's rendered logical line (`prompt + command`, soft-wrapped rows joined and bounded at the cursor column so zsh-autosuggestions ghost text is excluded) and splits the command off after the prompt's terminator, trimming leading whitespace. A non-empty result emits `commandLine` + `commandStart(source: "user_input")` immediately, so the active command shows even without command-start integration. Because it parses the rendered line, the title is correct regardless of how the command arrived — typed, history-recalled, or pasted — and independent of the race between shell output and idle detection. A prompt with no recognized terminator yields no shape, hence no title, rather than a wrong one.
+- The prompt shape survives across commands (it does not reset on `promptStart`/`promptEnd`/`commandStart`) and is pre-seeded from restored scrollback on session restore / VS Code panel reopen, so the first command after a reconnect — when the live shell will not re-emit its prompt — is still titled. Seeding is learn-only and fires no prompt transition.
+- The input fallback resolves the current Session id from the PTY id before recording submit input or prompt-looking output, so drag-to-swap moves the fallback state — including the learned prompt shape — with the visible pane.
 - `commandStart` creates `currentCommand`, snapshots `cwdAtStart`, uses `event.startedAt` when present, clears `pendingCommandLine`, and sets `{ kind: "running" }`.
 - `commandFinish` moves `currentCommand` to `lastCommand`, stores `finishedAt`/`exitCode`, snapshots the latest in-run OSC 0/2/9 title into `lastCommand.finalTerminalTitle` (titles older than `startedAt` or younger than `finishedAt` are excluded), clears `currentCommand`, and sets `{ kind: "finished", exitCode }`.
 - `title` updates `title` and the per-source entry in `titleCandidates`. Later OSC title events do not erase earlier user, shell, or notification channel candidates from other sources.
 - A later prompt signal moves the pane out of `finished`. If a command was started from `user_input` and no explicit `commandFinish` arrived, the prompt signal also clears `currentCommand` so the header returns to `<idle>`.
-- For `user_input` fallback commands only, visible output that looks like a returned shell prompt may synthesize the same prompt transition. This is a scoped fallback for shells that do not emit command finish/start OSCs.
+- Visible output that looks like a returned shell prompt always refreshes the learned prompt shape, but only synthesizes the idle prompt transition when `currentCommand.source === "user_input"`. This keeps shape learning available for all shells while scoping the finish/start synthesis to shells that do not emit command finish/start OSCs (OSC-tracked shells drive their own boundaries).
 
 CWD precedence:
 
@@ -230,29 +231,9 @@ Disambiguation:
 
 ## Grouping
 
-Supported grouping modes are `none`, `directory`, `command`, and `status`.
+Source of truth: `groupTerminalPanes()` in `lib/src/lib/terminal-state.ts` defines grouping modes (`TerminalGroupingMode`) and per-mode key derivation (directory uses `cwdAtStart ?? cwd`; command uses the running command's `displayCommand`, else the idle label).
 
-Directory grouping uses:
-
-```ts
-pane.currentCommand?.cwdAtStart ?? pane.cwd
-```
-
-Command grouping uses:
-
-```ts
-pane.currentCommand?.displayCommand ?? "<idle>"
-```
-
-Status grouping projects `ShellActivity.kind` (5 values) onto 4 buckets:
-
-| `pane.activity.kind` | Status bucket |
-|---|---|
-| `unknown`            | `unknown`     |
-| `prompt`             | `idle`        |
-| `editing`            | `idle`        |
-| `running`            | `running`     |
-| `finished`           | `finished`    |
+Source of truth: `statusBucket()` in `lib/src/lib/terminal-state.ts` projects the 5 `ShellActivity.kind` values onto 4 buckets (prompt+editing collapse to `idle`).
 
 `prompt` and `editing` collapse into a single `idle` bucket because the user-visible distinction between "at the prompt" and "typing a command" is not load-bearing for grouping. `finished` stays distinct so a recently-completed pane can be filtered separately even though its header label has the same `<idle>` prefix as plain idle panes.
 

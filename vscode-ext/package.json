@@ -115,12 +115,12 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
     "@types/vscode": "1.85.0",
-    "@vitejs/plugin-react-swc": "^4.3.1",
+    "@vitejs/plugin-react": "^6.0.2",
     "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.28.0",
     "ovsx": "^0.10.12",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
-    "vite": "^7.3.3"
+    "vite": "^8.0.14"
   }
 }

@@ -273,7 +273,7 @@ User-pin titles must not start with `<idle>` (the sentinel that prefixes the aut
 
 Pane IDs are session IDs. `TerminalPane` calls `getOrCreateTerminal(id)` on React mount and `unmountElement(id)` on React unmount. The session (xterm.js instance, PTY, DOM element) persists in the registry across mount/unmount cycles — the DOM element is detached from its container but the Registry entry stays `Mounted`.
 
-- **Create**: `getOrCreateTerminal` spawns xterm.js + FitAddon + PTY, returns existing if already created
+- **Create**: `getOrCreateTerminal` spawns xterm.js + UnicodeGraphemesAddon + FitAddon + PTY, returns existing if already created. The xterm instance sets `allowProposedApi: true` because UnicodeGraphemesAddon activates through xterm's proposed Unicode API.
 - **Resume**: `resumeTerminal` creates xterm entry and writes replay data without spawning a new PTY. Used when the webview is recreated while the host retains Live PTYs (Link: Severed → Resuming → Live).
 - **Restore**: `restoreTerminal` creates xterm entry and spawns a new PTY with saved cwd and scrollback. Used on cold start from a saved Snapshot (Link: Cold → Live).
 - **Untouched**: new `getOrCreateTerminal` sessions start untouched. `isUntouched(id)` exposes the flag, and user-originated PTY input clears it via the registry input paths. Resume/restore seed the persisted flag; missing legacy snapshot data defaults to touched (`false`) so close confirmation remains conservative.
@@ -303,11 +303,12 @@ Each session also carries `TerminalPaneState` from `docs/specs/terminal-state.md
 
 ## Theme
 
-Custom `dormouseTheme` extends dockview's `themeAbyss`:
-- `gap: 6` — 6px between groups in both directions
-- `dndOverlayMounting: 'absolute'`, `dndPanelOverlay: 'group'`
-- Pane header height: `--dv-tabs-and-actions-container-height: 30px`
-- 6px top/sides inset and 2px bottom inset around the dockview area (`px-1.5 pt-1.5 pb-0.5` on wrapper, `inset-x-1.5 top-1.5 bottom-0.5` on container)
+Custom `dormouseTheme` extends dockview's `themeAbyss`. Source of truth:
+`dormouseTheme` in `lib/src/components/Wall.tsx` defines gap and dnd overlay
+settings; `lib/src/index.css` defines dockview CSS-var overrides such as pane
+header height. The dockview area uses a 6px top/sides inset and 2px bottom
+inset (`px-1.5 pt-1.5 pb-0.5` on wrapper, `inset-x-1.5 top-1.5 bottom-0.5` on
+container).
 
 Colors use a two-layer CSS variable strategy: `@theme --color-*` tokens → `var(--vscode-*)`. VSCode provides host theme variables in extension mode; standalone and website mode apply bundled or installed theme variables before rendering. Tailwind v4 `@theme` block registers `--color-*` tokens as Tailwind colors (e.g., `bg-app-bg`, `text-app-fg`, `border-border`). See `theme.css` for the full token map.
 

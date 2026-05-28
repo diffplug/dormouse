@@ -1,10 +1,15 @@
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../..");
-const outPath = resolve(__dirname, "../src/data/dependencies.json");
+const npmOutPath = resolve(__dirname, "../src/data/dependencies-npm.json");
+const cargoOutPath = resolve(__dirname, "../src/data/dependencies-cargo.json");
+const runtimeOutPath = resolve(__dirname, "../src/data/dependencies-runtime.json");
+const cargoManifestPath = resolve(repoRoot, "standalone/src-tauri/Cargo.toml");
+const nodePinPath = resolve(repoRoot, "standalone/.node-version");
 const themeExtensionsPath = resolve(repoRoot, "lib/src/lib/themes/bundled-extensions.json");
 const productDependencyFilters = [
   "dormouse",
@@ -160,14 +165,34 @@ for (const packageName of productDependencyFilters) {
   scanWorkspacePackage(packageName);
 }
 
-const licenseAliases = {
-  "Apache-2.0 OR MIT": "MIT OR Apache-2.0",
-};
+// Within a single "A OR B OR ..." choice, move MIT to the front so the
+// listing reads consistently (MIT is the license we expect most often).
+function moveMitFirstInOrGroup(orExpression) {
+  const choices = orExpression.split(/\s+OR\s+/);
+  const mitIndex = choices.indexOf("MIT");
+  if (mitIndex <= 0) return orExpression;
+  choices.unshift(choices.splice(mitIndex, 1)[0]);
+  return choices.join(" OR ");
+}
+
+function normalizeLicense(license) {
+  if (!license) return null;
+  // Legacy dual-license syntax uses "/" to mean "OR" (e.g. "Apache-2.0/MIT").
+  const normalized = license.replace(/\s*\/\s*/g, " OR ");
+  // Reorder OR choices, both standalone and inside parenthesized groups
+  // (e.g. "(Apache-2.0 OR MIT) AND BSD-3-Clause"). AND expressions are
+  // conjunctive, so their operand order is left untouched.
+  if (normalized.includes("(")) {
+    return normalized.replace(/\(([^()]+)\)/g, (_, inner) => `(${moveMitFirstInOrGroup(inner)})`);
+  }
+  if (normalized.includes(" AND ")) return normalized;
+  return moveMitFirstInOrGroup(normalized);
+}
 
 const deps = [...externalPackages.values()].map((pkg) => ({
   name: pkg.name,
   version: [...pkg.versions].sort().join(", "),
-  license: pkg.license ? (licenseAliases[pkg.license] ?? pkg.license) : null,
+  license: normalizeLicense(pkg.license),
   author: pkg.author,
   homepage: pkg.homepage,
 }));
@@ -236,5 +261,125 @@ for (const dep of deps) {
 
 deps.sort((a, b) => a.name.localeCompare(b.name));
 
-writeFileSync(outPath, JSON.stringify(deps, null, 2) + "\n");
-console.log(`Wrote ${deps.length} dependencies to src/data/dependencies.json`);
+// Manual overrides for Cargo crates whose published Cargo.toml omits author or
+// homepage metadata. Keyed by crate name. libappindicator{,-sys} ship empty
+// `authors`/`homepage`/`repository`, so cargo metadata yields null for both.
+const cargoMissingAuthor = {
+  "libappindicator": "Tauri Apps Contributors",
+  "libappindicator-sys": "Tauri Apps Contributors",
+};
+const cargoMissingHomepage = {
+  "libappindicator": "https://github.com/tauri-apps/libappindicator-rs",
+  "libappindicator-sys": "https://github.com/tauri-apps/libappindicator-rs",
+};
+
+function getCargoHomepage(pkg) {
+  return pkg.homepage || pkg.repository || pkg.documentation || null;
+}
+
+function formatCargoAuthor(authors) {
+  if (!authors || authors.length === 0) return null;
+  return authors.join(", ");
+}
+
+function cargoPackageEntry(pkg) {
+  return {
+    name: pkg.name,
+    version: pkg.version,
+    license: normalizeLicense(pkg.license),
+    author: formatCargoAuthor(pkg.authors) ?? cargoMissingAuthor[pkg.name] ?? null,
+    homepage: getCargoHomepage(pkg) ?? cargoMissingHomepage[pkg.name] ?? null,
+  };
+}
+
+function compareDependencyEntries(a, b) {
+  return a.name.localeCompare(b.name) || a.version.localeCompare(b.version);
+}
+
+function getCargoMetadata() {
+  return JSON.parse(
+    execFileSync("cargo", [
+      "metadata",
+      "--format-version",
+      "1",
+      "--locked",
+      "--manifest-path",
+      cargoManifestPath,
+    ], {
+      cwd: repoRoot,
+      encoding: "utf-8",
+      maxBuffer: 1024 * 1024 * 64,
+    }),
+  );
+}
+
+function getManifestDependencyByName(manifestDependencies, name) {
+  return manifestDependencies.find((dep) => (dep.rename || dep.name).replaceAll("-", "_") === name);
+}
+
+function getCargoDependencies() {
+  const metadata = getCargoMetadata();
+  const rootPackage = metadata.packages.find((pkg) => pkg.id === metadata.resolve.root);
+  const rootNode = metadata.resolve.nodes.find((node) => node.id === metadata.resolve.root);
+  if (!rootPackage || !rootNode) {
+    throw new Error("Could not find root package in Cargo metadata");
+  }
+
+  const packagesById = new Map(metadata.packages.map((pkg) => [pkg.id, pkg]));
+  const directIds = new Set(rootNode.deps.map((dep) => dep.pkg));
+
+  const direct = rootNode.deps.map((dep) => {
+    const pkg = packagesById.get(dep.pkg);
+    if (!pkg) throw new Error(`Could not find Cargo package ${dep.pkg}`);
+
+    const manifestDep = getManifestDependencyByName(rootPackage.dependencies, dep.name);
+    return {
+      ...cargoPackageEntry(pkg),
+      declaredName: manifestDep?.rename || manifestDep?.name || dep.name.replaceAll("_", "-"),
+    };
+  }).sort(compareDependencyEntries);
+
+  const transitive = metadata.packages
+    .filter((pkg) => pkg.id !== metadata.resolve.root && !directIds.has(pkg.id))
+    .map(cargoPackageEntry)
+    .sort(compareDependencyEntries);
+
+  return { direct, transitive };
+}
+
+const cargoDeps = getCargoDependencies();
+
+// Bundled runtime: the standalone app ships a Node.js binary as a Tauri
+// sidecar (see standalone/src-tauri/build.rs). Its version is pinned exactly in
+// standalone/.node-version, and build.rs fails the build unless the bundled
+// binary matches that pin — so the version disclosed here provably equals what
+// ships. Reading the committed pin keeps this snapshot deterministic.
+function getBundledRuntimeDependencies() {
+  const nodeVersion = readFileSync(nodePinPath, "utf-8").trim().replace(/^v/, "");
+  if (!/^\d+\.\d+\.\d+$/.test(nodeVersion)) {
+    console.error(
+      `ERROR: standalone/.node-version must pin an exact Node.js version (e.g. 22.17.1), found "${nodeVersion}"`,
+    );
+    process.exit(1);
+  }
+  return [
+    {
+      name: "Node.js",
+      version: nodeVersion,
+      license: "MIT and bundled component licenses",
+      author: "OpenJS Foundation and Node.js contributors",
+      homepage: "https://github.com/nodejs/node",
+    },
+  ];
+}
+
+const runtimeDeps = getBundledRuntimeDependencies();
+
+writeFileSync(npmOutPath, JSON.stringify(deps, null, 2) + "\n");
+writeFileSync(cargoOutPath, JSON.stringify(cargoDeps, null, 2) + "\n");
+writeFileSync(runtimeOutPath, JSON.stringify(runtimeDeps, null, 2) + "\n");
+console.log(`Wrote ${deps.length} dependencies to src/data/dependencies-npm.json`);
+console.log(
+  `Wrote ${cargoDeps.direct.length} direct and ${cargoDeps.transitive.length} transitive Cargo dependencies to src/data/dependencies-cargo.json`,
+);
+console.log(`Wrote ${runtimeDeps.length} bundled runtime to src/data/dependencies-runtime.json`);

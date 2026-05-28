@@ -18,15 +18,18 @@ import {
   type TokenHint,
 } from '../lib/mouse-selection';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../components/design';
+import { TouchUiContext } from '../components/touch-ui-context';
 
 function SelectionOverlayStory({
   id,
   selection,
   hintToken = null,
+  touch = false,
 }: {
   id: string;
   selection: Omit<Selection, 'startedInScrollback'>;
   hintToken?: TokenHint | null;
+  touch?: boolean;
 }) {
   const terminalHostRef = useRef<HTMLDivElement>(null);
 
@@ -76,13 +79,15 @@ function SelectionOverlayStory({
   }, [id, selection, hintToken]);
 
   return (
-    <div
-      className={`relative bg-terminal-bg ${TERMINAL_BOTTOM_RADIUS_CLASS}`}
-      style={{ width: 620, height: 340 }}
-    >
-      <div ref={terminalHostRef} className="h-full w-full" />
-      <SelectionOverlay terminalId={id} />
-    </div>
+    <TouchUiContext.Provider value={touch}>
+      <div
+        className={`relative bg-terminal-bg ${TERMINAL_BOTTOM_RADIUS_CLASS}`}
+        style={{ width: 620, height: 340 }}
+      >
+        <div ref={terminalHostRef} className="h-full w-full" />
+        <SelectionOverlay terminalId={id} />
+      </div>
+    </TouchUiContext.Provider>
   );
 }
 
@@ -114,6 +119,38 @@ export const LinewiseDrag: Story = {
 export const BlockDrag: Story = {
   args: {
     id: 'selection-overlay-block-drag',
+    selection: {
+      startRow: 2,
+      startCol: 6,
+      endRow: 5,
+      endCol: 26,
+      shape: 'block',
+      dragging: true,
+    },
+  },
+};
+
+// Mobile: the block-selection hint reads "double-tap" instead of "Hold Opt", and
+// sits above the selection (never below) so the dragging thumb can't cover it.
+export const MobileLinewiseDrag: Story = {
+  args: {
+    id: 'selection-overlay-mobile-linewise-drag',
+    touch: true,
+    selection: {
+      startRow: 2,
+      startCol: 5,
+      endRow: 6,
+      endCol: 24,
+      shape: 'linewise',
+      dragging: true,
+    },
+  },
+};
+
+export const MobileBlockDrag: Story = {
+  args: {
+    id: 'selection-overlay-mobile-block-drag',
+    touch: true,
     selection: {
       startRow: 2,
       startCol: 6,

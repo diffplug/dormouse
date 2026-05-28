@@ -95,8 +95,10 @@ The VS Code extension stages the same workspace `dor` package into
 `vscode-ext/dor-cli` before the extension-host build. Packaged VSIX files include
 that staged directory alongside `dist/` and `media/`.
 
-The extension host starts `pty-host.js` with the same `DORMOUSE_NODE`,
-`DORMOUSE_CLI_JS`, private control socket, and token shape used by standalone.
+The extension host starts `pty-host.js` with the same `DORMOUSE_CLI_JS`, private
+control socket, and token shape used by standalone. `DORMOUSE_NODE` points at
+VS Code's own runtime (`process.execPath`, re-execed as Node through VS Code's
+extension-host environment) rather than searching for a user-installed Node.
 The forked PTY host runs the same control server module as standalone and uses
 the shared PTY core to prepend the staged `bin` directory to each spawned PTY's
 `PATH` while setting `DORMOUSE_SURFACE_ID`. VS Code also sends the Dormouse CLI

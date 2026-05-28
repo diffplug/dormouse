@@ -52,13 +52,16 @@ export interface MobileGestureOption {
   action: MobileGestureAction;
 }
 
+export type MobileGestureOptionTriple = readonly [MobileGestureOption, MobileGestureOption, MobileGestureOption];
+export type MobileGestureOptions = readonly [MobileGestureOption] | MobileGestureOptionTriple;
+
 export interface MobileGestureGroup {
   direction: MobileGestureDirection;
-  options: [MobileGestureOption, MobileGestureOption, MobileGestureOption];
+  options: MobileGestureOptions;
 }
 
 export interface MobileGestureCandidate {
-  phase: 'options' | 'quit';
+  phase: 'root' | 'options' | 'quit';
   groupDirection: MobileGestureDirection;
   direction: MobileGestureDirection;
   optionIndex: MobileGestureOptionIndex;
@@ -74,6 +77,7 @@ export type MobileGestureTrackingState =
       displayOrigin: MobileGesturePoint;
       currentPoint: MobileGesturePoint;
       highlightedDirection?: MobileGestureDirection;
+      candidate?: MobileGestureCandidate;
     }
   | {
       phase: 'options';
@@ -84,6 +88,9 @@ export type MobileGestureTrackingState =
       selectedDirection: MobileGestureDirection;
       optionOrigin: MobileGesturePoint;
       displayOptionOrigin: MobileGesturePoint;
+      // Latches true once the drag stops pushing further in the opening direction, so
+      // the compass can expand and stay expanded until the final selection.
+      expanded: boolean;
       highlightedOptionIndex?: MobileGestureOptionIndex;
       candidate?: MobileGestureCandidate;
     }
@@ -97,6 +104,7 @@ export type MobileGestureTrackingState =
       baseDirection: MobileGestureDirection;
       optionOrigin: MobileGesturePoint;
       displayOptionOrigin: MobileGesturePoint;
+      expanded: boolean;
       highlightedOptionIndex?: MobileGestureOptionIndex;
       candidate?: MobileGestureCandidate;
     }
@@ -132,6 +140,9 @@ export const RADIUS_HIGHLIGHT = RADIUS_SELECT * 0.5;
 export const MOBILE_GESTURE_COMPLETE_MS = 220;
 export const MOBILE_GESTURE_DISPLAY_MARGIN = 168;
 export const MOBILE_GESTURE_THUMB_OFFSET = 132;
+// Per-move outward distance below which the overshoot drag counts as settling rather
+// than still pushing out — the point where the compass is allowed to expand.
+export const OPTION_EXPAND_RELEASE = 2;
 
 export const MOBILE_GESTURE_DIRECTION_VECTORS: Record<MobileGestureDirection, MobileGesturePoint> = {
   n: { x: 0, y: -1 },
@@ -145,6 +156,7 @@ export const MOBILE_GESTURE_DIRECTION_VECTORS: Record<MobileGestureDirection, Mo
 };
 
 const ANGLE_DIRECTIONS: MobileGestureDirection[] = ['e', 'se', 's', 'sw', 'w', 'nw', 'n', 'ne'];
+const MOBILE_GESTURE_DIRECT_DIRECTIONS = new Set<MobileGestureDirection>(['n', 'e', 's', 'w']);
 
 export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGestureGroup> = {
   nw: {
@@ -162,8 +174,6 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
     direction: 'n',
     options: [
       { label: '▲', action: { kind: 'input', input: 'up' } },
-      { label: 'k', action: { kind: 'text', text: 'k' } },
-      { label: 'PgUp', action: { kind: 'input', input: 'pageUp' } },
     ],
   },
   ne: {
@@ -178,16 +188,12 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
     direction: 'w',
     options: [
       { label: '◀', action: { kind: 'input', input: 'left' } },
-      { label: 'Home', action: { kind: 'input', input: 'home' } },
-      { label: 'h', action: { kind: 'text', text: 'h' } },
     ],
   },
   e: {
     direction: 'e',
     options: [
       { label: '▶', action: { kind: 'input', input: 'right' } },
-      { label: 'End', action: { kind: 'input', input: 'end' } },
-      { label: 'l', action: { kind: 'text', text: 'l' } },
     ],
   },
   sw: {
@@ -202,8 +208,6 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
     direction: 's',
     options: [
       { label: '▼', action: { kind: 'input', input: 'down' } },
-      { label: 'j', action: { kind: 'text', text: 'j' } },
-      { label: 'PgDn', action: { kind: 'input', input: 'pageDown' } },
     ],
   },
   se: {
@@ -241,7 +245,7 @@ export const MOBILE_GESTURE_OPTION_DIRECTIONS: Record<
   nw: ['se', 'e', 's'],
 };
 
-export const MOBILE_GESTURE_QUIT_GROUP: MobileGestureGroup = {
+export const MOBILE_GESTURE_QUIT_GROUP: { direction: MobileGestureDirection; options: MobileGestureOptionTriple } = {
   direction: 'n',
   options: [
     { label: 'q', action: { kind: 'text', text: 'q' } },
@@ -292,6 +296,37 @@ export function translatedPoint(
   };
 }
 
+// As the user keeps dragging past a selection in the direction that opened the
+// submenu, slide the reference origin out to track that overshoot. Otherwise the
+// user would have to drag all the way back through the overshoot before a move in
+// any other direction could register. Only advances outward (a ratchet), so as soon
+// as the drag reverses the pulled-back distance counts toward the intended option.
+function advanceOptionOrigin(
+  selectionDirection: MobileGestureDirection,
+  optionOrigin: MobileGesturePoint,
+  displayOptionOrigin: MobileGesturePoint,
+  point: MobileGesturePoint,
+): { optionOrigin: MobileGesturePoint; displayOptionOrigin: MobileGesturePoint; advancing: boolean } {
+  const direction = MOBILE_GESTURE_DIRECTION_VECTORS[selectionDirection];
+  const overshoot = (point.x - optionOrigin.x) * direction.x + (point.y - optionOrigin.y) * direction.y;
+  if (overshoot <= 0) return { optionOrigin, displayOptionOrigin, advancing: false };
+  // Still ratchet the origin out to track the finger, but only call it "advancing"
+  // (which keeps the compass collapsed) while the outward push is brisk. Once the drag
+  // slows to a settle, advancing drops so the compass can expand without waiting for a
+  // deliberate move back in the chosen direction.
+  return {
+    advancing: overshoot > OPTION_EXPAND_RELEASE,
+    optionOrigin: {
+      x: optionOrigin.x + direction.x * overshoot,
+      y: optionOrigin.y + direction.y * overshoot,
+    },
+    displayOptionOrigin: {
+      x: displayOptionOrigin.x + direction.x * overshoot,
+      y: displayOptionOrigin.y + direction.y * overshoot,
+    },
+  };
+}
+
 function optionIndexForDirection(
   groupDirection: MobileGestureDirection,
   direction: MobileGestureDirection | null,
@@ -304,7 +339,7 @@ function optionIndexForDirection(
 function candidateForOptions(
   phase: 'options' | 'quit',
   groupDirection: MobileGestureDirection,
-  options: [MobileGestureOption, MobileGestureOption, MobileGestureOption],
+  options: MobileGestureOptionTriple,
   origin: MobileGesturePoint,
   point: MobileGesturePoint,
 ): MobileGestureOptionState {
@@ -378,6 +413,21 @@ export function updateMobileGesture(
       ? directionFromVector(point.x - state.origin.x, point.y - state.origin.y) ?? undefined
       : undefined;
     if (movementDistance >= RADIUS_SELECT && closestDirection) {
+      if (MOBILE_GESTURE_DIRECT_DIRECTIONS.has(closestDirection)) {
+        const option = MOBILE_GESTURE_GROUPS[closestDirection].options[0];
+        return {
+          ...state,
+          currentPoint: point,
+          highlightedDirection: closestDirection,
+          candidate: {
+            phase: 'root',
+            groupDirection: closestDirection,
+            direction: closestDirection,
+            optionIndex: 0,
+            option,
+          },
+        };
+      }
       const optionOrigin = pointOnRadius(state.origin, point, RADIUS_SELECT);
       return {
         phase: 'options',
@@ -388,25 +438,35 @@ export function updateMobileGesture(
         selectedDirection: closestDirection,
         optionOrigin,
         displayOptionOrigin: translatedPoint(state.displayOrigin, state.origin, optionOrigin),
+        expanded: false,
       };
     }
     return {
       ...state,
       currentPoint: point,
       highlightedDirection: closestDirection,
+      candidate: undefined,
     };
   }
 
   if (state.phase === 'options') {
+    const group = MOBILE_GESTURE_GROUPS[state.selectedDirection];
+    if (group.options.length !== 3) return state;
+    const { optionOrigin, displayOptionOrigin, advancing } = advanceOptionOrigin(
+      state.selectedDirection,
+      state.optionOrigin,
+      state.displayOptionOrigin,
+      point,
+    );
     const optionState = candidateForOptions(
       'options',
       state.selectedDirection,
-      MOBILE_GESTURE_GROUPS[state.selectedDirection].options,
-      state.optionOrigin,
+      group.options,
+      optionOrigin,
       point,
     );
     if (optionState.candidate?.option.action.kind === 'quitMenu') {
-      const quitOrigin = pointOnRadius(state.optionOrigin, point, RADIUS_SELECT);
+      const quitOrigin = pointOnRadius(optionOrigin, point, RADIUS_SELECT);
       return {
         phase: 'quit',
         pointerId: state.pointerId,
@@ -416,34 +476,47 @@ export function updateMobileGesture(
         parentDirection: state.selectedDirection,
         baseDirection: optionState.candidate.direction,
         optionOrigin: quitOrigin,
-        displayOptionOrigin: translatedPoint(state.displayOptionOrigin, state.optionOrigin, quitOrigin),
+        displayOptionOrigin: translatedPoint(displayOptionOrigin, optionOrigin, quitOrigin),
+        expanded: false,
       };
     }
     return {
       ...state,
       currentPoint: point,
+      optionOrigin,
+      displayOptionOrigin,
+      expanded: state.expanded || !advancing,
       highlightedOptionIndex: optionState.highlightedOptionIndex,
       candidate: optionState.candidate,
     };
   }
 
+  const { optionOrigin, displayOptionOrigin, advancing } = advanceOptionOrigin(
+    state.baseDirection,
+    state.optionOrigin,
+    state.displayOptionOrigin,
+    point,
+  );
   const optionState = candidateForOptions(
     'quit',
     state.baseDirection,
     MOBILE_GESTURE_QUIT_GROUP.options,
-    state.optionOrigin,
+    optionOrigin,
     point,
   );
   return {
     ...state,
     currentPoint: point,
+    optionOrigin,
+    displayOptionOrigin,
+    expanded: state.expanded || !advancing,
     highlightedOptionIndex: optionState.highlightedOptionIndex,
     candidate: optionState.candidate,
   };
 }
 
 export function finishMobileGesture(state: MobileGestureTrackingState): MobileGestureFinishResult {
-  const action = state.phase === 'options' || state.phase === 'quit'
+  const action = state.phase === 'root' || state.phase === 'options' || state.phase === 'quit'
     ? state.candidate?.option.action
     : undefined;
   return {
@@ -453,7 +526,7 @@ export function finishMobileGesture(state: MobileGestureTrackingState): MobileGe
 }
 
 export function completeMobileGesture(state: MobileGestureTrackingState): MobileGestureTrackingState | undefined {
-  if (state.phase !== 'options' && state.phase !== 'quit') return undefined;
+  if (state.phase !== 'root' && state.phase !== 'options' && state.phase !== 'quit') return undefined;
   if (!state.candidate) return undefined;
   return {
     phase: 'complete',
@@ -461,9 +534,13 @@ export function completeMobileGesture(state: MobileGestureTrackingState): Mobile
     origin: state.origin,
     displayOrigin: state.displayOrigin,
     currentPoint: state.currentPoint,
-    selectedDirection: state.phase === 'options' ? state.selectedDirection : state.parentDirection,
-    optionOrigin: state.optionOrigin,
-    displayOptionOrigin: state.displayOptionOrigin,
+    selectedDirection: state.phase === 'root'
+      ? state.candidate.groupDirection
+      : state.phase === 'options'
+        ? state.selectedDirection
+        : state.parentDirection,
+    optionOrigin: state.phase === 'root' ? state.origin : state.optionOrigin,
+    displayOptionOrigin: state.phase === 'root' ? state.displayOrigin : state.displayOptionOrigin,
     candidate: state.candidate,
   };
 }

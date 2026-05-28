@@ -23,8 +23,6 @@ import standaloneLatest from "@standalone-latest";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import { NotifySignupForm } from "../components/NotifySignupForm";
 
-export { Home as Component };
-
 /** Multiplier on scroll required to drive the hero animation.
  *  1 = baseline, 2 = half as sensitive, 0.5 = twice as sensitive. */
 const HERO_SLOMO_FACTOR = 2;
@@ -273,7 +271,7 @@ function DownloadGroupHeader({
   );
 }
 
-function Home() {
+export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const posterRef = useRef<HTMLImageElement>(null);
   const runwayRef = useRef<HTMLDivElement>(null);
@@ -941,7 +939,7 @@ function Home() {
               Walk away. Keep going.
             </h2>
             <p className="mb-4 text-lg leading-relaxed opacity-70">
-              Coming next: <a href="/pocket" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Dormouse Pocket</a>.
+              Coming next: <a href="/playground/pocket" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Dormouse Pocket</a>.
               Tether a terminal session to your phone over WebRTC and take a stroll — Dormouse
               buzzes your phone when something needs attention. A hosted auto-pairing service comes
               later, so you can close the laptop and walk away, no setup dance.
@@ -955,7 +953,7 @@ function Home() {
 
         <footer className="border-t border-[var(--color-text)]/20 py-10">
           <div className="mx-auto max-w-5xl px-4 md:px-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-base text-center opacity-50">
-            <a href="/dependencies" className="underline hover:opacity-100">Dependencies</a>
+            <a href="/supply-chain" className="underline hover:opacity-100">Supply Chain</a>
             <a href="https://github.com/diffplug/dormouse/issues" className="underline hover:opacity-100">Report an issue</a>
             <p>
               Built by{" "}

@@ -1,0 +1,11 @@
+bot_name: dormouse-bot
+
+secrets:
+  allowed:
+    - CHROMATIC_PROJECT_TOKEN
+
+workflows:
+  ci-fix:
+    watched_workflows:
+      - CI
+      - Chromatic

@@ -19,11 +19,22 @@ const HOST_TYPOGRAPHY_VARS: Record<string, string> = {
     "'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
 };
 
+function hasVisibleTheme(snapshot: AppliedThemeSnapshot): boolean {
+  const body = document.body;
+  const expectedClass = snapshot.theme.type === 'light' ? 'vscode-light' : 'vscode-dark';
+  if (!body.classList.contains(expectedClass)) return false;
+
+  for (const [name, value] of Object.entries(snapshot.resolvedVars)) {
+    if (body.style.getPropertyValue(name).trim() !== value) return false;
+  }
+  return true;
+}
+
 export function applyTheme(theme: DormouseTheme): void {
   if (typeof document === 'undefined') return;
-  if (theme === appliedThemeSnapshot?.theme) return;
+  if (theme === appliedThemeSnapshot?.theme && hasVisibleTheme(appliedThemeSnapshot)) return;
 
-  if (appliedThemeSnapshot) {
+  if (appliedThemeSnapshot && theme !== appliedThemeSnapshot.theme) {
     for (const name of Object.keys(appliedThemeSnapshot.resolvedVars)) {
       document.body.style.removeProperty(name);
     }
