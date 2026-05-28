@@ -1,4 +1,4 @@
-import type { AlertStateDetail, PlatformAdapter, PtyInfo } from './types';
+import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
 import { AlertManager, type SessionStatus } from '../alert-manager';
 import { normalizeExternalUri } from '../external-links';
 import {
@@ -45,6 +45,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   private scenarioMap = new Map<string, FakeScenario>();
   private inputHandlers = new Map<string, (data: string) => void>();
   private protocolParsers = new Map<string, TerminalProtocolParser>();
+  private openPortsMap = new Map<string, OpenPort[]>();
   private alertManager = new AlertManager();
 
   constructor() {
@@ -91,6 +92,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.spawnHandlers.clear();
     this.inputHandlers.clear();
     this.protocolParsers.clear();
+    this.openPortsMap.clear();
     this.alertManager.dispose();
     this.alertManager = new AlertManager();
     this.alertManager.onStateChange((id, state) => {
@@ -182,6 +184,15 @@ export class FakePtyAdapter implements PlatformAdapter {
 
   async getCwd(_id: string): Promise<string | null> { return null; }
   async getScrollback(_id: string): Promise<string | null> { return null; }
+
+  /** Ports the playground/tests want a given terminal to report. */
+  setOpenPorts(id: string, ports: OpenPort[]): void {
+    this.openPortsMap.set(id, ports);
+  }
+
+  async getOpenPorts(id: string): Promise<OpenPort[]> {
+    return this.openPortsMap.get(id) ?? [];
+  }
 
   getPtySize(id: string): FakePtySize {
     return this.terminalSizes.get(id) ?? DEFAULT_PTY_SIZE;

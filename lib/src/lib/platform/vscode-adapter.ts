@@ -1,4 +1,4 @@
-import type { AlertStateDetail, PlatformAdapter, PtyInfo } from './types';
+import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
 import { setDefaultShellOpts } from '../shell-defaults';
 import {
   collectTerminalSemanticEvents,
@@ -159,6 +159,17 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   getScrollback(id: string): Promise<string | null> {
     return this.requestResponse('pty:getScrollback', 'pty:scrollback', { id }, (msg) => msg.data);
+  }
+
+  async getOpenPorts(id: string): Promise<OpenPort[]> {
+    // Port enumeration shells out (lsof / PowerShell) on macOS/Windows, so allow
+    // a longer ceiling than the default 1s cwd query.
+    const result = await this.requestResponse<OpenPort[]>(
+      'pty:getOpenPorts', 'pty:openPorts', { id },
+      (msg) => msg.ports as OpenPort[],
+      4000,
+    );
+    return result ?? [];
   }
 
   readClipboardFilePaths(): Promise<string[] | null> {

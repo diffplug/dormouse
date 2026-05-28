@@ -236,6 +236,34 @@ export function getCwd(id: string): Promise<string | null> {
   });
 }
 
+export interface OpenPortEntry {
+  protocol: 'tcp';
+  family: 'IPv4' | 'IPv6';
+  address: string;
+  port: number;
+  pid: number;
+  processName?: string;
+}
+
+export function getOpenPorts(id: string): Promise<OpenPortEntry[]> {
+  return new Promise((resolve) => {
+    sendToChild({ type: 'getOpenPorts', id });
+    // Port enumeration shells out on macOS/Windows; allow more headroom than getCwd.
+    const timeout = setTimeout(() => {
+      child?.off('message', handler);
+      resolve([]);
+    }, 4000);
+    const handler = (msg: any) => {
+      if (msg.type === 'openPorts' && msg.id === id) {
+        clearTimeout(timeout);
+        child?.off('message', handler);
+        resolve(msg.ports || []);
+      }
+    };
+    child?.on('message', handler);
+  });
+}
+
 export function write(id: string, data: string): void {
   sendToChild({ type: 'input', id, data });
 }

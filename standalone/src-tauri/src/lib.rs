@@ -255,6 +255,25 @@ fn pty_get_cwd(
 }
 
 #[tauri::command]
+fn pty_get_open_ports(
+    state: tauri::State<'_, SidecarState>,
+    id: String,
+) -> Result<JsonValue, String> {
+    // Enumeration shells out to lsof / PowerShell, so allow more headroom than
+    // the 1s default used by most sidecar queries.
+    let response = request_from_sidecar_timeout(
+        &state,
+        "pty:getOpenPorts",
+        serde_json::json!({ "id": id }),
+        Duration::from_secs(8),
+    )?;
+    Ok(response
+        .get("ports")
+        .cloned()
+        .unwrap_or_else(|| JsonValue::Array(Vec::new())))
+}
+
+#[tauri::command]
 fn pty_get_scrollback(
     state: tauri::State<'_, SidecarState>,
     id: String,
@@ -638,6 +657,7 @@ pub fn run() {
             pty_resize,
             pty_kill,
             pty_get_cwd,
+            pty_get_open_ports,
             pty_get_scrollback,
             pty_request_init,
             kill_sidecar_now,

@@ -40,6 +40,7 @@ rl.on('line', (line) => {
       case 'pty:kill':    mgr.kill(data.id); break;
       case 'pty:requestInit': mgr.list(); break;
       case 'pty:getCwd':  mgr.getCwd(data.id, data.requestId); break;
+      case 'pty:getOpenPorts': mgr.getOpenPorts(data.id, data.requestId); break;
       case 'pty:getScrollback': mgr.getScrollback(data.id, data.requestId); break;
       case 'pty:getShells':  mgr.getShells(data.requestId); break;
       case 'pty:gracefulKillAll': mgr.gracefulKillAll(data.timeout); break;
