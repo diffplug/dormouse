@@ -43,6 +43,10 @@ fn bundle_node_runtime() -> Result<(), Box<dyn Error>> {
     let node_dest = binaries_dir.join(node_binary_name(&target));
     fs::copy(&node_source, &node_dest)?;
 
+    if target.contains("windows") {
+        force_windows_gui_subsystem(&node_dest)?;
+    }
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -52,6 +56,45 @@ fn bundle_node_runtime() -> Result<(), Box<dyn Error>> {
         fs::set_permissions(&node_dest, perms)?;
     }
 
+    Ok(())
+}
+
+// Rewrite the PE subsystem byte of the bundled node.exe from 3 (Windows
+// console) to 2 (Windows GUI). Node.js does not care which subsystem its
+// host binary advertises — it reads stdio handles from STARTUPINFO either
+// way — but a console-subsystem process triggers Windows' default-terminal
+// COM handoff, which on Win11 with Windows Terminal as DefTerm activates WT
+// to host the sidecar (visible as a stray WT window titled with the node.exe
+// path behind Dormouse). Neither CREATE_NO_WINDOW nor DETACHED_PROCESS opts
+// out of that handoff; only a non-console subsystem does.
+fn force_windows_gui_subsystem(path: &Path) -> Result<(), Box<dyn Error>> {
+    const IMAGE_SUBSYSTEM_WINDOWS_GUI: u16 = 2;
+    const IMAGE_SUBSYSTEM_WINDOWS_CUI: u16 = 3;
+
+    let mut bytes = fs::read(path)?;
+    if bytes.len() < 0x40 || &bytes[0..2] != b"MZ" {
+        return Err(format!("{} is not a PE/COFF binary", path.display()).into());
+    }
+    let pe_offset = u32::from_le_bytes(bytes[0x3C..0x40].try_into()?) as usize;
+    // PE signature (4) + COFF header (20) + Optional header up to Subsystem (0x44).
+    let subsystem_offset = pe_offset + 0x5C;
+    if bytes.len() < subsystem_offset + 2 || &bytes[pe_offset..pe_offset + 4] != b"PE\0\0" {
+        return Err(format!("{} has no PE signature at expected offset", path.display()).into());
+    }
+    let current = u16::from_le_bytes(bytes[subsystem_offset..subsystem_offset + 2].try_into()?);
+    if current == IMAGE_SUBSYSTEM_WINDOWS_GUI {
+        return Ok(());
+    }
+    if current != IMAGE_SUBSYSTEM_WINDOWS_CUI {
+        return Err(format!(
+            "{} has unexpected PE subsystem {current}; refusing to patch",
+            path.display()
+        )
+        .into());
+    }
+    bytes[subsystem_offset..subsystem_offset + 2]
+        .copy_from_slice(&IMAGE_SUBSYSTEM_WINDOWS_GUI.to_le_bytes());
+    fs::write(path, &bytes)?;
     Ok(())
 }
 
