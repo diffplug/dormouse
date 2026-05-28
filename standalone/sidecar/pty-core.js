@@ -145,6 +145,7 @@ function detectWindowsShells(runtime = {}) {
         encoding: 'utf-16le',
         stdio: ['ignore', 'pipe', 'ignore'],
         timeout: 5000,
+        windowsHide: true,
       });
       const distros = raw.split(/\r?\n/)
         .map((line) => line.replace(/\0/g, '').trim())
@@ -325,6 +326,9 @@ module.exports.create = function create(send, ptyModule) {
         rows: config.rows,
         cwd: config.cwd,
         env: config.env,
+        // System conhost.exe occasionally renders the PseudoConsoleWindow
+        // visible at startup; the bundled OpenConsole.exe keeps it fully hidden.
+        useConptyDll: true,
       });
     } catch (err) {
       console.error(`[pty-core] spawn failed for ${id}:`, err.message);

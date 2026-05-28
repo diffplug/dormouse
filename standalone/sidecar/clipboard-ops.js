@@ -9,6 +9,11 @@ const execFileP = promisify(execFile);
 
 const MAX_BUFFER = 16 * 1024 * 1024;
 
+// Without windowsHide, console subprocesses (powershell.exe in particular)
+// briefly flash a console window each time they're spawned from the sidecar.
+const EXEC_OPTS = { maxBuffer: MAX_BUFFER, windowsHide: true };
+const EXEC_OPTS_BUFFER = { ...EXEC_OPTS, encoding: 'buffer' };
+
 const MAC_FILE_PATHS_SCRIPT = [
   'use framework "AppKit"',
   'use framework "Foundation"',
@@ -32,7 +37,7 @@ const MAC_FILE_PATHS_SCRIPT = [
 async function readFilePathsMac(runtime) {
   const exec = runtime.exec || execFileP;
   try {
-    const { stdout } = await exec('osascript', ['-e', MAC_FILE_PATHS_SCRIPT], { maxBuffer: MAX_BUFFER });
+    const { stdout } = await exec('osascript', ['-e', MAC_FILE_PATHS_SCRIPT], EXEC_OPTS);
     return splitNonEmptyLines(stdout);
   } catch {
     return [];
@@ -46,7 +51,7 @@ async function readFilePathsWindows(runtime) {
     const { stdout } = await exec(
       'powershell',
       ['-NoProfile', '-NonInteractive', '-Command', cmd],
-      { maxBuffer: MAX_BUFFER },
+      EXEC_OPTS,
     );
     return splitNonEmptyLines(stdout);
   } catch {
@@ -77,7 +82,7 @@ async function readFilePathsLinux(runtime) {
 
   for (const [cmd, args] of attempts) {
     try {
-      const { stdout } = await exec(cmd, args, { maxBuffer: MAX_BUFFER });
+      const { stdout } = await exec(cmd, args, EXEC_OPTS);
       const paths = parseUriList(stdout);
       if (paths.length > 0) return paths;
     } catch {}
@@ -95,7 +100,7 @@ async function readClipboardFilePaths(runtime = {}) {
 async function readTextMac(runtime) {
   const exec = runtime.exec || execFileP;
   try {
-    const { stdout } = await exec('pbpaste', [], { maxBuffer: MAX_BUFFER });
+    const { stdout } = await exec('pbpaste', [], EXEC_OPTS);
     return stdout;
   } catch {
     return '';
@@ -108,7 +113,7 @@ async function readTextWindows(runtime) {
     const { stdout } = await exec(
       'powershell',
       ['-NoProfile', '-NonInteractive', '-Command', 'Get-Clipboard -Raw'],
-      { maxBuffer: MAX_BUFFER },
+      EXEC_OPTS,
     );
     // Get-Clipboard -Raw appends a trailing newline that wasn't on the clipboard.
     return stdout.replace(/\r?\n$/, '');
@@ -127,7 +132,7 @@ async function readTextLinux(runtime) {
 
   for (const [cmd, args] of attempts) {
     try {
-      const { stdout } = await exec(cmd, args, { maxBuffer: MAX_BUFFER });
+      const { stdout } = await exec(cmd, args, EXEC_OPTS);
       if (stdout) return stdout;
     } catch {}
   }
@@ -166,7 +171,7 @@ async function readImageMac(out, runtime) {
     'end try',
   ].join('\n');
   try {
-    const { stdout } = await exec('osascript', ['-e', script], { maxBuffer: MAX_BUFFER });
+    const { stdout } = await exec('osascript', ['-e', script], EXEC_OPTS);
     return stdout.trim() === 'ok';
   } catch {
     return false;
@@ -185,7 +190,7 @@ async function readImageWindows(out, runtime) {
     const { stdout } = await exec(
       'powershell',
       ['-NoProfile', '-NonInteractive', '-Command', cmd],
-      { maxBuffer: MAX_BUFFER },
+      EXEC_OPTS,
     );
     return stdout.trim() === 'ok';
   } catch {
@@ -203,7 +208,7 @@ async function readImageLinux(out, runtime, fsp) {
 
   for (const [cmd, args] of attempts) {
     try {
-      const { stdout } = await exec(cmd, args, { encoding: 'buffer', maxBuffer: MAX_BUFFER });
+      const { stdout } = await exec(cmd, args, EXEC_OPTS_BUFFER);
       if (stdout && stdout.length > 0) {
         await fsp.writeFile(out, stdout, { mode: 0o600 });
         return true;
