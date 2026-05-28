@@ -81,36 +81,12 @@ test('global help output', async () => {
   await snapshot('global-help', await runCli(['--help']));
 });
 
-test('new-split help output', async () => {
-  await snapshot('new-split-help', await runCli(['new-split', '--help']));
-});
-
-test('new-split pending implementation output', async () => {
-  await snapshot(
-    'new-split-unimplemented',
-    await runCli(['new-split', 'right'], {
-      env: {
-        DORMOUSE_CONTROL_SOCKET: '/tmp/dormouse.sock',
-        DORMOUSE_CONTROL_TOKEN: 'token',
-      },
-    }),
-  );
-});
-
-test('list-surfaces help output', async () => {
-  await snapshot('list-surfaces-help', await runCli(['list-surfaces', '--help']));
-});
-
 test('list-panes help output', async () => {
   await snapshot('list-panes-help', await runCli(['list-panes', '--help']));
 });
 
 test('list-pane-surfaces help output', async () => {
   await snapshot('list-pane-surfaces-help', await runCli(['list-pane-surfaces', '--help']));
-});
-
-test('list-panels help output', async () => {
-  await snapshot('list-panels-help', await runCli(['list-panels', '--help']));
 });
 
 test('list-panes text output', async () => {
@@ -131,33 +107,11 @@ test('list-panes json output', async () => {
   );
 });
 
-test('list-surfaces legacy alias output', async () => {
-  await snapshot('list-surfaces-alias', await runCli(['list-surfaces'], { client: fixtureClient() }));
-});
-
-test('list-panels text output', async () => {
-  await snapshot('list-panels-alias', await runCli(['list-panels'], { client: fixtureClient() }));
-});
-
-test('list-panels id-format both output', async () => {
-  await snapshot(
-    'list-panels-id-format-both',
-    await runCli(['list-panels', '--id-format', 'both'], { client: fixtureClient() }),
-  );
-});
-
-test('list-panels json output', async () => {
-  await snapshot(
-    'list-panels-json',
-    await runCli(['list-panels', '--json'], { client: fixtureClient() }),
-  );
-});
-
-test('list-pane-surfaces pane-scoped alias output', async () => {
+test('list-pane-surfaces pane-scoped output', async () => {
   const client = fixtureClient();
   const result = await runCli(['list-pane-surfaces'], { client });
   assert.deepEqual(client.requests, [{ pane: 'focused', workspace: undefined, window: undefined }]);
-  await snapshot('list-pane-surfaces-alias', result);
+  await snapshot('list-pane-surfaces-text', result);
 });
 
 test('list-pane-surfaces id-format both output', async () => {
@@ -192,33 +146,17 @@ test('list-pane-surfaces unknown cwd json output', async () => {
   );
 });
 
-test('focus-surface help output', async () => {
-  await snapshot('focus-surface-help', await runCli(['focus-surface', '--help']));
-});
-
-test('focus-surface pending implementation output', async () => {
-  await snapshot(
-    'focus-surface-unimplemented',
-    await runCli(['focus-surface', 'surface:1'], {
-      env: {
-        DORMOUSE_CONTROL_SOCKET: '/tmp/dormouse.sock',
-        DORMOUSE_CONTROL_TOKEN: 'token',
-      },
-    }),
-  );
-});
-
 test('unknown command output', async () => {
   await snapshot('unknown-command', await runCli(['wat']));
 });
 
 test('missing control endpoint output', async () => {
-  await snapshot('missing-control-endpoint', await runCli(['focus-surface', 'surface:1']));
+  await snapshot('missing-control-endpoint', await runCli(['list-panes']));
 });
 
 test('unsupported workspace output', async () => {
   await snapshot(
     'unsupported-workspace',
-    await runCli(['list-surfaces', '--workspace', 'workspace:2'], { client: fixtureClient() }),
+    await runCli(['list-panes', '--workspace', 'workspace:2'], { client: fixtureClient() }),
   );
 });

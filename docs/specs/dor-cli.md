@@ -113,7 +113,7 @@ that owns that surface when one is available.
 
 Dormouse currently exposes one workspace and one window. Each visible Pane has
 one terminal surface. The CLI still uses `surface` terminology for cmux
-compatibility and accepts `pane` aliases where cmux does.
+compatibility and accepts `pane` targets where cmux does.
 
 Invariants:
 
@@ -123,8 +123,6 @@ Invariants:
   `window:1`.
 - List output defaults to refs; commands that list handles accept
   `--id-format refs|uuids|both`.
-- `DORMOUSE_SURFACE_ID` is the default source for future source-relative
-  commands.
 - `--workspace workspace:1` / `--window window:1` and bare `1` are compatibility
   no-ops. Any other workspace/window target is rejected before host mutation.
 
@@ -189,51 +187,6 @@ Text shape:
 * surface:1  …/worktrees/0cbc/mouseterm  [selected]
 ```
 
-### `dor list-panels`
-
-Alias:
-
-- `dor list-surfaces`
-
-Usage:
-
-```text
-dor list-panels [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--window <id|ref|index>]
-```
-
-Behavior:
-
-- Implemented legacy cmux-compatible command.
-- Lists visible terminal surfaces across the current workspace.
-- Text output marks the focused surface with `*`, prints handle, `terminal`,
-  optional `[focused]`, and a JSON-escaped title.
-- `--json` returns `surfaces`, `workspace_ref`, and `window_ref`. Surface
-  entries preserve the legacy surface-list fields: `focused`, `index`,
-  `index_in_pane`, `pane_ref`, `requested_working_directory`,
-  `selected_in_pane`, `title`, and `type`.
-- `dor list-surfaces` is a Dormouse compatibility alias. It is not a current
-  cmux command.
-
-Text shape:
-
-```text
-* surface:1  terminal  [focused]  "build"
-```
-
-### Reserved Commands
-
-These commands are recognized for help and cmux-shaped UX, but current runtime
-execution returns `Error: command '<name>' is not implemented yet` after
-confirming the control endpoint exists:
-
-- `dor new-split <left|right|up|down>`
-- `dor focus-surface <surface>`
-- `dor focus-panel <surface>`
-
-Their help/output snapshots live with the implemented command snapshots. When
-implemented, they must preserve the singleton workspace/window validation above
-and avoid partial layout mutation on argument-validation failure.
-
 ## cmux Compatibility
 
 Dormouse tracks the public cmux CLI/API shape only where it maps cleanly:
@@ -243,13 +196,10 @@ Dormouse tracks the public cmux CLI/API shape only where it maps cleanly:
   compatibility targets.
 - cmux exposes both a CLI and socket API; Dormouse exposes only the CLI.
 - In the cmux version used to derive this contract on 2026-05-28, the relevant
-  CLI commands are `list-panes`, `list-pane-surfaces`, and the legacy
-  `list-panels`. The socket capabilities are named `surface.list` and
-  `surface.focus`.
-- `dor list-panes` and `dor list-pane-surfaces` are the canonical commands for
-  new code that wants cmux compatibility. `dor list-panels` is kept for cmux's
-  legacy surface-list output, and `dor list-surfaces` is kept only for existing
-  Dormouse callers.
+  working CLI commands are `list-panes` and `list-pane-surfaces`. The socket
+  capability used underneath is named `surface.list`.
+- Dormouse exposes only the implemented commands above. It does not currently
+  expose aliases or recognized-but-unimplemented command stubs.
 - Dormouse omits cmux JSON geometry fields such as `container_frame`,
   `pixel_frame`, rows/columns, and cell dimensions until those fields are part
   of the Dormouse control response.

@@ -1,7 +1,0 @@
-exitCode: 0
-stdout:
-Usage: dor focus-surface (--surface <id|ref|index> | --panel <id|ref|index>) [--workspace <id|ref|index>] [--window <id|ref|index>]
-       dor focus-surface <id|ref|index>
-
-stderr:
-

@@ -63,7 +63,7 @@ interface Pane {
   surfaces: Surface[];
 }
 
-type ListOutputMode = 'panes' | 'pane-surfaces' | 'surfaces';
+type ListOutputMode = 'panes' | 'pane-surfaces';
 
 type ParseResult<T> =
   | { ok: true; value: T }
@@ -72,13 +72,8 @@ type ParseResult<T> =
 const CWD_UNKNOWN_LABEL = '<cwd unknown>';
 
 const COMMANDS = new Set([
-  'new-split',
   'list-panes',
-  'list-surfaces',
-  'list-panels',
   'list-pane-surfaces',
-  'focus-surface',
-  'focus-panel',
 ]);
 
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<CliResult> {
@@ -95,13 +90,7 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     return ok(printCommandHelp(command));
   }
 
-  if (command === 'list-panes' || command === 'list-surfaces' || command === 'list-panels' || command === 'list-pane-surfaces') {
-    return listSurfaces(command, args, options);
-  }
-
-  const endpointCheck = requireControlEndpoint(options);
-  if (!endpointCheck.ok) return fail(endpointCheck.message);
-  return fail(`command '${command}' is not implemented yet`);
+  return listSurfaces(command, args, options);
 }
 
 function ok(stdout: string): CliResult {
@@ -119,32 +108,17 @@ Usage:
   dor <command> [options]
 
 Commands:
-  new-split <left|right|up|down>
   list-panes
   list-pane-surfaces
-  list-panels
-  focus-surface <surface>
-
-Aliases:
-  list-surfaces
-  focus-panel
 `;
 }
 
 function printCommandHelp(command: string): string {
   switch (command) {
-    case 'new-split':
-      return 'Usage: dor new-split <left|right|up|down> [--surface <id|ref|index>] [--panel <id|ref|index>] [--focus <true|false>] [--workspace <id|ref|index>] [--window <id|ref|index>]\n';
     case 'list-panes':
       return 'Usage: dor list-panes [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--window <id|ref|index>]\n';
     case 'list-pane-surfaces':
       return 'Usage: dor list-pane-surfaces [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--pane <id|ref|index>] [--window <id|ref|index>]\n';
-    case 'list-panels':
-    case 'list-surfaces':
-      return 'Usage: dor list-panels [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--window <id|ref|index>]\n';
-    case 'focus-surface':
-    case 'focus-panel':
-      return 'Usage: dor focus-surface (--surface <id|ref|index> | --panel <id|ref|index>) [--workspace <id|ref|index>] [--window <id|ref|index>]\n       dor focus-surface <id|ref|index>\n';
     default:
       return '';
   }
@@ -176,8 +150,7 @@ async function listSurfaces(command: string, args: string[], options: CliOptions
 
 function listOutputMode(command: string): ListOutputMode {
   if (command === 'list-panes') return 'panes';
-  if (command === 'list-pane-surfaces') return 'pane-surfaces';
-  return 'surfaces';
+  return 'pane-surfaces';
 }
 
 function parseListSurfacesArgs(command: string, args: string[]): ParseResult<ListSurfacesOptions> {
@@ -283,14 +256,9 @@ function renderListResponse(
       ? renderPanesJson(response, panes, idFormat)
       : renderPanesText(panes, idFormat);
   }
-  if (mode === 'pane-surfaces') {
-    return json
-      ? renderPaneSurfacesJson(response, idFormat)
-      : renderPaneSurfacesText(response.surfaces, idFormat);
-  }
   return json
-    ? renderSurfacesJson(response, idFormat)
-    : renderSurfacesText(response.surfaces, idFormat);
+    ? renderPaneSurfacesJson(response, idFormat)
+    : renderPaneSurfacesText(response.surfaces, idFormat);
 }
 
 function panesFromSurfaces(surfaces: Surface[]): Pane[] {
@@ -341,18 +309,6 @@ function renderPaneSurfaceTextLine(surface: Surface, idFormat: IdFormat): string
   const handle = renderSurfaceHandle(surface, idFormat);
   const selected = surface.selectedInPane ? '  [selected]' : '';
   return `${prefix} ${handle}  ${renderPaneSurfaceTitle(surface)}${selected}`;
-}
-
-function renderSurfacesText(surfaces: Surface[], idFormat: IdFormat): string {
-  if (surfaces.length === 0) return '';
-  return `${surfaces.map((surface) => renderSurfaceTextLine(surface, idFormat)).join('\n')}\n`;
-}
-
-function renderSurfaceTextLine(surface: Surface, idFormat: IdFormat): string {
-  const prefix = surface.focused ? '*' : ' ';
-  const handle = renderSurfaceHandle(surface, idFormat);
-  const focused = surface.focused ? '  [focused]' : '';
-  return `${prefix} ${handle}  ${surface.type}${focused}  ${JSON.stringify(surface.title)}`;
 }
 
 function renderPaneHandle(pane: Pane, idFormat: IdFormat): string {
@@ -447,28 +403,4 @@ function formatTailPath(path: string, separator: '/' | '\\'): string {
   if (segments.length === 0) return path;
   const tail = segments.slice(-3).join(separator);
   return segments.length > 3 ? `…${separator}${tail}` : tail;
-}
-
-function renderSurfacesJson(response: ListSurfacesResponse, idFormat: IdFormat): string {
-  const payload = {
-    surfaces: response.surfaces.map((surface) => renderSurfaceJson(surface, idFormat)),
-    ...(idFormat === 'refs' || idFormat === 'both' ? { window_ref: response.windowRef } : {}),
-    ...(idFormat === 'refs' || idFormat === 'both' ? { workspace_ref: response.workspaceRef } : {}),
-  };
-  return `${JSON.stringify(payload, null, 2)}\n`;
-}
-
-function renderSurfaceJson(surface: Surface, idFormat: IdFormat): Record<string, unknown> {
-  return {
-    focused: surface.focused,
-    ...(idFormat === 'uuids' || idFormat === 'both' ? { id: surface.id } : {}),
-    index: surface.index,
-    index_in_pane: surface.indexInPane,
-    pane_ref: surface.paneRef,
-    ...(idFormat === 'refs' || idFormat === 'both' ? { ref: surface.ref } : {}),
-    requested_working_directory: surface.requestedWorkingDirectory,
-    selected_in_pane: surface.selectedInPane,
-    title: surface.title,
-    type: surface.type,
-  };
 }

@@ -6,15 +6,8 @@ Usage:
   dor <command> [options]
 
 Commands:
-  new-split <left|right|up|down>
   list-panes
   list-pane-surfaces
-  list-panels
-  focus-surface <surface>
-
-Aliases:
-  list-surfaces
-  focus-panel
 
 stderr:
 
