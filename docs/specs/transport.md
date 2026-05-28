@@ -64,21 +64,23 @@ For cold restore (no live PTYs), the webview falls back to saved session state: 
 
 ## Message protocol
 
-Message types live in `vscode-ext/src/message-types.ts` (the canonical schema; other adapters import or mirror it). The persisted-session types in the next section live in `lib/src/lib/session-types.ts` because they cross the webview/host boundary and are also consumed by frontend persistence helpers. Webview-side handling lives in adapter modules (e.g., `vscode-adapter.ts`, `fake-adapter.ts`); host-side handling lives in the per-adapter message router.
+Source of truth:
 
-**Webview → host:**
+| Scope | Source |
+| --- | --- |
+| Message schema | `vscode-ext/src/message-types.ts` (`WebviewMessage`, `ExtensionMessage`; other adapters import or mirror it) |
+| Persisted-session types | `lib/src/lib/session-types.ts` (shared webview/host boundary types) |
+| Webview handlers | Adapter modules such as `vscode-adapter.ts` and `fake-adapter.ts` |
+| Host handlers | The per-adapter message router |
 
-Webview → host message types: see the `WebviewMessage` union in `vscode-ext/src/message-types.ts`. The ones with non-obvious contracts:
+Non-obvious message contracts:
 
-- `dormouse:openExternal` — request the host to open a user-confirmed external URI from an OSC 8 hyperlink. Hosts must revalidate and reject malformed, control-character-bearing, or blocked pseudo-scheme targets (`javascript:`, `data:`, `blob:`, `about:`).
-
-**Host → webview:**
-
-Host → webview message types: see the `ExtensionMessage` union in `vscode-ext/src/message-types.ts`. The ones with non-obvious contracts:
-
-- `pty:data` — PTY output after state-driving supported OSC sequences have been parsed/stripped; `OSC 8` hyperlinks are preserved for xterm.js (routed only to owning router).
-- `pty:replay` — buffered raw output since spawn; the webview parses semantic OSCs during replay reconstruction without triggering alerts (must not re-fire alerts).
-- `dormouse:newTerminal` — payload may include `shell`, `args`, display `name`, `replaceUntouched`, and `announce`; the webview replaces the selected untouched terminal in-place only when `replaceUntouched` is true, otherwise it spawns a new pane.
+| Direction | Message | Source type | Contract |
+| --- | --- | --- | --- |
+| Webview → host | `dormouse:openExternal` | `WebviewMessage` | Request the host to open a user-confirmed external URI from an OSC 8 hyperlink. Hosts must revalidate and reject malformed, control-character-bearing, or blocked pseudo-scheme targets (`javascript:`, `data:`, `blob:`, `about:`). |
+| Host → webview | `pty:data` | `ExtensionMessage` | PTY output after state-driving supported OSC sequences have been parsed/stripped; `OSC 8` hyperlinks are preserved for xterm.js and routed only to the owning router. |
+| Host → webview | `pty:replay` | `ExtensionMessage` | Buffered raw output since spawn; the webview parses semantic OSCs during replay reconstruction without triggering alerts. |
+| Host → webview | `dormouse:newTerminal` | `ExtensionMessage` | Payload may include `shell`, `args`, display `name`, `replaceUntouched`, and `announce`; the webview replaces the selected untouched terminal in-place only when `replaceUntouched` is true, otherwise it spawns a new pane. |
 
 The OSC parsing/stripping rules that produce `pty:data` and `terminal:semanticEvents` are specified in `docs/specs/terminal-escapes.md`.
 

@@ -103,8 +103,8 @@ The selector must be self-labeling through segmented buttons that include both
 an icon and a short mode label. Icon-only touch controls are too hard to
 discover in this prototype.
 
-Touch modes (button labels and icons are canonical in `TOUCH_MODES`,
-`lib/src/components/MobileTerminalUi.tsx`):
+Source of truth: `TOUCH_MODES` in `lib/src/components/MobileTerminalUi.tsx`
+defines touch-mode button labels and icons.
 
 | Mode | Availability | Behavior |
 | --- | --- | --- |
@@ -305,10 +305,10 @@ The quit submenu uses the same reset-center, highlight-radius, and select-radius
 rules as the main option selection. Its final selected item uses the same
 expand-and-fade completion feedback as the root menu options.
 
-Action-to-byte-sequence mapping is canonical in `MOBILE_TERMINAL_KEY_SEQUENCES`
-(`lib/src/components/MobileTerminalUi.tsx`). Root gesture text/paste actions
-come from `MOBILE_GESTURE_GROUPS`, and quit submenu actions come from
-`MOBILE_GESTURE_QUIT_GROUP` (`lib/src/lib/mobile-gesture-menu.ts`).
+Source of truth: `MOBILE_TERMINAL_KEY_SEQUENCES` in
+`lib/src/components/MobileTerminalUi.tsx` defines action-to-byte-sequence
+mapping; `MOBILE_GESTURE_GROUPS` and `MOBILE_GESTURE_QUIT_GROUP` in
+`lib/src/lib/mobile-gesture-menu.ts` define root and quit submenu actions.
 
 ## 6. Input Mode Selector
 
@@ -322,9 +322,9 @@ Sessions | Recent | Type | Draft
 The selector must be self-labeling through segmented buttons that include both
 an icon and a short mode label.
 
-Input modes (button labels and icons are canonical in `KEYBOARD_MODES`,
-`lib/src/components/MobileTerminalUi.tsx`; reserve placeholder copy is canonical
-in `RESERVE_PLACEHOLDER_COPY`, `lib/src/components/MobileTerminalUi.tsx`):
+Source of truth: `KEYBOARD_MODES` and `RESERVE_PLACEHOLDER_COPY` in
+`lib/src/components/MobileTerminalUi.tsx` define input-mode button labels,
+icons, and placeholder copy.
 
 | Mode | Reserve area content |
 | --- | --- |
@@ -406,9 +406,7 @@ The keyboard reserve area has a stable height. It should not be recomputed from
 `visualViewport` while the native keyboard animates.
 
 When the OS keyboard is hidden, the reserve area shows the selected app keyboard
-UI: session list, or the Recent/Type/Draft reserve placeholder copy. Reserve
-placeholder copy is canonical in `RESERVE_PLACEHOLDER_COPY`
-(`lib/src/components/MobileTerminalUi.tsx`).
+UI: session list, or the Recent/Type/Draft reserve placeholder copy.
 
 When the OS keyboard is visible, the OS keyboard may cover or occupy that same
 physical area. This is preferred over resizing the whole app around the keyboard.
@@ -476,9 +474,7 @@ Sessions | Recent | Type | Draft
 * Stable keyboard reserve area.
 * Sessions reserve content: active session rows with alert and TODO state.
 * Recent reserve content: the Recent reserve placeholder copy.
-* Draft reserve content: the Draft reserve placeholder copy. Reserve placeholder
-  copy is canonical in `RESERVE_PLACEHOLDER_COPY`
-  (`lib/src/components/MobileTerminalUi.tsx`).
+* Draft reserve content: the Draft reserve placeholder copy.
 * Type mode native mobile keyboard input.
 * Gesture mode radial menu for arrows, navigation keys, Esc, Tab, Enter, simple vim-like keys, confirmed Ctrl+C, confirmed Paste, and Quit breakout.
 * Pocket `tut` starts directly in the Gesture navigation section, uses the title `Dormouse Pocket Tutorial`, and credits gesture items from radial-menu input callbacks rather than from native keyboard input.

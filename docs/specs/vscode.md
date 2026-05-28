@@ -158,10 +158,13 @@ The CSP directives are assembled in `vscode-ext/src/webview-html.ts` (`getNonce(
 
 ### Build and development
 
-Root build/dogfood orchestration for `pnpm build:vscode` and `pnpm dogfood:vscode`
-lives in `package.json`; extension-local steps live in `vscode-ext/package.json`
-scripts (`build:frontend`, `build`, `dogfood`). The F5 launch chain is in
-`.vscode/launch.json` + `.vscode/tasks.json`.
+Source of truth:
+
+| Scope | Source | Covers |
+| --- | --- | --- |
+| Root commands | `package.json` | `pnpm build:vscode`, `pnpm dogfood:vscode` orchestration |
+| Extension scripts | `vscode-ext/package.json` | `build:frontend`, `build`, `dogfood` package-local steps |
+| F5 launch | `.vscode/launch.json` + `.vscode/tasks.json` | Extension Development Host debugging chain |
 
 **Dogfooding vs Extension Development Host:** Day-to-day development uses `pnpm dogfood:vscode` to install the extension into your real VS Code instance. This catches real-world issues since you're running with your actual settings, extensions, and workspaces. The F5 Extension Development Host workflow exists for when you need **breakpoint debugging** of extension host code (`extension.ts`, `message-router.ts`, `pty-manager.ts`, etc.) — it launches a separate VS Code window where the debugger can attach to the extension host process.
 
