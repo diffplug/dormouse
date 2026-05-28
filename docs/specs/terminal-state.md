@@ -231,29 +231,9 @@ Disambiguation:
 
 ## Grouping
 
-Supported grouping modes are `none`, `directory`, `command`, and `status`.
+Source of truth: `groupTerminalPanes()` in `lib/src/lib/terminal-state.ts` defines grouping modes (`TerminalGroupingMode`) and per-mode key derivation (directory uses `cwdAtStart ?? cwd`; command uses the running command's `displayCommand`, else the idle label).
 
-Directory grouping uses:
-
-```ts
-pane.currentCommand?.cwdAtStart ?? pane.cwd
-```
-
-Command grouping uses:
-
-```ts
-pane.currentCommand?.displayCommand ?? "<idle>"
-```
-
-Status grouping projects `ShellActivity.kind` (5 values) onto 4 buckets:
-
-| `pane.activity.kind` | Status bucket |
-|---|---|
-| `unknown`            | `unknown`     |
-| `prompt`             | `idle`        |
-| `editing`            | `idle`        |
-| `running`            | `running`     |
-| `finished`           | `finished`    |
+Source of truth: `statusBucket()` in `lib/src/lib/terminal-state.ts` projects the 5 `ShellActivity.kind` values onto 4 buckets (prompt+editing collapse to `idle`).
 
 `prompt` and `editing` collapse into a single `idle` bucket because the user-visible distinction between "at the prompt" and "typing a command" is not load-bearing for grouping. `finished` stays distinct so a recently-completed pane can be filtered separately even though its header label has the same `<idle>` prefix as plain idle panes.
 

@@ -43,6 +43,10 @@ The primary job of a spec is to be an accurate reference for the current state o
 
 When updating code covered by a spec, update the spec to match. When the two specs overlap (e.g. pane header elements appear in both), layout.md documents placement and sizing while alert.md documents behavior and visual states.
 
+When editing specs, keep them concise but do not replace invariants or edge cases with only a code pointer. Use `Source of truth:` for implementation references, and include direction/scope for protocols, command orchestration, and cross-package boundaries. For docs-only compression, spot-check referenced symbols, message directions, and root-vs-package script ownership against code before committing.
+
+Every spec that uses Session / Pane / Door / baseboard / passthrough vocabulary leads with a `> See \`docs/specs/glossary.md\` for ...` blockquote (see `layout.md`, `alert.md`, `terminal-state.md`). When introducing glossary vocabulary into a spec that lacks the callout, add it in the same edit.
+
 ## Design
 
 See [DESIGN.md](DESIGN.md) for full design context. Key principles:

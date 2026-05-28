@@ -1,5 +1,7 @@
 # Terminal Mouse and Clipboard Behavior Specification
 
+> See `docs/specs/glossary.md` for Session / Pane vocabulary. This spec uses it for the pane-level scoping of mouse regime, override state, and selection.
+
 ## Overview
 
 Mouse handling and clipboard (copy and paste) behavior for the terminal across macOS, Linux, and Windows. The core design goal is to make text selection, copying, pasting, and mouse-driven interaction with TUI programs coexist cleanly, with visible state and predictable transitions between modes.
@@ -25,63 +27,32 @@ The terminal makes the current regime visible in the pane header, provides a way
 
 ## 1. The Mouse Icon (Header Indicator)
 
-### 1.1 Visibility
+**Visibility.** No icon when the inside program has not requested mouse reporting; a **Mouse icon** (Phosphor `CursorClickIcon`) when it has; replaced by a **No-Mouse icon** (Phosphor `SelectionSlashIcon`) in the same header location while the user has activated an override.
 
-- When the inside program has **not** requested mouse reporting: no icon is shown.
-- When the inside program **has** requested mouse reporting: a **Mouse icon** (Phosphor `CursorClickIcon`) is shown in the terminal header.
-- When the user has activated an override: the Mouse icon is replaced by a **No-Mouse icon** (Phosphor `SelectionSlashIcon`) in the same header location.
+**Click.** Clicking the Mouse icon activates a **temporary override** (see §2). Clicking the No-Mouse icon ends the override immediately and restores mouse reporting to the inside program.
 
-### 1.2 Hover Text
-
-- Mouse icon hover text: `TUI is intercepting mouse commands. Click to override.`
-- No-Mouse icon hover text: `You're overriding the TUI's mouse capture. Click to restore.`
-
-### 1.3 Click Behavior
-
-- Clicking the **Mouse icon** activates a **temporary override** (see §2).
-- Clicking the **No-Mouse icon** ends the override immediately and restores mouse reporting to the inside program.
+Source of truth: `lib/src/components/wall/TerminalPaneHeader.tsx` defines hover text for both icons.
 
 ---
 
 ## 2. Override State
 
-### 2.1 Temporary Override
+There are two override modes: temporary (the default) and sticky.
 
-Activated by clicking the Mouse icon. While the temporary override is active:
+**Temporary override.** Activated by clicking the Mouse icon. While active:
 
 - Mouse events are handled by the terminal, not forwarded to the inside program.
-- Wheel events are also suppressed so xterm cannot translate scroll input into
-  mouse reports or alternate-screen arrow-key input for the inside program.
+- Wheel events are also suppressed so xterm cannot translate scroll input into mouse reports or alternate-screen arrow-key input for the inside program.
 - The Mouse icon is replaced with the No-Mouse icon.
 - A banner appears below the No-Mouse icon reading `Temporary mouse override until mouse-up.` followed by two buttons: **Make sticky** and **Cancel**.
-- The override persists until the **next mouse-up event inside the terminal content area** (live region or scrollback) that is paired with a prior mouse-down in the same area. This includes plain clicks (a mouse-down/up pair that never crossed the drag threshold) as well as completed drags. The click on the No-Mouse icon itself, the banner's buttons, and any "orphan" mouse-up from a drag that started outside the terminal do **not** count as that mouse-up.
-- After that mouse-up, the override automatically ends: mouse reporting is restored to the inside program, the banner is dismissed, and the icon reverts to the Mouse icon.
 
-### 2.2 Making the Override Sticky
+The temporary override ends on the **next mouse-up event inside the terminal content area** (live region or scrollback) that is paired with a prior mouse-down in the same area. This includes plain clicks (a mouse-down/up pair that never crossed the drag threshold) and completed drags; it excludes clicks on the No-Mouse icon, the banner buttons, and any "orphan" mouse-up from a drag that started outside the terminal. After that mouse-up, mouse reporting is restored, the banner is dismissed, and the icon reverts to the Mouse icon. Clicking **Cancel** in the banner ends the override immediately with the same outcome. If the user activates an override and never performs a mouse action, it remains in place indefinitely; there is no timeout.
 
-- Clicking **Make sticky** in the banner converts the temporary override into a sticky one.
-- The banner is dismissed.
-- The No-Mouse icon remains visible with its "click to restore" hover text.
-- Mouse and wheel events continue to be handled by the terminal rather than the
-  inside program.
-- The override persists until the user clicks the No-Mouse icon, or until the inside program stops requesting mouse reporting.
+**Sticky override.** Clicking **Make sticky** in the banner converts the temporary override into a sticky one. The banner is dismissed; the No-Mouse icon remains visible with its "click to restore" hover text; mouse and wheel events continue to be handled by the terminal rather than the inside program. The sticky override persists until the user clicks the No-Mouse icon, or until the inside program stops requesting mouse reporting.
 
-### 2.3 Canceling the Temporary Override
+**Auto-clear on reporting off.** If the inside program stops requesting mouse reporting (e.g. exits or sends DECRST `?1000l`/`?1002l`/`?1003l`) while either override is active, the override is cleared. The icon and banner are removed because there is no longer anything to override.
 
-- Clicking **Cancel** in the banner ends the override immediately.
-- The banner is dismissed, mouse reporting is restored, and the icon reverts to the Mouse icon.
-
-### 2.4 No Keyboard Activation
-
-The mouse icon, No-Mouse icon, and banner buttons are mouse-only. They are not keyboard-activatable.
-
-### 2.5 Edge Case: No Drag After Override
-
-If the user activates an override and then never performs a mouse action, the override remains in place indefinitely. There is no timeout.
-
-### 2.6 Auto-Cleared on Reporting Off
-
-If the inside program stops requesting mouse reporting (e.g. exits or explicitly sends DECRST `?1000l`/`?1002l`/`?1003l`) while an override is active, the override is cleared. The icon and banner are removed because there is no longer anything to override.
+**No keyboard activation.** The Mouse icon, No-Mouse icon, and banner buttons are mouse-only. They are not keyboard-activatable.
 
 ---
 
@@ -105,14 +76,11 @@ Selection is available whenever the terminal is handling mouse events — that i
 
 ### 3.3 Selection Hint Text
 
-While a drag is in progress, a small hint is displayed adjacent to the selection (below when dragging downward, above when dragging upward):
-
-- `Hold Alt for block selection` on Windows and Linux.
-- `Hold Opt for block selection` on macOS.
+While a drag is in progress, a small hint is displayed adjacent to the selection (below when dragging downward, above when dragging upward). The exact hint strings (mouse vs. touch, block-selection, and the URL/path extension hint) live in `lib/src/components/SelectionOverlay.tsx`.
 
 The hint is always shown during an active drag. It does not fade with use.
 
-When a URL or path token is detected near the current drag position, an additional extension hint (`Press e to select the full URL` / `Press e to select the full path`) is shown alongside it. See §5 for full details.
+When a URL or path token is detected near the current drag position, an additional extension hint is shown alongside it. See §5 for full details.
 
 ### 3.4 Selection Follows Content
 
@@ -148,12 +116,7 @@ When a selection is finalized, a popup appears adjacent to the selection (on the
 
 ### 4.1 Copy Buttons
 
-The popup shows two copy buttons:
-
-- `[Cmd+C] Copy Raw`
-- `[Cmd+Shift+C] Copy Rewrapped`
-
-On non-macOS platforms, the labels show `Ctrl` and `Ctrl+Shift` respectively.
+Source of truth: `lib/src/components/SelectionPopup.tsx` defines the Copy Raw and Copy Rewrapped buttons and their platform-dependent shortcut labels.
 
 #### 4.1.1 Copy Raw
 
@@ -195,21 +158,13 @@ Smart extension is offered **mid-drag**, in parallel with the Alt block-selectio
 
 ### 5.1 Detection
 
-A token is whitespace-delimited and matches one of (in priority order, see `lib/src/lib/smart-token.ts`):
-
-- A URL: `https?://...`, `file://...`.
-- An error location: `<path>:line` or `<path>:line:col`. (Matched first so it beats the generic path patterns; trailing `:line` digits are preserved.)
-- An absolute path beginning with `~/`, `/`, `./`, or `../`.
-- A Windows-style path (`C:\...`).
+A token is whitespace-delimited. Source of truth: `PATTERNS` in `lib/src/lib/smart-token.ts` defines the detected shapes in priority order. Error locations (`<path>:line` or `<path>:line:col`) are matched before the generic path patterns, and their trailing `:line` digits are preserved.
 
 For all kinds **except** error locations, trailing characters that are unlikely to be part of the token — `.`, `,`, `;`, `:`, `!`, `?`, single quotes, double quotes — are stripped from the detected token's end. Unmatched closing brackets (`)`, `]`, `}`, `>`) are also stripped, but matched pairs are preserved (e.g. `https://en.wikipedia.org/wiki/Foo_(bar)` keeps its trailing `)`).
 
 ### 5.2 Mid-Drag Hint
 
-When a qualifying token is detected during a drag, a hint is shown alongside the existing `Hold Alt for block selection` hint:
-
-- `Press e to select the full URL` (for URLs)
-- `Press e to select the full path` (for paths and error locations)
+When a qualifying token is detected during a drag, a hint is shown alongside the existing block-selection hint (the exact strings live in `lib/src/components/SelectionOverlay.tsx`).
 
 The hint appears and disappears live as the drag moves into and out of qualifying tokens. If no qualifying token is present at the current drag position, no extension hint is shown.
 
