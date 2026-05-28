@@ -1,7 +1,25 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { create, getCwdForPid, parseCwdFromLsof, resolveSpawnConfig, detectAvailableShells } = require('./pty-core');
+const {
+  create,
+  getCwdForPid,
+  parseCwdFromLsof,
+  resolveSpawnConfig,
+  detectAvailableShells,
+  buildDescendantSet,
+  parseProcStatPpid,
+  parsePsPairs,
+  parseHexIpv4,
+  parseHexIpv6,
+  parseProcNetTcp,
+  parseLsofListening,
+  parseNetTcpConnections,
+  parseNetstatListening,
+  getDescendantPids,
+  getListeningPortsForPids,
+  getOpenPortsForPid,
+} = require('./pty-core');
 
 test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
   const config = resolveSpawnConfig(undefined, {
@@ -379,4 +397,258 @@ test('detectAvailableShells detects WSL distros on Windows', () => {
 
   const debian = shells.find((s) => s.name === 'Debian');
   assert.ok(debian, 'Debian WSL should be detected');
+});
+
+// ── Open-port discovery ──────────────────────────────────────────────────────
+
+test('buildDescendantSet walks the process tree from the root', () => {
+  // 100 → 200 → 400, 100 → 300; 999 is unrelated.
+  const pairs = [
+    [200, 100],
+    [300, 100],
+    [400, 200],
+    [999, 1],
+  ];
+  const set = buildDescendantSet(pairs, 100);
+  assert.deepEqual([...set].sort((a, b) => a - b), [100, 200, 300, 400]);
+  assert.ok(!set.has(999));
+});
+
+test('buildDescendantSet tolerates cycles without looping forever', () => {
+  const pairs = [[200, 100], [100, 200]];
+  const set = buildDescendantSet(pairs, 100);
+  assert.deepEqual([...set].sort((a, b) => a - b), [100, 200]);
+});
+
+test('parseProcStatPpid handles comm containing spaces and parens', () => {
+  // comm = "(weird ) name)" — ppid is the second token after the final ')'.
+  const content = '4242 (weird ) name) S 4200 4242 4242 0 -1 4194304 100 0';
+  assert.equal(parseProcStatPpid(content), 4200);
+});
+
+test('parseProcStatPpid returns null on garbage', () => {
+  assert.equal(parseProcStatPpid('no parens here'), null);
+});
+
+test('parsePsPairs parses pid/ppid columns', () => {
+  const out = '  100   1\n  200 100\n 400  200\nheader junk\n';
+  assert.deepEqual(parsePsPairs(out), [[100, 1], [200, 100], [400, 200]]);
+});
+
+test('parseHexIpv4 decodes little-endian /proc address', () => {
+  assert.equal(parseHexIpv4('0100007F'), '127.0.0.1'); // loopback
+  assert.equal(parseHexIpv4('00000000'), '0.0.0.0');   // all interfaces
+});
+
+test('parseHexIpv6 decodes and compresses', () => {
+  assert.equal(parseHexIpv6('00000000000000000000000000000000'), '::');  // any
+  assert.equal(parseHexIpv6('00000000000000000000000001000000'), '::1'); // loopback
+});
+
+test('parseProcNetTcp keeps only LISTEN rows owned by tracked inodes', () => {
+  const content = [
+    '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode',
+    '   0: 0100007F:1538 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 55501 1 ffff 100',
+    '   1: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 55502 1 ffff 100',
+    '   2: 0100007F:E07A AB07007F:1538 01 00000000:00000000 00:00000000 00000000  1000        0 55503 1 ffff 100',
+  ].join('\n');
+  const inodeToPid = new Map([['55501', 4242], ['55502', 4242], ['55503', 4242]]);
+  const ports = parseProcNetTcp(content, 'IPv4', inodeToPid);
+  // Row 2 is ESTABLISHED (st 01) so it is dropped; only the two LISTEN rows remain.
+  assert.deepEqual(ports, [
+    { protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5432, pid: 4242 },
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 8080, pid: 4242 },
+  ]);
+});
+
+test('parseProcNetTcp ignores rows whose inode is not tracked', () => {
+  const content = [
+    'header',
+    '   0: 0100007F:1538 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000  0 77777 1 ffff 100',
+  ].join('\n');
+  assert.deepEqual(parseProcNetTcp(content, 'IPv4', new Map()), []);
+});
+
+test('parseLsofListening parses *, IPv4, and bracketed IPv6 names', () => {
+  const output = [
+    'p4242',
+    'cnode',
+    'tIPv4',
+    'n*:3000',
+    'tIPv4',
+    'n127.0.0.1:5432',
+    'p4300',
+    'cpython3',
+    'tIPv6',
+    'n[::1]:8080',
+  ].join('\n');
+  assert.deepEqual(parseLsofListening(output), [
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: 'node' },
+    { protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5432, pid: 4242, processName: 'node' },
+    { protocol: 'tcp', family: 'IPv6', address: '::1', port: 8080, pid: 4300, processName: 'python3' },
+  ]);
+});
+
+test('parseNetTcpConnections filters by owning pid and detects family', () => {
+  const json = JSON.stringify([
+    { LocalAddress: '0.0.0.0', LocalPort: 3000, OwningProcess: 4242 },
+    { LocalAddress: '::', LocalPort: 8080, OwningProcess: 4242 },
+    { LocalAddress: '0.0.0.0', LocalPort: 9999, OwningProcess: 1 }, // not ours
+  ]);
+  const ports = parseNetTcpConnections(json, new Set([4242]), new Map([[4242, 'node.exe']]));
+  assert.deepEqual(ports, [
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: 'node.exe' },
+    { protocol: 'tcp', family: 'IPv6', address: '::', port: 8080, pid: 4242, processName: 'node.exe' },
+  ]);
+});
+
+test('parseNetTcpConnections accepts a single (non-array) JSON object', () => {
+  const json = JSON.stringify({ LocalAddress: '0.0.0.0', LocalPort: 3000, OwningProcess: 4242 });
+  const ports = parseNetTcpConnections(json, new Set([4242]));
+  assert.equal(ports.length, 1);
+  assert.equal(ports[0].port, 3000);
+});
+
+test('parseNetstatListening parses LISTENING TCP rows for tracked pids', () => {
+  const output = [
+    'Active Connections',
+    '  Proto  Local Address          Foreign Address        State           PID',
+    '  TCP    0.0.0.0:3000           0.0.0.0:0              LISTENING       4242',
+    '  TCP    [::]:8080              [::]:0                 LISTENING       4242',
+    '  TCP    127.0.0.1:54000        127.0.0.1:5432         ESTABLISHED     4242',
+    '  TCP    0.0.0.0:9999           0.0.0.0:0              LISTENING       1',
+  ].join('\n');
+  const ports = parseNetstatListening(output, new Set([4242]));
+  assert.deepEqual(ports, [
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: undefined },
+    { protocol: 'tcp', family: 'IPv6', address: '::', port: 8080, pid: 4242, processName: undefined },
+  ]);
+});
+
+test('getDescendantPids (linux) reads ppid from /proc/<pid>/stat', () => {
+  const procStat = {
+    '100': '100 (zsh) S 1 100 100 0',
+    '200': '200 (node) S 100 200 200 0',
+    '400': '400 (esbuild) S 200 400 400 0',
+    '999': '999 (other) S 1 999 999 0',
+  };
+  const fsModule = {
+    readdirSync(p) {
+      if (p === '/proc') return ['100', '200', '400', '999', 'cpuinfo'];
+      throw new Error('ENOENT');
+    },
+    readFileSync(p) {
+      const m = /^\/proc\/(\d+)\/stat$/.exec(p);
+      if (m && procStat[m[1]]) return procStat[m[1]];
+      throw new Error('ENOENT');
+    },
+  };
+  const pids = getDescendantPids(100, { platform: 'linux', fsModule });
+  assert.deepEqual(pids.sort((a, b) => a - b), [100, 200, 400]);
+});
+
+test('getListeningPortsForPids (linux) maps fd inodes to /proc/net/tcp ports', () => {
+  const fdLinks = {
+    '/proc/200/fd/3': 'socket:[55501]',
+    '/proc/200/fd/4': '/dev/null',
+    '/proc/200/fd/5': 'socket:[55502]',
+  };
+  const tcp = [
+    'header',
+    '   0: 0100007F:1538 00000000:0000 0A 0 0 0  1000 0 55501 1 ffff 100',
+    '   1: 00000000:1F90 00000000:0000 0A 0 0 0  1000 0 55502 1 ffff 100',
+  ].join('\n');
+  const fsModule = {
+    readdirSync(p) {
+      if (p === '/proc/200/fd') return ['3', '4', '5'];
+      throw new Error('ENOENT');
+    },
+    readlinkSync(p) {
+      if (fdLinks[p]) return fdLinks[p];
+      throw new Error('ENOENT');
+    },
+    readFileSync(p) {
+      if (p === '/proc/net/tcp') return tcp;
+      if (p === '/proc/200/comm') return 'node\n';
+      throw new Error('ENOENT'); // no tcp6
+    },
+  };
+  const ports = getListeningPortsForPids([200], { platform: 'linux', fsModule });
+  assert.deepEqual(ports, [
+    { protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5432, pid: 200, processName: 'node' },
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 8080, pid: 200, processName: 'node' },
+  ]);
+});
+
+test('getListeningPortsForPids (darwin) runs lsof with the descendant pid list', () => {
+  let capturedArgs;
+  const execFileSync = (cmd, args) => {
+    assert.equal(cmd, 'lsof');
+    capturedArgs = args;
+    return ['p4242', 'cnode', 'tIPv4', 'n*:3000'].join('\n');
+  };
+  const ports = getListeningPortsForPids([100, 200], { platform: 'darwin', execFileSync });
+  assert.ok(capturedArgs.includes('-sTCP:LISTEN'));
+  assert.ok(capturedArgs.includes('100,200'));
+  assert.deepEqual(ports, [
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: 'node' },
+  ]);
+});
+
+test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', () => {
+  const execFileSync = (cmd, args) => {
+    assert.equal(cmd, 'powershell.exe');
+    const script = args[args.length - 1];
+    if (script.includes('Win32_Process')) {
+      return JSON.stringify([{ ProcessId: 4242, Name: 'node.exe' }]);
+    }
+    if (script.includes('Get-NetTCPConnection')) {
+      return JSON.stringify([{ LocalAddress: '0.0.0.0', LocalPort: 3000, OwningProcess: 4242 }]);
+    }
+    throw new Error(`unexpected script: ${script}`);
+  };
+  const ports = getListeningPortsForPids([4242], { platform: 'win32', execFileSync });
+  assert.deepEqual(ports, [
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: 'node.exe' },
+  ]);
+});
+
+test('getListeningPortsForPids (win32) falls back to netstat when the cmdlet fails', () => {
+  const execFileSync = (cmd, args) => {
+    if (cmd === 'powershell.exe') {
+      const script = args[args.length - 1];
+      if (script.includes('Win32_Process')) return JSON.stringify([]);
+      throw new Error('Get-NetTCPConnection: not recognized');
+    }
+    if (cmd === 'netstat') {
+      return '  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4242\n';
+    }
+    throw new Error('unexpected');
+  };
+  const ports = getListeningPortsForPids([4242], { platform: 'win32', execFileSync });
+  assert.deepEqual(ports, [
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: undefined },
+  ]);
+});
+
+test('getOpenPortsForPid de-duplicates and sorts by port', () => {
+  // darwin path: lsof returns a duplicate (same family/addr/port) plus an
+  // out-of-order pair to exercise sorting.
+  const execFileSync = (cmd) => {
+    if (cmd === 'ps') return '100 1\n200 100\n';
+    if (cmd === 'lsof') {
+      return [
+        'p200', 'cnode', 'tIPv4', 'n*:8080',
+        'tIPv4', 'n*:3000',
+        'tIPv4', 'n*:8080', // duplicate
+      ].join('\n');
+    }
+    throw new Error('unexpected');
+  };
+  const ports = getOpenPortsForPid(100, { platform: 'darwin', execFileSync });
+  assert.deepEqual(ports.map((p) => p.port), [3000, 8080]);
+});
+
+test('getOpenPortsForPid returns [] for a non-integer pid', () => {
+  assert.deepEqual(getOpenPortsForPid(undefined, { platform: 'linux' }), []);
 });

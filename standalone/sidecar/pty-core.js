@@ -276,6 +276,455 @@ function getCwdForPid(pid, runtime = {}) {
 
 module.exports.getCwdForPid = getCwdForPid;
 
+// ── Open-port discovery ──────────────────────────────────────────────────────
+//
+// `getOpenPortsForPid(rootPid)` answers "which TCP ports are listening, opened
+// by this shell or any of its descendant processes?" It works in two steps that
+// are each platform-specific but share the same shape:
+//
+//   1. getDescendantPids(rootPid) — walk the process tree to the full set of
+//      PIDs rooted at the shell (the shell itself plus every transitive child).
+//   2. getListeningPortsForPids(pids) — enumerate TCP sockets in the LISTEN
+//      state owned by any PID in that set.
+//
+// No third-party dependencies: Linux reads /proc directly, macOS shells out to
+// `ps` + `lsof` (already used for cwd), and Windows uses PowerShell cmdlets with
+// a `netstat -ano` fallback. Only listening TCP sockets are reported — this is
+// the "what server is this terminal running" signal, without the churn of
+// ephemeral outbound connections.
+
+/**
+ * Build the set of descendant PIDs (including rootPid) from a flat list of
+ * [pid, ppid] pairs via breadth-first walk. Shared by every platform.
+ */
+function buildDescendantSet(pairs, rootPid) {
+  const children = new Map();
+  for (const [pid, ppid] of pairs) {
+    if (!children.has(ppid)) children.set(ppid, []);
+    children.get(ppid).push(pid);
+  }
+  const result = new Set([rootPid]);
+  const queue = [rootPid];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    for (const child of children.get(current) || []) {
+      if (!result.has(child)) {
+        result.add(child);
+        queue.push(child);
+      }
+    }
+  }
+  return result;
+}
+
+module.exports.buildDescendantSet = buildDescendantSet;
+
+/**
+ * Extract the parent PID from the contents of a Linux /proc/<pid>/stat file.
+ * The comm field (2nd) is wrapped in parens and may itself contain spaces and
+ * parens, so we anchor on the last ')': state follows it, then ppid.
+ */
+function parseProcStatPpid(content) {
+  const rparen = content.lastIndexOf(')');
+  if (rparen < 0) return null;
+  const rest = content.slice(rparen + 1).trim().split(/\s+/);
+  // rest[0] = state, rest[1] = ppid
+  const ppid = Number(rest[1]);
+  return Number.isInteger(ppid) ? ppid : null;
+}
+
+module.exports.parseProcStatPpid = parseProcStatPpid;
+
+/** Parse `ps -axo pid=,ppid=` output into [pid, ppid] pairs (macOS/Linux). */
+function parsePsPairs(output) {
+  const pairs = [];
+  for (const line of output.split(/\r?\n/)) {
+    const match = line.trim().match(/^(\d+)\s+(\d+)$/);
+    if (match) pairs.push([Number(match[1]), Number(match[2])]);
+  }
+  return pairs;
+}
+
+module.exports.parsePsPairs = parsePsPairs;
+
+function getDescendantPids(rootPid, runtime = {}) {
+  const platform = runtime.platform || process.platform;
+  const fsModule = runtime.fsModule || fs;
+  const execFileSyncFn = runtime.execFileSync || execFileSync;
+
+  if (platform === 'linux') {
+    try {
+      const pairs = [];
+      for (const entry of fsModule.readdirSync('/proc')) {
+        if (!/^\d+$/.test(entry)) continue;
+        try {
+          const stat = fsModule.readFileSync(`/proc/${entry}/stat`, 'utf-8');
+          const ppid = parseProcStatPpid(stat);
+          if (ppid != null) pairs.push([Number(entry), ppid]);
+        } catch { /* process vanished mid-scan */ }
+      }
+      return [...buildDescendantSet(pairs, rootPid)];
+    } catch {
+      return [rootPid];
+    }
+  }
+
+  // macOS (and any other POSIX): ps gives the whole pid/ppid table.
+  if (platform === 'darwin') {
+    try {
+      const out = execFileSyncFn('ps', ['-axo', 'pid=,ppid='], {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 4000,
+      });
+      return [...buildDescendantSet(parsePsPairs(out), rootPid)];
+    } catch {
+      return [rootPid];
+    }
+  }
+
+  if (platform === 'win32') {
+    try {
+      const json = runPowerShell(
+        'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress',
+        execFileSyncFn,
+      );
+      const rows = normalizeJsonArray(JSON.parse(json));
+      const pairs = rows
+        .map((r) => [Number(r.ProcessId), Number(r.ParentProcessId)])
+        .filter(([pid, ppid]) => Number.isInteger(pid) && Number.isInteger(ppid));
+      return [...buildDescendantSet(pairs, rootPid)];
+    } catch {
+      return [rootPid];
+    }
+  }
+
+  return [rootPid];
+}
+
+module.exports.getDescendantPids = getDescendantPids;
+
+/** Format a Linux /proc/net hex IPv4 address (little-endian per byte). */
+function parseHexIpv4(hex) {
+  const octets = [];
+  for (let i = 0; i < 8; i += 2) {
+    octets.push(parseInt(hex.slice(i, i + 2), 16));
+  }
+  return octets.reverse().join('.');
+}
+
+module.exports.parseHexIpv4 = parseHexIpv4;
+
+/**
+ * Format a Linux /proc/net hex IPv6 address. The kernel stores it as four
+ * 32-bit words in host byte order, so each 4-byte word is byte-reversed before
+ * the 16 bytes are grouped and zero-compressed into canonical form.
+ */
+function parseHexIpv6(hex) {
+  const bytes = [];
+  for (let w = 0; w < 4; w++) {
+    const word = hex.slice(w * 8, w * 8 + 8);
+    for (let b = 3; b >= 0; b--) bytes.push(word.slice(b * 2, b * 2 + 2));
+  }
+  const groups = [];
+  for (let i = 0; i < 16; i += 2) {
+    groups.push(parseInt(bytes[i], 16) * 256 + parseInt(bytes[i + 1], 16));
+  }
+  return compressIpv6(groups);
+}
+
+module.exports.parseHexIpv6 = parseHexIpv6;
+
+/** Collapse the longest run of zero groups in an 8-group IPv6 address to "::". */
+function compressIpv6(groups) {
+  let bestStart = -1;
+  let bestLen = 0;
+  let runStart = -1;
+  let runLen = 0;
+  for (let i = 0; i < groups.length; i++) {
+    if (groups[i] === 0) {
+      if (runStart < 0) runStart = i;
+      runLen++;
+      if (runLen > bestLen) { bestLen = runLen; bestStart = runStart; }
+    } else {
+      runStart = -1;
+      runLen = 0;
+    }
+  }
+  const hex = groups.map((g) => g.toString(16));
+  if (bestLen < 2) return hex.join(':');
+  const head = hex.slice(0, bestStart).join(':');
+  const tail = hex.slice(bestStart + bestLen).join(':');
+  return `${head}::${tail}`;
+}
+
+/**
+ * Parse a /proc/net/tcp or /proc/net/tcp6 table into listening-socket records,
+ * keeping only rows whose socket inode is owned by one of `inodeToPid`.
+ * State `0A` is TCP_LISTEN.
+ */
+function parseProcNetTcp(content, family, inodeToPid) {
+  const ports = [];
+  const lines = content.split(/\r?\n/);
+  for (let i = 1; i < lines.length; i++) {
+    const tokens = lines[i].trim().split(/\s+/);
+    if (tokens.length < 10) continue;
+    if (tokens[3] !== '0A') continue; // TCP_LISTEN
+    const inode = tokens[9];
+    const pid = inodeToPid.get(inode);
+    if (pid === undefined) continue;
+    const [hexIp, hexPort] = tokens[1].split(':');
+    if (!hexPort) continue;
+    ports.push({
+      protocol: 'tcp',
+      family,
+      address: family === 'IPv6' ? parseHexIpv6(hexIp) : parseHexIpv4(hexIp),
+      port: parseInt(hexPort, 16),
+      pid,
+    });
+  }
+  return ports;
+}
+
+module.exports.parseProcNetTcp = parseProcNetTcp;
+
+function linuxListeningPorts(pids, runtime = {}) {
+  const fsModule = runtime.fsModule || fs;
+  const pidSet = new Set(pids);
+
+  // Map socket inode -> owning pid by reading each pid's open fds.
+  const inodeToPid = new Map();
+  for (const pid of pidSet) {
+    let fds;
+    try { fds = fsModule.readdirSync(`/proc/${pid}/fd`); } catch { continue; }
+    for (const fd of fds) {
+      try {
+        const link = fsModule.readlinkSync(`/proc/${pid}/fd/${fd}`);
+        const match = /^socket:\[(\d+)\]$/.exec(link);
+        if (match) inodeToPid.set(match[1], pid);
+      } catch { /* fd closed mid-scan */ }
+    }
+  }
+
+  const ports = [];
+  for (const [file, family] of [['/proc/net/tcp', 'IPv4'], ['/proc/net/tcp6', 'IPv6']]) {
+    try {
+      ports.push(...parseProcNetTcp(fsModule.readFileSync(file, 'utf-8'), family, inodeToPid));
+    } catch { /* file absent (e.g. IPv6 disabled) */ }
+  }
+
+  // Attach process names from /proc/<pid>/comm.
+  for (const entry of ports) {
+    try {
+      entry.processName = fsModule.readFileSync(`/proc/${entry.pid}/comm`, 'utf-8').trim();
+    } catch { /* gone */ }
+  }
+  return ports;
+}
+
+/**
+ * Parse `lsof -nP -iTCP -sTCP:LISTEN ... -Fpcnt` field output (macOS). Records
+ * are keyed by single-char field types: p=pid, c=command, t=type (IPv4/IPv6),
+ * n=name (addr:port). A listening name looks like `*:3000`, `127.0.0.1:3000`,
+ * or `[::1]:8080`.
+ */
+function parseLsofListening(output) {
+  const ports = [];
+  let pid;
+  let command;
+  let family = 'IPv4';
+  for (const line of output.split(/\r?\n/)) {
+    if (!line) continue;
+    const tag = line[0];
+    const value = line.slice(1);
+    if (tag === 'p') { pid = Number(value); continue; }
+    if (tag === 'c') { command = value; continue; }
+    if (tag === 't') { if (value === 'IPv4' || value === 'IPv6') family = value; continue; }
+    if (tag === 'n') {
+      const parsed = parseHostPort(value);
+      if (parsed) {
+        ports.push({ protocol: 'tcp', family, address: parsed.address, port: parsed.port, pid, processName: command });
+      }
+    }
+  }
+  return ports;
+}
+
+module.exports.parseLsofListening = parseLsofListening;
+
+/** Split an "address:port" token, handling `*`, IPv4, and bracketed IPv6. */
+function parseHostPort(token) {
+  let address;
+  let portStr;
+  if (token.startsWith('[')) {
+    const end = token.indexOf(']');
+    if (end < 0) return null;
+    address = token.slice(1, end);
+    portStr = token.slice(end + 2); // skip "]:"
+  } else {
+    const colon = token.lastIndexOf(':');
+    if (colon < 0) return null;
+    address = token.slice(0, colon);
+    portStr = token.slice(colon + 1);
+  }
+  if (address === '*') address = '0.0.0.0';
+  const port = Number(portStr);
+  if (!Number.isInteger(port) || port <= 0) return null;
+  return { address, port };
+}
+
+function macListeningPorts(pids, runtime = {}) {
+  const execFileSyncFn = runtime.execFileSync || execFileSync;
+  if (pids.length === 0) return [];
+  try {
+    const out = execFileSyncFn(
+      'lsof',
+      ['-nP', '-a', '-iTCP', '-sTCP:LISTEN', '-p', pids.join(','), '-Fpcnt'],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 4000 },
+    );
+    return parseLsofListening(out);
+  } catch {
+    // lsof exits non-zero when none of the pids have matching files.
+    return [];
+  }
+}
+
+/** ConvertTo-Json emits a bare object (not an array) for a single row. */
+function normalizeJsonArray(parsed) {
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed == null) return [];
+  return [parsed];
+}
+
+/**
+ * Parse `Get-NetTCPConnection -State Listen | Select LocalAddress,LocalPort,
+ * OwningProcess` JSON, keeping rows owned by a pid in `pidSet`.
+ */
+function parseNetTcpConnections(json, pidSet, nameByPid = new Map()) {
+  const rows = normalizeJsonArray(JSON.parse(json));
+  const ports = [];
+  for (const row of rows) {
+    const pid = Number(row.OwningProcess);
+    if (!pidSet.has(pid)) continue;
+    const port = Number(row.LocalPort);
+    if (!Number.isInteger(port)) continue;
+    const address = String(row.LocalAddress);
+    ports.push({
+      protocol: 'tcp',
+      family: address.includes(':') ? 'IPv6' : 'IPv4',
+      address,
+      port,
+      pid,
+      processName: nameByPid.get(pid),
+    });
+  }
+  return ports;
+}
+
+module.exports.parseNetTcpConnections = parseNetTcpConnections;
+
+/** Parse `netstat -ano` LISTENING TCP rows (Windows fallback for older hosts). */
+function parseNetstatListening(output, pidSet, nameByPid = new Map()) {
+  const ports = [];
+  for (const line of output.split(/\r?\n/)) {
+    const tokens = line.trim().split(/\s+/);
+    if (tokens.length < 5) continue;
+    if (!/^TCP$/i.test(tokens[0])) continue;
+    if (!/^LISTENING$/i.test(tokens[3])) continue;
+    const pid = Number(tokens[4]);
+    if (!pidSet.has(pid)) continue;
+    const parsed = parseHostPort(tokens[1]);
+    if (!parsed) continue;
+    ports.push({
+      protocol: 'tcp',
+      family: parsed.address.includes(':') ? 'IPv6' : 'IPv4',
+      address: parsed.address,
+      port: parsed.port,
+      pid,
+      processName: nameByPid.get(pid),
+    });
+  }
+  return ports;
+}
+
+module.exports.parseNetstatListening = parseNetstatListening;
+
+function runPowerShell(script, execFileSyncFn) {
+  return execFileSyncFn(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 6000 },
+  );
+}
+
+function windowsListeningPorts(pids, runtime = {}) {
+  const execFileSyncFn = runtime.execFileSync || execFileSync;
+  const pidSet = new Set(pids);
+
+  // Resolve pid -> process name once (best-effort; ports still returned without).
+  const nameByPid = new Map();
+  try {
+    const json = runPowerShell(
+      'Get-CimInstance Win32_Process | Select-Object ProcessId,Name | ConvertTo-Json -Compress',
+      execFileSyncFn,
+    );
+    for (const row of normalizeJsonArray(JSON.parse(json))) {
+      nameByPid.set(Number(row.ProcessId), String(row.Name));
+    }
+  } catch { /* names are optional */ }
+
+  // Preferred: Get-NetTCPConnection (Windows 8+/Server 2012+).
+  try {
+    const json = runPowerShell(
+      'Get-NetTCPConnection -State Listen | Select-Object LocalAddress,LocalPort,OwningProcess | ConvertTo-Json -Compress',
+      execFileSyncFn,
+    );
+    return parseNetTcpConnections(json, pidSet, nameByPid);
+  } catch { /* fall through to netstat */ }
+
+  // Fallback: netstat -ano.
+  try {
+    const out = execFileSyncFn('netstat', ['-ano', '-p', 'TCP'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 6000,
+    });
+    return parseNetstatListening(out, pidSet, nameByPid);
+  } catch {
+    return [];
+  }
+}
+
+function getListeningPortsForPids(pids, runtime = {}) {
+  const platform = runtime.platform || process.platform;
+  if (platform === 'linux') return linuxListeningPorts(pids, runtime);
+  if (platform === 'darwin') return macListeningPorts(pids, runtime);
+  if (platform === 'win32') return windowsListeningPorts(pids, runtime);
+  return [];
+}
+
+module.exports.getListeningPortsForPids = getListeningPortsForPids;
+
+/**
+ * Listening TCP ports opened by `rootPid` or any of its descendant processes,
+ * de-duplicated by (family, address, port) and sorted by port. Returns [] on
+ * any platform-specific failure rather than throwing.
+ */
+function getOpenPortsForPid(rootPid, runtime = {}) {
+  if (!Number.isInteger(rootPid)) return [];
+  const pids = getDescendantPids(rootPid, runtime);
+  const ports = getListeningPortsForPids(pids, runtime);
+
+  const seen = new Map();
+  for (const entry of ports) {
+    const key = `${entry.family}|${entry.address}|${entry.port}`;
+    if (!seen.has(key)) seen.set(key, entry);
+  }
+  return [...seen.values()].sort((a, b) => a.port - b.port || a.address.localeCompare(b.address));
+}
+
+module.exports.getOpenPortsForPid = getOpenPortsForPid;
+
 /**
  * Shared PTY manager — the single place where node-pty processes are managed.
  *
@@ -287,6 +736,7 @@ module.exports.getCwdForPid = getCwdForPid;
  *   send('exit',  { id, exitCode, signal })
  *   send('error', { id, message })
  *   send('list',  { ptys: [{ id, alive }] })
+ *   send('openPorts', { id, ports: [{ protocol, family, address, port, pid, processName }], requestId })
  */
 
 module.exports.create = function create(send, ptyModule) {
@@ -395,6 +845,14 @@ module.exports.create = function create(send, ptyModule) {
     send('cwd', { id, cwd: getCwdForPid(p.pid), requestId });
   }
 
+  function getOpenPorts(id, requestId) {
+    const p = ptys.get(id);
+    if (!p) { send('openPorts', { id, ports: [], requestId }); return; }
+    let ports = [];
+    try { ports = getOpenPortsForPid(p.pid); } catch { ports = []; }
+    send('openPorts', { id, ports, requestId });
+  }
+
   function getScrollback(id, requestId) {
     const entry = scrollback.get(id);
     send('scrollback', {
@@ -417,5 +875,5 @@ module.exports.create = function create(send, ptyModule) {
     send('shells', { shells: detectAvailableShells(), requestId });
   }
 
-  return { spawn, write, resize, kill, killAll, list, getCwd, getScrollback, gracefulKillAll, getShells };
+  return { spawn, write, resize, kill, killAll, list, getCwd, getOpenPorts, getScrollback, gracefulKillAll, getShells };
 };
