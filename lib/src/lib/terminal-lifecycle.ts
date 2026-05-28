@@ -1,7 +1,7 @@
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
-import { getPlatform } from './platform';
+import { getPlatform, IS_MAC, isVSCodePlatform } from './platform';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
 import { attachMouseModeObserver } from './mouse-mode-observer';
 import {
@@ -43,6 +43,7 @@ import {
 } from './terminal-state-store';
 import { readLogicalLineFromBuffer, type BufferLike } from './terminal-buffer-read';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
+import { vscodeWorkbenchCommandForKeydown } from './vscode-keybindings';
 
 function makePromptLineReader(terminal: Terminal): PromptLineReader {
   return {
@@ -114,6 +115,17 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
       allowNonHttpProtocols: true,
     },
   });
+
+  if (isVSCodePlatform()) {
+    terminal.attachCustomKeyEventHandler((event) => {
+      const command = vscodeWorkbenchCommandForKeydown(event, { isMac: IS_MAC });
+      if (!command) return true;
+      event.preventDefault();
+      event.stopPropagation();
+      getPlatform().runWorkbenchCommand?.(command);
+      return true;
+    });
+  }
 
   terminal.loadAddon(new UnicodeGraphemesAddon());
   const fit = new FitAddon();

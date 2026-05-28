@@ -80,6 +80,17 @@ describe('VSCodeAdapter PTY exit handling', () => {
     });
   });
 
+  it('posts allowlisted VS Code workbench commands to the extension host', () => {
+    const adapter = new VSCodeAdapter();
+
+    adapter.runWorkbenchCommand('workbench.action.quickOpen');
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'dormouse:runWorkbenchCommand',
+      command: 'workbench.action.quickOpen',
+    });
+  });
+
   it('parses replay buffers into semantic events and strips OSCs before forwarding', () => {
     const adapter = new VSCodeAdapter();
     const replays: Array<{ id: string; data: string }> = [];

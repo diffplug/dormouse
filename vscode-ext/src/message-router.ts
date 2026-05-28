@@ -23,6 +23,11 @@ const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
 const globalOwnedPtyIds = new Set<string>();
 const activeRouters = new Set<{ flushSessionSave(timeoutMs?: number): Promise<void> }>();
 let nextFlushRequestId = 0;
+const ALLOWED_WORKBENCH_COMMANDS = new Set([
+  'workbench.action.quickOpen',
+  'workbench.action.showCommands',
+  'workbench.action.toggleSidebarVisibility',
+]);
 
 // Shared alert manager — survives router disposal so alert state persists
 // across webview collapse/expand cycles.
@@ -282,6 +287,11 @@ export function attachRouter(
         );
         break;
       }
+      case 'dormouse:runWorkbenchCommand':
+        if (ALLOWED_WORKBENCH_COMMANDS.has(msg.command)) {
+          void vscode.commands.executeCommand(msg.command);
+        }
+        break;
       case 'dormouse:init': {
         // Webview has (re-)initialized — subscribe to live events.
         // Tear down previous subscriptions first (webview was destroyed and recreated).

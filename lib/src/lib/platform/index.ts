@@ -46,6 +46,10 @@ export function getPlatform(): PlatformAdapter {
   return adapter;
 }
 
+export function isVSCodePlatform(): boolean {
+  return adapter instanceof VSCodeAdapter || (typeof acquireVsCodeApi === 'function' && !(adapter instanceof FakePtyAdapter));
+}
+
 export function initPlatform(override: 'fake'): FakePtyAdapter;
 export function initPlatform(): PlatformAdapter;
 export function initPlatform(override?: 'fake'): PlatformAdapter {
