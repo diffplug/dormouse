@@ -7,6 +7,7 @@ import {
   MOBILE_GESTURE_COMPLETE_MS,
   MOBILE_GESTURE_DIRECTION_VECTORS,
   MOBILE_GESTURE_OPTION_DIRECTIONS,
+  OPTION_EXPAND_RELEASE,
   RADIUS_HIGHLIGHT,
   RADIUS_LAYOUT,
   RADIUS_SELECT,
@@ -95,6 +96,19 @@ describe('mobile gesture menu state machine', () => {
     expect(MOBILE_GESTURE_COMPLETE_MS).toBe(220);
   });
 
+  it('treats the layout radius as a circular radius for direction vectors', () => {
+    for (const vector of Object.values(MOBILE_GESTURE_DIRECTION_VECTORS)) {
+      expect(Math.hypot(vector.x * RADIUS_LAYOUT, vector.y * RADIUS_LAYOUT)).toBeCloseTo(
+        RADIUS_LAYOUT,
+        6,
+      );
+    }
+    expect(MOBILE_GESTURE_DIRECTION_VECTORS.ne.x * RADIUS_LAYOUT).toBeCloseTo(
+      RADIUS_LAYOUT * Math.SQRT1_2,
+      6,
+    );
+  });
+
   it('places exploded options opposite the selected direction', () => {
     expect(MOBILE_GESTURE_OPTION_DIRECTIONS.n).toEqual(['s', 'sw', 'se']);
     expect(MOBILE_GESTURE_OPTION_DIRECTIONS.e).toEqual(['w', 'nw', 'sw']);
@@ -179,6 +193,57 @@ describe('mobile gesture menu state machine', () => {
     expect(complete.candidate.optionIndex).toBe(0);
     expect(complete.candidate.option.action).toEqual({ kind: 'input', input: 'enter' });
     expect(updateMobileGesture(complete, optionSelectionPoint('se', 2))).toBe(complete);
+  });
+
+  it('tracks the reference origin while the drag overshoots the opening direction', () => {
+    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('se'));
+    state = updateMobileGesture(state, pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3));
+    expect(state.phase).toBe('options');
+    if (state.phase !== 'options') return;
+    // The reference origin slid out to meet the overshooting finger.
+    expect(state.optionOrigin).toEqual(pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3));
+  });
+
+  it('keeps the compass collapsed through overshoot, then latches expanded for good', () => {
+    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('se'));
+    expect(state.phase === 'options' && state.expanded).toBe(false);
+
+    // Still dragging in the opening direction (overshoot) — stays collapsed.
+    state = updateMobileGesture(state, pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 2));
+    expect(state.phase === 'options' && state.expanded).toBe(false);
+    state = updateMobileGesture(state, pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3));
+    expect(state.phase === 'options' && state.expanded).toBe(false);
+
+    // Turning back toward an option latches expanded.
+    const overshoot = pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3);
+    state = updateMobileGesture(state, pointInDirection(overshoot, 'nw', RADIUS_HIGHLIGHT));
+    expect(state.phase === 'options' && state.expanded).toBe(true);
+
+    // Pushing back out in the wrong direction does not collapse it again.
+    state = updateMobileGesture(state, pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 5));
+    expect(state.phase === 'options' && state.expanded).toBe(true);
+  });
+
+  it('expands once the overshoot drag settles, without a deliberate move back', () => {
+    let state = updateMobileGesture(beginMobileGesture(1, ORIGIN), rootSelectionPoint('se'));
+    // Brisk overshoot keeps it collapsed.
+    state = updateMobileGesture(state, pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3));
+    expect(state.phase === 'options' && state.expanded).toBe(false);
+    // A tiny continued nudge in the same direction (a settle, not a hard push) expands it.
+    const overshoot = pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3);
+    state = updateMobileGesture(state, pointInDirection(overshoot, 'se', OPTION_EXPAND_RELEASE - 1));
+    expect(state.phase === 'options' && state.expanded).toBe(true);
+  });
+
+  it('selects the back option after an overshoot without undoing the whole overshoot', () => {
+    // Drive past the southeast selection, keep dragging southeast, then reverse just
+    // far enough to break out toward the back ("Enter") option.
+    const overshoot = pointInDirection(ORIGIN, 'se', RADIUS_SELECT * 3);
+    const backOption = pointInDirection(overshoot, 'nw', RADIUS_SELECT + 1);
+    expect(runGesture([rootSelectionPoint('se'), overshoot, backOption])).toEqual({
+      kind: 'input',
+      input: 'enter',
+    });
   });
 
   it('clears the option highlight when the drag moves back inside the highlight radius', () => {

@@ -68,10 +68,16 @@ export function attachTerminalMouseRouter({
   };
 
   const DRAG_THRESHOLD_PX_SQ = 16;
+  // Touch has no Alt key, so a double-tap-then-drag is how a block selection is
+  // started on touch. A second touch within this window and distance of the
+  // previous one (which ended as a tap) arms block mode for the drag it begins.
+  const DOUBLE_TAP_MS = 300;
+  const DOUBLE_TAP_DIST_PX_SQ = 24 * 24;
   let pendingDrag: {
     row: number;
     col: number;
     altKey: boolean;
+    block: boolean;
     startedInScrollback: boolean;
     button: number;
     clientX: number;
@@ -81,6 +87,10 @@ export function attachTerminalMouseRouter({
   } | null = null;
   let activePointerId: number | null = null;
   let suppressSyntheticMouseUntil = 0;
+  // The most recent touch that ended as a tap (no drag), used to recognize a double-tap.
+  let lastTouchTap: { time: number; x: number; y: number } | null = null;
+  // True while the active drag is block-mode (Alt on desktop, double-tap on touch).
+  let dragBlock = false;
 
   const terminalOwnsEvent = (ev: MouseEvent | PointerEvent) => {
     const state = getMouseSelectionState(id);
@@ -94,7 +104,7 @@ export function attachTerminalMouseRouter({
 
   const beginPendingDrag = (
     ev: MouseEvent | PointerEvent,
-    opts: { pointerId: number | null; touchLike: boolean },
+    opts: { pointerId: number | null; touchLike: boolean; block?: boolean },
   ) => {
     const { state, cell, terminalOwns } = terminalOwnsEvent(ev);
     if (!terminalOwns) return false;
@@ -108,6 +118,7 @@ export function attachTerminalMouseRouter({
       row: cell.row,
       col: cell.col,
       altKey: ev.altKey,
+      block: opts.block ?? false,
       startedInScrollback: cell.startedInScrollback,
       button: ev.button,
       clientX: ev.clientX,
@@ -130,10 +141,15 @@ export function attachTerminalMouseRouter({
       const dx = ev.clientX - pendingDrag.clientX;
       const dy = ev.clientY - pendingDrag.clientY;
       if (dx * dx + dy * dy < DRAG_THRESHOLD_PX_SQ) return;
+      // Block mode (shape) is latched for the whole drag: Alt held at press on
+      // desktop, or a double-tap on touch (which has no Alt to read mid-drag). A
+      // tap can no longer chain into the next press once a drag has begun.
+      dragBlock = pendingDrag.block;
+      lastTouchTap = null;
       beginDrag(id, {
         row: pendingDrag.row,
         col: pendingDrag.col,
-        altKey: pendingDrag.altKey,
+        altKey: pendingDrag.altKey || pendingDrag.block,
         startedInScrollback: pendingDrag.startedInScrollback,
       });
       terminal.clearSelection();
@@ -141,7 +157,7 @@ export function attachTerminalMouseRouter({
     }
     if (!isDragging(id)) return;
     const cell = computeCell(ev);
-    updateDrag(id, { row: cell.row, col: cell.col, altKey: ev.altKey });
+    updateDrag(id, { row: cell.row, col: cell.col, altKey: ev.altKey || dragBlock });
     const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
     if (!consumed) consumePointerEvent(ev, suppressNativeMouse || isNonMousePointerEvent(ev));
 
@@ -162,6 +178,11 @@ export function attachTerminalMouseRouter({
       if (ev.button !== pendingDrag.button) return;
       const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
       if (suppressNativeMouse || pendingDrag.touchLike) consumePointerEvent(ev, true);
+      // A touch press that releases without ever dragging is a tap — remember it
+      // so the next press can be recognized as a double-tap (block selection).
+      if (pendingDrag.touchLike) {
+        lastTouchTap = { time: Date.now(), x: ev.clientX, y: ev.clientY };
+      }
       clearTemporaryOverrideAfterMouseDispatch(id);
       pendingDrag = null;
       return;
@@ -170,6 +191,7 @@ export function attachTerminalMouseRouter({
     if (!isDragging(id)) return;
     const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
     endDrag(id);
+    dragBlock = false;
     setHintToken(id, null);
     const sel = getMouseSelectionState(id).selection;
     setSelectionBaseline(sel ? extractSelectionText(terminal, sel) : null);
@@ -188,7 +210,15 @@ export function attachTerminalMouseRouter({
   const onPointerDown = (ev: PointerEvent) => {
     if (ev.pointerType === 'mouse') return;
     if (!ev.isPrimary) return;
-    const handled = beginPendingDrag(ev, { pointerId: ev.pointerId, touchLike: true });
+    // Double-tap = this press lands soon after, and near, the previous touch that
+    // ended as a tap. Recording only on a tap release (not on a drag) keeps two
+    // quick consecutive drags from masquerading as a double-tap.
+    const dx = ev.clientX - (lastTouchTap?.x ?? 0);
+    const dy = ev.clientY - (lastTouchTap?.y ?? 0);
+    const doubleTap = lastTouchTap !== null
+      && Date.now() - lastTouchTap.time <= DOUBLE_TAP_MS
+      && dx * dx + dy * dy <= DOUBLE_TAP_DIST_PX_SQ;
+    const handled = beginPendingDrag(ev, { pointerId: ev.pointerId, touchLike: true, block: doubleTap });
     if (!handled) return;
     activePointerId = ev.pointerId;
     suppressSyntheticMouseUntil = Date.now() + 800;
@@ -241,6 +271,7 @@ export function attachTerminalMouseRouter({
     if (activePointerId !== ev.pointerId) return;
     pendingDrag = null;
     activePointerId = null;
+    dragBlock = false;
     setSelection(id, null);
     setHintToken(id, null);
     consumePointerEvent(ev, true);

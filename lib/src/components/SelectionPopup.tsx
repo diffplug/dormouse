@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState, useEffect, useSyncExternalStore, type CSSProperties } from 'react';
+import { useContext, useLayoutEffect, useState, useEffect, useSyncExternalStore, type CSSProperties } from 'react';
 import {
   DEFAULT_MOUSE_SELECTION_STATE,
   flashCopy,
@@ -13,6 +13,7 @@ import { CheckIcon } from '@phosphor-icons/react';
 import { IS_MAC } from '../lib/platform';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { PopupButtonRow, popupButton, Shortcut } from './design';
+import { TouchUiContext } from './touch-ui-context';
 
 interface Props {
   terminalId: string;
@@ -23,6 +24,7 @@ interface Props {
  * and Copy Rewrapped. Dismissed on Esc, click-outside, or a successful copy.
  */
 export function SelectionPopup({ terminalId }: Props) {
+  const touchUi = useContext(TouchUiContext);
   const states = useSyncExternalStore(subscribeToMouseSelection, getMouseSelectionSnapshot);
   useSyncExternalStore(subscribeToRenderTick, getRenderTick);
 
@@ -52,7 +54,13 @@ export function SelectionPopup({ terminalId }: Props) {
     // selection than the hint did on drag-up.
     const draggedDown = selection.endRow >= selection.startRow;
     const left = Math.min(dims.elementWidth - 300, Math.max(0, gridLeft + selection.endCol * cellWidth));
-    if (draggedDown) {
+    if (touchUi) {
+      // Mobile: always sit above the selection so the dragging thumb (which ends
+      // at the selection's lower edge) never covers the copy buttons.
+      const topRow = Math.max(0, Math.min(dims.rows - 1, Math.min(selection.startRow, selection.endRow) - dims.viewportY));
+      const y = Math.max(gridTop + (topRow - 1) * cellHeight - 4, 28);
+      setAnchor({ left, bottom: dims.elementHeight - y });
+    } else if (draggedDown) {
       const top = Math.min(
         gridTop + (endRow + 2) * cellHeight + 4,
         dims.elementHeight - 24,
@@ -64,7 +72,7 @@ export function SelectionPopup({ terminalId }: Props) {
       const y = Math.max(gridTop + (endRow - 1) * cellHeight - 4, 28);
       setAnchor({ left, bottom: dims.elementHeight - y });
     }
-  }, [terminalId, shouldRender, selection]);
+  }, [terminalId, shouldRender, selection, touchUi]);
 
   useEffect(() => {
     if (!shouldRender) return;
@@ -118,6 +126,31 @@ export function SelectionPopup({ terminalId }: Props) {
   const flashed = (kind: 'raw' | 'rewrapped') => state.copyFlash === kind;
   const buttonClass = (kind: 'raw' | 'rewrapped') => popupButton({ flashed: flashed(kind) });
 
+  // The touch UI has no keyboard, so drop the shortcut hint there and keep only the
+  // copy-success check. On desktop the check sits over the (hidden) shortcut so the
+  // button width stays put while it flashes.
+  const leadingIndicator = (kind: 'raw' | 'rewrapped', shortcut: string) => {
+    if (touchUi) {
+      return flashed(kind) ? (
+        <span className="mr-1 inline-flex items-center align-middle">
+          <CheckIcon size={12} weight="bold" />
+        </span>
+      ) : null;
+    }
+    return (
+      <>
+        <span className="relative inline-block">
+          <Shortcut className={flashed(kind) ? 'invisible' : undefined}>{shortcut}</Shortcut>
+          {flashed(kind) && (
+            <span className="absolute inset-0 flex items-center justify-center">
+              <CheckIcon size={12} weight="bold" />
+            </span>
+          )}
+        </span>{' '}
+      </>
+    );
+  };
+
   return (
     <PopupButtonRow
       data-selection-popup-for={terminalId}
@@ -129,14 +162,7 @@ export function SelectionPopup({ terminalId }: Props) {
         className={buttonClass('raw')}
         onClick={() => onCopy(false)}
       >
-        <span className="relative inline-block">
-          <Shortcut className={flashed('raw') ? 'invisible' : undefined}>{copyShortcut}</Shortcut>
-          {flashed('raw') && (
-            <span className="absolute inset-0 flex items-center justify-center">
-              <CheckIcon size={12} weight="bold" />
-            </span>
-          )}
-        </span>{' '}
+        {leadingIndicator('raw', copyShortcut)}
         Copy Raw
       </button>
       <button
@@ -144,14 +170,7 @@ export function SelectionPopup({ terminalId }: Props) {
         className={buttonClass('rewrapped')}
         onClick={() => onCopy(true)}
       >
-        <span className="relative inline-block">
-          <Shortcut className={flashed('rewrapped') ? 'invisible' : undefined}>{rewrapShortcut}</Shortcut>
-          {flashed('rewrapped') && (
-            <span className="absolute inset-0 flex items-center justify-center">
-              <CheckIcon size={12} weight="bold" />
-            </span>
-          )}
-        </span>{' '}
+        {leadingIndicator('rewrapped', rewrapShortcut)}
         Copy Rewrapped
       </button>
     </PopupButtonRow>

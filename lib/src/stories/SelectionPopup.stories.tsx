@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import '@xterm/xterm/css/xterm.css';
-import { SelectionOverlay } from '../components/SelectionOverlay';
+import { SelectionPopup } from '../components/SelectionPopup';
 import {
   focusSession,
   getOrCreateTerminal,
@@ -11,24 +11,17 @@ import {
   unmountElement,
 } from '../lib/terminal-registry';
 import { flattenScenario, SCENARIO_LS_OUTPUT } from '../lib/platform';
-import {
-  setHintToken,
-  setSelection,
-  type Selection,
-  type TokenHint,
-} from '../lib/mouse-selection';
+import { setSelection, type Selection } from '../lib/mouse-selection';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../components/design';
 import { TouchUiContext } from '../components/touch-ui-context';
 
-function SelectionOverlayStory({
+function SelectionPopupStory({
   id,
   selection,
-  hintToken = null,
   touch = false,
 }: {
   id: string;
   selection: Omit<Selection, 'startedInScrollback'>;
-  hintToken?: TokenHint | null;
   touch?: boolean;
 }) {
   const terminalHostRef = useRef<HTMLDivElement>(null);
@@ -64,9 +57,8 @@ function SelectionOverlayStory({
         timer = setTimeout(applySelection, 50);
         return;
       }
-
-      setSelection(id, { ...selection, startedInScrollback: false });
-      setHintToken(id, hintToken);
+      // dragging: false so the popup (shown after mouse-up) renders.
+      setSelection(id, { ...selection, dragging: false, startedInScrollback: false });
     };
 
     timer = setTimeout(applySelection, 100);
@@ -74,9 +66,8 @@ function SelectionOverlayStory({
       cancelled = true;
       clearTimeout(timer);
       setSelection(id, null);
-      setHintToken(id, null);
     };
-  }, [id, selection, hintToken]);
+  }, [id, selection]);
 
   return (
     <TouchUiContext.Provider value={touch}>
@@ -85,56 +76,44 @@ function SelectionOverlayStory({
         style={{ width: 620, height: 340 }}
       >
         <div ref={terminalHostRef} className="h-full w-full" />
-        <SelectionOverlay terminalId={id} />
+        <SelectionPopup terminalId={id} />
       </div>
     </TouchUiContext.Provider>
   );
 }
 
-const meta: Meta<typeof SelectionOverlayStory> = {
-  title: 'Components/SelectionOverlay',
-  component: SelectionOverlayStory,
+const meta: Meta<typeof SelectionPopupStory> = {
+  title: 'Components/SelectionPopup',
+  component: SelectionPopupStory,
   parameters: {
     fakePty: { scenario: flattenScenario(SCENARIO_LS_OUTPUT) },
   },
 };
 
 export default meta;
-type Story = StoryObj<typeof SelectionOverlayStory>;
+type Story = StoryObj<typeof SelectionPopupStory>;
 
-export const LinewiseDrag: Story = {
+// Desktop: copy buttons carry their keyboard shortcuts and, for a downward drag,
+// sit below the selection.
+export const Desktop: Story = {
   args: {
-    id: 'selection-overlay-linewise-drag',
+    id: 'selection-popup-desktop',
     selection: {
       startRow: 2,
       startCol: 5,
       endRow: 6,
       endCol: 24,
       shape: 'linewise',
-      dragging: true,
+      dragging: false,
     },
   },
 };
 
-export const BlockDrag: Story = {
+// Mobile: no keyboard shortcuts, and the popup sits above the selection (never
+// below) so the thumb that finished the drag can't cover it.
+export const Mobile: Story = {
   args: {
-    id: 'selection-overlay-block-drag',
-    selection: {
-      startRow: 2,
-      startCol: 6,
-      endRow: 5,
-      endCol: 26,
-      shape: 'block',
-      dragging: true,
-    },
-  },
-};
-
-// Mobile: the block-selection hint reads "double-tap" instead of "Hold Opt", and
-// sits above the selection (never below) so the dragging thumb can't cover it.
-export const MobileLinewiseDrag: Story = {
-  args: {
-    id: 'selection-overlay-mobile-linewise-drag',
+    id: 'selection-popup-mobile',
     touch: true,
     selection: {
       startRow: 2,
@@ -142,43 +121,7 @@ export const MobileLinewiseDrag: Story = {
       endRow: 6,
       endCol: 24,
       shape: 'linewise',
-      dragging: true,
-    },
-  },
-};
-
-export const MobileBlockDrag: Story = {
-  args: {
-    id: 'selection-overlay-mobile-block-drag',
-    touch: true,
-    selection: {
-      startRow: 2,
-      startCol: 6,
-      endRow: 5,
-      endCol: 26,
-      shape: 'block',
-      dragging: true,
-    },
-  },
-};
-
-export const SmartPathHint: Story = {
-  args: {
-    id: 'selection-overlay-smart-path-hint',
-    selection: {
-      startRow: 2,
-      startCol: 5,
-      endRow: 6,
-      endCol: 24,
-      shape: 'linewise',
-      dragging: true,
-    },
-    hintToken: {
-      kind: 'path',
-      row: 8,
-      startCol: 35,
-      endCol: 38,
-      text: 'src',
+      dragging: false,
     },
   },
 };

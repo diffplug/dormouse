@@ -72,22 +72,22 @@ const GESTURE_NAVIGATION_SECTION: Section = {
     {
       id: 'gn-touch-mode',
       title: 'Switch between Select and Gestures',
-      hint: 'Tap `Select`, then tap `Gestures` again.',
+      hint: 'Tap `Select`, then tap `Gestures` again. This mode determines what happens when you touch the terminal.',
     },
     {
       id: 'gn-arrows',
       title: 'Use Gestures to send an arrow key',
-      hint: 'Drag directly up, down, left, or right past the circle.',
+      hint: 'Touch anywhere on the terminal to open the gesture compass. Then drag directly up, down, left, or right past the circle.',
     },
     {
       id: 'gn-enter',
       title: 'Use Gestures to press Enter',
-      hint: 'Drag toward `Enter`, then choose `Enter`.',
+      hint: 'Touch anywhere on the terminal to open the gesture compass. Drag towards the diagonal that has `Enter`, and then drag back in the other direction to choose which `kind` of Enter.',
     },
     {
       id: 'gn-esc',
       title: 'Use Gestures to press Esc',
-      hint: 'Drag toward `Esc`, then choose `Esc`.',
+      hint: 'Touch anywhere on the terminal to open the gesture compass. Drag towards the diagonal that has `Esc`, and then drag back in the other direction to choose which `kind` of Esc.',
     },
   ],
 };
@@ -128,7 +128,7 @@ const POCKET_COPY_PASTE_SECTION: Section = {
   ...COPY_PASTE_SECTION,
   items: COPY_PASTE_SECTION.items.filter((item) => item.id !== 'cp-override'),
   prose: [
-    'Some terminal programs trap the cursor, and some do not. In Pocket, Select mode takes over drag-to-copy even for sessions like `changelog` that normally trap the cursor. Switch back to Gestures when you want arrow, Enter, and Esc gestures again.',
+    '`Select` mode helps you copy text out of a TUI, while `Gestures` mode makes it easy to enter common keystrokes. `Mouse` mode turns your taps into clicks, but it is only available when the running program is capturing mouse input.',
   ],
 };
 
