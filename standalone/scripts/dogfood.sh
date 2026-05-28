@@ -45,7 +45,7 @@ if [[ "${1:-}" == "--install" ]]; then
       if [[ ! -f "$INSTALL_DIR/uninstall.exe" ]]; then
         echo "Dormouse is not installed yet."
         echo "Run the installer once first:"
-        echo "  $RELEASE_DIR/bundle/nsis/Dormouse Terminal_*-setup.exe"
+        echo "  $RELEASE_DIR/bundle/nsis/Dormouse\\ Terminal_*-setup.exe"
         echo ""
         echo "After that, 'dogfood:standalone --install' will work from then on."
         exit 1
@@ -74,8 +74,8 @@ if [[ "${1:-}" == "--install" ]]; then
       INSTALL_DIR="/Applications/Dormouse Terminal.app"
       if [[ ! -d "$INSTALL_DIR" ]]; then
         echo "Dormouse is not installed yet."
-        echo "Install via the DMG first:"
-        echo "  open $RELEASE_DIR/bundle/dmg/Dormouse Terminal_*.dmg"
+        echo "Move the freshly built app into place first:"
+        echo "  mv $RELEASE_DIR/bundle/macos/Dormouse\\ Terminal.app /Applications"
         echo ""
         echo "After that, 'dogfood:standalone --install' will work from then on."
         exit 1
