@@ -20,7 +20,7 @@ Terminal-report and command-exit alerts do not require WATCHING to be enabled. A
 
 ## Public State
 
-The public Activity state is defined by `AlertState` / `ActivityNotification` in `lib/src/lib/alert-manager.ts` and `SessionStatus` in `lib/src/lib/activity-monitor.ts`.
+Source of truth: `AlertState` / `ActivityNotification` in `lib/src/lib/alert-manager.ts` and `SessionStatus` in `lib/src/lib/activity-monitor.ts` define the public Activity state.
 
 Internal state is deliberately split into independent tracks:
 
@@ -39,7 +39,7 @@ Public `status` is a projection:
 
 Persist `status`, `watchingEnabled`, `todo`, and sanitized `notification`. Restore `todo` and `notification`, then restart WATCHING only if `watchingEnabled` is true. Restore must not recreate protocol progress, command-exit arms, or a fresh ring; replay filtering in `docs/specs/terminal-escapes.md` prevents old terminal output from firing notification side effects again.
 
-Legacy TODO values migrate to boolean via `migrateTodoState` in `lib/src/lib/alert-manager.ts`.
+Source of truth: `migrateTodoState` in `lib/src/lib/alert-manager.ts` defines the legacy-TODO-value migration to boolean.
 
 ## Attention
 
@@ -67,7 +67,7 @@ WATCHING is the user-controlled output/silence monitor. It starts fresh when ena
 | `MIGHT_NEED_ATTENTION` | A busy Session went quiet. Debounce state. |
 | `ALERT_RINGING` | WATCHING observed likely completion while the Session lacked attention. |
 
-Timer defaults and their purpose live in `cfg.alert` in `lib/src/cfg.ts`.
+Source of truth: `cfg.alert` in `lib/src/cfg.ts` defines timer defaults and their purpose.
 
 WATCHING transitions:
 
@@ -122,7 +122,7 @@ Rules:
 - Warning progress does not ring by itself, but completion of a warning cycle rings with a generated warning title.
 - Invalid states, missing required percents for states `1` and `4`, and out-of-range percents are ignored.
 
-Generated titles/bodies for these rings are produced in `lib/src/lib/alert-manager.ts` (`ringOrSuppressProtocolProgress` / `completeProtocolProgress`).
+Source of truth: `ringOrSuppressProtocolProgress` / `completeProtocolProgress` in `lib/src/lib/alert-manager.ts` produce generated titles/bodies for these rings.
 
 ### OSC 777
 
@@ -150,7 +150,7 @@ Management payloads do not ring:
 - `p=?` sends a support response advertising the support payload defined in `lib/src/lib/terminal-protocol.ts` (`OSC99_SUPPORT_PAYLOAD`).
 - `p=close`, `p=alive`, `p=icon`, and `p=buttons` are consumed or ignored without creating notification UI.
 
-Pending OSC 99 chunk TTL and max-pending-id cap are defined in `lib/src/lib/terminal-protocol.ts`.
+Source of truth: `lib/src/lib/terminal-protocol.ts` defines the pending OSC 99 chunk TTL and max-pending-id cap.
 
 ## Command-exit Track
 
@@ -194,7 +194,7 @@ The header shows:
 - a hover/focus notification preview when TODO has `notification`
 - a dialog from right-click or some left-click actions, containing TODO and WATCHING switches plus notification detail
 
-Bell visual state is a pure function of public status; the exact tilt/animation mapping lives in `bellIconClass` in `lib/src/components/bell-icon-class.ts`.
+Bell visual state is a pure function of public status. Source of truth: `bellIconClass` in `lib/src/components/bell-icon-class.ts` defines the tilt/animation mapping.
 
 Tilt and animation must not change layout size. Long titles truncate before alert/TODO controls disappear.
 

@@ -162,9 +162,9 @@ compass rose. It must not draw a line directly under the user's thumb. The guide
 line is solid and fully opaque, and the offset rose center renders a small
 fully opaque circle.
 
-Gesture mode uses these radii (values are defined in
-`lib/src/lib/mobile-gesture-menu.ts`: `RADIUS_LAYOUT`, `RADIUS_SELECT`,
-`RADIUS_FADE_START`, `RADIUS_HIGHLIGHT`):
+Source of truth: `RADIUS_LAYOUT`, `RADIUS_SELECT`, `RADIUS_FADE_START`, and
+`RADIUS_HIGHLIGHT` in `lib/src/lib/mobile-gesture-menu.ts` define the radii
+used below.
 
 | Variable | Behavior |
 | --- | --- |
@@ -216,9 +216,9 @@ positions in the opposite directions. They must not fade out and be replaced by
 newly spawned option labels.
 
 Root labels are laid out as a square keypad, not on a circle. The four cardinal
-arrow chips use one shared `GAP_CARDINAL_RING` from the select circle edge
-(`GAP_CARDINAL_RING` and `GAP_CLUSTER` values are defined in
-`lib/src/components/MobileGestureRadialMenu.tsx`).
+arrow chips use one shared `GAP_CARDINAL_RING` from the select circle edge.
+Source of truth: `GAP_CARDINAL_RING` and `GAP_CLUSTER` in
+`lib/src/components/MobileGestureRadialMenu.tsx`.
 Diagonal groups use an EW-dominant corner-and-stack layout: the center option's
 inward corner is aligned with the diagonal tick mark at the same ring gap used
 by the cardinal arrow chips, measured on screen as the same horizontal/vertical
@@ -266,8 +266,9 @@ For diagonal directions, the radial menu is a two-stage gesture:
 If the user releases after the first group selection but before choosing one of
 the exploded options, the gesture is cancelled.
 
-Exploded-option directions per diagonal group are defined in
-`MOBILE_GESTURE_OPTION_DIRECTIONS` (`lib/src/lib/mobile-gesture-menu.ts`).
+Source of truth: `MOBILE_GESTURE_OPTION_DIRECTIONS` in
+`lib/src/lib/mobile-gesture-menu.ts` defines exploded-option directions per
+diagonal group.
 
 Examples:
 

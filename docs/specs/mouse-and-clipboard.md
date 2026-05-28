@@ -33,7 +33,7 @@ The terminal makes the current regime visible in the pane header, provides a way
 
 ### 1.2 Hover Text
 
-Hover text for both icons is defined in `lib/src/components/wall/TerminalPaneHeader.tsx`.
+Source of truth: `lib/src/components/wall/TerminalPaneHeader.tsx` defines hover text for both icons.
 
 ### 1.3 Click Behavior
 
@@ -144,7 +144,7 @@ When a selection is finalized, a popup appears adjacent to the selection (on the
 
 ### 4.1 Copy Buttons
 
-The two buttons (Copy Raw, Copy Rewrapped) and their platform-dependent shortcut labels are defined in `lib/src/components/SelectionPopup.tsx`.
+Source of truth: `lib/src/components/SelectionPopup.tsx` defines the Copy Raw and Copy Rewrapped buttons and their platform-dependent shortcut labels.
 
 #### 4.1.1 Copy Raw
 
@@ -186,7 +186,7 @@ Smart extension is offered **mid-drag**, in parallel with the Alt block-selectio
 
 ### 5.1 Detection
 
-A token is whitespace-delimited. Detected shapes (in priority order) are the `PATTERNS` in `lib/src/lib/smart-token.ts`. Error locations (`<path>:line` or `<path>:line:col`) are matched first so they beat the generic path patterns, and their trailing `:line` digits are preserved.
+A token is whitespace-delimited. Source of truth: `PATTERNS` in `lib/src/lib/smart-token.ts` defines the detected shapes in priority order. Error locations (`<path>:line` or `<path>:line:col`) are matched before the generic path patterns, and their trailing `:line` digits are preserved.
 
 For all kinds **except** error locations, trailing characters that are unlikely to be part of the token — `.`, `,`, `;`, `:`, `!`, `?`, single quotes, double quotes — are stripped from the detected token's end. Unmatched closing brackets (`)`, `]`, `}`, `>`) are also stripped, but matched pairs are preserved (e.g. `https://en.wikipedia.org/wiki/Foo_(bar)` keeps its trailing `)`).
 

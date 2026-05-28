@@ -74,7 +74,7 @@ Universal PTY/transport invariants live in `docs/specs/transport.md`. The rules 
 
 ### Extension manifest (current)
 
-The activation events and `contributes` block (commands with titles/icons, menus, view container, webview view) are defined in `vscode-ext/package.json`.
+Source of truth: `vscode-ext/package.json` defines the activation events and `contributes` block (commands with titles/icons, menus, view container, webview view).
 
 ### Webview hosting
 
@@ -152,7 +152,7 @@ theme files.
 
 ### CSP policy
 
-The CSP directives are assembled in `vscode-ext/src/webview-html.ts` (`getNonce()` + the directive list).
+Source of truth: `vscode-ext/src/webview-html.ts` assembles the CSP directives (`getNonce()` + the directive list).
 
 `unsafe-inline` for styles is needed because VS Code injects theme CSS variables via inline styles on the body element. Scripts remain nonce-gated (32-char random alphanumeric nonce). The webview HTML is built by Vite from the `lib` package, then at runtime `webview-html.ts` rewrites asset URLs to webview URIs, injects the CSP meta tag, applies nonces to all script tags, and injects initial state via a nonce-gated inline script.
 

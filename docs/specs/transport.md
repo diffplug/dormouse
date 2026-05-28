@@ -86,7 +86,7 @@ The OSC parsing/stripping rules that produce `pty:data` and `terminal:semanticEv
 
 ## Persisted session types
 
-The persisted-session interfaces (`PersistedSession` v3, `PersistedPane`, `PersistedAlertState`, `PersistedDoor`) and their v1→v2→v3 migrations live in `lib/src/lib/session-types.ts`.
+Source of truth: `lib/src/lib/session-types.ts` defines the persisted-session interfaces (`PersistedSession` v3, `PersistedPane`, `PersistedAlertState`, `PersistedDoor`) and their v1→v2→v3 migrations.
 
 Every saved-session entry point must pass through `readPersistedSession()`. That reader accepts both the canonical parsed object and a JSON-stringified session blob before validating/migrating; this covers host state APIs that may hand back the inner serialized JSON string.
 

@@ -17,7 +17,7 @@ The chrome is anchored on VSCode's file-tree styling because those colors are
 designed to read clearly inside the sidebar host area. Use bg-only chrome for
 panes and doors; do not add borders to make the hierarchy work.
 
-Token→VSCode-key bindings live in `lib/src/theme.css`; the runtime-picked `--color-door-bg` and `--color-focus-ring` are computed by `computeDynamicPalette()`.
+Source of truth: `lib/src/theme.css` defines token→VSCode-key bindings. The runtime-picked `--color-door-bg` and `--color-focus-ring` are computed by `computeDynamicPalette()`.
 
 Door colors and the focus ring are chosen at runtime by
 `computeDynamicPalette()` in `lib/src/lib/themes/dynamic-palette.ts`, using
@@ -128,9 +128,10 @@ Storybook simulates VSCode themes through `lib/.storybook/themes.ts`. It must
 also run bundled theme vars through `completeThemeVars()` (with the same host
 typography defaults as `applyTheme()`) before injecting them, so isolated
 component stories see the same materialized `--vscode-*` token set as the app.
-Storybook's default simulated host theme defaults to `PREFERRED_STORYBOOK_THEME`
-in `lib/.storybook/preview.ts`, falling back to the first bundled theme so a
-renamed or removed bundle cannot leave stories without theme vars.
+Source of truth: `PREFERRED_STORYBOOK_THEME` in `lib/.storybook/preview.ts`
+defines Storybook's default simulated host theme, with fallback to the first
+bundled theme so a renamed or removed bundle cannot leave stories without theme
+vars.
 The Storybook preview decorator also computes and publishes the dynamic palette
 vars (`--color-door-bg`, `--color-door-fg`, `--color-focus-ring`) through the
 shared `computeDynamicPalette()` helper, matching the runtime
