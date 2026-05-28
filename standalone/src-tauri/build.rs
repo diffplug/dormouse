@@ -26,13 +26,14 @@ fn bundle_node_runtime() -> Result<(), Box<dyn Error>> {
     let host = env::var("HOST")?;
     let node_source = resolve_node_binary(&host, &target)?;
 
-    println!("cargo:rerun-if-changed={}", node_source.display());
     validate_node_binary(&node_source, &target)?;
 
     // The supply-chain page (website/src/data/dependencies-runtime.json) discloses
     // an exact Node.js version. Fail the build if the binary we're about to bundle
-    // doesn't match standalone/.node-version, so the disclosed version provably
-    // equals what ships. CI installs the pin via setup-node's node-version-file.
+    // doesn't match the pin in the root package.json's devEngines.runtime.version,
+    // so the disclosed version provably equals what ships. Locally pnpm honors
+    // devEngines (onFail: "download") so scripts run with the pinned Node; CI
+    // reads the same field to drive actions/setup-node.
     let pinned_version = read_pinned_node_version(&manifest_dir)?;
     verify_node_version(&node_source, &host, &target, &pinned_version)?;
 
@@ -92,15 +93,31 @@ fn reject_macos_dynamic_node(node_source: &Path) -> Result<(), Box<dyn Error>> {
 }
 
 fn read_pinned_node_version(manifest_dir: &Path) -> Result<String, Box<dyn Error>> {
-    let pin_path = manifest_dir
+    let repo_root = manifest_dir
         .parent()
-        .ok_or("manifest dir has no parent")?
-        .join(".node-version");
+        .and_then(Path::parent)
+        .ok_or("manifest dir has no grandparent (expected <repo>/standalone/src-tauri)")?;
+    let pin_path = repo_root.join("package.json");
     println!("cargo:rerun-if-changed={}", pin_path.display());
 
     let raw = fs::read_to_string(&pin_path)
         .map_err(|err| format!("failed to read {}: {err}", pin_path.display()))?;
-    let version = raw.trim().trim_start_matches('v').to_owned();
+    let pkg: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|err| format!("failed to parse {}: {err}", pin_path.display()))?;
+    let version = pkg
+        .get("devEngines")
+        .and_then(|v| v.get("runtime"))
+        .and_then(|v| v.get("version"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            format!(
+                "{} is missing devEngines.runtime.version (string)",
+                pin_path.display()
+            )
+        })?
+        .trim()
+        .trim_start_matches('v')
+        .to_owned();
 
     let is_exact = version.split('.').count() == 3
         && version
@@ -108,7 +125,7 @@ fn read_pinned_node_version(manifest_dir: &Path) -> Result<String, Box<dyn Error
             .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()));
     if !is_exact {
         return Err(format!(
-            "{} must pin an exact Node.js version (MAJOR.MINOR.PATCH), found {version:?}",
+            "{} devEngines.runtime.version must be an exact Node.js version (MAJOR.MINOR.PATCH), found {version:?}",
             pin_path.display()
         )
         .into());
@@ -144,10 +161,10 @@ fn verify_node_version(
         .to_owned();
     if actual != pinned {
         return Err(format!(
-            "bundled Node.js {actual} does not match the standalone/.node-version pin {pinned}. \
-             Install the pinned version (CI uses actions/setup-node with \
-             node-version-file: standalone/.node-version) or update the pin and regenerate \
-             website/src/data/dependencies-runtime.json."
+            "bundled Node.js {actual} does not match the package.json devEngines.runtime.version \
+             pin {pinned}. Run scripts via pnpm so devEngines (onFail: \"download\") provisions \
+             the pinned Node, or update the pin in package.json and regenerate \
+             website/src/data/dependencies-runtime.json (node website/scripts/generate-deps.js)."
         )
         .into());
     }
