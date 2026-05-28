@@ -24,7 +24,7 @@ use process_wrap::std::{CreationFlags, JobObject};
 #[cfg(unix)]
 use process_wrap::std::ProcessGroup;
 #[cfg(windows)]
-use windows::Win32::System::Threading::CREATE_NO_WINDOW;
+use windows::Win32::System::Threading::DETACHED_PROCESS;
 
 type SidecarSender = mpsc::Sender<String>;
 type PendingRequests = Arc<Mutex<HashMap<String, mpsc::Sender<JsonValue>>>>;
@@ -418,7 +418,14 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     });
     #[cfg(windows)]
     {
-        wrap.wrap(CreationFlags(CREATE_NO_WINDOW));
+        // DETACHED_PROCESS (not CREATE_NO_WINDOW): on Windows 11 with Windows
+        // Terminal set as the default terminal, the OS still activates WT via
+        // COM to host a CREATE_NO_WINDOW-launched console app, leaving a stray
+        // WT window titled with the sidecar's exe path visible behind Dormouse.
+        // DETACHED_PROCESS opts out of console allocation entirely, so the
+        // console-handover path never fires. The sidecar is pipe-driven, so
+        // it never needs a console.
+        wrap.wrap(CreationFlags(DETACHED_PROCESS));
         wrap.wrap(JobObject);
     }
     #[cfg(unix)]
