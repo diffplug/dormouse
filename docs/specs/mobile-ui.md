@@ -193,17 +193,12 @@ and the select circle grows from zero radius to `RADIUS_SELECT`. This is a short
 state-reveal motion, not an ongoing decoration; reduced-motion users get the
 final state immediately.
 
-While the user is still choosing a root group, the root groups fade according to
-the current drag vector only after the drag exceeds `RADIUS_FADE_START`. Before
-that threshold, all root groups render at full opacity. After the threshold,
-define `dragHat = (currentPoint - origin) / RADIUS_SELECT` and `unitToGroup` as
-the unit vector from the origin to the group's compass direction. The root group
-target opacity is `clamp(0.75 + dragHat dot unitToGroup, 0, 1)`. The rendered
-opacity blends smoothly from `1` at `RADIUS_FADE_START` to that target at
-`RADIUS_SELECT` using
-`fadeProgress = clamp((dragDistance - RADIUS_FADE_START) / (RADIUS_SELECT -
-RADIUS_FADE_START), 0, 1)` and
-`opacity = 1 + (targetOpacity - 1) * fadeProgress`.
+While the user is still choosing a root group, all root groups stay fully
+opaque until the drag exceeds `RADIUS_FADE_START`; past that threshold each
+group fades by its alignment with the drag vector (the group the user is
+moving toward stays brightest, the rest dim toward a floor), reaching the
+full per-direction opacity at `RADIUS_SELECT`. Source of truth:
+`rootGroupOpacity()` in `lib/src/components/MobileGestureRadialMenu.tsx`.
 
 N, S, E, and W root labels render as single arrow chips. Dragging to
 `RADIUS_SELECT` in one of those four cardinal directions immediately sends the
