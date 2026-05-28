@@ -1,5 +1,7 @@
 # Alert Spec
 
+> See `docs/specs/glossary.md` for Session / Pane / Door vocabulary. This spec uses it throughout.
+
 Alert state belongs to the **Session** Activity layer. It survives Pane <-> Door movement and is destroyed with the Session.
 
 Dormouse can owe the user attention in three ways:

@@ -1,5 +1,7 @@
 # Terminal Mouse and Clipboard Behavior Specification
 
+> See `docs/specs/glossary.md` for Session / Pane vocabulary. This spec uses it for the pane-level scoping of mouse regime, override state, and selection.
+
 ## Overview
 
 Mouse handling and clipboard (copy and paste) behavior for the terminal across macOS, Linux, and Windows. The core design goal is to make text selection, copying, pasting, and mouse-driven interaction with TUI programs coexist cleanly, with visible state and predictable transitions between modes.

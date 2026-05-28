@@ -1,5 +1,7 @@
 # Mobile Terminal Website Prototype Spec
 
+> See `docs/specs/glossary.md` for Session / Pane / Door vocabulary. This spec uses it throughout.
+
 ## 1. Overview
 
 This document specifies the `/playground/pocket` mobile terminal prototype.
