@@ -20,17 +20,9 @@ Terminal-report and command-exit alerts do not require WATCHING to be enabled. A
 
 ## Public State
 
-Source of truth: `AlertState` / `ActivityNotification` in `lib/src/lib/alert-manager.ts` and `SessionStatus` in `lib/src/lib/activity-monitor.ts` define the public Activity state.
+Source of truth: `AlertState` / `ActivityNotification` in `lib/src/lib/alert-manager.ts` and `SessionStatus` in `lib/src/lib/activity-monitor.ts` define the public Activity state. Internal state is deliberately split into independent tracks (`watchingStatus`, `protocolStatus`, `commandExitStatus`, plus `progress` and `commandExitWatch` companion state) so each axis evolves without entangling the others.
 
-Internal state is deliberately split into independent tracks:
-
-- `watchingStatus`: `WatchingSessionStatus`, or `WATCHING_DISABLED` when no `ActivityMonitor` exists.
-- `protocolStatus`: `IDLE | OSC_NOTIF_BUSY | ALERT_RINGING`.
-- `commandExitStatus`: `IDLE | COMMAND_EXIT_ARMED | ALERT_RINGING`.
-- `progress`: active `OSC 9;4` progress, if any.
-- `commandExitWatch`: the current foreground command eligible for command-exit alerting, if any.
-
-Public `status` is a projection:
+Public `status` is a projection — first match wins:
 
 1. `ALERT_RINGING` if `protocolStatus`, `commandExitStatus`, or `watchingStatus` is ringing, in that order.
 2. `OSC_NOTIF_BUSY` if protocol progress is active.
@@ -69,17 +61,12 @@ WATCHING is the user-controlled output/silence monitor. It starts fresh when ena
 
 Source of truth: `cfg.alert` in `lib/src/cfg.ts` defines timer defaults and their purpose.
 
-WATCHING transitions:
+Source of truth: `ActivityMonitor` in `lib/src/lib/activity-monitor.ts` implements the transitions. The invariants the implementation must honor:
 
-- First output in `NOTHING_TO_SHOW` starts candidate tracking but stays `NOTHING_TO_SHOW`.
-- Continued output across `busyCandidateGap` enters `MIGHT_BE_BUSY`; more output confirms `BUSY`, while no confirmation returns to `NOTHING_TO_SHOW`.
-- Output in `BUSY` restarts the silence timer.
-- Silence moves `BUSY -> MIGHT_NEED_ATTENTION -> ALERT_RINGING`, unless the Session has attention at confirmation time; if attended, reset to `NOTHING_TO_SHOW`.
-- Output in `MIGHT_NEED_ATTENTION` returns to `BUSY`.
-- `ALERT_RINGING` latches. New output without attention does not clear it; new output with attention starts a new `MIGHT_BE_BUSY` cycle.
+- Output drives the monitor up the chain `NOTHING_TO_SHOW` -> `MIGHT_BE_BUSY` -> `BUSY`; silence drives it down `BUSY` -> `MIGHT_NEED_ATTENTION` -> `ALERT_RINGING`. The `MIGHT_*` states are debounce windows in both directions.
+- Attention at confirmation time suppresses the ring and resets to `NOTHING_TO_SHOW`. `ALERT_RINGING` otherwise latches; new output with attention starts a fresh `MIGHT_BE_BUSY` cycle.
 - Attending or dismissing a WATCHING ring resets the monitor to `NOTHING_TO_SHOW`.
-
-Rings must be caused by a fresh transition into `ALERT_RINGING`, never by rerender, theme change, remount, minimize, or reattach.
+- Rings must be caused by a fresh transition into `ALERT_RINGING`, never by rerender, theme change, remount, minimize, or reattach.
 
 ## Protocol Track
 
