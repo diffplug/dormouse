@@ -239,23 +239,6 @@ Security requirements:
 - Bell, TODO, preview, and dialog controls must remain keyboard reachable; dialogs trap focus and support `Escape`.
 - Tooltips, dialog copy, and future localized TODO labels must wrap in narrow layouts.
 
-## Verification Checklist
-
-- WATCHING rings only on a fresh unattended transition into `ALERT_RINGING`.
-- Quick output stays in `NOTHING_TO_SHOW`; pauses in busy output debounce through `MIGHT_NEED_ATTENTION`.
-- Resize noise cannot cause a WATCHING ring.
-- Alert/TODO state survives Pane <-> Door transitions.
-- Door click/`Enter` clears a ring; Door `d` does not.
-- Protocol notifications ring with WATCHING disabled, but not while the Session has attention.
-- `OSC 9;4` active progress shows `OSC_NOTIF_BUSY`; completion, error, and active-progress clear ring only when unattended.
-- Standalone `BEL` does not replace richer OSC detail in the same parse batch.
-- OSC 99 chunking, base64, support query, and management payloads behave as specified.
-- Command-exit arms only after a seen command loses attention and rings only on the same command after the minimum runtime.
-- Protocol detail wins over generated command-exit detail.
-- Dismiss/attend creates TODO; passthrough `Enter` clears TODO.
-- Restore/replay does not refire old notification side effects.
-- Long titles and notification text do not overflow fixed header or Door controls.
-
 ## References
 
 - iTerm2 proprietary escape codes (OSC 9, OSC 9;4): https://iterm2.com/documentation-escape-codes.html
