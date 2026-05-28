@@ -71,7 +71,6 @@ Message types live in `vscode-ext/src/message-types.ts` (the canonical schema; o
 Webview → host message types: see the `WebviewMessage` union in `vscode-ext/src/message-types.ts`. The ones with non-obvious contracts:
 
 - `dormouse:openExternal` — request the host to open a user-confirmed external URI from an OSC 8 hyperlink. Hosts must revalidate and reject malformed, control-character-bearing, or blocked pseudo-scheme targets (`javascript:`, `data:`, `blob:`, `about:`).
-- `dormouse:newTerminal` — the webview replaces the selected untouched terminal in-place only when `replaceUntouched` is true, otherwise it spawns a new pane.
 
 **Host → webview:**
 
