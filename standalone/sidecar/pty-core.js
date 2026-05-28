@@ -326,9 +326,6 @@ module.exports.create = function create(send, ptyModule) {
         rows: config.rows,
         cwd: config.cwd,
         env: config.env,
-        // System conhost.exe occasionally renders the PseudoConsoleWindow
-        // visible at startup; the bundled OpenConsole.exe keeps it fully hidden.
-        useConptyDll: true,
       });
     } catch (err) {
       console.error(`[pty-core] spawn failed for ${id}:`, err.message);
