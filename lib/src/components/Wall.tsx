@@ -24,6 +24,7 @@ import {
   getActivitySnapshot,
   isUntouched,
   getOrCreateTerminal,
+  isReservedUserTitle,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
   type SessionStatus,
@@ -37,6 +38,12 @@ import {
 import { orchestrateKill } from '../lib/kill-animation';
 import { PLATFORM_STRING } from '../lib/platform';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
+import type {
+  Surface as DorSurface,
+  SplitDirection as DorSplitDirection,
+  ResolvedSplitDirection as DorResolvedSplitDirection,
+  ParseResult,
+} from 'dor/commands/types';
 import { findReattachNeighbor } from '../lib/spatial-nav';
 import { cloneLayout, getLayoutStructureSignature } from '../lib/layout-snapshot';
 import type { PersistedDoor } from '../lib/session-types';
@@ -97,25 +104,7 @@ type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
   respond: (response: DorControlResult) => void;
 };
 
-type DorSurface = {
-  id: string;
-  ref: string;
-  paneRef: string;
-  type: 'terminal';
-  title: string;
-  focused: boolean;
-  index: number;
-  indexInPane: number;
-  requestedWorkingDirectory: string | null;
-  selectedInPane: boolean;
-};
-
-type DorSplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
-type DorResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
 type DockviewSplitDirection = 'left' | 'right' | 'above' | 'below';
-type ParseResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; message: string };
 
 export type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind, SpawnDirection } from './wall/wall-types';
 export {
@@ -216,9 +205,7 @@ function titleFromCommand(command: string): string {
 function validateUserTitle(title: string): string | null {
   const trimmed = title.trim();
   if (!trimmed) return 'title cannot be empty';
-  if (trimmed === '<idle>' || trimmed.startsWith('<idle>')) {
-    return 'title is reserved';
-  }
+  if (isReservedUserTitle(trimmed)) return 'title is reserved';
   return null;
 }
 
