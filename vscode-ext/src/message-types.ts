@@ -1,5 +1,6 @@
 import type { ActivityNotification, SessionStatus, TodoState } from '../../lib/src/lib/alert-manager';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
+import type { OpenPort } from '../../lib/src/lib/platform/types';
 import type { VSCodeWorkbenchCommand } from '../../lib/src/lib/vscode-keybindings';
 
 // Messages from webview → extension host
@@ -9,6 +10,7 @@ export type WebviewMessage =
   | { type: 'pty:resize'; id: string; cols: number; rows: number }
   | { type: 'pty:kill'; id: string }
   | { type: 'pty:getCwd'; id: string; requestId?: string }
+  | { type: 'pty:getOpenPorts'; id: string; requestId?: string }
   | { type: 'pty:getScrollback'; id: string; requestId?: string }
   | { type: 'pty:getShells'; requestId?: string }
   | { type: 'clipboard:readFiles'; requestId: string }
@@ -45,6 +47,7 @@ export type ExtensionMessage =
   | { type: 'pty:list'; ptys: PtyInfo[] }
   | { type: 'pty:replay'; id: string; data: string }
   | { type: 'pty:cwd'; id: string; cwd: string | null; requestId?: string }
+  | { type: 'pty:openPorts'; id: string; ports: OpenPort[]; requestId?: string }
   | { type: 'pty:scrollback'; id: string; data: string | null; requestId?: string }
   | { type: 'pty:shells'; shells: Array<{ name: string; path: string; args: string[] }>; requestId?: string }
   | { type: 'clipboard:files'; paths: string[] | null; requestId: string }

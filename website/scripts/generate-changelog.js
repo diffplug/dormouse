@@ -10,5 +10,11 @@ const outPath = resolve(__dirname, "../src/data/changelog.json");
 
 const changelog = parseChangelog(readFileSync(changelogPath, "utf-8"));
 
+// Drop the "[Unreleased]" section — it's a Keep-a-Changelog authoring
+// convention in CHANGELOG.md, not something we publish on the website.
+changelog.releases = changelog.releases.filter(
+  (release) => release.version.toLowerCase() !== "unreleased",
+);
+
 writeFileSync(outPath, JSON.stringify(changelog, null, 2) + "\n");
 console.log(`Wrote ${changelog.releases.length} changelog releases to src/data/changelog.json`);

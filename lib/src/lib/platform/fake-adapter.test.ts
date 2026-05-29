@@ -239,6 +239,30 @@ describe('FakePtyAdapter', () => {
     expect(dataEvents).toEqual([{ id: 't1', data: 'after' }]);
   });
 
+  it('clears configured open ports on kill', async () => {
+    const { adapter } = createAdapter();
+    const ports = [
+      {
+        protocol: 'tcp' as const,
+        family: 'IPv4' as const,
+        address: '127.0.0.1',
+        port: 5173,
+        pid: 1234,
+        processName: 'vite',
+      },
+    ];
+    adapter.spawnPty('t1');
+    adapter.setOpenPorts('t1', ports);
+
+    await expect(adapter.getOpenPorts('t1')).resolves.toEqual(ports);
+
+    adapter.killPty('t1');
+    await expect(adapter.getOpenPorts('t1')).resolves.toEqual([]);
+
+    adapter.spawnPty('t1');
+    await expect(adapter.getOpenPorts('t1')).resolves.toEqual([]);
+  });
+
   it('clears input handlers on reset', () => {
     const { adapter, dataEvents } = createAdapter();
     const handled: string[] = [];

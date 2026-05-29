@@ -8,6 +8,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/). Release checklist in [deploy.md](docs/specs/deploy.md).
 
+## [Unreleased]
+### Fixed
+- On Windows, Shift+Enter and Ctrl+J now insert a newline (instead of submitting or doing nothing) in TUIs that read keyboard input via the Console API behind ConPTY, such as Codex. Dormouse advertises win32-input-mode so those apps receive faithful Win32 key events, the same way Windows Terminal does. Claude Code and macOS/Linux are unaffected — they continue to use the kitty keyboard protocol ([#117](https://github.com/diffplug/dormouse/pull/117)).
+
+
+## [0.11.0] - 2026-05-28
+### Added
+- Pane titles now read the running command off the rendered prompt line, so the title is correct whether the command was typed, recalled from history, or pasted, and it survives session restore / VS Code panel reopen ([#102](https://github.com/diffplug/dormouse/pull/102)).
+### Changed
+- 🖥️ The standalone app is now named **Dormouse Terminal** so it surfaces when you search for "Term" ([#111](https://github.com/diffplug/dormouse/pull/111)).
+### Fixed
+- On Windows, pane titles no longer show a bare interpreter path such as **cmd.exe**; the detected command is shown instead, and cmd.exe and Git Bash prompts are now recognized ([#103](https://github.com/diffplug/dormouse/pull/103)).
+- 🖥️ A stray Windows Terminal window no longer flashes behind the standalone app on Windows 11 where Windows Terminal is the default terminal ([#110](https://github.com/diffplug/dormouse/pull/110)).
+- 🔌 VS Code workbench chords now reach the terminal: **Cmd/Ctrl+P** (Go to File), **Cmd/Ctrl+Shift+P** and **F1** (Command Palette), and **Cmd/Ctrl+B** (toggle sidebar) fire even when a focused TUI has switched on an enhanced keyboard protocol ([#112](https://github.com/diffplug/dormouse/pull/112)).
+
+
 ## [0.10.2] - 2026-05-19
 ### Changed
 - Internal refactor unifying modal primitives and renaming dialog components to modals; Storybook entries reorganized to match ([#78](https://github.com/diffplug/dormouse/pull/78)).

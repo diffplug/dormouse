@@ -239,6 +239,11 @@ export function attachRouter(
           webview.postMessage({ type: 'pty:cwd', id: msg.id, cwd, requestId: msg.requestId } satisfies ExtensionMessage);
         });
         break;
+      case 'pty:getOpenPorts':
+        ptyManager.getOpenPorts(msg.id).then((ports) => {
+          webview.postMessage({ type: 'pty:openPorts', id: msg.id, ports, requestId: msg.requestId } satisfies ExtensionMessage);
+        });
+        break;
       case 'pty:getScrollback':
         webview.postMessage({
           type: 'pty:scrollback', id: msg.id,

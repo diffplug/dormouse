@@ -32,8 +32,10 @@ GitHub Actions are always pinned by commit hash, not version tag. Dependabot wil
 
 **Agent-managed workflows** are `tend-*.yaml`, `workflow-audit.yaml`, and `security-audit.yaml`. They implement the repo's automation and self-audit infrastructure, and are exempt from the two rules below because they need to modify issues, PRs, or code, or fetch an OIDC token. Their bounded scope is defined in the "Automated Maintainer" section.
 
+**Release audit dispatch.** The `security-audit` job in `release.yml` holds `actions: write` — the one write permission a non-agent-managed workflow is granted beyond release provenance. It uses it solely to dispatch `security-audit.yaml` on the release tag and watch the resulting run, gating the VS Code publish on the result. Dispatch is required because `claude-code-action` rejects the `push` event that a tag-triggered `workflow_call` would inherit, and `GITHUB_EVENT_NAME` is a default variable that cannot be overridden — so a `workflow_dispatch` run is the only way to exercise the audit under a supported event. Blast radius is bounded: `actions: write` lets that job's `GITHUB_TOKEN` start or cancel workflow runs in this repo, but it cannot reach env-scoped secrets, merge to `main`, or push tags, and `release.yml` only runs on admin-gated `v*` tags — so exercising it already requires an admin-gated tag push.
+
 - FAIL IF `pull_request_target` appears in any `.github/workflows/**` file other than `tend-*.yaml`.
-- FAIL IF a non-agent-managed workflow grants write permissions other than the explicitly scoped release provenance permissions `id-token: write` and `attestations: write`.
+- FAIL IF a non-agent-managed workflow grants write permissions other than the explicitly scoped release provenance permissions `id-token: write` and `attestations: write`, or the `actions: write` granted to the `security-audit` job in `release.yml` (see "Release audit dispatch" above).
 
 ## Automated Maintainer (tend)
 

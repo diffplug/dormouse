@@ -34,8 +34,11 @@ export const PLATFORM_STRING: string = (() => {
  */
 export const IS_MAC: boolean = /Mac|iPhone|iPad/i.test(PLATFORM_STRING);
 
-/** True when running on Windows. */
-export const IS_WINDOWS: boolean = /win/i.test(PLATFORM_STRING);
+/**
+ * True when running on Windows. Used to advertise win32-input-mode so
+ * Console-API TUIs behind ConPTY (e.g. Codex) receive faithful key events.
+ */
+export const IS_WINDOWS: boolean = /Win/i.test(PLATFORM_STRING);
 
 let adapter: PlatformAdapter | null = null;
 
