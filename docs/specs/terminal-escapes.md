@@ -86,6 +86,7 @@ The vast majority of CSI handling is delegated to xterm.js. Dormouse only interv
 | `CSI ? ... h` (DECSET) | Private-mode set, including mouse tracking and bracketed paste | Observed via an xterm.js parser hook that returns false (xterm still handles the sequence); the mouse-selection store reads `terminal.modes` in a microtask. | `docs/specs/mouse-and-clipboard.md` |
 | `CSI ? ... l` (DECRST) | Private-mode reset, including mouse tracking and bracketed paste | Same observation pattern as DECSET. | `docs/specs/mouse-and-clipboard.md` |
 | Kitty keyboard protocol | Disambiguated key-event reporting (CSI u with modifiers, e.g. Shift+Enter distinguishable from Enter) | Enabled by passing `vtExtensions: { kittyKeyboard: true }` to the xterm.js `Terminal` constructor; xterm.js handles the push/pop (`CSI > u` / `CSI < u`) and the modified key reports. | `lib/src/lib/terminal-lifecycle.ts` |
+| `CSI ? 9001 h/l` (win32-input-mode) | Faithful Win32 `INPUT_RECORD` key reporting for ConPTY apps that read via the Console API (e.g. Codex on Windows), which cannot negotiate the kitty protocol there. Without it, a key like Shift+Enter or Ctrl+J reaches the app as a bare byte (or not at all) and is not recognized as a modified key. | Advertised **only on Windows** by passing `vtExtensions: { win32InputMode: IS_WINDOWS }` to the xterm.js `Terminal` constructor; xterm.js answers the program's `CSI ? 9001 h` and then emits `CSI Vk;Sc;Uc;Kd;Cs;Rc _` key records. The kitty protocol still covers macOS/Linux and raw-VT apps; the two negotiate independently. | `lib/src/lib/terminal-lifecycle.ts` |
 
 ### Replay-time CSI filtering
 
@@ -98,7 +99,7 @@ During `pty:replay`, Dormouse reconstructs scrollback by replaying saved bytes t
 - Focus reports (`CSI I` / `CSI O`)
 - OSC and DCS replies of any shape
 
-This filter is limited to *terminal-generated reports*. User keyboard escape sequences — arrows, function keys, bracketed paste, and modified key reports from the kitty keyboard protocol — must not be swallowed. See `docs/specs/transport.md` and `docs/specs/layout.md` for the contexts that invoke the filter.
+This filter is limited to *terminal-generated reports*. User keyboard escape sequences — arrows, function keys, bracketed paste, modified key reports from the kitty keyboard protocol, and win32-input-mode key records (`CSI …_`) — must not be swallowed. See `docs/specs/transport.md` and `docs/specs/layout.md` for the contexts that invoke the filter.
 
 ### Pass-through and fail-inertly
 

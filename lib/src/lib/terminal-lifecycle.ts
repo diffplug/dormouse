@@ -1,7 +1,7 @@
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
-import { getPlatform, IS_MAC } from './platform';
+import { getPlatform, IS_MAC, IS_WINDOWS } from './platform';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
 import { attachMouseModeObserver } from './mouse-mode-observer';
 import {
@@ -105,7 +105,14 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
     fontFamily: editorFontFamily,
     cursorBlink: true,
     theme,
-    vtExtensions: { kittyKeyboard: true },
+    // kittyKeyboard disambiguates Shift+Enter from Enter for TUIs that read
+    // raw VT (Claude Code everywhere; Codex on macOS/Linux). win32InputMode
+    // covers Windows TUIs that read via the Console API behind ConPTY (Codex),
+    // which can't negotiate the kitty protocol there: when conhost enables it
+    // (CSI ? 9001 h), xterm sends faithful Win32 INPUT_RECORD key events so
+    // Shift+Enter and Ctrl+J reach the app intact. Both are opt-in/negotiated,
+    // so they coexist — each program turns on whichever it understands.
+    vtExtensions: { kittyKeyboard: true, win32InputMode: IS_WINDOWS },
     linkHandler: {
       activate: (event, uri, range) => {
         event.preventDefault();

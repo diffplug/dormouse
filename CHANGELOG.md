@@ -8,6 +8,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/). Release checklist in [deploy.md](docs/specs/deploy.md).
 
+## [Unreleased]
+### Fixed
+- On Windows, Shift+Enter and Ctrl+J now insert a newline (instead of submitting or doing nothing) in TUIs that read keyboard input via the Console API behind ConPTY, such as Codex. Dormouse advertises win32-input-mode so those apps receive faithful Win32 key events, the same way Windows Terminal does. Claude Code and macOS/Linux are unaffected — they continue to use the kitty keyboard protocol.
+
+
 ## [0.11.0] - 2026-05-28
 ### Added
 - Pane titles now read the running command off the rendered prompt line, so the title is correct whether the command was typed, recalled from history, or pasted, and it survives session restore / VS Code panel reopen ([#102](https://github.com/diffplug/dormouse/pull/102)).
