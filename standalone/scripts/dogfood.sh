@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 #
-# Builds the standalone app and either launches or installs it.
+# Builds the standalone app and either installs or launches it.
 #
 # Usage:
-#   pnpm dogfood:standalone              Build and launch from the build directory.
-#   pnpm dogfood:standalone --install    Build and copy into the system install location.
+#   pnpm dogfood:standalone                Build and copy into the system install location.
+#   pnpm dogfood:standalone --no-install   Build and launch from the build directory.
 #
-# Launch mode (default):
+# Install mode (default):
+#   Copies the built files over the system-installed copy, bypassing the slow
+#   installer step. This mirrors `dogfood:vscode`, which also installs by default.
+#   Requires a one-time install first (NSIS installer on Windows, DMG on macOS)
+#   so that the install location exists.
+#
+# Launch mode (--no-install):
 #   Runs the built binary directly from target/release. Works on Windows, macOS,
 #   and Linux with no prior setup. This is the fastest way to test changes.
-#
-# Install mode (--install):
-#   Copies the built files over the system-installed copy, bypassing the slow
-#   installer step. Requires a one-time install first (NSIS installer on Windows,
-#   DMG on macOS) so that the install location exists.
 #
 set -euo pipefail
 
@@ -22,7 +23,7 @@ set -euo pipefail
 
 RELEASE_DIR="standalone/src-tauri/target/release"
 
-if [[ "${1:-}" == "--install" ]]; then
+if [[ "${1:-}" != "--no-install" ]]; then
   # Full build with bundling, but disable updater artifact signing.
   # On macOS, build only the .app bundle (skip DMG creation).
   BUNDLE_ARGS=()
@@ -36,8 +37,8 @@ else
   pnpm --filter dormouse-standalone tauri build --no-bundle
 fi
 
-if [[ "${1:-}" == "--install" ]]; then
-  # --- Install mode ---
+if [[ "${1:-}" != "--no-install" ]]; then
+  # --- Install mode (default) ---
   # Platform-specific: copy built files to system install location
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*|Windows_NT)
@@ -47,7 +48,7 @@ if [[ "${1:-}" == "--install" ]]; then
         echo "Run the installer once first:"
         echo "  $RELEASE_DIR/bundle/nsis/Dormouse\\ Terminal_*-setup.exe"
         echo ""
-        echo "After that, 'dogfood:standalone --install' will work from then on."
+        echo "After that, 'dogfood:standalone' will work from then on."
         exit 1
       fi
       # Kill any running Dormouse processes (the app + its sidecar node.exe,
@@ -77,7 +78,7 @@ if [[ "${1:-}" == "--install" ]]; then
         echo "Move the freshly built app into place first:"
         echo "  mv $RELEASE_DIR/bundle/macos/Dormouse\\ Terminal.app /Applications"
         echo ""
-        echo "After that, 'dogfood:standalone --install' will work from then on."
+        echo "After that, 'dogfood:standalone' will work from then on."
         exit 1
       fi
       rm -rf "$INSTALL_DIR"
@@ -85,12 +86,13 @@ if [[ "${1:-}" == "--install" ]]; then
       echo "✦ Installed to $INSTALL_DIR"
       ;;
     *)
-      echo "--install is not yet implemented for this platform."
+      echo "Install mode is not yet implemented for this platform."
+      echo "Use 'dogfood:standalone --no-install' to launch from the build dir instead."
       exit 1
       ;;
   esac
 else
-  # --- Launch mode (default) ---
+  # --- Launch mode (--no-install) ---
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*|Windows_NT)
       "$RELEASE_DIR/dormouse.exe" ;;
