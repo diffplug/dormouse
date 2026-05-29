@@ -34,6 +34,9 @@ export const PLATFORM_STRING: string = (() => {
  */
 export const IS_MAC: boolean = /Mac|iPhone|iPad/i.test(PLATFORM_STRING);
 
+/** True when running on Windows. */
+export const IS_WINDOWS: boolean = /win/i.test(PLATFORM_STRING);
+
 let adapter: PlatformAdapter | null = null;
 
 /** Set an externally-created platform adapter (e.g. TauriAdapter from standalone). */

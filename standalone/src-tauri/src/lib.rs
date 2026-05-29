@@ -335,19 +335,23 @@ fn kill_sidecar(child: &SharedChild) {
 // crashed earlier), which would block forever. The ~5s cap means a wedged
 // sidecar can't stall quit indefinitely.
 fn kill_sidecar_and_wait(child: &SharedChild) {
+    // Poll for exit at this cadence, up to ~5s total (MAX_POLLS × POLL_INTERVAL).
+    const POLL_INTERVAL: Duration = Duration::from_millis(20);
+    const MAX_POLLS: u32 = 250;
+
     let Ok(mut guard) = child.lock() else { return };
     append_log(format!(
         "[sidecar] killing and waiting for exit (pid={})",
         guard.id()
     ));
     let _ = guard.start_kill();
-    for _ in 0..250 {
+    for _ in 0..MAX_POLLS {
         match guard.try_wait() {
             Ok(Some(status)) => {
                 append_log(format!("[sidecar] confirmed exit during kill (status: {status})"));
                 return;
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Ok(None) => std::thread::sleep(POLL_INTERVAL),
             Err(err) => {
                 append_log(format!("[sidecar] wait error during kill: {err}"));
                 return;

@@ -101,7 +101,7 @@ describe('shellEscapePath OS dispatch', () => {
   });
 
   async function importShellEscape(opts: { isMac: boolean; platform: string }) {
-    vi.doMock('./platform', () => ({ IS_MAC: opts.isMac }));
+    vi.doMock('./platform', () => ({ IS_MAC: opts.isMac, IS_WINDOWS: /win/i.test(opts.platform) }));
     Object.defineProperty(globalThis, 'navigator', {
       value: { platform: opts.platform, userAgent: opts.platform },
       configurable: true,

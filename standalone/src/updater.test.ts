@@ -38,6 +38,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 // exercised. updater.ts only consumes PLATFORM_STRING from this module.
 vi.mock('dormouse-lib/lib/platform', () => ({
   PLATFORM_STRING: 'Windows',
+  IS_WINDOWS: true,
 }));
 
 // --- Helpers ---
