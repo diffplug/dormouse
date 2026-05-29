@@ -135,6 +135,13 @@ Implemented commands call private `surface.*` control methods. `surface.list`
 derives its response from current Dockview panels plus terminal state/activity
 snapshots, then returns `workspace:1` and `window:1`.
 
+Command tails captured after `--` are sent through the private control protocol
+as `commandArgv`, not pre-quoted shell strings. The webview host converts that
+argv array into a shell command string immediately before spawning the new PTY,
+using the actual selected shell (`sh`/`zsh`/`bash`, `cmd.exe`, or PowerShell).
+Legacy `command` string parameters may still be accepted by the private handler,
+but the bundled `dor` CLI should send `commandArgv`.
+
 User-facing command docs live in the generated help snapshots. Implementation
 details live in the command files. When `stricli` cannot express a desired
 help shape, commands may declare narrow template-pattern `findReplace` /

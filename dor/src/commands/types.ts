@@ -34,6 +34,7 @@ export interface ListSurfacesResponse {
 
 export interface SplitSurfaceRequest {
   command?: string;
+  commandArgv?: string[];
   direction: SplitDirection;
   minimized: boolean;
   surface?: string;
@@ -49,7 +50,8 @@ export interface SplitSurfaceResponse {
 }
 
 export interface EnsureSurfaceRequest {
-  command: string;
+  command?: string;
+  commandArgv?: string[];
   minimized: boolean;
   surface?: string;
   title?: string;

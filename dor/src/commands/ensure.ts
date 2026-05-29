@@ -7,7 +7,7 @@ import type {
   EnsureSurfaceResponse,
 } from './types.js';
 import {
-  buildShellCommand,
+  buildCommandArgv,
   resolveControlClient,
   stringParser,
   writeStdout,
@@ -95,8 +95,8 @@ JSON output:
 };
 
 async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...commandArgs: string[]): Promise<void | Error> {
-  const command = buildShellCommand(commandArgs);
-  if (!command) {
+  const commandArgv = buildCommandArgv(commandArgs);
+  if (!commandArgv) {
     return new Error('dor ensure requires a command after --');
   }
 
@@ -113,7 +113,7 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
 
   try {
     const response = await clientResult.value.ensureSurface({
-      command,
+      commandArgv,
       minimized: flags.minimize === true,
       surface: flags.surface,
       title,

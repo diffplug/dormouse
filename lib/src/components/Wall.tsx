@@ -37,6 +37,7 @@ import {
 import { orchestrateKill } from '../lib/kill-animation';
 import { PLATFORM_STRING } from '../lib/platform';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
+import { buildShellCommand, commandShellArgs } from '../lib/shell-command';
 import { findReattachNeighbor } from '../lib/spatial-nav';
 import { cloneLayout, getLayoutStructureSignature } from '../lib/layout-snapshot';
 import type { PersistedDoor } from '../lib/session-types';
@@ -80,6 +81,7 @@ type ShellSpawnNoticeState = {
 
 type DorControlParams = {
   command?: unknown;
+  commandArgv?: unknown;
   direction?: unknown;
   minimized?: unknown;
   pane?: string;
@@ -178,8 +180,36 @@ function stringParam(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
+function stringArrayParam(value: unknown): ParseResult<string[] | undefined> {
+  if (value === undefined || value === null) return { ok: true, value: undefined };
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+    return { ok: false, message: 'commandArgv must be an array of strings' };
+  }
+  return { ok: true, value: [...value] };
+}
+
 function booleanParam(value: unknown): boolean {
   return value === true;
+}
+
+function commandFromDorParams(params: DorControlParams, shell: string | undefined, required: boolean): ParseResult<string | undefined> {
+  const commandArgv = stringArrayParam(params.commandArgv);
+  if (!commandArgv.ok) return commandArgv;
+  if (commandArgv.value !== undefined && params.command !== undefined) {
+    return { ok: false, message: 'command and commandArgv cannot both be set' };
+  }
+
+  if (commandArgv.value !== undefined) {
+    const command = buildShellCommand(shell, PLATFORM_STRING, commandArgv.value);
+    if (!command) return { ok: false, message: 'command cannot be empty' };
+    return { ok: true, value: command };
+  }
+
+  const command = stringParam(params.command)?.trim() || undefined;
+  if ((required || params.command !== undefined) && !command) {
+    return { ok: false, message: 'command cannot be empty' };
+  }
+  return { ok: true, value: command };
 }
 
 function parseDorSplitDirection(value: unknown): DorSplitDirection | null {
@@ -220,24 +250,6 @@ function validateUserTitle(title: string): string | null {
     return 'title is reserved';
   }
   return null;
-}
-
-function hostLooksWindows(): boolean {
-  return /win/i.test(PLATFORM_STRING);
-}
-
-function commandShellArgs(shell: string | undefined, command: string): string[] {
-  const normalizedShell = (shell ?? '').replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? '';
-  if (!normalizedShell && hostLooksWindows()) {
-    return ['/d', '/s', '/c', command];
-  }
-  if (normalizedShell === 'cmd.exe' || normalizedShell === 'cmd') {
-    return ['/d', '/s', '/c', command];
-  }
-  if (normalizedShell === 'powershell.exe' || normalizedShell === 'powershell' || normalizedShell === 'pwsh.exe' || normalizedShell === 'pwsh') {
-    return ['-NoLogo', '-NoProfile', '-Command', command];
-  }
-  return ['-lc', command];
 }
 
 function ShellSpawnNotice({
@@ -752,7 +764,7 @@ export function Wall({
     if (command) {
       setPendingShellOpts(newId, {
         shell: defaults?.shell,
-        args: commandShellArgs(defaults?.shell, command),
+        args: commandShellArgs(defaults?.shell, PLATFORM_STRING, command),
         cwd: inheritedCwd,
         title,
         untouched: false,
@@ -927,14 +939,14 @@ export function Wall({
         const direction = directionParam === 'auto'
           ? dorDirectionForDockview(pickSplitDirection(resolved.panel))
           : directionParam;
-        const rawCommand = stringParam(params.command);
-        const command = rawCommand?.trim() || undefined;
-        if (params.command !== undefined && !command) {
-          detail.respond({ ok: false, error: 'command cannot be empty' });
+        const defaults = getDefaultShellOpts();
+        const command = commandFromDorParams(params, defaults?.shell, false);
+        if (!command.ok) {
+          detail.respond({ ok: false, error: command.message });
           return;
         }
         const result = createSplitSurface({
-          command,
+          command: command.value,
           direction,
           minimized: booleanParam(params.minimized),
           referenceId: resolved.target.id,
@@ -951,19 +963,25 @@ export function Wall({
             surfaceRef: result.value.ref,
             direction,
             minimized: booleanParam(params.minimized),
-            ...(command ? { command } : {}),
+            ...(command.value ? { command: command.value } : {}),
           },
         });
         return;
       }
 
       if (detail.method === 'surface.ensure') {
-        const command = stringParam(params.command)?.trim();
-        if (!command) {
+        const defaults = getDefaultShellOpts();
+        const command = commandFromDorParams(params, defaults?.shell, true);
+        if (!command.ok) {
+          detail.respond({ ok: false, error: command.message });
+          return;
+        }
+        const commandValue = command.value;
+        if (!commandValue) {
           detail.respond({ ok: false, error: 'command cannot be empty' });
           return;
         }
-        const title = (stringParam(params.title)?.trim() || titleFromCommand(command));
+        const title = (stringParam(params.title)?.trim() || titleFromCommand(commandValue));
         const titleError = validateUserTitle(title);
         if (titleError) {
           detail.respond({ ok: false, error: titleError });
@@ -978,7 +996,7 @@ export function Wall({
               surfaceId: existingId,
               surfaceRef: surfaceRefForId(existingId),
               title,
-              command,
+              command: commandValue,
               minimized: doorsRef.current.some((door) => door.id === existingId),
             },
           });
@@ -988,7 +1006,7 @@ export function Wall({
         if (!resolved) return;
         const direction = dorDirectionForDockview(pickSplitDirection(resolved.panel));
         const result = createSplitSurface({
-          command,
+          command: commandValue,
           direction,
           minimized: booleanParam(params.minimized),
           referenceId: resolved.target.id,
@@ -1005,7 +1023,7 @@ export function Wall({
             surfaceId: result.value.id,
             surfaceRef: result.value.ref,
             title,
-            command,
+            command: commandValue,
             minimized: booleanParam(params.minimized),
           },
         });

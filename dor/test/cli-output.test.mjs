@@ -58,24 +58,26 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
     },
     async splitSurface(request) {
       this.requests.push({ method: 'splitSurface', request });
+      const command = request.command ?? request.commandArgv?.join(' ');
       return {
         status: 'created',
         surfaceId: '33333333-3333-4333-8333-333333333333',
         surfaceRef: 'surface:3',
         direction: request.direction === 'auto' ? 'right' : request.direction,
         minimized: request.minimized,
-        ...(request.command ? { command: request.command } : {}),
+        ...(command ? { command } : {}),
       };
     },
     async ensureSurface(request) {
       this.requests.push({ method: 'ensureSurface', request });
-      const title = request.title ?? request.command;
+      const command = request.command ?? request.commandArgv?.join(' ');
+      const title = request.title ?? command;
       return {
         status: title === 'dev server' ? 'existing' : 'created',
         surfaceId: '33333333-3333-4333-8333-333333333333',
         surfaceRef: 'surface:3',
         title,
-        command: request.command,
+        command,
         minimized: request.minimized,
       };
     },
@@ -114,11 +116,39 @@ test('split json output', async () => {
   );
 });
 
+test('split sends command argv tail without shell quoting', async () => {
+  const client = fixtureClient();
+  await runCli(['split', '--', 'node', '-e', 'console.log(process.argv[1])', 'hello world'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'splitSurface',
+    request: {
+      commandArgv: ['node', '-e', 'console.log(process.argv[1])', 'hello world'],
+      direction: 'auto',
+      minimized: false,
+      surface: undefined,
+    },
+  }]);
+});
+
 test('ensure text output', async () => {
   await snapshot(
     'ensure-text',
     await runCli(['ensure', '--title', 'dev server', '--', 'pnpm', 'dev:workspace'], { client: fixtureClient() }),
   );
+});
+
+test('ensure sends command argv tail without shell quoting', async () => {
+  const client = fixtureClient();
+  await runCli(['ensure', '--title', 'worker', '--', 'node', '-e', 'console.log(process.argv[1])', 'hello world'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'ensureSurface',
+    request: {
+      commandArgv: ['node', '-e', 'console.log(process.argv[1])', 'hello world'],
+      minimized: false,
+      surface: undefined,
+      title: 'worker',
+    },
+  }]);
 });
 
 test('ensure json output', async () => {

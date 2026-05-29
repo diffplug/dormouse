@@ -70,28 +70,12 @@ export function writeStdout(context: DorCommandContext, stdout: string): void {
   context.process.stdout.write(stdout);
 }
 
-const SAFE_SHELL_ARG = /^[A-Za-z0-9_@%+=:,./-]+$/;
-
 /**
- * Quote one argv token for a POSIX shell: left bare when it contains only
- * shell-safe characters, otherwise wrapped in single quotes with embedded
- * single quotes escaped as the standard '\'' sequence. The chosen quoting may
- * differ from how the user originally typed the argument, but the receiving
- * shell re-parses it into the identical token.
+ * Preserve the argv array captured after `--` so the host can quote it for the
+ * actual shell it is about to launch. Returns undefined when there is no
+ * meaningful command (no tokens, or only empty/whitespace tokens).
  */
-function quoteShellArg(arg: string): string {
-  if (arg === '') return "''";
-  if (SAFE_SHELL_ARG.test(arg)) return arg;
-  return `'${arg.replace(/'/g, "'\\''")}'`;
-}
-
-/**
- * Join an argv array captured after `--` into a single shell command string,
- * quoting each token so the receiving shell re-parses it into the same argv.
- * Returns undefined when there is no meaningful command (no tokens, or only
- * empty/whitespace tokens). Shared by `dor split` and `dor ensure`.
- */
-export function buildShellCommand(args: readonly string[]): string | undefined {
+export function buildCommandArgv(args: readonly string[]): string[] | undefined {
   if (args.join('').trim() === '') return undefined;
-  return args.map(quoteShellArg).join(' ');
+  return [...args];
 }
