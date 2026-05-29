@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "main": "main.js",
+  "scripts": {
+    "test": "node --test"
+  },
   "dependencies": {
     "node-pty": "1.2.0-beta.13"
   }

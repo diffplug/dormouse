@@ -254,6 +254,26 @@ fn pty_get_cwd(
         .and_then(|cwd| cwd.as_str().map(String::from)))
 }
 
+// Mirrors `OPEN_PORT_TIMEOUT_MS` in `lib/src/lib/platform/types.ts` — keep in sync.
+const OPEN_PORT_TIMEOUT_MS: u64 = 3000;
+
+#[tauri::command]
+fn pty_get_open_ports(
+    state: tauri::State<'_, SidecarState>,
+    id: String,
+) -> Result<JsonValue, String> {
+    let response = request_from_sidecar_timeout(
+        &state,
+        "pty:getOpenPorts",
+        serde_json::json!({ "id": id }),
+        Duration::from_millis(OPEN_PORT_TIMEOUT_MS),
+    )?;
+    Ok(response
+        .get("ports")
+        .cloned()
+        .unwrap_or_else(|| JsonValue::Array(Vec::new())))
+}
+
 #[tauri::command]
 fn pty_get_scrollback(
     state: tauri::State<'_, SidecarState>,
@@ -638,6 +658,7 @@ pub fn run() {
             pty_resize,
             pty_kill,
             pty_get_cwd,
+            pty_get_open_ports,
             pty_get_scrollback,
             pty_request_init,
             kill_sidecar_now,
