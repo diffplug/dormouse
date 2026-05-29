@@ -97,9 +97,9 @@ export interface Command {
 
 export interface HelpPatch {
   scope: 'root' | 'command';
-  /** Ordered regex-source find/replace pairs. */
+  /** Ordered template-pattern find/replace pairs. Tokens: <LS>, <WS>, <TO-EOL>. */
   findReplace?: readonly string[];
-  /** Regex-source patterns replaced with an empty string. */
+  /** Template patterns replaced with an empty string. Tokens: <LS>, <WS>, <TO-EOL>. */
   remove?: readonly string[];
 }
 

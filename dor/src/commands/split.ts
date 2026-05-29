@@ -26,7 +26,7 @@ interface SplitFlags {
   readonly up?: boolean;
 }
 
-const generatedSplitUsagePattern = String.raw`^  dor split \[--auto\] \[--command cmd\] \[--down\] \[--json\] \[--left\] \[--minimize\] \[--right\] \[--surface id\|ref\|index\] \[--up\]$`;
+const generatedSplitUsage = '  dor split [--auto] [--command cmd] [--down] [--json] [--left] [--minimize] [--right] [--surface id|ref|index] [--up]';
 const groupedSplitUsage = '[--left|--right|--up|--down|--auto] [--command cmd] [--json] [--minimize] [--surface id|ref|index]';
 const splitUsageBrief = 'Direction flags are mutually exclusive; --auto is the default.';
 
@@ -36,23 +36,23 @@ export const splitCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        generatedSplitUsagePattern,
+        generatedSplitUsage,
         `  dor split ${groupedSplitUsage}`,
       ],
     },
     {
       scope: 'command',
       findReplace: [
-        generatedSplitUsagePattern,
+        generatedSplitUsage,
         `  dor split ${groupedSplitUsage}\n    ${splitUsageBrief}`,
-        String.raw`^[ \t]*\[--auto\][ \t]+Default; choose right when wide and down when narrow\.$`,
-        '     [--left|--right|--up|--down|--auto]\n                  Split direction. Mutually exclusive; default is --auto.',
+        '<LS>[--auto]<WS>Default; choose right when wide and down when narrow.<TO-EOL>',
+        '     [--left|--right|--up|--down|--auto]\n                  Split direction. Mutually exclusive; default is --auto.\n',
       ],
       remove: [
-        String.raw`^[ \t]*\[--down\].*\n`,
-        String.raw`^[ \t]*\[--left\].*\n`,
-        String.raw`^[ \t]*\[--right\].*\n`,
-        String.raw`^[ \t]*\[--up\].*\n`,
+        '<LS>[--down]<TO-EOL>',
+        '<LS>[--left]<TO-EOL>',
+        '<LS>[--right]<TO-EOL>',
+        '<LS>[--up]<TO-EOL>',
       ],
     },
   ],

@@ -185,8 +185,47 @@ function applyHelpPatch(stdout: string, findReplace: readonly string[] | undefin
 }
 
 function applyHelpPattern(stdout: string, findPattern: string, replace: string): string {
-  const regex = new RegExp(findPattern, 'gm');
+  const regex = compileHelpPattern(findPattern);
   return stdout.replace(regex, () => replace);
+}
+
+const HELP_PATTERN_TOKENS: Readonly<Record<string, string>> = {
+  LS: '^[ \\t]*',
+  'TO-EOL': '[^\\n]*(?:\\n|$)',
+  WS: '[ \\t]+',
+};
+
+function compileHelpPattern(pattern: string): RegExp {
+  let source = '';
+  let index = 0;
+
+  while (index < pattern.length) {
+    const tokenStart = pattern.indexOf('<', index);
+    if (tokenStart === -1) {
+      source += escapeRegExp(pattern.slice(index));
+      break;
+    }
+
+    source += escapeRegExp(pattern.slice(index, tokenStart));
+    const tokenEnd = pattern.indexOf('>', tokenStart + 1);
+    if (tokenEnd === -1) {
+      throw new Error(`help patch pattern has unterminated token starting at offset ${tokenStart}`);
+    }
+
+    const token = pattern.slice(tokenStart + 1, tokenEnd);
+    const tokenSource = HELP_PATTERN_TOKENS[token];
+    if (!tokenSource) {
+      throw new Error(`unknown help patch token <${token}>`);
+    }
+    source += tokenSource;
+    index = tokenEnd + 1;
+  }
+
+  return new RegExp(source, 'gm');
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
 }
 
 function validateEnsureDelimiter(args: string[]): ParseResult<void> {
