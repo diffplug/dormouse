@@ -160,6 +160,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.terminalSizes.delete(id);
     this.inputHandlers.delete(id);
     this.protocolParsers.delete(id);
+    this.openPortsMap.delete(id);
     this.alertManager.onExit(id, 0);
     for (const handler of this.exitHandlers) {
       handler({ id, exitCode: 0 });
@@ -191,6 +192,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
 
   async getOpenPorts(id: string): Promise<OpenPort[]> {
+    if (!this.terminals.has(id)) return [];
     return this.openPortsMap.get(id) ?? [];
   }
 
