@@ -69,13 +69,3 @@ export function wantsIds(idFormat: IdFormat): boolean {
 export function writeStdout(context: DorCommandContext, stdout: string): void {
   context.process.stdout.write(stdout);
 }
-
-/**
- * Preserve the argv array captured after `--` so the host can quote it for the
- * actual shell it is about to launch. Returns undefined when there is no
- * meaningful command (no tokens, or only empty/whitespace tokens).
- */
-export function buildCommandArgv(args: readonly string[]): string[] | undefined {
-  if (args.join('').trim() === '') return undefined;
-  return [...args];
-}

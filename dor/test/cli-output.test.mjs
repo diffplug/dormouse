@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCli } from '../dist/cli.js';
+import { buildShellCommandForKind, shellCommandKind } from '../dist/commands/shell-command.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const snapshotsDir = join(__dirname, 'snapshots');
@@ -58,26 +59,24 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
     },
     async splitSurface(request) {
       this.requests.push({ method: 'splitSurface', request });
-      const command = request.command ?? request.commandArgv?.join(' ');
       return {
         status: 'created',
         surfaceId: '33333333-3333-4333-8333-333333333333',
         surfaceRef: 'surface:3',
         direction: request.direction === 'auto' ? 'right' : request.direction,
         minimized: request.minimized,
-        ...(command ? { command } : {}),
+        ...(request.command ? { command: request.command } : {}),
       };
     },
     async ensureSurface(request) {
       this.requests.push({ method: 'ensureSurface', request });
-      const command = request.command ?? request.commandArgv?.join(' ');
-      const title = request.title ?? command;
+      const title = request.title ?? request.command;
       return {
         status: title === 'dev server' ? 'existing' : 'created',
         surfaceId: '33333333-3333-4333-8333-333333333333',
         surfaceRef: 'surface:3',
         title,
-        command,
+        command: request.command,
         minimized: request.minimized,
       };
     },
@@ -116,13 +115,31 @@ test('split json output', async () => {
   );
 });
 
-test('split sends command argv tail without shell quoting', async () => {
+test('shell command quoting supports shell families', () => {
+  assert.equal(shellCommandKind('/bin/zsh', 'darwin'), 'posix');
+  assert.equal(shellCommandKind('C:\\Windows\\System32\\cmd.exe', 'win32'), 'cmd');
+  assert.equal(shellCommandKind('C:\\Program Files\\PowerShell\\7\\pwsh.exe', 'win32'), 'powershell');
+  assert.equal(
+    buildShellCommandForKind('posix', ['node', '-e', 'console.log(process.argv[1])', 'hello world', "it's"]),
+    "node -e 'console.log(process.argv[1])' 'hello world' 'it'\\''s'",
+  );
+  assert.equal(
+    buildShellCommandForKind('powershell', ['C:\\Program Files\\nodejs\\node.exe', '-e', 'Write-Output $args[0]', 'hello world', "it's"]),
+    "& 'C:\\Program Files\\nodejs\\node.exe' -e 'Write-Output $args[0]' 'hello world' 'it''s'",
+  );
+  assert.equal(
+    buildShellCommandForKind('cmd', ['C:\\Program Files\\nodejs\\node.exe', '-e', 'console.log(process.argv[1])', 'hello world', 'a&b']),
+    '"C:\\Program Files\\nodejs\\node.exe" -e "console.log^(process.argv[1]^)" "hello world" "a^&b"',
+  );
+});
+
+test('split sends command string to the host', async () => {
   const client = fixtureClient();
-  await runCli(['split', '--', 'node', '-e', 'console.log(process.argv[1])', 'hello world'], { client });
+  await runCli(['split', '--', 'pnpm', 'dev'], { client });
   assert.deepEqual(client.requests, [{
     method: 'splitSurface',
     request: {
-      commandArgv: ['node', '-e', 'console.log(process.argv[1])', 'hello world'],
+      command: 'pnpm dev',
       direction: 'auto',
       minimized: false,
       surface: undefined,
@@ -137,13 +154,13 @@ test('ensure text output', async () => {
   );
 });
 
-test('ensure sends command argv tail without shell quoting', async () => {
+test('ensure sends command string to the host', async () => {
   const client = fixtureClient();
-  await runCli(['ensure', '--title', 'worker', '--', 'node', '-e', 'console.log(process.argv[1])', 'hello world'], { client });
+  await runCli(['ensure', '--title', 'worker', '--', 'pnpm', 'dev'], { client });
   assert.deepEqual(client.requests, [{
     method: 'ensureSurface',
     request: {
-      commandArgv: ['node', '-e', 'console.log(process.argv[1])', 'hello world'],
+      command: 'pnpm dev',
       minimized: false,
       surface: undefined,
       title: 'worker',

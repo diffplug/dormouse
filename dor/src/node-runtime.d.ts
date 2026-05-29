@@ -12,5 +12,17 @@ declare module 'node:net' {
   export function createConnection(options: { path: string }): Socket;
 }
 
+declare module 'node:child_process' {
+  export function execFileSync(command: string, args: readonly string[], options: {
+    encoding: 'utf8';
+    timeout?: number;
+  }): string;
+}
+
+declare const process: {
+  platform: string;
+  ppid: number;
+};
+
 declare function setTimeout(callback: () => void, ms?: number): number;
 declare function clearTimeout(timeoutId: number): void;

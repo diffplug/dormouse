@@ -9,11 +9,11 @@ import type {
   SplitSurfaceResponse,
 } from './types.js';
 import {
-  buildCommandArgv,
   resolveControlClient,
   stringParser,
   writeStdout,
 } from './shared.js';
+import { buildShellCommand } from './shell-command.js';
 
 interface SplitFlags {
   readonly auto?: boolean;
@@ -125,14 +125,14 @@ JSON output:
 async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...commandArgs: string[]): Promise<void | Error> {
   const direction = parseSplitDirection(flags);
   if (!direction.ok) return new Error(direction.message);
-  const commandArgv = buildCommandArgv(commandArgs);
+  const command = buildShellCommand(commandArgs, this.options.env);
 
   const clientResult = resolveControlClient(this.options);
   if (!clientResult.ok) return new Error(clientResult.message);
 
   try {
     const response = await clientResult.value.splitSurface({
-      ...(commandArgv ? { commandArgv } : {}),
+      ...(command ? { command } : {}),
       direction: direction.value,
       minimized: flags.minimize === true,
       surface: flags.surface,
