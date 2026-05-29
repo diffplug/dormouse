@@ -163,6 +163,14 @@ function matchesDorPaneTarget(target: string | undefined, surface: DorSurface): 
   return Number.isInteger(numeric) && numeric >= 1 && surface.index === numeric - 1;
 }
 
+function surfaceTitleTarget(target: string): string | null {
+  return target.startsWith('title:') ? target.slice('title:'.length) : null;
+}
+
+function renderSurfaceForError(surface: DorSurface): string {
+  return `${surface.ref} ${JSON.stringify(surface.title)}`;
+}
+
 function stringParam(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
@@ -686,15 +694,30 @@ export function Wall({
     return id;
   }, []);
 
-  const findVisibleSurface = useCallback((
+  const resolveVisibleSurface = useCallback((
     api: DockviewApi,
     target: string | undefined,
     callerSurfaceId: string | undefined,
-  ): DorSurface | null => {
+  ): ParseResult<DorSurface> => {
     const surfaces = buildDorSurfaces(api);
     const resolvedTarget = target ?? callerSurfaceId ?? 'focused';
-    return surfaces.find((surface) => matchesDorPaneTarget(resolvedTarget, surface))
+    const titleTarget = surfaceTitleTarget(resolvedTarget);
+    if (titleTarget !== null) {
+      const matches = surfaces.filter((surface) => surface.title === titleTarget);
+      if (matches.length === 1) return { ok: true, value: matches[0] };
+      if (matches.length > 1) {
+        return {
+          ok: false,
+          message: `surface target '${resolvedTarget}' matched multiple surfaces: ${matches.map(renderSurfaceForError).join(', ')}`,
+        };
+      }
+      return { ok: false, message: `surface target '${resolvedTarget}' was not found` };
+    }
+
+    const matched = surfaces.find((surface) => matchesDorPaneTarget(resolvedTarget, surface))
       ?? (!target && !callerSurfaceId ? (surfaces[0] ?? null) : null);
+    if (matched) return { ok: true, value: matched };
+    return { ok: false, message: `surface '${resolvedTarget}' was not found` };
   }, [buildDorSurfaces]);
 
   const findSurfaceIdByUserTitle = useCallback((title: string): string | null => {
@@ -877,17 +900,17 @@ export function Wall({
       // Resolve the split reference surface and its live panel, responding with
       // the appropriate error and returning null when either is unavailable.
       const resolveSplitTarget = () => {
-        const target = findVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
-        if (!target) {
-          detail.respond({ ok: false, error: `surface '${stringParam(params.surface) ?? detail.surfaceId ?? 'focused'}' was not found` });
+        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
           return null;
         }
-        const panel = api.getPanel(target.id);
+        const panel = api.getPanel(target.value.id);
         if (!panel) {
-          detail.respond({ ok: false, error: `surface '${target.ref}' is not visible` });
+          detail.respond({ ok: false, error: `surface '${target.value.ref}' is not visible` });
           return null;
         }
-        return { target, panel };
+        return { target: target.value, panel };
       };
 
       if (detail.method === 'surface.list') {
@@ -1004,7 +1027,7 @@ export function Wall({
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, createSplitSurface, findSurfaceIdByUserTitle, findVisibleSurface, surfaceRefForId]);
+  }, [buildDorSurfaces, createSplitSurface, findSurfaceIdByUserTitle, resolveVisibleSurface, surfaceRefForId]);
 
   const addSplitPanel = useCallback((
     id: string | null,

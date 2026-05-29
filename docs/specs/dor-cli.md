@@ -122,6 +122,9 @@ Invariants:
 
 - Stable ids and short refs are accepted where a surface/pane target is
   accepted.
+- Surface targets also accept `title:<exact display title>`. If exactly one
+  visible surface has that title, it is selected. If multiple visible surfaces
+  match, the command fails and lists the matching surface refs.
 - Short refs currently use cmux-style names for implemented handles:
   `surface:1`, `pane:2`.
 - List output defaults to refs; commands that list handles accept
