@@ -6,9 +6,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+type PushHandler = () => boolean;
+type PopHandler = (params: (number | number[])[]) => boolean;
+
 interface MockHandlers {
-  push: Array<() => boolean>;
-  pop: Array<() => boolean>;
+  push: Array<PushHandler>;
+  pop: Array<PopHandler>;
 }
 
 function buildMockTerminal(
@@ -16,8 +19,11 @@ function buildMockTerminal(
 ): { terminal: Terminal; handlers: MockHandlers; getExt: () => Record<string, unknown> | undefined } {
   const handlers: MockHandlers = { push: [], pop: [] };
   const parser = {
-    registerCsiHandler(id: { prefix?: string; final?: string }, cb: () => boolean) {
-      if (id.prefix === '>' && id.final === 'u') handlers.push.push(cb);
+    registerCsiHandler(
+      id: { prefix?: string; final?: string },
+      cb: (params: (number | number[])[]) => boolean,
+    ) {
+      if (id.prefix === '>' && id.final === 'u') handlers.push.push(cb as PushHandler);
       else if (id.prefix === '<' && id.final === 'u') handlers.pop.push(cb);
       return { dispose: vi.fn() };
     },
@@ -41,7 +47,7 @@ describe('attachKeyboardProtocolArbiter', () => {
     const { terminal, handlers } = buildMockTerminal();
     attachKeyboardProtocolArbiter(terminal);
     expect(handlers.push[0]()).toBe(false);
-    expect(handlers.pop[0]()).toBe(false);
+    expect(handlers.pop[0]([])).toBe(false);
   });
 
   it('disables win32-input-mode on kitty push, preserving kittyKeyboard', () => {
@@ -60,8 +66,48 @@ describe('attachKeyboardProtocolArbiter', () => {
     handlers.push[0]();
     expect(getExt()).toMatchObject({ win32InputMode: false });
 
-    handlers.pop[0]();
+    handlers.pop[0]([]);
     expect(getExt()).toEqual({ kittyKeyboard: true, win32InputMode: true });
+  });
+
+  it('keeps win32-input-mode disabled when an inner kitty consumer pops but an outer one is still active', () => {
+    const { terminal, handlers, getExt } = buildMockTerminal({ kittyKeyboard: true, win32InputMode: true });
+    attachKeyboardProtocolArbiter(terminal);
+
+    handlers.push[0]();
+    handlers.push[0]();
+    expect(getExt()).toMatchObject({ win32InputMode: false });
+
+    handlers.pop[0]([]);
+    expect(getExt()).toMatchObject({ win32InputMode: false });
+
+    handlers.pop[0]([]);
+    expect(getExt()).toMatchObject({ win32InputMode: true });
+  });
+
+  it('honors the pop-count parameter on `CSI < N u`', () => {
+    const { terminal, handlers, getExt } = buildMockTerminal({ kittyKeyboard: true, win32InputMode: true });
+    attachKeyboardProtocolArbiter(terminal);
+
+    handlers.push[0]();
+    handlers.push[0]();
+    handlers.pop[0]([2]);
+
+    expect(getExt()).toMatchObject({ win32InputMode: true });
+  });
+
+  it('clamps depth at zero so a stray pop without a matching push is a no-op', () => {
+    const { terminal, handlers, getExt } = buildMockTerminal({ kittyKeyboard: true, win32InputMode: true });
+    attachKeyboardProtocolArbiter(terminal);
+
+    handlers.pop[0]([]);
+    expect(getExt()).toMatchObject({ win32InputMode: true });
+
+    handlers.push[0]();
+    expect(getExt()).toMatchObject({ win32InputMode: false });
+
+    handlers.pop[0]([]);
+    expect(getExt()).toMatchObject({ win32InputMode: true });
   });
 
   it('dispose tears down both handlers', () => {

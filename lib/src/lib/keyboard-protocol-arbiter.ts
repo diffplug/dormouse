@@ -34,12 +34,22 @@ export function attachKeyboardProtocolArbiter(terminal: Terminal): IDisposable {
   // We track the push/pop stack ops only — the set-flags form (`CSI = … u`) is
   // not observed, since the kitty TUIs we care about (Claude Code) enable the
   // protocol via push. Return false so xterm still processes the sequence.
+  //
+  // Count nested pushes so a TUI nested inside a kitty consumer (e.g. another
+  // kitty-using app launched from within Claude Code) doesn't re-enable
+  // win32-input-mode on inner-exit while the outer kitty consumer is still on
+  // the stack. `CSI < N u` pops N entries (default 1), so honor the param.
+  let kittyDepth = 0;
   const onKittyPush = terminal.parser.registerCsiHandler({ prefix: '>', final: 'u' }, () => {
+    kittyDepth++;
     setWin32InputMode(false);
     return false;
   });
-  const onKittyPop = terminal.parser.registerCsiHandler({ prefix: '<', final: 'u' }, () => {
-    setWin32InputMode(true);
+  const onKittyPop = terminal.parser.registerCsiHandler({ prefix: '<', final: 'u' }, (params) => {
+    const raw = params[0];
+    const n = (Array.isArray(raw) ? raw[0] : raw) || 1;
+    kittyDepth = Math.max(0, kittyDepth - n);
+    if (kittyDepth === 0) setWin32InputMode(true);
     return false;
   });
 
