@@ -20,6 +20,17 @@ export interface OpenPort {
   processName?: string;
 }
 
+/**
+ * End-to-end budget for `getOpenPorts()` at every transport boundary
+ * (webview → host adapter, host → pty-host child, Tauri command → sidecar) and
+ * for the per-subprocess execs inside `getOpenPortsForPid()` (lsof, PowerShell,
+ * `Get-NetTCPConnection`, `netstat`). Wider than the 1 s cwd query because
+ * enumeration shells out on macOS/Windows; tight enough to fail visibly rather
+ * than hang a pane header. Mirrored as `OPEN_PORT_TIMEOUT_MS` in
+ * `standalone/sidecar/pty-core.js` and `standalone/src-tauri/src/lib.rs`.
+ */
+export const OPEN_PORT_TIMEOUT_MS = 3000;
+
 export type AlertStateDetail = { id: string } & AlertState;
 
 export interface PlatformAdapter {

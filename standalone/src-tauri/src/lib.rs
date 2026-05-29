@@ -254,18 +254,19 @@ fn pty_get_cwd(
         .and_then(|cwd| cwd.as_str().map(String::from)))
 }
 
+// Mirrors `OPEN_PORT_TIMEOUT_MS` in `lib/src/lib/platform/types.ts` — keep in sync.
+const OPEN_PORT_TIMEOUT_MS: u64 = 3000;
+
 #[tauri::command]
 fn pty_get_open_ports(
     state: tauri::State<'_, SidecarState>,
     id: String,
 ) -> Result<JsonValue, String> {
-    // Enumeration shells out to lsof / PowerShell, so allow more headroom than
-    // the 1s default used by most sidecar queries.
     let response = request_from_sidecar_timeout(
         &state,
         "pty:getOpenPorts",
         serde_json::json!({ "id": id }),
-        Duration::from_secs(8),
+        Duration::from_millis(OPEN_PORT_TIMEOUT_MS),
     )?;
     Ok(response
         .get("ports")

@@ -293,6 +293,11 @@ module.exports.getCwdForPid = getCwdForPid;
 // the "what server is this terminal running" signal, without the churn of
 // ephemeral outbound connections.
 
+// Mirrors `OPEN_PORT_TIMEOUT_MS` in `lib/src/lib/platform/types.ts` — keep in
+// sync. Used as the per-subprocess timeout cap inside the open-port pipeline.
+const OPEN_PORT_TIMEOUT_MS = 3000;
+module.exports.OPEN_PORT_TIMEOUT_MS = OPEN_PORT_TIMEOUT_MS;
+
 /**
  * Build the set of descendant PIDs (including rootPid) from a flat list of
  * [pid, ppid] pairs via breadth-first walk. Shared by every platform.
@@ -375,7 +380,7 @@ function getDescendantPids(rootPid, runtime = {}) {
       const out = execFileSyncFn('ps', ['-axo', 'pid=,ppid='], {
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'ignore'],
-        timeout: 4000,
+        timeout: OPEN_PORT_TIMEOUT_MS,
       });
       return [...buildDescendantSet(parsePsPairs(out), rootPid)];
     } catch {
@@ -583,7 +588,7 @@ function macListeningPorts(pids, runtime = {}) {
     const out = execFileSyncFn(
       'lsof',
       ['-nP', '-a', '-iTCP', '-sTCP:LISTEN', '-p', pids.join(','), '-Fpcnt'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 4000 },
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: OPEN_PORT_TIMEOUT_MS },
     );
     return parseLsofListening(out);
   } catch {
@@ -656,7 +661,7 @@ function runPowerShell(script, execFileSyncFn) {
   return execFileSyncFn(
     'powershell.exe',
     ['-NoProfile', '-NonInteractive', '-Command', script],
-    { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 6000 },
+    { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: OPEN_PORT_TIMEOUT_MS },
   );
 }
 
@@ -695,7 +700,7 @@ function windowsListeningPorts(pids, runtime = {}) {
     const out = execFileSyncFn('netstat', ['-ano', '-p', 'TCP'], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 6000,
+      timeout: OPEN_PORT_TIMEOUT_MS,
     });
     return parseNetstatListening(out, pidSet, nameByPid);
   } catch {

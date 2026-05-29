@@ -1,4 +1,5 @@
 import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
+import { OPEN_PORT_TIMEOUT_MS } from './types';
 import { setDefaultShellOpts } from '../shell-defaults';
 import {
   collectTerminalSemanticEvents,
@@ -162,12 +163,10 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   async getOpenPorts(id: string): Promise<OpenPort[]> {
-    // Port enumeration shells out (lsof / PowerShell) on macOS/Windows, so allow
-    // a longer ceiling than the default 1s cwd query.
     const result = await this.requestResponse<OpenPort[]>(
       'pty:getOpenPorts', 'pty:openPorts', { id },
       (msg) => msg.ports as OpenPort[],
-      4000,
+      OPEN_PORT_TIMEOUT_MS,
     );
     return result ?? [];
   }

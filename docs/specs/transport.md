@@ -78,28 +78,13 @@ Non-obvious message contracts:
 | Direction | Message | Source type | Contract |
 | --- | --- | --- | --- |
 | Webview → host | `dormouse:openExternal` | `WebviewMessage` | Request the host to open a user-confirmed external URI from an OSC 8 hyperlink. Hosts must revalidate and reject malformed, control-character-bearing, or blocked pseudo-scheme targets (`javascript:`, `data:`, `blob:`, `about:`). |
-| Webview → host | `pty:getOpenPorts` | `WebviewMessage` | Request the TCP listening ports opened by a PTY's shell process **and all of its descendant subprocesses**. The host resolves them from the PTY's root pid (see "Open-port discovery" below) and replies with `pty:openPorts`. |
+| Webview → host | `pty:getOpenPorts` | `WebviewMessage` | Request the TCP listening ports opened by a PTY's shell process **and all of its descendant subprocesses**. The host resolves them from the PTY's root pid and replies with `pty:openPorts`. Source of truth: `getOpenPortsForPid()` in `standalone/sidecar/pty-core.js` (the VS Code extension loads it through the `lib/pty-core.cjs` shim). |
 | Host → webview | `pty:openPorts` | `ExtensionMessage` | Reply to `pty:getOpenPorts`: `ports: OpenPort[]` (`{ protocol, family, address, port, pid, processName }`), de-duplicated by `(family, address, port)` and sorted by port. Empty array when the PTY is gone or enumeration fails. |
 | Host → webview | `pty:data` | `ExtensionMessage` | PTY output after state-driving supported OSC sequences have been parsed/stripped; `OSC 8` hyperlinks are preserved for xterm.js and routed only to the owning router. |
 | Host → webview | `pty:replay` | `ExtensionMessage` | Buffered raw output since spawn; the webview parses semantic OSCs during replay reconstruction without triggering alerts. |
 | Host → webview | `dormouse:newTerminal` | `ExtensionMessage` | Payload may include `shell`, `args`, display `name`, `replaceUntouched`, and `announce`; the webview replaces the selected untouched terminal in-place only when `replaceUntouched` is true, otherwise it spawns a new pane. |
 
 The OSC parsing/stripping rules that produce `pty:data` and `terminal:semanticEvents` are specified in `docs/specs/terminal-escapes.md`.
-
-## Open-port discovery
-
-`getOpenPorts(id)` answers "which TCP ports is this terminal listening on?" — covering the shell process **and every descendant subprocess** (e.g. a dev server launched from the shell, or a server launched by a script launched by the shell). It works for any Dormouse pane on any platform because Dormouse always holds the root shell pid of the PTYs it spawns; no terminal-side cooperation is required.
-
-Source of truth: `getOpenPortsForPid(rootPid)` in `standalone/sidecar/pty-core.js` (the shared core; the VS Code extension loads it through the `lib/pty-core.cjs` shim). It runs in two platform-specific steps with no third-party dependencies:
-
-1. **Process tree** (`getDescendantPids`) — Linux scans `/proc/<pid>/stat` for the pid→ppid table; macOS uses `ps -axo pid=,ppid=`; Windows uses `Get-CimInstance Win32_Process`. A shared BFS (`buildDescendantSet`) collects the root pid plus all transitive children.
-2. **Listening sockets** (`getListeningPortsForPids`) — Linux maps each pid's `/proc/<pid>/fd` socket inodes to `0A` (LISTEN) rows in `/proc/net/tcp{,6}`; macOS runs `lsof -nP -iTCP -sTCP:LISTEN -p <csv>`; Windows runs `Get-NetTCPConnection -State Listen` with a `netstat -ano` fallback for hosts lacking the cmdlet.
-
-Invariants:
-
-- **Listening TCP only.** Established/outbound connections and UDP are intentionally excluded — the signal is "what server is this terminal running," not raw connection churn.
-- **Fail soft, never throw.** Any platform-specific failure (missing `/proc`, `lsof`/PowerShell error, timeout) yields `[]`, never an exception. The Tauri command uses an 8s timeout and the VS Code path a 4s timeout, both wider than the 1s cwd query because enumeration shells out on macOS/Windows.
-- **`address` is the bind interface.** `0.0.0.0`/`::` mean all interfaces; `127.0.0.1`/`::1` mean loopback-only. Results are de-duplicated by `(family, address, port)` and sorted by port.
 
 ## Persisted session types
 

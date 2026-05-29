@@ -2,6 +2,7 @@ import { fork, ChildProcess } from 'child_process';
 import * as path from 'path';
 import { log } from './log';
 import type { OpenPort } from '../../lib/src/lib/platform/types';
+import { OPEN_PORT_TIMEOUT_MS } from '../../lib/src/lib/platform/types';
 
 export interface PtyCallbacks {
   onData(id: string, data: string): void;
@@ -240,11 +241,10 @@ export function getCwd(id: string): Promise<string | null> {
 export function getOpenPorts(id: string): Promise<OpenPort[]> {
   return new Promise((resolve) => {
     sendToChild({ type: 'getOpenPorts', id });
-    // Port enumeration shells out on macOS/Windows; allow more headroom than getCwd.
     const timeout = setTimeout(() => {
       child?.off('message', handler);
       resolve([]);
-    }, 4000);
+    }, OPEN_PORT_TIMEOUT_MS);
     const handler = (msg: any) => {
       if (msg.type === 'openPorts' && msg.id === id) {
         clearTimeout(timeout);
