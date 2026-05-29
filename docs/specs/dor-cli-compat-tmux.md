@@ -1,114 +1,86 @@
-# Dor CLI tmux Compatibility
+# Dor CLI tmux Migration
 
 > See `docs/specs/dor-cli.md` for the current `dor` command contract. This
-> file tracks tmux compatibility policy and command coverage.
+> file is a migration guide for tmux habits and scripts, not a command coverage
+> table.
 
-Dormouse is not trying to become a tmux server. tmux compatibility is valuable
-only where a tmux command name or output shape gives users and agents a familiar
-way to control Dormouse panes and terminal text.
+Dormouse is not trying to become a tmux server. Port tmux scripts by translating
+the user's intended interactive action into a Dormouse command, not by copying
+tmux's server/session/window/pane model.
 
-## Status Values
+## Model Differences
 
-| Status | Meaning |
-| --- | --- |
-| `implemented-blessed` | Implemented and intended as a first-class `dor` command. |
-| `implemented-compat-only` | Implemented only to match an external CLI spelling; prefer a blessed `dor` command in new usage. |
-| `planned` | Should be implemented next or soon, with semantics that fit Dormouse's model. |
-| `undecided` | Not implemented; needs design work or a product decision. |
-| `will-not-implement` | Out of scope for `dor`, incompatible with Dormouse's model, or deliberately not accepted as cruft. |
+- tmux has a server with clients, sessions, windows, panes, buffers, options,
+  hooks, keybindings, and copy mode. Dormouse exposes terminal surfaces inside
+  the current app workspace.
+- A tmux pane usually maps to a Dormouse surface. A tmux window/session/client
+  usually has no Dormouse CLI equivalent.
+- Dormouse commands run from terminals that the app launched. They rely on
+  injected `DORMOUSE_*` env and private control credentials, not a global tmux
+  server socket.
+- Dormouse's default scripting handle should be a surface ref such as
+  `surface:1`, not a tmux pane id such as `%1`.
+- For idempotent workflows, prefer `dor ensure --title <title> -- <cmd>` over
+  hand-rolled "find pane, then maybe create pane" logic.
 
-## Command Coverage
+## Migration Rules
 
-Local `tmux` is not installed in this workspace, so this table is a conservative
-coverage policy for the tmux command set rather than a version-pinned dump from
-`tmux list-commands`. Before implementing a broad tmux-compatibility layer,
-refresh this table against the exact tmux version being targeted.
+- Replace `tmux split-window` with `dor split`.
+- Replace "make sure this command exists somewhere" scripts with `dor ensure`.
+- Replace topology reads with `dor list-panes` or `dor list-pane-surfaces`.
+- Do not migrate tmux server/session/window/client management directly. Use
+  Dormouse app/workspace behavior instead.
+- Do not migrate tmux configuration commands (`bind-key`, `set-option`,
+  `set-hook`, `source-file`) into `dor`. Those belong in Dormouse settings or
+  UI, not the terminal control CLI.
+- Do not migrate tmux paste-buffer/copy-mode commands into `dor` unless
+  Dormouse adds a terminal capture or clipboard feature with its own native
+  semantics.
 
-| tmux command | Status | Notes |
+## Command Migration
+
+| tmux intent | tmux spelling | Dormouse migration |
 | --- | --- | --- |
-| `attach-session` | `will-not-implement` | tmux server/client session attachment. |
-| `bind-key` | `will-not-implement` | Keybinding configuration is not `dor` scope. |
-| `break-pane` | `undecided` | Could map to moving a pane, but tmux window semantics do not fit yet. |
-| `capture-pane` | `planned` | High-value screen/scrollback read command. |
-| `choose-buffer` | `will-not-implement` | Interactive tmux buffer UI. |
-| `choose-client` | `will-not-implement` | tmux client UI. |
-| `choose-session` | `will-not-implement` | tmux session UI. |
-| `choose-tree` | `will-not-implement` | tmux chooser UI. |
-| `choose-window` | `will-not-implement` | tmux window UI. |
-| `clear-history` | `planned` | Maps to clearing terminal scrollback/history. |
-| `clock-mode` | `will-not-implement` | tmux UI mode. |
-| `command-prompt` | `will-not-implement` | tmux command UI. |
-| `confirm-before` | `will-not-implement` | tmux command wrapper. |
-| `copy-mode` | `will-not-implement` | Dormouse selection is UI-owned. |
-| `customize-mode` | `will-not-implement` | tmux configuration UI. |
-| `delete-buffer` | `will-not-implement` | tmux paste-buffer model. |
-| `detach-client` | `will-not-implement` | tmux client/session model. |
-| `display-menu` | `will-not-implement` | tmux UI menu. |
-| `display-message` | `undecided` | Could map to transient Dormouse UI notices. |
-| `display-panes` | `undecided` | Could map to pane labels/selection overlay. |
-| `display-popup` | `will-not-implement` | tmux popup model. |
-| `find-window` | `undecided` | Search/select semantics need design. |
-| `has-session` | `will-not-implement` | tmux server/session existence check. |
-| `if-shell` | `will-not-implement` | tmux scripting primitive. |
-| `join-pane` | `undecided` | Layout operation could map, but target semantics need design. |
-| `kill-pane` | `planned` | Maps to closing a Dormouse pane/surface. |
-| `kill-server` | `will-not-implement` | Destructive tmux server command. |
-| `kill-session` | `will-not-implement` | tmux session model. |
-| `kill-window` | `will-not-implement` | tmux window model. |
-| `last-pane` | `planned` | Useful pane navigation primitive. |
-| `last-window` | `will-not-implement` | tmux window model. |
-| `link-window` | `will-not-implement` | tmux window/session model. |
-| `list-buffers` | `will-not-implement` | tmux paste-buffer model. |
-| `list-clients` | `will-not-implement` | tmux client model. |
-| `list-commands` | `undecided` | Could report supported `dor` commands later. |
-| `list-keys` | `will-not-implement` | tmux keybinding configuration. |
-| `list-panes` | `implemented-blessed` | Implemented using cmux-compatible `dor list-panes`. |
-| `list-sessions` | `will-not-implement` | tmux session model. |
-| `list-windows` | `will-not-implement` | tmux window model. |
-| `load-buffer` | `will-not-implement` | tmux paste-buffer model. |
-| `lock-client` | `will-not-implement` | tmux client model. |
-| `lock-server` | `will-not-implement` | tmux server model. |
-| `lock-session` | `will-not-implement` | tmux session model. |
-| `move-window` | `will-not-implement` | tmux window model. |
-| `new-session` | `will-not-implement` | tmux session model. |
-| `new-window` | `will-not-implement` | tmux window model. |
-| `next-layout` | `undecided` | Could map to layout cycling if added. |
-| `next-window` | `will-not-implement` | tmux window model. |
-| `paste-buffer` | `will-not-implement` | tmux paste-buffer model. |
-| `pipe-pane` | `undecided` | Requires stream plumbing. |
-| `previous-layout` | `undecided` | Could map to layout cycling if added. |
-| `previous-window` | `will-not-implement` | tmux window model. |
-| `refresh-client` | `will-not-implement` | tmux client model. |
-| `rename-session` | `will-not-implement` | tmux session model. |
-| `rename-window` | `will-not-implement` | tmux window model. |
-| `resize-pane` | `planned` | Maps to layout sizing; needs Dockview sizing semantics. |
-| `resize-window` | `will-not-implement` | tmux window model. |
-| `respawn-pane` | `undecided` | Could map to restarting a terminal Session. |
-| `respawn-window` | `will-not-implement` | tmux window model. |
-| `rotate-window` | `will-not-implement` | tmux window/pane layout model does not directly map. |
-| `run-shell` | `will-not-implement` | tmux scripting primitive. |
-| `save-buffer` | `will-not-implement` | tmux paste-buffer model. |
-| `select-layout` | `undecided` | Could map to layout presets if added. |
-| `select-pane` | `planned` | Maps to focusing a Dormouse pane. |
-| `select-window` | `will-not-implement` | tmux window model. |
-| `send-keys` | `planned` | High-value terminal input automation. |
-| `send-prefix` | `will-not-implement` | tmux prefix/keybinding model. |
-| `server-access` | `will-not-implement` | tmux server access control. |
-| `set-buffer` | `will-not-implement` | tmux paste-buffer model. |
-| `set-environment` | `will-not-implement` | tmux server environment model. |
-| `set-hook` | `will-not-implement` | tmux scripting/config primitive. |
-| `set-option` | `will-not-implement` | tmux option model. |
-| `set-window-option` | `will-not-implement` | tmux window option model. |
-| `show-buffer` | `will-not-implement` | tmux paste-buffer model. |
-| `show-environment` | `will-not-implement` | tmux server environment model. |
-| `show-hooks` | `will-not-implement` | tmux scripting/config primitive. |
-| `show-messages` | `will-not-implement` | tmux message log model. |
-| `show-options` | `will-not-implement` | tmux option model. |
-| `show-window-options` | `will-not-implement` | tmux window option model. |
-| `source-file` | `will-not-implement` | tmux config file loading. |
-| `split-window` | `planned` | tmux name for creating a new pane by splitting. |
-| `swap-pane` | `undecided` | Layout operation exists conceptually; CLI semantics need design. |
-| `swap-window` | `will-not-implement` | tmux window model. |
-| `switch-client` | `will-not-implement` | tmux client/session model. |
-| `unbind-key` | `will-not-implement` | Keybinding configuration is not `dor` scope. |
-| `wait-for` | `undecided` | Synchronization primitive; useful only after event APIs exist. |
+| Split horizontally | `tmux split-window -h` | Use `dor split --right`. Use `--left` when the desired interactive action is a split on the left. |
+| Split vertically | `tmux split-window -v` | Use `dor split --down`. Use `--up` when the desired interactive action is a split above. |
+| Let the app choose split direction | common custom tmux logic based on size | Use `dor split --auto`. Dormouse resolves this to right when wide and down when narrow. |
+| Start a command in a new pane | `tmux split-window -h "pnpm dev"` | Use `dor split --right --command "pnpm dev"`. |
+| Ensure one long-running command exists | custom `tmux list-panes` plus `split-window` script | Use `dor ensure --title "dev server" -- pnpm dev`. The title is the idempotency key. |
+| Rename a pane/window for a command | `tmux rename-window "dev server"` or title conventions | Use `dor ensure --title "dev server" -- <cmd>` when creating/ensuring command surfaces. Manual UI rename remains separate. |
+| List panes | `tmux list-panes` | Use `dor list-panes`. For surface-level detail, use `dor list-pane-surfaces --pane focused` or pass a pane ref. |
+| Select/focus a pane | `tmux select-pane -t %1` | No direct CLI migration today. Dormouse focus is currently an interactive app action; a future command should be surface-oriented. |
+| Kill a pane | `tmux kill-pane -t %1` | No direct CLI migration today. A future Dormouse command should require an explicit confirmation mode because it can destroy terminal text. |
+| Capture pane contents | `tmux capture-pane` | No direct CLI migration today. Add a Dormouse-native capture command only if it can specify visible screen vs scrollback and output encoding clearly. |
+| Send input to a pane | `tmux send-keys` | No direct CLI migration today. Add a Dormouse-native send/input command only with clear quoting, paste, and control-key semantics. |
+| Clear history | `tmux clear-history` | No direct CLI migration today. This should map to Dormouse terminal scrollback clearing if added. |
+| Resize pane | `tmux resize-pane` | No direct CLI migration today. This needs Dormouse layout sizing semantics, not tmux cell arithmetic copied directly. |
+| Session attach/detach | `tmux attach-session`, `detach-client`, `switch-client` | No CLI migration. Dormouse is already the host application; use app windows/workspaces instead. |
+| New session/window | `tmux new-session`, `new-window` | Use `dor split` or `dor ensure` for terminal work. Standalone workspaces may later cover some window/session use cases; VS Code should remain single workspace. |
+| Buffers and copy mode | `copy-mode`, `save-buffer`, `paste-buffer`, `list-buffers` | No CLI migration. Dormouse owns selection and clipboard behavior in the UI. |
+| Options, hooks, config | `set-option`, `set-hook`, `bind-key`, `source-file` | No CLI migration. These belong in Dormouse configuration or extension/app integration. |
+
+## Porting Examples
+
+Create a terminal next to the current one:
+
+```sh
+# tmux
+tmux split-window -h
+
+# dor
+dor split --right
+```
+
+Start or reuse a project dev server:
+
+```sh
+# tmux scripts often search pane titles or process text first.
+# dor makes that identity explicit.
+dor ensure --title "dev server" -- pnpm dev
+```
+
+List the focused surface with JSON output:
+
+```sh
+dor list-pane-surfaces --pane focused --json
+```

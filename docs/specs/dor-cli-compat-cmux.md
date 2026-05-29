@@ -1,52 +1,79 @@
-# Dor CLI cmux Compatibility
+# Dor CLI cmux Migration
 
 > See `docs/specs/dor-cli.md` for the current `dor` command contract. This
-> file tracks cmux compatibility policy and command coverage.
+> file is a migration guide for cmux-shaped habits and scripts, not an
+> implementation backlog.
 
-Dormouse tracks the public cmux CLI/API shape only where it maps cleanly:
+Dormouse should not grow a cmux clone inside `dor`. Use this guide to translate
+the small part of cmux that maps cleanly onto Dormouse's model.
 
-- cmux has Pane + Surface; Dormouse currently has one terminal surface per Pane.
-- cmux has no analogue for Dormouse's "minimized" panes.
-- cmux supports multiple workspaces/windows; Dormouse accepts only the singleton
-  compatibility targets.
-- cmux exposes both a CLI and socket API; Dormouse exposes only the CLI.
-- In the cmux version used to derive this contract on 2026-05-28, the relevant
-  working CLI commands are `list-panes` and `list-pane-surfaces`. The socket
-  capability used underneath is named `surface.list`.
-- Dormouse exposes only commands implemented in `dor`; it does not expose
-  aliases or recognized-but-unimplemented command stubs.
+## Model Differences
+
+- Dormouse uses `surface` as the user-facing handle in new CLI design. `pane`
+  remains compatibility/layout vocabulary for `list-panes` and
+  `list-pane-surfaces`.
+- Dormouse currently has one terminal surface per Pane. cmux can model multiple
+  surfaces in one Pane.
+- Dormouse currently exposes one workspace and one window. `workspace:1`,
+  `window:1`, and bare `1` are compatibility no-ops; other workspace/window
+  targets are rejected.
+- cmux exposes both a CLI and socket API. Dormouse exposes `dor` as the public
+  API; the control socket is private host plumbing.
 - Dormouse omits cmux JSON geometry fields such as `container_frame`,
-  `pixel_frame`, rows/columns, and cell dimensions until those fields are part
-  of the Dormouse control response.
-- Dormouse also omits workspace/window UUID fields until the host exposes stable
-  workspace/window ids distinct from the singleton refs.
+  `pixel_frame`, rows/columns, and cell dimensions until those fields exist in
+  the Dormouse control response.
+- Dormouse omits workspace/window UUID fields until the host exposes stable ids
+  distinct from singleton refs.
+- Dormouse exposes only real `dor` commands. Do not add aliases, command stubs,
+  or "recognized but unimplemented" spellings just because cmux has them.
 
-## Status Values
+## Migration Rules
 
-| Status | Meaning |
-| --- | --- |
-| `implemented-blessed` | Implemented and intended as a first-class `dor` command. |
-| `implemented-compat-only` | Implemented only to match an external CLI spelling; prefer a blessed `dor` command in new usage. |
-| `planned` | Should be implemented next or soon, with semantics that fit Dormouse's model. |
-| `undecided` | Not implemented; needs design work or a product decision. |
-| `will-not-implement` | Out of scope for `dor`, incompatible with Dormouse's model, or deliberately not accepted as cruft. |
+- Prefer native Dormouse commands for new scripts: `dor split`, `dor ensure`,
+  and the surface-oriented commands that follow them.
+- When a cmux script has a `pane:N` target but the Dormouse command wants a
+  surface, resolve the pane's selected surface with
+  `dor list-pane-surfaces --pane pane:N --json`.
+- When porting mechanically, current Dormouse target resolution accepts surface
+  refs, surface ids, pane refs, and 1-based indexes. New scripts should keep
+  surface refs once they have them.
+- Treat cmux workspaces/windows as singleton context until Dormouse standalone
+  grows multiple workspaces. VS Code-hosted Dormouse should stay single
+  workspace.
+- Keep JSON consumers tolerant of missing cmux geometry and UUID fields.
 
-## Command Coverage
+## Command Migration
 
-Source: core cmux compatibility target set chosen for `dor` on 2026-05-28. This
-is intentionally not a full `cmux --help` inventory; commands outside this table
-are out of the current cmux compatibility scope.
-
-| cmux command | Status | Notes |
+| cmux intent | cmux spelling | Dormouse migration |
 | --- | --- | --- |
-| `identify --json` | `planned` | Report caller context: current window, workspace, pane, and surface refs/ids. |
-| `list-windows` | `planned` | Report the singleton Dormouse window until a multi-window model exists. |
-| `list-workspaces` | `planned` | Report the singleton Dormouse workspace until a multi-workspace model exists. |
-| `list-panes` | `implemented-blessed` | Implemented cmux-compatible pane listing. |
-| `list-pane-surfaces --pane pane:1` | `implemented-blessed` | Implemented cmux-compatible pane-scoped surface listing. |
-| `new-workspace` | `planned` | Create a new Dormouse workspace once workspace creation is exposed. |
-| `new-split right --panel pane:1` | `planned` | cmux-compatible split creation. `--panel` is accepted only for cmux compatibility. |
-| `move-surface --surface surface:7 --pane pane:2 --focus true` | `undecided` | Needs a clear mapping between cmux multi-surface panes and Dormouse's one-surface panes. |
-| `split-off --surface surface:7 right` | `undecided` | Needs a clear mapping because Dormouse does not currently have multiple surfaces inside one Pane. |
-| `reorder-surface --surface surface:7 --before surface:3` | `undecided` | Needs a clear mapping because surface order and pane order are currently the same thing in Dormouse. |
-| `trigger-flash --surface surface:7` | `planned` | Attention cue for a specific surface/pane. |
+| Identify current caller context | `cmux identify --json` | Use `DORMOUSE_SURFACE_ID` for the invoking surface and `dor list-pane-surfaces --pane focused --json` for the focused surface. A future Dormouse-native identify command should report surface, pane, workspace, and window refs/ids in one call. |
+| List windows | `cmux list-windows` | Treat the current window as `window:1`. Do not add a list command until Dormouse has multiple windows or a real need for compatibility output. |
+| List workspaces | `cmux list-workspaces` | Treat the current workspace as `workspace:1`. Add a Dormouse-native workspace command only when standalone supports multiple workspaces. |
+| List panes | `cmux list-panes` | Use `dor list-panes`. It intentionally keeps cmux-compatible text shape for pane topology. |
+| List surfaces in a pane | `cmux list-pane-surfaces --pane pane:1` | Use `dor list-pane-surfaces --pane pane:1`. With today's one-surface panes, this returns zero or one surface. |
+| Create workspace | `cmux new-workspace` | No direct migration today. In standalone, this should become a Dormouse workspace command when multiple workspaces land. In VS Code, keep a single workspace. |
+| Create split | `cmux new-split right --panel pane:1` | Use `dor split --right --surface <surface-ref>`. If the script only has `pane:1`, resolve it through `dor list-pane-surfaces --pane pane:1 --json` first. |
+| Move surface into another pane | `cmux move-surface --surface surface:7 --pane pane:2 --focus true` | No direct migration today. Dormouse currently treats surface order and pane placement as the same thing. Add a native move/focus command only after the desired interactive action is clear. |
+| Split a surface out of a pane | `cmux split-off --surface surface:7 right` | Usually translates to no operation because a Dormouse surface is already the split-level unit. If the intent is "create new space next to this surface", use `dor split --right --surface surface:7`. |
+| Reorder surfaces | `cmux reorder-surface --surface surface:7 --before surface:3` | No direct migration today. This needs a Dormouse-native reorder/move design, not a cmux spelling. |
+| Trigger attention cue | `cmux trigger-flash --surface surface:7` | No direct migration today. A future Dormouse command should be surface-oriented and map to the app's alert/attention model. |
+
+## Porting Examples
+
+Create a split next to the current cmux pane:
+
+```sh
+# cmux
+cmux new-split right --panel pane:1
+
+# dor
+dor split --right --surface surface:1
+```
+
+Make a dev server idempotent rather than scripting pane existence:
+
+```sh
+# cmux-style scripts often inspect topology, then create conditionally.
+# dor makes the idempotency key explicit with a user-enforced surface title.
+dor ensure --title "dev server" -- pnpm dev
+```

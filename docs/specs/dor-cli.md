@@ -144,14 +144,16 @@ The behavior specs live at the top of each command implementation file:
 ## Compatibility References
 
 `dor-cli.md` documents the commands Dormouse actually exposes today. External
-CLI compatibility planning lives in separate specs so this file stays focused:
+CLI migration guidance lives in separate specs so this file stays focused:
 
-- `docs/specs/dor-cli-compat-cmux.md` tracks cmux command coverage and policy.
-- `docs/specs/dor-cli-compat-tmux.md` tracks tmux command coverage and policy.
+- `docs/specs/dor-cli-compat-cmux.md` describes how to migrate cmux-shaped
+  scripts and habits.
+- `docs/specs/dor-cli-compat-tmux.md` describes how to migrate tmux-shaped
+  scripts and habits.
 
-When adding a command for compatibility, update the relevant compatibility spec
-first, then update this file after the command is implemented and snapshot
-tested.
+When adding a command because a migration pattern needs it, update the relevant
+compatibility spec first, then update this file after the command is implemented
+and snapshot tested.
 
 ## Errors
 
