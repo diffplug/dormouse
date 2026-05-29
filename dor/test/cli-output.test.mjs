@@ -103,14 +103,14 @@ async function snapshot(name, result) {
 test('split text output', async () => {
   await snapshot(
     'split-text',
-    await runCli(['split', '--down', '--minimize', '--command', 'pnpm dev'], { client: fixtureClient() }),
+    await runCli(['split', '--down', '--minimize', '--', 'pnpm', 'dev'], { client: fixtureClient() }),
   );
 });
 
 test('split json output', async () => {
   await snapshot(
     'split-json',
-    await runCli(['split', '--command', 'pnpm dev', '--json'], { client: fixtureClient() }),
+    await runCli(['split', '--json', '--', 'pnpm', 'test', '--', '--watch'], { client: fixtureClient() }),
   );
 });
 

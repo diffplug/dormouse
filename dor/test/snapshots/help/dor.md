@@ -4,7 +4,7 @@ Invocation: `dor --help`
 
 ```text
 USAGE
-  dor split [--left|--right|--up|--down|--auto] [--command cmd] [--json] [--minimize] [--surface id|ref|index]
+  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref|index] [-- <command>...]
   dor ensure [--json] [--minimize] [--surface id|ref|index] [--title value] <command>...
   dor list-panes [--id-format refs|uuids|both] [--json]
   dor list-pane-surfaces [--id-format refs|uuids|both] [--json] [--pane id|ref|index]

@@ -6,7 +6,7 @@ stdout:
   "surface_ref": "surface:3",
   "direction": "right",
   "minimized": false,
-  "command": "pnpm dev"
+  "command": "pnpm test -- --watch"
 }
 
 stderr:

@@ -4,12 +4,12 @@ Invocation: `dor split --help`
 
 ```text
 USAGE
-  dor split [--left|--right|--up|--down|--auto] [--command cmd] [--json] [--minimize] [--surface id|ref|index]
+  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref|index] [-- <command>...]
   dor split --help
 
 If no direction is provided, --auto is used. --auto chooses right when the target surface is wide and down when it is narrow.
 
---command runs the given command as the new terminal surface's initial command.
+Use -- followed by a command to run an initial command in the new terminal surface.
 
 --minimize creates the surface and immediately sends it to the minimized area.
 
@@ -17,8 +17,8 @@ If no direction is provided, --auto is used. --auto chooses right when the targe
 
 split does not know about non-terminal surface types. Compose future content commands through the initial command:
 
-  dor split --right --command "dor iframe https://example.com"
-  dor split --auto --command "dor agent-browser open https://example.com"
+  dor split --right -- dor iframe https://example.com
+  dor split --auto -- dor agent-browser open https://example.com
 
 Text output:
   created surface:2  [right]
@@ -37,7 +37,6 @@ JSON output:
 FLAGS
      [--left|--right|--up|--down|--auto]
                   Split direction. Mutually exclusive; default is --auto.
-     [--command]   Run an initial command in the new surface.
      [--json]      Print JSON output.
      [--minimize]  Create the surface minimized.
      [--surface]   Surface to split.

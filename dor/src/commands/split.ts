@@ -16,7 +16,6 @@ import {
 
 interface SplitFlags {
   readonly auto?: boolean;
-  readonly command?: string;
   readonly down?: boolean;
   readonly json?: boolean;
   readonly left?: boolean;
@@ -40,8 +39,20 @@ export const splitCommand: Command = {
       remove: ['<WS>[--down]', '<WS>[--left]', '<WS>[--right]', '<WS>[--up]'],
     },
     {
+      scope: 'root',
+      findReplace: [
+        `  dor split ${groupedSplitDirectionUsage} [--json] [--minimize] [--surface id|ref|index]<TO-EOL>`,
+        `  dor split ${groupedSplitDirectionUsage} [--json] [--minimize] [--surface id|ref|index] [-- <command>...]\n`,
+      ],
+    },
+    {
       scope: 'command-usage',
-      findReplace: ['[--auto]', `${groupedSplitDirectionUsage}`],
+      findReplace: [
+        '[--auto]',
+        `${groupedSplitDirectionUsage}`,
+        '[--surface id|ref|index]<TO-EOL>',
+        '[--surface id|ref|index] [-- <command>...]\n',
+      ],
       remove: ['<WS>[--down]', '<WS>[--left]', '<WS>[--right]', '<WS>[--up]'],
     },
     {
@@ -50,15 +61,21 @@ export const splitCommand: Command = {
         '<LS>[--auto]<TO-EOL>',
         '     [--left|--right|--up|--down|--auto]\n                  Split direction. Mutually exclusive; default is --auto.\n',
       ],
-      remove: ['<LS>[--down]<TO-EOL>', '<LS>[--left]<TO-EOL>', '<LS>[--right]<TO-EOL>', '<LS>[--up]<TO-EOL>'],
+      remove: [
+        '<LS>[--down]<TO-EOL>',
+        '<LS>[--left]<TO-EOL>',
+        '<LS>[--right]<TO-EOL>',
+        '<LS>[--up]<TO-EOL>',
+        '\nARGUMENTS<TO-EOL><LS>command<TO-EOL>',
+      ],
     },
   ],
-  command: buildCommand<SplitFlags, [], DorCommandContext>({
+  command: buildCommand<SplitFlags, string[], DorCommandContext>({
     docs: {
       brief: 'Create a new terminal surface by splitting an existing surface.',
       fullDescription: `If no direction is provided, --auto is used. --auto chooses right when the target surface is wide and down when it is narrow.
 
---command runs the given command as the new terminal surface's initial command.
+Use -- followed by a command to run an initial command in the new terminal surface.
 
 --minimize creates the surface and immediately sends it to the minimized area.
 
@@ -66,8 +83,8 @@ export const splitCommand: Command = {
 
 split does not know about non-terminal surface types. Compose future content commands through the initial command:
 
-  dor split --right --command "dor iframe https://example.com"
-  dor split --auto --command "dor agent-browser open https://example.com"
+  dor split --right -- dor iframe https://example.com
+  dor split --auto -- dor agent-browser open https://example.com
 
 Text output:
   created surface:2  [right]
@@ -86,7 +103,6 @@ JSON output:
     parameters: {
       flags: {
         auto: { kind: 'boolean', brief: 'Default; choose right when wide and down when narrow.', optional: true, withNegated: false },
-        command: { kind: 'parsed', parse: stringParser, brief: 'Run an initial command in the new surface.', optional: true, placeholder: 'cmd' },
         down: { kind: 'boolean', brief: 'Split below the target surface.', optional: true, withNegated: false },
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         left: { kind: 'boolean', brief: 'Split left of the target surface.', optional: true, withNegated: false },
@@ -95,21 +111,27 @@ JSON output:
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split.', optional: true, placeholder: 'id|ref|index' },
         up: { kind: 'boolean', brief: 'Split above the target surface.', optional: true, withNegated: false },
       },
+      positional: {
+        kind: 'array',
+        minimum: 0,
+        parameter: { parse: stringParser, brief: 'Initial command to run.', placeholder: 'command' },
+      },
     },
     func: runSplitCommand,
   }),
 };
 
-async function runSplitCommand(this: DorCommandContext, flags: SplitFlags): Promise<void | Error> {
+async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...commandArgs: string[]): Promise<void | Error> {
   const direction = parseSplitDirection(flags);
   if (!direction.ok) return new Error(direction.message);
+  const command = commandArgs.join(' ').trim() || undefined;
 
   const clientResult = resolveControlClient(this.options);
   if (!clientResult.ok) return new Error(clientResult.message);
 
   try {
     const response = await clientResult.value.splitSurface({
-      command: flags.command,
+      command,
       direction: direction.value,
       minimized: flags.minimize === true,
       surface: flags.surface,
