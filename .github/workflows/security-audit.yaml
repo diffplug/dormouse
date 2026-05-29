@@ -69,6 +69,13 @@ jobs:
           # and have the prompt instruct Claude to prefix `gh api`
           # calls with `GH_TOKEN=$AUDIT_PAT`.
           AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
+          # When release.yml calls this workflow via `workflow_call`, the
+          # triggering event is the release tag `push`, which the action
+          # rejects ("Unsupported event type: push"). Schedule and
+          # workflow_dispatch runs both resolve to the action's agent
+          # mode, so masquerade the push as workflow_dispatch — identical
+          # to the nightly path — while leaving real event names intact.
+          GITHUB_EVENT_NAME: ${{ github.event_name == 'push' && 'workflow_dispatch' || github.event_name }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Without an explicit allowlist the action defaults to a
