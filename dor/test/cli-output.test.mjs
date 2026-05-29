@@ -106,6 +106,16 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         text: limited,
       };
     },
+    async killSurface(request) {
+      this.requests.push({ method: 'killSurface', request });
+      return {
+        status: 'killed',
+        surfaceId: request.surface === 'surface:2'
+          ? '22222222-2222-4222-8222-222222222222'
+          : '11111111-1111-4111-8111-111111111111',
+        surfaceRef: request.surface,
+      };
+    },
   };
 }
 
@@ -307,6 +317,36 @@ test('read json output', async () => {
 
 test('read invalid lines output', async () => {
   await snapshot('read-invalid-lines', await runCli(['read', '--lines', '0'], { client: fixtureClient() }));
+});
+
+test('kill text output', async () => {
+  await snapshot(
+    'kill-text',
+    await runCli(['kill', '--surface', 'surface:2', '--confirm-dangerously'], { client: fixtureClient() }),
+  );
+});
+
+test('kill sends confirmation to the host', async () => {
+  const client = fixtureClient();
+  await runCli(['kill', '--surface', 'title:repo "watch"', '--confirm-if-read', 'done'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'killSurface',
+    request: {
+      confirmation: { mode: 'if-read', text: 'done' },
+      surface: 'title:repo "watch"',
+    },
+  }]);
+});
+
+test('kill missing confirmation output', async () => {
+  await snapshot('kill-missing-confirmation', await runCli(['kill', '--surface', 'surface:2'], { client: fixtureClient() }));
+});
+
+test('kill short confirm-if-read output', async () => {
+  await snapshot(
+    'kill-short-confirm-if-read',
+    await runCli(['kill', '--surface', 'surface:2', '--confirm-if-read', 'abc'], { client: fixtureClient() }),
+  );
 });
 
 test('list-panes text output', async () => {

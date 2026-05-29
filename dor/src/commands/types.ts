@@ -90,12 +90,29 @@ export interface ReadSurfaceResponse {
   text: string;
 }
 
+export type KillSurfaceConfirmation =
+  | { mode: 'await-user' }
+  | { mode: 'if-read'; text: string }
+  | { mode: 'dangerously' };
+
+export interface KillSurfaceRequest {
+  confirmation: KillSurfaceConfirmation;
+  surface: string;
+}
+
+export interface KillSurfaceResponse {
+  status: 'killed';
+  surfaceId?: string;
+  surfaceRef: string;
+}
+
 export interface ControlClient {
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse>;
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse>;
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse>;
   readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse>;
+  killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse>;
 }
 
 export interface CliEnv {

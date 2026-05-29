@@ -7,6 +7,7 @@ import {
   type StricliProcess,
 } from '@stricli/core';
 import { ensureCommand } from './commands/ensure.js';
+import { killCommand } from './commands/kill.js';
 import { listPaneSurfacesCommand } from './commands/list-pane-surfaces.js';
 import { listPanesCommand } from './commands/list-panes.js';
 import { readCommand } from './commands/read.js';
@@ -34,6 +35,9 @@ export type {
   EnsureSurfaceRequest,
   EnsureSurfaceResponse,
   IdFormat,
+  KillSurfaceConfirmation,
+  KillSurfaceRequest,
+  KillSurfaceResponse,
   ListSurfacesRequest,
   ListSurfacesResponse,
   ReadSurfaceRequest,
@@ -54,6 +58,7 @@ const COMMANDS = [
   versionCommand,
   sendCommand,
   readCommand,
+  killCommand,
   listPanesCommand,
   listPaneSurfacesCommand,
 ] as const satisfies readonly Command[];
@@ -64,6 +69,7 @@ const ROUTES = {
   version: versionCommand.command,
   send: sendCommand.command,
   read: readCommand.command,
+  kill: killCommand.command,
   'list-panes': listPanesCommand.command,
   'list-pane-surfaces': listPaneSurfacesCommand.command,
 };

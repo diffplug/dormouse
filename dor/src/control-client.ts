@@ -3,6 +3,8 @@ import type {
   ControlClient,
   EnsureSurfaceRequest,
   EnsureSurfaceResponse,
+  KillSurfaceRequest,
+  KillSurfaceResponse,
   ListSurfacesRequest,
   ListSurfacesResponse,
   ReadSurfaceRequest,
@@ -58,6 +60,10 @@ export class SocketControlClient implements ControlClient {
 
   readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse> {
     return this.request<ReadSurfaceResponse>('surface.read', request);
+  }
+
+  killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse> {
+    return this.request<KillSurfaceResponse>('surface.kill', request);
   }
 
   private request<T>(method: string, params: unknown): Promise<T> {

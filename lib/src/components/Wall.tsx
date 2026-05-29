@@ -88,6 +88,7 @@ type ShellSpawnNoticeState = {
 
 type DorControlParams = {
   command?: unknown;
+  confirmation?: unknown;
   direction?: unknown;
   input?: unknown;
   inputCount?: unknown;
@@ -207,6 +208,17 @@ function readVisibleSurfaceText(surfaceId: string, lines: number | undefined): s
   }
 
   return limitLines(visibleLines.join('\n').replace(/\n+$/, ''), lines);
+}
+
+function killConfirmationParam(value: unknown): { mode: 'await-user' } | { mode: 'if-read'; text: string } | { mode: 'dangerously' } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const confirmation = value as { mode?: unknown; text?: unknown };
+  if (confirmation.mode === 'await-user') return { mode: 'await-user' };
+  if (confirmation.mode === 'dangerously') return { mode: 'dangerously' };
+  if (confirmation.mode === 'if-read' && typeof confirmation.text === 'string') {
+    return { mode: 'if-read', text: confirmation.text };
+  }
+  return null;
 }
 
 function parseDorSplitDirection(value: unknown): DorSplitDirection | null {
@@ -1099,12 +1111,54 @@ export function Wall({
         return;
       }
 
+      if (detail.method === 'surface.kill') {
+        const confirmation = killConfirmationParam(params.confirmation);
+        if (!confirmation) {
+          detail.respond({ ok: false, error: 'invalid kill confirmation' });
+          return;
+        }
+        const surface = stringParam(params.surface);
+        if (!surface) {
+          detail.respond({ ok: false, error: 'surface is required' });
+          return;
+        }
+        const target = resolveVisibleSurface(api, surface, detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        if (confirmation.mode === 'if-read') {
+          const text = readVisibleSurfaceText(target.value.id, undefined);
+          if (!text.includes(confirmation.text)) {
+            detail.respond({ ok: false, error: `surface '${target.value.ref}' read text did not contain confirmation text` });
+            return;
+          }
+        }
+        if (confirmation.mode === 'await-user') {
+          const confirmed = window.confirm(`Kill ${target.value.ref}?`);
+          if (!confirmed) {
+            detail.respond({ ok: false, error: 'kill was not confirmed' });
+            return;
+          }
+        }
+        killPaneImmediately(target.value.id);
+        detail.respond({
+          ok: true,
+          result: {
+            status: 'killed',
+            surfaceId: target.value.id,
+            surfaceRef: target.value.ref,
+          },
+        });
+        return;
+      }
+
       detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
     };
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, createSplitSurface, findSurfaceIdByUserTitle, resolveVisibleSurface, surfaceRefForId]);
+  }, [buildDorSurfaces, createSplitSurface, findSurfaceIdByUserTitle, killPaneImmediately, resolveVisibleSurface, surfaceRefForId]);
 
   const addSplitPanel = useCallback((
     id: string | null,
