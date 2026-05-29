@@ -23,6 +23,7 @@ vi.mock('@xterm/xterm', () => {
     writes: string[] = [];
     private dataListeners = new Set<(data: string) => void>();
     private resizeListeners = new Set<(size: { cols: number; rows: number }) => void>();
+    private keyHandler: ((event: KeyboardEvent) => boolean) | null = null;
 
     parser = {
       registerCsiHandler: () => ({ dispose: () => {} }),
@@ -62,6 +63,10 @@ vi.mock('@xterm/xterm', () => {
       return { dispose: () => {} };
     }
 
+    attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean): void {
+      this.keyHandler = handler;
+    }
+
     focus(): void {}
 
     blur(): void {}
@@ -70,6 +75,21 @@ vi.mock('@xterm/xterm', () => {
 
     emitInput(data: string): void {
       this.dataListeners.forEach((listener) => listener(data));
+    }
+
+    emitKeyDown(init: Partial<KeyboardEvent> = {}): boolean | null {
+      return this.keyHandler?.({
+        altKey: false,
+        ctrlKey: false,
+        isComposing: false,
+        key: 'Enter',
+        metaKey: false,
+        preventDefault: vi.fn(),
+        shiftKey: true,
+        stopPropagation: vi.fn(),
+        type: 'keydown',
+        ...init,
+      } as KeyboardEvent) ?? null;
     }
 
     emitResize(cols: number, rows: number): void {
@@ -83,8 +103,11 @@ vi.mock('@xterm/xterm', () => {
 vi.mock('./platform', async () => {
   const actual = await vi.importActual<typeof import('./platform')>('./platform');
   const fakePlatform = new actual.FakePtyAdapter();
+  // Force IS_WINDOWS so the Shift+Enter handler is attached regardless of
+  // the host OS this test runs on (Linux CI evaluates it false at module load).
   return {
     ...actual,
+    IS_WINDOWS: true,
     getPlatform: () => fakePlatform,
     __fakePlatform: fakePlatform,
   };
@@ -121,8 +144,10 @@ import {
 import { pasteFilePaths } from './clipboard';
 
 interface MockTerminalInstance {
+  modes: { bracketedPasteMode: boolean };
   writes: string[];
   emitInput(data: string): void;
+  emitKeyDown(init?: Partial<KeyboardEvent>): boolean | null;
   emitResize(cols: number, rows: number): void;
 }
 
@@ -277,6 +302,27 @@ describe('terminal-registry alert behavior', () => {
     entry.terminal.emitInput('x');
 
     expect(isUntouched(id)).toBe(false);
+  });
+
+  it('sends LF for Windows Shift+Enter before xterm handles Enter normally', () => {
+    const id = 'shift-enter-lf';
+    const entry = createSession(id);
+
+    const handled = entry.terminal.emitKeyDown();
+
+    expect(handled).toBe(false);
+    expect(entry.terminal.writes).toContain('\n');
+  });
+
+  it('sends bracketed-paste newline for Windows Shift+Enter when the app enabled bracketed paste', () => {
+    const id = 'shift-enter-bracketed';
+    const entry = createSession(id);
+    entry.terminal.modes.bracketedPasteMode = true;
+
+    const handled = entry.terminal.emitKeyDown();
+
+    expect(handled).toBe(false);
+    expect(entry.terminal.writes).toContain('\x1b[200~\n\x1b[201~');
   });
 
   it('does not mark synthetic terminal reports as touched', () => {

@@ -34,6 +34,12 @@ export const PLATFORM_STRING: string = (() => {
  */
 export const IS_MAC: boolean = /Mac|iPhone|iPad/i.test(PLATFORM_STRING);
 
+/**
+ * True when running on Windows. Used for keyboard behavior that Windows
+ * terminals commonly normalize differently from macOS terminals.
+ */
+export const IS_WINDOWS: boolean = /Win/i.test(PLATFORM_STRING);
+
 let adapter: PlatformAdapter | null = null;
 
 /** Set an externally-created platform adapter (e.g. TauriAdapter from standalone). */

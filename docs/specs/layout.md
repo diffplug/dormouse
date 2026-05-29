@@ -141,6 +141,7 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 - All keyboard input routes to the active session's xterm.js instance
 - Only the mode-exit gesture (LCmd → RCmd) is intercepted
 - In the VS Code host, selected workbench chords are mirrored: xterm still processes the key, and Dormouse also asks the extension host to run the matching VS Code command. See [the VS Code host spec](vscode.md) for the allowlist.
+- On Windows, `Shift+Enter` is normalized before xterm's default Enter handling. If the foreground app has enabled bracketed paste, Dormouse sends a bracketed-paste LF (`\x1b[200~\n\x1b[201~`); otherwise it sends bare LF (`\x0a`). This preserves the common multiline-input contract used by terminal TUIs such as Codex, where plain `Enter` submits and pasted/LF newline input inserts a newline.
 - Selection overlay shows 2px solid border with glow
 - Terminal has DOM focus
 

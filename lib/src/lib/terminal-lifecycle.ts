@@ -1,7 +1,7 @@
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
-import { getPlatform, IS_MAC } from './platform';
+import { getPlatform, IS_MAC, IS_WINDOWS } from './platform';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
 import { attachMouseModeObserver } from './mouse-mode-observer';
 import {
@@ -28,6 +28,7 @@ import {
   writeReplay,
 } from './terminal-report-filter';
 import { getTerminalTheme, paintTerminalHost, startThemeObserver } from './terminal-theme';
+import { shiftEnterInputForEvent } from './terminal-keyboard';
 import {
   ensureTerminalPaneState,
   fillTerminalProcessCwdByPtyId,
@@ -93,7 +94,7 @@ function readDisplayTextFromBuffer(terminal: Terminal, range: IBufferRange): str
   }
 }
 
-function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDivElement } {
+function createXtermHost(id: string): { terminal: Terminal; fit: FitAddon; element: HTMLDivElement } {
   const styles = getComputedStyle(document.body);
   const editorFontSize = parseInt(styles.getPropertyValue('--vscode-editor-font-size'), 10) || 12;
   const editorFontFamily = styles.getPropertyValue('--vscode-editor-font-family').trim() || "'SF Mono', Menlo, Monaco, monospace";
@@ -116,16 +117,31 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
     },
   });
 
-  // Only hosts that can run workbench commands (the VS Code adapter) opt in;
-  // on every other platform runWorkbenchCommand is undefined, so the chords
-  // stay in xterm exactly as before.
-  if (getPlatform().runWorkbenchCommand) {
+  // Two independent reasons to intercept keydown:
+  //   - Windows Shift+Enter needs newline normalization so terminal TUIs see
+  //     multiline input instead of Enter.
+  //   - Hosts that run workbench commands (the VS Code adapter) opt in to
+  //     forwarding F1/Ctrl+P/etc. up to the workbench; non-VS-Code hosts
+  //     leave those chords alone so the browser default still fires.
+  if (IS_WINDOWS || getPlatform().runWorkbenchCommand) {
     terminal.attachCustomKeyEventHandler((event) => {
+      const shiftEnterInput = shiftEnterInputForEvent(event, {
+        isWindows: IS_WINDOWS,
+        bracketedPasteMode: terminal.modes.bracketedPasteMode,
+      });
+      if (shiftEnterInput !== null) {
+        event.preventDefault();
+        event.stopPropagation();
+        handleTerminalInput(id, terminal, shiftEnterInput);
+        return false;
+      }
+      const runWorkbenchCommand = getPlatform().runWorkbenchCommand;
+      if (!runWorkbenchCommand) return true;
       const command = vscodeWorkbenchCommandForKeydown(event, { isMac: IS_MAC });
       if (!command) return true;
       event.preventDefault();
       event.stopPropagation();
-      getPlatform().runWorkbenchCommand?.(command);
+      runWorkbenchCommand(command);
       return true;
     });
   }
@@ -163,6 +179,36 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
   };
 }
 
+function handleTerminalInput(id: string, terminal: Terminal, data: string): void {
+  let input = data;
+  if (getMouseSelectionState(id).override !== 'off') {
+    input = stripMouseReportsFromInput(input);
+    if (input.length === 0) return;
+  }
+
+  const isReplayTerminalReport = inputIsReplayTerminalReport(input);
+
+  if (isReplayTerminalReport && registry.get(id)?.isReplaying) return;
+
+  if (!isReplayTerminalReport) {
+    markSessionTouched(id);
+  }
+
+  const isSyntheticTerminalReport = inputIsSyntheticTerminalReport(input);
+
+  if (!isSyntheticTerminalReport) {
+    recordTerminalUserInputByPtyId(id, input, makePromptLineReader(terminal));
+    const entry = registry.get(id);
+    const hadTodo = entry?.todo === true;
+    getPlatform().alertAttend(id);
+    if (hadTodo && inputContainsEnter(input)) {
+      getPlatform().alertClearTodo(id);
+    }
+  }
+
+  getPlatform().writePty(id, input);
+}
+
 /** xterm input/resize/render handlers. Returns a dispose. The render
  *  handler watches selectionBaseline (mutated by the mouse router) so the
  *  baseline is read by reference rather than captured. */
@@ -171,35 +217,7 @@ function wireXtermHandlers(
   terminal: Terminal,
   selectionBaselineRef: { current: string | null },
 ): () => void {
-  const inputDisposable = terminal.onData((data) => {
-    let input = data;
-    if (getMouseSelectionState(id).override !== 'off') {
-      input = stripMouseReportsFromInput(input);
-      if (input.length === 0) return;
-    }
-
-    const isReplayTerminalReport = inputIsReplayTerminalReport(input);
-
-    if (isReplayTerminalReport && registry.get(id)?.isReplaying) return;
-
-    if (!isReplayTerminalReport) {
-      markSessionTouched(id);
-    }
-
-    const isSyntheticTerminalReport = inputIsSyntheticTerminalReport(input);
-
-    if (!isSyntheticTerminalReport) {
-      recordTerminalUserInputByPtyId(id, input, makePromptLineReader(terminal));
-      const entry = registry.get(id);
-      const hadTodo = entry?.todo === true;
-      getPlatform().alertAttend(id);
-      if (hadTodo && inputContainsEnter(input)) {
-        getPlatform().alertClearTodo(id);
-      }
-    }
-
-    getPlatform().writePty(id, input);
-  });
+  const inputDisposable = terminal.onData((data) => handleTerminalInput(id, terminal, data));
 
   const resizeDisposable = terminal.onResize(({ cols, rows }) => {
     getPlatform().alertResize(id);
@@ -232,7 +250,7 @@ function wireXtermHandlers(
 }
 
 function setupTerminalEntry(id: string, options: { untouched?: boolean } = {}): TerminalEntry {
-  const { terminal, fit, element } = createXtermHost();
+  const { terminal, fit, element } = createXtermHost(id);
   const selectionBaselineRef = { current: null as string | null };
 
   const disposePty = wirePtyEvents(id, terminal);
