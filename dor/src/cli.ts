@@ -45,6 +45,10 @@ const ROUTES = {
   'list-pane-surfaces': listPaneSurfacesCommand.command,
 };
 
+const ROOT_USAGE_OVERRIDES: Partial<Record<keyof typeof ROUTES, string>> = {
+  ...(splitCommand.rootUsage ? { split: splitCommand.rootUsage } : {}),
+};
+
 const DOR_TEXT: ApplicationText = {
   ...text_en,
   commandErrorResult: (error, _ansiColor) => `Error: ${error.message}`,
@@ -88,6 +92,7 @@ interface CaptureProcess extends StricliProcess {
 }
 
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<CliResult> {
+  const rootHelpRequest = isRootHelpRequest(argv);
   const [commandName, ...args] = argv[0] === 'help' ? ['--help'] : argv;
 
   if (commandName === 'ensure' && !args.includes('-h') && !args.includes('--help')) {
@@ -106,9 +111,25 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
 
   return {
     exitCode: normalizeExitCode(capture.process.exitCode),
-    stdout: capture.stdout(),
+    stdout: rootHelpRequest ? applyRootUsageOverrides(capture.stdout()) : capture.stdout(),
     stderr: capture.stderr(),
   };
+}
+
+function isRootHelpRequest(argv: string[]): boolean {
+  return argv.length === 0 || argv[0] === 'help' || (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h'));
+}
+
+function applyRootUsageOverrides(stdout: string): string {
+  const lines = stdout.split('\n').map((line) => {
+    for (const [route, usage] of Object.entries(ROOT_USAGE_OVERRIDES)) {
+      if (line.startsWith(`  dor ${route} `) || line === `  dor ${route}`) {
+        return `  ${usage}`;
+      }
+    }
+    return line;
+  });
+  return lines.join('\n');
 }
 
 function validateEnsureDelimiter(args: string[]): ParseResult<void> {

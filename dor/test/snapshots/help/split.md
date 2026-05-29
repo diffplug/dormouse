@@ -5,9 +5,10 @@ Invocation: `dor split --help`
 ```text
 USAGE
   dor split [--left|--right|--up|--down|--auto] [--command <cmd>] [--minimize] [--surface <id|ref|index>] [--json]
+    Direction flags are mutually exclusive; --auto is the default.
   dor split --help
 
-Direction flags are mutually exclusive. If no direction is provided, --auto is used. --auto chooses right when the target surface is wide and down when it is narrow.
+If no direction is provided, --auto is used. --auto chooses right when the target surface is wide and down when it is narrow.
 
 --surface selects the surface to split. If omitted, Dormouse uses the caller surface when available, then the focused surface.
 
@@ -37,7 +38,7 @@ JSON output:
   }
 
 FLAGS
-     [--auto]      Choose right when wide and down when narrow.
+     [--auto]      Default; choose right when wide and down when narrow.
      [--command]   Run an initial command in the new surface.
      [--down]      Split below the target surface.
      [--json]      Print JSON output.

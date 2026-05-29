@@ -92,6 +92,7 @@ export interface DorCommandContext extends CommandContext {
 export interface Command {
   name: string;
   command: StricliCommand<DorCommandContext>;
+  rootUsage?: string;
 }
 
 export type ParseResult<T> =
