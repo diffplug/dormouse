@@ -34,7 +34,13 @@ app launch
                          └─ install fails → overwrite with failure marker → exit normally
 ```
 
-The `Update` object returned by `check()` is held in memory as an available update. Clicking the approval action calls `download()` and promotes it to a pending update only after the download succeeds. The close handler intercepts the window close event only when there is an approved, downloaded update, writes a success marker to `localStorage` *before* calling `install()` (because on Windows, NSIS force-kills the process), then calls `install()`. In Vite dev mode (`pnpm dev:standalone`), the close handler skips `install()` without preventing the close. Dev mode is useful for testing check/download/banner behavior, but install must be tested from a packaged app because the updater resolves its replacement target from the current executable path.
+The `Update` object returned by `check()` is held in memory as an available update. Clicking the approval action calls `download()` and promotes it to a pending update only after the download succeeds. The close handler intercepts the window close event only when there is an approved, downloaded update, writes a success marker to `localStorage` *before* calling `install()` (because on Windows, NSIS force-kills the process), then — on Windows only — kills the sidecar and waits for it to fully exit (see *Sidecar teardown on Windows* below) before calling `install()`. In Vite dev mode (`pnpm dev:standalone`), the close handler skips `install()` without preventing the close. Dev mode is useful for testing check/download/banner behavior, but install must be tested from a packaged app because the updater resolves its replacement target from the current executable path.
+
+## Sidecar teardown on Windows
+
+The NSIS installer overwrites files inside the bundled sidecar — including node-pty's native `conpty.node`. Windows refuses to overwrite a native module that a live process still has loaded, so if the Node sidecar is running when NSIS reaches `node_modules`, the install fails with *"Error opening file for writing: …\_up_\sidecar\node_modules\node-pty\prebuilds\win32-x64\conpty.node"*. The Rust `RunEvent::Exit` kill is too late and asynchronous — NSIS starts copying files immediately after `install()` force-kills the app, racing the sidecar's shutdown.
+
+So on Windows the close handler `invoke`s `kill_sidecar_now` and awaits it before `install()`. That command is synchronous on the Rust side: it sends the kill, then polls `try_wait` (capped at ~5s) until the process has actually exited and released its file handles. `try_wait` is used instead of the job-object `wait()` because `wait()` consumes a completion-port message the reaper thread relies on and could block forever if the sidecar had already exited. macOS and Linux can replace open files in place, so they skip this and rely on the existing `RunEvent::Exit` cleanup.
 
 ## Update notice in the Baseboard
 
@@ -63,7 +69,7 @@ The Baseboard is in `lib/` but the updater is standalone-only. The notice is thr
 
 | Platform | What `install()` does | App exit |
 |----------|----------------------|----------|
-| Windows | Launches NSIS installer in passive mode (progress bar, no user interaction). Force-kills the app. | Automatic (NSIS) |
+| Windows | Kills the sidecar and waits for it to exit (so NSIS can overwrite its loaded native modules), then launches NSIS installer in passive mode (progress bar, no user interaction). Force-kills the app. | Automatic (NSIS) |
 | macOS | Replaces the `.app` bundle in place | `getCurrentWindow().close()` after `install()` returns |
 | Linux | Replaces the AppImage in place | `getCurrentWindow().close()` after `install()` returns |
 | Vite dev mode | Skips `install()` to avoid replacing the dev executable directory | Native close proceeds normally |
@@ -125,6 +131,6 @@ The Rust side registers the plugin with `tauri_plugin_updater::Builder::new().bu
 
 **Why write the success marker before `install()`?** On Windows, the NSIS installer force-kills the process — code after `install()` may never run. Writing optimistically and overwriting on failure handles both platforms correctly.
 
-**Why no `on_before_exit` Rust hook?** The JS close handler (`onCloseRequested`) runs before `install()` and handles marker writes. On Windows, NSIS handles process termination after `install()`. Sidecar cleanup is not currently handled at update-time — the sidecar process is orphaned and will exit when its stdin closes.
+**Why no `on_before_exit` Rust hook?** The JS close handler (`onCloseRequested`) runs before `install()` and handles marker writes and (on Windows) the synchronous sidecar kill. On Windows, NSIS handles process termination after `install()`. On macOS/Linux the sidecar is orphaned and exits when its stdin closes — harmless there because open files can be replaced in place.
 
 **Why `localStorage` instead of Tauri's store plugin?** `localStorage` persists across launches in Tauri's webview, requires no additional dependencies, and is automatically scoped to the app. If the user resets app data, markers are cleaned up naturally.

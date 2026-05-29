@@ -1,10 +1,36 @@
 import type { AlertState } from '../alert-manager';
+import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 
 export interface PtyInfo {
   id: string;
   alive: boolean;
   exitCode?: number;
 }
+
+/**
+ * A TCP socket in the LISTEN state opened by a terminal's shell process or any
+ * of its descendant subprocesses. `address` is the bind interface — `0.0.0.0`
+ * / `::` mean all interfaces, `127.0.0.1` / `::1` mean loopback-only.
+ */
+export interface OpenPort {
+  protocol: 'tcp';
+  family: 'IPv4' | 'IPv6';
+  address: string;
+  port: number;
+  pid: number;
+  processName?: string;
+}
+
+/**
+ * End-to-end budget for `getOpenPorts()` at every transport boundary
+ * (webview → host adapter, host → pty-host child, Tauri command → sidecar) and
+ * for the per-subprocess execs inside `getOpenPortsForPid()` (lsof, PowerShell,
+ * `Get-NetTCPConnection`, `netstat`). Wider than the 1 s cwd query because
+ * enumeration shells out on macOS/Windows; tight enough to fail visibly rather
+ * than hang a pane header. Mirrored as `OPEN_PORT_TIMEOUT_MS` in
+ * `standalone/sidecar/pty-core.js` and `standalone/src-tauri/src/lib.rs`.
+ */
+export const OPEN_PORT_TIMEOUT_MS = 3000;
 
 export type AlertStateDetail = { id: string } & AlertState;
 
@@ -25,6 +51,8 @@ export interface PlatformAdapter {
   // PTY queries
   getCwd(id: string): Promise<string | null>;
   getScrollback(id: string): Promise<string | null>;
+  /** TCP listening ports opened by this terminal's process tree (shell + descendants). */
+  getOpenPorts(id: string): Promise<OpenPort[]>;
 
   // Clipboard support for file references and raw images.
   readClipboardFilePaths(): Promise<string[] | null>;
@@ -39,6 +67,9 @@ export interface PlatformAdapter {
   // Open a sanitized external URI. Implementations must revalidate because
   // terminal output is untrusted.
   openExternal?(uri: string): void;
+
+  // VS Code-only escape hatch for mirrored workbench shortcuts from webviews.
+  runWorkbenchCommand?(command: VSCodeWorkbenchCommand): void;
 
   // PTY event listeners
   onPtyData(handler: (detail: { id: string; data: string }) => void): void;

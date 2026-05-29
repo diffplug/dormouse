@@ -54,7 +54,7 @@ fn default_log_path() -> PathBuf {
     #[cfg(target_os = "windows")]
     if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
         return PathBuf::from(local_app_data)
-            .join("Dormouse")
+            .join("Dormouse Terminal")
             .join("dormouse.log");
     }
 
@@ -280,6 +280,26 @@ fn pty_get_cwd(
         .and_then(|cwd| cwd.as_str().map(String::from)))
 }
 
+// Mirrors `OPEN_PORT_TIMEOUT_MS` in `lib/src/lib/platform/types.ts` — keep in sync.
+const OPEN_PORT_TIMEOUT_MS: u64 = 3000;
+
+#[tauri::command]
+fn pty_get_open_ports(
+    state: tauri::State<'_, SidecarState>,
+    id: String,
+) -> Result<JsonValue, String> {
+    let response = request_from_sidecar_timeout(
+        &state,
+        "pty:getOpenPorts",
+        serde_json::json!({ "id": id }),
+        Duration::from_millis(OPEN_PORT_TIMEOUT_MS),
+    )?;
+    Ok(response
+        .get("ports")
+        .cloned()
+        .unwrap_or_else(|| JsonValue::Array(Vec::new())))
+}
+
 #[tauri::command]
 fn pty_get_scrollback(
     state: tauri::State<'_, SidecarState>,
@@ -334,7 +354,7 @@ fn read_update_log() -> Result<String, String> {
 
 #[tauri::command]
 fn kill_sidecar_now(state: tauri::State<'_, SidecarState>) {
-    kill_sidecar(&state.child);
+    kill_sidecar_and_wait(&state.child);
 }
 
 // Job Object on Windows / process group on Unix — kill propagates to the
@@ -346,6 +366,45 @@ fn kill_sidecar(child: &SharedChild) {
         append_log(format!("[sidecar] killing (pid={})", guard.id()));
         let _ = guard.start_kill();
     }
+}
+
+// Like `kill_sidecar`, but blocks until the process has actually exited. The
+// updater calls this before launching the Windows NSIS installer: NSIS
+// overwrites files inside the bundled sidecar (e.g. node-pty's `conpty.node`),
+// and Windows refuses to overwrite a native module the live sidecar still has
+// loaded — surfacing as "Error opening file for writing". Releasing those
+// handles first requires the node process to be gone, not merely signalled.
+//
+// We poll `try_wait` rather than block on `wait()`: `try_wait` is idempotent
+// and can't hang, whereas the job-object `wait()` consumes a completion-port
+// message the reaper thread may already have drained (e.g. if the sidecar had
+// crashed earlier), which would block forever. The ~5s cap means a wedged
+// sidecar can't stall quit indefinitely.
+fn kill_sidecar_and_wait(child: &SharedChild) {
+    // Poll for exit at this cadence, up to ~5s total (MAX_POLLS × POLL_INTERVAL).
+    const POLL_INTERVAL: Duration = Duration::from_millis(20);
+    const MAX_POLLS: u32 = 250;
+
+    let Ok(mut guard) = child.lock() else { return };
+    append_log(format!(
+        "[sidecar] killing and waiting for exit (pid={})",
+        guard.id()
+    ));
+    let _ = guard.start_kill();
+    for _ in 0..MAX_POLLS {
+        match guard.try_wait() {
+            Ok(Some(status)) => {
+                append_log(format!("[sidecar] confirmed exit during kill (status: {status})"));
+                return;
+            }
+            Ok(None) => std::thread::sleep(POLL_INTERVAL),
+            Err(err) => {
+                append_log(format!("[sidecar] wait error during kill: {err}"));
+                return;
+            }
+        }
+    }
+    append_log("[sidecar] kill wait timed out (~5s); proceeding anyway");
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -725,6 +784,7 @@ pub fn run() {
             pty_resize,
             pty_kill,
             pty_get_cwd,
+            pty_get_open_ports,
             pty_get_scrollback,
             pty_request_init,
             dor_control_response,

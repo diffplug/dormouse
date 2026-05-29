@@ -1,9 +1,10 @@
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
-import { getPlatform } from './platform';
+import { getPlatform, IS_MAC, IS_WINDOWS } from './platform';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
 import { attachMouseModeObserver } from './mouse-mode-observer';
+import { attachKeyboardProtocolArbiter } from './keyboard-protocol-arbiter';
 import {
   bumpRenderTick,
   getMouseSelectionState,
@@ -43,6 +44,7 @@ import {
 } from './terminal-state-store';
 import { readLogicalLineFromBuffer, type BufferLike } from './terminal-buffer-read';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
+import { vscodeWorkbenchCommandForKeydown } from './vscode-keybindings';
 
 function makePromptLineReader(terminal: Terminal): PromptLineReader {
   return {
@@ -104,7 +106,14 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
     fontFamily: editorFontFamily,
     cursorBlink: true,
     theme,
-    vtExtensions: { kittyKeyboard: true },
+    // kittyKeyboard disambiguates Shift+Enter from Enter for TUIs that read
+    // raw VT (Claude Code everywhere; Codex on macOS/Linux). win32InputMode
+    // covers Windows TUIs that read via the Console API behind ConPTY (Codex),
+    // which can't negotiate the kitty protocol there: when conhost enables it
+    // (CSI ? 9001 h), xterm sends faithful Win32 INPUT_RECORD key events so
+    // Shift+Enter and Ctrl+J reach the app intact. Both are opt-in/negotiated,
+    // so they coexist — each program turns on whichever it understands.
+    vtExtensions: { kittyKeyboard: true, win32InputMode: IS_WINDOWS },
     linkHandler: {
       activate: (event, uri, range) => {
         event.preventDefault();
@@ -114,6 +123,20 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
       allowNonHttpProtocols: true,
     },
   });
+
+  // Only hosts that can run workbench commands (the VS Code adapter) opt in;
+  // on every other platform runWorkbenchCommand is undefined, so the chords
+  // stay in xterm exactly as before.
+  if (getPlatform().runWorkbenchCommand) {
+    terminal.attachCustomKeyEventHandler((event) => {
+      const command = vscodeWorkbenchCommandForKeydown(event, { isMac: IS_MAC });
+      if (!command) return true;
+      event.preventDefault();
+      event.stopPropagation();
+      getPlatform().runWorkbenchCommand?.(command);
+      return true;
+    });
+  }
 
   terminal.loadAddon(new UnicodeGraphemesAddon());
   const fit = new FitAddon();
@@ -223,6 +246,9 @@ function setupTerminalEntry(id: string, options: { untouched?: boolean } = {}): 
   const disposePty = wirePtyEvents(id, terminal);
   const disposeXterm = wireXtermHandlers(id, terminal, selectionBaselineRef);
   const mouseModeObserver = attachMouseModeObserver(id, terminal);
+  // Windows-only: keep win32-input-mode from clobbering kitty-protocol TUIs.
+  // Off-Windows win32-input-mode is never advertised, so kitty already wins.
+  const keyboardProtocolArbiter = IS_WINDOWS ? attachKeyboardProtocolArbiter(terminal) : null;
   const cleanupMouseRouter = attachTerminalMouseRouter({
     id,
     terminal,
@@ -237,6 +263,7 @@ function setupTerminalEntry(id: string, options: { untouched?: boolean } = {}): 
     disposePty();
     disposeXterm();
     mouseModeObserver.dispose();
+    keyboardProtocolArbiter?.dispose();
     cleanupMouseRouter();
   };
 

@@ -1,7 +1,7 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
-import type { AlertStateDetail, PlatformAdapter, PtyInfo } from "dormouse-lib/lib/platform/types";
+import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from "dormouse-lib/lib/platform/types";
 import { AlertManager, type SessionStatus } from "dormouse-lib/lib/alert-manager";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import {
@@ -188,6 +188,12 @@ export class TauriAdapter implements PlatformAdapter {
     try {
       return await rawInvoke<string | null>("pty_get_scrollback", { id });
     } catch { return null; }
+  }
+
+  async getOpenPorts(id: string): Promise<OpenPort[]> {
+    try {
+      return await rawInvoke<OpenPort[]>("pty_get_open_ports", { id });
+    } catch { return []; }
   }
 
   async readClipboardFilePaths(): Promise<string[] | null> {

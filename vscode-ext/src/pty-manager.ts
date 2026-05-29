@@ -4,6 +4,8 @@ import * as os from 'os';
 import { randomBytes } from 'crypto';
 import { log } from './log';
 import type { DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
+import type { OpenPort } from '../../lib/src/lib/platform/types';
+import { OPEN_PORT_TIMEOUT_MS } from '../../lib/src/lib/platform/types';
 
 export interface PtyCallbacks {
   onData(id: string, data: string): void;
@@ -303,6 +305,24 @@ export function getCwd(id: string): Promise<string | null> {
         clearTimeout(timeout);
         child?.off('message', handler);
         resolve(msg.cwd);
+      }
+    };
+    child?.on('message', handler);
+  });
+}
+
+export function getOpenPorts(id: string): Promise<OpenPort[]> {
+  return new Promise((resolve) => {
+    sendToChild({ type: 'getOpenPorts', id });
+    const timeout = setTimeout(() => {
+      child?.off('message', handler);
+      resolve([]);
+    }, OPEN_PORT_TIMEOUT_MS);
+    const handler = (msg: any) => {
+      if (msg.type === 'openPorts' && msg.id === id) {
+        clearTimeout(timeout);
+        child?.off('message', handler);
+        resolve(msg.ports || []);
       }
     };
     child?.on('message', handler);

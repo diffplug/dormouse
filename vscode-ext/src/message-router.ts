@@ -8,6 +8,7 @@ import {
   TerminalProtocolParser,
 } from '../../lib/src/lib/terminal-protocol';
 import { normalizeExternalUri } from '../../lib/src/lib/external-links';
+import { VSCODE_WORKBENCH_COMMANDS } from '../../lib/src/lib/vscode-keybindings';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { PersistedSession } from '../../lib/src/lib/session-types';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
@@ -30,6 +31,7 @@ interface ActiveRouter {
 
 const activeRouters = new Set<ActiveRouter>();
 let nextFlushRequestId = 0;
+const ALLOWED_WORKBENCH_COMMANDS = new Set<string>(VSCODE_WORKBENCH_COMMANDS);
 
 // Shared alert manager — survives router disposal so alert state persists
 // across webview collapse/expand cycles.
@@ -294,6 +296,11 @@ export function attachRouter(
           webview.postMessage({ type: 'pty:cwd', id: msg.id, cwd, requestId: msg.requestId } satisfies ExtensionMessage);
         });
         break;
+      case 'pty:getOpenPorts':
+        ptyManager.getOpenPorts(msg.id).then((ports) => {
+          webview.postMessage({ type: 'pty:openPorts', id: msg.id, ports, requestId: msg.requestId } satisfies ExtensionMessage);
+        });
+        break;
       case 'pty:getScrollback':
         webview.postMessage({
           type: 'pty:scrollback', id: msg.id,
@@ -339,6 +346,11 @@ export function attachRouter(
         );
         break;
       }
+      case 'dormouse:runWorkbenchCommand':
+        if (ALLOWED_WORKBENCH_COMMANDS.has(msg.command)) {
+          void vscode.commands.executeCommand(msg.command);
+        }
+        break;
       case 'dormouse:init': {
         // Webview has (re-)initialized — subscribe to live events.
         // Tear down previous subscriptions first (webview was destroyed and recreated).

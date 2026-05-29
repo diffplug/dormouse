@@ -659,7 +659,7 @@ dependencies = [
 
 [[package]]
 name = "dormouse"
-version = "0.10.2"
+version = "0.11.0"
 dependencies = [
  "process-wrap",
  "serde",

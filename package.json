@@ -3,6 +3,13 @@
   "private": true,
   "license": "FSL-1.1-MIT",
   "packageManager": "pnpm@11.0.6",
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "22.22.3",
+      "onFail": "download"
+    }
+  },
   "scripts": {
     "build": "pnpm run build:vscode && pnpm --filter dormouse-website build",
     "test": "pnpm -r run test",
@@ -16,5 +23,6 @@
     "dogfood:standalone": "bash standalone/scripts/dogfood.sh",
     "storybook": "pnpm --filter dormouse-lib storybook",
     "bundle-themes": "node lib/scripts/bundle-themes.mjs"
-  }
+  },
+  "devDependencies": {}
 }

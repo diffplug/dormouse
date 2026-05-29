@@ -27,6 +27,7 @@ process.on('message', (msg) => {
     case 'killAll': mgr.killAll(); break;
     case 'gracefulKillAll': mgr.gracefulKillAll(msg.timeout); break;
     case 'getCwd':  mgr.getCwd(msg.id); break;
+    case 'getOpenPorts': mgr.getOpenPorts(msg.id); break;
     case 'getShells': mgr.getShells(msg.requestId); break;
     case 'dor:controlResponse': dorControl?.respond(msg); break;
   }

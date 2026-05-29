@@ -154,7 +154,7 @@ require_single_find_match() {
 mac_app_path() {
     require_directory \
         "macOS app bundle" \
-        "$SIGN_DIR/standalone-mac-aarch64/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Dormouse.app"
+        "$SIGN_DIR/standalone-mac-aarch64/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Dormouse Terminal.app"
 }
 
 windows_release_dir() {
@@ -169,9 +169,9 @@ windows_exe_path() {
 
 windows_installer_path() {
     local version="${1:-}"
-    local pattern="Dormouse_*_x64-setup.exe"
+    local pattern="Dormouse Terminal_*_x64-setup.exe"
     if [[ -n "$version" ]]; then
-        pattern="Dormouse_${version}_x64-setup.exe"
+        pattern="Dormouse Terminal_${version}_x64-setup.exe"
     fi
 
     require_single_find_match \
@@ -188,7 +188,7 @@ linux_appimage_path() {
         "Linux AppImage" \
         "$SIGN_DIR/standalone-linux-x64/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage" \
         -type f \
-        -name "Dormouse_${version}_amd64.AppImage"
+        -name "Dormouse Terminal_${version}_amd64.AppImage"
 }
 
 nsis_script_path() {

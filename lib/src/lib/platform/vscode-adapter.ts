@@ -1,4 +1,5 @@
-import type { AlertStateDetail, PlatformAdapter, PtyInfo } from './types';
+import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
+import { OPEN_PORT_TIMEOUT_MS } from './types';
 import { setDefaultShellOpts } from '../shell-defaults';
 import {
   collectTerminalSemanticEvents,
@@ -8,6 +9,7 @@ import {
   applyTerminalSemanticEventsByPtyId,
 } from '../terminal-state-store';
 import type { DorControlResult } from 'dor/protocol';
+import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 
 export class VSCodeAdapter implements PlatformAdapter {
   private vscode: ReturnType<typeof acquireVsCodeApi>;
@@ -180,6 +182,15 @@ export class VSCodeAdapter implements PlatformAdapter {
     return this.requestResponse('pty:getScrollback', 'pty:scrollback', { id }, (msg) => msg.data);
   }
 
+  async getOpenPorts(id: string): Promise<OpenPort[]> {
+    const result = await this.requestResponse<OpenPort[]>(
+      'pty:getOpenPorts', 'pty:openPorts', { id },
+      (msg) => msg.ports as OpenPort[],
+      OPEN_PORT_TIMEOUT_MS,
+    );
+    return result ?? [];
+  }
+
   readClipboardFilePaths(): Promise<string[] | null> {
     return this.requestResponse<string[] | null>(
       'clipboard:readFiles', 'clipboard:files', {},
@@ -198,6 +209,10 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   openExternal(uri: string): void {
     this.vscode.postMessage({ type: 'dormouse:openExternal', uri });
+  }
+
+  runWorkbenchCommand(command: VSCodeWorkbenchCommand): void {
+    this.vscode.postMessage({ type: 'dormouse:runWorkbenchCommand', command });
   }
 
   onPtyData(handler: (detail: { id: string; data: string }) => void): void {

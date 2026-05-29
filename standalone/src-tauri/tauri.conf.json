@@ -1,7 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Dormouse",
-  "version": "0.10.2",
+  "productName": "Dormouse Terminal",
+  "mainBinaryName": "dormouse",
+  "version": "0.11.0",
   "identifier": "sh.dormouse.standalone",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -12,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "Dormouse",
+        "title": "Dormouse Terminal",
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "width": 1200,

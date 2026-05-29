@@ -62,7 +62,7 @@ Triggered by tag push `v*`. Three jobs run in parallel — `build-standalone`, `
 
 Jobs, matrix targets, pnpm/Node versions, and step ordering are defined in [.github/workflows/release.yml](../../.github/workflows/release.yml).
 
-The workflow defaults `GITHUB_TOKEN` to read-only repository access (`contents: read`). Only the build jobs request additional permissions, and only for provenance (`id-token: write` + `attestations: write`). The publish job stays on the workflow read-only default and is separately gated by the `vscode-extension-publish` environment.
+The workflow defaults `GITHUB_TOKEN` to read-only repository access (`contents: read`). The build jobs request provenance permissions (`id-token: write` + `attestations: write`), and the `security-audit` job requests `actions: write` so it can dispatch the audit workflow. The publish job stays on the workflow read-only default and is separately gated by the `vscode-extension-publish` environment.
 
 **Note:** We do NOT use `tauri-action`'s built-in GitHub Release creation. We create the release locally after signing.
 
@@ -70,7 +70,7 @@ The CI updater key exists only so Tauri emits updater-shaped artifacts during un
 
 ### Job: `security-audit`
 
-Calls the reusable `security-audit.yaml` workflow, which audits the repo against `SECURITY.md` (the same audit that runs nightly via schedule). `publish-vscode` is gated on it, so a failing security audit blocks the VS Code Marketplace publish.
+Dispatches the `security-audit.yaml` workflow on the release tag (via `gh workflow run`), polls for the resulting run, and waits for its conclusion with `gh run watch --exit-status`, so a failing audit fails this job. `publish-vscode` is gated on it, so a failing security audit blocks the VS Code Marketplace publish. It dispatches rather than calling the reusable workflow with `uses:` because `anthropics/claude-code-action` rejects the `push` event that a tag-triggered `workflow_call` would inherit (and `GITHUB_EVENT_NAME` is a default variable that cannot be overridden); a dispatched run sees a supported `workflow_dispatch` event — the same path the nightly audit uses. `workflow_dispatch` is the documented exception that still creates a run when triggered by the default `GITHUB_TOKEN`, so no extra PAT is needed.
 
 ### Job: `publish-vscode`
 
@@ -123,7 +123,7 @@ codesign/jsign the executable
 
 ### Packaged app logging
 
-Windows release builds use the GUI subsystem, so launching `dormouse.exe` from a terminal returns immediately and does not stream stdout/stderr. The Tauri backend writes sidecar diagnostics to `%LOCALAPPDATA%\Dormouse\dormouse.log` on Windows, or to `$TMPDIR/dormouse.log` on other platforms. Set `DORMOUSE_LOG_FILE` to override the path.
+Windows release builds use the GUI subsystem, so launching `dormouse.exe` from a terminal returns immediately and does not stream stdout/stderr. The Tauri backend writes sidecar diagnostics to `%LOCALAPPDATA%\Dormouse Terminal\dormouse.log` on Windows, or to `$TMPDIR/dormouse.log` on other platforms. Set `DORMOUSE_LOG_FILE` to override the path.
 
 ## Artifact filenames
 

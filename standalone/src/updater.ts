@@ -4,7 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { getVersion } from '@tauri-apps/api/app';
 import { open } from '@tauri-apps/plugin-shell';
 import { invoke } from '@tauri-apps/api/core';
-import { PLATFORM_STRING } from 'dormouse-lib/lib/platform';
+import { IS_WINDOWS, PLATFORM_STRING } from 'dormouse-lib/lib/platform';
 import type { UpdateBannerState } from './UpdateBanner';
 
 const GITHUB_REPO_URL = 'https://github.com/diffplug/dormouse';
@@ -231,6 +231,15 @@ function registerCloseHandler(): void {
         from: currentVersion,
         to: update.version,
       }));
+      // On Windows the NSIS installer overwrites files inside the bundled
+      // sidecar (e.g. node-pty's conpty.node). Windows refuses to overwrite a
+      // native module the running sidecar still has loaded, which surfaces as
+      // "Error opening file for writing". Kill the sidecar and wait for it to
+      // fully exit before launching the installer. (On macOS/Linux open files
+      // can be replaced in place, so this is Windows-only.)
+      if (IS_WINDOWS) {
+        await invoke('kill_sidecar_now');
+      }
       await update.install();
     } catch (e) {
       // Overwrite with failure marker
