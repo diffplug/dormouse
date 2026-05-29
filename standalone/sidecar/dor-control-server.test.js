@@ -10,7 +10,7 @@ function testSocketPath(name) {
   if (process.platform === 'win32') {
     return `\\\\.\\pipe\\dormouse-${name}-${suffix}`;
   }
-  return path.join('/private/tmp', `dormouse-${name}-${suffix}.sock`);
+  return path.join('/tmp', `dormouse-${name}-${suffix}.sock`);
 }
 
 function sendSocketRequest(socketPath, payload) {
