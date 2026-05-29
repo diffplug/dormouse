@@ -1,6 +1,7 @@
 import { fork, ChildProcess } from 'child_process';
 import * as path from 'path';
 import { log } from './log';
+import type { OpenPort } from '../../lib/src/lib/platform/types';
 
 export interface PtyCallbacks {
   onData(id: string, data: string): void;
@@ -236,16 +237,7 @@ export function getCwd(id: string): Promise<string | null> {
   });
 }
 
-export interface OpenPortEntry {
-  protocol: 'tcp';
-  family: 'IPv4' | 'IPv6';
-  address: string;
-  port: number;
-  pid: number;
-  processName?: string;
-}
-
-export function getOpenPorts(id: string): Promise<OpenPortEntry[]> {
+export function getOpenPorts(id: string): Promise<OpenPort[]> {
   return new Promise((resolve) => {
     sendToChild({ type: 'getOpenPorts', id });
     // Port enumeration shells out on macOS/Windows; allow more headroom than getCwd.

@@ -385,11 +385,10 @@ function getDescendantPids(rootPid, runtime = {}) {
 
   if (platform === 'win32') {
     try {
-      const json = runPowerShell(
+      const rows = runPowerShellJson(
         'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress',
         execFileSyncFn,
       );
-      const rows = normalizeJsonArray(JSON.parse(json));
       const pairs = rows
         .map((r) => [Number(r.ProcessId), Number(r.ParentProcessId)])
         .filter(([pid, ppid]) => Number.isInteger(pid) && Number.isInteger(ppid));
@@ -513,11 +512,15 @@ function linuxListeningPorts(pids, runtime = {}) {
     } catch { /* file absent (e.g. IPv6 disabled) */ }
   }
 
-  // Attach process names from /proc/<pid>/comm.
+  // Attach process names from /proc/<pid>/comm, reading each pid at most once.
+  const nameByPid = new Map();
   for (const entry of ports) {
-    try {
-      entry.processName = fsModule.readFileSync(`/proc/${entry.pid}/comm`, 'utf-8').trim();
-    } catch { /* gone */ }
+    if (!nameByPid.has(entry.pid)) {
+      let name;
+      try { name = fsModule.readFileSync(`/proc/${entry.pid}/comm`, 'utf-8').trim(); } catch { /* gone */ }
+      nameByPid.set(entry.pid, name);
+    }
+    entry.processName = nameByPid.get(entry.pid);
   }
   return ports;
 }
@@ -657,6 +660,11 @@ function runPowerShell(script, execFileSyncFn) {
   );
 }
 
+/** Run a `... | ConvertTo-Json` script and return its rows as an array. */
+function runPowerShellJson(script, execFileSyncFn) {
+  return normalizeJsonArray(JSON.parse(runPowerShell(script, execFileSyncFn)));
+}
+
 function windowsListeningPorts(pids, runtime = {}) {
   const execFileSyncFn = runtime.execFileSync || execFileSync;
   const pidSet = new Set(pids);
@@ -664,11 +672,11 @@ function windowsListeningPorts(pids, runtime = {}) {
   // Resolve pid -> process name once (best-effort; ports still returned without).
   const nameByPid = new Map();
   try {
-    const json = runPowerShell(
+    const rows = runPowerShellJson(
       'Get-CimInstance Win32_Process | Select-Object ProcessId,Name | ConvertTo-Json -Compress',
       execFileSyncFn,
     );
-    for (const row of normalizeJsonArray(JSON.parse(json))) {
+    for (const row of rows) {
       nameByPid.set(Number(row.ProcessId), String(row.Name));
     }
   } catch { /* names are optional */ }
@@ -847,10 +855,8 @@ module.exports.create = function create(send, ptyModule) {
 
   function getOpenPorts(id, requestId) {
     const p = ptys.get(id);
-    if (!p) { send('openPorts', { id, ports: [], requestId }); return; }
-    let ports = [];
-    try { ports = getOpenPortsForPid(p.pid); } catch { ports = []; }
-    send('openPorts', { id, ports, requestId });
+    // getOpenPortsForPid is fail-soft (returns [] on any platform error).
+    send('openPorts', { id, ports: p ? getOpenPortsForPid(p.pid) : [], requestId });
   }
 
   function getScrollback(id, requestId) {
