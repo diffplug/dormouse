@@ -13,6 +13,9 @@ test('help snapshots cover every command in global help', async (t) => {
   const globalHelp = await runCli(['--help']);
   const commandNames = parseCommandNames(globalHelp.stdout);
 
+  assert.deepEqual(await runCli([]), globalHelp, 'no-arg dor should print root help');
+  assert.deepEqual(await runCli(['help']), globalHelp, 'dor help should print root help');
+
   await t.test('dor', async () => {
     await snapshotHelp({
       file: 'dor',
@@ -38,13 +41,13 @@ test('help snapshots cover every command in global help', async (t) => {
 
 function parseCommandNames(stdout) {
   const lines = stdout.split('\n');
-  const commandsIndex = lines.indexOf('Commands:');
+  const commandsIndex = lines.indexOf('COMMANDS');
   assert.notEqual(commandsIndex, -1, 'global help should include a Commands section');
 
   return lines
     .slice(commandsIndex + 1)
     .filter((line) => line.startsWith('  '))
-    .map((line) => line.trim())
+    .map((line) => line.trim().split(/\s+/)[0])
     .filter(Boolean);
 }
 

@@ -91,7 +91,6 @@ export interface DorCommandContext extends CommandContext {
 
 export interface Command {
   name: string;
-  usage: string;
   command: StricliCommand<DorCommandContext>;
 }
 

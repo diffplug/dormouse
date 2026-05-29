@@ -1,55 +1,4 @@
-/**
- * # `dor split`
- *
- * Usage:
- *
- * ```text
- * dor split [--left|--right|--up|--down|--auto] [--command <cmd>] [--minimize] [--surface <id|ref|index>] [--json]
- * ```
- *
- * Behavior:
- *
- * - Calls the private `surface.split` control method.
- * - Creates a new terminal surface by splitting an existing surface.
- * - Direction flags are mutually exclusive. If no direction is provided,
- *   `--auto` is used.
- * - `--auto` chooses `right` when the target surface is wide and `down` when it
- *   is narrow.
- * - `--surface` selects the surface to split. If omitted, Dormouse uses the
- *   caller surface when available, then the focused surface.
- * - `--command` runs the given command as the new terminal surface's initial
- *   command.
- * - `--minimize` creates the surface and immediately sends it to the minimized
- *   area.
- * - No workspace argument exists until Dormouse supports multiple workspaces.
- * - `split` does not know about non-terminal surface types. Compose future
- *   content commands through the terminal:
- *
- * ```sh
- * dor split --right --command "dor iframe https://example.com"
- * dor split --auto --command "dor agent-browser open https://example.com"
- * ```
- *
- * Text shape:
- *
- * ```text
- * created surface:2  [right]
- * created surface:3  [down]  [minimized]  "pnpm dev"
- * ```
- *
- * JSON shape:
- *
- * ```json
- * {
- *   "status": "created",
- *   "surface_id": "pane-abc",
- *   "surface_ref": "surface:2",
- *   "direction": "right",
- *   "minimized": false,
- *   "command": "pnpm dev"
- * }
- * ```
- */
+/** Private `surface.split` command wiring and response rendering. */
 
 import { buildCommand } from '@stricli/core';
 import type {
@@ -79,22 +28,52 @@ interface SplitFlags {
 
 export const splitCommand: Command = {
   name: 'split',
-  usage: 'Usage: dor split [--left|--right|--up|--down|--auto] [--command <cmd>] [--minimize] [--surface <id|ref|index>] [--json]\n',
   command: buildCommand<SplitFlags, [], DorCommandContext>({
     docs: {
       brief: 'Create a new terminal surface by splitting an existing surface.',
+      customUsage: [
+        '[--left|--right|--up|--down|--auto] [--command <cmd>] [--minimize] [--surface <id|ref|index>] [--json]',
+      ],
+      fullDescription: `Direction flags are mutually exclusive. If no direction is provided, --auto is used. --auto chooses right when the target surface is wide and down when it is narrow.
+
+--surface selects the surface to split. If omitted, Dormouse uses the caller surface when available, then the focused surface.
+
+--command runs the given command as the new terminal surface's initial command.
+
+--minimize creates the surface and immediately sends it to the minimized area.
+
+No workspace argument exists until Dormouse supports multiple workspaces.
+
+split does not know about non-terminal surface types. Compose future content commands through the terminal:
+
+  dor split --right --command "dor iframe https://example.com"
+  dor split --auto --command "dor agent-browser open https://example.com"
+
+Text output:
+  created surface:2  [right]
+  created surface:3  [down]  [minimized]  "pnpm dev"
+
+JSON output:
+  {
+    "status": "created",
+    "surface_id": "pane-abc",
+    "surface_ref": "surface:2",
+    "direction": "right",
+    "minimized": false,
+    "command": "pnpm dev"
+  }`,
     },
     parameters: {
       flags: {
-        auto: { kind: 'boolean', brief: 'Choose right when wide and down when narrow.', optional: true },
+        auto: { kind: 'boolean', brief: 'Choose right when wide and down when narrow.', optional: true, withNegated: false },
         command: { kind: 'parsed', parse: stringParser, brief: 'Run an initial command in the new surface.', optional: true, placeholder: 'cmd' },
-        down: { kind: 'boolean', brief: 'Split below the target surface.', optional: true },
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true },
-        left: { kind: 'boolean', brief: 'Split left of the target surface.', optional: true },
-        minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true },
-        right: { kind: 'boolean', brief: 'Split right of the target surface.', optional: true },
+        down: { kind: 'boolean', brief: 'Split below the target surface.', optional: true, withNegated: false },
+        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        left: { kind: 'boolean', brief: 'Split left of the target surface.', optional: true, withNegated: false },
+        minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
+        right: { kind: 'boolean', brief: 'Split right of the target surface.', optional: true, withNegated: false },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split.', optional: true, placeholder: 'id|ref|index' },
-        up: { kind: 'boolean', brief: 'Split above the target surface.', optional: true },
+        up: { kind: 'boolean', brief: 'Split above the target surface.', optional: true, withNegated: false },
       },
     },
     func: runSplitCommand,

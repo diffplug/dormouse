@@ -10,12 +10,11 @@ import { ensureCommand } from './commands/ensure.js';
 import { listPaneSurfacesCommand } from './commands/list-pane-surfaces.js';
 import { listPanesCommand } from './commands/list-panes.js';
 import { splitCommand } from './commands/split.js';
-import { fail, ok } from './commands/shared.js';
+import { fail } from './commands/shared.js';
 import type {
   CliEnv,
   CliOptions,
   CliResult,
-  Command,
   DorCommandContext,
   ParseResult,
 } from './commands/types.js';
@@ -39,15 +38,6 @@ export type {
   Surface,
 } from './commands/types.js';
 
-const COMMANDS: Command[] = [
-  splitCommand,
-  ensureCommand,
-  listPanesCommand,
-  listPaneSurfacesCommand,
-];
-
-const COMMAND_BY_NAME = new Map(COMMANDS.map((command) => [command.name, command]));
-
 const ROUTES = {
   split: splitCommand.command,
   ensure: ensureCommand.command,
@@ -70,6 +60,7 @@ const APPLICATION = buildApplication(
     routes: ROUTES,
     docs: {
       brief: 'control Dormouse from a terminal',
+      fullDescription: 'Dormouse bundles the dor CLI into every terminal it launches.',
     },
   }),
   {
@@ -97,23 +88,15 @@ interface CaptureProcess extends StricliProcess {
 }
 
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<CliResult> {
-  const [commandName, ...args] = argv;
-  if (!commandName || commandName === '-h' || commandName === '--help' || commandName === 'help') {
-    return ok(printHelp());
-  }
+  const [commandName, ...args] = argv[0] === 'help' ? ['--help'] : argv;
 
-  const command = COMMAND_BY_NAME.get(commandName);
-  if (command && (args.includes('-h') || args.includes('--help'))) {
-    return ok(command.usage);
-  }
-
-  if (commandName === 'ensure') {
+  if (commandName === 'ensure' && !args.includes('-h') && !args.includes('--help')) {
     const delimiterCheck = validateEnsureDelimiter(args);
     if (!delimiterCheck.ok) return fail(delimiterCheck.message);
   }
 
   const capture = createCaptureProcess(options.env);
-  await runStricli(APPLICATION, argv, {
+  await runStricli(APPLICATION, commandName ? [commandName, ...args] : [], {
     process: capture.process,
     forCommand: (): DorCommandContext => ({
       process: capture.process,
@@ -126,18 +109,6 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     stdout: capture.stdout(),
     stderr: capture.stderr(),
   };
-}
-
-function printHelp(): string {
-  const commands = COMMANDS.map((command) => `  ${command.name}`).join('\n');
-  return `dor - control Dormouse from a terminal
-
-Usage:
-  dor <command> [options]
-
-Commands:
-${commands}
-`;
 }
 
 function validateEnsureDelimiter(args: string[]): ParseResult<void> {

@@ -12,7 +12,7 @@ Source of truth:
 | Scope | Source |
 | --- | --- |
 | `stricli` application, command registry, and stdout/stderr capture | `dor/src/cli.ts` |
-| Command behavior specs, `stricli` flag definitions, help, and output rendering | `dor/src/commands/*.ts` |
+| Command implementation, `stricli` flag definitions, and output rendering | `dor/src/commands/*.ts` |
 | Control method request/response types | `dor/src/commands/types.ts` |
 | Socket client and request envelope | `dor/src/control-client.ts`, `dor/src/protocol.ts` |
 | POSIX / Windows launchers | `dor/bin/dor`, `dor/bin/dor.cmd` |
@@ -134,12 +134,13 @@ Implemented commands call private `surface.*` control methods. `surface.list`
 derives its response from current Dockview panels plus terminal state/activity
 snapshots, then returns `workspace:1` and `window:1`.
 
-The behavior specs live at the top of each command implementation file:
+User-facing command docs live in the generated help snapshots. Implementation
+details live in the command files:
 
-- [`dor split`](../../dor/src/commands/split.ts)
-- [`dor ensure`](../../dor/src/commands/ensure.ts)
-- [`dor list-panes`](../../dor/src/commands/list-panes.ts)
-- [`dor list-pane-surfaces`](../../dor/src/commands/list-pane-surfaces.ts)
+- `dor split` [impl](../../dor/src/commands/split.ts) [docs](../../dor/test/snapshots/help/split.md)
+- `dor ensure` [impl](../../dor/src/commands/ensure.ts) [docs](../../dor/test/snapshots/help/ensure.md)
+- `dor list-panes` [impl](../../dor/src/commands/list-panes.ts) [docs](../../dor/test/snapshots/help/list-panes.md)
+- `dor list-pane-surfaces` [impl](../../dor/src/commands/list-pane-surfaces.ts) [docs](../../dor/test/snapshots/help/list-pane-surfaces.md)
 
 ## Compatibility References
 

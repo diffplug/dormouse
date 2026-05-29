@@ -3,15 +3,23 @@
 Invocation: `dor --help`
 
 ```text
-dor - control Dormouse from a terminal
+USAGE
+  dor split [--auto] [--command cmd] [--down] [--json] [--left] [--minimize] [--right] [--surface id|ref|index] [--up]
+  dor ensure [--json] [--minimize] [--surface id|ref|index] [--title value] <command>...
+  dor list-panes [--id-format refs|uuids|both] [--json] [--window id|ref|index] [--workspace id|ref|index]
+  dor list-pane-surfaces [--id-format refs|uuids|both] [--json] [--pane id|ref|index] [--window id|ref|index] [--workspace id|ref|index]
+  dor --help
 
-Usage:
-  dor <command> [options]
+Dormouse bundles the dor CLI into every terminal it launches.
 
-Commands:
-  split
-  ensure
-  list-panes
-  list-pane-surfaces
+FLAGS
+  -h --help  Print help information and exit
+     --      All subsequent inputs should be interpreted as arguments
+
+COMMANDS
+  split               Create a new terminal surface by splitting an existing surface.
+  ensure              Ensure one surface exists for a user-enforced title.
+  list-panes          List visible panes.
+  list-pane-surfaces  List surfaces in a pane.
 
 ```

@@ -1,4 +1,7 @@
-import { buildCommand } from '@stricli/core';
+import {
+  buildCommand,
+  type FlagParametersForType,
+} from '@stricli/core';
 import type {
   Command as DorCommand,
   DorCommandContext,
@@ -36,6 +39,13 @@ interface Pane {
   surfaces: Surface[];
 }
 
+interface BuildListCommandOptions {
+  brief: string;
+  customUsage: string;
+  fullDescription: string;
+  mode: ListOutputMode;
+}
+
 export async function runListCommand(
   mode: ListOutputMode,
   flags: ListFlags,
@@ -61,26 +71,51 @@ export async function runListCommand(
   }
 }
 
-export function buildListCommand(mode: ListOutputMode, brief: string): DorCommand['command'] {
+export function buildListCommand(options: BuildListCommandOptions): DorCommand['command'] {
+  const flags: FlagParametersForType<ListFlags, DorCommandContext> = {
+    idFormat: {
+      kind: 'parsed',
+      parse: parseIdFormat,
+      brief: 'Handle format for listed ids.',
+      optional: true,
+      placeholder: 'refs|uuids|both',
+    },
+    json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+    pane: {
+      kind: 'parsed',
+      parse: stringParser,
+      brief: 'Pane or surface target.',
+      optional: true,
+      placeholder: 'id|ref|index',
+      hidden: options.mode === 'panes',
+    },
+    window: {
+      kind: 'parsed',
+      parse: stringParser,
+      brief: 'Window target.',
+      optional: true,
+      placeholder: 'id|ref|index',
+    },
+    workspace: {
+      kind: 'parsed',
+      parse: stringParser,
+      brief: 'Workspace target.',
+      optional: true,
+      placeholder: 'id|ref|index',
+    },
+  };
+
   return buildCommand<ListFlags, [], DorCommandContext>({
-    docs: { brief },
+    docs: {
+      brief: options.brief,
+      customUsage: [options.customUsage],
+      fullDescription: options.fullDescription,
+    },
     parameters: {
-      flags: {
-        idFormat: {
-          kind: 'parsed',
-          parse: parseIdFormat,
-          brief: 'Handle format for listed ids.',
-          optional: true,
-          placeholder: 'refs|uuids|both',
-        },
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true },
-        pane: { kind: 'parsed', parse: stringParser, brief: 'Pane or surface target.', optional: true, placeholder: 'id|ref|index' },
-        window: { kind: 'parsed', parse: stringParser, brief: 'Window target.', optional: true, placeholder: 'id|ref|index' },
-        workspace: { kind: 'parsed', parse: stringParser, brief: 'Workspace target.', optional: true, placeholder: 'id|ref|index' },
-      },
+      flags,
     },
     func(flags) {
-      return runListCommand(mode, flags, this);
+      return runListCommand(options.mode, flags, this);
     },
   });
 }
