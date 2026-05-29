@@ -168,20 +168,25 @@ function applyHelpPatch(stdout: string, findReplace: readonly string[] | undefin
     for (let index = 0; index < findReplace.length; index += 2) {
       const find = findReplace[index] ?? '';
       if (!find) {
-        throw new Error('help patch findReplace must not use an empty find string');
+        throw new Error('help patch findReplace must not use an empty find pattern');
       }
-      patched = patched.split(find).join(findReplace[index + 1] ?? '');
+      patched = applyHelpPattern(patched, find, findReplace[index + 1] ?? '');
     }
   }
 
   for (const find of remove ?? []) {
     if (!find) {
-      throw new Error('help patch remove must not use an empty find string');
+      throw new Error('help patch remove must not use an empty find pattern');
     }
-    patched = patched.split(find).join('');
+    patched = applyHelpPattern(patched, find, '');
   }
 
   return patched;
+}
+
+function applyHelpPattern(stdout: string, findPattern: string, replace: string): string {
+  const regex = new RegExp(findPattern, 'gm');
+  return stdout.replace(regex, () => replace);
 }
 
 function validateEnsureDelimiter(args: string[]): ParseResult<void> {

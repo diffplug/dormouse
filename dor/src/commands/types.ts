@@ -97,7 +97,9 @@ export interface Command {
 
 export interface HelpPatch {
   scope: 'root' | 'command';
+  /** Ordered regex-source find/replace pairs. */
   findReplace?: readonly string[];
+  /** Regex-source patterns replaced with an empty string. */
   remove?: readonly string[];
 }
 
