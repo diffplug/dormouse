@@ -260,8 +260,13 @@ jobs:
           # pre-existing workflow_dispatch run on the same commit.
           since="$(date -u -d '-30 seconds' +%Y-%m-%dT%H:%M:%SZ)"
 
+          # This job has no checkout, so every gh call needs an explicit
+          # -R; otherwise gh tries to infer the repo from git and fails
+          # with "not a git repository".
+          repo="$GITHUB_REPOSITORY"
+
           echo "Dispatching $workflow on $tag ($sha)…"
-          gh workflow run "$workflow" --ref "$tag"
+          gh workflow run "$workflow" -R "$repo" --ref "$tag"
 
           # The dispatched run takes a few seconds to register. Poll for it:
           # same head commit, workflow_dispatch event, created after $since.
@@ -269,6 +274,7 @@ jobs:
           for attempt in $(seq 1 36); do
             sleep 5
             run_id="$(gh run list \
+              -R "$repo" \
               --workflow "$workflow" \
               --event workflow_dispatch \
               --limit 20 \
@@ -286,7 +292,7 @@ jobs:
           echo "Watching security-audit run $run_id …"
           # --exit-status fails this job if the audit run failed, which
           # blocks publish-vscode (needs: security-audit).
-          gh run watch "$run_id" --exit-status
+          gh run watch "$run_id" -R "$repo" --exit-status
 
   publish-vscode:
     name: Publish VSCode Extension
