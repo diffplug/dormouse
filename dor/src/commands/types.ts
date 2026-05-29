@@ -77,11 +77,25 @@ export interface SendSurfaceResponse {
   inputCount: number;
 }
 
+export interface ReadSurfaceRequest {
+  lines?: number;
+  scrollback: boolean;
+  surface?: string;
+}
+
+export interface ReadSurfaceResponse {
+  workspaceRef: string;
+  surfaceId?: string;
+  surfaceRef: string;
+  text: string;
+}
+
 export interface ControlClient {
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse>;
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse>;
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse>;
+  readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse>;
 }
 
 export interface CliEnv {

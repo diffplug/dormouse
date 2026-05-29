@@ -91,6 +91,21 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         inputCount: request.inputCount,
       };
     },
+    async readSurface(request) {
+      this.requests.push({ method: 'readSurface', request });
+      const text = request.scrollback
+        ? 'first line\nsecond line\nthird line\nfourth line'
+        : 'visible one\nvisible two';
+      const limited = request.lines ? text.split('\n').slice(-request.lines).join('\n') : text;
+      return {
+        workspaceRef: 'workspace:1',
+        surfaceId: request.surface === 'surface:2'
+          ? '22222222-2222-4222-8222-222222222222'
+          : '11111111-1111-4111-8111-111111111111',
+        surfaceRef: request.surface ?? 'surface:1',
+        text: limited,
+      };
+    },
   };
 }
 
@@ -264,6 +279,34 @@ test('send missing input output', async () => {
 
 test('send unsupported key output', async () => {
   await snapshot('send-unsupported-key', await runCli(['send', '--key', 'cmd-k'], { client: fixtureClient() }));
+});
+
+test('read text output', async () => {
+  await snapshot('read-text', await runCli(['read'], { client: fixtureClient() }));
+});
+
+test('read sends request to the host', async () => {
+  const client = fixtureClient();
+  await runCli(['read', '--surface', 'title:repo "watch"', '--scrollback', '--lines', '2'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'readSurface',
+    request: {
+      lines: 2,
+      scrollback: true,
+      surface: 'title:repo "watch"',
+    },
+  }]);
+});
+
+test('read json output', async () => {
+  await snapshot(
+    'read-json',
+    await runCli(['read', '--json', '--surface', 'surface:2', '--scrollback', '--lines', '2'], { client: fixtureClient() }),
+  );
+});
+
+test('read invalid lines output', async () => {
+  await snapshot('read-invalid-lines', await runCli(['read', '--lines', '0'], { client: fixtureClient() }));
 });
 
 test('list-panes text output', async () => {

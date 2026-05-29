@@ -5,6 +5,8 @@ import type {
   EnsureSurfaceResponse,
   ListSurfacesRequest,
   ListSurfacesResponse,
+  ReadSurfaceRequest,
+  ReadSurfaceResponse,
   SendSurfaceRequest,
   SendSurfaceResponse,
   SplitSurfaceRequest,
@@ -52,6 +54,10 @@ export class SocketControlClient implements ControlClient {
 
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse> {
     return this.request<SendSurfaceResponse>('surface.send', request);
+  }
+
+  readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse> {
+    return this.request<ReadSurfaceResponse>('surface.read', request);
   }
 
   private request<T>(method: string, params: unknown): Promise<T> {

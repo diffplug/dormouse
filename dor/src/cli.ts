@@ -9,6 +9,7 @@ import {
 import { ensureCommand } from './commands/ensure.js';
 import { listPaneSurfacesCommand } from './commands/list-pane-surfaces.js';
 import { listPanesCommand } from './commands/list-panes.js';
+import { readCommand } from './commands/read.js';
 import { sendCommand } from './commands/send.js';
 import { splitCommand } from './commands/split.js';
 import { versionCommand } from './commands/version.js';
@@ -35,6 +36,8 @@ export type {
   IdFormat,
   ListSurfacesRequest,
   ListSurfacesResponse,
+  ReadSurfaceRequest,
+  ReadSurfaceResponse,
   ResolvedSplitDirection,
   SendSurfaceRequest,
   SendSurfaceResponse,
@@ -50,6 +53,7 @@ const COMMANDS = [
   ensureCommand,
   versionCommand,
   sendCommand,
+  readCommand,
   listPanesCommand,
   listPaneSurfacesCommand,
 ] as const satisfies readonly Command[];
@@ -59,6 +63,7 @@ const ROUTES = {
   ensure: ensureCommand.command,
   version: versionCommand.command,
   send: sendCommand.command,
+  read: readCommand.command,
   'list-panes': listPanesCommand.command,
   'list-pane-surfaces': listPaneSurfacesCommand.command,
 };

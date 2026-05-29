@@ -24,6 +24,7 @@ import {
   getActivitySnapshot,
   isUntouched,
   getOrCreateTerminal,
+  getTerminalInstance,
   isReservedUserTitle,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
@@ -90,12 +91,14 @@ type DorControlParams = {
   direction?: unknown;
   input?: unknown;
   inputCount?: unknown;
+  lines?: unknown;
   minimized?: unknown;
   pane?: string;
   surface?: unknown;
   title?: unknown;
   workspace?: string;
   window?: string;
+  scrollback?: unknown;
 };
 
 // The webview view of a control request: the shared wire payload, but with
@@ -179,6 +182,31 @@ function stringParam(value: unknown): string | undefined {
 
 function booleanParam(value: unknown): boolean {
   return value === true;
+}
+
+function numberParam(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function limitLines(text: string, lines: number | undefined): string {
+  if (lines === undefined) return text;
+  const parts = text.split('\n');
+  return parts.slice(-lines).join('\n');
+}
+
+function readVisibleSurfaceText(surfaceId: string, lines: number | undefined): string {
+  const terminal = getTerminalInstance(surfaceId);
+  if (!terminal) return '';
+
+  const buffer = terminal.buffer.active;
+  const start = Math.max(0, buffer.viewportY);
+  const end = start + terminal.rows;
+  const visibleLines: string[] = [];
+  for (let row = start; row < end; row += 1) {
+    visibleLines.push(buffer.getLine(row)?.translateToString(true) ?? '');
+  }
+
+  return limitLines(visibleLines.join('\n').replace(/\n+$/, ''), lines);
 }
 
 function parseDorSplitDirection(value: unknown): DorSplitDirection | null {
@@ -879,7 +907,7 @@ export function Wall({
   }, [generatePaneId, selectPane, showShellSpawnNotice]);
 
   useEffect(() => {
-    const handler = (event: Event) => {
+    const handler = async (event: Event) => {
       const detail = (event as CustomEvent<DorControlRequest>).detail;
       if (!detail) return;
 
@@ -1043,6 +1071,29 @@ export function Wall({
             surfaceId: target.value.id,
             surfaceRef: target.value.ref,
             inputCount: typeof params.inputCount === 'number' ? params.inputCount : 1,
+          },
+        });
+        return;
+      }
+
+      if (detail.method === 'surface.read') {
+        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        const lines = numberParam(params.lines);
+        const scrollback = booleanParam(params.scrollback);
+        const text = scrollback
+          ? limitLines((await getPlatform().getScrollback(target.value.id)) ?? '', lines)
+          : readVisibleSurfaceText(target.value.id, lines);
+        detail.respond({
+          ok: true,
+          result: {
+            workspaceRef: 'workspace:1',
+            surfaceId: target.value.id,
+            surfaceRef: target.value.ref,
+            text,
           },
         });
         return;
