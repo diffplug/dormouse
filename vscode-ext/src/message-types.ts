@@ -1,5 +1,6 @@
 import type { ActivityNotification, SessionStatus, TodoState } from '../../lib/src/lib/alert-manager';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
+import type { DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
 
 // Messages from webview → extension host
 export type WebviewMessage =
@@ -16,7 +17,7 @@ export type WebviewMessage =
   | { type: 'dormouse:init' }
   | { type: 'dormouse:saveState'; state: unknown }
   | { type: 'dormouse:flushSessionSaveDone'; requestId: string }
-  | { type: 'dor:controlResponse'; requestId: string; ok: boolean; result?: unknown; error?: string }
+  | ({ type: 'dor:controlResponse' } & DorControlResponsePayload)
   // Alert actions
   | { type: 'alert:remove'; id: string }
   | { type: 'alert:toggle'; id: string }
@@ -59,7 +60,7 @@ export type ExtensionMessage =
   | { type: 'dormouse:selectedShell'; shell?: string; args?: string[] }
   | { type: 'dormouse:openThemeDebugger' }
   | { type: 'dormouse:flushSessionSave'; requestId: string }
-  | { type: 'dor:controlRequest'; requestId: string; surfaceId?: string; method: string; params?: Record<string, unknown> }
+  | ({ type: 'dor:controlRequest' } & DorControlRequestPayload)
   // Alert state updates
   | {
     type: 'alert:state';

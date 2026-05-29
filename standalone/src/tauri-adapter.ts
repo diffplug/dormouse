@@ -13,25 +13,13 @@ import {
 import {
   applyTerminalSemanticEventsByPtyId,
 } from "dormouse-lib/lib/terminal-state-store";
+import type { DorControlRequestPayload, DorControlResult } from "dor/protocol";
 
 function invoke(cmd: string, args?: Record<string, unknown>): void {
   rawInvoke(cmd, args).catch((err) =>
     console.error(`[tauri-adapter] ${cmd} failed:`, err),
   );
 }
-
-type DorControlRequestPayload = {
-  requestId: string;
-  surfaceId?: string;
-  method: string;
-  params?: Record<string, unknown>;
-};
-
-type DorControlResponse = {
-  ok: boolean;
-  result?: unknown;
-  error?: string;
-};
 
 /**
  * Platform adapter for the Tauri standalone app.
@@ -132,7 +120,7 @@ export class TauriAdapter implements PlatformAdapter {
     this.unlistenFns.push(
       await listen<DorControlRequestPayload>("dor:controlRequest", (event) => {
         const payload = event.payload;
-        const respond = (response: DorControlResponse) => {
+        const respond = (response: DorControlResult) => {
           rawInvoke("dor_control_response", {
             response: {
               requestId: payload.requestId,

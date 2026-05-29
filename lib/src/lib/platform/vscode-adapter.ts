@@ -7,12 +7,7 @@ import {
 import {
   applyTerminalSemanticEventsByPtyId,
 } from '../terminal-state-store';
-
-type DorControlResponse = {
-  ok: boolean;
-  result?: unknown;
-  error?: string;
-};
+import type { DorControlResult } from 'dor/protocol';
 
 export class VSCodeAdapter implements PlatformAdapter {
   private vscode: ReturnType<typeof acquireVsCodeApi>;
@@ -96,7 +91,7 @@ export class VSCodeAdapter implements PlatformAdapter {
       } else if (msg.type === 'dormouse:openThemeDebugger') {
         window.dispatchEvent(new CustomEvent('dormouse:openThemeDebugger'));
       } else if (msg.type === 'dor:controlRequest') {
-        const respond = (response: DorControlResponse) => {
+        const respond = (response: DorControlResult) => {
           this.vscode.postMessage({
             type: 'dor:controlResponse',
             requestId: msg.requestId,

@@ -8,18 +8,13 @@ import type {
   SplitSurfaceRequest,
   SplitSurfaceResponse,
 } from './cli.js';
+import type { DorControlResult } from './protocol.js';
 
 export interface SocketControlClientOptions {
   socketPath: string;
   token: string;
   surfaceId?: string;
   timeoutMs?: number;
-}
-
-interface SocketResponse<T> {
-  ok: boolean;
-  result?: T;
-  error?: string;
 }
 
 export class SocketControlClient implements ControlClient {
@@ -89,7 +84,7 @@ export class SocketControlClient implements ControlClient {
         const line = responseBuffer.slice(0, newlineIndex);
         settle(() => {
           try {
-            const response = JSON.parse(line) as SocketResponse<T>;
+            const response = JSON.parse(line) as DorControlResult<T>;
             if (response.ok) {
               resolve(response.result as T);
             } else {

@@ -128,6 +128,14 @@ const COMMANDS = new Set([
   'split',
 ]);
 
+const DIRECTION_FLAGS: Record<string, SplitDirection> = {
+  '--left': 'left',
+  '--right': 'right',
+  '--up': 'up',
+  '--down': 'down',
+  '--auto': 'auto',
+};
+
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<CliResult> {
   const [command, ...args] = argv;
   if (!command || command === '-h' || command === '--help' || command === 'help') {
@@ -322,8 +330,8 @@ function parseSplitArgs(args: string[]): ParseResult<SplitOptions> {
       if (!value.ok) return value;
       result.surface = value.value;
       index += 1;
-    } else if (isDirectionFlag(arg)) {
-      const direction = directionFromFlag(arg);
+    } else if (DIRECTION_FLAGS[arg]) {
+      const direction = DIRECTION_FLAGS[arg];
       if (explicitDirection && explicitDirection !== direction) {
         return { ok: false, message: 'direction flags are mutually exclusive' };
       }
@@ -393,25 +401,6 @@ function takeFlagValue(args: string[], index: number, flag: string): ParseResult
 
 function isIdFormat(value: string): value is IdFormat {
   return value === 'refs' || value === 'uuids' || value === 'both';
-}
-
-function isDirectionFlag(value: string): boolean {
-  return value === '--left' || value === '--right' || value === '--up' || value === '--down' || value === '--auto';
-}
-
-function directionFromFlag(value: string): SplitDirection {
-  switch (value) {
-    case '--left':
-      return 'left';
-    case '--right':
-      return 'right';
-    case '--up':
-      return 'up';
-    case '--down':
-      return 'down';
-    default:
-      return 'auto';
-  }
 }
 
 function validateSingletonTargets(workspace: string | undefined, window: string | undefined): ParseResult<void> {
@@ -495,7 +484,7 @@ function renderPanesText(panes: Pane[], idFormat: IdFormat): string {
 
 function renderPaneTextLine(pane: Pane, idFormat: IdFormat): string {
   const prefix = pane.focused ? '*' : ' ';
-  const handle = renderPaneHandle(pane, idFormat);
+  const handle = renderHandle(pane, idFormat);
   const surfaceLabel = pane.surfaces.length === 1 ? 'surface' : 'surfaces';
   const focused = pane.focused ? '  [focused]' : '';
   return `${prefix} ${handle}  [${pane.surfaces.length} ${surfaceLabel}]${focused}`;
@@ -508,38 +497,34 @@ function renderPaneSurfacesText(surfaces: Surface[], idFormat: IdFormat): string
 
 function renderPaneSurfaceTextLine(surface: Surface, idFormat: IdFormat): string {
   const prefix = surface.selectedInPane ? '*' : ' ';
-  const handle = renderSurfaceHandle(surface, idFormat);
+  const handle = renderHandle(surface, idFormat);
   const selected = surface.selectedInPane ? '  [selected]' : '';
-  return `${prefix} ${handle}  ${renderPaneSurfaceTitle(surface)}${selected}`;
+  return `${prefix} ${handle}  ${surface.title}${selected}`;
 }
 
-function renderPaneHandle(pane: Pane, idFormat: IdFormat): string {
+function renderHandle(handle: { ref: string; id: string }, idFormat: IdFormat): string {
   switch (idFormat) {
     case 'refs':
-      return pane.ref;
+      return handle.ref;
     case 'uuids':
-      return pane.id;
+      return handle.id;
     case 'both':
-      return `${pane.ref} ${pane.id}`;
+      return `${handle.ref} ${handle.id}`;
   }
 }
 
-function renderSurfaceHandle(surface: Surface, idFormat: IdFormat): string {
-  switch (idFormat) {
-    case 'refs':
-      return surface.ref;
-    case 'uuids':
-      return surface.id;
-    case 'both':
-      return `${surface.ref} ${surface.id}`;
-  }
+function wantsRefs(idFormat: IdFormat): boolean {
+  return idFormat !== 'uuids';
+}
+
+function wantsIds(idFormat: IdFormat): boolean {
+  return idFormat !== 'refs';
 }
 
 function renderPanesJson(response: ListSurfacesResponse, panes: Pane[], idFormat: IdFormat): string {
   const payload = {
     panes: panes.map((pane) => renderPaneJson(pane, idFormat)),
-    ...(idFormat === 'refs' || idFormat === 'both' ? { window_ref: response.windowRef } : {}),
-    ...(idFormat === 'refs' || idFormat === 'both' ? { workspace_ref: response.workspaceRef } : {}),
+    ...(wantsRefs(idFormat) ? { window_ref: response.windowRef, workspace_ref: response.workspaceRef } : {}),
   };
   return `${JSON.stringify(payload, null, 2)}\n`;
 }
@@ -547,42 +532,37 @@ function renderPanesJson(response: ListSurfacesResponse, panes: Pane[], idFormat
 function renderPaneJson(pane: Pane, idFormat: IdFormat): Record<string, unknown> {
   return {
     focused: pane.focused,
-    ...(idFormat === 'uuids' || idFormat === 'both' ? { id: pane.id } : {}),
+    ...(wantsIds(idFormat) ? { id: pane.id } : {}),
     index: pane.index,
-    ...(idFormat === 'refs' || idFormat === 'both' ? { ref: pane.ref } : {}),
-    ...(idFormat === 'uuids' || idFormat === 'both' ? { selected_surface_id: pane.selectedSurface.id } : {}),
-    ...(idFormat === 'refs' || idFormat === 'both' ? { selected_surface_ref: pane.selectedSurface.ref } : {}),
+    ...(wantsRefs(idFormat) ? { ref: pane.ref } : {}),
+    ...(wantsIds(idFormat) ? { selected_surface_id: pane.selectedSurface.id } : {}),
+    ...(wantsRefs(idFormat) ? { selected_surface_ref: pane.selectedSurface.ref } : {}),
     surface_count: pane.surfaces.length,
-    ...(idFormat === 'uuids' || idFormat === 'both' ? { surface_ids: pane.surfaces.map((surface) => surface.id) } : {}),
-    ...(idFormat === 'refs' || idFormat === 'both' ? { surface_refs: pane.surfaces.map((surface) => surface.ref) } : {}),
+    ...(wantsIds(idFormat) ? { surface_ids: pane.surfaces.map((surface) => surface.id) } : {}),
+    ...(wantsRefs(idFormat) ? { surface_refs: pane.surfaces.map((surface) => surface.ref) } : {}),
   };
 }
 
 function renderPaneSurfacesJson(response: ListSurfacesResponse, idFormat: IdFormat): string {
   const pane = panesFromSurfaces(response.surfaces)[0];
   const payload = {
-    ...(pane && (idFormat === 'uuids' || idFormat === 'both') ? { pane_id: pane.id } : {}),
-    ...(pane && (idFormat === 'refs' || idFormat === 'both') ? { pane_ref: pane.ref } : {}),
+    ...(pane && wantsIds(idFormat) ? { pane_id: pane.id } : {}),
+    ...(pane && wantsRefs(idFormat) ? { pane_ref: pane.ref } : {}),
     surfaces: response.surfaces.map((surface) => renderPaneSurfaceJson(surface, idFormat)),
-    ...(idFormat === 'refs' || idFormat === 'both' ? { window_ref: response.windowRef } : {}),
-    ...(idFormat === 'refs' || idFormat === 'both' ? { workspace_ref: response.workspaceRef } : {}),
+    ...(wantsRefs(idFormat) ? { window_ref: response.windowRef, workspace_ref: response.workspaceRef } : {}),
   };
   return `${JSON.stringify(payload, null, 2)}\n`;
 }
 
 function renderPaneSurfaceJson(surface: Surface, idFormat: IdFormat): Record<string, unknown> {
   return {
-    ...(idFormat === 'uuids' || idFormat === 'both' ? { id: surface.id } : {}),
+    ...(wantsIds(idFormat) ? { id: surface.id } : {}),
     index: surface.indexInPane,
-    ...(idFormat === 'refs' || idFormat === 'both' ? { ref: surface.ref } : {}),
+    ...(wantsRefs(idFormat) ? { ref: surface.ref } : {}),
     selected: surface.selectedInPane,
-    title: renderPaneSurfaceTitle(surface),
+    title: surface.title,
     type: surface.type,
   };
-}
-
-function renderPaneSurfaceTitle(surface: Surface): string {
-  return surface.title;
 }
 
 function renderSplitResponse(response: SplitSurfaceResponse, json: boolean): string {

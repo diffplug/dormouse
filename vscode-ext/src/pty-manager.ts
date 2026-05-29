@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { randomBytes } from 'crypto';
 import { log } from './log';
+import type { DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
 
 export interface PtyCallbacks {
   onData(id: string, data: string): void;
@@ -17,19 +18,9 @@ export interface PtySpawnOptions {
   args?: string[];
 }
 
-export interface DorControlRequest {
-  requestId: string;
-  surfaceId?: string;
-  method: string;
-  params?: Record<string, unknown>;
-}
-
-export interface DorControlResponse {
-  requestId: string;
-  ok: boolean;
-  result?: unknown;
-  error?: string;
-}
+// The pty host forwards the dor wire payloads verbatim over IPC.
+export type DorControlRequest = DorControlRequestPayload;
+export type DorControlResponse = DorControlResponsePayload;
 
 interface PtyBufferEntry {
   replayChunks: string[];
@@ -135,16 +126,23 @@ function resolveNodeBinary(): string {
   return process.execPath;
 }
 
+// The runtime env is constant for the life of the extension host (it depends
+// only on the fixed extension path and module-level socket/token), so compute
+// it once and reuse it across every PTY spawn rather than rebuilding the paths.
+let dorRuntimeEnvCache: { path: string; env: Record<string, string> } | null = null;
+
 function getDorRuntimeEnv(extensionPath: string): Record<string, string> {
-  const nodePath = resolveNodeBinary();
+  if (dorRuntimeEnvCache?.path === extensionPath) return dorRuntimeEnvCache.env;
   const dorCliRoot = path.join(extensionPath, 'dor-cli');
-  return {
-    DORMOUSE_NODE: nodePath,
+  const env = {
+    DORMOUSE_NODE: resolveNodeBinary(),
     DORMOUSE_CLI_BIN: path.join(dorCliRoot, 'bin'),
     DORMOUSE_CLI_JS: path.join(dorCliRoot, 'dist', 'dor.js'),
     DORMOUSE_CONTROL_SOCKET: dorControlSocket,
     DORMOUSE_CONTROL_TOKEN: dorControlToken,
   };
+  dorRuntimeEnvCache = { path: extensionPath, env };
+  return env;
 }
 
 function ensureChild(extensionPath: string): ChildProcess {

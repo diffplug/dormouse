@@ -35,6 +35,8 @@ import {
   resolveDisplayPrimary,
 } from '../lib/terminal-state';
 import { orchestrateKill } from '../lib/kill-animation';
+import { PLATFORM_STRING } from '../lib/platform';
+import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
 import { findReattachNeighbor } from '../lib/spatial-nav';
 import { cloneLayout, getLayoutStructureSignature } from '../lib/layout-snapshot';
 import type { PersistedDoor } from '../lib/session-types';
@@ -87,18 +89,12 @@ type DorControlParams = {
   window?: string;
 };
 
-type DorControlResponse = {
-  ok: boolean;
-  result?: unknown;
-  error?: string;
-};
-
-type DorControlRequest = {
-  requestId: string;
-  method: string;
+// The webview view of a control request: the shared wire payload, but with
+// semantically-typed params and a `respond` callback the transport layer wires
+// back to the request's `requestId`.
+type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
   params?: DorControlParams;
-  surfaceId?: string;
-  respond: (response: DorControlResponse) => void;
+  respond: (response: DorControlResult) => void;
 };
 
 type DorSurface = {
@@ -227,8 +223,7 @@ function validateUserTitle(title: string): string | null {
 }
 
 function hostLooksWindows(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  return /win/i.test(navigator.platform || navigator.userAgent || '');
+  return /win/i.test(PLATFORM_STRING);
 }
 
 function commandShellArgs(shell: string | undefined, command: string): string[] {
@@ -892,6 +887,22 @@ export function Wall({
         return;
       }
 
+      // Resolve the split reference surface and its live panel, responding with
+      // the appropriate error and returning null when either is unavailable.
+      const resolveSplitTarget = () => {
+        const target = findVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        if (!target) {
+          detail.respond({ ok: false, error: `surface '${stringParam(params.surface) ?? detail.surfaceId ?? 'focused'}' was not found` });
+          return null;
+        }
+        const panel = api.getPanel(target.id);
+        if (!panel) {
+          detail.respond({ ok: false, error: `surface '${target.ref}' is not visible` });
+          return null;
+        }
+        return { target, panel };
+      };
+
       if (detail.method === 'surface.list') {
         const surfaces = buildDorSurfaces(api);
         detail.respond({
@@ -911,18 +922,10 @@ export function Wall({
           detail.respond({ ok: false, error: `invalid split direction '${String(params.direction)}'` });
           return;
         }
-        const target = findVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
-        if (!target) {
-          detail.respond({ ok: false, error: `surface '${stringParam(params.surface) ?? detail.surfaceId ?? 'focused'}' was not found` });
-          return;
-        }
-        const targetPanel = api.getPanel(target.id);
-        if (!targetPanel) {
-          detail.respond({ ok: false, error: `surface '${target.ref}' is not visible` });
-          return;
-        }
+        const resolved = resolveSplitTarget();
+        if (!resolved) return;
         const direction = directionParam === 'auto'
-          ? dorDirectionForDockview(pickSplitDirection(targetPanel))
+          ? dorDirectionForDockview(pickSplitDirection(resolved.panel))
           : directionParam;
         const rawCommand = stringParam(params.command);
         const command = rawCommand?.trim() || undefined;
@@ -934,7 +937,7 @@ export function Wall({
           command,
           direction,
           minimized: booleanParam(params.minimized),
-          referenceId: target.id,
+          referenceId: resolved.target.id,
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });
@@ -981,22 +984,14 @@ export function Wall({
           });
           return;
         }
-        const target = findVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
-        if (!target) {
-          detail.respond({ ok: false, error: `surface '${stringParam(params.surface) ?? detail.surfaceId ?? 'focused'}' was not found` });
-          return;
-        }
-        const targetPanel = api.getPanel(target.id);
-        if (!targetPanel) {
-          detail.respond({ ok: false, error: `surface '${target.ref}' is not visible` });
-          return;
-        }
-        const direction = dorDirectionForDockview(pickSplitDirection(targetPanel));
+        const resolved = resolveSplitTarget();
+        if (!resolved) return;
+        const direction = dorDirectionForDockview(pickSplitDirection(resolved.panel));
         const result = createSplitSurface({
           command,
           direction,
           minimized: booleanParam(params.minimized),
-          referenceId: target.id,
+          referenceId: resolved.target.id,
           title,
         });
         if (!result.ok) {
