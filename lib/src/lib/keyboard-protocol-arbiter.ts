@@ -31,7 +31,9 @@ export function attachKeyboardProtocolArbiter(terminal: Terminal): IDisposable {
     terminal.options.vtExtensions = { ...ext, win32InputMode: enabled };
   };
 
-  // Return false so xterm still processes the sequence; we only observe.
+  // We track the push/pop stack ops only — the set-flags form (`CSI = … u`) is
+  // not observed, since the kitty TUIs we care about (Claude Code) enable the
+  // protocol via push. Return false so xterm still processes the sequence.
   const onKittyPush = terminal.parser.registerCsiHandler({ prefix: '>', final: 'u' }, () => {
     setWin32InputMode(false);
     return false;

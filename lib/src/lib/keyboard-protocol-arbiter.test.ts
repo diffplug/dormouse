@@ -15,7 +15,6 @@ function buildMockTerminal(
   initial: { kittyKeyboard?: boolean; win32InputMode?: boolean } = { kittyKeyboard: true, win32InputMode: true },
 ): { terminal: Terminal; handlers: MockHandlers; getExt: () => Record<string, unknown> | undefined } {
   const handlers: MockHandlers = { push: [], pop: [] };
-  let vtExtensions: Record<string, unknown> | undefined = { ...initial };
   const parser = {
     registerCsiHandler(id: { prefix?: string; final?: string }, cb: () => boolean) {
       if (id.prefix === '>' && id.final === 'u') handlers.push.push(cb);
@@ -23,20 +22,11 @@ function buildMockTerminal(
       return { dispose: vi.fn() };
     },
   };
-  const terminal = {
-    parser,
-    get options() {
-      return {
-        get vtExtensions() {
-          return vtExtensions;
-        },
-        set vtExtensions(value: Record<string, unknown> | undefined) {
-          vtExtensions = value;
-        },
-      };
-    },
-  } as unknown as Terminal;
-  return { terminal, handlers, getExt: () => vtExtensions };
+  // A plain property suffices: the arbiter reads and reassigns the whole
+  // vtExtensions object, so no getter/setter is needed to observe writes.
+  const options = { vtExtensions: { ...initial } as Record<string, unknown> | undefined };
+  const terminal = { parser, options } as unknown as Terminal;
+  return { terminal, handlers, getExt: () => options.vtExtensions };
 }
 
 describe('attachKeyboardProtocolArbiter', () => {
