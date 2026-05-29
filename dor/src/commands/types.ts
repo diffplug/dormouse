@@ -6,12 +6,13 @@ import type {
 export type IdFormat = 'refs' | 'uuids' | 'both';
 export type SplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
 export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
+export type SurfaceType = 'terminal' | 'iframe' | 'agent-browser';
 
 export interface Surface {
   id: string;
   ref: string;
   paneRef: string;
-  type: 'terminal';
+  type: SurfaceType;
   title: string;
   focused: boolean;
   index: number;
@@ -106,6 +107,20 @@ export interface KillSurfaceResponse {
   surfaceRef: string;
 }
 
+export interface IframeSurfaceRequest {
+  minimized: boolean;
+  surface?: string;
+  url: string;
+}
+
+export interface IframeSurfaceResponse {
+  status: 'created' | 'replaced';
+  surfaceId?: string;
+  surfaceRef: string;
+  url: string;
+  minimized: boolean;
+}
+
 export interface ControlClient {
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse>;
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;
@@ -113,6 +128,7 @@ export interface ControlClient {
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse>;
   readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse>;
   killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse>;
+  iframeSurface(request: IframeSurfaceRequest): Promise<IframeSurfaceResponse>;
 }
 
 export interface CliEnv {

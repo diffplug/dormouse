@@ -116,6 +116,18 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         surfaceRef: request.surface,
       };
     },
+    async iframeSurface(request) {
+      this.requests.push({ method: 'iframeSurface', request });
+      return {
+        status: request.surface === 'surface:1' ? 'replaced' : 'created',
+        surfaceId: request.surface === 'surface:1'
+          ? '11111111-1111-4111-8111-111111111111'
+          : '33333333-3333-4333-8333-333333333333',
+        surfaceRef: request.surface === 'surface:1' ? 'surface:1' : 'surface:3',
+        url: request.url,
+        minimized: request.minimized,
+      };
+    },
   };
 }
 
@@ -347,6 +359,37 @@ test('kill short confirm-if-read output', async () => {
     'kill-short-confirm-if-read',
     await runCli(['kill', '--surface', 'surface:2', '--confirm-if-read', 'abc'], { client: fixtureClient() }),
   );
+});
+
+test('iframe text output', async () => {
+  await snapshot(
+    'iframe-text',
+    await runCli(['iframe', '--surface', 'surface:1', 'https://localhost:5173'], { client: fixtureClient() }),
+  );
+});
+
+test('iframe sends request to the host', async () => {
+  const client = fixtureClient();
+  await runCli(['iframe', '--minimize', 'https://example.com/docs?x=1'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'iframeSurface',
+    request: {
+      minimized: true,
+      surface: undefined,
+      url: 'https://example.com/docs?x=1',
+    },
+  }]);
+});
+
+test('iframe json output', async () => {
+  await snapshot(
+    'iframe-json',
+    await runCli(['iframe', '--json', 'http://localhost:5173/'], { client: fixtureClient() }),
+  );
+});
+
+test('iframe invalid url output', async () => {
+  await snapshot('iframe-invalid-url', await runCli(['iframe', 'localhost:5173'], { client: fixtureClient() }));
 });
 
 test('list-panes text output', async () => {

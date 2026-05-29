@@ -3,6 +3,8 @@ import type {
   ControlClient,
   EnsureSurfaceRequest,
   EnsureSurfaceResponse,
+  IframeSurfaceRequest,
+  IframeSurfaceResponse,
   KillSurfaceRequest,
   KillSurfaceResponse,
   ListSurfacesRequest,
@@ -64,6 +66,10 @@ export class SocketControlClient implements ControlClient {
 
   killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse> {
     return this.request<KillSurfaceResponse>('surface.kill', request);
+  }
+
+  iframeSurface(request: IframeSurfaceRequest): Promise<IframeSurfaceResponse> {
+    return this.request<IframeSurfaceResponse>('surface.iframe', request);
   }
 
   private request<T>(method: string, params: unknown): Promise<T> {
