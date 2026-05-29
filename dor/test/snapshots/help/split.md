@@ -5,20 +5,17 @@ Invocation: `dor split --help`
 ```text
 USAGE
   dor split [--left|--right|--up|--down|--auto] [--command cmd] [--json] [--minimize] [--surface id|ref|index]
-    Direction flags are mutually exclusive; --auto is the default.
   dor split --help
 
 If no direction is provided, --auto is used. --auto chooses right when the target surface is wide and down when it is narrow.
-
---surface selects the surface to split. If omitted, Dormouse uses the caller surface when available, then the focused surface.
 
 --command runs the given command as the new terminal surface's initial command.
 
 --minimize creates the surface and immediately sends it to the minimized area.
 
-No workspace argument exists until Dormouse supports multiple workspaces.
+--surface selects the surface to split. If omitted, Dormouse uses the caller surface when available, then the focused surface.
 
-split does not know about non-terminal surface types. Compose future content commands through the terminal:
+split does not know about non-terminal surface types. Compose future content commands through the initial command:
 
   dor split --right --command "dor iframe https://example.com"
   dor split --auto --command "dor agent-browser open https://example.com"

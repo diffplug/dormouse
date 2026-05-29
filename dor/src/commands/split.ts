@@ -27,7 +27,6 @@ interface SplitFlags {
 }
 
 const groupedSplitDirectionUsage = '[--left|--right|--up|--down|--auto]';
-const splitUsageBrief = 'Direction flags are mutually exclusive; --auto is the default.';
 
 export const splitCommand: Command = {
   name: 'split',
@@ -38,45 +37,20 @@ export const splitCommand: Command = {
         '  dor split [--auto]',
         `  dor split ${groupedSplitDirectionUsage}`,
       ],
-      remove: [
-        '<WS>[--down]',
-        '<WS>[--left]',
-        '<WS>[--right]',
-        '<WS>[--up]',
-      ],
+      remove: ['<WS>[--down]', '<WS>[--left]', '<WS>[--right]', '<WS>[--up]'],
     },
     {
       scope: 'command-usage',
-      findReplace: [
-        '[--auto]',
-        `${groupedSplitDirectionUsage}`,
-      ],
-      remove: [
-        '<WS>[--down]',
-        '<WS>[--left]',
-        '<WS>[--right]',
-        '<WS>[--up]',
-      ],
-    },
-    {
-      scope: 'command-usage',
-      findReplace: [
-        '[--surface id|ref|index]\n  dor split --help',
-        `[--surface id|ref|index]\n    ${splitUsageBrief}\n  dor split --help`,
-      ],
+      findReplace: ['[--auto]', `${groupedSplitDirectionUsage}`],
+      remove: ['<WS>[--down]', '<WS>[--left]', '<WS>[--right]', '<WS>[--up]'],
     },
     {
       scope: 'command-detail',
       findReplace: [
-        '<LS>[--auto]<WS>Default; choose right when wide and down when narrow.<TO-EOL>',
+        '<LS>[--auto]<TO-EOL>',
         '     [--left|--right|--up|--down|--auto]\n                  Split direction. Mutually exclusive; default is --auto.\n',
       ],
-      remove: [
-        '<LS>[--down]<TO-EOL>',
-        '<LS>[--left]<TO-EOL>',
-        '<LS>[--right]<TO-EOL>',
-        '<LS>[--up]<TO-EOL>',
-      ],
+      remove: ['<LS>[--down]<TO-EOL>', '<LS>[--left]<TO-EOL>', '<LS>[--right]<TO-EOL>', '<LS>[--up]<TO-EOL>'],
     },
   ],
   command: buildCommand<SplitFlags, [], DorCommandContext>({
@@ -84,15 +58,13 @@ export const splitCommand: Command = {
       brief: 'Create a new terminal surface by splitting an existing surface.',
       fullDescription: `If no direction is provided, --auto is used. --auto chooses right when the target surface is wide and down when it is narrow.
 
---surface selects the surface to split. If omitted, Dormouse uses the caller surface when available, then the focused surface.
-
 --command runs the given command as the new terminal surface's initial command.
 
 --minimize creates the surface and immediately sends it to the minimized area.
 
-No workspace argument exists until Dormouse supports multiple workspaces.
+--surface selects the surface to split. If omitted, Dormouse uses the caller surface when available, then the focused surface.
 
-split does not know about non-terminal surface types. Compose future content commands through the terminal:
+split does not know about non-terminal surface types. Compose future content commands through the initial command:
 
   dor split --right --command "dor iframe https://example.com"
   dor split --auto --command "dor agent-browser open https://example.com"
