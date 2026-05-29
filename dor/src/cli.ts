@@ -17,6 +17,7 @@ import type {
   CliResult,
   Command,
   DorCommandContext,
+  HelpPatch,
   ParseResult,
 } from './commands/types.js';
 
@@ -144,18 +145,35 @@ function isCommandName(value: string): value is keyof typeof ROUTES {
 function applyHelpPatches(stdout: string, target: HelpTarget | undefined): string {
   if (!target) return stdout;
 
+  if (target.scope === 'command') {
+    const [usage, detail] = splitCommandHelp(stdout);
+    return `${applyScopedHelpPatches(usage, target, 'command-usage')}${applyScopedHelpPatches(detail, target, 'command-detail')}`;
+  }
+
+  return applyScopedHelpPatches(stdout, target, 'root');
+}
+
+function applyScopedHelpPatches(stdout: string, target: HelpTarget, scope: HelpPatch['scope']): string {
   let patched = stdout;
   for (const command of COMMANDS) {
     if (target.scope === 'command' && command.name !== target.commandName) {
       continue;
     }
     for (const patch of command.helpPatches ?? []) {
-      if (patch.scope === target.scope) {
+      if (patch.scope === scope) {
         patched = applyHelpPatch(patched, patch.findReplace, patch.remove);
       }
     }
   }
   return patched;
+}
+
+function splitCommandHelp(stdout: string): [usage: string, detail: string] {
+  const usageEnd = stdout.indexOf('\n\n');
+  if (usageEnd === -1) {
+    return [stdout, ''];
+  }
+  return [stdout.slice(0, usageEnd), stdout.slice(usageEnd)];
 }
 
 function applyHelpPatch(stdout: string, findReplace: readonly string[] | undefined, remove: readonly string[] | undefined): string {

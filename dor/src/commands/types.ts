@@ -96,7 +96,7 @@ export interface Command {
 }
 
 export interface HelpPatch {
-  scope: 'root' | 'command';
+  scope: 'root' | 'command-usage' | 'command-detail';
   /** Ordered template-pattern find/replace pairs. Tokens: <LS>, <WS>, <TO-EOL>. */
   findReplace?: readonly string[];
   /** Template patterns replaced with an empty string. Tokens: <LS>, <WS>, <TO-EOL>. */

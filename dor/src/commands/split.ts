@@ -47,20 +47,28 @@ export const splitCommand: Command = {
       ],
     },
     {
-      scope: 'command',
+      scope: 'command-usage',
       findReplace: [
         '  dor split [--auto]',
         `  dor split ${groupedSplitDirectionUsage}`,
-        '[--command cmd] [--down]',
-        '[--command cmd]',
-        '[--json] [--left]',
-        '[--json]',
-        '[--minimize] [--right]',
-        '[--minimize]',
-        '[--surface id|ref|index] [--up]',
-        '[--surface id|ref|index]',
+      ],
+      remove: [
+        '<WS>[--down]',
+        '<WS>[--left]',
+        '<WS>[--right]',
+        '<WS>[--up]',
+      ],
+    },
+    {
+      scope: 'command-usage',
+      findReplace: [
         `  dor split ${groupedSplitUsage}`,
         `  dor split ${groupedSplitUsage}\n    ${splitUsageBrief}`,
+      ],
+    },
+    {
+      scope: 'command-detail',
+      findReplace: [
         '<LS>[--auto]<WS>Default; choose right when wide and down when narrow.<TO-EOL>',
         '     [--left|--right|--up|--down|--auto]\n                  Split direction. Mutually exclusive; default is --auto.\n',
       ],

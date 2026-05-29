@@ -142,7 +142,8 @@ help shape, commands may declare narrow template-pattern `findReplace` /
 than treated as a general docs renderer. Supported pattern tokens are `<LS>`
 (line start plus leading horizontal whitespace), `<WS>` (one or more horizontal
 whitespace characters), and `<TO-EOL>` (rest of line including the newline or
-EOF).
+EOF). Command help patches can target the `command-usage` section separately
+from `command-detail`.
 
 - `dor split` [impl](../../dor/src/commands/split.ts) [docs](../../dor/test/snapshots/help/split.md)
 - `dor ensure` [impl](../../dor/src/commands/ensure.ts) [docs](../../dor/test/snapshots/help/ensure.md)
