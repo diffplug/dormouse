@@ -18,6 +18,9 @@ importers:
         specifier: ^1.2.7
         version: 1.2.7
     devDependencies:
+      esbuild:
+        specifier: ^0.28.0
+        version: 0.28.0
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

@@ -12,10 +12,11 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && esbuild src/dor.ts --bundle --format=esm --platform=node --outfile=dist/dor.js",
     "test": "pnpm run build && node --test test/*.test.mjs"
   },
   "devDependencies": {
+    "esbuild": "^0.28.0",
     "typescript": "^6.0.3"
   },
   "dependencies": {
