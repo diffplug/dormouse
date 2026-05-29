@@ -48,8 +48,8 @@ export const splitCommand: Command = {
     {
       scope: 'command-usage',
       findReplace: [
-        '  dor split [--auto]',
-        `  dor split ${groupedSplitDirectionUsage}`,
+        '[--auto]',
+        `${groupedSplitDirectionUsage}`,
       ],
       remove: [
         '<WS>[--down]',
