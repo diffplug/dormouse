@@ -97,8 +97,8 @@ export interface Command {
 
 export interface HelpPatch {
   scope: 'root' | 'command';
-  find: string;
-  replace: string;
+  findReplace?: readonly string[];
+  remove?: readonly string[];
 }
 
 export type ParseResult<T> =

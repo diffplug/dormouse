@@ -151,10 +151,36 @@ function applyHelpPatches(stdout: string, target: HelpTarget | undefined): strin
     }
     for (const patch of command.helpPatches ?? []) {
       if (patch.scope === target.scope) {
-        patched = patched.split(patch.find).join(patch.replace);
+        patched = applyHelpPatch(patched, patch.findReplace, patch.remove);
       }
     }
   }
+  return patched;
+}
+
+function applyHelpPatch(stdout: string, findReplace: readonly string[] | undefined, remove: readonly string[] | undefined): string {
+  let patched = stdout;
+
+  if (findReplace) {
+    if (findReplace.length % 2 !== 0) {
+      throw new Error('help patch findReplace must contain find/replace pairs');
+    }
+    for (let index = 0; index < findReplace.length; index += 2) {
+      const find = findReplace[index] ?? '';
+      if (!find) {
+        throw new Error('help patch findReplace must not use an empty find string');
+      }
+      patched = patched.split(find).join(findReplace[index + 1] ?? '');
+    }
+  }
+
+  for (const find of remove ?? []) {
+    if (!find) {
+      throw new Error('help patch remove must not use an empty find string');
+    }
+    patched = patched.split(find).join('');
+  }
+
   return patched;
 }
 

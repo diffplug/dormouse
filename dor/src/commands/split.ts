@@ -35,38 +35,25 @@ export const splitCommand: Command = {
   helpPatches: [
     {
       scope: 'root',
-      find: `  dor split ${generatedSplitUsage}`,
-      replace: `  dor split ${groupedSplitUsage}`,
+      findReplace: [
+        `  dor split ${generatedSplitUsage}`,
+        `  dor split ${groupedSplitUsage}`,
+      ],
     },
     {
       scope: 'command',
-      find: `  dor split ${generatedSplitUsage}`,
-      replace: `  dor split ${groupedSplitUsage}\n    ${splitUsageBrief}`,
-    },
-    {
-      scope: 'command',
-      find: '     [--auto]      Default; choose right when wide and down when narrow.',
-      replace: '     [--left|--right|--up|--down|--auto]\n                  Split direction. Mutually exclusive; default is --auto.',
-    },
-    {
-      scope: 'command',
-      find: '     [--down]      Split below the target surface.\n',
-      replace: '',
-    },
-    {
-      scope: 'command',
-      find: '     [--left]      Split left of the target surface.\n',
-      replace: '',
-    },
-    {
-      scope: 'command',
-      find: '     [--right]     Split right of the target surface.\n',
-      replace: '',
-    },
-    {
-      scope: 'command',
-      find: '     [--up]        Split above the target surface.\n',
-      replace: '',
+      findReplace: [
+        `  dor split ${generatedSplitUsage}`,
+        `  dor split ${groupedSplitUsage}\n    ${splitUsageBrief}`,
+        '     [--auto]      Default; choose right when wide and down when narrow.',
+        '     [--left|--right|--up|--down|--auto]\n                  Split direction. Mutually exclusive; default is --auto.',
+      ],
+      remove: [
+        '     [--down]      Split below the target surface.\n',
+        '     [--left]      Split left of the target surface.\n',
+        '     [--right]     Split right of the target surface.\n',
+        '     [--up]        Split above the target surface.\n',
+      ],
     },
   ],
   command: buildCommand<SplitFlags, [], DorCommandContext>({
