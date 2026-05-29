@@ -481,11 +481,14 @@ test('parseLsofListening parses *, IPv4, and bracketed IPv6 names', () => {
     'cpython3',
     'tIPv6',
     'n[::1]:8080',
+    'tIPv6',
+    'n*:5173',
   ].join('\n');
   assert.deepEqual(parseLsofListening(output), [
     { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: 'node' },
     { protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5432, pid: 4242, processName: 'node' },
     { protocol: 'tcp', family: 'IPv6', address: '::1', port: 8080, pid: 4300, processName: 'python3' },
+    { protocol: 'tcp', family: 'IPv6', address: '::', port: 5173, pid: 4300, processName: 'python3' },
   ]);
 });
 

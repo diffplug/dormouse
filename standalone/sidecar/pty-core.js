@@ -544,7 +544,7 @@ function parseLsofListening(output) {
     if (tag === 'c') { command = value; continue; }
     if (tag === 't') { if (value === 'IPv4' || value === 'IPv6') family = value; continue; }
     if (tag === 'n') {
-      const parsed = parseHostPort(value);
+      const parsed = parseHostPort(value, family);
       if (parsed) {
         ports.push({ protocol: 'tcp', family, address: parsed.address, port: parsed.port, pid, processName: command });
       }
@@ -556,7 +556,7 @@ function parseLsofListening(output) {
 module.exports.parseLsofListening = parseLsofListening;
 
 /** Split an "address:port" token, handling `*`, IPv4, and bracketed IPv6. */
-function parseHostPort(token) {
+function parseHostPort(token, wildcardFamily = 'IPv4') {
   let address;
   let portStr;
   if (token.startsWith('[')) {
@@ -570,7 +570,7 @@ function parseHostPort(token) {
     address = token.slice(0, colon);
     portStr = token.slice(colon + 1);
   }
-  if (address === '*') address = '0.0.0.0';
+  if (address === '*') address = wildcardFamily === 'IPv6' ? '::' : '0.0.0.0';
   const port = Number(portStr);
   if (!Number.isInteger(port) || port <= 0) return null;
   return { address, port };
