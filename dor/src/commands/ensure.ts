@@ -21,12 +21,29 @@ interface EnsureFlags {
 
 export const ensureCommand: Command = {
   name: 'ensure',
+  helpPatches: [
+    {
+      scope: 'root',
+      findReplace: [
+        '  dor ensure [--json] [--minimize] [--surface id|ref|index] [--title value]<TO-EOL>',
+        '  dor ensure [--json] [--minimize] [--surface id|ref|index] [--title value] -- <command>...\n',
+      ],
+    },
+    {
+      scope: 'command-usage',
+      findReplace: [
+        '  dor ensure [--json] [--minimize] [--surface id|ref|index] [--title value]<TO-EOL>',
+        '  dor ensure [--json] [--minimize] [--surface id|ref|index] [--title value] -- <command>...\n',
+      ],
+    },
+    {
+      scope: 'command-detail',
+      remove: ['\nARGUMENTS<TO-EOL><LS>command...<TO-EOL>'],
+    },
+  ],
   command: buildCommand<EnsureFlags, string[], DorCommandContext>({
     docs: {
       brief: 'Ensure one surface exists for a user-enforced title.',
-      customUsage: [
-        '[--title <title>] [--minimize] [--surface <id|ref|index>] [--json] -- <command...>',
-      ],
       fullDescription: `Ensures one surface exists in the current workspace for a user-enforced title. The idempotency key is always the user-enforced title.
 
 If --title is omitted, Dormouse derives the title from the command after --.

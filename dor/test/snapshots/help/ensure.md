@@ -4,7 +4,7 @@ Invocation: `dor ensure --help`
 
 ```text
 USAGE
-  dor ensure [--title <title>] [--minimize] [--surface <id|ref|index>] [--json] -- <command...>
+  dor ensure [--json] [--minimize] [--surface id|ref|index] [--title value] -- <command>...
   dor ensure --help
 
 Ensures one surface exists in the current workspace for a user-enforced title. The idempotency key is always the user-enforced title.
@@ -46,8 +46,5 @@ FLAGS
      [--title]     User-enforced surface title.
   -h  --help       Print help information and exit
       --           All subsequent inputs should be interpreted as arguments
-
-ARGUMENTS
-  command...  Command to run.
 
 ```
