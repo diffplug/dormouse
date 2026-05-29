@@ -1,19 +1,15 @@
 name: security-audit
 
-# Audits this repo against SECURITY.md. Reusable: runs nightly via the
-# schedule trigger, on-demand via workflow_dispatch, and is called from
-# release.yml as a precondition to publishing.
+# Audits this repo against SECURITY.md. Runs nightly via the schedule
+# trigger and on-demand via workflow_dispatch. release.yml dispatches it
+# on the release tag and gates publishing on the result — it dispatches
+# rather than calling this workflow with `uses:` because a tag `push`
+# would propagate as event_name `push`, which claude-code-action rejects.
 
 on:
   schedule:
     - cron: "21 4 * * *"
   workflow_dispatch:
-  workflow_call:
-    secrets:
-      AUDIT_PAT:
-        required: true
-      CLAUDE_CODE_OAUTH_TOKEN:
-        required: true
 
 permissions:
   contents: read
@@ -69,13 +65,6 @@ jobs:
           # and have the prompt instruct Claude to prefix `gh api`
           # calls with `GH_TOKEN=$AUDIT_PAT`.
           AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
-          # When release.yml calls this workflow via `workflow_call`, the
-          # triggering event is the release tag `push`, which the action
-          # rejects ("Unsupported event type: push"). Schedule and
-          # workflow_dispatch runs both resolve to the action's agent
-          # mode, so masquerade the push as workflow_dispatch — identical
-          # to the nightly path — while leaving real event names intact.
-          GITHUB_EVENT_NAME: ${{ github.event_name == 'push' && 'workflow_dispatch' || github.event_name }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Without an explicit allowlist the action defaults to a

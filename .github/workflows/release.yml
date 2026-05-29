@@ -235,15 +235,58 @@ jobs:
 
   security-audit:
     name: Security audit
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read
-      issues: write
-      id-token: write
-    uses: ./.github/workflows/security-audit.yaml
-    secrets:
-      AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      # Dispatch the security-audit workflow and read its run status. We
+      # cannot call security-audit.yaml via `uses:` here: a tag `push`
+      # propagates into the reusable workflow as event_name `push`, which
+      # claude-code-action rejects ("Unsupported event type: push"), and
+      # GITHUB_EVENT_NAME is a default var that cannot be overridden.
+      # Dispatching produces a genuine workflow_dispatch run — the same
+      # supported path the nightly audit uses.
+      actions: write
+    steps:
+      - name: Dispatch security audit and gate on its result
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          workflow="security-audit.yaml"
+          tag="${GITHUB_REF#refs/tags/}"
+          sha="${GITHUB_SHA}"
+          # A little before dispatch, so we can distinguish our run from any
+          # pre-existing workflow_dispatch run on the same commit.
+          since="$(date -u -d '-30 seconds' +%Y-%m-%dT%H:%M:%SZ)"
+
+          echo "Dispatching $workflow on $tag ($sha)…"
+          gh workflow run "$workflow" --ref "$tag"
+
+          # The dispatched run takes a few seconds to register. Poll for it:
+          # same head commit, workflow_dispatch event, created after $since.
+          run_id=""
+          for attempt in $(seq 1 36); do
+            sleep 5
+            run_id="$(gh run list \
+              --workflow "$workflow" \
+              --event workflow_dispatch \
+              --limit 20 \
+              --json databaseId,headSha,createdAt \
+              --jq "[.[] | select(.headSha==\"$sha\" and .createdAt >= \"$since\")] | sort_by(.createdAt) | last | .databaseId // empty")"
+            [ -n "$run_id" ] && break
+            echo "  …waiting for dispatched run to appear (attempt $attempt/36)"
+          done
+
+          if [ -z "$run_id" ]; then
+            echo "::error::Dispatched security-audit run never appeared." >&2
+            exit 1
+          fi
+
+          echo "Watching security-audit run $run_id …"
+          # --exit-status fails this job if the audit run failed, which
+          # blocks publish-vscode (needs: security-audit).
+          gh run watch "$run_id" --exit-status
 
   publish-vscode:
     name: Publish VSCode Extension
