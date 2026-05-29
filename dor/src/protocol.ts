@@ -2,8 +2,9 @@
  * The dor control protocol's wire contract — shared by the CLI, the control
  * servers that bridge it into each host, and the webview that fulfils control
  * requests. This is the single source of truth for the transport envelope;
- * method-specific request/response shapes live in `cli.ts`. As the protocol
- * grows, add to these types here rather than re-declaring them per layer.
+ * method-specific request/response shapes live in `commands/types.ts`. As the
+ * protocol grows, add to these types here rather than re-declaring them per
+ * layer.
  */
 
 /** A control request as it travels over a transport, correlated by `requestId`. */

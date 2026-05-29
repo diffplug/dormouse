@@ -7,7 +7,7 @@ import type {
   ListSurfacesResponse,
   SplitSurfaceRequest,
   SplitSurfaceResponse,
-} from './cli.js';
+} from './commands/types.js';
 import type { DorControlResult } from './protocol.js';
 
 export interface SocketControlClientOptions {

@@ -11,8 +11,10 @@ Source of truth:
 
 | Scope | Source |
 | --- | --- |
-| CLI parser, command help, output rendering, current command support | `dor/src/cli.ts` |
-| Socket client and request envelope | `dor/src/control-client.ts` |
+| CLI parser and command registry | `dor/src/cli.ts` |
+| Command behavior specs, parser, help, and output rendering | `dor/src/commands/*.ts` |
+| Control method request/response types | `dor/src/commands/types.ts` |
+| Socket client and request envelope | `dor/src/control-client.ts`, `dor/src/protocol.ts` |
 | POSIX / Windows launchers | `dor/bin/dor`, `dor/bin/dor.cmd` |
 | Snapshot tests for CLI output | `dor/test/cli-output.test.mjs`, `dor/test/snapshots/` |
 | Shared staging script | `scripts/stage-dor-cli.mjs` |
@@ -132,161 +134,12 @@ Implemented commands call private `surface.*` control methods. `surface.list`
 derives its response from current Dockview panels plus terminal state/activity
 snapshots, then returns `workspace:1` and `window:1`.
 
-### `dor split`
+The behavior specs live at the top of each command implementation file:
 
-Usage:
-
-```text
-dor split [--left|--right|--up|--down|--auto] [--command <cmd>] [--minimize] [--surface <id|ref|index>] [--json]
-```
-
-Behavior:
-
-- Calls the private `surface.split` control method.
-- Creates a new terminal surface by splitting an existing surface.
-- Direction flags are mutually exclusive. If no direction is provided, `--auto`
-  is used.
-- `--auto` chooses `right` when the target surface is wide and `down` when it is
-  narrow.
-- `--surface` selects the surface to split. If omitted, Dormouse uses the
-  caller surface when available, then the focused surface.
-- `--command` runs the given command as the new terminal surface's initial
-  command.
-- `--minimize` creates the surface and immediately sends it to the minimized
-  area.
-- No workspace argument exists until Dormouse supports multiple workspaces.
-- `split` does not know about non-terminal surface types. Compose future content
-  commands through the terminal:
-
-```sh
-dor split --right --command "dor iframe https://example.com"
-dor split --auto --command "dor agent-browser open https://example.com"
-```
-
-Text shape:
-
-```text
-created surface:2  [right]
-created surface:3  [down]  [minimized]  "pnpm dev"
-```
-
-JSON shape:
-
-```json
-{
-  "status": "created",
-  "surface_id": "pane-abc",
-  "surface_ref": "surface:2",
-  "direction": "right",
-  "minimized": false,
-  "command": "pnpm dev"
-}
-```
-
-### `dor ensure`
-
-Usage:
-
-```text
-dor ensure [--title <title>] [--minimize] [--surface <id|ref|index>] [--json] -- <command...>
-```
-
-Behavior:
-
-- Calls the private `surface.ensure` control method.
-- Ensures one surface exists in the current workspace for a user-enforced title.
-- The idempotency key is always the user-enforced title.
-- If `--title` is omitted, Dormouse derives the title from the command after
-  `--`.
-- If a surface in the current workspace already has the enforced title,
-  Dormouse returns that surface and does not start another command.
-- If no surface has that enforced title, Dormouse creates a split, starts the
-  command, marks the surface title as user-enforced, and returns the new
-  surface.
-- A user-enforced title is visible in the UI and must not be overwritten by
-  terminal title escape sequences from the running process.
-- Matching uses Dormouse metadata, not process inspection.
-- Minimized surfaces participate in matching.
-- `--minimize` applies only when creating a new surface; it does not minimize an
-  existing match.
-- `--surface` selects the surface to split only when creating a new surface. If
-  omitted, Dormouse uses the same caller/focused fallback as `dor split`.
-- Closed/killed surfaces do not participate in matching.
-- No workspace argument exists until Dormouse supports multiple workspaces.
-
-Text shape:
-
-```text
-created surface:3  "dev server"
-existing surface:3  "dev server"
-```
-
-JSON shape:
-
-```json
-{
-  "status": "created",
-  "surface_id": "pane-def",
-  "surface_ref": "surface:3",
-  "title": "dev server",
-  "command": "pnpm dev:workspace",
-  "minimized": false
-}
-```
-
-### `dor list-panes`
-
-Usage:
-
-```text
-dor list-panes [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--window <id|ref|index>]
-```
-
-Behavior:
-
-- Implemented cmux-compatible command.
-- Lists visible Panes, grouped by `paneRef` in the `surface.list` response.
-- Text output marks the focused Pane with `*`, prints the pane handle,
-  `[N surface]` / `[N surfaces]`, and optional `[focused]`.
-- `--json` returns `panes`, `workspace_ref`, and `window_ref`. Pane entries use
-  cmux field names for focus, index, selected surface, and surface refs/ids.
-- Dormouse currently has one terminal surface per Pane, so runtime
-  `surface_count` is `1` for each Pane.
-
-Text shape:
-
-```text
-* pane:1  [1 surface]  [focused]
-```
-
-### `dor list-pane-surfaces`
-
-Usage:
-
-```text
-dor list-pane-surfaces [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--pane <id|ref|index>] [--window <id|ref|index>]
-```
-
-Behavior:
-
-- Implemented cmux-compatible command.
-- Defaults missing `--pane` to `focused`.
-- `--pane` filters by surface id, surface ref, or pane ref. Because Dormouse has
-  one surface per Pane, the command currently returns zero or one surface.
-- Text output marks the selected surface with `*`, prints the surface handle,
-  the surface title, and optional `[selected]`.
-- `--json` returns `pane_ref`, `surfaces`, `workspace_ref`, and `window_ref`.
-  Surface entries use cmux field names for index, selected state, title, and
-  type.
-- The `title` field for this command is the surface title reported by
-  `surface.list`. It can look like a CWD when the shell is idle, or like the
-  running command when a foreground command updates the title.
-
-Text shape:
-
-```text
-* surface:1  dor list-pane-surfaces  [selected]
-```
+- [`dor split`](../../dor/src/commands/split.ts)
+- [`dor ensure`](../../dor/src/commands/ensure.ts)
+- [`dor list-panes`](../../dor/src/commands/list-panes.ts)
+- [`dor list-pane-surfaces`](../../dor/src/commands/list-pane-surfaces.ts)
 
 ## Compatibility References
 
