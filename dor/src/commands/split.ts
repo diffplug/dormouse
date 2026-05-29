@@ -26,7 +26,6 @@ interface SplitFlags {
   readonly up?: boolean;
 }
 
-const generatedSplitUsage = '  dor split [--auto] [--command cmd] [--down] [--json] [--left] [--minimize] [--right] [--surface id|ref|index] [--up]';
 const groupedSplitDirectionUsage = '[--left|--right|--up|--down|--auto]';
 const groupedSplitUsage = `${groupedSplitDirectionUsage} [--command cmd] [--json] [--minimize] [--surface id|ref|index]`;
 const splitUsageBrief = 'Direction flags are mutually exclusive; --auto is the default.';
@@ -50,7 +49,17 @@ export const splitCommand: Command = {
     {
       scope: 'command',
       findReplace: [
-        generatedSplitUsage,
+        '  dor split [--auto]',
+        `  dor split ${groupedSplitDirectionUsage}`,
+        '[--command cmd] [--down]',
+        '[--command cmd]',
+        '[--json] [--left]',
+        '[--json]',
+        '[--minimize] [--right]',
+        '[--minimize]',
+        '[--surface id|ref|index] [--up]',
+        '[--surface id|ref|index]',
+        `  dor split ${groupedSplitUsage}`,
         `  dor split ${groupedSplitUsage}\n    ${splitUsageBrief}`,
         '<LS>[--auto]<WS>Default; choose right when wide and down when narrow.<TO-EOL>',
         '     [--left|--right|--up|--down|--auto]\n                  Split direction. Mutually exclusive; default is --auto.\n',
