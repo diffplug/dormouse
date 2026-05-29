@@ -11,8 +11,8 @@ Source of truth:
 
 | Scope | Source |
 | --- | --- |
-| CLI parser and command registry | `dor/src/cli.ts` |
-| Command behavior specs, parser, help, and output rendering | `dor/src/commands/*.ts` |
+| `stricli` application, command registry, and stdout/stderr capture | `dor/src/cli.ts` |
+| Command behavior specs, `stricli` flag definitions, help, and output rendering | `dor/src/commands/*.ts` |
 | Control method request/response types | `dor/src/commands/types.ts` |
 | Socket client and request envelope | `dor/src/control-client.ts`, `dor/src/protocol.ts` |
 | POSIX / Windows launchers | `dor/bin/dor`, `dor/bin/dor.cmd` |
@@ -154,16 +154,3 @@ CLI migration guidance lives in separate specs so this file stays focused:
 When adding a command because a migration pattern needs it, update the relevant
 compatibility spec first, then update this file after the command is implemented
 and snapshot tested.
-
-## Errors
-
-Successful commands exit `0`. Failed commands exit non-zero and print
-`Error: <message>` to stderr.
-
-Common failures:
-
-- Missing or stale control endpoint.
-- Unknown option or invalid flag value.
-- Unsupported workspace/window target.
-- Unsupported private control method.
-- Layout not ready when the webview has not mounted.

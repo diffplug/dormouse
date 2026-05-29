@@ -51,94 +51,90 @@
  * ```
  */
 
+import { buildCommand } from '@stricli/core';
 import type {
-  CliOptions,
-  CliResult,
   Command,
+  DorCommandContext,
   ParseResult,
   SplitDirection,
-  SplitSurfaceRequest,
   SplitSurfaceResponse,
 } from './types.js';
 import {
-  fail,
-  ok,
   resolveControlClient,
-  takeFlagValue,
+  stringParser,
+  writeStdout,
 } from './shared.js';
 
-interface SplitOptions extends SplitSurfaceRequest {
-  json: boolean;
+interface SplitFlags {
+  readonly auto?: boolean;
+  readonly command?: string;
+  readonly down?: boolean;
+  readonly json?: boolean;
+  readonly left?: boolean;
+  readonly minimize?: boolean;
+  readonly right?: boolean;
+  readonly surface?: string;
+  readonly up?: boolean;
 }
-
-const DIRECTION_FLAGS: Record<string, SplitDirection> = {
-  '--left': 'left',
-  '--right': 'right',
-  '--up': 'up',
-  '--down': 'down',
-  '--auto': 'auto',
-};
 
 export const splitCommand: Command = {
   name: 'split',
   usage: 'Usage: dor split [--left|--right|--up|--down|--auto] [--command <cmd>] [--minimize] [--surface <id|ref|index>] [--json]\n',
-  run: runSplitCommand,
+  command: buildCommand<SplitFlags, [], DorCommandContext>({
+    docs: {
+      brief: 'Create a new terminal surface by splitting an existing surface.',
+    },
+    parameters: {
+      flags: {
+        auto: { kind: 'boolean', brief: 'Choose right when wide and down when narrow.', optional: true },
+        command: { kind: 'parsed', parse: stringParser, brief: 'Run an initial command in the new surface.', optional: true, placeholder: 'cmd' },
+        down: { kind: 'boolean', brief: 'Split below the target surface.', optional: true },
+        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true },
+        left: { kind: 'boolean', brief: 'Split left of the target surface.', optional: true },
+        minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true },
+        right: { kind: 'boolean', brief: 'Split right of the target surface.', optional: true },
+        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split.', optional: true, placeholder: 'id|ref|index' },
+        up: { kind: 'boolean', brief: 'Split above the target surface.', optional: true },
+      },
+    },
+    func: runSplitCommand,
+  }),
 };
 
-async function runSplitCommand(args: string[], options: CliOptions): Promise<CliResult> {
-  const parsed = parseSplitArgs(args);
-  if (!parsed.ok) return fail(parsed.message);
+async function runSplitCommand(this: DorCommandContext, flags: SplitFlags): Promise<void | Error> {
+  const direction = parseSplitDirection(flags);
+  if (!direction.ok) return new Error(direction.message);
 
-  const clientResult = resolveControlClient(options);
-  if (!clientResult.ok) return fail(clientResult.message);
+  const clientResult = resolveControlClient(this.options);
+  if (!clientResult.ok) return new Error(clientResult.message);
 
   try {
-    const response = await clientResult.value.splitSurface(parsed.value);
-    return ok(renderSplitResponse(response, parsed.value.json));
+    const response = await clientResult.value.splitSurface({
+      command: flags.command,
+      direction: direction.value,
+      minimized: flags.minimize === true,
+      surface: flags.surface,
+    });
+    writeStdout(this, renderSplitResponse(response, flags.json === true));
+    return undefined;
   } catch (error) {
-    return fail(error instanceof Error ? error.message : String(error));
+    return new Error(error instanceof Error ? error.message : String(error));
   }
 }
 
-function parseSplitArgs(args: string[]): ParseResult<SplitOptions> {
-  const result: SplitOptions = {
-    json: false,
-    direction: 'auto',
-    minimized: false,
-  };
-  let explicitDirection: SplitDirection | null = null;
+function parseSplitDirection(flags: SplitFlags): ParseResult<SplitDirection> {
+  const explicitDirections: SplitDirection[] = [];
+  if (flags.left) explicitDirections.push('left');
+  if (flags.right) explicitDirections.push('right');
+  if (flags.up) explicitDirections.push('up');
+  if (flags.down) explicitDirections.push('down');
+  if (flags.auto) explicitDirections.push('auto');
 
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (arg === '--json') {
-      result.json = true;
-    } else if (arg === '--minimize') {
-      result.minimized = true;
-    } else if (arg === '--command') {
-      const value = takeFlagValue(args, index, arg);
-      if (!value.ok) return value;
-      result.command = value.value;
-      index += 1;
-    } else if (arg === '--surface') {
-      const value = takeFlagValue(args, index, arg);
-      if (!value.ok) return value;
-      result.surface = value.value;
-      index += 1;
-    } else if (DIRECTION_FLAGS[arg]) {
-      const direction = DIRECTION_FLAGS[arg];
-      if (explicitDirection && explicitDirection !== direction) {
-        return { ok: false, message: 'direction flags are mutually exclusive' };
-      }
-      explicitDirection = direction;
-      result.direction = direction;
-    } else if (arg.startsWith('-')) {
-      return { ok: false, message: `unknown option '${arg}'` };
-    } else {
-      return { ok: false, message: `unexpected argument '${arg}'` };
-    }
+  if (explicitDirections.length > 1) {
+    return { ok: false, message: 'direction flags are mutually exclusive' };
   }
 
-  return { ok: true, value: result };
+  return { ok: true, value: explicitDirections[0] ?? 'auto' };
 }
 
 function renderSplitResponse(response: SplitSurfaceResponse, json: boolean): string {

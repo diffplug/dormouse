@@ -31,10 +31,10 @@
  */
 
 import type { Command } from './types.js';
-import { runListCommand } from './list-surfaces.js';
+import { buildListCommand } from './list-surfaces.js';
 
 export const listPaneSurfacesCommand: Command = {
   name: 'list-pane-surfaces',
   usage: 'Usage: dor list-pane-surfaces [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--pane <id|ref|index>] [--window <id|ref|index>]\n',
-  run: (args, options) => runListCommand('pane-surfaces', args, options),
+  command: buildListCommand('pane-surfaces', 'List surfaces in a pane.'),
 };

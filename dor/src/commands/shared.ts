@@ -3,9 +3,12 @@ import type {
   CliOptions,
   CliResult,
   ControlClient,
+  DorCommandContext,
   IdFormat,
   ParseResult,
 } from './types.js';
+
+export const stringParser = (input: string): string => input;
 
 export function ok(stdout: string): CliResult {
   return { exitCode: 0, stdout, stderr: '' };
@@ -15,16 +18,13 @@ export function fail(message: string): CliResult {
   return { exitCode: 1, stdout: '', stderr: `Error: ${message}\n` };
 }
 
-export function takeFlagValue(args: string[], index: number, flag: string): ParseResult<string> {
-  const value = args[index + 1];
-  if (!value || value.startsWith('-')) {
-    return { ok: false, message: `${flag} requires a value` };
-  }
-  return { ok: true, value };
-}
-
 export function isIdFormat(value: string): value is IdFormat {
   return value === 'refs' || value === 'uuids' || value === 'both';
+}
+
+export function parseIdFormat(value: string): IdFormat {
+  if (isIdFormat(value)) return value;
+  throw new SyntaxError(`invalid --id-format '${value}'`);
 }
 
 export function validateSingletonTargets(workspace: string | undefined, window: string | undefined): ParseResult<void> {
@@ -74,4 +74,8 @@ export function wantsRefs(idFormat: IdFormat): boolean {
 
 export function wantsIds(idFormat: IdFormat): boolean {
   return idFormat !== 'refs';
+}
+
+export function writeStdout(context: DorCommandContext, stdout: string): void {
+  context.process.stdout.write(stdout);
 }

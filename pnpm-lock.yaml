@@ -9,6 +9,10 @@ importers:
   .: {}
 
   dor:
+    dependencies:
+      '@stricli/core':
+        specifier: ^1.2.7
+        version: 1.2.7
     devDependencies:
       typescript:
         specifier: ^6.0.3
@@ -1781,6 +1785,9 @@ packages:
         optional: true
       typescript:
         optional: true
+
+  '@stricli/core@1.2.7':
+    resolution: {integrity: sha512-a0HxA/cSWjqHj/9GM+cfc/zGNmBdxVTQQpHIEvY1AbDEgo4ZU84cTCbtywYEQOHw2wIc6Vu+PKv+ZQoqZwkHnQ==}
 
   '@tailwindcss/node@4.3.0':
     resolution: {integrity: sha512-aFb4gUhFOgdh9AXo4IzBEOzBkkAxm9VigwDJnMIYv3lcfXCJVesNfbEaBl4BNgVRyid92AmdviqwBUBRKSeY3g==}
@@ -5345,6 +5352,8 @@ snapshots:
       typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
+
+  '@stricli/core@1.2.7': {}
 
   '@tailwindcss/node@4.3.0':
     dependencies:

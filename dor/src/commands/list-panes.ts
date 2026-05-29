@@ -27,10 +27,10 @@
  */
 
 import type { Command } from './types.js';
-import { runListCommand } from './list-surfaces.js';
+import { buildListCommand } from './list-surfaces.js';
 
 export const listPanesCommand: Command = {
   name: 'list-panes',
   usage: 'Usage: dor list-panes [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--window <id|ref|index>]\n',
-  run: (args, options) => runListCommand('panes', args, options),
+  command: buildListCommand('panes', 'List visible panes.'),
 };

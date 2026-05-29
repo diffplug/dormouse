@@ -52,97 +52,70 @@
  * ```
  */
 
+import { buildCommand } from '@stricli/core';
 import type {
-  CliOptions,
-  CliResult,
   Command,
-  EnsureSurfaceRequest,
+  DorCommandContext,
   EnsureSurfaceResponse,
-  ParseResult,
 } from './types.js';
 import {
-  fail,
-  ok,
   resolveControlClient,
-  takeFlagValue,
+  stringParser,
+  writeStdout,
 } from './shared.js';
 
-interface EnsureOptions extends EnsureSurfaceRequest {
-  json: boolean;
+interface EnsureFlags {
+  readonly json?: boolean;
+  readonly minimize?: boolean;
+  readonly surface?: string;
+  readonly title?: string;
 }
 
 export const ensureCommand: Command = {
   name: 'ensure',
   usage: 'Usage: dor ensure [--title <title>] [--minimize] [--surface <id|ref|index>] [--json] -- <command...>\n',
-  run: runEnsureCommand,
+  command: buildCommand<EnsureFlags, string[], DorCommandContext>({
+    docs: {
+      brief: 'Ensure one surface exists for a user-enforced title.',
+    },
+    parameters: {
+      flags: {
+        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true },
+        minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true },
+        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'id|ref|index' },
+        title: { kind: 'parsed', parse: stringParser, brief: 'User-enforced surface title.', optional: true },
+      },
+      positional: {
+        kind: 'array',
+        minimum: 1,
+        parameter: { parse: stringParser, brief: 'Command to run.', placeholder: 'command' },
+      },
+    },
+    func: runEnsureCommand,
+  }),
 };
 
-async function runEnsureCommand(args: string[], options: CliOptions): Promise<CliResult> {
-  const parsed = parseEnsureArgs(args);
-  if (!parsed.ok) return fail(parsed.message);
-
-  const clientResult = resolveControlClient(options);
-  if (!clientResult.ok) return fail(clientResult.message);
-
-  try {
-    const response = await clientResult.value.ensureSurface(parsed.value);
-    return ok(renderEnsureResponse(response, parsed.value.json));
-  } catch (error) {
-    return fail(error instanceof Error ? error.message : String(error));
-  }
-}
-
-function parseEnsureArgs(args: string[]): ParseResult<EnsureOptions> {
-  const result: Omit<EnsureOptions, 'command'> & { command?: string } = {
-    json: false,
-    minimized: false,
-  };
-  let commandArgs: string[] | null = null;
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (arg === '--') {
-      commandArgs = args.slice(index + 1);
-      break;
-    } else if (arg === '--json') {
-      result.json = true;
-    } else if (arg === '--minimize') {
-      result.minimized = true;
-    } else if (arg === '--title') {
-      const value = takeFlagValue(args, index, arg);
-      if (!value.ok) return value;
-      result.title = value.value;
-      index += 1;
-    } else if (arg === '--surface') {
-      const value = takeFlagValue(args, index, arg);
-      if (!value.ok) return value;
-      result.surface = value.value;
-      index += 1;
-    } else if (arg.startsWith('-')) {
-      return { ok: false, message: `unknown option '${arg}'` };
-    } else {
-      return { ok: false, message: `unexpected argument '${arg}' before --` };
-    }
-  }
-
-  if (!commandArgs) {
-    return { ok: false, message: 'dor ensure requires -- <command...>' };
-  }
+async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...commandArgs: string[]): Promise<void | Error> {
   const command = commandArgs.join(' ').trim();
   if (!command) {
-    return { ok: false, message: 'dor ensure requires a command after --' };
+    return new Error('dor ensure requires a command after --');
   }
 
-  return {
-    ok: true,
-    value: {
+  const clientResult = resolveControlClient(this.options);
+  if (!clientResult.ok) return new Error(clientResult.message);
+
+  try {
+    const response = await clientResult.value.ensureSurface({
       command,
-      json: result.json,
-      minimized: result.minimized,
-      surface: result.surface,
-      title: result.title,
-    },
-  };
+      minimized: flags.minimize === true,
+      surface: flags.surface,
+      title: flags.title,
+    });
+    writeStdout(this, renderEnsureResponse(response, flags.json === true));
+    return undefined;
+  } catch (error) {
+    return new Error(error instanceof Error ? error.message : String(error));
+  }
 }
 
 function renderEnsureResponse(response: EnsureSurfaceResponse, json: boolean): string {

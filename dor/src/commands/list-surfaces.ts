@@ -1,31 +1,30 @@
+import { buildCommand } from '@stricli/core';
 import type {
-  CliOptions,
-  CliResult,
+  Command as DorCommand,
+  DorCommandContext,
   IdFormat,
   ListSurfacesResponse,
-  ParseResult,
   Surface,
 } from './types.js';
 import {
-  fail,
-  isIdFormat,
-  ok,
+  parseIdFormat,
   renderHandle,
   resolveControlClient,
-  takeFlagValue,
+  stringParser,
   validateSingletonTargets,
   wantsIds,
   wantsRefs,
+  writeStdout,
 } from './shared.js';
 
 export type ListOutputMode = 'panes' | 'pane-surfaces';
 
-interface ListSurfacesOptions {
-  json: boolean;
-  idFormat: IdFormat;
-  pane?: string;
-  workspace?: string;
-  window?: string;
+interface ListFlags {
+  readonly idFormat?: IdFormat;
+  readonly json?: boolean;
+  readonly pane?: string;
+  readonly window?: string;
+  readonly workspace?: string;
 }
 
 interface Pane {
@@ -39,76 +38,51 @@ interface Pane {
 
 export async function runListCommand(
   mode: ListOutputMode,
-  args: string[],
-  options: CliOptions,
-): Promise<CliResult> {
-  const parsed = parseListSurfacesArgs(mode, args);
-  if (!parsed.ok) return fail(parsed.message);
+  flags: ListFlags,
+  context: DorCommandContext,
+): Promise<void | Error> {
+  const workspace = flags.workspace;
+  const window = flags.window;
+  const singletonCheck = validateSingletonTargets(workspace, window);
+  if (!singletonCheck.ok) return new Error(singletonCheck.message);
 
-  const singletonCheck = validateSingletonTargets(parsed.value.workspace, parsed.value.window);
-  if (!singletonCheck.ok) return fail(singletonCheck.message);
-
-  const clientResult = resolveControlClient(options);
-  if (!clientResult.ok) return fail(clientResult.message);
+  const clientResult = resolveControlClient(context.options);
+  if (!clientResult.ok) return new Error(clientResult.message);
 
   try {
-    const response = await clientResult.value.listSurfaces({
-      pane: mode === 'panes' ? undefined : parsed.value.pane,
-      workspace: parsed.value.workspace,
-      window: parsed.value.window,
-    });
-    const stdout = renderListResponse(response, mode, parsed.value.idFormat, parsed.value.json);
-    return ok(stdout);
+    const pane = mode === 'pane-surfaces' ? (flags.pane ?? 'focused') : undefined;
+    const response = await clientResult.value.listSurfaces({ pane, workspace, window });
+    const idFormat = flags.idFormat ?? 'refs';
+    const stdout = renderListResponse(response, mode, idFormat, flags.json === true);
+    writeStdout(context, stdout);
+    return undefined;
   } catch (error) {
-    return fail(error instanceof Error ? error.message : String(error));
+    return new Error(error instanceof Error ? error.message : String(error));
   }
 }
 
-function parseListSurfacesArgs(mode: ListOutputMode, args: string[]): ParseResult<ListSurfacesOptions> {
-  const result: ListSurfacesOptions = {
-    json: false,
-    idFormat: 'refs',
-  };
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (arg === '--json') {
-      result.json = true;
-    } else if (arg === '--id-format') {
-      const value = takeFlagValue(args, index, arg);
-      if (!value.ok) return value;
-      if (!isIdFormat(value.value)) {
-        return { ok: false, message: `invalid --id-format '${value.value}'` };
-      }
-      result.idFormat = value.value;
-      index += 1;
-    } else if (arg === '--pane') {
-      const value = takeFlagValue(args, index, arg);
-      if (!value.ok) return value;
-      result.pane = value.value;
-      index += 1;
-    } else if (arg === '--workspace') {
-      const value = takeFlagValue(args, index, arg);
-      if (!value.ok) return value;
-      result.workspace = value.value;
-      index += 1;
-    } else if (arg === '--window') {
-      const value = takeFlagValue(args, index, arg);
-      if (!value.ok) return value;
-      result.window = value.value;
-      index += 1;
-    } else if (arg.startsWith('-')) {
-      return { ok: false, message: `unknown option '${arg}'` };
-    } else {
-      return { ok: false, message: `unexpected argument '${arg}'` };
-    }
-  }
-
-  if (mode === 'pane-surfaces' && !result.pane) {
-    result.pane = 'focused';
-  }
-
-  return { ok: true, value: result };
+export function buildListCommand(mode: ListOutputMode, brief: string): DorCommand['command'] {
+  return buildCommand<ListFlags, [], DorCommandContext>({
+    docs: { brief },
+    parameters: {
+      flags: {
+        idFormat: {
+          kind: 'parsed',
+          parse: parseIdFormat,
+          brief: 'Handle format for listed ids.',
+          optional: true,
+          placeholder: 'refs|uuids|both',
+        },
+        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true },
+        pane: { kind: 'parsed', parse: stringParser, brief: 'Pane or surface target.', optional: true, placeholder: 'id|ref|index' },
+        window: { kind: 'parsed', parse: stringParser, brief: 'Window target.', optional: true, placeholder: 'id|ref|index' },
+        workspace: { kind: 'parsed', parse: stringParser, brief: 'Workspace target.', optional: true, placeholder: 'id|ref|index' },
+      },
+    },
+    func(flags) {
+      return runListCommand(mode, flags, this);
+    },
+  });
 }
 
 function renderListResponse(

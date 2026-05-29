@@ -1,3 +1,8 @@
+import type {
+  Command as StricliCommand,
+  CommandContext,
+} from '@stricli/core';
+
 export type IdFormat = 'refs' | 'uuids' | 'both';
 export type SplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
 export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
@@ -80,10 +85,14 @@ export interface CliResult {
   stderr: string;
 }
 
+export interface DorCommandContext extends CommandContext {
+  readonly options: CliOptions;
+}
+
 export interface Command {
   name: string;
   usage: string;
-  run(args: string[], options: CliOptions): Promise<CliResult>;
+  command: StricliCommand<DorCommandContext>;
 }
 
 export type ParseResult<T> =
