@@ -231,6 +231,15 @@ function registerCloseHandler(): void {
         from: currentVersion,
         to: update.version,
       }));
+      // On Windows the NSIS installer overwrites files inside the bundled
+      // sidecar (e.g. node-pty's conpty.node). Windows refuses to overwrite a
+      // native module the running sidecar still has loaded, which surfaces as
+      // "Error opening file for writing". Kill the sidecar and wait for it to
+      // fully exit before launching the installer. (On macOS/Linux open files
+      // can be replaced in place, so this is Windows-only.)
+      if (/Win/i.test(PLATFORM_STRING)) {
+        await invoke('kill_sidecar_now');
+      }
       await update.install();
     } catch (e) {
       // Overwrite with failure marker

@@ -34,6 +34,12 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: mocks.invoke,
 }));
 
+// Force the Windows code path so the sidecar-kill-before-install branch is
+// exercised. updater.ts only consumes PLATFORM_STRING from this module.
+vi.mock('dormouse-lib/lib/platform', () => ({
+  PLATFORM_STRING: 'Windows',
+}));
+
 // --- Helpers ---
 
 const STORAGE_KEY = 'dormouse:update-result';
@@ -205,6 +211,34 @@ describe('updater', () => {
       expect(event.preventDefault).toHaveBeenCalled();
       expect(order).toEqual(['marker-set', 'install']);
       expect(mocks.windowClose).toHaveBeenCalled();
+    });
+
+    it('kills the sidecar and waits for it before installing on Windows', async () => {
+      const update = makeUpdate('0.5.0');
+      mocks.check.mockResolvedValue(update);
+
+      startUpdateCheck();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(0);
+      approveUpdate();
+      await vi.advanceTimersByTimeAsync(0);
+
+      const order: string[] = [];
+      mocks.invoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'kill_sidecar_now') order.push('kill');
+        return '';
+      });
+      update.install.mockImplementation(async () => {
+        order.push('install');
+      });
+
+      const closeHandler = mocks.onCloseRequested.mock.calls[0][0];
+      await closeHandler({ preventDefault: vi.fn() });
+
+      expect(mocks.invoke).toHaveBeenCalledWith('kill_sidecar_now');
+      // The kill must complete before NSIS runs, or it can't overwrite the
+      // sidecar's still-loaded native modules.
+      expect(order).toEqual(['kill', 'install']);
     });
 
     it('writes failure marker when install throws', async () => {
