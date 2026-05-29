@@ -4,6 +4,7 @@ import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { getPlatform, IS_MAC, IS_WINDOWS } from './platform';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
 import { attachMouseModeObserver } from './mouse-mode-observer';
+import { attachKeyboardProtocolArbiter } from './keyboard-protocol-arbiter';
 import {
   bumpRenderTick,
   getMouseSelectionState,
@@ -245,6 +246,9 @@ function setupTerminalEntry(id: string, options: { untouched?: boolean } = {}): 
   const disposePty = wirePtyEvents(id, terminal);
   const disposeXterm = wireXtermHandlers(id, terminal, selectionBaselineRef);
   const mouseModeObserver = attachMouseModeObserver(id, terminal);
+  // Windows-only: keep win32-input-mode from clobbering kitty-protocol TUIs.
+  // Off-Windows win32-input-mode is never advertised, so kitty already wins.
+  const keyboardProtocolArbiter = IS_WINDOWS ? attachKeyboardProtocolArbiter(terminal) : null;
   const cleanupMouseRouter = attachTerminalMouseRouter({
     id,
     terminal,
@@ -259,6 +263,7 @@ function setupTerminalEntry(id: string, options: { untouched?: boolean } = {}): 
     disposePty();
     disposeXterm();
     mouseModeObserver.dispose();
+    keyboardProtocolArbiter?.dispose();
     cleanupMouseRouter();
   };
 
