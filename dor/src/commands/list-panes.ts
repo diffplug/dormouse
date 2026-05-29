@@ -8,7 +8,7 @@ export const listPanesCommand: Command = {
   command: buildListCommand({
     mode: 'panes',
     brief: 'List visible panes.',
-    customUsage: '[--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--window <id|ref|index>]',
+    customUsage: '[--json] [--id-format refs|uuids|both]',
     fullDescription: `Implemented cmux-compatible command.
 
 Lists visible Panes grouped by Pane handle.

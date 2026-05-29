@@ -1,5 +1,0 @@
-exitCode: 1
-stdout:
-
-stderr:
-Error: unsupported workspace target 'workspace:2'

@@ -27,16 +27,6 @@ export function parseIdFormat(value: string): IdFormat {
   throw new SyntaxError(`invalid --id-format '${value}'`);
 }
 
-export function validateSingletonTargets(workspace: string | undefined, window: string | undefined): ParseResult<void> {
-  if (workspace && workspace !== 'workspace:1' && workspace !== '1') {
-    return { ok: false, message: `unsupported workspace target '${workspace}'` };
-  }
-  if (window && window !== 'window:1' && window !== '1') {
-    return { ok: false, message: `unsupported window target '${window}'` };
-  }
-  return { ok: true, value: undefined };
-}
-
 export function resolveControlClient(options: CliOptions): ParseResult<ControlClient> {
   if (options.client) return { ok: true, value: options.client };
 

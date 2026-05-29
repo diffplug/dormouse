@@ -6,8 +6,8 @@ Invocation: `dor --help`
 USAGE
   dor split [--auto] [--command cmd] [--down] [--json] [--left] [--minimize] [--right] [--surface id|ref|index] [--up]
   dor ensure [--json] [--minimize] [--surface id|ref|index] [--title value] <command>...
-  dor list-panes [--id-format refs|uuids|both] [--json] [--window id|ref|index] [--workspace id|ref|index]
-  dor list-pane-surfaces [--id-format refs|uuids|both] [--json] [--pane id|ref|index] [--window id|ref|index] [--workspace id|ref|index]
+  dor list-panes [--id-format refs|uuids|both] [--json]
+  dor list-pane-surfaces [--id-format refs|uuids|both] [--json] [--pane id|ref|index]
   dor --help
 
 Dormouse bundles the dor CLI into every terminal it launches.

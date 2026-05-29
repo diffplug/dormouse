@@ -8,7 +8,7 @@ export const listPaneSurfacesCommand: Command = {
   command: buildListCommand({
     mode: 'pane-surfaces',
     brief: 'List surfaces in a pane.',
-    customUsage: '[--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--pane <id|ref|index>] [--window <id|ref|index>]',
+    customUsage: '[--json] [--id-format refs|uuids|both] [--pane <id|ref|index>]',
     fullDescription: `Implemented cmux-compatible command.
 
 Defaults missing --pane to focused.

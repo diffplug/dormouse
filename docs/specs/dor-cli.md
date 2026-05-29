@@ -113,20 +113,21 @@ that owns that surface when one is available.
 
 ## Handle Model
 
-Dormouse currently exposes one workspace and one window. Each visible Pane has
-one terminal surface. User-facing `dor` commands should expose surface handles;
-Pane remains layout vocabulary and compatibility-command terminology.
+Dormouse currently exposes one workspace and one window internally, but no
+workspace/window targeting CLI flags. Each visible Pane has one terminal
+surface. User-facing `dor` commands should expose surface handles; Pane remains
+layout vocabulary and compatibility-command terminology.
 
 Invariants:
 
 - Stable ids and short refs are accepted where a surface/pane target is
   accepted.
-- Short refs use cmux-style names: `surface:1`, `pane:2`, `workspace:1`,
-  `window:1`.
+- Short refs currently use cmux-style names for implemented handles:
+  `surface:1`, `pane:2`.
 - List output defaults to refs; commands that list handles accept
   `--id-format refs|uuids|both`.
-- `--workspace workspace:1` / `--window window:1` and bare `1` are compatibility
-  no-ops. Any other workspace/window target is rejected before host mutation.
+- Workspace/window refs and target flags will be added only when Dormouse
+  actually supports them.
 
 ## Current Implemented Commands
 

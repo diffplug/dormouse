@@ -14,7 +14,6 @@ import {
   renderHandle,
   resolveControlClient,
   stringParser,
-  validateSingletonTargets,
   wantsIds,
   wantsRefs,
   writeStdout,
@@ -26,8 +25,6 @@ interface ListFlags {
   readonly idFormat?: IdFormat;
   readonly json?: boolean;
   readonly pane?: string;
-  readonly window?: string;
-  readonly workspace?: string;
 }
 
 interface Pane {
@@ -51,17 +48,12 @@ export async function runListCommand(
   flags: ListFlags,
   context: DorCommandContext,
 ): Promise<void | Error> {
-  const workspace = flags.workspace;
-  const window = flags.window;
-  const singletonCheck = validateSingletonTargets(workspace, window);
-  if (!singletonCheck.ok) return new Error(singletonCheck.message);
-
   const clientResult = resolveControlClient(context.options);
   if (!clientResult.ok) return new Error(clientResult.message);
 
   try {
     const pane = mode === 'pane-surfaces' ? (flags.pane ?? 'focused') : undefined;
-    const response = await clientResult.value.listSurfaces({ pane, workspace, window });
+    const response = await clientResult.value.listSurfaces({ pane });
     const idFormat = flags.idFormat ?? 'refs';
     const stdout = renderListResponse(response, mode, idFormat, flags.json === true);
     writeStdout(context, stdout);
@@ -88,20 +80,6 @@ export function buildListCommand(options: BuildListCommandOptions): DorCommand['
       optional: true,
       placeholder: 'id|ref|index',
       hidden: options.mode === 'panes',
-    },
-    window: {
-      kind: 'parsed',
-      parse: stringParser,
-      brief: 'Window target.',
-      optional: true,
-      placeholder: 'id|ref|index',
-    },
-    workspace: {
-      kind: 'parsed',
-      parse: stringParser,
-      brief: 'Workspace target.',
-      optional: true,
-      placeholder: 'id|ref|index',
     },
   };
 

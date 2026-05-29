@@ -4,7 +4,7 @@ Invocation: `dor list-pane-surfaces --help`
 
 ```text
 USAGE
-  dor list-pane-surfaces [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--pane <id|ref|index>] [--window <id|ref|index>]
+  dor list-pane-surfaces [--json] [--id-format refs|uuids|both] [--pane <id|ref|index>]
   dor list-pane-surfaces --help
 
 Implemented cmux-compatible command.
@@ -26,8 +26,6 @@ FLAGS
      [--id-format]  Handle format for listed ids.
      [--json]       Print JSON output.
      [--pane]       Pane or surface target.
-     [--window]     Window target.
-     [--workspace]  Workspace target.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments
 

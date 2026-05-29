@@ -4,7 +4,7 @@ Invocation: `dor list-panes --help`
 
 ```text
 USAGE
-  dor list-panes [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--window <id|ref|index>]
+  dor list-panes [--json] [--id-format refs|uuids|both]
   dor list-panes --help
 
 Implemented cmux-compatible command.
@@ -23,8 +23,6 @@ Text output:
 FLAGS
      [--id-format]  Handle format for listed ids.
      [--json]       Print JSON output.
-     [--window]     Window target.
-     [--workspace]  Workspace target.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments
 

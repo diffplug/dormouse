@@ -149,7 +149,7 @@ test('list-panes json output', async () => {
 test('list-pane-surfaces pane-scoped output', async () => {
   const client = fixtureClient();
   const result = await runCli(['list-pane-surfaces'], { client });
-  assert.deepEqual(client.requests, [{ pane: 'focused', workspace: undefined, window: undefined }]);
+  assert.deepEqual(client.requests, [{ pane: 'focused' }]);
   await snapshot('list-pane-surfaces-text', result);
 });
 
@@ -173,13 +173,6 @@ test('unknown command output', async () => {
 
 test('missing control endpoint output', async () => {
   await snapshot('missing-control-endpoint', await runCli(['list-panes']));
-});
-
-test('unsupported workspace output', async () => {
-  await snapshot(
-    'unsupported-workspace',
-    await runCli(['list-panes', '--workspace', 'workspace:2'], { client: fixtureClient() }),
-  );
 });
 
 test('ensure missing command output', async () => {
