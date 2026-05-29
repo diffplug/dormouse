@@ -23,6 +23,7 @@ import {
   getTerminalPaneStateSnapshot,
   getActivitySnapshot,
   isUntouched,
+  getOrCreateTerminal,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
   type SessionStatus,
@@ -76,7 +77,12 @@ type ShellSpawnNoticeState = {
 };
 
 type DorControlParams = {
+  command?: unknown;
+  direction?: unknown;
+  minimized?: unknown;
   pane?: string;
+  surface?: unknown;
+  title?: unknown;
   workspace?: string;
   window?: string;
 };
@@ -91,6 +97,7 @@ type DorControlRequest = {
   requestId: string;
   method: string;
   params?: DorControlParams;
+  surfaceId?: string;
   respond: (response: DorControlResponse) => void;
 };
 
@@ -106,6 +113,13 @@ type DorSurface = {
   requestedWorkingDirectory: string | null;
   selectedInPane: boolean;
 };
+
+type DorSplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
+type DorResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
+type DockviewSplitDirection = 'left' | 'right' | 'above' | 'below';
+type ParseResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; message: string };
 
 export type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind, SpawnDirection } from './wall/wall-types';
 export {
@@ -162,6 +176,73 @@ function matchesDorPaneTarget(target: string | undefined, surface: DorSurface): 
 
   const numeric = Number(target);
   return Number.isInteger(numeric) && numeric >= 1 && surface.index === numeric - 1;
+}
+
+function stringParam(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function booleanParam(value: unknown): boolean {
+  return value === true;
+}
+
+function parseDorSplitDirection(value: unknown): DorSplitDirection | null {
+  if (value === undefined || value === null) return 'auto';
+  if (value === 'left' || value === 'right' || value === 'up' || value === 'down' || value === 'auto') return value;
+  return null;
+}
+
+function dockviewDirectionForDor(direction: DorResolvedSplitDirection): DockviewSplitDirection {
+  switch (direction) {
+    case 'left':
+      return 'left';
+    case 'right':
+      return 'right';
+    case 'up':
+      return 'above';
+    case 'down':
+      return 'below';
+  }
+}
+
+function dorDirectionForDockview(direction: 'right' | 'below'): DorResolvedSplitDirection {
+  return direction === 'right' ? 'right' : 'down';
+}
+
+function spawnDirectionForDockview(direction: DockviewSplitDirection): SpawnDirection {
+  return direction === 'above' || direction === 'below' ? 'top' : 'left';
+}
+
+function titleFromCommand(command: string): string {
+  return command.trim().replace(/\s+/g, ' ');
+}
+
+function validateUserTitle(title: string): string | null {
+  const trimmed = title.trim();
+  if (!trimmed) return 'title cannot be empty';
+  if (trimmed === '<idle>' || trimmed.startsWith('<idle>')) {
+    return 'title is reserved';
+  }
+  return null;
+}
+
+function hostLooksWindows(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /win/i.test(navigator.platform || navigator.userAgent || '');
+}
+
+function commandShellArgs(shell: string | undefined, command: string): string[] {
+  const normalizedShell = (shell ?? '').replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? '';
+  if (!normalizedShell && hostLooksWindows()) {
+    return ['/d', '/s', '/c', command];
+  }
+  if (normalizedShell === 'cmd.exe' || normalizedShell === 'cmd') {
+    return ['/d', '/s', '/c', command];
+  }
+  if (normalizedShell === 'powershell.exe' || normalizedShell === 'powershell' || normalizedShell === 'pwsh.exe' || normalizedShell === 'pwsh') {
+    return ['-NoLogo', '-NoProfile', '-Command', command];
+  }
+  return ['-lc', command];
 }
 
 function ShellSpawnNotice({
@@ -585,6 +666,139 @@ export function Wall({
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
+  const buildDorSurfaces = useCallback((api: DockviewApi): DorSurface[] => {
+    const panels = api.panels;
+    const activeId = api.activePanel?.id ?? (selectedTypeRef.current === 'pane' ? selectedIdRef.current : null);
+    const terminalStates = getTerminalPaneStateSnapshot();
+    const activityStates = getActivitySnapshot();
+    const appTitleForPane = buildAppTitleResolver(terminalStates, activityStates);
+    const panelStates = panels.map((panel) => terminalStates.get(panel.id) ?? createTerminalPaneState());
+
+    return panels.map((panel, index) => {
+      const state = panelStates[index] ?? createTerminalPaneState();
+      const derived = deriveHeader(state, panelStates, { appTitleForPane });
+      const title = resolveDisplayPrimary(derived.primary, panel.title ?? panel.id);
+
+      return {
+        id: panel.id,
+        ref: `surface:${index + 1}`,
+        paneRef: `pane:${index + 1}`,
+        type: 'terminal',
+        title,
+        focused: panel.id === activeId,
+        index,
+        indexInPane: 0,
+        requestedWorkingDirectory: state.cwd?.path ?? null,
+        selectedInPane: true,
+      };
+    });
+  }, []);
+
+  const surfaceRefForId = useCallback((id: string): string => {
+    const api = apiRef.current;
+    const panelIndex = api?.panels.findIndex((panel) => panel.id === id) ?? -1;
+    if (panelIndex >= 0) return `surface:${panelIndex + 1}`;
+    const doorIndex = doorsRef.current.findIndex((door) => door.id === id);
+    const visibleCount = api?.panels.length ?? 0;
+    if (doorIndex >= 0) return `surface:${visibleCount + doorIndex + 1}`;
+    return id;
+  }, []);
+
+  const findVisibleSurface = useCallback((
+    api: DockviewApi,
+    target: string | undefined,
+    callerSurfaceId: string | undefined,
+  ): DorSurface | null => {
+    const surfaces = buildDorSurfaces(api);
+    const resolvedTarget = target ?? callerSurfaceId ?? 'focused';
+    return surfaces.find((surface) => matchesDorPaneTarget(resolvedTarget, surface))
+      ?? (!target && !callerSurfaceId ? (surfaces[0] ?? null) : null);
+  }, [buildDorSurfaces]);
+
+  const findSurfaceIdByUserTitle = useCallback((title: string): string | null => {
+    const ids = [
+      ...(apiRef.current?.panels.map((panel) => panel.id) ?? []),
+      ...doorsRef.current.map((door) => door.id),
+    ];
+    return ids.find((id) => getTerminalPaneState(id).titleCandidates.user?.title.trim() === title) ?? null;
+  }, []);
+
+  const createSplitSurface = useCallback(({
+    command,
+    direction,
+    minimized,
+    referenceId,
+    title,
+  }: {
+    command?: string;
+    direction: DorResolvedSplitDirection;
+    minimized: boolean;
+    referenceId: string;
+    title?: string;
+  }): ParseResult<{
+    id: string;
+    ref: string;
+  }> => {
+    const api = apiRef.current;
+    if (!api) return { ok: false, message: 'Dormouse layout is not ready yet' };
+    const referencePanel = api.getPanel(referenceId);
+    if (!referencePanel) return { ok: false, message: `surface '${referenceId}' is not visible` };
+
+    if (title) {
+      const titleError = validateUserTitle(title);
+      if (titleError) return { ok: false, message: titleError };
+    }
+
+    const newId = generatePaneId();
+    const defaults = getDefaultShellOpts();
+    const sourceCwd = getTerminalPaneState(referencePanel.id).cwd;
+    const inheritedCwd = sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined;
+
+    if (command) {
+      setPendingShellOpts(newId, {
+        shell: defaults?.shell,
+        args: commandShellArgs(defaults?.shell, command),
+        cwd: inheritedCwd,
+        title,
+        untouched: false,
+      });
+    } else if (defaults?.shell || inheritedCwd || title) {
+      setPendingShellOpts(newId, {
+        shell: defaults?.shell,
+        args: defaults?.args,
+        cwd: inheritedCwd,
+        title,
+      });
+    }
+
+    if (title) {
+      const result = setTerminalUserTitle(newId, title);
+      if (!result.accepted) return { ok: false, message: `title is ${result.reason}` };
+    }
+
+    const dockDirection = dockviewDirectionForDor(direction);
+    freshlySpawnedRef.current.set(newId, spawnDirectionForDockview(dockDirection));
+    api.addPanel({
+      id: newId,
+      component: 'terminal',
+      tabComponent: 'terminal',
+      title: title ?? UNNAMED_PANEL_TITLE,
+      position: { referencePanel: referencePanel.id, direction: dockDirection },
+    });
+    selectPane(newId);
+    if (title) api.getPanel(newId)?.api.setTitle(title);
+    onEventRef.current?.({
+      type: 'split',
+      direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
+      source: 'dor',
+    });
+    if (minimized) {
+      getOrCreateTerminal(newId);
+      minimizePane(newId);
+    }
+    return { ok: true, value: { id: newId, ref: surfaceRefForId(newId) } };
+  }, [generatePaneId, minimizePane, selectPane, surfaceRefForId]);
+
   // Listen for external "new terminal" requests (e.g. from the standalone AppBar)
   useEffect(() => {
     const handler = (e: Event) => {
@@ -662,11 +876,6 @@ export function Wall({
       const detail = (event as CustomEvent<DorControlRequest>).detail;
       if (!detail) return;
 
-      if (detail.method !== 'surface.list') {
-        detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
-        return;
-      }
-
       const params = detail.params ?? {};
       if (!isSingletonWorkspaceTarget(params.workspace)) {
         detail.respond({ ok: false, error: `unsupported workspace target '${params.workspace}'` });
@@ -683,45 +892,137 @@ export function Wall({
         return;
       }
 
-      const panels = api.panels;
-      const activeId = api.activePanel?.id ?? (selectedTypeRef.current === 'pane' ? selectedIdRef.current : null);
-      const terminalStates = getTerminalPaneStateSnapshot();
-      const activityStates = getActivitySnapshot();
-      const appTitleForPane = buildAppTitleResolver(terminalStates, activityStates);
-      const panelStates = panels.map((panel) => terminalStates.get(panel.id) ?? createTerminalPaneState());
+      if (detail.method === 'surface.list') {
+        const surfaces = buildDorSurfaces(api);
+        detail.respond({
+          ok: true,
+          result: {
+            surfaces: surfaces.filter((surface) => matchesDorPaneTarget(params.pane, surface)),
+            workspaceRef: 'workspace:1',
+            windowRef: 'window:1',
+          },
+        });
+        return;
+      }
 
-      const surfaces: DorSurface[] = panels.map((panel, index) => {
-        const state = panelStates[index] ?? createTerminalPaneState();
-        const derived = deriveHeader(state, panelStates, { appTitleForPane });
-        const title = resolveDisplayPrimary(derived.primary, panel.title ?? panel.id);
+      if (detail.method === 'surface.split') {
+        const directionParam = parseDorSplitDirection(params.direction);
+        if (!directionParam) {
+          detail.respond({ ok: false, error: `invalid split direction '${String(params.direction)}'` });
+          return;
+        }
+        const target = findVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        if (!target) {
+          detail.respond({ ok: false, error: `surface '${stringParam(params.surface) ?? detail.surfaceId ?? 'focused'}' was not found` });
+          return;
+        }
+        const targetPanel = api.getPanel(target.id);
+        if (!targetPanel) {
+          detail.respond({ ok: false, error: `surface '${target.ref}' is not visible` });
+          return;
+        }
+        const direction = directionParam === 'auto'
+          ? dorDirectionForDockview(pickSplitDirection(targetPanel))
+          : directionParam;
+        const rawCommand = stringParam(params.command);
+        const command = rawCommand?.trim() || undefined;
+        if (params.command !== undefined && !command) {
+          detail.respond({ ok: false, error: 'command cannot be empty' });
+          return;
+        }
+        const result = createSplitSurface({
+          command,
+          direction,
+          minimized: booleanParam(params.minimized),
+          referenceId: target.id,
+        });
+        if (!result.ok) {
+          detail.respond({ ok: false, error: result.message });
+          return;
+        }
+        detail.respond({
+          ok: true,
+          result: {
+            status: 'created',
+            surfaceId: result.value.id,
+            surfaceRef: result.value.ref,
+            direction,
+            minimized: booleanParam(params.minimized),
+            ...(command ? { command } : {}),
+          },
+        });
+        return;
+      }
 
-        return {
-          id: panel.id,
-          ref: `surface:${index + 1}`,
-          paneRef: `pane:${index + 1}`,
-          type: 'terminal',
+      if (detail.method === 'surface.ensure') {
+        const command = stringParam(params.command)?.trim();
+        if (!command) {
+          detail.respond({ ok: false, error: 'command cannot be empty' });
+          return;
+        }
+        const title = (stringParam(params.title)?.trim() || titleFromCommand(command));
+        const titleError = validateUserTitle(title);
+        if (titleError) {
+          detail.respond({ ok: false, error: titleError });
+          return;
+        }
+        const existingId = findSurfaceIdByUserTitle(title);
+        if (existingId) {
+          detail.respond({
+            ok: true,
+            result: {
+              status: 'existing',
+              surfaceId: existingId,
+              surfaceRef: surfaceRefForId(existingId),
+              title,
+              command,
+              minimized: doorsRef.current.some((door) => door.id === existingId),
+            },
+          });
+          return;
+        }
+        const target = findVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        if (!target) {
+          detail.respond({ ok: false, error: `surface '${stringParam(params.surface) ?? detail.surfaceId ?? 'focused'}' was not found` });
+          return;
+        }
+        const targetPanel = api.getPanel(target.id);
+        if (!targetPanel) {
+          detail.respond({ ok: false, error: `surface '${target.ref}' is not visible` });
+          return;
+        }
+        const direction = dorDirectionForDockview(pickSplitDirection(targetPanel));
+        const result = createSplitSurface({
+          command,
+          direction,
+          minimized: booleanParam(params.minimized),
+          referenceId: target.id,
           title,
-          focused: panel.id === activeId,
-          index,
-          indexInPane: 0,
-          requestedWorkingDirectory: state.cwd?.path ?? null,
-          selectedInPane: true,
-        };
-      });
+        });
+        if (!result.ok) {
+          detail.respond({ ok: false, error: result.message });
+          return;
+        }
+        detail.respond({
+          ok: true,
+          result: {
+            status: 'created',
+            surfaceId: result.value.id,
+            surfaceRef: result.value.ref,
+            title,
+            command,
+            minimized: booleanParam(params.minimized),
+          },
+        });
+        return;
+      }
 
-      detail.respond({
-        ok: true,
-        result: {
-          surfaces: surfaces.filter((surface) => matchesDorPaneTarget(params.pane, surface)),
-          workspaceRef: 'workspace:1',
-          windowRef: 'window:1',
-        },
-      });
+      detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
     };
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, []);
+  }, [buildDorSurfaces, createSplitSurface, findSurfaceIdByUserTitle, findVisibleSurface, surfaceRefForId]);
 
   const addSplitPanel = useCallback((
     id: string | null,

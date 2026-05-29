@@ -1,5 +1,13 @@
 import { createConnection } from 'node:net';
-import type { ControlClient, ListSurfacesRequest, ListSurfacesResponse } from './cli.js';
+import type {
+  ControlClient,
+  EnsureSurfaceRequest,
+  EnsureSurfaceResponse,
+  ListSurfacesRequest,
+  ListSurfacesResponse,
+  SplitSurfaceRequest,
+  SplitSurfaceResponse,
+} from './cli.js';
 
 export interface SocketControlClientOptions {
   socketPath: string;
@@ -35,6 +43,14 @@ export class SocketControlClient implements ControlClient {
 
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse> {
     return this.request<ListSurfacesResponse>('surface.list', request);
+  }
+
+  splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse> {
+    return this.request<SplitSurfaceResponse>('surface.split', request);
+  }
+
+  ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse> {
+    return this.request<EnsureSurfaceResponse>('surface.ensure', request);
   }
 
   private request<T>(method: string, params: unknown): Promise<T> {

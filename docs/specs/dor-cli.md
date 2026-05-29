@@ -128,9 +128,111 @@ Invariants:
 
 ## Current Implemented Commands
 
-All implemented list commands call the private `surface.list` control method.
-`Wall.tsx` derives the response from current Dockview panels plus terminal
-state/activity snapshots, then returns `workspace:1` and `window:1`.
+Implemented commands call private `surface.*` control methods. `surface.list`
+derives its response from current Dockview panels plus terminal state/activity
+snapshots, then returns `workspace:1` and `window:1`.
+
+### `dor split`
+
+Usage:
+
+```text
+dor split [--left|--right|--up|--down|--auto] [--command <cmd>] [--minimize] [--surface <id|ref|index>] [--json]
+```
+
+Behavior:
+
+- Calls the private `surface.split` control method.
+- Creates a new terminal surface by splitting an existing surface.
+- Direction flags are mutually exclusive. If no direction is provided, `--auto`
+  is used.
+- `--auto` chooses `right` when the target surface is wide and `down` when it is
+  narrow.
+- `--surface` selects the surface to split. If omitted, Dormouse uses the
+  caller surface when available, then the focused surface.
+- `--command` runs the given command as the new terminal surface's initial
+  command.
+- `--minimize` creates the surface and immediately sends it to the minimized
+  area.
+- No workspace argument exists until Dormouse supports multiple workspaces.
+- `split` does not know about non-terminal surface types. Compose future content
+  commands through the terminal:
+
+```sh
+dor split --right --command "dor iframe https://example.com"
+dor split --auto --command "dor agent-browser open https://example.com"
+```
+
+Text shape:
+
+```text
+created surface:2  [right]
+created surface:3  [down]  [minimized]  "pnpm dev"
+```
+
+JSON shape:
+
+```json
+{
+  "status": "created",
+  "surface_id": "pane-abc",
+  "surface_ref": "surface:2",
+  "direction": "right",
+  "minimized": false,
+  "command": "pnpm dev"
+}
+```
+
+### `dor ensure`
+
+Usage:
+
+```text
+dor ensure [--title <title>] [--minimize] [--surface <id|ref|index>] [--json] -- <command...>
+```
+
+Behavior:
+
+- Calls the private `surface.ensure` control method.
+- Ensures one surface exists in the current workspace for a user-enforced title.
+- The idempotency key is always the user-enforced title.
+- If `--title` is omitted, Dormouse derives the title from the command after
+  `--`.
+- If a surface in the current workspace already has the enforced title,
+  Dormouse returns that surface and does not start another command.
+- If no surface has that enforced title, Dormouse creates a split, starts the
+  command, marks the surface title as user-enforced, and returns the new
+  surface.
+- A user-enforced title is visible in the UI and must not be overwritten by
+  terminal title escape sequences from the running process.
+- Matching uses Dormouse metadata, not process inspection.
+- Minimized surfaces participate in matching.
+- `--minimize` applies only when creating a new surface; it does not minimize an
+  existing match.
+- `--surface` selects the surface to split only when creating a new surface. If
+  omitted, Dormouse uses the same caller/focused fallback as `dor split`.
+- Closed/killed surfaces do not participate in matching.
+- No workspace argument exists until Dormouse supports multiple workspaces.
+
+Text shape:
+
+```text
+created surface:3  "dev server"
+existing surface:3  "dev server"
+```
+
+JSON shape:
+
+```json
+{
+  "status": "created",
+  "surface_id": "pane-def",
+  "surface_ref": "surface:3",
+  "title": "dev server",
+  "command": "pnpm dev:workspace",
+  "minimized": false
+}
+```
 
 ### `dor list-panes`
 
@@ -184,109 +286,6 @@ Text shape:
 
 ```text
 * surface:1  dor list-pane-surfaces  [selected]
-```
-
-## Planned Dormouse-Native Commands
-
-These commands are not implemented yet. They define the intended Dormouse-first
-CLI shape for surface creation and idempotent user workflows.
-
-### `dor split`
-
-Usage:
-
-```text
-dor split [--left|--right|--up|--down|--auto] [--command <cmd>] [--minimize] [--surface <id|ref|index>] [--json]
-```
-
-Behavior:
-
-- Creates a new terminal surface by splitting an existing surface.
-- Direction flags are mutually exclusive. If no direction is provided, `--auto`
-  is used.
-- `--auto` chooses `right` when the target surface is wide and `down` when it is
-  narrow.
-- `--surface` selects the surface to split. If omitted, Dormouse uses the
-  caller surface when available, then the focused surface.
-- `--command` runs the given command as the new terminal surface's initial
-  command.
-- `--minimize` creates the surface and immediately sends it to the minimized
-  area.
-- No workspace argument exists until Dormouse supports multiple workspaces.
-- `split` does not know about non-terminal surface types. Compose future content
-  commands through the terminal:
-
-```sh
-dor split --right --command "dor iframe https://example.com"
-dor split --auto --command "dor agent-browser open https://example.com"
-```
-
-Text shape:
-
-```text
-created surface:2  [right]
-created surface:3  [down]  [minimized]  "pnpm dev"
-```
-
-JSON shape:
-
-```json
-{
-  "status": "created",
-  "surface_ref": "surface:2",
-  "direction": "right",
-  "minimized": false,
-  "command": "pnpm dev"
-}
-```
-
-### `dor ensure`
-
-Usage:
-
-```text
-dor ensure [--title <title>] [--minimize] [--surface <id|ref|index>] [--json] -- <command...>
-```
-
-Behavior:
-
-- Ensures one surface exists in the current workspace for a user-enforced title.
-- The idempotency key is always the user-enforced title.
-- If `--title` is omitted, Dormouse derives the title from the command after
-  `--`.
-- If a surface in the current workspace already has the enforced title,
-  Dormouse returns that surface and does not start another command.
-- If no surface has that enforced title, Dormouse creates a split, starts the
-  command, marks the surface title as user-enforced, and returns the new
-  surface.
-- A user-enforced title is visible in the UI and must not be overwritten by
-  terminal title escape sequences from the running process.
-- Matching uses Dormouse metadata, not process inspection.
-- Minimized surfaces participate in matching.
-- `--minimize` applies only when creating a new surface; it does not minimize an
-  existing match.
-- `--surface` selects the surface to split only when creating a new surface. If
-  omitted, Dormouse uses the same caller/focused fallback as `dor split`.
-- Closed/killed surfaces do not participate in matching.
-- No workspace argument exists until Dormouse supports multiple workspaces.
-
-Text shape:
-
-```text
-created surface:3  "dev server"
-existing surface:3  "dev server"
-```
-
-JSON shape:
-
-```json
-{
-  "status": "created",
-  "surface_ref": "surface:3",
-  "title": "dev server",
-  "command": "pnpm dev:workspace",
-  "minimized": false
-}
 ```
 
 ## Compatibility References

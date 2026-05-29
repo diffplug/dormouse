@@ -6,8 +6,9 @@ Usage:
   dor <command> [options]
 
 Commands:
+  split
+  ensure
   list-panes
   list-pane-surfaces
 
 stderr:
-

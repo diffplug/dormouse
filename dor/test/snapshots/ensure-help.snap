@@ -1,0 +1,5 @@
+exitCode: 0
+stdout:
+Usage: dor ensure [--title <title>] [--minimize] [--surface <id|ref|index>] [--json] -- <command...>
+
+stderr:

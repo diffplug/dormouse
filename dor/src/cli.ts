@@ -1,6 +1,8 @@
 import { SocketControlClient } from './control-client.js';
 
 export type IdFormat = 'refs' | 'uuids' | 'both';
+export type SplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
+export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
 
 export interface Surface {
   id: string;
@@ -27,8 +29,42 @@ export interface ListSurfacesResponse {
   windowRef: string;
 }
 
+export interface SplitSurfaceRequest {
+  command?: string;
+  direction: SplitDirection;
+  minimized: boolean;
+  surface?: string;
+}
+
+export interface SplitSurfaceResponse {
+  status: 'created';
+  surfaceId?: string;
+  surfaceRef: string;
+  direction: ResolvedSplitDirection;
+  minimized: boolean;
+  command?: string;
+}
+
+export interface EnsureSurfaceRequest {
+  command: string;
+  minimized: boolean;
+  surface?: string;
+  title?: string;
+}
+
+export interface EnsureSurfaceResponse {
+  status: 'created' | 'existing';
+  surfaceId?: string;
+  surfaceRef: string;
+  title: string;
+  command: string;
+  minimized: boolean;
+}
+
 export interface ControlClient {
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse>;
+  splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;
+  ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse>;
 }
 
 export interface CliEnv {
@@ -54,6 +90,22 @@ interface ListSurfacesOptions {
   window?: string;
 }
 
+interface SplitOptions {
+  json: boolean;
+  command?: string;
+  direction: SplitDirection;
+  minimized: boolean;
+  surface?: string;
+}
+
+interface EnsureOptions {
+  json: boolean;
+  command: string;
+  minimized: boolean;
+  surface?: string;
+  title?: string;
+}
+
 interface Pane {
   id: string;
   ref: string;
@@ -70,8 +122,10 @@ type ParseResult<T> =
   | { ok: false; message: string };
 
 const COMMANDS = new Set([
+  'ensure',
   'list-panes',
   'list-pane-surfaces',
+  'split',
 ]);
 
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<CliResult> {
@@ -88,7 +142,17 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     return ok(printCommandHelp(command));
   }
 
-  return listSurfaces(command, args, options);
+  switch (command) {
+    case 'list-panes':
+    case 'list-pane-surfaces':
+      return listSurfaces(command, args, options);
+    case 'split':
+      return splitSurface(args, options);
+    case 'ensure':
+      return ensureSurface(args, options);
+    default:
+      return fail(`unknown command '${command}'`);
+  }
 }
 
 function ok(stdout: string): CliResult {
@@ -106,6 +170,8 @@ Usage:
   dor <command> [options]
 
 Commands:
+  split
+  ensure
   list-panes
   list-pane-surfaces
 `;
@@ -113,12 +179,46 @@ Commands:
 
 function printCommandHelp(command: string): string {
   switch (command) {
+    case 'split':
+      return 'Usage: dor split [--left|--right|--up|--down|--auto] [--command <cmd>] [--minimize] [--surface <id|ref|index>] [--json]\n';
+    case 'ensure':
+      return 'Usage: dor ensure [--title <title>] [--minimize] [--surface <id|ref|index>] [--json] -- <command...>\n';
     case 'list-panes':
       return 'Usage: dor list-panes [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--window <id|ref|index>]\n';
     case 'list-pane-surfaces':
       return 'Usage: dor list-pane-surfaces [--json] [--id-format refs|uuids|both] [--workspace <id|ref|index>] [--pane <id|ref|index>] [--window <id|ref|index>]\n';
     default:
       return '';
+  }
+}
+
+async function splitSurface(args: string[], options: CliOptions): Promise<CliResult> {
+  const parsed = parseSplitArgs(args);
+  if (!parsed.ok) return fail(parsed.message);
+
+  const clientResult = resolveControlClient(options);
+  if (!clientResult.ok) return fail(clientResult.message);
+
+  try {
+    const response = await clientResult.value.splitSurface(parsed.value);
+    return ok(renderSplitResponse(response, parsed.value.json));
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function ensureSurface(args: string[], options: CliOptions): Promise<CliResult> {
+  const parsed = parseEnsureArgs(args);
+  if (!parsed.ok) return fail(parsed.message);
+
+  const clientResult = resolveControlClient(options);
+  if (!clientResult.ok) return fail(clientResult.message);
+
+  try {
+    const response = await clientResult.value.ensureSurface(parsed.value);
+    return ok(renderEnsureResponse(response, parsed.value.json));
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -198,6 +298,91 @@ function parseListSurfacesArgs(command: string, args: string[]): ParseResult<Lis
   return { ok: true, value: result };
 }
 
+function parseSplitArgs(args: string[]): ParseResult<SplitOptions> {
+  const result: SplitOptions = {
+    json: false,
+    direction: 'auto',
+    minimized: false,
+  };
+  let explicitDirection: SplitDirection | null = null;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--json') {
+      result.json = true;
+    } else if (arg === '--minimize') {
+      result.minimized = true;
+    } else if (arg === '--command') {
+      const value = takeFlagValue(args, index, arg);
+      if (!value.ok) return value;
+      result.command = value.value;
+      index += 1;
+    } else if (arg === '--surface') {
+      const value = takeFlagValue(args, index, arg);
+      if (!value.ok) return value;
+      result.surface = value.value;
+      index += 1;
+    } else if (isDirectionFlag(arg)) {
+      const direction = directionFromFlag(arg);
+      if (explicitDirection && explicitDirection !== direction) {
+        return { ok: false, message: 'direction flags are mutually exclusive' };
+      }
+      explicitDirection = direction;
+      result.direction = direction;
+    } else if (arg.startsWith('-')) {
+      return { ok: false, message: `unknown option '${arg}'` };
+    } else {
+      return { ok: false, message: `unexpected argument '${arg}'` };
+    }
+  }
+
+  return { ok: true, value: result };
+}
+
+function parseEnsureArgs(args: string[]): ParseResult<EnsureOptions> {
+  const result: Omit<EnsureOptions, 'command'> & { command?: string } = {
+    json: false,
+    minimized: false,
+  };
+  let commandArgs: string[] | null = null;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--') {
+      commandArgs = args.slice(index + 1);
+      break;
+    } else if (arg === '--json') {
+      result.json = true;
+    } else if (arg === '--minimize') {
+      result.minimized = true;
+    } else if (arg === '--title') {
+      const value = takeFlagValue(args, index, arg);
+      if (!value.ok) return value;
+      result.title = value.value;
+      index += 1;
+    } else if (arg === '--surface') {
+      const value = takeFlagValue(args, index, arg);
+      if (!value.ok) return value;
+      result.surface = value.value;
+      index += 1;
+    } else if (arg.startsWith('-')) {
+      return { ok: false, message: `unknown option '${arg}'` };
+    } else {
+      return { ok: false, message: `unexpected argument '${arg}' before --` };
+    }
+  }
+
+  if (!commandArgs) {
+    return { ok: false, message: 'dor ensure requires -- <command...>' };
+  }
+  const command = commandArgs.join(' ').trim();
+  if (!command) {
+    return { ok: false, message: 'dor ensure requires a command after --' };
+  }
+
+  return { ok: true, value: { ...result, command } };
+}
+
 function takeFlagValue(args: string[], index: number, flag: string): ParseResult<string> {
   const value = args[index + 1];
   if (!value || value.startsWith('-')) {
@@ -208,6 +393,25 @@ function takeFlagValue(args: string[], index: number, flag: string): ParseResult
 
 function isIdFormat(value: string): value is IdFormat {
   return value === 'refs' || value === 'uuids' || value === 'both';
+}
+
+function isDirectionFlag(value: string): boolean {
+  return value === '--left' || value === '--right' || value === '--up' || value === '--down' || value === '--auto';
+}
+
+function directionFromFlag(value: string): SplitDirection {
+  switch (value) {
+    case '--left':
+      return 'left';
+    case '--right':
+      return 'right';
+    case '--up':
+      return 'up';
+    case '--down':
+      return 'down';
+    default:
+      return 'auto';
+  }
 }
 
 function validateSingletonTargets(workspace: string | undefined, window: string | undefined): ParseResult<void> {
@@ -379,4 +583,36 @@ function renderPaneSurfaceJson(surface: Surface, idFormat: IdFormat): Record<str
 
 function renderPaneSurfaceTitle(surface: Surface): string {
   return surface.title;
+}
+
+function renderSplitResponse(response: SplitSurfaceResponse, json: boolean): string {
+  if (json) {
+    return `${JSON.stringify({
+      status: response.status,
+      ...(response.surfaceId ? { surface_id: response.surfaceId } : {}),
+      surface_ref: response.surfaceRef,
+      direction: response.direction,
+      minimized: response.minimized,
+      ...(response.command ? { command: response.command } : {}),
+    }, null, 2)}\n`;
+  }
+
+  const minimized = response.minimized ? '  [minimized]' : '';
+  const command = response.command ? `  ${JSON.stringify(response.command)}` : '';
+  return `${response.status} ${response.surfaceRef}  [${response.direction}]${minimized}${command}\n`;
+}
+
+function renderEnsureResponse(response: EnsureSurfaceResponse, json: boolean): string {
+  if (json) {
+    return `${JSON.stringify({
+      status: response.status,
+      ...(response.surfaceId ? { surface_id: response.surfaceId } : {}),
+      surface_ref: response.surfaceRef,
+      title: response.title,
+      command: response.command,
+      minimized: response.minimized,
+    }, null, 2)}\n`;
+  }
+
+  return `${response.status} ${response.surfaceRef}  ${JSON.stringify(response.title)}\n`;
 }

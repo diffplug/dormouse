@@ -278,17 +278,21 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
 
-  const entry = setupTerminalEntry(id, { untouched: true });
-  resetTerminalPaneState(id);
-
   const shellOpts = pendingShellOpts.get(id);
   pendingShellOpts.delete(id);
+  const entry = setupTerminalEntry(id, { untouched: shellOpts?.untouched ?? true });
+  resetTerminalPaneState(id);
+  if (shellOpts?.title) {
+    setTerminalUserTitle(id, shellOpts.title);
+  }
 
   const dims = entry.fit.proposeDimensions();
   getPlatform().spawnPty(id, {
     cols: dims?.cols || 80,
     rows: dims?.rows || 30,
-    ...shellOpts,
+    shell: shellOpts?.shell,
+    args: shellOpts?.args,
+    cwd: shellOpts?.cwd,
   });
   seedProcessCwdAfterSpawn(id);
 

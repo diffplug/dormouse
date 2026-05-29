@@ -22,6 +22,7 @@ function invoke(cmd: string, args?: Record<string, unknown>): void {
 
 type DorControlRequestPayload = {
   requestId: string;
+  surfaceId?: string;
   method: string;
   params?: Record<string, unknown>;
 };
@@ -145,6 +146,7 @@ export class TauriAdapter implements PlatformAdapter {
         window.dispatchEvent(new CustomEvent("dormouse:control-request", {
           detail: {
             requestId: payload.requestId,
+            surfaceId: payload.surfaceId,
             method: payload.method,
             params: payload.params ?? {},
             respond,

@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: dor ensure requires -- <command...>

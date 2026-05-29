@@ -56,6 +56,29 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         workspaceRef: 'workspace:1',
       };
     },
+    async splitSurface(request) {
+      this.requests.push({ method: 'splitSurface', request });
+      return {
+        status: 'created',
+        surfaceId: '33333333-3333-4333-8333-333333333333',
+        surfaceRef: 'surface:3',
+        direction: request.direction === 'auto' ? 'right' : request.direction,
+        minimized: request.minimized,
+        ...(request.command ? { command: request.command } : {}),
+      };
+    },
+    async ensureSurface(request) {
+      this.requests.push({ method: 'ensureSurface', request });
+      const title = request.title ?? request.command;
+      return {
+        status: title === 'dev server' ? 'existing' : 'created',
+        surfaceId: '33333333-3333-4333-8333-333333333333',
+        surfaceRef: 'surface:3',
+        title,
+        command: request.command,
+        minimized: request.minimized,
+      };
+    },
   };
 }
 
@@ -66,7 +89,7 @@ async function snapshot(name, result) {
     result.stdout,
     'stderr:',
     result.stderr,
-  ].join('\n') + '\n';
+  ].join('\n');
   const path = join(snapshotsDir, `${name}.snap`);
   if (updateSnapshots) {
     await mkdir(snapshotsDir, { recursive: true });
@@ -87,6 +110,42 @@ test('list-panes help output', async () => {
 
 test('list-pane-surfaces help output', async () => {
   await snapshot('list-pane-surfaces-help', await runCli(['list-pane-surfaces', '--help']));
+});
+
+test('split help output', async () => {
+  await snapshot('split-help', await runCli(['split', '--help']));
+});
+
+test('ensure help output', async () => {
+  await snapshot('ensure-help', await runCli(['ensure', '--help']));
+});
+
+test('split text output', async () => {
+  await snapshot(
+    'split-text',
+    await runCli(['split', '--down', '--minimize', '--command', 'pnpm dev'], { client: fixtureClient() }),
+  );
+});
+
+test('split json output', async () => {
+  await snapshot(
+    'split-json',
+    await runCli(['split', '--command', 'pnpm dev', '--json'], { client: fixtureClient() }),
+  );
+});
+
+test('ensure text output', async () => {
+  await snapshot(
+    'ensure-text',
+    await runCli(['ensure', '--title', 'dev server', '--', 'pnpm', 'dev:workspace'], { client: fixtureClient() }),
+  );
+});
+
+test('ensure json output', async () => {
+  await snapshot(
+    'ensure-json',
+    await runCli(['ensure', '--json', '--minimize', '--', 'pnpm', 'dev:workspace'], { client: fixtureClient() }),
+  );
 });
 
 test('list-panes text output', async () => {
@@ -141,4 +200,12 @@ test('unsupported workspace output', async () => {
     'unsupported-workspace',
     await runCli(['list-panes', '--workspace', 'workspace:2'], { client: fixtureClient() }),
   );
+});
+
+test('ensure missing command output', async () => {
+  await snapshot('ensure-missing-command', await runCli(['ensure'], { client: fixtureClient() }));
+});
+
+test('split conflicting direction output', async () => {
+  await snapshot('split-conflicting-direction', await runCli(['split', '--left', '--right'], { client: fixtureClient() }));
 });
