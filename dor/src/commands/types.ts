@@ -64,10 +64,24 @@ export interface EnsureSurfaceResponse {
   minimized: boolean;
 }
 
+export interface SendSurfaceRequest {
+  surface?: string;
+  input: string;
+  inputCount: number;
+}
+
+export interface SendSurfaceResponse {
+  status: 'sent';
+  surfaceId?: string;
+  surfaceRef: string;
+  inputCount: number;
+}
+
 export interface ControlClient {
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse>;
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse>;
+  sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse>;
 }
 
 export interface CliEnv {
@@ -77,6 +91,7 @@ export interface CliEnv {
 export interface CliOptions {
   env?: CliEnv;
   client?: ControlClient;
+  readStdin?: () => Promise<string>;
   versionMetadata?: VersionMetadata;
 }
 

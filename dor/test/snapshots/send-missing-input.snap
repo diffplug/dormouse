@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: dor send requires exactly one input source

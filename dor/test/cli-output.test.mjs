@@ -80,6 +80,17 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         minimized: request.minimized,
       };
     },
+    async sendSurface(request) {
+      this.requests.push({ method: 'sendSurface', request });
+      return {
+        status: 'sent',
+        surfaceId: request.surface === 'surface:2'
+          ? '22222222-2222-4222-8222-222222222222'
+          : '11111111-1111-4111-8111-111111111111',
+        surfaceRef: request.surface ?? 'surface:1',
+        inputCount: request.inputCount,
+      };
+    },
   };
 }
 
@@ -186,6 +197,73 @@ test('version output', async () => {
       },
     }),
   );
+});
+
+test('send text output', async () => {
+  await snapshot(
+    'send-text',
+    await runCli(['send', '--surface', 'surface:2', 'echo hello\\n'], { client: fixtureClient() }),
+  );
+});
+
+test('send sends escaped text to the host', async () => {
+  const client = fixtureClient();
+  await runCli(['send', '--text', 'echo hello\\n'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'sendSurface',
+    request: {
+      surface: undefined,
+      input: 'echo hello\n',
+      inputCount: 1,
+    },
+  }]);
+});
+
+test('send sends key input to the host', async () => {
+  const client = fixtureClient();
+  await runCli(['send', '--surface', 'surface:2', '--key', 'ctrl-c'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'sendSurface',
+    request: {
+      surface: 'surface:2',
+      input: '\x03',
+      inputCount: 1,
+    },
+  }]);
+});
+
+test('send sequence sends ordered input to the host', async () => {
+  const client = fixtureClient();
+  await runCli(['send', '--sequence', '[{"text":"npm test"},{"key":"enter"}]'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'sendSurface',
+    request: {
+      surface: undefined,
+      input: 'npm test\r',
+      inputCount: 2,
+    },
+  }]);
+});
+
+test('send stdin sends standard input to the host', async () => {
+  const client = fixtureClient();
+  await runCli(['send', '--stdin'], { client, readStdin: async () => 'cat from stdin\n' });
+  assert.deepEqual(client.requests, [{
+    method: 'sendSurface',
+    request: {
+      surface: undefined,
+      input: 'cat from stdin\n',
+      inputCount: 1,
+    },
+  }]);
+});
+
+test('send missing input output', async () => {
+  await snapshot('send-missing-input', await runCli(['send'], { client: fixtureClient() }));
+});
+
+test('send unsupported key output', async () => {
+  await snapshot('send-unsupported-key', await runCli(['send', '--key', 'cmd-k'], { client: fixtureClient() }));
 });
 
 test('list-panes text output', async () => {

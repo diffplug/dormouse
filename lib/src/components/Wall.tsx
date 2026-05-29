@@ -36,7 +36,7 @@ import {
   resolveDisplayPrimary,
 } from '../lib/terminal-state';
 import { orchestrateKill } from '../lib/kill-animation';
-import { PLATFORM_STRING } from '../lib/platform';
+import { getPlatform, PLATFORM_STRING } from '../lib/platform';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
 import type {
   Surface as DorSurface,
@@ -88,6 +88,8 @@ type ShellSpawnNoticeState = {
 type DorControlParams = {
   command?: unknown;
   direction?: unknown;
+  input?: unknown;
+  inputCount?: unknown;
   minimized?: unknown;
   pane?: string;
   surface?: unknown;
@@ -1017,6 +1019,30 @@ export function Wall({
             title,
             command,
             minimized: booleanParam(params.minimized),
+          },
+        });
+        return;
+      }
+
+      if (detail.method === 'surface.send') {
+        const input = stringParam(params.input);
+        if (input === undefined) {
+          detail.respond({ ok: false, error: 'input is required' });
+          return;
+        }
+        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        getPlatform().writePty(target.value.id, input);
+        detail.respond({
+          ok: true,
+          result: {
+            status: 'sent',
+            surfaceId: target.value.id,
+            surfaceRef: target.value.ref,
+            inputCount: typeof params.inputCount === 'number' ? params.inputCount : 1,
           },
         });
         return;

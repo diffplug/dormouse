@@ -5,6 +5,8 @@ import type {
   EnsureSurfaceResponse,
   ListSurfacesRequest,
   ListSurfacesResponse,
+  SendSurfaceRequest,
+  SendSurfaceResponse,
   SplitSurfaceRequest,
   SplitSurfaceResponse,
 } from './commands/types.js';
@@ -46,6 +48,10 @@ export class SocketControlClient implements ControlClient {
 
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse> {
     return this.request<EnsureSurfaceResponse>('surface.ensure', request);
+  }
+
+  sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse> {
+    return this.request<SendSurfaceResponse>('surface.send', request);
   }
 
   private request<T>(method: string, params: unknown): Promise<T> {
