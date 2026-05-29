@@ -1,11 +1,4 @@
-import { IS_MAC } from './platform';
-
-const IS_WINDOWS: boolean = (() => {
-  if (typeof navigator === 'undefined') return false;
-  const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
-  const p = (nav.userAgentData?.platform ?? nav.platform ?? nav.userAgent ?? '').toLowerCase();
-  return p.includes('win');
-})();
+import { IS_MAC, IS_WINDOWS } from './platform';
 
 // Matches macOS Terminal's drag-and-drop format: backslash-escape each shell
 // metacharacter instead of wrapping in quotes. TUIs like `claude` recognize

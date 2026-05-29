@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('./platform', () => ({
   IS_MAC: false,
+  IS_WINDOWS: false,
   getPlatform: () => ({
     readClipboardFilePaths: mocks.readClipboardFilePaths,
     readClipboardImageAsFilePath: mocks.readClipboardImageAsFilePath,
