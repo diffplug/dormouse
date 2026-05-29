@@ -67,6 +67,14 @@ jobs:
           AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # release.yml dispatches this workflow with the default
+          # GITHUB_TOKEN, so the actor is `github-actions[bot]`. The
+          # action refuses bot-initiated runs unless the bot is allow-
+          # listed. This is safe here: the prompt below is hardcoded (no
+          # comment/PR/issue injection vector) and the job only runs on
+          # admin-gated refs behind the `security-audit` environment. The
+          # nightly `schedule` run has a human actor and is unaffected.
+          allowed_bots: "github-actions"
           # Without an explicit allowlist the action defaults to a
           # restrictive set that excludes Bash and Write, so an
           # auditing prompt that wants to run `gh api` and produce a
