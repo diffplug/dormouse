@@ -27,7 +27,6 @@ interface SplitFlags {
 }
 
 const groupedSplitDirectionUsage = '[--left|--right|--up|--down|--auto]';
-const groupedSplitUsage = `${groupedSplitDirectionUsage} [--command cmd] [--json] [--minimize] [--surface id|ref|index]`;
 const splitUsageBrief = 'Direction flags are mutually exclusive; --auto is the default.';
 
 export const splitCommand: Command = {
@@ -62,8 +61,8 @@ export const splitCommand: Command = {
     {
       scope: 'command-usage',
       findReplace: [
-        `  dor split ${groupedSplitUsage}`,
-        `  dor split ${groupedSplitUsage}\n    ${splitUsageBrief}`,
+        '[--surface id|ref|index]\n  dor split --help',
+        `[--surface id|ref|index]\n    ${splitUsageBrief}\n  dor split --help`,
       ],
     },
     {
