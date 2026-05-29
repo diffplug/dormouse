@@ -1,4 +1,5 @@
 import type { AlertState } from '../alert-manager';
+import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 
 export interface PtyInfo {
   id: string;
@@ -66,6 +67,9 @@ export interface PlatformAdapter {
   // Open a sanitized external URI. Implementations must revalidate because
   // terminal output is untrusted.
   openExternal?(uri: string): void;
+
+  // VS Code-only escape hatch for mirrored workbench shortcuts from webviews.
+  runWorkbenchCommand?(command: VSCodeWorkbenchCommand): void;
 
   // PTY event listeners
   onPtyData(handler: (detail: { id: string; data: string }) => void): void;

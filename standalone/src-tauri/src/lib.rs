@@ -54,7 +54,7 @@ fn default_log_path() -> PathBuf {
     #[cfg(target_os = "windows")]
     if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
         return PathBuf::from(local_app_data)
-            .join("Dormouse")
+            .join("Dormouse Terminal")
             .join("dormouse.log");
     }
 

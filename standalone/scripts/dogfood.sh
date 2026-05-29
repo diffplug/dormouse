@@ -41,11 +41,11 @@ if [[ "${1:-}" == "--install" ]]; then
   # Platform-specific: copy built files to system install location
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*|Windows_NT)
-      INSTALL_DIR="$LOCALAPPDATA/Dormouse"
+      INSTALL_DIR="$LOCALAPPDATA/Dormouse Terminal"
       if [[ ! -f "$INSTALL_DIR/uninstall.exe" ]]; then
         echo "Dormouse is not installed yet."
         echo "Run the installer once first:"
-        echo "  $RELEASE_DIR/bundle/nsis/Dormouse_*-setup.exe"
+        echo "  $RELEASE_DIR/bundle/nsis/Dormouse\\ Terminal_*-setup.exe"
         echo ""
         echo "After that, 'dogfood:standalone --install' will work from then on."
         exit 1
@@ -57,7 +57,7 @@ if [[ "${1:-}" == "--install" ]]; then
       # and `//T` would then cascade and kill us. Filter by image path so we
       # only target processes loaded from the install dir.
       powershell.exe -NoProfile -Command \
-        "Get-Process -Name dormouse,node -EA SilentlyContinue | Where-Object Path -Like '$LOCALAPPDATA\\Dormouse\\*' | Stop-Process -Force -EA SilentlyContinue" \
+        "Get-Process -Name dormouse,node -EA SilentlyContinue | Where-Object Path -Like '$LOCALAPPDATA\\Dormouse Terminal\\*' | Stop-Process -Force -EA SilentlyContinue" \
         >/dev/null 2>&1 || true
       # Wipe install-dir contents except uninstall.exe (managed by NSIS).
       # We delete *contents* rather than the directory itself so we don't trip
@@ -71,17 +71,17 @@ if [[ "${1:-}" == "--install" ]]; then
       echo "✦ Installed to $INSTALL_DIR"
       ;;
     Darwin)
-      INSTALL_DIR="/Applications/Dormouse.app"
+      INSTALL_DIR="/Applications/Dormouse Terminal.app"
       if [[ ! -d "$INSTALL_DIR" ]]; then
         echo "Dormouse is not installed yet."
-        echo "Install via the DMG first:"
-        echo "  open $RELEASE_DIR/bundle/dmg/Dormouse_*.dmg"
+        echo "Move the freshly built app into place first:"
+        echo "  mv $RELEASE_DIR/bundle/macos/Dormouse\\ Terminal.app /Applications"
         echo ""
         echo "After that, 'dogfood:standalone --install' will work from then on."
         exit 1
       fi
       rm -rf "$INSTALL_DIR"
-      cp -r "$RELEASE_DIR/bundle/macos/Dormouse.app" "$INSTALL_DIR"
+      cp -r "$RELEASE_DIR/bundle/macos/Dormouse Terminal.app" "$INSTALL_DIR"
       echo "✦ Installed to $INSTALL_DIR"
       ;;
     *)
