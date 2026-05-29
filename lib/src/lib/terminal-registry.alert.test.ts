@@ -304,20 +304,9 @@ describe('terminal-registry alert behavior', () => {
     expect(isUntouched(id)).toBe(false);
   });
 
-  it('sends LF for Windows Shift+Enter before xterm handles Enter normally', () => {
-    const id = 'shift-enter-lf';
-    const entry = createSession(id);
-
-    const handled = entry.terminal.emitKeyDown();
-
-    expect(handled).toBe(false);
-    expect(entry.terminal.writes).toContain('\n');
-  });
-
-  it('sends bracketed-paste newline for Windows Shift+Enter when the app enabled bracketed paste', () => {
+  it('sends bracketed-paste newline for Windows Shift+Enter before xterm handles Enter normally', () => {
     const id = 'shift-enter-bracketed';
     const entry = createSession(id);
-    entry.terminal.modes.bracketedPasteMode = true;
 
     const handled = entry.terminal.emitKeyDown();
 

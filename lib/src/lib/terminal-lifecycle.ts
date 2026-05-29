@@ -127,7 +127,6 @@ function createXtermHost(id: string): { terminal: Terminal; fit: FitAddon; eleme
     terminal.attachCustomKeyEventHandler((event) => {
       const shiftEnterInput = shiftEnterInputForEvent(event, {
         isWindows: IS_WINDOWS,
-        bracketedPasteMode: terminal.modes.bracketedPasteMode,
       });
       if (shiftEnterInput !== null) {
         event.preventDefault();

@@ -28,21 +28,16 @@ describe('terminal keyboard normalization', () => {
     expect(shouldHandleWindowsShiftEnter(keydown(), { isWindows: true })).toBe(true);
   });
 
-  it('uses bracketed paste for Shift+Enter when the foreground app enabled bracketed paste', () => {
-    expect(shiftEnterInputForEvent(keydown(), { isWindows: true, bracketedPasteMode: true }))
+  it('uses bracketed paste for Shift+Enter on Windows', () => {
+    expect(shiftEnterInputForEvent(keydown(), { isWindows: true }))
       .toBe(BRACKETED_PASTE_NEWLINE_INPUT);
-  });
-
-  it('falls back to LF when bracketed paste is not enabled', () => {
-    expect(shiftEnterInputForEvent(keydown(), { isWindows: true, bracketedPasteMode: false }))
-      .toBe(SHIFT_ENTER_NEWLINE_INPUT);
   });
 
   it('does not match normal Enter, composing input, or non-Windows platforms', () => {
     expect(shouldHandleWindowsShiftEnter(keydown({ shiftKey: false }), { isWindows: true })).toBe(false);
     expect(shouldHandleWindowsShiftEnter(keydown({ isComposing: true }), { isWindows: true })).toBe(false);
     expect(shouldHandleWindowsShiftEnter(keydown(), { isWindows: false })).toBe(false);
-    expect(shiftEnterInputForEvent(keydown(), { isWindows: false, bracketedPasteMode: true })).toBe(null);
+    expect(shiftEnterInputForEvent(keydown(), { isWindows: false })).toBe(null);
   });
 
   it('leaves modified Enter chords alone', () => {

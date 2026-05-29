@@ -10,12 +10,12 @@ export function shouldHandleWindowsShiftEnter(
   event: KeyboardEventLike,
   options: { isWindows: boolean },
 ): boolean {
-  return shiftEnterInputForEvent(event, { ...options, bracketedPasteMode: false }) !== null;
+  return shiftEnterInputForEvent(event, options) !== null;
 }
 
 export function shiftEnterInputForEvent(
   event: KeyboardEventLike,
-  options: { isWindows: boolean; bracketedPasteMode: boolean },
+  options: { isWindows: boolean },
 ): string | null {
   if (!options.isWindows) return null;
   if (event.type !== 'keydown') return null;
@@ -23,5 +23,5 @@ export function shiftEnterInputForEvent(
   if (event.key !== 'Enter') return null;
   if (!event.shiftKey) return null;
   if (event.ctrlKey || event.altKey || event.metaKey) return null;
-  return options.bracketedPasteMode ? BRACKETED_PASTE_NEWLINE_INPUT : SHIFT_ENTER_NEWLINE_INPUT;
+  return BRACKETED_PASTE_NEWLINE_INPUT;
 }
