@@ -10,6 +10,7 @@ import { ensureCommand } from './commands/ensure.js';
 import { listPaneSurfacesCommand } from './commands/list-pane-surfaces.js';
 import { listPanesCommand } from './commands/list-panes.js';
 import { splitCommand } from './commands/split.js';
+import { versionCommand } from './commands/version.js';
 import { fail } from './commands/shared.js';
 import type {
   CliEnv,
@@ -38,11 +39,13 @@ export type {
   SplitSurfaceRequest,
   SplitSurfaceResponse,
   Surface,
+  VersionMetadata,
 } from './commands/types.js';
 
 const COMMANDS = [
   splitCommand,
   ensureCommand,
+  versionCommand,
   listPanesCommand,
   listPaneSurfacesCommand,
 ] as const satisfies readonly Command[];
@@ -50,6 +53,7 @@ const COMMANDS = [
 const ROUTES = {
   split: splitCommand.command,
   ensure: ensureCommand.command,
+  version: versionCommand.command,
   'list-panes': listPanesCommand.command,
   'list-pane-surfaces': listPaneSurfacesCommand.command,
 };

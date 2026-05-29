@@ -77,6 +77,7 @@ export interface CliEnv {
 export interface CliOptions {
   env?: CliEnv;
   client?: ControlClient;
+  versionMetadata?: VersionMetadata;
 }
 
 export interface CliResult {
@@ -93,6 +94,12 @@ export interface Command {
   name: string;
   command: StricliCommand<DorCommandContext>;
   helpPatches?: readonly HelpPatch[];
+}
+
+export interface VersionMetadata {
+  version: string;
+  commit: string;
+  commitsSinceVersion: number;
 }
 
 export interface HelpPatch {

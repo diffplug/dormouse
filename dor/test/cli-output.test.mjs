@@ -175,6 +175,19 @@ test('ensure json output', async () => {
   );
 });
 
+test('version output', async () => {
+  await snapshot(
+    'version',
+    await runCli(['version'], {
+      versionMetadata: {
+        version: '0.12.0',
+        commit: '6e86b3ba',
+        commitsSinceVersion: 89,
+      },
+    }),
+  );
+});
+
 test('list-panes text output', async () => {
   await snapshot('list-panes-text', await runCli(['list-panes'], { client: fixtureClient() }));
 });
