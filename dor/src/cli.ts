@@ -15,6 +15,7 @@ import type {
   CliEnv,
   CliOptions,
   CliResult,
+  Command,
   DorCommandContext,
   ParseResult,
 } from './commands/types.js';
@@ -38,15 +39,18 @@ export type {
   Surface,
 } from './commands/types.js';
 
+const COMMANDS = [
+  splitCommand,
+  ensureCommand,
+  listPanesCommand,
+  listPaneSurfacesCommand,
+] as const satisfies readonly Command[];
+
 const ROUTES = {
   split: splitCommand.command,
   ensure: ensureCommand.command,
   'list-panes': listPanesCommand.command,
   'list-pane-surfaces': listPaneSurfacesCommand.command,
-};
-
-const ROOT_USAGE_OVERRIDES: Partial<Record<keyof typeof ROUTES, string>> = {
-  ...(splitCommand.rootUsage ? { split: splitCommand.rootUsage } : {}),
 };
 
 const DOR_TEXT: ApplicationText = {
@@ -92,7 +96,7 @@ interface CaptureProcess extends StricliProcess {
 }
 
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<CliResult> {
-  const rootHelpRequest = isRootHelpRequest(argv);
+  const helpTarget = getHelpTarget(argv);
   const [commandName, ...args] = argv[0] === 'help' ? ['--help'] : argv;
 
   if (commandName === 'ensure' && !args.includes('-h') && !args.includes('--help')) {
@@ -111,25 +115,47 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
 
   return {
     exitCode: normalizeExitCode(capture.process.exitCode),
-    stdout: rootHelpRequest ? applyRootUsageOverrides(capture.stdout()) : capture.stdout(),
+    stdout: applyHelpPatches(capture.stdout(), helpTarget),
     stderr: capture.stderr(),
   };
 }
 
-function isRootHelpRequest(argv: string[]): boolean {
-  return argv.length === 0 || argv[0] === 'help' || (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h'));
+type HelpTarget =
+  | { scope: 'root' }
+  | { scope: 'command'; commandName: string };
+
+function getHelpTarget(argv: string[]): HelpTarget | undefined {
+  if (argv.length === 0 || argv[0] === 'help' || (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h'))) {
+    return { scope: 'root' };
+  }
+
+  const commandName = argv[0];
+  if (commandName && isCommandName(commandName) && argv.some((arg) => arg === '--help' || arg === '-h')) {
+    return { scope: 'command', commandName };
+  }
+
+  return undefined;
 }
 
-function applyRootUsageOverrides(stdout: string): string {
-  const lines = stdout.split('\n').map((line) => {
-    for (const [route, usage] of Object.entries(ROOT_USAGE_OVERRIDES)) {
-      if (line.startsWith(`  dor ${route} `) || line === `  dor ${route}`) {
-        return `  ${usage}`;
+function isCommandName(value: string): value is keyof typeof ROUTES {
+  return value in ROUTES;
+}
+
+function applyHelpPatches(stdout: string, target: HelpTarget | undefined): string {
+  if (!target) return stdout;
+
+  let patched = stdout;
+  for (const command of COMMANDS) {
+    if (target.scope === 'command' && command.name !== target.commandName) {
+      continue;
+    }
+    for (const patch of command.helpPatches ?? []) {
+      if (patch.scope === target.scope) {
+        patched = patched.split(patch.find).join(patch.replace);
       }
     }
-    return line;
-  });
-  return lines.join('\n');
+  }
+  return patched;
 }
 
 function validateEnsureDelimiter(args: string[]): ParseResult<void> {

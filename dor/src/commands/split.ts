@@ -26,18 +26,52 @@ interface SplitFlags {
   readonly up?: boolean;
 }
 
-const splitUsage = '[--left|--right|--up|--down|--auto] [--command <cmd>] [--minimize] [--surface <id|ref|index>] [--json]';
+const generatedSplitUsage = '[--auto] [--command cmd] [--down] [--json] [--left] [--minimize] [--right] [--surface id|ref|index] [--up]';
+const groupedSplitUsage = '[--left|--right|--up|--down|--auto] [--command cmd] [--json] [--minimize] [--surface id|ref|index]';
 const splitUsageBrief = 'Direction flags are mutually exclusive; --auto is the default.';
 
 export const splitCommand: Command = {
   name: 'split',
-  rootUsage: `dor split ${splitUsage}`,
+  helpPatches: [
+    {
+      scope: 'root',
+      find: `  dor split ${generatedSplitUsage}`,
+      replace: `  dor split ${groupedSplitUsage}`,
+    },
+    {
+      scope: 'command',
+      find: `  dor split ${generatedSplitUsage}`,
+      replace: `  dor split ${groupedSplitUsage}\n    ${splitUsageBrief}`,
+    },
+    {
+      scope: 'command',
+      find: '     [--auto]      Default; choose right when wide and down when narrow.',
+      replace: '     [--left|--right|--up|--down|--auto]\n                  Split direction. Mutually exclusive; default is --auto.',
+    },
+    {
+      scope: 'command',
+      find: '     [--down]      Split below the target surface.\n',
+      replace: '',
+    },
+    {
+      scope: 'command',
+      find: '     [--left]      Split left of the target surface.\n',
+      replace: '',
+    },
+    {
+      scope: 'command',
+      find: '     [--right]     Split right of the target surface.\n',
+      replace: '',
+    },
+    {
+      scope: 'command',
+      find: '     [--up]        Split above the target surface.\n',
+      replace: '',
+    },
+  ],
   command: buildCommand<SplitFlags, [], DorCommandContext>({
     docs: {
       brief: 'Create a new terminal surface by splitting an existing surface.',
-      customUsage: [
-        { input: splitUsage, brief: splitUsageBrief },
-      ],
       fullDescription: `If no direction is provided, --auto is used. --auto chooses right when the target surface is wide and down when it is narrow.
 
 --surface selects the surface to split. If omitted, Dormouse uses the caller surface when available, then the focused surface.

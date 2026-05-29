@@ -136,7 +136,10 @@ derives its response from current Dockview panels plus terminal state/activity
 snapshots, then returns `workspace:1` and `window:1`.
 
 User-facing command docs live in the generated help snapshots. Implementation
-details live in the command files:
+details live in the command files. When `stricli` cannot express a desired
+help shape, commands may declare narrow find/replace help patches; those
+patches are intentionally snapshot-tested rather than treated as a general docs
+renderer.
 
 - `dor split` [impl](../../dor/src/commands/split.ts) [docs](../../dor/test/snapshots/help/split.md)
 - `dor ensure` [impl](../../dor/src/commands/ensure.ts) [docs](../../dor/test/snapshots/help/ensure.md)
