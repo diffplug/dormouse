@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/). Release 
 
 ## [Unreleased]
 ### Fixed
-- On Windows, Shift+Enter and Ctrl+J now insert a newline (instead of submitting or doing nothing) in TUIs that read keyboard input via the Console API behind ConPTY, such as Codex. Dormouse advertises win32-input-mode so those apps receive faithful Win32 key events, the same way Windows Terminal does. Claude Code and macOS/Linux are unaffected — they continue to use the kitty keyboard protocol.
+- On Windows, Shift+Enter and Ctrl+J now insert a newline (instead of submitting or doing nothing) in TUIs that read keyboard input via the Console API behind ConPTY, such as Codex. Dormouse advertises win32-input-mode so those apps receive faithful Win32 key events, the same way Windows Terminal does. Claude Code and macOS/Linux are unaffected — they continue to use the kitty keyboard protocol ([#117](https://github.com/diffplug/dormouse/pull/117)).
 
 
 ## [0.11.0] - 2026-05-28
