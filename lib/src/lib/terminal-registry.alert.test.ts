@@ -63,6 +63,10 @@ vi.mock('@xterm/xterm', () => {
       return { dispose: () => {} };
     }
 
+    input(data: string): void {
+      this.emitInput(data);
+    }
+
     attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean): void {
       this.keyHandler = handler;
     }
@@ -149,6 +153,7 @@ interface MockTerminalInstance {
   emitInput(data: string): void;
   emitKeyDown(init?: Partial<KeyboardEvent>): boolean | null;
   emitResize(cols: number, rows: number): void;
+  input(data: string): void;
 }
 
 class MockElement {
@@ -304,14 +309,14 @@ describe('terminal-registry alert behavior', () => {
     expect(isUntouched(id)).toBe(false);
   });
 
-  it('sends bracketed-paste newline for Windows Shift+Enter before xterm handles Enter normally', () => {
-    const id = 'shift-enter-bracketed';
+  it('sends LF through xterm input for Windows Shift+Enter before xterm handles Enter normally', () => {
+    const id = 'shift-enter-lf';
     const entry = createSession(id);
 
     const handled = entry.terminal.emitKeyDown();
 
     expect(handled).toBe(false);
-    expect(entry.terminal.writes).toContain('\x1b[200~\n\x1b[201~');
+    expect(entry.terminal.writes).toContain('\n');
   });
 
   it('does not mark synthetic terminal reports as touched', () => {

@@ -94,7 +94,7 @@ function readDisplayTextFromBuffer(terminal: Terminal, range: IBufferRange): str
   }
 }
 
-function createXtermHost(id: string): { terminal: Terminal; fit: FitAddon; element: HTMLDivElement } {
+function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDivElement } {
   const styles = getComputedStyle(document.body);
   const editorFontSize = parseInt(styles.getPropertyValue('--vscode-editor-font-size'), 10) || 12;
   const editorFontFamily = styles.getPropertyValue('--vscode-editor-font-family').trim() || "'SF Mono', Menlo, Monaco, monospace";
@@ -131,7 +131,7 @@ function createXtermHost(id: string): { terminal: Terminal; fit: FitAddon; eleme
       if (shiftEnterInput !== null) {
         event.preventDefault();
         event.stopPropagation();
-        handleTerminalInput(id, terminal, shiftEnterInput);
+        terminal.input(shiftEnterInput, true);
         return false;
       }
       const runWorkbenchCommand = getPlatform().runWorkbenchCommand;
@@ -249,7 +249,7 @@ function wireXtermHandlers(
 }
 
 function setupTerminalEntry(id: string, options: { untouched?: boolean } = {}): TerminalEntry {
-  const { terminal, fit, element } = createXtermHost(id);
+  const { terminal, fit, element } = createXtermHost();
   const selectionBaselineRef = { current: null as string | null };
 
   const disposePty = wirePtyEvents(id, terminal);

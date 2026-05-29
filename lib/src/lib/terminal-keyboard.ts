@@ -4,7 +4,6 @@ type KeyboardEventLike = Pick<
 >;
 
 export const SHIFT_ENTER_NEWLINE_INPUT = '\n';
-export const BRACKETED_PASTE_NEWLINE_INPUT = '\x1b[200~\n\x1b[201~';
 
 export function shouldHandleWindowsShiftEnter(
   event: KeyboardEventLike,
@@ -23,5 +22,5 @@ export function shiftEnterInputForEvent(
   if (event.key !== 'Enter') return null;
   if (!event.shiftKey) return null;
   if (event.ctrlKey || event.altKey || event.metaKey) return null;
-  return BRACKETED_PASTE_NEWLINE_INPUT;
+  return SHIFT_ENTER_NEWLINE_INPUT;
 }

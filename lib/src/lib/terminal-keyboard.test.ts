@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  BRACKETED_PASTE_NEWLINE_INPUT,
   SHIFT_ENTER_NEWLINE_INPUT,
   shiftEnterInputForEvent,
   shouldHandleWindowsShiftEnter,
@@ -28,9 +27,9 @@ describe('terminal keyboard normalization', () => {
     expect(shouldHandleWindowsShiftEnter(keydown(), { isWindows: true })).toBe(true);
   });
 
-  it('uses bracketed paste for Shift+Enter on Windows', () => {
+  it('uses LF for Shift+Enter on Windows', () => {
     expect(shiftEnterInputForEvent(keydown(), { isWindows: true }))
-      .toBe(BRACKETED_PASTE_NEWLINE_INPUT);
+      .toBe(SHIFT_ENTER_NEWLINE_INPUT);
   });
 
   it('does not match normal Enter, composing input, or non-Windows platforms', () => {
