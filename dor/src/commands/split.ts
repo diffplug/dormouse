@@ -9,6 +9,7 @@ import type {
   SplitSurfaceResponse,
 } from './types.js';
 import {
+  buildShellCommand,
   resolveControlClient,
   stringParser,
   writeStdout,
@@ -124,7 +125,7 @@ JSON output:
 async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...commandArgs: string[]): Promise<void | Error> {
   const direction = parseSplitDirection(flags);
   if (!direction.ok) return new Error(direction.message);
-  const command = commandArgs.join(' ').trim() || undefined;
+  const command = buildShellCommand(commandArgs);
 
   const clientResult = resolveControlClient(this.options);
   if (!clientResult.ok) return new Error(clientResult.message);

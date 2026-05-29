@@ -7,6 +7,7 @@ import type {
   EnsureSurfaceResponse,
 } from './types.js';
 import {
+  buildShellCommand,
   resolveControlClient,
   stringParser,
   writeStdout,
@@ -94,9 +95,17 @@ JSON output:
 };
 
 async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...commandArgs: string[]): Promise<void | Error> {
-  const command = commandArgs.join(' ').trim();
+  const command = buildShellCommand(commandArgs);
   if (!command) {
     return new Error('dor ensure requires a command after --');
+  }
+
+  let title = flags.title;
+  if (title !== undefined) {
+    title = title.trim();
+    if (title === '') {
+      return new Error('dor ensure --title must not be empty');
+    }
   }
 
   const clientResult = resolveControlClient(this.options);
@@ -107,7 +116,7 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
       command,
       minimized: flags.minimize === true,
       surface: flags.surface,
-      title: flags.title,
+      title,
     });
     writeStdout(this, renderEnsureResponse(response, flags.json === true));
     return undefined;
