@@ -16,7 +16,7 @@ Source of truth:
 | Control method request/response types | `dor/src/commands/types.ts` |
 | Socket client and request envelope | `dor/src/control-client.ts`, `dor/src/protocol.ts` |
 | POSIX / Windows launchers | `dor/bin/dor`, `dor/bin/dor.cmd` |
-| Snapshot tests for CLI output | `dor/test/cli-output.test.mjs`, `dor/test/snapshots/` |
+| Snapshot tests for CLI output and help text | `dor/test/cli-output.test.mjs`, `dor/test/cli-help.test.mjs`, `dor/test/snapshots/` |
 | Shared staging script | `scripts/stage-dor-cli.mjs` |
 | Standalone staging/runtime env | `standalone/package.json`, `standalone/src-tauri/src/lib.rs`, `standalone/sidecar/pty-core.js`, `standalone/sidecar/main.js` |
 | VS Code staging/runtime env | `vscode-ext/package.json`, `vscode-ext/src/pty-manager.ts`, `vscode-ext/src/pty-host.js` |

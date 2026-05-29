@@ -100,26 +100,6 @@ async function snapshot(name, result) {
   assert.equal(actual, expected);
 }
 
-test('global help output', async () => {
-  await snapshot('global-help', await runCli(['--help']));
-});
-
-test('list-panes help output', async () => {
-  await snapshot('list-panes-help', await runCli(['list-panes', '--help']));
-});
-
-test('list-pane-surfaces help output', async () => {
-  await snapshot('list-pane-surfaces-help', await runCli(['list-pane-surfaces', '--help']));
-});
-
-test('split help output', async () => {
-  await snapshot('split-help', await runCli(['split', '--help']));
-});
-
-test('ensure help output', async () => {
-  await snapshot('ensure-help', await runCli(['ensure', '--help']));
-});
-
 test('split text output', async () => {
   await snapshot(
     'split-text',
