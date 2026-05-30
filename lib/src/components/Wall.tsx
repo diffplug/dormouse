@@ -409,9 +409,24 @@ export function Wall({
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Resolver for a `dor kill --confirm-await-user` request that is currently
+  // blocking on the in-app kill dialog. Accept resolves true, reject/dismiss
+  // resolves false; cleared once resolved so it only ever fires once.
+  const pendingKillResolveRef = useRef<((accepted: boolean) => void) | null>(null);
+  const resolvePendingKill = useCallback((accepted: boolean) => {
+    const resolve = pendingKillResolveRef.current;
+    if (!resolve) return;
+    pendingKillResolveRef.current = null;
+    resolve(accepted);
+  }, []);
+
   useEffect(() => {
     if (!confirmKill && shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
-  }, [confirmKill]);
+    // Safety net: if the dialog is dismissed by a path that bypasses
+    // accept/reject (e.g. clicking another pane), treat it as a rejection so a
+    // blocked await-user CLI call never hangs.
+    if (!confirmKill) resolvePendingKill(false);
+  }, [confirmKill, resolvePendingKill]);
 
   useEffect(() => () => {
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
@@ -431,9 +446,10 @@ export function Wall({
   const rejectKill = useCallback(() => {
     const ck = confirmKillRef.current;
     if (!ck || ck.exit) return;
+    resolvePendingKill(false);
     setConfirmKill({ ...ck, exit: 'shake' });
     shakeTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_SHAKE_MS);
-  }, []);
+  }, [resolvePendingKill]);
 
   useEffect(() => { onEventRef.current?.({ type: 'modeChange', mode }); }, [mode]);
   useEffect(() => { onEventRef.current?.({ type: 'zoomChange', zoomed }); }, [zoomed]);
@@ -477,10 +493,11 @@ export function Wall({
   const acceptKill = useCallback(() => {
     const ck = confirmKillRef.current;
     if (!ck || ck.exit) return;
+    resolvePendingKill(true);
     setConfirmKill({ ...ck, exit: 'confirm' });
     killPaneImmediately(ck.id);
     confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
-  }, [killPaneImmediately]);
+  }, [killPaneImmediately, resolvePendingKill]);
 
   /** Select a door in the baseboard */
   const selectDoor = useCallback((id: string) => {
@@ -1135,11 +1152,30 @@ export function Wall({
           }
         }
         if (confirmation.mode === 'await-user') {
-          const confirmed = window.confirm(`Kill ${target.value.ref}?`);
-          if (!confirmed) {
+          if (confirmKillRef.current || pendingKillResolveRef.current) {
+            detail.respond({ ok: false, error: 'a kill confirmation is already in progress' });
+            return;
+          }
+          // Open the in-app kill dialog and block until the user accepts
+          // (matching letter) or rejects (Esc/any other key/dismiss).
+          const accepted = await new Promise<boolean>((resolve) => {
+            pendingKillResolveRef.current = resolve;
+            setConfirmKill({ id: target.value.id, char: randomKillChar() });
+          });
+          if (!accepted) {
             detail.respond({ ok: false, error: 'kill was not confirmed' });
             return;
           }
+          // acceptKill already ran killPaneImmediately and the confirm animation.
+          detail.respond({
+            ok: true,
+            result: {
+              status: 'killed',
+              surfaceId: target.value.id,
+              surfaceRef: target.value.ref,
+            },
+          });
+          return;
         }
         killPaneImmediately(target.value.id);
         detail.respond({
@@ -1158,7 +1194,7 @@ export function Wall({
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, createSplitSurface, findSurfaceIdByUserTitle, killPaneImmediately, resolveVisibleSurface, surfaceRefForId]);
+  }, [buildDorSurfaces, createSplitSurface, findSurfaceIdByUserTitle, killPaneImmediately, resolveVisibleSurface, setConfirmKill, surfaceRefForId]);
 
   const addSplitPanel = useCallback((
     id: string | null,

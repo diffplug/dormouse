@@ -63,11 +63,16 @@ export class SocketControlClient implements ControlClient {
   }
 
   killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse> {
-    return this.request<KillSurfaceResponse>('surface.kill', request);
+    // await-user blocks on a human answering the in-app dialog, so the client
+    // must not impose its own deadline — pass null to disable the timeout.
+    const timeoutMs = request.confirmation.mode === 'await-user' ? null : undefined;
+    return this.request<KillSurfaceResponse>('surface.kill', request, timeoutMs);
   }
 
-  private request<T>(method: string, params: unknown): Promise<T> {
+  private request<T>(method: string, params: unknown, timeoutMs?: number | null): Promise<T> {
     const requestId = `dor-${this.idBase}-${++this.nextRequestId}`;
+    // undefined → fall back to the per-client default; null → no deadline.
+    const effectiveTimeout = timeoutMs === undefined ? this.timeoutMs : timeoutMs;
     return new Promise((resolve, reject) => {
       const socket = createConnection({ path: this.socketPath });
       let responseBuffer = '';
@@ -76,14 +81,16 @@ export class SocketControlClient implements ControlClient {
       const settle = (callback: () => void) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timeout);
+        if (timeout) clearTimeout(timeout);
         socket.destroy();
         callback();
       };
 
-      const timeout = setTimeout(() => {
-        settle(() => reject(new Error(`timed out waiting for ${method}`)));
-      }, this.timeoutMs);
+      const timeout = effectiveTimeout === null
+        ? undefined
+        : setTimeout(() => {
+            settle(() => reject(new Error(`timed out waiting for ${method}`)));
+          }, effectiveTimeout);
 
       socket.setEncoding('utf8');
       socket.on('connect', () => {
