@@ -126,6 +126,30 @@ Device/version query:
 
 Because this identity can cause tools to emit more iTerm2 escape codes than Dormouse implements, **unsupported escape codes must fail inertly**: consume or ignore them without visible terminal garbage, privilege escalation, clipboard access, file access, or focus stealing. This rule applies to both OSC and CSI sequences (see [Known-unimplemented iTerm2 and clipboard-capable sequences](#known-unimplemented-iterm2-and-clipboard-capable-sequences) for OSCs and the [Pass-through and fail-inertly](#pass-through-and-fail-inertly) note under CSI).
 
+## Shell-integration injection
+
+The iTerm2 identity above makes well-behaved tools emit OSC 633/133 *if their own shell integration is loaded* — but most shells don't emit prompt/command boundaries on their own. So Dormouse injects its own integration when it spawns a shell, making the shell emit the `OSC 633` family (`A`/`B` prompt boundaries, `C` command start, `D;<exit>` command finish, `E;<commandline>`, `P;Cwd=`) that the parser above already consumes. This is the *emit* side of OSC 633; the parser is the *consume* side.
+
+A binary on `PATH` only has to be **found**, so it injects via one env var (`DORMOUSE_CLI_BIN` → `PATH`). OSC 633 is different: the shell must **run hook code on every prompt**, which no single env var enables. The reliable per-shell mechanism therefore differs by shell:
+
+| Shell | Mechanism | Channel | Notes |
+|---|---|---|---|
+| zsh | `ZDOTDIR` → our dotfiles chain to the user's, then install `precmd`/`preexec` hooks | env (as reliable as the `PATH` prepend) | User's real `ZDOTDIR` is passed through as `USER_ZDOTDIR`; our `.zshrc` hands `ZDOTDIR` back so `.zlogin` and child shells are unaffected. |
+| bash | `--rcfile`/`--init-file`; the script re-sources the user's rc and replicates login-profile loading | shellArgs | `--rcfile` conflicts with login mode, so the script must replicate what `-l` would have sourced. (not yet implemented) |
+| fish | `XDG_DATA_DIRS` → fish auto-sources `*/fish/vendor_conf.d/*.fish` | env | (not yet implemented) |
+| PowerShell | `-NoExit -Command <dot-source>` | shellArgs | (not yet implemented) |
+| cmd.exe | no per-command hook exists | — | Never gets real OSC 633; always uses the keystroke fallback below. |
+
+Injection is wired in `resolveSpawnConfig` (`standalone/sidecar/pty-core.js`) and applies to both distributions (the standalone sidecar and the VS Code pty-host both spawn through it). The integration scripts are static files under `standalone/sidecar/shell-integration/`; the directory is resolved from `DORMOUSE_SHELL_INTEGRATION_DIR` (set by the host, mirroring `DORMOUSE_CLI_BIN`) and falls back to the sidecar's own directory. Standalone ships them via the tauri `../sidecar/**/*` resources glob; the VS Code build copies them into `dist/shell-integration`. If the scripts are missing, injection is skipped and the shell spawns exactly as before — injection is fail-safe.
+
+### Keystroke fallback
+
+When injection isn't possible (cmd.exe, an unknown shell, or scripts not present) or simply doesn't take, Dormouse falls back to its keystroke heuristic: it watches what the user types and synthesizes `commandStart{source:'user_input'}` (see `recordTerminalUserInput` in `lib/src/lib/terminal-state-store.ts` and [terminal-state.md](terminal-state.md)). This fallback has no real exit codes and only a best-effort idle transition.
+
+The two are mutually exclusive **per pane**: the first genuine OSC 633/133 boundary a pane sees (a real prompt-start lands before the first command is typed) flips that pane to "OSC-driven" and retires the keystroke heuristic for it, so the two never both report the same command. Prompt boundaries that the heuristic *itself* synthesizes are flagged so they don't trip this detection. This is what makes the fallback fire "only if injection fails."
+
+> Packaging caveat: the zsh scripts are dotfiles (`.zshrc`, `.zshenv`, `.zprofile`). Confirm the VS Code `.vsix` actually includes `dist/shell-integration/.z*` — if a packaging step strips dotfiles, VS Code silently degrades to the keystroke fallback.
+
 ## Known-unimplemented iTerm2 and clipboard-capable sequences
 
 Dormouse intentionally does not implement the following sequences. They are mostly iTerm2-proprietary; `OSC 50` (font) and `OSC 52` (clipboard) are standard xterm extensions included here because the iTerm2 identity prompts tools to emit them and they have security implications. All of them must fail inertly per the rule above, which means they are consumed/ignored rather than forwarded to xterm.js.

@@ -140,6 +140,9 @@ function getDorRuntimeEnv(extensionPath: string): Record<string, string> {
     DORMOUSE_NODE: resolveNodeBinary(),
     DORMOUSE_CLI_BIN: path.join(dorCliRoot, 'bin'),
     DORMOUSE_CLI_JS: path.join(dorCliRoot, 'dist', 'dor.js'),
+    // OSC 633 shell-integration scripts, copied next to the bundled pty-host by
+    // the build (see package.json `build`). Mirrors how DORMOUSE_CLI_BIN is set.
+    DORMOUSE_SHELL_INTEGRATION_DIR: path.join(extensionPath, 'dist', 'shell-integration'),
     DORMOUSE_CONTROL_SOCKET: dorControlSocket,
     DORMOUSE_CONTROL_TOKEN: dorControlToken,
   };

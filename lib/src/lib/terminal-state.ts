@@ -124,6 +124,11 @@ export const DEFAULT_TERMINAL_PANE_STATE: TerminalPaneState = Object.freeze({
 });
 
 export const DEFAULT_IDLE_TITLE = '<idle>';
+// Appended to the idle title when the last command exited non-zero. Kept as a
+// plain glyph in the title string so tab/OS-level titles carry it too; the pane
+// header re-colors this trailing glyph red (see TerminalPaneHeader). Only shows
+// when we have a real exit code — the keystroke fallback leaves exitCode unset.
+export const COMMAND_FAIL_GLYPH = '✗';
 export const DEFAULT_COMMAND_TITLE = 'shell';
 export const UNNAMED_PANEL_TITLE = '<unnamed>';
 const DEFAULT_DIRECTORY_LABEL = 'Unknown directory';
@@ -770,8 +775,17 @@ function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): string 
   const userTitle = titleCandidateForSource(pane, 'user')?.title.trim();
   if (userTitle) return userTitle;
   if (pane.currentCommand) return commandHeaderLabel(pane, pane.currentCommand, options);
-  if (pane.lastCommand) return `${DEFAULT_IDLE_TITLE} ${commandHeaderLabel(pane, pane.lastCommand, options)}`;
+  if (pane.lastCommand) {
+    const idle = `${DEFAULT_IDLE_TITLE} ${commandHeaderLabel(pane, pane.lastCommand, options)}`;
+    return lastCommandFailed(pane.lastCommand) ? `${idle} ${COMMAND_FAIL_GLYPH}` : idle;
+  }
   return DEFAULT_IDLE_TITLE;
+}
+
+// A finished command "failed" only when we have a real non-zero exit code. The
+// keystroke fallback never sets exitCode, so it shows no glyph either way.
+function lastCommandFailed(command: CommandRun): boolean {
+  return typeof command.exitCode === 'number' && command.exitCode !== 0;
 }
 
 function commandHeaderLabel(pane: TerminalPaneState, command: CommandRun, options: HeaderOptions): string {

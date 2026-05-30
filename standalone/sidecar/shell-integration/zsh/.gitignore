@@ -1,0 +1,4 @@
+# Runtime artifacts zsh may write into ZDOTDIR; never commit or ship these.
+.zcompdump*
+.zsh_history
+.zsh_sessions/

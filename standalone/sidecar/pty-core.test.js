@@ -351,6 +351,87 @@ test('resolveSpawnConfig honors non-empty explicit args (e.g. WSL distro flags)'
   assert.deepEqual(config.shellArgs, ['-d', 'Ubuntu']);
 });
 
+// ── OSC 633 shell-integration injection ─────────────────────────────────
+
+// Pretend the shipped integration scripts exist on disk.
+const integrationFsModule = {
+  statSync(filePath) {
+    if (String(filePath).endsWith('.zshrc')) return { isFile: () => true };
+    throw new Error(`ENOENT: ${filePath}`);
+  },
+};
+
+test('resolveSpawnConfig injects zsh integration via ZDOTDIR and preserves the user ZDOTDIR', () => {
+  const config = resolveSpawnConfig(undefined, {
+    platform: 'linux',
+    env: {
+      SHELL: '/bin/zsh',
+      HOME: '/home/tester',
+      ZDOTDIR: '/home/tester/.config/zsh',
+      DORMOUSE_SHELL_INTEGRATION_DIR: '/opt/dormouse/shell-integration',
+    },
+    osModule: { homedir: () => '/home/tester', tmpdir: () => '/tmp/fallback' },
+    fsModule: integrationFsModule,
+  });
+
+  assert.equal(config.env.ZDOTDIR, '/opt/dormouse/shell-integration/zsh');
+  assert.equal(config.env.USER_ZDOTDIR, '/home/tester/.config/zsh');
+  // Login flag is unaffected — integration is env-only for zsh.
+  assert.deepEqual(config.shellArgs, ['-l']);
+  // The internal pointer is not leaked to the shell.
+  assert.equal(config.env.DORMOUSE_SHELL_INTEGRATION_DIR, undefined);
+});
+
+test('resolveSpawnConfig zsh integration falls back to HOME when the user has no ZDOTDIR', () => {
+  const config = resolveSpawnConfig(undefined, {
+    platform: 'linux',
+    env: {
+      SHELL: '/bin/zsh',
+      HOME: '/home/tester',
+      DORMOUSE_SHELL_INTEGRATION_DIR: '/opt/dormouse/shell-integration',
+    },
+    osModule: { homedir: () => '/home/tester', tmpdir: () => '/tmp/fallback' },
+    fsModule: integrationFsModule,
+  });
+
+  assert.equal(config.env.ZDOTDIR, '/opt/dormouse/shell-integration/zsh');
+  assert.equal(config.env.USER_ZDOTDIR, '/home/tester');
+});
+
+test('resolveSpawnConfig leaves non-zsh shells untouched (keystroke fallback)', () => {
+  const config = resolveSpawnConfig(undefined, {
+    platform: 'linux',
+    env: {
+      SHELL: '/bin/bash',
+      HOME: '/home/tester',
+      DORMOUSE_SHELL_INTEGRATION_DIR: '/opt/dormouse/shell-integration',
+    },
+    osModule: { homedir: () => '/home/tester', tmpdir: () => '/tmp/fallback' },
+    fsModule: integrationFsModule,
+  });
+
+  assert.equal(config.env.ZDOTDIR, undefined);
+  assert.equal(config.env.USER_ZDOTDIR, undefined);
+});
+
+test('resolveSpawnConfig skips zsh integration when the scripts are not present', () => {
+  const config = resolveSpawnConfig(undefined, {
+    platform: 'linux',
+    env: {
+      SHELL: '/bin/zsh',
+      HOME: '/home/tester',
+      ZDOTDIR: '/home/tester/.config/zsh',
+      DORMOUSE_SHELL_INTEGRATION_DIR: '/opt/dormouse/shell-integration',
+    },
+    osModule: { homedir: () => '/home/tester', tmpdir: () => '/tmp/fallback' },
+    fsModule: { statSync() { throw new Error('ENOENT'); } },
+  });
+
+  // ZDOTDIR is left exactly as the user had it; no injection occurred.
+  assert.equal(config.env.ZDOTDIR, '/home/tester/.config/zsh');
+  assert.equal(config.env.USER_ZDOTDIR, undefined);
+});
+
 // ── detectAvailableShells ───────────────────────────────────────────────
 
 test('detectAvailableShells returns $SHELL on non-Windows', () => {
