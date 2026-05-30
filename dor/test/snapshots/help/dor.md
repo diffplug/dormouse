@@ -9,7 +9,7 @@ USAGE
   dor version
   dor send [--key value] [--raw] [--sequence json] [--stdin] [--surface id|ref|index] [--text value] [<text>]
   dor read [--json] [--lines count] [--scrollback] [--surface id|ref|index]
-  dor kill --surface id|ref|index [--confirm-await-user|--confirm-if-read text|--confirm-dangerously]
+  dor kill --surface id|ref|index [--confirm-if-read text|--confirm-dangerously]
   dor iframe [--json] [--minimize] [--surface id|ref|index] <url>
   dor list-panes [--id-format refs|uuids|both] [--json]
   dor list-pane-surfaces [--id-format refs|uuids|both] [--json] [--pane id|ref|index]

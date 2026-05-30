@@ -15,7 +15,6 @@ import {
 } from './shared.js';
 
 interface KillFlags {
-  readonly confirmAwaitUser?: boolean;
   readonly confirmDangerously?: boolean;
   readonly confirmIfRead?: string;
   readonly surface: string;
@@ -27,15 +26,15 @@ export const killCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        '  dor kill [--confirm-await-user] [--confirm-dangerously] [--confirm-if-read text] (--surface id|ref|index)',
-        '  dor kill --surface id|ref|index [--confirm-await-user|--confirm-if-read text|--confirm-dangerously]',
+        '  dor kill [--confirm-dangerously] [--confirm-if-read text] (--surface id|ref|index)',
+        '  dor kill --surface id|ref|index [--confirm-if-read text|--confirm-dangerously]',
       ],
     },
     {
       scope: 'command-usage',
       findReplace: [
-        '  dor kill [--confirm-await-user] [--confirm-dangerously] [--confirm-if-read text] (--surface id|ref|index)',
-        '  dor kill --surface id|ref|index [--confirm-await-user|--confirm-if-read text|--confirm-dangerously]',
+        '  dor kill [--confirm-dangerously] [--confirm-if-read text] (--surface id|ref|index)',
+        '  dor kill --surface id|ref|index [--confirm-if-read text|--confirm-dangerously]',
       ],
     },
   ],
@@ -43,8 +42,6 @@ export const killCommand: Command = {
     docs: {
       brief: 'Kill a terminal surface.',
       fullDescription: `Kills a terminal surface. One confirmation mode is required.
-
---confirm-await-user asks Dormouse to prompt before killing.
 
 --confirm-if-read kills only if dor read --surface <surface> would return visible text containing the provided text. The text must contain at least 4 non-whitespace characters.
 
@@ -55,7 +52,6 @@ Text output:
     },
     parameters: {
       flags: {
-        confirmAwaitUser: { kind: 'boolean', brief: 'Ask Dormouse to prompt before killing.', optional: true, withNegated: false },
         confirmDangerously: { kind: 'boolean', brief: 'Kill without further confirmation.', optional: true, withNegated: false },
         confirmIfRead: { kind: 'parsed', parse: stringParser, brief: 'Kill only if dor read contains this text.', optional: true, placeholder: 'text' },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to kill.', placeholder: 'id|ref|index' },
@@ -86,7 +82,6 @@ async function runKillCommand(this: DorCommandContext, flags: KillFlags): Promis
 
 function parseConfirmation(flags: KillFlags): ParseResult<KillSurfaceConfirmation> {
   const confirmations = [
-    flags.confirmAwaitUser === true,
     flags.confirmDangerously === true,
     flags.confirmIfRead !== undefined,
   ].filter(Boolean).length;
@@ -95,7 +90,6 @@ function parseConfirmation(flags: KillFlags): ParseResult<KillSurfaceConfirmatio
     return { ok: false, message: 'dor kill requires exactly one confirmation mode' };
   }
 
-  if (flags.confirmAwaitUser) return { ok: true, value: { mode: 'await-user' } };
   if (flags.confirmDangerously) return { ok: true, value: { mode: 'dangerously' } };
 
   const text = flags.confirmIfRead?.trim() ?? '';

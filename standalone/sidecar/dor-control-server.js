@@ -23,6 +23,17 @@ function createDorControlServer({ socketPath, token, send, timeoutMs = 10000 }) 
     // down the long-lived sidecar/pty-host.
     socket.on('error', () => {});
 
+    // If the client disconnects (timeout/Ctrl-C) before the webview answers,
+    // release any entries owned by this socket right away rather than letting
+    // them linger until their own timeout fires against a dead socket.
+    socket.on('close', () => {
+      for (const [requestId, entry] of pending) {
+        if (entry.socket !== socket) continue;
+        if (entry.timeout) clearTimeout(entry.timeout);
+        pending.delete(requestId);
+      }
+    });
+
     socket.on('data', (chunk) => {
       buffer += chunk;
       const newlineIndex = buffer.indexOf('\n');

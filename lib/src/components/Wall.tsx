@@ -241,10 +241,9 @@ function readVisibleSurfaceText(surfaceId: string, lines: number | undefined): s
   return limitLines(visibleLines.join('\n').replace(/\n+$/, ''), lines);
 }
 
-function killConfirmationParam(value: unknown): { mode: 'await-user' } | { mode: 'if-read'; text: string } | { mode: 'dangerously' } | null {
+function killConfirmationParam(value: unknown): { mode: 'if-read'; text: string } | { mode: 'dangerously' } | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const confirmation = value as { mode?: unknown; text?: unknown };
-  if (confirmation.mode === 'await-user') return { mode: 'await-user' };
   if (confirmation.mode === 'dangerously') return { mode: 'dangerously' };
   if (confirmation.mode === 'if-read' && typeof confirmation.text === 'string') {
     return { mode: 'if-read', text: confirmation.text };
@@ -1238,13 +1237,6 @@ export function Wall({
           const text = readVisibleSurfaceText(target.value.id, undefined);
           if (!text.includes(confirmation.text)) {
             detail.respond({ ok: false, error: `surface '${target.value.ref}' read text did not contain confirmation text` });
-            return;
-          }
-        }
-        if (confirmation.mode === 'await-user') {
-          const confirmed = window.confirm(`Kill ${target.value.ref}?`);
-          if (!confirmed) {
-            detail.respond({ ok: false, error: 'kill was not confirmed' });
             return;
           }
         }
