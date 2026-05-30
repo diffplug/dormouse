@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: direction flags are mutually exclusive

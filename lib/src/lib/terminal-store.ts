@@ -42,6 +42,8 @@ export interface PendingShellOpts {
   shell?: string;
   args?: string[];
   cwd?: string;
+  title?: string;
+  untouched?: boolean;
 }
 
 export const registry = new Map<string, TerminalEntry>();

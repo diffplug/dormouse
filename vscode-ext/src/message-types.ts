@@ -1,5 +1,6 @@
 import type { ActivityNotification, SessionStatus, TodoState } from '../../lib/src/lib/alert-manager';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
+import type { DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
 import type { OpenPort } from '../../lib/src/lib/platform/types';
 import type { VSCodeWorkbenchCommand } from '../../lib/src/lib/vscode-keybindings';
 
@@ -20,6 +21,7 @@ export type WebviewMessage =
   | { type: 'dormouse:init' }
   | { type: 'dormouse:saveState'; state: unknown }
   | { type: 'dormouse:flushSessionSaveDone'; requestId: string }
+  | ({ type: 'dor:controlResponse' } & DorControlResponsePayload)
   // Alert actions
   | { type: 'alert:remove'; id: string }
   | { type: 'alert:toggle'; id: string }
@@ -63,6 +65,7 @@ export type ExtensionMessage =
   | { type: 'dormouse:selectedShell'; shell?: string; args?: string[] }
   | { type: 'dormouse:openThemeDebugger' }
   | { type: 'dormouse:flushSessionSave'; requestId: string }
+  | ({ type: 'dor:controlRequest' } & DorControlRequestPayload)
   // Alert state updates
   | {
     type: 'alert:state';

@@ -10,6 +10,7 @@ const readline = require('readline');
 const nodePty = require('node-pty');
 const { create } = require('./pty-core');
 const clipboard = require('./clipboard-ops');
+const { createDorControlServer } = require('./dor-control-server');
 
 function send(event, data) {
   process.stdout.write(JSON.stringify({ event, data }) + '\n');
@@ -18,6 +19,12 @@ function send(event, data) {
 const mgr = create((event, data) => {
   send(`pty:${event}`, data);
 }, nodePty);
+
+const dorControl = createDorControlServer({
+  socketPath: process.env.DORMOUSE_CONTROL_SOCKET,
+  token: process.env.DORMOUSE_CONTROL_TOKEN,
+  send,
+});
 
 async function respondAsync(event, requestId, run) {
   try {
@@ -44,6 +51,7 @@ rl.on('line', (line) => {
       case 'pty:getScrollback': mgr.getScrollback(data.id, data.requestId); break;
       case 'pty:getShells':  mgr.getShells(data.requestId); break;
       case 'pty:gracefulKillAll': mgr.gracefulKillAll(data.timeout); break;
+      case 'dor:controlResponse': dorControl?.respond(data); break;
       case 'clipboard:readFiles':
         respondAsync('clipboard:files', data.requestId, async () => ({
           paths: await clipboard.readClipboardFilePaths(),
@@ -66,8 +74,14 @@ rl.on('line', (line) => {
   }
 });
 
-rl.on('close', () => { mgr.killAll(); process.exit(0); });
-process.on('SIGTERM', () => { mgr.killAll(); process.exit(0); });
+function shutdown() {
+  dorControl?.close();
+  mgr.killAll();
+  process.exit(0);
+}
+
+rl.on('close', shutdown);
+process.on('SIGTERM', shutdown);
 
 // Watchdog: if the Tauri host crashes or is force-killed, stdin EOF isn't
 // always delivered (esp. on Windows), leaving us as an orphan that locks
@@ -78,8 +92,7 @@ if (parentPid && parentPid > 0) {
     try {
       process.kill(parentPid, 0);
     } catch {
-      mgr.killAll();
-      process.exit(0);
+      shutdown();
     }
   }, 2000).unref();
 }

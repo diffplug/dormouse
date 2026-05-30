@@ -167,6 +167,10 @@ Source of truth:
 | Extension scripts | `vscode-ext/package.json` | `build:frontend`, `build`, `dogfood` package-local steps |
 | F5 launch | `.vscode/launch.json` + `.vscode/tasks.json` | Extension Development Host debugging chain |
 
+`pnpm dogfood:vscode` uninstalls the legacy `diffplug.mouseterm` extension
+before packaging and installing the current Dormouse VSIX, then the VS Code
+window must be reloaded to pick up changes.
+
 **Dogfooding vs Extension Development Host:** Day-to-day development uses `pnpm dogfood:vscode` to install the extension into your real VS Code instance. This catches real-world issues since you're running with your actual settings, extensions, and workspaces. The F5 Extension Development Host workflow exists for when you need **breakpoint debugging** of extension host code (`extension.ts`, `message-router.ts`, `pty-manager.ts`, etc.) — it launches a separate VS Code window where the debugger can attach to the extension host process.
 
 The Vite config for the extension (`vscode-ext/vite.config.ts`) sets `root: ../lib` and `outDir: ./media`, building the shared React frontend directly into the extension's media folder.

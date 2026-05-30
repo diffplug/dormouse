@@ -12,6 +12,19 @@ importers:
         specifier: runtime:22.22.3
         version: runtime:22.22.3
 
+  dor:
+    dependencies:
+      '@stricli/core':
+        specifier: ^1.2.7
+        version: 1.2.7
+    devDependencies:
+      esbuild:
+        specifier: ^0.28.0
+        version: 0.28.0
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   lib:
     dependencies:
       '@phosphor-icons/react':
@@ -1779,6 +1792,9 @@ packages:
         optional: true
       typescript:
         optional: true
+
+  '@stricli/core@1.2.7':
+    resolution: {integrity: sha512-a0HxA/cSWjqHj/9GM+cfc/zGNmBdxVTQQpHIEvY1AbDEgo4ZU84cTCbtywYEQOHw2wIc6Vu+PKv+ZQoqZwkHnQ==}
 
   '@tailwindcss/node@4.3.0':
     resolution: {integrity: sha512-aFb4gUhFOgdh9AXo4IzBEOzBkkAxm9VigwDJnMIYv3lcfXCJVesNfbEaBl4BNgVRyid92AmdviqwBUBRKSeY3g==}
@@ -5485,6 +5501,8 @@ snapshots:
       typescript: 6.0.3
     transitivePeerDependencies:
       - supports-color
+
+  '@stricli/core@1.2.7': {}
 
   '@tailwindcss/node@4.3.0':
     dependencies:

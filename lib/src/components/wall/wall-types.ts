@@ -23,7 +23,7 @@ export type WallEvent =
   | { type: 'modeChange'; mode: WallMode }
   | { type: 'zoomChange'; zoomed: boolean }
   | { type: 'minimizeChange'; count: number }
-  | { type: 'split'; direction: 'horizontal' | 'vertical'; source: 'keyboard' | 'mouse' }
+  | { type: 'split'; direction: 'horizontal' | 'vertical'; source: 'keyboard' | 'mouse' | 'dor' }
   | { type: 'selectionChange'; id: string | null; kind: WallSelectionKind }
   | { type: 'kill'; id: string }
   | { type: 'move'; fromId: string; toId: string };

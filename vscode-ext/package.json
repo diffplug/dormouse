@@ -101,10 +101,11 @@
   "scripts": {
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true",
     "build:frontend": "vite build --config vite.config.ts",
-    "build": "esbuild src/extension.ts --bundle --outdir=dist --external:vscode --external:node-pty --format=cjs --platform=node && esbuild src/pty-host.js --bundle --outfile=dist/pty-host.js --external:node-pty --format=cjs --platform=node && cp -RL node_modules/node-pty dist/node-pty",
+    "build": "pnpm stage:dor-cli && esbuild src/extension.ts --bundle --outdir=dist --external:vscode --external:node-pty --format=cjs --platform=node && esbuild src/pty-host.js --bundle --outfile=dist/pty-host.js --external:node-pty --format=cjs --platform=node && cp -RL node_modules/node-pty dist/node-pty",
+    "stage:dor-cli": "pnpm --filter dor build && node ../scripts/stage-dor-cli.mjs vscode-ext/dor-cli",
     "watch": "pnpm build --watch",
     "package": "vsce package --no-dependencies --out dormouse.vsix",
-    "dogfood": "pnpm package && code --install-extension dormouse.vsix --force && rm -f dormouse.vsix && echo '\\n✦ Reload VSCode window (Cmd+Shift+P → Reload Window) to pick up the new extension.'",
+    "dogfood": "code --uninstall-extension diffplug.mouseterm >/dev/null 2>&1 || true; pnpm package && code --install-extension dormouse.vsix --force && rm -f dormouse.vsix && echo '\\n✦ Reload VSCode window (Cmd+Shift+P → Reload Window) to pick up the new extension.'",
     "publish:marketplace": "vsce publish --no-dependencies",
     "publish:openvsx": "ovsx publish --no-dependencies"
   },

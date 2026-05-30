@@ -16,7 +16,8 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "dormouse-lib/*": ["../lib/src/*"]
+      "dormouse-lib/*": ["../lib/src/*"],
+      "dor/*": ["../dor/src/*"]
     }
   },
   "include": ["src"]

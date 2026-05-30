@@ -12,6 +12,7 @@ import { VSCODE_WORKBENCH_COMMANDS } from '../../lib/src/lib/vscode-keybindings'
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { PersistedSession } from '../../lib/src/lib/session-types';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
+import type { DorControlRequest } from './pty-manager';
 import { log } from './log';
 
 const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
@@ -22,7 +23,13 @@ const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
 // Global set of PTY IDs claimed by any router instance.
 // Prevents reconnecting routers from stealing PTYs owned by other webviews.
 const globalOwnedPtyIds = new Set<string>();
-const activeRouters = new Set<{ flushSessionSave(timeoutMs?: number): Promise<void> }>();
+interface ActiveRouter {
+  flushSessionSave(timeoutMs?: number): Promise<void>;
+  ownsPty(id: string): boolean;
+  forwardDorControlRequest(request: DorControlRequest): void;
+}
+
+const activeRouters = new Set<ActiveRouter>();
 let nextFlushRequestId = 0;
 const ALLOWED_WORKBENCH_COMMANDS = new Set<string>(VSCODE_WORKBENCH_COMMANDS);
 
@@ -83,6 +90,26 @@ ptyManager.addCallbacks({
     alertManager.onExit(id, exitCode);
     alertProtocolParsers.delete(id);
   },
+});
+
+ptyManager.onDorControlRequest((request) => {
+  const routers = [...activeRouters];
+  const router = request.surfaceId
+    ? routers.find((candidate) => candidate.ownsPty(request.surfaceId!))
+    : routers[0];
+
+  if (!router) {
+    ptyManager.respondDorControl({
+      requestId: request.requestId,
+      ok: false,
+      error: request.surfaceId
+        ? `No Dormouse webview owns surface '${request.surfaceId}'`
+        : 'No Dormouse webview is available to handle dor',
+    });
+    return;
+  }
+
+  router.forwardDorControlRequest(request);
 });
 
 function getAlertProtocolParser(id: string): TerminalProtocolParser {
@@ -165,6 +192,36 @@ export function attachRouter(
 
       void webview.postMessage({ type: 'dormouse:flushSessionSave', requestId } satisfies ExtensionMessage);
     });
+  }
+
+  function ownsPty(id: string): boolean {
+    return ownedPtyIds.has(id);
+  }
+
+  function forwardDorControlRequest(request: DorControlRequest): void {
+    void webview.postMessage({
+      type: 'dor:controlRequest',
+      requestId: request.requestId,
+      surfaceId: request.surfaceId,
+      method: request.method,
+      params: request.params ?? {},
+    } satisfies ExtensionMessage).then(
+      (posted) => {
+        if (posted) return;
+        ptyManager.respondDorControl({
+          requestId: request.requestId,
+          ok: false,
+          error: 'Dormouse webview is not available to handle dor',
+        });
+      },
+      (err) => {
+        ptyManager.respondDorControl({
+          requestId: request.requestId,
+          ok: false,
+          error: `Failed to forward dor request: ${err?.message ?? err}`,
+        });
+      },
+    );
   }
 
   /**
@@ -398,6 +455,14 @@ export function attachRouter(
       case 'dormouse:saveState':
         options?.onSaveState?.(msg.state);
         break;
+      case 'dor:controlResponse':
+        ptyManager.respondDorControl({
+          requestId: msg.requestId,
+          ok: msg.ok,
+          result: msg.result,
+          error: msg.error,
+        });
+        break;
 
       // Alert actions — proxy to the shared alert manager
       case 'alert:remove':
@@ -438,6 +503,8 @@ export function attachRouter(
 
   const router = {
     flushSessionSave,
+    ownsPty,
+    forwardDorControlRequest,
     dispose() {
       if (disposed) return;
       disposed = true;

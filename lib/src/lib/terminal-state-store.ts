@@ -175,7 +175,7 @@ export type SetTerminalUserTitleResult =
 // from that derived state. `<unnamed>` is just the default panel placeholder, so we let users
 // pin to it explicitly if they want — the resume/restore seed paths already skip `<unnamed>`
 // before calling this function, so they never accidentally seed it as a real pin.
-function isReservedUserTitle(trimmed: string): boolean {
+export function isReservedUserTitle(trimmed: string): boolean {
   return trimmed === DEFAULT_IDLE_TITLE || trimmed.startsWith(DEFAULT_IDLE_TITLE);
 }
 

@@ -1,0 +1,7 @@
+#!/bin/sh
+if [ -n "${DORMOUSE_NODE:-}" ] && [ -n "${DORMOUSE_CLI_JS:-}" ]; then
+  exec "$DORMOUSE_NODE" "$DORMOUSE_CLI_JS" "$@"
+fi
+
+SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
+exec node "$SCRIPT_DIR/../dist/dor.js" "$@"

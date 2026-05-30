@@ -1,6 +1,9 @@
 import { fork, ChildProcess } from 'child_process';
 import * as path from 'path';
+import * as os from 'os';
+import { randomBytes } from 'crypto';
 import { log } from './log';
+import type { DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
 import type { OpenPort } from '../../lib/src/lib/platform/types';
 import { OPEN_PORT_TIMEOUT_MS } from '../../lib/src/lib/platform/types';
 
@@ -8,6 +11,18 @@ export interface PtyCallbacks {
   onData(id: string, data: string): void;
   onExit(id: string, exitCode: number): void;
 }
+
+export interface PtySpawnOptions {
+  cols?: number;
+  rows?: number;
+  cwd?: string;
+  shell?: string;
+  args?: string[];
+}
+
+// The pty host forwards the dor wire payloads verbatim over IPC.
+export type DorControlRequest = DorControlRequestPayload;
+export type DorControlResponse = DorControlResponsePayload;
 
 interface PtyBufferEntry {
   replayChunks: string[];
@@ -96,6 +111,12 @@ let child: ChildProcess | null = null;
 let childReady = false;
 let pendingMessages: any[] = [];
 const callbackSet = new Set<PtyCallbacks>();
+const dorControlRequestListeners = new Set<(request: DorControlRequest) => void>();
+const dorControlToken = randomBytes(24).toString('hex');
+const dorControlSocket = process.platform === 'win32'
+  ? `\\\\.\\pipe\\dormouse-vscode-${process.pid}-dor`
+  : path.join(os.tmpdir(), `dormouse-vscode-${process.pid}-dor.sock`);
+
 // Always run the pty host under the editor's own Node — Electron's bundled
 // runtime (process.execPath, re-execed as Node via ELECTRON_RUN_AS_NODE, which
 // is inherited through `env` at the fork site). VSCode's integrated terminal
@@ -107,17 +128,40 @@ function resolveNodeBinary(): string {
   return process.execPath;
 }
 
+// The runtime env is constant for the life of the extension host (it depends
+// only on the fixed extension path and module-level socket/token), so compute
+// it once and reuse it across every PTY spawn rather than rebuilding the paths.
+let dorRuntimeEnvCache: { path: string; env: Record<string, string> } | null = null;
+
+function getDorRuntimeEnv(extensionPath: string): Record<string, string> {
+  if (dorRuntimeEnvCache?.path === extensionPath) return dorRuntimeEnvCache.env;
+  const dorCliRoot = path.join(extensionPath, 'dor-cli');
+  const env = {
+    DORMOUSE_NODE: resolveNodeBinary(),
+    DORMOUSE_CLI_BIN: path.join(dorCliRoot, 'bin'),
+    DORMOUSE_CLI_JS: path.join(dorCliRoot, 'dist', 'dor.js'),
+    DORMOUSE_CONTROL_SOCKET: dorControlSocket,
+    DORMOUSE_CONTROL_TOKEN: dorControlToken,
+  };
+  dorRuntimeEnvCache = { path: extensionPath, env };
+  return env;
+}
+
 function ensureChild(extensionPath: string): ChildProcess {
   if (child && child.connected) return child;
 
   const hostScript = path.join(extensionPath, 'dist', 'pty-host.js');
-  const nodePath = resolveNodeBinary();
+  const dorEnv = getDorRuntimeEnv(extensionPath);
+  const nodePath = dorEnv.DORMOUSE_NODE;
 
   child = fork(hostScript, [], {
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     execPath: nodePath,
     execArgv: [], // clear --inspect flags inherited from VSCode debug
-    env: process.env,
+    env: {
+      ...process.env,
+      ...dorEnv,
+    },
   });
 
   childReady = false;
@@ -138,6 +182,15 @@ function ensureChild(extensionPath: string): ChildProcess {
       for (const cb of callbackSet) cb.onExit(msg.id, msg.exitCode);
     } else if (msg.type === 'error') {
       log.error(`PTY error for ${msg.id}:`, msg.message);
+    } else if (msg.type === 'dor:controlRequest') {
+      for (const listener of dorControlRequestListeners) {
+        listener({
+          requestId: msg.requestId,
+          surfaceId: msg.surfaceId,
+          method: msg.method,
+          params: msg.params,
+        });
+      }
     }
   });
 
@@ -167,6 +220,16 @@ export function addCallbacks(cb: PtyCallbacks): () => void {
   return () => { callbackSet.delete(cb); };
 }
 
+export function onDorControlRequest(listener: (request: DorControlRequest) => void): () => void {
+  dorControlRequestListeners.add(listener);
+  return () => { dorControlRequestListeners.delete(listener); };
+}
+
+export function respondDorControl(response: DorControlResponse): void {
+  if (!child?.connected) return;
+  child.send({ type: 'dor:controlResponse', ...response });
+}
+
 function sendToChild(msg: any): void {
   ensureChild(extensionPath_);
   if (childReady) {
@@ -176,10 +239,20 @@ function sendToChild(msg: any): void {
   }
 }
 
-export function spawn(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[] }): void {
+export function spawn(id: string, options?: PtySpawnOptions): void {
   killedPtyIds.delete(id);
   ptyBuffers.set(id, createBufferEntry(true));
-  sendToChild({ type: 'spawn', id, cols: options?.cols || 80, rows: options?.rows || 30, cwd: options?.cwd, shell: options?.shell, args: options?.args });
+  const dorEnv = getDorRuntimeEnv(extensionPath_);
+  sendToChild({
+    type: 'spawn',
+    id,
+    cols: options?.cols || 80,
+    rows: options?.rows || 30,
+    cwd: options?.cwd,
+    shell: options?.shell,
+    args: options?.args,
+    env: dorEnv,
+  });
 }
 
 export interface ShellEntry {

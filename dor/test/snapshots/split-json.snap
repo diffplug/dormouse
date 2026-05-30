@@ -1,0 +1,12 @@
+exitCode: 0
+stdout:
+{
+  "status": "created",
+  "surface_id": "33333333-3333-4333-8333-333333333333",
+  "surface_ref": "surface:3",
+  "direction": "right",
+  "minimized": false,
+  "command": "pnpm test -- --watch"
+}
+
+stderr:

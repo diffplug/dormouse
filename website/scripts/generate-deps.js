@@ -12,6 +12,7 @@ const cargoManifestPath = resolve(repoRoot, "standalone/src-tauri/Cargo.toml");
 const rootPackageJsonPath = resolve(repoRoot, "package.json");
 const themeExtensionsPath = resolve(repoRoot, "lib/src/lib/themes/bundled-extensions.json");
 const productDependencyFilters = [
+  "dor",
   "dormouse",
   "dormouse-standalone",
   "dormouse-lib",

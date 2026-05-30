@@ -8,6 +8,7 @@ import {
 import {
   applyTerminalSemanticEventsByPtyId,
 } from '../terminal-state-store';
+import type { DorControlResult } from 'dor/protocol';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 
 export class VSCodeAdapter implements PlatformAdapter {
@@ -91,6 +92,24 @@ export class VSCodeAdapter implements PlatformAdapter {
         setDefaultShellOpts(msg.shell ? { shell: msg.shell, args: msg.args } : null);
       } else if (msg.type === 'dormouse:openThemeDebugger') {
         window.dispatchEvent(new CustomEvent('dormouse:openThemeDebugger'));
+      } else if (msg.type === 'dor:controlRequest') {
+        const respond = (response: DorControlResult) => {
+          this.vscode.postMessage({
+            type: 'dor:controlResponse',
+            requestId: msg.requestId,
+            ...response,
+          });
+        };
+
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            requestId: msg.requestId,
+            surfaceId: msg.surfaceId,
+            method: msg.method,
+            params: msg.params ?? {},
+            respond,
+          },
+        }));
       }
     });
   }

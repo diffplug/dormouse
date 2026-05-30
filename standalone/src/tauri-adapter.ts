@@ -13,6 +13,7 @@ import {
 import {
   applyTerminalSemanticEventsByPtyId,
 } from "dormouse-lib/lib/terminal-state-store";
+import type { DorControlRequestPayload, DorControlResult } from "dor/protocol";
 
 function invoke(cmd: string, args?: Record<string, unknown>): void {
   rawInvoke(cmd, args).catch((err) =>
@@ -113,6 +114,32 @@ export class TauriAdapter implements PlatformAdapter {
         const paths = event.payload.paths ?? [];
         if (paths.length === 0) return;
         for (const handler of this.filesDroppedHandlers) handler(paths);
+      }),
+    );
+
+    this.unlistenFns.push(
+      await listen<DorControlRequestPayload>("dor:controlRequest", (event) => {
+        const payload = event.payload;
+        const respond = (response: DorControlResult) => {
+          rawInvoke("dor_control_response", {
+            response: {
+              requestId: payload.requestId,
+              ...response,
+            },
+          }).catch((err) =>
+            console.error("[tauri-adapter] dor_control_response failed:", err),
+          );
+        };
+
+        window.dispatchEvent(new CustomEvent("dormouse:control-request", {
+          detail: {
+            requestId: payload.requestId,
+            surfaceId: payload.surfaceId,
+            method: payload.method,
+            params: payload.params ?? {},
+            respond,
+          },
+        }));
       }),
     );
   }
