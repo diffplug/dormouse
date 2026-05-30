@@ -7,6 +7,7 @@ import type {
   EnsureSurfaceResponse,
 } from './types.js';
 import {
+  errorMessage,
   resolveControlClient,
   stringParser,
   writeStdout,
@@ -121,7 +122,7 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
     writeStdout(this, renderEnsureResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
-    return new Error(error instanceof Error ? error.message : String(error));
+    return new Error(errorMessage(error));
   }
 }
 

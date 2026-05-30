@@ -10,6 +10,7 @@ import type {
   Surface,
 } from './types.js';
 import {
+  errorMessage,
   parseIdFormat,
   renderHandle,
   resolveControlClient,
@@ -59,7 +60,7 @@ export async function runListCommand(
     writeStdout(context, stdout);
     return undefined;
   } catch (error) {
-    return new Error(error instanceof Error ? error.message : String(error));
+    return new Error(errorMessage(error));
   }
 }
 

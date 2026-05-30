@@ -10,7 +10,7 @@ import { ensureCommand } from './commands/ensure.js';
 import { listPaneSurfacesCommand } from './commands/list-pane-surfaces.js';
 import { listPanesCommand } from './commands/list-panes.js';
 import { splitCommand } from './commands/split.js';
-import { fail } from './commands/shared.js';
+import { errorMessage, fail } from './commands/shared.js';
 import type {
   CliEnv,
   CliOptions,
@@ -324,8 +324,4 @@ function normalizeExitCode(exitCode: number | string | null | undefined): number
       ? Number(exitCode)
       : 0;
   return numeric === 0 || Number.isNaN(numeric) ? 0 : 1;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

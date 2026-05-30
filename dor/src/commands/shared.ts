@@ -10,6 +10,10 @@ import type {
 
 export const stringParser = (input: string): string => input;
 
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function fail(message: string): CliResult {
   return { exitCode: 1, stdout: '', stderr: `Error: ${message}\n` };
 }

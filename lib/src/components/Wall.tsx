@@ -670,7 +670,6 @@ export function Wall({
         focused: panel.id === activeId,
         index,
         indexInPane: 0,
-        requestedWorkingDirectory: state.cwd?.path ?? null,
         selectedInPane: true,
       };
     });

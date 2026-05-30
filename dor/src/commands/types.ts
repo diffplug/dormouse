@@ -16,7 +16,6 @@ export interface Surface {
   focused: boolean;
   index: number;
   indexInPane: number;
-  requestedWorkingDirectory: string | null;
   selectedInPane: boolean;
 }
 

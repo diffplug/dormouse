@@ -20,7 +20,6 @@ const fixtureSurfaces = [
     focused: true,
     index: 0,
     indexInPane: 0,
-    requestedWorkingDirectory: '/Users/example/.codex/worktrees/0cbc/mouseterm',
     selectedInPane: true,
   },
   {
@@ -32,7 +31,6 @@ const fixtureSurfaces = [
     focused: false,
     index: 1,
     indexInPane: 0,
-    requestedWorkingDirectory: '/workspace/app/packages/repo',
     selectedInPane: true,
   },
 ];

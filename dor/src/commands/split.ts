@@ -9,6 +9,7 @@ import type {
   SplitSurfaceResponse,
 } from './types.js';
 import {
+  errorMessage,
   resolveControlClient,
   stringParser,
   writeStdout,
@@ -140,7 +141,7 @@ async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...co
     writeStdout(this, renderSplitResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
-    return new Error(error instanceof Error ? error.message : String(error));
+    return new Error(errorMessage(error));
   }
 }
 
