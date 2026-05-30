@@ -91,7 +91,6 @@ export interface ReadSurfaceResponse {
 }
 
 export type KillSurfaceConfirmation =
-  | { mode: 'await-user' }
   | { mode: 'if-read'; text: string }
   | { mode: 'dangerously' };
 

@@ -23,9 +23,9 @@ function createDorControlServer({ socketPath, token, send, timeoutMs = 10000 }) 
     // down the long-lived sidecar/pty-host.
     socket.on('error', () => {});
 
-    // A no-timeout request (await-user kill) would otherwise leak its pending
-    // entry forever if the client disconnects (Ctrl-C) before the webview
-    // answers. Drop any entries owned by this socket when it closes.
+    // If the client disconnects (timeout/Ctrl-C) before the webview answers,
+    // release any entries owned by this socket right away rather than letting
+    // them linger until their own timeout fires against a dead socket.
     socket.on('close', () => {
       for (const [requestId, entry] of pending) {
         if (entry.socket !== socket) continue;
@@ -63,17 +63,7 @@ function createDorControlServer({ socketPath, token, send, timeoutMs = 10000 }) 
       return;
     }
 
-    // await-user kills block on a human answering the in-app dialog, which can
-    // take arbitrarily long; the client disables its own deadline for these, so
-    // the safety-net timeout would only cut the user off prematurely. The
-    // socket 'close' handler releases the entry if the client goes away.
-    const awaitsUser = request.method === 'surface.kill'
-      && request.params
-      && typeof request.params === 'object'
-      && request.params.confirmation
-      && request.params.confirmation.mode === 'await-user';
-
-    const timeout = awaitsUser ? null : setTimeout(() => {
+    const timeout = setTimeout(() => {
       pending.delete(request.requestId);
       writeResponse(socket, { requestId: request.requestId, ok: false, error: `timed out waiting for ${request.method}` });
     }, timeoutMs);
