@@ -24,6 +24,7 @@ import {
   getActivitySnapshot,
   isUntouched,
   getOrCreateTerminal,
+  getTerminalInstance,
   isReservedUserTitle,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
@@ -36,7 +37,7 @@ import {
   resolveDisplayPrimary,
 } from '../lib/terminal-state';
 import { orchestrateKill } from '../lib/kill-animation';
-import { PLATFORM_STRING } from '../lib/platform';
+import { getPlatform, PLATFORM_STRING } from '../lib/platform';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
 import type {
   Surface as DorSurface,
@@ -87,13 +88,18 @@ type ShellSpawnNoticeState = {
 
 type DorControlParams = {
   command?: unknown;
+  confirmation?: unknown;
   direction?: unknown;
+  input?: unknown;
+  inputCount?: unknown;
+  lines?: unknown;
   minimized?: unknown;
   pane?: string;
   surface?: unknown;
   title?: unknown;
   workspace?: string;
   window?: string;
+  scrollback?: unknown;
 };
 
 // The webview view of a control request: the shared wire payload, but with
@@ -163,12 +169,55 @@ function matchesDorPaneTarget(target: string | undefined, surface: DorSurface): 
   return Number.isInteger(numeric) && numeric >= 1 && surface.index === numeric - 1;
 }
 
+function surfaceTitleTarget(target: string): string | null {
+  return target.startsWith('title:') ? target.slice('title:'.length) : null;
+}
+
+function renderSurfaceForError(surface: DorSurface): string {
+  return `${surface.ref} ${JSON.stringify(surface.title)}`;
+}
+
 function stringParam(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
 function booleanParam(value: unknown): boolean {
   return value === true;
+}
+
+function numberParam(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function limitLines(text: string, lines: number | undefined): string {
+  if (lines === undefined) return text;
+  const parts = text.split('\n');
+  return parts.slice(-lines).join('\n');
+}
+
+function readVisibleSurfaceText(surfaceId: string, lines: number | undefined): string {
+  const terminal = getTerminalInstance(surfaceId);
+  if (!terminal) return '';
+
+  const buffer = terminal.buffer.active;
+  const start = Math.max(0, buffer.viewportY);
+  const end = start + terminal.rows;
+  const visibleLines: string[] = [];
+  for (let row = start; row < end; row += 1) {
+    visibleLines.push(buffer.getLine(row)?.translateToString(true) ?? '');
+  }
+
+  return limitLines(visibleLines.join('\n').replace(/\n+$/, ''), lines);
+}
+
+function killConfirmationParam(value: unknown): { mode: 'if-read'; text: string } | { mode: 'dangerously' } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const confirmation = value as { mode?: unknown; text?: unknown };
+  if (confirmation.mode === 'dangerously') return { mode: 'dangerously' };
+  if (confirmation.mode === 'if-read' && typeof confirmation.text === 'string') {
+    return { mode: 'if-read', text: confirmation.text };
+  }
+  return null;
 }
 
 function parseDorSplitDirection(value: unknown): DorSplitDirection | null {
@@ -686,15 +735,30 @@ export function Wall({
     return id;
   }, []);
 
-  const findVisibleSurface = useCallback((
+  const resolveVisibleSurface = useCallback((
     api: DockviewApi,
     target: string | undefined,
     callerSurfaceId: string | undefined,
-  ): DorSurface | null => {
+  ): ParseResult<DorSurface> => {
     const surfaces = buildDorSurfaces(api);
     const resolvedTarget = target ?? callerSurfaceId ?? 'focused';
-    return surfaces.find((surface) => matchesDorPaneTarget(resolvedTarget, surface))
+    const titleTarget = surfaceTitleTarget(resolvedTarget);
+    if (titleTarget !== null) {
+      const matches = surfaces.filter((surface) => surface.title === titleTarget);
+      if (matches.length === 1) return { ok: true, value: matches[0] };
+      if (matches.length > 1) {
+        return {
+          ok: false,
+          message: `surface target '${resolvedTarget}' matched multiple surfaces: ${matches.map(renderSurfaceForError).join(', ')}`,
+        };
+      }
+      return { ok: false, message: `surface target '${resolvedTarget}' was not found` };
+    }
+
+    const matched = surfaces.find((surface) => matchesDorPaneTarget(resolvedTarget, surface))
       ?? (!target && !callerSurfaceId ? (surfaces[0] ?? null) : null);
+    if (matched) return { ok: true, value: matched };
+    return { ok: false, message: `surface '${resolvedTarget}' was not found` };
   }, [buildDorSurfaces]);
 
   const findSurfaceIdByUserTitle = useCallback((title: string): string | null => {
@@ -854,7 +918,7 @@ export function Wall({
   }, [generatePaneId, selectPane, showShellSpawnNotice]);
 
   useEffect(() => {
-    const handler = (event: Event) => {
+    const handler = async (event: Event) => {
       const detail = (event as CustomEvent<DorControlRequest>).detail;
       if (!detail) return;
 
@@ -877,17 +941,17 @@ export function Wall({
       // Resolve the split reference surface and its live panel, responding with
       // the appropriate error and returning null when either is unavailable.
       const resolveSplitTarget = () => {
-        const target = findVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
-        if (!target) {
-          detail.respond({ ok: false, error: `surface '${stringParam(params.surface) ?? detail.surfaceId ?? 'focused'}' was not found` });
+        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
           return null;
         }
-        const panel = api.getPanel(target.id);
+        const panel = api.getPanel(target.value.id);
         if (!panel) {
-          detail.respond({ ok: false, error: `surface '${target.ref}' is not visible` });
+          detail.respond({ ok: false, error: `surface '${target.value.ref}' is not visible` });
           return null;
         }
-        return { target, panel };
+        return { target: target.value, panel };
       };
 
       if (detail.method === 'surface.list') {
@@ -999,12 +1063,94 @@ export function Wall({
         return;
       }
 
+      if (detail.method === 'surface.send') {
+        const input = stringParam(params.input);
+        if (input === undefined) {
+          detail.respond({ ok: false, error: 'input is required' });
+          return;
+        }
+        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        getPlatform().writePty(target.value.id, input);
+        detail.respond({
+          ok: true,
+          result: {
+            status: 'sent',
+            surfaceId: target.value.id,
+            surfaceRef: target.value.ref,
+            inputCount: typeof params.inputCount === 'number' ? params.inputCount : 1,
+          },
+        });
+        return;
+      }
+
+      if (detail.method === 'surface.read') {
+        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        const lines = numberParam(params.lines);
+        const scrollback = booleanParam(params.scrollback);
+        const text = scrollback
+          ? limitLines((await getPlatform().getScrollback(target.value.id)) ?? '', lines)
+          : readVisibleSurfaceText(target.value.id, lines);
+        detail.respond({
+          ok: true,
+          result: {
+            workspaceRef: 'workspace:1',
+            surfaceId: target.value.id,
+            surfaceRef: target.value.ref,
+            text,
+          },
+        });
+        return;
+      }
+
+      if (detail.method === 'surface.kill') {
+        const confirmation = killConfirmationParam(params.confirmation);
+        if (!confirmation) {
+          detail.respond({ ok: false, error: 'invalid kill confirmation' });
+          return;
+        }
+        const surface = stringParam(params.surface);
+        if (!surface) {
+          detail.respond({ ok: false, error: 'surface is required' });
+          return;
+        }
+        const target = resolveVisibleSurface(api, surface, detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        if (confirmation.mode === 'if-read') {
+          const text = readVisibleSurfaceText(target.value.id, undefined);
+          if (!text.includes(confirmation.text)) {
+            detail.respond({ ok: false, error: `surface '${target.value.ref}' read text did not contain confirmation text` });
+            return;
+          }
+        }
+        killPaneImmediately(target.value.id);
+        detail.respond({
+          ok: true,
+          result: {
+            status: 'killed',
+            surfaceId: target.value.id,
+            surfaceRef: target.value.ref,
+          },
+        });
+        return;
+      }
+
       detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
     };
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, createSplitSurface, findSurfaceIdByUserTitle, findVisibleSurface, surfaceRefForId]);
+  }, [buildDorSurfaces, createSplitSurface, findSurfaceIdByUserTitle, killPaneImmediately, resolveVisibleSurface, surfaceRefForId]);
 
   const addSplitPanel = useCallback((
     id: string | null,

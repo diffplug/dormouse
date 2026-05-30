@@ -122,6 +122,9 @@ Invariants:
 
 - Stable ids and short refs are accepted where a surface/pane target is
   accepted.
+- Surface targets also accept `title:<exact display title>`. If exactly one
+  visible surface has that title, it is selected. If multiple visible surfaces
+  match, the command fails and lists the matching surface refs.
 - Short refs currently use cmux-style names for implemented handles:
   `surface:1`, `pane:2`.
 - List output defaults to refs; commands that list handles accept
@@ -154,5 +157,9 @@ from `command-detail`.
 
 - `dor split` [impl](../../dor/src/commands/split.ts) [docs](../../dor/test/snapshots/help/split.md)
 - `dor ensure` [impl](../../dor/src/commands/ensure.ts) [docs](../../dor/test/snapshots/help/ensure.md)
+- `dor version` [impl](../../dor/src/commands/version.ts) [docs](../../dor/test/snapshots/help/version.md)
+- `dor send` [impl](../../dor/src/commands/send.ts) [docs](../../dor/test/snapshots/help/send.md)
+- `dor read` [impl](../../dor/src/commands/read.ts) [docs](../../dor/test/snapshots/help/read.md)
+- `dor kill` [impl](../../dor/src/commands/kill.ts) [docs](../../dor/test/snapshots/help/kill.md)
 - `dor list-panes` [impl](../../dor/src/commands/list-panes.ts) [docs](../../dor/test/snapshots/help/list-panes.md)
 - `dor list-pane-surfaces` [impl](../../dor/src/commands/list-pane-surfaces.ts) [docs](../../dor/test/snapshots/help/list-pane-surfaces.md)

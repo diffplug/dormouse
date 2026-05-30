@@ -4,6 +4,7 @@ node_modules/
 
 # Build output
 dist/
+dor/src/generated-version.ts
 lib/dist/
 *.tsbuildinfo
 

@@ -64,10 +64,54 @@ export interface EnsureSurfaceResponse {
   minimized: boolean;
 }
 
+export interface SendSurfaceRequest {
+  surface?: string;
+  input: string;
+  inputCount: number;
+}
+
+export interface SendSurfaceResponse {
+  status: 'sent';
+  surfaceId?: string;
+  surfaceRef: string;
+  inputCount: number;
+}
+
+export interface ReadSurfaceRequest {
+  lines?: number;
+  scrollback: boolean;
+  surface?: string;
+}
+
+export interface ReadSurfaceResponse {
+  workspaceRef: string;
+  surfaceId?: string;
+  surfaceRef: string;
+  text: string;
+}
+
+export type KillSurfaceConfirmation =
+  | { mode: 'if-read'; text: string }
+  | { mode: 'dangerously' };
+
+export interface KillSurfaceRequest {
+  confirmation: KillSurfaceConfirmation;
+  surface: string;
+}
+
+export interface KillSurfaceResponse {
+  status: 'killed';
+  surfaceId?: string;
+  surfaceRef: string;
+}
+
 export interface ControlClient {
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse>;
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse>;
+  sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse>;
+  readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse>;
+  killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse>;
 }
 
 export interface CliEnv {
@@ -77,6 +121,8 @@ export interface CliEnv {
 export interface CliOptions {
   env?: CliEnv;
   client?: ControlClient;
+  readStdin?: () => Promise<string>;
+  versionMetadata?: VersionMetadata;
 }
 
 export interface CliResult {
@@ -93,6 +139,12 @@ export interface Command {
   name: string;
   command: StricliCommand<DorCommandContext>;
   helpPatches?: readonly HelpPatch[];
+}
+
+export interface VersionMetadata {
+  version: string;
+  commit: string;
+  commitsSinceVersion: number;
 }
 
 export interface HelpPatch {

@@ -3,8 +3,14 @@ import type {
   ControlClient,
   EnsureSurfaceRequest,
   EnsureSurfaceResponse,
+  KillSurfaceRequest,
+  KillSurfaceResponse,
   ListSurfacesRequest,
   ListSurfacesResponse,
+  ReadSurfaceRequest,
+  ReadSurfaceResponse,
+  SendSurfaceRequest,
+  SendSurfaceResponse,
   SplitSurfaceRequest,
   SplitSurfaceResponse,
 } from './commands/types.js';
@@ -46,6 +52,18 @@ export class SocketControlClient implements ControlClient {
 
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse> {
     return this.request<EnsureSurfaceResponse>('surface.ensure', request);
+  }
+
+  sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse> {
+    return this.request<SendSurfaceResponse>('surface.send', request);
+  }
+
+  readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse> {
+    return this.request<ReadSurfaceResponse>('surface.read', request);
+  }
+
+  killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse> {
+    return this.request<KillSurfaceResponse>('surface.kill', request);
   }
 
   private request<T>(method: string, params: unknown): Promise<T> {
