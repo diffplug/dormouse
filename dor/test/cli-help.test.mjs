@@ -15,6 +15,11 @@ test('help snapshots cover every command in global help', async (t) => {
 
   assert.deepEqual(await runCli([]), globalHelp, 'no-arg dor should print root help');
   assert.deepEqual(await runCli(['help']), globalHelp, 'dor help should print root help');
+  assert.deepEqual(
+    await runCli(['help', 'not-a-command']),
+    globalHelp,
+    'dor help <unknown> should print root help',
+  );
 
   await t.test('dor', async () => {
     await snapshotHelp({
@@ -26,14 +31,20 @@ test('help snapshots cover every command in global help', async (t) => {
   });
 
   for (const command of commandNames) {
+    const commandHelp = await runCli([command, '--help']);
     await t.test(`dor ${command}`, async () => {
       await snapshotHelp({
         file: command,
         title: `dor ${command}`,
         invocation: `dor ${command} --help`,
-        result: await runCli([command, '--help']),
+        result: commandHelp,
       });
     });
+    assert.deepEqual(
+      await runCli(['help', command]),
+      commandHelp,
+      `dor help ${command} should match dor ${command} --help`,
+    );
   }
 
   await assertSnapshotInventory(['dor', ...commandNames]);
