@@ -6,6 +6,7 @@ import {
   cwdFromOsc7,
   cwdFromOsc9_9,
   cwdIdentity,
+  COMMAND_FAIL_GLYPH,
   DEFAULT_IDLE_TITLE,
   deriveHeader,
   buildAppTitleResolver,
@@ -179,6 +180,46 @@ describe('terminal command state reducer', () => {
     expect(deriveHeader(state, [state])).toEqual({
       primary: `${DEFAULT_IDLE_TITLE} lazygit`,
     });
+  });
+
+  it('appends the fail glyph to the idle title when the last command exited non-zero', () => {
+    let state = runningPane('/repo/app', 'pnpm build');
+    state = reduceTerminalState(state, { type: 'commandFinish', exitCode: 1 }, { now: () => 2 });
+
+    expect(deriveHeader(state, [state])).toEqual({
+      primary: `${DEFAULT_IDLE_TITLE} pnpm build ${COMMAND_FAIL_GLYPH}`,
+      lastCommandFailed: true,
+    });
+
+    // The marker persists across the next prompt, until a new command runs.
+    state = reduceTerminalState(state, { type: 'promptStart' });
+    expect(deriveHeader(state, [state]).primary).toBe(`${DEFAULT_IDLE_TITLE} pnpm build ${COMMAND_FAIL_GLYPH}`);
+  });
+
+  it('shows no fail glyph for a successful command', () => {
+    let state = runningPane('/repo/app', 'pnpm build');
+    state = reduceTerminalState(state, { type: 'commandFinish', exitCode: 0 }, { now: () => 2 });
+
+    expect(deriveHeader(state, [state])).toEqual({ primary: `${DEFAULT_IDLE_TITLE} pnpm build` });
+  });
+
+  it('shows no fail glyph when the exit code is unknown (keystroke fallback)', () => {
+    let state = runningPane('/repo/app', 'pnpm build');
+    state = reduceTerminalState(state, { type: 'commandFinish' }, { now: () => 2 });
+
+    expect(deriveHeader(state, [state])).toEqual({ primary: `${DEFAULT_IDLE_TITLE} pnpm build` });
+  });
+
+  it('drops the fail glyph once a new command starts running', () => {
+    let state = runningPane('/repo/app', 'pnpm build');
+    state = reduceTerminalState(state, { type: 'commandFinish', exitCode: 1 }, { now: () => 2 });
+    state = reduceTerminalState(state, { type: 'commandStart', source: 'osc633_boundaries' }, {
+      now: () => 3,
+      createId: () => 'next',
+    });
+
+    // While running we show the live command, no glyph.
+    expect(deriveHeader(state, [state]).primary).not.toContain(COMMAND_FAIL_GLYPH);
   });
 
   it('clears stale pending typed command lines on a fresh prompt', () => {

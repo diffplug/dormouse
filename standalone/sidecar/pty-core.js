@@ -73,7 +73,52 @@ function withPrependedPath(env, dir, platform = process.platform) {
 function withoutInternalDormouseEnv(env) {
   const next = { ...env };
   delete next.DORMOUSE_CLI_BIN;
+  delete next.DORMOUSE_SHELL_INTEGRATION_DIR;
   return next;
+}
+
+// Directory holding the per-shell OSC 633 integration scripts. Shipped next to
+// this file (standalone bundles it via the tauri `../sidecar/**/*` resources
+// glob); `DORMOUSE_SHELL_INTEGRATION_DIR` overrides it for hosts that stage the
+// sidecar elsewhere (e.g. the VS Code bundle) and for tests.
+function resolveShellIntegrationDir(env, runtime = {}) {
+  return env.DORMOUSE_SHELL_INTEGRATION_DIR || path.join(runtime.dirname || __dirname, 'shell-integration');
+}
+
+// Enable OSC 633 shell integration for shells that support reliable injection,
+// returning possibly-modified { env, shellArgs }. The keystroke-based command
+// heuristic remains the fallback for shells we can't inject (cmd.exe, others)
+// or when the scripts aren't present on disk. See docs/specs/terminal-escapes.md.
+//
+// zsh  — injected purely via env (`ZDOTDIR`), as reliable as a PATH prepend. We
+//        point ZDOTDIR at our scripts and pass the user's real ZDOTDIR through
+//        `USER_ZDOTDIR`; our dotfiles chain to the user's then install the hooks.
+// bash — injected via `--init-file`, which has no env equivalent. Because that
+//        flag and login mode are mutually exclusive, we drop the login flag and
+//        the script replicates login-profile sourcing itself. Skipped when the
+//        caller passed explicit args, since we'd be replacing them.
+function applyShellIntegration(shell, env, shellArgs, integrationDir, hasExplicitArgs, runtime = {}) {
+  const fsModule = runtime.fsModule || fs;
+  const shellName = path.posix.basename(shell || '').toLowerCase();
+
+  if (shellName === 'zsh') {
+    const zshDir = path.join(integrationDir, 'zsh');
+    if (fileExists(path.join(zshDir, '.zshrc'), fsModule)) {
+      return {
+        env: { ...env, ZDOTDIR: zshDir, USER_ZDOTDIR: env.ZDOTDIR || env.HOME || '' },
+        shellArgs,
+      };
+    }
+  }
+
+  if (shellName === 'bash' && !hasExplicitArgs) {
+    const script = path.join(integrationDir, 'bash', 'shellIntegration.bash');
+    if (fileExists(script, fsModule)) {
+      return { env, shellArgs: ['--init-file', script] };
+    }
+  }
+
+  return { env, shellArgs };
 }
 
 function resolveSpawnConfig(options, runtime = {}) {
@@ -94,23 +139,29 @@ function resolveSpawnConfig(options, runtime = {}) {
     ? explicitArgs
     : resolveLoginArg(shell, platform);
 
+  // Resolve the integration dir from the original env before the internal
+  // DORMOUSE_* vars are stripped below.
+  const integrationDir = resolveShellIntegrationDir(env, runtime);
   const envWithCliPath = withoutInternalDormouseEnv(withPrependedPath(env, env.DORMOUSE_CLI_BIN, platform));
+  const childEnv = {
+    ...envWithCliPath,
+    TERM_PROGRAM: 'iTerm.app',
+    TERM_PROGRAM_VERSION: ITERM2_COMPAT_VERSION,
+    LC_TERMINAL: 'iTerm2',
+    LC_TERMINAL_VERSION: ITERM2_COMPAT_VERSION,
+    DORMOUSE_SURFACE_ID: surfaceId || options?.id || '',
+  };
+  const hasExplicitArgs = Boolean(explicitArgs && explicitArgs.length > 0);
+  const integrated = applyShellIntegration(shell, childEnv, shellArgs, integrationDir, hasExplicitArgs, runtime);
 
   return {
     cols,
     rows,
     cwd: missingExplicitCwd ? defaultCwd : (cwd || defaultCwd),
     cwdWarning: missingExplicitCwd ? `unable to restore because directory ${cwd} was removed` : null,
-    env: {
-      ...envWithCliPath,
-      TERM_PROGRAM: 'iTerm.app',
-      TERM_PROGRAM_VERSION: ITERM2_COMPAT_VERSION,
-      LC_TERMINAL: 'iTerm2',
-      LC_TERMINAL_VERSION: ITERM2_COMPAT_VERSION,
-      DORMOUSE_SURFACE_ID: surfaceId || options?.id || '',
-    },
+    env: integrated.env,
     shell,
-    shellArgs,
+    shellArgs: integrated.shellArgs,
   };
 }
 
@@ -236,17 +287,44 @@ function detectWindowsShells(runtime = {}) {
   return shells;
 }
 
+// Well-known interactive shells we offer in the picker on macOS/Linux when they
+// exist on disk, in addition to the user's $SHELL. Listed by preference; the
+// first entry of each basename wins (so $SHELL, added first, keeps its slot).
+const COMMON_UNIX_SHELLS = [
+  '/bin/zsh',
+  '/bin/bash',
+  '/opt/homebrew/bin/bash', '/usr/local/bin/bash',
+  '/opt/homebrew/bin/fish', '/usr/local/bin/fish', '/usr/bin/fish',
+  '/opt/homebrew/bin/zsh', '/usr/local/bin/zsh',
+  '/bin/sh',
+];
+
+function detectUnixShells(runtime = {}) {
+  const env = runtime.env || process.env;
+  const fsModule = runtime.fsModule || fs;
+  const seenByName = new Set();
+  const shells = [];
+  const add = (shellPath, trusted) => {
+    if (!shellPath) return;
+    const name = path.posix.basename(shellPath);
+    // De-dupe by name so the picker shows one entry per shell, $SHELL winning.
+    if (seenByName.has(name)) return;
+    if (!trusted && !fileExists(shellPath, fsModule)) return;
+    seenByName.add(name);
+    shells.push({ name, path: shellPath, args: [] });
+  };
+
+  add(env.SHELL || '/bin/sh', true); // user's default, always first
+  for (const candidate of COMMON_UNIX_SHELLS) add(candidate, false);
+  return shells;
+}
+
 function detectAvailableShells(runtime = {}) {
   const platform = runtime.platform || process.platform;
   if (platform === 'win32') {
     return detectWindowsShells(runtime);
   }
-
-  // macOS / Linux: return $SHELL or /bin/sh
-  const env = runtime.env || process.env;
-  const shellPath = env.SHELL || '/bin/sh';
-  const name = path.posix.basename(shellPath);
-  return [{ name, path: shellPath, args: [] }];
+  return detectUnixShells(runtime);
 }
 
 module.exports.detectAvailableShells = detectAvailableShells;

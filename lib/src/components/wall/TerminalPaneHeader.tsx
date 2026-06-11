@@ -37,6 +37,7 @@ import {
 import {
   buildAppTitleResolver,
   createTerminalPaneState,
+  COMMAND_FAIL_GLYPH,
   deriveHeader,
   resolveDisplayPrimary,
   titleCandidatesForDisplay,
@@ -102,6 +103,14 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
   );
   const derivedHeader = deriveHeader(paneState, visiblePaneStates, { appTitleForPane });
   const displayTitle = resolveDisplayPrimary(derivedHeader.primary, api.title);
+  // The failure glyph rides at the end of the title string (so tabs/OS titles
+  // carry it too). `lastCommandFailed` tells us authoritatively that it's there,
+  // so we can color it red and strip it from the editing/rename base without
+  // guessing from the string (a user title ending in "✗" would fool a match).
+  const showsFailGlyph = derivedHeader.lastCommandFailed === true;
+  const displayTitleBase = showsFailGlyph
+    ? displayTitle.slice(0, -` ${COMMAND_FAIL_GLYPH}`.length)
+    : displayTitle;
   const mouseState = mouseStates.get(api.id) ?? DEFAULT_MOUSE_SELECTION_STATE;
   const showMouseIcon = mouseState.mouseReporting !== 'none';
   const inOverride = mouseState.override !== 'off';
@@ -205,7 +214,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
           <input
             data-renaming-input-for={api.id}
             className="bg-transparent outline-none border-none text-inherit font-medium font-mono w-full min-w-0 p-0 m-0"
-            defaultValue={displayTitle}
+            defaultValue={displayTitleBase}
             autoFocus
             ref={(el) => el?.select()}
             onKeyDown={(e) => {
@@ -231,7 +240,10 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
               setTitleCandidatesRect(e.currentTarget.getBoundingClientRect());
             }}
           >
-            <span className="min-w-0 shrink truncate">{displayTitle}</span>
+            <span className="min-w-0 shrink truncate">{displayTitleBase}</span>
+            {showsFailGlyph && (
+              <span className="ml-1 shrink-0 text-error" aria-label="last command failed">{COMMAND_FAIL_GLYPH}</span>
+            )}
             {derivedHeader.secondary && (
               <span className="ml-1 min-w-0 shrink truncate opacity-70">{derivedHeader.secondary}</span>
             )}
@@ -382,7 +394,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
         <TitleCandidatesPopover
           anchorRect={titleCandidatesRect}
           candidates={titleCandidates}
-          currentTitle={displayTitle}
+          currentTitle={displayTitleBase}
           onClose={closeTitleCandidates}
         />
       )}
