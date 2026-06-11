@@ -135,7 +135,7 @@ A binary on `PATH` only has to be **found**, so it injects via one env var (`DOR
 | Shell | Mechanism | Channel | Notes |
 |---|---|---|---|
 | zsh | `ZDOTDIR` → our dotfiles chain to the user's, then install `precmd`/`preexec` hooks | env (as reliable as the `PATH` prepend) | User's real `ZDOTDIR` is passed through as `USER_ZDOTDIR`; our `.zshrc` hands `ZDOTDIR` back so `.zlogin` and child shells are unaffected. |
-| bash | `--rcfile`/`--init-file`; the script re-sources the user's rc and replicates login-profile loading | shellArgs | `--rcfile` conflicts with login mode, so the script must replicate what `-l` would have sourced. (not yet implemented) |
+| bash | `--init-file` → our script replicates login-profile sourcing, then installs a `DEBUG`-trap / `PROMPT_COMMAND` hook | shellArgs | `--init-file` and login mode are mutually exclusive, so Dormouse drops `-l` and the script sources `/etc/profile` + the user's profile itself. Written for bash 3.2 (macOS system bash): no `PS0`, no array `PROMPT_COMMAND`. The `E` command line is the first simple command of a pipeline (a `DEBUG`-trap limitation); boundaries and exit codes stay exact. |
 | fish | `XDG_DATA_DIRS` → fish auto-sources `*/fish/vendor_conf.d/*.fish` | env | (not yet implemented) |
 | PowerShell | `-NoExit -Command <dot-source>` | shellArgs | (not yet implemented) |
 | cmd.exe | no per-command hook exists | — | Never gets real OSC 633; always uses the keystroke fallback below. |

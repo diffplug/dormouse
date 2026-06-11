@@ -90,10 +90,14 @@ function resolveShellIntegrationDir(env, runtime = {}) {
 // heuristic remains the fallback for shells we can't inject (cmd.exe, others)
 // or when the scripts aren't present on disk. See docs/specs/terminal-escapes.md.
 //
-// zsh — injected purely via env (`ZDOTDIR`), as reliable as a PATH prepend.
-// We point ZDOTDIR at our scripts and pass the user's real ZDOTDIR through
-// `USER_ZDOTDIR`; our dotfiles chain to the user's then install the hooks.
-function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = {}) {
+// zsh  — injected purely via env (`ZDOTDIR`), as reliable as a PATH prepend. We
+//        point ZDOTDIR at our scripts and pass the user's real ZDOTDIR through
+//        `USER_ZDOTDIR`; our dotfiles chain to the user's then install the hooks.
+// bash — injected via `--init-file`, which has no env equivalent. Because that
+//        flag and login mode are mutually exclusive, we drop the login flag and
+//        the script replicates login-profile sourcing itself. Skipped when the
+//        caller passed explicit args, since we'd be replacing them.
+function applyShellIntegration(shell, env, shellArgs, integrationDir, hasExplicitArgs, runtime = {}) {
   const fsModule = runtime.fsModule || fs;
   const shellName = path.posix.basename(shell || '').toLowerCase();
 
@@ -104,6 +108,13 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = 
         env: { ...env, ZDOTDIR: zshDir, USER_ZDOTDIR: env.ZDOTDIR || env.HOME || '' },
         shellArgs,
       };
+    }
+  }
+
+  if (shellName === 'bash' && !hasExplicitArgs) {
+    const script = path.join(integrationDir, 'bash', 'shellIntegration.bash');
+    if (fileExists(script, fsModule)) {
+      return { env, shellArgs: ['--init-file', script] };
     }
   }
 
@@ -140,7 +151,8 @@ function resolveSpawnConfig(options, runtime = {}) {
     LC_TERMINAL_VERSION: ITERM2_COMPAT_VERSION,
     DORMOUSE_SURFACE_ID: surfaceId || options?.id || '',
   };
-  const integrated = applyShellIntegration(shell, childEnv, shellArgs, integrationDir, runtime);
+  const hasExplicitArgs = Boolean(explicitArgs && explicitArgs.length > 0);
+  const integrated = applyShellIntegration(shell, childEnv, shellArgs, integrationDir, hasExplicitArgs, runtime);
 
   return {
     cols,
@@ -275,17 +287,44 @@ function detectWindowsShells(runtime = {}) {
   return shells;
 }
 
+// Well-known interactive shells we offer in the picker on macOS/Linux when they
+// exist on disk, in addition to the user's $SHELL. Listed by preference; the
+// first entry of each basename wins (so $SHELL, added first, keeps its slot).
+const COMMON_UNIX_SHELLS = [
+  '/bin/zsh',
+  '/bin/bash',
+  '/opt/homebrew/bin/bash', '/usr/local/bin/bash',
+  '/opt/homebrew/bin/fish', '/usr/local/bin/fish', '/usr/bin/fish',
+  '/opt/homebrew/bin/zsh', '/usr/local/bin/zsh',
+  '/bin/sh',
+];
+
+function detectUnixShells(runtime = {}) {
+  const env = runtime.env || process.env;
+  const fsModule = runtime.fsModule || fs;
+  const seenByName = new Set();
+  const shells = [];
+  const add = (shellPath, trusted) => {
+    if (!shellPath) return;
+    const name = path.posix.basename(shellPath);
+    // De-dupe by name so the picker shows one entry per shell, $SHELL winning.
+    if (seenByName.has(name)) return;
+    if (!trusted && !fileExists(shellPath, fsModule)) return;
+    seenByName.add(name);
+    shells.push({ name, path: shellPath, args: [] });
+  };
+
+  add(env.SHELL || '/bin/sh', true); // user's default, always first
+  for (const candidate of COMMON_UNIX_SHELLS) add(candidate, false);
+  return shells;
+}
+
 function detectAvailableShells(runtime = {}) {
   const platform = runtime.platform || process.platform;
   if (platform === 'win32') {
     return detectWindowsShells(runtime);
   }
-
-  // macOS / Linux: return $SHELL or /bin/sh
-  const env = runtime.env || process.env;
-  const shellPath = env.SHELL || '/bin/sh';
-  const name = path.posix.basename(shellPath);
-  return [{ name, path: shellPath, args: [] }];
+  return detectUnixShells(runtime);
 }
 
 module.exports.detectAvailableShells = detectAvailableShells;
