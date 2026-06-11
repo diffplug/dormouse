@@ -188,6 +188,7 @@ describe('terminal command state reducer', () => {
 
     expect(deriveHeader(state, [state])).toEqual({
       primary: `${DEFAULT_IDLE_TITLE} pnpm build ${COMMAND_FAIL_GLYPH}`,
+      lastCommandFailed: true,
     });
 
     // The marker persists across the next prompt, until a new command runs.

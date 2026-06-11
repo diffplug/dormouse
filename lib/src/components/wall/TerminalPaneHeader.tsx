@@ -104,11 +104,13 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
   const derivedHeader = deriveHeader(paneState, visiblePaneStates, { appTitleForPane });
   const displayTitle = resolveDisplayPrimary(derivedHeader.primary, api.title);
   // The failure glyph rides at the end of the title string (so tabs/OS titles
-  // carry it too); split it off here to color it red, and strip it from the
-  // base used in editing/rename contexts.
-  const failGlyphSuffix = ` ${COMMAND_FAIL_GLYPH}`;
-  const showsFailGlyph = displayTitle.endsWith(failGlyphSuffix);
-  const displayTitleBase = showsFailGlyph ? displayTitle.slice(0, -failGlyphSuffix.length) : displayTitle;
+  // carry it too). `lastCommandFailed` tells us authoritatively that it's there,
+  // so we can color it red and strip it from the editing/rename base without
+  // guessing from the string (a user title ending in "✗" would fool a match).
+  const showsFailGlyph = derivedHeader.lastCommandFailed === true;
+  const displayTitleBase = showsFailGlyph
+    ? displayTitle.slice(0, -` ${COMMAND_FAIL_GLYPH}`.length)
+    : displayTitle;
   const mouseState = mouseStates.get(api.id) ?? DEFAULT_MOUSE_SELECTION_STATE;
   const showMouseIcon = mouseState.mouseReporting !== 'none';
   const inOverride = mouseState.override !== 'off';

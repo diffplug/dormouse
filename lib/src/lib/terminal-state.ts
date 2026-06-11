@@ -97,6 +97,10 @@ export interface HeaderOptions extends DirectoryDisplayOptions {
 export interface DerivedHeader {
   primary: string;
   secondary?: string;
+  // True when `primary` ends with the fail glyph because the last command
+  // exited non-zero. The header uses this to color the glyph red without having
+  // to re-parse it back out of the title string.
+  lastCommandFailed?: boolean;
 }
 
 export type TerminalGroupingMode = 'none' | 'directory' | 'command' | 'status';
@@ -398,7 +402,7 @@ export function deriveHeader(
   options: HeaderOptions = {},
 ): DerivedHeader {
   const primary = headerPrimary(pane, options);
-  const samePrimary = visiblePanes.filter((candidate) => headerPrimary(candidate, options) === primary);
+  const samePrimary = visiblePanes.filter((candidate) => headerPrimary(candidate, options).text === primary.text);
   const cwd = cwdForHeader(pane);
   let secondary: string | undefined;
 
@@ -411,7 +415,7 @@ export function deriveHeader(
     }
   }
 
-  return { primary, secondary };
+  return { primary: primary.text, secondary, lastCommandFailed: primary.failed || undefined };
 }
 
 export function notificationDisplayTitle(
@@ -771,15 +775,18 @@ function truncateCommandTitle(title: string): string {
   return `${Array.from(title).slice(0, COMMAND_TITLE_LIMIT - 3).join('').trimEnd()}...`;
 }
 
-function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): string {
+// Returns the title text plus whether it carries the fail glyph, so callers can
+// color the glyph without inferring its presence by matching the string.
+function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): { text: string; failed: boolean } {
   const userTitle = titleCandidateForSource(pane, 'user')?.title.trim();
-  if (userTitle) return userTitle;
-  if (pane.currentCommand) return commandHeaderLabel(pane, pane.currentCommand, options);
+  if (userTitle) return { text: userTitle, failed: false };
+  if (pane.currentCommand) return { text: commandHeaderLabel(pane, pane.currentCommand, options), failed: false };
   if (pane.lastCommand) {
     const idle = `${DEFAULT_IDLE_TITLE} ${commandHeaderLabel(pane, pane.lastCommand, options)}`;
-    return lastCommandFailed(pane.lastCommand) ? `${idle} ${COMMAND_FAIL_GLYPH}` : idle;
+    const failed = lastCommandFailed(pane.lastCommand);
+    return { text: failed ? `${idle} ${COMMAND_FAIL_GLYPH}` : idle, failed };
   }
-  return DEFAULT_IDLE_TITLE;
+  return { text: DEFAULT_IDLE_TITLE, failed: false };
 }
 
 // A finished command "failed" only when we have a real non-zero exit code. The
