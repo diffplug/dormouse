@@ -118,7 +118,7 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
 // The host has no idea where `dor` was launched, so the caller's directory must
 // travel in the request. Prefer the shell's PWD (injectable, matches what the
 // user sees) and fall back to the process cwd. A relative --cwd resolves against
-// that base; the host normalizes symlinks before keying.
+// that base into an absolute path the host can key on.
 function callerWorkingDirectory(flag: string | undefined, env: CliEnv | undefined): string {
   const base = env?.PWD ?? process.cwd();
   return flag === undefined ? base : resolvePath(base, flag);
