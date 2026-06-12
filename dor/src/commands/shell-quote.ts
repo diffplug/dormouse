@@ -1,35 +1,14 @@
-import { execFileSync } from 'node:child_process';
+/**
+ * Pure, dependency-free shell quoting. The webview (the only layer that knows
+ * the target pane's shell) turns a raw argv array into a single command string
+ * for that shell. Keep this module free of Node imports so it can be bundled
+ * into the browser-side webview as well as the CLI.
+ */
 
 export type ShellCommandKind = 'cmd' | 'posix' | 'powershell';
 
 const POSIX_SAFE_ARG = /^[A-Za-z0-9_@%+=:,./-]+$/;
 const WINDOWS_SAFE_ARG = /^[A-Za-z0-9_@+=:,./\\-]+$/;
-
-export function buildShellCommand(args: readonly string[], env: Readonly<Partial<Record<string, string>>> = {}): string | undefined {
-  if (args.join('').trim() === '') return undefined;
-  return buildShellCommandForKind(detectCallerShellKind(env), args);
-}
-
-export function buildShellCommandForKind(kind: ShellCommandKind, args: readonly string[]): string {
-  switch (kind) {
-    case 'cmd':
-      return args.map(quoteCmdArg).join(' ');
-    case 'powershell':
-      return quotePowerShellCommand(args);
-    case 'posix':
-      return args.map(quotePosixArg).join(' ');
-  }
-}
-
-export function detectCallerShellKind(env: Readonly<Partial<Record<string, string>>> = {}): ShellCommandKind {
-  return shellCommandKind(
-    parentProcessName() ||
-      env.SHELL ||
-      env.ComSpec ||
-      env.COMSPEC,
-    process.platform,
-  );
-}
 
 export function shellCommandKind(shell: string | undefined, platformString: string): ShellCommandKind {
   const normalizedShell = (shell ?? '').replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? '';
@@ -41,16 +20,14 @@ export function shellCommandKind(shell: string | undefined, platformString: stri
   return 'posix';
 }
 
-function parentProcessName(): string | undefined {
-  if (process.platform === 'win32') return undefined;
-  try {
-    const output = execFileSync('ps', ['-p', String(process.ppid), '-o', 'comm='], {
-      encoding: 'utf8',
-      timeout: 1000,
-    });
-    return output.trim() || undefined;
-  } catch {
-    return undefined;
+export function buildShellCommandForKind(kind: ShellCommandKind, args: readonly string[]): string {
+  switch (kind) {
+    case 'cmd':
+      return args.map(quoteCmdArg).join(' ');
+    case 'powershell':
+      return quotePowerShellCommand(args);
+    case 'posix':
+      return args.map(quotePosixArg).join(' ');
   }
 }
 

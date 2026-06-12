@@ -32,7 +32,8 @@ export interface ListSurfacesResponse {
 }
 
 export interface SplitSurfaceRequest {
-  command?: string;
+  /** Raw argv for the initial command; the host quotes it for the target shell. */
+  command?: string[];
   direction: SplitDirection;
   minimized: boolean;
   surface?: string;
@@ -48,7 +49,8 @@ export interface SplitSurfaceResponse {
 }
 
 export interface EnsureSurfaceRequest {
-  command: string;
+  /** Raw argv for the command; the host quotes it for the target shell. */
+  command: string[];
   minimized: boolean;
   surface?: string;
   title?: string;

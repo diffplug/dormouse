@@ -14,7 +14,6 @@ import {
   stringParser,
   writeStdout,
 } from './shared.js';
-import { buildShellCommand } from './shell-command.js';
 
 interface SplitFlags {
   readonly auto?: boolean;
@@ -126,7 +125,7 @@ JSON output:
 async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...commandArgs: string[]): Promise<void | Error> {
   const direction = parseSplitDirection(flags);
   if (!direction.ok) return new Error(direction.message);
-  const command = buildShellCommand(commandArgs, this.options.env);
+  const command = commandArgs.length > 0 ? commandArgs : undefined;
 
   const clientResult = resolveControlClient(this.options);
   if (!clientResult.ok) return new Error(clientResult.message);

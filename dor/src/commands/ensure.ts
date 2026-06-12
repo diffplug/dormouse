@@ -12,7 +12,6 @@ import {
   stringParser,
   writeStdout,
 } from './shared.js';
-import { buildShellCommand } from './shell-command.js';
 
 interface EnsureFlags {
   readonly json?: boolean;
@@ -96,10 +95,10 @@ JSON output:
 };
 
 async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...commandArgs: string[]): Promise<void | Error> {
-  const command = buildShellCommand(commandArgs, this.options.env);
-  if (!command) {
+  if (commandArgs.length === 0) {
     return new Error('dor ensure requires a command after --');
   }
+  const command = commandArgs;
 
   let title = flags.title;
   if (title !== undefined) {

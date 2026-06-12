@@ -44,6 +44,7 @@ import type {
   ResolvedSplitDirection as DorResolvedSplitDirection,
   ParseResult,
 } from 'dor/commands/types';
+import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import { findReattachNeighbor } from '../lib/spatial-nav';
 import { cloneLayout, getLayoutStructureSignature } from '../lib/layout-snapshot';
 import type { PersistedDoor } from '../lib/session-types';
@@ -171,6 +172,11 @@ function booleanParam(value: unknown): boolean {
   return value === true;
 }
 
+function stringArrayParam(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) return undefined;
+  return value;
+}
+
 function parseDorSplitDirection(value: unknown): DorSplitDirection | null {
   if (value === undefined || value === null) return 'auto';
   if (value === 'left' || value === 'right' || value === 'up' || value === 'down' || value === 'auto') return value;
@@ -209,22 +215,27 @@ function validateUserTitle(title: string): string | null {
   return null;
 }
 
-function hostLooksWindows(): boolean {
-  return /win/i.test(PLATFORM_STRING);
+/**
+ * Quote a raw argv into a single command string for the target pane's shell.
+ * This is the one place the command is quoted; the CLI sends argv unquoted
+ * precisely because only the webview knows which shell will run it.
+ */
+function dorCommandString(args: string[] | undefined): string | undefined {
+  if (!args || args.join('').trim() === '') return undefined;
+  const shell = getDefaultShellOpts()?.shell;
+  return buildShellCommandForKind(shellCommandKind(shell, PLATFORM_STRING), args);
 }
 
+/** Wrap an already-quoted command string in the target shell's launch flags. */
 function commandShellArgs(shell: string | undefined, command: string): string[] {
-  const normalizedShell = (shell ?? '').replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? '';
-  if (!normalizedShell && hostLooksWindows()) {
-    return ['/d', '/s', '/c', command];
+  switch (shellCommandKind(shell, PLATFORM_STRING)) {
+    case 'cmd':
+      return ['/d', '/s', '/c', command];
+    case 'powershell':
+      return ['-NoLogo', '-NoProfile', '-Command', command];
+    case 'posix':
+      return ['-lc', command];
   }
-  if (normalizedShell === 'cmd.exe' || normalizedShell === 'cmd') {
-    return ['/d', '/s', '/c', command];
-  }
-  if (normalizedShell === 'powershell.exe' || normalizedShell === 'powershell' || normalizedShell === 'pwsh.exe' || normalizedShell === 'pwsh') {
-    return ['-NoLogo', '-NoProfile', '-Command', command];
-  }
-  return ['-lc', command];
 }
 
 function ShellSpawnNotice({
@@ -913,8 +924,7 @@ export function Wall({
         const direction = directionParam === 'auto'
           ? dorDirectionForDockview(pickSplitDirection(resolved.panel))
           : directionParam;
-        const rawCommand = stringParam(params.command);
-        const command = rawCommand?.trim() || undefined;
+        const command = dorCommandString(stringArrayParam(params.command));
         if (params.command !== undefined && !command) {
           detail.respond({ ok: false, error: 'command cannot be empty' });
           return;
@@ -944,7 +954,7 @@ export function Wall({
       }
 
       if (detail.method === 'surface.ensure') {
-        const command = stringParam(params.command)?.trim();
+        const command = dorCommandString(stringArrayParam(params.command));
         if (!command) {
           detail.respond({ ok: false, error: 'command cannot be empty' });
           return;
