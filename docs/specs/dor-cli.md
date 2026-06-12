@@ -140,8 +140,9 @@ Invariants:
 > likely path forward is to ship an **agent-browser** surface instead — a
 > Dormouse-controlled browser view (see `lib/src/components/wall/AgentBrowserPanel.tsx`)
 > that does not embed a foreign page as a peer browsing context — and to drop or
-> hide `dor iframe`. Do not build features on top of the iframe surface until
-> this is resolved.
+> hide `dor iframe`. That surface is specified in
+> [dor-agent-browser.md](dor-agent-browser.md). Do not build features on top of
+> the iframe surface until this is resolved.
 
 An `<iframe>` pointed at an arbitrary URL is a **separate browsing context** from
 the Wall. Dormouse's input, focus, and attention model assumes a single
@@ -213,5 +214,8 @@ from `command-detail`.
 - `dor read` [impl](../../dor/src/commands/read.ts) [docs](../../dor/test/snapshots/help/read.md)
 - `dor kill` [impl](../../dor/src/commands/kill.ts) [docs](../../dor/test/snapshots/help/kill.md)
 - `dor iframe` [impl](../../dor/src/commands/iframe.ts) [docs](../../dor/test/snapshots/help/iframe.md)
+- `dor agent-browser` / `dor ab` — delegates to the user's `agent-browser`,
+  rendered in a Dormouse-native surface; see [dor-agent-browser.md](dor-agent-browser.md)
+  (the chosen alternative to the iframe surface)
 - `dor list-panes` [impl](../../dor/src/commands/list-panes.ts) [docs](../../dor/test/snapshots/help/list-panes.md)
 - `dor list-pane-surfaces` [impl](../../dor/src/commands/list-pane-surfaces.ts) [docs](../../dor/test/snapshots/help/list-pane-surfaces.md)
