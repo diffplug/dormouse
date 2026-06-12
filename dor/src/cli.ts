@@ -124,7 +124,7 @@ interface CaptureProcess extends StricliProcess {
 
 export async function runCli(argv: string[], options: CliOptions = {}): Promise<CliResult> {
   const helpTarget = getHelpTarget(argv);
-  const [commandName, ...args] = argv[0] === 'help' ? ['--help'] : argv;
+  const [commandName, ...args] = rewriteHelpArgv(argv);
 
   if (commandName === 'ensure' && !args.includes('-h') && !args.includes('--help')) {
     const delimiterCheck = validateEnsureDelimiter(args);
@@ -152,7 +152,13 @@ type HelpTarget =
   | { scope: 'command'; commandName: string };
 
 function getHelpTarget(argv: string[]): HelpTarget | undefined {
-  if (argv.length === 0 || argv[0] === 'help' || (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h'))) {
+  if (argv[0] === 'help') {
+    const subject = argv[1];
+    return subject && isCommandName(subject)
+      ? { scope: 'command', commandName: subject }
+      : { scope: 'root' };
+  }
+  if (argv.length === 0 || (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h'))) {
     return { scope: 'root' };
   }
 
@@ -162,6 +168,12 @@ function getHelpTarget(argv: string[]): HelpTarget | undefined {
   }
 
   return undefined;
+}
+
+function rewriteHelpArgv(argv: string[]): string[] {
+  if (argv[0] !== 'help') return argv;
+  const subject = argv[1];
+  return subject && isCommandName(subject) ? [subject, '--help'] : ['--help'];
 }
 
 function isCommandName(value: string): value is keyof typeof ROUTES {

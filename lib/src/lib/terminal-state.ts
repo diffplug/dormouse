@@ -97,6 +97,10 @@ export interface HeaderOptions extends DirectoryDisplayOptions {
 export interface DerivedHeader {
   primary: string;
   secondary?: string;
+  // True when `primary` ends with the fail glyph because the last command
+  // exited non-zero. The header uses this to color the glyph red without having
+  // to re-parse it back out of the title string.
+  lastCommandFailed?: boolean;
 }
 
 export type TerminalGroupingMode = 'none' | 'directory' | 'command' | 'status';
@@ -124,6 +128,11 @@ export const DEFAULT_TERMINAL_PANE_STATE: TerminalPaneState = Object.freeze({
 });
 
 export const DEFAULT_IDLE_TITLE = '<idle>';
+// Appended to the idle title when the last command exited non-zero. Kept as a
+// plain glyph in the title string so tab/OS-level titles carry it too; the pane
+// header re-colors this trailing glyph red (see TerminalPaneHeader). Only shows
+// when we have a real exit code — the keystroke fallback leaves exitCode unset.
+export const COMMAND_FAIL_GLYPH = '✗';
 export const DEFAULT_COMMAND_TITLE = 'shell';
 export const UNNAMED_PANEL_TITLE = '<unnamed>';
 const DEFAULT_DIRECTORY_LABEL = 'Unknown directory';
@@ -393,7 +402,7 @@ export function deriveHeader(
   options: HeaderOptions = {},
 ): DerivedHeader {
   const primary = headerPrimary(pane, options);
-  const samePrimary = visiblePanes.filter((candidate) => headerPrimary(candidate, options) === primary);
+  const samePrimary = visiblePanes.filter((candidate) => headerPrimary(candidate, options).text === primary.text);
   const cwd = cwdForHeader(pane);
   let secondary: string | undefined;
 
@@ -406,7 +415,7 @@ export function deriveHeader(
     }
   }
 
-  return { primary, secondary };
+  return { primary: primary.text, secondary, lastCommandFailed: primary.failed || undefined };
 }
 
 export function notificationDisplayTitle(
@@ -766,12 +775,24 @@ function truncateCommandTitle(title: string): string {
   return `${Array.from(title).slice(0, COMMAND_TITLE_LIMIT - 3).join('').trimEnd()}...`;
 }
 
-function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): string {
+// Returns the title text plus whether it carries the fail glyph, so callers can
+// color the glyph without inferring its presence by matching the string.
+function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): { text: string; failed: boolean } {
   const userTitle = titleCandidateForSource(pane, 'user')?.title.trim();
-  if (userTitle) return userTitle;
-  if (pane.currentCommand) return commandHeaderLabel(pane, pane.currentCommand, options);
-  if (pane.lastCommand) return `${DEFAULT_IDLE_TITLE} ${commandHeaderLabel(pane, pane.lastCommand, options)}`;
-  return DEFAULT_IDLE_TITLE;
+  if (userTitle) return { text: userTitle, failed: false };
+  if (pane.currentCommand) return { text: commandHeaderLabel(pane, pane.currentCommand, options), failed: false };
+  if (pane.lastCommand) {
+    const idle = `${DEFAULT_IDLE_TITLE} ${commandHeaderLabel(pane, pane.lastCommand, options)}`;
+    const failed = lastCommandFailed(pane.lastCommand);
+    return { text: failed ? `${idle} ${COMMAND_FAIL_GLYPH}` : idle, failed };
+  }
+  return { text: DEFAULT_IDLE_TITLE, failed: false };
+}
+
+// A finished command "failed" only when we have a real non-zero exit code. The
+// keystroke fallback never sets exitCode, so it shows no glyph either way.
+function lastCommandFailed(command: CommandRun): boolean {
+  return typeof command.exitCode === 'number' && command.exitCode !== 0;
 }
 
 function commandHeaderLabel(pane: TerminalPaneState, command: CommandRun, options: HeaderOptions): string {
