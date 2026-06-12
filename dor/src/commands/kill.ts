@@ -9,7 +9,7 @@ import type {
   ParseResult,
 } from './types.js';
 import {
-  resolveControlClient,
+  requireControlClient,
   stringParser,
   writeStdout,
 } from './shared.js';
@@ -65,11 +65,11 @@ async function runKillCommand(this: DorCommandContext, flags: KillFlags): Promis
   const confirmation = parseConfirmation(flags);
   if (!confirmation.ok) return new Error(confirmation.message);
 
-  const clientResult = resolveControlClient(this.options);
-  if (!clientResult.ok) return new Error(clientResult.message);
+  const client = requireControlClient(this.options);
+  if (client instanceof Error) return client;
 
   try {
-    const response = await clientResult.value.killSurface({
+    const response = await client.killSurface({
       confirmation: confirmation.value,
       surface: flags.surface,
     });

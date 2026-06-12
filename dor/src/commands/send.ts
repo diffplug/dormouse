@@ -8,7 +8,7 @@ import type {
   SendSurfaceResponse,
 } from './types.js';
 import {
-  resolveControlClient,
+  requireControlClient,
   stringParser,
   writeStdout,
 } from './shared.js';
@@ -78,11 +78,11 @@ async function runSendCommand(this: DorCommandContext, flags: SendFlags, text?: 
   if (!encoded.ok) return new Error(encoded.message);
   if (encoded.value.input.length === 0) return new Error('input cannot be empty');
 
-  const clientResult = resolveControlClient(this.options);
-  if (!clientResult.ok) return new Error(clientResult.message);
+  const client = requireControlClient(this.options);
+  if (client instanceof Error) return client;
 
   try {
-    const response = await clientResult.value.sendSurface({
+    const response = await client.sendSurface({
       surface: flags.surface,
       input: encoded.value.input,
       inputCount: encoded.value.inputCount,

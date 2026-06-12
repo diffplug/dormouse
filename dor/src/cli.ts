@@ -295,7 +295,7 @@ function validateEnsureDelimiter(args: string[]): ParseResult<void> {
     if (arg === '--json' || arg === '--minimize') {
       continue;
     }
-    if (arg === '--title' || arg === '--surface') {
+    if (arg === '--cwd' || arg === '--surface') {
       const value = args[index + 1];
       if (!value || value.startsWith('-') || index + 1 >= delimiterIndex) {
         return { ok: false, message: `${arg} requires a value` };
