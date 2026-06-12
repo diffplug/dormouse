@@ -22,6 +22,9 @@ export interface PersistedPane {
 export interface PersistedDoor {
   id: string;
   title: string;
+  component?: string;
+  tabComponent?: string;
+  params?: Record<string, unknown>;
   neighborId: string | null;
   direction: DoorDirection;
   remainingPaneIds: string[];
@@ -144,6 +147,9 @@ function isPersistedDoor(value: unknown): value is PersistedDoor {
     typeof value.id === 'string' &&
     typeof value.title === 'string' &&
     (typeof value.neighborId === 'string' || value.neighborId === null) &&
+    (value.component === undefined || typeof value.component === 'string') &&
+    (value.tabComponent === undefined || typeof value.tabComponent === 'string') &&
+    (value.params === undefined || isRecord(value.params)) &&
     typeof value.direction === 'string' &&
     Array.isArray(value.remainingPaneIds) &&
     value.remainingPaneIds.every((id) => typeof id === 'string') &&

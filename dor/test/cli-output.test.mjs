@@ -81,6 +81,54 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         minimized: request.minimized,
       };
     },
+    async sendSurface(request) {
+      this.requests.push({ method: 'sendSurface', request });
+      return {
+        status: 'sent',
+        surfaceId: request.surface === 'surface:2'
+          ? '22222222-2222-4222-8222-222222222222'
+          : '11111111-1111-4111-8111-111111111111',
+        surfaceRef: request.surface ?? 'surface:1',
+        inputCount: request.inputCount,
+      };
+    },
+    async readSurface(request) {
+      this.requests.push({ method: 'readSurface', request });
+      const text = request.scrollback
+        ? 'first line\nsecond line\nthird line\nfourth line'
+        : 'visible one\nvisible two';
+      const limited = request.lines ? text.split('\n').slice(-request.lines).join('\n') : text;
+      return {
+        workspaceRef: 'workspace:1',
+        surfaceId: request.surface === 'surface:2'
+          ? '22222222-2222-4222-8222-222222222222'
+          : '11111111-1111-4111-8111-111111111111',
+        surfaceRef: request.surface ?? 'surface:1',
+        text: limited,
+      };
+    },
+    async killSurface(request) {
+      this.requests.push({ method: 'killSurface', request });
+      return {
+        status: 'killed',
+        surfaceId: request.surface === 'surface:2'
+          ? '22222222-2222-4222-8222-222222222222'
+          : '11111111-1111-4111-8111-111111111111',
+        surfaceRef: request.surface,
+      };
+    },
+    async iframeSurface(request) {
+      this.requests.push({ method: 'iframeSurface', request });
+      return {
+        status: request.surface === 'surface:1' ? 'replaced' : 'created',
+        surfaceId: request.surface === 'surface:1'
+          ? '11111111-1111-4111-8111-111111111111'
+          : '33333333-3333-4333-8333-333333333333',
+        surfaceRef: request.surface === 'surface:1' ? 'surface:1' : 'surface:3',
+        url: request.url,
+        minimized: request.minimized,
+      };
+    },
   };
 }
 
@@ -174,6 +222,175 @@ test('ensure json output', async () => {
     'ensure-json',
     await runCli(['ensure', '--json', '--minimize', '--', 'pnpm', 'dev:workspace'], { client: fixtureClient() }),
   );
+});
+
+test('version output', async () => {
+  await snapshot(
+    'version',
+    await runCli(['version'], {
+      versionMetadata: {
+        version: '0.12.0',
+        commit: '6e86b3ba',
+        commitsSinceVersion: 89,
+      },
+    }),
+  );
+});
+
+test('send text output', async () => {
+  await snapshot(
+    'send-text',
+    await runCli(['send', '--surface', 'surface:2', 'echo hello\\n'], { client: fixtureClient() }),
+  );
+});
+
+test('send sends escaped text to the host', async () => {
+  const client = fixtureClient();
+  await runCli(['send', '--text', 'echo hello\\n'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'sendSurface',
+    request: {
+      surface: undefined,
+      input: 'echo hello\n',
+      inputCount: 1,
+    },
+  }]);
+});
+
+test('send sends key input to the host', async () => {
+  const client = fixtureClient();
+  await runCli(['send', '--surface', 'surface:2', '--key', 'ctrl-c'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'sendSurface',
+    request: {
+      surface: 'surface:2',
+      input: '\x03',
+      inputCount: 1,
+    },
+  }]);
+});
+
+test('send sequence sends ordered input to the host', async () => {
+  const client = fixtureClient();
+  await runCli(['send', '--sequence', '[{"text":"npm test"},{"key":"enter"}]'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'sendSurface',
+    request: {
+      surface: undefined,
+      input: 'npm test\r',
+      inputCount: 2,
+    },
+  }]);
+});
+
+test('send stdin sends standard input to the host', async () => {
+  const client = fixtureClient();
+  await runCli(['send', '--stdin'], { client, readStdin: async () => 'cat from stdin\n' });
+  assert.deepEqual(client.requests, [{
+    method: 'sendSurface',
+    request: {
+      surface: undefined,
+      input: 'cat from stdin\n',
+      inputCount: 1,
+    },
+  }]);
+});
+
+test('send missing input output', async () => {
+  await snapshot('send-missing-input', await runCli(['send'], { client: fixtureClient() }));
+});
+
+test('send unsupported key output', async () => {
+  await snapshot('send-unsupported-key', await runCli(['send', '--key', 'cmd-k'], { client: fixtureClient() }));
+});
+
+test('read text output', async () => {
+  await snapshot('read-text', await runCli(['read'], { client: fixtureClient() }));
+});
+
+test('read sends request to the host', async () => {
+  const client = fixtureClient();
+  await runCli(['read', '--surface', 'title:repo "watch"', '--scrollback', '--lines', '2'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'readSurface',
+    request: {
+      lines: 2,
+      scrollback: true,
+      surface: 'title:repo "watch"',
+    },
+  }]);
+});
+
+test('read json output', async () => {
+  await snapshot(
+    'read-json',
+    await runCli(['read', '--json', '--surface', 'surface:2', '--scrollback', '--lines', '2'], { client: fixtureClient() }),
+  );
+});
+
+test('read invalid lines output', async () => {
+  await snapshot('read-invalid-lines', await runCli(['read', '--lines', '0'], { client: fixtureClient() }));
+});
+
+test('kill text output', async () => {
+  await snapshot(
+    'kill-text',
+    await runCli(['kill', '--surface', 'surface:2', '--confirm-dangerously'], { client: fixtureClient() }),
+  );
+});
+
+test('kill sends confirmation to the host', async () => {
+  const client = fixtureClient();
+  await runCli(['kill', '--surface', 'title:repo "watch"', '--confirm-if-read', 'done'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'killSurface',
+    request: {
+      confirmation: { mode: 'if-read', text: 'done' },
+      surface: 'title:repo "watch"',
+    },
+  }]);
+});
+
+test('kill missing confirmation output', async () => {
+  await snapshot('kill-missing-confirmation', await runCli(['kill', '--surface', 'surface:2'], { client: fixtureClient() }));
+});
+
+test('kill short confirm-if-read output', async () => {
+  await snapshot(
+    'kill-short-confirm-if-read',
+    await runCli(['kill', '--surface', 'surface:2', '--confirm-if-read', 'abc'], { client: fixtureClient() }),
+  );
+});
+
+test('iframe text output', async () => {
+  await snapshot(
+    'iframe-text',
+    await runCli(['iframe', '--surface', 'surface:1', 'https://localhost:5173'], { client: fixtureClient() }),
+  );
+});
+
+test('iframe sends request to the host', async () => {
+  const client = fixtureClient();
+  await runCli(['iframe', '--minimize', 'https://example.com/docs?x=1'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'iframeSurface',
+    request: {
+      minimized: true,
+      surface: undefined,
+      url: 'https://example.com/docs?x=1',
+    },
+  }]);
+});
+
+test('iframe json output', async () => {
+  await snapshot(
+    'iframe-json',
+    await runCli(['iframe', '--json', 'http://localhost:5173/'], { client: fixtureClient() }),
+  );
+});
+
+test('iframe invalid url output', async () => {
+  await snapshot('iframe-invalid-url', await runCli(['iframe', 'localhost:5173'], { client: fixtureClient() }));
 });
 
 test('list-panes text output', async () => {

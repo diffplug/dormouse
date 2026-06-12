@@ -24,6 +24,7 @@ import {
   getActivitySnapshot,
   isUntouched,
   getOrCreateTerminal,
+  getTerminalInstance,
   isReservedUserTitle,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
@@ -36,13 +37,14 @@ import {
   resolveDisplayPrimary,
 } from '../lib/terminal-state';
 import { orchestrateKill } from '../lib/kill-animation';
-import { PLATFORM_STRING } from '../lib/platform';
+import { getPlatform, PLATFORM_STRING } from '../lib/platform';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
 import type {
   Surface as DorSurface,
   SplitDirection as DorSplitDirection,
   ResolvedSplitDirection as DorResolvedSplitDirection,
   ParseResult,
+  SurfaceType as DorSurfaceType,
 } from 'dor/commands/types';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import { findReattachNeighbor } from '../lib/spatial-nav';
@@ -51,6 +53,9 @@ import type { PersistedDoor } from '../lib/session-types';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import { TerminalPanel } from './wall/TerminalPanel';
 import { TerminalPaneHeader } from './wall/TerminalPaneHeader';
+import { AgentBrowserPanel } from './wall/AgentBrowserPanel';
+import { IframePanel } from './wall/IframePanel';
+import { SurfacePaneHeader } from './wall/SurfacePaneHeader';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { useDockviewReady } from './wall/use-dockview-ready';
 import { pickSplitDirection } from './wall/dockview-helpers';
@@ -88,13 +93,19 @@ type ShellSpawnNoticeState = {
 
 type DorControlParams = {
   command?: unknown;
+  confirmation?: unknown;
   direction?: unknown;
+  input?: unknown;
+  inputCount?: unknown;
+  lines?: unknown;
   minimized?: unknown;
   pane?: string;
   surface?: unknown;
   title?: unknown;
+  url?: unknown;
   workspace?: string;
   window?: string;
+  scrollback?: unknown;
 };
 
 // The webview view of a control request: the shared wire payload, but with
@@ -147,6 +158,32 @@ function persistedPanelTitle(title: string | null | undefined): string {
   return trimmed || UNNAMED_PANEL_TITLE;
 }
 
+function surfaceTypeFromParams(params: unknown): DorSurfaceType {
+  if (params && typeof params === 'object' && !Array.isArray(params)) {
+    const surfaceType = (params as { surfaceType?: unknown }).surfaceType;
+    if (surfaceType === 'iframe' || surfaceType === 'agent-browser') return surfaceType;
+  }
+  return 'terminal';
+}
+
+function iframeTitle(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname === '/' ? '' : parsed.pathname;
+    return `${parsed.host}${path}${parsed.search}`;
+  } catch {
+    return url;
+  }
+}
+
+function componentForSurfaceType(type: DorSurfaceType): string {
+  return type;
+}
+
+function tabComponentForSurfaceType(type: DorSurfaceType): string {
+  return type === 'terminal' ? 'terminal' : 'surface';
+}
+
 function isSingletonWorkspaceTarget(target: string | undefined): boolean {
   return !target || target === 'workspace:1' || target === '1';
 }
@@ -164,6 +201,14 @@ function matchesDorPaneTarget(target: string | undefined, surface: DorSurface): 
   return Number.isInteger(numeric) && numeric >= 1 && surface.index === numeric - 1;
 }
 
+function surfaceTitleTarget(target: string): string | null {
+  return target.startsWith('title:') ? target.slice('title:'.length) : null;
+}
+
+function renderSurfaceForError(surface: DorSurface): string {
+  return `${surface.ref} ${JSON.stringify(surface.title)}`;
+}
+
 function stringParam(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
@@ -175,6 +220,45 @@ function booleanParam(value: unknown): boolean {
 function stringArrayParam(value: unknown): string[] | undefined {
   if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) return undefined;
   return value;
+}
+
+function numberParam(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function limitLines(text: string, lines: number | undefined): string {
+  if (lines === undefined) return text;
+  const parts = text.split('\n');
+  return parts.slice(-lines).join('\n');
+}
+
+function readSurfaceText(surfaceId: string, lines: number | undefined, scrollback: boolean): string {
+  const terminal = getTerminalInstance(surfaceId);
+  if (!terminal) return '';
+
+  // Read rendered text straight off the xterm buffer so both modes return clean,
+  // ANSI-free lines and `--lines` trims by rendered line consistently. With
+  // scrollback we walk the whole buffer (history + screen); otherwise just the
+  // visible screen, which sits at `baseY..length`.
+  const buffer = terminal.buffer.active;
+  const start = scrollback ? 0 : Math.max(0, buffer.baseY);
+  const end = buffer.length;
+  const collected: string[] = [];
+  for (let row = start; row < end; row += 1) {
+    collected.push(buffer.getLine(row)?.translateToString(true) ?? '');
+  }
+
+  return limitLines(collected.join('\n').replace(/\n+$/, ''), lines);
+}
+
+function killConfirmationParam(value: unknown): { mode: 'if-read'; text: string } | { mode: 'dangerously' } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const confirmation = value as { mode?: unknown; text?: unknown };
+  if (confirmation.mode === 'dangerously') return { mode: 'dangerously' };
+  if (confirmation.mode === 'if-read' && typeof confirmation.text === 'string') {
+    return { mode: 'if-read', text: confirmation.text };
+  }
+  return null;
 }
 
 function parseDorSplitDirection(value: unknown): DorSplitDirection | null {
@@ -267,8 +351,8 @@ function ShellSpawnNotice({
   );
 }
 
-const components = { terminal: TerminalPanel };
-const tabComponents = { terminal: TerminalPaneHeader };
+const components = { terminal: TerminalPanel, iframe: IframePanel, 'agent-browser': AgentBrowserPanel };
+const tabComponents = { terminal: TerminalPaneHeader, surface: SurfacePaneHeader };
 
 // --- Main component ---
 
@@ -476,6 +560,7 @@ export function Wall({
     const panel = api.getPanel(id);
     if (!panel) return;
     const title = persistedPanelTitle(panel.title);
+    const surfaceType = surfaceTypeFromParams(panel.params);
     const layoutAtMinimize = cloneLayout(api.toJSON());
 
     // Capture the nearest adjacent pane and our actual relative position
@@ -493,6 +578,9 @@ export function Wall({
     const nextDoors = [...doorsRef.current, {
       id,
       title,
+      component: componentForSurfaceType(surfaceType),
+      tabComponent: tabComponentForSurfaceType(surfaceType),
+      params: panel.params,
       neighborId,
       direction,
       remainingPaneIds,
@@ -600,9 +688,10 @@ export function Wall({
         // Restore to original position next to the same neighbor
         api.addPanel({
           id: item.id,
-          component: 'terminal',
-          tabComponent: 'terminal',
+          component: item.component ?? 'terminal',
+          tabComponent: item.tabComponent ?? 'terminal',
           title: item.title,
+          params: item.params,
           position: { referencePanel: item.neighborId!, direction: item.direction },
         });
       } else {
@@ -611,9 +700,10 @@ export function Wall({
         const refPanel = (sid && api.getPanel(sid)) ?? api.panels[0] ?? null;
         api.addPanel({
           id: item.id,
-          component: 'terminal',
-          tabComponent: 'terminal',
+          component: item.component ?? 'terminal',
+          tabComponent: item.tabComponent ?? 'terminal',
           title: item.title,
+          params: item.params,
           position: refPanel ? { referencePanel: refPanel.id, direction: pickSplitDirection(refPanel) } : undefined,
         });
       }
@@ -668,19 +758,23 @@ export function Wall({
     const panelStates = panels.map((panel) => terminalStates.get(panel.id) ?? createTerminalPaneState());
 
     return panels.map((panel, index) => {
+      const type = surfaceTypeFromParams(panel.params);
       const state = panelStates[index] ?? createTerminalPaneState();
       const derived = deriveHeader(state, panelStates, { appTitleForPane });
-      const title = resolveDisplayPrimary(derived.primary, panel.title ?? panel.id);
+      const title = type === 'terminal'
+        ? resolveDisplayPrimary(derived.primary, panel.title ?? panel.id)
+        : (panel.title ?? panel.id);
 
       return {
         id: panel.id,
         ref: `surface:${index + 1}`,
         paneRef: `pane:${index + 1}`,
-        type: 'terminal',
+        type,
         title,
         focused: panel.id === activeId,
         index,
         indexInPane: 0,
+        requestedWorkingDirectory: type === 'terminal' ? (state.cwd?.path ?? null) : null,
         selectedInPane: true,
       };
     });
@@ -696,15 +790,30 @@ export function Wall({
     return id;
   }, []);
 
-  const findVisibleSurface = useCallback((
+  const resolveVisibleSurface = useCallback((
     api: DockviewApi,
     target: string | undefined,
     callerSurfaceId: string | undefined,
-  ): DorSurface | null => {
+  ): ParseResult<DorSurface> => {
     const surfaces = buildDorSurfaces(api);
     const resolvedTarget = target ?? callerSurfaceId ?? 'focused';
-    return surfaces.find((surface) => matchesDorPaneTarget(resolvedTarget, surface))
+    const titleTarget = surfaceTitleTarget(resolvedTarget);
+    if (titleTarget !== null) {
+      const matches = surfaces.filter((surface) => surface.title === titleTarget);
+      if (matches.length === 1) return { ok: true, value: matches[0] };
+      if (matches.length > 1) {
+        return {
+          ok: false,
+          message: `surface target '${resolvedTarget}' matched multiple surfaces: ${matches.map(renderSurfaceForError).join(', ')}`,
+        };
+      }
+      return { ok: false, message: `surface target '${resolvedTarget}' was not found` };
+    }
+
+    const matched = surfaces.find((surface) => matchesDorPaneTarget(resolvedTarget, surface))
       ?? (!target && !callerSurfaceId ? (surfaces[0] ?? null) : null);
+    if (matched) return { ok: true, value: matched };
+    return { ok: false, message: `surface '${resolvedTarget}' was not found` };
   }, [buildDorSurfaces]);
 
   const findSurfaceIdByUserTitle = useCallback((title: string): string | null => {
@@ -791,6 +900,65 @@ export function Wall({
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId) } };
   }, [generatePaneId, minimizePane, selectPane, surfaceRefForId]);
 
+  const createIframeSurface = useCallback(({
+    minimized,
+    reference,
+    url,
+  }: {
+    minimized: boolean;
+    reference: DorSurface;
+    url: string;
+  }): ParseResult<{
+    id: string;
+    ref: string;
+    status: 'created' | 'replaced';
+  }> => {
+    const api = apiRef.current;
+    if (!api) return { ok: false, message: 'Dormouse layout is not ready yet' };
+    const referencePanel = api.getPanel(reference.id);
+    if (!referencePanel) return { ok: false, message: `surface '${reference.ref}' is not visible` };
+
+    const newId = generatePaneId();
+    const title = iframeTitle(url);
+    const params = { surfaceType: 'iframe', url };
+    const replaceUntouchedTerminal = reference.type === 'terminal' && isUntouched(reference.id);
+
+    if (replaceUntouchedTerminal) {
+      api.addPanel({
+        id: newId,
+        component: 'iframe',
+        tabComponent: 'surface',
+        title,
+        params,
+        position: { referencePanel: referencePanel.id, direction: 'within' },
+      });
+      disposeSession(reference.id);
+      api.removePanel(referencePanel);
+      selectPane(newId);
+      if (minimized) minimizePane(newId);
+      return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'replaced' } };
+    }
+
+    const dockDirection = pickSplitDirection(referencePanel);
+    freshlySpawnedRef.current.set(newId, dockDirection === 'below' ? 'top' : 'left');
+    api.addPanel({
+      id: newId,
+      component: 'iframe',
+      tabComponent: 'surface',
+      title,
+      params,
+      position: { referencePanel: referencePanel.id, direction: dockDirection },
+    });
+    selectPane(newId);
+    onEventRef.current?.({
+      type: 'split',
+      direction: dockDirection === 'right' ? 'horizontal' : 'vertical',
+      source: 'dor',
+    });
+    if (minimized) minimizePane(newId);
+    return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'created' } };
+  }, [generatePaneId, minimizePane, selectPane, surfaceRefForId]);
+
   // Listen for external "new terminal" requests (e.g. from the standalone AppBar)
   useEffect(() => {
     const handler = (e: Event) => {
@@ -864,7 +1032,7 @@ export function Wall({
   }, [generatePaneId, selectPane, showShellSpawnNotice]);
 
   useEffect(() => {
-    const handler = (event: Event) => {
+    const handler = async (event: Event) => {
       const detail = (event as CustomEvent<DorControlRequest>).detail;
       if (!detail) return;
 
@@ -887,17 +1055,17 @@ export function Wall({
       // Resolve the split reference surface and its live panel, responding with
       // the appropriate error and returning null when either is unavailable.
       const resolveSplitTarget = () => {
-        const target = findVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
-        if (!target) {
-          detail.respond({ ok: false, error: `surface '${stringParam(params.surface) ?? detail.surfaceId ?? 'focused'}' was not found` });
+        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
           return null;
         }
-        const panel = api.getPanel(target.id);
+        const panel = api.getPanel(target.value.id);
         if (!panel) {
-          detail.respond({ ok: false, error: `surface '${target.ref}' is not visible` });
+          detail.respond({ ok: false, error: `surface '${target.value.ref}' is not visible` });
           return null;
         }
-        return { target, panel };
+        return { target: target.value, panel };
       };
 
       if (detail.method === 'surface.list') {
@@ -1008,12 +1176,133 @@ export function Wall({
         return;
       }
 
+      if (detail.method === 'surface.send') {
+        const input = stringParam(params.input);
+        if (input === undefined) {
+          detail.respond({ ok: false, error: 'input is required' });
+          return;
+        }
+        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        if (target.value.type !== 'terminal') {
+          detail.respond({ ok: false, error: `surface '${target.value.ref}' is not a terminal` });
+          return;
+        }
+        getPlatform().writePty(target.value.id, input);
+        detail.respond({
+          ok: true,
+          result: {
+            status: 'sent',
+            surfaceId: target.value.id,
+            surfaceRef: target.value.ref,
+            inputCount: typeof params.inputCount === 'number' ? params.inputCount : 1,
+          },
+        });
+        return;
+      }
+
+      if (detail.method === 'surface.read') {
+        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        if (target.value.type !== 'terminal') {
+          detail.respond({ ok: false, error: `surface '${target.value.ref}' is not a terminal` });
+          return;
+        }
+        const lines = numberParam(params.lines);
+        const scrollback = booleanParam(params.scrollback);
+        const text = readSurfaceText(target.value.id, lines, scrollback);
+        detail.respond({
+          ok: true,
+          result: {
+            workspaceRef: 'workspace:1',
+            surfaceId: target.value.id,
+            surfaceRef: target.value.ref,
+            text,
+          },
+        });
+        return;
+      }
+
+      if (detail.method === 'surface.kill') {
+        const confirmation = killConfirmationParam(params.confirmation);
+        if (!confirmation) {
+          detail.respond({ ok: false, error: 'invalid kill confirmation' });
+          return;
+        }
+        const surface = stringParam(params.surface);
+        if (!surface) {
+          detail.respond({ ok: false, error: 'surface is required' });
+          return;
+        }
+        const target = resolveVisibleSurface(api, surface, detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        if (confirmation.mode === 'if-read') {
+          const text = readSurfaceText(target.value.id, undefined, false);
+          if (!text.includes(confirmation.text)) {
+            detail.respond({ ok: false, error: `surface '${target.value.ref}' read text did not contain confirmation text` });
+            return;
+          }
+        }
+        killPaneImmediately(target.value.id);
+        detail.respond({
+          ok: true,
+          result: {
+            status: 'killed',
+            surfaceId: target.value.id,
+            surfaceRef: target.value.ref,
+          },
+        });
+        return;
+      }
+
+      if (detail.method === 'surface.iframe') {
+        const url = stringParam(params.url);
+        if (!url) {
+          detail.respond({ ok: false, error: 'url is required' });
+          return;
+        }
+        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        const result = createIframeSurface({
+          minimized: booleanParam(params.minimized),
+          reference: target.value,
+          url,
+        });
+        if (!result.ok) {
+          detail.respond({ ok: false, error: result.message });
+          return;
+        }
+        detail.respond({
+          ok: true,
+          result: {
+            status: result.value.status,
+            surfaceId: result.value.id,
+            surfaceRef: result.value.ref,
+            url,
+            minimized: booleanParam(params.minimized),
+          },
+        });
+        return;
+      }
+
       detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
     };
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, createSplitSurface, findSurfaceIdByUserTitle, findVisibleSurface, surfaceRefForId]);
+  }, [buildDorSurfaces, createIframeSurface, createSplitSurface, findSurfaceIdByUserTitle, killPaneImmediately, resolveVisibleSurface, surfaceRefForId]);
 
   const addSplitPanel = useCallback((
     id: string | null,

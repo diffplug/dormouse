@@ -114,14 +114,18 @@ that owns that surface when one is available.
 ## Handle Model
 
 Dormouse currently exposes one workspace and one window internally, but no
-workspace/window targeting CLI flags. Each visible Pane has one terminal
-surface. User-facing `dor` commands should expose surface handles; Pane remains
-layout vocabulary and compatibility-command terminology.
+workspace/window targeting CLI flags. Each visible Pane has one selected
+surface. Most surfaces are terminals; `dor iframe` introduces a non-terminal
+iframe surface. User-facing `dor` commands should expose surface handles; Pane
+remains layout vocabulary and compatibility-command terminology.
 
 Invariants:
 
 - Stable ids and short refs are accepted where a surface/pane target is
   accepted.
+- Surface targets also accept `title:<exact display title>`. If exactly one
+  visible surface has that title, it is selected. If multiple visible surfaces
+  match, the command fails and lists the matching surface refs.
 - Short refs currently use cmux-style names for implemented handles:
   `surface:1`, `pane:2`.
 - List output defaults to refs; commands that list handles accept
@@ -133,7 +137,7 @@ Invariants:
 
 Implemented commands call private `surface.*` control methods. `surface.list`
 derives its response from current Dockview panels plus terminal state/activity
-snapshots, then returns `workspace:1` and `window:1`.
+snapshots where available, then returns `workspace:1` and `window:1`.
 
 Command tails captured after `--` are quoted by `dor` before the private control
 request is sent. `dor` detects the invoking shell from its parent process when
@@ -154,5 +158,10 @@ from `command-detail`.
 
 - `dor split` [impl](../../dor/src/commands/split.ts) [docs](../../dor/test/snapshots/help/split.md)
 - `dor ensure` [impl](../../dor/src/commands/ensure.ts) [docs](../../dor/test/snapshots/help/ensure.md)
+- `dor version` [impl](../../dor/src/commands/version.ts) [docs](../../dor/test/snapshots/help/version.md)
+- `dor send` [impl](../../dor/src/commands/send.ts) [docs](../../dor/test/snapshots/help/send.md)
+- `dor read` [impl](../../dor/src/commands/read.ts) [docs](../../dor/test/snapshots/help/read.md)
+- `dor kill` [impl](../../dor/src/commands/kill.ts) [docs](../../dor/test/snapshots/help/kill.md)
+- `dor iframe` [impl](../../dor/src/commands/iframe.ts) [docs](../../dor/test/snapshots/help/iframe.md)
 - `dor list-panes` [impl](../../dor/src/commands/list-panes.ts) [docs](../../dor/test/snapshots/help/list-panes.md)
 - `dor list-pane-surfaces` [impl](../../dor/src/commands/list-pane-surfaces.ts) [docs](../../dor/test/snapshots/help/list-pane-surfaces.md)
