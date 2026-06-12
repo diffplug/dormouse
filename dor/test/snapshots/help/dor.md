@@ -11,6 +11,7 @@ USAGE
   dor read [--json] [--lines count] [--scrollback] [--surface id|ref|index]
   dor kill --surface id|ref|index [--confirm-if-read text|--confirm-dangerously]
   dor iframe [--json] [--minimize] [--surface id|ref|index] <url>
+  dor agent-browser [--key name|--session name] [args...]
   dor list-panes [--id-format refs|uuids|both] [--json]
   dor list-pane-surfaces [--id-format refs|uuids|both] [--json] [--pane id|ref|index]
   dor --help
@@ -29,6 +30,7 @@ COMMANDS
   read                Read terminal text from a surface.
   kill                Kill a terminal surface.
   iframe              Open a URL in an iframe surface.
+  agent-browser       Drive a browser surface via your agent-browser install (alias: dor ab).
   list-panes          List visible panes.
   list-pane-surfaces  List surfaces in a pane.
 

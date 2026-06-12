@@ -1,0 +1,261 @@
+# DOR_AGENT_BROWSER — Implementation Plan
+
+Implementation plan for the `dor agent-browser` / `dor ab` surface.
+
+**Design spec (read first):** [`docs/specs/dor-agent-browser.md`](docs/specs/dor-agent-browser.md).
+This plan does not restate the design — it sequences the build and says how to
+verify each step. When the plan and the spec disagree, the spec wins; if the
+build forces a design change, update the spec in the same commit.
+
+**Reference prototype:** `~/Documents/dev/agent-proto` (`serve.mjs` + `viewer.html`).
+A working end-to-end viewer: stream-WS frames + CDP-proxied input + active-target
+re-resolution. Treat it as the source of truth for the channel mechanics.
+
+---
+
+## Locked decisions (do not relitigate)
+
+These are settled in the spec; the implementation follows them:
+
+- Viewer client, **not a fork**. Resolve the user's `agent-browser` on `PATH`
+  (`DORMOUSE_AGENT_BROWSER_BIN` override); never bundle it.
+- `--key <name>` is primary, workspace-scoped, default `default`; maps to session
+  `dormouse/<workspaceId>/<key>` (`workspaceId` hardcoded `1`). Mutually exclusive
+  with raw `--session`.
+- Session is the join key; **1:1 with an auto-managed surface**; no 1:many.
+- Surface kill ↔ session close, both directions.
+- One session = one surface regardless of tab count; tabs live **inside** the
+  surface (integrated vs multi-tab strip), orthogonal to minimize.
+- Three delegated channels: frames (stream WS), input (CDP via host proxy — but
+  see the spike below), tabs (`tab list/<n>/close`).
+
+---
+
+## Dev loop & prerequisites
+
+- `agent-browser` installed on PATH (`agent-browser --version`; tested against
+  `0.27.0`). `npm i -g agent-browser` if missing.
+- CLI-only iteration: `cd dor && pnpm build && node --test test/cli-output.test.mjs`.
+- Full app: `pnpm build:vscode` then `pnpm --filter dormouse dogfood`, reload the
+  VS Code window. (`dogfood:vscode` does **not** exist at the repo root.)
+- Manual channel checks against a live session:
+  ```
+  agent-browser --session dormouse/1/default open http://localhost:5173
+  agent-browser --session dormouse/1/default stream status --json   # → { port }
+  agent-browser --session dormouse/1/default tab list --json
+  ```
+
+---
+
+## Architecture at a glance
+
+```
+dor ab <args>  ──(resolve --key→session, exec)──▶  agent-browser  (user's binary)
+      │
+      └─(control: surface.agentBrowser {key,session,wsPort})─▶ Wall registry → surface
+                                                                      │
+AgentBrowserPanel (webview):                                          │
+  • frames:  ws://127.0.0.1:<port>  ──── direct ───▶  canvas          │
+  • input:   pointer/key ─▶ host (CDP proxy) ─▶ Chrome   ◀── see spike ┘
+  • tabs:    tab list/<n>/close  (delegated via dor ab passthrough or control)
+```
+
+The host CDP proxy is the only genuinely new long-lived plumbing. The webview
+**cannot** open a CDP WebSocket directly (Chrome refuses CDP from non-localhost
+origins), so a host process (sidecar / `pty-host`) must hold the CDP socket and
+forward input. **Unless the spike below removes that need.**
+
+---
+
+## ⚠️ Spike first: can input ride the stream WS directly?
+
+The prototype proxies input through CDP. But agent-browser's stream WS protocol
+documents **native input messages** (`input_mouse`, `input_keyboard`,
+`input_touch`). If those work, the webview can send input over the **same
+ws://localhost socket it already opened for frames** — eliminating the host CDP
+proxy entirely and collapsing the hardest phase.
+
+**Spike (do this before Phase 4):**
+1. `agent-browser --session s open <url>` + `stream status --json` for the port.
+2. Open that WS from a throwaway Node script; send
+   `{"type":"input_mouse","eventType":"mousePressed","x":100,"y":200,"button":"left","clickCount":1}`
+   then `mouseReleased`; confirm the page reacts (e.g. a button click).
+3. Repeat for `input_keyboard` (keyDown/keyUp + a focused field).
+
+**Decision:**
+- **Works** → use stream-native input, skip the host CDP proxy, and **update the
+  spec's "Input (in)" section** to match. Phase 4 shrinks to "send input_* over
+  the frame socket."
+- **Insufficient** (missing key codes, IME, uploads, modifier handling) → keep the
+  CDP-via-host-proxy design as spec'd and port `serve.mjs`'s approach.
+
+Record the outcome at the top of Phase 4 before building it.
+
+**SPIKE OUTCOME (2026-06-12, agent-browser 0.27.0): stream-native input WORKS.**
+Click, typing (with `text`), and `mouseWheel` scrolling all confirmed against a
+live session. The CDP host proxy is dead. Additional discoveries:
+- Session names must not contain `/` (daemon dies on startup — the name becomes
+  a socket path). Managed sessions are `dormouse.<workspaceId>.<key>`; spec
+  updated.
+- The stream WS pushes `status` and `tabs` messages, so the tab strip needs no
+  polling; only tab *actions* need the CLI.
+- The stream WS **rejects upgrades with a non-localhost `Origin`** (403 for
+  `vscode-webview://…`; `tauri://localhost` and absent Origin are allowed). VS
+  Code needs a loopback origin-stripping TCP relay in the extension host
+  (Phase 7); standalone connects directly. Spec updated.
+
+---
+
+## Phases
+
+Build leaf-up. Each phase is independently verifiable; the surface is usable for
+real (frames visible) by end of Phase 3.
+
+### Phase 1 — `dor ab` command (passthrough + `--key`)
+
+CLI leaf, no rendering. Mirror an existing command end-to-end.
+
+- **Files:** `dor/src/commands/agent-browser.ts` (new, mirror
+  `dor/src/commands/iframe.ts`); register in `dor/src/cli.ts` `COMMANDS` +
+  `ROUTES` with **both** keys `'agent-browser'` and `'ab'` pointing at the same
+  `.command` (confirm stricli renders the alias acceptably in help — adjust if it
+  duplicates the entry).
+- **Behavior:** parse/strip `--key` (default `default`) and `--session`; error if
+  both given; resolve `--key` → `dormouse/1/<key>`; forward all remaining args
+  verbatim to the resolved `agent-browser --session <s> …`. Resolve the binary
+  via `DORMOUSE_AGENT_BROWSER_BIN` ?? PATH; friendly error + install hint if
+  absent.
+- **Tests/snapshots:** add `dor/test/snapshots/help/agent-browser.md`; extend
+  `dor/test/cli-output.test.mjs` for: `--help`, `--key`/`--session` mutual
+  exclusion error, missing-binary error, and the key→session translation.
+- **Verify:** `node --test test/cli-output.test.mjs` green; `dor ab open <url>`
+  drives the right session from a terminal (no surface yet).
+- **Spec:** "Delegation Boundary", "The `--key` Model".
+
+### Phase 2 — `surface.agentBrowser` control method + Wall registry
+
+Wire surface creation; the surface can stay the stub.
+
+- **Files:** `dor/src/commands/types.ts` (add `AgentBrowserSurfaceRequest/Response`
+  + `ControlClient.agentBrowserSurface`, mirror `IframeSurface*` at types.ts:109);
+  `dor/src/control-client.ts` (map to `'surface.agentBrowser'`, mirror line 71);
+  `lib/src/components/Wall.tsx` (handler mirroring the `surface.iframe` handler at
+  Wall.tsx:1255 + `createIframeSurface` at Wall.tsx:888; add the
+  `key→{session,surfaceId}` registry).
+- **Behavior:** first call for a session with no surface → create (split next to
+  caller, iframe placement rule); subsequent calls reuse. Pass `wsPort` (from
+  `stream status --json`) + session into panel params.
+- **Verify:** `dor ab open <url>` twice with same key → one surface, reused;
+  different `--key` → second surface. (Stub still renders.)
+- **Spec:** "Session ↔ Surface Mapping".
+
+### Phase 3 — Frames channel (the payoff)
+
+Replace the `AgentBrowserPanel` stub with a live canvas viewer.
+
+- **Files:** `lib/src/components/wall/AgentBrowserPanel.tsx` (currently a stub).
+- **Behavior:** connect `ws://127.0.0.1:<wsPort>`; on `{type:'frame'}` decode
+  base64 JPEG → `drawImage` on a `<canvas>`; track `metadata` device size for
+  later coordinate mapping; handle status messages (`connected`,
+  `screencasting`) for placeholder states. Port `viewer.html`'s frame loop.
+- **Verify:** `dor ab open http://localhost:5173` shows the live page in the
+  surface; navigations update.
+- **Spec:** "Channels → Frames (out)".
+
+### Phase 4 — Input channel
+
+**Resolve the spike first** and note the outcome here. Then either:
+
+- **Stream-native:** send `input_mouse`/`input_keyboard` over the frame socket;
+  map canvas → device coords via `metadata` (port `toViewport` from the
+  prototype). Update the spec's Input section.
+- **CDP-via-host-proxy:** add a long-lived CDP connection manager in the host
+  (`standalone/sidecar/*`, `vscode-ext/src/pty-host.js`) holding the browser-level
+  CDP WS + flattened `Target.attachToTarget` session, dispatching
+  `Input.dispatchMouseEvent`/`dispatchKeyEvent`; add a webview→host input message
+  path through the adapters (`lib/src/lib/platform/vscode-adapter.ts`,
+  `standalone/src/tauri-adapter.ts`, `vscode-ext/src/message-router.ts`); throttle
+  `mousemove`; re-resolve the active target on navigation (prototype's
+  `/cdp-target`).
+- **Focus:** terminal-surface semantics — click-to-focus, forward keys only while
+  selected + in interact mode; leader chord returns to the Wall (Dormouse owns the
+  keydown listener — `lib/src/components/wall/use-wall-keyboard.ts`).
+- **Verify:** click and type into the embedded page; ⌘-leader still navigates panes.
+- **Spec:** "Channels → Input (in)".
+
+### Phase 5 — Tabs
+
+- **Files:** `AgentBrowserPanel.tsx` (tab strip below header).
+- **Behavior:** poll/refresh `tab list` → integrated (1) vs multi-tab (≥2) strip
+  (title + favicon + close ×); selecting → `tab <n>` (stream/input follow active
+  target); × → `tab close`; focus newest web-opened tab; `dor ab open` navigates
+  active, never spawns.
+- **Verify:** trigger a `target=_blank`/popup → strip appears, newest focused,
+  closing extras returns to integrated mode; minimized surface stays title-only.
+- **Spec:** "Tabs".
+
+### Phase 6 — Lifecycle
+
+- **Behavior:** surface kill (`dor kill` / header × / `dor ab … close`) →
+  `agent-browser --session <s> close` + registry cleanup; external session death
+  (stream `connected:false`) → remove/placeholder the surface.
+- **Verify:** kill surface → browser process exits; `agent-browser close`
+  elsewhere → surface tears down.
+- **Spec:** "Lifecycle".
+
+### Phase 7 — VS Code CSP + dogfood
+
+- **Files:** `vscode-ext/src/webview-html.ts` — add
+  `connect-src ws://127.0.0.1:* ws://localhost:* <existing cspSource>`. No
+  `frame-src`/`img-src` change (canvas from base64, no iframe).
+- **Verify:** `pnpm build:vscode` + `pnpm --filter dormouse dogfood`, reload; full
+  flow works in the real extension. Also smoke-test the standalone (Tauri) build.
+- **Spec:** "VS Code Webview CSP".
+
+---
+
+## Testing strategy
+
+- **CLI:** snapshot + behavior tests alongside the other commands
+  (`dor/test/cli-output.test.mjs`, `dor/test/snapshots/`). This is the
+  highest-leverage automated coverage — Phases 1–2 are fully testable headless.
+- **Channels:** mostly manual against a live `agent-browser` (frames/input/tabs
+  need a real browser). The spike script and the prototype are the harness.
+- **Run `node --test` in `dor/` after every CLI change; snapshots will catch help
+  drift** (see how the iframe help snapshot is maintained).
+
+---
+
+## Risks & edge cases
+
+- **Input spike is the pivot.** It decides whether Phase 4 is small (stream-native)
+  or the largest phase (host CDP proxy + new adapter message path). Spike before
+  committing to either.
+- **CDP origin refusal** (if proxying): the webview cannot hold the CDP socket;
+  it must live in the host. Don't try to connect CDP from the panel.
+- **Coordinate mapping:** canvas size ≠ device size; scale through frame
+  `metadata` (`deviceWidth/Height`, `pageScaleFactor`, scroll offsets). Port
+  `toViewport` rather than reinventing.
+- **Stream port churn:** OS-assigned per session; always read `stream status
+  --json` fresh, don't cache across session restarts. `AGENT_BROWSER_STREAM_PORT`
+  can pin it if needed.
+- **Zero-tab state:** closing the last page leaves a context with no page — define
+  the surface's empty state (placeholder, not a crash).
+- **Mousemove chatter** (CDP path): throttle webview→host input.
+- **`--headed` passthrough** pops a separate OS window (defeats embedding). Decide
+  whether to warn/block; spec currently leaves passthrough verbatim.
+- **stricli alias rendering:** verify `ab` appears sanely in `dor --help` / `dor ab
+  --help`; adjust ROUTES if it duplicates.
+
+---
+
+## Definition of done
+
+- `dor ab` and `dor ab --key <name>` open/reuse browser surfaces per the registry;
+  CLI snapshot tests pass.
+- Frames render live; input works; ⌘-leader still controls the Wall.
+- Tabs present integrated vs multi-tab per spec; minimize stays binary.
+- Surface kill ↔ session close both directions.
+- Works in `dogfood` (VS Code) and standalone; CSP allows the stream WS.
+- Spec updated for any design change the build forced (especially the input
+  channel after the spike).

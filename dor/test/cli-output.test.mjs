@@ -128,6 +128,30 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         minimized: request.minimized,
       };
     },
+    async agentBrowserSurface(request) {
+      this.requests.push({ method: 'agentBrowserSurface', request });
+      return {
+        status: 'created',
+        surfaceId: '33333333-3333-4333-8333-333333333333',
+        surfaceRef: 'surface:3',
+        session: request.session,
+        minimized: false,
+      };
+    },
+  };
+}
+
+function fakeAgentBrowser({ exitCode = 0, stdout = '✓ ok\n', stderr = '' } = {}) {
+  const calls = [];
+  return {
+    calls,
+    exec: async (binary, args) => {
+      calls.push([binary, ...args]);
+      if (args.includes('stream')) {
+        return { exitCode: 0, stdout: '{"success":true,"data":{"port":61141}}\n', stderr: '' };
+      }
+      return { exitCode, stdout, stderr };
+    },
   };
 }
 
@@ -390,6 +414,98 @@ test('iframe json output', async () => {
 
 test('iframe invalid url output', async () => {
   await snapshot('iframe-invalid-url', await runCli(['iframe', 'localhost:5173'], { client: fixtureClient() }));
+});
+
+test('agent-browser passthrough output', async () => {
+  const ab = fakeAgentBrowser({ stdout: '✓ \n  http://localhost:5173\n' });
+  await snapshot(
+    'agent-browser-passthrough',
+    await runCli(['ab', 'open', 'http://localhost:5173'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
+  );
+});
+
+test('agent-browser resolves --key to a namespaced session and opens a surface', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', '--key', 'storybook', 'open', 'http://localhost:6006'], { client, execAgentBrowser: ab.exec });
+  assert.deepEqual(ab.calls, [
+    ['agent-browser', '--session', 'dormouse.1.storybook', 'open', 'http://localhost:6006'],
+    ['agent-browser', '--session', 'dormouse.1.storybook', 'stream', 'status', '--json'],
+  ]);
+  assert.deepEqual(client.requests, [{
+    method: 'agentBrowserSurface',
+    request: { key: 'storybook', session: 'dormouse.1.storybook', wsPort: 61141 },
+  }]);
+});
+
+test('agent-browser defaults to --key default', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['agent-browser', 'open', 'http://localhost:5173'], { client, execAgentBrowser: ab.exec });
+  assert.equal(ab.calls[0][2], 'dormouse.1.default');
+  assert.deepEqual(client.requests[0].request, { key: 'default', session: 'dormouse.1.default', wsPort: 61141 });
+});
+
+test('agent-browser raw --session skips key namespacing', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', '--session', 'mine', 'snapshot'], { client, execAgentBrowser: ab.exec });
+  assert.equal(ab.calls[0][2], 'mine');
+  assert.deepEqual(client.requests[0].request, { key: undefined, session: 'mine', wsPort: 61141 });
+});
+
+test('agent-browser close skips surface management', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', 'close'], { client, execAgentBrowser: ab.exec });
+  assert.deepEqual(ab.calls, [['agent-browser', '--session', 'dormouse.1.default', 'close']]);
+  assert.deepEqual(client.requests, []);
+});
+
+test('agent-browser without a control endpoint stays a pure passthrough', async () => {
+  const ab = fakeAgentBrowser();
+  const result = await runCli(['ab', 'open', 'http://localhost:5173'], { execAgentBrowser: ab.exec });
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, '');
+  assert.deepEqual(ab.calls, [['agent-browser', '--session', 'dormouse.1.default', 'open', 'http://localhost:5173']]);
+});
+
+test('agent-browser forwards child exit code and skips surface on failure', async () => {
+  const ab = fakeAgentBrowser({ exitCode: 1, stderr: '✗ boom\n' });
+  const client = fixtureClient();
+  const result = await runCli(['ab', 'open', 'nope'], { client, execAgentBrowser: ab.exec });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stderr, '✗ boom\n');
+  assert.deepEqual(client.requests, []);
+});
+
+test('agent-browser key/session conflict output', async () => {
+  const ab = fakeAgentBrowser();
+  await snapshot(
+    'agent-browser-key-session-conflict',
+    await runCli(['ab', '--key', 'a', '--session', 'b', 'open', 'x'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
+  );
+});
+
+test('agent-browser missing binary output', async () => {
+  const enoent = Object.assign(new Error("spawn agent-browser ENOENT"), { code: 'ENOENT' });
+  await snapshot(
+    'agent-browser-missing-binary',
+    await runCli(['ab', 'open', 'http://localhost:5173'], {
+      client: fixtureClient(),
+      execAgentBrowser: async () => { throw enoent; },
+    }),
+  );
+});
+
+test('agent-browser respects DORMOUSE_AGENT_BROWSER_BIN', async () => {
+  const ab = fakeAgentBrowser();
+  await runCli(['ab', 'snapshot'], {
+    client: fixtureClient(),
+    execAgentBrowser: ab.exec,
+    env: { DORMOUSE_AGENT_BROWSER_BIN: '/opt/custom/agent-browser' },
+  });
+  assert.equal(ab.calls[0][0], '/opt/custom/agent-browser');
 });
 
 test('list-panes text output', async () => {

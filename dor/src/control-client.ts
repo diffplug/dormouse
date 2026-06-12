@@ -1,5 +1,7 @@
 import { createConnection } from 'node:net';
 import type {
+  AgentBrowserSurfaceRequest,
+  AgentBrowserSurfaceResponse,
   ControlClient,
   EnsureSurfaceRequest,
   EnsureSurfaceResponse,
@@ -70,6 +72,10 @@ export class SocketControlClient implements ControlClient {
 
   iframeSurface(request: IframeSurfaceRequest): Promise<IframeSurfaceResponse> {
     return this.request<IframeSurfaceResponse>('surface.iframe', request);
+  }
+
+  agentBrowserSurface(request: AgentBrowserSurfaceRequest): Promise<AgentBrowserSurfaceResponse> {
+    return this.request<AgentBrowserSurfaceResponse>('surface.agentBrowser', request);
   }
 
   private request<T>(method: string, params: unknown): Promise<T> {

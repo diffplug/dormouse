@@ -36,8 +36,8 @@ than reimplemented:
 | Concern | Delegated to |
 | --- | --- |
 | Video (frames) | agent-browser session **stream** WebSocket |
-| Input (mouse/keyboard) | **CDP** `Input.*`, proxied by the Dormouse host |
-| Tabs | agent-browser **`tab list` / `tab <n>` / `tab close`** |
+| Input (mouse/keyboard) | the same stream WebSocket's native **`input_*`** messages |
+| Tabs | stream `tabs` messages (read) + **`tab list` / `tab <n>` / `tab close`** (act) |
 
 ## The `--key` Model
 
@@ -63,13 +63,16 @@ resolution is scoped to the right workspace with no extra plumbing.
 A managed `--key` maps to a namespaced agent-browser session:
 
 ```
-session = "dormouse/<workspaceId>/<key>"
+session = "dormouse.<workspaceId>.<key>"
 ```
 
 `<workspaceId>` is hardcoded `1` until Dormouse exposes real workspaces (see
 `dor-cli.md` → Handle Model); it is encoded now to avoid a later rename.
 Namespacing keeps managed keys from colliding with sessions a user created
-directly via plain `agent-browser`.
+directly via plain `agent-browser`. Dots, not slashes: agent-browser session
+names become socket paths, and a `/` in the name kills the daemon on startup
+(verified against 0.27.0). Keys are validated to `[A-Za-z0-9._-]+` for the
+same reason.
 
 ### `--key` vs raw `--session`
 
@@ -157,13 +160,19 @@ to a `<canvas>`:
 
 ### Input (in)
 
-Chrome refuses CDP WebSocket connections from regular http(s) origins, so the
-webview **cannot** speak CDP directly. Input is proxied by the Dormouse host
-(sidecar / `pty-host`, the same process that already bridges control requests):
-the host holds one persistent browser-level CDP WebSocket plus a flattened
-`Target.attachToTarget` session and dispatches `Input.dispatchMouseEvent` /
-`Input.dispatchKeyEvent`. The host re-resolves the active page target on
-navigation (the prototype's `/cdp-target`).
+The stream WebSocket natively accepts input messages, so the webview sends
+input on the **same socket it already opened for frames** — there is no CDP
+connection and no host input proxy. (Verified against 0.27.0: `input_mouse`
+press/release/move/wheel and `input_keyboard` keyDown/keyUp with `text` all
+work, including scroll. The daemon dispatches to the active target itself, so
+tab switches need no input re-attachment.)
+
+- Mouse: `{ type: "input_mouse", eventType: "mousePressed" | "mouseReleased" |
+  "mouseMoved" | "mouseWheel", x, y, button, clickCount, deltaX?, deltaY?,
+  modifiers }` — coordinates mapped from canvas space to device space via frame
+  `metadata`.
+- Keyboard: `{ type: "input_keyboard", eventType: "keyDown" | "keyUp", key,
+  code, text?, windowsVirtualKeyCode?, modifiers }`.
 
 Focus behaves like a terminal surface: click-to-focus; keystrokes forward to the
 browser only while the surface is selected and in interact mode. Because Dormouse
@@ -172,8 +181,11 @@ control to the Wall.
 
 ### Tabs
 
-`agent-browser tab list` (strip contents), `tab <n>` (switch), `tab close`
-(per-tab `×`) — all verbatim passthrough.
+The stream WebSocket pushes `{ type: "tabs", tabs: [{ tabId, title, url,
+active }] }` messages, which feed the strip for free. Tab *actions* still go
+through the CLI — `tab <n>` (switch), `tab close` (per-tab `×`) — issued by the
+host on the webview's behalf (a webview cannot spawn processes; see
+`agentBrowserCommand` below).
 
 ## Implementation Touchpoints
 
@@ -184,9 +196,21 @@ control to the Wall.
 | Surface component (canvas viewer + WS client + tab strip) | `lib/src/components/wall/AgentBrowserPanel.tsx` (currently a stub) |
 | Surface registration | `lib/src/components/Wall.tsx:339` (`'agent-browser': AgentBrowserPanel`) |
 | Control handler + key→session registry | `lib/src/components/Wall.tsx` (mirror the `surface.iframe` handler at Wall.tsx:1255) |
-| CDP input proxy | host: `standalone/sidecar/*`, `vscode-ext/src/pty-host.js` |
+| Host CLI runner (`agentBrowserCommand`) + VS Code stream relay | `lib/src/lib/platform/types.ts` (optional adapter methods), `vscode-ext/src/message-router.ts`, `vscode-ext/src/agent-browser-host.ts` |
 
-## VS Code Webview CSP
+### Host capabilities
+
+Two narrow host capabilities back the surface, both optional on
+`PlatformAdapter` so hosts degrade gracefully:
+
+- **`agentBrowserCommand(session, args)`** — runs the user's agent-browser
+  binary for tab actions (`tab <n>`, `tab close`, `tab new`) and lifecycle
+  (`close`). The host validates `args[0]` against an allowlist (`tab`,
+  `close`); this is not a general exec channel.
+- **`getAgentBrowserStreamUrl(port)`** — returns the WebSocket URL the webview
+  should use for the session stream (see CSP/origin below).
+
+## VS Code Webview CSP and Stream Origin
 
 The VS Code webview CSP (`vscode-ext/src/webview-html.ts`) must allow the stream
 WebSocket:
@@ -197,3 +221,12 @@ connect-src ws://127.0.0.1:* ws://localhost:* <existing cspSource>
 
 The canvas is drawn from base64 frame data, so no `img-src` change is needed, and
 no `frame-src` is involved — there is no iframe.
+
+CSP alone is not enough in VS Code: the agent-browser stream server rejects
+WebSocket upgrades whose `Origin` is not localhost-or-absent (verified against
+0.27.0: `vscode-webview://…` → 403; `tauri://localhost` and plain localhost →
+allowed; no override env var exists). The VS Code extension host therefore runs
+a loopback-only TCP relay that strips the `Origin` header and pipes bytes to
+`127.0.0.1:<streamPort>`; `getAgentBrowserStreamUrl` returns the relay URL
+(`ws://127.0.0.1:<relayPort>/stream/<streamPort>`). The standalone (Tauri)
+webview connects directly — its origin is allowed.

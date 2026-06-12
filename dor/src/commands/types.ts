@@ -120,6 +120,23 @@ export interface IframeSurfaceResponse {
   minimized: boolean;
 }
 
+export interface AgentBrowserSurfaceRequest {
+  /** Managed workspace-scoped key; absent when attaching via raw --session. */
+  key?: string;
+  /** Resolved agent-browser session name — the join key for the surface. */
+  session: string;
+  /** Session stream WebSocket port from `stream status --json`. */
+  wsPort?: number;
+}
+
+export interface AgentBrowserSurfaceResponse {
+  status: 'created' | 'existing' | 'replaced';
+  surfaceId?: string;
+  surfaceRef: string;
+  session: string;
+  minimized: boolean;
+}
+
 export interface ControlClient {
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse>;
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;
@@ -128,7 +145,17 @@ export interface ControlClient {
   readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse>;
   killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse>;
   iframeSurface(request: IframeSurfaceRequest): Promise<IframeSurfaceResponse>;
+  agentBrowserSurface(request: AgentBrowserSurfaceRequest): Promise<AgentBrowserSurfaceResponse>;
 }
+
+export interface AgentBrowserExecResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** Runs the user's agent-browser binary; injectable so CLI tests stay hermetic. */
+export type AgentBrowserExec = (binary: string, args: string[]) => Promise<AgentBrowserExecResult>;
 
 export interface CliEnv {
   [key: string]: string | undefined;
@@ -139,6 +166,7 @@ export interface CliOptions {
   client?: ControlClient;
   readStdin?: () => Promise<string>;
   versionMetadata?: VersionMetadata;
+  execAgentBrowser?: AgentBrowserExec;
 }
 
 export interface CliResult {
