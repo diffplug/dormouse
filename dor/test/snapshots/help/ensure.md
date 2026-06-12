@@ -15,7 +15,7 @@ A surface matches only while the command is live. Once the command exits and the
 
 Two surfaces running the same command in different working directories are distinct (e.g. the same dev server in two worktrees). Both keep running; ensure never collapses them.
 
---cwd sets the working directory used both for matching and for the new command. If omitted, Dormouse uses the directory dor was invoked from. The path is normalized (symlinks resolved) before it becomes part of the key.
+--cwd sets the working directory used both for matching and for the new command. If omitted, Dormouse uses the directory dor was invoked from. The path is resolved to an absolute path and matched exactly; symlinks are not resolved, so two routes to the same directory are treated as distinct.
 
 --minimize applies only when creating a new surface; it does not minimize an existing match.
 
