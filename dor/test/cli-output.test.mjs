@@ -70,14 +70,15 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
     },
     async ensureSurface(request) {
       this.requests.push({ method: 'ensureSurface', request });
+      // Mirror the host: quote the argv for the target shell, and key on the
+      // command so the fixture can exercise both the created and existing paths.
       const command = buildShellCommandForKind('posix', request.command);
-      const title = request.title ?? command;
       return {
-        status: title === 'dev server' ? 'existing' : 'created',
+        status: command === 'pnpm dev:workspace' ? 'existing' : 'created',
         surfaceId: '33333333-3333-4333-8333-333333333333',
         surfaceRef: 'surface:3',
-        title,
         command,
+        cwd: request.cwd,
         minimized: request.minimized,
       };
     },
@@ -199,20 +200,23 @@ test('split sends command argv to the host', async () => {
 test('ensure text output', async () => {
   await snapshot(
     'ensure-text',
-    await runCli(['ensure', '--title', 'dev server', '--', 'pnpm', 'dev:workspace'], { client: fixtureClient() }),
+    await runCli(['ensure', '--', 'pnpm', 'dev:workspace'], {
+      client: fixtureClient(),
+      env: { PWD: '/Users/me/projects/site' },
+    }),
   );
 });
 
-test('ensure sends command argv to the host', async () => {
+test('ensure sends command argv and caller cwd to the host', async () => {
   const client = fixtureClient();
-  await runCli(['ensure', '--title', 'worker', '--', 'pnpm', 'dev'], { client });
+  await runCli(['ensure', '--', 'pnpm', 'dev'], { client, env: { PWD: '/work/site' } });
   assert.deepEqual(client.requests, [{
     method: 'ensureSurface',
     request: {
       command: ['pnpm', 'dev'],
       minimized: false,
       surface: undefined,
-      title: 'worker',
+      cwd: '/work/site',
     },
   }]);
 });
@@ -220,7 +224,9 @@ test('ensure sends command argv to the host', async () => {
 test('ensure json output', async () => {
   await snapshot(
     'ensure-json',
-    await runCli(['ensure', '--json', '--minimize', '--', 'pnpm', 'dev:workspace'], { client: fixtureClient() }),
+    await runCli(['ensure', '--json', '--minimize', '--cwd', '/Users/me/projects/site', '--', 'pnpm', 'dev'], {
+      client: fixtureClient(),
+    }),
   );
 });
 

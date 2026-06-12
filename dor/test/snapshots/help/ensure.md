@@ -9,7 +9,7 @@ USAGE
 
 Ensures one surface in the current workspace is running the given command at the given path. If it's already running, no-op. If it isn't, then it creates a split and runs the command.
 
-Matching uses the command each shell reports it is running via Dormouse shell integration, not process inspection. This captures the typed command (`npm dev`), not the forked child process (`node .../vite`), and works for shells the user started by hand as well as shells Dormouse started.
+Matching uses the command each shell reports it is running via Dormouse shell integration, not process inspection. This captures the typed command (`npm run dev`), not the forked child process (`node .../vite`), and works for shells the user started by hand as well as shells Dormouse started. The match is exact: `npm run dev` and `npm run dev --host` are different commands and get separate surfaces. Shells without the integration don't report their command, so ensure can't match them and starts a new surface every time.
 
 A surface matches only while the command is live. Once the command exits and the shell returns to its prompt, the surface no longer matches; the next ensure causes a fresh split rather than reusing the idle shell. Minimized surfaces participate in matching. Closed/killed surfaces do not.
 
@@ -22,15 +22,15 @@ Two surfaces running the same command in different working directories are disti
 --surface selects the surface to split only when creating a new surface. If omitted, Dormouse uses the same caller/focused fallback as dor split.
 
 Text output:
-  created surface:3  "npm dev"
-  existing surface:3  "npm dev"
+  created surface:3  "npm run dev"
+  existing surface:3  "npm run dev"
 
 JSON output:
   {
     "status": "created",
     "surface_id": "pane-def",
     "surface_ref": "surface:3",
-    "command": "npm dev",
+    "command": "npm run dev",
     "cwd": "/Users/me/projects/site",
     "minimized": false
   }

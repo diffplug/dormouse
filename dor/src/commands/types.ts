@@ -54,15 +54,16 @@ export interface EnsureSurfaceRequest {
   command: string[];
   minimized: boolean;
   surface?: string;
-  title?: string;
+  /** Working directory for matching and for the new command; part of the idempotency key. */
+  cwd: string;
 }
 
 export interface EnsureSurfaceResponse {
   status: 'created' | 'existing';
   surfaceId?: string;
   surfaceRef: string;
-  title: string;
   command: string;
+  cwd: string;
   minimized: boolean;
 }
 

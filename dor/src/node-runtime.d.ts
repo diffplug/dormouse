@@ -19,9 +19,14 @@ declare module 'node:child_process' {
   }): string;
 }
 
+declare module 'node:path' {
+  export function resolve(...segments: string[]): string;
+}
+
 declare const process: {
   platform: string;
   ppid: number;
+  cwd(): string;
 };
 
 declare function setTimeout(callback: () => void, ms?: number): number;
