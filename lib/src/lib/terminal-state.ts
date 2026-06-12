@@ -392,21 +392,12 @@ export function surfaceRunsCommand(
   const run = state.currentCommand;
   if (!run || run.rawCommandLine === null) return false;
   if (run.rawCommandLine !== command) return false;
+  // Exact compare, matching the command half. The CLI sends a path.resolve'd cwd
+  // (trailing slashes, `..`, `.` already collapsed), so there's nothing further
+  // to normalize here — and trailing-slash trimming wouldn't address the real
+  // divergences (symlinks, case) anyway.
   const runCwd = run.cwdAtStart?.path ?? state.cwd?.path;
-  return runCwd !== undefined && sameCwdPath(runCwd, cwdPath);
-}
-
-/** Compare two absolute working-directory paths, ignoring a trailing separator. */
-export function sameCwdPath(a: string, b: string): boolean {
-  return normalizeCwdPath(a) === normalizeCwdPath(b);
-}
-
-function normalizeCwdPath(path: string): string {
-  const trimmed = path.trim();
-  if (trimmed.length > 1 && (trimmed.endsWith('/') || trimmed.endsWith('\\'))) {
-    return trimmed.slice(0, -1);
-  }
-  return trimmed;
+  return runCwd === cwdPath;
 }
 
 export function deriveFallbackCommandTitle(

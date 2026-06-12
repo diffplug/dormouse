@@ -13,7 +13,6 @@ import {
   groupTerminalPanes,
   notificationDisplayTitle,
   reduceTerminalState,
-  sameCwdPath,
   shortestUniqueCwdLabels,
   summarizeCommandLine,
   surfaceRunsCommand,
@@ -527,12 +526,10 @@ describe('surfaceRunsCommand (dor ensure matching)', () => {
     expect(surfaceRunsCommand(pane, 'pnpm dev:website', '/repo/app')).toBe(false);
   });
 
-  it('ignores a trailing separator on either side of the cwd', () => {
+  it('compares the cwd exactly (the CLI sends a canonicalized path)', () => {
     const pane = runningPane('/repo/app', 'pnpm dev:website');
-    expect(surfaceRunsCommand(pane, 'pnpm dev:website', '/repo/app/')).toBe(true);
-    expect(sameCwdPath('/repo/app/', '/repo/app')).toBe(true);
-    expect(sameCwdPath('/', '/')).toBe(true);
-    expect(sameCwdPath('/a', '/b')).toBe(false);
+    expect(surfaceRunsCommand(pane, 'pnpm dev:website', '/repo/app')).toBe(true);
+    expect(surfaceRunsCommand(pane, 'pnpm dev:website', '/repo/app/')).toBe(false);
   });
 });
 
