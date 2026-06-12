@@ -25,7 +25,6 @@ import {
   isUntouched,
   getOrCreateTerminal,
   getTerminalInstance,
-  isReservedUserTitle,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
   type SessionStatus,
@@ -287,13 +286,6 @@ function dorDirectionForDockview(direction: 'right' | 'below'): DorResolvedSplit
 
 function spawnDirectionForDockview(direction: DockviewSplitDirection): SpawnDirection {
   return direction === 'above' || direction === 'below' ? 'top' : 'left';
-}
-
-function validateUserTitle(title: string): string | null {
-  const trimmed = title.trim();
-  if (!trimmed) return 'title cannot be empty';
-  if (isReservedUserTitle(trimmed)) return 'title is reserved';
-  return null;
 }
 
 /**
@@ -826,14 +818,12 @@ export function Wall({
     direction,
     minimized,
     referenceId,
-    title,
     cwd,
   }: {
     command?: string;
     direction: DorResolvedSplitDirection;
     minimized: boolean;
     referenceId: string;
-    title?: string;
     cwd?: string;
   }): ParseResult<{
     id: string;
@@ -843,11 +833,6 @@ export function Wall({
     if (!api) return { ok: false, message: 'Dormouse layout is not ready yet' };
     const referencePanel = api.getPanel(referenceId);
     if (!referencePanel) return { ok: false, message: `surface '${referenceId}' is not visible` };
-
-    if (title) {
-      const titleError = validateUserTitle(title);
-      if (titleError) return { ok: false, message: titleError };
-    }
 
     const newId = generatePaneId();
     const defaults = getDefaultShellOpts();
@@ -861,22 +846,15 @@ export function Wall({
         shell: defaults?.shell,
         args: commandShellArgs(defaults?.shell, command),
         cwd: inheritedCwd,
-        title,
         untouched: false,
         command,
       });
-    } else if (defaults?.shell || inheritedCwd || title) {
+    } else if (defaults?.shell || inheritedCwd) {
       setPendingShellOpts(newId, {
         shell: defaults?.shell,
         args: defaults?.args,
         cwd: inheritedCwd,
-        title,
       });
-    }
-
-    if (title) {
-      const result = setTerminalUserTitle(newId, title);
-      if (!result.accepted) return { ok: false, message: `title is ${result.reason}` };
     }
 
     const dockDirection = dockviewDirectionForDor(direction);
@@ -885,11 +863,10 @@ export function Wall({
       id: newId,
       component: 'terminal',
       tabComponent: 'terminal',
-      title: title ?? UNNAMED_PANEL_TITLE,
+      title: UNNAMED_PANEL_TITLE,
       position: { referencePanel: referencePanel.id, direction: dockDirection },
     });
     selectPane(newId);
-    if (title) api.getPanel(newId)?.api.setTitle(title);
     onEventRef.current?.({
       type: 'split',
       direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
