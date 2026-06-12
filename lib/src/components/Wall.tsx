@@ -96,15 +96,18 @@ type DorControlParams = {
   direction?: unknown;
   input?: unknown;
   inputCount?: unknown;
+  key?: unknown;
   lines?: unknown;
   minimized?: unknown;
   pane?: string;
+  session?: unknown;
   surface?: unknown;
   title?: unknown;
   url?: unknown;
   workspace?: string;
   window?: string;
   scrollback?: unknown;
+  wsPort?: unknown;
 };
 
 // The webview view of a control request: the shared wire payload, but with
@@ -885,14 +888,23 @@ export function Wall({
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId) } };
   }, [generatePaneId, minimizePane, selectPane, surfaceRefForId]);
 
-  const createIframeSurface = useCallback(({
+  /**
+   * Create a non-terminal content surface (iframe, agent-browser) next to a
+   * reference surface: an untouched terminal caller is replaced in place,
+   * anything else gets a split (the `dor iframe` placement rule).
+   */
+  const createContentSurface = useCallback(({
+    component,
     minimized,
+    params,
     reference,
-    url,
+    title,
   }: {
+    component: 'iframe' | 'agent-browser';
     minimized: boolean;
+    params: Record<string, unknown>;
     reference: DorSurface;
-    url: string;
+    title: string;
   }): ParseResult<{
     id: string;
     ref: string;
@@ -904,14 +916,12 @@ export function Wall({
     if (!referencePanel) return { ok: false, message: `surface '${reference.ref}' is not visible` };
 
     const newId = generatePaneId();
-    const title = iframeTitle(url);
-    const params = { surfaceType: 'iframe', url };
     const replaceUntouchedTerminal = reference.type === 'terminal' && isUntouched(reference.id);
 
     if (replaceUntouchedTerminal) {
       api.addPanel({
         id: newId,
-        component: 'iframe',
+        component,
         tabComponent: 'surface',
         title,
         params,
@@ -928,7 +938,7 @@ export function Wall({
     freshlySpawnedRef.current.set(newId, dockDirection === 'below' ? 'top' : 'left');
     api.addPanel({
       id: newId,
-      component: 'iframe',
+      component,
       tabComponent: 'surface',
       title,
       params,
@@ -943,6 +953,24 @@ export function Wall({
     if (minimized) minimizePane(newId);
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'created' } };
   }, [generatePaneId, minimizePane, selectPane, surfaceRefForId]);
+
+  /**
+   * The agent-browser session ↔ surface registry, derived from panel/door
+   * params rather than kept as separate state so it survives webview reloads.
+   * Returns the surface bound to `session`, or null if none exists.
+   */
+  const findAgentBrowserSurface = useCallback((session: string): { id: string; minimized: boolean } | null => {
+    const isMatch = (params: unknown) =>
+      !!params && typeof params === 'object' &&
+      (params as { surfaceType?: unknown }).surfaceType === 'agent-browser' &&
+      (params as { session?: unknown }).session === session;
+
+    const panel = apiRef.current?.panels.find((candidate) => isMatch(candidate.params));
+    if (panel) return { id: panel.id, minimized: false };
+    const door = doorsRef.current.find((candidate) => isMatch(candidate.params));
+    if (door) return { id: door.id, minimized: true };
+    return null;
+  }, []);
 
   // Listen for external "new terminal" requests (e.g. from the standalone AppBar)
   useEffect(() => {
@@ -1263,10 +1291,12 @@ export function Wall({
           detail.respond({ ok: false, error: target.message });
           return;
         }
-        const result = createIframeSurface({
+        const result = createContentSurface({
+          component: 'iframe',
           minimized: booleanParam(params.minimized),
+          params: { surfaceType: 'iframe', url },
           reference: target.value,
-          url,
+          title: iframeTitle(url),
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });
@@ -1285,12 +1315,81 @@ export function Wall({
         return;
       }
 
+      if (detail.method === 'surface.agentBrowser') {
+        const session = stringParam(params.session);
+        if (!session) {
+          detail.respond({ ok: false, error: 'session is required' });
+          return;
+        }
+        const key = stringParam(params.key);
+        const wsPort = numberParam(params.wsPort);
+
+        const existing = findAgentBrowserSurface(session);
+        if (existing) {
+          // Reuse: refresh the stream port (OS-assigned, churns across session
+          // restarts) so the panel reconnects to the live stream.
+          if (!existing.minimized && wsPort !== undefined) {
+            api.getPanel(existing.id)?.api.updateParameters({ wsPort });
+          } else if (existing.minimized && wsPort !== undefined) {
+            const nextDoors = doorsRef.current.map((door) => door.id === existing.id
+              ? { ...door, params: { ...door.params, wsPort } }
+              : door);
+            doorsRef.current = nextDoors;
+            setDoors(nextDoors);
+          }
+          detail.respond({
+            ok: true,
+            result: {
+              status: 'existing',
+              surfaceId: existing.id,
+              surfaceRef: surfaceRefForId(existing.id),
+              session,
+              minimized: existing.minimized,
+            },
+          });
+          return;
+        }
+
+        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        const result = createContentSurface({
+          component: 'agent-browser',
+          minimized: booleanParam(params.minimized),
+          params: {
+            surfaceType: 'agent-browser',
+            session,
+            ...(key !== undefined ? { key } : {}),
+            ...(wsPort !== undefined ? { wsPort } : {}),
+          },
+          reference: target.value,
+          title: key ?? session,
+        });
+        if (!result.ok) {
+          detail.respond({ ok: false, error: result.message });
+          return;
+        }
+        detail.respond({
+          ok: true,
+          result: {
+            status: result.value.status,
+            surfaceId: result.value.id,
+            surfaceRef: result.value.ref,
+            session,
+            minimized: booleanParam(params.minimized),
+          },
+        });
+        return;
+      }
+
       detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
     };
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, createIframeSurface, createSplitSurface, findSurfaceIdByUserTitle, killPaneImmediately, resolveVisibleSurface, surfaceRefForId]);
+  }, [buildDorSurfaces, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdByUserTitle, killPaneImmediately, resolveVisibleSurface, surfaceRefForId]);
 
   const addSplitPanel = useCallback((
     id: string | null,
