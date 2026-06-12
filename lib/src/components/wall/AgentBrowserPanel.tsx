@@ -11,6 +11,7 @@ import type { IDockviewPanelProps } from 'dockview-react';
 import { clsx } from 'clsx';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
+import { readTextFromClipboard } from '../../lib/clipboard';
 import {
   FreshlySpawnedContext,
   ModeContext,
@@ -39,8 +40,8 @@ type StreamStatus = {
   screencasting: boolean;
 };
 
-// Mirrors agent-browser's own viewer: `text` is what makes typing land, and
-// the keyCode map covers the editing/navigation keys CDP wants spelled out.
+// `text` is what makes typing land; windowsVirtualKeyCode is what makes
+// non-text keys and modifier chords act. Keyed by KeyboardEvent.key.
 const SPECIAL_KEYS: Record<string, { text?: string; keyCode: number }> = {
   Enter: { text: '\r', keyCode: 13 },
   Tab: { text: '\t', keyCode: 9 },
@@ -51,11 +52,52 @@ const SPECIAL_KEYS: Record<string, { text?: string; keyCode: number }> = {
   ArrowRight: { keyCode: 39 },
   ArrowDown: { keyCode: 40 },
   Delete: { keyCode: 46 },
+  Insert: { keyCode: 45 },
   Home: { keyCode: 36 },
   End: { keyCode: 35 },
   PageUp: { keyCode: 33 },
   PageDown: { keyCode: 34 },
+  Shift: { keyCode: 16 },
+  Control: { keyCode: 17 },
+  Alt: { keyCode: 18 },
+  Meta: { keyCode: 91 },
+  CapsLock: { keyCode: 20 },
+  ContextMenu: { keyCode: 93 },
 };
+
+// Windows virtual-key codes for printable keys, keyed by KeyboardEvent.code
+// (the physical key, so shifted variants share an entry). Letters and digits
+// are handled structurally in virtualKeyCode. Never derive a VK from
+// `key.charCodeAt(0)`: '.' is 46, which is VK_DELETE — the daemon deletes
+// instead of typing a period.
+const OEM_VK_BY_CODE: Record<string, number> = {
+  Space: 32,
+  Semicolon: 186,
+  Equal: 187,
+  Comma: 188,
+  Minus: 189,
+  Period: 190,
+  Slash: 191,
+  Backquote: 192,
+  BracketLeft: 219,
+  Backslash: 220,
+  BracketRight: 221,
+  Quote: 222,
+  NumpadDecimal: 110,
+  NumpadDivide: 111,
+  NumpadMultiply: 106,
+  NumpadSubtract: 109,
+  NumpadAdd: 107,
+};
+
+function virtualKeyCode(key: string, code: string): number {
+  const special = SPECIAL_KEYS[key];
+  if (special) return special.keyCode;
+  if (/^Key[A-Z]$/.test(code)) return code.charCodeAt(3);
+  if (/^(Digit|Numpad)[0-9]$/.test(code)) return code.charCodeAt(code.length - 1) + (code.startsWith('Numpad') ? 48 : 0);
+  if (/^F([1-9]|1[0-2])$/.test(code)) return 111 + Number(code.slice(1));
+  return OEM_VK_BY_CODE[code] ?? 0;
+}
 
 const MOUSE_BUTTONS: Record<number, string> = { 0: 'left', 1: 'middle', 2: 'right' };
 const MOUSE_BUTTON_MASKS: Record<number, number> = { 0: 1, 1: 4, 2: 2 };
@@ -398,26 +440,57 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     return () => canvas.removeEventListener('wheel', onWheel);
   }, [send, toDevice]);
 
-  const sendKey = useCallback((
-    e: { key: string; code: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
-    eventType: 'keyDown' | 'keyUp',
-  ) => {
+  type KeyLike = { key: string; code: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean };
+
+  const sendKey = useCallback((e: KeyLike, eventType: 'keyDown' | 'keyUp') => {
     const info = SPECIAL_KEYS[e.key];
+    // Under ctrl/cmd the key is a shortcut, not text — sending text would make
+    // e.g. cmd-A insert an "a" instead of acting as a chord.
+    const wantsText = eventType === 'keyDown' && !e.ctrlKey && !e.metaKey;
     send({
       type: 'input_keyboard',
       eventType,
       key: e.key,
       code: e.code,
-      text: eventType === 'keyDown' ? info?.text ?? (e.key.length === 1 ? e.key : undefined) : undefined,
-      windowsVirtualKeyCode: info?.keyCode ?? (e.key.length === 1 ? e.key.charCodeAt(0) : 0),
+      // The daemon (verified 0.27.0) silently DROPS any event whose text field
+      // is absent — arrows, Escape, modifier keys, chords. An empty string
+      // dispatches a proper non-text key event, so always send a string.
+      text: wantsText ? info?.text ?? (e.key.length === 1 ? e.key : '') : '',
+      windowsVirtualKeyCode: virtualKeyCode(e.key, e.code),
       modifiers: modifiers(e),
     });
   }, [send]);
 
+  // cmd/ctrl-V types the LOCAL clipboard into the page. Plain key forwarding
+  // would trigger paste of the embedded Chromium's own (empty) clipboard, so
+  // bridge by replaying the text as per-character keyDown events.
+  const insertText = useCallback((text: string) => {
+    for (const ch of text) {
+      if (ch === '\r') continue;
+      if (ch === '\n') {
+        send({ type: 'input_keyboard', eventType: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13, modifiers: 0 });
+        send({ type: 'input_keyboard', eventType: 'keyUp', key: 'Enter', code: 'Enter', text: '', windowsVirtualKeyCode: 13, modifiers: 0 });
+      } else {
+        send({ type: 'input_keyboard', eventType: 'keyDown', key: ch, code: '', text: ch, windowsVirtualKeyCode: 0, modifiers: 0 });
+        send({ type: 'input_keyboard', eventType: 'keyUp', key: ch, code: '', text: '', windowsVirtualKeyCode: 0, modifiers: 0 });
+      }
+    }
+  }, [send]);
+
+  const handleKeyDownLike = useCallback((e: KeyLike) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v') {
+      void readTextFromClipboard().then((text) => {
+        if (text) insertText(text);
+      });
+      return;
+    }
+    sendKey(e, 'keyDown');
+  }, [insertText, sendKey]);
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!interactiveRef.current) return;
     e.preventDefault();
-    sendKey(e, 'keyDown');
+    handleKeyDownLike(e);
   };
 
   const onKeyUp = (e: React.KeyboardEvent) => {
@@ -445,7 +518,8 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       const el = elRef.current;
       if (el && e.target instanceof Node && el.contains(e.target)) return;
       e.preventDefault();
-      sendKey(e, e.type === 'keydown' ? 'keyDown' : 'keyUp');
+      if (e.type === 'keydown') handleKeyDownLike(e);
+      else sendKey(e, 'keyUp');
     };
     window.addEventListener('keydown', forward, true);
     window.addEventListener('keyup', forward, true);
@@ -453,7 +527,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       window.removeEventListener('keydown', forward, true);
       window.removeEventListener('keyup', forward, true);
     };
-  }, [interactive, sendKey]);
+  }, [interactive, handleKeyDownLike, sendKey]);
 
   // --- tab strip actions ---
 

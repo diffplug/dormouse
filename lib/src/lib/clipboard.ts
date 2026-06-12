@@ -62,7 +62,7 @@ export function pasteFilePaths(terminalId: string, paths: string[]): void {
   writePasteToPty(terminalId, text);
 }
 
-async function readTextFromClipboard(): Promise<string> {
+export async function readTextFromClipboard(): Promise<string> {
   // Prefer the platform's native text read when available — navigator.clipboard.readText()
   // on macOS WKWebView pops a "Paste from <App>" confirmation menu at the cursor every
   // time it's invoked from JS, which defeats the point of a paste shortcut.
