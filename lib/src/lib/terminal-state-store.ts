@@ -21,7 +21,29 @@ const paneStates = new Map<string, TerminalPaneState>();
 const promptSubmitStates = new Map<string, PromptSubmitState>();
 const promptShapes = new Map<string, PromptShape>();
 const promptOutputBuffers = new Map<string, string>();
+// Panes whose shell emits real OSC 633/133 command boundaries (i.e. shell
+// integration injection took). Once a pane is here, the keystroke heuristic
+// stands down so the two don't both synthesize command starts — the keystroke
+// path is the fallback "only if injection fails". See docs/specs/terminal-escapes.md.
+const oscDrivenPanes = new Set<string>();
 const listeners = new Set<() => void>();
+
+// Events that prove the shell itself is reporting prompt/command boundaries via
+// OSC, as opposed to boundaries the keystroke heuristic synthesizes. A real
+// prompt-start (A) lands on the very first prompt — before any command is typed
+// — so this flips a pane to OSC-driven ahead of the first keystroke command.
+function isOscDrivenBoundary(event: TerminalSemanticEvent): boolean {
+  switch (event.type) {
+    case 'promptStart':
+    case 'promptEnd':
+    case 'commandFinish':
+      return true;
+    case 'commandStart':
+      return event.source === 'osc633_boundaries' || event.source === 'osc133_boundaries';
+    default:
+      return false;
+  }
+}
 let cachedSnapshot: Map<string, TerminalPaneState> | null = null;
 
 export function subscribeToTerminalPaneState(listener: () => void): () => void {
@@ -54,6 +76,7 @@ export function resetTerminalPaneState(id: string, initial?: Partial<TerminalPan
   promptSubmitStates.delete(id);
   promptShapes.delete(id);
   promptOutputBuffers.delete(id);
+  oscDrivenPanes.delete(id);
   paneStates.set(id, createTerminalPaneState(initial));
   notifyTerminalPaneStateListeners();
 }
@@ -62,6 +85,7 @@ export function removeTerminalPaneState(id: string): void {
   promptSubmitStates.delete(id);
   promptShapes.delete(id);
   promptOutputBuffers.delete(id);
+  oscDrivenPanes.delete(id);
   if (!paneStates.delete(id)) return;
   notifyTerminalPaneStateListeners();
 }
@@ -71,8 +95,17 @@ export function applyTerminalSemanticEventsByPtyId(ptyId: string, events: Termin
   applyTerminalSemanticEvents(id, events);
 }
 
-export function applyTerminalSemanticEvents(id: string, events: TerminalSemanticEvent[]): void {
+export function applyTerminalSemanticEvents(
+  id: string,
+  events: TerminalSemanticEvent[],
+  options?: { keystrokeHeuristic?: boolean },
+): void {
   if (events.length === 0) return;
+  // Real OSC boundaries (not the heuristic's own synthesized prompt markers)
+  // promote the pane to OSC-driven, retiring the keystroke fallback for it.
+  if (!options?.keystrokeHeuristic && !oscDrivenPanes.has(id) && events.some(isOscDrivenBoundary)) {
+    oscDrivenPanes.add(id);
+  }
   if (events.some((event) => event.type === 'promptStart' || event.type === 'promptEnd' || event.type === 'commandStart')) {
     promptSubmitStates.delete(id);
     promptOutputBuffers.delete(id);
@@ -98,6 +131,9 @@ export interface PromptLineReader {
 
 export function recordTerminalUserInput(id: string, input: string, reader?: PromptLineReader): void {
   if (!input) return;
+  // Shell integration is authoritative once it's emitting OSC boundaries; don't
+  // also synthesize command starts from keystrokes (that would double-count).
+  if (oscDrivenPanes.has(id)) return;
   const state = paneStates.get(id) ?? createTerminalPaneState();
   if (state.currentCommand || state.activity.kind === 'running' || state.activity.kind === 'finished') return;
 
@@ -144,7 +180,9 @@ export function recordTerminalOutput(id: string, output: string): void {
   // running; OSC-tracked shells drive their own boundaries.
   const state = paneStates.get(id);
   if (state?.currentCommand?.source === 'user_input') {
-    applyTerminalSemanticEvents(id, [{ type: 'promptStart' }, { type: 'promptEnd' }]);
+    // Flagged as the heuristic's own synthesis so it doesn't mark the pane
+    // OSC-driven (which would then silence the very path emitting this).
+    applyTerminalSemanticEvents(id, [{ type: 'promptStart' }, { type: 'promptEnd' }], { keystrokeHeuristic: true });
   }
 }
 

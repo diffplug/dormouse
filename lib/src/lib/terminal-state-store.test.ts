@@ -61,6 +61,36 @@ describe('terminal semantic state store command input fallback', () => {
     expect(state.activity).toEqual({ kind: 'prompt' });
   });
 
+  it('retires the keystroke fallback once the shell emits real OSC command boundaries', () => {
+    // Shell integration draws its first prompt before any command is typed.
+    applyTerminalSemanticEvents('pane', [{ type: 'promptStart' }]);
+    // The user then runs a command; OSC drives it, the keystroke path must not.
+    submit('pane', 'lazygit');
+
+    expect(getTerminalPaneState('pane').currentCommand).toBeNull();
+  });
+
+  it('lets the OSC command-start win instead of double-counting with keystrokes', () => {
+    applyTerminalSemanticEvents('pane', [{ type: 'commandStart', source: 'osc633_boundaries' }]);
+    submit('pane', 'lazygit');
+
+    // currentCommand stays the OSC-sourced one; no user_input command is layered on.
+    expect(getTerminalPaneState('pane').currentCommand?.source).toBe('osc633_boundaries');
+  });
+
+  it('keeps the keystroke fallback alive across its own synthesized prompt markers', () => {
+    submit('pane', 'first');
+    // The heuristic itself emits promptStart/promptEnd here — that must not be
+    // mistaken for shell integration and silence the fallback.
+    recordTerminalOutput('pane', '\r\nuser@host repo % ');
+    submit('pane', 'second');
+
+    expect(getTerminalPaneState('pane').currentCommand).toMatchObject({
+      source: 'user_input',
+      rawCommandLine: 'second',
+    });
+  });
+
   it('returns to idle when prompt-looking output follows a user-input command', () => {
     submit('pane', 'lazygit');
     recordTerminalOutput('pane', '\x1b[?1049l\r\nuser@host repo % ');

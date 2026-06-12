@@ -187,6 +187,7 @@ The parser accepts both BEL and ST terminators and handles split chunks. Support
 - `title` updates `title` and the per-source entry in `titleCandidates`. Later OSC title events do not erase earlier user, shell, or notification channel candidates from other sources.
 - A later prompt signal moves the pane out of `finished`. If a command was started from `user_input` and no explicit `commandFinish` arrived, the prompt signal also clears `currentCommand` so the header returns to `<idle>`.
 - Visible output that looks like a returned shell prompt always refreshes the learned prompt shape, but only synthesizes the idle prompt transition when `currentCommand.source === "user_input"`. This keeps shape learning available for all shells while scoping the finish/start synthesis to shells that do not emit command finish/start OSCs (OSC-tracked shells drive their own boundaries).
+- **Per-pane keystroke retirement.** The keystroke fallback and real OSC 633/133 integration are mutually exclusive per pane. The first authentic OSC boundary a pane emits (`promptStart`/`promptEnd`/`commandFinish` always, or a `commandStart` whose source is an OSC boundary — not `user_input`) promotes the pane to **OSC-driven**, after which the keystroke path stops recording: `recordTerminalUserInput` early-returns and no further `user_input` `commandStart`/`commandLine` is synthesized, so injected shells never double-count. The synthesized prompt markers the fallback itself emits are passed with a `keystrokeHeuristic` flag so they do **not** trigger promotion — otherwise the fallback would retire the very path that emits them. The flag is per-pane runtime state, seeded fresh and cleared on pane reset/removal; it is not persisted.
 
 CWD precedence:
 
@@ -203,10 +204,11 @@ Asynchronous process CWD query results are applied through PTY-id resolution, so
 type DerivedHeader = {
   primary: string;
   secondary?: string;
+  lastCommandFailed?: boolean;
 };
 ```
 
-The header carries only the primary label and an optional secondary disambiguator. Activity state lives on `pane.activity` directly; consumers that need it (status grouping, exit-code badges) read it from there.
+The header carries the primary label, an optional secondary disambiguator, and `lastCommandFailed` — a structured flag set when `primary` ends with the fail glyph (see below). Richer activity state still lives on `pane.activity` directly; consumers that need it (status grouping) read it from there.
 
 Header priority — first match wins:
 
@@ -217,11 +219,13 @@ Header priority — first match wins:
 3. After a command has finished (`currentCommand` is null and `lastCommand` is set): `<idle> ${LAST_TITLE}`, where `LAST_TITLE` follows the same priority as the running case applied to `lastCommand`:
    - App-sent title override that was emitted between `lastCommand.startedAt` and `lastCommand.finishedAt`. The candidate is taken from `lastCommand.finalTerminalTitle` (snapshotted at finish) so a post-finish title event cannot overwrite it.
    - `lastCommand.displayCommand`.
+
+   When the finished command exited non-zero, a trailing fail glyph (`✗`) is appended — `<idle> ${LAST_TITLE} ✗` — and `lastCommandFailed` is set on the result. "Failed" requires a real non-zero `exitCode`: the keystroke fallback never records one, so it shows no glyph either way. The glyph rides in `primary` so plain-text title consumers (OS/tab titles) carry it, while the pane header reads `lastCommandFailed` to color it red without re-parsing the string.
 4. Otherwise (no running command and no last command): `<idle>`.
 
 Rich notification titles from `OSC 99` and `OSC 777` are stored in `titleCandidates` for the diagnostic popup but never become header/door labels. Older shell titles (terminal titles emitted before the current command started, or after the last command finished) remain fallback-only and do not replace `<idle>` or pollute `LAST_TITLE`.
 
-`<idle> ${LAST_TITLE}` keeps the just-finished context visible so the user can see at a glance which program just exited. Exit code, output, and TODO notification are still surfaced via the alert/TODO machinery (`docs/specs/alert.md`); the header itself stays peaceful but informative. `<idle> ${LAST_TITLE}` persists across subsequent prompt/editing transitions until a new `commandStart` replaces it; only a fresh pane (no `lastCommand` at all) shows plain `<idle>`.
+`<idle> ${LAST_TITLE}` keeps the just-finished context visible so the user can see at a glance which program just exited. The header surfaces failure minimally — the trailing `✗` glyph for a non-zero exit, nothing more; output and TODO notification are still surfaced via the alert/TODO machinery (`docs/specs/alert.md`). `<idle> ${LAST_TITLE}` persists across subsequent prompt/editing transitions until a new `commandStart` replaces it; only a fresh pane (no `lastCommand` at all) shows plain `<idle>`.
 
 Disambiguation:
 
