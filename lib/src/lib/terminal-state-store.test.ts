@@ -11,12 +11,13 @@ import {
   recordTerminalUserInputByPtyId,
   removeTerminalPaneState,
   resetTerminalPaneState,
+  seedLaunchedCommand,
   seedPromptShapeFromScrollback,
   seedTerminalManualCwd,
   setTerminalUserTitle,
 } from './terminal-state-store';
 import { registry, type TerminalEntry } from './terminal-store';
-import { DEFAULT_IDLE_TITLE, UNNAMED_PANEL_TITLE } from './terminal-state';
+import { DEFAULT_IDLE_TITLE, surfaceRunsCommand, UNNAMED_PANEL_TITLE } from './terminal-state';
 
 const PROMPT = 'user@host repo % ';
 
@@ -274,5 +275,24 @@ describe('terminal command input via rendered buffer', () => {
     recordTerminalUserInput('pane', 'pnpm build\r', lineReader(`${PROMPT}pnpm build`));
 
     expect(getTerminalPaneState('pane').currentCommand).toBeNull();
+  });
+});
+
+describe('seedLaunchedCommand (dor split/ensure -lc launches)', () => {
+  afterEach(() => removeTerminalPaneState('launch'));
+
+  it('reports a launched command so ensure can match it, then clears it on finish', () => {
+    seedLaunchedCommand('launch', 'pnpm dev:website', '/repo/app');
+
+    const live = getTerminalPaneState('launch');
+    expect(live.currentCommand?.rawCommandLine).toBe('pnpm dev:website');
+    expect(live.currentCommand?.cwdAtStart?.path).toBe('/repo/app');
+    expect(surfaceRunsCommand(live, 'pnpm dev:website', '/repo/app')).toBe(true);
+
+    applyTerminalSemanticEvents('launch', [{ type: 'commandFinish', exitCode: 0 }]);
+
+    const done = getTerminalPaneState('launch');
+    expect(done.currentCommand).toBeNull();
+    expect(surfaceRunsCommand(done, 'pnpm dev:website', '/repo/app')).toBe(false);
   });
 });

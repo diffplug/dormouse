@@ -35,6 +35,7 @@ import {
   createTerminalPaneState,
   deriveHeader,
   resolveDisplayPrimary,
+  surfaceRunsCommand,
 } from '../lib/terminal-state';
 import { orchestrateKill } from '../lib/kill-animation';
 import { getPlatform, PLATFORM_STRING } from '../lib/platform';
@@ -94,6 +95,7 @@ type ShellSpawnNoticeState = {
 type DorControlParams = {
   command?: unknown;
   confirmation?: unknown;
+  cwd?: unknown;
   direction?: unknown;
   input?: unknown;
   inputCount?: unknown;
@@ -101,7 +103,6 @@ type DorControlParams = {
   minimized?: unknown;
   pane?: string;
   surface?: unknown;
-  title?: unknown;
   url?: unknown;
   workspace?: string;
   window?: string;
@@ -286,10 +287,6 @@ function dorDirectionForDockview(direction: 'right' | 'below'): DorResolvedSplit
 
 function spawnDirectionForDockview(direction: DockviewSplitDirection): SpawnDirection {
   return direction === 'above' || direction === 'below' ? 'top' : 'left';
-}
-
-function titleFromCommand(command: string): string {
-  return command.trim().replace(/\s+/g, ' ');
 }
 
 function validateUserTitle(title: string): string | null {
@@ -816,12 +813,12 @@ export function Wall({
     return { ok: false, message: `surface '${resolvedTarget}' was not found` };
   }, [buildDorSurfaces]);
 
-  const findSurfaceIdByUserTitle = useCallback((title: string): string | null => {
+  const findSurfaceIdRunningCommand = useCallback((command: string, cwdPath: string): string | null => {
     const ids = [
       ...(apiRef.current?.panels.map((panel) => panel.id) ?? []),
       ...doorsRef.current.map((door) => door.id),
     ];
-    return ids.find((id) => getTerminalPaneState(id).titleCandidates.user?.title.trim() === title) ?? null;
+    return ids.find((id) => surfaceRunsCommand(getTerminalPaneState(id), command, cwdPath)) ?? null;
   }, []);
 
   const createSplitSurface = useCallback(({
@@ -830,12 +827,14 @@ export function Wall({
     minimized,
     referenceId,
     title,
+    cwd,
   }: {
     command?: string;
     direction: DorResolvedSplitDirection;
     minimized: boolean;
     referenceId: string;
     title?: string;
+    cwd?: string;
   }): ParseResult<{
     id: string;
     ref: string;
@@ -852,8 +851,10 @@ export function Wall({
 
     const newId = generatePaneId();
     const defaults = getDefaultShellOpts();
+    // An explicit cwd (dor ensure --cwd, defaulting to the caller's directory)
+    // wins; otherwise inherit the reference pane's local cwd as dor split does.
     const sourceCwd = getTerminalPaneState(referencePanel.id).cwd;
-    const inheritedCwd = sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined;
+    const inheritedCwd = cwd ?? (sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined);
 
     if (command) {
       setPendingShellOpts(newId, {
@@ -862,6 +863,7 @@ export function Wall({
         cwd: inheritedCwd,
         title,
         untouched: false,
+        command,
       });
     } else if (defaults?.shell || inheritedCwd || title) {
       setPendingShellOpts(newId, {
@@ -1127,13 +1129,12 @@ export function Wall({
           detail.respond({ ok: false, error: 'command cannot be empty' });
           return;
         }
-        const title = (stringParam(params.title)?.trim() || titleFromCommand(command));
-        const titleError = validateUserTitle(title);
-        if (titleError) {
-          detail.respond({ ok: false, error: titleError });
+        const cwd = stringParam(params.cwd)?.trim();
+        if (!cwd) {
+          detail.respond({ ok: false, error: 'cwd is required' });
           return;
         }
-        const existingId = findSurfaceIdByUserTitle(title);
+        const existingId = findSurfaceIdRunningCommand(command, cwd);
         if (existingId) {
           detail.respond({
             ok: true,
@@ -1141,8 +1142,8 @@ export function Wall({
               status: 'existing',
               surfaceId: existingId,
               surfaceRef: surfaceRefForId(existingId),
-              title,
               command,
+              cwd,
               minimized: doorsRef.current.some((door) => door.id === existingId),
             },
           });
@@ -1156,7 +1157,7 @@ export function Wall({
           direction,
           minimized: booleanParam(params.minimized),
           referenceId: resolved.target.id,
-          title,
+          cwd,
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });
@@ -1168,8 +1169,8 @@ export function Wall({
             status: 'created',
             surfaceId: result.value.id,
             surfaceRef: result.value.ref,
-            title,
             command,
+            cwd,
             minimized: booleanParam(params.minimized),
           },
         });
@@ -1302,7 +1303,7 @@ export function Wall({
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, createIframeSurface, createSplitSurface, findSurfaceIdByUserTitle, killPaneImmediately, resolveVisibleSurface, surfaceRefForId]);
+  }, [buildDorSurfaces, createIframeSurface, createSplitSurface, findSurfaceIdRunningCommand, killPaneImmediately, resolveVisibleSurface, surfaceRefForId]);
 
   const addSplitPanel = useCallback((
     id: string | null,

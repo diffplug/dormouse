@@ -13,8 +13,10 @@ import {
   groupTerminalPanes,
   notificationDisplayTitle,
   reduceTerminalState,
+  sameCwdPath,
   shortestUniqueCwdLabels,
   summarizeCommandLine,
+  surfaceRunsCommand,
   terminalTitleFromNotification,
   titleCandidatesForDisplay,
   type CwdState,
@@ -482,6 +484,55 @@ describe('header and grouping derivation', () => {
       'unknown',
       'finished',
     ]);
+  });
+});
+
+describe('surfaceRunsCommand (dor ensure matching)', () => {
+  it('matches a pane currently running the exact command in the same cwd', () => {
+    const pane = runningPane('/repo/app', 'pnpm dev:website');
+    expect(surfaceRunsCommand(pane, 'pnpm dev:website', '/repo/app')).toBe(true);
+  });
+
+  it('is exact: a different command line does not match', () => {
+    const pane = runningPane('/repo/app', 'pnpm dev:website');
+    expect(surfaceRunsCommand(pane, 'pnpm dev:website --host', '/repo/app')).toBe(false);
+    expect(surfaceRunsCommand(pane, 'pnpm dev', '/repo/app')).toBe(false);
+  });
+
+  it('does not match the same command in a different working directory', () => {
+    const pane = runningPane('/repo/app', 'pnpm dev:website');
+    expect(surfaceRunsCommand(pane, 'pnpm dev:website', '/repo/other')).toBe(false);
+  });
+
+  it('only matches while the command is live', () => {
+    let pane = runningPane('/repo/app', 'pnpm dev:website');
+    pane = reduceTerminalState(pane, { type: 'commandFinish', exitCode: 0 });
+    expect(pane.currentCommand).toBeNull();
+    expect(surfaceRunsCommand(pane, 'pnpm dev:website', '/repo/app')).toBe(false);
+  });
+
+  it('never matches a pane with no reported command line (no shell integration)', () => {
+    const pane = createTerminalPaneState({
+      cwd: cwd('/repo/app'),
+      activity: { kind: 'running' },
+      currentCommand: {
+        id: 'run-x',
+        rawCommandLine: null,
+        displayCommand: 'shell',
+        cwdAtStart: cwd('/repo/app'),
+        startedAt: 1,
+        source: 'osc133_boundaries',
+      },
+    });
+    expect(surfaceRunsCommand(pane, 'pnpm dev:website', '/repo/app')).toBe(false);
+  });
+
+  it('ignores a trailing separator on either side of the cwd', () => {
+    const pane = runningPane('/repo/app', 'pnpm dev:website');
+    expect(surfaceRunsCommand(pane, 'pnpm dev:website', '/repo/app/')).toBe(true);
+    expect(sameCwdPath('/repo/app/', '/repo/app')).toBe(true);
+    expect(sameCwdPath('/', '/')).toBe(true);
+    expect(sameCwdPath('/a', '/b')).toBe(false);
   });
 });
 

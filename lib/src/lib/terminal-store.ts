@@ -44,6 +44,8 @@ export interface PendingShellOpts {
   cwd?: string;
   title?: string;
   untouched?: boolean;
+  /** Raw command string launched via `-lc`/`/c`, seeded as the pane's command run. */
+  command?: string;
 }
 
 export const registry = new Map<string, TerminalEntry>();
