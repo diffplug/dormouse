@@ -226,19 +226,23 @@ function limitLines(text: string, lines: number | undefined): string {
   return parts.slice(-lines).join('\n');
 }
 
-function readVisibleSurfaceText(surfaceId: string, lines: number | undefined): string {
+function readSurfaceText(surfaceId: string, lines: number | undefined, scrollback: boolean): string {
   const terminal = getTerminalInstance(surfaceId);
   if (!terminal) return '';
 
+  // Read rendered text straight off the xterm buffer so both modes return clean,
+  // ANSI-free lines and `--lines` trims by rendered line consistently. With
+  // scrollback we walk the whole buffer (history + screen); otherwise just the
+  // visible screen, which sits at `baseY..length`.
   const buffer = terminal.buffer.active;
-  const start = Math.max(0, buffer.viewportY);
-  const end = start + terminal.rows;
-  const visibleLines: string[] = [];
+  const start = scrollback ? 0 : Math.max(0, buffer.baseY);
+  const end = buffer.length;
+  const collected: string[] = [];
   for (let row = start; row < end; row += 1) {
-    visibleLines.push(buffer.getLine(row)?.translateToString(true) ?? '');
+    collected.push(buffer.getLine(row)?.translateToString(true) ?? '');
   }
 
-  return limitLines(visibleLines.join('\n').replace(/\n+$/, ''), lines);
+  return limitLines(collected.join('\n').replace(/\n+$/, ''), lines);
 }
 
 function killConfirmationParam(value: unknown): { mode: 'if-read'; text: string } | { mode: 'dangerously' } | null {
@@ -1202,9 +1206,7 @@ export function Wall({
         }
         const lines = numberParam(params.lines);
         const scrollback = booleanParam(params.scrollback);
-        const text = scrollback
-          ? limitLines((await getPlatform().getScrollback(target.value.id)) ?? '', lines)
-          : readVisibleSurfaceText(target.value.id, lines);
+        const text = readSurfaceText(target.value.id, lines, scrollback);
         detail.respond({
           ok: true,
           result: {
@@ -1234,7 +1236,7 @@ export function Wall({
           return;
         }
         if (confirmation.mode === 'if-read') {
-          const text = readVisibleSurfaceText(target.value.id, undefined);
+          const text = readSurfaceText(target.value.id, undefined, false);
           if (!text.includes(confirmation.text)) {
             detail.respond({ ok: false, error: `surface '${target.value.ref}' read text did not contain confirmation text` });
             return;

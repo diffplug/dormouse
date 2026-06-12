@@ -85,5 +85,7 @@ function renderReadResponse(response: ReadSurfaceResponse, json: boolean): strin
     }, null, 2)}\n`;
   }
 
-  return response.text;
+  // Terminal text comes back with trailing newlines stripped; re-add one so the
+  // next shell prompt starts on its own line, matching the JSON branch.
+  return `${response.text}\n`;
 }
