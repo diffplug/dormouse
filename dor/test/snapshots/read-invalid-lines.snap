@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: Failed to parse "0" for lines: invalid --lines '0'
