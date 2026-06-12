@@ -502,7 +502,14 @@ export function Wall({
 
   const killPaneImmediately = useCallback((id: string) => {
     const api = apiRef.current;
-    if (!api?.getPanel(id)) return;
+    const panel = api?.getPanel(id);
+    if (!api || !panel) return;
+    // Surface lifetime and browser lifetime are bound: killing an
+    // agent-browser surface closes its session (spec → Lifecycle).
+    const panelParams = panel.params as { surfaceType?: unknown; session?: unknown } | undefined;
+    if (panelParams?.surfaceType === 'agent-browser' && typeof panelParams.session === 'string') {
+      getPlatform().agentBrowserCommand?.(panelParams.session, ['close']).catch(() => {});
+    }
     orchestrateKill(api, id, selectPane, setSelectedId, killInProgressRef, overlayElRef);
     fireEvent({ type: 'kill', id });
   }, [fireEvent, selectPane]);

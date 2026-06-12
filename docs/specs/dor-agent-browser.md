@@ -111,11 +111,13 @@ count. Tabs live entirely inside that surface's chrome.
 - **Integrated mode (1 tab):** the page title sits in the Dormouse surface
   header. No tab strip — the pretty, default case.
 - **Multi-tab mode (≥2 tabs):** a tab strip renders *below* the Dormouse header,
-  inside the surface body (title + favicon + close `×` per tab; no manual "+").
-  The strip is a thin view over `agent-browser tab list`; selecting a tab issues
-  `tab <n>` (the frame stream and CDP input follow the active target because
-  "active tab" is an agent-browser operation); the `×` issues `tab close`. When
-  the session returns to one tab, the surface drops back to integrated mode.
+  inside the surface body (title + close `×` per tab; no manual "+", and no
+  favicons — the webview CSP blocks arbitrary external images). The strip is a
+  thin view over the stream's pushed `tabs` messages; selecting a tab issues
+  `tab <tabId>` (the frame stream and input follow the active target because
+  "active tab" is an agent-browser operation); the `×` issues
+  `tab close <tabId>`. When the session returns to one tab, the surface drops
+  back to integrated mode.
 - **Orthogonal to minimize.** Internal tab count is invisible when the surface is
   minimized: title-only along the bottom whether it holds 1 tab or 9. Dormouse's
   binary "you're looking at it or you're not" model is preserved.

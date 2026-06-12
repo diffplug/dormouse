@@ -1,4 +1,4 @@
-import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
+import type { AgentBrowserCommandResult, AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
 import { setDefaultShellOpts } from '../shell-defaults';
 import {
@@ -213,6 +213,25 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   runWorkbenchCommand(command: VSCodeWorkbenchCommand): void {
     this.vscode.postMessage({ type: 'dormouse:runWorkbenchCommand', command });
+  }
+
+  async agentBrowserCommand(session: string, args: string[]): Promise<AgentBrowserCommandResult> {
+    const result = await this.requestResponse<AgentBrowserCommandResult>(
+      'agentBrowser:command', 'agentBrowser:commandResult', { session, args },
+      (msg) => ({ exitCode: msg.exitCode, stdout: msg.stdout, stderr: msg.stderr }),
+      10000,
+    );
+    return result ?? { exitCode: 1, stdout: '', stderr: 'agent-browser command timed out' };
+  }
+
+  getAgentBrowserStreamUrl(port: number): Promise<string | null> {
+    // The agent-browser stream server rejects vscode-webview:// origins, so
+    // the extension host relays the stream (see agent-browser-host.ts).
+    return this.requestResponse<string | null>(
+      'agentBrowser:getStreamUrl', 'agentBrowser:streamUrl', { port },
+      (msg) => msg.url,
+      5000,
+    );
   }
 
   onPtyData(handler: (detail: { id: string; data: string }) => void): void {

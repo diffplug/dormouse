@@ -13,6 +13,7 @@ import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { PersistedSession } from '../../lib/src/lib/session-types';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
+import { ensureStreamRelayPort, runAgentBrowserCommand } from './agent-browser-host';
 import { log } from './log';
 
 const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
@@ -351,6 +352,28 @@ export function attachRouter(
           void vscode.commands.executeCommand(msg.command);
         }
         break;
+      case 'agentBrowser:command':
+        runAgentBrowserCommand(msg.session, Array.isArray(msg.args) ? msg.args : []).then((result) => {
+          webview.postMessage({
+            type: 'agentBrowser:commandResult', requestId: msg.requestId, ...result,
+          } satisfies ExtensionMessage);
+        });
+        break;
+      case 'agentBrowser:getStreamUrl': {
+        const streamPort = Number.isInteger(msg.port) && msg.port > 0 && msg.port <= 65535 ? msg.port : null;
+        if (!streamPort) {
+          webview.postMessage({ type: 'agentBrowser:streamUrl', requestId: msg.requestId, url: null } satisfies ExtensionMessage);
+          break;
+        }
+        ensureStreamRelayPort().then(
+          (relayPort) => webview.postMessage({
+            type: 'agentBrowser:streamUrl', requestId: msg.requestId,
+            url: `ws://127.0.0.1:${relayPort}/stream/${streamPort}`,
+          } satisfies ExtensionMessage),
+          () => webview.postMessage({ type: 'agentBrowser:streamUrl', requestId: msg.requestId, url: null } satisfies ExtensionMessage),
+        );
+        break;
+      }
       case 'dormouse:init': {
         // Webview has (re-)initialized — subscribe to live events.
         // Tear down previous subscriptions first (webview was destroyed and recreated).

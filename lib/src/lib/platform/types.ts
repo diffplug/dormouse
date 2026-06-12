@@ -34,6 +34,16 @@ export const OPEN_PORT_TIMEOUT_MS = 3000;
 
 export type AlertStateDetail = { id: string } & AlertState;
 
+export interface AgentBrowserCommandResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** Subcommands the host will run on the webview's behalf — this is a narrow
+ * channel for tab actions and session teardown, not a general exec path. */
+export const AGENT_BROWSER_ALLOWED_SUBCOMMANDS = ['tab', 'close'] as const;
+
 export interface PlatformAdapter {
   // Lifecycle
   init(): Promise<void>;
@@ -70,6 +80,15 @@ export interface PlatformAdapter {
 
   // VS Code-only escape hatch for mirrored workbench shortcuts from webviews.
   runWorkbenchCommand?(command: VSCodeWorkbenchCommand): void;
+
+  // agent-browser surface support (see docs/specs/dor-agent-browser.md).
+  // Runs the user's agent-browser binary against a session; the host validates
+  // args[0] against AGENT_BROWSER_ALLOWED_SUBCOMMANDS.
+  agentBrowserCommand?(session: string, args: string[]): Promise<AgentBrowserCommandResult>;
+  // The WebSocket URL for a session's stream port. Hosts whose webview origin
+  // the agent-browser stream server rejects (VS Code) return a relay URL;
+  // absent or null falls back to ws://127.0.0.1:<port>.
+  getAgentBrowserStreamUrl?(port: number): Promise<string | null>;
 
   // PTY event listeners
   onPtyData(handler: (detail: { id: string; data: string }) => void): void;
