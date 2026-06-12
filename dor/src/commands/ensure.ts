@@ -8,7 +8,8 @@ import type {
 } from './types.js';
 import {
   errorMessage,
-  resolveControlClient,
+  renderJson,
+  requireControlClient,
   stringParser,
   writeStdout,
 } from './shared.js';
@@ -108,11 +109,11 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
     }
   }
 
-  const clientResult = resolveControlClient(this.options);
-  if (!clientResult.ok) return new Error(clientResult.message);
+  const client = requireControlClient(this.options);
+  if (client instanceof Error) return client;
 
   try {
-    const response = await clientResult.value.ensureSurface({
+    const response = await client.ensureSurface({
       command,
       minimized: flags.minimize === true,
       surface: flags.surface,
@@ -127,14 +128,14 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
 
 function renderEnsureResponse(response: EnsureSurfaceResponse, json: boolean): string {
   if (json) {
-    return `${JSON.stringify({
+    return renderJson({
       status: response.status,
       ...(response.surfaceId ? { surface_id: response.surfaceId } : {}),
       surface_ref: response.surfaceRef,
       title: response.title,
       command: response.command,
       minimized: response.minimized,
-    }, null, 2)}\n`;
+    });
   }
 
   return `${response.status} ${response.surfaceRef}  ${JSON.stringify(response.title)}\n`;

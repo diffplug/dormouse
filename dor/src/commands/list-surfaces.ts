@@ -13,7 +13,8 @@ import {
   errorMessage,
   parseIdFormat,
   renderHandle,
-  resolveControlClient,
+  renderJson,
+  requireControlClient,
   stringParser,
   wantsIds,
   wantsRefs,
@@ -49,12 +50,12 @@ export async function runListCommand(
   flags: ListFlags,
   context: DorCommandContext,
 ): Promise<void | Error> {
-  const clientResult = resolveControlClient(context.options);
-  if (!clientResult.ok) return new Error(clientResult.message);
+  const client = requireControlClient(context.options);
+  if (client instanceof Error) return client;
 
   try {
     const pane = mode === 'pane-surfaces' ? (flags.pane ?? 'focused') : undefined;
-    const response = await clientResult.value.listSurfaces({ pane });
+    const response = await client.listSurfaces({ pane });
     const idFormat = flags.idFormat ?? 'refs';
     const stdout = renderListResponse(response, mode, idFormat, flags.json === true);
     writeStdout(context, stdout);
@@ -171,7 +172,7 @@ function renderPanesJson(response: ListSurfacesResponse, panes: Pane[], idFormat
     panes: panes.map((pane) => renderPaneJson(pane, idFormat)),
     ...(wantsRefs(idFormat) ? { window_ref: response.windowRef, workspace_ref: response.workspaceRef } : {}),
   };
-  return `${JSON.stringify(payload, null, 2)}\n`;
+  return renderJson(payload);
 }
 
 function renderPaneJson(pane: Pane, idFormat: IdFormat): Record<string, unknown> {
@@ -196,7 +197,7 @@ function renderPaneSurfacesJson(response: ListSurfacesResponse, idFormat: IdForm
     surfaces: response.surfaces.map((surface) => renderPaneSurfaceJson(surface, idFormat)),
     ...(wantsRefs(idFormat) ? { window_ref: response.windowRef, workspace_ref: response.workspaceRef } : {}),
   };
-  return `${JSON.stringify(payload, null, 2)}\n`;
+  return renderJson(payload);
 }
 
 function renderPaneSurfaceJson(surface: Surface, idFormat: IdFormat): Record<string, unknown> {
