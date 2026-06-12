@@ -10,7 +10,8 @@ import type {
 } from './types.js';
 import {
   errorMessage,
-  resolveControlClient,
+  renderJson,
+  requireControlClient,
   stringParser,
   writeStdout,
 } from './shared.js';
@@ -127,11 +128,11 @@ async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...co
   if (!direction.ok) return new Error(direction.message);
   const command = commandArgs.length > 0 ? commandArgs : undefined;
 
-  const clientResult = resolveControlClient(this.options);
-  if (!clientResult.ok) return new Error(clientResult.message);
+  const client = requireControlClient(this.options);
+  if (client instanceof Error) return client;
 
   try {
-    const response = await clientResult.value.splitSurface({
+    const response = await client.splitSurface({
       ...(command ? { command } : {}),
       direction: direction.value,
       minimized: flags.minimize === true,
@@ -161,14 +162,14 @@ function parseSplitDirection(flags: SplitFlags): ParseResult<SplitDirection> {
 
 function renderSplitResponse(response: SplitSurfaceResponse, json: boolean): string {
   if (json) {
-    return `${JSON.stringify({
+    return renderJson({
       status: response.status,
       ...(response.surfaceId ? { surface_id: response.surfaceId } : {}),
       surface_ref: response.surfaceRef,
       direction: response.direction,
       minimized: response.minimized,
       ...(response.command ? { command: response.command } : {}),
-    }, null, 2)}\n`;
+    });
   }
 
   const minimized = response.minimized ? '  [minimized]' : '';
