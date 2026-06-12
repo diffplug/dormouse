@@ -4,38 +4,34 @@ Invocation: `dor ensure --help`
 
 ```text
 USAGE
-  dor ensure [--json] [--minimize] [--surface id|ref|index] [--title value] -- <command>...
+  dor ensure [--json] [--minimize] [--surface id|ref|index] [--cwd path] -- <command>...
   dor ensure --help
 
-Ensures one surface exists in the current workspace for a user-enforced title. The idempotency key is always the user-enforced title.
+Ensures one surface in the current workspace is running the given command at the given path. If it's already running, no-op. If it isn't, then it creates a split and runs the command.
 
-If --title is omitted, Dormouse derives the title from the command after --.
+Matching uses the command each shell reports it is running via Dormouse shell integration, not process inspection. This captures the typed command (`npm dev`), not the forked child process (`node .../vite`), and works for shells the user started by hand as well as shells Dormouse started.
 
-If a surface in the current workspace already has the enforced title, Dormouse returns that surface and does not start another command.
+A surface matches only while the command is live. Once the command exits and the shell returns to its prompt, the surface no longer matches; the next ensure causes a fresh split rather than reusing the idle shell. Minimized surfaces participate in matching. Closed/killed surfaces do not.
 
-If no surface has that enforced title, Dormouse creates a split, starts the command, marks the surface title as user-enforced, and returns the new surface.
+Two surfaces running the same command in different working directories are distinct (e.g. the same dev server in two worktrees). Both keep running; ensure never collapses them.
 
-A user-enforced title is visible in the UI and must not be overwritten by terminal title escape sequences from the running process.
-
-Matching uses Dormouse metadata, not process inspection. Minimized surfaces participate in matching. Closed/killed surfaces do not participate in matching.
+--cwd sets the working directory used both for matching and for the new command. If omitted, Dormouse uses the directory dor was invoked from. The path is normalized (symlinks resolved) before it becomes part of the key.
 
 --minimize applies only when creating a new surface; it does not minimize an existing match.
 
 --surface selects the surface to split only when creating a new surface. If omitted, Dormouse uses the same caller/focused fallback as dor split.
 
-No workspace argument exists until Dormouse supports multiple workspaces.
-
 Text output:
-  created surface:3  "dev server"
-  existing surface:3  "dev server"
+  created surface:3  "npm dev"
+  existing surface:3  "npm dev"
 
 JSON output:
   {
     "status": "created",
     "surface_id": "pane-def",
     "surface_ref": "surface:3",
-    "title": "dev server",
-    "command": "pnpm dev:workspace",
+    "command": "npm dev",
+    "cwd": "/Users/me/projects/site",
     "minimized": false
   }
 
@@ -43,7 +39,7 @@ FLAGS
      [--json]      Print JSON output.
      [--minimize]  Create the surface minimized.
      [--surface]   Surface to split when creating.
-     [--title]     User-enforced surface title.
+     [--cwd]       Working directory for matching and for the new command.
   -h  --help       Print help information and exit
       --           All subsequent inputs should be interpreted as arguments
 
