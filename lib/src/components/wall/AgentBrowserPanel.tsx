@@ -24,6 +24,7 @@ type AgentBrowserPanelParams = {
   session?: string;
   key?: string;
   wsPort?: number;
+  binaryPath?: string;
 };
 
 type StreamTab = {
@@ -99,10 +100,22 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   const [tabs, setTabs] = useState<StreamTab[]>([]);
   const knownTabIdsRef = useRef<Set<string>>(new Set());
 
+  const binaryPath = params?.binaryPath;
   const runAgentBrowser = useCallback((args: string[]) => {
     if (!session) return;
-    getPlatform().agentBrowserCommand?.(session, args).catch(() => {});
-  }, [session]);
+    const command = getPlatform().agentBrowserCommand;
+    if (!command) {
+      console.warn('[agent-browser] this host cannot run agent-browser commands; tab actions are unavailable');
+      return;
+    }
+    command(session, args, binaryPath).then((result) => {
+      if (result.exitCode !== 0) {
+        console.warn(`[agent-browser] ${args.join(' ')} failed:`, result.stderr || result.stdout || `exit ${result.exitCode}`);
+      }
+    }).catch((error) => {
+      console.warn(`[agent-browser] ${args.join(' ')} failed:`, error);
+    });
+  }, [session, binaryPath]);
 
   // --- pane registration + spawn animation (shared surface boilerplate) ---
 
@@ -268,13 +281,18 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
 
   const toDevice = useCallback((e: { clientX: number; clientY: number }): { x: number; y: number } | null => {
     const canvas = canvasRef.current;
-    if (!canvas) return null;
+    if (!canvas || !canvas.width || !canvas.height) return null;
     const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
-    const device = deviceRef.current;
+    // Map into frame pixels (the canvas intrinsic grid), then apply ONE
+    // uniform frame→CSS-pixel scale derived from the widths. The frame can be
+    // SHORTER than the viewport (observed 1280×577 vs a 1280×720 device), so
+    // scaling y by deviceHeight/rect.height stretches clicks downward —
+    // frame pixels map 1:1 onto viewport CSS pixels, top-aligned.
+    const frameToDevice = deviceRef.current.width ? deviceRef.current.width / canvas.width : 1;
     return {
-      x: Math.round((e.clientX - rect.left) * (device.width / rect.width)),
-      y: Math.round((e.clientY - rect.top) * (device.height / rect.height)),
+      x: Math.round((e.clientX - rect.left) * (canvas.width / rect.width) * frameToDevice),
+      y: Math.round((e.clientY - rect.top) * (canvas.height / rect.height) * frameToDevice),
     };
   }, []);
 
@@ -297,7 +315,11 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
 
   const onCanvasMouseDown = (e: React.MouseEvent) => {
     if (!interactiveRef.current) return;
+    // preventDefault stops the browser's focus-shift default action (a click
+    // on a non-focusable canvas would otherwise blur to <body>), and the
+    // explicit focus claims keystrokes for this pane.
     e.preventDefault();
+    elRef.current?.focus({ preventScroll: true });
     const point = toDevice(e);
     if (!point) return;
     buttonsHeldRef.current |= MOUSE_BUTTON_MASKS[e.button] ?? 0;
@@ -376,7 +398,10 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     return () => canvas.removeEventListener('wheel', onWheel);
   }, [send, toDevice]);
 
-  const sendKey = (e: React.KeyboardEvent, eventType: 'keyDown' | 'keyUp') => {
+  const sendKey = useCallback((
+    e: { key: string; code: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
+    eventType: 'keyDown' | 'keyUp',
+  ) => {
     const info = SPECIAL_KEYS[e.key];
     send({
       type: 'input_keyboard',
@@ -387,7 +412,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       windowsVirtualKeyCode: info?.keyCode ?? (e.key.length === 1 ? e.key.charCodeAt(0) : 0),
       modifiers: modifiers(e),
     });
-  };
+  }, [send]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!interactiveRef.current) return;
@@ -406,6 +431,29 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   useEffect(() => {
     if (interactive) elRef.current?.focus({ preventScroll: true });
   }, [interactive]);
+
+  // Fallback: if focus fell through to <body> (dockview focus churn, clicks
+  // racing the passthrough transition), forward keys from the window so the
+  // pane never goes keyboard-dead while interactive. Events targeted inside
+  // the pane are skipped — the React handlers above already cover those. The
+  // Wall's own capture listener registered earlier, so its dual-tap leader
+  // still runs first.
+  useEffect(() => {
+    if (!interactive) return;
+    const forward = (e: KeyboardEvent) => {
+      if (!interactiveRef.current || e.defaultPrevented) return;
+      const el = elRef.current;
+      if (el && e.target instanceof Node && el.contains(e.target)) return;
+      e.preventDefault();
+      sendKey(e, e.type === 'keydown' ? 'keyDown' : 'keyUp');
+    };
+    window.addEventListener('keydown', forward, true);
+    window.addEventListener('keyup', forward, true);
+    return () => {
+      window.removeEventListener('keydown', forward, true);
+      window.removeEventListener('keyup', forward, true);
+    };
+  }, [interactive, sendKey]);
 
   // --- tab strip actions ---
 
@@ -437,7 +485,12 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       ref={elRef}
       tabIndex={-1}
       className={`flex h-full w-full flex-col overflow-hidden bg-terminal-bg outline-none ${TERMINAL_BOTTOM_RADIUS_CLASS}`}
-      onMouseDown={() => actions.onClickPanel(api.id)}
+      onMouseDown={() => {
+        actions.onClickPanel(api.id);
+        // Deferred so it lands after dockview's own focus handling for this
+        // mousedown (same trick as enterTerminalMode's focusSession).
+        requestAnimationFrame(() => elRef.current?.focus({ preventScroll: true }));
+      }}
       onKeyDown={onKeyDown}
       onKeyUp={onKeyUp}
     >
@@ -472,7 +525,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       <div className="relative flex min-h-0 flex-1 items-center justify-center">
         <canvas
           ref={canvasRef}
-          className={clsx('max-h-full max-w-full select-none', !hasFrame && 'hidden')}
+          className={clsx('block max-h-full max-w-full select-none', !hasFrame && 'hidden')}
           onMouseDown={onCanvasMouseDown}
           onMouseUp={onCanvasMouseUp}
           onMouseMove={onCanvasMouseMove}

@@ -498,14 +498,36 @@ test('agent-browser missing binary output', async () => {
   );
 });
 
-test('agent-browser respects DORMOUSE_AGENT_BROWSER_BIN', async () => {
+test('agent-browser respects DORMOUSE_AGENT_BROWSER_BIN and forwards it as binaryPath', async () => {
   const ab = fakeAgentBrowser();
+  const client = fixtureClient();
   await runCli(['ab', 'snapshot'], {
-    client: fixtureClient(),
+    client,
     execAgentBrowser: ab.exec,
     env: { DORMOUSE_AGENT_BROWSER_BIN: '/opt/custom/agent-browser' },
   });
   assert.equal(ab.calls[0][0], '/opt/custom/agent-browser');
+  assert.equal(client.requests[0].request.binaryPath, '/opt/custom/agent-browser');
+});
+
+test('agent-browser resolves the binary on PATH to an absolute binaryPath', async () => {
+  const { mkdtemp, writeFile: write, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const dir = await mkdtemp(join(tmpdir(), 'dor-ab-'));
+  try {
+    const binPath = join(dir, 'agent-browser');
+    await write(binPath, '#!/bin/sh\n', { mode: 0o755 });
+    const ab = fakeAgentBrowser();
+    const client = fixtureClient();
+    await runCli(['ab', 'snapshot'], {
+      client,
+      execAgentBrowser: ab.exec,
+      env: { PATH: `/nonexistent:${dir}` },
+    });
+    assert.equal(client.requests[0].request.binaryPath, binPath);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('list-panes text output', async () => {

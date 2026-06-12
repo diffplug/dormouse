@@ -83,8 +83,10 @@ export interface PlatformAdapter {
 
   // agent-browser surface support (see docs/specs/dor-agent-browser.md).
   // Runs the user's agent-browser binary against a session; the host validates
-  // args[0] against AGENT_BROWSER_ALLOWED_SUBCOMMANDS.
-  agentBrowserCommand?(session: string, args: string[]): Promise<AgentBrowserCommandResult>;
+  // args[0] against AGENT_BROWSER_ALLOWED_SUBCOMMANDS. `binaryPath` is the
+  // absolute path resolved by `dor ab` in the invoking terminal — the host's
+  // own PATH (e.g. a GUI-launched extension host) may not find the binary.
+  agentBrowserCommand?(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult>;
   // The WebSocket URL for a session's stream port. Hosts whose webview origin
   // the agent-browser stream server rejects (VS Code) return a relay URL;
   // absent or null falls back to ws://127.0.0.1:<port>.

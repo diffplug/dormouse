@@ -34,6 +34,10 @@ declare module 'node:child_process' {
   }): ChildProcess;
 }
 
+declare module 'node:fs' {
+  export function existsSync(path: string): boolean;
+}
+
 declare const process: {
   platform: string;
   ppid: number;

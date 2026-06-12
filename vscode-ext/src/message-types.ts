@@ -18,7 +18,7 @@ export type WebviewMessage =
   | { type: 'clipboard:readImage'; requestId: string }
   | { type: 'dormouse:openExternal'; uri: string }
   | { type: 'dormouse:runWorkbenchCommand'; command: VSCodeWorkbenchCommand }
-  | { type: 'agentBrowser:command'; session: string; args: string[]; requestId: string }
+  | { type: 'agentBrowser:command'; session: string; args: string[]; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:getStreamUrl'; port: number; requestId: string }
   | { type: 'dormouse:init' }
   | { type: 'dormouse:saveState'; state: unknown }

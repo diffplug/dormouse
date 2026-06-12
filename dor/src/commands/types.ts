@@ -127,6 +127,9 @@ export interface AgentBrowserSurfaceRequest {
   session: string;
   /** Session stream WebSocket port from `stream status --json`. */
   wsPort?: number;
+  /** Absolute path of the agent-browser binary, resolved with the invoking
+   * terminal's PATH so the host (which may lack it) can run tab/close. */
+  binaryPath?: string;
 }
 
 export interface AgentBrowserSurfaceResponse {

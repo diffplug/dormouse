@@ -17,7 +17,9 @@
 
 import { buildCommand } from '@stricli/core';
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import type {
+  CliEnv,
   AgentBrowserExecResult,
   CliOptions,
   CliResult,
@@ -177,7 +179,17 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
       try {
         const status = await exec(binary, ['--session', session, 'stream', 'status', '--json']);
         const wsPort = parseStreamPort(status.stdout);
-        await clientResult.value.agentBrowserSurface({ key, session, wsPort });
+        // The Dormouse host (e.g. a GUI-launched VS Code extension host) may
+        // not share this terminal's PATH, so resolve the binary to an
+        // absolute path here, where the user's environment is authoritative,
+        // and pass it along for host-side tab/close commands.
+        const binaryPath = resolveBinaryPath(binary, env);
+        await clientResult.value.agentBrowserSurface({
+          key,
+          session,
+          wsPort,
+          ...(binaryPath ? { binaryPath } : {}),
+        });
       } catch (error) {
         stderrSuffix = `Warning: could not open the Dormouse browser surface: ${error instanceof Error ? error.message : String(error)}\n`;
       }
@@ -198,6 +210,22 @@ function shouldManageSurface(exitCode: number, rest: string[]): boolean {
   // placeholders the surface, so opening one here would be self-defeating.
   const subcommand = rest.find((arg) => !arg.startsWith('-'));
   return subcommand !== undefined && subcommand !== 'close';
+}
+
+export function resolveBinaryPath(binary: string, env: CliEnv): string | undefined {
+  if (binary.includes('/') || binary.includes('\\')) return binary;
+  const pathVar = env.PATH;
+  if (!pathVar) return undefined;
+  const isWindows = process.platform === 'win32';
+  const names = isWindows ? [`${binary}.cmd`, `${binary}.exe`, `${binary}.bat`] : [binary];
+  for (const dir of pathVar.split(isWindows ? ';' : ':')) {
+    if (!dir) continue;
+    for (const name of names) {
+      const candidate = `${dir}${isWindows ? '\\' : '/'}${name}`;
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return undefined;
 }
 
 function parseStreamPort(stdout: string): number | undefined {

@@ -353,7 +353,11 @@ export function attachRouter(
         }
         break;
       case 'agentBrowser:command':
-        runAgentBrowserCommand(msg.session, Array.isArray(msg.args) ? msg.args : []).then((result) => {
+        runAgentBrowserCommand(
+          msg.session,
+          Array.isArray(msg.args) ? msg.args : [],
+          typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
+        ).then((result) => {
           webview.postMessage({
             type: 'agentBrowser:commandResult', requestId: msg.requestId, ...result,
           } satisfies ExtensionMessage);

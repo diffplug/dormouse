@@ -27,23 +27,46 @@ export interface AgentBrowserCommandResult {
   stderr: string;
 }
 
-export function runAgentBrowserCommand(session: string, args: string[]): Promise<AgentBrowserCommandResult> {
+export async function runAgentBrowserCommand(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
   if (typeof session !== 'string' || !session) {
-    return Promise.resolve({ exitCode: 1, stdout: '', stderr: 'session is required' });
+    return { exitCode: 1, stdout: '', stderr: 'session is required' };
   }
   const subcommand = args[0];
   if (!subcommand || !ALLOWED_SUBCOMMANDS.has(subcommand)) {
-    return Promise.resolve({ exitCode: 1, stdout: '', stderr: `agent-browser subcommand '${subcommand ?? ''}' is not allowed from the webview` });
+    return { exitCode: 1, stdout: '', stderr: `agent-browser subcommand '${subcommand ?? ''}' is not allowed from the webview` };
   }
 
-  const binary = process.env.DORMOUSE_AGENT_BROWSER_BIN || 'agent-browser';
+  // The extension host's PATH is often the GUI login PATH (no nvm/volta
+  // shims), so prefer the absolute path `dor ab` resolved in the user's
+  // terminal; fall through on ENOENT in case it has gone stale.
+  const candidates = [...new Set([
+    binaryPath,
+    process.env.DORMOUSE_AGENT_BROWSER_BIN,
+    'agent-browser',
+  ].filter((c): c is string => !!c))];
+
+  let lastError = '';
+  for (const binary of candidates) {
+    const result = await spawnAgentBrowser(binary, ['--session', session, ...args]);
+    if (result !== 'ENOENT') return result;
+    lastError = `'${binary}' was not found`;
+    log.info(`[agent-browser] ${lastError}; trying next candidate`);
+  }
+  return { exitCode: 1, stdout: '', stderr: `agent-browser binary not found (${lastError})` };
+}
+
+function spawnAgentBrowser(binary: string, args: string[]): Promise<AgentBrowserCommandResult | 'ENOENT'> {
   return new Promise((resolve) => {
-    const child = spawn(binary, ['--session', session, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += String(chunk); });
     child.stderr.on('data', (chunk) => { stderr += String(chunk); });
-    child.on('error', (err) => {
+    child.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') {
+        resolve('ENOENT');
+        return;
+      }
       log.info(`[agent-browser] spawn failed: ${err.message}`);
       resolve({ exitCode: 1, stdout: '', stderr: err.message });
     });

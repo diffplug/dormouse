@@ -99,6 +99,7 @@ type DorControlParams = {
   key?: unknown;
   lines?: unknown;
   minimized?: unknown;
+  binaryPath?: unknown;
   pane?: string;
   session?: unknown;
   surface?: unknown;
@@ -506,9 +507,10 @@ export function Wall({
     if (!api || !panel) return;
     // Surface lifetime and browser lifetime are bound: killing an
     // agent-browser surface closes its session (spec → Lifecycle).
-    const panelParams = panel.params as { surfaceType?: unknown; session?: unknown } | undefined;
+    const panelParams = panel.params as { surfaceType?: unknown; session?: unknown; binaryPath?: unknown } | undefined;
     if (panelParams?.surfaceType === 'agent-browser' && typeof panelParams.session === 'string') {
-      getPlatform().agentBrowserCommand?.(panelParams.session, ['close']).catch(() => {});
+      const binaryPath = typeof panelParams.binaryPath === 'string' ? panelParams.binaryPath : undefined;
+      getPlatform().agentBrowserCommand?.(panelParams.session, ['close'], binaryPath).catch(() => {});
     }
     orchestrateKill(api, id, selectPane, setSelectedId, killInProgressRef, overlayElRef);
     fireEvent({ type: 'kill', id });
@@ -1330,16 +1332,22 @@ export function Wall({
         }
         const key = stringParam(params.key);
         const wsPort = numberParam(params.wsPort);
+        const binaryPath = stringParam(params.binaryPath);
+        const refreshedParams = {
+          ...(wsPort !== undefined ? { wsPort } : {}),
+          ...(binaryPath !== undefined ? { binaryPath } : {}),
+        };
 
         const existing = findAgentBrowserSurface(session);
         if (existing) {
           // Reuse: refresh the stream port (OS-assigned, churns across session
-          // restarts) so the panel reconnects to the live stream.
-          if (!existing.minimized && wsPort !== undefined) {
-            api.getPanel(existing.id)?.api.updateParameters({ wsPort });
-          } else if (existing.minimized && wsPort !== undefined) {
+          // restarts) so the panel reconnects to the live stream, and the
+          // resolved binary path alongside it.
+          if (!existing.minimized && Object.keys(refreshedParams).length > 0) {
+            api.getPanel(existing.id)?.api.updateParameters(refreshedParams);
+          } else if (existing.minimized && Object.keys(refreshedParams).length > 0) {
             const nextDoors = doorsRef.current.map((door) => door.id === existing.id
-              ? { ...door, params: { ...door.params, wsPort } }
+              ? { ...door, params: { ...door.params, ...refreshedParams } }
               : door);
             doorsRef.current = nextDoors;
             setDoors(nextDoors);
@@ -1369,7 +1377,7 @@ export function Wall({
             surfaceType: 'agent-browser',
             session,
             ...(key !== undefined ? { key } : {}),
-            ...(wsPort !== undefined ? { wsPort } : {}),
+            ...refreshedParams,
           },
           reference: target.value,
           title: key ?? session,

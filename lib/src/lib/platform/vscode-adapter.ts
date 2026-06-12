@@ -215,9 +215,9 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.vscode.postMessage({ type: 'dormouse:runWorkbenchCommand', command });
   }
 
-  async agentBrowserCommand(session: string, args: string[]): Promise<AgentBrowserCommandResult> {
+  async agentBrowserCommand(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
     const result = await this.requestResponse<AgentBrowserCommandResult>(
-      'agentBrowser:command', 'agentBrowser:commandResult', { session, args },
+      'agentBrowser:command', 'agentBrowser:commandResult', { session, args, binaryPath },
       (msg) => ({ exitCode: msg.exitCode, stdout: msg.stdout, stderr: msg.stderr }),
       10000,
     );
