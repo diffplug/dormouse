@@ -30,6 +30,11 @@ export function getWebviewHtml(
     `font-src ${webview.cspSource}`,
     `img-src ${webview.cspSource} data: blob:`,
     `connect-src ${webview.cspSource}`,
+    // `dor iframe` opens arbitrary absolute http(s) URLs in an iframe surface.
+    // Without a frame-src override the `default-src 'none'` fallback blocks the
+    // frame outright, leaving a blank (white) pane. parseIframeUrl already
+    // constrains inputs to http:/https:.
+    `frame-src http: https:`,
   ].join('; ');
 
   html = html.replace(

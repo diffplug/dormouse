@@ -34,15 +34,15 @@ If the caller surface is an untouched terminal, Dormouse replaces that terminal 
 The URL must be an absolute http:// or https:// URL. Dormouse does not infer schemes.
 
 Text output:
-  created surface:3  "https://localhost:5173"
-  replaced surface:1  "https://localhost:5173"
+  created surface:3  "http://localhost:5173"
+  replaced surface:1  "http://localhost:5173"
 
 JSON output:
   {
     "status": "created",
     "surface_id": "pane-abc",
     "surface_ref": "surface:3",
-    "url": "https://localhost:5173",
+    "url": "http://localhost:5173",
     "minimized": false
   }`,
     },
