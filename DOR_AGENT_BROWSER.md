@@ -2,6 +2,23 @@
 
 Implementation plan for the `dor agent-browser` / `dor ab` surface.
 
+## Implementation status (2026-06-12)
+
+All seven phases are built; see the spike outcome under Phase 4 for the three
+design changes the build forced (dot-separated session names, stream-native
+input replacing the CDP proxy, VS Code origin-stripping relay). Verified so
+far: CLI phases headless (`dor/test`), stream input + relay live against
+agent-browser 0.27.0. Outstanding:
+
+- **In-app dogfood pass** (VS Code): extension is built and installed; needs a
+  window reload and a `dor ab open` walk-through of frames/input/tabs/kill.
+- **Standalone (Tauri) gaps:** frames + input work (its origin is allowed, so
+  it connects to the stream directly), but `agentBrowserCommand` is not
+  implemented in the Tauri adapter — tab switch/close, popup auto-focus, and
+  kill→session-close are inert there until the sidecar grows that capability.
+- **Favicons** are omitted from the tab strip (webview CSP blocks external
+  images); spec updated.
+
 **Design spec (read first):** [`docs/specs/dor-agent-browser.md`](docs/specs/dor-agent-browser.md).
 This plan does not restate the design — it sequences the build and says how to
 verify each step. When the plan and the spec disagree, the spec wins; if the
