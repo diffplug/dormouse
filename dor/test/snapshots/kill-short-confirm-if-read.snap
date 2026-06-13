@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: dor kill --confirm-if-read requires at least 4 non-whitespace characters
