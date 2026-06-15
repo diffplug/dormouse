@@ -15,6 +15,7 @@
  *    connects to ws://127.0.0.1:<relayPort>/stream/<streamPort> instead and
  *    the relay pipes bytes to 127.0.0.1:<streamPort>.
  */
+import * as vscode from 'vscode';
 import * as net from 'net';
 import { spawn } from 'child_process';
 import { log } from './log';
@@ -27,6 +28,24 @@ export interface AgentBrowserCommandResult {
   stderr: string;
 }
 
+export type AgentBrowserEditOp = 'selectAll' | 'copy' | 'cut';
+
+export interface AgentBrowserEditResult {
+  ok: boolean;
+  text?: string;
+  error?: string;
+}
+
+// The host owns the exact JS for each editing op — the webview only selects a
+// name, so this never becomes an arbitrary-eval channel. copy/cut return the
+// selected text; selectAll returns ''. Inputs/textareas use selection ranges;
+// everything else falls back to the Selection API + execCommand.
+const EDIT_SCRIPTS: Record<AgentBrowserEditOp, string> = {
+  selectAll: `(()=>{const el=document.activeElement;if(el&&'select'in el&&'value'in el){el.select();}else{document.execCommand('selectAll');}return'';})()`,
+  copy: `(()=>{const el=document.activeElement;if(el&&'selectionStart'in el&&el.selectionStart!=null){return el.value.slice(el.selectionStart,el.selectionEnd);}return String(window.getSelection()||'');})()`,
+  cut: `(()=>{const el=document.activeElement;if(el&&'selectionStart'in el&&el.selectionStart!=null){const s=el.selectionStart,e=el.selectionEnd,t=el.value.slice(s,e);el.setRangeText('',s,e,'end');el.dispatchEvent(new Event('input',{bubbles:true}));return t;}const sel=String(window.getSelection()||'');if(sel)document.execCommand('delete');return sel;})()`,
+};
+
 export async function runAgentBrowserCommand(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
   if (typeof session !== 'string' || !session) {
     return { exitCode: 1, stdout: '', stderr: 'session is required' };
@@ -35,10 +54,46 @@ export async function runAgentBrowserCommand(session: string, args: string[], bi
   if (!subcommand || !ALLOWED_SUBCOMMANDS.has(subcommand)) {
     return { exitCode: 1, stdout: '', stderr: `agent-browser subcommand '${subcommand ?? ''}' is not allowed from the webview` };
   }
+  return runWithBinaryFallback(['--session', session, ...args], binaryPath);
+}
 
-  // The extension host's PATH is often the GUI login PATH (no nvm/volta
-  // shims), so prefer the absolute path `dor ab` resolved in the user's
-  // terminal; fall through on ENOENT in case it has gone stale.
+export async function runAgentBrowserEdit(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult> {
+  if (typeof session !== 'string' || !session) {
+    return { ok: false, error: 'session is required' };
+  }
+  const script = EDIT_SCRIPTS[op];
+  if (!script) {
+    return { ok: false, error: `unknown edit op '${op}'` };
+  }
+
+  const result = await runWithBinaryFallback(['--session', session, 'eval', script, '--json'], binaryPath);
+  if (result.exitCode !== 0) {
+    return { ok: false, error: result.stderr.trim() || `eval exited ${result.exitCode}` };
+  }
+
+  // eval --json envelope: { success, data: { result }, error }.
+  let text = '';
+  try {
+    const envelope = JSON.parse(result.stdout) as { success?: boolean; data?: { result?: unknown }; error?: unknown };
+    if (envelope.success === false) {
+      return { ok: false, error: typeof envelope.error === 'string' ? envelope.error : `${op} failed` };
+    }
+    if (typeof envelope.data?.result === 'string') text = envelope.data.result;
+  } catch {
+    return { ok: false, error: `could not parse eval output for ${op}` };
+  }
+
+  if (op === 'selectAll') return { ok: true };
+  // Land the grabbed text on the user's real OS clipboard. Skip empty so an
+  // empty selection doesn't clobber what's already there.
+  if (text) await vscode.env.clipboard.writeText(text);
+  return { ok: true, text };
+}
+
+// The extension host's PATH is often the GUI login PATH (no nvm/volta shims),
+// so prefer the absolute path `dor ab` resolved in the user's terminal; fall
+// through on ENOENT in case it has gone stale.
+async function runWithBinaryFallback(args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
   const candidates = [...new Set([
     binaryPath,
     process.env.DORMOUSE_AGENT_BROWSER_BIN,
@@ -47,7 +102,7 @@ export async function runAgentBrowserCommand(session: string, args: string[], bi
 
   let lastError = '';
   for (const binary of candidates) {
-    const result = await spawnAgentBrowser(binary, ['--session', session, ...args]);
+    const result = await spawnAgentBrowser(binary, args);
     if (result !== 'ENOENT') return result;
     lastError = `'${binary}' was not found`;
     log.info(`[agent-browser] ${lastError}; trying next candidate`);

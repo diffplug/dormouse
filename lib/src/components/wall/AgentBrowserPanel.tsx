@@ -99,6 +99,9 @@ function virtualKeyCode(key: string, code: string): number {
   return OEM_VK_BY_CODE[code] ?? 0;
 }
 
+// Cmd/Ctrl + these map to native editing ops the stream input path can't do.
+const EDIT_OPS = { a: 'selectAll', c: 'copy', x: 'cut' } as const;
+
 const MOUSE_BUTTONS: Record<number, string> = { 0: 'left', 1: 'middle', 2: 'right' };
 const MOUSE_BUTTON_MASKS: Record<number, number> = { 0: 1, 1: 4, 2: 2 };
 
@@ -478,14 +481,30 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   }, [send]);
 
   const handleKeyDownLike = useCallback((e: KeyLike) => {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v') {
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key.toLowerCase() === 'v') {
       void readTextFromClipboard().then((text) => {
         if (text) insertText(text);
       });
       return;
     }
+    // macOS native editing chords (select-all/copy/cut) don't fire over the
+    // stream input path (CDP commands field is dropped). Route the intent
+    // through the host's purpose-built edit channel instead. If the host
+    // lacks it (e.g. standalone), fall through so the page still gets the
+    // chord for its own JS shortcuts.
+    if (mod && !e.altKey && !e.shiftKey) {
+      const op = EDIT_OPS[e.key.toLowerCase() as keyof typeof EDIT_OPS];
+      const edit = getPlatform().agentBrowserEdit;
+      if (op && edit && session) {
+        edit(session, op, binaryPath).then((r) => {
+          if (!r.ok && r.error) console.warn(`[agent-browser] ${op} failed:`, r.error);
+        }).catch((err) => console.warn(`[agent-browser] ${op} failed:`, err));
+        return;
+      }
+    }
     sendKey(e, 'keyDown');
-  }, [insertText, sendKey]);
+  }, [insertText, sendKey, session, binaryPath]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!interactiveRef.current) return;

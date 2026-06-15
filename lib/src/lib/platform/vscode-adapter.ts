@@ -1,4 +1,4 @@
-import type { AgentBrowserCommandResult, AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
+import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
 import { setDefaultShellOpts } from '../shell-defaults';
 import {
@@ -222,6 +222,15 @@ export class VSCodeAdapter implements PlatformAdapter {
       10000,
     );
     return result ?? { exitCode: 1, stdout: '', stderr: 'agent-browser command timed out' };
+  }
+
+  async agentBrowserEdit(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult> {
+    const result = await this.requestResponse<AgentBrowserEditResult>(
+      'agentBrowser:edit', 'agentBrowser:editResult', { session, op, binaryPath },
+      (msg) => ({ ok: msg.ok, text: msg.text, error: msg.error }),
+      10000,
+    );
+    return result ?? { ok: false, error: 'agent-browser edit timed out' };
   }
 
   getAgentBrowserStreamUrl(port: number): Promise<string | null> {

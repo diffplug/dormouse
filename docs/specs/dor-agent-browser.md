@@ -232,11 +232,23 @@ Keyboard caveats (all verified against 0.27.0):
 - **Paste is bridged.** cmd/ctrl-V types the *local* clipboard into the page
   as per-character keyDown events; plain forwarding would paste the embedded
   Chromium's own (empty) clipboard.
-- **macOS native editing chords (cmd-A/C/X/Z) do not act** inside the embedded
-  Chromium: CDP `Input.dispatchKeyEvent` needs the `commands` hint for
-  OS-level editing commands on macOS, and the stream protocol does not forward
-  it (upstream limitation). Pages still *receive* the chord keydowns, so web
-  apps' own JS shortcuts (e.g. cmd-K) work.
+- **macOS native editing chords (cmd-A/C/X) are emulated via the host edit
+  channel,** not the stream. CDP `Input.dispatchKeyEvent` needs the `commands`
+  hint for OS-level editing on macOS, and the stream protocol drops it (upstream
+  limitation — see the filed issue). So instead of forwarding those chords, the
+  panel routes the *intent* to the host's `agentBrowserEdit(session, op)`
+  capability, which runs a host-owned `eval` over the daemon's CDP connection:
+  - `selectAll` → `el.select()` / `execCommand('selectAll')`.
+  - `copy` → read the selection, write it to the **OS clipboard**
+    (`vscode.env.clipboard`). Copying from the embedded browser lands in your
+    real clipboard, which is the desired UX anyway.
+  - `cut` → copy + delete the selection.
+  The webview only picks one of these three op names; the host owns the JS, so
+  this is a purpose-built channel, not arbitrary eval. **cmd-Z/⇧Z (undo/redo)
+  are not emulated** — `execCommand('undo')` is unreliable for CDP-typed input;
+  they remain no-ops pending the upstream `commands` fix. On hosts without the
+  capability (standalone/Tauri), the chords fall through to plain key
+  forwarding, so pages' own JS shortcuts still fire.
 
 Focus behaves like a terminal surface: click-to-focus; keystrokes forward to the
 browser only while the surface is selected and in interact mode. Because Dormouse

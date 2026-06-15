@@ -44,6 +44,20 @@ export interface AgentBrowserCommandResult {
  * channel for tab actions and session teardown, not a general exec path. */
 export const AGENT_BROWSER_ALLOWED_SUBCOMMANDS = ['tab', 'close'] as const;
 
+/** Native editing operations that the stream's input_keyboard path cannot
+ * trigger on macOS (CDP drops the `commands` field — see
+ * docs/specs/dor-agent-browser.md and the upstream issue). The host owns the
+ * exact JS for each; the webview only picks one of these names, so this stays
+ * a purpose-built channel rather than an arbitrary-eval one. */
+export type AgentBrowserEditOp = 'selectAll' | 'copy' | 'cut';
+
+export interface AgentBrowserEditResult {
+  ok: boolean;
+  /** Text the host placed on the OS clipboard (copy/cut); omitted for selectAll. */
+  text?: string;
+  error?: string;
+}
+
 export interface PlatformAdapter {
   // Lifecycle
   init(): Promise<void>;
@@ -87,6 +101,11 @@ export interface PlatformAdapter {
   // absolute path resolved by `dor ab` in the invoking terminal — the host's
   // own PATH (e.g. a GUI-launched extension host) may not find the binary.
   agentBrowserCommand?(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult>;
+  // Performs a native editing operation (select-all/copy/cut) the stream input
+  // path can't, via the daemon's CDP-backed eval. The host owns the JS and,
+  // for copy/cut, writes the result to the OS clipboard. Absent on hosts that
+  // can't run the binary (degrades to plain key forwarding).
+  agentBrowserEdit?(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult>;
   // The WebSocket URL for a session's stream port. Hosts whose webview origin
   // the agent-browser stream server rejects (VS Code) return a relay URL;
   // absent or null falls back to ws://127.0.0.1:<port>.
