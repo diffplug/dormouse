@@ -276,3 +276,113 @@ Replace the `AgentBrowserPanel` stub with a live canvas viewer.
 - Works in `dogfood` (VS Code) and standalone; CSP allows the stream WS.
 - Spec updated for any design change the build forced (especially the input
   channel after the spike).
+
+---
+
+## Phase 8 — Screen indicator (SYNCED/SCALED) + viewport modal
+
+**Spec:** "Screen Indicator & Viewport". A two-state header indicator derived
+from reality, plus a modal that is purely a GUI front-end for native
+`agent-browser set viewport` / `set device`. No keyboard shortcut.
+
+**The architectural wrinkle to solve first.** The indicator lives in
+`SurfacePaneHeader` (a dockview *tab* component) but the live state (viewport,
+pane size, sync) and the action (`runAgentBrowser`) live in `AgentBrowserPanel`
+(the *body* component). They are separate components for one pane, so they need a
+per-surface bridge. Use the patterns already in the tree: a surface-id-keyed
+registry like `terminal-lifecycle.ts` + a `useSyncExternalStore` store like
+`external-link-confirmation.ts`. Build that bridge in 8b before the UI.
+
+Leaf-up, each step independently verifiable:
+
+### 8a — Allowlist `set`
+
+- Add `'set'` to **both** allowlists: `AGENT_BROWSER_ALLOWED_SUBCOMMANDS`
+  (`lib/src/lib/platform/types.ts:45`) and `ALLOWED_SUBCOMMANDS`
+  (`vscode-ext/src/agent-browser-host.ts:23`). Still `args[0]`-gated — not a
+  general exec channel.
+- **Verify:** from the panel, `runAgentBrowser(['set','viewport','800','600','1'])`
+  resizes the live browser (frames reflow).
+
+### 8b — Per-surface screen bridge
+
+- New `lib/src/components/wall/agent-browser-screen.ts`: registry keyed by
+  surface id, each entry exposing `subscribe`/`snapshot` of
+  `{ state: 'SYNCED'|'SCALED', viewport:{w,h,dpr}, paneCss:{w,h}, displayDpr,
+  syncEngaged }` and actions `{ engageSync(), applyDevice(name),
+  applyViewport(w,h,dpr), openModal() }`.
+- `AgentBrowserPanel` registers its controller on mount (with `session` /
+  `binaryPath`), unregisters on unmount. Presence of a controller for `api.id`
+  is how the header knows a pane is an agent-browser surface.
+
+### 8c — Derive SYNCED/SCALED in the panel + publish
+
+- Compute from `deviceRef` (browser CSS viewport) and `canvas.width /
+  deviceRef.width` (inferred DPR) vs pane CSS size (`getBoundingClientRect` on
+  `elRef`) and `window.devicePixelRatio`. `SYNCED` iff dims + DPR match within a
+  tolerance (guard fractional-DPR off-by-one). Publish to the registry **only on
+  flip or dim change** — never per frame (don't thrash the header).
+- **Verify:** resize the pane / change display scale → indicator value flips.
+
+### 8d — Sync-to-pane + reconciliation (panel)
+
+- While `syncEngaged`: `ResizeObserver` on `elRef` → re-issue `set viewport
+  <cssW> <cssH> <displayDpr>` debounced ~200ms; track `lastIssued`.
+- **Disengage rule:** when a frame reports a viewport matching neither
+  `lastIssued` nor the current pane (evaluated only when the pane is stable and
+  after we've issued), set `syncEngaged=false`. This is what lets `dor ab set …`
+  and modal Device/Custom transparently take over.
+- **Default on create: auto-engage sync** (decided) — a fresh browser surface
+  starts `SYNCED`, responsive to the pane, not at native 1280×720. Spec updated.
+- **Verify:** engage sync → `SYNCED`, resizes stay `SYNCED`; run `dor ab set
+  device "iPhone 16"` in a terminal → sync disengages, `SCALED`.
+
+### 8e — Header indicator
+
+- In `SurfacePaneHeader`, if a controller exists for `api.id`, render the
+  `SYNCED`/`SCALED` chip immediately right of the title; click → `openModal()`.
+  Gate strictly on controller presence so terminals/iframes are untouched.
+- **Verify:** chip shows only on browser surfaces, reflects state, click opens.
+
+### 8f — The modal
+
+- New `lib/src/components/wall/AgentBrowserScreenModal.tsx`, mounted via a host
+  in `Wall` (mirror `ExternalLinkModalHost`). Reads the controller snapshot and
+  pre-selects: *Sync* (if engaged + matching), else the registry device whose
+  dims match, else *Custom* prefilled with current dims. Radios: **Sync to pane**
+  / **Device** (fixed registry: iPhone 15/16/16 Pro/17, iPad, iPad Pro, Pixel 9,
+  Galaxy S25) / **Custom** (W/H/DPI). Apply → `engageSync()` / `applyDevice()` /
+  `applyViewport()`. Suppress Wall keys while open via `DialogKeyboardContext`
+  (`setDialogKeyboardActive`); Esc cancels.
+- **Device dims: apply-then-reflect** (decided) — the CLI doesn't expose a
+  device's dims up front, so choosing a device issues `set device <name>` and the
+  detail line fills in from the next frames. No hardcoded dims map. Spec updated.
+- **Verify:** pick iPhone 16 → `SCALED` + phone frame; Custom 800×600 → applies;
+  Sync → `SYNCED`.
+
+### 8g — Persistence
+
+- Persist `syncEngaged` per agent-browser surface. **Built via dockview panel
+  params** (`AgentBrowserPanel` writes `api.updateParameters({ syncEngaged })`
+  and seeds from `params.syncEngaged`), which round-trip through the serialized
+  layout blob — the same channel that already carries `session`/`wsPort` across
+  reloads — so no `session-types.ts`/`session-save.ts` change was needed. Device/
+  custom viewports live in the agent-browser session and survive reattach on
+  their own; sync re-engages on reattach iff it was engaged.
+- **Verify:** save/restore preserves sync; save/restore with a device keeps that
+  device (from the session).
+
+### 8h — Host-capability degradation
+
+- Without `agentBrowserCommand` (Tauri today), modal Apply / Sync are inert —
+  disable Apply or show a note, mirroring tab-action degradation. `dor ab set …`
+  from a terminal still works there (execs directly).
+
+### Definition of done (Phase 8)
+
+- Header shows `SYNCED`/`SCALED`, derived from frames, only on browser surfaces.
+- Modal applies Sync / Device / Custom via native `set`; pre-fills from reality.
+- `dor ab set …` from a terminal disengages sync and the indicator follows —
+  CLI and GUI stay consistent.
+- `syncEngaged` persists; standalone degrades gracefully.
+- Spec updated for the two decisions (create-default, device-dims).

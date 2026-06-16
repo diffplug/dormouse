@@ -11,6 +11,10 @@ import {
 import { HeaderActionButton } from '../HeaderActionButton';
 import { TERMINAL_TOP_RADIUS_CLASS } from '../design';
 import {
+  useAgentBrowserScreenController,
+  useAgentBrowserScreenSnapshot,
+} from './agent-browser-screen';
+import {
   ModeContext,
   SelectedIdContext,
   WallActionsContext,
@@ -26,12 +30,29 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
   const actions = useContext(WallActionsContext);
   const isActiveHeader = mode === 'passthrough' && selectedId === api.id && windowFocused;
 
+  // Presence of a screen controller for this pane is exactly what marks it an
+  // agent-browser surface — terminals/iframes never register one, so the chip
+  // is strictly scoped to browser surfaces.
+  const screen = useAgentBrowserScreenController(api.id);
+  const screenSnapshot = useAgentBrowserScreenSnapshot(screen);
+
   return (
     <div
       className={`flex h-full w-full cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${isActiveHeader ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg'}`}
       onMouseDown={() => actions.onClickPanel(api.id)}
     >
       <span className="min-w-0 flex-1 truncate font-medium">{api.title ?? api.id}</span>
+      {screen && screenSnapshot && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); screen.actions.openModal(); }}
+          aria-label={`Screen: ${screenSnapshot.state} — change viewport`}
+          title="Screen / viewport"
+          className="shrink-0 rounded px-1 py-0.5 text-xs leading-none font-semibold tracking-[0.08em] text-current/70 transition-colors hover:bg-current/10 hover:text-current"
+        >
+          {screenSnapshot.state}
+        </button>
+      )}
       <div className="ml-1 hidden shrink-0 items-center gap-0.5 min-[420px]:flex">
         <HeaderActionButton
           className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"

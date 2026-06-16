@@ -41,8 +41,9 @@ export interface AgentBrowserCommandResult {
 }
 
 /** Subcommands the host will run on the webview's behalf — this is a narrow
- * channel for tab actions and session teardown, not a general exec path. */
-export const AGENT_BROWSER_ALLOWED_SUBCOMMANDS = ['tab', 'close'] as const;
+ * channel for tab actions, screen-mode resizing (`set viewport` / `set
+ * device`), and session teardown, not a general exec path. */
+export const AGENT_BROWSER_ALLOWED_SUBCOMMANDS = ['tab', 'set', 'close'] as const;
 
 /** Native editing operations that the stream's input_keyboard path cannot
  * trigger on macOS (CDP drops the `commands` field — see

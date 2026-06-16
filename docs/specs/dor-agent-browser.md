@@ -144,17 +144,23 @@ nothing more than a GUI front-end for those native `set` commands.
 Immediately to the **right of the title**, the header shows one of two derived
 states — never a stored mode:
 
-- **`SYNCED`** — the browser's live viewport **and** DPI exactly equal the pane's
+- **`SYNCED`** — the browser's live viewport (CSS pixels) equals the pane's CSS
   pixel size, so frames map 1:1 with no scaling.
 - **`SCALED`** — anything else; the frame is letterboxed/zoomed to fit the pane.
 
-Both are computed from the stream: viewport from frame
-`metadata.deviceWidth/Height`, DPI inferred as `frameBitmap.width /
-metadata.deviceWidth`. Because it is derived, the indicator is correct no matter
-*how* the viewport was set — modal, `dor ab set …`, or a raw `agent-browser`
-call. The panel's existing contain-scaling (`max-h-full max-w-full`) and
-coordinate mapping already produce the `SCALED` letterboxing; `SYNCED` is simply
-the case where the frame equals the pane. There is **no keyboard shortcut**.
+The viewport is read from the stream (`status.viewportWidth/Height`, equal to
+frame `metadata.deviceWidth/Height`) and compared against the pane's CSS size
+(`getBoundingClientRect`). **DPR is not part of the comparison:** the screencast
+is delivered at CSS-pixel resolution, so the JPEG never encodes the browser's
+device pixel ratio (verified 0.27.0 — `set viewport 800 600 2` yields the same
+800×600 frame as `@1`); it is therefore unrecoverable from frames. Dormouse still
+*issues* `displayDpr` when syncing so the page renders at the right density, but
+the indicator is a pure CSS-size match. Because it is derived, the indicator is
+correct no matter *how* the viewport was set — modal, `dor ab set …`, or a raw
+`agent-browser` call. The panel's existing contain-scaling (`max-h-full
+max-w-full`) and coordinate mapping already produce the `SCALED` letterboxing;
+`SYNCED` is simply the case where the viewport equals the pane. There is **no
+keyboard shortcut**.
 
 ### The modal
 
@@ -198,9 +204,17 @@ The device registry is fixed (no custom descriptors), and touch / mobile-UA are
 **only** available bundled inside `set device` — there is no standalone touch
 setting (verified against 0.27.0). So Sync/Custom are never touch; only Device
 is. The modal **reads the live viewport on open** and pre-selects accordingly:
-*Sync* if sync is engaged and matching, else the registry device whose
-dimensions match, else *Custom* pre-filled with the current dims. Like the
-indicator, the modal reflects reality rather than a stored intent.
+*Sync* if sync is engaged and matching, otherwise *Custom* pre-filled with the
+current dims. Like the indicator, the modal reflects reality rather than a stored
+intent.
+
+The CLI does not expose a device's dimensions ahead of time, so device sizing is
+**apply-then-reflect**: choosing a device issues `set device <name>`, and the
+detail line (`iPhone 16 · 393×852 @3x`) fills in from the next frames rather than
+being known up front. The same gap means the modal **cannot pre-select a device
+by matching dims** — with no dims map to compare against, a non-synced viewport
+pre-selects *Custom* (the device list still shows the live `SYNCED`/`SCALED`
+readout, just without a radio pre-checked on a specific device).
 
 ### Transparency with `dor ab set …`
 
@@ -214,7 +228,10 @@ pre-fill reflect it.
 
 **Sync is the one non-native concept.** agent-browser has no "follow the pane"
 mode; *Sync to pane* is a Dormouse behavior that auto-issues native `set
-viewport <pane>` and re-issues on resize. Coexistence is **last-writer-wins**:
+viewport <pane>` and re-issues on resize. **A freshly created browser surface
+auto-engages sync**, so it starts `SYNCED` — pixel-for-pixel and responsive to
+the pane — rather than at agent-browser's native 1280×720. Coexistence is
+**last-writer-wins**:
 Dormouse tracks the viewport it last issued (`lastIssued`); when a frame reports
 a viewport matching neither `lastIssued` nor the current pane, an external setter
 (`dor ab set …`) intervened, so Dormouse **disengages sync** and the indicator
@@ -235,8 +252,12 @@ the re-issue lands — is not mistaken for an external override.)
   `close`).
 - The only Dormouse-side state worth persisting is **whether sync is engaged**;
   device/custom viewports live in the agent-browser session itself and survive
-  reattach. On reattach Dormouse re-engages sync if it was engaged
-  (`session-types.ts`, `session-save.ts`).
+  reattach. `syncEngaged` rides in the surface's dockview **panel params**, which
+  already round-trip through the serialized layout blob (the same channel that
+  carries `session`/`wsPort` across webview reloads), so it persists with no
+  `session-types.ts`/`session-save.ts` changes; the panel seeds its initial state
+  from `params.syncEngaged` (absent ⇒ fresh surface ⇒ auto-engage), so reattach
+  re-engages sync iff it was engaged.
 - Like tab actions, this inherits the `agentBrowserCommand` host capability: on
   adapters that do not implement it (currently Tauri), modal-driven resizes are
   inert and the control degrades accordingly. (`dor ab set …` from a terminal
@@ -339,7 +360,8 @@ host on the webview's behalf (a webview cannot spawn processes; see
 | Surface component (canvas viewer + WS client + tab strip + sync tracking / `set` issuance / SYNCED-SCALED derivation) | `lib/src/components/wall/AgentBrowserPanel.tsx` |
 | SYNCED/SCALED indicator right of the title; opens the screen modal (agent-browser surfaces only) | `lib/src/components/wall/SurfacePaneHeader.tsx` |
 | Screen modal (Sync / Device-registry / Custom; issues native `set …`) | `lib/src/components/wall/AgentBrowserScreenModal.tsx` (new) |
-| Per-surface "sync engaged" persistence | `lib/src/lib/session-types.ts`, `lib/src/lib/session-save.ts` |
+| Per-surface "sync engaged" persistence | the surface's dockview **panel params** (`syncEngaged`), persisted via the serialized layout blob — no `session-types.ts`/`session-save.ts` change |
+| Per-surface screen bridge (header↔body↔modal) | `lib/src/components/wall/agent-browser-screen.ts` (new); modal host `lib/src/components/AgentBrowserScreenModalHost.tsx` (new) |
 | Surface registration | `lib/src/components/Wall.tsx:339` (`'agent-browser': AgentBrowserPanel`) |
 | Control handler + key→session registry | `lib/src/components/Wall.tsx` (mirror the `surface.iframe` handler at Wall.tsx:1255) |
 | Host CLI runner (`agentBrowserCommand`) + VS Code stream relay | `lib/src/lib/platform/types.ts` (optional adapter methods), `vscode-ext/src/message-router.ts`, `vscode-ext/src/agent-browser-host.ts` |

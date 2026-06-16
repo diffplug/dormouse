@@ -6,12 +6,20 @@
  * `tabs` messages. Tab actions (switch/close) go through the host's
  * `agentBrowserCommand` because a webview cannot spawn the agent-browser CLI.
  */
-import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { clsx } from 'clsx';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
 import { readTextFromClipboard } from '../../lib/clipboard';
+import {
+  openAgentBrowserScreenModal,
+  registerAgentBrowserScreen,
+  type ScreenActions,
+  type ScreenRegistration,
+  type ScreenSnapshot,
+  type ScreenState,
+} from './agent-browser-screen';
 import {
   FreshlySpawnedContext,
   ModeContext,
@@ -26,7 +34,23 @@ type AgentBrowserPanelParams = {
   key?: string;
   wsPort?: number;
   binaryPath?: string;
+  /** Whether sync-to-pane is engaged; persists via the dockview layout blob so
+   *  a re-attached surface re-engages sync if it was engaged. Absent on a fresh
+   *  surface ⇒ auto-engage (see docs/specs/dor-agent-browser.md). */
+  syncEngaged?: boolean;
 };
+
+// SYNCED is "browser viewport CSS size == pane CSS size". The screencast is
+// always delivered at CSS-pixel resolution — the frame never encodes the
+// browser's DPR (verified 0.27.0: `set viewport 800 600 2` yields the same
+// 800×600 JPEG as @1) — so DPR is unrecoverable from frames and plays no part
+// in the match; we still *issue* displayDpr so the page renders at the right
+// density. Dims can be a pixel off after rounding, so compare with a tolerance.
+const DIM_TOLERANCE = 1;
+
+function dimsMatch(a: { w: number; h: number }, b: { w: number; h: number }): boolean {
+  return Math.abs(a.w - b.w) <= DIM_TOLERANCE && Math.abs(a.h - b.h) <= DIM_TOLERANCE;
+}
 
 type StreamTab = {
   tabId: string;
@@ -128,6 +152,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const elRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const session = params?.session;
@@ -148,12 +173,14 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   const binaryPath = params?.binaryPath;
   const runAgentBrowser = useCallback((args: string[]) => {
     if (!session) return;
-    const command = getPlatform().agentBrowserCommand;
-    if (!command) {
+    // Call through the adapter instance — pulling the method into a bare
+    // variable would detach `this` and break its internal `requestResponse`.
+    const platform = getPlatform();
+    if (!platform.agentBrowserCommand) {
       console.warn('[agent-browser] this host cannot run agent-browser commands; tab actions are unavailable');
       return;
     }
-    command(session, args, binaryPath).then((result) => {
+    platform.agentBrowserCommand(session, args, binaryPath).then((result) => {
       if (result.exitCode !== 0) {
         console.warn(`[agent-browser] ${args.join(' ')} failed:`, result.stderr || result.stdout || `exit ${result.exitCode}`);
       }
@@ -161,6 +188,101 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       console.warn(`[agent-browser] ${args.join(' ')} failed:`, error);
     });
   }, [session, binaryPath]);
+  const runAgentBrowserRef = useRef(runAgentBrowser);
+  runAgentBrowserRef.current = runAgentBrowser;
+
+  // --- screen indicator (SYNCED/SCALED) + sync-to-pane ---
+  //
+  // A fresh surface auto-engages sync (no persisted flag); a re-attached one
+  // restores whatever was persisted into the layout blob.
+  const [syncEngaged, setSyncEngaged] = useState<boolean>(params?.syncEngaged ?? true);
+  const syncEngagedRef = useRef(syncEngaged);
+  syncEngagedRef.current = syncEngaged;
+  // The pane size we last issued `set viewport` for; null while not driving the
+  // viewport (device/custom, or never issued). Used both to skip redundant
+  // re-issues and to detect an external `set …` taking over.
+  const lastIssuedRef = useRef<{ w: number; h: number; dpr: number } | null>(null);
+  // True once a frame has confirmed `lastIssued` actually landed. Until then,
+  // frames still at the browser's pre-resize size are our own `set` not having
+  // taken effect yet — not an external override.
+  const syncConfirmedRef = useRef(false);
+  const lastPublishedRef = useRef<ScreenSnapshot | null>(null);
+  const registrationRef = useRef<ScreenRegistration | null>(null);
+
+  const computeSnapshot = useCallback((): ScreenSnapshot => {
+    const rect = viewportRef.current?.getBoundingClientRect();
+    const displayDpr = window.devicePixelRatio || 1;
+    const device = deviceRef.current;
+    const paneCss = { w: rect ? Math.round(rect.width) : 0, h: rect ? Math.round(rect.height) : 0 };
+    // DPR can't be read back from frames, so report the density we'd sync to.
+    const viewport = { w: device.width, h: device.height, dpr: displayDpr };
+    const state: ScreenState = dimsMatch(viewport, paneCss) ? 'SYNCED' : 'SCALED';
+    return { state, viewport, paneCss, displayDpr, syncEngaged: syncEngagedRef.current };
+  }, []);
+
+  // Publish to the registry only when something the header/modal cares about
+  // changed — never per frame (the frame loop calls this every paint).
+  const publishScreen = useCallback(() => {
+    const next = computeSnapshot();
+    const prev = lastPublishedRef.current;
+    const changed =
+      !prev ||
+      prev.state !== next.state ||
+      prev.viewport.w !== next.viewport.w ||
+      prev.viewport.h !== next.viewport.h ||
+      prev.viewport.dpr !== next.viewport.dpr ||
+      prev.displayDpr !== next.displayDpr ||
+      prev.syncEngaged !== next.syncEngaged ||
+      !dimsMatch(prev.paneCss, next.paneCss);
+    if (changed) {
+      lastPublishedRef.current = next;
+      registrationRef.current?.update(next);
+    }
+  }, [computeSnapshot]);
+
+  // Push the current pane size to the browser as a native `set viewport`.
+  const issueSyncToPane = useCallback(() => {
+    // Hosts without agentBrowserCommand (Tauri today) can't drive the viewport;
+    // stay silent rather than warn on every resize. The surface just reads
+    // SCALED, which is accurate.
+    if (!getPlatform().agentBrowserCommand) return;
+    const el = viewportRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const w = Math.round(rect.width);
+    const h = Math.round(rect.height);
+    if (!w || !h) return;
+    const dpr = window.devicePixelRatio || 1;
+    const prev = lastIssuedRef.current;
+    if (prev && prev.w === w && prev.h === h && Math.abs(prev.dpr - dpr) <= 0.001) return;
+    lastIssuedRef.current = { w, h, dpr };
+    syncConfirmedRef.current = false;
+    runAgentBrowserRef.current(['set', 'viewport', String(w), String(h), String(dpr)]);
+  }, []);
+
+  // Last-writer-wins: drop sync when an external `dor ab set …` takes the
+  // viewport away from what we issued. The trap is that right after we issue a
+  // new size, the browser keeps streaming the OLD size for a few frames — those
+  // must NOT count as external. So we only disengage once a frame has first
+  // *confirmed* our issued size landed, and a later frame then deviates.
+  const maybeDisengageSync = useCallback(() => {
+    if (!syncEngagedRef.current) return;
+    const issued = lastIssuedRef.current;
+    const el = viewportRef.current;
+    if (!issued || !el) return;
+    const rect = el.getBoundingClientRect();
+    const pane = { w: Math.round(rect.width), h: Math.round(rect.height) };
+    // Mid-resize: we haven't issued for the pane's current size yet.
+    if (!dimsMatch(issued, pane)) return;
+    const device = { w: deviceRef.current.width, h: deviceRef.current.height };
+    if (dimsMatch(device, issued)) {
+      syncConfirmedRef.current = true; // our `set` landed
+      return;
+    }
+    // Frame differs from what we issued: a pre-landing stale frame until
+    // confirmed; an external override once confirmed.
+    if (syncConfirmedRef.current) setSyncEngaged(false);
+  }, []);
 
   // --- pane registration + spawn animation (shared surface boilerplate) ---
 
@@ -228,6 +350,11 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
         canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
         bitmap.close();
         setHasFrame(true);
+        // The frame just told us the browser's live viewport + DPR; reconcile
+        // sync and refresh the indicator. publishScreen self-gates, so this is
+        // cheap despite running every paint.
+        maybeDisengageSync();
+        publishScreen();
       }).catch(() => {});
     };
 
@@ -247,6 +374,8 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
         else setConnectionLost(false);
         if (typeof msg.viewportWidth === 'number' && typeof msg.viewportHeight === 'number') {
           deviceRef.current = { width: msg.viewportWidth, height: msg.viewportHeight };
+          maybeDisengageSync();
+          publishScreen();
         }
       } else if (msg.type === 'tabs' && Array.isArray(msg.tabs)) {
         const next: StreamTab[] = msg.tabs
@@ -308,7 +437,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       wsRef.current = null;
       ws?.close();
     };
-  }, [wsPort, runAgentBrowser]);
+  }, [wsPort, runAgentBrowser, maybeDisengageSync, publishScreen]);
 
   // --- header title follows the active tab ---
 
@@ -316,6 +445,107 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     const active = tabs.find((tab) => tab.active) ?? tabs[0];
     if (active) api.setTitle(tabDisplayTitle(active));
   }, [tabs, api]);
+
+  // --- screen controller: register for the header/modal bridge ---
+
+  // Stable across renders (reads refs / stable setters), so the registered
+  // controller never goes stale. Engaging always re-issues (clears lastIssued)
+  // so it reclaims the viewport even from an external device.
+  const screenActions = useMemo<ScreenActions>(() => ({
+    engageSync() {
+      // Clear lastIssued so the issue below isn't skipped, and issue now rather
+      // than relying on the syncEngaged effect — re-selecting Sync while already
+      // engaged must still reclaim the viewport (e.g. from an external `set`).
+      lastIssuedRef.current = null;
+      setSyncEngaged(true);
+      issueSyncToPane();
+    },
+    applyDevice(name) {
+      lastIssuedRef.current = null;
+      setSyncEngaged(false);
+      runAgentBrowserRef.current(['set', 'device', name]);
+    },
+    applyViewport(w, h, dpr) {
+      lastIssuedRef.current = null;
+      setSyncEngaged(false);
+      runAgentBrowserRef.current(['set', 'viewport', String(w), String(h), String(dpr)]);
+    },
+    openModal() {
+      openAgentBrowserScreenModal(api.id);
+    },
+  }), [api.id, issueSyncToPane]);
+
+  useEffect(() => {
+    const registration = registerAgentBrowserScreen(api.id, {
+      snapshot: computeSnapshot(),
+      actions: screenActions,
+      hostCapable: !!getPlatform().agentBrowserCommand,
+    });
+    registrationRef.current = registration;
+    lastPublishedRef.current = null;
+    publishScreen();
+    return () => {
+      registration.dispose();
+      registrationRef.current = null;
+    };
+  }, [api.id, screenActions, computeSnapshot, publishScreen]);
+
+  // Persist sync state into the panel params so it round-trips through the
+  // dockview layout blob (and survives reattach). Skip no-op writes.
+  useEffect(() => {
+    if (params?.syncEngaged !== syncEngaged) api.updateParameters({ syncEngaged });
+  }, [syncEngaged, params?.syncEngaged, api]);
+
+  // Reflect a sync flip in the indicator immediately, without waiting for the
+  // next frame.
+  useEffect(() => {
+    publishScreen();
+  }, [syncEngaged, publishScreen]);
+
+  // While sync is engaged, follow the pane: re-issue `set viewport` (debounced)
+  // on resize. ResizeObserver fires once on observe, giving the initial sync;
+  // the explicit call covers re-engaging at an unchanged size.
+  useEffect(() => {
+    if (!syncEngaged) return;
+    const el = viewportRef.current;
+    if (!el) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const observer = new ResizeObserver(() => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        issueSyncToPane();
+        publishScreen();
+      }, 200);
+    });
+    observer.observe(el);
+    issueSyncToPane();
+    return () => {
+      observer.disconnect();
+      if (timer) clearTimeout(timer);
+    };
+  }, [syncEngaged, issueSyncToPane, publishScreen]);
+
+  // A new/restarted session (wsPort change) comes up at agent-browser's native
+  // viewport; if sync is engaged, reclaim the pane size. Clearing lastIssued is
+  // essential — it otherwise still holds the previous session's pane size and
+  // issueSyncToPane would no-op, leaving the fresh browser unsynced (SCALED).
+  useEffect(() => {
+    if (!wsPort || !syncEngagedRef.current) return;
+    lastIssuedRef.current = null;
+    issueSyncToPane();
+  }, [wsPort, issueSyncToPane]);
+
+  // Display-scale (DPR) changes don't resize the pane, so ResizeObserver misses
+  // them; a window resize is the available signal. Recompute the indicator and,
+  // if synced, re-issue at the new DPR.
+  useEffect(() => {
+    const onWindowResize = () => {
+      if (syncEngagedRef.current) issueSyncToPane();
+      publishScreen();
+    };
+    window.addEventListener('resize', onWindowResize);
+    return () => window.removeEventListener('resize', onWindowResize);
+  }, [issueSyncToPane, publishScreen]);
 
   // --- input forwarding (stream-native input_* messages) ---
 
@@ -495,9 +725,10 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     // chord for its own JS shortcuts.
     if (mod && !e.altKey && !e.shiftKey) {
       const op = EDIT_OPS[e.key.toLowerCase() as keyof typeof EDIT_OPS];
-      const edit = getPlatform().agentBrowserEdit;
-      if (op && edit && session) {
-        edit(session, op, binaryPath).then((r) => {
+      // Call through the adapter instance — detaching the method drops `this`.
+      const platform = getPlatform();
+      if (op && platform.agentBrowserEdit && session) {
+        platform.agentBrowserEdit(session, op, binaryPath).then((r) => {
           if (!r.ok && r.error) console.warn(`[agent-browser] ${op} failed:`, r.error);
         }).catch((err) => console.warn(`[agent-browser] ${op} failed:`, err));
         return;
@@ -536,6 +767,10 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       if (!interactiveRef.current || e.defaultPrevented) return;
       const el = elRef.current;
       if (el && e.target instanceof Node && el.contains(e.target)) return;
+      // A screen modal (or any dialog) renders outside the pane element, so the
+      // contains() check above misses it; without this, typing into the modal's
+      // Custom W/H/DPI fields would be swallowed and forwarded to the browser.
+      if (e.target instanceof Element && e.target.closest('[role="dialog"]')) return;
       e.preventDefault();
       if (e.type === 'keydown') handleKeyDownLike(e);
       else sendKey(e, 'keyUp');
@@ -615,7 +850,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
           ))}
         </div>
       )}
-      <div className="relative flex min-h-0 flex-1 items-center justify-center">
+      <div ref={viewportRef} className="relative flex min-h-0 flex-1 items-center justify-center">
         <canvas
           ref={canvasRef}
           className={clsx('block max-h-full max-w-full select-none', !hasFrame && 'hidden')}

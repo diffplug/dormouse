@@ -20,7 +20,7 @@ import * as net from 'net';
 import { spawn } from 'child_process';
 import { log } from './log';
 
-const ALLOWED_SUBCOMMANDS = new Set(['tab', 'close']);
+const ALLOWED_SUBCOMMANDS = new Set(['tab', 'set', 'close']);
 
 export interface AgentBrowserCommandResult {
   exitCode: number;

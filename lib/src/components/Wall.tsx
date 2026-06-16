@@ -9,6 +9,7 @@ import {
 import 'dockview-react/dist/styles/dockview.css';
 import { Baseboard } from './Baseboard';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
+import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import {
   clearSessionAttention,
@@ -1580,6 +1581,10 @@ export function Wall({
             />
 
             <ExternalLinkModalHost onKeyboardActiveChange={setDialogKeyboardActive} />
+            <AgentBrowserScreenModalHost
+              onKeyboardActiveChange={setDialogKeyboardActive}
+              resolveLabel={surfaceRefForId}
+            />
 
           </div>
           </DialogKeyboardContext.Provider>
