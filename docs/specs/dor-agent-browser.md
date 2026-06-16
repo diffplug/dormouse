@@ -14,7 +14,7 @@ tabs. We reimplement none of agent-browser's behavior, the same way an HTTP
 client is not a fork of the server.
 
 This is the chosen alternative to the iframe surface (see
-`dor-cli.md` → "Iframe Surface: Limitations And Status"). Because the browser
+[dor-iframe.md](dor-iframe.md)). Because the browser
 renders to a Dormouse-owned `<canvas>` rather than a cross-origin `<iframe>`,
 Dormouse keeps its own keydown listener and never loses focus control: the
 keyboard model that breaks for iframes does not apply here.
