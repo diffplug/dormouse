@@ -25,7 +25,7 @@ export async function saveSession(
   }
   const persistedDoors = doors.map((door) => ({
     ...door,
-    title: persistedDoorTitle(door.id),
+    title: persistedDoorTitle(door.id, door.title, door.component),
   }));
   for (const item of persistedDoors) {
     allPanes.set(item.id, { id: item.id, title: item.title });
@@ -61,7 +61,8 @@ function persistedVisiblePaneTitle(title: string): string {
   return trimmed || UNNAMED_PANEL_TITLE;
 }
 
-function persistedDoorTitle(id: string): string {
+function persistedDoorTitle(id: string, fallback: string, component: string | undefined): string {
   const userTitle = getTerminalPaneState(id).titleCandidates.user?.title.trim();
-  return userTitle || UNNAMED_PANEL_TITLE;
+  if (userTitle) return userTitle;
+  return component && component !== 'terminal' ? persistedVisiblePaneTitle(fallback) : UNNAMED_PANEL_TITLE;
 }
