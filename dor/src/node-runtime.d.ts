@@ -12,20 +12,12 @@ declare module 'node:net' {
   export function createConnection(options: { path: string }): Socket;
 }
 
-declare module 'node:child_process' {
-  export function execFileSync(command: string, args: readonly string[], options: {
-    encoding: 'utf8';
-    timeout?: number;
-  }): string;
-}
-
 declare module 'node:path' {
   export function resolve(...segments: string[]): string;
 }
 
 declare const process: {
   platform: string;
-  ppid: number;
   cwd(): string;
 };
 
