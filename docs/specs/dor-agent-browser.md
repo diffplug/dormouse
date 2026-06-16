@@ -132,48 +132,115 @@ Tab behaviors:
   matching typical browser foregrounding; reversible by clicking back. Dormouse
   does not fight the web's popup / open-in-new-tab behavior.
 
-## Screen Modes (Zoom)
+## Screen Indicator & Viewport
 
-Each browser surface has a **screen mode** that controls the agent-browser
-viewport and how the frame fills the pane. It is a thin convenience over
-agent-browser's own `set viewport` / `set device` — it wraps none of
-agent-browser's other `set` options, which stay reachable via `dor ab set …`
-passthrough. Three presets, default **`ONE_TO_ONE`**:
+The surface viewport is governed by agent-browser's own `set viewport` / `set
+device`. Dormouse does not invent a parallel "mode" enum; instead the header
+carries a **two-state indicator that reflects reality**, and a modal that is
+nothing more than a GUI front-end for those native `set` commands.
 
-| Mode | Icon | agent-browser viewport | Canvas |
-| --- | --- | --- | --- |
-| `ONE_TO_ONE` | `FrameCornersIcon` | `set viewport <paneW> <paneH>` (DPR 1), re-issued (debounced ~200ms) as the pane resizes | frame ≈ pane → renders pixel-for-pixel; the page reflows responsively to the pane |
-| `DESKTOP` | `DesktopIcon` | `set viewport 1280 720` (DPR 1 — typical non-retina desktop; a tunable constant) | fixed frame scaled to **contain** (letterboxed) |
-| `PHONE` | `DeviceMobileIcon` | `set device "iPhone 14"` (390×844 @ DPR 3, mobile UA + touch) | fixed frame scaled to **contain** |
+### The indicator (SYNCED / SCALED)
 
-The panel's existing contain-scaling (`max-h-full max-w-full`) and
-canvas→device coordinate mapping (via frame `metadata`) already handle the
-`DESKTOP`/`PHONE` letterboxing; no input-mapping change is needed. `ONE_TO_ONE`
-is the responsive case — resize the pane and the page reflows, the way a browser
-window would.
+Immediately to the **right of the title**, the header shows one of two derived
+states — never a stored mode:
 
-- **Indicator & control.** The mode icon sits immediately to the **right of the
-  title** in the surface header. Clicking cycles
-  `ONE_TO_ONE → DESKTOP → PHONE → ONE_TO_ONE`. In command mode, `s` cycles the
-  focused browser surface's mode (gated to agent-browser surfaces, the way `t` /
-  `a` are gated to panes in `handle-pane-shortcuts.ts`).
-- **`CUSTOM` state.** If the live viewport (from frame
-  `metadata.deviceWidth/Height`) does not match the active preset's target —
-  e.g. the user ran `dor ab set viewport …` / `set device …` directly — the
-  indicator shows a distinct `CUSTOM` glyph (e.g. `SlidersHorizontalIcon`) so it
-  reflects reality, not intent (mirroring how the tab strip reflects pushed
-  state). Toggling from `CUSTOM` re-enters the cycle at `ONE_TO_ONE`. This is how
-  "custom resolutions and other agent-browser options" are accommodated without
-  the presets trying to enumerate them.
-- **Default & persistence.** New surfaces start `ONE_TO_ONE`. The chosen mode is
-  per-surface and persists in saved session state (`session-types.ts`,
-  `session-save.ts`); on (re)attach Dormouse re-asserts it by issuing the
-  corresponding `set`.
-- **Mechanism & host capability.** Mode changes issue `set viewport` / `set
-  device` through `agentBrowserCommand`, whose allowlist must be extended from
-  `{tab, close}` to also permit `set`. Like tab actions, the control inherits
-  that host capability: on adapters that do not implement `agentBrowserCommand`
-  (currently Tauri), the resize is inert and the control degrades accordingly.
+- **`SYNCED`** — the browser's live viewport **and** DPI exactly equal the pane's
+  pixel size, so frames map 1:1 with no scaling.
+- **`SCALED`** — anything else; the frame is letterboxed/zoomed to fit the pane.
+
+Both are computed from the stream: viewport from frame
+`metadata.deviceWidth/Height`, DPI inferred as `frameBitmap.width /
+metadata.deviceWidth`. Because it is derived, the indicator is correct no matter
+*how* the viewport was set — modal, `dor ab set …`, or a raw `agent-browser`
+call. The panel's existing contain-scaling (`max-h-full max-w-full`) and
+coordinate mapping already produce the `SCALED` letterboxing; `SYNCED` is simply
+the case where the frame equals the pane. There is **no keyboard shortcut**.
+
+### The modal
+
+Clicking the indicator opens a modal — three mutually exclusive targets:
+
+```
+╭─ Screen — surface:3 ────────────────────────────────────────╮
+│                                                              │
+│   Currently  SCALED                                          │
+│   browser 393×852 @3x   ·   pane 980×560 @2x   (zoomed)       │
+│                                                              │
+│   ( ) Sync to pane                                           │
+│       viewport follows the pane, pixel-for-pixel             │
+│       → now: 980×560 @2x                                      │
+│                                                              │
+│   (•) Device           all devices emulate touch + mobile UA │
+│       ┌──────────────────┐  ┌──────────────────┐            │
+│       │ • iPhone 16      │  │   iPhone 16 Pro  │             │
+│       │   iPhone 17      │  │   iPhone 15      │             │
+│       │   Pixel 9        │  │   Galaxy S25     │             │
+│       │   iPad           │  │   iPad Pro       │             │
+│       └──────────────────┘  └──────────────────┘            │
+│       iPhone 16 · 393×852 @3x                                │
+│                                                              │
+│   ( ) Custom     W [ 1280 ]   H [ 720 ]    DPI [ 1 ]         │
+│                                                              │
+│                                   [ Cancel ]   [ Apply ]     │
+╰──────────────────────────────────────────────────────────────╯
+```
+
+Each target maps to a native command — the modal issues exactly what a user
+could type:
+
+| Target | Native command issued |
+| --- | --- |
+| **Sync to pane** | `set viewport <paneCssW> <paneCssH> <displayDpr>`, re-issued (debounced ~200ms) on pane resize |
+| **Device** | `set device <name>` — the fixed registry only (`iPhone 15`, `iPhone 16`, `iPhone 16 Pro`, `iPhone 17`, `iPad`, `iPad Pro`, `Pixel 9`, `Galaxy S25`); bundles viewport + DPR + touch + mobile UA |
+| **Custom** | `set viewport <w> <h> <dpi>` |
+
+The device registry is fixed (no custom descriptors), and touch / mobile-UA are
+**only** available bundled inside `set device` — there is no standalone touch
+setting (verified against 0.27.0). So Sync/Custom are never touch; only Device
+is. The modal **reads the live viewport on open** and pre-selects accordingly:
+*Sync* if sync is engaged and matching, else the registry device whose
+dimensions match, else *Custom* pre-filled with the current dims. Like the
+indicator, the modal reflects reality rather than a stored intent.
+
+### Transparency with `dor ab set …`
+
+There is nothing extra to "expose" — **the modal *is* a GUI for native
+`agent-browser set`.** Device/Custom issue the same `set device` / `set
+viewport` a user runs as `dor ab set …`. Two issue paths converge on one
+session — the terminal's `dor ab` execs agent-browser directly; the webview
+modal goes through the host's `agentBrowserCommand` — and the daemon serializes
+them. Whichever wrote last, the `SYNCED`/`SCALED` indicator and the modal's
+pre-fill reflect it.
+
+**Sync is the one non-native concept.** agent-browser has no "follow the pane"
+mode; *Sync to pane* is a Dormouse behavior that auto-issues native `set
+viewport <pane>` and re-issues on resize. Coexistence is **last-writer-wins**:
+Dormouse tracks the viewport it last issued (`lastIssued`); when a frame reports
+a viewport matching neither `lastIssued` nor the current pane, an external setter
+(`dor ab set …`) intervened, so Dormouse **disengages sync** and the indicator
+falls to `SCALED`. (Evaluate this only when the pane size is stable and Dormouse
+has already issued for it, so a resize transient — a frame at the old size before
+the re-issue lands — is not mistaken for an external override.)
+
+> **Known limitation: there is currently no way to re-trigger sync from the
+> CLI.** Because sync is not an agent-browser concept, `dor ab` has no verb for
+> it; once an external `set` disengages sync, re-enabling it means reopening the
+> modal and choosing *Sync to pane*. (A Dormouse-reserved `dor ab` verb could add
+> this later, at the cost of the first non-passthrough subcommand.)
+
+### Mechanism, persistence, host capability
+
+- Modal and sync issue `set viewport` / `set device` through
+  `agentBrowserCommand`, whose allowlist includes `set` (alongside `tab`,
+  `close`).
+- The only Dormouse-side state worth persisting is **whether sync is engaged**;
+  device/custom viewports live in the agent-browser session itself and survive
+  reattach. On reattach Dormouse re-engages sync if it was engaged
+  (`session-types.ts`, `session-save.ts`).
+- Like tab actions, this inherits the `agentBrowserCommand` host capability: on
+  adapters that do not implement it (currently Tauri), modal-driven resizes are
+  inert and the control degrades accordingly. (`dor ab set …` from a terminal
+  still works there, since it execs agent-browser directly.)
 
 ## Lifecycle
 
@@ -269,10 +336,10 @@ host on the webview's behalf (a webview cannot spawn processes; see
 | --- | --- |
 | `dor ab` command (passthrough + `--key` intercept) | `dor/src/commands/agent-browser.ts` (new) |
 | Control method `surface.agentBrowser` request/response | `dor/src/commands/types.ts`, `dor/src/control-client.ts` (mirror `surface.iframe`, types.ts:109, control-client.ts:71) |
-| Surface component (canvas viewer + WS client + tab strip + screen-mode state / `set` issuance / pane-resize tracking) | `lib/src/components/wall/AgentBrowserPanel.tsx` |
-| Screen-mode indicator/control, right of the title (agent-browser surfaces only) | `lib/src/components/wall/SurfacePaneHeader.tsx` |
-| Command-mode `s` (cycle screen mode, gated to agent-browser surfaces) | `lib/src/components/wall/keyboard/handle-pane-shortcuts.ts` |
-| Per-surface screen-mode persistence | `lib/src/lib/session-types.ts`, `lib/src/lib/session-save.ts` |
+| Surface component (canvas viewer + WS client + tab strip + sync tracking / `set` issuance / SYNCED-SCALED derivation) | `lib/src/components/wall/AgentBrowserPanel.tsx` |
+| SYNCED/SCALED indicator right of the title; opens the screen modal (agent-browser surfaces only) | `lib/src/components/wall/SurfacePaneHeader.tsx` |
+| Screen modal (Sync / Device-registry / Custom; issues native `set …`) | `lib/src/components/wall/AgentBrowserScreenModal.tsx` (new) |
+| Per-surface "sync engaged" persistence | `lib/src/lib/session-types.ts`, `lib/src/lib/session-save.ts` |
 | Surface registration | `lib/src/components/Wall.tsx:339` (`'agent-browser': AgentBrowserPanel`) |
 | Control handler + key→session registry | `lib/src/components/Wall.tsx` (mirror the `surface.iframe` handler at Wall.tsx:1255) |
 | Host CLI runner (`agentBrowserCommand`) + VS Code stream relay | `lib/src/lib/platform/types.ts` (optional adapter methods), `vscode-ext/src/message-router.ts`, `vscode-ext/src/agent-browser-host.ts` |
