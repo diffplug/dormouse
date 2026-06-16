@@ -276,9 +276,16 @@ purely as a **change signal**:
 - Port discovery: `agent-browser --session <s> stream status --json` →
   `{ "port": <n>, ... }` ⇒ `ws://127.0.0.1:<n>`. Streaming is always enabled;
   `AGENT_BROWSER_STREAM_PORT` pins a port.
-- Each `{ "type": "frame", "metadata": { deviceWidth, deviceHeight, … } }`
-  message is a "page changed" **pulse** (and updates the live viewport for the
-  indicator and input mapping). The frame's own JPEG is **not** decoded/drawn.
+- Each `{ "type": "frame", … }` message is a "page changed" **pulse**. The
+  frame's own JPEG is **not** decoded/drawn — in fact it is **not even parsed**:
+  frames are the only large stream messages (a base64 JPEG, ~150–220 KB at
+  desktop sizes; an animating page streams ~13 MB/s of them at 1080p/60fps that
+  we'd otherwise `JSON.parse` and throw away), so we pulse on any message over a
+  size threshold and skip the parse + allocation. The live viewport (for the
+  indicator and input mapping) comes from the small `status` messages, which fire
+  whenever it changes. Frame size is fixed to the viewport — the screencast has
+  no resolution/fps knob (only `AGENT_BROWSER_STREAM_PORT`), and its rate is
+  ~60fps regardless of size, so there's nothing to shrink anyway.
 - On a pulse, capture a crisp frame via the host's `agentBrowserScreenshot`
   (`agent-browser screenshot`, which honors the session viewport/DPR — device
   resolution, e.g. 2560×1600 for a 1280×800@2 pane) and `drawImage` it to the

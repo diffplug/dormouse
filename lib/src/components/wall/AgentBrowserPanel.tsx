@@ -52,6 +52,15 @@ function dimsMatch(a: { w: number; h: number }, b: { w: number; h: number }): bo
   return Math.abs(a.w - b.w) <= DIM_TOLERANCE && Math.abs(a.h - b.h) <= DIM_TOLERANCE;
 }
 
+// Stream messages above this size are frames (a base64 JPEG — ~150–220 KB at
+// desktop sizes); `status`/`tabs` are well under 16 KB. We display screenshots,
+// not frames, so a frame's payload is discarded — there's no point paying
+// JSON.parse + a throwaway allocation for it (measured ~13 MB/s at 1080p/60fps
+// on an animating page). We pulse on the raw message and read the viewport from
+// the small `status` messages instead. Smaller messages still get parsed, so a
+// rare tiny-viewport frame falling under the cutoff still pulses correctly.
+const FRAME_PULSE_THRESHOLD = 16384;
+
 type StreamTab = {
   tabId: string;
   title: string | null;
@@ -531,7 +540,16 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
         failures = 0;
         setConnectionLost(false);
       };
-      ws.onmessage = (ev) => handleMessage(ev.data);
+      ws.onmessage = (ev) => {
+        // Fast-path discarded frames: any large message is a screencast frame
+        // whose pixels we don't display, so pulse without parsing the payload.
+        const data = ev.data;
+        if (screenshotCapableRef.current && typeof data === 'string' && data.length > FRAME_PULSE_THRESHOLD) {
+          screenshotLoop.pulse();
+          return;
+        }
+        handleMessage(data);
+      };
       ws.onclose = () => {
         wsRef.current = null;
         if (disposed) return;
