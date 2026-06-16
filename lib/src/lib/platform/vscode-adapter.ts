@@ -1,4 +1,4 @@
-import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
+import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserScreenshotResult, AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
 import { setDefaultShellOpts } from '../shell-defaults';
 import {
@@ -23,6 +23,15 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   constructor() {
     this.vscode = acquireVsCodeApi();
+
+    // These get called through detached references in the agent-browser panel
+    // (e.g. `getPlatform().agentBrowserScreenshot`), which would otherwise drop
+    // `this` and throw on the internal `requestResponse`. Bind them once so any
+    // call style is safe.
+    this.agentBrowserCommand = this.agentBrowserCommand.bind(this);
+    this.agentBrowserEdit = this.agentBrowserEdit.bind(this);
+    this.agentBrowserScreenshot = this.agentBrowserScreenshot.bind(this);
+    this.getAgentBrowserStreamUrl = this.getAgentBrowserStreamUrl.bind(this);
 
     // Seed the default shell from the extension-injected global so that
     // the first terminal on startup (which spawns synchronously on Wall
@@ -213,6 +222,44 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   runWorkbenchCommand(command: VSCodeWorkbenchCommand): void {
     this.vscode.postMessage({ type: 'dormouse:runWorkbenchCommand', command });
+  }
+
+  async agentBrowserCommand(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
+    const result = await this.requestResponse<AgentBrowserCommandResult>(
+      'agentBrowser:command', 'agentBrowser:commandResult', { session, args, binaryPath },
+      (msg) => ({ exitCode: msg.exitCode, stdout: msg.stdout, stderr: msg.stderr }),
+      10000,
+    );
+    return result ?? { exitCode: 1, stdout: '', stderr: 'agent-browser command timed out' };
+  }
+
+  async agentBrowserEdit(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult> {
+    const result = await this.requestResponse<AgentBrowserEditResult>(
+      'agentBrowser:edit', 'agentBrowser:editResult', { session, op, binaryPath },
+      (msg) => ({ ok: msg.ok, text: msg.text, error: msg.error }),
+      10000,
+    );
+    return result ?? { ok: false, error: 'agent-browser edit timed out' };
+  }
+
+  async agentBrowserScreenshot(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult> {
+    const result = await this.requestResponse<AgentBrowserScreenshotResult>(
+      'agentBrowser:screenshot', 'agentBrowser:screenshotResult',
+      { session, format: opts.format, quality: opts.quality, binaryPath },
+      (msg) => ({ ok: msg.ok, bytes: msg.bytes, mime: msg.mime, error: msg.error }),
+      10000,
+    );
+    return result ?? { ok: false, error: 'agent-browser screenshot timed out' };
+  }
+
+  getAgentBrowserStreamUrl(port: number): Promise<string | null> {
+    // The agent-browser stream server rejects vscode-webview:// origins, so
+    // the extension host relays the stream (see agent-browser-host.ts).
+    return this.requestResponse<string | null>(
+      'agentBrowser:getStreamUrl', 'agentBrowser:streamUrl', { port },
+      (msg) => msg.url,
+      5000,
+    );
   }
 
   onPtyData(handler: (detail: { id: string; data: string }) => void): void {

@@ -29,7 +29,14 @@ export function getWebviewHtml(
     `script-src 'nonce-${nonce}'`,
     `font-src ${webview.cspSource}`,
     `img-src ${webview.cspSource} data: blob:`,
-    `connect-src ${webview.cspSource}`,
+    // ws: entries cover the agent-browser stream relay (frames + input for
+    // browser surfaces; see docs/specs/dor-agent-browser.md).
+    `connect-src ${webview.cspSource} ws://127.0.0.1:* ws://localhost:*`,
+    // `dor iframe` opens arbitrary absolute http(s) URLs in an iframe surface.
+    // Without a frame-src override the `default-src 'none'` fallback blocks the
+    // frame outright, leaving a blank (white) pane. parseIframeUrl already
+    // constrains inputs to http:/https:.
+    `frame-src http: https:`,
   ].join('; ');
 
   html = html.replace(

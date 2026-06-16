@@ -6,6 +6,7 @@ import {
   type ApplicationText,
   type StricliProcess,
 } from '@stricli/core';
+import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
 import { ensureCommand } from './commands/ensure.js';
 import { iframeCommand } from './commands/iframe.js';
 import { killCommand } from './commands/kill.js';
@@ -27,6 +28,10 @@ import type {
 } from './commands/types.js';
 
 export type {
+  AgentBrowserExec,
+  AgentBrowserExecResult,
+  AgentBrowserSurfaceRequest,
+  AgentBrowserSurfaceResponse,
   CliEnv,
   CliOptions,
   CliResult,
@@ -64,6 +69,7 @@ const COMMANDS = [
   readCommand,
   killCommand,
   iframeCommand,
+  agentBrowserCommand,
   listPanesCommand,
   listPaneSurfacesCommand,
 ] as const satisfies readonly Command[];
@@ -76,6 +82,7 @@ const ROUTES = {
   read: readCommand.command,
   kill: killCommand.command,
   iframe: iframeCommand.command,
+  'agent-browser': agentBrowserCommand.command,
   'list-panes': listPanesCommand.command,
   'list-pane-surfaces': listPaneSurfacesCommand.command,
 };
@@ -122,7 +129,16 @@ interface CaptureProcess extends StricliProcess {
   };
 }
 
-export async function runCli(argv: string[], options: CliOptions = {}): Promise<CliResult> {
+export async function runCli(rawArgv: string[], options: CliOptions = {}): Promise<CliResult> {
+  const argv = normalizeAgentBrowserAlias(rawArgv);
+
+  // `dor ab <args...>` forwards args verbatim to agent-browser, so they must
+  // never reach stricli's flag parser. Only a bare `--help`/`-h` (or
+  // `dor help agent-browser`, normalized above) falls through to stricli.
+  if (argv[0] === 'agent-browser' && !isAgentBrowserHelpInvocation(argv)) {
+    return runAgentBrowserCli(argv.slice(1), options);
+  }
+
   const helpTarget = getHelpTarget(argv);
   const [commandName, ...args] = rewriteHelpArgv(argv);
 
@@ -145,6 +161,17 @@ export async function runCli(argv: string[], options: CliOptions = {}): Promise<
     stdout: applyHelpPatches(capture.stdout(), helpTarget),
     stderr: capture.stderr(),
   };
+}
+
+/** `ab` is the documented short alias for `agent-browser`, in any help form. */
+function normalizeAgentBrowserAlias(argv: string[]): string[] {
+  if (argv[0] === 'ab') return ['agent-browser', ...argv.slice(1)];
+  if (argv[0] === 'help' && argv[1] === 'ab') return ['help', 'agent-browser', ...argv.slice(2)];
+  return argv;
+}
+
+function isAgentBrowserHelpInvocation(argv: string[]): boolean {
+  return argv.length === 2 && (argv[1] === '--help' || argv[1] === '-h');
 }
 
 type HelpTarget =
