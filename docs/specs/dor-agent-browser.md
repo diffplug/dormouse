@@ -272,24 +272,184 @@ Surface lifetime and browser lifetime are bound, both directions:
   close`).
 - **Session dies externally → tear down the surface.** If the browser exits
   (crash, or a plain `agent-browser close` elsewhere), the stream reports
-  `connected: false`; the Wall removes or placeholders the surface.
+  `connected: false`; the Wall removes or placeholders the surface. (Exception:
+  while a surface is **popped out**, see below, the headed window closing is
+  expected and reverts the pane rather than tearing it down.)
+
+## Headed Pop-Out
+
+The headless + streamed-screenshot surface is the default everywhere: it is
+crisp, deterministic, and **uniformly portable** (no OS window, no positioning,
+no DPI/Wayland concerns; works identically on win/mac/linux, in VS Code, and on
+web). But streaming can't match a *real* window for hands-on interactivity —
+IME composition, file uploads, smooth scrolling, native editing chords,
+extensions, DevTools, native dialogs. **Pop-out** is the escape hatch: it
+relaunches the surface's browser **headed**, as an ordinary OS window the user
+drives directly. It is a deliberate, occasional mode, not the rendering path.
+
+Because Chrome's headed/headless choice is fixed at process launch (no live
+toggle — verified), pop-out is a **relaunch**, not a move. The design embraces
+that: the user interacts with the headed window natively, so Dormouse does
+**not** screencast it — the in-Dormouse pane becomes a stub. This sidesteps the
+headed-screencast, off-screen-occlusion, and window-tracking problems entirely.
+
+### Affordance
+
+A pop-out control (arrow icon) sits in the surface header's action cluster, on
+**agent-browser surfaces only** and only where the host can spawn a headed
+window (gated on a host capability; see below). Web hosts, which cannot spawn OS
+windows, omit it. Pop-out is **GUI-only** — like *Sync to pane*, it is a
+Dormouse behavior with no `agent-browser` equivalent, so it gets no `dor ab`
+verb.
+
+Because pop-out is destructive of live state (it relaunches the browser and, in
+v1, drops scroll/DOM/login — see below), the click is **confirmed the same way
+as kill**: a `randomKillChar()`-style overlay requires typing the shown
+character, so a stray click can't discard your live page (mirror `KillConfirm` /
+`KillConfirmOverlay`).
+
+### Identity-preserving relaunch
+
+Pop-out **keeps the session name** (`dormouse.<workspaceId>.<key>`); only the
+underlying Chrome process changes (now headed, new stream port). The
+key→`{session, surfaceId}` registry is untouched, so **`dor ab --key …`
+continues to drive the same surface transparently** — navigation and commands
+now land in the headed window. `dor ab open <url>` still navigates the active
+tab; it does not spawn one.
+
+### State carried across the relaunch
+
+Pop-out preserves **what it can**, and is honest that it is a *reload*, not a
+continuation:
+
+- **v1: the ordered list of tab URLs + which was active.** On relaunch the
+  headed window reopens each URL as a tab in the same order and focuses the
+  previously-active one.
+- **Lost (v1):** live DOM, scroll position, form inputs, `sessionStorage`,
+  in-memory JS/SPA route state — and, because agent-browser launches each Chrome
+  with an ephemeral temp profile, **cookies/login**. So a popped-out window
+  starts logged out unless/until profile persistence lands.
+- **Planned (profile spike):** persist cookies/storage via a stable
+  user-data-dir (or `agent-browser state save`/`load`) so logins survive the
+  relaunch — without it, pop-out is frustrating for authenticated sites, so this
+  is a known and wanted follow-up, not a maybe. v1 still ships URLs-only.
+
+### The pane while popped out
+
+The pane **stays open** and switches to a **clean placeholder** (no dimmed last
+frame):
+
+- Copy indicating the surface is open in a separate window.
+- A **"Bring to front"** action that best-effort raises/focuses the headed
+  window (may be unavailable on some platforms — see cross-platform).
+- A **"Pop back in"** action that closes the headed window, which triggers the
+  auto-revert below (relaunch headless, resume streaming, reopen the tabs) —
+  i.e. it is the same path as the user dismissing the window themselves.
+- Frame display, screenshot capture, input forwarding, the SYNCED/SCALED chip,
+  and the tab strip are all inert (you interact with the real window). But the
+  **stream WS stays connected** to keep observing `tabs`/`status`: we track the
+  **last non-empty tab list** (what to reopen on revert) and watch for
+  `connected: false` (the window ended).
+
+### Positioning
+
+Placement is **best-effort, one-time, and does not follow** (a separate OS
+window won't track the pane after spawn):
+
+- If the host can resolve the pane's screen rectangle, place the headed window's
+  **content area** over it (accounting for window chrome and the target
+  display's DPR).
+- Otherwise — **always in VS Code** (the sandboxed webview cannot read screen
+  coordinates) and **on Wayland** (clients cannot self-position) — fall back to
+  **centering on the current monitor**.
+
+### Window identity
+
+There is **no control tab** (it would only have been needed to distinguish the
+two close gestures, which the unified lifecycle below removes). Window identity
+is therefore best-effort: *Bring to front* raises the OS window via the host
+(by the session's process), not via an anchor tab. A Dormouse-flavored window
+title isn't guaranteed — a Chrome window's title follows its active tab — so it's
+a nice-to-have, not relied upon.
+
+### Lifecycle (pop-out)
+
+The headed window ending and the surface being disposed are **decoupled**: the
+only thing that tears a surface down is Dormouse's own kill. Everything else just
+moves the surface between headed and headless.
+
+- **The headed window ends** — by any gesture (window `×` / `⌘⇧W`, or closing
+  the last tab; without a control tab these are indistinguishable, and they
+  behave the same) → **auto-revert**: relaunch the session headless, resume
+  streaming in the pane, and reopen the **last non-empty tab list** in order. So
+  closing the final tab reopens *that* tab back in Dormouse; closing a
+  three-tab window reopens those three. The surface is never lost this way.
+  (The pane's *Pop back in* button takes this same path by closing the window
+  for you.)
+- **Kill the Dormouse pane / `dor kill`** → the only teardown: close the headed
+  window + session (the normal surface↔session binding). This is the way to
+  actually be done with the browser.
+- **Dormouse/editor quits** → headed windows must be cleaned up; no orphans
+  (agent-browser's daemon outlives the editor, so shutdown closes managed
+  sessions explicitly).
+
+### Host capability & cross-platform
+
+Pop-out needs host support beyond `agentBrowserCommand`: relaunching a session
+**headed** with window-position args, optionally **raising** a window, and
+optionally resolving the **pane→screen rectangle**. As with other host
+capabilities, adapters degrade rather than fail:
+
+| Host / platform | Spawn headed | Position over pane | Bring to front |
+| --- | --- | --- | --- |
+| Standalone (Tauri), macOS / Windows / Linux-X11 | yes | yes (best-effort) | yes |
+| Standalone, Linux-**Wayland** | yes | **no** → center | best-effort / maybe no |
+| VS Code (any OS) | yes | **no** → center (webview can't read screen coords) | best-effort |
+| Web | **no** (affordance hidden) | — | — |
+
+Windows adds per-monitor / fractional-DPI math for the pane→window mapping;
+macOS Retina works as tested; Wayland cannot self-position or reliably raise, so
+it always centers. The feature is therefore a **platform-gated enhancement**,
+never load-bearing — the streamed surface remains the portable baseline on every
+target.
 
 ## Channels
 
 Mirrors the validated `~/Documents/dev/agent-proto` prototype.
 
-### Frames (out)
+### Frames (out) — screenshot display, screencast-paced
 
-The webview connects directly to the session stream WebSocket and renders frames
-to a `<canvas>`:
+The stream's screencast is **CSS-resolution only**: Chromium's
+`Page.startScreencast` captures in DIP and has no deviceScaleFactor/scale knob,
+so on a HiDPI display its frames upscale to mush. (Verified against the CDP spec
+— screencast metadata is defined in DIP, `maxWidth/maxHeight` only *downscale* —
+and by probe: our own screencast at `deviceScaleFactor: 2` still returns 1×;
+only `Page.captureScreenshot` honors DPR. This is a Chromium limitation, not
+agent-browser's, so owning the CDP connection wouldn't change it.)
+
+So Dormouse **displays device-resolution screenshots** and uses the screencast
+purely as a **change signal**:
 
 - Port discovery: `agent-browser --session <s> stream status --json` →
   `{ "port": <n>, ... }` ⇒ `ws://127.0.0.1:<n>`. Streaming is always enabled;
   `AGENT_BROWSER_STREAM_PORT` pins a port.
-- Frame message: `{ "type": "frame", "data": "<base64 jpeg>", "metadata": {
-  deviceWidth, deviceHeight, pageScaleFactor, scrollOffsetX, scrollOffsetY, … } }`.
-  Decode → `drawImage`; map pointer coordinates through `metadata` device size vs
-  canvas size.
+- Each `{ "type": "frame", "metadata": { deviceWidth, deviceHeight, … } }`
+  message is a "page changed" **pulse** (and updates the live viewport for the
+  indicator and input mapping). The frame's own JPEG is **not** decoded/drawn.
+- On a pulse, capture a crisp frame via the host's `agentBrowserScreenshot`
+  (`agent-browser screenshot`, which honors the session viewport/DPR — device
+  resolution, e.g. 2560×1600 for a 1280×800@2 pane) and `drawImage` it to the
+  canvas.
+- **Backpressure (latest-only, self-throttling):** at most one screenshot in
+  flight; a pulse during a shot sets a `dirty` flag (no queue — bursts collapse
+  to one follow-up, latest wins); a sequence guard drops out-of-order decodes;
+  the next shot waits ~1.5× the measured (EWMA) capture time since the last
+  start (≈⅔ duty), with a floor against tight loops. A static page produces no
+  pulses, hence no shots and no cost. (~17 fps JPEG q85 on an M-series Mac.)
+- **Fallback:** on hosts without `agentBrowserScreenshot` (e.g. Tauri today),
+  render the CSS-resolution screencast frame directly instead.
+- Pointer coordinates map through the pane rect vs `metadata` device size
+  (aspect-preserving; independent of the screenshot's pixel size).
 
 ### Input (in)
 
@@ -368,16 +528,26 @@ host on the webview's behalf (a webview cannot spawn processes; see
 
 ### Host capabilities
 
-Two narrow host capabilities back the surface, both optional on
-`PlatformAdapter` so hosts degrade gracefully:
+Narrow host capabilities back the surface, all optional on `PlatformAdapter` so
+hosts degrade gracefully:
 
 - **`agentBrowserCommand(session, args)`** — runs the user's agent-browser
   binary for tab actions (`tab <n>`, `tab close`, `tab new`), screen-mode
   resizing (`set viewport`, `set device`), and lifecycle (`close`). The host
-  validates `args[0]` against an allowlist (`tab`, `set`, `close`); this is not
-  a general exec channel.
+  validates `args[0]` against an allowlist (`tab`, `set`, `screenshot`,
+  `close`); this is not a general exec channel.
+- **`agentBrowserScreenshot(session, { format, quality })`** — captures one
+  device-resolution frame via `agent-browser screenshot` (which honors the
+  session DPR, unlike the screencast) and returns it base64. Drives the crisp
+  display path; absent ⇒ the panel falls back to rendering screencast frames.
+- **`agentBrowserEdit(session, op)`** — host-owned `eval` for the macOS editing
+  chords (select-all/copy/cut) the stream input path can't dispatch.
 - **`getAgentBrowserStreamUrl(port)`** — returns the WebSocket URL the webview
   should use for the session stream (see CSP/origin below).
+- **(Planned) headed pop-out** — relaunch a session headed with window-position
+  args, raise a window, and resolve the pane→screen rectangle (see Headed
+  Pop-Out). Platform-gated; degrades to center-on-monitor where positioning
+  isn't possible.
 
 ## VS Code Webview CSP and Stream Origin
 
