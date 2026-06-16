@@ -376,6 +376,30 @@ export function summarizeCommandLine(raw: string): string {
   return truncateCommandTitle(`${visibleTokens.join(' ')}${suffix}`);
 }
 
+/**
+ * The idempotency predicate for `dor ensure`: true when the pane is *currently
+ * running* `command` in `cwdPath`. It matches only while the command is live
+ * (`currentCommand` is set between commandStart and commandFinish) and only on
+ * the exact command line the shell reported via integration — never the
+ * summarized display label, and never a forked child. Panes with no reported
+ * command line (no shell integration) never match.
+ */
+export function surfaceRunsCommand(
+  state: TerminalPaneState,
+  command: string,
+  cwdPath: string,
+): boolean {
+  const run = state.currentCommand;
+  if (!run || run.rawCommandLine === null) return false;
+  if (run.rawCommandLine !== command) return false;
+  // Exact compare, matching the command half. The CLI sends a path.resolve'd cwd
+  // (trailing slashes, `..`, `.` already collapsed), so there's nothing further
+  // to normalize here — and trailing-slash trimming wouldn't address the real
+  // divergences (symlinks, case) anyway.
+  const runCwd = run.cwdAtStart?.path ?? state.cwd?.path;
+  return runCwd === cwdPath;
+}
+
 export function deriveFallbackCommandTitle(
   state?: TerminalPaneState | null,
   options: { shellName?: string } = {},

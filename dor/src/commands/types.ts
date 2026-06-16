@@ -17,7 +17,6 @@ export interface Surface {
   focused: boolean;
   index: number;
   indexInPane: number;
-  requestedWorkingDirectory: string | null;
   selectedInPane: boolean;
 }
 
@@ -34,7 +33,8 @@ export interface ListSurfacesResponse {
 }
 
 export interface SplitSurfaceRequest {
-  command?: string;
+  /** Raw argv for the initial command; the host quotes it for the target shell. */
+  command?: string[];
   direction: SplitDirection;
   minimized: boolean;
   surface?: string;
@@ -50,18 +50,20 @@ export interface SplitSurfaceResponse {
 }
 
 export interface EnsureSurfaceRequest {
-  command: string;
+  /** Raw argv for the command; the host quotes it for the target shell. */
+  command: string[];
   minimized: boolean;
   surface?: string;
-  title?: string;
+  /** Working directory for matching and for the new command; part of the idempotency key. */
+  cwd: string;
 }
 
 export interface EnsureSurfaceResponse {
   status: 'created' | 'existing';
   surfaceId?: string;
   surfaceRef: string;
-  title: string;
   command: string;
+  cwd: string;
   minimized: boolean;
 }
 

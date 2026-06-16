@@ -7,7 +7,7 @@ import type {
   IframeSurfaceResponse,
 } from './types.js';
 import {
-  resolveControlClient,
+  requireControlClient,
   stringParser,
   writeStdout,
 } from './shared.js';
@@ -64,11 +64,11 @@ JSON output:
 };
 
 async function runIframeCommand(this: DorCommandContext, flags: IframeFlags, url: string): Promise<void | Error> {
-  const clientResult = resolveControlClient(this.options);
-  if (!clientResult.ok) return new Error(clientResult.message);
+  const client = requireControlClient(this.options);
+  if (client instanceof Error) return client;
 
   try {
-    const response = await clientResult.value.iframeSurface({
+    const response = await client.iframeSurface({
       minimized: flags.minimize === true,
       surface: flags.surface,
       url,

@@ -27,7 +27,7 @@ import type {
   DorCommandContext,
   ParseResult,
 } from './types.js';
-import { fail, resolveControlClient, stringParser } from './shared.js';
+import { fail, requireControlClient, stringParser } from './shared.js';
 
 /** Hardcoded until Dormouse exposes real workspaces; encoded now to avoid a rename. */
 const WORKSPACE_ID = '1';
@@ -172,10 +172,10 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
 
   let stderrSuffix = '';
   if (shouldManageSurface(result.exitCode, rest)) {
-    const clientResult = resolveControlClient(options);
+    const client = requireControlClient(options);
     // Outside a Dormouse terminal there is no control endpoint; stay a pure
     // passthrough rather than nagging about the missing surface.
-    if (clientResult.ok) {
+    if (!(client instanceof Error)) {
       try {
         const status = await exec(binary, ['--session', session, 'stream', 'status', '--json']);
         const wsPort = parseStreamPort(status.stdout);
@@ -184,7 +184,7 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
         // absolute path here, where the user's environment is authoritative,
         // and pass it along for host-side tab/close commands.
         const binaryPath = resolveBinaryPath(binary, env);
-        await clientResult.value.agentBrowserSurface({
+        await client.agentBrowserSurface({
           key,
           session,
           wsPort,

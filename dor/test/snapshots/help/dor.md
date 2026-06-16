@@ -5,7 +5,7 @@ Invocation: `dor --help`
 ```text
 USAGE
   dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref|index] [-- <command>...]
-  dor ensure [--json] [--minimize] [--surface id|ref|index] [--title value] -- <command>...
+  dor ensure [--json] [--minimize] [--surface id|ref|index] [--cwd path] -- <command>...
   dor version
   dor send [--key value] [--raw] [--sequence json] [--stdin] [--surface id|ref|index] [--text value] [<text>]
   dor read [--json] [--lines count] [--scrollback] [--surface id|ref|index]
@@ -24,7 +24,7 @@ FLAGS
 
 COMMANDS
   split               Create a new terminal surface by splitting an existing surface.
-  ensure              Ensure one surface exists for a user-enforced title.
+  ensure              Ensure one surface is running a command.
   version             Print the dor CLI version.
   send                Send text or key input to a terminal surface.
   read                Read terminal text from a surface.

@@ -38,9 +38,14 @@ declare module 'node:fs' {
   export function existsSync(path: string): boolean;
 }
 
+declare module 'node:path' {
+  export function resolve(...segments: string[]): string;
+}
+
 declare const process: {
   platform: string;
   ppid: number;
+  cwd(): string;
 };
 
 declare function setTimeout(callback: () => void, ms?: number): number;

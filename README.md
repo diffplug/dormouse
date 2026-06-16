@@ -10,7 +10,7 @@
 
 ## Features
 
-- **Automatic completion detection.** Detect when an agent needs your attention with standard terminal .,mn,.mn.,mnWhen a pane goes quiet for two seconds, it's marked done. Works with builds, AI agents, scripts, anything.
+- **Automatic completion detection.** Detect when an agent needs your attention. When a pane goes quiet for two seconds, it's marked done. Works with builds, AI agents, scripts, anything.
 - **tmux-compatible keybindings.** Same prefix, same splits, same pane navigation. Muscle memory transfers.
 - **Full mouse support.** Click to split, drag to resize, scroll to navigate. Or stay on the keyboard.
 - **Copy-paste that works.** Click and drag selects text the way you'd expect, even in mouse-aware TUIs that normally swallow it as escape codes.

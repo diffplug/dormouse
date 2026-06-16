@@ -7,7 +7,7 @@ import type {
   ReadSurfaceResponse,
 } from './types.js';
 import {
-  resolveControlClient,
+  requireControlClient,
   stringParser,
   writeStdout,
 } from './shared.js';
@@ -51,11 +51,11 @@ JSON output:
 };
 
 async function runReadCommand(this: DorCommandContext, flags: ReadFlags): Promise<void | Error> {
-  const clientResult = resolveControlClient(this.options);
-  if (!clientResult.ok) return new Error(clientResult.message);
+  const client = requireControlClient(this.options);
+  if (client instanceof Error) return client;
 
   try {
-    const response = await clientResult.value.readSurface({
+    const response = await client.readSurface({
       ...(flags.lines !== undefined ? { lines: flags.lines } : {}),
       scrollback: flags.scrollback === true,
       surface: flags.surface,
@@ -85,5 +85,7 @@ function renderReadResponse(response: ReadSurfaceResponse, json: boolean): strin
     }, null, 2)}\n`;
   }
 
-  return response.text;
+  // Terminal text comes back with trailing newlines stripped; re-add one so the
+  // next shell prompt starts on its own line, matching the JSON branch.
+  return `${response.text}\n`;
 }

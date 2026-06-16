@@ -26,7 +26,6 @@ import {
   isUntouched,
   getOrCreateTerminal,
   getTerminalInstance,
-  isReservedUserTitle,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
   type SessionStatus,
@@ -36,6 +35,7 @@ import {
   createTerminalPaneState,
   deriveHeader,
   resolveDisplayPrimary,
+  surfaceRunsCommand,
 } from '../lib/terminal-state';
 import { orchestrateKill } from '../lib/kill-animation';
 import { getPlatform, PLATFORM_STRING } from '../lib/platform';
@@ -47,6 +47,7 @@ import type {
   ParseResult,
   SurfaceType as DorSurfaceType,
 } from 'dor/commands/types';
+import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import { findReattachNeighbor } from '../lib/spatial-nav';
 import { cloneLayout, getLayoutStructureSignature } from '../lib/layout-snapshot';
 import type { PersistedDoor } from '../lib/session-types';
@@ -94,6 +95,7 @@ type ShellSpawnNoticeState = {
 type DorControlParams = {
   command?: unknown;
   confirmation?: unknown;
+  cwd?: unknown;
   direction?: unknown;
   input?: unknown;
   inputCount?: unknown;
@@ -104,7 +106,6 @@ type DorControlParams = {
   pane?: string;
   session?: unknown;
   surface?: unknown;
-  title?: unknown;
   url?: unknown;
   workspace?: string;
   window?: string;
@@ -221,6 +222,11 @@ function booleanParam(value: unknown): boolean {
   return value === true;
 }
 
+function stringArrayParam(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) return undefined;
+  return value;
+}
+
 function numberParam(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
@@ -231,19 +237,23 @@ function limitLines(text: string, lines: number | undefined): string {
   return parts.slice(-lines).join('\n');
 }
 
-function readVisibleSurfaceText(surfaceId: string, lines: number | undefined): string {
+function readSurfaceText(surfaceId: string, lines: number | undefined, scrollback: boolean): string {
   const terminal = getTerminalInstance(surfaceId);
   if (!terminal) return '';
 
+  // Read rendered text straight off the xterm buffer so both modes return clean,
+  // ANSI-free lines and `--lines` trims by rendered line consistently. With
+  // scrollback we walk the whole buffer (history + screen); otherwise just the
+  // visible screen, which sits at `baseY..length`.
   const buffer = terminal.buffer.active;
-  const start = Math.max(0, buffer.viewportY);
-  const end = start + terminal.rows;
-  const visibleLines: string[] = [];
+  const start = scrollback ? 0 : Math.max(0, buffer.baseY);
+  const end = buffer.length;
+  const collected: string[] = [];
   for (let row = start; row < end; row += 1) {
-    visibleLines.push(buffer.getLine(row)?.translateToString(true) ?? '');
+    collected.push(buffer.getLine(row)?.translateToString(true) ?? '');
   }
 
-  return limitLines(visibleLines.join('\n').replace(/\n+$/, ''), lines);
+  return limitLines(collected.join('\n').replace(/\n+$/, ''), lines);
 }
 
 function killConfirmationParam(value: unknown): { mode: 'if-read'; text: string } | { mode: 'dangerously' } | null {
@@ -283,33 +293,27 @@ function spawnDirectionForDockview(direction: DockviewSplitDirection): SpawnDire
   return direction === 'above' || direction === 'below' ? 'top' : 'left';
 }
 
-function titleFromCommand(command: string): string {
-  return command.trim().replace(/\s+/g, ' ');
+/**
+ * Quote a raw argv into a single command string for the target pane's shell.
+ * This is the one place the command is quoted; the CLI sends argv unquoted
+ * precisely because only the webview knows which shell will run it.
+ */
+function dorCommandString(args: string[] | undefined): string | undefined {
+  if (!args || args.join('').trim() === '') return undefined;
+  const shell = getDefaultShellOpts()?.shell;
+  return buildShellCommandForKind(shellCommandKind(shell, PLATFORM_STRING), args);
 }
 
-function validateUserTitle(title: string): string | null {
-  const trimmed = title.trim();
-  if (!trimmed) return 'title cannot be empty';
-  if (isReservedUserTitle(trimmed)) return 'title is reserved';
-  return null;
-}
-
-function hostLooksWindows(): boolean {
-  return /win/i.test(PLATFORM_STRING);
-}
-
+/** Wrap an already-quoted command string in the target shell's launch flags. */
 function commandShellArgs(shell: string | undefined, command: string): string[] {
-  const normalizedShell = (shell ?? '').replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? '';
-  if (!normalizedShell && hostLooksWindows()) {
-    return ['/d', '/s', '/c', command];
+  switch (shellCommandKind(shell, PLATFORM_STRING)) {
+    case 'cmd':
+      return ['/d', '/s', '/c', command];
+    case 'powershell':
+      return ['-NoLogo', '-NoProfile', '-Command', command];
+    case 'posix':
+      return ['-lc', command];
   }
-  if (normalizedShell === 'cmd.exe' || normalizedShell === 'cmd') {
-    return ['/d', '/s', '/c', command];
-  }
-  if (normalizedShell === 'powershell.exe' || normalizedShell === 'powershell' || normalizedShell === 'pwsh.exe' || normalizedShell === 'pwsh') {
-    return ['-NoLogo', '-NoProfile', '-Command', command];
-  }
-  return ['-lc', command];
 }
 
 function ShellSpawnNotice({
@@ -814,12 +818,12 @@ export function Wall({
     return { ok: false, message: `surface '${resolvedTarget}' was not found` };
   }, [buildDorSurfaces]);
 
-  const findSurfaceIdByUserTitle = useCallback((title: string): string | null => {
+  const findSurfaceIdRunningCommand = useCallback((command: string, cwdPath: string): string | null => {
     const ids = [
       ...(apiRef.current?.panels.map((panel) => panel.id) ?? []),
       ...doorsRef.current.map((door) => door.id),
     ];
-    return ids.find((id) => getTerminalPaneState(id).titleCandidates.user?.title.trim() === title) ?? null;
+    return ids.find((id) => surfaceRunsCommand(getTerminalPaneState(id), command, cwdPath)) ?? null;
   }, []);
 
   const createSplitSurface = useCallback(({
@@ -827,13 +831,13 @@ export function Wall({
     direction,
     minimized,
     referenceId,
-    title,
+    cwd,
   }: {
     command?: string;
     direction: DorResolvedSplitDirection;
     minimized: boolean;
     referenceId: string;
-    title?: string;
+    cwd?: string;
   }): ParseResult<{
     id: string;
     ref: string;
@@ -843,36 +847,27 @@ export function Wall({
     const referencePanel = api.getPanel(referenceId);
     if (!referencePanel) return { ok: false, message: `surface '${referenceId}' is not visible` };
 
-    if (title) {
-      const titleError = validateUserTitle(title);
-      if (titleError) return { ok: false, message: titleError };
-    }
-
     const newId = generatePaneId();
     const defaults = getDefaultShellOpts();
+    // An explicit cwd (dor ensure --cwd, defaulting to the caller's directory)
+    // wins; otherwise inherit the reference pane's local cwd as dor split does.
     const sourceCwd = getTerminalPaneState(referencePanel.id).cwd;
-    const inheritedCwd = sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined;
+    const inheritedCwd = cwd ?? (sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined);
 
     if (command) {
       setPendingShellOpts(newId, {
         shell: defaults?.shell,
         args: commandShellArgs(defaults?.shell, command),
         cwd: inheritedCwd,
-        title,
         untouched: false,
+        command,
       });
-    } else if (defaults?.shell || inheritedCwd || title) {
+    } else if (defaults?.shell || inheritedCwd) {
       setPendingShellOpts(newId, {
         shell: defaults?.shell,
         args: defaults?.args,
         cwd: inheritedCwd,
-        title,
       });
-    }
-
-    if (title) {
-      const result = setTerminalUserTitle(newId, title);
-      if (!result.accepted) return { ok: false, message: `title is ${result.reason}` };
     }
 
     const dockDirection = dockviewDirectionForDor(direction);
@@ -881,11 +876,10 @@ export function Wall({
       id: newId,
       component: 'terminal',
       tabComponent: 'terminal',
-      title: title ?? UNNAMED_PANEL_TITLE,
+      title: UNNAMED_PANEL_TITLE,
       position: { referencePanel: referencePanel.id, direction: dockDirection },
     });
     selectPane(newId);
-    if (title) api.getPanel(newId)?.api.setTitle(title);
     onEventRef.current?.({
       type: 'split',
       direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
@@ -1115,8 +1109,7 @@ export function Wall({
         const direction = directionParam === 'auto'
           ? dorDirectionForDockview(pickSplitDirection(resolved.panel))
           : directionParam;
-        const rawCommand = stringParam(params.command);
-        const command = rawCommand?.trim() || undefined;
+        const command = dorCommandString(stringArrayParam(params.command));
         if (params.command !== undefined && !command) {
           detail.respond({ ok: false, error: 'command cannot be empty' });
           return;
@@ -1146,18 +1139,17 @@ export function Wall({
       }
 
       if (detail.method === 'surface.ensure') {
-        const command = stringParam(params.command)?.trim();
+        const command = dorCommandString(stringArrayParam(params.command));
         if (!command) {
           detail.respond({ ok: false, error: 'command cannot be empty' });
           return;
         }
-        const title = (stringParam(params.title)?.trim() || titleFromCommand(command));
-        const titleError = validateUserTitle(title);
-        if (titleError) {
-          detail.respond({ ok: false, error: titleError });
+        const cwd = stringParam(params.cwd)?.trim();
+        if (!cwd) {
+          detail.respond({ ok: false, error: 'cwd is required' });
           return;
         }
-        const existingId = findSurfaceIdByUserTitle(title);
+        const existingId = findSurfaceIdRunningCommand(command, cwd);
         if (existingId) {
           detail.respond({
             ok: true,
@@ -1165,8 +1157,8 @@ export function Wall({
               status: 'existing',
               surfaceId: existingId,
               surfaceRef: surfaceRefForId(existingId),
-              title,
               command,
+              cwd,
               minimized: doorsRef.current.some((door) => door.id === existingId),
             },
           });
@@ -1180,7 +1172,7 @@ export function Wall({
           direction,
           minimized: booleanParam(params.minimized),
           referenceId: resolved.target.id,
-          title,
+          cwd,
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });
@@ -1192,8 +1184,8 @@ export function Wall({
             status: 'created',
             surfaceId: result.value.id,
             surfaceRef: result.value.ref,
-            title,
             command,
+            cwd,
             minimized: booleanParam(params.minimized),
           },
         });
@@ -1240,9 +1232,7 @@ export function Wall({
         }
         const lines = numberParam(params.lines);
         const scrollback = booleanParam(params.scrollback);
-        const text = scrollback
-          ? limitLines((await getPlatform().getScrollback(target.value.id)) ?? '', lines)
-          : readVisibleSurfaceText(target.value.id, lines);
+        const text = readSurfaceText(target.value.id, lines, scrollback);
         detail.respond({
           ok: true,
           result: {
@@ -1272,7 +1262,7 @@ export function Wall({
           return;
         }
         if (confirmation.mode === 'if-read') {
-          const text = readVisibleSurfaceText(target.value.id, undefined);
+          const text = readSurfaceText(target.value.id, undefined, false);
           if (!text.includes(confirmation.text)) {
             detail.respond({ ok: false, error: `surface '${target.value.ref}' read text did not contain confirmation text` });
             return;
@@ -1405,7 +1395,7 @@ export function Wall({
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdByUserTitle, killPaneImmediately, resolveVisibleSurface, surfaceRefForId]);
+  }, [buildDorSurfaces, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, resolveVisibleSurface, surfaceRefForId]);
 
   const addSplitPanel = useCallback((
     id: string | null,

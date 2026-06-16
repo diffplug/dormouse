@@ -10,8 +10,16 @@ import type {
 
 export const stringParser = (input: string): string => input;
 
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function fail(message: string): CliResult {
   return { exitCode: 1, stdout: '', stderr: `Error: ${message}\n` };
+}
+
+export function renderJson(payload: unknown): string {
+  return `${JSON.stringify(payload, null, 2)}\n`;
 }
 
 export function isIdFormat(value: string): value is IdFormat {
@@ -23,7 +31,7 @@ export function parseIdFormat(value: string): IdFormat {
   throw new SyntaxError(`invalid --id-format '${value}'`);
 }
 
-export function resolveControlClient(options: CliOptions): ParseResult<ControlClient> {
+function resolveControlClient(options: CliOptions): ParseResult<ControlClient> {
   if (options.client) return { ok: true, value: options.client };
 
   const env = options.env ?? {};
@@ -41,6 +49,11 @@ export function resolveControlClient(options: CliOptions): ParseResult<ControlCl
       surfaceId: env.DORMOUSE_SURFACE_ID,
     }),
   };
+}
+
+export function requireControlClient(options: CliOptions): ControlClient | Error {
+  const result = resolveControlClient(options);
+  return result.ok ? result.value : new Error(result.message);
 }
 
 export function renderHandle(handle: { ref: string; id: string }, idFormat: IdFormat): string {

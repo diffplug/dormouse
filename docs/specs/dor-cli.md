@@ -190,12 +190,14 @@ Implemented commands call private `surface.*` control methods. `surface.list`
 derives its response from current Dockview panels plus terminal state/activity
 snapshots where available, then returns `workspace:1` and `window:1`.
 
-Command tails captured after `--` are quoted by `dor` before the private control
-request is sent. `dor` detects the invoking shell from its parent process when
-possible, falls back to shell environment variables, and assumes the target
-surface will use the same shell family. The quoted command string is sent as
-`command`, so output, JSON responses, default `ensure` titles, and the launched
-command all show the same debuggable text.
+Command tails captured after `--` are sent as raw argv arrays (`command:
+string[]`); the host — not `dor` — quotes them for the target shell. `dor`
+cannot know which shell the target surface runs, so it forwards argv unquoted
+and the host (`lib/src/components/Wall.tsx`, `dorCommandString`) detects the
+target shell, picks a quoting style with
+[`shellCommandKind` / `buildShellCommandForKind`](../../dor/src/commands/shell-quote.ts)
+(`cmd` / `posix` / `powershell`), and renders a single command string used for
+output, JSON responses, default `ensure` titles, and the launched command alike.
 
 User-facing command docs live in the generated help snapshots. Implementation
 details live in the command files. When `stricli` cannot express a desired

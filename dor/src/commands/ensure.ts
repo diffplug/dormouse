@@ -1,23 +1,26 @@
-/** Private `surface.ensure` wiring for title-based idempotency. */
+/** Private `surface.ensure` wiring for command+cwd idempotency. */
 
+import { resolve as resolvePath } from 'node:path';
 import { buildCommand } from '@stricli/core';
 import type {
+  CliEnv,
   Command,
   DorCommandContext,
   EnsureSurfaceResponse,
 } from './types.js';
 import {
-  resolveControlClient,
+  errorMessage,
+  renderJson,
+  requireControlClient,
   stringParser,
   writeStdout,
 } from './shared.js';
-import { buildShellCommand } from './shell-command.js';
 
 interface EnsureFlags {
   readonly json?: boolean;
   readonly minimize?: boolean;
   readonly surface?: string;
-  readonly title?: string;
+  readonly cwd?: string;
 }
 
 export const ensureCommand: Command = {
@@ -26,15 +29,15 @@ export const ensureCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--surface id|ref|index] [--title value]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--surface id|ref|index] [--title value] -- <command>...\n',
+        '  dor ensure [--json] [--minimize] [--surface id|ref|index] [--cwd path]<TO-EOL>',
+        '  dor ensure [--json] [--minimize] [--surface id|ref|index] [--cwd path] -- <command>...\n',
       ],
     },
     {
       scope: 'command-usage',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--surface id|ref|index] [--title value]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--surface id|ref|index] [--title value] -- <command>...\n',
+        '  dor ensure [--json] [--minimize] [--surface id|ref|index] [--cwd path]<TO-EOL>',
+        '  dor ensure [--json] [--minimize] [--surface id|ref|index] [--cwd path] -- <command>...\n',
       ],
     },
     {
@@ -44,36 +47,32 @@ export const ensureCommand: Command = {
   ],
   command: buildCommand<EnsureFlags, string[], DorCommandContext>({
     docs: {
-      brief: 'Ensure one surface exists for a user-enforced title.',
-      fullDescription: `Ensures one surface exists in the current workspace for a user-enforced title. The idempotency key is always the user-enforced title.
+      brief: 'Ensure one surface is running a command.',
+      fullDescription: `Ensures one surface in the current workspace is running the given command at the given path. If it's already running, no-op. If it isn't, then it creates a split and runs the command.
 
-If --title is omitted, Dormouse derives the title from the command after --.
+Matching uses the command each shell reports it is running via Dormouse shell integration, not process inspection. This captures the typed command (\`npm run dev\`), not the forked child process (\`node .../vite\`), and works for shells the user started by hand as well as shells Dormouse started. The match is exact: \`npm run dev\` and \`npm run dev --host\` are different commands and get separate surfaces. Shells without the integration don't report their command, so ensure can't match them and starts a new surface every time.
 
-If a surface in the current workspace already has the enforced title, Dormouse returns that surface and does not start another command.
+A surface matches only while the command is live. Once the command exits and the shell returns to its prompt, the surface no longer matches; the next ensure causes a fresh split rather than reusing the idle shell. Minimized surfaces participate in matching. Closed/killed surfaces do not.
 
-If no surface has that enforced title, Dormouse creates a split, starts the command, marks the surface title as user-enforced, and returns the new surface.
+Two surfaces running the same command in different working directories are distinct (e.g. the same dev server in two worktrees). Both keep running; ensure never collapses them.
 
-A user-enforced title is visible in the UI and must not be overwritten by terminal title escape sequences from the running process.
-
-Matching uses Dormouse metadata, not process inspection. Minimized surfaces participate in matching. Closed/killed surfaces do not participate in matching.
+--cwd sets the working directory used both for matching and for the new command. If omitted, Dormouse uses the directory dor was invoked from. The path is resolved to an absolute path and matched exactly; symlinks are not resolved, so two routes to the same directory are treated as distinct.
 
 --minimize applies only when creating a new surface; it does not minimize an existing match.
 
 --surface selects the surface to split only when creating a new surface. If omitted, Dormouse uses the same caller/focused fallback as dor split.
 
-No workspace argument exists until Dormouse supports multiple workspaces.
-
 Text output:
-  created surface:3  "dev server"
-  existing surface:3  "dev server"
+  created surface:3  "npm run dev"
+  existing surface:3  "npm run dev"
 
 JSON output:
   {
     "status": "created",
     "surface_id": "pane-def",
     "surface_ref": "surface:3",
-    "title": "dev server",
-    "command": "pnpm dev:workspace",
+    "command": "npm run dev",
+    "cwd": "/Users/me/projects/site",
     "minimized": false
   }`,
     },
@@ -82,7 +81,7 @@ JSON output:
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'id|ref|index' },
-        title: { kind: 'parsed', parse: stringParser, brief: 'User-enforced surface title.', optional: true },
+        cwd: { kind: 'parsed', parse: stringParser, brief: 'Working directory for matching and for the new command.', optional: true, placeholder: 'path' },
       },
       positional: {
         kind: 'array',
@@ -95,47 +94,48 @@ JSON output:
 };
 
 async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...commandArgs: string[]): Promise<void | Error> {
-  const command = buildShellCommand(commandArgs, this.options.env);
-  if (!command) {
+  if (commandArgs.length === 0) {
     return new Error('dor ensure requires a command after --');
   }
 
-  let title = flags.title;
-  if (title !== undefined) {
-    title = title.trim();
-    if (title === '') {
-      return new Error('dor ensure --title must not be empty');
-    }
-  }
-
-  const clientResult = resolveControlClient(this.options);
-  if (!clientResult.ok) return new Error(clientResult.message);
+  const client = requireControlClient(this.options);
+  if (client instanceof Error) return client;
 
   try {
-    const response = await clientResult.value.ensureSurface({
-      command,
+    const response = await client.ensureSurface({
+      command: commandArgs,
       minimized: flags.minimize === true,
       surface: flags.surface,
-      title,
+      cwd: callerWorkingDirectory(flags.cwd, this.options.env),
     });
     writeStdout(this, renderEnsureResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
-    return new Error(error instanceof Error ? error.message : String(error));
+    return new Error(errorMessage(error));
   }
+}
+
+// The host has no idea where `dor` was launched, so the caller's directory must
+// travel in the request. Prefer the shell's PWD (injectable, matches what the
+// user sees) and fall back to the process cwd. resolvePath canonicalizes both
+// the default and a relative/absolute --cwd into one absolute path the host can
+// key on with an exact compare.
+function callerWorkingDirectory(flag: string | undefined, env: CliEnv | undefined): string {
+  const base = env?.PWD ?? process.cwd();
+  return resolvePath(base, flag ?? '.');
 }
 
 function renderEnsureResponse(response: EnsureSurfaceResponse, json: boolean): string {
   if (json) {
-    return `${JSON.stringify({
+    return renderJson({
       status: response.status,
       ...(response.surfaceId ? { surface_id: response.surfaceId } : {}),
       surface_ref: response.surfaceRef,
-      title: response.title,
       command: response.command,
+      cwd: response.cwd,
       minimized: response.minimized,
-    }, null, 2)}\n`;
+    });
   }
 
-  return `${response.status} ${response.surfaceRef}  ${JSON.stringify(response.title)}\n`;
+  return `${response.status} ${response.surfaceRef}  ${JSON.stringify(response.command)}\n`;
 }

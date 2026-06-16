@@ -32,10 +32,12 @@ import { getTerminalTheme, paintTerminalHost, startThemeObserver } from './termi
 import {
   ensureTerminalPaneState,
   fillTerminalProcessCwdByPtyId,
+  finishLaunchedCommandByPtyId,
   recordTerminalOutputByPtyId,
   recordTerminalUserInputByPtyId,
   removeTerminalPaneState,
   resetTerminalPaneState,
+  seedLaunchedCommand,
   seedPromptShapeFromScrollback,
   seedTerminalManualCwd,
   setTerminalUserTitle,
@@ -161,7 +163,11 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
     }
   };
   const handleExit = (detail: { id: string; exitCode: number }) => {
-    if (detail.id === id) terminal.write(`\r\n[Process exited with code ${detail.exitCode}]\r\n`);
+    if (detail.id !== id) return;
+    terminal.write(`\r\n[Process exited with code ${detail.exitCode}]\r\n`);
+    // The process is gone, so any command we seeded for this pane is no longer
+    // live; clear it so `dor ensure` stops matching a dead surface.
+    finishLaunchedCommandByPtyId(id, detail.exitCode);
   };
   platform.onPtyData(handleData);
   platform.onPtyExit(handleExit);
@@ -321,6 +327,9 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     args: shellOpts?.args,
     cwd: shellOpts?.cwd,
   });
+  if (shellOpts?.command) {
+    seedLaunchedCommand(id, shellOpts.command, shellOpts.cwd);
+  }
   seedProcessCwdAfterSpawn(id);
 
   return entry;
