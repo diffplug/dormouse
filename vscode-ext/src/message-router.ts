@@ -13,7 +13,7 @@ import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { PersistedSession } from '../../lib/src/lib/session-types';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
-import { ensureStreamRelayPort, runAgentBrowserCommand, runAgentBrowserEdit } from './agent-browser-host';
+import { ensureStreamRelayPort, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserScreenshot } from './agent-browser-host';
 import { log } from './log';
 
 const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
@@ -371,6 +371,17 @@ export function attachRouter(
         ).then((result) => {
           webview.postMessage({
             type: 'agentBrowser:editResult', requestId: msg.requestId, ...result,
+          } satisfies ExtensionMessage);
+        });
+        break;
+      case 'agentBrowser:screenshot':
+        runAgentBrowserScreenshot(
+          msg.session,
+          { format: msg.format, quality: msg.quality },
+          typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
+        ).then((result) => {
+          webview.postMessage({
+            type: 'agentBrowser:screenshotResult', requestId: msg.requestId, ...result,
           } satisfies ExtensionMessage);
         });
         break;

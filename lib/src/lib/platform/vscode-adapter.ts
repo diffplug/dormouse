@@ -1,4 +1,4 @@
-import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
+import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserScreenshotResult, AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
 import { setDefaultShellOpts } from '../shell-defaults';
 import {
@@ -23,6 +23,15 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   constructor() {
     this.vscode = acquireVsCodeApi();
+
+    // These get called through detached references in the agent-browser panel
+    // (e.g. `getPlatform().agentBrowserScreenshot`), which would otherwise drop
+    // `this` and throw on the internal `requestResponse`. Bind them once so any
+    // call style is safe.
+    this.agentBrowserCommand = this.agentBrowserCommand.bind(this);
+    this.agentBrowserEdit = this.agentBrowserEdit.bind(this);
+    this.agentBrowserScreenshot = this.agentBrowserScreenshot.bind(this);
+    this.getAgentBrowserStreamUrl = this.getAgentBrowserStreamUrl.bind(this);
 
     // Seed the default shell from the extension-injected global so that
     // the first terminal on startup (which spawns synchronously on Wall
@@ -231,6 +240,16 @@ export class VSCodeAdapter implements PlatformAdapter {
       10000,
     );
     return result ?? { ok: false, error: 'agent-browser edit timed out' };
+  }
+
+  async agentBrowserScreenshot(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult> {
+    const result = await this.requestResponse<AgentBrowserScreenshotResult>(
+      'agentBrowser:screenshot', 'agentBrowser:screenshotResult',
+      { session, format: opts.format, quality: opts.quality, binaryPath },
+      (msg) => ({ ok: msg.ok, dataBase64: msg.dataBase64, mime: msg.mime, error: msg.error }),
+      10000,
+    );
+    return result ?? { ok: false, error: 'agent-browser screenshot timed out' };
   }
 
   getAgentBrowserStreamUrl(port: number): Promise<string | null> {

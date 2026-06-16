@@ -20,6 +20,7 @@ export type WebviewMessage =
   | { type: 'dormouse:runWorkbenchCommand'; command: VSCodeWorkbenchCommand }
   | { type: 'agentBrowser:command'; session: string; args: string[]; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:edit'; session: string; op: 'selectAll' | 'copy' | 'cut'; binaryPath?: string; requestId: string }
+  | { type: 'agentBrowser:screenshot'; session: string; format?: 'jpeg' | 'png'; quality?: number; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:getStreamUrl'; port: number; requestId: string }
   | { type: 'dormouse:init' }
   | { type: 'dormouse:saveState'; state: unknown }
@@ -59,6 +60,7 @@ export type ExtensionMessage =
   | { type: 'clipboard:image'; path: string | null; requestId: string }
   | { type: 'agentBrowser:commandResult'; requestId: string; exitCode: number; stdout: string; stderr: string }
   | { type: 'agentBrowser:editResult'; requestId: string; ok: boolean; text?: string; error?: string }
+  | { type: 'agentBrowser:screenshotResult'; requestId: string; ok: boolean; dataBase64?: string; mime?: string; error?: string }
   | { type: 'agentBrowser:streamUrl'; requestId: string; url: string | null }
   | {
       type: 'dormouse:newTerminal';

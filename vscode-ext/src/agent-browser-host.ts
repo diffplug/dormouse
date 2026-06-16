@@ -17,10 +17,13 @@
  */
 import * as vscode from 'vscode';
 import * as net from 'net';
+import * as os from 'os';
+import * as path from 'path';
+import { promises as fs } from 'fs';
 import { spawn } from 'child_process';
 import { log } from './log';
 
-const ALLOWED_SUBCOMMANDS = new Set(['tab', 'set', 'close']);
+const ALLOWED_SUBCOMMANDS = new Set(['tab', 'set', 'screenshot', 'close']);
 
 export interface AgentBrowserCommandResult {
   exitCode: number;
@@ -33,6 +36,13 @@ export type AgentBrowserEditOp = 'selectAll' | 'copy' | 'cut';
 export interface AgentBrowserEditResult {
   ok: boolean;
   text?: string;
+  error?: string;
+}
+
+export interface AgentBrowserScreenshotResult {
+  ok: boolean;
+  dataBase64?: string;
+  mime?: string;
   error?: string;
 }
 
@@ -88,6 +98,47 @@ export async function runAgentBrowserEdit(session: string, op: AgentBrowserEditO
   // empty selection doesn't clobber what's already there.
   if (text) await vscode.env.clipboard.writeText(text);
   return { ok: true, text };
+}
+
+// Reused per session so we don't litter tmp with one file per frame; the panel
+// guarantees one screenshot in flight per surface, so overwriting is safe.
+function screenshotPath(session: string, ext: string): string {
+  const safe = session.replace(/[^A-Za-z0-9._-]/g, '_');
+  return path.join(os.tmpdir(), `dormouse-ab-shot-${safe}.${ext}`);
+}
+
+// Capture one device-resolution frame via the user's agent-browser `screenshot`
+// command (which honors the session's viewport/DPR, unlike the CSS-resolution
+// screencast) and return it base64-encoded. agent-browser writes a file and
+// reports the path; we read it back and hand the bytes to the webview.
+export async function runAgentBrowserScreenshot(
+  session: string,
+  opts: { format?: 'jpeg' | 'png'; quality?: number },
+  binaryPath?: string,
+): Promise<AgentBrowserScreenshotResult> {
+  if (typeof session !== 'string' || !session) {
+    return { ok: false, error: 'session is required' };
+  }
+  const format = opts.format === 'png' ? 'png' : 'jpeg';
+  const ext = format === 'png' ? 'png' : 'jpg';
+  const out = screenshotPath(session, ext);
+  const args = ['--session', session, 'screenshot', out, '--screenshot-format', format];
+  if (format === 'jpeg') {
+    const q = Number.isFinite(opts.quality) ? Math.min(100, Math.max(1, Math.round(opts.quality as number))) : 85;
+    args.push('--screenshot-quality', String(q));
+  }
+  const result = await runWithBinaryFallback(args, binaryPath);
+  if (result.exitCode !== 0) {
+    log.info(`[agent-browser] screenshot failed (exit ${result.exitCode}): ${result.stderr.trim() || result.stdout.trim()}`);
+    return { ok: false, error: result.stderr.trim() || `screenshot exited ${result.exitCode}` };
+  }
+  try {
+    const bytes = await fs.readFile(out);
+    return { ok: true, dataBase64: bytes.toString('base64'), mime: format === 'png' ? 'image/png' : 'image/jpeg' };
+  } catch (err) {
+    log.info(`[agent-browser] screenshot read failed: ${err instanceof Error ? err.message : String(err)}`);
+    return { ok: false, error: `could not read screenshot file: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }
 
 // The extension host's PATH is often the GUI login PATH (no nvm/volta shims),

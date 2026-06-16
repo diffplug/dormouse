@@ -42,8 +42,18 @@ export interface AgentBrowserCommandResult {
 
 /** Subcommands the host will run on the webview's behalf — this is a narrow
  * channel for tab actions, screen-mode resizing (`set viewport` / `set
- * device`), and session teardown, not a general exec path. */
-export const AGENT_BROWSER_ALLOWED_SUBCOMMANDS = ['tab', 'set', 'close'] as const;
+ * device`), HiDPI frame capture (`screenshot`), and session teardown, not a
+ * general exec path. */
+export const AGENT_BROWSER_ALLOWED_SUBCOMMANDS = ['tab', 'set', 'screenshot', 'close'] as const;
+
+export interface AgentBrowserScreenshotResult {
+  ok: boolean;
+  /** base64-encoded image bytes (no data: prefix); present iff ok. */
+  dataBase64?: string;
+  /** e.g. 'image/jpeg' | 'image/png'. */
+  mime?: string;
+  error?: string;
+}
 
 /** Native editing operations that the stream's input_keyboard path cannot
  * trigger on macOS (CDP drops the `commands` field — see
@@ -107,6 +117,14 @@ export interface PlatformAdapter {
   // for copy/cut, writes the result to the OS clipboard. Absent on hosts that
   // can't run the binary (degrades to plain key forwarding).
   agentBrowserEdit?(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult>;
+  // Captures a single device-resolution (HiDPI) frame via the user's
+  // agent-browser `screenshot` command and returns it base64-encoded. The
+  // stream's screencast is CSS-resolution only (a Chromium limitation —
+  // Page.startScreencast ignores deviceScaleFactor), so the panel displays
+  // these crisp screenshots instead, using stream frames only as change
+  // signals. Absent on hosts that can't run the binary (degrades to rendering
+  // the screencast frames directly).
+  agentBrowserScreenshot?(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult>;
   // The WebSocket URL for a session's stream port. Hosts whose webview origin
   // the agent-browser stream server rejects (VS Code) return a relay URL;
   // absent or null falls back to ws://127.0.0.1:<port>.

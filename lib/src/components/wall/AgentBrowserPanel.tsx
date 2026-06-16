@@ -190,6 +190,128 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   }, [session, binaryPath]);
   const runAgentBrowserRef = useRef(runAgentBrowser);
   runAgentBrowserRef.current = runAgentBrowser;
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const binaryPathRef = useRef(binaryPath);
+  binaryPathRef.current = binaryPath;
+
+  // --- display: crisp HiDPI screenshots, paced by stream-frame "pulses" ---
+  //
+  // The stream's screencast is CSS-resolution only (Chromium's
+  // Page.startScreencast ignores deviceScaleFactor — see the spec), so on a
+  // Retina display its frames upscale to mush. Instead we DISPLAY
+  // device-resolution screenshots (`agent-browser screenshot`, which honors the
+  // session DPR) and use the screencast frames purely as "the page changed"
+  // pulses telling us when to grab a fresh one.
+  //
+  // Backpressure (we only ever want the latest, and must slow down if capture
+  // can't keep up): at most one screenshot in flight; a pulse during a shot
+  // sets `dirty` (no queue — bursts collapse to one follow-up, latest wins);
+  // the next shot won't start until at least one shot-duration (adaptive EWMA)
+  // has passed since the last one began, so a slow capture self-throttles. A
+  // static page produces no pulses, so no shots and no cost.
+  const drawBitmap = useCallback((bitmap: ImageBitmap) => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      bitmap.close();
+      return;
+    }
+    if (canvas.width !== bitmap.width) canvas.width = bitmap.width;
+    if (canvas.height !== bitmap.height) canvas.height = bitmap.height;
+    canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    setHasFrame(true);
+  }, []);
+  const drawBitmapRef = useRef(drawBitmap);
+  drawBitmapRef.current = drawBitmap;
+
+  const screenshotCapableRef = useRef(false);
+  screenshotCapableRef.current = !!getPlatform().agentBrowserScreenshot && !!session;
+
+  const screenshotLoop = useMemo(() => {
+    let inFlight = false;
+    let dirty = false;
+    let seq = 0;
+    let lastStart = 0;
+    let avgMs = 120;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let disposed = false;
+
+    const display = (dataBase64: string, mime: string, mySeq: number) => {
+      const binary = atob(dataBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      createImageBitmap(new Blob([bytes], { type: mime })).then((bitmap) => {
+        // A newer shot landed first (or we're gone) — drop this one.
+        if (disposed || mySeq !== seq) {
+          bitmap.close();
+          return;
+        }
+        drawBitmapRef.current(bitmap);
+      }).catch((err) => console.warn(`[agent-browser] screenshot decode failed:`, err));
+    };
+
+    const take = () => {
+      // Call through the adapter instance — a detached method reference drops
+      // `this` and throws on its internal `requestResponse`.
+      const platform = getPlatform();
+      const sess = sessionRef.current;
+      if (!platform.agentBrowserScreenshot || !sess) return;
+      inFlight = true;
+      dirty = false;
+      const mySeq = ++seq;
+      lastStart = performance.now();
+      platform.agentBrowserScreenshot(sess, { format: 'jpeg', quality: 85 }, binaryPathRef.current).then((res) => {
+        avgMs = avgMs * 0.6 + (performance.now() - lastStart) * 0.4;
+        inFlight = false;
+        if (res.ok && res.dataBase64) display(res.dataBase64, res.mime || 'image/jpeg', mySeq);
+        else console.warn('[agent-browser] screenshot failed:', res.error ?? '(no data)');
+        if (dirty) schedule();
+      }).catch((err) => {
+        console.warn('[agent-browser] screenshot error:', err);
+        inFlight = false;
+        if (dirty) schedule();
+      });
+    };
+
+    const schedule = () => {
+      if (disposed) return;
+      if (inFlight) {
+        dirty = true;
+        return;
+      }
+      // Space shots to ~1.5× the measured capture time since the last START:
+      // the slower capture gets, the more we back off (≈⅔ duty cycle), and the
+      // 50ms floor stops a fast/cached/error return from spinning a tight loop.
+      const floor = Math.max(50, avgMs * 1.5);
+      const wait = lastStart + floor - performance.now();
+      if (wait > 0) {
+        dirty = true;
+        if (timer === undefined) {
+          timer = setTimeout(() => {
+            timer = undefined;
+            if (dirty && !inFlight) take();
+          }, wait);
+        }
+        return;
+      }
+      take();
+    };
+
+    return {
+      pulse: () => {
+        if (disposed || !screenshotCapableRef.current) return;
+        dirty = true;
+        schedule();
+      },
+      dispose: () => {
+        disposed = true;
+        if (timer !== undefined) clearTimeout(timer);
+      },
+    };
+  }, []);
+
+  useEffect(() => () => screenshotLoop.dispose(), [screenshotLoop]);
 
   // --- screen indicator (SYNCED/SCALED) + sync-to-pane ---
   //
@@ -326,10 +448,9 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let failures = 0;
 
-    const drawFrame = (data: string, metadata?: { deviceWidth?: number; deviceHeight?: number }) => {
-      if (metadata?.deviceWidth && metadata?.deviceHeight) {
-        deviceRef.current = { width: metadata.deviceWidth, height: metadata.deviceHeight };
-      }
+    // Fallback only (hosts without the screenshot capability, e.g. Tauri):
+    // render the CSS-resolution screencast frame directly.
+    const drawScreencastFrame = (data: string) => {
       const seq = ++frameSeqRef.current;
       const binary = atob(data);
       const bytes = new Uint8Array(binary.length);
@@ -340,21 +461,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
           bitmap.close();
           return;
         }
-        const canvas = canvasRef.current;
-        if (!canvas) {
-          bitmap.close();
-          return;
-        }
-        if (canvas.width !== bitmap.width) canvas.width = bitmap.width;
-        if (canvas.height !== bitmap.height) canvas.height = bitmap.height;
-        canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
-        bitmap.close();
-        setHasFrame(true);
-        // The frame just told us the browser's live viewport + DPR; reconcile
-        // sync and refresh the indicator. publishScreen self-gates, so this is
-        // cheap despite running every paint.
-        maybeDisengageSync();
-        publishScreen();
+        drawBitmapRef.current(bitmap);
       }).catch(() => {});
     };
 
@@ -367,7 +474,17 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
         return;
       }
       if (msg.type === 'frame' && typeof msg.data === 'string') {
-        drawFrame(msg.data, msg.metadata);
+        // The frame carries the browser's live viewport; update it, reconcile
+        // sync, and refresh the indicator (publishScreen self-gates). Then use
+        // the frame as a "page changed" pulse to grab a crisp screenshot — or,
+        // where the host can't screenshot, render the frame itself.
+        if (msg.metadata?.deviceWidth && msg.metadata?.deviceHeight) {
+          deviceRef.current = { width: msg.metadata.deviceWidth, height: msg.metadata.deviceHeight };
+        }
+        maybeDisengageSync();
+        publishScreen();
+        if (screenshotCapableRef.current) screenshotLoop.pulse();
+        else drawScreencastFrame(msg.data);
       } else if (msg.type === 'status') {
         setStatus({ connected: msg.connected === true, screencasting: msg.screencasting === true });
         if (msg.connected === false) setConnectionLost(true);
@@ -437,7 +554,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       wsRef.current = null;
       ws?.close();
     };
-  }, [wsPort, runAgentBrowser, maybeDisengageSync, publishScreen]);
+  }, [wsPort, runAgentBrowser, maybeDisengageSync, publishScreen, screenshotLoop]);
 
   // --- header title follows the active tab ---
 
