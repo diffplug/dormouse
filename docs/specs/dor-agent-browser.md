@@ -385,8 +385,9 @@ hosts degrade gracefully:
   `close`); this is not a general exec channel.
 - **`agentBrowserScreenshot(session, { format, quality })`** — captures one
   device-resolution frame via `agent-browser screenshot` (which honors the
-  session DPR, unlike the screencast) and returns it base64. Drives the crisp
-  display path; absent ⇒ the panel falls back to rendering screencast frames.
+  session DPR, unlike the screencast) and returns the raw bytes (a `Uint8Array`
+  over structured clone, no base64 round-trip). Drives the crisp display path;
+  absent ⇒ the panel falls back to rendering screencast frames.
 - **`agentBrowserEdit(session, op)`** — host-owned `eval` for the macOS editing
   chords (select-all/copy/cut) the stream input path can't dispatch.
 - **`getAgentBrowserStreamUrl(port)`** — returns the WebSocket URL the webview
@@ -406,8 +407,9 @@ WebSocket:
 connect-src ws://127.0.0.1:* ws://localhost:* <existing cspSource>
 ```
 
-The canvas is drawn from base64 data, so no `img-src` change is needed, and no
-`frame-src` is involved — there is no iframe.
+The canvas is drawn from in-memory image bytes (`createImageBitmap` over a
+`Blob`, never an `<img src>` to an external URL), so no `img-src` change is
+needed, and no `frame-src` is involved — there is no iframe.
 
 CSP alone is not enough in VS Code: the agent-browser stream server rejects
 WebSocket upgrades whose `Origin` is not localhost-or-absent (verified against

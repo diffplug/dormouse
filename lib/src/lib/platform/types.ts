@@ -119,7 +119,7 @@ export interface PlatformAdapter {
   // can't run the binary (degrades to plain key forwarding).
   agentBrowserEdit?(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult>;
   // Captures a single device-resolution (HiDPI) frame via the user's
-  // agent-browser `screenshot` command and returns it base64-encoded. The
+  // agent-browser `screenshot` command and returns the raw image bytes. The
   // stream's screencast is CSS-resolution only (a Chromium limitation —
   // Page.startScreencast ignores deviceScaleFactor), so the panel displays
   // these crisp screenshots instead, using stream frames only as change

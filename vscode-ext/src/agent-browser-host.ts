@@ -99,7 +99,7 @@ function screenshotPath(session: string, ext: string): string {
 
 // Capture one device-resolution frame via the user's agent-browser `screenshot`
 // command (which honors the session's viewport/DPR, unlike the CSS-resolution
-// screencast) and return it base64-encoded. agent-browser writes a file and
+// screencast) and return the raw image bytes. agent-browser writes a file and
 // reports the path; we read it back and hand the bytes to the webview.
 export async function runAgentBrowserScreenshot(
   session: string,
