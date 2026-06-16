@@ -5,8 +5,10 @@ import {
   releaseDevServerPort,
   requestDevServerPort,
   setDevServerResolution,
+  subscribeDevServerRescan,
   subscribeDevServerResolutions,
   subscribeWantedDevServerPorts,
+  triggerDevServerRescan,
 } from './agent-browser-ports';
 
 describe('dev-server port store', () => {
@@ -50,6 +52,26 @@ describe('dev-server port store', () => {
     expect(notify).toHaveBeenCalledTimes(2);
 
     unsubscribe();
+  });
+
+  it('notifies rescan subscribers without touching resolutions', () => {
+    requestDevServerPort(7000);
+    setDevServerResolution(7000, { paneId: 'pane-r', label: 'pnpm dev' });
+
+    const notify = vi.fn();
+    const unsubscribe = subscribeDevServerRescan(notify);
+
+    triggerDevServerRescan();
+    expect(notify).toHaveBeenCalledTimes(1);
+    // The signal is optimistic: the current match stays put until a rescan
+    // actually overwrites it.
+    expect(getDevServerResolution(7000)).toEqual({ paneId: 'pane-r', label: 'pnpm dev' });
+
+    unsubscribe();
+    triggerDevServerRescan();
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    releaseDevServerPort(7000);
   });
 
   it('clears a resolution once the last watcher releases the port', () => {

@@ -10,16 +10,17 @@
  *
  * This is **purely decorative and strictly off the hot path.** `getOpenPorts`
  * shells out (per-OS `lsof`/PowerShell) on the host that also drives the live
- * screencast, so a scan triggered the instant a tab opens would contend with
- * that tab's first screenshots. So resolution is:
+ * screencast, so scans must never pile onto tab-open or run on a timer forever:
  *   - **deferred & debounced** — a loopback URL appearing schedules a scan a
  *     beat later, coalescing rapid navigation, so tab-open finishes first;
  *   - **idle-scheduled** — the scan runs in `requestIdleCallback` time (with a
  *     timeout fallback), yielding to rendering and the screencast;
- *   - **adaptively paced** — it polls only while a loopback port is on screen,
- *     quickly while a port is still unmatched (a dev server may start after the
- *     tab), then backs off to a slow refresh once matched, and stops entirely
- *     when nothing is wanted.
+ *   - **scan once, then settle** — a matched port is remembered and never
+ *     rescanned; we only keep polling (slowly, at idle) while a wanted port is
+ *     still *unmatched* (a dev server may start after the tab opened);
+ *   - **re-validate on reload** — a surface reload (or navigating to a new
+ *     loopback port) un-settles and rescans, but optimistically: the current
+ *     chip stays until the rescan disagrees.
  * At most one scan is in flight (`running`), and `getOpenPorts`' own ~3s timeout
  * keeps a stuck pane from wedging the loop.
  */
@@ -29,11 +30,10 @@ import { getPlatform } from '../../lib/platform';
 import { getActivitySnapshot, getTerminalPaneStateSnapshot } from '../../lib/terminal-registry';
 import { buildAppTitleResolver, deriveHeader, resolveDisplayPrimary } from '../../lib/terminal-state';
 import {
-  getDevServerResolution,
   getWantedDevServerPorts,
   setDevServerResolution,
+  subscribeDevServerRescan,
   subscribeWantedDevServerPorts,
-  type DevServerMatch,
 } from './agent-browser-ports';
 import type { DooredItem } from './wall-types';
 
@@ -41,13 +41,12 @@ import type { DooredItem } from './wall-types';
 // initial screencast settle first and quick navigation coalesces into one scan.
 const DEBOUNCE_MS = 600;
 // Re-scan cadence while a wanted port has no match yet (server may be starting).
+// Once matched, a port is settled and not rescanned until reload/navigation.
 const PENDING_REFRESH_MS = 4000;
-// Re-scan cadence once every wanted port is matched (servers rarely move).
-const MATCHED_REFRESH_MS = 15000;
 // Upper bound on how long the idle scan may be deferred before it's forced.
 const IDLE_TIMEOUT_MS = 2000;
 
-type ResolveOutcome = 'busy' | 'empty' | 'pending' | 'matched';
+type ResolveOutcome = 'busy' | 'idle' | 'pending';
 
 function isTerminalParams(params: unknown): boolean {
   if (!params || typeof params !== 'object') return true;
@@ -94,6 +93,9 @@ export function useDevServerPortCorrelation({
     let debounceTimer: ReturnType<typeof setTimeout> | undefined;
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     let idleHandle: number | undefined;
+    // Ports already matched to a pane. We don't rescan these until a reload
+    // (clears the whole set) or the port leaves "wanted" (navigation).
+    const settled = new Set<number>();
 
     // Concise pane label (e.g. `pnpm dev`), mirroring buildDorSurfaces; falls
     // back to the panel/door title. Works for visible panes and minimized doors
@@ -112,15 +114,24 @@ export function useDevServerPortCorrelation({
 
     const resolveOnce = async (): Promise<ResolveOutcome> => {
       if (cancelled || running) return 'busy';
-      const ports = getWantedDevServerPorts();
-      if (ports.length === 0) return 'empty';
+
+      const wanted = getWantedDevServerPorts();
+      // Drop settled ports that are no longer on screen (navigated away).
+      for (const port of [...settled]) {
+        if (!wanted.includes(port)) settled.delete(port);
+      }
+      if (wanted.length === 0) return 'idle';
+
+      // Only chase ports we haven't matched yet — matched ones stay put.
+      const unsettled = wanted.filter((port) => !settled.has(port));
+      if (unsettled.length === 0) return 'idle';
 
       const platform = getPlatform();
       if (!platform.getOpenPorts) {
         // No port enumeration on this host (e.g. Tauri today): nothing will ever
-        // match, so settle to "no match" and pace as matched (no fast polling).
-        for (const port of ports) setDevServerResolution(port, null);
-        return 'matched';
+        // match, so settle to "no match" and stop (don't poll).
+        for (const port of unsettled) setDevServerResolution(port, null);
+        return 'idle';
       }
 
       running = true;
@@ -159,22 +170,25 @@ export function useDevServerPortCorrelation({
         }));
         if (cancelled) return 'busy';
 
-        // Resolve only what's still wanted — interest can churn during the await.
-        const stillWanted = getWantedDevServerPorts();
-        for (const port of stillWanted) {
+        // Resolve only what's still wanted + unsettled — interest can churn
+        // during the await.
+        const stillWanted = new Set(getWantedDevServerPorts());
+        for (const port of unsettled) {
+          if (!stillWanted.has(port)) continue;
           const list = owners.get(port) ?? [];
-          // Exactly one owner ⇒ confident match. Zero (no pane) or two+
-          // (ambiguous) ⇒ no match; the header degrades to just the URL.
-          const match: DevServerMatch | null = list.length === 1
-            ? { paneId: list[0], label: labelForPane(list[0], titles.get(list[0]) ?? null) }
-            : null;
-          setDevServerResolution(port, match);
+          // Exactly one owner ⇒ confident match; settle it. Zero (no pane) or
+          // two+ (ambiguous) ⇒ no match; leave it unsettled so we keep looking
+          // (e.g. the dev server is still starting up).
+          if (list.length === 1) {
+            settled.add(port);
+            setDevServerResolution(port, { paneId: list[0], label: labelForPane(list[0], titles.get(list[0]) ?? null) });
+          } else {
+            setDevServerResolution(port, null);
+          }
         }
 
-        if (stillWanted.length === 0) return 'empty';
-        // "pending" while any wanted port is still unmatched, so we keep looking
-        // (the server may not have started when the tab opened).
-        return stillWanted.every((port) => getDevServerResolution(port) != null) ? 'matched' : 'pending';
+        const remaining = getWantedDevServerPorts().some((port) => !settled.has(port));
+        return remaining ? 'pending' : 'idle';
       } finally {
         running = false;
       }
@@ -186,20 +200,21 @@ export function useDevServerPortCorrelation({
       refreshTimer = setTimeout(() => scheduleScan(0), delay);
     };
 
-    // Run a scan during idle time, then pace the next one by the outcome.
+    // Run a scan during idle time; keep polling only while ports are unmatched.
     const runIdleScan = () => {
       idleHandle = scheduleIdle(() => {
         idleHandle = undefined;
         void resolveOnce().then((outcome) => {
-          if (cancelled || outcome === 'busy') return; // an in-flight scan paces itself
-          if (outcome === 'empty') return;             // nothing wanted → wait for new interest
-          scheduleRefresh(outcome === 'pending' ? PENDING_REFRESH_MS : MATCHED_REFRESH_MS);
+          if (cancelled) return;
+          // 'busy' → an in-flight scan paces itself; 'idle' → all matched (or
+          // nothing wanted) so stop until reload/navigation wakes us.
+          if (outcome === 'pending') scheduleRefresh(PENDING_REFRESH_MS);
         });
       });
     };
 
     // Coalesce triggers: debounce, then scan at idle. Never scans synchronously
-    // on the triggering event (tab open / navigation).
+    // on the triggering event (tab open / navigation / reload).
     const scheduleScan = (delay: number) => {
       if (cancelled) return;
       if (debounceTimer) clearTimeout(debounceTimer);
@@ -210,7 +225,13 @@ export function useDevServerPortCorrelation({
 
     // A header showing a new loopback URL bumps "wanted"; debounce + defer so the
     // scan lands after the tab is up, not during its first paints.
-    const unsubscribe = subscribeWantedDevServerPorts(() => scheduleScan(DEBOUNCE_MS));
+    const unsubscribeWanted = subscribeWantedDevServerPorts(() => scheduleScan(DEBOUNCE_MS));
+    // A reload un-settles every port and re-validates — optimistically, since we
+    // leave the published resolutions in place until the rescan overwrites them.
+    const unsubscribeRescan = subscribeDevServerRescan(() => {
+      settled.clear();
+      scheduleScan(DEBOUNCE_MS);
+    });
     scheduleScan(DEBOUNCE_MS);
 
     return () => {
@@ -218,7 +239,8 @@ export function useDevServerPortCorrelation({
       if (debounceTimer) clearTimeout(debounceTimer);
       if (refreshTimer) clearTimeout(refreshTimer);
       cancelIdle(idleHandle);
-      unsubscribe();
+      unsubscribeWanted();
+      unsubscribeRescan();
     };
   }, [apiRef, doorsRef]);
 }

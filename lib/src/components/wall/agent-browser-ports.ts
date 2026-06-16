@@ -102,6 +102,24 @@ export function subscribeDevServerResolutions(listener: () => void): () => void 
   };
 }
 
+// --- reload re-validate signal ---
+//
+// Once a port is matched the Wall stops rescanning it (the serving pane rarely
+// moves). A surface reload asks the Wall to re-validate its ports — optimistically,
+// so the current chip stays put until the rescan actually disagrees.
+const rescanListeners = new Set<() => void>();
+
+export function triggerDevServerRescan(): void {
+  for (const listener of rescanListeners) listener();
+}
+
+export function subscribeDevServerRescan(listener: () => void): () => void {
+  rescanListeners.add(listener);
+  return () => {
+    rescanListeners.delete(listener);
+  };
+}
+
 /** Header hook: register interest in a loopback `port` (or none) and return the
  *  pane currently serving it, or null while unresolved / unmatched. */
 export function useDevServerMatch(port: number | null): DevServerMatch | null {

@@ -21,7 +21,7 @@ import {
   useAgentBrowserScreenSnapshot,
 } from './agent-browser-screen';
 import { loopbackPort } from './browser-url';
-import { useDevServerMatch } from './agent-browser-ports';
+import { triggerDevServerRescan, useDevServerMatch } from './agent-browser-ports';
 import {
   ModeContext,
   SelectedIdContext,
@@ -90,7 +90,7 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
             ><ArrowRightIcon size={14} /></HeaderActionButton>
             <HeaderActionButton
               className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-              onClick={(e) => { e.stopPropagation(); screen.chromeActions.reload(); }}
+              onClick={(e) => { e.stopPropagation(); screen.chromeActions.reload(); triggerDevServerRescan(); }}
               ariaLabel="Reload"
               tooltip="Reload"
             ><ArrowClockwiseIcon size={14} /></HeaderActionButton>

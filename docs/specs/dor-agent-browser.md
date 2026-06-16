@@ -205,10 +205,16 @@ Mechanics & wrinkles:
   localhost-reachable bind — loopback (`127.0.0.1` / `::1`) **or** any-interface
   (`0.0.0.0` / `::`, which still answers `localhost`). A bind on one specific
   non-loopback interface does not match.
-- **Cost.** `getOpenPorts` has a ~3s timeout, so the correlation runs **only
-  while a loopback port is on screen** — promptly when a header first shows one,
-  then on a slow (~5s) refresh — and at most one sweep is in flight. Visible
-  panes and minimized doors are both scanned (both keep live ptys).
+- **Cost — strictly off the hot path.** `getOpenPorts` shells out (`lsof` /
+  PowerShell) on the host that also drives the screencast, so a scan never runs
+  synchronously on tab-open: it's **debounced + idle-scheduled**
+  (`requestIdleCallback`) so the opening tab's first screenshots come first. It
+  **scans once, then settles** — a matched port is remembered and not rescanned;
+  we only keep retrying (slow idle poll) while a wanted port is still *unmatched*
+  (the dev server may start after the tab). A **surface reload** un-settles and
+  re-validates, but optimistically — the current chip stays until the rescan
+  disagrees. At most one scan is in flight; visible panes and minimized doors are
+  both scanned (both keep live ptys).
 - **Fallbacks (degrade to just the URL):** non-loopback URL; no pane listening on
   the port; a bind on a specific non-loopback interface; a tunneled/proxied
   domain; or two+ panes claiming the port (ambiguous).
