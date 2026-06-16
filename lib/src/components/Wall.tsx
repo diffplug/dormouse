@@ -62,6 +62,7 @@ import { useDockviewReady } from './wall/use-dockview-ready';
 import { pickSplitDirection } from './wall/dockview-helpers';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
+import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
 import { useWindowFocused } from './wall/use-window-focused';
 import {
   DialogKeyboardContext,
@@ -640,6 +641,9 @@ export function Wall({
     selectedIdRef,
     selectedTypeRef,
   });
+
+  // --- Dev-server port → pane correlation (browser header connection chip) ---
+  useDevServerPortCorrelation({ apiRef, doorsRef });
 
   // --- Reattach ---
 
@@ -1470,6 +1474,16 @@ export function Wall({
     onClickPanel: (id: string) => {
       setConfirmKill(null);
       enterTerminalMode(id);
+    },
+    onFocusPane: (id: string) => {
+      setConfirmKill(null);
+      // Visible pane → jump straight in; minimized (a door) → reattach first.
+      if (apiRef.current?.getPanel(id)) {
+        enterTerminalMode(id);
+        return;
+      }
+      const door = doorsRef.current.find((item) => item.id === id);
+      if (door) handleReattachRef.current(door, { enterPassthrough: true });
     },
     onStartRename: (id: string) => {
       setRenamingPaneId(id);

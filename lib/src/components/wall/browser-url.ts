@@ -1,0 +1,54 @@
+/**
+ * Small URL helpers for the agent-browser surface header
+ * (see docs/specs/dor-agent-browser.md → "Browser-chrome header").
+ *
+ * The header shows a tab's URL as host+path (Chrome-style, the scheme and any
+ * query/hash dropped) and, when that URL is loopback, correlates its port to a
+ * Dormouse terminal pane. Both jobs are pure string parsing kept out of the
+ * components so they can be unit-tested directly.
+ */
+
+/** Host + path of a URL (e.g. `localhost:5173/app`), the header's primary text.
+ *  Falls back to the raw string for anything `URL` can't parse. */
+export function hostPathDisplay(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    const path = parsed.pathname === '/' ? '' : parsed.pathname;
+    return `${parsed.host}${path}` || rawUrl;
+  } catch {
+    return rawUrl || '';
+  }
+}
+
+/** True for hostnames that resolve to the local machine. `*.localhost` is
+ *  included because browsers route it to loopback per the RFC. */
+function isLoopbackHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === '[::1]' ||
+    host.endsWith('.localhost')
+  );
+}
+
+/** The TCP port of a loopback URL, or null if the URL is not loopback / has no
+ *  resolvable port. Defaults the port from the scheme (http→80, https→443) so a
+ *  bare `http://localhost` still correlates. */
+export function loopbackPort(rawUrl: string): number | null {
+  try {
+    const parsed = new URL(rawUrl);
+    if (!isLoopbackHostname(parsed.hostname)) return null;
+    const port = parsed.port
+      ? Number(parsed.port)
+      : parsed.protocol === 'https:'
+        ? 443
+        : parsed.protocol === 'http:'
+          ? 80
+          : NaN;
+    return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null;
+  } catch {
+    return null;
+  }
+}

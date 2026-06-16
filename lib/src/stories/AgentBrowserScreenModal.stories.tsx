@@ -35,6 +35,19 @@ function useMockController(args: StoryArgs): ScreenController {
       id: 'story',
       subscribe: () => () => {},
       snapshot: () => snapshot,
+      subscribeChrome: () => () => {},
+      chrome: () => ({
+        url: 'http://localhost:5173/',
+        displayUrl: 'localhost:5173',
+        title: 'Vite + React',
+        key: null,
+        connection: 'connected',
+      }),
+      chromeActions: {
+        back: () => console.log('[story] back'),
+        forward: () => console.log('[story] forward'),
+        reload: () => console.log('[story] reload'),
+      },
       hostCapable: args.hostCapable,
       actions: {
         engageSync: () => console.log('[story] engageSync'),
