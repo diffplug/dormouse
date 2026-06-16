@@ -4,6 +4,8 @@ import {
   ArrowLineDownIcon,
   ArrowsInIcon,
   ArrowsOutIcon,
+  FrameCornersIcon,
+  ResizeIcon,
   SplitHorizontalIcon,
   SplitVerticalIcon,
   XIcon,
@@ -47,10 +49,12 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
           type="button"
           onClick={(e) => { e.stopPropagation(); screen.actions.openModal(); }}
           aria-label={`Screen: ${screenSnapshot.state} — change viewport`}
-          title="Screen / viewport"
-          className="shrink-0 rounded px-1 py-0.5 text-xs leading-none font-semibold tracking-[0.08em] text-current/70 transition-colors hover:bg-current/10 hover:text-current"
+          title={`Screen: ${screenSnapshot.state} — change viewport`}
+          className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded text-current/70 transition-colors hover:bg-current/10 hover:text-current"
         >
-          {screenSnapshot.state}
+          {screenSnapshot.state === 'SYNCED'
+            ? <FrameCornersIcon size={14} />
+            : <ResizeIcon size={14} />}
         </button>
       )}
       <div className="ml-1 hidden shrink-0 items-center gap-0.5 min-[420px]:flex">
