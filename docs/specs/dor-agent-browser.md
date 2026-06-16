@@ -512,3 +512,106 @@ baseline on every target.
 - **Re-trigger sync from the CLI** — a Dormouse-reserved `dor ab` verb, at the
   cost of the first non-passthrough subcommand.
 - **Undo/redo chords** — blocked on the upstream stream-input `commands` fix.
+
+## Browser-chrome header (nav + URL + connection)
+
+Today the surface header shows the active tab's **HTML `<title>`** and the
+SYNCED/SCALED icon, and offers no navigation. For a dev workflow the HTML title
+("Vite + React") tells you less than the **URL** — and less still than *where the
+URL comes from*. This proposal reshapes the header to read like a browser and to
+surface the one thing only Dormouse can show: that a localhost page is being
+served by another pane in the same workspace.
+
+### Layout — mirror Chrome's toolbar
+
+Left→right, matching a real browser so it reads as "browser-ish":
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ ⤢   ←  →  ⟳    (storybook) localhost:5173   ◉ pnpm dev          ⬍ ⬌ ⤢   _  ✕ │
+└──────────────────────────────────────────────────────────────────────────────┘
+ sync  back/fwd/    key      URL              dev-server          split/zoom  min/
+ chip  refresh      badge    (host+path)      connection          (collapse)  kill
+```
+
+- **Sync chip → far left.** The SYNCED/SCALED icon (`FrameCorners`/`Resize`,
+  click → screen modal) moves from "right of the title" to the very left edge,
+  out of the way of the new nav controls. Behavior unchanged.
+- **Back / forward / refresh** sit where Chrome puts them, immediately left of
+  the URL.
+- **URL is the primary text**, replacing the HTML title (below). The flexible
+  spacer lives after the URL so the layout buttons stay right-aligned.
+
+All of this is **browser-surface only**, gated on the screen-controller presence
+exactly like today's chip; terminals/iframes are untouched. The header is
+shared (`SurfacePaneHeader.tsx`), and it is already tight and responsive
+(`min-[420px]` collapse). Priority order under width pressure: **sync + URL/
+connection always visible; nav buttons next; split/zoom collapse first** (kill
+stays).
+
+### URL over HTML title
+
+Show the active tab's **URL (host + path)** as the header's primary text;
+**demote the HTML `<title>` to the tooltip**. The URL already rides the `tabs`
+stream (`tabDisplayTitle` even falls back to host+path today) — this just flips
+the preference. The HTML title stays useful in the **multi-tab strip** to tell
+tabs apart, so the change is scoped to the single-surface header.
+
+### `--key` badge
+
+The `--key` (default `default`) is what `dor ab --key … ` targets, so with two
+or more browser surfaces it's exactly what you need to see. Render a small badge
+for **non-default keys only** (skip `default`), as a **separate element — not a
+string prefix on the title** — because the title is persisted (door labels,
+session save) and we don't want `(storybook)` leaking into saved state. It's
+already in `params.key`; raw `--session` surfaces (no key) show nothing (or a
+truncated session) rather than a badge.
+
+### Dev-server connection (the differentiated piece)
+
+When the active tab URL is **loopback** (`localhost` / `127.0.0.1:<port>`),
+correlate `<port>` to the Dormouse **terminal pane serving it** and surface that
+link — e.g. `◉ pnpm dev :5173` — that **jumps to / focuses that terminal** on
+click. Dormouse is the only tool that owns both the browser surface and the
+terminals, and the building block already exists: `PlatformAdapter.getOpenPorts(id)`
+returns the TCP ports a terminal's process tree is listening on. This answers
+"where is this localhost coming from?" and makes the relationship navigable.
+
+Mechanics & wrinkles:
+
+- **Where it lives.** A panel doesn't know other panes' ports, so the
+  port→pane correlation belongs in the **Wall** (or a shared port store the Wall
+  feeds), with the header consuming the resolved `{ paneId, label }`. The header
+  click calls back into the Wall to focus that pane.
+- **The capability exists but is dormant.** `getOpenPorts` is fully plumbed and
+  tested (adapter → message-router → `pty-manager` → per-OS lsof/PowerShell) but
+  currently has **no UI consumer** — so the hard part (per-OS port detection) is
+  done, and this feature is its first consumer; the correlation store + chip are
+  greenfield, nothing to reuse.
+- **Cost.** `getOpenPorts` has a ~3s timeout; polling every pane continuously is
+  wasteful. Compute **on demand only when the active URL is loopback**, on a
+  slow refresh, and cache.
+- **Fallbacks (degrade to just the URL):** non-loopback URL; no pane matches the
+  port; the dev server bound `0.0.0.0`/a specific interface; a tunneled/proxied
+  domain; or (rarely) two panes claiming the port.
+- **Bidirectional (later):** a terminal serving a port could conversely show
+  "viewed in `surface:3`". Out of scope for v1; the port store would make it
+  cheap.
+
+### Back / forward / refresh mechanics
+
+- **All three are native agent-browser commands** — `back`, `forward`, `reload`
+  (verified 0.27.0: `back`/`forward` actually move history). So each is just a
+  new entry on the `agentBrowserCommand` allowlist (`reload`, `back`, `forward`)
+  issued like tab actions — **no eval fallback needed**.
+- **No enabled-state.** `canGoBack`/`canGoForward` are not in the stream, so the
+  buttons are **always enabled** (click no-ops at the ends) rather than greyed —
+  acceptable, matching most embedded browsers. Deriving real enablement would
+  need an extra channel and isn't worth it for v1.
+
+### Touchpoints
+
+`SurfacePaneHeader.tsx` (the browser-only header branch: reorder, nav buttons,
+URL, key badge, connection chip), `Wall.tsx` (new port→pane correlation store +
+focus callback — `getOpenPorts` is already plumbed but unused), and the
+`agentBrowserCommand` allowlist (add `reload`, `back`, `forward`).
