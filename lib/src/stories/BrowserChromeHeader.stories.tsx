@@ -7,7 +7,7 @@ import {
   WindowFocusedContext,
   ZoomedContext,
   type WallActions,
-} from '../components/Wall';
+} from '../components/wall/wall-context';
 import { SurfacePaneHeader } from '../components/wall/SurfacePaneHeader';
 import {
   registerAgentBrowserScreen,
