@@ -161,6 +161,26 @@ export function recordTerminalUserInputByPtyId(ptyId: string, input: string, rea
   recordTerminalUserInput(resolvePaneStateIdByPtyId(ptyId), input, reader);
 }
 
+// A command Dormouse launched into a pane (dor split/ensure `-- <command>`) runs
+// under a non-interactive `-lc` shell, so the OSC 633 integration never loads
+// and neither the OSC path nor the keystroke heuristic ever reports it. Seed the
+// command run ourselves at spawn so the pane reports what it's running — needed
+// for `dor ensure` to match a surface it (or a prior ensure) created. Sourced as
+// `user_input` so it does not mark the pane OSC-driven. `finishLaunchedCommand`
+// (on pty exit) clears it, preserving the liveness half of the match.
+export function seedLaunchedCommand(id: string, command: string, cwdPath?: string): void {
+  const events: TerminalSemanticEvent[] = [];
+  const cwd = cwdPath ? cwdFromManualPath(cwdPath) : null;
+  if (cwd) events.push({ type: 'cwd', cwd });
+  events.push({ type: 'commandLine', commandLine: command });
+  events.push({ type: 'commandStart', source: 'user_input' });
+  applyTerminalSemanticEvents(id, events);
+}
+
+export function finishLaunchedCommandByPtyId(ptyId: string, exitCode: number): void {
+  applyTerminalSemanticEventsByPtyId(ptyId, [{ type: 'commandFinish', exitCode }]);
+}
+
 export function recordTerminalOutput(id: string, output: string): void {
   if (!output) return;
 

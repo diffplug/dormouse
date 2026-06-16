@@ -15,7 +15,7 @@ import { readCommand } from './commands/read.js';
 import { sendCommand } from './commands/send.js';
 import { splitCommand } from './commands/split.js';
 import { versionCommand } from './commands/version.js';
-import { fail } from './commands/shared.js';
+import { errorMessage, fail } from './commands/shared.js';
 import type {
   CliEnv,
   CliOptions,
@@ -295,7 +295,7 @@ function validateEnsureDelimiter(args: string[]): ParseResult<void> {
     if (arg === '--json' || arg === '--minimize') {
       continue;
     }
-    if (arg === '--title' || arg === '--surface') {
+    if (arg === '--cwd' || arg === '--surface') {
       const value = args[index + 1];
       if (!value || value.startsWith('-') || index + 1 >= delimiterIndex) {
         return { ok: false, message: `${arg} requires a value` };
@@ -362,8 +362,4 @@ function normalizeExitCode(exitCode: number | string | null | undefined): number
       ? Number(exitCode)
       : 0;
   return numeric === 0 || Number.isNaN(numeric) ? 0 : 1;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

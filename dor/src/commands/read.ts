@@ -7,7 +7,7 @@ import type {
   ReadSurfaceResponse,
 } from './types.js';
 import {
-  resolveControlClient,
+  requireControlClient,
   stringParser,
   writeStdout,
 } from './shared.js';
@@ -51,11 +51,11 @@ JSON output:
 };
 
 async function runReadCommand(this: DorCommandContext, flags: ReadFlags): Promise<void | Error> {
-  const clientResult = resolveControlClient(this.options);
-  if (!clientResult.ok) return new Error(clientResult.message);
+  const client = requireControlClient(this.options);
+  if (client instanceof Error) return client;
 
   try {
-    const response = await clientResult.value.readSurface({
+    const response = await client.readSurface({
       ...(flags.lines !== undefined ? { lines: flags.lines } : {}),
       scrollback: flags.scrollback === true,
       surface: flags.surface,

@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCli } from '../dist/cli.js';
-import { buildShellCommandForKind, shellCommandKind } from '../dist/commands/shell-command.js';
+import { buildShellCommandForKind, shellCommandKind } from '../dist/commands/shell-quote.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const snapshotsDir = join(__dirname, 'snapshots');
@@ -20,7 +20,6 @@ const fixtureSurfaces = [
     focused: true,
     index: 0,
     indexInPane: 0,
-    requestedWorkingDirectory: '/Users/example/.codex/worktrees/0cbc/mouseterm',
     selectedInPane: true,
   },
   {
@@ -32,7 +31,6 @@ const fixtureSurfaces = [
     focused: false,
     index: 1,
     indexInPane: 0,
-    requestedWorkingDirectory: '/workspace/app/packages/repo',
     selectedInPane: true,
   },
 ];
@@ -59,24 +57,28 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
     },
     async splitSurface(request) {
       this.requests.push({ method: 'splitSurface', request });
+      // Mirror the real host: quote the argv for the target (here, posix) shell.
+      const command = request.command ? buildShellCommandForKind('posix', request.command) : undefined;
       return {
         status: 'created',
         surfaceId: '33333333-3333-4333-8333-333333333333',
         surfaceRef: 'surface:3',
         direction: request.direction === 'auto' ? 'right' : request.direction,
         minimized: request.minimized,
-        ...(request.command ? { command: request.command } : {}),
+        ...(command ? { command } : {}),
       };
     },
     async ensureSurface(request) {
       this.requests.push({ method: 'ensureSurface', request });
-      const title = request.title ?? request.command;
+      // Mirror the host: quote the argv for the target shell, and key on the
+      // command so the fixture can exercise both the created and existing paths.
+      const command = buildShellCommandForKind('posix', request.command);
       return {
-        status: title === 'dev server' ? 'existing' : 'created',
+        status: command === 'pnpm dev:workspace' ? 'existing' : 'created',
         surfaceId: '33333333-3333-4333-8333-333333333333',
         surfaceRef: 'surface:3',
-        title,
-        command: request.command,
+        command,
+        cwd: request.cwd,
         minimized: request.minimized,
       };
     },
@@ -181,13 +183,13 @@ test('shell command quoting supports shell families', () => {
   );
 });
 
-test('split sends command string to the host', async () => {
+test('split sends command argv to the host', async () => {
   const client = fixtureClient();
   await runCli(['split', '--', 'pnpm', 'dev'], { client });
   assert.deepEqual(client.requests, [{
     method: 'splitSurface',
     request: {
-      command: 'pnpm dev',
+      command: ['pnpm', 'dev'],
       direction: 'auto',
       minimized: false,
       surface: undefined,
@@ -198,20 +200,23 @@ test('split sends command string to the host', async () => {
 test('ensure text output', async () => {
   await snapshot(
     'ensure-text',
-    await runCli(['ensure', '--title', 'dev server', '--', 'pnpm', 'dev:workspace'], { client: fixtureClient() }),
+    await runCli(['ensure', '--', 'pnpm', 'dev:workspace'], {
+      client: fixtureClient(),
+      env: { PWD: '/Users/me/projects/site' },
+    }),
   );
 });
 
-test('ensure sends command string to the host', async () => {
+test('ensure sends command argv and caller cwd to the host', async () => {
   const client = fixtureClient();
-  await runCli(['ensure', '--title', 'worker', '--', 'pnpm', 'dev'], { client });
+  await runCli(['ensure', '--', 'pnpm', 'dev'], { client, env: { PWD: '/work/site' } });
   assert.deepEqual(client.requests, [{
     method: 'ensureSurface',
     request: {
-      command: 'pnpm dev',
+      command: ['pnpm', 'dev'],
       minimized: false,
       surface: undefined,
-      title: 'worker',
+      cwd: '/work/site',
     },
   }]);
 });
@@ -219,7 +224,9 @@ test('ensure sends command string to the host', async () => {
 test('ensure json output', async () => {
   await snapshot(
     'ensure-json',
-    await runCli(['ensure', '--json', '--minimize', '--', 'pnpm', 'dev:workspace'], { client: fixtureClient() }),
+    await runCli(['ensure', '--json', '--minimize', '--cwd', '/Users/me/projects/site', '--', 'pnpm', 'dev'], {
+      client: fixtureClient(),
+    }),
   );
 });
 
