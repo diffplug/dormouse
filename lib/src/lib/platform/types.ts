@@ -127,8 +127,8 @@ export interface PlatformAdapter {
   // the screencast frames directly).
   agentBrowserScreenshot?(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult>;
   // The WebSocket URL for a session's stream port. Hosts whose webview origin
-  // the agent-browser stream server rejects (VS Code) return a relay URL;
-  // absent or null falls back to ws://127.0.0.1:<port>.
+  // the agent-browser stream server rejects (VS Code) return a tokenized relay
+  // URL; absent or null falls back to ws://127.0.0.1:<port>.
   getAgentBrowserStreamUrl?(port: number): Promise<string | null>;
 
   // PTY event listeners

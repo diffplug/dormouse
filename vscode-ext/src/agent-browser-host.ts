@@ -8,12 +8,12 @@
  *    session for tab actions and session teardown. Subcommands are
  *    allowlisted; this is not a general exec channel.
  *
- * 2. `ensureStreamRelayPort` — a loopback-only TCP relay that strips the
+ * 2. `createStreamRelayUrl` — a loopback-only TCP relay that strips the
  *    `Origin` header from WebSocket upgrade requests. The agent-browser stream
  *    server returns 403 for `vscode-webview://` origins (only localhost or
  *    absent origins are accepted), so the webview cannot connect directly; it
- *    connects to ws://127.0.0.1:<relayPort>/stream/<streamPort> instead and
- *    the relay pipes bytes to 127.0.0.1:<streamPort>.
+ *    connects to a short-lived tokenized relay URL instead and the relay pipes
+ *    bytes only to the authorized 127.0.0.1:<streamPort>.
  */
 import * as vscode from 'vscode';
 import * as net from 'net';
@@ -21,30 +21,20 @@ import * as os from 'os';
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import { spawn } from 'child_process';
+import { randomBytes } from 'crypto';
 import { log } from './log';
+import {
+  AGENT_BROWSER_ALLOWED_SUBCOMMANDS,
+  type AgentBrowserCommandResult,
+  type AgentBrowserEditOp,
+  type AgentBrowserEditResult,
+  type AgentBrowserScreenshotResult,
+} from '../../lib/src/lib/platform/types';
 
-const ALLOWED_SUBCOMMANDS = new Set(['tab', 'set', 'screenshot', 'close']);
-
-export interface AgentBrowserCommandResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
-
-export type AgentBrowserEditOp = 'selectAll' | 'copy' | 'cut';
-
-export interface AgentBrowserEditResult {
-  ok: boolean;
-  text?: string;
-  error?: string;
-}
-
-export interface AgentBrowserScreenshotResult {
-  ok: boolean;
-  bytes?: Uint8Array;
-  mime?: string;
-  error?: string;
-}
+const ALLOWED_SUBCOMMANDS = new Set<string>(AGENT_BROWSER_ALLOWED_SUBCOMMANDS);
+const STREAM_RELAY_TOKEN_BYTES = 32;
+const STREAM_RELAY_GRANT_TTL_MS = 60_000;
+const STREAM_RELAY_GRANT_SWEEP_MS = 30_000;
 
 // The host owns the exact JS for each editing op — the webview only selects a
 // name, so this never becomes an arbitrary-eval channel. copy/cut return the
@@ -186,8 +176,19 @@ function spawnAgentBrowser(binary: string, args: string[]): Promise<AgentBrowser
 }
 
 let relayPortPromise: Promise<number> | null = null;
+const streamRelayGrants = new Map<string, { port: number; expiresAt: number }>();
+let lastStreamRelayGrantSweep = 0;
 
-export function ensureStreamRelayPort(): Promise<number> {
+export async function createStreamRelayUrl(streamPort: number): Promise<string> {
+  const relayPort = await ensureStreamRelayPort();
+  const token = randomBytes(STREAM_RELAY_TOKEN_BYTES).toString('hex');
+  const now = Date.now();
+  sweepStreamRelayGrants(now);
+  streamRelayGrants.set(token, { port: streamPort, expiresAt: now + STREAM_RELAY_GRANT_TTL_MS });
+  return `ws://127.0.0.1:${relayPort}/stream/${streamPort}/${token}`;
+}
+
+function ensureStreamRelayPort(): Promise<number> {
   if (!relayPortPromise) {
     relayPortPromise = new Promise<number>((resolve, reject) => {
       const server = net.createServer(handleRelayClient);
@@ -211,10 +212,27 @@ export function ensureStreamRelayPort(): Promise<number> {
   return relayPortPromise;
 }
 
+function sweepStreamRelayGrants(now = Date.now()): void {
+  if (now - lastStreamRelayGrantSweep < STREAM_RELAY_GRANT_SWEEP_MS) return;
+  lastStreamRelayGrantSweep = now;
+  for (const [token, grant] of streamRelayGrants) {
+    if (grant.expiresAt <= now) streamRelayGrants.delete(token);
+  }
+}
+
+function consumeStreamRelayGrant(token: string, port: number): boolean {
+  const now = Date.now();
+  sweepStreamRelayGrants(now);
+  const grant = streamRelayGrants.get(token);
+  if (!grant) return false;
+  streamRelayGrants.delete(token);
+  return grant.expiresAt > now && grant.port === port;
+}
+
 // The relay is loopback-only on both sides: it accepts connections from
-// 127.0.0.1 and dials only 127.0.0.1:<port>. It rewrites the upgrade request
-// head (path → "/", Origin dropped, Host rewritten) and from then on is a dumb
-// byte pipe in both directions.
+// 127.0.0.1 and dials only an explicitly granted 127.0.0.1:<port>. It rewrites
+// the upgrade request head (path → "/", Origin dropped, Host rewritten) and
+// from then on is a dumb byte pipe in both directions.
 function handleRelayClient(client: net.Socket): void {
   let head = Buffer.alloc(0);
   client.on('error', () => {});
@@ -231,10 +249,15 @@ function handleRelayClient(client: net.Socket): void {
 
     const headText = head.subarray(0, headEnd).toString('latin1');
     const remainder = head.subarray(headEnd + 4);
-    const requestMatch = /^GET \/stream\/(\d{1,5}) HTTP\/1\.1\r\n/.exec(headText);
+    const requestMatch = /^GET \/stream\/(\d{1,5})\/([a-f0-9]{64}) HTTP\/1\.1\r\n/i.exec(headText);
     const targetPort = requestMatch ? Number(requestMatch[1]) : 0;
     if (!targetPort || targetPort > 65535) {
       client.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+      return;
+    }
+    const token = requestMatch?.[2] ?? '';
+    if (!consumeStreamRelayGrant(token, targetPort)) {
+      client.end('HTTP/1.1 403 Forbidden\r\n\r\n');
       return;
     }
 

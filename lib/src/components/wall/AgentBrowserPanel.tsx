@@ -282,6 +282,8 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let failures = 0;
 
+    knownTabIdsRef.current = new Set();
+
     // Fallback only (hosts without the screenshot capability, e.g. Tauri):
     // render the CSS-resolution screencast frame directly.
     const drawScreencastFrame = (data: string) => {

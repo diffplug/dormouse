@@ -413,10 +413,12 @@ CSP alone is not enough in VS Code: the agent-browser stream server rejects
 WebSocket upgrades whose `Origin` is not localhost-or-absent (verified against
 0.27.0: `vscode-webview://…` → 403; `tauri://localhost` and plain localhost →
 allowed; no override env var exists). The VS Code extension host therefore runs
-a loopback-only TCP relay that strips the `Origin` header and pipes bytes to
-`127.0.0.1:<streamPort>`; `getAgentBrowserStreamUrl` returns the relay URL
-(`ws://127.0.0.1:<relayPort>/stream/<streamPort>`). The standalone (Tauri)
-webview connects directly — its origin is allowed.
+a loopback-only TCP relay that strips the `Origin` header and pipes bytes only
+to a stream port it has explicitly authorized. `getAgentBrowserStreamUrl` asks
+the host for a short-lived, one-use relay URL
+(`ws://127.0.0.1:<relayPort>/stream/<streamPort>/<token>`); the relay rejects
+requests without a matching token/port grant. The standalone (Tauri) webview
+connects directly — its origin is allowed.
 
 ---
 
