@@ -99,10 +99,12 @@ describe('SurfacePaneHeader — browser chrome', () => {
     registration.dispose();
   });
 
-  it('badges a non-default --key but not the default key', () => {
+  it('shows a key indicator for a non-default --key but not the default key', () => {
     const reg = register('pane-key', { ...CHROME, key: 'storybook' });
     renderHeader(headerApi('pane-key', 'x'), stubActions());
-    expect(container.textContent).toContain('storybook');
+    // Rendered as a filled key icon; the key name lives in the hover tooltip.
+    expect(container.querySelector('[aria-label="--key storybook"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('storybook');
     reg.dispose();
 
     act(() => root.unmount());
@@ -110,7 +112,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
 
     const reg2 = register('pane-key2', { ...CHROME, key: 'default' });
     renderHeader(headerApi('pane-key2', 'x'), stubActions());
-    expect(container.querySelector('[title="dor ab --key default"]')).toBeNull();
+    expect(container.querySelector('[aria-label="--key default"]')).toBeNull();
     reg2.dispose();
   });
 
