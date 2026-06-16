@@ -60,7 +60,7 @@ export type ExtensionMessage =
   | { type: 'clipboard:image'; path: string | null; requestId: string }
   | { type: 'agentBrowser:commandResult'; requestId: string; exitCode: number; stdout: string; stderr: string }
   | { type: 'agentBrowser:editResult'; requestId: string; ok: boolean; text?: string; error?: string }
-  | { type: 'agentBrowser:screenshotResult'; requestId: string; ok: boolean; dataBase64?: string; mime?: string; error?: string }
+  | { type: 'agentBrowser:screenshotResult'; requestId: string; ok: boolean; bytes?: Uint8Array; mime?: string; error?: string }
   | { type: 'agentBrowser:streamUrl'; requestId: string; url: string | null }
   | {
       type: 'dormouse:newTerminal';

@@ -6,7 +6,7 @@
  * `tabs` messages. Tab actions (switch/close) go through the host's
  * `agentBrowserCommand` because a webview cannot spawn the agent-browser CLI.
  */
-import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { clsx } from 'clsx';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
@@ -21,9 +21,17 @@ import {
   type ScreenState,
 } from './agent-browser-screen';
 import {
-  FreshlySpawnedContext,
+  EDIT_OPS,
+  MOUSE_BUTTONS,
+  MOUSE_BUTTON_MASKS,
+  SPECIAL_KEYS,
+  modifiers,
+  virtualKeyCode,
+} from './agent-browser-input';
+import { createScreenshotLoop } from './agent-browser-screenshot-loop';
+import { usePaneChrome } from './use-pane-chrome';
+import {
   ModeContext,
-  PaneElementsContext,
   SelectedIdContext,
   WallActionsContext,
 } from './wall-context';
@@ -73,75 +81,6 @@ type StreamStatus = {
   screencasting: boolean;
 };
 
-// `text` is what makes typing land; windowsVirtualKeyCode is what makes
-// non-text keys and modifier chords act. Keyed by KeyboardEvent.key.
-const SPECIAL_KEYS: Record<string, { text?: string; keyCode: number }> = {
-  Enter: { text: '\r', keyCode: 13 },
-  Tab: { text: '\t', keyCode: 9 },
-  Backspace: { text: '\b', keyCode: 8 },
-  Escape: { keyCode: 27 },
-  ArrowLeft: { keyCode: 37 },
-  ArrowUp: { keyCode: 38 },
-  ArrowRight: { keyCode: 39 },
-  ArrowDown: { keyCode: 40 },
-  Delete: { keyCode: 46 },
-  Insert: { keyCode: 45 },
-  Home: { keyCode: 36 },
-  End: { keyCode: 35 },
-  PageUp: { keyCode: 33 },
-  PageDown: { keyCode: 34 },
-  Shift: { keyCode: 16 },
-  Control: { keyCode: 17 },
-  Alt: { keyCode: 18 },
-  Meta: { keyCode: 91 },
-  CapsLock: { keyCode: 20 },
-  ContextMenu: { keyCode: 93 },
-};
-
-// Windows virtual-key codes for printable keys, keyed by KeyboardEvent.code
-// (the physical key, so shifted variants share an entry). Letters and digits
-// are handled structurally in virtualKeyCode. Never derive a VK from
-// `key.charCodeAt(0)`: '.' is 46, which is VK_DELETE — the daemon deletes
-// instead of typing a period.
-const OEM_VK_BY_CODE: Record<string, number> = {
-  Space: 32,
-  Semicolon: 186,
-  Equal: 187,
-  Comma: 188,
-  Minus: 189,
-  Period: 190,
-  Slash: 191,
-  Backquote: 192,
-  BracketLeft: 219,
-  Backslash: 220,
-  BracketRight: 221,
-  Quote: 222,
-  NumpadDecimal: 110,
-  NumpadDivide: 111,
-  NumpadMultiply: 106,
-  NumpadSubtract: 109,
-  NumpadAdd: 107,
-};
-
-function virtualKeyCode(key: string, code: string): number {
-  const special = SPECIAL_KEYS[key];
-  if (special) return special.keyCode;
-  if (/^Key[A-Z]$/.test(code)) return code.charCodeAt(3);
-  if (/^(Digit|Numpad)[0-9]$/.test(code)) return code.charCodeAt(code.length - 1) + (code.startsWith('Numpad') ? 48 : 0);
-  if (/^F([1-9]|1[0-2])$/.test(code)) return 111 + Number(code.slice(1));
-  return OEM_VK_BY_CODE[code] ?? 0;
-}
-
-// Cmd/Ctrl + these map to native editing ops the stream input path can't do.
-const EDIT_OPS = { a: 'selectAll', c: 'copy', x: 'cut' } as const;
-
-const MOUSE_BUTTONS: Record<number, string> = { 0: 'left', 1: 'middle', 2: 'right' };
-const MOUSE_BUTTON_MASKS: Record<number, number> = { 0: 1, 1: 4, 2: 2 };
-
-function modifiers(e: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): number {
-  return (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
-}
-
 function tabDisplayTitle(tab: StreamTab): string {
   const title = tab.title?.trim();
   if (title) return title;
@@ -154,15 +93,21 @@ function tabDisplayTitle(tab: StreamTab): string {
   }
 }
 
+// Decode a base64 screencast frame to an ImageBitmap (the fallback display path
+// for hosts that can't screenshot). Callers apply their own freshness guard.
+function decodeScreencastFrame(dataBase64: string): Promise<ImageBitmap> {
+  const bytes = Uint8Array.from(atob(dataBase64), (c) => c.charCodeAt(0));
+  return createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
+}
+
 export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrowserPanelParams>) {
   const actions = useContext(WallActionsContext);
-  const { elements: paneElements, bumpVersion } = useContext(PaneElementsContext);
-  const freshlySpawned = useContext(FreshlySpawnedContext);
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const elRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  usePaneChrome(api, elRef);
 
   const session = params?.session;
   const wsPort = params?.wsPort;
@@ -206,19 +151,10 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
 
   // --- display: crisp HiDPI screenshots, paced by stream-frame "pulses" ---
   //
-  // The stream's screencast is CSS-resolution only (Chromium's
-  // Page.startScreencast ignores deviceScaleFactor — see the spec), so on a
-  // Retina display its frames upscale to mush. Instead we DISPLAY
-  // device-resolution screenshots (`agent-browser screenshot`, which honors the
-  // session DPR) and use the screencast frames purely as "the page changed"
-  // pulses telling us when to grab a fresh one.
-  //
-  // Backpressure (we only ever want the latest, and must slow down if capture
-  // can't keep up): at most one screenshot in flight; a pulse during a shot
-  // sets `dirty` (no queue — bursts collapse to one follow-up, latest wins);
-  // the next shot won't start until at least one shot-duration (adaptive EWMA)
-  // has passed since the last one began, so a slow capture self-throttles. A
-  // static page produces no pulses, so no shots and no cost.
+  // The screencast is CSS-resolution only, so we DISPLAY device-resolution
+  // screenshots and use stream frames purely as "page changed" pulses. The
+  // backpressure machine lives in createScreenshotLoop; here we just supply the
+  // live session/binary/capability (via refs) and the canvas draw.
   const drawBitmap = useCallback((bitmap: ImageBitmap) => {
     const canvas = canvasRef.current;
     if (!canvas) {
@@ -231,94 +167,16 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     bitmap.close();
     setHasFrame(true);
   }, []);
-  const drawBitmapRef = useRef(drawBitmap);
-  drawBitmapRef.current = drawBitmap;
 
   const screenshotCapableRef = useRef(false);
   screenshotCapableRef.current = !!getPlatform().agentBrowserScreenshot && !!session;
 
-  const screenshotLoop = useMemo(() => {
-    let inFlight = false;
-    let dirty = false;
-    let seq = 0;
-    let lastStart = 0;
-    let avgMs = 120;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let disposed = false;
-
-    const display = (dataBase64: string, mime: string, mySeq: number) => {
-      const binary = atob(dataBase64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-      createImageBitmap(new Blob([bytes], { type: mime })).then((bitmap) => {
-        // A newer shot landed first (or we're gone) — drop this one.
-        if (disposed || mySeq !== seq) {
-          bitmap.close();
-          return;
-        }
-        drawBitmapRef.current(bitmap);
-      }).catch((err) => console.warn(`[agent-browser] screenshot decode failed:`, err));
-    };
-
-    const take = () => {
-      // Call through the adapter instance — a detached method reference drops
-      // `this` and throws on its internal `requestResponse`.
-      const platform = getPlatform();
-      const sess = sessionRef.current;
-      if (!platform.agentBrowserScreenshot || !sess) return;
-      inFlight = true;
-      dirty = false;
-      const mySeq = ++seq;
-      lastStart = performance.now();
-      platform.agentBrowserScreenshot(sess, { format: 'jpeg', quality: 85 }, binaryPathRef.current).then((res) => {
-        avgMs = avgMs * 0.6 + (performance.now() - lastStart) * 0.4;
-        inFlight = false;
-        if (res.ok && res.dataBase64) display(res.dataBase64, res.mime || 'image/jpeg', mySeq);
-        else console.warn('[agent-browser] screenshot failed:', res.error ?? '(no data)');
-        if (dirty) schedule();
-      }).catch((err) => {
-        console.warn('[agent-browser] screenshot error:', err);
-        inFlight = false;
-        if (dirty) schedule();
-      });
-    };
-
-    const schedule = () => {
-      if (disposed) return;
-      if (inFlight) {
-        dirty = true;
-        return;
-      }
-      // Space shots to ~1.5× the measured capture time since the last START:
-      // the slower capture gets, the more we back off (≈⅔ duty cycle), and the
-      // 50ms floor stops a fast/cached/error return from spinning a tight loop.
-      const floor = Math.max(50, avgMs * 1.5);
-      const wait = lastStart + floor - performance.now();
-      if (wait > 0) {
-        dirty = true;
-        if (timer === undefined) {
-          timer = setTimeout(() => {
-            timer = undefined;
-            if (dirty && !inFlight) take();
-          }, wait);
-        }
-        return;
-      }
-      take();
-    };
-
-    return {
-      pulse: () => {
-        if (disposed || !screenshotCapableRef.current) return;
-        dirty = true;
-        schedule();
-      },
-      dispose: () => {
-        disposed = true;
-        if (timer !== undefined) clearTimeout(timer);
-      },
-    };
-  }, []);
+  const screenshotLoop = useMemo(() => createScreenshotLoop({
+    getSession: () => sessionRef.current,
+    getBinaryPath: () => binaryPathRef.current,
+    isCapable: () => screenshotCapableRef.current,
+    draw: drawBitmap,
+  }), [drawBitmap]);
 
   useEffect(() => () => screenshotLoop.dispose(), [screenshotLoop]);
 
@@ -415,39 +273,6 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     if (syncConfirmedRef.current) setSyncEngaged(false);
   }, []);
 
-  // --- pane registration + spawn animation (shared surface boilerplate) ---
-
-  useEffect(() => {
-    if (!elRef.current) return;
-    paneElements.set(api.id, elRef.current);
-    bumpVersion();
-    return () => {
-      paneElements.delete(api.id);
-      bumpVersion();
-    };
-  }, [api.id, paneElements, bumpVersion]);
-
-  useLayoutEffect(() => {
-    const direction = freshlySpawned.get(api.id);
-    if (!direction) return;
-    freshlySpawned.delete(api.id);
-    const groupEl = api.group?.element;
-    if (!groupEl) return;
-    const className = `pane-spawning-from-${direction}`;
-    const animationName = `pane-spawn-from-${direction}`;
-    groupEl.classList.add(className);
-    const onEnd = (ev: AnimationEvent) => {
-      if (ev.animationName !== animationName) return;
-      groupEl.classList.remove(className);
-      groupEl.removeEventListener('animationend', onEnd);
-    };
-    groupEl.addEventListener('animationend', onEnd);
-    return () => {
-      groupEl.removeEventListener('animationend', onEnd);
-      groupEl.classList.remove(className);
-    };
-  }, [api, freshlySpawned]);
-
   // --- stream connection ---
 
   useEffect(() => {
@@ -461,16 +286,13 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     // render the CSS-resolution screencast frame directly.
     const drawScreencastFrame = (data: string) => {
       const seq = ++frameSeqRef.current;
-      const binary = atob(data);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-      createImageBitmap(new Blob([bytes], { type: 'image/jpeg' })).then((bitmap) => {
+      decodeScreencastFrame(data).then((bitmap) => {
         // JPEG decodes are async; drop frames that finished out of order.
         if (disposed || seq !== frameSeqRef.current) {
           bitmap.close();
           return;
         }
-        drawBitmapRef.current(bitmap);
+        drawBitmap(bitmap);
       }).catch(() => {});
     };
 
@@ -496,8 +318,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
         else drawScreencastFrame(msg.data);
       } else if (msg.type === 'status') {
         setStatus({ connected: msg.connected === true, screencasting: msg.screencasting === true });
-        if (msg.connected === false) setConnectionLost(true);
-        else setConnectionLost(false);
+        setConnectionLost(msg.connected === false);
         if (typeof msg.viewportWidth === 'number' && typeof msg.viewportHeight === 'number') {
           deviceRef.current = { width: msg.viewportWidth, height: msg.viewportHeight };
           maybeDisengageSync();
@@ -572,7 +393,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       wsRef.current = null;
       ws?.close();
     };
-  }, [wsPort, runAgentBrowser, maybeDisengageSync, publishScreen, screenshotLoop]);
+  }, [wsPort, runAgentBrowser, maybeDisengageSync, publishScreen, screenshotLoop, drawBitmap]);
 
   // --- header title follows the active tab ---
 

@@ -41,7 +41,7 @@ export interface AgentBrowserEditResult {
 
 export interface AgentBrowserScreenshotResult {
   ok: boolean;
-  dataBase64?: string;
+  bytes?: Uint8Array;
   mime?: string;
   error?: string;
 }
@@ -133,8 +133,11 @@ export async function runAgentBrowserScreenshot(
     return { ok: false, error: result.stderr.trim() || `screenshot exited ${result.exitCode}` };
   }
   try {
-    const bytes = await fs.readFile(out);
-    return { ok: true, dataBase64: bytes.toString('base64'), mime: format === 'png' ? 'image/png' : 'image/jpeg' };
+    const buffer = await fs.readFile(out);
+    // A Uint8Array view over exactly this file's bytes; structured-clone copies
+    // it across the webview boundary (no base64 round-trip).
+    const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    return { ok: true, bytes, mime: format === 'png' ? 'image/png' : 'image/jpeg' };
   } catch (err) {
     log.info(`[agent-browser] screenshot read failed: ${err instanceof Error ? err.message : String(err)}`);
     return { ok: false, error: `could not read screenshot file: ${err instanceof Error ? err.message : String(err)}` };

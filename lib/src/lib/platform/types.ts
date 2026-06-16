@@ -48,8 +48,9 @@ export const AGENT_BROWSER_ALLOWED_SUBCOMMANDS = ['tab', 'set', 'screenshot', 'c
 
 export interface AgentBrowserScreenshotResult {
   ok: boolean;
-  /** base64-encoded image bytes (no data: prefix); present iff ok. */
-  dataBase64?: string;
+  /** Raw image bytes (transferred over the host↔webview channel via structured
+   *  clone, so no base64 round-trip); present iff ok. */
+  bytes?: Uint8Array;
   /** e.g. 'image/jpeg' | 'image/png'. */
   mime?: string;
   error?: string;

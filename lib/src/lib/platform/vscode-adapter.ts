@@ -246,7 +246,7 @@ export class VSCodeAdapter implements PlatformAdapter {
     const result = await this.requestResponse<AgentBrowserScreenshotResult>(
       'agentBrowser:screenshot', 'agentBrowser:screenshotResult',
       { session, format: opts.format, quality: opts.quality, binaryPath },
-      (msg) => ({ ok: msg.ok, dataBase64: msg.dataBase64, mime: msg.mime, error: msg.error }),
+      (msg) => ({ ok: msg.ok, bytes: msg.bytes, mime: msg.mime, error: msg.error }),
       10000,
     );
     return result ?? { ok: false, error: 'agent-browser screenshot timed out' };
