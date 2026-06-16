@@ -19,6 +19,12 @@ const config: StorybookConfig = {
       '@tauri-apps/plugin-shell': stub,
       '@tauri-apps/plugin-updater': stub,
       'dormouse-lib': path.resolve(here, '..', 'src'),
+      // Mirror tsconfig.app.json's `dor/* → ../dor/src/*` mapping so stories
+      // that import `Wall` (which pulls `dor/commands/*`, `dor/protocol`)
+      // resolve. Storybook's Vite doesn't read tsconfig paths, so without this
+      // any Wall-importing story fails with "Failed to resolve import 'dor/…'".
+      // Safe next to `dormouse-lib`: a string alias only matches `dor` or `dor/…`.
+      dor: path.resolve(here, '..', '..', 'dor', 'src'),
     };
     return config;
   },
