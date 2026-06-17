@@ -54,7 +54,9 @@ const GRANT_IDLE_TTL_MS = 5 * 60_000;
 const GRANT_SWEEP_MS = 60_000;
 // Backstop against unbounded server accumulation if sweeps never run.
 const MAX_GRANTS = 32;
-const HTML_BODY_LIMIT = 32 * 1024 * 1024;
+// We only buffer the <head> region (to find the shim insertion point); if no
+// </head>/<body> shows up within this many bytes, inject at the front and pipe.
+const HEAD_STREAM_CAP = 512 * 1024;
 // Idle timeout on the upstream socket (no bytes flowing). Generous so a slow or
 // streaming dev server isn't cut off, but bounded so a hung upstream becomes a
 // visible error page instead of an indefinitely blank frame.
@@ -180,20 +182,14 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
       passThrough(grant, upstreamRes, res);
       return;
     }
-    collectBody(upstreamRes, (body) => {
-      // A remote that forbids embedding is never force-framed — serve an
-      // actionable page that points at `dor ab` instead of a blank pane.
-      if (!grant.isLoopback && refusesFraming(upstreamRes.headers)) {
-        serveErrorPage(res, frameRefusedPage(grant.upstream));
-        return;
-      }
-      const html = instrumentHtml(body);
-      const outHeaders = sanitizeResponseHeaders(grant, upstreamRes.headers);
-      outHeaders['content-type'] = 'text/html; charset=utf-8';
-      outHeaders['content-length'] = Buffer.byteLength(html).toString();
-      res.writeHead(upstreamRes.statusCode ?? 200, outHeaders);
-      res.end(html);
-    });
+    // A remote that forbids embedding is never force-framed — the headers tell
+    // us, so we can divert to an actionable page without reading the body.
+    if (!grant.isLoopback && refusesFraming(upstreamRes.headers)) {
+      upstreamRes.destroy();
+      serveErrorPage(res, frameRefusedPage(grant.upstream));
+      return;
+    }
+    streamHtml(grant, upstreamRes, res);
   });
   upstreamReq.on('error', (err) => {
     // Once we've begun streaming the response we can't swap in an error page —
@@ -227,20 +223,41 @@ function passThrough(grant: Grant, upstreamRes: http.IncomingMessage, res: http.
   upstreamRes.pipe(res);
 }
 
-function collectBody(stream: http.IncomingMessage, done: (body: string) => void): void {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  stream.on('data', (chunk: Buffer) => {
-    size += chunk.length;
-    if (size > HTML_BODY_LIMIT) {
-      stream.destroy();
-      return;
-    }
-    chunks.push(chunk);
+// Inject the shim into the <head> while streaming, without buffering the whole
+// document: accumulate only until the insertion point (</head>, else <body>,
+// else the cap), instrument that prefix, then pipe the rest through untouched.
+// latin1 is byte-preserving, so searching/rewriting ASCII tags and re-encoding
+// can't corrupt multibyte bytes in <head> (e.g. an em-dash in <title>). The
+// response is chunked (no content-length) since instrumentation changes length.
+function streamHtml(grant: Grant, upstreamRes: http.IncomingMessage, res: http.ServerResponse): void {
+  const outHeaders = sanitizeResponseHeaders(grant, upstreamRes.headers);
+  outHeaders['content-type'] = 'text/html; charset=utf-8';
+  delete outHeaders['content-length'];
+  res.writeHead(upstreamRes.statusCode ?? 200, outHeaders);
+
+  let pending = Buffer.alloc(0);
+  let handled = false;
+
+  const onData = (chunk: Buffer) => {
+    pending = Buffer.concat([pending, chunk]);
+    const text = pending.toString('latin1');
+    if (pending.length <= HEAD_STREAM_CAP && !/<\/head>/i.test(text) && !/<body[^>]*>/i.test(text)) return;
+    // Found the insertion point (or hit the cap): instrument the buffered
+    // prefix, then hand the remainder to a raw pipe (backpressure + end).
+    handled = true;
+    upstreamRes.off('data', onData);
+    res.write(Buffer.from(instrumentHtml(text), 'latin1'));
+    pending = Buffer.alloc(0);
+    upstreamRes.pipe(res);
+  };
+
+  upstreamRes.on('data', onData);
+  upstreamRes.on('end', () => {
+    if (handled) return; // the pipe ends `res`
+    // Whole document arrived before any head marker — instrument and finish.
+    res.end(Buffer.from(instrumentHtml(pending.toString('latin1')), 'latin1'));
   });
-  const complete = () => done(Buffer.concat(chunks).toString('utf8'));
-  stream.on('end', complete);
-  stream.on('error', complete);
+  upstreamRes.on('error', () => { if (!res.writableEnded) res.destroy(); });
 }
 
 function sanitizeResponseHeaders(grant: Grant, headers: http.IncomingHttpHeaders): http.OutgoingHttpHeaders {
