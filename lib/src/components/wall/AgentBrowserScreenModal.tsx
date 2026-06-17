@@ -22,6 +22,7 @@ import {
   ArrowSquareOutIcon,
   CheckIcon,
   FrameCornersIcon,
+  type Icon,
   LinkIcon,
   LockSimpleIcon,
   XIcon,
@@ -115,7 +116,7 @@ export function AgentBrowserScreenModal({
   // under the screencast render option (or standalone when the surface can't
   // swap render mode), and greyed whenever the active mode isn't screencast.
   const viewportControls = (
-    <fieldset disabled={viewportDisabled} className={viewportDisabled ? 'opacity-40' : ''}>
+    <fieldset disabled={viewportDisabled} className={viewportDisabled ? 'opacity-40' : undefined}>
       <div className="text-xs font-semibold tracking-wide text-muted uppercase">Resolution</div>
       <div className="mt-2 flex flex-col gap-3 text-sm">
         <label className="flex cursor-pointer items-center gap-2">
@@ -195,65 +196,35 @@ export function AgentBrowserScreenModal({
 
       {canSwapRender ? (
         <div className="mt-4 flex flex-col gap-3">
-          {/* agent-browser screencast — no mode icon of its own; its two
-              resolution modes (resize-with-pane / fixed) carry the link / lock
-              glyphs. The resolution controls nest here and grey out when
-              another render mode wins. */}
-          <div className="flex flex-col gap-1.5 text-sm">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                type="radio"
-                name="render-mode"
-                checked={renderMode === 'screencast'}
-                onChange={() => setRenderMode('screencast')}
-              />
-              <span className="text-foreground">agent-browser screencast</span>
-            </label>
-            <div className="ml-6 flex flex-col gap-0.5 text-xs">
-              <Feature ok>agents can read/write</Feature>
-              <Feature ok>any URL</Feature>
-              <Feature ok={false}>laggy for humans</Feature>
-            </div>
+          {/* Screencast has no mode icon of its own — its two resolution modes
+              (resize-with-pane / fixed) carry the link / lock glyphs, and the
+              resolution controls nest under it, greying out for the other modes. */}
+          <RenderOption
+            checked={renderMode === 'screencast'}
+            onSelect={() => setRenderMode('screencast')}
+            label="agent-browser screencast"
+            features={[[true, 'agents can read/write'], [true, 'any URL'], [false, 'laggy for humans']]}
+          >
             <div className="ml-6 mt-2">{viewportControls}</div>
-          </div>
+          </RenderOption>
 
           {canPopOut && (
-            <div className="flex flex-col gap-1.5 text-sm">
-              <label className="flex cursor-pointer items-center gap-2">
-                <input
-                  type="radio"
-                  name="render-mode"
-                  checked={renderMode === 'popout'}
-                  onChange={() => setRenderMode('popout')}
-                />
-                <ArrowSquareOutIcon size={14} className="shrink-0 text-muted" />
-                <span className="text-foreground">agent-browser popout</span>
-              </label>
-              <div className="ml-6 flex flex-col gap-0.5 text-xs">
-                <Feature ok>agents can read/write</Feature>
-                <Feature ok>any URL</Feature>
-                <Feature ok>native human experience</Feature>
-              </div>
-            </div>
+            <RenderOption
+              checked={renderMode === 'popout'}
+              onSelect={() => setRenderMode('popout')}
+              icon={ArrowSquareOutIcon}
+              label="agent-browser popout"
+              features={[[true, 'agents can read/write'], [true, 'any URL'], [true, 'native human experience']]}
+            />
           )}
 
-          <div className="flex flex-col gap-1.5 text-sm">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                type="radio"
-                name="render-mode"
-                checked={renderMode === 'embed'}
-                onChange={() => setRenderMode('embed')}
-              />
-              <FrameCornersIcon size={14} className="shrink-0 text-muted" />
-              <span className="text-foreground">iframe embed</span>
-            </label>
-            <div className="ml-6 flex flex-col gap-0.5 text-xs">
-              <Feature ok={false}>agents cannot read/write</Feature>
-              <Feature ok={false}>localhost only</Feature>
-              <Feature ok>native human experience</Feature>
-            </div>
-          </div>
+          <RenderOption
+            checked={renderMode === 'embed'}
+            onSelect={() => setRenderMode('embed')}
+            icon={FrameCornersIcon}
+            label="iframe embed"
+            features={[[false, 'agents cannot read/write'], [false, 'localhost only'], [true, 'native human experience']]}
+          />
         </div>
       ) : (
         // No render swap wired: the legacy plain screencast resolution modal.
@@ -286,6 +257,39 @@ export function AgentBrowserScreenModal({
         </button>
       </div>
     </ModalFrame>
+  );
+}
+
+/** One render-backend option: a radio + optional mode icon + label, then its
+ *  agent/URL/feel trade-offs. Screencast passes its nested resolution controls
+ *  as children. */
+function RenderOption({
+  checked,
+  onSelect,
+  icon: ModeIcon,
+  label,
+  features,
+  children,
+}: {
+  checked: boolean;
+  onSelect: () => void;
+  icon?: Icon;
+  label: string;
+  features: [boolean, string][];
+  children?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5 text-sm">
+      <label className="flex cursor-pointer items-center gap-2">
+        <input type="radio" name="render-mode" checked={checked} onChange={onSelect} />
+        {ModeIcon && <ModeIcon size={14} className="shrink-0 text-muted" />}
+        <span className="text-foreground">{label}</span>
+      </label>
+      <div className="ml-6 flex flex-col gap-0.5 text-xs">
+        {features.map(([ok, text]) => <Feature key={text} ok={ok}>{text}</Feature>)}
+      </div>
+      {children}
+    </div>
   );
 }
 

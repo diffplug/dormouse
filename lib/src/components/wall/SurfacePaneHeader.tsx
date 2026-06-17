@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useEffect, useState, type ReactNode } from 'react';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import {
   ArrowClockwiseIcon,
@@ -37,21 +37,15 @@ import {
 /** The far-left chip reflects the surface's render backend at a glance, and
  *  opens the Display modal. iframe embed → frame; agent-browser popout →
  *  open-window glyph; agent-browser screencast → a link when its resolution
- *  resizes with the pane, a lock when it's fixed. */
-function screenChipLabel(s: ScreenSnapshot): string {
+ *  resizes with the pane, a lock when it's fixed. Returns the glyph and its
+ *  label together so the two never drift apart. */
+function screenChip(s: ScreenSnapshot): { icon: ReactNode; label: string } {
   const mode = s.renderMode ?? 'screencast';
-  if (mode === 'embed') return 'iframe embed — change render';
-  if (mode === 'popout') return 'agent-browser popout — change render';
+  if (mode === 'embed') return { icon: <FrameCornersIcon size={14} />, label: 'iframe embed — change render' };
+  if (mode === 'popout') return { icon: <ArrowSquareOutIcon size={14} />, label: 'agent-browser popout — change render' };
   return s.state === 'SYNCED'
-    ? 'agent-browser screencast, resizes with pane — change render or resolution'
-    : 'agent-browser screencast, fixed resolution — change render or resolution';
-}
-
-function ScreenChipIcon({ snapshot }: { snapshot: ScreenSnapshot }) {
-  const mode = snapshot.renderMode ?? 'screencast';
-  if (mode === 'embed') return <FrameCornersIcon size={14} />;
-  if (mode === 'popout') return <ArrowSquareOutIcon size={14} />;
-  return snapshot.state === 'SYNCED' ? <LinkIcon size={14} /> : <LockSimpleIcon size={14} />;
+    ? { icon: <LinkIcon size={14} />, label: 'agent-browser screencast, resizes with pane — change render or resolution' }
+    : { icon: <LockSimpleIcon size={14} />, label: 'agent-browser screencast, fixed resolution — change render or resolution' };
 }
 
 export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
@@ -68,6 +62,7 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
   const screen = useAgentBrowserScreenController(api.id);
   const screenSnapshot = useAgentBrowserScreenSnapshot(screen);
   const chrome = useAgentBrowserChromeSnapshot(screen);
+  const chip = screenSnapshot ? screenChip(screenSnapshot) : null;
 
   // Dev-server connection: when the active tab is loopback, correlate its port
   // to the Dormouse terminal pane serving it (resolved Wall-side). Hooks run
@@ -109,15 +104,15 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
         <>
           {/* Render/screen chip → far left, out of the way of the nav controls.
               Opens the Display modal; the glyph reflects reality — frame =
-              embed, closed lock = screencast synced, open lock = scaled. */}
+              embed, window = popout, link/lock = screencast resize/fixed. */}
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); screen.actions.openModal(); }}
-            aria-label={screenChipLabel(screenSnapshot)}
-            title={screenChipLabel(screenSnapshot)}
+            aria-label={chip?.label}
+            title={chip?.label}
             className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-current/10"
           >
-            <ScreenChipIcon snapshot={screenSnapshot} />
+            {chip?.icon}
           </button>
 
           {/* Back / forward / refresh — native agent-browser commands; always
