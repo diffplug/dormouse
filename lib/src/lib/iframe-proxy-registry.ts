@@ -4,26 +4,24 @@
  * frames (docs/specs/dor-iframe.md → "The keyboard side-channel"). The shim we
  * inject calls `parent.postMessage(...)`, which is cross-origin-safe by design;
  * the Wall validates `event.origin` against this set before acting on a
- * forwarded leader chord or focus/blur, so only a frame Dormouse itself served
- * can drive those paths.
+ * forwarded leader chord, so only a frame Dormouse itself served can drive it.
  *
- * Reference-counted because a surface can briefly re-register the same origin
- * across a webview reload (mount of the new panel before unmount of the old).
+ * A plain Set suffices: each proxied surface gets its own ephemeral loopback
+ * origin (a unique OS-assigned port per grant), so an origin is only ever held
+ * by one live surface at a time — there's nothing to reference-count.
  */
-const proxyOriginCounts = new Map<string, number>();
+const proxyOrigins = new Set<string>();
 
 export function registerProxyOrigin(origin: string): () => void {
-  proxyOriginCounts.set(origin, (proxyOriginCounts.get(origin) ?? 0) + 1);
+  proxyOrigins.add(origin);
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    const next = (proxyOriginCounts.get(origin) ?? 1) - 1;
-    if (next <= 0) proxyOriginCounts.delete(origin);
-    else proxyOriginCounts.set(origin, next);
+    proxyOrigins.delete(origin);
   };
 }
 
 export function isProxyOrigin(origin: string): boolean {
-  return proxyOriginCounts.has(origin);
+  return proxyOrigins.has(origin);
 }

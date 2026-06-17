@@ -928,6 +928,10 @@ export function Wall({
         tabComponent: 'surface',
         title,
         params,
+        // Keep iframes mounted across (de)activation — dockview's default
+        // onlyWhenVisible renderer detaches/reattaches panel DOM, and moving an
+        // <iframe> in the DOM reloads it (docs/specs/dor-iframe.md).
+        renderer: component === 'iframe' ? 'always' : undefined,
         position: { referencePanel: referencePanel.id, direction: 'within' },
       });
       disposeSession(reference.id);
@@ -945,6 +949,7 @@ export function Wall({
       tabComponent: 'surface',
       title,
       params,
+      renderer: component === 'iframe' ? 'always' : undefined,
       position: { referencePanel: referencePanel.id, direction: dockDirection },
     });
     selectPane(newId);
