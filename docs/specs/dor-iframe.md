@@ -17,12 +17,13 @@ Dormouse-served content, which is the one capability the raw iframe lacked — a
 from it the surface gains a keyboard side-channel for its global leader chord, an
 accurate focus model, and real error pages.
 
-> Status: **works for loopback dev servers** (implemented on the VS Code host).
-> Arbitrary web browsing is still better served by the **agent-browser** surface
-> (`dor ab`, see [dor-agent-browser.md](dor-agent-browser.md)): the iframe surface
-> proxies `http://` upstreams (loopback dev servers are overwhelmingly plain
-> http), defers `https://`, and routes a remote that refuses framing to an error
-> page pointing at `dor ab`.
+> Status: **works for loopback dev servers** in hosts that can run the shared
+> Node proxy (VS Code extension host and standalone/Tauri sidecar). Arbitrary
+> web browsing is still better served by the **agent-browser** surface (`dor ab`,
+> see [dor-agent-browser.md](dor-agent-browser.md)): the iframe surface proxies
+> `http://` upstreams (loopback dev servers are overwhelmingly plain http),
+> defers `https://`, and routes a remote that refuses framing to an error page
+> pointing at `dor ab`.
 
 ## The CLI → surface
 
@@ -42,9 +43,9 @@ isn't proxyable (e.g. an `https://` URL) it shows an actionable message instead.
 
 This is the **substrate** the surface is built on. Instead of pointing the
 `<iframe>` at the target, Dormouse points it at a loopback proxy
-(`vscode-ext/src/iframe-proxy-host.ts`) that fetches the target and serves it
-back. The moment Dormouse serves the bytes, two things become possible that the
-raw iframe cannot do:
+(`lib/src/host/iframe-proxy.ts`) that fetches the target and serves it back. The
+moment Dormouse serves the bytes, two things become possible that the raw iframe
+cannot do:
 
 1. **Inject a keyboard side-channel** so Dormouse's global leader chord keeps
    working inside the frame (the technique VS Code uses for its own webviews).
@@ -85,6 +86,10 @@ forwarder. The difference: this proxy speaks **HTTP** (it parses and rewrites
 responses) and passes through **WebSocket upgrades** (dev-server HMR,
 openvscode-server's connection).
 
+Source of truth: `lib/src/host/iframe-proxy.ts` owns the shared HTTP/WebSocket
+server, while `lib/src/host/iframe-proxy-rewrite.ts` owns the dependency-free
+policy, HTML instrumentation, framing checks, and served error pages.
+
 - **Per-grant dedicated loopback server.** Each grant gets its own ephemeral
   `http.Server` bound to `127.0.0.1:0`, fronting exactly **one** fixed upstream.
   The grant's *origin* is the grant. Two consequences, and they are deliberate
@@ -109,6 +114,9 @@ openvscode-server's connection).
   off-proxy. Non-HTML passes through (framing/hop-by-hop headers still stripped).
   The initial framed proxy URL preserves the target's path, query, and fragment;
   the fragment remains browser-only and is not sent on upstream HTTP requests.
+  HTML injection streams: the proxy buffers only until `</head>`, `<body>`, or a
+  bounded prefix cap, instruments that prefix, then pipes the rest of the
+  upstream response through without waiting for the full document.
 - **WebSocket passthrough.** Upgrades are forwarded as a raw byte pipe once the
   upgrade head is rewritten (`Host`/`Origin` → upstream), exactly like the stream
   relay.
@@ -116,23 +124,28 @@ openvscode-server's connection).
   `allow-top-navigation`, so a tool's `if (top !== self) top.location = …` cannot
   navigate the Wall away.
 
-### The keyboard side-channel (resolves #1)
+### The iframe shim message channel (resolves #1 and proxied click adoption)
 
 A fixed, Dormouse-owned script — like agent-browser's `EDIT_SCRIPTS`, never
-user-supplied, so it is not an eval vector — injected inline before `</head>`. It
-reclaims **only** the reserved leader chord (dual-tap ⌘ / ⇧, the same detection as
-`handle-dual-tap.ts`) and `postMessage`s it to the parent; **every other keystroke
-flows to the tool untouched**. The embedded tool (a code editor, a VS-Code-web
-workbench) keeps full keyboard interactivity; Dormouse keeps its one global chord.
+user-supplied, so it is not an eval vector — injected inline before `</head>`.
+It posts only Dormouse-owned control messages to the parent:
+
+- `leader`: the reserved leader chord (dual-tap ⌘ / ⇧, the same detection as
+  `handle-dual-tap.ts`).
+- `pointerdown`: genuine user pointerdown inside the cross-origin frame, so the
+  panel can adopt the click as pane selection + passthrough entry.
+
+Every other keystroke and pointer event flows to the tool untouched. The
+embedded tool (a code editor, a VS-Code-web workbench) keeps full keyboard
+interactivity; Dormouse keeps its one global chord and a click-adoption signal.
 
 The Wall already owns a capturing `window` keydown listener
 (`use-wall-keyboard.ts`); it gains a `message` listener that validates
 `event.origin` against the live proxy grants (`lib/src/lib/iframe-proxy-registry.ts`)
 and feeds the forwarded chord into the same dispatch the in-document dual-tap
-would (`exitTerminalMode`) — no synthesized `KeyboardEvent` round-trip.
-
-> Deviation from the original sketch: the shim forwards **only** the leader, not
-> `focus`/`blur`. The focus model below needs no message channel.
+would (`exitTerminalMode`) — no synthesized `KeyboardEvent` round-trip. The
+iframe panel separately listens for the same validated proxy origin and treats a
+`pointerdown` message as `onClickPanel(api.id)`.
 
 ### Accurate focus model (resolves #2 and #3)
 
@@ -143,11 +156,12 @@ would (`exitTerminalMode`) — no synthesized `KeyboardEvent` round-trip.
   inactive, so headers/attention stay live when an iframe takes focus.
 - **#3** — `IframePanel` registers a focus handle (`registerSurfaceFocusHandle` in
   `terminal-lifecycle.ts`) so `focusSession` focuses the frame element like any
-  other surface. And because clicking *into* a cross-origin frame doesn't bubble a
-  `mousedown` to the pane, `IframePanel` adopts "the frame took focus" (window
-  `blur` while our iframe is `document.activeElement` and the app still has focus)
-  as entering the pane — so mode/selection stay consistent and the leader chord
-  round-trips back out.
+  other surface. Because clicking *into* a cross-origin frame doesn't bubble a
+  `mousedown` to the pane, proxied frames adopt the shim's validated
+  `pointerdown` message as entering the pane. The raw fallback has no shim, so it
+  preserves the older focus heuristic: window `blur` while our iframe is
+  `document.activeElement` and the app still has focus. Both paths keep
+  mode/selection consistent when the frame owns focus.
 
 ### Real error signals (resolves #4)
 
@@ -186,13 +200,16 @@ createIframeProxyUrl?(targetUrl: string): Promise<
 >;
 ```
 
-VS Code implements it in the extension host (`iframe-proxy-host.ts`), routed via
-`message-router.ts` / `message-types.ts` and the `vscode-adapter.ts` request/
-response pair. **The proxy is needed on every host** — even where a Tauri webview
-could frame `http://127.0.0.1` directly for origin reasons, injection still
-requires controlling the bytes — unlike the agent-browser relay, which was a
-VS-Code-only origin fix. Hosts with no process to run one (the web host) omit the
-method and the panel falls back to a raw, uninstrumented `<iframe>`.
+VS Code implements it in the extension host (`vscode-ext/src/iframe-proxy-host.ts`),
+routed via `message-router.ts` / `message-types.ts` and the `vscode-adapter.ts`
+request/response pair. Standalone implements the same adapter method through
+`standalone/src/tauri-adapter.ts` → `iframe_create_proxy_url` in
+`standalone/src-tauri/src/lib.rs` → the sidecar's `iframe:createProxyUrl` command,
+which loads the bundled shared proxy. **The proxy is needed on every host** —
+even where a Tauri webview could frame `http://127.0.0.1` directly for origin
+reasons, injection still requires controlling the bytes. Hosts with no process
+to run one (the web host) omit the method and the panel falls back to a raw,
+uninstrumented `<iframe>`.
 
 With the proxy, the VS Code webview CSP (`vscode-ext/src/webview-html.ts`) narrows
 from the old broad `frame-src http: https:` to the loopback proxy origin only:
@@ -233,8 +250,6 @@ user's own `dor iframe <url>`.
   absolute `http://localhost:5173/…` (notably Vite's HMR `ws://localhost:5173/…`)
   connects straight to the upstream — uninstrumented, though harmless for loopback
   since the browser can reach it.
-- **Streaming SSR is buffered.** The proxy buffers an HTML response fully before
-  injecting the shim, adding latency for streamed responses.
 - **No teardown-on-kill hook yet.** A killed iframe surface's proxy server is
   reaped by the idle sweep, not immediately on kill. (The shared teardown hook is
   tracked under Path 2 below.)
