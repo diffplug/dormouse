@@ -1,4 +1,5 @@
 import { copyRaw, copyRewrapped, doPaste } from '../../../lib/clipboard';
+import { isEditableTarget } from '../../../lib/dom';
 import { IS_MAC } from '../../../lib/platform';
 import {
   extendSelectionToToken,
@@ -18,12 +19,7 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
   // copy/paste there. Xterm's hidden helper textarea is the input proxy
   // for the terminal itself, so we keep intercepting its keydowns.
   const tgt = e.target as HTMLElement | null;
-  if (
-    tgt &&
-    (tgt.tagName === 'INPUT' ||
-      (tgt.tagName === 'TEXTAREA' && !tgt.classList.contains('xterm-helper-textarea')) ||
-      tgt.isContentEditable)
-  ) {
+  if (isEditableTarget(tgt) && !tgt?.classList.contains('xterm-helper-textarea')) {
     return false;
   }
 

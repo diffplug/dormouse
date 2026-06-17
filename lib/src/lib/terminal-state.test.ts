@@ -9,6 +9,7 @@ import {
   COMMAND_FAIL_GLYPH,
   DEFAULT_IDLE_TITLE,
   deriveHeader,
+  deriveSurfaceLabel,
   buildAppTitleResolver,
   groupTerminalPanes,
   notificationDisplayTitle,
@@ -293,6 +294,16 @@ describe('header and grouping derivation', () => {
       primary: 'pnpm test --watch',
       secondary: 'api',
     });
+  });
+
+  it('deriveSurfaceLabel composes deriveHeader + resolveDisplayPrimary for one pane', () => {
+    // A real command label wins; the fallback title is ignored.
+    const running = runningPane('/repo/app', 'pnpm test --watch');
+    expect(deriveSurfaceLabel(running, [running], () => null, 'door title')).toBe('pnpm test --watch');
+    // An idle pane stays <idle> (resolveDisplayPrimary substitutes the fallback
+    // only for the generic command title, not for idle).
+    const idle = createTerminalPaneState();
+    expect(deriveSurfaceLabel(idle, [idle], () => null, 'door title')).toBe(DEFAULT_IDLE_TITLE);
   });
 
   it('lets fresh app-sent terminal titles override running command labels', () => {

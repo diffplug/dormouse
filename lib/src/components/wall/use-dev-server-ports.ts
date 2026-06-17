@@ -28,7 +28,7 @@ import { useEffect } from 'react';
 import type { DockviewApi } from 'dockview-react';
 import { getPlatform } from '../../lib/platform';
 import { getActivitySnapshot, getTerminalPaneStateSnapshot } from '../../lib/terminal-registry';
-import { buildAppTitleResolver, deriveHeader, resolveDisplayPrimary } from '../../lib/terminal-state';
+import { buildAppTitleResolver, deriveSurfaceLabel, DEFAULT_IDLE_TITLE } from '../../lib/terminal-state';
 import {
   getWantedDevServerPorts,
   setDevServerResolution,
@@ -105,9 +105,8 @@ export function useDevServerPortCorrelation({
       const state = states.get(id);
       if (state) {
         const appTitleForPane = buildAppTitleResolver(states, getActivitySnapshot());
-        const derived = deriveHeader(state, [state], { appTitleForPane });
-        const primary = resolveDisplayPrimary(derived.primary, fallbackTitle);
-        if (primary && primary !== '<idle>') return primary;
+        const primary = deriveSurfaceLabel(state, [state], appTitleForPane, fallbackTitle);
+        if (primary && primary !== DEFAULT_IDLE_TITLE) return primary;
       }
       return fallbackTitle?.trim() || 'terminal';
     };

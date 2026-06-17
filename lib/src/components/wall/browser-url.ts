@@ -8,13 +8,15 @@
  * components so they can be unit-tested directly.
  */
 
-/** Host + path of a URL (e.g. `localhost:5173/app`), the header's primary text.
- *  Falls back to the raw string for anything `URL` can't parse. */
-export function hostPathDisplay(rawUrl: string): string {
+/** Host + path of a URL (e.g. `localhost:5173/app`) — the browser header's
+ *  primary text, and the iframe surface's title. Pass `includeSearch` to keep
+ *  the query string (iframes do; the browser header drops it). Falls back to the
+ *  raw string for anything `URL` can't parse. */
+export function hostPathDisplay(rawUrl: string, includeSearch = false): string {
   try {
     const parsed = new URL(rawUrl);
     const path = parsed.pathname === '/' ? '' : parsed.pathname;
-    return `${parsed.host}${path}` || rawUrl;
+    return `${parsed.host}${path}${includeSearch ? parsed.search : ''}` || rawUrl;
   } catch {
     return rawUrl || '';
   }

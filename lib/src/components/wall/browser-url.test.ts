@@ -11,6 +11,11 @@ describe('hostPathDisplay', () => {
     expect(hostPathDisplay('http://localhost:5173/app/page?x=1#frag')).toBe('localhost:5173/app/page');
   });
 
+  it('includes the query when asked (iframe titles do)', () => {
+    expect(hostPathDisplay('http://localhost:5173/app?x=1', true)).toBe('localhost:5173/app?x=1');
+    expect(hostPathDisplay('http://localhost:5173/?id=story', true)).toBe('localhost:5173?id=story');
+  });
+
   it('falls back to the raw string when unparseable', () => {
     expect(hostPathDisplay('not a url')).toBe('not a url');
     expect(hostPathDisplay('')).toBe('');

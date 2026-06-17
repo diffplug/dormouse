@@ -12,6 +12,7 @@ import { clsx } from 'clsx';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
 import { readTextFromClipboard } from '../../lib/clipboard';
+import { isEditableTarget } from '../../lib/dom';
 import {
   openAgentBrowserScreenModal,
   registerAgentBrowserScreen,
@@ -764,8 +765,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       if (e.target instanceof Element && e.target.closest('[role="dialog"]')) return;
       // Likewise never hijack keystrokes destined for an editable field that
       // lives outside the pane — notably the header's URL editor.
-      if (e.target instanceof HTMLElement &&
-        (e.target.isContentEditable || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
+      if (isEditableTarget(e.target)) return;
       e.preventDefault();
       if (e.type === 'keydown') handleKeyDownLike(e);
       else sendKey(e, 'keyUp');
