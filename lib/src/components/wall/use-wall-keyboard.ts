@@ -4,6 +4,7 @@ import { handleMouseSelectionKeys } from './keyboard/handle-mouse-selection-keys
 import { handleKillConfirm } from './keyboard/handle-kill-confirm';
 import { handlePaneShortcuts } from './keyboard/handle-pane-shortcuts';
 import { handlePaneNavigation } from './keyboard/handle-pane-navigation';
+import { isProxyOrigin } from '../../lib/iframe-proxy-registry';
 import type { NavHistoryRef, WallKeyboardCtx } from './keyboard/types';
 
 export function useWallKeyboard(ctx: WallKeyboardCtx): void {
@@ -36,7 +37,24 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       handlePaneNavigation(e, c, navHistory);
     };
 
+    // A focused cross-origin iframe owns the keyboard, so its keystrokes never
+    // reach the capturing window listener above. The proxy shim posts our
+    // reserved leader chord back out (docs/specs/dor-iframe.md → "The keyboard
+    // side-channel"); feed it into the same dispatch the in-document dual-tap
+    // would, after validating the message came from a live proxy origin.
+    const onMessage = (e: MessageEvent) => {
+      const data = e.data as { __dormouse?: unknown } | null;
+      if (!data || data.__dormouse !== 'leader') return;
+      if (!isProxyOrigin(e.origin)) return;
+      const c = ctxRef.current;
+      if (c.modeRef.current === 'passthrough') c.exitTerminalMode();
+    };
+
     window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
+    window.addEventListener('message', onMessage);
+    return () => {
+      window.removeEventListener('keydown', handler, true);
+      window.removeEventListener('message', onMessage);
+    };
   }, []);
 }

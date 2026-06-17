@@ -14,6 +14,7 @@ import type { PersistedSession } from '../../lib/src/lib/session-types';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserScreenshot } from './agent-browser-host';
+import { createIframeProxyUrl } from './iframe-proxy-host';
 import { log } from './log';
 
 const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
@@ -400,6 +401,17 @@ export function attachRouter(
         );
         break;
       }
+      case 'iframe:createProxyUrl':
+        createIframeProxyUrl(typeof msg.url === 'string' ? msg.url : '').then(
+          (result) => webview.postMessage({
+            type: 'iframe:proxyUrl', requestId: msg.requestId, result,
+          } satisfies ExtensionMessage),
+          (err) => webview.postMessage({
+            type: 'iframe:proxyUrl', requestId: msg.requestId,
+            result: { ok: false, reason: 'unreachable', detail: err?.message ?? String(err) },
+          } satisfies ExtensionMessage),
+        );
+        break;
       case 'dormouse:init': {
         // Webview has (re-)initialized — subscribe to live events.
         // Tear down previous subscriptions first (webview was destroyed and recreated).
