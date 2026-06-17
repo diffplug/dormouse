@@ -1,20 +1,24 @@
 /**
- * Screen / viewport modal for an agent-browser surface
- * (docs/specs/dor-agent-browser.md → "Screen Indicator & Viewport → The
- * modal"). It is purely a GUI front-end for native `agent-browser set
- * viewport` / `set device`, plus the one Dormouse-side concept, *Sync to pane*.
+ * Display modal for a web surface (docs/specs/dor-agent-browser.md → "Screen
+ * Indicator & Viewport → The modal"; docs/specs/dor-iframe.md → "Path 1 —
+ * Swappable Render Backend"). Opened from the header's far-left chip, it is the
+ * single place that owns *how* a surface renders:
  *
- * Three mutually exclusive targets:
- *   - Sync to pane → engageSync()  (auto-issues `set viewport <pane>` on resize)
- *   - Device       → applyDevice() (fixed registry; bundles viewport+DPR+touch+UA)
- *   - Custom       → applyViewport()
+ *   - Render — swap the backend in place (Screencast ↔ Embed), preserving the
+ *     target. Shown only when the controller wires `setRenderMode`.
+ *   - Screen — viewport for the screencast backend; a GUI front-end for native
+ *     `agent-browser set viewport` / `set device`, plus the Dormouse-side
+ *     *Sync to pane*. Greyed out in embed (the iframe renders at the pane size).
+ *   - Pop out — relaunch the browser headed as an OS window (screencast only,
+ *     gated on `canPopOut`).
  *
  * It reads the live snapshot on open and pre-selects accordingly, reflecting
  * reality rather than a stored intent.
  */
 import { useMemo, useRef, useState } from 'react';
+import { ArrowSquareOutIcon } from '@phosphor-icons/react';
 import { ModalCloseButton, ModalFrame, modalActionButton } from '../design';
-import type { ScreenController, ScreenSnapshot } from './agent-browser-screen';
+import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-browser-screen';
 import { useAgentBrowserScreenSnapshot } from './agent-browser-screen';
 
 // Fixed registry — the CLI's own device set. No custom descriptors; touch +
@@ -65,6 +69,16 @@ export function AgentBrowserScreenModal({
   const [customH, setCustomH] = useState(String(initial?.viewport.h ?? 720));
   const [customDpi, setCustomDpi] = useState(String(initial?.viewport.dpr ?? 1));
 
+  // Render backend (Path 1). The Render section only appears when the surface
+  // wires `setRenderMode` (the swap is wired); otherwise the modal is the plain
+  // screencast viewport modal it has always been.
+  const currentMode: RenderMode = snapshot?.renderMode ?? 'screencast';
+  const canSwapRender = !!controller.actions.setRenderMode;
+  const [renderMode, setRenderMode] = useState<RenderMode>(currentMode);
+  const isEmbed = renderMode === 'embed';
+  // Pop out is a screencast-only escape hatch, gated per host/platform.
+  const canPopOut = (controller.canPopOut ?? false) && !!controller.actions.popOut;
+
   const customValid = useMemo(() => {
     const w = Number(customW);
     const h = Number(customH);
@@ -72,13 +86,22 @@ export function AgentBrowserScreenModal({
     return Number.isInteger(w) && w > 0 && Number.isInteger(h) && h > 0 && dpi > 0 && Number.isFinite(dpi);
   }, [customW, customH, customDpi]);
 
-  const applyDisabled = !hostCapable || (target === 'custom' && !customValid);
+  // Embed has no viewport to set, so its only gate is the render swap itself.
+  const applyDisabled = isEmbed ? false : (!hostCapable || (target === 'custom' && !customValid));
 
   const apply = () => {
     if (applyDisabled) return;
-    if (target === 'sync') controller.actions.engageSync();
-    else if (target === 'device') controller.actions.applyDevice(device);
-    else controller.actions.applyViewport(Number(customW), Number(customH), Number(customDpi));
+    if (renderMode !== currentMode) controller.actions.setRenderMode?.(renderMode);
+    if (renderMode === 'screencast') {
+      if (target === 'sync') controller.actions.engageSync();
+      else if (target === 'device') controller.actions.applyDevice(device);
+      else controller.actions.applyViewport(Number(customW), Number(customH), Number(customDpi));
+    }
+    onClose();
+  };
+
+  const popOut = () => {
+    controller.actions.popOut?.();
     onClose();
   };
 
@@ -101,23 +124,70 @@ export function AgentBrowserScreenModal({
           id="agent-browser-screen-modal-title"
           className="min-w-0 flex-1 text-sm leading-5 text-foreground"
         >
-          Screen — <span className="font-semibold">{label}</span>
+          Display — <span className="font-semibold">{label}</span>
         </h2>
         <ModalCloseButton onClick={onClose} />
       </div>
 
-      {snapshot && vp && pane && (
+      {snapshot && (
         <div className="mt-3 text-xs text-muted">
-          Currently <span className="font-semibold text-foreground">{snapshot.state}</span>
-          <div className="mt-0.5 font-mono">
-            browser {vp.w}×{vp.h}
-            {'  ·  '}
-            pane {pane.w}×{pane.h} @{formatDpr(snapshot.displayDpr)}
-          </div>
+          Currently{' '}
+          <span className="font-semibold text-foreground">
+            {currentMode === 'embed' ? 'EMBED' : snapshot.state}
+          </span>
+          {currentMode === 'embed' ? (
+            <div className="mt-0.5">the page's own DOM, rendered at the pane size</div>
+          ) : vp && pane ? (
+            <div className="mt-0.5 font-mono">
+              browser {vp.w}×{vp.h}
+              {'  ·  '}
+              pane {pane.w}×{pane.h} @{formatDpr(snapshot.displayDpr)}
+            </div>
+          ) : null}
         </div>
       )}
 
-      <div className="mt-4 flex flex-col gap-3 text-sm">
+      {canSwapRender && (
+        <fieldset className="mt-4">
+          <legend className="text-xs font-semibold tracking-wide text-muted uppercase">Render</legend>
+          <div className="mt-2 flex flex-col gap-2 text-sm">
+            <label className="flex cursor-pointer items-start gap-2">
+              <input
+                type="radio"
+                name="render-mode"
+                className="mt-0.5"
+                checked={renderMode === 'screencast'}
+                onChange={() => setRenderMode('screencast')}
+              />
+              <span className="min-w-0">
+                <span className="text-foreground">Screencast (browser)</span>
+                <span className="mt-0.5 block text-xs text-muted">real Chromium, agent-drivable, any URL</span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2">
+              <input
+                type="radio"
+                name="render-mode"
+                className="mt-0.5"
+                checked={renderMode === 'embed'}
+                onChange={() => setRenderMode('embed')}
+              />
+              <span className="min-w-0">
+                <span className="text-foreground">Embed (iframe)</span>
+                <span className="mt-0.5 block text-xs text-muted">the page's own DOM, zero-lag, loopback only</span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+      )}
+
+      <fieldset className="mt-4" disabled={isEmbed}>
+        {canSwapRender && (
+          <legend className="text-xs font-semibold tracking-wide text-muted uppercase">
+            Screen <span className="font-normal normal-case">· screencast only</span>
+          </legend>
+        )}
+        <div className={`mt-2 flex flex-col gap-3 text-sm ${isEmbed ? 'opacity-40' : ''}`}>
         <label className="flex cursor-pointer items-start gap-2">
           <input
             type="radio"
@@ -183,13 +253,25 @@ export function AgentBrowserScreenModal({
             <DimInput label="DPI" value={customDpi} onChange={setCustomDpi} onFocus={() => setTarget('custom')} />
           </span>
         </label>
-      </div>
+        </div>
+      </fieldset>
 
-      {!hostCapable && (
+      {!hostCapable && !isEmbed && (
         <p className="mt-3 text-xs text-muted">
           This host can't drive the browser viewport; run <span className="font-mono">dor ab set …</span> from a
           terminal instead.
         </p>
+      )}
+
+      {canPopOut && renderMode === 'screencast' && (
+        <button
+          type="button"
+          onClick={popOut}
+          className="mt-4 flex items-center gap-2 rounded border border-border px-2.5 py-1.5 text-xs text-muted transition-colors hover:border-foreground hover:text-foreground"
+        >
+          <ArrowSquareOutIcon size={14} />
+          Pop out to window…
+        </button>
       )}
 
       <div className="mt-4 flex justify-end gap-2 text-xs">

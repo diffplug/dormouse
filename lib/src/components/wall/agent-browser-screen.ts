@@ -20,8 +20,18 @@ import { useSyncExternalStore } from 'react';
 
 export type ScreenState = 'SYNCED' | 'SCALED';
 
+/** How a web surface is rendered (docs/specs/dor-iframe.md → "Render Backends:
+ *  Two Axes"). `screencast` = real Chromium drawn to a canvas (agent-drivable,
+ *  any URL, laggy); `embed` = the page's own DOM in a proxied iframe (zero-lag,
+ *  loopback-only). Absent ⇒ `screencast` — the only backend wired today, so a
+ *  surface with no explicit mode reads as a screencast. */
+export type RenderMode = 'screencast' | 'embed';
+
 export interface ScreenSnapshot {
   state: ScreenState;
+  /** The surface's current render backend; absent ⇒ `screencast`. Drives the
+   *  far-left chip glyph (frame-corners = embed; lock = screencast). */
+  renderMode?: RenderMode;
   /** The browser's live CSS viewport + inferred device pixel ratio. */
   viewport: { w: number; h: number; dpr: number };
   /** The pane's CSS pixel size (the canvas render area). */
@@ -40,6 +50,14 @@ export interface ScreenActions {
   applyViewport(w: number, h: number, dpr: number): void;
   /** Open the screen modal for this surface. */
   openModal(): void;
+  /** Swap this surface's render backend in place, preserving the target
+   *  (docs/specs/dor-iframe.md → "Path 1 — Swappable Render Backend"). Absent
+   *  until the swap is wired; the modal hides its Render section without it. */
+  setRenderMode?(mode: RenderMode): void;
+  /** Relaunch the browser headed as an OS window
+   *  (docs/specs/dor-agent-browser.md → "Headed Pop-Out"). Absent until wired;
+   *  gated additionally by `ScreenController.canPopOut` per host/platform. */
+  popOut?(): void;
 }
 
 /** What the browser-chrome header reads about the active tab
@@ -82,6 +100,9 @@ export interface ScreenController {
   readonly chromeActions: ChromeActions;
   /** Whether the host can run `agentBrowserCommand` (false ⇒ resizes inert). */
   readonly hostCapable: boolean;
+  /** Whether this host/platform can pop the surface out to a headed OS window
+   *  (false/absent on web; gates the modal's "Pop out to window" button). */
+  readonly canPopOut?: boolean;
 }
 
 interface ScreenEntry {
@@ -122,6 +143,7 @@ export function registerAgentBrowserScreen(
     chrome: ChromeSnapshot;
     chromeActions: ChromeActions;
     hostCapable: boolean;
+    canPopOut?: boolean;
   },
 ): ScreenRegistration {
   const entry: ScreenEntry = {
@@ -144,6 +166,7 @@ export function registerAgentBrowserScreen(
       chrome: () => entry.chrome,
       chromeActions: init.chromeActions,
       hostCapable: init.hostCapable,
+      canPopOut: init.canPopOut,
     },
   };
   registry.set(id, entry);

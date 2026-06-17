@@ -8,7 +8,8 @@ import {
   ArrowsInIcon,
   ArrowsOutIcon,
   FrameCornersIcon,
-  ResizeIcon,
+  LockSimpleIcon,
+  LockSimpleOpenIcon,
   SplitHorizontalIcon,
   SplitVerticalIcon,
   XIcon,
@@ -19,6 +20,7 @@ import {
   useAgentBrowserChromeSnapshot,
   useAgentBrowserScreenController,
   useAgentBrowserScreenSnapshot,
+  type ScreenSnapshot,
 } from './agent-browser-screen';
 import { loopbackPort, normalizeNavUrl, pathDisplay } from './browser-url';
 import { triggerDevServerRescan, useDevServerMatch } from './agent-browser-ports';
@@ -30,6 +32,22 @@ import {
   WindowFocusedContext,
   ZoomedContext,
 } from './wall-context';
+
+/** The far-left chip reflects the surface's render backend at a glance, and
+ *  opens the Display modal (render + viewport). Embed shows a frame; a
+ *  screencast shows a lock that's closed when its viewport is synced to the
+ *  pane, open when it's scaled/free. */
+function screenChipLabel(s: ScreenSnapshot): string {
+  if ((s.renderMode ?? 'screencast') === 'embed') return 'Embed (iframe) — change render or viewport';
+  return s.state === 'SYNCED'
+    ? 'Screencast, synced to pane — change render or viewport'
+    : 'Screencast, scaled — change render or viewport';
+}
+
+function ScreenChipIcon({ snapshot }: { snapshot: ScreenSnapshot }) {
+  if ((snapshot.renderMode ?? 'screencast') === 'embed') return <FrameCornersIcon size={14} />;
+  return snapshot.state === 'SYNCED' ? <LockSimpleIcon size={14} /> : <LockSimpleOpenIcon size={14} />;
+}
 
 export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
   const mode = useContext(ModeContext);
@@ -84,18 +102,17 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
     >
       {screen && screenSnapshot && chrome ? (
         <>
-          {/* Sync chip → far left, out of the way of the nav controls. Opens
-              the screen modal; SYNCED/SCALED reflects reality. */}
+          {/* Render/screen chip → far left, out of the way of the nav controls.
+              Opens the Display modal; the glyph reflects reality — frame =
+              embed, closed lock = screencast synced, open lock = scaled. */}
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); screen.actions.openModal(); }}
-            aria-label={`Screen: ${screenSnapshot.state} — change viewport`}
-            title={`Screen: ${screenSnapshot.state} — change viewport`}
+            aria-label={screenChipLabel(screenSnapshot)}
+            title={screenChipLabel(screenSnapshot)}
             className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-current/10"
           >
-            {screenSnapshot.state === 'SYNCED'
-              ? <FrameCornersIcon size={14} />
-              : <ResizeIcon size={14} />}
+            <ScreenChipIcon snapshot={screenSnapshot} />
           </button>
 
           {/* Back / forward / refresh — native agent-browser commands; always

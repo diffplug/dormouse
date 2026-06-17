@@ -12,6 +12,7 @@ import { SurfacePaneHeader } from '../components/wall/SurfacePaneHeader';
 import {
   registerAgentBrowserScreen,
   type ChromeSnapshot,
+  type RenderMode,
   type ScreenRegistration,
   type ScreenSnapshot,
   type ScreenState,
@@ -48,6 +49,9 @@ const loggingActions: WallActions = {
 };
 
 interface StoryArgs {
+  /** Render backend — drives the far-left chip glyph: frame = embed, lock =
+   *  screencast (closed when synced, open when scaled). */
+  renderMode: RenderMode;
   /** Drives the SYNCED/SCALED chip + the modal it opens. */
   state: ScreenState;
   /** Active tab URL — also the source of the host+path text and loopback port. */
@@ -74,11 +78,12 @@ function BrowserChromeStory(args: StoryArgs) {
 
   const screenSnapshot: ScreenSnapshot = useMemo(() => ({
     state: args.state,
+    renderMode: args.renderMode,
     viewport: { w: 1280, h: 720, dpr: 1 },
     paneCss: args.state === 'SYNCED' ? { w: 1280, h: 720 } : { w: 980, h: 560 },
     displayDpr: 2,
     syncEngaged: args.state === 'SYNCED',
-  }), [args.state]);
+  }), [args.state, args.renderMode]);
 
   const chromeSnapshot: ChromeSnapshot = useMemo(() => ({
     url: args.url,
@@ -98,6 +103,8 @@ function BrowserChromeStory(args: StoryArgs) {
         applyDevice: (name) => console.log('[story] applyDevice', name),
         applyViewport: (w, h, dpr) => console.log('[story] applyViewport', w, h, dpr),
         openModal: () => console.log('[story] openModal'),
+        setRenderMode: (mode) => console.log('[story] setRenderMode', mode),
+        popOut: () => console.log('[story] popOut'),
       },
       chromeActions: {
         navigate: (url) => console.log('[story] navigate', url),
@@ -158,6 +165,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
   title: 'Components/BrowserChromeHeader',
   component: BrowserChromeStory,
   argTypes: {
+    renderMode: { control: 'inline-radio', options: ['screencast', 'embed'] },
     state: { control: 'radio', options: ['SYNCED', 'SCALED'] },
     url: { control: 'text' },
     htmlTitle: { control: 'text' },
@@ -168,6 +176,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
     selected: { control: 'boolean' },
   },
   args: {
+    renderMode: 'screencast',
     state: 'SYNCED',
     url: 'http://localhost:5173/app',
     htmlTitle: 'Vite + React',
@@ -184,6 +193,13 @@ type Story = StoryObj<typeof BrowserChromeStory>;
 
 /** Everything on at once: key badge + URL + dev-server chip + nav. */
 export const Playground: Story = {};
+
+/** Embed (iframe) render mode — the unified chrome is identical to screencast,
+ *  but the far-left chip becomes the frame-corners glyph. Same URL/nav/dev-server
+ *  header; only the chip + body renderer differ. */
+export const Embed: Story = {
+  args: { renderMode: 'embed' },
+};
 
 /** Letterboxed viewport — the chip reads SCALED (click it for the modal). */
 export const Scaled: Story = {
