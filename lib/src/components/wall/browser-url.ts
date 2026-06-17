@@ -20,6 +20,17 @@ export function hostPathDisplay(rawUrl: string): string {
   }
 }
 
+/** Path only (e.g. `/app`), used when a dev-server chip already shows the
+ *  host+port so the domain would be redundant. Falls back to the raw string for
+ *  anything `URL` can't parse. */
+export function pathDisplay(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).pathname || '/';
+  } catch {
+    return rawUrl || '';
+  }
+}
+
 /** True for hostnames that resolve to the local machine. `*.localhost` is
  *  included because browsers route it to loopback per the RFC. */
 function isLoopbackHostname(hostname: string): boolean {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hostPathDisplay, loopbackPort } from './browser-url';
+import { hostPathDisplay, loopbackPort, pathDisplay } from './browser-url';
 
 describe('hostPathDisplay', () => {
   it('drops the scheme and a bare root path', () => {
@@ -14,6 +14,23 @@ describe('hostPathDisplay', () => {
   it('falls back to the raw string when unparseable', () => {
     expect(hostPathDisplay('not a url')).toBe('not a url');
     expect(hostPathDisplay('')).toBe('');
+  });
+});
+
+describe('pathDisplay', () => {
+  it('returns the path only, dropping scheme/host', () => {
+    expect(pathDisplay('http://localhost:5173/app')).toBe('/app');
+    expect(pathDisplay('http://localhost:5173/app/page')).toBe('/app/page');
+  });
+
+  it('returns "/" for a root URL', () => {
+    expect(pathDisplay('http://localhost:5173/')).toBe('/');
+    expect(pathDisplay('http://localhost:5173')).toBe('/');
+  });
+
+  it('falls back to the raw string when unparseable', () => {
+    expect(pathDisplay('not a url')).toBe('not a url');
+    expect(pathDisplay('')).toBe('');
   });
 });
 

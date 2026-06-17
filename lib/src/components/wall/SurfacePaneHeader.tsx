@@ -21,7 +21,7 @@ import {
   useAgentBrowserScreenController,
   useAgentBrowserScreenSnapshot,
 } from './agent-browser-screen';
-import { loopbackPort } from './browser-url';
+import { loopbackPort, pathDisplay } from './browser-url';
 import { triggerDevServerRescan, useDevServerMatch } from './agent-browser-ports';
 import {
   ModeContext,
@@ -52,6 +52,10 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
   const port = chrome ? loopbackPort(chrome.url) : null;
   const devServer = useDevServerMatch(port);
 
+  // With a dev-server chip in front, the chip already shows host:port, so the
+  // URL collapses to just the path; otherwise it's the full host+path.
+  const urlText = chrome ? (devServer ? pathDisplay(chrome.url) : chrome.displayUrl) : '';
+
   return (
     <div
       className={`flex h-full w-full cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${isActiveHeader ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg'}`}
@@ -66,7 +70,7 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
             onClick={(e) => { e.stopPropagation(); screen.actions.openModal(); }}
             aria-label={`Screen: ${screenSnapshot.state} — change viewport`}
             title={`Screen: ${screenSnapshot.state} — change viewport`}
-            className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded text-current/70 transition-colors hover:bg-current/10 hover:text-current"
+            className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-current/10"
           >
             {screenSnapshot.state === 'SYNCED'
               ? <FrameCornersIcon size={14} />
@@ -102,7 +106,7 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
               title. Raw --session surfaces show none. */}
           {chrome.key && chrome.key !== 'default' && (
             <span
-              className="flex h-5 min-w-5 shrink-0 items-center justify-center text-current/70"
+              className="flex h-5 min-w-5 shrink-0 items-center justify-center"
               title={`--key ${chrome.key}`}
               aria-label={`--key ${chrome.key}`}
             >
@@ -110,28 +114,31 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
             </span>
           )}
 
-          {/* URL (host + path) is the primary text; HTML <title> → tooltip. */}
-          <span
-            className="min-w-0 truncate font-medium"
-            title={chrome.title ?? chrome.url ?? undefined}
-          >{chrome.displayUrl || api.title || api.id}</span>
-
-          {/* Dev-server connection chip — only when the port maps to a single
-              pane; click focuses that terminal. Degrades to just the URL
-              otherwise (non-loopback, no/ambiguous match, proxied domain). */}
+          {/* Dev-server connection chip — in front of the URL when the port maps
+              to a single pane; click focuses that terminal. The full command
+              shows by default (no fixed cap); it only truncates after the URL
+              path has, since the URL shrinks far faster. Absent (non-loopback,
+              no/ambiguous match, proxied domain) ⇒ no chip + full host+path. */}
           {devServer && (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); actions.onFocusPane(devServer.paneId); }}
               aria-label={`Focus ${devServer.label} — serves this localhost port`}
               title={`localhost served by ${devServer.label}${port != null ? ` (:${port})` : ''} — click to focus`}
-              className="flex h-5 min-w-0 shrink-0 items-center gap-1 rounded px-1.5 text-xs text-current/70 transition-colors hover:bg-current/10 hover:text-current"
+              className="flex h-5 min-w-0 items-center gap-1 rounded px-1.5 text-xs transition-colors hover:bg-current/10"
             >
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" />
-              <span className="max-w-[14ch] truncate">{devServer.label}</span>
-              {port != null && <span className="text-current/50">:{port}</span>}
+              <span className="min-w-0 truncate">{devServer.label}</span>
+              {port != null && <span className="shrink-0 text-current/70">:{port}</span>}
             </button>
           )}
+
+          {/* URL is the path only when a chip fronts it (domain is in the chip),
+              else the full host+path. HTML <title> / full URL → tooltip. It
+              gives up width (shrink-[10]) long before the command does. */}
+          <span
+            className="min-w-0 shrink-[10] truncate font-medium"
+            title={chrome.title ?? chrome.url ?? undefined}
+          >{urlText || api.title || api.id}</span>
 
           {/* Flexible spacer keeps the layout buttons right-aligned. */}
           <div className="min-w-0 flex-1" />
