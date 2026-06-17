@@ -8,7 +8,6 @@ import {
   ArrowsInIcon,
   ArrowsOutIcon,
   FrameCornersIcon,
-  KeyIcon,
   ResizeIcon,
   SplitHorizontalIcon,
   SplitVerticalIcon,
@@ -101,17 +100,14 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
             ><ArrowClockwiseIcon size={14} /></HeaderActionButton>
           </div>
 
-          {/* --key indicator for non-default keys only — a filled key icon
-              (hover reveals `--key <name>`), never a prefix on the persisted
-              title. Raw --session surfaces show none. */}
+          {/* --key indicator for non-default keys only — the key name inline,
+              small + quiet (hover reveals `--key <name>`), never a prefix on the
+              persisted title. Raw --session surfaces show none. */}
           {chrome.key && chrome.key !== 'default' && (
             <span
-              className="flex h-5 min-w-5 shrink-0 items-center justify-center"
+              className="shrink-0 text-xs text-current/70"
               title={`--key ${chrome.key}`}
-              aria-label={`--key ${chrome.key}`}
-            >
-              <KeyIcon size={14} weight="fill" />
-            </span>
+            >{chrome.key}</span>
           )}
 
           {/* Dev-server connection chip — in front of the URL when the port maps

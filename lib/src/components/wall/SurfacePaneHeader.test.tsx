@@ -101,9 +101,8 @@ describe('SurfacePaneHeader — browser chrome', () => {
   it('shows a key indicator for a non-default --key but not the default key', () => {
     const reg = register('pane-key', { ...CHROME, key: 'storybook' });
     renderHeader(headerApi('pane-key', 'x'), stubActions());
-    // Rendered as a filled key icon; the key name lives in the hover tooltip.
-    expect(container.querySelector('[aria-label="--key storybook"]')).not.toBeNull();
-    expect(container.textContent).not.toContain('storybook');
+    // Rendered inline as the key name, with `--key <name>` in the hover tooltip.
+    expect(container.querySelector('[title="--key storybook"]')?.textContent).toBe('storybook');
     reg.dispose();
 
     act(() => root.unmount());
@@ -111,7 +110,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
 
     const reg2 = register('pane-key2', { ...CHROME, key: 'default' });
     renderHeader(headerApi('pane-key2', 'x'), stubActions());
-    expect(container.querySelector('[aria-label="--key default"]')).toBeNull();
+    expect(container.querySelector('[title="--key default"]')).toBeNull();
     reg2.dispose();
   });
 
