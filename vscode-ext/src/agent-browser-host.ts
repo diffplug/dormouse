@@ -136,18 +136,31 @@ export async function runAgentBrowserScreenshot(
   }
 }
 
+const STREAM_PORT_READ_ATTEMPTS = 4;
+const STREAM_PORT_READ_DELAY_MS = 150;
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 // Read a session's stream WebSocket port via `stream status --json`. Mirrors
 // the parse in dor/src/commands/agent-browser.ts: { port } or { data: { port } }.
+// Right after `open` / `--headed open` (a fresh spawn, a pop-out, or a pop-in
+// relaunch) the daemon may not have published the port yet; a single read would
+// then return undefined and leave the panel pinned to a stale port — it reads
+// "ended" though the session is live. Retry briefly to close that window.
 async function readStreamPort(session: string, binaryPath?: string): Promise<number | undefined> {
-  const result = await runWithBinaryFallback(['--session', session, 'stream', 'status', '--json'], binaryPath);
-  if (result.exitCode !== 0) return undefined;
-  try {
-    const parsed = JSON.parse(result.stdout) as { port?: unknown; data?: { port?: unknown } };
-    const port = parsed.data?.port ?? parsed.port;
-    return typeof port === 'number' && Number.isFinite(port) ? port : undefined;
-  } catch {
-    return undefined;
+  for (let attempt = 0; attempt < STREAM_PORT_READ_ATTEMPTS; attempt++) {
+    const result = await runWithBinaryFallback(['--session', session, 'stream', 'status', '--json'], binaryPath);
+    if (result.exitCode === 0) {
+      try {
+        const parsed = JSON.parse(result.stdout) as { port?: unknown; data?: { port?: unknown } };
+        const port = parsed.data?.port ?? parsed.port;
+        if (typeof port === 'number' && Number.isFinite(port)) return port;
+      } catch {
+        // malformed output — fall through and retry
+      }
+    }
+    if (attempt < STREAM_PORT_READ_ATTEMPTS - 1) await delay(STREAM_PORT_READ_DELAY_MS);
   }
+  return undefined;
 }
 
 // A fresh managed session for a surface spawned from the GUI (no `--key`),

@@ -11,6 +11,7 @@ import { Baseboard } from './Baseboard';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
 import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
+import { markAgentBrowserSessionClosed } from './wall/agent-browser-sessions';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import {
   clearSessionAttention,
@@ -180,6 +181,9 @@ function closeAgentBrowserSession(params: unknown): void {
   const p = params as { surfaceType?: unknown; session?: unknown; binaryPath?: unknown } | undefined;
   if (p?.surfaceType === 'agent-browser' && typeof p.session === 'string') {
     const binaryPath = typeof p.binaryPath === 'string' ? p.binaryPath : undefined;
+    // Mark before issuing the close so a popped-out surface's auto-revert sees
+    // the impending teardown and doesn't relaunch the session we're killing.
+    markAgentBrowserSessionClosed(p.session);
     getPlatform().agentBrowserCommand?.(p.session, ['close'], binaryPath).catch(() => {});
   }
 }

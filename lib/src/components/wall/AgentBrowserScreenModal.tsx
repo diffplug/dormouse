@@ -86,6 +86,10 @@ export function AgentBrowserScreenModal({
   // Only the screencast backend has a Dormouse-settable viewport; pop-out is a
   // native OS window and embed renders at the pane size, so both grey it out.
   const viewportDisabled = renderMode !== 'screencast';
+  // Whether Apply changes the render backend (vs only tweaking the current
+  // screencast's viewport). A swap is gated on whether its option is shown, not
+  // on the viewport-drive capability below.
+  const switchingMode = renderMode !== currentMode;
   // Within screencast, the resolution is either linked to the pane (resize with
   // pane) or fixed — Device/Custom are the two ways to pick the fixed size.
   const isFixed = target === 'device' || target === 'custom';
@@ -97,13 +101,28 @@ export function AgentBrowserScreenModal({
     return Number.isInteger(w) && w > 0 && Number.isInteger(h) && h > 0 && dpi > 0 && Number.isFinite(dpi);
   }, [customW, customH, customDpi]);
 
-  // A non-screencast mode has no viewport to set, so its only gate is the swap.
-  const applyDisabled = viewportDisabled ? false : (!hostCapable || (target === 'custom' && !customValid));
+  // Apply gating splits three ways:
+  //   - non-screencast target (embed/popout): no viewport to set; the swap is
+  //     the action, gated only on its option being shown — always enabled.
+  //   - swapping TO screencast (from embed/popout): spawns a fresh session that
+  //     drives its own viewport, so the *current* surface's viewport-drive
+  //     capability is irrelevant — always enabled. (This is the embed→screencast
+  //     bug: an embed surface reports hostCapable:false, which used to dead-lock
+  //     Apply even though switching needs only the spawn capability.)
+  //   - staying on screencast (tweaking the viewport): needs the host to drive
+  //     `set viewport`, and a valid custom size.
+  const applyDisabled =
+    viewportDisabled || switchingMode
+      ? false
+      : (!hostCapable || (target === 'custom' && !customValid));
 
   const apply = () => {
     if (applyDisabled) return;
-    if (renderMode !== currentMode) controller.actions.setRenderMode?.(renderMode);
-    if (renderMode === 'screencast') {
+    if (switchingMode) {
+      // A mode swap; the viewport sub-controls don't apply to the outgoing
+      // surface (and are inert on embed/popout controllers anyway).
+      controller.actions.setRenderMode?.(renderMode);
+    } else if (renderMode === 'screencast') {
       if (target === 'sync') controller.actions.engageSync();
       else if (target === 'device') controller.actions.applyDevice(device);
       else controller.actions.applyViewport(Number(customW), Number(customH), Number(customDpi));
@@ -231,7 +250,7 @@ export function AgentBrowserScreenModal({
         <div className="mt-4">{viewportControls}</div>
       )}
 
-      {!hostCapable && !viewportDisabled && (
+      {!hostCapable && !viewportDisabled && !switchingMode && (
         <p className="mt-3 text-xs text-muted">
           This host can't drive the browser viewport; run <span className="font-mono">dor ab set …</span> from a
           terminal instead.

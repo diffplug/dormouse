@@ -24,6 +24,7 @@ import {
   type ScreenState,
 } from './agent-browser-screen';
 import { hostPathDisplay } from './browser-url';
+import { clearAgentBrowserSessionClosed, isAgentBrowserSessionClosed } from './agent-browser-sessions';
 import {
   EDIT_OPS,
   MOUSE_BUTTONS,
@@ -563,12 +564,22 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   // Push the render-mode flip (screencast ↔ popout) to the header/modal.
   useEffect(() => { publishScreen(); }, [poppedOut, publishScreen]);
 
+  // This surface owns its session again — clear any teardown mark a prior
+  // surface (re-using the same managed name) left behind, so auto-revert works.
+  useEffect(() => {
+    if (session) clearAgentBrowserSessionClosed(session);
+  }, [session]);
+
   // Auto-revert: once the headed stream has connected, a later disconnect means
   // the window closed → relaunch headless and resume streaming (spec → Lifecycle).
+  // But a disconnect also happens when Dormouse itself closes the session (pane
+  // kill, or a render-swap away from popout); the closed-session mark tells those
+  // apart so we don't resurrect a session that's being torn down.
   useEffect(() => {
     if (!poppedOut) { headedConnectedRef.current = false; return; }
     if (status?.connected === true) headedConnectedRef.current = true;
     else if (headedConnectedRef.current && (status?.connected === false || connectionLost)) {
+      if (sessionRef.current && isAgentBrowserSessionClosed(sessionRef.current)) return;
       popInRef.current();
     }
   }, [poppedOut, status?.connected, connectionLost]);
