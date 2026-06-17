@@ -272,15 +272,25 @@ function instrumentHtml(body: string): string {
 }
 
 // A remote refuses framing if it sends any X-Frame-Options or a CSP
-// frame-ancestors that is not the permissive `*`. Conservative on purpose: when
-// in doubt we divert to an error page rather than show a guaranteed-blank frame.
+// frame-ancestors that is not the permissive standalone `*`. Conservative on
+// purpose: when in doubt we divert to an error page rather than show a
+// guaranteed-blank frame.
 function refusesFraming(headers: http.IncomingHttpHeaders): boolean {
   if (headers['x-frame-options']) return true;
   const csp = headers['content-security-policy'];
-  const cspText = Array.isArray(csp) ? csp.join(';') : (csp ?? '');
-  const match = /frame-ancestors([^;]*)/i.exec(cspText);
-  if (!match) return false;
-  return !/\*/.test(match[1]);
+  const policies = Array.isArray(csp) ? csp : csp ? [csp] : [];
+  return policies.some((policy) => hasRestrictiveFrameAncestors(policy));
+}
+
+function hasRestrictiveFrameAncestors(policy: string): boolean {
+  const directives = policy.split(';');
+  for (const directive of directives) {
+    const parts = directive.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0 || parts[0].toLowerCase() !== 'frame-ancestors') continue;
+    const sources = parts.slice(1);
+    if (!sources.includes('*')) return true;
+  }
+  return false;
 }
 
 // --- WebSocket upgrade passthrough (dev-server HMR, openvscode-server) -------

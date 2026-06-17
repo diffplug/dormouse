@@ -67,7 +67,7 @@ new technique, the proven one.
 | Target | Proxy behavior |
 | --- | --- |
 | **Loopback** (`localhost`/`127.0.0.1`/`[::1]`) http | Full instrument: strip `X-Frame-Options`, drop the page CSP, inject the shim, serve. The user spawned it; framing is the intent. |
-| **Remote** http, frameable | Best-effort render with the injected shim (flagged that `dor ab` is the better tool for arbitrary browsing). |
+| **Remote** http, frameable | Best-effort render with the injected shim (flagged that `dor ab` is the better tool for arbitrary browsing). A CSP `frame-ancestors *` is considered frameable; scoped sources such as `https://*.example.com` are restrictive. |
 | **Remote** http, refuses framing | **Never force-framed.** Serve a Dormouse error page with a one-click hint to `dor ab open <url>`. |
 | **Unreachable** (conn refused, DNS, non-2xx) | Serve a Dormouse error page ("is the dev server running?"). |
 | **`https://`** | Deferred. The panel reports `scheme` and points at `dor ab`. |
@@ -205,8 +205,10 @@ The same fences as the stream relay: loopback-only bind both sides; a per-surfac
 grant served by a dedicated **single-upstream** server (no open forwarder); the
 injected shim is fixed and Dormouse-owned (no user script ever reaches the page);
 header-stripping never force-frames a third-party site (a refusing remote is
-diverted to an error page, not stripped). **SSRF:** the proxy fetches a
-user-supplied URL, so it refuses link-local / cloud-metadata ranges
+diverted to an error page, not stripped). For CSP, only a standalone
+`frame-ancestors *` is permissive; wildcard host patterns remain restrictive.
+**SSRF:** the proxy fetches a user-supplied URL, so it refuses link-local /
+cloud-metadata ranges
 (`169.254.0.0/16`, `fe80::/10`) and trusts other ranges — the trust boundary is the
 user's own `dor iframe <url>`.
 
