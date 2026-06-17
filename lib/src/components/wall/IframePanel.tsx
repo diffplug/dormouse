@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
@@ -7,6 +7,14 @@ import { registerSurfaceFocusHandle } from '../../lib/terminal-registry';
 import type { IframeProxyResult } from '../../lib/platform/types';
 import { usePaneChrome } from './use-pane-chrome';
 import { WallActionsContext } from './wall-context';
+import {
+  openAgentBrowserScreenModal,
+  registerAgentBrowserScreen,
+  type ChromeActions,
+  type ScreenActions,
+  type ScreenRegistration,
+} from './agent-browser-screen';
+import { hostPathDisplay } from './browser-url';
 
 type IframePanelParams = {
   surfaceType?: string;
@@ -44,6 +52,11 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
   const iframeRef = useRef<HTMLIFrameElement>(null);
   usePaneChrome(api, elRef);
   const url = typeof params?.url === 'string' ? params.url : '';
+  // Bumped by the header's reload button to re-resolve the proxy (a cross-origin
+  // frame can't be reloaded via its contentWindow).
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
 
   // Ask the host to front the target with its transparent proxy. The returned
   // URL is a loopback origin that serves the page's bytes (instrumented for
@@ -74,7 +87,57 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
       },
     );
     return () => { cancelled = true; };
-  }, [url]);
+  }, [url, reloadNonce]);
+
+  // Register a screen controller so the embed surface shows the unified
+  // browser chrome (URL + the far-left chip → Display modal) and can swap back
+  // to a live screencast. Gated on the host being able to spawn an
+  // agent-browser (agentBrowserOpen) — without it there's no screencast to
+  // swap to, so the embed surface keeps its plain title (e.g. the web host).
+  const swapCapable = !!getPlatform().agentBrowserOpen;
+  const screenActions = useMemo<ScreenActions>(() => ({
+    engageSync() {},
+    applyDevice() {},
+    applyViewport() {},
+    openModal() { openAgentBrowserScreenModal(api.id); },
+    setRenderMode(mode) {
+      // embed is the current backend; screencast/popout swap to agent-browser.
+      if (mode !== 'embed') actionsRef.current.onSwapRenderMode(api.id, mode);
+    },
+  }), [api.id]);
+  const chromeActions = useMemo<ChromeActions>(() => ({
+    navigate(next) { api.updateParameters({ url: next }); },
+    back() {},     // cross-origin frame history is unreachable
+    forward() {},
+    reload() { setReloadNonce((n) => n + 1); },
+  }), [api]);
+  const registrationRef = useRef<ScreenRegistration | null>(null);
+  useEffect(() => {
+    if (!swapCapable) return;
+    const registration = registerAgentBrowserScreen(api.id, {
+      snapshot: {
+        state: 'SYNCED',
+        renderMode: 'embed',
+        viewport: { w: 0, h: 0, dpr: 1 },
+        paneCss: { w: 0, h: 0 },
+        displayDpr: 1,
+        syncEngaged: false,
+      },
+      actions: screenActions,
+      chrome: { url, displayUrl: hostPathDisplay(url), title: api.title ?? null, key: null },
+      chromeActions,
+      hostCapable: false,
+      // embed→popout would need spawn + an auto-pop-out on the new surface;
+      // for now the embed modal offers screencast only.
+      canPopOut: false,
+    });
+    registrationRef.current = registration;
+    return () => { registration.dispose(); registrationRef.current = null; };
+  }, [api.id, swapCapable, screenActions, chromeActions]);
+  // Keep the header's URL current as navigate/param changes land.
+  useEffect(() => {
+    registrationRef.current?.updateChrome({ url, displayUrl: hostPathDisplay(url), title: api.title ?? null, key: null });
+  }, [url, api.title]);
 
   // Trust postMessage from this frame's origin (validated by the Wall's
   // keyboard/focus channel) only while the proxied surface is live.
