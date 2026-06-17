@@ -198,11 +198,17 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
       passThrough(grant, upstreamRes, res);
       return;
     }
-    collectBody(upstreamRes, (body) => {
+    collectBody(upstreamRes, (body, truncated) => {
       // A remote that forbids embedding is never force-framed — serve an
       // actionable page that points at `dor ab` instead of a blank pane.
       if (!grant.isLoopback && refusesFraming(upstreamRes.headers)) {
         serveErrorPage(res, frameRefusedPage(grant.upstream));
+        return;
+      }
+      // An over-limit body can't be safely instrumented (the shim may land past
+      // the cutoff, and serving half a document is worse than an honest error).
+      if (truncated) {
+        serveErrorPage(res, bodyTooLargePage(grant.upstream));
         return;
       }
       const html = instrumentHtml(body);
@@ -225,18 +231,20 @@ function passThrough(grant: Grant, upstreamRes: http.IncomingMessage, res: http.
   upstreamRes.pipe(res);
 }
 
-function collectBody(stream: http.IncomingMessage, done: (body: string) => void): void {
+function collectBody(stream: http.IncomingMessage, done: (body: string, truncated: boolean) => void): void {
   const chunks: Buffer[] = [];
   let size = 0;
+  let truncated = false;
   stream.on('data', (chunk: Buffer) => {
     size += chunk.length;
     if (size > HTML_BODY_LIMIT) {
+      truncated = true;
       stream.destroy();
       return;
     }
     chunks.push(chunk);
   });
-  const complete = () => done(Buffer.concat(chunks).toString('utf8'));
+  const complete = () => done(Buffer.concat(chunks).toString('utf8'), truncated);
   stream.on('end', complete);
   stream.on('error', complete);
 }
@@ -363,6 +371,15 @@ function frameRefusedPage(upstream: URL): ErrorPage {
   return {
     title: `${upstream.host} refuses to be embedded`,
     message: `${upstream.host} sends a frame-blocking header (X-Frame-Options or CSP frame-ancestors), so it can’t be shown in an iframe surface.`,
+    hint: `dor ab open ${upstream.href}`,
+  };
+}
+
+function bodyTooLargePage(upstream: URL): ErrorPage {
+  const limit = `${Math.round(HTML_BODY_LIMIT / (1024 * 1024))} MB`;
+  return {
+    title: `${upstream.host} sent too much HTML`,
+    message: `The HTML response from ${upstream.href} exceeded HTML_BODY_LIMIT of ${limit}, so it couldn’t be instrumented and shown in an iframe surface.`,
     hint: `dor ab open ${upstream.href}`,
   };
 }
