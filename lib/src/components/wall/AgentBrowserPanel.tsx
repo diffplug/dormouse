@@ -50,7 +50,23 @@ type AgentBrowserPanelParams = {
    *  a re-attached surface re-engages sync if it was engaged. Absent on a fresh
    *  surface ⇒ auto-engage (see docs/specs/dor-agent-browser.md). */
   syncEngaged?: boolean;
+  /** Whether this session is currently popped out to a headed OS window
+   *  (docs/specs/dor-agent-browser.md → "Headed Pop-Out"). Persists via the
+   *  layout blob so a re-attached surface re-renders the stub. */
+  poppedOut?: boolean;
 };
+
+/** Best-effort screen rect for positioning a popped-out window over the pane.
+ *  VS Code webviews can't read true screen coords (the host then centers); on
+ *  standalone, window.screenX/Y offset the pane's viewport rect into screen
+ *  space. */
+function paneScreenRect(el: HTMLElement | null): { x: number; y: number; width: number; height: number } | undefined {
+  if (!el) return undefined;
+  const r = el.getBoundingClientRect();
+  const sx = typeof window.screenX === 'number' ? window.screenX : 0;
+  const sy = typeof window.screenY === 'number' ? window.screenY : 0;
+  return { x: Math.round(sx + r.left), y: Math.round(sy + r.top), width: Math.round(r.width), height: Math.round(r.height) };
+}
 
 // SYNCED is "browser viewport CSS size == pane CSS size". The screencast is
 // always delivered at CSS-pixel resolution — the frame never encodes the
@@ -125,6 +141,15 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   const [connectionLost, setConnectionLost] = useState(false);
   const [tabs, setTabs] = useState<StreamTab[]>([]);
   const knownTabIdsRef = useRef<Set<string>>(new Set());
+
+  // Pop-out state: while true the browser runs in a headed OS window and the
+  // pane is a stub. Seeded from params so it survives a re-attach.
+  const [poppedOut, setPoppedOut] = useState<boolean>(params?.poppedOut === true);
+  const poppedOutRef = useRef(poppedOut);
+  poppedOutRef.current = poppedOut;
+  // Gate auto-revert: only treat a dropped stream as "window closed" once the
+  // headed stream has actually connected (avoids reverting mid-relaunch).
+  const headedConnectedRef = useRef(false);
 
   const binaryPath = params?.binaryPath;
   const runAgentBrowser = useCallback((args: string[]) => {
@@ -208,7 +233,8 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     // DPR can't be read back from frames, so report the density we'd sync to.
     const viewport = { w: device.width, h: device.height, dpr: displayDpr };
     const state: ScreenState = dimsMatch(viewport, paneCss) ? 'SYNCED' : 'SCALED';
-    return { state, viewport, paneCss, displayDpr, syncEngaged: syncEngagedRef.current, renderMode: 'screencast' };
+    const renderMode = poppedOutRef.current ? 'popout' : 'screencast';
+    return { state, viewport, paneCss, displayDpr, syncEngaged: syncEngagedRef.current, renderMode };
   }, []);
 
   // Publish to the registry only when something the header/modal cares about
@@ -224,6 +250,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       prev.viewport.dpr !== next.viewport.dpr ||
       prev.displayDpr !== next.displayDpr ||
       prev.syncEngaged !== next.syncEngaged ||
+      prev.renderMode !== next.renderMode ||
       !dimsMatch(prev.paneCss, next.paneCss);
     if (changed) {
       lastPublishedRef.current = next;
@@ -318,7 +345,10 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
         }
         maybeDisengageSync();
         publishScreen();
-        if (screenshotCapableRef.current) screenshotLoop.pulse();
+        // Popped out: the headed window renders; we keep the stream only to
+        // observe tabs/status, so draw nothing.
+        if (poppedOutRef.current) { /* observe only */ }
+        else if (screenshotCapableRef.current) screenshotLoop.pulse();
         else drawScreencastFrame(msg.data);
       } else if (msg.type === 'status') {
         setStatus({ connected: msg.connected === true, screencasting: msg.screencasting === true });
@@ -437,6 +467,40 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   // Stable across renders (reads refs / stable setters), so the registered
   // controller never goes stale. Engaging always re-issues (clears lastIssued)
   // so it reclaims the viewport even from an external device.
+  // --- Headed Pop-Out: relaunch this session's browser as a native OS window.
+  // The pane becomes a stub; the stream stays connected to observe tabs/status
+  // and to auto-revert when the window closes. The new Chrome process gets a
+  // fresh stream port, which we write into params so the WS reconnects. ---
+  const popOut = useCallback(() => {
+    const fn = getPlatform().agentBrowserPopOut;
+    if (!session || !fn) return;
+    headedConnectedRef.current = false;
+    fn(session, { rect: paneScreenRect(elRef.current) }, binaryPathRef.current).then((res) => {
+      if (!res.ok) return;
+      setPoppedOut(true);
+      api.updateParameters({ poppedOut: true, ...(res.wsPort ? { wsPort: res.wsPort } : {}) });
+    }).catch(() => {});
+  }, [session, api]);
+
+  const popIn = useCallback(() => {
+    const fn = getPlatform().agentBrowserPopIn;
+    setPoppedOut(false);
+    if (!session || !fn) { api.updateParameters({ poppedOut: false }); return; }
+    fn(session, binaryPathRef.current).then((res) => {
+      api.updateParameters({ poppedOut: false, ...(res.ok && res.wsPort ? { wsPort: res.wsPort } : {}) });
+    }).catch(() => { api.updateParameters({ poppedOut: false }); });
+  }, [session, api]);
+
+  const bringToFront = useCallback(() => {
+    if (!session) return;
+    getPlatform().agentBrowserBringToFront?.(session, binaryPathRef.current)?.catch(() => {});
+  }, [session]);
+
+  const popOutRef = useRef(popOut);
+  popOutRef.current = popOut;
+  const popInRef = useRef(popIn);
+  popInRef.current = popIn;
+
   const screenActions = useMemo<ScreenActions>(() => ({
     engageSync() {
       // Clear lastIssued so the issue below isn't skipped, and issue now rather
@@ -461,9 +525,10 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     },
     setRenderMode(renderMode) {
       // agent-browser → iframe embed is a surface-type swap handled by the Wall;
-      // screencast ↔ popout (a relaunch of this same session) is handled inside
-      // this panel and lands in a later stage.
+      // screencast ↔ popout relaunches this same session, handled in-panel.
       if (renderMode === 'embed') actionsRef.current.onSwapRenderMode(api.id, 'embed');
+      else if (renderMode === 'popout') popOutRef.current();
+      else if (poppedOutRef.current) popInRef.current(); // popout → screencast
     },
   }), [api.id, issueSyncToPane]);
 
@@ -492,6 +557,19 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     registrationRef.current?.updateChrome(chromeSnapshotRef.current);
     // displayUrl is a pure function of url, so url covers it.
   }, [chromeSnapshot.url, chromeSnapshot.title, chromeSnapshot.key]);
+
+  // Push the render-mode flip (screencast ↔ popout) to the header/modal.
+  useEffect(() => { publishScreen(); }, [poppedOut, publishScreen]);
+
+  // Auto-revert: once the headed stream has connected, a later disconnect means
+  // the window closed → relaunch headless and resume streaming (spec → Lifecycle).
+  useEffect(() => {
+    if (!poppedOut) { headedConnectedRef.current = false; return; }
+    if (status?.connected === true) headedConnectedRef.current = true;
+    else if (headedConnectedRef.current && (status?.connected === false || connectionLost)) {
+      popInRef.current();
+    }
+  }, [poppedOut, status?.connected, connectionLost]);
 
   // Persist sync state into the panel params so it round-trips through the
   // dockview layout blob (and survives reattach). Skip no-op writes.
@@ -857,9 +935,11 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
         </div>
       )}
       <div ref={viewportRef} className="relative flex min-h-0 flex-1 items-center justify-center">
+        {/* Canvas stays mounted across pop-out (its listeners keep their element)
+            — just hidden under the stub while a headed window renders instead. */}
         <canvas
           ref={canvasRef}
-          className={clsx('block max-h-full max-w-full select-none', !hasFrame && 'hidden')}
+          className={clsx('block max-h-full max-w-full select-none', (!hasFrame || poppedOut) && 'hidden')}
           onMouseDown={onCanvasMouseDown}
           onMouseUp={onCanvasMouseUp}
           onMouseMove={onCanvasMouseMove}
@@ -867,9 +947,30 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
             if (interactiveRef.current) e.preventDefault();
           }}
         />
-        {placeholder && (
+        {poppedOut ? (
+          // Popped out to a headed OS window — the pane is a clean stub.
+          <div className="flex flex-col items-center gap-3 px-4 text-center text-sm text-muted">
+            <div>This browser is running in a separate window.</div>
+            <div className="flex gap-2 text-xs">
+              <button
+                type="button"
+                onClick={bringToFront}
+                className="rounded border border-border px-2.5 py-1 text-muted transition-colors hover:border-foreground hover:text-foreground"
+              >
+                Bring to front
+              </button>
+              <button
+                type="button"
+                onClick={popIn}
+                className="rounded border border-border px-2.5 py-1 text-muted transition-colors hover:border-foreground hover:text-foreground"
+              >
+                Pop back in
+              </button>
+            </div>
+          </div>
+        ) : placeholder ? (
           <div className="px-4 text-center text-sm text-muted">{placeholder}</div>
-        )}
+        ) : null}
       </div>
     </div>
   );
