@@ -45,10 +45,6 @@ const DEVICES = [
 
 type Target = 'sync' | 'device' | 'custom';
 
-function formatDpr(dpr: number): string {
-  return `${Number.isInteger(dpr) ? dpr : Math.round(dpr * 100) / 100}x`;
-}
-
 export function AgentBrowserScreenModal({
   controller,
   label,
@@ -114,8 +110,6 @@ export function AgentBrowserScreenModal({
     onClose();
   };
 
-  const pane = snapshot?.paneCss;
-
   // Screencast resolution controls: Resize with pane (viewport linked to the
   // pane) vs a Fixed resolution chosen via Device or Custom. Rendered nested
   // under the screencast render option (or standalone when the surface can't
@@ -124,65 +118,55 @@ export function AgentBrowserScreenModal({
     <fieldset disabled={viewportDisabled} className={viewportDisabled ? 'opacity-40' : ''}>
       <div className="text-xs font-semibold tracking-wide text-muted uppercase">Resolution</div>
       <div className="mt-2 flex flex-col gap-3 text-sm">
-        <label className="flex cursor-pointer items-start gap-2">
+        <label className="flex cursor-pointer items-center gap-2">
           <input
             type="radio"
             name="screen-target"
-            className="mt-0.5"
             checked={target === 'sync'}
             onChange={() => setTarget('sync')}
           />
-          <LinkIcon size={14} className="mt-0.5 shrink-0 text-muted" />
-          <span className="min-w-0">
-            <span className="text-foreground">Resize with pane</span>
-            <span className="mt-0.5 block text-xs text-muted">
-              viewport follows the pane, pixel-for-pixel
-              {pane ? ` → now: ${pane.w}×${pane.h} @${formatDpr(snapshot?.displayDpr ?? 1)}` : ''}
-            </span>
-          </span>
+          <LinkIcon size={14} className="shrink-0 text-muted" />
+          <span className="text-foreground">Resize with pane</span>
         </label>
 
         <div className="flex flex-col gap-2">
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="radio"
-              name="screen-target"
-              checked={isFixed}
-              onChange={() => setTarget('custom')}
-            />
-            <LockSimpleIcon size={14} className="shrink-0 text-muted" />
-            <span className="text-foreground">Fixed</span>
-          </label>
-          <div className="ml-6 flex flex-col gap-2">
-            <div>
-              <span className="text-xs text-muted">
-                Device <span className="opacity-80">· emulates touch + mobile UA</span>
-              </span>
-              <div className="mt-1.5 grid grid-cols-2 gap-1">
-                {DEVICES.map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => { setTarget('device'); setDevice(name); }}
-                    className={`rounded border px-2 py-1 text-left text-xs transition-colors ${
-                      target === 'device' && device === name
-                        ? 'border-focus-ring bg-header-inactive-bg text-foreground'
-                        : 'border-border text-muted hover:text-foreground'
-                    }`}
-                  >
-                    {name}
-                  </button>
-                ))}
-              </div>
-              <span className="mt-1 block text-xs text-muted">dimensions fill in after applying</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-muted">Custom</span>
-              <DimInput label="W" value={customW} onChange={setCustomW} onFocus={() => setTarget('custom')} />
-              <DimInput label="H" value={customH} onChange={setCustomH} onFocus={() => setTarget('custom')} />
-              <DimInput label="DPI" value={customDpi} onChange={setCustomDpi} onFocus={() => setTarget('custom')} />
+          <div className="flex items-center gap-3">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                type="radio"
+                name="screen-target"
+                checked={isFixed}
+                onChange={() => setTarget('custom')}
+              />
+              <LockSimpleIcon size={14} className="shrink-0 text-muted" />
+              <span className="text-foreground">Fixed</span>
+            </label>
+            {/* Dimensions inline; or pick a device via Emulate below (emulating
+                disables the dims — they fill in from the next frames). */}
+            <div className="flex items-center gap-2">
+              <DimInput label="W" chars={4} value={customW} disabled={target === 'device'} onChange={setCustomW} onFocus={() => setTarget('custom')} />
+              <DimInput label="H" chars={4} value={customH} disabled={target === 'device'} onChange={setCustomH} onFocus={() => setTarget('custom')} />
+              <DimInput label="DPI" chars={1} value={customDpi} disabled={target === 'device'} onChange={setCustomDpi} onFocus={() => setTarget('custom')} />
             </div>
           </div>
+          <label className="ml-6 flex items-center gap-2 text-xs text-muted">
+            <span>Emulate</span>
+            <select
+              value={target === 'device' ? device : ''}
+              onChange={(e) => {
+                const name = e.target.value;
+                if (name) { setTarget('device'); setDevice(name); }
+                else setTarget('custom');
+              }}
+              title="touch + mobile UA"
+              className="rounded border border-border bg-app-bg px-1.5 py-1 font-mono text-foreground outline-none focus:border-focus-ring"
+            >
+              <option value="">none</option>
+              {DEVICES.map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          </label>
         </div>
       </div>
     </fieldset>
@@ -223,7 +207,6 @@ export function AgentBrowserScreenModal({
                 checked={renderMode === 'screencast'}
                 onChange={() => setRenderMode('screencast')}
               />
-              <span className="w-3.5 shrink-0" />
               <span className="text-foreground">agent-browser screencast</span>
             </label>
             <div className="ml-6 flex flex-col gap-0.5 text-xs">
@@ -324,22 +307,29 @@ function DimInput({
   value,
   onChange,
   onFocus,
+  disabled,
+  chars = 4,
 }: {
   label: string;
   value: string;
   onChange: (next: string) => void;
   onFocus: () => void;
+  disabled?: boolean;
+  /** Max digits the field holds — sizes the box so W/H/DPI stay compact. */
+  chars?: number;
 }) {
   return (
-    <span className="inline-flex items-center gap-1 text-xs text-muted">
+    <span className={`inline-flex items-center gap-1 text-xs text-muted ${disabled ? 'opacity-50' : ''}`}>
       {label}
       <input
         type="text"
         inputMode="numeric"
         value={value}
+        disabled={disabled}
         onFocus={onFocus}
         onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ''))}
-        className="w-16 rounded border border-border bg-app-bg px-1.5 py-1 font-mono text-foreground outline-none focus:border-focus-ring"
+        style={{ width: `calc(${chars}ch + 0.5rem)` }}
+        className="border-0 border-b border-border bg-transparent px-0.5 py-0.5 font-mono text-foreground outline-none focus:border-focus-ring"
       />
     </span>
   );
