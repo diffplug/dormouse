@@ -284,17 +284,41 @@ exercise.
 
 ## Path 1 — Swappable Render Backend
 
+> Status: **implemented** (lib + VS Code host). Triggered from the **Display
+> modal** (the far-left header chip), whose *Render* section offers the three
+> cells of the matrix: `agent-browser screencast`, `agent-browser popout` (see
+> dor-agent-browser.md → Headed Pop-Out), and `iframe embed`.
+
 Expose the **render axis** as a per-pane choice: same target, switch screencast ↔
 embed. This is the hedge on the agent-browser bet — if the screencast's lag is
 unacceptable for a local dev server, one gesture swaps it to the zero-lag embed.
 
-**Do not fuse the surfaces into a dual-mode mega-component.** `AgentBrowserPanel`
-is already large and the input models differ fundamentally (CDP `input_*` messages
-vs native DOM). Instead, make the swap a **layout operation: replace the pane's
-renderer in place, preserving the target.** `createContentSurface` already replaces
-an untouched terminal in its slot — generalize that to "replace surface X with
-surface Y at the same dock position," triggered by a header affordance ("open in
-iframe" / "open in browser").
+**The surfaces are not fused into a dual-mode mega-component** (`AgentBrowserPanel`
+is already large and the input models differ fundamentally — CDP `input_*`
+messages vs native DOM). Instead the swap is a **layout operation: replace the
+pane's renderer in place, preserving the target.** `Wall.replaceSurface(oldId,
+{component, params, title})` generalizes `createContentSurface`'s
+replace-untouched-terminal branch — it adds the new panel `within` the old dock
+slot, closes the old surface's session, removes the old panel, and selects the
+new. A panel's `setRenderMode` action routes the cross-type case through
+`WallActions.onSwapRenderMode`.
+
+**The two directions are asymmetric** because of how each surface is born:
+
+- **screencast → embed** is webview-only: read the active tab URL from the
+  screen controller's chrome snapshot, create an `iframe` surface for it, close
+  the now-unneeded headless browser. No host capability beyond the existing
+  session-close.
+- **embed → screencast** needs the host to spawn a session for the URL
+  (`PlatformAdapter.agentBrowserOpen` — the webview can't resolve/run the binary
+  itself), so it is gated on that capability. The Wall caches the last `dor ab`
+  `binaryPath` to spawn with. Absent ⇒ the embed surface keeps its plain title
+  (e.g. the web host).
+
+Both surfaces register a screen controller, so an `iframe embed` surface shows
+the same browser chrome (URL + chip) as a screencast on capable hosts; its nav
+is reload (re-resolve the proxy) + URL-edit, with back/forward inert (a
+cross-origin frame's history is unreachable).
 
 ## Path 2 — Plugin System
 

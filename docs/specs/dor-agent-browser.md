@@ -542,6 +542,19 @@ connects directly — its origin is allowed.
 
 ## Headed Pop-Out
 
+> Status: **implemented** on the VS Code host as a third render mode (not a
+> separate header arrow): the Display modal's *Render* section offers
+> `agent-browser popout` whenever the host exposes `agentBrowserPopOut`
+> (`canPopOut`). Selecting it relaunches the session headed and turns the pane
+> into a stub (`AgentBrowserPanel`'s popped-out state); the stub keeps the stream
+> open to observe tabs/status and **auto-reverts** to a headless screencast when
+> the headed window closes. *Bring to front* renders only when the host wires
+> `agentBrowserBringToFront` (a no-op today). **v1 limits:** preserves the active
+> tab URL only (multi-tab + cookie/profile restore are follow-ups), and **does
+> not position** the window over the pane (VS Code can't read screen coords, so
+> Chrome places it). Standalone/Tauri lacks agent-browser entirely, so pop-out
+> is VS-Code-only for now.
+
 The headless + streamed-screenshot surface above is the default everywhere: it is
 crisp, deterministic, and **uniformly portable** (no OS window, no positioning,
 no DPI/Wayland concerns; works identically on win/mac/linux, in VS Code, and on
