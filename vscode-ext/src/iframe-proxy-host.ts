@@ -235,8 +235,9 @@ function collectBody(stream: http.IncomingMessage, done: (body: string) => void)
     }
     chunks.push(chunk);
   });
-  stream.on('end', () => done(Buffer.concat(chunks).toString('utf8')));
-  stream.on('error', () => done(Buffer.concat(chunks).toString('utf8')));
+  const complete = () => done(Buffer.concat(chunks).toString('utf8'));
+  stream.on('end', complete);
+  stream.on('error', complete);
 }
 
 function sanitizeResponseHeaders(grant: Grant, headers: http.IncomingHttpHeaders): http.OutgoingHttpHeaders {
