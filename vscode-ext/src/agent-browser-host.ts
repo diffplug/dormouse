@@ -28,6 +28,8 @@ import {
   type AgentBrowserCommandResult,
   type AgentBrowserEditOp,
   type AgentBrowserEditResult,
+  type AgentBrowserOpenResult,
+  type AgentBrowserPopResult,
   type AgentBrowserScreenshotResult,
 } from '../../lib/src/lib/platform/types';
 
@@ -132,6 +134,81 @@ export async function runAgentBrowserScreenshot(
     log.info(`[agent-browser] screenshot read failed: ${err instanceof Error ? err.message : String(err)}`);
     return { ok: false, error: `could not read screenshot file: ${err instanceof Error ? err.message : String(err)}` };
   }
+}
+
+// Read a session's stream WebSocket port via `stream status --json`. Mirrors
+// the parse in dor/src/commands/agent-browser.ts: { port } or { data: { port } }.
+async function readStreamPort(session: string, binaryPath?: string): Promise<number | undefined> {
+  const result = await runWithBinaryFallback(['--session', session, 'stream', 'status', '--json'], binaryPath);
+  if (result.exitCode !== 0) return undefined;
+  try {
+    const parsed = JSON.parse(result.stdout) as { port?: unknown; data?: { port?: unknown } };
+    const port = parsed.data?.port ?? parsed.port;
+    return typeof port === 'number' && Number.isFinite(port) ? port : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// A fresh managed session for a surface spawned from the GUI (no `--key`),
+// mirroring `dor ab`'s `dormouse.<workspaceId>.<key>` namespacing so it can't
+// collide with a user's own agent-browser sessions.
+function generateGuiSession(): string {
+  return `dormouse.1.gui-${randomBytes(6).toString('hex')}`;
+}
+
+// Spawn a managed session and open <url> — backs swapping an iframe embed up to
+// a live screencast (docs/specs/dor-iframe.md → "Path 1"). Mirrors what
+// `dor ab open <url>` does, but driven from the GUI rather than a terminal.
+export async function runAgentBrowserOpen(url: string, binaryPath?: string): Promise<AgentBrowserOpenResult> {
+  if (typeof url !== 'string' || !url) return { ok: false, error: 'url is required' };
+  const session = generateGuiSession();
+  const open = await runWithBinaryFallback(['--session', session, 'open', url], binaryPath);
+  if (open.exitCode !== 0) {
+    return { ok: false, error: open.stderr.trim() || `open exited ${open.exitCode}` };
+  }
+  const wsPort = await readStreamPort(session, binaryPath);
+  return { ok: true, session, ...(wsPort ? { wsPort } : {}), ...(binaryPath ? { binaryPath } : {}) };
+}
+
+// Pop-out is a relaunch, not a live toggle: Chrome's headed/headless choice is
+// fixed at launch (spec → "Headed Pop-Out"). Close the headless session, then
+// reopen it headed at the active URL. (v1 preserves the active tab URL only;
+// multi-tab + profile/cookie restore are tracked follow-ups. Window
+// positioning over opts.rect is deferred — VS Code can't read screen coords, so
+// the window opens where Chrome places it.)
+export async function runAgentBrowserPopOut(
+  session: string,
+  opts: { rect?: { x: number; y: number; width: number; height: number }; url?: string },
+  binaryPath?: string,
+): Promise<AgentBrowserPopResult> {
+  if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
+  await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
+  const url = typeof opts?.url === 'string' && opts.url ? opts.url : 'about:blank';
+  const open = await runWithBinaryFallback(['--session', session, '--headed', 'open', url], binaryPath);
+  if (open.exitCode !== 0) {
+    return { ok: false, error: open.stderr.trim() || `headed open exited ${open.exitCode}` };
+  }
+  const wsPort = await readStreamPort(session, binaryPath);
+  return { ok: true, ...(wsPort ? { wsPort } : {}) };
+}
+
+// The reverse: close the headed session and relaunch it headless at the active
+// URL, resuming the screencast.
+export async function runAgentBrowserPopIn(
+  session: string,
+  opts: { url?: string },
+  binaryPath?: string,
+): Promise<AgentBrowserPopResult> {
+  if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
+  await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
+  const url = typeof opts?.url === 'string' && opts.url ? opts.url : 'about:blank';
+  const open = await runWithBinaryFallback(['--session', session, 'open', url], binaryPath);
+  if (open.exitCode !== 0) {
+    return { ok: false, error: open.stderr.trim() || `open exited ${open.exitCode}` };
+  }
+  const wsPort = await readStreamPort(session, binaryPath);
+  return { ok: true, ...(wsPort ? { wsPort } : {}) };
 }
 
 // The extension host's PATH is often the GUI login PATH (no nvm/volta shims),

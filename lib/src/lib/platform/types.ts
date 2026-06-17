@@ -177,13 +177,14 @@ export interface PlatformAdapter {
   // `dor ab` surface resolved (a GUI-launched host's own PATH may miss the
   // binary); the host falls back to PATH / DORMOUSE_AGENT_BROWSER_BIN.
   agentBrowserOpen?(url: string, binaryPath?: string): Promise<AgentBrowserOpenResult>;
-  // Relaunch a session's browser headed as a native OS window, best-effort
-  // positioned over `rect` (CSS px in screen space). Returns the new stream
-  // port. Absent ⇒ pop-out hidden (e.g. the web host).
-  agentBrowserPopOut?(session: string, opts: { rect?: { x: number; y: number; width: number; height: number } }, binaryPath?: string): Promise<AgentBrowserPopResult>;
-  // Relaunch headless (pop back in), resuming the screencast; returns the new
-  // stream port. Pairs with agentBrowserPopOut.
-  agentBrowserPopIn?(session: string, binaryPath?: string): Promise<AgentBrowserPopResult>;
+  // Relaunch a session's browser headed as a native OS window, reopening `url`
+  // (headed/headless is fixed at launch, so this is a close+relaunch — v1
+  // preserves the active tab URL). Best-effort positioned over `rect` (CSS px
+  // in screen space). Returns the new stream port. Absent ⇒ pop-out hidden.
+  agentBrowserPopOut?(session: string, opts: { rect?: { x: number; y: number; width: number; height: number }; url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult>;
+  // Relaunch headless (pop back in) reopening `url`, resuming the screencast;
+  // returns the new stream port. Pairs with agentBrowserPopOut.
+  agentBrowserPopIn?(session: string, opts: { url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult>;
   // Best-effort raise the session's headed window to the front.
   agentBrowserBringToFront?(session: string, binaryPath?: string): Promise<void>;
 

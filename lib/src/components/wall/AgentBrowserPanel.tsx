@@ -475,7 +475,8 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     const fn = getPlatform().agentBrowserPopOut;
     if (!session || !fn) return;
     headedConnectedRef.current = false;
-    fn(session, { rect: paneScreenRect(elRef.current) }, binaryPathRef.current).then((res) => {
+    const url = chromeSnapshotRef.current.url || undefined;
+    fn(session, { rect: paneScreenRect(elRef.current), url }, binaryPathRef.current).then((res) => {
       if (!res.ok) return;
       setPoppedOut(true);
       api.updateParameters({ poppedOut: true, ...(res.wsPort ? { wsPort: res.wsPort } : {}) });
@@ -486,7 +487,8 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     const fn = getPlatform().agentBrowserPopIn;
     setPoppedOut(false);
     if (!session || !fn) { api.updateParameters({ poppedOut: false }); return; }
-    fn(session, binaryPathRef.current).then((res) => {
+    const url = chromeSnapshotRef.current.url || undefined;
+    fn(session, { url }, binaryPathRef.current).then((res) => {
       api.updateParameters({ poppedOut: false, ...(res.ok && res.wsPort ? { wsPort: res.wsPort } : {}) });
     }).catch(() => { api.updateParameters({ poppedOut: false }); });
   }, [session, api]);
@@ -952,13 +954,15 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
           <div className="flex flex-col items-center gap-3 px-4 text-center text-sm text-muted">
             <div>This browser is running in a separate window.</div>
             <div className="flex gap-2 text-xs">
-              <button
-                type="button"
-                onClick={bringToFront}
-                className="rounded border border-border px-2.5 py-1 text-muted transition-colors hover:border-foreground hover:text-foreground"
-              >
-                Bring to front
-              </button>
+              {getPlatform().agentBrowserBringToFront && (
+                <button
+                  type="button"
+                  onClick={bringToFront}
+                  className="rounded border border-border px-2.5 py-1 text-muted transition-colors hover:border-foreground hover:text-foreground"
+                >
+                  Bring to front
+                </button>
+              )}
               <button
                 type="button"
                 onClick={popIn}
