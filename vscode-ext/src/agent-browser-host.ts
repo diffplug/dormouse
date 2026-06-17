@@ -158,12 +158,15 @@ function generateGuiSession(): string {
 }
 
 // Spawn a managed session and open <url> — backs swapping an iframe embed up to
-// a live screencast (docs/specs/dor-iframe.md → "Path 1"). Mirrors what
-// `dor ab open <url>` does, but driven from the GUI rather than a terminal.
-export async function runAgentBrowserOpen(url: string, binaryPath?: string): Promise<AgentBrowserOpenResult> {
+// a live screencast (docs/specs/dor-iframe.md → "Path 1"). With `headed`, the
+// process launches headed in one shot so embed→popout doesn't open a headless
+// browser only to tear it down. Mirrors what `dor ab open <url>` does, but
+// driven from the GUI rather than a terminal.
+export async function runAgentBrowserOpen(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
   if (typeof url !== 'string' || !url) return { ok: false, error: 'url is required' };
   const session = generateGuiSession();
-  const open = await runWithBinaryFallback(['--session', session, 'open', url], binaryPath);
+  const args = ['--session', session, ...(opts?.headed ? ['--headed'] : []), 'open', url];
+  const open = await runWithBinaryFallback(args, binaryPath);
   if (open.exitCode !== 0) {
     return { ok: false, error: open.stderr.trim() || `open exited ${open.exitCode}` };
   }

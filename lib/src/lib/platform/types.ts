@@ -173,10 +173,12 @@ export interface PlatformAdapter {
   // so hosts degrade: the modal hides whatever isn't backed by a capability.
   //
   // Spawn a managed agent-browser session and open <url> — backs swapping an
-  // iframe embed up to a live screencast. `binaryPath` is the last one a
+  // iframe embed up to a live screencast (`headed: false`) or straight to a
+  // popped-out window (`headed: true`, so embed→popout is one spawn, not a
+  // headless launch immediately torn down). `binaryPath` is the last one a
   // `dor ab` surface resolved (a GUI-launched host's own PATH may miss the
   // binary); the host falls back to PATH / DORMOUSE_AGENT_BROWSER_BIN.
-  agentBrowserOpen?(url: string, binaryPath?: string): Promise<AgentBrowserOpenResult>;
+  agentBrowserOpen?(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult>;
   // Relaunch a session's browser headed as a native OS window, reopening `url`
   // (headed/headless is fixed at launch, so this is a close+relaunch — v1
   // preserves the active tab URL). Best-effort positioned over `rect` (CSS px

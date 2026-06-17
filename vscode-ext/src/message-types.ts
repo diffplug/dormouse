@@ -22,7 +22,7 @@ export type WebviewMessage =
   | { type: 'agentBrowser:edit'; session: string; op: 'selectAll' | 'copy' | 'cut'; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:screenshot'; session: string; format?: 'jpeg' | 'png'; quality?: number; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:getStreamUrl'; port: number; requestId: string }
-  | { type: 'agentBrowser:open'; url: string; binaryPath?: string; requestId: string }
+  | { type: 'agentBrowser:open'; url: string; headed?: boolean; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:popOut'; session: string; url?: string; rect?: { x: number; y: number; width: number; height: number }; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:popIn'; session: string; url?: string; binaryPath?: string; requestId: string }
   | { type: 'iframe:createProxyUrl'; url: string; requestId: string }

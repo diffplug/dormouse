@@ -1570,12 +1570,14 @@ export function Wall({
 
       // iframe embed → live agent-browser (screencast or popout): the host must
       // spawn a session for the URL (absent ⇒ inert, like other host-gated
-      // affordances). popOutOnReady tells the new panel to pop straight out.
+      // affordances). popout spawns headed directly and the new surface mounts
+      // already popped-out (no headless launch + immediate relaunch flash).
       if (currentType === 'iframe' && (mode === 'screencast' || mode === 'popout')) {
         const url = typeof params?.url === 'string' ? params.url : undefined;
         const open = getPlatform().agentBrowserOpen;
         if (!url || !open) return;
-        open(url, lastAgentBrowserBinaryPathRef.current).then((res) => {
+        const headed = mode === 'popout';
+        open(url, { headed }, lastAgentBrowserBinaryPathRef.current).then((res) => {
           if (!res.ok || !res.session) return;
           if (res.binaryPath) lastAgentBrowserBinaryPathRef.current = res.binaryPath;
           replaceSurface(id, {
@@ -1586,7 +1588,7 @@ export function Wall({
               ...(res.wsPort !== undefined ? { wsPort: res.wsPort } : {}),
               ...(res.binaryPath !== undefined ? { binaryPath: res.binaryPath } : {}),
               syncEngaged: true,
-              ...(mode === 'popout' ? { popOutOnReady: true } : {}),
+              ...(headed ? { poppedOut: true } : {}),
             },
             title: hostPathDisplay(url, true),
           });

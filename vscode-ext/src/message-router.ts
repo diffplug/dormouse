@@ -404,6 +404,7 @@ export function attachRouter(
       case 'agentBrowser:open':
         runAgentBrowserOpen(
           typeof msg.url === 'string' ? msg.url : '',
+          { headed: msg.headed === true },
           typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
         ).then((result) => {
           webview.postMessage({ type: 'agentBrowser:openResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);

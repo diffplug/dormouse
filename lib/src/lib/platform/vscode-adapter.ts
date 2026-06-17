@@ -266,9 +266,9 @@ export class VSCodeAdapter implements PlatformAdapter {
     );
   }
 
-  async agentBrowserOpen(url: string, binaryPath?: string): Promise<AgentBrowserOpenResult> {
+  async agentBrowserOpen(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
     const result = await this.requestResponse<AgentBrowserOpenResult>(
-      'agentBrowser:open', 'agentBrowser:openResult', { url, binaryPath },
+      'agentBrowser:open', 'agentBrowser:openResult', { url, headed: opts.headed, binaryPath },
       (msg) => ({ ok: msg.ok, session: msg.session, wsPort: msg.wsPort, binaryPath: msg.binaryPath, error: msg.error }),
       15000,
     );

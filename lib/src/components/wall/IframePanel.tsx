@@ -127,9 +127,9 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
       chrome: { url, displayUrl: hostPathDisplay(url), title: api.title ?? null, key: null },
       chromeActions,
       hostCapable: false,
-      // embed→popout would need spawn + an auto-pop-out on the new surface;
-      // for now the embed modal offers screencast only.
-      canPopOut: false,
+      // embed→popout spawns the new agent-browser headed and mounts it
+      // popped-out, so it needs both spawn and pop-out host capabilities.
+      canPopOut: !!getPlatform().agentBrowserPopOut,
     });
     registrationRef.current = registration;
     return () => { registration.dispose(); registrationRef.current = null; };
