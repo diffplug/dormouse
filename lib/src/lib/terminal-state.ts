@@ -442,6 +442,20 @@ export function deriveHeader(
   return { primary: primary.text, secondary, lastCommandFailed: primary.failed || undefined };
 }
 
+/** A single surface's display label: the derived header primary, with the
+ *  saved/fallback title substituted when the primary is the generic command
+ *  title. The one place to compose `deriveHeader` + `resolveDisplayPrimary` for
+ *  one pane; callers that also need `secondary`/`lastCommandFailed` use
+ *  `deriveHeader` directly. */
+export function deriveSurfaceLabel(
+  pane: TerminalPaneState,
+  visiblePanes: TerminalPaneState[],
+  appTitleForPane: HeaderOptions['appTitleForPane'],
+  fallbackTitle: string | null | undefined,
+): string {
+  return resolveDisplayPrimary(deriveHeader(pane, visiblePanes, { appTitleForPane }).primary, fallbackTitle);
+}
+
 export function notificationDisplayTitle(
   notification: TerminalNotificationTitleLike | null | undefined,
 ): string | null {

@@ -7,14 +7,12 @@ import { IS_MAC } from '../lib/platform';
 import {
   buildAppTitleResolver,
   DEFAULT_ACTIVITY_STATE,
-  deriveHeader,
   getActivitySnapshot,
   getTerminalPaneStateSnapshot,
-  resolveDisplayPrimary,
   subscribeToActivity,
   subscribeToTerminalPaneState,
 } from '../lib/terminal-registry';
-import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
+import { createTerminalPaneState, deriveSurfaceLabel, type TerminalPaneState } from '../lib/terminal-state';
 
 export interface BaseboardProps {
   items: DooredItem[];
@@ -227,5 +225,5 @@ function deriveDoorTitle(
 ): string {
   const paneState = terminalStates.get(id) ?? createTerminalPaneState();
   const visible = allPaneStates.length > 0 ? allPaneStates : [paneState];
-  return resolveDisplayPrimary(deriveHeader(paneState, visible, { appTitleForPane }).primary, savedTitle);
+  return deriveSurfaceLabel(paneState, visible, appTitleForPane, savedTitle);
 }

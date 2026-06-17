@@ -7,6 +7,8 @@ import {
   registerAgentBrowserScreen,
   subscribeAgentBrowserScreenModal,
   subscribeAgentBrowserScreenPresence,
+  type ChromeActions,
+  type ChromeSnapshot,
   type ScreenActions,
   type ScreenSnapshot,
 } from './agent-browser-screen';
@@ -19,8 +21,29 @@ const SNAPSHOT: ScreenSnapshot = {
   syncEngaged: true,
 };
 
+const CHROME: ChromeSnapshot = {
+  url: 'http://localhost:5173/',
+  displayUrl: 'localhost:5173',
+  title: 'Vite + React',
+  key: null,
+};
+
 function stubActions(): ScreenActions {
   return { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() };
+}
+
+function stubChromeActions(): ChromeActions {
+  return { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn() };
+}
+
+function register(id: string, overrides?: { hostCapable?: boolean }) {
+  return registerAgentBrowserScreen(id, {
+    snapshot: SNAPSHOT,
+    actions: stubActions(),
+    chrome: CHROME,
+    chromeActions: stubChromeActions(),
+    hostCapable: overrides?.hostCapable ?? true,
+  });
 }
 
 describe('agent-browser screen registry', () => {
@@ -32,16 +55,13 @@ describe('agent-browser screen registry', () => {
 
     expect(getAgentBrowserScreenController('pane-1')).toBeNull();
 
-    const registration = registerAgentBrowserScreen('pane-1', {
-      snapshot: SNAPSHOT,
-      actions: stubActions(),
-      hostCapable: true,
-    });
+    const registration = register('pane-1');
     expect(presence).toBe(1);
 
     const controller = getAgentBrowserScreenController('pane-1');
     expect(controller).not.toBeNull();
     expect(controller?.snapshot()).toEqual(SNAPSHOT);
+    expect(controller?.chrome()).toEqual(CHROME);
     expect(controller?.hostCapable).toBe(true);
 
     registration.dispose();
@@ -52,11 +72,7 @@ describe('agent-browser screen registry', () => {
   });
 
   it('publishes snapshot updates to subscribers', () => {
-    const registration = registerAgentBrowserScreen('pane-2', {
-      snapshot: SNAPSHOT,
-      actions: stubActions(),
-      hostCapable: false,
-    });
+    const registration = register('pane-2', { hostCapable: false });
     const controller = getAgentBrowserScreenController('pane-2')!;
 
     let updates = 0;
@@ -73,17 +89,34 @@ describe('agent-browser screen registry', () => {
     registration.dispose();
   });
 
+  it('publishes chrome updates on a channel separate from the screen snapshot', () => {
+    const registration = register('pane-chrome');
+    const controller = getAgentBrowserScreenController('pane-chrome')!;
+
+    let screenUpdates = 0;
+    let chromeUpdates = 0;
+    const unsubScreen = controller.subscribe(() => { screenUpdates += 1; });
+    const unsubChrome = controller.subscribeChrome(() => { chromeUpdates += 1; });
+
+    const nextChrome: ChromeSnapshot = { ...CHROME, displayUrl: 'localhost:5173/app', title: 'Vite' };
+    registration.updateChrome(nextChrome);
+    expect(controller.chrome()).toEqual(nextChrome);
+    expect(chromeUpdates).toBe(1);
+    // A chrome change must NOT wake the screen subscribers, and vice versa.
+    expect(screenUpdates).toBe(0);
+
+    registration.update({ ...SNAPSHOT, state: 'SYNCED' });
+    expect(screenUpdates).toBe(1);
+    expect(chromeUpdates).toBe(1);
+
+    unsubScreen();
+    unsubChrome();
+    registration.dispose();
+  });
+
   it('a stale registration does not clobber a re-registered surface on dispose', () => {
-    const first = registerAgentBrowserScreen('pane-3', {
-      snapshot: SNAPSHOT,
-      actions: stubActions(),
-      hostCapable: true,
-    });
-    const second = registerAgentBrowserScreen('pane-3', {
-      snapshot: SNAPSHOT,
-      actions: stubActions(),
-      hostCapable: true,
-    });
+    const first = register('pane-3');
+    const second = register('pane-3');
     const live = getAgentBrowserScreenController('pane-3');
 
     // Disposing the superseded registration must not remove the live one.

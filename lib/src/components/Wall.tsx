@@ -33,8 +33,7 @@ import {
 import {
   buildAppTitleResolver,
   createTerminalPaneState,
-  deriveHeader,
-  resolveDisplayPrimary,
+  deriveSurfaceLabel,
   surfaceRunsCommand,
 } from '../lib/terminal-state';
 import { orchestrateKill } from '../lib/kill-animation';
@@ -56,12 +55,14 @@ import { TerminalPanel } from './wall/TerminalPanel';
 import { TerminalPaneHeader } from './wall/TerminalPaneHeader';
 import { AgentBrowserPanel } from './wall/AgentBrowserPanel';
 import { IframePanel } from './wall/IframePanel';
+import { hostPathDisplay } from './wall/browser-url';
 import { SurfacePaneHeader } from './wall/SurfacePaneHeader';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { useDockviewReady } from './wall/use-dockview-ready';
 import { pickSplitDirection } from './wall/dockview-helpers';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
+import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
 import { useWindowFocused } from './wall/use-window-focused';
 import {
   DialogKeyboardContext,
@@ -169,16 +170,6 @@ function surfaceTypeFromParams(params: unknown): DorSurfaceType {
     if (surfaceType === 'iframe' || surfaceType === 'agent-browser') return surfaceType;
   }
   return 'terminal';
-}
-
-function iframeTitle(url: string): string {
-  try {
-    const parsed = new URL(url);
-    const path = parsed.pathname === '/' ? '' : parsed.pathname;
-    return `${parsed.host}${path}${parsed.search}`;
-  } catch {
-    return url;
-  }
 }
 
 function componentForSurfaceType(type: DorSurfaceType): string {
@@ -647,6 +638,9 @@ export function Wall({
     selectedTypeRef,
   });
 
+  // --- Dev-server port → pane correlation (browser header connection chip) ---
+  useDevServerPortCorrelation({ apiRef, doorsRef });
+
   // --- Reattach ---
 
   const handleReattach = useCallback((
@@ -768,9 +762,8 @@ export function Wall({
     return panels.map((panel, index) => {
       const type = surfaceTypeFromParams(panel.params);
       const state = panelStates[index] ?? createTerminalPaneState();
-      const derived = deriveHeader(state, panelStates, { appTitleForPane });
       const title = type === 'terminal'
-        ? resolveDisplayPrimary(derived.primary, panel.title ?? panel.id)
+        ? deriveSurfaceLabel(state, panelStates, appTitleForPane, panel.title ?? panel.id)
         : (panel.title ?? panel.id);
 
       return {
@@ -1302,7 +1295,7 @@ export function Wall({
           minimized: booleanParam(params.minimized),
           params: { surfaceType: 'iframe', url },
           reference: target.value,
-          title: iframeTitle(url),
+          title: hostPathDisplay(url, true),
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });
@@ -1476,6 +1469,16 @@ export function Wall({
     onClickPanel: (id: string) => {
       setConfirmKill(null);
       enterTerminalMode(id);
+    },
+    onFocusPane: (id: string) => {
+      setConfirmKill(null);
+      // Visible pane → jump straight in; minimized (a door) → reattach first.
+      if (apiRef.current?.getPanel(id)) {
+        enterTerminalMode(id);
+        return;
+      }
+      const door = doorsRef.current.find((item) => item.id === id);
+      if (door) handleReattachRef.current(door, { enterPassthrough: true });
     },
     onStartRename: (id: string) => {
       setRenamingPaneId(id);

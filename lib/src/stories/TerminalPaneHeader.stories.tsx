@@ -22,6 +22,7 @@ const noopActions: WallActions = {
   onSplitV: () => {},
   onZoom: () => {},
   onClickPanel: () => {},
+  onFocusPane: () => {},
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
