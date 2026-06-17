@@ -1,4 +1,4 @@
-import { useContext } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import {
   ArrowClockwiseIcon,
@@ -20,9 +20,10 @@ import {
   useAgentBrowserScreenController,
   useAgentBrowserScreenSnapshot,
 } from './agent-browser-screen';
-import { loopbackPort, pathDisplay } from './browser-url';
+import { loopbackPort, normalizeNavUrl, pathDisplay } from './browser-url';
 import { triggerDevServerRescan, useDevServerMatch } from './agent-browser-ports';
 import {
+  DialogKeyboardContext,
   ModeContext,
   SelectedIdContext,
   WallActionsContext,
@@ -54,6 +55,27 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
   // With a dev-server chip in front, the chip already shows host:port, so the
   // URL collapses to just the path; otherwise it's the full host+path.
   const urlText = chrome ? (devServer ? pathDisplay(chrome.url) : chrome.displayUrl) : '';
+
+  // Clicking the URL opens an inline editor (like renaming a terminal tab) to
+  // navigate elsewhere. While it's open we flag dialog-keyboard so the Wall's
+  // keyboard handler stands down (the panel's own key-forwarder skips editable
+  // targets); the editor closes itself when the surface stops being a browser.
+  const setDialogKeyboardActive = useContext(DialogKeyboardContext);
+  const [editingUrl, setEditingUrl] = useState(false);
+  useEffect(() => {
+    if (!editingUrl) return;
+    setDialogKeyboardActive(true);
+    return () => setDialogKeyboardActive(false);
+  }, [editingUrl, setDialogKeyboardActive]);
+  useEffect(() => {
+    if (!screen && editingUrl) setEditingUrl(false);
+  }, [screen, editingUrl]);
+
+  const submitUrl = (value: string) => {
+    const url = normalizeNavUrl(value);
+    if (url) screen?.chromeActions.navigate(url);
+    setEditingUrl(false);
+  };
 
   return (
     <div
@@ -110,34 +132,60 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
             >{chrome.key}</span>
           )}
 
-          {/* Dev-server connection chip — in front of the URL when the port maps
-              to a single pane; click focuses that terminal. The full command
-              shows by default (no fixed cap); it only truncates after the URL
-              path has, since the URL shrinks far faster. Absent (non-loopback,
-              no/ambiguous match, proxied domain) ⇒ no chip + full host+path. */}
-          {devServer && (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); actions.onFocusPane(devServer.paneId); }}
-              aria-label={`Focus ${devServer.label} — serves this localhost port`}
-              title={`localhost served by ${devServer.label}${port != null ? ` (:${port})` : ''} — click to focus`}
-              className="flex h-5 min-w-0 items-center gap-1 rounded px-1.5 text-xs transition-colors hover:bg-current/10"
-            >
-              <span className="min-w-0 truncate">{devServer.label}</span>
-              {port != null && <span className="shrink-0 text-current/70">:{port}</span>}
-            </button>
+          {editingUrl ? (
+            /* Inline URL editor (like renaming a terminal tab): pre-filled with
+               the full URL + all selected, Enter navigates, Escape/blur cancels
+               (browser-omnibox style). Fills the URL+chip+spacer span. */
+            <input
+              data-url-input-for={api.id}
+              className="min-w-0 flex-1 border-none bg-transparent p-0 font-medium text-inherit outline-none"
+              defaultValue={chrome.url}
+              autoFocus
+              ref={(el) => el?.select()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitUrl((e.target as HTMLInputElement).value);
+                else if (e.key === 'Escape') setEditingUrl(false);
+                e.stopPropagation();
+              }}
+              onBlur={() => setEditingUrl(false)}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <>
+              {/* Dev-server connection chip — in front of the URL when the port
+                  maps to a single pane; click focuses that terminal. The full
+                  command shows by default (no fixed cap); it only truncates
+                  after the URL path has, since the URL shrinks far faster.
+                  Absent ⇒ no chip + full host+path. */}
+              {devServer && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); actions.onFocusPane(devServer.paneId); }}
+                  aria-label={`Focus ${devServer.label} — serves this localhost port`}
+                  title={`localhost served by ${devServer.label}${port != null ? ` (:${port})` : ''} — click to focus`}
+                  className="flex h-5 min-w-0 items-center gap-1 rounded px-1.5 text-xs transition-colors hover:bg-current/10"
+                >
+                  <span className="min-w-0 truncate">{devServer.label}</span>
+                  {port != null && <span className="shrink-0 text-current/70">:{port}</span>}
+                </button>
+              )}
+
+              {/* URL is the path only when a chip fronts it (domain is in the
+                  chip), else the full host+path. Click to edit/navigate; HTML
+                  <title> / full URL → tooltip. Gives up width (shrink-[10]) long
+                  before the command does. */}
+              <span
+                className="min-w-0 shrink-[10] cursor-text truncate font-medium underline-offset-2 hover:underline"
+                title={chrome.title ?? chrome.url ?? undefined}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); setEditingUrl(true); }}
+              >{urlText || api.title || api.id}</span>
+
+              {/* Flexible spacer keeps the layout buttons right-aligned. */}
+              <div className="min-w-0 flex-1" />
+            </>
           )}
-
-          {/* URL is the path only when a chip fronts it (domain is in the chip),
-              else the full host+path. HTML <title> / full URL → tooltip. It
-              gives up width (shrink-[10]) long before the command does. */}
-          <span
-            className="min-w-0 shrink-[10] truncate font-medium"
-            title={chrome.title ?? chrome.url ?? undefined}
-          >{urlText || api.title || api.id}</span>
-
-          {/* Flexible spacer keeps the layout buttons right-aligned. */}
-          <div className="min-w-0 flex-1" />
         </>
       ) : (
         <span className="min-w-0 flex-1 truncate font-medium">{api.title ?? api.id}</span>

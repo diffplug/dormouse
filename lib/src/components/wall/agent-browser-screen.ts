@@ -60,6 +60,8 @@ export interface ChromeSnapshot {
 }
 
 export interface ChromeActions {
+  /** Native `open <url>` — navigate the active tab to a new URL. */
+  navigate(url: string): void;
   /** Native `back` — move history back one entry (no-op at the start). */
   back(): void;
   /** Native `forward` — move history forward one entry (no-op at the end). */

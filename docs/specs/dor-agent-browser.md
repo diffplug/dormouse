@@ -176,6 +176,14 @@ existing screen controller's separate **chrome snapshot** channel (URL / key),
 kept distinct from the screen snapshot so tab updates don't churn the
 SYNCED/SCALED chip and vice versa.
 
+**Click to navigate.** Clicking the URL opens an inline editor (the
+terminal-rename pattern) pre-filled with the full URL, all selected: **Enter**
+navigates (`open <url>`, scheme-normalized — `http://` for loopback so a bare
+`localhost:5173` doesn't SSL-error, `https://` otherwise); **Escape**/blur
+cancels, browser-omnibox style. While it's open the surface flags
+dialog-keyboard so the Wall's chord handler stands down, and the panel's
+key-forwarder skips editable targets so keystrokes reach the field, not the page.
+
 ### `--key` badge
 
 The `--key` (default `default`) is what `dor ab --key …` targets, so with two or
@@ -482,10 +490,10 @@ hosts degrade gracefully:
 
 - **`agentBrowserCommand(session, args)`** — runs the user's agent-browser
   binary for tab actions (`tab <n>`, `tab close`, `tab new`), screen-mode
-  resizing (`set viewport`, `set device`), history nav (`reload`, `back`,
-  `forward`), and lifecycle (`close`). The host validates `args[0]` against an
-  allowlist (`tab`, `set`, `screenshot`, `reload`, `back`, `forward`, `close`);
-  this is not a general exec channel.
+  resizing (`set viewport`, `set device`), navigation (`open <url>`, `reload`,
+  `back`, `forward`), and lifecycle (`close`). The host validates `args[0]`
+  against an allowlist (`tab`, `set`, `screenshot`, `open`, `reload`, `back`,
+  `forward`, `close`); this is not a general exec channel.
 - **`agentBrowserScreenshot(session, { format, quality })`** — captures one
   device-resolution frame via `agent-browser screenshot` (which honors the
   session DPR, unlike the screencast) and returns the raw bytes (a `Uint8Array`

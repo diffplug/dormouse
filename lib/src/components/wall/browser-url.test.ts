@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hostPathDisplay, loopbackPort, pathDisplay } from './browser-url';
+import { hostPathDisplay, loopbackPort, normalizeNavUrl, pathDisplay } from './browser-url';
 
 describe('hostPathDisplay', () => {
   it('drops the scheme and a bare root path', () => {
@@ -31,6 +31,31 @@ describe('pathDisplay', () => {
   it('falls back to the raw string when unparseable', () => {
     expect(pathDisplay('not a url')).toBe('not a url');
     expect(pathDisplay('')).toBe('');
+  });
+});
+
+describe('normalizeNavUrl', () => {
+  it('keeps an explicit scheme untouched', () => {
+    expect(normalizeNavUrl('https://example.com')).toBe('https://example.com');
+    expect(normalizeNavUrl('http://localhost:5173/app')).toBe('http://localhost:5173/app');
+    expect(normalizeNavUrl('about:blank')).toBe('about:blank');
+  });
+
+  it('adds http:// for loopback hosts (https just SSL-errors there)', () => {
+    expect(normalizeNavUrl('localhost:5173')).toBe('http://localhost:5173');
+    expect(normalizeNavUrl('127.0.0.1:6006/x')).toBe('http://127.0.0.1:6006/x');
+    expect(normalizeNavUrl('app.localhost:3000')).toBe('http://app.localhost:3000');
+  });
+
+  it('adds https:// for everything else', () => {
+    expect(normalizeNavUrl('example.com')).toBe('https://example.com');
+    expect(normalizeNavUrl('example.com/path?q=1')).toBe('https://example.com/path?q=1');
+  });
+
+  it('trims and treats empty input as no navigation', () => {
+    expect(normalizeNavUrl('   ')).toBe('');
+    expect(normalizeNavUrl('')).toBe('');
+    expect(normalizeNavUrl('  example.com  ')).toBe('https://example.com');
   });
 });
 

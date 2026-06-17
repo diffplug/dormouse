@@ -31,6 +31,29 @@ export function pathDisplay(rawUrl: string): string {
   }
 }
 
+/** Turn a typed address-bar value into a navigable URL: keep an explicit scheme,
+ *  otherwise add one — `http://` for loopback hosts (a bare `localhost:5173`
+ *  speaks http, and `https` there just SSL-errors), `https://` for everything
+ *  else. Empty input ⇒ '' (caller skips navigation). */
+export function normalizeNavUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  // A hierarchical scheme (http://, https://, file://, …) or a known schemeless
+  // one (about:, data:, mailto:, …) — leave it be. A bare `host:port` such as
+  // `localhost:5173` is NOT a scheme (no `//`), so it falls through to get one.
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) return trimmed;
+  if (/^(about|data|blob|mailto|tel|javascript|view-source|chrome):/i.test(trimmed)) return trimmed;
+  const host = trimmed.split(/[/?#]/, 1)[0].toLowerCase();
+  const hostname = host.split(':', 1)[0];
+  const isLoopback =
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '[::1]' ||
+    hostname === '::1' ||
+    hostname.endsWith('.localhost');
+  return `${isLoopback ? 'http' : 'https'}://${trimmed}`;
+}
+
 /** True for hostnames that resolve to the local machine. `*.localhost` is
  *  included because browsers route it to loopback per the RFC. */
 function isLoopbackHostname(hostname: string): boolean {

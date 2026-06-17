@@ -100,6 +100,7 @@ function BrowserChromeStory(args: StoryArgs) {
         openModal: () => console.log('[story] openModal'),
       },
       chromeActions: {
+        navigate: (url) => console.log('[story] navigate', url),
         back: () => console.log('[story] back'),
         forward: () => console.log('[story] forward'),
         reload: () => console.log('[story] reload'),

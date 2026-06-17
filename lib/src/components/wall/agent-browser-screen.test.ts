@@ -33,7 +33,7 @@ function stubActions(): ScreenActions {
 }
 
 function stubChromeActions(): ChromeActions {
-  return { back: vi.fn(), forward: vi.fn(), reload: vi.fn() };
+  return { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn() };
 }
 
 function register(id: string, overrides?: { hostCapable?: boolean }) {

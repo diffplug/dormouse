@@ -54,7 +54,7 @@ function register(id: string, chrome: ChromeSnapshot = CHROME) {
     snapshot: SCREEN,
     actions: { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
     chrome,
-    chromeActions: { back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
+    chromeActions: { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
     hostCapable: true,
   });
 }
@@ -144,6 +144,65 @@ describe('SurfacePaneHeader — browser chrome', () => {
     expect(container.querySelector('[aria-label="Forward"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Reload"]')).not.toBeNull();
     reg.dispose();
+  });
+
+  it('opens an inline editor on URL click and navigates (normalized) on Enter', () => {
+    const navigate = vi.fn();
+    const registration = registerAgentBrowserScreen('pane-url-edit', {
+      snapshot: SCREEN,
+      actions: { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
+      chrome: CHROME,
+      chromeActions: { navigate, back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
+      hostCapable: true,
+    });
+    renderHeader(headerApi('pane-url-edit', 'x'), stubActions());
+
+    const urlSpan = container.querySelector('span[title="Vite + React"]') as HTMLElement;
+    expect(urlSpan).not.toBeNull();
+    act(() => { urlSpan.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    // The editor is pre-filled with the full URL (not the host+path display).
+    const input = container.querySelector<HTMLInputElement>('[data-url-input-for="pane-url-edit"]');
+    expect(input).not.toBeNull();
+    expect(input!.value).toBe('http://localhost:5173/app');
+
+    act(() => {
+      input!.value = 'localhost:3000/x';
+      input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(navigate).toHaveBeenCalledWith('http://localhost:3000/x');
+    // Editor closes after navigating.
+    expect(container.querySelector('[data-url-input-for="pane-url-edit"]')).toBeNull();
+
+    registration.dispose();
+  });
+
+  it('cancels URL editing on Escape without navigating', () => {
+    const navigate = vi.fn();
+    const registration = registerAgentBrowserScreen('pane-url-esc', {
+      snapshot: SCREEN,
+      actions: { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
+      chrome: CHROME,
+      chromeActions: { navigate, back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
+      hostCapable: true,
+    });
+    renderHeader(headerApi('pane-url-esc', 'x'), stubActions());
+
+    act(() => {
+      (container.querySelector('span[title="Vite + React"]') as HTMLElement)
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    const input = container.querySelector<HTMLInputElement>('[data-url-input-for="pane-url-esc"]');
+    expect(input).not.toBeNull();
+
+    act(() => {
+      input!.value = 'example.com';
+      input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(navigate).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-url-input-for="pane-url-esc"]')).toBeNull();
+
+    registration.dispose();
   });
 
   it('falls back to a plain title (no nav) for non-browser surfaces', () => {

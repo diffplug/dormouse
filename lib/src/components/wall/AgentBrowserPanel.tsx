@@ -421,6 +421,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   // (allowlisted in agentBrowserCommand). Stable; reads the live closure via
   // the ref so the registered controller never goes stale.
   const chromeActions = useMemo<ChromeActions>(() => ({
+    navigate(url) { if (url) runAgentBrowserRef.current(['open', url]); },
     back() { runAgentBrowserRef.current(['back']); },
     forward() { runAgentBrowserRef.current(['forward']); },
     reload() { runAgentBrowserRef.current(['reload']); },
@@ -760,6 +761,10 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       // contains() check above misses it; without this, typing into the modal's
       // Custom W/H/DPI fields would be swallowed and forwarded to the browser.
       if (e.target instanceof Element && e.target.closest('[role="dialog"]')) return;
+      // Likewise never hijack keystrokes destined for an editable field that
+      // lives outside the pane — notably the header's URL editor.
+      if (e.target instanceof HTMLElement &&
+        (e.target.isContentEditable || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
       e.preventDefault();
       if (e.type === 'keydown') handleKeyDownLike(e);
       else sendKey(e, 'keyUp');

@@ -42,10 +42,10 @@ export interface AgentBrowserCommandResult {
 
 /** Subcommands the host will run on the webview's behalf — this is a narrow
  * channel for tab actions, screen-mode resizing (`set viewport` / `set
- * device`), HiDPI frame capture (`screenshot`), history navigation
- * (`reload` / `back` / `forward`), and session teardown, not a general exec
+ * device`), HiDPI frame capture (`screenshot`), navigation (`open <url>`,
+ * `reload` / `back` / `forward`), and session teardown, not a general exec
  * path. */
-export const AGENT_BROWSER_ALLOWED_SUBCOMMANDS = ['tab', 'set', 'screenshot', 'reload', 'back', 'forward', 'close'] as const;
+export const AGENT_BROWSER_ALLOWED_SUBCOMMANDS = ['tab', 'set', 'screenshot', 'open', 'reload', 'back', 'forward', 'close'] as const;
 
 export interface AgentBrowserScreenshotResult {
   ok: boolean;
