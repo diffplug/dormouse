@@ -78,10 +78,11 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
 
   // Trust postMessage from this frame's origin (validated by the Wall's
   // keyboard/focus channel) only while the proxied surface is live.
+  const proxyOrigin = resolution.kind === 'proxied' ? resolution.origin : null;
   useEffect(() => {
-    if (resolution.kind !== 'proxied' || !resolution.origin) return;
-    return registerProxyOrigin(resolution.origin);
-  }, [resolution.kind === 'proxied' ? resolution.origin : null]);
+    if (!proxyOrigin) return;
+    return registerProxyOrigin(proxyOrigin);
+  }, [proxyOrigin]);
 
   // Register a focus handle so onClickPanel → enterTerminalMode can focus the
   // frame like any other surface (spec → "#3"). Focusing the element moves
