@@ -1,7 +1,7 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
-import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from "dormouse-lib/lib/platform/types";
+import type { AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo } from "dormouse-lib/lib/platform/types";
 import { AlertManager, type SessionStatus } from "dormouse-lib/lib/alert-manager";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import {
@@ -212,6 +212,17 @@ export class TauriAdapter implements PlatformAdapter {
     try {
       return await rawInvoke<string>("read_clipboard_text");
     } catch { return null; }
+  }
+
+  async createIframeProxyUrl(targetUrl: string): Promise<IframeProxyResult> {
+    // The sidecar stands up the loopback proxy and serves the bytes (shared
+    // lib/src/host/iframe-proxy.ts). On failure, report unreachable so the panel
+    // shows a hint rather than a never-loading frame.
+    try {
+      return await rawInvoke<IframeProxyResult>("iframe_create_proxy_url", { target: targetUrl });
+    } catch (err) {
+      return { ok: false, reason: "unreachable", detail: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   openExternal(uri: string): void {

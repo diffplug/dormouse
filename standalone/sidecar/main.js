@@ -11,6 +11,9 @@ const nodePty = require('node-pty');
 const { create } = require('./pty-core');
 const clipboard = require('./clipboard-ops');
 const { createDorControlServer } = require('./dor-control-server');
+// Built from lib/src/host/iframe-proxy.ts (shared with the VS Code host) by
+// scripts/build-sidecar-proxy.mjs. See docs/specs/dor-iframe.md.
+const { createIframeProxyUrl } = require('./iframe-proxy.cjs');
 
 function send(event, data) {
   process.stdout.write(JSON.stringify({ event, data }) + '\n');
@@ -52,6 +55,12 @@ rl.on('line', (line) => {
       case 'pty:getShells':  mgr.getShells(data.requestId); break;
       case 'pty:gracefulKillAll': mgr.gracefulKillAll(data.timeout); break;
       case 'dor:controlResponse': dorControl?.respond(data); break;
+      case 'iframe:createProxyUrl':
+        // Log to stderr — stdout is the JSON-lines protocol channel.
+        respondAsync('iframe:proxyUrl', data.requestId, async () => ({
+          result: await createIframeProxyUrl(data.target, { log: (m) => console.error(m) }),
+        }));
+        break;
       case 'clipboard:readFiles':
         respondAsync('clipboard:files', data.requestId, async () => ({
           paths: await clipboard.readClipboardFilePaths(),
