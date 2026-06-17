@@ -76,6 +76,30 @@ export interface AgentBrowserEditResult {
 
 export type { IframeProxyResult };
 
+/** Result of spawning a managed agent-browser session for a render swap
+ *  (docs/specs/dor-iframe.md → "Path 1 — Swappable Render Backend"). */
+export interface AgentBrowserOpenResult {
+  ok: boolean;
+  /** The resolved/namespaced session name the new surface should bind to. */
+  session?: string;
+  /** The session's stream WebSocket port. */
+  wsPort?: number;
+  /** The binary path the host resolved, threaded back so later host commands
+   *  (close, screenshot…) reuse it. */
+  binaryPath?: string;
+  error?: string;
+}
+
+/** Result of a headed/headless relaunch (docs/specs/dor-agent-browser.md →
+ *  "Headed Pop-Out"). The Chrome process is replaced, so the stream port
+ *  changes; the session name is preserved. */
+export interface AgentBrowserPopResult {
+  ok: boolean;
+  /** The new stream WebSocket port after the relaunch. */
+  wsPort?: number;
+  error?: string;
+}
+
 export interface PlatformAdapter {
   // Lifecycle
   init(): Promise<void>;
@@ -143,6 +167,25 @@ export interface PlatformAdapter {
   // could not. Absent on hosts with no process to run a proxy (e.g. the web
   // host), where the panel falls back to a raw, uninstrumented `<iframe>`.
   createIframeProxyUrl?(targetUrl: string): Promise<IframeProxyResult>;
+
+  // Render-swap support (docs/specs/dor-iframe.md → "Path 1 — Swappable Render
+  // Backend"; docs/specs/dor-agent-browser.md → "Headed Pop-Out"). All optional
+  // so hosts degrade: the modal hides whatever isn't backed by a capability.
+  //
+  // Spawn a managed agent-browser session and open <url> — backs swapping an
+  // iframe embed up to a live screencast. `binaryPath` is the last one a
+  // `dor ab` surface resolved (a GUI-launched host's own PATH may miss the
+  // binary); the host falls back to PATH / DORMOUSE_AGENT_BROWSER_BIN.
+  agentBrowserOpen?(url: string, binaryPath?: string): Promise<AgentBrowserOpenResult>;
+  // Relaunch a session's browser headed as a native OS window, best-effort
+  // positioned over `rect` (CSS px in screen space). Returns the new stream
+  // port. Absent ⇒ pop-out hidden (e.g. the web host).
+  agentBrowserPopOut?(session: string, opts: { rect?: { x: number; y: number; width: number; height: number } }, binaryPath?: string): Promise<AgentBrowserPopResult>;
+  // Relaunch headless (pop back in), resuming the screencast; returns the new
+  // stream port. Pairs with agentBrowserPopOut.
+  agentBrowserPopIn?(session: string, binaryPath?: string): Promise<AgentBrowserPopResult>;
+  // Best-effort raise the session's headed window to the front.
+  agentBrowserBringToFront?(session: string, binaryPath?: string): Promise<void>;
 
   // PTY event listeners
   onPtyData(handler: (detail: { id: string; data: string }) => void): void;

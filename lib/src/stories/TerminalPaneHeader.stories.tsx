@@ -26,6 +26,7 @@ const noopActions: WallActions = {
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
+  onSwapRenderMode: () => {},
 };
 
 function actionsRejecting(reason: 'empty' | 'reserved'): WallActions {

@@ -46,6 +46,7 @@ const loggingActions: WallActions = {
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
+  onSwapRenderMode: (id, mode) => console.log('[story] swap render', id, mode),
 };
 
 interface StoryArgs {

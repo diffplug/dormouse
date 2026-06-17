@@ -32,6 +32,7 @@ const noopActions: WallActions = {
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
+  onSwapRenderMode: () => {},
 };
 
 function MouseIconStoryFrame({

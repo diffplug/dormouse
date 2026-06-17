@@ -100,6 +100,10 @@ function decodeScreencastFrame(dataBase64: string): Promise<ImageBitmap> {
 
 export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrowserPanelParams>) {
   const actions = useContext(WallActionsContext);
+  // Stable handle so the screen controller (registered once) can reach the live
+  // Wall actions — used by setRenderMode to trigger an in-place surface swap.
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const elRef = useRef<HTMLDivElement>(null);
@@ -204,7 +208,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     // DPR can't be read back from frames, so report the density we'd sync to.
     const viewport = { w: device.width, h: device.height, dpr: displayDpr };
     const state: ScreenState = dimsMatch(viewport, paneCss) ? 'SYNCED' : 'SCALED';
-    return { state, viewport, paneCss, displayDpr, syncEngaged: syncEngagedRef.current };
+    return { state, viewport, paneCss, displayDpr, syncEngaged: syncEngagedRef.current, renderMode: 'screencast' };
   }, []);
 
   // Publish to the registry only when something the header/modal cares about
@@ -455,6 +459,12 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     openModal() {
       openAgentBrowserScreenModal(api.id);
     },
+    setRenderMode(renderMode) {
+      // agent-browser → iframe embed is a surface-type swap handled by the Wall;
+      // screencast ↔ popout (a relaunch of this same session) is handled inside
+      // this panel and lands in a later stage.
+      if (renderMode === 'embed') actionsRef.current.onSwapRenderMode(api.id, 'embed');
+    },
   }), [api.id, issueSyncToPane]);
 
   useEffect(() => {
@@ -464,6 +474,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       chrome: chromeSnapshotRef.current,
       chromeActions,
       hostCapable: !!getPlatform().agentBrowserCommand,
+      canPopOut: !!getPlatform().agentBrowserPopOut,
     });
     registrationRef.current = registration;
     lastPublishedRef.current = null;

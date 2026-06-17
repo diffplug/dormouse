@@ -45,6 +45,7 @@ function stubActions(overrides: Partial<WallActions> = {}): WallActions {
     onStartRename: vi.fn(),
     onFinishRename: vi.fn(() => ({ accepted: true })),
     onCancelRename: vi.fn(),
+    onSwapRenderMode: vi.fn(),
     ...overrides,
   };
 }

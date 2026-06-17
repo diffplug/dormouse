@@ -10,6 +10,7 @@ import 'dockview-react/dist/styles/dockview.css';
 import { Baseboard } from './Baseboard';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
 import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
+import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import {
   clearSessionAttention,
@@ -170,6 +171,17 @@ function surfaceTypeFromParams(params: unknown): DorSurfaceType {
     if (surfaceType === 'iframe' || surfaceType === 'agent-browser') return surfaceType;
   }
   return 'terminal';
+}
+
+/** Killing or swapping away from an agent-browser surface closes its session —
+ *  surface lifetime and browser lifetime are bound (spec → Lifecycle). No-op
+ *  for other surface types. */
+function closeAgentBrowserSession(params: unknown): void {
+  const p = params as { surfaceType?: unknown; session?: unknown; binaryPath?: unknown } | undefined;
+  if (p?.surfaceType === 'agent-browser' && typeof p.session === 'string') {
+    const binaryPath = typeof p.binaryPath === 'string' ? p.binaryPath : undefined;
+    getPlatform().agentBrowserCommand?.(p.session, ['close'], binaryPath).catch(() => {});
+  }
 }
 
 function componentForSurfaceType(type: DorSurfaceType): string {
@@ -501,13 +513,7 @@ export function Wall({
     const api = apiRef.current;
     const panel = api?.getPanel(id);
     if (!api || !panel) return;
-    // Surface lifetime and browser lifetime are bound: killing an
-    // agent-browser surface closes its session (spec → Lifecycle).
-    const panelParams = panel.params as { surfaceType?: unknown; session?: unknown; binaryPath?: unknown } | undefined;
-    if (panelParams?.surfaceType === 'agent-browser' && typeof panelParams.session === 'string') {
-      const binaryPath = typeof panelParams.binaryPath === 'string' ? panelParams.binaryPath : undefined;
-      getPlatform().agentBrowserCommand?.(panelParams.session, ['close'], binaryPath).catch(() => {});
-    }
+    closeAgentBrowserSession(panel.params);
     orchestrateKill(api, id, selectPane, setSelectedId, killInProgressRef, overlayElRef);
     fireEvent({ type: 'kill', id });
   }, [fireEvent, selectPane]);
@@ -962,6 +968,42 @@ export function Wall({
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'created' } };
   }, [generatePaneId, minimizePane, selectPane, surfaceRefForId]);
 
+  // The last binary path a `dor ab` surface resolved on a terminal's PATH.
+  // Re-used to spawn an agent-browser when swapping an iframe embed up to a
+  // screencast, since the webview/host PATH may not find the binary itself.
+  const lastAgentBrowserBinaryPathRef = useRef<string | undefined>(undefined);
+
+  /**
+   * Replace a content surface's renderer in place, preserving its dock slot
+   * (docs/specs/dor-iframe.md → "Path 1 — Swappable Render Backend"). Adds the
+   * new panel `within` the old one, closes the old surface's session if any,
+   * then removes the old panel and selects the new. The generalized form of
+   * createContentSurface's replace-untouched-terminal branch.
+   */
+  const replaceSurface = useCallback((oldId: string, next: {
+    component: 'iframe' | 'agent-browser';
+    params: Record<string, unknown>;
+    title: string;
+  }): string | null => {
+    const api = apiRef.current;
+    const panel = api?.getPanel(oldId);
+    if (!api || !panel) return null;
+    closeAgentBrowserSession(panel.params);
+    const newId = generatePaneId();
+    api.addPanel({
+      id: newId,
+      component: next.component,
+      tabComponent: 'surface',
+      title: next.title,
+      params: next.params,
+      renderer: next.component === 'iframe' ? 'always' : undefined,
+      position: { referencePanel: oldId, direction: 'within' },
+    });
+    api.removePanel(panel);
+    selectPane(newId);
+    return newId;
+  }, [generatePaneId, selectPane]);
+
   /**
    * The agent-browser session ↔ surface registry, derived from panel/door
    * params rather than kept as separate state so it survives webview reloads.
@@ -1328,6 +1370,8 @@ export function Wall({
         const key = stringParam(params.key);
         const wsPort = numberParam(params.wsPort);
         const binaryPath = stringParam(params.binaryPath);
+        // Remember the resolved binary so an embed→screencast swap can spawn one.
+        if (binaryPath) lastAgentBrowserBinaryPathRef.current = binaryPath;
         const refreshedParams = {
           ...(wsPort !== undefined ? { wsPort } : {}),
           ...(binaryPath !== undefined ? { binaryPath } : {}),
@@ -1504,7 +1548,52 @@ export function Wall({
     onCancelRename: () => {
       setRenamingPaneId(null);
     },
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately]);
+    onSwapRenderMode: (id, mode) => {
+      const api = apiRef.current;
+      const panel = api?.getPanel(id);
+      if (!api || !panel) return;
+      const params = panel.params as Record<string, unknown> | undefined;
+      const currentType = surfaceTypeFromParams(params);
+
+      // agent-browser → iframe embed: frame the active tab's URL, then the
+      // replace closes the now-unneeded headless browser. Webview-only.
+      if (currentType === 'agent-browser' && mode === 'embed') {
+        const url = getAgentBrowserScreenController(id)?.chrome().url;
+        if (!url) return;
+        replaceSurface(id, {
+          component: 'iframe',
+          params: { surfaceType: 'iframe', url },
+          title: hostPathDisplay(url, true),
+        });
+        return;
+      }
+
+      // iframe embed → live agent-browser (screencast or popout): the host must
+      // spawn a session for the URL (absent ⇒ inert, like other host-gated
+      // affordances). popOutOnReady tells the new panel to pop straight out.
+      if (currentType === 'iframe' && (mode === 'screencast' || mode === 'popout')) {
+        const url = typeof params?.url === 'string' ? params.url : undefined;
+        const open = getPlatform().agentBrowserOpen;
+        if (!url || !open) return;
+        open(url, lastAgentBrowserBinaryPathRef.current).then((res) => {
+          if (!res.ok || !res.session) return;
+          if (res.binaryPath) lastAgentBrowserBinaryPathRef.current = res.binaryPath;
+          replaceSurface(id, {
+            component: 'agent-browser',
+            params: {
+              surfaceType: 'agent-browser',
+              session: res.session,
+              ...(res.wsPort !== undefined ? { wsPort: res.wsPort } : {}),
+              ...(res.binaryPath !== undefined ? { binaryPath: res.binaryPath } : {}),
+              syncEngaged: true,
+              ...(mode === 'popout' ? { popOutOnReady: true } : {}),
+            },
+            title: hostPathDisplay(url, true),
+          });
+        }).catch(() => {});
+      }
+    },
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface]);
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
 

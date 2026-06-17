@@ -1,6 +1,7 @@
 import { createContext } from 'react';
 import type { AlertButtonActionResult, SessionStatus, SetTerminalUserTitleResult } from '../../lib/terminal-registry';
 import type { WallMode, SpawnDirection } from './wall-types';
+import type { RenderMode } from './agent-browser-screen';
 
 export interface PaneElementsState {
   elements: Map<string, HTMLElement>;
@@ -38,6 +39,11 @@ export interface WallActions {
   onStartRename: (id: string) => void;
   onFinishRename: (id: string, value: string) => SetTerminalUserTitleResult;
   onCancelRename: () => void;
+  /** Swap a surface's render backend in place, preserving the target URL
+   *  (docs/specs/dor-iframe.md → "Path 1"). agent-browser ↔ iframe is a
+   *  surface-type replacement; screencast ↔ popout is handled inside the
+   *  agent-browser panel and does not route here. */
+  onSwapRenderMode: (id: string, mode: RenderMode) => void;
 }
 
 export const WallActionsContext = createContext<WallActions>({
@@ -53,6 +59,7 @@ export const WallActionsContext = createContext<WallActions>({
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
+  onSwapRenderMode: () => {},
 });
 
 export const RenamingIdContext = createContext<string | null>(null);
