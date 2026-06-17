@@ -256,12 +256,10 @@ user's own `dor iframe <url>`.
 
 ---
 
-# Future Work
+# Render Backends: Two Axes
 
-> Designed, not yet built. Everything above is implemented; everything below is
-> the roadmap. Both paths reuse the proxy + shim substrate unchanged.
-
-## Render Backends: Two Axes
+> **Path 1 (the swap) is implemented; Path 2 (the plugin system) is the remaining
+> roadmap.** Both reuse the proxy + shim substrate unchanged.
 
 With the proxy in place, "view a web thing in a pane" factors into two
 **independent axes**, and the agent-browser and iframe surfaces are just cells in
@@ -321,6 +319,8 @@ is reload (re-resolve the proxy) + URL-edit, with back/forward inert (a
 cross-origin frame's history is unreachable).
 
 ## Path 2 — Plugin System
+
+> Status: **not yet built** — the remaining roadmap item.
 
 Extend the **target axis** with process ownership: Dormouse spawns the plugin's
 backend (an HTML editor, `openvscode-server` / `code serve-web`, any local tool)
