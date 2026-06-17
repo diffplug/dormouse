@@ -375,7 +375,7 @@ function unreachablePage(upstream: URL, detail: string): ErrorPage {
 }
 
 function serveErrorPage(res: http.ServerResponse, page: ErrorPage): void {
-  const html = errorPageHtml(page);
+  const html = instrumentHtml(errorPageHtml(page));
   res.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
     'content-length': Buffer.byteLength(html).toString(),

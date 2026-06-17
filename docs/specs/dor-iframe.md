@@ -157,7 +157,9 @@ precise error *page* from the proxy origin (which frames fine): a refused remote
 responding at `localhost:8080` — is the dev server running?". `createIframeProxyUrl`
 itself returns `{ ok: false, reason }` only for the synchronous cases (chiefly an
 unproxyable `scheme`); reachability and frame-refusal are surfaced as served
-pages.
+pages. These served error pages include the same fixed leader shim as proxied
+HTML, so the keyboard escape path still works after the user clicks inside an
+error state.
 
 ### Cursor alignment (the out-of-process-frame offset)
 
