@@ -1,7 +1,7 @@
 import type { ActivityNotification, SessionStatus, TodoState } from '../../lib/src/lib/alert-manager';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
-import type { OpenPort } from '../../lib/src/lib/platform/types';
+import type { IframeProxyResult, OpenPort } from '../../lib/src/lib/platform/types';
 import type { VSCodeWorkbenchCommand } from '../../lib/src/lib/vscode-keybindings';
 
 // Messages from webview → extension host
@@ -22,6 +22,7 @@ export type WebviewMessage =
   | { type: 'agentBrowser:edit'; session: string; op: 'selectAll' | 'copy' | 'cut'; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:screenshot'; session: string; format?: 'jpeg' | 'png'; quality?: number; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:getStreamUrl'; port: number; requestId: string }
+  | { type: 'iframe:createProxyUrl'; url: string; requestId: string }
   | { type: 'dormouse:init' }
   | { type: 'dormouse:saveState'; state: unknown }
   | { type: 'dormouse:flushSessionSaveDone'; requestId: string }
@@ -62,6 +63,7 @@ export type ExtensionMessage =
   | { type: 'agentBrowser:editResult'; requestId: string; ok: boolean; text?: string; error?: string }
   | { type: 'agentBrowser:screenshotResult'; requestId: string; ok: boolean; bytes?: Uint8Array; mime?: string; error?: string }
   | { type: 'agentBrowser:streamUrl'; requestId: string; url: string | null }
+  | { type: 'iframe:proxyUrl'; requestId: string; result: IframeProxyResult }
   | {
       type: 'dormouse:newTerminal';
       shell?: string;

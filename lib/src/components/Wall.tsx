@@ -598,7 +598,13 @@ export function Wall({
   }, []);
 
   useEffect(() => {
-    const handleBlur = () => clearSessionAttention();
+    // An iframe surface taking focus blurs this window without backgrounding the
+    // app (document.hasFocus() stays true). Only clear cross-session attention
+    // on a real blur, else focusing an iframe wipes attention (spec → "#2").
+    const handleBlur = () => {
+      if (document.hasFocus()) return;
+      clearSessionAttention();
+    };
     window.addEventListener('blur', handleBlur);
     return () => window.removeEventListener('blur', handleBlur);
   }, []);

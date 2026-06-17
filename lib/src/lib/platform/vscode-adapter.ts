@@ -1,4 +1,4 @@
-import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserScreenshotResult, AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
+import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserScreenshotResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
 import { setDefaultShellOpts } from '../shell-defaults';
 import {
@@ -32,6 +32,7 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.agentBrowserEdit = this.agentBrowserEdit.bind(this);
     this.agentBrowserScreenshot = this.agentBrowserScreenshot.bind(this);
     this.getAgentBrowserStreamUrl = this.getAgentBrowserStreamUrl.bind(this);
+    this.createIframeProxyUrl = this.createIframeProxyUrl.bind(this);
 
     // Seed the default shell from the extension-injected global so that
     // the first terminal on startup (which spawns synchronously on Wall
@@ -260,6 +261,18 @@ export class VSCodeAdapter implements PlatformAdapter {
       (msg) => msg.url,
       5000,
     );
+  }
+
+  async createIframeProxyUrl(url: string): Promise<IframeProxyResult> {
+    // The extension host stands up the loopback proxy and serves the bytes (see
+    // iframe-proxy-host.ts). On timeout, report unreachable so the panel shows a
+    // hint rather than hanging on a never-loading frame.
+    const result = await this.requestResponse<IframeProxyResult>(
+      'iframe:createProxyUrl', 'iframe:proxyUrl', { url },
+      (msg) => msg.result,
+      5000,
+    );
+    return result ?? { ok: false, reason: 'unreachable', detail: 'iframe proxy request timed out' };
   }
 
   onPtyData(handler: (detail: { id: string; data: string }) => void): void {

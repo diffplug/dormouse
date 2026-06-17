@@ -71,6 +71,22 @@ export interface AgentBrowserEditResult {
   error?: string;
 }
 
+/**
+ * Result of asking the host to front a `dor iframe` target with its transparent
+ * proxy (docs/specs/dor-iframe.md → "The Transparent Proxy"). On `ok` the panel
+ * points the `<iframe>` at `url` — a loopback proxy origin that fetches the
+ * target, strips frame-blocking headers (loopback only), and injects the
+ * Dormouse shim. On failure `reason` says why there is nothing to frame:
+ * `scheme` (not a proxyable `http://` upstream — e.g. an `https://` target,
+ * which v1 defers), `unreachable` (nothing answered), or `frame-refused` (a
+ * remote that forbids embedding — use `dor ab` instead). Reachability and
+ * frame-refusal are normally diagnosed lazily and surfaced as a served error
+ * *page* inside the frame, so v1 mostly returns `ok` or `scheme` here.
+ */
+export type IframeProxyResult =
+  | { ok: true; url: string }
+  | { ok: false; reason: 'frame-refused' | 'unreachable' | 'scheme'; detail?: string };
+
 export interface PlatformAdapter {
   // Lifecycle
   init(): Promise<void>;
@@ -131,6 +147,13 @@ export interface PlatformAdapter {
   // the agent-browser stream server rejects (VS Code) return a tokenized relay
   // URL; absent or null falls back to ws://127.0.0.1:<port>.
   getAgentBrowserStreamUrl?(port: number): Promise<string | null>;
+
+  // iframe surface support (see docs/specs/dor-iframe.md → "The Transparent
+  // Proxy"). Stands up a loopback proxy in front of a `dor iframe` target and
+  // returns the proxy URL the panel should frame, or a structured reason it
+  // could not. Absent on hosts with no process to run a proxy (e.g. the web
+  // host), where the panel falls back to a raw, uninstrumented `<iframe>`.
+  createIframeProxyUrl?(targetUrl: string): Promise<IframeProxyResult>;
 
   // PTY event listeners
   onPtyData(handler: (detail: { id: string; data: string }) => void): void;

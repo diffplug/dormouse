@@ -511,7 +511,36 @@ export function markSessionTouched(id: string): void {
   entry.untouched = false;
 }
 
+/**
+ * A non-terminal content surface's focus contract, so `focusSession` can drive
+ * it like any xterm pane. The iframe surface registers one whose `focus` moves
+ * keyboard focus into the instrumented frame (docs/specs/dor-iframe.md → "#3 —
+ * the surface registers a focus handle").
+ */
+export interface SurfaceFocusHandle {
+  focus(): void;
+  blur(): void;
+}
+
+const surfaceFocusHandles = new Map<string, SurfaceFocusHandle>();
+
+export function registerSurfaceFocusHandle(id: string, handle: SurfaceFocusHandle): () => void {
+  surfaceFocusHandles.set(id, handle);
+  return () => {
+    if (surfaceFocusHandles.get(id) === handle) surfaceFocusHandles.delete(id);
+  };
+}
+
 export function focusSession(id: string, focused: boolean): void {
+  // Non-terminal surfaces (iframe) aren't in the xterm registry — route to
+  // their focus handle so onClickPanel → enterTerminalMode focuses them too.
+  const handle = surfaceFocusHandles.get(id);
+  if (handle) {
+    if (focused) handle.focus();
+    else handle.blur();
+    return;
+  }
+
   const entry = registry.get(id);
   if (!entry) return;
 
