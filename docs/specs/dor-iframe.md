@@ -51,6 +51,8 @@ cannot do:
    working inside the frame (the technique VS Code uses for its own webviews).
 2. **See the upstream result**, so a refused-to-be-framed page or a dead server
    becomes a clear error page instead of a blank pane.
+3. **Report the frame's current location**, so Dormouse's browser chrome stays
+   aligned with same-frame iframe navigation.
 
 ### The one load-bearing fact
 
@@ -134,6 +136,10 @@ It posts only Dormouse-owned control messages to the parent:
   `handle-dual-tap.ts`).
 - `pointerdown`: genuine user pointerdown inside the cross-origin frame, so the
   panel can adopt the click as pane selection + passthrough entry.
+- `location`: the proxied frame URL after `pushState`/`replaceState`,
+  `popstate`, `hashchange`, page show/load, and before same-frame anchor
+  navigation. `IframePanel` maps that proxy-origin URL back to the upstream URL
+  before updating pane params and Back/Forward history.
 
 Every other keystroke and pointer event flows to the tool untouched. The
 embedded tool (a code editor, a VS-Code-web workbench) keeps full keyboard
@@ -145,7 +151,8 @@ The Wall already owns a capturing `window` keydown listener
 and feeds the forwarded chord into the same dispatch the in-document dual-tap
 would (`exitTerminalMode`) — no synthesized `KeyboardEvent` round-trip. The
 iframe panel separately listens for the same validated proxy origin and treats a
-`pointerdown` message as `onClickPanel(api.id)`.
+`pointerdown` message as `onClickPanel(api.id)` and a `location` message as a
+browser-history update for iframe chrome.
 
 ### Accurate focus model (resolves #2 and #3)
 

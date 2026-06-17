@@ -519,10 +519,13 @@ hosts degrade gracefully:
   `{ session, wsPort }`. Backs a render-swap from `iframe embed` up to a live
   screencast/popout, where the webview can't resolve/run the binary itself.
 - **`agentBrowserPopOut(session, { url, rect })`** / **`agentBrowserPopIn(session,
-  { url })`** — relaunch a session headed / headless at `url`, returning the new
-  `wsPort`. Chrome's headed/headless choice is fixed at launch, so pop-out is a
-  close + relaunch rather than a live toggle; `rect` is accepted but unused (no
-  window positioning today).
+  { url })`** — relaunch a session headed / headless at the session's live
+  active URL, returning the new `wsPort`. The host queries `agent-browser get
+  url` immediately before closing the old Chrome process; the webview-provided
+  `url` is only a fallback, because the tab snapshot can lag during a mode swap.
+  Chrome's headed/headless choice is fixed at launch, so pop-out is a close +
+  relaunch rather than a live toggle; `rect` is accepted but unused (no window
+  positioning today).
 - **`agentBrowserBringToFront(session)`** — raise the headed OS window. Optional
   and **unimplemented today**, so the stub's *Bring to front* button stays hidden.
 
@@ -591,11 +594,12 @@ registry is untouched, so `dor ab --key …` keeps driving the same surface
 transparently.
 
 **State carried (v1).** Only the **active tab's URL** is preserved across the
-relaunch. Lost: other tabs, live DOM, scroll, form inputs, `sessionStorage`, and
-— because agent-browser uses an ephemeral temp profile — **cookies/login**. The
-**profile-persistence spike** (stable user-data-dir or `agent-browser state
-save`/`load`) is the wanted follow-up that makes pop-out usable for authenticated
-sites.
+relaunch, resolved by the VS Code host from the live agent-browser session just
+before it closes the current process. Lost: other tabs, live DOM, scroll, form
+inputs, `sessionStorage`, and — because agent-browser uses an ephemeral temp
+profile — **cookies/login**. The **profile-persistence spike** (stable
+user-data-dir or `agent-browser state save`/`load`) is the wanted follow-up that
+makes pop-out usable for authenticated sites.
 
 **The pane while popped out.** A clean stub: copy that the browser is in a
 separate window, a **Pop back in** button (relaunch headless → resume the

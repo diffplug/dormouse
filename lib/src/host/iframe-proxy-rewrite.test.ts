@@ -80,6 +80,9 @@ describe('instrumentHtml', () => {
     expect(IFRAME_SHIM).toContain('__dormouse');
     expect(IFRAME_SHIM).toContain("'leader'");
     expect(IFRAME_SHIM).toContain("'pointerdown'");
+    expect(IFRAME_SHIM).toContain("'location'");
+    expect(IFRAME_SHIM).toContain("addEventListener('click'");
+    expect(IFRAME_SHIM).toContain('pushState');
   });
 });
 

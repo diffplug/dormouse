@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
@@ -38,11 +38,46 @@ type Resolution =
   | { kind: 'raw'; src: string }
   | { kind: 'error'; reason: 'frame-refused' | 'unreachable' | 'scheme'; detail?: string };
 
+type IframeHistory = {
+  entries: string[];
+  index: number;
+};
+
 function originOf(url: string): string {
   try {
     return new URL(url).origin;
   } catch {
     return '';
+  }
+}
+
+function sameUrl(a: string, b: string): boolean {
+  if (a === b) return true;
+  try {
+    return new URL(a).href === new URL(b).href;
+  } catch {
+    return false;
+  }
+}
+
+function appendHistory(history: IframeHistory, nextUrl: string): IframeHistory {
+  const current = history.entries[history.index] ?? '';
+  if (!nextUrl || sameUrl(current, nextUrl)) return history;
+  return {
+    entries: [...history.entries.slice(0, history.index + 1), nextUrl],
+    index: history.index + 1,
+  };
+}
+
+function upstreamUrlFromFrameLocation(frameUrl: unknown, targetUrl: string, proxyOrigin: string): string | null {
+  if (typeof frameUrl !== 'string' || !targetUrl || !proxyOrigin) return null;
+  try {
+    const frame = new URL(frameUrl);
+    if (frame.origin !== proxyOrigin) return null;
+    const target = new URL(targetUrl);
+    return `${target.origin}${frame.pathname}${frame.search}${frame.hash}`;
+  } catch {
+    return null;
   }
 }
 
@@ -52,11 +87,41 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
   const iframeRef = useRef<HTMLIFrameElement>(null);
   usePaneChrome(api, elRef);
   const url = typeof params?.url === 'string' ? params.url : '';
+  const [history, setHistory] = useState<IframeHistory>(() => ({ entries: url ? [url] : [], index: url ? 0 : -1 }));
   // Bumped by the header's reload button to re-resolve the proxy (a cross-origin
   // frame can't be reloaded via its contentWindow).
   const [reloadNonce, setReloadNonce] = useState(0);
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
+
+  // Params are still the persisted/source URL for session restore and
+  // render-swaps. Keep a small browser-like history on top so iframe chrome
+  // Back/Forward are real even though the cross-origin frame history itself is
+  // not reachable from the parent webview.
+  useEffect(() => {
+    if (!url) {
+      setHistory({ entries: [], index: -1 });
+      return;
+    }
+    setHistory((prev) => appendHistory(prev, url));
+  }, [url]);
+
+  const commitUrl = useCallback((nextUrl: string) => {
+    if (!nextUrl) return;
+    setHistory((prev) => appendHistory(prev, nextUrl));
+    api.updateParameters({ url: nextUrl });
+    api.setTitle?.(hostPathDisplay(nextUrl, true));
+  }, [api]);
+
+  const goToHistoryIndex = useCallback((nextIndex: number) => {
+    setHistory((prev) => {
+      if (nextIndex < 0 || nextIndex >= prev.entries.length) return prev;
+      const nextUrl = prev.entries[nextIndex];
+      api.updateParameters({ url: nextUrl });
+      api.setTitle?.(hostPathDisplay(nextUrl, true));
+      return { ...prev, index: nextIndex };
+    });
+  }, [api]);
 
   // Ask the host to front the target with its transparent proxy. The returned
   // URL is a loopback origin that serves the page's bytes (instrumented for
@@ -106,11 +171,11 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     },
   }), [api.id]);
   const chromeActions = useMemo<ChromeActions>(() => ({
-    navigate(next) { api.updateParameters({ url: next }); },
-    back() {},     // cross-origin frame history is unreachable
-    forward() {},
+    navigate(next) { commitUrl(next); },
+    back() { goToHistoryIndex(history.index - 1); },
+    forward() { goToHistoryIndex(history.index + 1); },
     reload() { setReloadNonce((n) => n + 1); },
-  }), [api]);
+  }), [commitUrl, goToHistoryIndex, history.index]);
   const registrationRef = useRef<ScreenRegistration | null>(null);
   useEffect(() => {
     if (!swapCapable) return;
@@ -140,7 +205,7 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
   }, [url, api.title]);
 
   // Trust postMessage from this frame's origin (validated by the Wall's
-  // keyboard/focus channel) only while the proxied surface is live.
+  // keyboard/focus/location channel) only while the proxied surface is live.
   const proxyOrigin = resolution.kind === 'proxied' ? resolution.origin : null;
   useEffect(() => {
     if (!proxyOrigin) return;
@@ -159,12 +224,19 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     if (!proxyOrigin) return;
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== proxyOrigin) return;
-      if ((e.data as { __dormouse?: unknown } | null)?.__dormouse !== 'pointerdown') return;
-      actions.onClickPanel(api.id);
+      const data = e.data as { __dormouse?: unknown; url?: unknown } | null;
+      if (data?.__dormouse === 'pointerdown') {
+        actions.onClickPanel(api.id);
+        return;
+      }
+      if (data?.__dormouse === 'location') {
+        const nextUrl = upstreamUrlFromFrameLocation(data.url, url, proxyOrigin);
+        if (nextUrl) commitUrl(nextUrl);
+      }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [api, proxyOrigin, actions]);
+  }, [api, proxyOrigin, actions, url, commitUrl]);
 
   // Raw fallback frames have no injected shim, but focusing a cross-origin
   // iframe still blurs the parent window while the document itself remains

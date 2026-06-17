@@ -169,6 +169,26 @@ async function readStreamPort(session: string, binaryPath?: string): Promise<num
   return undefined;
 }
 
+function usableRelaunchUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === 'about:blank') return undefined;
+  return trimmed;
+}
+
+async function readCurrentUrl(session: string, binaryPath?: string): Promise<string | undefined> {
+  const result = await runWithBinaryFallback(['--session', session, 'get', 'url'], binaryPath);
+  if (result.exitCode !== 0) return undefined;
+  return usableRelaunchUrl(result.stdout.split(/\r?\n/).find((line) => line.trim().length > 0));
+}
+
+async function resolveRelaunchUrl(session: string, requestedUrl: unknown, binaryPath?: string): Promise<string> {
+  // The webview's tab snapshot can lag behind the daemon, especially while
+  // swapping headed/headless modes. Query the live session immediately before
+  // closing it so pop-out/pop-in preserves the page the user is actually on.
+  return (await readCurrentUrl(session, binaryPath)) ?? usableRelaunchUrl(requestedUrl) ?? 'about:blank';
+}
+
 export async function runAgentBrowserStreamStatus(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult> {
   if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
   const wsPort = await readStreamPort(session, binaryPath);
@@ -212,8 +232,8 @@ export async function runAgentBrowserPopOut(
   binaryPath?: string,
 ): Promise<AgentBrowserPopResult> {
   if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
+  const url = await resolveRelaunchUrl(session, opts?.url, binaryPath);
   await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
-  const url = typeof opts?.url === 'string' && opts.url ? opts.url : 'about:blank';
   const open = await runWithBinaryFallback(['--session', session, '--headed', 'open', url], binaryPath);
   if (open.exitCode !== 0) {
     return { ok: false, error: open.stderr.trim() || `headed open exited ${open.exitCode}` };
@@ -230,8 +250,8 @@ export async function runAgentBrowserPopIn(
   binaryPath?: string,
 ): Promise<AgentBrowserPopResult> {
   if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
+  const url = await resolveRelaunchUrl(session, opts?.url, binaryPath);
   await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
-  const url = typeof opts?.url === 'string' && opts.url ? opts.url : 'about:blank';
   const open = await runWithBinaryFallback(['--session', session, 'open', url], binaryPath);
   if (open.exitCode !== 0) {
     return { ok: false, error: open.stderr.trim() || `open exited ${open.exitCode}` };

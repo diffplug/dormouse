@@ -34,10 +34,22 @@ export const STRIP_RESPONSE_HEADERS = new Set([
 //     only the frame, so the Wall can't see it; this lets it select the pane /
 //     enter passthrough (#3). It's genuine user input, so it can't loop with the
 //     parent's programmatic focus.
+//   - `location`: the proxied frame's current URL. The parent converts it back
+//     to the upstream URL and uses it to keep iframe Back/Forward/Reload chrome
+//     honest.
 export const IFRAME_SHIM = `(function(){
   var P=window.parent;
   if(!P||P===window)return;
-  function post(t){try{P.postMessage({__dormouse:t},'*');}catch(e){}}
+  function post(t,d){try{var m={__dormouse:t};if(d)for(var k in d)m[k]=d[k];P.postMessage(m,'*');}catch(e){}}
+  function postLocation(){post('location',{url:String(location.href)});}
+  function anchorHref(e){
+    var n=e&&e.target;
+    while(n&&n.nodeType===1){
+      if(n.tagName&&String(n.tagName).toLowerCase()==='a'&&n.href)return n;
+      n=n.parentElement;
+    }
+    return null;
+  }
   function tap(s,e){
     var now=Date.now(),side=e.location===1?'left':'right';
     if(s.side==='left'&&side==='right'&&now-s.time<500){s.side=null;return true;}
@@ -49,6 +61,22 @@ export const IFRAME_SHIM = `(function(){
     else if(e.key==='Shift'){if(tap(shift,e))post('leader');}
   },true);
   addEventListener('pointerdown',function(){post('pointerdown');},true);
+  addEventListener('click',function(e){
+    var a=anchorHref(e);
+    if(!a||a.target&&a.target!=='_self'||a.hasAttribute('download'))return;
+    post('location',{url:String(a.href)});
+  },true);
+  addEventListener('popstate',postLocation,true);
+  addEventListener('hashchange',postLocation,true);
+  addEventListener('pageshow',postLocation,true);
+  var H=history;
+  if(H&&H.pushState&&H.replaceState){
+    var p=H.pushState,r=H.replaceState;
+    H.pushState=function(){var v=p.apply(this,arguments);setTimeout(postLocation,0);return v;};
+    H.replaceState=function(){var v=r.apply(this,arguments);setTimeout(postLocation,0);return v;};
+  }
+  if(document.readyState==='loading')addEventListener('DOMContentLoaded',postLocation,{once:true});
+  else setTimeout(postLocation,0);
 })();`;
 
 // Drop any in-document CSP (loopback "relax CSP") and inject the shim before
