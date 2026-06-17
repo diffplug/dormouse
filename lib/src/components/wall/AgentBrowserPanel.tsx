@@ -478,7 +478,8 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   // tab/status changes, not every frame pulse.
   useEffect(() => {
     registrationRef.current?.updateChrome(chromeSnapshotRef.current);
-  }, [chromeSnapshot.url, chromeSnapshot.displayUrl, chromeSnapshot.title, chromeSnapshot.key]);
+    // displayUrl is a pure function of url, so url covers it.
+  }, [chromeSnapshot.url, chromeSnapshot.title, chromeSnapshot.key]);
 
   // Persist sync state into the panel params so it round-trips through the
   // dockview layout blob (and survives reattach). Skip no-op writes.

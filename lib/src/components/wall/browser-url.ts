@@ -43,15 +43,8 @@ export function normalizeNavUrl(raw: string): string {
   // `localhost:5173` is NOT a scheme (no `//`), so it falls through to get one.
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) return trimmed;
   if (/^(about|data|blob|mailto|tel|javascript|view-source|chrome):/i.test(trimmed)) return trimmed;
-  const host = trimmed.split(/[/?#]/, 1)[0].toLowerCase();
-  const hostname = host.split(':', 1)[0];
-  const isLoopback =
-    hostname === 'localhost' ||
-    hostname === '127.0.0.1' ||
-    hostname === '[::1]' ||
-    hostname === '::1' ||
-    hostname.endsWith('.localhost');
-  return `${isLoopback ? 'http' : 'https'}://${trimmed}`;
+  const hostname = trimmed.split(/[/?#]/, 1)[0].split(':', 1)[0];
+  return `${isLoopbackHostname(hostname) ? 'http' : 'https'}://${trimmed}`;
 }
 
 /** True for hostnames that resolve to the local machine. `*.localhost` is
