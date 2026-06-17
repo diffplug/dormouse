@@ -116,6 +116,14 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     <div
       ref={elRef}
       className={`relative h-full w-full overflow-hidden bg-terminal-bg ${TERMINAL_BOTTOM_RADIUS_CLASS}`}
+      // A cross-origin iframe is an out-of-process frame; Chromium maps pointer
+      // events to it relative to its nearest compositing/containing ancestor.
+      // Dockview's root (.dv-dockview) sets `contain: layout`, so without this
+      // the frame's reference is that far-away root and clicks land offset by the
+      // pane's distance from it. translateZ(0) gives this container its own layer
+      // co-located with the frame, collapsing the offset to ~0. It's identity, so
+      // getBoundingClientRect (overlay measurement) is unaffected.
+      style={{ transform: 'translateZ(0)' }}
       onMouseDown={() => actions.onClickPanel(api.id)}
     >
       {src ? (
