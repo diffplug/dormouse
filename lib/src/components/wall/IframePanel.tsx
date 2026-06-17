@@ -84,39 +84,55 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     return registerProxyOrigin(proxyOrigin);
   }, [proxyOrigin]);
 
+  // A cross-origin click reaches only the frame, so the Wall never sees the
+  // mousedown — and on WebKit the iframe element's own `focus` event doesn't
+  // fire for it either. The shim posts `pointerdown` from inside the frame;
+  // adopt it as entering the pane (select + passthrough), exactly like clicking
+  // any other pane. Only genuine clicks emit `pointerdown`, so command-mode
+  // arrow navigation never triggers it, and onClickPanel is idempotent for
+  // repeat clicks. (We can't gate on dockview's `api.isActive`: in a split each
+  // sole panel is always "active" within its own group.)
+  useEffect(() => {
+    if (!proxyOrigin) return;
+    const onMessage = (e: MessageEvent) => {
+      if (e.origin !== proxyOrigin) return;
+      if ((e.data as { __dormouse?: unknown } | null)?.__dormouse !== 'pointerdown') return;
+      actions.onClickPanel(api.id);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [api, proxyOrigin, actions]);
+
   // Register a focus handle so onClickPanel → enterTerminalMode can focus the
-  // frame like any other surface (spec → "#3"). Focusing the element moves
-  // keyboard focus into the frame; the shim then reports focus back to the Wall.
+  // frame like any other surface (spec → "#3"), and exitTerminalMode can hand
+  // focus back. Focusing the element moves keyboard focus into the frame.
   useEffect(() => {
     if (resolution.kind !== 'proxied' && resolution.kind !== 'raw') return;
     return registerSurfaceFocusHandle(api.id, {
-      focus: () => iframeRef.current?.focus(),
-      blur: () => iframeRef.current?.blur(),
+      // Skip if the frame already holds focus: re-focusing a cross-origin frame
+      // on WebKit can blank it (the frame is already focused after a click).
+      focus: () => {
+        if (document.activeElement !== iframeRef.current) iframeRef.current?.focus();
+      },
+      // Pull focus back into the top document so the Wall's window keydown
+      // listener receives command-mode keys after the leader exits passthrough —
+      // blurring a cross-origin frame doesn't reliably hand focus back on WebKit.
+      blur: () => {
+        iframeRef.current?.blur();
+        elRef.current?.focus();
+      },
     });
   }, [api.id, resolution.kind]);
-
-  // Clicking *into* a cross-origin frame doesn't bubble a mousedown to the pane,
-  // so the onMouseDown below never fires and the surface never enters
-  // passthrough. Detect the frame taking focus (window blurs while our iframe
-  // becomes activeElement, app still focused) and adopt it as entering the pane,
-  // so mode/selection stay consistent and the leader chord can round-trip out.
-  useEffect(() => {
-    if (resolution.kind !== 'proxied' && resolution.kind !== 'raw') return;
-    const onWindowBlur = () => {
-      if (document.hasFocus() && document.activeElement === iframeRef.current) {
-        actions.onClickPanel(api.id);
-      }
-    };
-    window.addEventListener('blur', onWindowBlur);
-    return () => window.removeEventListener('blur', onWindowBlur);
-  }, [api.id, resolution.kind, actions]);
 
   const src = resolution.kind === 'proxied' || resolution.kind === 'raw' ? resolution.src : '';
 
   return (
     <div
       ref={elRef}
-      className={`relative h-full w-full overflow-hidden bg-terminal-bg ${TERMINAL_BOTTOM_RADIUS_CLASS}`}
+      // tabIndex makes this focusable so the focus handle can park focus here
+      // (in the top document) when the frame blurs; outline-none hides the ring.
+      tabIndex={-1}
+      className={`relative h-full w-full overflow-hidden bg-terminal-bg outline-none ${TERMINAL_BOTTOM_RADIUS_CLASS}`}
       // A cross-origin iframe is an out-of-process frame; Chromium maps pointer
       // events to it relative to its nearest compositing/containing ancestor.
       // Dockview's root (.dv-dockview) sets `contain: layout`, so without this

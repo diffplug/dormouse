@@ -26,26 +26,29 @@ export const STRIP_RESPONSE_HEADERS = new Set([
 
 // The fixed, Dormouse-owned shim — like agent-browser's EDIT_SCRIPTS, never
 // user-supplied, so it is not an eval vector. Injected inline into served HTML
-// (loopback CSP is dropped, so an inline script runs). It reclaims ONLY the
-// reserved leader chord (dual-tap ⌘ / ⇧, matching handle-dual-tap.ts) and posts
-// it to the Wall; every other keystroke flows to the tool untouched. The focus
-// model needs no message channel — `document.hasFocus()` already stays true
-// while a descendant frame holds focus (resolves #2), and the Wall focuses the
-// frame element directly (resolves #3).
+// (loopback CSP is dropped, so an inline script runs). It posts two things to
+// the Wall and nothing else (every other keystroke flows to the tool):
+//   - `leader`: the reserved dual-tap ⌘/⇧ chord (matching handle-dual-tap.ts),
+//     so the global chord keeps working with the frame focused (#1).
+//   - `pointerdown`: a click landed in the frame. A cross-origin click reaches
+//     only the frame, so the Wall can't see it; this lets it select the pane /
+//     enter passthrough (#3). It's genuine user input, so it can't loop with the
+//     parent's programmatic focus.
 export const IFRAME_SHIM = `(function(){
   var P=window.parent;
   if(!P||P===window)return;
+  function post(t){try{P.postMessage({__dormouse:t},'*');}catch(e){}}
   function tap(s,e){
     var now=Date.now(),side=e.location===1?'left':'right';
     if(s.side==='left'&&side==='right'&&now-s.time<500){s.side=null;return true;}
     s.side=side;s.time=now;return false;
   }
-  function leader(){try{P.postMessage({__dormouse:'leader'},'*');}catch(e){}}
   var cmd={side:null,time:0},shift={side:null,time:0};
   addEventListener('keydown',function(e){
-    if(e.key==='Meta'){if(tap(cmd,e))leader();}
-    else if(e.key==='Shift'){if(tap(shift,e))leader();}
+    if(e.key==='Meta'){if(tap(cmd,e))post('leader');}
+    else if(e.key==='Shift'){if(tap(shift,e))post('leader');}
   },true);
+  addEventListener('pointerdown',function(){post('pointerdown');},true);
 })();`;
 
 // Drop any in-document CSP (loopback "relax CSP") and inject the shim before

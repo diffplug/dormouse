@@ -60,7 +60,7 @@ describe('refusesFraming', () => {
 describe('instrumentHtml', () => {
   it('injects the shim before </head>', () => {
     const out = instrumentHtml('<html><head><title>x</title></head><body>hi</body></html>');
-    expect(out).toContain("__dormouse:'leader'");
+    expect(out).toContain('__dormouse');
     expect(out).toMatch(/<\/script><\/head>/);
     expect(out).toContain('<title>x</title>');
   });
@@ -75,9 +75,10 @@ describe('instrumentHtml', () => {
     expect(out).not.toMatch(/http-equiv=["']?content-security-policy/i);
   });
 
-  it('carries the leader-only shim (no focus/blur channel)', () => {
-    expect(IFRAME_SHIM).toContain("__dormouse:'leader'");
-    expect(IFRAME_SHIM).not.toContain('focus');
+  it('forwards the leader chord and a pointerdown select signal', () => {
+    expect(IFRAME_SHIM).toContain('__dormouse');
+    expect(IFRAME_SHIM).toContain("'leader'");
+    expect(IFRAME_SHIM).toContain("'pointerdown'");
   });
 });
 
