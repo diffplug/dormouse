@@ -235,16 +235,25 @@ function collectBody(stream: http.IncomingMessage, done: (body: string, truncate
   const chunks: Buffer[] = [];
   let size = 0;
   let truncated = false;
+  let settled = false;
+  const complete = () => {
+    if (settled) return;
+    settled = true;
+    done(Buffer.concat(chunks).toString('utf8'), truncated);
+  };
   stream.on('data', (chunk: Buffer) => {
     size += chunk.length;
     if (size > HTML_BODY_LIMIT) {
       truncated = true;
+      // `destroy()` (no error) emits 'close'/'aborted' but neither 'end' nor
+      // 'error', so the listeners below would never fire — settle explicitly
+      // or the downstream response hangs with nothing served.
       stream.destroy();
+      complete();
       return;
     }
     chunks.push(chunk);
   });
-  const complete = () => done(Buffer.concat(chunks).toString('utf8'), truncated);
   stream.on('end', complete);
   stream.on('error', complete);
 }
