@@ -8,6 +8,7 @@ import {
   IFRAME_SHIM,
   errorPageHtml,
   frameRefusedPage,
+  timedOutPage,
 } from './iframe-proxy-rewrite';
 
 describe('hasRestrictiveFrameAncestors', () => {
@@ -114,5 +115,11 @@ describe('errorPageHtml', () => {
     expect(html).toContain('refuses to be embedded');
     expect(html).toContain('dor ab open');
     expect(html).not.toContain('a"b'); // escaped
+  });
+
+  it('renders a timed-out page that suggests reloading', () => {
+    const html = errorPageHtml(timedOutPage(new URL('http://localhost:5173/')));
+    expect(html).toContain('isn’t responding');
+    expect(html).toMatch(/reload/i);
   });
 });

@@ -42,6 +42,7 @@ import {
   isBlockedAddress,
   isLoopbackHost,
   refusesFraming,
+  timedOutPage,
   unreachablePage,
   type ErrorPage,
 } from './iframe-proxy-rewrite';
@@ -54,6 +55,10 @@ const GRANT_SWEEP_MS = 60_000;
 // Backstop against unbounded server accumulation if sweeps never run.
 const MAX_GRANTS = 32;
 const HTML_BODY_LIMIT = 32 * 1024 * 1024;
+// Idle timeout on the upstream socket (no bytes flowing). Generous so a slow or
+// streaming dev server isn't cut off, but bounded so a hung upstream becomes a
+// visible error page instead of an indefinitely blank frame.
+const UPSTREAM_IDLE_TIMEOUT_MS = 30_000;
 
 /** Host-supplied logger; defaults to a no-op so the module is usable bare. */
 export type ProxyLogger = (message: string) => void;
@@ -190,7 +195,27 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
       res.end(html);
     });
   });
-  upstreamReq.on('error', (err) => serveErrorPage(res, unreachablePage(grant.upstream, err.message)));
+  upstreamReq.on('error', (err) => {
+    // Once we've begun streaming the response we can't swap in an error page —
+    // just tear down. Otherwise serve an actionable page: distinguish "didn't
+    // respond in time" (dev server busy/optimizing) from "couldn't connect"
+    // (dev server down).
+    if (res.headersSent || res.writableEnded) {
+      res.destroy();
+      return;
+    }
+    const code = (err as { code?: string }).code;
+    serveErrorPage(res, code === 'ETIMEDOUT'
+      ? timedOutPage(grant.upstream)
+      : unreachablePage(grant.upstream, err.message));
+  });
+  // Fire on socket inactivity (not total duration), so active/streaming
+  // responses are never cut off; a stalled upstream surfaces as a timeout page.
+  upstreamReq.setTimeout(UPSTREAM_IDLE_TIMEOUT_MS, () => {
+    upstreamReq.destroy(Object.assign(new Error('upstream timed out'), { code: 'ETIMEDOUT' }));
+  });
+  // If the frame navigates away or is closed, stop fetching upstream.
+  res.on('close', () => { if (!res.writableEnded) upstreamReq.destroy(); });
   req.pipe(upstreamReq);
 }
 

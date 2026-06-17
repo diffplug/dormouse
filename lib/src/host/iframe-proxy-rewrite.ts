@@ -124,6 +124,13 @@ export function unreachablePage(upstream: URL, detail: string): ErrorPage {
   };
 }
 
+export function timedOutPage(upstream: URL): ErrorPage {
+  return {
+    title: `${upstream.host} isn’t responding`,
+    message: `Dormouse connected to ${upstream.host} but it didn’t respond in time — the dev server may be busy (e.g. optimizing dependencies). Try reloading.`,
+  };
+}
+
 export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
