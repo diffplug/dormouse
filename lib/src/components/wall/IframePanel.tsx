@@ -103,6 +103,21 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     return () => window.removeEventListener('message', onMessage);
   }, [api, proxyOrigin, actions]);
 
+  // Raw fallback frames have no injected shim, but focusing a cross-origin
+  // iframe still blurs the parent window while the document itself remains
+  // focused. Adopt that as entering the pane so hosts without a proxy keep the
+  // same click/focus behavior, albeit without the proxied leader side-channel.
+  useEffect(() => {
+    if (resolution.kind !== 'raw') return;
+    const onWindowBlur = () => {
+      if (document.hasFocus() && document.activeElement === iframeRef.current) {
+        actions.onClickPanel(api.id);
+      }
+    };
+    window.addEventListener('blur', onWindowBlur);
+    return () => window.removeEventListener('blur', onWindowBlur);
+  }, [api.id, resolution.kind, actions]);
+
   // Register a focus handle so onClickPanel → enterTerminalMode can focus the
   // frame like any other surface (spec → "#3"), and exitTerminalMode can hand
   // focus back. Focusing the element moves keyboard focus into the frame.
