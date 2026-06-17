@@ -39,6 +39,7 @@ import {
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
+import { isEditableTarget } from '../lib/dom';
 import { TouchUiContext } from './touch-ui-context';
 import type { SessionStatus } from '../lib/terminal-registry';
 
@@ -508,13 +509,7 @@ export function MobileTerminalUi({
       const active = document.activeElement;
       if (!(active instanceof HTMLElement)) return;
       if (!terminalHostRef.current?.contains(active)) return;
-      if (
-        active instanceof HTMLInputElement
-        || active instanceof HTMLTextAreaElement
-        || active.isContentEditable
-      ) {
-        active.blur();
-      }
+      if (isEditableTarget(active)) active.blur();
     };
     // Wall defers xterm focus via rAF, so a single blur can be reverted after we
     // return; repeat across rAF and a few staggered ticks. See mobile-ui.md §10.

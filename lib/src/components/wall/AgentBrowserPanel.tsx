@@ -12,14 +12,18 @@ import { clsx } from 'clsx';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
 import { readTextFromClipboard } from '../../lib/clipboard';
+import { isEditableTarget } from '../../lib/dom';
 import {
   openAgentBrowserScreenModal,
   registerAgentBrowserScreen,
+  type ChromeActions,
+  type ChromeSnapshot,
   type ScreenActions,
   type ScreenRegistration,
   type ScreenSnapshot,
   type ScreenState,
 } from './agent-browser-screen';
+import { hostPathDisplay } from './browser-url';
 import {
   EDIT_OPS,
   MOUSE_BUTTONS,
@@ -84,13 +88,7 @@ type StreamStatus = {
 function tabDisplayTitle(tab: StreamTab): string {
   const title = tab.title?.trim();
   if (title) return title;
-  try {
-    const parsed = new URL(tab.url);
-    const path = parsed.pathname === '/' ? '' : parsed.pathname;
-    return `${parsed.host}${path}` || tab.url;
-  } catch {
-    return tab.url || 'untitled';
-  }
+  return hostPathDisplay(tab.url) || 'untitled';
 }
 
 // Decode a base64 screencast frame to an ImageBitmap (the fallback display path
@@ -397,12 +395,38 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     };
   }, [wsPort, runAgentBrowser, maybeDisengageSync, publishScreen, screenshotLoop, drawBitmap]);
 
-  // --- header title follows the active tab ---
+  // --- header: persisted title + browser-chrome (URL / key) ---
 
+  const activeTab = useMemo(() => tabs.find((tab) => tab.active) ?? tabs[0] ?? null, [tabs]);
+
+  // The persisted panel title (door labels, session save) stays the active
+  // tab's display title; the live browser-chrome header shows the URL instead
+  // (from the snapshot below) and demotes this title to a tooltip.
   useEffect(() => {
-    const active = tabs.find((tab) => tab.active) ?? tabs[0];
-    if (active) api.setTitle(tabDisplayTitle(active));
-  }, [tabs, api]);
+    if (activeTab) api.setTitle(tabDisplayTitle(activeTab));
+  }, [activeTab, api]);
+
+  // The browser-chrome snapshot the header reads. Recomputed each render and
+  // mirrored into a ref so a (re-)registration always seeds the latest; the
+  // publish effect below pushes it to subscribers only on real changes.
+  const chromeSnapshot: ChromeSnapshot = {
+    url: activeTab?.url ?? '',
+    displayUrl: activeTab ? hostPathDisplay(activeTab.url) : '',
+    title: activeTab?.title ?? null,
+    key: params?.key ?? null,
+  };
+  const chromeSnapshotRef = useRef(chromeSnapshot);
+  chromeSnapshotRef.current = chromeSnapshot;
+
+  // Native history nav — `back`/`forward`/`reload` issued like tab actions
+  // (allowlisted in agentBrowserCommand). Stable; reads the live closure via
+  // the ref so the registered controller never goes stale.
+  const chromeActions = useMemo<ChromeActions>(() => ({
+    navigate(url) { if (url) runAgentBrowserRef.current(['open', url]); },
+    back() { runAgentBrowserRef.current(['back']); },
+    forward() { runAgentBrowserRef.current(['forward']); },
+    reload() { runAgentBrowserRef.current(['reload']); },
+  }), []);
 
   // --- screen controller: register for the header/modal bridge ---
 
@@ -437,6 +461,8 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     const registration = registerAgentBrowserScreen(api.id, {
       snapshot: computeSnapshot(),
       actions: screenActions,
+      chrome: chromeSnapshotRef.current,
+      chromeActions,
       hostCapable: !!getPlatform().agentBrowserCommand,
     });
     registrationRef.current = registration;
@@ -446,7 +472,15 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       registration.dispose();
       registrationRef.current = null;
     };
-  }, [api.id, screenActions, computeSnapshot, publishScreen]);
+  }, [api.id, screenActions, chromeActions, computeSnapshot, publishScreen]);
+
+  // Push browser-chrome changes to the header on a channel separate from the
+  // screen snapshot. Gated on the primitive fields so it fires on real
+  // tab/status changes, not every frame pulse.
+  useEffect(() => {
+    registrationRef.current?.updateChrome(chromeSnapshotRef.current);
+    // displayUrl is a pure function of url, so url covers it.
+  }, [chromeSnapshot.url, chromeSnapshot.title, chromeSnapshot.key]);
 
   // Persist sync state into the panel params so it round-trips through the
   // dockview layout blob (and survives reattach). Skip no-op writes.
@@ -729,6 +763,9 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       // contains() check above misses it; without this, typing into the modal's
       // Custom W/H/DPI fields would be swallowed and forwarded to the browser.
       if (e.target instanceof Element && e.target.closest('[role="dialog"]')) return;
+      // Likewise never hijack keystrokes destined for an editable field that
+      // lives outside the pane — notably the header's URL editor.
+      if (isEditableTarget(e.target)) return;
       e.preventDefault();
       if (e.type === 'keydown') handleKeyDownLike(e);
       else sendKey(e, 'keyUp');

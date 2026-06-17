@@ -32,6 +32,9 @@ export interface WallActions {
   onSplitV: (id: string | null, source?: 'keyboard' | 'mouse') => void;
   onZoom: (id: string) => void;
   onClickPanel: (id: string) => void;
+  /** Jump to/focus an arbitrary pane by id (visible or minimized). Used by the
+   *  browser header's dev-server chip to surface the terminal serving a port. */
+  onFocusPane: (id: string) => void;
   onStartRename: (id: string) => void;
   onFinishRename: (id: string, value: string) => SetTerminalUserTitleResult;
   onCancelRename: () => void;
@@ -46,6 +49,7 @@ export const WallActionsContext = createContext<WallActions>({
   onSplitV: () => {},
   onZoom: () => {},
   onClickPanel: () => {},
+  onFocusPane: () => {},
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
