@@ -104,7 +104,6 @@ function BrowserChromeStory(args: StoryArgs) {
         applyViewport: (w, h, dpr) => console.log('[story] applyViewport', w, h, dpr),
         openModal: () => console.log('[story] openModal'),
         setRenderMode: (mode) => console.log('[story] setRenderMode', mode),
-        popOut: () => console.log('[story] popOut'),
       },
       chromeActions: {
         navigate: (url) => console.log('[story] navigate', url),
@@ -165,7 +164,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
   title: 'Components/BrowserChromeHeader',
   component: BrowserChromeStory,
   argTypes: {
-    renderMode: { control: 'inline-radio', options: ['screencast', 'embed'] },
+    renderMode: { control: 'inline-radio', options: ['screencast', 'popout', 'embed'] },
     state: { control: 'radio', options: ['SYNCED', 'SCALED'] },
     url: { control: 'text' },
     htmlTitle: { control: 'text' },
@@ -193,6 +192,13 @@ type Story = StoryObj<typeof BrowserChromeStory>;
 
 /** Everything on at once: key badge + URL + dev-server chip + nav. */
 export const Playground: Story = {};
+
+/** Pop-out render mode — same agent-browser, relaunched as a native OS window;
+ *  the far-left chip becomes the open-window glyph. (The pane body is a stub
+ *  while the window is up, but the header chrome stays live.) */
+export const Popout: Story = {
+  args: { renderMode: 'popout' },
+};
 
 /** Embed (iframe) render mode — the unified chrome is identical to screencast,
  *  but the far-left chip becomes the frame-corners glyph. Same URL/nav/dev-server

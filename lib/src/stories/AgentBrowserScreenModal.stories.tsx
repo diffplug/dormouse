@@ -61,7 +61,6 @@ function useMockController(args: StoryArgs): ScreenController {
         applyViewport: (w, h, dpr) => console.log('[story] applyViewport', w, h, dpr),
         openModal: () => {},
         setRenderMode: (mode) => console.log('[story] setRenderMode', mode),
-        popOut: () => console.log('[story] popOut'),
       },
     };
   }, [args.state, args.renderMode, args.vpW, args.vpH, args.vpDpr, args.paneW, args.paneH, args.displayDpr, args.syncEngaged, args.hostCapable, args.canPopOut]);
@@ -81,7 +80,7 @@ const meta: Meta<typeof AgentBrowserScreenModalStory> = {
   title: 'Modals/AgentBrowserScreenModal',
   component: AgentBrowserScreenModalStory,
   argTypes: {
-    renderMode: { control: 'inline-radio', options: ['screencast', 'embed'] },
+    renderMode: { control: 'inline-radio', options: ['screencast', 'popout', 'embed'] },
     canPopOut: { control: 'boolean' },
     state: { control: 'inline-radio', options: ['SYNCED', 'SCALED'] },
     vpW: { control: 'number' },
@@ -156,9 +155,24 @@ export const HostIncapable: Story = {
   },
 };
 
+// Pop-out render mode: same agent-browser as a native OS window. The Render
+// section pre-selects Pop-out and the Screen section greys out (the window owns
+// its own size).
+export const Popout: Story = {
+  args: {
+    renderMode: 'popout',
+    state: 'SYNCED',
+    vpW: 980, vpH: 560, vpDpr: 2,
+    paneW: 980, paneH: 560,
+    displayDpr: 2,
+    syncEngaged: true,
+    hostCapable: true,
+  },
+};
+
 // Embed (iframe) render mode: the Render section pre-selects Embed and the
 // Screen (viewport) section greys out — the iframe renders at the pane size, so
-// there's nothing to set. Pop-out hides (it's a screencast-only escape hatch).
+// there's nothing to set.
 export const EmbedRender: Story = {
   args: {
     renderMode: 'embed',
@@ -171,8 +185,8 @@ export const EmbedRender: Story = {
   },
 };
 
-// Host can't pop out (e.g. the web host) ⇒ the "Pop out to window" button is
-// hidden; the render swap + viewport controls remain.
+// Host can't pop out (e.g. the web host) ⇒ the Render section drops the Pop-out
+// option, leaving Screencast / Embed.
 export const NoPopOut: Story = {
   args: {
     canPopOut: false,

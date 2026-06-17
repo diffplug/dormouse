@@ -20,12 +20,19 @@ import { useSyncExternalStore } from 'react';
 
 export type ScreenState = 'SYNCED' | 'SCALED';
 
-/** How a web surface is rendered (docs/specs/dor-iframe.md → "Render Backends:
- *  Two Axes"). `screencast` = real Chromium drawn to a canvas (agent-drivable,
- *  any URL, laggy); `embed` = the page's own DOM in a proxied iframe (zero-lag,
- *  loopback-only). Absent ⇒ `screencast` — the only backend wired today, so a
- *  surface with no explicit mode reads as a screencast. */
-export type RenderMode = 'screencast' | 'embed';
+/** How a web surface is rendered (docs/specs/dor-iframe.md → "Render Backends";
+ *  dor-agent-browser.md → "Headed Pop-Out"). Three cells in the matrix of
+ *  {agent-drivable, URL scope, human feel}:
+ *    - `screencast` — real Chromium to a canvas: agent-drivable, any URL, but
+ *      laggy for a human.
+ *    - `popout`     — the same agent-browser relaunched headed as a native OS
+ *      window: agent-drivable, any URL, native human feel; the in-Dormouse pane
+ *      becomes a stub.
+ *    - `embed`      — the page's own DOM in a proxied iframe: native + zero-lag,
+ *      but loopback-only and not agent-drivable.
+ *  Absent ⇒ `screencast` — the only backend wired today, so a surface with no
+ *  explicit mode reads as a screencast. */
+export type RenderMode = 'screencast' | 'popout' | 'embed';
 
 export interface ScreenSnapshot {
   state: ScreenState;
@@ -51,13 +58,11 @@ export interface ScreenActions {
   /** Open the screen modal for this surface. */
   openModal(): void;
   /** Swap this surface's render backend in place, preserving the target
-   *  (docs/specs/dor-iframe.md → "Path 1 — Swappable Render Backend"). Absent
-   *  until the swap is wired; the modal hides its Render section without it. */
+   *  (docs/specs/dor-iframe.md → "Path 1 — Swappable Render Backend"). This is
+   *  the single entry point for every mode, including `popout` (relaunch headed
+   *  — docs/specs/dor-agent-browser.md → "Headed Pop-Out"). Absent until the
+   *  swap is wired; the modal hides its Render section without it. */
   setRenderMode?(mode: RenderMode): void;
-  /** Relaunch the browser headed as an OS window
-   *  (docs/specs/dor-agent-browser.md → "Headed Pop-Out"). Absent until wired;
-   *  gated additionally by `ScreenController.canPopOut` per host/platform. */
-  popOut?(): void;
 }
 
 /** What the browser-chrome header reads about the active tab
@@ -101,7 +106,7 @@ export interface ScreenController {
   /** Whether the host can run `agentBrowserCommand` (false ⇒ resizes inert). */
   readonly hostCapable: boolean;
   /** Whether this host/platform can pop the surface out to a headed OS window
-   *  (false/absent on web; gates the modal's "Pop out to window" button). */
+   *  (false/absent on web; gates the modal's `popout` render option). */
   readonly canPopOut?: boolean;
 }
 

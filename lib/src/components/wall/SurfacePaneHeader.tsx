@@ -5,11 +5,12 @@ import {
   ArrowLeftIcon,
   ArrowLineDownIcon,
   ArrowRightIcon,
+  ArrowSquareOutIcon,
   ArrowsInIcon,
   ArrowsOutIcon,
   FrameCornersIcon,
+  LinkIcon,
   LockSimpleIcon,
-  LockSimpleOpenIcon,
   SplitHorizontalIcon,
   SplitVerticalIcon,
   XIcon,
@@ -34,19 +35,23 @@ import {
 } from './wall-context';
 
 /** The far-left chip reflects the surface's render backend at a glance, and
- *  opens the Display modal (render + viewport). Embed shows a frame; a
- *  screencast shows a lock that's closed when its viewport is synced to the
- *  pane, open when it's scaled/free. */
+ *  opens the Display modal. iframe embed → frame; agent-browser popout →
+ *  open-window glyph; agent-browser screencast → a link when its resolution
+ *  resizes with the pane, a lock when it's fixed. */
 function screenChipLabel(s: ScreenSnapshot): string {
-  if ((s.renderMode ?? 'screencast') === 'embed') return 'Embed (iframe) — change render or viewport';
+  const mode = s.renderMode ?? 'screencast';
+  if (mode === 'embed') return 'iframe embed — change render';
+  if (mode === 'popout') return 'agent-browser popout — change render';
   return s.state === 'SYNCED'
-    ? 'Screencast, synced to pane — change render or viewport'
-    : 'Screencast, scaled — change render or viewport';
+    ? 'agent-browser screencast, resizes with pane — change render or resolution'
+    : 'agent-browser screencast, fixed resolution — change render or resolution';
 }
 
 function ScreenChipIcon({ snapshot }: { snapshot: ScreenSnapshot }) {
-  if ((snapshot.renderMode ?? 'screencast') === 'embed') return <FrameCornersIcon size={14} />;
-  return snapshot.state === 'SYNCED' ? <LockSimpleIcon size={14} /> : <LockSimpleOpenIcon size={14} />;
+  const mode = snapshot.renderMode ?? 'screencast';
+  if (mode === 'embed') return <FrameCornersIcon size={14} />;
+  if (mode === 'popout') return <ArrowSquareOutIcon size={14} />;
+  return snapshot.state === 'SYNCED' ? <LinkIcon size={14} /> : <LockSimpleIcon size={14} />;
 }
 
 export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
