@@ -76,6 +76,16 @@ export interface AgentBrowserEditResult {
 
 export type { IframeProxyResult };
 
+/** Result of asking the host for the current stream status of an existing
+ *  session. Used to recover persisted panels whose saved wsPort went stale
+ *  across VS Code/webview reloads without exposing a generic `stream` exec
+ *  channel to the webview. */
+export interface AgentBrowserStreamStatusResult {
+  ok: boolean;
+  wsPort?: number;
+  error?: string;
+}
+
 /** Result of spawning a managed agent-browser session for a render swap
  *  (docs/specs/dor-iframe.md → "Path 1 — Swappable Render Backend"). */
 export interface AgentBrowserOpenResult {
@@ -156,6 +166,10 @@ export interface PlatformAdapter {
   // signals. Absent on hosts that can't run the binary (degrades to rendering
   // the screencast frames directly).
   agentBrowserScreenshot?(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult>;
+  // Reads the current stream port for an already-running session. This is a
+  // purpose-built status channel, not part of agentBrowserCommand's allowlist,
+  // so restored panels can recover from a stale persisted wsPort after reload.
+  agentBrowserStreamStatus?(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult>;
   // The WebSocket URL for a session's stream port. Hosts whose webview origin
   // the agent-browser stream server rejects (VS Code) return a tokenized relay
   // URL; absent or null falls back to ws://127.0.0.1:<port>.

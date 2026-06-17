@@ -140,6 +140,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   const [status, setStatus] = useState<StreamStatus | null>(null);
   const [hasFrame, setHasFrame] = useState(false);
   const [connectionLost, setConnectionLost] = useState(false);
+  const [streamRecoverySeq, setStreamRecoverySeq] = useState(0);
   const [tabs, setTabs] = useState<StreamTab[]>([]);
   const knownTabIdsRef = useRef<Set<string>>(new Set());
 
@@ -176,6 +177,51 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   sessionRef.current = session;
   const binaryPathRef = useRef(binaryPath);
   binaryPathRef.current = binaryPath;
+  const wsPortRef = useRef(wsPort);
+  wsPortRef.current = wsPort;
+
+  const closeIfSessionMarkedClosed = useCallback((targetSession: string | null | undefined = sessionRef.current): boolean => {
+    if (!targetSession || !isAgentBrowserSessionClosed(targetSession)) return false;
+    getPlatform().agentBrowserCommand?.(targetSession, ['close'], binaryPathRef.current).catch(() => {});
+    return true;
+  }, []);
+
+  const reconcileStreamPort = useCallback(async (directPort?: number): Promise<boolean> => {
+    if (closeIfSessionMarkedClosed()) return false;
+    setConnectionLost(false);
+    setStatus(null);
+    setHasFrame(false);
+
+    if (directPort && directPort > 0) {
+      if (directPort !== wsPortRef.current) {
+        api.updateParameters({ wsPort: directPort });
+      } else {
+        setStreamRecoverySeq((seq) => seq + 1);
+      }
+      return true;
+    }
+
+    const currentSession = sessionRef.current;
+    const fn = getPlatform().agentBrowserStreamStatus;
+    if (!currentSession || !fn) {
+      setStreamRecoverySeq((seq) => seq + 1);
+      return false;
+    }
+
+    try {
+      const res = await fn(currentSession, binaryPathRef.current);
+      if (closeIfSessionMarkedClosed(currentSession)) return false;
+      if (!res.ok || !res.wsPort) return false;
+      if (res.wsPort !== wsPortRef.current) {
+        api.updateParameters({ wsPort: res.wsPort });
+      } else {
+        setStreamRecoverySeq((seq) => seq + 1);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }, [api, closeIfSessionMarkedClosed]);
 
   // --- display: crisp HiDPI screenshots, paced by stream-frame "pulses" ---
   //
@@ -428,7 +474,31 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       wsRef.current = null;
       ws?.close();
     };
-  }, [wsPort, runAgentBrowser, maybeDisengageSync, publishScreen, screenshotLoop, drawBitmap]);
+  }, [wsPort, streamRecoverySeq, runAgentBrowser, maybeDisengageSync, publishScreen, screenshotLoop, drawBitmap]);
+
+  // A persisted panel may restore with a stale wsPort: the agent-browser
+  // session is still alive, but the stream server restarted on a new port while
+  // VS Code/webview state kept the old one. Once the old socket is proven dead
+  // (or no port was persisted), ask the host for the current port and rewrite
+  // panel params so the normal WebSocket effect reconnects.
+  useEffect(() => {
+    if (!session) return;
+    if (wsPort && !connectionLost && status?.connected !== false) return;
+    const fn = getPlatform().agentBrowserStreamStatus;
+    if (!fn) return;
+    let cancelled = false;
+    fn(session, binaryPath).then((res) => {
+      if (cancelled || !res.ok || !res.wsPort) return;
+      setConnectionLost(false);
+      setStatus(null);
+      if (res.wsPort !== wsPort) {
+        api.updateParameters({ wsPort: res.wsPort });
+      } else {
+        setStreamRecoverySeq((seq) => seq + 1);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [session, binaryPath, wsPort, connectionLost, status?.connected, api]);
 
   // --- header: persisted title + browser-chrome (URL / key) ---
 
@@ -475,24 +545,50 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   const popOut = useCallback(() => {
     const fn = getPlatform().agentBrowserPopOut;
     if (!session || !fn) return;
+    if (closeIfSessionMarkedClosed(session)) return;
     headedConnectedRef.current = false;
+    setPoppedOut(true);
+    api.updateParameters({ poppedOut: true });
+    void reconcileStreamPort();
     const url = chromeSnapshotRef.current.url || undefined;
     fn(session, { rect: paneScreenRect(elRef.current), url }, binaryPathRef.current).then((res) => {
-      if (!res.ok) return;
-      setPoppedOut(true);
-      api.updateParameters({ poppedOut: true, ...(res.wsPort ? { wsPort: res.wsPort } : {}) });
-    }).catch(() => {});
-  }, [session, api]);
+      if (closeIfSessionMarkedClosed(session)) return;
+      if (!res.ok) {
+        reconcileStreamPort().then((live) => {
+          if (live) return;
+          setPoppedOut(false);
+          api.updateParameters({ poppedOut: false });
+        });
+        return;
+      }
+      void reconcileStreamPort(res.wsPort);
+    }).catch(() => {
+      if (closeIfSessionMarkedClosed(session)) return;
+      reconcileStreamPort().then((live) => {
+        if (live) return;
+        setPoppedOut(false);
+        api.updateParameters({ poppedOut: false });
+      });
+    });
+  }, [session, api, reconcileStreamPort, closeIfSessionMarkedClosed]);
 
   const popIn = useCallback(() => {
     const fn = getPlatform().agentBrowserPopIn;
+    if (closeIfSessionMarkedClosed(session)) return;
     setPoppedOut(false);
     if (!session || !fn) { api.updateParameters({ poppedOut: false }); return; }
+    api.updateParameters({ poppedOut: false });
+    void reconcileStreamPort();
     const url = chromeSnapshotRef.current.url || undefined;
     fn(session, { url }, binaryPathRef.current).then((res) => {
-      api.updateParameters({ poppedOut: false, ...(res.ok && res.wsPort ? { wsPort: res.wsPort } : {}) });
-    }).catch(() => { api.updateParameters({ poppedOut: false }); });
-  }, [session, api]);
+      if (closeIfSessionMarkedClosed(session)) return;
+      if (res.ok) void reconcileStreamPort(res.wsPort);
+      else void reconcileStreamPort();
+    }).catch(() => {
+      if (closeIfSessionMarkedClosed(session)) return;
+      void reconcileStreamPort();
+    });
+  }, [session, api, reconcileStreamPort, closeIfSessionMarkedClosed]);
 
   const bringToFront = useCallback(() => {
     if (!session) return;
@@ -968,7 +1064,11 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
               {getPlatform().agentBrowserBringToFront && (
                 <button
                   type="button"
-                  onClick={bringToFront}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    bringToFront();
+                  }}
                   className="rounded border border-border px-2.5 py-1 text-muted transition-colors hover:border-foreground hover:text-foreground"
                 >
                   Bring to front
@@ -976,7 +1076,11 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
               )}
               <button
                 type="button"
-                onClick={popIn}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  popIn();
+                }}
                 className="rounded border border-border px-2.5 py-1 text-muted transition-colors hover:border-foreground hover:text-foreground"
               >
                 Pop back in

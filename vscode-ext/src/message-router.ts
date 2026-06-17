@@ -13,7 +13,7 @@ import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { PersistedSession } from '../../lib/src/lib/session-types';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
-import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot } from './agent-browser-host';
+import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
 import { log } from './log';
 
@@ -383,6 +383,16 @@ export function attachRouter(
         ).then((result) => {
           webview.postMessage({
             type: 'agentBrowser:screenshotResult', requestId: msg.requestId, ...result,
+          } satisfies ExtensionMessage);
+        });
+        break;
+      case 'agentBrowser:streamStatus':
+        runAgentBrowserStreamStatus(
+          msg.session,
+          typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
+        ).then((result) => {
+          webview.postMessage({
+            type: 'agentBrowser:streamStatusResult', requestId: msg.requestId, ...result,
           } satisfies ExtensionMessage);
         });
         break;

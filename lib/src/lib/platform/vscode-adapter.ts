@@ -1,4 +1,4 @@
-import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo } from './types';
+import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
 import { setDefaultShellOpts } from '../shell-defaults';
 import {
@@ -31,6 +31,7 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.agentBrowserCommand = this.agentBrowserCommand.bind(this);
     this.agentBrowserEdit = this.agentBrowserEdit.bind(this);
     this.agentBrowserScreenshot = this.agentBrowserScreenshot.bind(this);
+    this.agentBrowserStreamStatus = this.agentBrowserStreamStatus.bind(this);
     this.getAgentBrowserStreamUrl = this.getAgentBrowserStreamUrl.bind(this);
     this.agentBrowserOpen = this.agentBrowserOpen.bind(this);
     this.agentBrowserPopOut = this.agentBrowserPopOut.bind(this);
@@ -254,6 +255,16 @@ export class VSCodeAdapter implements PlatformAdapter {
       10000,
     );
     return result ?? { ok: false, error: 'agent-browser screenshot timed out' };
+  }
+
+  async agentBrowserStreamStatus(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult> {
+    const result = await this.requestResponse<AgentBrowserStreamStatusResult>(
+      'agentBrowser:streamStatus', 'agentBrowser:streamStatusResult',
+      { session, binaryPath },
+      (msg) => ({ ok: msg.ok, wsPort: msg.wsPort, error: msg.error }),
+      5000,
+    );
+    return result ?? { ok: false, error: 'agent-browser stream status timed out' };
   }
 
   getAgentBrowserStreamUrl(port: number): Promise<string | null> {

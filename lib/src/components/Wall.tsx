@@ -1001,7 +1001,7 @@ export function Wall({
       title: next.title,
       params: next.params,
       renderer: next.component === 'iframe' ? 'always' : undefined,
-      position: { referencePanel: oldId, direction: 'within' },
+      position: { referencePanel: panel, direction: 'within' },
     });
     api.removePanel(panel);
     selectPane(newId);
@@ -1584,19 +1584,26 @@ export function Wall({
         open(url, { headed }, lastAgentBrowserBinaryPathRef.current).then((res) => {
           if (!res.ok || !res.session) return;
           if (res.binaryPath) lastAgentBrowserBinaryPathRef.current = res.binaryPath;
-          replaceSurface(id, {
+          const nextParams = {
+            surfaceType: 'agent-browser',
+            session: res.session,
+            ...(res.wsPort !== undefined ? { wsPort: res.wsPort } : {}),
+            ...(res.binaryPath !== undefined ? { binaryPath: res.binaryPath } : {}),
+            syncEngaged: true,
+            ...(headed ? { poppedOut: true } : {}),
+          };
+          const nextId = replaceSurface(id, {
             component: 'agent-browser',
-            params: {
-              surfaceType: 'agent-browser',
-              session: res.session,
-              ...(res.wsPort !== undefined ? { wsPort: res.wsPort } : {}),
-              ...(res.binaryPath !== undefined ? { binaryPath: res.binaryPath } : {}),
-              syncEngaged: true,
-              ...(headed ? { poppedOut: true } : {}),
-            },
+            params: nextParams,
             title: hostPathDisplay(url, true),
           });
-        }).catch(() => {});
+          if (!nextId) {
+            closeAgentBrowserSession(nextParams);
+            console.warn(`[dormouse] failed to replace iframe surface '${id}' with agent-browser surface`);
+          }
+        }).catch((err) => {
+          console.warn('[dormouse] failed to swap iframe surface to agent-browser:', err);
+        });
       }
     },
   }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface]);

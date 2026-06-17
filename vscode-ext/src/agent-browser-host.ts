@@ -2,13 +2,18 @@
  * Extension-host support for the agent-browser surface
  * (docs/specs/dor-agent-browser.md → "Host capabilities").
  *
- * Two narrow capabilities, both on behalf of the webview:
+ * Narrow capabilities, all on behalf of the webview:
  *
  * 1. `runAgentBrowserCommand` — runs the user's agent-browser binary against a
  *    session for tab actions and session teardown. Subcommands are
  *    allowlisted; this is not a general exec channel.
  *
- * 2. `createStreamRelayUrl` — a loopback-only TCP relay that strips the
+ * 2. `runAgentBrowserStreamStatus` — reads the current stream port for an
+ *    existing session. This lets restored panels recover from a stale
+ *    persisted port without exposing `stream` through the general command
+ *    allowlist.
+ *
+ * 3. `createStreamRelayUrl` — a loopback-only TCP relay that strips the
  *    `Origin` header from WebSocket upgrade requests. The agent-browser stream
  *    server returns 403 for `vscode-webview://` origins (only localhost or
  *    absent origins are accepted), so the webview cannot connect directly; it
@@ -31,6 +36,7 @@ import {
   type AgentBrowserOpenResult,
   type AgentBrowserPopResult,
   type AgentBrowserScreenshotResult,
+  type AgentBrowserStreamStatusResult,
 } from '../../lib/src/lib/platform/types';
 
 const ALLOWED_SUBCOMMANDS = new Set<string>(AGENT_BROWSER_ALLOWED_SUBCOMMANDS);
@@ -161,6 +167,13 @@ async function readStreamPort(session: string, binaryPath?: string): Promise<num
     if (attempt < STREAM_PORT_READ_ATTEMPTS - 1) await delay(STREAM_PORT_READ_DELAY_MS);
   }
   return undefined;
+}
+
+export async function runAgentBrowserStreamStatus(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult> {
+  if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
+  const wsPort = await readStreamPort(session, binaryPath);
+  if (!wsPort) return { ok: false, error: 'stream port unavailable' };
+  return { ok: true, wsPort };
 }
 
 // A fresh managed session for a surface spawned from the GUI (no `--key`),

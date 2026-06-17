@@ -339,6 +339,13 @@ Persistence and degradation:
   carries `session`/`wsPort` across webview reloads), so it persists with no
   `session-types.ts`/`session-save.ts` changes; the panel seeds its initial state
   from `params.syncEngaged` (absent ⇒ fresh surface ⇒ auto-engage).
+- A persisted `wsPort` is best-effort only. If a restored panel has no port or
+  its saved stream socket is proven dead while the session is still live, the
+  panel asks the host for `agentBrowserStreamStatus(session)` and rewrites
+  `params.wsPort` with the current port before reconnecting. If the host reports
+  the same port, the panel still clears the ended state and restarts its stream
+  connection once; an unchanged live port can happen after a webview reload even
+  though the prior socket attempt has failed.
 - Like tab actions, this inherits the `agentBrowserCommand` host capability: on
   adapters that do not implement it (currently Tauri), modal-driven resizes are
   inert. (`dor ab set …` from a terminal still works there, since it execs
@@ -499,6 +506,10 @@ hosts degrade gracefully:
   session DPR, unlike the screencast) and returns the raw bytes (a `Uint8Array`
   over structured clone, no base64 round-trip). Drives the crisp display path;
   absent ⇒ the panel falls back to rendering screencast frames.
+- **`agentBrowserStreamStatus(session)`** — reads the current `stream status
+  --json` port for an existing session so restored panels can recover from a
+  stale persisted `wsPort`. This is intentionally narrower than adding `stream`
+  to `agentBrowserCommand`'s allowlist.
 - **`agentBrowserEdit(session, op)`** — host-owned `eval` for the macOS editing
   chords (select-all/copy/cut) the stream input path can't dispatch.
 - **`getAgentBrowserStreamUrl(port)`** — returns the WebSocket URL the webview
