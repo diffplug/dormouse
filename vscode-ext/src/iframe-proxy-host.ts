@@ -154,9 +154,10 @@ export async function createIframeProxyUrl(targetUrl: string): Promise<IframePro
   log.info(`[iframe-proxy] ${upstream.href} → ${grant.proxyOrigin} (loopback=${grant.isLoopback})`);
 
   // The proxy origin maps to one fixed upstream, so the full path resolves
-  // transparently — keep the upstream's own initial path so deep-linked targets
-  // land where the user pointed.
-  return { ok: true, url: `${grant.proxyOrigin}${upstream.pathname}${upstream.search}` };
+  // transparently — keep the upstream's own initial path/search/hash so
+  // deep-linked and hash-routed targets land where the user pointed. The hash is
+  // browser-only; it is preserved in the iframe URL but never sent upstream.
+  return { ok: true, url: `${grant.proxyOrigin}${upstream.pathname}${upstream.search}${upstream.hash}` };
 }
 
 function listen(server: http.Server): Promise<number> {

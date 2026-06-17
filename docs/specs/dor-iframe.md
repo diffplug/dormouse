@@ -107,6 +107,8 @@ openvscode-server's connection).
   checks) see a same-origin request, and a `Location` redirect back to the
   upstream origin is rewritten to the proxy origin so it doesn't bounce the frame
   off-proxy. Non-HTML passes through (framing/hop-by-hop headers still stripped).
+  The initial framed proxy URL preserves the target's path, query, and fragment;
+  the fragment remains browser-only and is not sent on upstream HTTP requests.
 - **WebSocket passthrough.** Upgrades are forwarded as a raw byte pipe once the
   upgrade head is rewritten (`Host`/`Origin` → upstream), exactly like the stream
   relay.
