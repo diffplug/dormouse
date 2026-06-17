@@ -29,7 +29,6 @@ const CHROME: ChromeSnapshot = {
   displayUrl: 'localhost:5173/app',
   title: 'Vite + React',
   key: 'storybook',
-  connection: 'connected',
 };
 
 function stubActions(overrides: Partial<WallActions> = {}): WallActions {
@@ -126,6 +125,10 @@ describe('SurfacePaneHeader — browser chrome', () => {
     expect(chip).not.toBeNull();
     expect(chip?.textContent).toContain('pnpm dev');
     expect(chip?.textContent).toContain(':5173');
+
+    // With the chip fronting it, the URL drops the (redundant) domain and shows
+    // only the path.
+    expect(container.querySelector('span[title="Vite + React"]')?.textContent).toBe('/app');
 
     act(() => {
       chip?.dispatchEvent(new MouseEvent('click', { bubbles: true }));

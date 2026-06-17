@@ -41,7 +41,6 @@ function useMockController(args: StoryArgs): ScreenController {
         displayUrl: 'localhost:5173',
         title: 'Vite + React',
         key: null,
-        connection: 'connected',
       }),
       chromeActions: {
         back: () => console.log('[story] back'),

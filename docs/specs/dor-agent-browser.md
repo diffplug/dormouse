@@ -172,9 +172,9 @@ The header's primary text is the active tab's **URL (host + path)**; the HTML
 The persisted panel title (door labels, session save) stays the tab's display
 title — the URL preference is a live-header concern only, so the multi-tab strip
 still shows HTML titles to tell tabs apart. Both flow body→header through the
-existing screen controller's separate **chrome snapshot** channel (URL / key /
-connection), kept distinct from the screen snapshot so tab/status updates don't
-churn the SYNCED/SCALED chip and vice versa.
+existing screen controller's separate **chrome snapshot** channel (URL / key),
+kept distinct from the screen snapshot so tab updates don't churn the
+SYNCED/SCALED chip and vice versa.
 
 ### `--key` badge
 

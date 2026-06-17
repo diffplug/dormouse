@@ -11,7 +11,6 @@ import {
 import { SurfacePaneHeader } from '../components/wall/SurfacePaneHeader';
 import {
   registerAgentBrowserScreen,
-  type ChromeConnection,
   type ChromeSnapshot,
   type ScreenRegistration,
   type ScreenSnapshot,
@@ -25,8 +24,8 @@ import { setDevServerResolution } from '../components/wall/agent-browser-ports';
  * (docs/specs/dor-agent-browser.md → "Browser-Chrome Header").
  *
  * `SurfacePaneHeader` decides "this is a browser surface" purely from the
- * presence of a screen controller for its `api.id`, and reads URL / key /
- * connection from that controller's chrome snapshot. So the story registers a
+ * presence of a screen controller for its `api.id`, and reads URL / key from
+ * that controller's chrome snapshot. So the story registers a
  * controller backed by the args and pushes updates as the controls change —
  * exactly the real body→header path, just driven by knobs instead of a live
  * stream. The dev-server chip is wired through the genuine port store.
@@ -57,7 +56,6 @@ interface StoryArgs {
   htmlTitle: string;
   /** Managed --key; '' = raw --session (no badge), 'default' is skipped. */
   paneKey: string;
-  connection: ChromeConnection;
   /** Pane label for the dev-server chip; '' = no pane correlates (chip hidden). */
   devServerLabel: string;
   /** Whether the host can run agent-browser commands (false ⇒ nav/resize inert). */
@@ -87,8 +85,7 @@ function BrowserChromeStory(args: StoryArgs) {
     displayUrl: hostPathDisplay(args.url),
     title: args.htmlTitle || null,
     key: args.paneKey || null,
-    connection: args.connection,
-  }), [args.url, args.htmlTitle, args.paneKey, args.connection]);
+  }), [args.url, args.htmlTitle, args.paneKey]);
 
   // Register on mount; re-register when hostCapable flips (it's fixed at
   // registration time). The update effects below keep the snapshots live.
@@ -164,7 +161,6 @@ const meta: Meta<typeof BrowserChromeStory> = {
     url: { control: 'text' },
     htmlTitle: { control: 'text' },
     paneKey: { control: 'select', options: ['', 'default', 'storybook'] },
-    connection: { control: 'radio', options: ['connected', 'connecting', 'lost'] },
     devServerLabel: { control: 'text' },
     hostCapable: { control: 'boolean' },
     width: { control: { type: 'range', min: 200, max: 900, step: 10 } },
@@ -175,7 +171,6 @@ const meta: Meta<typeof BrowserChromeStory> = {
     url: 'http://localhost:5173/app',
     htmlTitle: 'Vite + React',
     paneKey: 'storybook',
-    connection: 'connected',
     devServerLabel: 'pnpm dev',
     hostCapable: true,
     width: 620,
@@ -202,11 +197,6 @@ export const RawSession: Story = {
 /** The differentiated piece: a localhost URL correlated to a terminal pane. */
 export const DevServerConnected: Story = {
   args: { url: 'http://localhost:6006/', devServerLabel: 'storybook', paneKey: 'storybook' },
-};
-
-/** Session stream dropped — connection is lost. */
-export const ConnectionLost: Story = {
-  args: { connection: 'lost' },
 };
 
 /** Narrow header: split/zoom collapse first (≤420px), then nav (≤360px). */

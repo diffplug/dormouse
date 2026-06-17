@@ -16,7 +16,6 @@ import {
   openAgentBrowserScreenModal,
   registerAgentBrowserScreen,
   type ChromeActions,
-  type ChromeConnection,
   type ChromeSnapshot,
   type ScreenActions,
   type ScreenRegistration,
@@ -395,7 +394,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     };
   }, [wsPort, runAgentBrowser, maybeDisengageSync, publishScreen, screenshotLoop, drawBitmap]);
 
-  // --- header: persisted title + browser-chrome (URL / key / connection) ---
+  // --- header: persisted title + browser-chrome (URL / key) ---
 
   const activeTab = useMemo(() => tabs.find((tab) => tab.active) ?? tabs[0] ?? null, [tabs]);
 
@@ -409,18 +408,11 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   // The browser-chrome snapshot the header reads. Recomputed each render and
   // mirrored into a ref so a (re-)registration always seeds the latest; the
   // publish effect below pushes it to subscribers only on real changes.
-  const chromeConnection: ChromeConnection =
-    connectionLost || status?.connected === false
-      ? 'lost'
-      : status?.connected === true
-        ? 'connected'
-        : 'connecting';
   const chromeSnapshot: ChromeSnapshot = {
     url: activeTab?.url ?? '',
     displayUrl: activeTab ? hostPathDisplay(activeTab.url) : '',
     title: activeTab?.title ?? null,
     key: params?.key ?? null,
-    connection: chromeConnection,
   };
   const chromeSnapshotRef = useRef(chromeSnapshot);
   chromeSnapshotRef.current = chromeSnapshot;
@@ -485,7 +477,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   // tab/status changes, not every frame pulse.
   useEffect(() => {
     registrationRef.current?.updateChrome(chromeSnapshotRef.current);
-  }, [chromeSnapshot.url, chromeSnapshot.displayUrl, chromeSnapshot.title, chromeSnapshot.key, chromeSnapshot.connection]);
+  }, [chromeSnapshot.url, chromeSnapshot.displayUrl, chromeSnapshot.title, chromeSnapshot.key]);
 
   // Persist sync state into the panel params so it round-trips through the
   // dockview layout blob (and survives reattach). Skip no-op writes.

@@ -26,7 +26,6 @@ const CHROME: ChromeSnapshot = {
   displayUrl: 'localhost:5173',
   title: 'Vite + React',
   key: null,
-  connection: 'connected',
 };
 
 function stubActions(): ScreenActions {
@@ -99,7 +98,7 @@ describe('agent-browser screen registry', () => {
     const unsubScreen = controller.subscribe(() => { screenUpdates += 1; });
     const unsubChrome = controller.subscribeChrome(() => { chromeUpdates += 1; });
 
-    const nextChrome: ChromeSnapshot = { ...CHROME, displayUrl: 'localhost:5173/app', connection: 'connecting' };
+    const nextChrome: ChromeSnapshot = { ...CHROME, displayUrl: 'localhost:5173/app', title: 'Vite' };
     registration.updateChrome(nextChrome);
     expect(controller.chrome()).toEqual(nextChrome);
     expect(chromeUpdates).toBe(1);

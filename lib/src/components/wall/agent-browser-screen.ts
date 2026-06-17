@@ -42,12 +42,10 @@ export interface ScreenActions {
   openModal(): void;
 }
 
-export type ChromeConnection = 'connected' | 'connecting' | 'lost';
-
-/** What the browser-chrome header reads about the active tab + session
+/** What the browser-chrome header reads about the active tab
  *  (docs/specs/dor-agent-browser.md → "Browser-chrome header"). Updated on its
- *  own cadence (tab/status stream messages), separate from the screen snapshot
- *  which churns on resize. */
+ *  own cadence (tab stream messages), separate from the screen snapshot which
+ *  churns on resize. */
 export interface ChromeSnapshot {
   /** Active tab's full URL — used to extract the loopback port + as a tooltip
    *  fallback. */
@@ -59,8 +57,6 @@ export interface ChromeSnapshot {
   /** Managed `--key` for this surface, or null for raw `--session` / no key.
    *  The header shows a badge for non-`default` keys only. */
   key: string | null;
-  /** Live connection state of the session stream. */
-  connection: ChromeConnection;
 }
 
 export interface ChromeActions {
@@ -77,8 +73,8 @@ export interface ScreenController {
   subscribe(listener: () => void): () => void;
   snapshot(): ScreenSnapshot;
   readonly actions: ScreenActions;
-  /** Browser-chrome (URL / key / connection) channel — separate subscription so
-   *  tab/status updates don't churn the screen snapshot and vice versa. */
+  /** Browser-chrome (URL / key) channel — separate subscription so
+   *  tab updates don't churn the screen snapshot and vice versa. */
   subscribeChrome(listener: () => void): () => void;
   chrome(): ChromeSnapshot;
   readonly chromeActions: ChromeActions;
@@ -106,8 +102,8 @@ export interface ScreenRegistration {
    *  object only when something actually changed (the panel gates on flip /
    *  dim change to avoid thrashing the header per frame). */
   update(snapshot: ScreenSnapshot): void;
-  /** Push a new browser-chrome snapshot (URL / key / connection); notifies the
-   *  chrome subscribers. Gated by the panel on its tab/status effects. */
+  /** Push a new browser-chrome snapshot (URL / key); notifies the
+   *  chrome subscribers. Gated by the panel on its tab effects. */
   updateChrome(chrome: ChromeSnapshot): void;
   dispose(): void;
 }
@@ -233,7 +229,7 @@ export function useAgentBrowserScreenSnapshot(controller: ScreenController | nul
   );
 }
 
-/** A controller's live browser-chrome snapshot (URL / key / connection), or
+/** A controller's live browser-chrome snapshot (URL / key), or
  *  null for a non-browser surface. Re-renders only on tab/status changes. */
 export function useAgentBrowserChromeSnapshot(controller: ScreenController | null): ChromeSnapshot | null {
   return useSyncExternalStore(
