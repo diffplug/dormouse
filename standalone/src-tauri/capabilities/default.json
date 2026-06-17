@@ -8,9 +8,11 @@
     "core:event:allow-unlisten",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
+    "core:window:allow-internal-toggle-maximize",
     "core:window:allow-close",
     "core:window:allow-destroy",
     "core:window:allow-is-maximized",
+    "core:window:allow-is-focused",
     "core:window:allow-start-dragging",
     "shell:default",
     "updater:default"

@@ -28,6 +28,7 @@ standalone/src-tauri/binaries/
 standalone/src-tauri/gen/
 standalone/dist/
 standalone/sidecar/dor-cli/
+standalone/sidecar/iframe-proxy.cjs
 standalone/sidecar/node_modules/
 standalone/node_modules/
 

@@ -312,6 +312,23 @@ fn pty_get_scrollback(
         .and_then(|data| data.as_str().map(String::from)))
 }
 
+// Stands up the loopback iframe proxy in the sidecar and returns the
+// IframeProxyResult JSON the webview's IframePanel expects. The proxy server is
+// the shared lib/src/host/iframe-proxy.ts; this only bridges the request.
+#[tauri::command]
+fn iframe_create_proxy_url(
+    state: tauri::State<'_, SidecarState>,
+    target: String,
+) -> Result<JsonValue, String> {
+    let response = request_from_sidecar_timeout(
+        &state,
+        "iframe:createProxyUrl",
+        serde_json::json!({ "target": target }),
+        Duration::from_secs(5),
+    )?;
+    Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
+}
+
 #[tauri::command]
 fn read_clipboard_file_paths(
     state: tauri::State<'_, SidecarState>,
@@ -786,6 +803,7 @@ pub fn run() {
             pty_get_cwd,
             pty_get_open_ports,
             pty_get_scrollback,
+            iframe_create_proxy_url,
             pty_request_init,
             dor_control_response,
             kill_sidecar_now,
