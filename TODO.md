@@ -3,9 +3,10 @@
 This branch (`ab-iframe-unify`) wires up the **swappable render backend** and
 **headed pop-out** described in `docs/specs/dor-iframe.md` (Path 1) and
 `docs/specs/dor-agent-browser.md` (Headed Pop-Out). The **lib** side is fully
-typechecked + unit-tested (620 tests green); the **VS Code host** process
-orchestration was written but **never run against a live `agent-browser`**.
-This doc is the manual/computer-use validation pass.
+typechecked + unit-tested (623 tests green). The agent-browser **CLI assumptions
+are now validated live** (Phase 0 below); the **integrated VS Code webview path**
+(Phases 1–6) still needs this manual/computer-use pass. **Start with the Run 2
+section** — a round of fixes landed, and only the called-out items need re-testing.
 
 You are validating that the three render modes — `agent-browser screencast`,
 `agent-browser popout`, `iframe embed` — swap correctly in place, and capturing
@@ -322,12 +323,12 @@ When any Phase 1–6 step fails, capture:
    | pop back in / auto-revert | `agent-browser --session <s> close` → `agent-browser --session <s> open <url>` → `… stream status --json` |
    | kill | `agent-browser --session <s> close` |
 
-   The **most likely root cause** is a mismatch in Phase 0 (e.g. `--headed` isn't
-   the right flag, or a headed session has no stream, or a closed session can't
-   be relaunched by name). If so, the fix is in
-   `vscode-ext/src/agent-browser-host.ts` (`runAgentBrowserOpen` /
-   `runAgentBrowserPopOut` / `runAgentBrowserPopIn`) — adjust the CLI invocation
-   to match what Phase 0 proved actually works, rebuild (`pnpm dogfood:vscode`),
+   **Phase 0 is already confirmed** (Run 2 — the CLI spawns, headed sessions
+   stream, `close` kills, relaunch-by-name works), so a failure is **unlikely to
+   be the CLI**. Look first in the lib's stream reconnect / lifecycle (the panel's
+   `wsPort` reconnect, the auto-revert teardown guard) or the host
+   request/response plumbing (`vscode-ext/src/message-router.ts`,
+   `lib/src/lib/platform/vscode-adapter.ts`). Rebuild with `pnpm dogfood:vscode`,
    reload, retest.
 
 ---

@@ -258,10 +258,11 @@ current render backend, and for a screencast whether the viewport is locked to
 the pane:
 
 - **embed** (`iframe`) — frame-corners glyph.
-- **screencast, `SYNCED`** — closed-lock glyph: the browser's live viewport (CSS
-  pixels) equals the pane's CSS size, so the display maps 1:1.
-- **screencast, `SCALED`** — open-lock glyph: anything else; the display is
-  letterboxed/zoomed to fit the pane.
+- **screencast, `SYNCED`** — link glyph (viewport resizes with the pane): the
+  browser's live viewport (CSS pixels) equals the pane's CSS size, so the display
+  maps 1:1. Matches the Display modal's *Resize with pane* control.
+- **screencast, `SCALED`** — closed-lock glyph (fixed resolution): anything else;
+  the display is letterboxed/zoomed to fit the pane. Matches *Fixed* in the modal.
 - **popped out** — box-with-arrow glyph (see Headed Pop-Out).
 
 > **UI source of truth:** the `Components/BrowserChromeHeader` Storybook story.
