@@ -6,7 +6,7 @@ Dormouse is a terminal, so users trust it with shells, source trees, credentials
 
 ## Dependency Supply Chain
 
-Dormouse keeps its runtime dependency surface intentionally small. We add dependencies only when they are necessary, and we expect dependency changes to justify their value against their supply-chain risk. We use maturity gating inside our pnpm configuration and also inside our [dependabot configuration](.github/dependabot.yml).
+Dormouse keeps its runtime dependency surface intentionally small. We add dependencies only when they are necessary, and we expect dependency changes to justify their value against their supply-chain risk. We use maturity gating inside our pnpm configuration and also inside our [Renovate configuration](.github/renovate.json).
 
 Every dependency shipped in the end-user application is listed at <https://dormouse.sh/supply-chain>. This includes:
 
@@ -16,19 +16,19 @@ Every dependency shipped in the end-user application is listed at <https://dormo
 
 Those dependency snapshots are generated from the lockfiles and reviewed as part of release work. If a production dependency is added, removed, or upgraded, the dependency lists must be regenerated and committed.
 
-The standalone app ships a Node.js runtime binary (`standalone/src-tauri/build.rs` copies it into the bundle as a Tauri sidecar). Its version is pinned exactly in the root `package.json` under `devEngines.runtime.version`, and the build is the authority: `build.rs` runs `--version` on the binary it is about to bundle and fails the build unless it matches the pin. On Windows the build then flips one byte of the bundled `node.exe` — the PE Optional Header's `Subsystem` field from `IMAGE_SUBSYSTEM_WINDOWS_CUI` (3) to `IMAGE_SUBSYSTEM_WINDOWS_GUI` (2) — to suppress Windows Terminal's default-terminal handoff, which would otherwise spawn a stray terminal window behind the app. The version check runs before the byte flip and the patch leaves Node.js semantics unchanged (Node reads its stdio handles from `STARTUPINFO`, which is subsystem-agnostic); the bundled `node.exe` is therefore not byte-identical to the upstream archive — it differs at exactly the documented 2-byte field. The supply-chain page reads the same pin, so the version disclosed there provably equals the runtime users receive — it cannot drift to whatever Node happened to be on the build machine's PATH. Locally, pnpm honors `devEngines` (`onFail: "download"`) so scripts run under the pinned Node; CI extracts the same field to drive `actions/setup-node`. The version is a deliberate, manual pin (no Dependabot ecosystem tracks it); the workflows that do not bundle the runtime are free to track the latest `22`.
+The standalone app ships a Node.js runtime binary (`standalone/src-tauri/build.rs` copies it into the bundle as a Tauri sidecar). Its version is pinned exactly in the root `package.json` under `devEngines.runtime.version`, and the build is the authority: `build.rs` runs `--version` on the binary it is about to bundle and fails the build unless it matches the pin. On Windows the build then flips one byte of the bundled `node.exe` — the PE Optional Header's `Subsystem` field from `IMAGE_SUBSYSTEM_WINDOWS_CUI` (3) to `IMAGE_SUBSYSTEM_WINDOWS_GUI` (2) — to suppress Windows Terminal's default-terminal handoff, which would otherwise spawn a stray terminal window behind the app. The version check runs before the byte flip and the patch leaves Node.js semantics unchanged (Node reads its stdio handles from `STARTUPINFO`, which is subsystem-agnostic); the bundled `node.exe` is therefore not byte-identical to the upstream archive — it differs at exactly the documented 2-byte field. The supply-chain page reads the same pin, so the version disclosed there provably equals the runtime users receive — it cannot drift to whatever Node happened to be on the build machine's PATH. Locally, pnpm honors `devEngines` (`onFail: "download"`) so scripts run under the pinned Node; CI extracts the same field to drive `actions/setup-node`. The version is a deliberate, manual pin (no automated ecosystem tracks it); the workflows that do not bundle the runtime are free to track the latest `22`.
 
 - FAIL IF `node website/scripts/generate-deps.js` changes `website/src/data/dependencies-npm.json`, `website/src/data/dependencies-cargo.json`, or `website/src/data/dependencies-runtime.json` when run from a clean checkout.
 - FAIL IF the root `package.json` is missing `devEngines.runtime.version`, or its value is not an exact Node.js version (a bare major such as `22` is not acceptable; it must be `MAJOR.MINOR.PATCH`).
 - FAIL IF `standalone/src-tauri/build.rs` no longer verifies that the bundled Node.js binary matches `package.json`'s `devEngines.runtime.version` (this verification is what makes the disclosed runtime version provable).
 - FAIL IF the `build-standalone` job in `.github/workflows/release.yml` does not install the pinned runtime by reading `devEngines.runtime.version` from `package.json` and passing it to `actions/setup-node` (other jobs may pin `node-version` inline since their interpreter is never bundled).
 - FAIL IF `pnpm-workspace.yaml` is missing `minimumReleaseAge: 1440`.
-- FAIL IF `.github/dependabot.yml` is missing npm coverage for `/` or Cargo coverage for `/standalone/src-tauri`.
-- FAIL IF `.github/dependabot.yml` is missing dependency cooldown windows.
+- FAIL IF `.github/renovate.json` is missing `npm` or `cargo` from `enabledManagers` (npm covers `/`; cargo covers `/standalone/src-tauri`).
+- FAIL IF `.github/renovate.json` is missing `minimumReleaseAge` package rules for `npm`/`cargo` updates (the Renovate equivalent of dependency cooldown windows).
 
 ## GitHub Actions Policies
 
-GitHub Actions are always pinned by commit hash, not version tag. Dependabot will update the hashes as necessary.
+GitHub Actions are always pinned by commit hash, not version tag. Renovate will update the hashes as necessary.
 
 **Agent-managed workflows** are `tend-*.yaml`, `workflow-audit.yaml`, and `security-audit.yaml`. They implement the repo's automation and self-audit infrastructure, and are exempt from the two rules below because they need to modify issues, PRs, or code, or fetch an OIDC token. Their bounded scope is defined in the "Automated Maintainer" section.
 
