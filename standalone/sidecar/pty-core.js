@@ -38,6 +38,40 @@ function bashArgsAreInjectable(shellArgs) {
   return (shellArgs || []).every((arg) => BASH_INJECTABLE_ARGS.has(arg));
 }
 
+// Build the PowerShell argument list that dot-sources our integration script,
+// or return null to leave the launch untouched. Profiles still load (no
+// -NoProfile). The path is single-quoted so spaces (e.g. "Program Files")
+// survive; it's host-controlled and won't contain a single quote.
+//
+// We key on interactivity rather than "are there args": a launch that already
+// runs a startup command (e.g. the VS "Developer PowerShell", which is
+// `-NoExit -Command "& { Import-Module ... }"`) gets our dot-source appended to
+// that command, so its environment is set up first and our prompt wrapper
+// installs after it. A non-interactive one-off (a -Command/-File/-EncodedCommand
+// without -NoExit) is returned as null so we don't alter it.
+function powerShellIntegratedArgs(shellArgs, script) {
+  const dotSource = `. '${script}'`;
+  const args = [...(shellArgs || [])];
+
+  // No args at all → a plain interactive REPL; add our own dot-source.
+  if (args.length === 0) return ['-NoExit', '-Command', dotSource];
+
+  const is = (arg, ...names) => names.includes(arg.toLowerCase());
+  // Only augment interactive sessions; without -NoExit a command/file runs and
+  // exits, so there's no prompt to wrap.
+  if (!args.some((a) => is(a, '-noexit', '-noe'))) return null;
+  // Command forms we can't safely concatenate onto — leave them alone.
+  if (args.some((a) => is(a, '-encodedcommand', '-ec', '-e', '-file', '-f'))) return null;
+
+  const cmdIdx = args.findIndex((a) => is(a, '-command', '-c'));
+  if (cmdIdx !== -1 && cmdIdx + 1 < args.length) {
+    args[cmdIdx + 1] = `${args[cmdIdx + 1]}; ${dotSource}`;
+    return args;
+  }
+  // Interactive but no inline command (e.g. just `-NoExit`); add ours.
+  return [...args, '-Command', dotSource];
+}
+
 function resolveLoginArg(shell, platform = process.platform) {
   if (platform === 'win32') {
     return [];
@@ -118,11 +152,12 @@ function shellStem(shell) {
 //        the args are only interactive/login flags (so Git Bash, launched with
 //        `--login -i`, is covered too); skipped for specific invocations like
 //        `-c <cmd>`, since we'd be replacing them.
-// PowerShell — injected via `-NoExit -Command ". '<script>'"` (pwsh and Windows
-//        PowerShell). We omit `-NoProfile` so the user's profile loads first; the
-//        dot-sourced script then wraps their `prompt`. Skipped when the caller
-//        passed explicit args, since we'd be replacing them.
-function applyShellIntegration(shell, env, shellArgs, integrationDir, hasExplicitArgs, runtime = {}) {
+// PowerShell — injected by dot-sourcing our script via `-Command` (pwsh and
+//        Windows PowerShell). We omit `-NoProfile` so the user's profile loads
+//        first; the dot-sourced script then wraps their `prompt`. Augments an
+//        interactive launch that already runs a startup command (so the VS
+//        "Developer PowerShell" is covered); skips non-interactive one-offs.
+function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = {}) {
   const fsModule = runtime.fsModule || fs;
   const stem = shellStem(shell);
 
@@ -143,12 +178,11 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, hasExplici
     }
   }
 
-  if ((stem === 'pwsh' || stem === 'powershell') && !hasExplicitArgs) {
+  if (stem === 'pwsh' || stem === 'powershell') {
     const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
     if (fileExists(script, fsModule)) {
-      // Single-quote the path so spaces (e.g. "Program Files") survive; the path
-      // is host-controlled and won't contain a single quote.
-      return { env, shellArgs: ['-NoExit', '-Command', `. '${script}'`] };
+      const integratedArgs = powerShellIntegratedArgs(shellArgs, script);
+      if (integratedArgs) return { env, shellArgs: integratedArgs };
     }
   }
 
@@ -185,8 +219,7 @@ function resolveSpawnConfig(options, runtime = {}) {
     LC_TERMINAL_VERSION: ITERM2_COMPAT_VERSION,
     DORMOUSE_SURFACE_ID: surfaceId || options?.id || '',
   };
-  const hasExplicitArgs = Boolean(explicitArgs && explicitArgs.length > 0);
-  const integrated = applyShellIntegration(shell, childEnv, shellArgs, integrationDir, hasExplicitArgs, runtime);
+  const integrated = applyShellIntegration(shell, childEnv, shellArgs, integrationDir, runtime);
 
   return {
     cols,

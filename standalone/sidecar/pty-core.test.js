@@ -535,11 +535,57 @@ test('resolveSpawnConfig injects Windows PowerShell (powershell.exe) too', () =>
   assert.deepEqual(config.shellArgs, ['-NoExit', '-Command', `. '${script}'`]);
 });
 
-test('resolveSpawnConfig leaves pwsh args alone when the caller passed explicit args', () => {
+test('resolveSpawnConfig merges integration into an interactive pwsh -Command (e.g. Developer PowerShell)', () => {
+  const integrationDir = 'C:\\Program Files\\Dormouse\\shell-integration';
+  const config = resolveSpawnConfig(
+    {
+      shell: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+      args: ['-NoExit', '-Command', '& { Import-Module "C:\\VS\\Launch-VsDevShell.ps1" }'],
+    },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: integrationDir,
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  // The dev-shell command runs first, then our dot-source installs the prompt wrapper.
+  const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+  assert.deepEqual(config.shellArgs, [
+    '-NoExit',
+    '-Command',
+    `& { Import-Module "C:\\VS\\Launch-VsDevShell.ps1" }; . '${script}'`,
+  ]);
+});
+
+test('resolveSpawnConfig adds a -Command to an interactive pwsh launch that has none', () => {
+  const integrationDir = 'C:\\Program Files\\Dormouse\\shell-integration';
+  const config = resolveSpawnConfig(
+    { shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', args: ['-NoExit', '-NoLogo'] },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: integrationDir,
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+  assert.deepEqual(config.shellArgs, ['-NoExit', '-NoLogo', '-Command', `. '${script}'`]);
+});
+
+test('resolveSpawnConfig leaves a non-interactive pwsh one-off alone (-Command without -NoExit)', () => {
   const config = resolveSpawnConfig(
     {
       shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
-      args: ['-NoExit', '-Command', '& { Import-Module Foo }'],
+      args: ['-Command', 'Get-Process'],
     },
     {
       platform: 'win32',
@@ -552,7 +598,27 @@ test('resolveSpawnConfig leaves pwsh args alone when the caller passed explicit 
     },
   );
 
-  assert.deepEqual(config.shellArgs, ['-NoExit', '-Command', '& { Import-Module Foo }']);
+  assert.deepEqual(config.shellArgs, ['-Command', 'Get-Process']);
+});
+
+test('resolveSpawnConfig leaves a pwsh -File invocation alone', () => {
+  const config = resolveSpawnConfig(
+    {
+      shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      args: ['-NoExit', '-File', 'C:\\scripts\\do.ps1'],
+    },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: 'C:\\Program Files\\Dormouse\\shell-integration',
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  assert.deepEqual(config.shellArgs, ['-NoExit', '-File', 'C:\\scripts\\do.ps1']);
 });
 
 test('resolveSpawnConfig falls back to no args when the pwsh script is not present', () => {
