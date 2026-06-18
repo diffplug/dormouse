@@ -40,6 +40,15 @@ import {
 } from '../../lib/src/lib/platform/types';
 
 const ALLOWED_SUBCOMMANDS = new Set<string>(AGENT_BROWSER_ALLOWED_SUBCOMMANDS);
+
+// Sessions currently relaunched headed via pop-out, mapped to the binary path
+// that spawned them. A headed session is a real OS window, so the editor must
+// close it on shutdown or it orphans (spec → "Headed Pop-Out" lifecycle:
+// "Dormouse/editor quits → headed windows are cleaned up; no orphans").
+// Headless sessions are deliberately NOT tracked — they're left alive to
+// reattach across webview reloads (the wsPort/stream-recovery design).
+const poppedOutSessions = new Map<string, string | undefined>();
+
 const STREAM_RELAY_TOKEN_BYTES = 32;
 const STREAM_RELAY_GRANT_TTL_MS = 60_000;
 const STREAM_RELAY_GRANT_SWEEP_MS = 30_000;
@@ -62,6 +71,9 @@ export async function runAgentBrowserCommand(session: string, args: string[], bi
   if (!subcommand || !ALLOWED_SUBCOMMANDS.has(subcommand)) {
     return { exitCode: 1, stdout: '', stderr: `agent-browser subcommand '${subcommand ?? ''}' is not allowed from the webview` };
   }
+  // An explicit close (kill / render-swap) tears the session down itself, so
+  // it's no longer ours to clean up on shutdown.
+  if (subcommand === 'close') poppedOutSessions.delete(session);
   return runWithBinaryFallback(['--session', session, ...args], binaryPath);
 }
 
@@ -238,6 +250,8 @@ export async function runAgentBrowserPopOut(
   if (open.exitCode !== 0) {
     return { ok: false, error: open.stderr.trim() || `headed open exited ${open.exitCode}` };
   }
+  // Now a real headed OS window — track it so shutdown can close it.
+  poppedOutSessions.set(session, binaryPath);
   const wsPort = await readStreamPort(session, binaryPath);
   return { ok: true, ...(wsPort ? { wsPort } : {}) };
 }
@@ -252,12 +266,28 @@ export async function runAgentBrowserPopIn(
   if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
   const url = await resolveRelaunchUrl(session, opts?.url, binaryPath);
   await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
+  // The headed window is gone after the close above; back to headless.
+  poppedOutSessions.delete(session);
   const open = await runWithBinaryFallback(['--session', session, 'open', url], binaryPath);
   if (open.exitCode !== 0) {
     return { ok: false, error: open.stderr.trim() || `open exited ${open.exitCode}` };
   }
   const wsPort = await readStreamPort(session, binaryPath);
   return { ok: true, ...(wsPort ? { wsPort } : {}) };
+}
+
+// Close every still-popped-out session's headed window. Called from the
+// extension's deactivate() so quitting the editor doesn't orphan real Chrome
+// windows. deactivate() also fires on Reload Window; a popped-out surface then
+// auto-reverts to a headless screencast when it reactivates (spec → "The headed
+// window ends → auto-revert"), which is preferable to leaving a detached
+// headed Chrome behind.
+export async function closePoppedOutSessions(): Promise<void> {
+  const entries = [...poppedOutSessions.entries()];
+  poppedOutSessions.clear();
+  await Promise.all(entries.map(([session, binaryPath]) =>
+    runWithBinaryFallback(['--session', session, 'close'], binaryPath).catch(() => undefined),
+  ));
 }
 
 // The extension host's PATH is often the GUI login PATH (no nvm/volta shims),
