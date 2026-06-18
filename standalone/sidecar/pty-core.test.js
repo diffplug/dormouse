@@ -440,6 +440,45 @@ test('resolveSpawnConfig leaves bash login args alone when the caller passed exp
   assert.deepEqual(config.shellArgs, ['-c', 'echo hi']);
 });
 
+test('resolveSpawnConfig injects bash integration for Git Bash despite its --login -i args', () => {
+  const integrationDir = 'C:\\Program Files\\Dormouse\\shell-integration';
+  const config = resolveSpawnConfig(
+    { shell: 'C:\\Program Files\\Git\\bin\\bash.exe', args: ['--login', '-i'] },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: integrationDir,
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  // The --login -i defaults are subsumed by the init-file script, which sources
+  // the login profile itself.
+  const script = path.join(integrationDir, 'bash', 'shellIntegration.bash');
+  assert.deepEqual(config.shellArgs, ['--init-file', script]);
+});
+
+test('resolveSpawnConfig keeps Git Bash login args when the script is not present', () => {
+  const config = resolveSpawnConfig(
+    { shell: 'C:\\Program Files\\Git\\bin\\bash.exe', args: ['--login', '-i'] },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: 'C:\\Program Files\\Dormouse\\shell-integration',
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: { statSync() { throw new Error('ENOENT'); } },
+    },
+  );
+
+  // Fail-safe: no script on disk → the original login/interactive args survive.
+  assert.deepEqual(config.shellArgs, ['--login', '-i']);
+});
+
 test('resolveSpawnConfig falls back to the bash login flag when the script is not present', () => {
   const config = resolveSpawnConfig(undefined, {
     platform: 'linux',

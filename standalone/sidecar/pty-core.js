@@ -26,6 +26,18 @@ function resolveDefaultShell(platform = process.platform, env = process.env) {
 const LOGIN_ARG_UNSUPPORTED_SHELLS = new Set(['csh', 'tcsh']);
 const ITERM2_COMPAT_VERSION = '3.5.0';
 
+// bash flags that merely select an interactive and/or login shell. When the args
+// are only these, OSC 633 injection can safely replace them: it spawns an
+// interactive shell and the `--init-file` script sources the login profile
+// itself, so it subsumes them — including the `--login -i` that Git Bash on
+// Windows is launched with. Anything else (e.g. `-c <cmd>` or a script file)
+// means the caller wants a specific invocation we must not clobber.
+const BASH_INJECTABLE_ARGS = new Set(['-i', '-l', '--login']);
+
+function bashArgsAreInjectable(shellArgs) {
+  return (shellArgs || []).every((arg) => BASH_INJECTABLE_ARGS.has(arg));
+}
+
 function resolveLoginArg(shell, platform = process.platform) {
   if (platform === 'win32') {
     return [];
@@ -102,8 +114,10 @@ function shellStem(shell) {
 //        `USER_ZDOTDIR`; our dotfiles chain to the user's then install the hooks.
 // bash       — injected via `--init-file`, which has no env equivalent. Because that
 //        flag and login mode are mutually exclusive, we drop the login flag and
-//        the script replicates login-profile sourcing itself. Skipped when the
-//        caller passed explicit args, since we'd be replacing them.
+//        the script replicates login-profile sourcing itself. Injected whenever
+//        the args are only interactive/login flags (so Git Bash, launched with
+//        `--login -i`, is covered too); skipped for specific invocations like
+//        `-c <cmd>`, since we'd be replacing them.
 // PowerShell — injected via `-NoExit -Command ". '<script>'"` (pwsh and Windows
 //        PowerShell). We omit `-NoProfile` so the user's profile loads first; the
 //        dot-sourced script then wraps their `prompt`. Skipped when the caller
@@ -122,7 +136,7 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, hasExplici
     }
   }
 
-  if (stem === 'bash' && !hasExplicitArgs) {
+  if (stem === 'bash' && bashArgsAreInjectable(shellArgs)) {
     const script = path.join(integrationDir, 'bash', 'shellIntegration.bash');
     if (fileExists(script, fsModule)) {
       return { env, shellArgs: ['--init-file', script] };
