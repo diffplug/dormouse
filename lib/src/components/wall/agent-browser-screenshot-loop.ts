@@ -57,13 +57,30 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
     dirty = false;
     const mySeq = ++seq;
     lastStart = performance.now();
+    // Watchdog: a capture that never resolves (a wedged host round-trip) must not
+    // pin `inFlight` forever and silently freeze the screencast. Free the slot and
+    // retry after a generous bound; a late resolve is dropped by the seq guard.
+    let settled = false;
+    const watchdog = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      inFlight = false;
+      console.warn('[agent-browser] screenshot capture stalled (>8s); retrying');
+      if (dirty) schedule();
+    }, 8000);
     platform.agentBrowserScreenshot(session, { format: 'jpeg', quality: 85 }, deps.getBinaryPath()).then((res) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(watchdog);
       avgMs = avgMs * 0.6 + (performance.now() - lastStart) * 0.4;
       inFlight = false;
       if (res.ok && res.bytes) display(res.bytes, res.mime || 'image/jpeg', mySeq);
       else console.warn('[agent-browser] screenshot failed:', res.error ?? '(no data)');
       if (dirty) schedule();
     }).catch((err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(watchdog);
       console.warn('[agent-browser] screenshot error:', err);
       inFlight = false;
       if (dirty) schedule();

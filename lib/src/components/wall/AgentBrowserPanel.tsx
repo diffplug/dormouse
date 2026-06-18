@@ -116,13 +116,6 @@ function tabDisplayTitle(tab: StreamTab): string {
   return hostPathDisplay(tab.url) || 'untitled';
 }
 
-// Decode a base64 screencast frame to an ImageBitmap (the fallback display path
-// for hosts that can't screenshot). Callers apply their own freshness guard.
-function decodeScreencastFrame(dataBase64: string): Promise<ImageBitmap> {
-  const bytes = Uint8Array.from(atob(dataBase64), (c) => c.charCodeAt(0));
-  return createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
-}
-
 export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: IDockviewPanelProps<AgentBrowserPanelParams> & { renderMode?: RenderMode }) {
   const actions = useContext(WallActionsContext);
   // Stable handle so the screen controller (registered once) can reach the live
@@ -143,7 +136,6 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   interactiveRef.current = interactive;
 
   const wsRef = useRef<WebSocket | null>(null);
-  const frameSeqRef = useRef(0);
   const deviceRef = useRef({ width: 1280, height: 720 });
   const [status, setStatus] = useState<StreamStatus | null>(null);
   const [hasFrame, setHasFrame] = useState(false);
@@ -272,15 +264,6 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   const screenshotCapableRef = useRef(false);
   screenshotCapableRef.current = !!getPlatform().agentBrowserScreenshot && !!session;
 
-  const screenshotLoop = useMemo(() => createScreenshotLoop({
-    getSession: () => sessionRef.current,
-    getBinaryPath: () => binaryPathRef.current,
-    isCapable: () => screenshotCapableRef.current,
-    draw: drawBitmap,
-  }), [drawBitmap]);
-
-  useEffect(() => () => screenshotLoop.dispose(), [screenshotLoop]);
-
   // --- screen indicator (SYNCED/SCALED) + sync-to-pane ---
   //
   // A fresh surface auto-engages sync (no persisted flag); a re-attached one
@@ -391,19 +374,16 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
 
     knownTabIdsRef.current = new Set();
 
-    // Fallback only (hosts without the screenshot capability, e.g. Tauri):
-    // render the CSS-resolution screencast frame directly.
-    const drawScreencastFrame = (data: string) => {
-      const seq = ++frameSeqRef.current;
-      decodeScreencastFrame(data).then((bitmap) => {
-        // JPEG decodes are async; drop frames that finished out of order.
-        if (disposed || seq !== frameSeqRef.current) {
-          bitmap.close();
-          return;
-        }
-        drawBitmap(bitmap);
-      }).catch(() => {});
-    };
+    // Per-connection resource: created here and disposed in this effect's cleanup
+    // so it survives React StrictMode's mount→cleanup→mount double-invoke. A
+    // memoized loop disposed by a separate effect's cleanup would never be
+    // recreated on the re-mount, leaving every frame pulse dropped (disposed loop).
+    const screenshotLoop = createScreenshotLoop({
+      getSession: () => sessionRef.current,
+      getBinaryPath: () => binaryPathRef.current,
+      isCapable: () => screenshotCapableRef.current,
+      draw: drawBitmap,
+    });
 
     const handleMessage = (raw: unknown) => {
       if (typeof raw !== 'string') return;
@@ -414,21 +394,16 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
         return;
       }
       if (msg.type === 'frame' && typeof msg.data === 'string') {
-        // The frame carries the browser's live viewport; update it, reconcile
-        // sync, and refresh the indicator (publishScreen self-gates). Then use
-        // the frame as a "page changed" pulse to grab a crisp screenshot — or,
-        // where the host can't screenshot, render the frame itself.
+        // Update the viewport if the frame carries it, reconcile sync, refresh the
+        // indicator, then pulse a crisp screenshot — the sole render path on every
+        // host (we never draw the CSS-resolution stream frame itself).
         if (msg.metadata?.deviceWidth && msg.metadata?.deviceHeight) {
           deviceRef.current = { width: msg.metadata.deviceWidth, height: msg.metadata.deviceHeight };
         }
         maybeDisengageSync();
         publishScreen();
-        // Popped out: the headed window renders; we keep the stream only to
-        // observe tabs/status, so draw nothing.
-        if (!poppedOutRef.current) {
-          if (screenshotCapableRef.current) screenshotLoop.pulse();
-          else drawScreencastFrame(msg.data);
-        }
+        // Popped out: the headed window renders; keep the stream only to observe.
+        if (!poppedOutRef.current) screenshotLoop.pulse();
       } else if (msg.type === 'status') {
         setStatus({ connected: msg.connected === true, screencasting: msg.screencasting === true });
         setConnectionLost(msg.connected === false);
@@ -475,11 +450,12 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
         setConnectionLost(false);
       };
       ws.onmessage = (ev) => {
-        // Fast-path discarded frames: any large message is a screencast frame
-        // whose pixels we don't display, so pulse without parsing the payload.
+        // Fast-path: a screencast frame is the only large message, and its pixels
+        // aren't displayed (we screenshot instead), so pulse without parsing the
+        // ~150-220 KB payload. Smaller messages (status / tabs) go to handleMessage.
         const data = ev.data;
-        if (screenshotCapableRef.current && typeof data === 'string' && data.length > FRAME_PULSE_THRESHOLD) {
-          screenshotLoop.pulse();
+        if (typeof data === 'string' && data.length > FRAME_PULSE_THRESHOLD) {
+          if (!poppedOutRef.current) screenshotLoop.pulse();
           return;
         }
         handleMessage(data);
@@ -505,8 +481,9 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
       if (retryTimer !== undefined) clearTimeout(retryTimer);
       wsRef.current = null;
       ws?.close();
+      screenshotLoop.dispose();
     };
-  }, [wsPort, streamRecoverySeq, runAgentBrowser, maybeDisengageSync, publishScreen, screenshotLoop, drawBitmap]);
+  }, [wsPort, streamRecoverySeq, runAgentBrowser, maybeDisengageSync, publishScreen, drawBitmap]);
 
   // A persisted panel may restore with a stale wsPort: the agent-browser
   // session is still alive, but the stream server restarted on a new port while
