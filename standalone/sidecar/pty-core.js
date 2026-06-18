@@ -31,8 +31,7 @@ function resolveLoginArg(shell, platform = process.platform) {
     return [];
   }
 
-  const shellName = path.posix.basename(shell || '').toLowerCase();
-  return LOGIN_ARG_UNSUPPORTED_SHELLS.has(shellName) ? [] : ['-l'];
+  return LOGIN_ARG_UNSUPPORTED_SHELLS.has(shellStem(shell)) ? [] : ['-l'];
 }
 
 function resolveDefaultCwd(platform = process.platform, env = process.env, osModule = os) {
@@ -85,23 +84,35 @@ function resolveShellIntegrationDir(env, runtime = {}) {
   return env.DORMOUSE_SHELL_INTEGRATION_DIR || path.join(runtime.dirname || __dirname, 'shell-integration');
 }
 
+// Basename of a shell path, lowercased and with any `.exe` dropped, handling
+// both `/` and `\` separators so Windows paths (e.g. the absolute pwsh.exe path)
+// resolve correctly — `path.posix.basename` would return a Windows path whole.
+function shellStem(shell) {
+  const base = String(shell || '').split(/[\\/]/).pop() || '';
+  return base.toLowerCase().replace(/\.exe$/, '');
+}
+
 // Enable OSC 633 shell integration for shells that support reliable injection,
 // returning possibly-modified { env, shellArgs }. The keystroke-based command
 // heuristic remains the fallback for shells we can't inject (cmd.exe, others)
 // or when the scripts aren't present on disk. See docs/specs/terminal-escapes.md.
 //
-// zsh  — injected purely via env (`ZDOTDIR`), as reliable as a PATH prepend. We
-//        point ZDOTDIR at our scripts and pass the user's real ZDOTDIR through
+// zsh        — injected purely via env (`ZDOTDIR`), as reliable as a PATH prepend.
+//        We point ZDOTDIR at our scripts and pass the user's real ZDOTDIR through
 //        `USER_ZDOTDIR`; our dotfiles chain to the user's then install the hooks.
-// bash — injected via `--init-file`, which has no env equivalent. Because that
+// bash       — injected via `--init-file`, which has no env equivalent. Because that
 //        flag and login mode are mutually exclusive, we drop the login flag and
 //        the script replicates login-profile sourcing itself. Skipped when the
 //        caller passed explicit args, since we'd be replacing them.
+// PowerShell — injected via `-NoExit -Command ". '<script>'"` (pwsh and Windows
+//        PowerShell). We omit `-NoProfile` so the user's profile loads first; the
+//        dot-sourced script then wraps their `prompt`. Skipped when the caller
+//        passed explicit args, since we'd be replacing them.
 function applyShellIntegration(shell, env, shellArgs, integrationDir, hasExplicitArgs, runtime = {}) {
   const fsModule = runtime.fsModule || fs;
-  const shellName = path.posix.basename(shell || '').toLowerCase();
+  const stem = shellStem(shell);
 
-  if (shellName === 'zsh') {
+  if (stem === 'zsh') {
     const zshDir = path.join(integrationDir, 'zsh');
     if (fileExists(path.join(zshDir, '.zshrc'), fsModule)) {
       return {
@@ -111,10 +122,19 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, hasExplici
     }
   }
 
-  if (shellName === 'bash' && !hasExplicitArgs) {
+  if (stem === 'bash' && !hasExplicitArgs) {
     const script = path.join(integrationDir, 'bash', 'shellIntegration.bash');
     if (fileExists(script, fsModule)) {
       return { env, shellArgs: ['--init-file', script] };
+    }
+  }
+
+  if ((stem === 'pwsh' || stem === 'powershell') && !hasExplicitArgs) {
+    const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+    if (fileExists(script, fsModule)) {
+      // Single-quote the path so spaces (e.g. "Program Files") survive; the path
+      // is host-controlled and won't contain a single quote.
+      return { env, shellArgs: ['-NoExit', '-Command', `. '${script}'`] };
     }
   }
 

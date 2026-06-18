@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('node:path');
 
 const {
   create,
@@ -357,7 +358,9 @@ test('resolveSpawnConfig honors non-empty explicit args (e.g. WSL distro flags)'
 const integrationFsModule = {
   statSync(filePath) {
     const p = String(filePath);
-    if (p.endsWith('.zshrc') || p.endsWith('shellIntegration.bash')) return { isFile: () => true };
+    if (p.endsWith('.zshrc') || p.endsWith('shellIntegration.bash') || p.endsWith('shellIntegration.ps1')) {
+      return { isFile: () => true };
+    }
     throw new Error(`ENOENT: ${filePath}`);
   },
 };
@@ -450,6 +453,85 @@ test('resolveSpawnConfig falls back to the bash login flag when the script is no
   });
 
   assert.deepEqual(config.shellArgs, ['-l']);
+});
+
+test('resolveSpawnConfig injects pwsh integration via -NoExit -Command dot-source', () => {
+  const integrationDir = 'C:\\Program Files\\Dormouse\\shell-integration';
+  const config = resolveSpawnConfig(
+    { shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' },
+    {
+      platform: 'win32',
+      env: {
+        HOME: 'C:\\Users\\tester',
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: integrationDir,
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+  assert.deepEqual(config.shellArgs, ['-NoExit', '-Command', `. '${script}'`]);
+});
+
+test('resolveSpawnConfig injects Windows PowerShell (powershell.exe) too', () => {
+  const integrationDir = 'C:\\Program Files\\Dormouse\\shell-integration';
+  const config = resolveSpawnConfig(
+    {
+      shell: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: integrationDir,
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+  assert.deepEqual(config.shellArgs, ['-NoExit', '-Command', `. '${script}'`]);
+});
+
+test('resolveSpawnConfig leaves pwsh args alone when the caller passed explicit args', () => {
+  const config = resolveSpawnConfig(
+    {
+      shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      args: ['-NoExit', '-Command', '& { Import-Module Foo }'],
+    },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: 'C:\\Program Files\\Dormouse\\shell-integration',
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  assert.deepEqual(config.shellArgs, ['-NoExit', '-Command', '& { Import-Module Foo }']);
+});
+
+test('resolveSpawnConfig falls back to no args when the pwsh script is not present', () => {
+  const config = resolveSpawnConfig(
+    { shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: 'C:\\Program Files\\Dormouse\\shell-integration',
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: { statSync() { throw new Error('ENOENT'); } },
+    },
+  );
+
+  // No injection: win32 has no login flag, so shellArgs stays empty.
+  assert.deepEqual(config.shellArgs, []);
 });
 
 test('resolveSpawnConfig leaves other shells untouched (keystroke fallback)', () => {
