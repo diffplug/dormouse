@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync, execSync } = require('node:child_process');
+const { execFileSync } = require('node:child_process');
 
 function safeResolve(resolver) {
   try {
@@ -248,7 +248,7 @@ function fileExists(filePath, fsModule = fs) {
 function detectWindowsShells(runtime = {}) {
   const env = runtime.env || process.env;
   const fsModule = runtime.fsModule || fs;
-  const execSyncFn = runtime.execSync || execSync;
+  const execFileSyncFn = runtime.execFileSync || execFileSync;
   const systemRoot = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows';
   const shells = [];
 
@@ -283,23 +283,34 @@ function detectWindowsShells(runtime = {}) {
     } catch { /* dir doesn't exist */ }
   }
 
-  // WSL distributions
-  try {
-    const wslExe = path.win32.join(systemRoot, 'System32', 'wsl.exe');
-    if (fileExists(wslExe, fsModule)) {
-      const raw = execSyncFn(`"${wslExe}" -l -q`, {
-        encoding: 'utf-16le',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        timeout: 5000,
-      });
-      const distros = raw.split(/\r?\n/)
-        .map((line) => line.replace(/\0/g, '').trim())
-        .filter(Boolean);
-      for (const distro of distros) {
-        shells.push({ name: distro, path: wslExe, args: ['-d', distro] });
+  // WSL distributions. Read from the registry rather than `wsl.exe -l -q`: that
+  // call hangs on its piped stdio when the sidecar has no console (the normal
+  // packaged/GUI launch), so it would hit its timeout and drop every distro. The
+  // registry (`HKCU\...\Lxss\<guid>\DistributionName`) is the same source wsl.exe
+  // reads, mirroring how Windows Terminal enumerates WSL.
+  //
+  // windowsHide (CREATE_NO_WINDOW) below is essential, not cosmetic: the sidecar
+  // is itself spawned CREATE_NO_WINDOW, and a *synchronous* spawn of a console
+  // child without that flag deadlocks on Windows console allocation — that is the
+  // actual reason the old wsl.exe call timed out, and reg.exe times out the same
+  // way without it.
+  const wslExe = path.win32.join(systemRoot, 'System32', 'wsl.exe');
+  if (fileExists(wslExe, fsModule)) {
+    try {
+      const regExe = path.win32.join(systemRoot, 'System32', 'reg.exe');
+      const raw = execFileSyncFn(
+        regExe,
+        ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss', '/s', '/v', 'DistributionName'],
+        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000, windowsHide: true },
+      );
+      for (const line of raw.split(/\r?\n/)) {
+        const match = line.match(/^\s*DistributionName\s+REG_SZ\s+(.+?)\s*$/);
+        if (match) {
+          shells.push({ name: match[1], path: wslExe, args: ['-d', match[1]] });
+        }
       }
-    }
-  } catch { /* WSL not installed or no distros */ }
+    } catch { /* no Lxss key (no distros installed) or reg.exe unavailable */ }
+  }
 
   // Git Bash
   const gitBashPaths = [
@@ -834,7 +845,9 @@ function runPowerShell(script, execFileSyncFn) {
   return execFileSyncFn(
     'powershell.exe',
     ['-NoProfile', '-NonInteractive', '-Command', script],
-    { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: OPEN_PORT_TIMEOUT_MS },
+    // windowsHide: a synchronous spawn of a console child from the CREATE_NO_WINDOW
+    // sidecar deadlocks on console allocation without it (see the WSL note above).
+    { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: OPEN_PORT_TIMEOUT_MS, windowsHide: true },
   );
 }
 
@@ -874,6 +887,7 @@ function windowsListeningPorts(pids, runtime = {}) {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: OPEN_PORT_TIMEOUT_MS,
+      windowsHide: true, // see runPowerShell: avoid the console-allocation deadlock
     });
     return parseNetstatListening(out, pidSet, nameByPid);
   } catch {

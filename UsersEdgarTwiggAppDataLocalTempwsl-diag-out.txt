@@ -1,0 +1,3 @@
+hasConsole(stdout.isTTY)=true
+wslExe=C:\WINDOWS\System32\wsl.exe exists=true
+OK 38ms rawHex=5500620075006e00740075000d000a00 distros=["Ubuntu"]

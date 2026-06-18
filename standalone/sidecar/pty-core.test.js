@@ -735,7 +735,6 @@ test('detectAvailableShells detects PowerShell and cmd on Windows', () => {
       },
       readdirSync() { throw new Error('ENOENT'); },
     },
-    execSync() { throw new Error('not available'); },
   });
 
   assert.equal(shells.length, 2);
@@ -764,7 +763,6 @@ test('detectAvailableShells detects Git Bash on Windows', () => {
       },
       readdirSync() { throw new Error('ENOENT'); },
     },
-    execSync() { throw new Error('not available'); },
   });
 
   const gitBash = shells.find((s) => s.name === 'Git Bash');
@@ -773,7 +771,7 @@ test('detectAvailableShells detects Git Bash on Windows', () => {
   assert.deepEqual(gitBash.args, ['--login', '-i']);
 });
 
-test('detectAvailableShells detects WSL distros on Windows', () => {
+test('detectAvailableShells detects WSL distros from the registry on Windows', () => {
   const existingFiles = new Set([
     'C:\\Windows\\System32\\cmd.exe',
     'C:\\Windows\\System32\\wsl.exe',
@@ -794,9 +792,20 @@ test('detectAvailableShells detects WSL distros on Windows', () => {
       },
       readdirSync() { throw new Error('ENOENT'); },
     },
-    execSync() {
-      // wsl.exe -l -q returns UTF-16LE with null bytes
-      return 'Ubuntu\r\nDebian\r\n';
+    execFileSync(file, args) {
+      // `reg query ...\Lxss /s /v DistributionName` output shape.
+      if (String(file).endsWith('reg.exe')) {
+        return [
+          'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\\{guid-1}',
+          '    DistributionName    REG_SZ    Ubuntu',
+          '',
+          'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\\{guid-2}',
+          '    DistributionName    REG_SZ    Debian',
+          '',
+          'End of search: 2 match(es) found.',
+        ].join('\r\n');
+      }
+      throw new Error(`unexpected execFileSync: ${file} ${args}`);
     },
   });
 
@@ -807,6 +816,26 @@ test('detectAvailableShells detects WSL distros on Windows', () => {
 
   const debian = shells.find((s) => s.name === 'Debian');
   assert.ok(debian, 'Debian WSL should be detected');
+});
+
+test('detectAvailableShells omits WSL when no distros are registered', () => {
+  const shells = detectAvailableShells({
+    platform: 'win32',
+    env: { SystemRoot: 'C:\\Windows', ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+    fsModule: {
+      statSync(p) {
+        if (p === 'C:\\Windows\\System32\\wsl.exe' || p === 'C:\\Windows\\System32\\cmd.exe') {
+          return { isFile: () => true, isDirectory: () => false };
+        }
+        throw new Error('ENOENT');
+      },
+      readdirSync() { throw new Error('ENOENT'); },
+    },
+    // reg.exe exits non-zero when the Lxss key is absent → execFileSync throws.
+    execFileSync() { throw new Error('reg: key not found'); },
+  });
+
+  assert.equal(shells.find((s) => s.path.endsWith('wsl.exe')), undefined);
 });
 
 // ── Open-port discovery ──────────────────────────────────────────────────────
