@@ -14,6 +14,15 @@ const { createDorControlServer } = require('./dor-control-server');
 // Built from lib/src/host/iframe-proxy.ts (shared with the VS Code host) by
 // scripts/build-sidecar-proxy.mjs. See docs/specs/dor-iframe.md.
 const { createIframeProxyUrl } = require('./iframe-proxy.cjs');
+// Same pattern: lib/src/host/agent-browser-host.ts is the single source of truth
+// for the agent-browser host capabilities, run here exactly as the VS Code
+// extension host runs it. See docs/specs/dor-agent-browser.md → "Host capabilities".
+const { createAgentBrowserHost } = require('./agent-browser-host.cjs');
+
+const agentBrowser = createAgentBrowserHost({
+  writeClipboardText: (text) => clipboard.writeClipboardText(text),
+  log: (m) => console.error(m),
+});
 
 function send(event, data) {
   process.stdout.write(JSON.stringify({ event, data }) + '\n');
@@ -61,6 +70,47 @@ rl.on('line', (line) => {
           result: await createIframeProxyUrl(data.target, { log: (m) => console.error(m) }),
         }));
         break;
+      case 'agentBrowser:command':
+        respondAsync('agentBrowser:result', data.requestId, async () => ({
+          result: await agentBrowser.command(data.session, data.args, data.binaryPath),
+        }));
+        break;
+      case 'agentBrowser:edit':
+        respondAsync('agentBrowser:result', data.requestId, async () => ({
+          result: await agentBrowser.edit(data.session, data.op, data.binaryPath),
+        }));
+        break;
+      case 'agentBrowser:screenshot':
+        // Raw bytes can't ride the JSON-lines stdio, so base64 here; the Rust
+        // forwarder decodes back to a raw tauri::ipc::Response for the webview.
+        respondAsync('agentBrowser:result', data.requestId, async () => {
+          const shot = await agentBrowser.screenshot(
+            data.session, { format: data.format, quality: data.quality }, data.binaryPath,
+          );
+          if (!shot.ok) return { result: { ok: false, error: shot.error } };
+          return { result: { ok: true, mime: shot.mime, bytesBase64: Buffer.from(shot.bytes).toString('base64') } };
+        });
+        break;
+      case 'agentBrowser:streamStatus':
+        respondAsync('agentBrowser:result', data.requestId, async () => ({
+          result: await agentBrowser.streamStatus(data.session, data.binaryPath),
+        }));
+        break;
+      case 'agentBrowser:open':
+        respondAsync('agentBrowser:result', data.requestId, async () => ({
+          result: await agentBrowser.open(data.url, { headed: data.headed }, data.binaryPath),
+        }));
+        break;
+      case 'agentBrowser:popOut':
+        respondAsync('agentBrowser:result', data.requestId, async () => ({
+          result: await agentBrowser.popOut(data.session, { url: data.url, rect: data.rect }, data.binaryPath),
+        }));
+        break;
+      case 'agentBrowser:popIn':
+        respondAsync('agentBrowser:result', data.requestId, async () => ({
+          result: await agentBrowser.popIn(data.session, { url: data.url }, data.binaryPath),
+        }));
+        break;
       case 'clipboard:readFiles':
         respondAsync('clipboard:files', data.requestId, async () => ({
           paths: await clipboard.readClipboardFilePaths(),
@@ -83,7 +133,19 @@ rl.on('line', (line) => {
   }
 });
 
-function shutdown() {
+let shuttingDown = false;
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  // Close any headed pop-out windows so quitting never orphans a real Chrome
+  // window (spec → "Headed Pop-Out" lifecycle). Bounded so a hung agent-browser
+  // can't wedge the exit; mirrors the VS Code host's deactivate().
+  try {
+    await Promise.race([
+      agentBrowser.closePoppedOut(),
+      new Promise((resolve) => setTimeout(resolve, 1500).unref?.()),
+    ]);
+  } catch {}
   dorControl?.close();
   mgr.killAll();
   process.exit(0);

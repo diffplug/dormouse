@@ -1,335 +1,43 @@
 /**
- * Extension-host support for the agent-browser surface
+ * Extension-host wiring for the agent-browser surface
  * (docs/specs/dor-agent-browser.md → "Host capabilities").
  *
- * Narrow capabilities, all on behalf of the webview:
- *
- * 1. `runAgentBrowserCommand` — runs the user's agent-browser binary against a
- *    session for tab actions and session teardown. Subcommands are
- *    allowlisted; this is not a general exec channel.
- *
- * 2. `runAgentBrowserStreamStatus` — reads the current stream port for an
- *    existing session. This lets restored panels recover from a stale
- *    persisted port without exposing `stream` through the general command
- *    allowlist.
- *
- * 3. `createStreamRelayUrl` — a loopback-only TCP relay that strips the
- *    `Origin` header from WebSocket upgrade requests. The agent-browser stream
- *    server returns 403 for `vscode-webview://` origins (only localhost or
- *    absent origins are accepted), so the webview cannot connect directly; it
- *    connects to a short-lived tokenized relay URL instead and the relay pipes
- *    bytes only to the authorized 127.0.0.1:<streamPort>.
+ * The capability logic itself is host-agnostic and lives in
+ * `lib/src/host/agent-browser-host.ts` (shared verbatim with the standalone
+ * Node sidecar). This file only:
+ *   1. instantiates that shared host with the two VS-Code-specific bits —
+ *      writing the OS clipboard and logging — and re-exports its methods; and
+ *   2. owns the **stream relay**, which is genuinely VS-Code-only: the
+ *      agent-browser stream server returns 403 for `vscode-webview://` origins
+ *      (only localhost or absent origins are accepted), so the webview cannot
+ *      connect directly. It connects to a short-lived tokenized relay URL and
+ *      the relay pipes bytes only to the authorized 127.0.0.1:<streamPort>.
+ *      (The standalone webview's `tauri://localhost` origin is accepted, so it
+ *      connects directly and needs no relay.)
  */
 import * as vscode from 'vscode';
 import * as net from 'net';
-import * as os from 'os';
-import * as path from 'path';
-import { promises as fs } from 'fs';
-import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
 import { log } from './log';
-import {
-  AGENT_BROWSER_ALLOWED_SUBCOMMANDS,
-  type AgentBrowserCommandResult,
-  type AgentBrowserEditOp,
-  type AgentBrowserEditResult,
-  type AgentBrowserOpenResult,
-  type AgentBrowserPopResult,
-  type AgentBrowserScreenshotResult,
-  type AgentBrowserStreamStatusResult,
-} from '../../lib/src/lib/platform/types';
+import { createAgentBrowserHost } from '../../lib/src/host/agent-browser-host';
 
-const ALLOWED_SUBCOMMANDS = new Set<string>(AGENT_BROWSER_ALLOWED_SUBCOMMANDS);
+const host = createAgentBrowserHost({
+  writeClipboardText: (text) => vscode.env.clipboard.writeText(text),
+  log: (message) => log.info(message),
+});
 
-// Sessions currently relaunched headed via pop-out, mapped to the binary path
-// that spawned them. A headed session is a real OS window, so the editor must
-// close it on shutdown or it orphans (spec → "Headed Pop-Out" lifecycle:
-// "Dormouse/editor quits → headed windows are cleaned up; no orphans").
-// Headless sessions are deliberately NOT tracked — they're left alive to
-// reattach across webview reloads (the wsPort/stream-recovery design).
-const poppedOutSessions = new Map<string, string | undefined>();
+export const runAgentBrowserCommand = host.command;
+export const runAgentBrowserEdit = host.edit;
+export const runAgentBrowserScreenshot = host.screenshot;
+export const runAgentBrowserStreamStatus = host.streamStatus;
+export const runAgentBrowserOpen = host.open;
+export const runAgentBrowserPopOut = host.popOut;
+export const runAgentBrowserPopIn = host.popIn;
+export const closePoppedOutSessions = host.closePoppedOut;
 
 const STREAM_RELAY_TOKEN_BYTES = 32;
 const STREAM_RELAY_GRANT_TTL_MS = 60_000;
 const STREAM_RELAY_GRANT_SWEEP_MS = 30_000;
-
-// The host owns the exact JS for each editing op — the webview only selects a
-// name, so this never becomes an arbitrary-eval channel. copy/cut return the
-// selected text; selectAll returns ''. Inputs/textareas use selection ranges;
-// everything else falls back to the Selection API + execCommand.
-const EDIT_SCRIPTS: Record<AgentBrowserEditOp, string> = {
-  selectAll: `(()=>{const el=document.activeElement;if(el&&'select'in el&&'value'in el){el.select();}else{document.execCommand('selectAll');}return'';})()`,
-  copy: `(()=>{const el=document.activeElement;if(el&&'selectionStart'in el&&el.selectionStart!=null){return el.value.slice(el.selectionStart,el.selectionEnd);}return String(window.getSelection()||'');})()`,
-  cut: `(()=>{const el=document.activeElement;if(el&&'selectionStart'in el&&el.selectionStart!=null){const s=el.selectionStart,e=el.selectionEnd,t=el.value.slice(s,e);el.setRangeText('',s,e,'end');el.dispatchEvent(new Event('input',{bubbles:true}));return t;}const sel=String(window.getSelection()||'');if(sel)document.execCommand('delete');return sel;})()`,
-};
-
-export async function runAgentBrowserCommand(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
-  if (typeof session !== 'string' || !session) {
-    return { exitCode: 1, stdout: '', stderr: 'session is required' };
-  }
-  const subcommand = args[0];
-  if (!subcommand || !ALLOWED_SUBCOMMANDS.has(subcommand)) {
-    return { exitCode: 1, stdout: '', stderr: `agent-browser subcommand '${subcommand ?? ''}' is not allowed from the webview` };
-  }
-  // An explicit close (kill / render-swap) tears the session down itself, so
-  // it's no longer ours to clean up on shutdown.
-  if (subcommand === 'close') poppedOutSessions.delete(session);
-  return runWithBinaryFallback(['--session', session, ...args], binaryPath);
-}
-
-export async function runAgentBrowserEdit(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult> {
-  if (typeof session !== 'string' || !session) {
-    return { ok: false, error: 'session is required' };
-  }
-  const script = EDIT_SCRIPTS[op];
-  if (!script) {
-    return { ok: false, error: `unknown edit op '${op}'` };
-  }
-
-  const result = await runWithBinaryFallback(['--session', session, 'eval', script, '--json'], binaryPath);
-  if (result.exitCode !== 0) {
-    return { ok: false, error: result.stderr.trim() || `eval exited ${result.exitCode}` };
-  }
-
-  // eval --json envelope: { success, data: { result }, error }.
-  let text = '';
-  try {
-    const envelope = JSON.parse(result.stdout) as { success?: boolean; data?: { result?: unknown }; error?: unknown };
-    if (envelope.success === false) {
-      return { ok: false, error: typeof envelope.error === 'string' ? envelope.error : `${op} failed` };
-    }
-    if (typeof envelope.data?.result === 'string') text = envelope.data.result;
-  } catch {
-    return { ok: false, error: `could not parse eval output for ${op}` };
-  }
-
-  if (op === 'selectAll') return { ok: true };
-  // Land the grabbed text on the user's real OS clipboard. Skip empty so an
-  // empty selection doesn't clobber what's already there.
-  if (text) await vscode.env.clipboard.writeText(text);
-  return { ok: true, text };
-}
-
-// Reused per session so we don't litter tmp with one file per frame; the panel
-// guarantees one screenshot in flight per surface, so overwriting is safe.
-function screenshotPath(session: string, ext: string): string {
-  const safe = session.replace(/[^A-Za-z0-9._-]/g, '_');
-  return path.join(os.tmpdir(), `dormouse-ab-shot-${safe}.${ext}`);
-}
-
-// Capture one device-resolution frame via the user's agent-browser `screenshot`
-// command (which honors the session's viewport/DPR, unlike the CSS-resolution
-// screencast) and return the raw image bytes. agent-browser writes a file and
-// reports the path; we read it back and hand the bytes to the webview.
-export async function runAgentBrowserScreenshot(
-  session: string,
-  opts: { format?: 'jpeg' | 'png'; quality?: number },
-  binaryPath?: string,
-): Promise<AgentBrowserScreenshotResult> {
-  if (typeof session !== 'string' || !session) {
-    return { ok: false, error: 'session is required' };
-  }
-  const format = opts.format === 'png' ? 'png' : 'jpeg';
-  const ext = format === 'png' ? 'png' : 'jpg';
-  const out = screenshotPath(session, ext);
-  const args = ['--session', session, 'screenshot', out, '--screenshot-format', format];
-  if (format === 'jpeg') {
-    const q = Number.isFinite(opts.quality) ? Math.min(100, Math.max(1, Math.round(opts.quality as number))) : 85;
-    args.push('--screenshot-quality', String(q));
-  }
-  const result = await runWithBinaryFallback(args, binaryPath);
-  if (result.exitCode !== 0) {
-    log.info(`[agent-browser] screenshot failed (exit ${result.exitCode}): ${result.stderr.trim() || result.stdout.trim()}`);
-    return { ok: false, error: result.stderr.trim() || `screenshot exited ${result.exitCode}` };
-  }
-  try {
-    const buffer = await fs.readFile(out);
-    // A Uint8Array view over exactly this file's bytes; structured-clone copies
-    // it across the webview boundary (no base64 round-trip).
-    const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-    return { ok: true, bytes, mime: format === 'png' ? 'image/png' : 'image/jpeg' };
-  } catch (err) {
-    log.info(`[agent-browser] screenshot read failed: ${err instanceof Error ? err.message : String(err)}`);
-    return { ok: false, error: `could not read screenshot file: ${err instanceof Error ? err.message : String(err)}` };
-  }
-}
-
-const STREAM_PORT_READ_ATTEMPTS = 4;
-const STREAM_PORT_READ_DELAY_MS = 150;
-const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-// Read a session's stream WebSocket port via `stream status --json`. Mirrors
-// the parse in dor/src/commands/agent-browser.ts: { port } or { data: { port } }.
-// Right after `open` / `--headed open` (a fresh spawn, a pop-out, or a pop-in
-// relaunch) the daemon may not have published the port yet; a single read would
-// then return undefined and leave the panel pinned to a stale port — it reads
-// "ended" though the session is live. Retry briefly to close that window.
-async function readStreamPort(session: string, binaryPath?: string): Promise<number | undefined> {
-  for (let attempt = 0; attempt < STREAM_PORT_READ_ATTEMPTS; attempt++) {
-    const result = await runWithBinaryFallback(['--session', session, 'stream', 'status', '--json'], binaryPath);
-    if (result.exitCode === 0) {
-      try {
-        const parsed = JSON.parse(result.stdout) as { port?: unknown; data?: { port?: unknown } };
-        const port = parsed.data?.port ?? parsed.port;
-        if (typeof port === 'number' && Number.isFinite(port)) return port;
-      } catch {
-        // malformed output — fall through and retry
-      }
-    }
-    if (attempt < STREAM_PORT_READ_ATTEMPTS - 1) await delay(STREAM_PORT_READ_DELAY_MS);
-  }
-  return undefined;
-}
-
-function usableRelaunchUrl(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === 'about:blank') return undefined;
-  return trimmed;
-}
-
-async function readCurrentUrl(session: string, binaryPath?: string): Promise<string | undefined> {
-  const result = await runWithBinaryFallback(['--session', session, 'get', 'url'], binaryPath);
-  if (result.exitCode !== 0) return undefined;
-  return usableRelaunchUrl(result.stdout.split(/\r?\n/).find((line) => line.trim().length > 0));
-}
-
-async function resolveRelaunchUrl(session: string, requestedUrl: unknown, binaryPath?: string): Promise<string> {
-  // The webview's tab snapshot can lag behind the daemon, especially while
-  // swapping headed/headless modes. Query the live session immediately before
-  // closing it so pop-out/pop-in preserves the page the user is actually on.
-  return (await readCurrentUrl(session, binaryPath)) ?? usableRelaunchUrl(requestedUrl) ?? 'about:blank';
-}
-
-export async function runAgentBrowserStreamStatus(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult> {
-  if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
-  const wsPort = await readStreamPort(session, binaryPath);
-  if (!wsPort) return { ok: false, error: 'stream port unavailable' };
-  return { ok: true, wsPort };
-}
-
-// A fresh managed session for a surface spawned from the GUI (no `--key`),
-// mirroring `dor ab`'s `dormouse.<workspaceId>.<key>` namespacing so it can't
-// collide with a user's own agent-browser sessions.
-function generateGuiSession(): string {
-  return `dormouse.1.gui-${randomBytes(6).toString('hex')}`;
-}
-
-// Spawn a managed session and open <url> — backs swapping an iframe embed up to
-// a live screencast (docs/specs/dor-iframe.md → "Path 1"). With `headed`, the
-// process launches headed in one shot so embed→popout doesn't open a headless
-// browser only to tear it down. Mirrors what `dor ab open <url>` does, but
-// driven from the GUI rather than a terminal.
-export async function runAgentBrowserOpen(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
-  if (typeof url !== 'string' || !url) return { ok: false, error: 'url is required' };
-  const session = generateGuiSession();
-  const args = ['--session', session, ...(opts?.headed ? ['--headed'] : []), 'open', url];
-  const open = await runWithBinaryFallback(args, binaryPath);
-  if (open.exitCode !== 0) {
-    return { ok: false, error: open.stderr.trim() || `open exited ${open.exitCode}` };
-  }
-  const wsPort = await readStreamPort(session, binaryPath);
-  return { ok: true, session, ...(wsPort ? { wsPort } : {}), ...(binaryPath ? { binaryPath } : {}) };
-}
-
-// Pop-out is a relaunch, not a live toggle: Chrome's headed/headless choice is
-// fixed at launch (spec → "Headed Pop-Out"). Close the headless session, then
-// reopen it headed at the active URL. (v1 preserves the active tab URL only;
-// multi-tab + profile/cookie restore are tracked follow-ups. Window
-// positioning over opts.rect is deferred — VS Code can't read screen coords, so
-// the window opens where Chrome places it.)
-export async function runAgentBrowserPopOut(
-  session: string,
-  opts: { rect?: { x: number; y: number; width: number; height: number }; url?: string },
-  binaryPath?: string,
-): Promise<AgentBrowserPopResult> {
-  if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
-  const url = await resolveRelaunchUrl(session, opts?.url, binaryPath);
-  await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
-  const open = await runWithBinaryFallback(['--session', session, '--headed', 'open', url], binaryPath);
-  if (open.exitCode !== 0) {
-    return { ok: false, error: open.stderr.trim() || `headed open exited ${open.exitCode}` };
-  }
-  // Now a real headed OS window — track it so shutdown can close it.
-  poppedOutSessions.set(session, binaryPath);
-  const wsPort = await readStreamPort(session, binaryPath);
-  return { ok: true, ...(wsPort ? { wsPort } : {}) };
-}
-
-// The reverse: close the headed session and relaunch it headless at the active
-// URL, resuming the screencast.
-export async function runAgentBrowserPopIn(
-  session: string,
-  opts: { url?: string },
-  binaryPath?: string,
-): Promise<AgentBrowserPopResult> {
-  if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
-  const url = await resolveRelaunchUrl(session, opts?.url, binaryPath);
-  await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
-  // The headed window is gone after the close above; back to headless.
-  poppedOutSessions.delete(session);
-  const open = await runWithBinaryFallback(['--session', session, 'open', url], binaryPath);
-  if (open.exitCode !== 0) {
-    return { ok: false, error: open.stderr.trim() || `open exited ${open.exitCode}` };
-  }
-  const wsPort = await readStreamPort(session, binaryPath);
-  return { ok: true, ...(wsPort ? { wsPort } : {}) };
-}
-
-// Close every still-popped-out session's headed window. Called from the
-// extension's deactivate() so quitting the editor doesn't orphan real Chrome
-// windows. deactivate() also fires on Reload Window; a popped-out surface then
-// auto-reverts to a headless screencast when it reactivates (spec → "The headed
-// window ends → auto-revert"), which is preferable to leaving a detached
-// headed Chrome behind.
-export async function closePoppedOutSessions(): Promise<void> {
-  const entries = [...poppedOutSessions.entries()];
-  poppedOutSessions.clear();
-  await Promise.all(entries.map(([session, binaryPath]) =>
-    runWithBinaryFallback(['--session', session, 'close'], binaryPath).catch(() => undefined),
-  ));
-}
-
-// The extension host's PATH is often the GUI login PATH (no nvm/volta shims),
-// so prefer the absolute path `dor ab` resolved in the user's terminal; fall
-// through on ENOENT in case it has gone stale.
-async function runWithBinaryFallback(args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
-  const candidates = [...new Set([
-    binaryPath,
-    process.env.DORMOUSE_AGENT_BROWSER_BIN,
-    'agent-browser',
-  ].filter((c): c is string => !!c))];
-
-  let lastError = '';
-  for (const binary of candidates) {
-    const result = await spawnAgentBrowser(binary, args);
-    if (result !== 'ENOENT') return result;
-    lastError = `'${binary}' was not found`;
-    log.info(`[agent-browser] ${lastError}; trying next candidate`);
-  }
-  return { exitCode: 1, stdout: '', stderr: `agent-browser binary not found (${lastError})` };
-}
-
-function spawnAgentBrowser(binary: string, args: string[]): Promise<AgentBrowserCommandResult | 'ENOENT'> {
-  return new Promise((resolve) => {
-    const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk) => { stdout += String(chunk); });
-    child.stderr.on('data', (chunk) => { stderr += String(chunk); });
-    child.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'ENOENT') {
-        resolve('ENOENT');
-        return;
-      }
-      log.info(`[agent-browser] spawn failed: ${err.message}`);
-      resolve({ exitCode: 1, stdout: '', stderr: err.message });
-    });
-    child.on('close', (code) => {
-      resolve({ exitCode: code ?? 1, stdout, stderr });
-    });
-  });
-}
 
 let relayPortPromise: Promise<number> | null = null;
 const streamRelayGrants = new Map<string, { port: number; expiresAt: number }>();

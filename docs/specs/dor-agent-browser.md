@@ -488,12 +488,21 @@ host on the webview's behalf (a webview cannot spawn processes; see
 | Dev-server port→pane store (consumed by the header) + Wall-side correlation driver | `lib/src/components/wall/agent-browser-ports.ts`, `lib/src/components/wall/use-dev-server-ports.ts` |
 | Per-surface `syncEngaged` persistence | dockview **panel params**, via the serialized layout blob (no `session-types.ts`/`session-save.ts` change) |
 | Surface registration + control handler + key→session registry + `onFocusPane` | `lib/src/components/Wall.tsx` |
-| Host capabilities (VS Code + standalone) + VS Code stream relay | `lib/src/lib/platform/types.ts`, `lib/src/lib/platform/vscode-adapter.ts`, `vscode-ext/src/agent-browser-host.ts`, `vscode-ext/src/message-router.ts`, `standalone/src/tauri-adapter.ts`, `standalone/src-tauri/src/agent_browser.rs` |
+| Host capability logic — **single source of truth, run by both hosts** | `lib/src/host/agent-browser-host.ts` (+ types/allowlist in `lib/src/lib/platform/types.ts`) |
+| Host wiring — VS Code | `lib/src/lib/platform/vscode-adapter.ts`, `vscode-ext/src/agent-browser-host.ts` (thin: instantiates the shared host + owns the VS-Code-only stream relay), `vscode-ext/src/message-router.ts` |
+| Host wiring — standalone | `standalone/src/tauri-adapter.ts` → thin forwarders in `standalone/src-tauri/src/lib.rs` → the Node sidecar (`standalone/sidecar/main.js`, running the bundled `agent-browser-host.cjs`), exactly like the iframe proxy |
 
 ### Host capabilities
 
 Narrow host capabilities back the surface, all optional on `PlatformAdapter` so
-hosts degrade gracefully:
+hosts degrade gracefully. The capability *logic* is **one host-agnostic module**
+(`lib/src/host/agent-browser-host.ts`) — running the user's `agent-browser`
+binary, the allowlist, the edit scripts, gui-session naming, pop-out tracking,
+shutdown cleanup. Each host only injects the two genuinely host-specific bits
+(writing the OS clipboard, logging) and runs it: the VS Code extension host
+imports it directly; the standalone Node sidecar runs the bundled copy behind
+thin Rust forwarders, exactly as it runs the shared iframe proxy. So the two
+hosts can't drift — there is no parallel re-implementation.
 
 - **`agentBrowserCommand(session, args)`** — runs the user's agent-browser
   binary for tab actions (`tab <n>`, `tab close`, `tab new`), screen-mode
@@ -503,9 +512,11 @@ hosts degrade gracefully:
   `forward`, `close`); this is not a general exec channel.
 - **`agentBrowserScreenshot(session, { format, quality })`** — captures one
   device-resolution frame via `agent-browser screenshot` (which honors the
-  session DPR, unlike the screencast) and returns the raw bytes (a `Uint8Array`
-  over structured clone, no base64 round-trip). Drives the crisp display path;
-  absent ⇒ the panel falls back to rendering screencast frames.
+  session DPR, unlike the screencast) and returns the raw bytes. (VS Code hands
+  the webview a `Uint8Array` via structured clone; the standalone base64s them
+  over the sidecar stdio, decoded back to raw bytes by the Rust forwarder, so the
+  webview still receives an `ArrayBuffer`.) Drives the crisp display path; absent
+  ⇒ the panel falls back to rendering screencast frames.
 - **`agentBrowserStreamStatus(session)`** — reads the current `stream status
   --json` port for an existing session so restored panels can recover from a
   stale persisted `wsPort`. This is intentionally narrower than adding `stream`
@@ -565,8 +576,7 @@ connects directly — its origin is allowed.
 > render mode — not a separate header arrow. The Display modal's *Render* section
 > offers `agent-browser popout` whenever the host exposes `agentBrowserPopOut`
 > (`canPopOut`). The web host has no agent-browser, so pop-out is unavailable
-> there. One piece of the lifecycle is still VS-Code-only — closing orphaned headed
-> windows on editor shutdown (see Lifecycle below).
+> there.
 
 The headless + streamed-screenshot surface above is the default everywhere: it is
 crisp, deterministic, and **uniformly portable** (no OS window, no positioning,
@@ -620,17 +630,17 @@ decoupled:
   popout) also drops the stream, so the teardown guard keeps auto-revert from
   resurrecting it (see Lifecycle above).
 - **Kill the pane / `dor kill`** → the only teardown.
-- **Dormouse/editor quits** → headed windows are cleaned up; no orphans. **VS
-  Code only:** the extension tracks popped-out sessions and closes their windows
-  from `deactivate()`. The standalone host does not do this yet, so quitting it
-  while popped out can leave a detached Chrome window behind.
+- **Dormouse/editor quits** → headed windows are cleaned up; no orphans. The
+  shared host tracks popped-out sessions and closes them from each host's
+  shutdown — VS Code's `deactivate()`, the sidecar's `shutdown()` — so neither
+  host leaves a detached Chrome window behind.
 
 **Not built yet.** Window **positioning** over the pane (no host acts on the pane
-`rect` it's passed yet, so Chrome places the window), **Bring to front**, headed-
-window cleanup on **standalone** shutdown, and any **web host** support (no
-agent-browser to spawn). Positioning eventually wants per-monitor / fractional-DPI
-math on Windows and a center-only fallback on Wayland; it stays a **platform-gated
-enhancement**, never load-bearing — the streamed surface is the portable baseline.
+`rect` it's passed yet, so Chrome places the window), **Bring to front**, and any
+**web host** support (no agent-browser to spawn). Positioning eventually wants
+per-monitor / fractional-DPI math on Windows and a center-only fallback on
+Wayland; it stays a **platform-gated enhancement**, never load-bearing — the
+streamed surface is the portable baseline.
 
 ---
 

@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::{
@@ -25,8 +26,6 @@ use process_wrap::std::{CreationFlags, JobObject};
 use process_wrap::std::ProcessGroup;
 #[cfg(windows)]
 use windows::Win32::System::Threading::CREATE_NO_WINDOW;
-
-mod agent_browser;
 
 type SidecarSender = mpsc::Sender<String>;
 type PendingRequests = Arc<Mutex<HashMap<String, mpsc::Sender<JsonValue>>>>;
@@ -329,6 +328,142 @@ fn iframe_create_proxy_url(
         Duration::from_secs(5),
     )?;
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
+}
+
+// ── agent-browser host (docs/specs/dor-agent-browser.md → "Host capabilities").
+// Thin forwarders to the Node sidecar, which runs the shared
+// lib/src/host/agent-browser-host.ts — the very same module the VS Code
+// extension host runs. Mirrors iframe_create_proxy_url; the logic lives in lib,
+// not here, so the two hosts can't drift. ──────────────────────────────────────
+
+// agent-browser launches Chrome (slow on first run), and pop-out is a
+// close + relaunch, so allow a generous window before a forward times out.
+const AGENT_BROWSER_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn agent_browser_forward(
+    state: &SidecarState,
+    event: &str,
+    data: JsonValue,
+) -> Result<JsonValue, String> {
+    let response = request_from_sidecar_timeout(state, event, data, AGENT_BROWSER_TIMEOUT)?;
+    Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
+}
+
+#[tauri::command]
+fn agent_browser_command(
+    state: tauri::State<'_, SidecarState>,
+    session: String,
+    args: Vec<String>,
+    binary_path: Option<String>,
+) -> Result<JsonValue, String> {
+    agent_browser_forward(
+        &state,
+        "agentBrowser:command",
+        serde_json::json!({ "session": session, "args": args, "binaryPath": binary_path }),
+    )
+}
+
+#[tauri::command]
+fn agent_browser_edit(
+    state: tauri::State<'_, SidecarState>,
+    session: String,
+    op: String,
+    binary_path: Option<String>,
+) -> Result<JsonValue, String> {
+    agent_browser_forward(
+        &state,
+        "agentBrowser:edit",
+        serde_json::json!({ "session": session, "op": op, "binaryPath": binary_path }),
+    )
+}
+
+#[tauri::command]
+fn agent_browser_stream_status(
+    state: tauri::State<'_, SidecarState>,
+    session: String,
+    binary_path: Option<String>,
+) -> Result<JsonValue, String> {
+    agent_browser_forward(
+        &state,
+        "agentBrowser:streamStatus",
+        serde_json::json!({ "session": session, "binaryPath": binary_path }),
+    )
+}
+
+#[tauri::command]
+fn agent_browser_open(
+    state: tauri::State<'_, SidecarState>,
+    url: String,
+    headed: Option<bool>,
+    binary_path: Option<String>,
+) -> Result<JsonValue, String> {
+    agent_browser_forward(
+        &state,
+        "agentBrowser:open",
+        serde_json::json!({ "url": url, "headed": headed, "binaryPath": binary_path }),
+    )
+}
+
+// `rect` is accepted by the adapter but unused — no window positioning today.
+#[tauri::command]
+fn agent_browser_pop_out(
+    state: tauri::State<'_, SidecarState>,
+    session: String,
+    url: Option<String>,
+    binary_path: Option<String>,
+) -> Result<JsonValue, String> {
+    agent_browser_forward(
+        &state,
+        "agentBrowser:popOut",
+        serde_json::json!({ "session": session, "url": url, "binaryPath": binary_path }),
+    )
+}
+
+#[tauri::command]
+fn agent_browser_pop_in(
+    state: tauri::State<'_, SidecarState>,
+    session: String,
+    url: Option<String>,
+    binary_path: Option<String>,
+) -> Result<JsonValue, String> {
+    agent_browser_forward(
+        &state,
+        "agentBrowser:popIn",
+        serde_json::json!({ "session": session, "url": url, "binaryPath": binary_path }),
+    )
+}
+
+// Screenshot returns raw image bytes. The sidecar base64s them over the
+// JSON-lines stdio; decode back to a raw tauri::ipc::Response so the webview
+// gets an ArrayBuffer (the path the panel decodes with createImageBitmap).
+#[tauri::command]
+fn agent_browser_screenshot(
+    state: tauri::State<'_, SidecarState>,
+    session: String,
+    format: Option<String>,
+    quality: Option<u32>,
+    binary_path: Option<String>,
+) -> Result<tauri::ipc::Response, String> {
+    let result = agent_browser_forward(
+        &state,
+        "agentBrowser:screenshot",
+        serde_json::json!({ "session": session, "format": format, "quality": quality, "binaryPath": binary_path }),
+    )?;
+    if result.get("ok").and_then(JsonValue::as_bool) != Some(true) {
+        return Err(result
+            .get("error")
+            .and_then(JsonValue::as_str)
+            .unwrap_or("screenshot failed")
+            .to_string());
+    }
+    let b64 = result
+        .get("bytesBase64")
+        .and_then(JsonValue::as_str)
+        .ok_or("screenshot returned no bytes")?;
+    let bytes = BASE64
+        .decode(b64)
+        .map_err(|err| format!("bad screenshot base64: {err}"))?;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 #[tauri::command]
@@ -720,9 +855,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        // Backs the agent-browser host's edit channel (copy/cut land the grabbed
-        // text on the OS clipboard, mirroring vscode.env.clipboard.writeText).
-        .plugin(tauri_plugin_clipboard_manager::init())
         // Replace Tauri's default menu, which binds Cmd+V to a native Paste
         // action that fights with the webview's DOM keydown handler. The
         // terminal owns Cmd+C / Cmd+V / Cmd+X in JS (see `Wall.tsx`).
@@ -817,13 +949,13 @@ pub fn run() {
             read_clipboard_image_as_file_path,
             read_clipboard_text,
             read_update_log,
-            agent_browser::agent_browser_command,
-            agent_browser::agent_browser_edit,
-            agent_browser::agent_browser_screenshot,
-            agent_browser::agent_browser_stream_status,
-            agent_browser::agent_browser_open,
-            agent_browser::agent_browser_pop_out,
-            agent_browser::agent_browser_pop_in,
+            agent_browser_command,
+            agent_browser_edit,
+            agent_browser_screenshot,
+            agent_browser_stream_status,
+            agent_browser_open,
+            agent_browser_pop_out,
+            agent_browser_pop_in,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Dormouse")

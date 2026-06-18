@@ -1,23 +1,32 @@
-// Bundle the host-agnostic iframe proxy (lib/src/host/iframe-proxy.ts, shared
-// with the VS Code extension host) into a CommonJS file the Node sidecar can
-// require. Keeps the proxy as a single TypeScript source while the sidecar
-// itself stays plain CJS. See docs/specs/dor-iframe.md → "The Transparent Proxy".
+// Bundle the host-agnostic host modules (shared with the VS Code extension host)
+// into CommonJS files the Node sidecar can require. Keeps each as a single
+// TypeScript source while the sidecar itself stays plain CJS.
+//   - lib/src/host/iframe-proxy.ts        → sidecar/iframe-proxy.cjs
+//   - lib/src/host/agent-browser-host.ts  → sidecar/agent-browser-host.cjs
+// See docs/specs/dor-iframe.md and docs/specs/dor-agent-browser.md.
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const entry = path.resolve(here, '../../lib/src/host/iframe-proxy.ts');
-const outfile = path.resolve(here, '../sidecar/iframe-proxy.cjs');
+const libHost = path.resolve(here, '../../lib/src/host');
+const sidecar = path.resolve(here, '../sidecar');
 
-await build({
-  entryPoints: [entry],
-  outfile,
-  bundle: true,
-  platform: 'node', // node builtins (http/net) stay external automatically
-  format: 'cjs',
-  target: 'node22',
-  logLevel: 'warning',
-});
+const bundles = [
+  { entry: 'iframe-proxy.ts', out: 'iframe-proxy.cjs' },
+  { entry: 'agent-browser-host.ts', out: 'agent-browser-host.cjs' },
+];
 
-console.log(`[sidecar] built ${path.relative(process.cwd(), outfile)}`);
+for (const { entry, out } of bundles) {
+  const outfile = path.resolve(sidecar, out);
+  await build({
+    entryPoints: [path.resolve(libHost, entry)],
+    outfile,
+    bundle: true,
+    platform: 'node', // node builtins (http/net/fs/child_process) stay external
+    format: 'cjs',
+    target: 'node22',
+    logLevel: 'warning',
+  });
+  console.log(`[sidecar] built ${path.relative(process.cwd(), outfile)}`);
+}
