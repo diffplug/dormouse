@@ -394,9 +394,10 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
         publishScreen();
         // Popped out: the headed window renders; we keep the stream only to
         // observe tabs/status, so draw nothing.
-        if (poppedOutRef.current) { /* observe only */ }
-        else if (screenshotCapableRef.current) screenshotLoop.pulse();
-        else drawScreencastFrame(msg.data);
+        if (!poppedOutRef.current) {
+          if (screenshotCapableRef.current) screenshotLoop.pulse();
+          else drawScreencastFrame(msg.data);
+        }
       } else if (msg.type === 'status') {
         setStatus({ connected: msg.connected === true, screencasting: msg.screencasting === true });
         setConnectionLost(msg.connected === false);
@@ -550,34 +551,32 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     setPoppedOut(true);
     api.updateParameters({ poppedOut: true });
     void reconcileStreamPort();
+    // Pop-out failed: revert to in-pane unless the stream came back live anyway.
+    const revertUnlessLive = () => reconcileStreamPort().then((live) => {
+      if (live) return;
+      setPoppedOut(false);
+      api.updateParameters({ poppedOut: false });
+    });
     const url = chromeSnapshotRef.current.url || undefined;
     fn(session, { rect: paneScreenRect(elRef.current), url }, binaryPathRef.current).then((res) => {
       if (closeIfSessionMarkedClosed(session)) return;
       if (!res.ok) {
-        reconcileStreamPort().then((live) => {
-          if (live) return;
-          setPoppedOut(false);
-          api.updateParameters({ poppedOut: false });
-        });
+        void revertUnlessLive();
         return;
       }
       void reconcileStreamPort(res.wsPort);
     }).catch(() => {
       if (closeIfSessionMarkedClosed(session)) return;
-      reconcileStreamPort().then((live) => {
-        if (live) return;
-        setPoppedOut(false);
-        api.updateParameters({ poppedOut: false });
-      });
+      void revertUnlessLive();
     });
   }, [session, api, reconcileStreamPort, closeIfSessionMarkedClosed]);
 
   const popIn = useCallback(() => {
-    const fn = getPlatform().agentBrowserPopIn;
     if (closeIfSessionMarkedClosed(session)) return;
     setPoppedOut(false);
-    if (!session || !fn) { api.updateParameters({ poppedOut: false }); return; }
     api.updateParameters({ poppedOut: false });
+    const fn = getPlatform().agentBrowserPopIn;
+    if (!session || !fn) return;
     void reconcileStreamPort();
     const url = chromeSnapshotRef.current.url || undefined;
     fn(session, { url }, binaryPathRef.current).then((res) => {

@@ -88,6 +88,11 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
   usePaneChrome(api, elRef);
   const url = typeof params?.url === 'string' ? params.url : '';
   const [history, setHistory] = useState<IframeHistory>(() => ({ entries: url ? [url] : [], index: url ? 0 : -1 }));
+  // Mirror the live index into a ref so the back/forward actions stay stable —
+  // otherwise chromeActions (and the screen registration depending on it) would
+  // churn on every navigation.
+  const historyIndexRef = useRef(history.index);
+  historyIndexRef.current = history.index;
   // Bumped by the header's reload button to re-resolve the proxy (a cross-origin
   // frame can't be reloaded via its contentWindow).
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -172,10 +177,10 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
   }), [api.id]);
   const chromeActions = useMemo<ChromeActions>(() => ({
     navigate(next) { commitUrl(next); },
-    back() { goToHistoryIndex(history.index - 1); },
-    forward() { goToHistoryIndex(history.index + 1); },
+    back() { goToHistoryIndex(historyIndexRef.current - 1); },
+    forward() { goToHistoryIndex(historyIndexRef.current + 1); },
     reload() { setReloadNonce((n) => n + 1); },
-  }), [commitUrl, goToHistoryIndex, history.index]);
+  }), [commitUrl, goToHistoryIndex]);
   const registrationRef = useRef<ScreenRegistration | null>(null);
   useEffect(() => {
     if (!swapCapable) return;
