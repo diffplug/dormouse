@@ -78,14 +78,14 @@ export function AgentBrowserScreenModal({
   // Render backend (Path 1 + Headed Pop-Out). The Render section only appears
   // when the surface wires `setRenderMode` (the swap is wired); otherwise the
   // modal is the plain screencast viewport modal it has always been.
-  const currentMode: RenderMode = snapshot?.renderMode ?? 'screencast';
+  const currentMode: RenderMode = snapshot?.renderMode ?? 'ab-screencast';
   const canSwapRender = !!controller.actions.setRenderMode;
   const [renderMode, setRenderMode] = useState<RenderMode>(currentMode);
   // Pop-out is a render mode, gated per host/platform (hidden on web).
   const canPopOut = controller.canPopOut ?? false;
   // Only the screencast backend has a Dormouse-settable viewport; pop-out is a
   // native OS window and embed renders at the pane size, so both grey it out.
-  const viewportDisabled = renderMode !== 'screencast';
+  const viewportDisabled = renderMode !== 'ab-screencast';
   // Whether Apply changes the render backend (vs only tweaking the current
   // screencast's viewport). A swap is gated on whether its option is shown, not
   // on the viewport-drive capability below.
@@ -122,7 +122,7 @@ export function AgentBrowserScreenModal({
       // A mode swap; the viewport sub-controls don't apply to the outgoing
       // surface (and are inert on embed/popout controllers anyway).
       controller.actions.setRenderMode?.(renderMode);
-    } else if (renderMode === 'screencast') {
+    } else if (renderMode === 'ab-screencast') {
       if (target === 'sync') controller.actions.engageSync();
       else if (target === 'device') controller.actions.applyDevice(device);
       else controller.actions.applyViewport(Number(customW), Number(customH), Number(customDpi));
@@ -219,8 +219,8 @@ export function AgentBrowserScreenModal({
               (resize-with-pane / fixed) carry the link / lock glyphs, and the
               resolution controls nest under it, greying out for the other modes. */}
           <RenderOption
-            checked={renderMode === 'screencast'}
-            onSelect={() => setRenderMode('screencast')}
+            checked={renderMode === 'ab-screencast'}
+            onSelect={() => setRenderMode('ab-screencast')}
             label="agent-browser screencast"
             features={[[true, 'agents can read/write'], [true, 'any URL'], [false, 'laggy for humans']]}
           >
@@ -229,8 +229,8 @@ export function AgentBrowserScreenModal({
 
           {canPopOut && (
             <RenderOption
-              checked={renderMode === 'popout'}
-              onSelect={() => setRenderMode('popout')}
+              checked={renderMode === 'ab-popout'}
+              onSelect={() => setRenderMode('ab-popout')}
               icon={ArrowSquareOutIcon}
               label="agent-browser popout"
               features={[[true, 'agents can read/write'], [true, 'any URL'], [true, 'native human experience']]}
@@ -238,8 +238,8 @@ export function AgentBrowserScreenModal({
           )}
 
           <RenderOption
-            checked={renderMode === 'embed'}
-            onSelect={() => setRenderMode('embed')}
+            checked={renderMode === 'iframe'}
+            onSelect={() => setRenderMode('iframe')}
             icon={FrameCornersIcon}
             label="iframe embed"
             features={[[false, 'agents cannot read/write'], [false, 'localhost only'], [true, 'native human experience']]}

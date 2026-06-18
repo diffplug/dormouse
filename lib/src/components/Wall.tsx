@@ -1561,7 +1561,7 @@ export function Wall({
 
       // agent-browser → iframe embed: frame the active tab's URL, then the
       // replace closes the now-unneeded headless browser. Webview-only.
-      if (currentType === 'agent-browser' && mode === 'embed') {
+      if (currentType === 'agent-browser' && mode === 'iframe') {
         // Canonical params.url (mirrored from the chrome snapshot) first; fall
         // back to the live snapshot for a surface that hasn't reported a tab yet.
         const url = (typeof params?.url === 'string' && params.url) || getAgentBrowserScreenController(id)?.chrome().url;
@@ -1578,11 +1578,11 @@ export function Wall({
       // spawn a session for the URL (absent ⇒ inert, like other host-gated
       // affordances). popout spawns headed directly and the new surface mounts
       // already popped-out (no headless launch + immediate relaunch flash).
-      if (currentType === 'iframe' && (mode === 'screencast' || mode === 'popout')) {
+      if (currentType === 'iframe' && (mode === 'ab-screencast' || mode === 'ab-popout')) {
         const url = typeof params?.url === 'string' ? params.url : undefined;
         const open = getPlatform().agentBrowserOpen;
         if (!url || !open) return;
-        const headed = mode === 'popout';
+        const headed = mode === 'ab-popout';
         open(url, { headed }, lastAgentBrowserBinaryPathRef.current).then((res) => {
           if (!res.ok || !res.session) return;
           if (res.binaryPath) lastAgentBrowserBinaryPathRef.current = res.binaryPath;

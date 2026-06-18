@@ -187,7 +187,7 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     openModal() { openAgentBrowserScreenModal(api.id); },
     setRenderMode(mode) {
       // embed is the current backend; screencast/popout swap to agent-browser.
-      if (mode !== 'embed') actionsRef.current.onSwapRenderMode(api.id, mode);
+      if (mode !== 'iframe') actionsRef.current.onSwapRenderMode(api.id, mode);
     },
   }), [api.id]);
   const chromeActions = useMemo<ChromeActions>(() => ({
@@ -202,7 +202,7 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     const registration = registerAgentBrowserScreen(api.id, {
       snapshot: {
         state: 'SYNCED',
-        renderMode: 'embed',
+        renderMode: 'iframe',
         viewport: { w: 0, h: 0, dpr: 1 },
         paneCss: { w: 0, h: 0 },
         displayDpr: 1,

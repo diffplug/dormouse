@@ -290,7 +290,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     // DPR can't be read back from frames, so report the density we'd sync to.
     const viewport = { w: device.width, h: device.height, dpr: displayDpr };
     const state: ScreenState = dimsMatch(viewport, paneCss) ? 'SYNCED' : 'SCALED';
-    const renderMode = poppedOutRef.current ? 'popout' : 'screencast';
+    const renderMode = poppedOutRef.current ? 'ab-popout' : 'ab-screencast';
     return { state, viewport, paneCss, displayDpr, syncEngaged: syncEngagedRef.current, renderMode };
   }, []);
 
@@ -636,11 +636,11 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       openAgentBrowserScreenModal(api.id);
     },
     setRenderMode(renderMode) {
-      // agent-browser → iframe embed is a surface-type swap handled by the Wall;
-      // screencast ↔ popout relaunches this same session, handled in-panel.
-      if (renderMode === 'embed') actionsRef.current.onSwapRenderMode(api.id, 'embed');
-      else if (renderMode === 'popout') popOutRef.current();
-      else if (poppedOutRef.current) popInRef.current(); // popout → screencast
+      // agent-browser → iframe is a render swap handled by the Wall;
+      // ab-screencast ↔ ab-popout relaunches this same session, handled in-panel.
+      if (renderMode === 'iframe') actionsRef.current.onSwapRenderMode(api.id, 'iframe');
+      else if (renderMode === 'ab-popout') popOutRef.current();
+      else if (poppedOutRef.current) popInRef.current(); // ab-popout → ab-screencast
     },
   }), [api.id, issueSyncToPane]);
 

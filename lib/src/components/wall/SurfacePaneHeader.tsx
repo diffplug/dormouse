@@ -40,9 +40,9 @@ import {
  *  resizes with the pane, a lock when it's fixed. Returns the glyph and its
  *  label together so the two never drift apart. */
 function screenChip(s: ScreenSnapshot): { icon: ReactNode; label: string } {
-  const mode = s.renderMode ?? 'screencast';
-  if (mode === 'embed') return { icon: <FrameCornersIcon size={14} />, label: 'iframe embed — change render' };
-  if (mode === 'popout') return { icon: <ArrowSquareOutIcon size={14} />, label: 'agent-browser popout — change render' };
+  const mode = s.renderMode ?? 'ab-screencast';
+  if (mode === 'iframe') return { icon: <FrameCornersIcon size={14} />, label: 'iframe embed — change render' };
+  if (mode === 'ab-popout') return { icon: <ArrowSquareOutIcon size={14} />, label: 'agent-browser popout — change render' };
   return s.state === 'SYNCED'
     ? { icon: <LinkIcon size={14} />, label: 'agent-browser screencast, resizes with pane — change render or resolution' }
     : { icon: <LockSimpleIcon size={14} />, label: 'agent-browser screencast, fixed resolution — change render or resolution' };

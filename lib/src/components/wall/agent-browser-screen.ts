@@ -21,23 +21,24 @@ import { useSyncExternalStore } from 'react';
 export type ScreenState = 'SYNCED' | 'SCALED';
 
 /** How a web surface is rendered (docs/specs/dor-iframe.md → "Render Backends";
- *  dor-agent-browser.md → "Headed Pop-Out"). Three cells in the matrix of
- *  {agent-drivable, URL scope, human feel}:
- *    - `screencast` — real Chromium to a canvas: agent-drivable, any URL, but
+ *  dor-agent-browser.md → "Headed Pop-Out"). The `ab-` prefix names the engine
+ *  (agent-browser), leaving room for a future engine beside it; `iframe` is the
+ *  engine-less DOM embed:
+ *    - `ab-screencast` — real Chromium to a canvas: agent-drivable, any URL, but
  *      laggy for a human.
- *    - `popout`     — the same agent-browser relaunched headed as a native OS
+ *    - `ab-popout`     — the same agent-browser relaunched headed as a native OS
  *      window: agent-drivable, any URL, native human feel; the in-Dormouse pane
  *      becomes a stub.
- *    - `embed`      — the page's own DOM in a proxied iframe: native + zero-lag,
+ *    - `iframe`        — the page's own DOM in a proxied iframe: native + zero-lag,
  *      but loopback-only and not agent-drivable.
- *  Absent ⇒ `screencast` — the only backend wired today, so a surface with no
- *  explicit mode reads as a screencast. */
-export type RenderMode = 'screencast' | 'popout' | 'embed';
+ *  Absent ⇒ `ab-screencast` — a surface with no explicit mode reads as a
+ *  screencast. */
+export type RenderMode = 'ab-screencast' | 'ab-popout' | 'iframe';
 
 export interface ScreenSnapshot {
   state: ScreenState;
-  /** The surface's current render backend; absent ⇒ `screencast`. Drives the
-   *  far-left chip glyph (frame-corners = embed; lock = screencast). */
+  /** The surface's current render backend; absent ⇒ `ab-screencast`. Drives the
+   *  far-left chip glyph (frame-corners = iframe; lock = screencast). */
   renderMode?: RenderMode;
   /** The browser's live CSS viewport + inferred device pixel ratio. */
   viewport: { w: number; h: number; dpr: number };

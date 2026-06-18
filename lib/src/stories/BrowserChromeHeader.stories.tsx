@@ -165,7 +165,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
   title: 'Components/BrowserChromeHeader',
   component: BrowserChromeStory,
   argTypes: {
-    renderMode: { control: 'inline-radio', options: ['screencast', 'popout', 'embed'] },
+    renderMode: { control: 'inline-radio', options: ['ab-screencast', 'ab-popout', 'iframe'] },
     state: { control: 'radio', options: ['SYNCED', 'SCALED'] },
     url: { control: 'text' },
     htmlTitle: { control: 'text' },
@@ -176,7 +176,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
     selected: { control: 'boolean' },
   },
   args: {
-    renderMode: 'screencast',
+    renderMode: 'ab-screencast',
     state: 'SYNCED',
     url: 'http://localhost:5173/app',
     htmlTitle: 'Vite + React',
@@ -198,14 +198,14 @@ export const Playground: Story = {};
  *  the far-left chip becomes the open-window glyph. (The pane body is a stub
  *  while the window is up, but the header chrome stays live.) */
 export const Popout: Story = {
-  args: { renderMode: 'popout' },
+  args: { renderMode: 'ab-popout' },
 };
 
 /** Embed (iframe) render mode — the unified chrome is identical to screencast,
  *  but the far-left chip becomes the frame-corners glyph. Same URL/nav/dev-server
  *  header; only the chip + body renderer differ. */
 export const Embed: Story = {
-  args: { renderMode: 'embed' },
+  args: { renderMode: 'iframe' },
 };
 
 /** Letterboxed viewport — the chip reads SCALED (click it for the modal). */

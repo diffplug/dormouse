@@ -80,7 +80,7 @@ const meta: Meta<typeof AgentBrowserScreenModalStory> = {
   title: 'Modals/AgentBrowserScreenModal',
   component: AgentBrowserScreenModalStory,
   argTypes: {
-    renderMode: { control: 'inline-radio', options: ['screencast', 'popout', 'embed'] },
+    renderMode: { control: 'inline-radio', options: ['ab-screencast', 'ab-popout', 'iframe'] },
     canPopOut: { control: 'boolean' },
     state: { control: 'inline-radio', options: ['SYNCED', 'SCALED'] },
     vpW: { control: 'number' },
@@ -95,7 +95,7 @@ const meta: Meta<typeof AgentBrowserScreenModalStory> = {
   // Defaults shared by every story (each story overrides the viewport knobs);
   // a swap-capable, pop-out-capable surface so both new affordances show.
   args: {
-    renderMode: 'screencast',
+    renderMode: 'ab-screencast',
     canPopOut: true,
   },
 };
@@ -160,7 +160,7 @@ export const HostIncapable: Story = {
 // its own size).
 export const Popout: Story = {
   args: {
-    renderMode: 'popout',
+    renderMode: 'ab-popout',
     state: 'SYNCED',
     vpW: 980, vpH: 560, vpDpr: 2,
     paneW: 980, paneH: 560,
@@ -175,7 +175,7 @@ export const Popout: Story = {
 // there's nothing to set.
 export const EmbedRender: Story = {
   args: {
-    renderMode: 'embed',
+    renderMode: 'iframe',
     state: 'SYNCED',
     vpW: 980, vpH: 560, vpDpr: 2,
     paneW: 980, paneH: 560,
