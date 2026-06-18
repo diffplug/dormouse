@@ -150,6 +150,12 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   const [streamRecoverySeq, setStreamRecoverySeq] = useState(0);
   const [tabs, setTabs] = useState<StreamTab[]>([]);
   const knownTabIdsRef = useRef<Set<string>>(new Set());
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  // Crossing to the single-frame iframe renderer closes all but the active tab;
+  // when others are open the swap is gated behind a typed confirm (overlay below).
+  const [pendingIframeSwap, setPendingIframeSwap] = useState(false);
+  const swapConfirmRef = useRef<HTMLDivElement>(null);
 
   // Pop-out state: while true the browser runs in a headed OS window and the
   // pane is a stub. Seeded from params so it survives a re-attach.
@@ -644,8 +650,12 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
     setRenderMode(renderMode) {
       // agent-browser → iframe is a render swap handled by the Wall;
       // ab-screencast ↔ ab-popout relaunches this same session, handled in-panel.
-      if (renderMode === 'iframe') actionsRef.current.onSwapRenderMode(api.id, 'iframe');
-      else if (renderMode === 'ab-popout') popOutRef.current();
+      if (renderMode === 'iframe') {
+        // The iframe renderer is single-frame: only the active tab survives.
+        // Warn + require a typed confirm when other tabs would be closed.
+        if (tabsRef.current.length >= 2) setPendingIframeSwap(true);
+        else actionsRef.current.onSwapRenderMode(api.id, 'iframe');
+      } else if (renderMode === 'ab-popout') popOutRef.current();
       else if (poppedOutRef.current) popInRef.current(); // ab-popout → ab-screencast
     },
   }), [api.id, issueSyncToPane]);
@@ -708,6 +718,12 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
       popInRef.current();
     }
   }, [poppedOut, status?.connected, connectionLost]);
+
+  // Focus the swap-confirm overlay when it appears so it captures the typed
+  // confirm/cancel keys (the pane's key-forwarder skips in-pane targets).
+  useEffect(() => {
+    if (pendingIframeSwap) swapConfirmRef.current?.focus();
+  }, [pendingIframeSwap]);
 
   // Persist sync state into the panel params so it round-trips through the
   // dockview layout blob (and survives reattach). Skip no-op writes.
@@ -1119,6 +1135,31 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
         ) : placeholder ? (
           <div className="px-4 text-center text-sm text-muted">{placeholder}</div>
         ) : null}
+        {pendingIframeSwap && (
+          <div
+            ref={swapConfirmRef}
+            tabIndex={-1}
+            className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-terminal-bg/95 px-6 text-center outline-none"
+            onMouseDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'c' || e.key === 'C') {
+                setPendingIframeSwap(false);
+                actions.onSwapRenderMode(api.id, 'iframe');
+              } else if (e.key === 'Escape') {
+                setPendingIframeSwap(false);
+              }
+            }}
+          >
+            <div className="max-w-sm text-sm text-foreground">
+              Switching to the iframe renderer keeps only the active tab.{' '}
+              <span className="font-semibold">{Math.max(0, tabs.length - 1)} other tab{tabs.length - 1 === 1 ? '' : 's'}</span> will be closed.
+            </div>
+            <div className="text-xs text-muted">
+              Press <kbd className="rounded bg-app-bg px-1 py-0.5 font-mono">c</kbd> to continue · <kbd className="rounded bg-app-bg px-1 py-0.5 font-mono">Esc</kbd> to cancel
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

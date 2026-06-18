@@ -131,4 +131,23 @@ describe('AgentBrowserPanel render mode controller', () => {
     expect(updateParameters).toHaveBeenCalledWith({ renderMode: 'ab-screencast' });
     expect(getAgentBrowserScreenController('ab-panel')?.snapshot().renderMode).toBe('ab-screencast');
   });
+
+  it('swaps straight to iframe with no extra tabs (no confirm gate)', async () => {
+    const onSwapRenderMode = vi.fn();
+    await act(async () => {
+      root.render(
+        <WallActionsContext.Provider value={stubActions({ onSwapRenderMode })}>
+          <AgentBrowserPanel {...panelProps('ab-panel')} />
+        </WallActionsContext.Provider>,
+      );
+    });
+
+    // A single-tab (here zero-tab) session has nothing to lose, so the swap is
+    // issued immediately; the ≥2-tab confirm gate is exercised only in the GUI.
+    await act(async () => {
+      getAgentBrowserScreenController('ab-panel')?.actions.setRenderMode?.('iframe');
+    });
+
+    expect(onSwapRenderMode).toHaveBeenCalledWith('ab-panel', 'iframe');
+  });
 });
