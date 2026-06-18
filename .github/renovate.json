@@ -1,0 +1,53 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "enabledManagers": ["github-actions", "npm", "cargo"],
+  "timezone": "America/Los_Angeles",
+  "schedule": ["* * * * 1"],
+  "packageRules": [
+    {
+      "matchManagers": ["npm", "cargo"],
+      "rangeStrategy": "update-lockfile"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions",
+      "groupSlug": "github-actions",
+      "separateMajorMinor": false
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["dependencies"],
+      "groupName": "npm-production",
+      "groupSlug": "npm-production",
+      "separateMajorMinor": false
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["devDependencies"],
+      "groupName": "npm-development",
+      "groupSlug": "npm-development",
+      "separateMajorMinor": false
+    },
+    {
+      "matchManagers": ["cargo"],
+      "groupName": "cargo",
+      "groupSlug": "cargo",
+      "separateMajorMinor": false
+    },
+    {
+      "matchManagers": ["npm", "cargo"],
+      "matchUpdateTypes": ["patch"],
+      "minimumReleaseAge": "1 day"
+    },
+    {
+      "matchManagers": ["npm", "cargo"],
+      "matchUpdateTypes": ["minor"],
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "matchManagers": ["npm", "cargo"],
+      "matchUpdateTypes": ["major"],
+      "minimumReleaseAge": "14 days"
+    }
+  ]
+}
