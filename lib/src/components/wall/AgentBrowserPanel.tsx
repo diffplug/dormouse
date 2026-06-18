@@ -25,6 +25,7 @@ import {
   type ScreenState,
 } from './agent-browser-screen';
 import { hostPathDisplay } from './browser-url';
+import { resolveRenderMode } from './browser-surface';
 import { clearAgentBrowserSessionClosed, isAgentBrowserSessionClosed } from './agent-browser-sessions';
 import {
   EDIT_OPS,
@@ -160,8 +161,8 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   // Pop-out state: while true the browser runs in a headed OS window and the
   // pane is a stub. Seeded from params so it survives a re-attach.
   // poppedOut is derived from the canonical renderMode the shell passes; fall
-  // back to params for a direct mount (tests) or a legacy layout blob.
-  const seededMode = renderModeProp ?? params?.renderMode ?? (params?.poppedOut ? 'ab-popout' : undefined);
+  // back to resolving it from params for a direct mount (tests) or a legacy blob.
+  const seededMode = renderModeProp ?? resolveRenderMode(params);
   const [poppedOut, setPoppedOut] = useState<boolean>(seededMode === 'ab-popout');
   const poppedOutRef = useRef(poppedOut);
   poppedOutRef.current = poppedOut;

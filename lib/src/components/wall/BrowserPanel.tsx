@@ -12,6 +12,7 @@
 import { useEffect } from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
 import type { RenderMode } from './agent-browser-screen';
+import { resolveRenderMode } from './browser-surface';
 import { AgentBrowserPanel } from './AgentBrowserPanel';
 import { IframePanel } from './IframePanel';
 
@@ -31,17 +32,6 @@ export type BrowserPanelParams = {
    *  boolean alongside surfaceType 'iframe' | 'agent-browser'. Migrated below. */
   poppedOut?: boolean;
 };
-
-/** Resolve the render mode, migrating layouts persisted before `renderMode`
- *  existed (surfaceType 'iframe' | 'agent-browser' + `poppedOut`). */
-export function resolveRenderMode(params: BrowserPanelParams | undefined): RenderMode {
-  if (params?.renderMode) return params.renderMode;
-  if (params?.surfaceType === 'iframe') return 'iframe';
-  if (params?.surfaceType === 'agent-browser' || params?.session) {
-    return params?.poppedOut ? 'ab-popout' : 'ab-screencast';
-  }
-  return 'iframe';
-}
 
 export function BrowserPanel(props: IDockviewPanelProps<BrowserPanelParams>) {
   const { api, params } = props;

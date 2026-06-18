@@ -36,6 +36,7 @@ import {
   subscribeWantedDevServerPorts,
 } from './agent-browser-ports';
 import type { DooredItem } from './wall-types';
+import { isBrowserParams } from './browser-surface';
 
 // Wait this long after interest changes before scanning, so a tab's open +
 // initial screencast settle first and quick navigation coalesces into one scan.
@@ -49,13 +50,7 @@ const IDLE_TIMEOUT_MS = 2000;
 type ResolveOutcome = 'busy' | 'idle' | 'pending';
 
 function isTerminalParams(params: unknown): boolean {
-  if (!params || typeof params !== 'object') return true;
-  const p = params as { surfaceType?: unknown; renderMode?: unknown };
-  // A browser surface (unified 'browser', a legacy iframe/agent-browser blob, or
-  // anything carrying a renderMode) is not a terminal.
-  const isBrowser = p.surfaceType === 'browser' || p.surfaceType === 'iframe'
-    || p.surfaceType === 'agent-browser' || typeof p.renderMode === 'string';
-  return !isBrowser;
+  return !isBrowserParams(params);
 }
 
 function isTerminalDoor(door: DooredItem): boolean {
