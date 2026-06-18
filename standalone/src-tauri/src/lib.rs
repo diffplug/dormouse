@@ -26,6 +26,8 @@ use process_wrap::std::ProcessGroup;
 #[cfg(windows)]
 use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 
+mod agent_browser;
+
 type SidecarSender = mpsc::Sender<String>;
 type PendingRequests = Arc<Mutex<HashMap<String, mpsc::Sender<JsonValue>>>>;
 type SharedChild = Arc<Mutex<Box<dyn ChildWrapper + Send + Sync>>>;
@@ -718,6 +720,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Backs the agent-browser host's edit channel (copy/cut land the grabbed
+        // text on the OS clipboard, mirroring vscode.env.clipboard.writeText).
+        .plugin(tauri_plugin_clipboard_manager::init())
         // Replace Tauri's default menu, which binds Cmd+V to a native Paste
         // action that fights with the webview's DOM keydown handler. The
         // terminal owns Cmd+C / Cmd+V / Cmd+X in JS (see `Wall.tsx`).
@@ -812,6 +817,13 @@ pub fn run() {
             read_clipboard_image_as_file_path,
             read_clipboard_text,
             read_update_log,
+            agent_browser::agent_browser_command,
+            agent_browser::agent_browser_edit,
+            agent_browser::agent_browser_screenshot,
+            agent_browser::agent_browser_stream_status,
+            agent_browser::agent_browser_open,
+            agent_browser::agent_browser_pop_out,
+            agent_browser::agent_browser_pop_in,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Dormouse")

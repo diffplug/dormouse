@@ -1,7 +1,20 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
-import type { AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo } from "dormouse-lib/lib/platform/types";
+import type {
+  AgentBrowserCommandResult,
+  AgentBrowserEditOp,
+  AgentBrowserEditResult,
+  AgentBrowserOpenResult,
+  AgentBrowserPopResult,
+  AgentBrowserScreenshotResult,
+  AgentBrowserStreamStatusResult,
+  AlertStateDetail,
+  IframeProxyResult,
+  OpenPort,
+  PlatformAdapter,
+  PtyInfo,
+} from "dormouse-lib/lib/platform/types";
 import { AlertManager, type SessionStatus } from "dormouse-lib/lib/alert-manager";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import {
@@ -222,6 +235,80 @@ export class TauriAdapter implements PlatformAdapter {
       return await rawInvoke<IframeProxyResult>("iframe_create_proxy_url", { target: targetUrl });
     } catch (err) {
       return { ok: false, reason: "unreachable", detail: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  // --- agent-browser host capabilities (see docs/specs/dor-agent-browser.md →
+  // "Host capabilities"). Each invokes the matching Rust command, which runs the
+  // user's agent-browser binary (binaryPath → DORMOUSE_AGENT_BROWSER_BIN → PATH,
+  // mirroring the VS Code host's runWithBinaryFallback). Note there is no
+  // getAgentBrowserStreamUrl here: the agent-browser stream server accepts the
+  // tauri://localhost origin, so the panel connects directly to
+  // ws://127.0.0.1:<port> via its built-in fallback when the method is absent. ---
+
+  async agentBrowserCommand(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
+    try {
+      return await rawInvoke<AgentBrowserCommandResult>("agent_browser_command", { session, args, binaryPath });
+    } catch (err) {
+      return { exitCode: 1, stdout: "", stderr: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  async agentBrowserEdit(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult> {
+    try {
+      return await rawInvoke<AgentBrowserEditResult>("agent_browser_edit", { session, op, binaryPath });
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  async agentBrowserScreenshot(session: string, opts: { format?: "jpeg" | "png"; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult> {
+    // The Rust command returns the raw image as an ArrayBuffer (tauri::ipc::Response)
+    // on success, or rejects with an error string — no base64 round-trip.
+    try {
+      const buffer = await rawInvoke<ArrayBuffer>("agent_browser_screenshot", {
+        session,
+        format: opts.format,
+        quality: opts.quality,
+        binaryPath,
+      });
+      const mime = opts.format === "png" ? "image/png" : "image/jpeg";
+      return { ok: true, bytes: new Uint8Array(buffer), mime };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  async agentBrowserStreamStatus(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult> {
+    try {
+      return await rawInvoke<AgentBrowserStreamStatusResult>("agent_browser_stream_status", { session, binaryPath });
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  async agentBrowserOpen(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
+    try {
+      return await rawInvoke<AgentBrowserOpenResult>("agent_browser_open", { url, headed: opts.headed, binaryPath });
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  async agentBrowserPopOut(session: string, opts: { rect?: { x: number; y: number; width: number; height: number }; url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult> {
+    // `rect` is accepted by the type but unused — no window positioning today.
+    try {
+      return await rawInvoke<AgentBrowserPopResult>("agent_browser_pop_out", { session, url: opts.url, binaryPath });
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  async agentBrowserPopIn(session: string, opts: { url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult> {
+    try {
+      return await rawInvoke<AgentBrowserPopResult>("agent_browser_pop_in", { session, url: opts.url, binaryPath });
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
