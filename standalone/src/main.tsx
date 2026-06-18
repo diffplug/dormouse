@@ -1,13 +1,12 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { invoke } from "@tauri-apps/api/core";
 import { setPlatform } from "dormouse-lib/lib/platform";
+import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
 import { resumeOrRestore } from "dormouse-lib/lib/reconnect";
 import { setDefaultShellOpts } from "dormouse-lib/lib/shell-defaults";
 import { restoreActiveTheme } from "dormouse-lib/lib/themes";
 import App from "dormouse-lib/App";
 import "dormouse-lib/index.css";
-import { TauriAdapter } from "./tauri-adapter";
 import { UpdateBanner } from "./UpdateBanner";
 import { UpdateDebugModal } from "./UpdateDebugModal";
 import { AppBar, type ShellEntry } from "./AppBar";
@@ -19,10 +18,6 @@ import {
   openChangelog,
   buildDebugReport,
 } from "./updater";
-
-// Initialize Tauri platform adapter before rendering
-const platform = new TauriAdapter();
-setPlatform(platform);
 
 function ConnectedUpdateBanner() {
   const state = useUpdateState();
@@ -69,15 +64,30 @@ function ConnectedUpdateBanner() {
   );
 }
 
+async function createPlatform(): Promise<PlatformAdapter> {
+  const browserDevHost = import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST as string | undefined;
+  if (browserDevHost) {
+    const [{ BrowserSidecarHost }, { BrowserSidecarAdapter }] = await Promise.all([
+      import("./browser-sidecar-host"),
+      import("./browser-sidecar-adapter"),
+    ]);
+    return new BrowserSidecarAdapter(new BrowserSidecarHost(browserDevHost));
+  }
+  const { TauriAdapter } = await import("./tauri-adapter");
+  return new TauriAdapter();
+}
+
 // Await init() first to register event listeners before reconnecting
 async function bootstrap() {
+  const platform = await createPlatform();
+  setPlatform(platform);
   await platform.init();
   const { initAlertStateReceiver } = await import("dormouse-lib/lib/terminal-registry");
   initAlertStateReceiver();
   restoreActiveTheme();
 
-  // Fetch app bar data from Rust backend
-  const detectedShells = await invoke<ShellEntry[]>("get_available_shells");
+  // Fetch app bar data from the active host backend.
+  const detectedShells = await platform.getAvailableShells();
   const shells: ShellEntry[] = detectedShells.length > 0 ? detectedShells : [{ name: 'shell', path: '' }];
   const initialShell = shells[0];
   setDefaultShellOpts(initialShell ? { shell: initialShell.path, args: initialShell.args } : null);

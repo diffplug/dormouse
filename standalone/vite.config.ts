@@ -8,6 +8,7 @@ const dorDir = path.resolve(__dirname, "../dor");
 
 // https://v2.tauri.app/start/frontend/vite/
 const host = process.env.TAURI_DEV_HOST;
+const port = Number(process.env.DORMOUSE_BROWSER_DEV_VITE_PORT || 1420);
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -24,7 +25,7 @@ export default defineConfig({
   // Tauri expects a fixed port; fail if that port is not available
   server: {
     host: host || false,
-    port: 1420,
+    port,
     strictPort: true,
     hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
     fs: {

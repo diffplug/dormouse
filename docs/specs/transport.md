@@ -10,7 +10,23 @@ Each platform adapter wraps a PTY-spawning runtime and a transport channel betwe
 |---|---|---|
 | VS Code extension | extension host (Node.js) | `vscode.Webview.postMessage` ↔ `acquireVsCodeApi().postMessage` |
 | Standalone (Tauri) | sidecar process | Tauri command/event bridge |
+| Standalone browser-dev | sidecar process + local dev HTTP bridge | fetch commands + Server-Sent Events |
 | Fake (tests, playground) | in-process | direct function calls / event emitter |
+
+### Standalone browser-dev harness
+
+Source of truth: `standalone/scripts/dev-agent-browser.mjs`, `standalone/src/browser-sidecar-host.ts`, and `standalone/src/browser-sidecar-adapter.ts`.
+
+`pnpm dev:standalone:ab` starts the standalone sidecar directly, starts a localhost-only HTTP bridge, starts Vite with `VITE_DORMOUSE_BROWSER_DEV_HOST`, and opens the app URL in an `agent-browser` session. The browser build uses `BrowserSidecarAdapter` instead of `TauriAdapter` when that env var is present.
+
+The browser-dev bridge is intentionally a transport shim over the same sidecar protocol, not a second PTY implementation:
+
+- Webview → host fire-and-forget commands use `POST /__dormouse_dev_host/send`.
+- Webview → host request/response commands use `POST /__dormouse_dev_host/invoke`.
+- Host → webview events use `GET /__dormouse_dev_host/events` as an SSE stream.
+- Browser console calls are mirrored to `POST /__dormouse_dev_host/console` so a single `pnpm dev:standalone:ab` terminal shows sidecar logs, Vite logs, and in-browser diagnostics.
+
+The harness may omit native-only desktop chrome such as window controls and update checks, but it must preserve the `PlatformAdapter` PTY, control-request, clipboard, iframe-proxy, and agent-browser contracts used by the app. Tauri APIs must not be required at static module-evaluation time when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set, because the page is loaded by a normal browser rather than the Tauri WebView.
 
 ## PTY lifecycle
 
