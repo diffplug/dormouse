@@ -91,12 +91,17 @@ function Global:prompt() {
 		$result += __dormouse_633_osc "P;Cwd=$cwd"
 	}
 
-	# The user's prompt text, then prompt-end / input-start (B).
+	# The user's prompt text, then prompt-end / input-start (B). Note: $? is always
+	# $True here because Get-History and the assignments above clobbered it, so a
+	# prompt that colors itself off $? sees success regardless. $LASTEXITCODE
+	# survives (nothing reassigns it), so starship-style prompts are unaffected.
 	$result += $Global:__dormouse_633_original_prompt.Invoke()
 	$result += __dormouse_633_osc 'B'
 
-	if ($null -ne $lastHistory) {
-		$Global:__dormouse_633_last_history_id = $lastHistory.Id
-	}
+	# Clear the -1 first-prompt sentinel on every render — even when history is
+	# still empty — so the first real command is reported at the next prompt.
+	# History ids start at 1, so 0 ("empty history") never matches a real command
+	# and the guard above still suppresses the genuine first prompt's report.
+	$Global:__dormouse_633_last_history_id = if ($null -ne $lastHistory) { $lastHistory.Id } else { 0 }
 	return $result
 }
