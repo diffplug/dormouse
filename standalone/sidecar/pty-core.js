@@ -216,13 +216,14 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = 
       // detection — the safe default, since bash is near-universal on WSL); and
       // falls back to the login shell only when bash is absent (e.g. Alpine). The
       // init-file path is single-quoted for sh so spaces ("Program Files") survive.
-      const detector =
-        'u=$(whoami 2>/dev/null); '
-        + 'login=$(grep "^$u:" /etc/passwd 2>/dev/null | cut -d: -f7); '
-        + 'if command -v bash >/dev/null 2>&1; then '
-        + 'case "$login" in *zsh|*fish) exec "$login" -l;; '
-        + "*) exec bash --init-file '" + mount + "' -i;; esac; fi; "
-        + 'exec "${login:-/bin/sh}" -l';
+      // One sh statement per line for readability; joined into a single -c string.
+      const detector = [
+        'u=$(whoami 2>/dev/null);',
+        'login=$(grep "^$u:" /etc/passwd 2>/dev/null | cut -d: -f7);',
+        'if command -v bash >/dev/null 2>&1; then',
+        `case "$login" in *zsh|*fish) exec "$login" -l;; *) exec bash --init-file '${mount}' -i;; esac; fi;`,
+        'exec "${login:-/bin/sh}" -l',
+      ].join(' ');
       return { env, shellArgs: [...shellArgs, '--', 'sh', '-c', detector] };
     }
   }
