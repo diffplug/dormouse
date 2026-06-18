@@ -27,12 +27,16 @@ accurate focus model, and real error pages.
 
 ## The CLI → surface
 
-`dor iframe <url>` (`dor/src/commands/iframe.ts`) sends a `surface.iframe` control
-request; `parseIframeUrl` constrains inputs to absolute `http://`/`https://`
-(Dormouse does not infer schemes). Placement follows the shared content-surface
-rule (`lib/src/components/Wall.tsx` → `createContentSurface`): an untouched
-terminal caller is replaced in place, anything else gets a split next to the
-caller.
+`dor iframe <url>` (`dor/src/commands/iframe.ts`) sends a control request;
+`parseIframeUrl` constrains inputs to absolute `http://`/`https://` (Dormouse does
+not infer schemes). Placement follows the shared content-surface rule
+(`lib/src/components/Wall.tsx` → `createContentSurface`): an untouched terminal
+caller is replaced in place, anything else gets a split next to the caller.
+
+It opens a **`browser` surface with `renderMode: 'iframe'`** — a full
+browser-chrome tab (URL bar, back/forward, dev-server chip, render chip),
+identical chrome to `dor ab`, differing only in the rendered content (see
+"Render Backends: Two Axes" below). It is not a lesser "iframe-only" surface.
 
 `IframePanel.tsx` then asks the host to front the target with its proxy
 (`getPlatform().createIframeProxyUrl`) and frames the returned loopback URL. If
@@ -267,66 +271,131 @@ user's own `dor iframe <url>`.
 
 # Render Backends: Two Axes
 
-> **Path 1 (the swap) is implemented; Path 2 (the plugin system) is the remaining
-> roadmap.** Both reuse the proxy + shim substrate unchanged.
+> **Path 1 (the swap) is migrating to the unified `browser`-surface model below;
+> Path 2 (the plugin system) is the remaining roadmap.** Both reuse the proxy +
+> shim substrate unchanged.
 
 With the proxy in place, "view a web thing in a pane" factors into two
-**independent axes**, and the agent-browser and iframe surfaces are just cells in
-the grid:
+**independent axes**. There is exactly one content surface — **`surfaceType:
+'browser'`** — and these axes are its parameters, not separate surface types:
 
 | | **Target: just a URL** | **Target: a backend Dormouse spawns & owns** |
 | --- | --- | --- |
-| **Render: screencast** (agent-browser) | `dor ab open <url>` — today | (possible, rarely wanted) |
-| **Render: embed** (proxy + shim iframe) | `dor iframe <localhost>` — today | **the plugin system (Path 2)** |
+| **Render: `ab-screencast` / `ab-popout`** | `dor ab open <url>` — today | (possible, rarely wanted) |
+| **Render: `iframe`** (proxy + shim iframe) | `dor iframe <localhost>` — today | **the plugin system (Path 2)** |
 
-- **Render axis** = *how* you see it. `screencast` (real Chromium, agent-drivable,
-  any URL, laggy) vs `embed` (the page's own DOM, zero-lag, loopback-only, not
-  agent-drivable).
+- **Render axis** = *how* you see it, the pane's `renderMode`. The agent-browser
+  engine offers two (`ab-screencast` — real Chromium to a canvas, agent-drivable,
+  any URL, laggy; `ab-popout` — the same session relaunched headed as an OS
+  window); `iframe` is the engine-less DOM embed (the page's own DOM, zero-lag,
+  loopback-only, not agent-drivable). The `ab-` prefix names the *engine*, leaving
+  room for a future engine (`xyz-screencast`) beside it; `iframe` carries no
+  engine.
 - **Target axis** = *what* you point at. A bare URL, vs. a URL whose backend
   process Dormouse spawns and reaps.
 
-The shim and proxy live **entirely in the `embed` render backend**, which is why
+The shim and proxy live **entirely in the `iframe` render backend**, which is why
 both paths below reuse them unchanged — they differ only in which other axis they
 exercise.
 
-## Path 1 — Swappable Render Backend
+## Path 1 — One `browser` surface, swappable renderer
 
-> Status: **implemented** (lib + the VS Code and standalone hosts). Triggered from
-> the **Display modal** (the far-left header chip), whose *Render* section offers
-> the three cells of the matrix: `agent-browser screencast`, `agent-browser popout`
-> (see dor-agent-browser.md → Headed Pop-Out), and `iframe embed`.
+> Status: **migrating to the unified model below.** The swap mechanism is
+> implemented (lib + the VS Code and standalone hosts) and is triggered from the
+> **Display modal** (the far-left header chip), whose *Render* section offers
+> `ab-screencast`, `ab-popout` (see dor-agent-browser.md → Headed Pop-Out), and
+> `iframe`. The migration replaces the previous "two surface types, swap by
+> destroy-and-recreate" implementation — whose transitions lost the URL and the
+> selected mode — with the single-surface, canonical-state model here.
 
-Expose the **render axis** as a per-pane choice: same target, switch screencast ↔
-embed. This is the hedge on the agent-browser bet — if the screencast's lag is
-unacceptable for a local dev server, one gesture swaps it to the zero-lag embed.
+A browser pane is **one surface with a swappable renderer**, not three surface
+types. The render axis is a per-pane choice: same target, switch
+`ab-screencast` ↔ `ab-popout` ↔ `iframe`. This is the hedge on the agent-browser
+bet — if the screencast's lag is unacceptable for a local dev server, one gesture
+swaps it to the zero-lag iframe.
 
-**The surfaces are not fused into a dual-mode mega-component** (`AgentBrowserPanel`
-is already large and the input models differ fundamentally — CDP `input_*`
-messages vs native DOM). Instead the swap is a **layout operation: replace the
-pane's renderer in place, preserving the target.** `Wall.replaceSurface(oldId,
-{component, params, title})` generalizes `createContentSurface`'s
-replace-untouched-terminal branch — it adds the new panel `within` the old dock
-slot, closes the old surface's session, removes the old panel, and selects the
-new. A panel's `setRenderMode` action routes the cross-type case through
-`WallActions.onSwapRenderMode`.
+### Canonical pane state (the single source of truth)
 
-**The two directions are asymmetric** because of how each surface is born:
+Two things are persisted in the dockview **panel params** and are authoritative
+for *every* renderer — this is what makes a swap preserve "where you were" and
+"how you were looking at it":
 
-- **screencast → embed** is webview-only: read the active tab URL from the
-  screen controller's chrome snapshot, create an `iframe` surface for it, close
-  the now-unneeded headless browser. No host capability beyond the existing
-  session-close.
-- **embed → screencast** needs the host to spawn a session for the URL
-  (`PlatformAdapter.agentBrowserOpen` — the webview can't resolve/run the binary
-  itself), so it is gated on that capability. The Wall caches the last `dor ab`
-  `binaryPath` to spawn with. Absent ⇒ the embed surface keeps its plain title
-  (e.g. the web host).
+```ts
+// surfaceType: 'browser'
+type BrowserPaneState = {
+  url: string;                                      // the target — every renderer reads & writes it
+  renderMode: 'ab-screencast' | 'ab-popout' | 'iframe';
+  agentBrowser?: {                                  // engine state, present iff renderMode starts with `ab-`
+    session: string; wsPort?: number; binaryPath?: string; syncEngaged?: boolean;
+  };
+};
+```
 
-Both surfaces register a screen controller, so an `iframe embed` surface shows
-the same browser chrome (URL + chip) as a screencast on capable hosts. URL edits
-and Back/Forward update the pane's source URL and re-resolve the proxy; shim
-`location` reports from in-frame navigation update only the displayed URL and the
-panel's small parent-side history. Reload explicitly re-resolves the proxy.
+- **`url` is single-homed.** The iframe renderer already round-trips `params.url`;
+  the agent-browser renderer must do the same — write the active tab's URL back to
+  `params.url` whenever its chrome snapshot changes, and seed the param from the
+  `dor ab open <url>` that created it. Every transition then reads `params.url`,
+  **never** a live stream snapshot that can be empty mid-relaunch. This is the fix
+  for the previous class of swap bugs (blank-page swaps, `about:blank`
+  auto-revert): the URL had no canonical home for agent-browser and was laundered
+  from whatever happened to be live at the instant of the swap.
+- **`renderMode` is one field**, not a `(surfaceType, poppedOut)` tuple split
+  across two representations. Restore seeds straight from it. Invariant:
+  `renderMode`'s engine prefix ⇔ the matching `agentBrowser` sub-state is present.
+
+### One shell, two renderer children (not a fused component)
+
+`AgentBrowserPanel` and `IframePanel` are **not** fused into a dual-mode
+mega-component — their input models differ fundamentally (CDP `input_*` messages
+vs native DOM). Instead a thin **`BrowserPanel` shell** owns `url` + `renderMode`,
+registers the screen controller (so the browser chrome is present in *every* mode,
+unconditionally — this is why `dor iframe` is a full browser-chrome tab), and
+conditionally mounts the matching renderer **child** (`AgentBrowserContent` /
+`IframeContent`). Switching mode updates the shell's state + params and remounts
+only the child; the shell, the chrome, and the URL survive. The two renderers stay
+separate components, so the anti-fusion constraint holds while the chrome and
+target unify above them.
+
+### Render-mode transitions
+
+| From → To | Behavior |
+| --- | --- |
+| `iframe` → `ab-screencast` / `ab-popout` | **Trivial.** One frame → spawn an agent-browser session at `params.url` = one tab; no loss. Host-gated on `agentBrowserOpen` (the webview can't resolve/run the binary); the Wall caches the last `dor ab` `binaryPath` to spawn with. Absent ⇒ the swap option is hidden (e.g. the web host). |
+| `ab-screencast` ↔ `ab-popout` | Same session, relaunch headed/headless. **Silently drops all but the active tab** — accepted limitation pending profile persistence (dor-agent-browser.md → Future work). No warning. |
+| `ab-screencast` / `ab-popout` → `iframe` | If the session has **1 tab**, swap directly. If it has **≥2 tabs**, the agent-browser renderer (which owns the live tab list — the chrome snapshot carries only the active tab) shows a **warning that only the active tab transitions and the rest are closed, gated behind a typed-character confirm** (the gesture the original pop-out design reserved). On confirm, close the session and mount the iframe renderer at `params.url`. |
+
+Because `url` and `renderMode` are canonical params, a swap is no longer a fragile
+`replaceSurface` that hand-assembles state per direction; it is a renderer remount
+inside a shell that already holds both. URL edits and Back/Forward update
+`params.url` and (for the iframe renderer) re-resolve the proxy; shim `location`
+reports from in-frame navigation update only the displayed URL and the panel's
+small parent-side history. Reload explicitly re-resolves the proxy.
+
+### New tab from the iframe renderer → new pane
+
+The iframe renderer is a single frame with no tab model, but pages do try to open
+new tabs (`target=_blank`, `window.open`). Today the shim **ignores** them — its
+click handler bails on any non-`_self` target (`iframe-proxy-rewrite.ts`) and
+`window.open` is untouched — so the attempt is silently dropped, which is poor.
+Because Dormouse owns the served bytes, the shim can intercept instead: it already
+posts Dormouse-owned `leader` / `pointerdown` / `location` messages to the parent,
+so add an **`open-window`** message (from intercepted `target=_blank` clicks and a
+`window.open` override) carrying the target URL.
+
+`IframePanel`'s existing origin-validated `message` listener handles `open-window`
+by **prompting the user**, and on accept opens the URL as a **new `browser` pane**
+(split beside the current one). This is the renderer-symmetric model:
+**agent-browser holds many tabs inside one pane (the tab strip); the iframe
+renderer spreads them across panes.** Two honest limits, surfaced in the prompt
+rather than hidden:
+
+- **Proxied mode only.** The raw-iframe fallback (no proxy, e.g. the web host) has
+  no shim to intercept with, so popups there stay at the webview's mercy.
+- **Opener-coupled popups don't survive a new pane.** OAuth / payment flows that
+  `postMessage` back to `window.opener` break across a separate browsing context +
+  proxy origin. Those are exactly what agent-browser's real tabs handle natively,
+  so the prompt also offers **"switch this pane to `ab-screencast`"** for
+  popup-heavy pages — turning a silent dead-end into an informed choice.
 
 ## Path 2 — Plugin System
 

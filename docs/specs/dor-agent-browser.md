@@ -143,10 +143,12 @@ Tab behaviors:
 The browser surface's header reads like a browser: the active tab's **URL** (not
 its HTML `<title>`), Chrome-style nav controls, and the one thing only Dormouse
 can show — which pane in the workspace is serving a localhost URL. All of this is
-gated on **screen-controller presence**: a screencast surface and an `iframe
-embed` surface (on hosts that can swap render mode) both register one and get the
-full chrome; **terminals** keep their plain title header. The header is shared
-(`SurfacePaneHeader.tsx`) and already tight and responsive.
+gated on **screen-controller presence**, which a **`browser` surface registers
+unconditionally** — every render mode, including `iframe`, on every host — while
+**terminals** never do and keep their plain title header. (This is why
+`dor iframe` is a full browser-chrome tab, not a lesser iframe-only one; the
+chrome is no longer gated on the host being able to swap to a screencast.) The
+header is shared (`SurfacePaneHeader.tsx`) and already tight and responsive.
 
 ### Layout — mirror Chrome's toolbar
 
@@ -257,13 +259,14 @@ entry point to the **Display modal** (below). Its glyph reflects reality — the
 current render backend, and for a screencast whether the viewport is locked to
 the pane:
 
-- **embed** (`iframe`) — frame-corners glyph.
-- **screencast, `SYNCED`** — link glyph (viewport resizes with the pane): the
+- **`iframe`** — frame-corners glyph.
+- **`ab-screencast`, `SYNCED`** — link glyph (viewport resizes with the pane): the
   browser's live viewport (CSS pixels) equals the pane's CSS size, so the display
   maps 1:1. Matches the Display modal's *Resize with pane* control.
-- **screencast, `SCALED`** — closed-lock glyph (fixed resolution): anything else;
-  the display is letterboxed/zoomed to fit the pane. Matches *Fixed* in the modal.
-- **popped out** — box-with-arrow glyph (see Headed Pop-Out).
+- **`ab-screencast`, `SCALED`** — closed-lock glyph (fixed resolution): anything
+  else; the display is letterboxed/zoomed to fit the pane. Matches *Fixed* in the
+  modal.
+- **`ab-popout`** — box-with-arrow glyph (see Headed Pop-Out).
 
 > **UI source of truth:** the `Components/BrowserChromeHeader` Storybook story.
 
@@ -285,10 +288,10 @@ call). There is **no keyboard shortcut**.
 The chip opens the **Display modal** — the one place that owns *how* the surface
 renders. Two parts:
 
-- **Render** — swap the backend in place: `agent-browser screencast`,
-  `agent-browser popout` (Headed Pop-Out, below), or `iframe embed`
-  ([dor-iframe.md](dor-iframe.md) → Path 1). The popout option appears only when
-  the host exposes `canPopOut`.
+- **Render** — swap the backend in place: `ab-screencast`, `ab-popout`
+  (Headed Pop-Out, below), or `iframe`
+  ([dor-iframe.md](dor-iframe.md) → Path 1). The `ab-popout` option appears only
+  when the host exposes `canPopOut`.
 - **Resolution** (screencast only, greyed for the other render modes) — *Resize
   with pane*, a *Fixed* `W H DPI`, or a device from a fixed registry. Each is a
   GUI front-end for native `agent-browser set viewport` / `set device`: the modal
@@ -648,6 +651,18 @@ streamed surface is the portable baseline.
 
 - **Profile persistence** (above) — also benefits the streamed surface (logins
   survive daemon restarts), not just pop-out.
+
+  > **Accepted limitation until then — agent-browser ↔ agent-browser swaps drop
+  > tabs silently.** Every render-mode swap within agent-browser is a Chrome
+  > relaunch that carries only the active tab's URL (see "State carried (v1)"
+  > above), so switching `ab-screencast` ↔ `ab-popout` **silently closes all
+  > other tabs — no warning, no confirm.** This is deliberate: multi-tab is the
+  > rare case, the swap is user-initiated, and the auto-revert path (headed
+  > window closed) can't prompt anyway. Only crossing to the single-frame
+  > `iframe` renderer warns + requires a typed confirm (see dor-iframe.md →
+  > "Render-mode transitions"), because that's the surprising loss; staying
+  > within agent-browser is not. Profile persistence retires this by making the
+  > relaunch carry the full tab set.
 - **Re-trigger sync from the CLI** — a Dormouse-reserved `dor ab` verb, at the
   cost of the first non-passthrough subcommand.
 - **Undo/redo chords** — blocked on the upstream stream-input `commands` fix.
