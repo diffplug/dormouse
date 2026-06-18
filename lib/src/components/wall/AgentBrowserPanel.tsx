@@ -98,6 +98,16 @@ function dimsMatch(a: { w: number; h: number }, b: { w: number; h: number }): bo
 // rare tiny-viewport frame falling under the cutoff still pulses correctly.
 const FRAME_PULSE_THRESHOLD = 16384;
 
+// A pop-out/pop-in relaunch restores a single URL. A transient about:blank — a
+// stray tab the close+reopen can momentarily surface, or a freshly-relaunched
+// blank page — must never be treated as the page to restore, or the real URL is
+// lost on the way back in. Mirrors the host's usableRelaunchUrl.
+function isRestorableUrl(url: string | null | undefined): url is string {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  return trimmed !== '' && trimmed !== 'about:blank';
+}
+
 type StreamTab = {
   tabId: string;
   title: string | null;
@@ -143,6 +153,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   const [streamRecoverySeq, setStreamRecoverySeq] = useState(0);
   const [tabs, setTabs] = useState<StreamTab[]>([]);
   const knownTabIdsRef = useRef<Set<string>>(new Set());
+  const lastTabsSigRef = useRef<string>(''); // DIAG(ab-relaunch): dedupe tab logging
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   // Crossing to the single-frame iframe renderer closes all but the active tab;
@@ -403,7 +414,10 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
         maybeDisengageSync();
         publishScreen();
         // Popped out: the headed window renders; keep the stream only to observe.
-        if (!poppedOutRef.current) screenshotLoop.pulse();
+        // Mid-relaunch (close→reopen): a screenshot would relaunch the just-closed
+        // browser at about:blank, leaving a stray tab and losing the URL — suppress
+        // until the fresh stream reconnects.
+        if (!poppedOutRef.current && !relaunchingRef.current) screenshotLoop.pulse();
       } else if (msg.type === 'status') {
         setStatus({ connected: msg.connected === true, screencasting: msg.screencasting === true });
         setConnectionLost(msg.connected === false);
@@ -423,14 +437,25 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
           }));
         // Web-opened tabs (popups, target=_blank) are focused, matching
         // browser foregrounding. Skip the first message — that's catch-up,
-        // not a popup.
+        // not a popup. While popped out the user drives the headed window
+        // directly, and mid-relaunch the daemon is in flux — in both cases stay
+        // a passive observer and never reach in to switch tabs.
         const known = knownTabIdsRef.current;
-        if (known.size > 0) {
+        if (!poppedOutRef.current && !relaunchingRef.current && known.size > 0) {
           const fresh = next.filter((t) => !known.has(t.tabId));
           const newest = fresh[fresh.length - 1];
           if (newest && !newest.active) runAgentBrowser(['tab', newest.tabId]);
         }
         knownTabIdsRef.current = new Set(next.map((t) => t.tabId));
+        // DIAG(ab-relaunch): observation while popped out — does the headed
+        // window's stream reach us? Stringified (WebKit hides bare objects) and
+        // deduped by signature so only real tab changes print. Remove once the
+        // transition bug is closed.
+        const sig = JSON.stringify({ p: poppedOutRef.current, w: wsPort, t: next.map((t) => `${t.tabId}:${t.active ? 'A' : '-'}:${t.url}`) });
+        if (sig !== lastTabsSigRef.current) {
+          lastTabsSigRef.current = sig;
+          console.log(`[ab-panel] tabs msg ${sig}`);
+        }
         setTabs(next);
       }
     };
@@ -443,6 +468,8 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
         url = null;
       }
       if (disposed) return;
+      // DIAG(ab-relaunch): which port the panel is actually streaming from.
+      console.log(`[ab-panel] connecting stream ${JSON.stringify({ wsPort, url: url ?? `ws://127.0.0.1:${wsPort}`, poppedOut: poppedOutRef.current })}`);
       ws = new WebSocket(url ?? `ws://127.0.0.1:${wsPort}`);
       wsRef.current = ws;
       ws.onopen = () => {
@@ -455,7 +482,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
         // ~150-220 KB payload. Smaller messages (status / tabs) go to handleMessage.
         const data = ev.data;
         if (typeof data === 'string' && data.length > FRAME_PULSE_THRESHOLD) {
-          if (!poppedOutRef.current) screenshotLoop.pulse();
+          if (!poppedOutRef.current && !relaunchingRef.current) screenshotLoop.pulse();
           return;
         }
         handleMessage(data);
@@ -492,6 +519,12 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   // panel params so the normal WebSocket effect reconnects.
   useEffect(() => {
     if (!session) return;
+    // Critical: do NOT query the daemon mid-relaunch. A pop-out/pop-in close+kills
+    // the daemon before reopening; querying `stream status` in that window spawns
+    // a fresh COMPETING headless daemon on a different port and pins the panel to
+    // it — so the panel ends up streaming an about:blank ghost instead of the
+    // headed window. The host hands back the authoritative port when it's done.
+    if (relaunchingRef.current) return;
     if (wsPort && !connectionLost && status?.connected !== false) return;
     const fn = getPlatform().agentBrowserStreamStatus;
     if (!fn) return;
@@ -568,8 +601,10 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
     });
     // Don't reconcile to the current (headless) port first — it's about to close.
     // Connect to the headed window's fresh port once the relaunch returns it.
-    const url = paramsUrlRef.current || chromeSnapshotRef.current.url || undefined;
+    const url = [paramsUrlRef.current, chromeSnapshotRef.current.url].find(isRestorableUrl);
+    console.log(`[ab-panel] popOut -> ${JSON.stringify({ session, url })}`);
     fn(session, { rect: paneScreenRect(elRef.current), url }, binaryPathRef.current).then((res) => {
+      console.log(`[ab-panel] popOut result ${JSON.stringify(res)}`);
       if (closeIfSessionMarkedClosed(session)) return;
       if (!res.ok) {
         void revertUnlessLive();
@@ -577,7 +612,8 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
       }
       void reconcileStreamPort(res.wsPort);
       relaunchingRef.current = false;
-    }).catch(() => {
+    }).catch((err) => {
+      console.log(`[ab-panel] popOut error ${String(err)}`);
       if (closeIfSessionMarkedClosed(session)) return;
       void revertUnlessLive();
     });
@@ -585,19 +621,28 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
 
   const popIn = useCallback(() => {
     if (closeIfSessionMarkedClosed(session)) return;
+    // Same expected mid-relaunch stream drop as pop-out: suppress screenshot
+    // pulses so none relaunches the just-closed browser at about:blank.
+    relaunchingRef.current = true;
     setPoppedOut(false);
     api.updateParameters({ renderMode: 'ab-screencast' });
     const fn = getPlatform().agentBrowserPopIn;
-    if (!session || !fn) return;
-    void reconcileStreamPort();
-    const url = paramsUrlRef.current || chromeSnapshotRef.current.url || undefined;
+    if (!session || !fn) { relaunchingRef.current = false; return; }
+    // Don't reconcile to the current (headed) port first — the host is about to
+    // kill that daemon. Querying now would spawn a competing daemon (see the
+    // recovery-effect note). Connect to the fresh port the host returns.
+    const url = [paramsUrlRef.current, chromeSnapshotRef.current.url].find(isRestorableUrl);
+    console.log(`[ab-panel] popIn -> ${JSON.stringify({ session, url })}`);
     fn(session, { url }, binaryPathRef.current).then((res) => {
-      if (closeIfSessionMarkedClosed(session)) return;
+      console.log(`[ab-panel] popIn result ${JSON.stringify(res)}`);
+      if (closeIfSessionMarkedClosed(session)) { relaunchingRef.current = false; return; }
       if (res.ok) void reconcileStreamPort(res.wsPort);
       else void reconcileStreamPort();
+      relaunchingRef.current = false;
     }).catch(() => {
-      if (closeIfSessionMarkedClosed(session)) return;
+      if (closeIfSessionMarkedClosed(session)) { relaunchingRef.current = false; return; }
       void reconcileStreamPort();
+      relaunchingRef.current = false;
     });
   }, [session, api, reconcileStreamPort, closeIfSessionMarkedClosed]);
 
@@ -679,7 +724,14 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   // it does not re-fire.
   useEffect(() => {
     const url = chromeSnapshot.url;
-    if (url && url !== paramsUrlRef.current) api.updateParameters({ url });
+    // Track the active tab faithfully so url is always the page the user is on —
+    // this is the source of truth the relaunch (pop-out/pop-in/auto-revert)
+    // reads. Two guards: freeze while a relaunch is in flight (the active tab is
+    // momentarily a blank/booting page that must not overwrite the real target),
+    // and never record a transient about:blank.
+    if (!relaunchingRef.current && isRestorableUrl(url) && url !== paramsUrlRef.current) {
+      api.updateParameters({ url });
+    }
   }, [chromeSnapshot.url, api]);
 
   // Push the render-mode flip (screencast ↔ popout) to the header/modal.

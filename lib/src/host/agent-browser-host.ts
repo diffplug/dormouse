@@ -168,17 +168,94 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     return trimmed;
   }
 
-  async function readCurrentUrl(session: string, binaryPath?: string): Promise<string | undefined> {
-    const result = await runWithBinaryFallback(['--session', session, 'get', 'url'], binaryPath);
-    if (result.exitCode !== 0) return undefined;
-    return usableRelaunchUrl(result.stdout.split(/\r?\n/).find((line) => line.trim().length > 0));
+  interface SessionTab { tabId: string; url: string; active: boolean }
+
+  // Enumerate a session's tabs via `tab list --json`. Envelope mirrors the rest
+  // of the CLI parsing here: { tabs } or { data: { tabs } }. Returns [] on any
+  // failure so callers degrade gracefully.
+  async function listTabs(session: string, binaryPath?: string): Promise<SessionTab[]> {
+    const result = await runWithBinaryFallback(['--session', session, 'tab', 'list', '--json'], binaryPath);
+    if (result.exitCode !== 0) return [];
+    try {
+      const parsed = JSON.parse(result.stdout) as { tabs?: unknown; data?: { tabs?: unknown } };
+      const raw = parsed.data?.tabs ?? parsed.tabs;
+      if (!Array.isArray(raw)) return [];
+      return raw
+        .filter((t): t is Record<string, unknown> => typeof (t as { tabId?: unknown })?.tabId === 'string')
+        .map((t) => ({
+          tabId: t.tabId as string,
+          url: typeof t.url === 'string' ? t.url : '',
+          active: t.active === true,
+        }));
+    } catch {
+      return [];
+    }
   }
 
-  async function resolveRelaunchUrl(session: string, requestedUrl: unknown, binaryPath?: string): Promise<string> {
-    // The webview's tab snapshot can lag behind the daemon, especially while
-    // swapping headed/headless modes. Query the live session immediately before
-    // closing it so pop-out/pop-in preserves the page the user is actually on.
-    return (await readCurrentUrl(session, binaryPath)) ?? usableRelaunchUrl(requestedUrl) ?? 'about:blank';
+  // Dormouse is the source of truth for the relaunch target: the panel observes
+  // the live `tabs` stream and tracks the active tab's URL in its params, then
+  // passes it here. We deliberately do NOT re-query the daemon — right after
+  // `close` the daemon relaunches at about:blank, so a `get url` / `tab list`
+  // would race the very transition it's meant to preserve and hand back blank.
+  function relaunchUrl(requestedUrl: unknown): string {
+    return usableRelaunchUrl(requestedUrl) ?? 'about:blank';
+  }
+
+  // agent-browser keeps a long-lived per-session daemon whose headed/headless
+  // mode is fixed at *its* launch. `close` only closes the browser, not the
+  // daemon, and there is no CLI verb to stop it — so a `--headed`/headless
+  // relaunch against a live daemon is silently ignored ("daemon already
+  // running"), and pop-out/pop-in never actually switches mode. The daemon's pid
+  // lives in `$AGENT_BROWSER_SOCKET_DIR/<session>.pid` (default ~/.agent-browser);
+  // terminate it and wait for the process to exit so the next `open` spawns a
+  // fresh daemon in the mode we ask for. Best-effort and cross-platform
+  // (process.kill works on win/mac/linux).
+  function agentBrowserStateDir(): string {
+    return process.env.AGENT_BROWSER_SOCKET_DIR || path.join(os.homedir(), '.agent-browser');
+  }
+
+  async function killDaemon(session: string): Promise<void> {
+    const pidFile = path.join(agentBrowserStateDir(), `${session}.pid`);
+    let pid: number;
+    try {
+      pid = Number.parseInt((await fs.readFile(pidFile, 'utf8')).trim(), 10);
+    } catch {
+      return; // no pid file — nothing to kill (already gone, or custom dir)
+    }
+    if (!Number.isInteger(pid) || pid <= 0) return;
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      return; // ESRCH: already dead
+    }
+    // Wait for the process to actually exit (signal 0 throws once it's gone), so
+    // the relaunch doesn't race a daemon that's still shutting down.
+    for (let i = 0; i < 40; i++) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        log(`[ab-relaunch] daemon ${pid} for ${session} exited after ${i * 50}ms`);
+        return;
+      }
+      await delay(50);
+    }
+    log(`[ab-relaunch] daemon ${pid} for ${session} still alive after 2s; SIGKILL`);
+    try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ }
+  }
+
+  // After a relaunch, close any stray about:blank tab the close+reopen race can
+  // leave behind — but only when a real page is open, so we never close the sole
+  // tab. Best-effort: a failure here must not fail the pop-out/pop-in.
+  async function closeStrayBlankTabs(session: string, binaryPath?: string): Promise<void> {
+    const tabs = await listTabs(session, binaryPath);
+    log(`[ab-relaunch] tabs after open: ${JSON.stringify(tabs)}`);
+    if (tabs.length < 2 || !tabs.some((t) => usableRelaunchUrl(t.url))) return;
+    for (const tab of tabs) {
+      if (!usableRelaunchUrl(tab.url)) {
+        log(`[ab-relaunch] closing stray blank tab ${tab.tabId}`);
+        await runWithBinaryFallback(['--session', session, 'tab', 'close', tab.tabId], binaryPath);
+      }
+    }
   }
 
   // A fresh managed session for a surface spawned from the GUI (no `--key`),
@@ -323,15 +400,22 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     binaryPath?: string,
   ): Promise<AgentBrowserPopResult> {
     if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
-    const url = await resolveRelaunchUrl(session, opts?.url, binaryPath);
+    const url = relaunchUrl(opts?.url);
+    log(`[ab-relaunch] popOut session=${session} requestedUrl=${JSON.stringify(opts?.url)} -> open ${url}`);
+    // Close the browser, then fully stop the daemon so the headed relaunch isn't
+    // ignored as "daemon already running" (which would leave it headless).
     await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
+    await killDaemon(session);
     const opened = await runWithBinaryFallback(['--session', session, '--headed', 'open', url], binaryPath);
+    log(`[ab-relaunch] popOut headed-open exit=${opened.exitCode}${opened.stderr.trim() ? ` stderr=${opened.stderr.trim()}` : ''}`);
     if (opened.exitCode !== 0) {
       return { ok: false, error: opened.stderr.trim() || `headed open exited ${opened.exitCode}` };
     }
     // Now a real headed OS window — track it so shutdown can close it.
     poppedOutSessions.set(session, binaryPath);
+    await closeStrayBlankTabs(session, binaryPath);
     const wsPort = await readStreamPort(session, binaryPath);
+    log(`[ab-relaunch] popOut returning wsPort=${wsPort}`);
     return { ok: true, ...(wsPort ? { wsPort } : {}) };
   }
 
@@ -343,15 +427,22 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     binaryPath?: string,
   ): Promise<AgentBrowserPopResult> {
     if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
-    const url = await resolveRelaunchUrl(session, opts?.url, binaryPath);
+    const url = relaunchUrl(opts?.url);
+    log(`[ab-relaunch] popIn session=${session} requestedUrl=${JSON.stringify(opts?.url)} -> open ${url}`);
+    // Reverse of pop-out: the daemon is headed, so a plain `open` would reattach
+    // to it and stay headed. Stop the daemon so the relaunch comes up headless.
     await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
+    await killDaemon(session);
     // The headed window is gone after the close above; back to headless.
     poppedOutSessions.delete(session);
     const opened = await runWithBinaryFallback(['--session', session, 'open', url], binaryPath);
+    log(`[ab-relaunch] popIn open exit=${opened.exitCode}${opened.stderr.trim() ? ` stderr=${opened.stderr.trim()}` : ''}`);
     if (opened.exitCode !== 0) {
       return { ok: false, error: opened.stderr.trim() || `open exited ${opened.exitCode}` };
     }
+    await closeStrayBlankTabs(session, binaryPath);
     const wsPort = await readStreamPort(session, binaryPath);
+    log(`[ab-relaunch] popIn returning wsPort=${wsPort}`);
     return { ok: true, ...(wsPort ? { wsPort } : {}) };
   }
 
