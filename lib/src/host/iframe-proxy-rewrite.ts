@@ -63,9 +63,22 @@ export const IFRAME_SHIM = `(function(){
   addEventListener('pointerdown',function(){post('pointerdown');},true);
   addEventListener('click',function(e){
     var a=anchorHref(e);
-    if(!a||a.target&&a.target!=='_self'||a.hasAttribute('download'))return;
+    if(!a||a.hasAttribute('download'))return;
+    if(a.target&&a.target!=='_self'){
+      // New-tab/window link: the iframe renderer is single-frame, so hand the
+      // URL to Dormouse to open as a new pane instead of letting it vanish.
+      e.preventDefault();
+      post('open-window',{url:String(a.href)});
+      return;
+    }
     post('location',{url:String(a.href)});
   },true);
+  // window.open is likewise single-frame-hostile; redirect it to a new pane.
+  try{window.open=function(u){
+    var url='';try{url=u?String(new URL(String(u),location.href)):'';}catch(_e){url=String(u||'');}
+    post('open-window',{url:url});
+    return null;
+  };}catch(_e){}
   addEventListener('popstate',postLocation,true);
   addEventListener('hashchange',postLocation,true);
   addEventListener('pageshow',postLocation,true);

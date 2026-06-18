@@ -88,6 +88,9 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
   usePaneChrome(api, elRef);
   const sourceUrl = typeof params?.url === 'string' ? params.url : '';
   const [liveUrl, setLiveUrl] = useState(sourceUrl);
+  // A new-tab/window request from the proxy shim, pending the user's choice to
+  // open it as a new pane (docs/specs/dor-iframe.md → "New tab ... → new pane").
+  const [pendingOpenUrl, setPendingOpenUrl] = useState<string | null>(null);
   const [history, setHistory] = useState<IframeHistory>(() => (
     sourceUrl ? { entries: [sourceUrl], index: 0 } : { entries: [], index: -1 }
   ));
@@ -255,6 +258,13 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
         actions.onClickPanel(api.id);
         return;
       }
+      if (data?.__dormouse === 'open-window' && typeof data.url === 'string') {
+        // Single-frame renderer: a new-tab/window request becomes a new pane.
+        // Map a proxy-origin URL back to the upstream; pass externals through.
+        const mapped = upstreamUrlFromFrameLocation(data.url, liveUrl || sourceUrl, proxyOrigin) ?? data.url;
+        setPendingOpenUrl(mapped);
+        return;
+      }
       if (data?.__dormouse === 'location') {
         const nextUrl = upstreamUrlFromFrameLocation(data.url, liveUrl || sourceUrl, proxyOrigin);
         if (nextUrl) observeFrameUrl(nextUrl);
@@ -331,6 +341,40 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
         />
       ) : (
         <PanelMessage resolution={resolution} url={sourceUrl} />
+      )}
+      {pendingOpenUrl && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-terminal-bg/95 px-6 text-center">
+          <div className="max-w-sm text-sm text-foreground">
+            This page wants to open a new tab:
+            <div className="mt-1 break-all font-mono text-xs text-muted">{pendingOpenUrl}</div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                const u = pendingOpenUrl;
+                setPendingOpenUrl(null);
+                if (u) actions.onOpenBrowserPane?.(api.id, u);
+              }}
+              className="rounded border border-border px-2.5 py-1 text-sm text-foreground transition-colors hover:border-foreground"
+            >
+              Open in new pane
+            </button>
+            <button
+              type="button"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); setPendingOpenUrl(null); }}
+              className="rounded border border-border px-2.5 py-1 text-sm text-muted transition-colors hover:text-foreground"
+            >
+              Cancel
+            </button>
+          </div>
+          <div className="text-xs text-muted/80">
+            Pages that open many tabs work better in agent-browser — open the chip → Render.
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1618,7 +1618,22 @@ export function Wall({
         });
       }
     },
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface]);
+    onOpenBrowserPane: (id, url) => {
+      const api = apiRef.current;
+      if (!api) return;
+      // A new-tab request from the iframe shim → open the URL as a new iframe
+      // browser pane, split next to the source (docs/specs/dor-iframe.md →
+      // "New tab from the iframe renderer → new pane").
+      const reference = buildDorSurfaces(api).find((s) => s.id === id);
+      if (!reference) return;
+      createContentSurface({
+        minimized: false,
+        params: { surfaceType: 'browser', renderMode: 'iframe', url },
+        reference,
+        title: hostPathDisplay(url, true),
+      });
+    },
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface]);
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
 

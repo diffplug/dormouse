@@ -84,6 +84,12 @@ describe('instrumentHtml', () => {
     expect(IFRAME_SHIM).toContain("addEventListener('click'");
     expect(IFRAME_SHIM).toContain('pushState');
   });
+
+  it('intercepts new-tab attempts (target=_blank / window.open) as open-window', () => {
+    expect(IFRAME_SHIM).toContain("'open-window'");
+    // window.open is overridden so popups become a new pane rather than vanishing.
+    expect(IFRAME_SHIM).toContain('window.open=function');
+  });
 });
 
 describe('isLoopbackHost', () => {

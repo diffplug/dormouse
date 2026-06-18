@@ -44,6 +44,11 @@ export interface WallActions {
    *  surface-type replacement; screencast ↔ popout is handled inside the
    *  agent-browser panel and does not route here. */
   onSwapRenderMode: (id: string, mode: RenderMode) => void;
+  /** Open a URL as a new iframe browser pane, split next to `id`. The iframe
+   *  renderer is single-frame, so a page's new-tab request (target=_blank /
+   *  window.open, surfaced by the proxy shim) becomes a new pane
+   *  (docs/specs/dor-iframe.md → "New tab from the iframe renderer → new pane"). */
+  onOpenBrowserPane?: (id: string, url: string) => void;
 }
 
 export const WallActionsContext = createContext<WallActions>({
@@ -60,6 +65,7 @@ export const WallActionsContext = createContext<WallActions>({
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
   onSwapRenderMode: () => {},
+  onOpenBrowserPane: () => {},
 });
 
 export const RenamingIdContext = createContext<string | null>(null);
