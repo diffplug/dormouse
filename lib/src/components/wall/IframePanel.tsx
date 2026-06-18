@@ -185,11 +185,13 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     applyDevice() {},
     applyViewport() {},
     openModal() { openAgentBrowserScreenModal(api.id); },
-    setRenderMode(mode) {
-      // embed is the current backend; screencast/popout swap to agent-browser.
-      if (mode !== 'iframe') actionsRef.current.onSwapRenderMode(api.id, mode);
-    },
-  }), [api.id]);
+    // iframe is the current backend; ab-screencast / ab-popout swap to
+    // agent-browser. Wired only when the host can spawn one — without it the
+    // modal hides its Render section, but the chrome (URL/nav) still shows.
+    setRenderMode: swapCapable
+      ? (mode) => { if (mode !== 'iframe') actionsRef.current.onSwapRenderMode(api.id, mode); }
+      : undefined,
+  }), [api.id, swapCapable]);
   const chromeActions = useMemo<ChromeActions>(() => ({
     navigate(next) { commitUrl(next); },
     back() { goToHistoryIndex(historyIndexRef.current - 1); },
@@ -197,8 +199,11 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     reload() { setReloadNonce((n) => n + 1); },
   }), [commitUrl, goToHistoryIndex]);
   const registrationRef = useRef<ScreenRegistration | null>(null);
+  // Register the screen controller unconditionally so the browser chrome (URL +
+  // far-left chip) shows for every iframe surface, on every host — `dor iframe`
+  // is a full browser-chrome tab, not a lesser one (docs/specs/dor-iframe.md).
+  // The render-swap action is gated separately (screenActions.setRenderMode).
   useEffect(() => {
-    if (!swapCapable) return;
     const registration = registerAgentBrowserScreen(api.id, {
       snapshot: {
         state: 'SYNCED',

@@ -18,6 +18,7 @@ import {
   registerAgentBrowserScreen,
   type ChromeActions,
   type ChromeSnapshot,
+  type RenderMode,
   type ScreenActions,
   type ScreenRegistration,
   type ScreenSnapshot,
@@ -43,6 +44,8 @@ import {
 
 type AgentBrowserPanelParams = {
   surfaceType?: string;
+  /** Canonical render backend; the BrowserPanel shell also passes it as a prop. */
+  renderMode?: RenderMode;
   session?: string;
   key?: string;
   wsPort?: number;
@@ -119,7 +122,7 @@ function decodeScreencastFrame(dataBase64: string): Promise<ImageBitmap> {
   return createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
 }
 
-export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrowserPanelParams>) {
+export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: IDockviewPanelProps<AgentBrowserPanelParams> & { renderMode?: RenderMode }) {
   const actions = useContext(WallActionsContext);
   // Stable handle so the screen controller (registered once) can reach the live
   // Wall actions — used by setRenderMode to trigger an in-place surface swap.
@@ -150,7 +153,10 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
 
   // Pop-out state: while true the browser runs in a headed OS window and the
   // pane is a stub. Seeded from params so it survives a re-attach.
-  const [poppedOut, setPoppedOut] = useState<boolean>(params?.poppedOut === true);
+  // poppedOut is derived from the canonical renderMode the shell passes; fall
+  // back to params for a direct mount (tests) or a legacy layout blob.
+  const seededMode = renderModeProp ?? params?.renderMode ?? (params?.poppedOut ? 'ab-popout' : undefined);
+  const [poppedOut, setPoppedOut] = useState<boolean>(seededMode === 'ab-popout');
   const poppedOutRef = useRef(poppedOut);
   poppedOutRef.current = poppedOut;
   // Gate auto-revert: only treat a dropped stream as "window closed" once the
@@ -563,13 +569,13 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     if (closeIfSessionMarkedClosed(session)) return;
     headedConnectedRef.current = false;
     setPoppedOut(true);
-    api.updateParameters({ poppedOut: true });
+    api.updateParameters({ renderMode: 'ab-popout' });
     void reconcileStreamPort();
     // Pop-out failed: revert to in-pane unless the stream came back live anyway.
     const revertUnlessLive = () => reconcileStreamPort().then((live) => {
       if (live) return;
       setPoppedOut(false);
-      api.updateParameters({ poppedOut: false });
+      api.updateParameters({ renderMode: 'ab-screencast' });
     });
     const url = paramsUrlRef.current || chromeSnapshotRef.current.url || undefined;
     fn(session, { rect: paneScreenRect(elRef.current), url }, binaryPathRef.current).then((res) => {
@@ -588,7 +594,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   const popIn = useCallback(() => {
     if (closeIfSessionMarkedClosed(session)) return;
     setPoppedOut(false);
-    api.updateParameters({ poppedOut: false });
+    api.updateParameters({ renderMode: 'ab-screencast' });
     const fn = getPlatform().agentBrowserPopIn;
     if (!session || !fn) return;
     void reconcileStreamPort();

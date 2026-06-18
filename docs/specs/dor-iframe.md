@@ -364,9 +364,14 @@ target unify above them.
 | `ab-screencast` ↔ `ab-popout` | Same session, relaunch headed/headless. **Silently drops all but the active tab** — accepted limitation pending profile persistence (dor-agent-browser.md → Future work). No warning. |
 | `ab-screencast` / `ab-popout` → `iframe` | If the session has **1 tab**, swap directly. If it has **≥2 tabs**, the agent-browser renderer (which owns the live tab list — the chrome snapshot carries only the active tab) shows a **warning that only the active tab transitions and the rest are closed, gated behind a typed-character confirm** (the gesture the original pop-out design reserved). On confirm, close the session and mount the iframe renderer at `params.url`. |
 
-Because `url` and `renderMode` are canonical params, a swap is no longer a fragile
-`replaceSurface` that hand-assembles state per direction; it is a renderer remount
-inside a shell that already holds both. URL edits and Back/Forward update
+Because `url` and `renderMode` are canonical params, a swap preserves both no
+matter the mechanism. Same-engine `ab-screencast` ↔ `ab-popout` is an in-panel
+relaunch (no surface swap). A cross-renderer `ab-*` ↔ `iframe` swap still recreates
+the pane through `Wall.replaceSurface` — the iframe renderer needs dockview's
+`renderer:'always'` (fixed at panel creation), so it can't be a pure in-place child
+remount — but it is no longer fragile: it reads `url` / `renderMode` from params
+instead of hand-assembling state from a possibly-empty live snapshot. URL edits and
+Back/Forward update
 `params.url` and (for the iframe renderer) re-resolve the proxy; shim `location`
 reports from in-frame navigation update only the displayed URL and the panel's
 small parent-side history. Reload explicitly re-resolves the proxy.

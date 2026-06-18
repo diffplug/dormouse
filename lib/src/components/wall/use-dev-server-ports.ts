@@ -50,8 +50,12 @@ type ResolveOutcome = 'busy' | 'idle' | 'pending';
 
 function isTerminalParams(params: unknown): boolean {
   if (!params || typeof params !== 'object') return true;
-  const surfaceType = (params as { surfaceType?: unknown }).surfaceType;
-  return surfaceType !== 'iframe' && surfaceType !== 'agent-browser';
+  const p = params as { surfaceType?: unknown; renderMode?: unknown };
+  // A browser surface (unified 'browser', a legacy iframe/agent-browser blob, or
+  // anything carrying a renderMode) is not a terminal.
+  const isBrowser = p.surfaceType === 'browser' || p.surfaceType === 'iframe'
+    || p.surfaceType === 'agent-browser' || typeof p.renderMode === 'string';
+  return !isBrowser;
 }
 
 function isTerminalDoor(door: DooredItem): boolean {

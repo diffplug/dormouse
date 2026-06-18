@@ -99,7 +99,7 @@ describe('AgentBrowserPanel render mode controller', () => {
     });
 
     expect(popOut).toHaveBeenCalledWith('browser-session', expect.objectContaining({ url: undefined }), undefined);
-    expect(updateParameters).toHaveBeenCalledWith({ poppedOut: true });
+    expect(updateParameters).toHaveBeenCalledWith({ renderMode: 'ab-popout' });
     expect(getAgentBrowserScreenController('ab-panel')?.snapshot().renderMode).toBe('ab-popout');
     expect(container.textContent).toContain('This browser is running in a separate window.');
   });
@@ -118,8 +118,8 @@ describe('AgentBrowserPanel render mode controller', () => {
 
     await renderPanel({
       ...panelProps('ab-panel', updateParameters),
-      params: { surfaceType: 'agent-browser', session: 'browser-session', poppedOut: true },
-    } as unknown as IDockviewPanelProps<{ surfaceType: string; session: string; poppedOut: boolean }>);
+      params: { surfaceType: 'browser', renderMode: 'ab-popout', session: 'browser-session' },
+    } as unknown as IDockviewPanelProps<{ surfaceType: string; renderMode: string; session: string }>);
 
     expect(getAgentBrowserScreenController('ab-panel')?.snapshot().renderMode).toBe('ab-popout');
 
@@ -128,7 +128,7 @@ describe('AgentBrowserPanel render mode controller', () => {
     });
 
     expect(popIn).toHaveBeenCalledWith('browser-session', expect.objectContaining({ url: undefined }), undefined);
-    expect(updateParameters).toHaveBeenCalledWith({ poppedOut: false });
+    expect(updateParameters).toHaveBeenCalledWith({ renderMode: 'ab-screencast' });
     expect(getAgentBrowserScreenController('ab-panel')?.snapshot().renderMode).toBe('ab-screencast');
   });
 });
