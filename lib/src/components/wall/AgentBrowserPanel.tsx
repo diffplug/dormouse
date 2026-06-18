@@ -169,6 +169,10 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   // Gate auto-revert: only treat a dropped stream as "window closed" once the
   // headed stream has actually connected (avoids reverting mid-relaunch).
   const headedConnectedRef = useRef(false);
+  // True while a headed↔headless relaunch is in flight. The relaunch closes the
+  // current stream before reopening on a new port, so that expected drop must
+  // not be read as "the headed window closed" (it would auto-revert mid-pop-out).
+  const relaunchingRef = useRef(false);
 
   const binaryPath = params?.binaryPath;
   const runAgentBrowser = useCallback((args: string[]) => {
@@ -575,15 +579,18 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
     if (!session || !fn) return;
     if (closeIfSessionMarkedClosed(session)) return;
     headedConnectedRef.current = false;
+    relaunchingRef.current = true;
     setPoppedOut(true);
     api.updateParameters({ renderMode: 'ab-popout' });
-    void reconcileStreamPort();
     // Pop-out failed: revert to in-pane unless the stream came back live anyway.
     const revertUnlessLive = () => reconcileStreamPort().then((live) => {
+      relaunchingRef.current = false;
       if (live) return;
       setPoppedOut(false);
       api.updateParameters({ renderMode: 'ab-screencast' });
     });
+    // Don't reconcile to the current (headless) port first — it's about to close.
+    // Connect to the headed window's fresh port once the relaunch returns it.
     const url = paramsUrlRef.current || chromeSnapshotRef.current.url || undefined;
     fn(session, { rect: paneScreenRect(elRef.current), url }, binaryPathRef.current).then((res) => {
       if (closeIfSessionMarkedClosed(session)) return;
@@ -592,6 +599,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
         return;
       }
       void reconcileStreamPort(res.wsPort);
+      relaunchingRef.current = false;
     }).catch(() => {
       if (closeIfSessionMarkedClosed(session)) return;
       void revertUnlessLive();
@@ -713,6 +721,8 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   // apart so we don't resurrect a session that's being torn down.
   useEffect(() => {
     if (!poppedOut) { headedConnectedRef.current = false; return; }
+    // The expected mid-relaunch drop isn't the window closing — ignore it.
+    if (relaunchingRef.current) return;
     if (status?.connected === true) headedConnectedRef.current = true;
     else if (headedConnectedRef.current && (status?.connected === false || connectionLost)) {
       if (sessionRef.current && isAgentBrowserSessionClosed(sessionRef.current)) return;
