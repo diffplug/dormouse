@@ -138,6 +138,17 @@ function shellStem(shell) {
   return base.toLowerCase().replace(/\.exe$/, '');
 }
 
+// Translate a Windows path to its WSL mount path (`C:\a\b` -> `/mnt/c/a/b`) so a
+// script on the Windows filesystem can be referenced from inside a distro. Strips
+// the `\\?\` verbatim prefix. Assumes the default automount root (`/mnt`); a
+// distro that remaps it via /etc/wsl.conf won't resolve, and injection is skipped.
+function winPathToWslMount(winPath) {
+  const stripped = String(winPath).replace(/^\\\\\?\\/, '');
+  const match = /^([A-Za-z]):[\\/]([\s\S]*)$/.exec(stripped);
+  if (!match) return null;
+  return `/mnt/${match[1].toLowerCase()}/${match[2].replace(/\\/g, '/')}`;
+}
+
 // Enable OSC 633 shell integration for shells that support reliable injection,
 // returning possibly-modified { env, shellArgs }. The keystroke-based command
 // heuristic remains the fallback for shells we can't inject (cmd.exe, others)
@@ -157,6 +168,12 @@ function shellStem(shell) {
 //        first; the dot-sourced script then wraps their `prompt`. Augments an
 //        interactive launch that already runs a startup command (so the VS
 //        "Developer PowerShell" is covered); skips non-interactive one-offs.
+// WSL  — `wsl.exe -d <distro>` launches the distro's login shell, where the
+//        Windows-side injection can't reach. We append a `sh -c` detector that
+//        execs bash with our `--init-file` (the bash script on the Windows FS,
+//        referenced via its `/mnt/...` path) when the user's login shell is bash,
+//        and otherwise execs their login shell unchanged — so non-bash users keep
+//        their shell. bash is the only WSL shell we integrate for now.
 function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = {}) {
   const fsModule = runtime.fsModule || fs;
   const stem = shellStem(shell);
@@ -183,6 +200,30 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = 
     if (fileExists(script, fsModule)) {
       const integratedArgs = powerShellIntegratedArgs(shellArgs, script);
       if (integratedArgs) return { env, shellArgs: integratedArgs };
+    }
+  }
+
+  // WSL: only the standard `-d <distro>` launch (the shape the picker emits).
+  if (stem === 'wsl' && shellArgs.length === 2 && shellArgs[0] === '-d') {
+    const script = path.join(integrationDir, 'bash', 'shellIntegration.bash');
+    const mount = winPathToWslMount(script);
+    if (mount && fileExists(script, fsModule)) {
+      // A `sh -c` detector, passed as one argv element so node-pty hands it to
+      // wsl.exe → sh verbatim (no shell-quoting games). It reads the login shell
+      // from /etc/passwd (NSS-independent, unlike getent which flaked on cold
+      // starts) and: steps aside for an explicit zsh/fish login shell; otherwise
+      // execs bash with our init-file when bash exists (covering bash and an empty
+      // detection — the safe default, since bash is near-universal on WSL); and
+      // falls back to the login shell only when bash is absent (e.g. Alpine). The
+      // init-file path is single-quoted for sh so spaces ("Program Files") survive.
+      const detector =
+        'u=$(whoami 2>/dev/null); '
+        + 'login=$(grep "^$u:" /etc/passwd 2>/dev/null | cut -d: -f7); '
+        + 'if command -v bash >/dev/null 2>&1; then '
+        + 'case "$login" in *zsh|*fish) exec "$login" -l;; '
+        + "*) exec bash --init-file '" + mount + "' -i;; esac; fi; "
+        + 'exec "${login:-/bin/sh}" -l';
+      return { env, shellArgs: [...shellArgs, '--', 'sh', '-c', detector] };
     }
   }
 

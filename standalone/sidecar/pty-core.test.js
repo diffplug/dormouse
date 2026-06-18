@@ -639,6 +639,50 @@ test('resolveSpawnConfig falls back to no args when the pwsh script is not prese
   assert.deepEqual(config.shellArgs, []);
 });
 
+test('resolveSpawnConfig injects WSL bash integration via a sh -c detector', () => {
+  const config = resolveSpawnConfig(
+    { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'] },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: 'C:\\Program Files\\Dormouse\\shell-integration',
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  // -d Ubuntu is preserved; the detector execs bash with our init-file (referenced
+  // by its /mnt path, single-quoted so the "Program Files" space survives).
+  const detector =
+    'u=$(whoami 2>/dev/null); '
+    + 'login=$(grep "^$u:" /etc/passwd 2>/dev/null | cut -d: -f7); '
+    + 'if command -v bash >/dev/null 2>&1; then '
+    + 'case "$login" in *zsh|*fish) exec "$login" -l;; '
+    + "*) exec bash --init-file "
+    + "'/mnt/c/Program Files/Dormouse/shell-integration/bash/shellIntegration.bash' -i;; esac; fi; "
+    + 'exec "${login:-/bin/sh}" -l';
+  assert.deepEqual(config.shellArgs, ['-d', 'Ubuntu', '--', 'sh', '-c', detector]);
+});
+
+test('resolveSpawnConfig leaves a non-standard WSL invocation untouched', () => {
+  const config = resolveSpawnConfig(
+    { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu', '--', 'htop'] },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: 'C:\\Program Files\\Dormouse\\shell-integration',
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  assert.deepEqual(config.shellArgs, ['-d', 'Ubuntu', '--', 'htop']);
+});
+
 test('resolveSpawnConfig leaves other shells untouched (keystroke fallback)', () => {
   const config = resolveSpawnConfig(undefined, {
     platform: 'linux',
