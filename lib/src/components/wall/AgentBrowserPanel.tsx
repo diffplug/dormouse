@@ -307,6 +307,10 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
 
   // Push the current pane size to the browser as a native `set viewport`.
   const issueSyncToPane = useCallback(() => {
+    // A popped-out surface is a real headed OS window the user drives directly;
+    // never force its viewport to the (now-stub) pane size. Sync resumes when it
+    // pops back in — the wsPort-change effect re-issues against the fresh session.
+    if (poppedOutRef.current) return;
     // Hosts without agentBrowserCommand (Tauri today) can't drive the viewport;
     // stay silent rather than warn on every resize. The surface just reads
     // SCALED, which is accurate.
