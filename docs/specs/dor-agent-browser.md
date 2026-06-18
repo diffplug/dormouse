@@ -246,7 +246,7 @@ Mechanics & wrinkles:
 - **No enabled-state.** `canGoBack` / `canGoForward` aren't in the stream, so the
   buttons are **always enabled** (a click at the ends no-ops) rather than greyed,
   matching most embedded browsers. They are inert on hosts without
-  `agentBrowserCommand` (Tauri today), like the Display-modal resizes.
+  `agentBrowserCommand` (the web host), like the Display-modal resizes.
 
 ## Render Indicator & Viewport
 
@@ -346,10 +346,10 @@ Persistence and degradation:
   the same port, the panel still clears the ended state and restarts its stream
   connection once; an unchanged live port can happen after a webview reload even
   though the prior socket attempt has failed.
-- Like tab actions, this inherits the `agentBrowserCommand` host capability: on
-  adapters that do not implement it (currently Tauri), modal-driven resizes are
-  inert. (`dor ab set …` from a terminal still works there, since it execs
-  agent-browser directly.)
+- Like tab actions, this inherits the `agentBrowserCommand` host capability,
+  implemented on both the VS Code and standalone (Tauri) hosts. Only a host that
+  doesn't run agent-browser at all (the web host) leaves modal-driven resizes
+  inert.
 
 ## Lifecycle
 
@@ -409,7 +409,7 @@ purely as a **change signal**:
   the next shot waits ~1.5× the measured (EWMA) capture time since the last
   start (≈⅔ duty), with a floor against tight loops. A static page produces no
   pulses, hence no shots and no cost. (~17 fps JPEG q85 on an M-series Mac.)
-- **Fallback:** on hosts without `agentBrowserScreenshot` (e.g. Tauri today),
+- **Fallback:** on hosts without `agentBrowserScreenshot` (e.g. the web host),
   render the CSS-resolution screencast frame directly instead.
 - Pointer coordinates map through the pane rect vs `metadata` device size
   (aspect-preserving; independent of the screenshot's pixel size).
@@ -456,7 +456,7 @@ Keyboard caveats (all verified against 0.27.0):
   this is a purpose-built channel, not arbitrary eval. **cmd-Z/⇧Z (undo/redo)
   are not emulated** — `execCommand('undo')` is unreliable for CDP-typed input;
   they remain no-ops pending the upstream `commands` fix. On hosts without the
-  capability (standalone/Tauri), the chords fall through to plain key
+  capability (the web host), the chords fall through to plain key
   forwarding, so pages' own JS shortcuts still fire.
 
 Focus behaves like a terminal surface: click-to-focus; keystrokes forward to the
@@ -488,7 +488,7 @@ host on the webview's behalf (a webview cannot spawn processes; see
 | Dev-server port→pane store (consumed by the header) + Wall-side correlation driver | `lib/src/components/wall/agent-browser-ports.ts`, `lib/src/components/wall/use-dev-server-ports.ts` |
 | Per-surface `syncEngaged` persistence | dockview **panel params**, via the serialized layout blob (no `session-types.ts`/`session-save.ts` change) |
 | Surface registration + control handler + key→session registry + `onFocusPane` | `lib/src/components/Wall.tsx` |
-| Host capabilities + VS Code stream relay | `lib/src/lib/platform/types.ts`, `lib/src/lib/platform/vscode-adapter.ts`, `vscode-ext/src/agent-browser-host.ts`, `vscode-ext/src/message-router.ts` |
+| Host capabilities (VS Code + standalone) + VS Code stream relay | `lib/src/lib/platform/types.ts`, `lib/src/lib/platform/vscode-adapter.ts`, `vscode-ext/src/agent-browser-host.ts`, `vscode-ext/src/message-router.ts`, `standalone/src/tauri-adapter.ts`, `standalone/src-tauri/src/agent_browser.rs` |
 
 ### Host capabilities
 
@@ -529,10 +529,11 @@ hosts degrade gracefully:
 - **`agentBrowserBringToFront(session)`** — raise the headed OS window. Optional
   and **unimplemented today**, so the stub's *Bring to front* button stays hidden.
 
-> **Footgun:** these adapter methods use `this.requestResponse` internally and
-> are **bound in the adapter constructor**, because the panel calls some through
-> detached references (`getPlatform().agentBrowserScreenshot`) which would
-> otherwise drop `this`.
+> **Footgun:** in the VS Code adapter these methods use `this.requestResponse`
+> internally and are **bound in the adapter constructor**, because the panel calls
+> some through detached references (`getPlatform().agentBrowserScreenshot`) which
+> would otherwise drop `this`. (The Tauri adapter routes through a module-level
+> `invoke`, so it has no such binding concern.)
 
 ## VS Code Webview CSP and Stream Origin
 
@@ -560,11 +561,12 @@ connects directly — its origin is allowed.
 
 ## Headed Pop-Out
 
-> Status: **implemented on the VS Code host** as a third render mode — not a
-> separate header arrow. The Display modal's *Render* section offers
-> `agent-browser popout` whenever the host exposes `agentBrowserPopOut`
-> (`canPopOut`). Standalone/Tauri and web have no agent-browser, so pop-out is
-> **VS-Code-only** for now.
+> Status: **implemented on the VS Code and standalone (Tauri) hosts** as a third
+> render mode — not a separate header arrow. The Display modal's *Render* section
+> offers `agent-browser popout` whenever the host exposes `agentBrowserPopOut`
+> (`canPopOut`). The web host has no agent-browser, so pop-out is unavailable
+> there. One piece of the lifecycle is still VS-Code-only — closing orphaned headed
+> windows on editor shutdown (see Lifecycle below).
 
 The headless + streamed-screenshot surface above is the default everywhere: it is
 crisp, deterministic, and **uniformly portable** (no OS window, no positioning,
@@ -594,7 +596,7 @@ registry is untouched, so `dor ab --key …` keeps driving the same surface
 transparently.
 
 **State carried (v1).** Only the **active tab's URL** is preserved across the
-relaunch, resolved by the VS Code host from the live agent-browser session just
+relaunch, resolved by the host from the live agent-browser session just
 before it closes the current process. Lost: other tabs, live DOM, scroll, form
 inputs, `sessionStorage`, and — because agent-browser uses an ephemeral temp
 profile — **cookies/login**. The **profile-persistence spike** (stable
@@ -618,13 +620,17 @@ decoupled:
   popout) also drops the stream, so the teardown guard keeps auto-revert from
   resurrecting it (see Lifecycle above).
 - **Kill the pane / `dor kill`** → the only teardown.
-- **Dormouse/editor quits** → headed windows are cleaned up; no orphans.
+- **Dormouse/editor quits** → headed windows are cleaned up; no orphans. **VS
+  Code only:** the extension tracks popped-out sessions and closes their windows
+  from `deactivate()`. The standalone host does not do this yet, so quitting it
+  while popped out can leave a detached Chrome window behind.
 
-**Not built yet.** Window **positioning** over the pane (VS Code can't read screen
-coords, so Chrome places the window), **Bring to front**, and any **non-VS-Code
-host**. Positioning eventually wants per-monitor / fractional-DPI math on Windows
-and a center-only fallback on Wayland; it stays a **platform-gated enhancement**,
-never load-bearing — the streamed surface is the portable baseline.
+**Not built yet.** Window **positioning** over the pane (no host acts on the pane
+`rect` it's passed yet, so Chrome places the window), **Bring to front**, headed-
+window cleanup on **standalone** shutdown, and any **web host** support (no
+agent-browser to spawn). Positioning eventually wants per-monitor / fractional-DPI
+math on Windows and a center-only fallback on Wayland; it stays a **platform-gated
+enhancement**, never load-bearing — the streamed surface is the portable baseline.
 
 ---
 

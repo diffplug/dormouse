@@ -291,10 +291,10 @@ exercise.
 
 ## Path 1 — Swappable Render Backend
 
-> Status: **implemented** (lib + VS Code host). Triggered from the **Display
-> modal** (the far-left header chip), whose *Render* section offers the three
-> cells of the matrix: `agent-browser screencast`, `agent-browser popout` (see
-> dor-agent-browser.md → Headed Pop-Out), and `iframe embed`.
+> Status: **implemented** (lib + the VS Code and standalone hosts). Triggered from
+> the **Display modal** (the far-left header chip), whose *Render* section offers
+> the three cells of the matrix: `agent-browser screencast`, `agent-browser popout`
+> (see dor-agent-browser.md → Headed Pop-Out), and `iframe embed`.
 
 Expose the **render axis** as a per-pane choice: same target, switch screencast ↔
 embed. This is the hedge on the agent-browser bet — if the screencast's lag is
