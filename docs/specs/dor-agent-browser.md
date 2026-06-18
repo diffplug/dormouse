@@ -136,7 +136,14 @@ Tab behaviors:
   which is what naturally moves the surface into multi-tab mode.
 - **Web-opened tabs are focused** (enter multi-tab mode, select the newest),
   matching typical browser foregrounding; reversible by clicking back. Dormouse
-  does not fight the web's popup / open-in-new-tab behavior.
+  trusts the stream's active bit when it already marks the new tab active.
+  Dormouse only issues `tab <newestTabId>` when the new tab is not active, or
+  when a provisional duplicate-URL tab later reaches its destination and still
+  is not active. Dormouse does not fight the web's popup / open-in-new-tab
+  behavior.
+- **Empty tab snapshots after a non-empty list are transient**, usually a stream
+  disconnect or target churn. They are logged and ignored so the browser chrome
+  keeps showing the last real active tab instead of blanking the URL and title.
 
 ## Browser-Chrome Header
 
@@ -343,12 +350,15 @@ Persistence and degradation:
   `session-types.ts`/`session-save.ts` changes; the panel seeds its initial state
   from `params.syncEngaged` (absent ⇒ fresh surface ⇒ auto-engage).
 - A persisted `wsPort` is best-effort only. If a restored panel has no port or
-  its saved stream socket is proven dead while the session is still live, the
-  panel asks the host for `agentBrowserStreamStatus(session)` and rewrites
-  `params.wsPort` with the current port before reconnecting. If the host reports
-  the same port, the panel still clears the ended state and restarts its stream
-  connection once; an unchanged live port can happen after a webview reload even
-  though the prior socket attempt has failed.
+  its saved stream socket is proven dead before that port ever opens in this
+  panel instance, the panel asks the host for `agentBrowserStreamStatus(session)`
+  and rewrites `params.wsPort` with the current port before reconnecting. Once a
+  port has opened live, later disconnects are treated as stream failures and do
+  **not** trigger `stream status`: that CLI read can spawn a fresh daemon and
+  reset the session, hiding the real failure. If the host reports the same port,
+  the panel still clears the ended state and restarts its stream connection once;
+  an unchanged live port can happen after a webview reload even though the prior
+  socket attempt has failed.
 - Like tab actions, this inherits the `agentBrowserCommand` host capability,
   implemented on both the VS Code and standalone (Tauri) hosts. Only a host that
   doesn't run agent-browser at all (the web host) leaves modal-driven resizes
@@ -373,6 +383,37 @@ Surface lifetime and browser lifetime are bound, both directions:
   swap away from popout — *also* drop that stream, which would otherwise be read
   as "the window closed" and resurrect the session. So a kill/swap marks the
   session closed first (`agent-browser-sessions.ts`) and auto-revert stands down.
+
+## Single-Instance Connection
+
+Each visible agent-browser surface owns one `AgentBrowserConnection` for one
+`{ session, streamPort, binaryPath }` tuple. The connection is the UI-agnostic
+boundary for a single agent-browser daemon instance:
+
+- **All tab metadata, one active visual target.** The stream publishes every tab
+  (`tabs: [{ tabId, title, url, active }]`) so Dormouse can render the strip,
+  close tabs, track the active URL, and detect new-tab/provisional-tab churn. The
+  frame stream and input path still target only the daemon's active tab. Dormouse
+  does not model per-tab frame streams.
+- **Both screencast and pop-out use it.** In screencast mode the panel consumes
+  frame pulses to drive screenshots and forwards input. In pop-out mode the panel
+  stays connected only as an observer for tabs/status and auto-revert; it does
+  not draw screenshots or force viewport sync.
+- **Minimized browser surfaces are quiescent.** Minimize removes the pane, which
+  unmounts `AgentBrowserPanel` and disposes the connection: the WebSocket closes,
+  screenshot capture stops, input forwarding stops, and tab/status observation
+  stops. The agent-browser session itself remains alive, like a terminal PTY
+  behind a Door. Reattach recreates the connection from persisted params
+  (`session`, `wsPort`, `binaryPath`, `url`) and resumes observation/rendering.
+- **Protocol hardening lives here.** The connection owns stream parsing,
+  `tabId`/`id` normalization, ignored transient empty tab snapshots, provisional
+  duplicate-URL new tabs, explicit tab selection for inactive web-opened tabs,
+  close-code logging, retry on the same stream port, and the debug ring.
+- **Debuggability is first-class.** Each connection records a bounded debug ring
+  (`connect`, `open`, `close`, `tabs`, ignored transient events, tab-selection
+  decisions). The panel may print selected events while a bug is under
+  investigation, but the durable diagnostic surface is the connection snapshot
+  and debug ring.
 
 ## Channels
 
@@ -481,7 +522,8 @@ host on the webview's behalf (a webview cannot spawn processes; see
 | --- | --- |
 | `dor ab` command (passthrough + `--key` intercept) | `dor/src/commands/agent-browser.ts` |
 | Control method `surface.agentBrowser` request/response | `dor/src/commands/types.ts`, `dor/src/control-client.ts` |
-| Surface component (canvas viewer + WS client + tab strip + screenshot loop + sync tracking + render indicator + chrome snapshot + pop-out stub + auto-revert) | `lib/src/components/wall/AgentBrowserPanel.tsx` |
+| Surface component (canvas viewer + tab strip + screenshot loop + sync tracking + render indicator + chrome snapshot + pop-out stub + auto-revert) | `lib/src/components/wall/AgentBrowserPanel.tsx` |
+| Single-session stream connection (WebSocket lifecycle + tab/status/frame-pulse parsing + debug ring + visible-only resource boundary) | `lib/src/components/wall/agent-browser-connection.ts` |
 | Browser-chrome header (render/screen chip + back/fwd/reload + URL + key badge + dev-server chip; agent-browser + iframe-embed surfaces) | `lib/src/components/wall/SurfacePaneHeader.tsx` |
 | Display modal (Render swap + Resolution; issues native `set …`) | `lib/src/components/wall/AgentBrowserScreenModal.tsx` |
 | Render-backend swap (in-place replace) + iframe-embed surface controller | `lib/src/components/Wall.tsx` (`replaceSurface` / `onSwapRenderMode`), `lib/src/components/wall/IframePanel.tsx` |
@@ -533,13 +575,19 @@ hosts can't drift — there is no parallel re-implementation.
   `{ session, wsPort }`. Backs a render-swap from `iframe embed` up to a live
   screencast/popout, where the webview can't resolve/run the binary itself.
 - **`agentBrowserPopOut(session, { url, rect })`** / **`agentBrowserPopIn(session,
-  { url })`** — relaunch a session headed / headless at the session's live
-  active URL, returning the new `wsPort`. The host queries `agent-browser get
-  url` immediately before closing the old Chrome process; the webview-provided
-  `url` is only a fallback, because the tab snapshot can lag during a mode swap.
-  Chrome's headed/headless choice is fixed at launch, so pop-out is a close +
-  relaunch rather than a live toggle; `rect` is accepted but unused (no window
-  positioning today).
+  { url })`** — relaunch a session headed / headless at the active tab URL
+  observed by the panel's live `tabs` stream, returning the new `wsPort`.
+  Dormouse is the source of truth for this URL: the panel ignores transient
+  `about:blank` values, mirrors the latest real active-tab URL into panel
+  params, and also keeps a local ref so a just-arrived headed-window navigation
+  wins over stale persisted params. The host trusts that supplied URL and does
+  not query the daemon during close/reopen, because `stream status` / tab queries
+  in the gap can spawn a competing blank daemon. Chrome's headed/headless choice
+  is fixed at launch, so pop-out is a close + relaunch rather than a live toggle;
+  `rect` is accepted but unused (no window positioning today). After relaunch,
+  the host best-effort closes stray blank tabs when a real tab is also present,
+  accepting either stream-style `tabId` or CLI-style `id` fields from
+  `tab list --json`.
 - **`agentBrowserBringToFront(session)`** — raise the headed OS window. Optional
   and **unimplemented today**, so the stub's *Bring to front* button stays hidden.
 
@@ -609,19 +657,23 @@ registry is untouched, so `dor ab --key …` keeps driving the same surface
 transparently.
 
 **State carried (v1).** Only the **active tab's URL** is preserved across the
-relaunch, resolved by the host from the live agent-browser session just
-before it closes the current process. Lost: other tabs, live DOM, scroll, form
-inputs, `sessionStorage`, and — because agent-browser uses an ephemeral temp
-profile — **cookies/login**. The **profile-persistence spike** (stable
-user-data-dir or `agent-browser state save`/`load`) is the wanted follow-up that
-makes pop-out usable for authenticated sites.
+relaunch, resolved from the panel's latest non-blank active-tab observation and
+passed to the host. Lost: other tabs, live DOM, scroll, form inputs,
+`sessionStorage`, and — because agent-browser uses an ephemeral temp profile —
+**cookies/login**. The **profile-persistence spike** (stable user-data-dir or
+`agent-browser state save`/`load`) is the wanted follow-up that makes pop-out
+usable for authenticated sites.
 
 **The pane while popped out.** A clean stub: copy that the browser is in a
 separate window, a **Pop back in** button (relaunch headless → resume the
 screencast), and a best-effort **Bring to front** that renders only when the host
 wires `agentBrowserBringToFront` (unimplemented today, so hidden). Frame display /
 screenshots / input / chip / tab strip are inert, but the stream WS stays
-connected to observe `status`/`tabs` and to drive auto-revert.
+connected to observe `status`/`tabs` and to drive auto-revert. Same-tab manual
+navigation in the headed window is observed through a CDP subscription:
+`agent-browser get cdp-url` returns the DevTools WebSocket, and the panel listens
+for `Target.targetInfoChanged` / `Page.frameNavigated` events to keep the
+Dormouse URL/header current without polling.
 
 **Lifecycle.** The headed window ending and the surface being disposed are
 decoupled:

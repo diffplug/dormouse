@@ -36,6 +36,12 @@ import {
   virtualKeyCode,
 } from './agent-browser-input';
 import { createScreenshotLoop } from './agent-browser-screenshot-loop';
+import {
+  createAgentBrowserConnection,
+  type AgentBrowserConnection,
+  type AgentBrowserStreamStatus as StreamStatus,
+  type AgentBrowserTab as StreamTab,
+} from './agent-browser-connection';
 import { usePaneChrome } from './use-pane-chrome';
 import {
   ModeContext,
@@ -89,15 +95,6 @@ function dimsMatch(a: { w: number; h: number }, b: { w: number; h: number }): bo
   return Math.abs(a.w - b.w) <= DIM_TOLERANCE && Math.abs(a.h - b.h) <= DIM_TOLERANCE;
 }
 
-// Stream messages above this size are frames (a base64 JPEG — ~150–220 KB at
-// desktop sizes); `status`/`tabs` are well under 16 KB. We display screenshots,
-// not frames, so a frame's payload is discarded — there's no point paying
-// JSON.parse + a throwaway allocation for it (measured ~13 MB/s at 1080p/60fps
-// on an animating page). We pulse on the raw message and read the viewport from
-// the small `status` messages instead. Smaller messages still get parsed, so a
-// rare tiny-viewport frame falling under the cutoff still pulses correctly.
-const FRAME_PULSE_THRESHOLD = 16384;
-
 // A pop-out/pop-in relaunch restores a single URL. A transient about:blank — a
 // stray tab the close+reopen can momentarily surface, or a freshly-relaunched
 // blank page — must never be treated as the page to restore, or the real URL is
@@ -108,17 +105,18 @@ function isRestorableUrl(url: string | null | undefined): url is string {
   return trimmed !== '' && trimmed !== 'about:blank';
 }
 
-type StreamTab = {
-  tabId: string;
-  title: string | null;
-  url: string;
-  active: boolean;
-};
-
-type StreamStatus = {
-  connected: boolean;
-  screencasting: boolean;
-};
+function parseCdpUrl(stdout: string): string | null {
+  const trimmed = stdout.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as { data?: { result?: unknown }; result?: unknown; url?: unknown };
+    const value = parsed.data?.result ?? parsed.result ?? parsed.url;
+    if (typeof value === 'string' && value.startsWith('ws://')) return value;
+  } catch {
+    // Plain text is the common CLI output.
+  }
+  return trimmed.match(/ws:\/\/\S+/)?.[0] ?? null;
+}
 
 function tabDisplayTitle(tab: StreamTab): string {
   const title = tab.title?.trim();
@@ -141,19 +139,19 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
 
   const session = params?.session;
   const wsPort = params?.wsPort;
+  const [streamPort, setStreamPort] = useState(wsPort);
+  useEffect(() => { setStreamPort(wsPort); }, [wsPort]);
   const interactive = mode === 'passthrough' && selectedId === api.id;
   const interactiveRef = useRef(interactive);
   interactiveRef.current = interactive;
 
-  const wsRef = useRef<WebSocket | null>(null);
+  const connectionRef = useRef<AgentBrowserConnection | null>(null);
   const deviceRef = useRef({ width: 1280, height: 720 });
   const [status, setStatus] = useState<StreamStatus | null>(null);
   const [hasFrame, setHasFrame] = useState(false);
   const [connectionLost, setConnectionLost] = useState(false);
   const [streamRecoverySeq, setStreamRecoverySeq] = useState(0);
   const [tabs, setTabs] = useState<StreamTab[]>([]);
-  const knownTabIdsRef = useRef<Set<string>>(new Set());
-  const lastTabsSigRef = useRef<string>(''); // DIAG(ab-relaunch): dedupe tab logging
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   // Crossing to the single-frame iframe renderer closes all but the active tab;
@@ -201,14 +199,49 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   sessionRef.current = session;
   const binaryPathRef = useRef(binaryPath);
   binaryPathRef.current = binaryPath;
-  const wsPortRef = useRef(wsPort);
-  wsPortRef.current = wsPort;
+  const wsPortRef = useRef(streamPort);
+  wsPortRef.current = streamPort;
+  const liveStreamPortRef = useRef<number | null>(null);
   // Canonical URL mirror (params.url): kept in a ref so the pop-out / pop-in
   // callbacks read the latest without re-creating, and prefer it over the live
   // chrome snapshot, which can be momentarily empty during a relaunch.
   const paramsUrl = params?.url;
   const paramsUrlRef = useRef(paramsUrl);
   paramsUrlRef.current = paramsUrl;
+  // The newest non-blank active-tab URL observed from the live stream. This is
+  // deliberately separate from params.url: Dockview param writes can lag a tab
+  // message, but pop-in/auto-revert must carry the page the user just navigated
+  // to in the headed window.
+  const latestRestorableUrlRef = useRef<string | undefined>(isRestorableUrl(paramsUrl) ? paramsUrl : undefined);
+  useEffect(() => {
+    if (isRestorableUrl(paramsUrl)) latestRestorableUrlRef.current = paramsUrl;
+  }, [paramsUrl]);
+  const rememberRestorableUrl = useCallback((url: string | null | undefined) => {
+    if (!isRestorableUrl(url)) return false;
+    latestRestorableUrlRef.current = url;
+    if (!relaunchingRef.current && url !== paramsUrlRef.current) {
+      paramsUrlRef.current = url;
+      api.updateParameters({ url });
+    }
+    return true;
+  }, [api]);
+  const rememberActiveTabUrl = useCallback((next: StreamTab[]) => {
+    const active = next.find((t) => t.active) ?? next[0] ?? null;
+    rememberRestorableUrl(active?.url);
+  }, [rememberRestorableUrl]);
+  const applyObservedNavigation = useCallback((url: string | null | undefined, title?: string | null) => {
+    if (!isRestorableUrl(url)) return;
+    rememberRestorableUrl(url);
+    setTabs((prev) => {
+      if (prev.length === 0) return [{ tabId: 'cdp-active', title: title ?? null, url, active: true }];
+      const activeIndex = Math.max(0, prev.findIndex((tab) => tab.active));
+      const current = prev[activeIndex];
+      if (!current || (current.url === url && (title == null || current.title === title))) return prev;
+      return prev.map((tab, index) => index === activeIndex
+        ? { ...tab, url, title: title ?? tab.title }
+        : tab);
+    });
+  }, [rememberRestorableUrl]);
 
   const closeIfSessionMarkedClosed = useCallback((targetSession: string | null | undefined = sessionRef.current): boolean => {
     if (!targetSession || !isAgentBrowserSessionClosed(targetSession)) return false;
@@ -224,6 +257,10 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
 
     if (directPort && directPort > 0) {
       if (directPort !== wsPortRef.current) {
+        setStreamPort(directPort);
+        console.log(`[ab-panel] subscribing to returned stream port ${JSON.stringify({ session: sessionRef.current, wsPort: directPort, previousWsPort: wsPortRef.current })}`);
+      }
+      if (directPort !== wsPort) {
         api.updateParameters({ wsPort: directPort });
       } else {
         setStreamRecoverySeq((seq) => seq + 1);
@@ -243,6 +280,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
       if (closeIfSessionMarkedClosed(currentSession)) return false;
       if (!res.ok || !res.wsPort) return false;
       if (res.wsPort !== wsPortRef.current) {
+        setStreamPort(res.wsPort);
         api.updateParameters({ wsPort: res.wsPort });
       } else {
         setStreamRecoverySeq((seq) => seq + 1);
@@ -251,7 +289,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
     } catch {
       return false;
     }
-  }, [api, closeIfSessionMarkedClosed]);
+  }, [api, closeIfSessionMarkedClosed, wsPort]);
 
   // --- display: crisp HiDPI screenshots, paced by stream-frame "pulses" ---
   //
@@ -377,13 +415,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   // --- stream connection ---
 
   useEffect(() => {
-    if (!wsPort) return;
-    let disposed = false;
-    let ws: WebSocket | null = null;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    let failures = 0;
-
-    knownTabIdsRef.current = new Set();
+    if (!streamPort || !session) return;
 
     // Per-connection resource: created here and disposed in this effect's cleanup
     // so it survives React StrictMode's mount→cleanup→mount double-invoke. A
@@ -396,121 +428,130 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
       draw: drawBitmap,
     });
 
-    const handleMessage = (raw: unknown) => {
-      if (typeof raw !== 'string') return;
-      let msg: any;
-      try {
-        msg = JSON.parse(raw);
-      } catch {
-        return;
-      }
-      if (msg.type === 'frame' && typeof msg.data === 'string') {
-        // Update the viewport if the frame carries it, reconcile sync, refresh the
-        // indicator, then pulse a crisp screenshot — the sole render path on every
-        // host (we never draw the CSS-resolution stream frame itself).
-        if (msg.metadata?.deviceWidth && msg.metadata?.deviceHeight) {
-          deviceRef.current = { width: msg.metadata.deviceWidth, height: msg.metadata.deviceHeight };
-        }
-        maybeDisengageSync();
-        publishScreen();
-        // Popped out: the headed window renders; keep the stream only to observe.
-        // Mid-relaunch (close→reopen): a screenshot would relaunch the just-closed
-        // browser at about:blank, leaving a stray tab and losing the URL — suppress
-        // until the fresh stream reconnects.
-        if (!poppedOutRef.current && !relaunchingRef.current) screenshotLoop.pulse();
-      } else if (msg.type === 'status') {
-        setStatus({ connected: msg.connected === true, screencasting: msg.screencasting === true });
-        setConnectionLost(msg.connected === false);
-        if (typeof msg.viewportWidth === 'number' && typeof msg.viewportHeight === 'number') {
-          deviceRef.current = { width: msg.viewportWidth, height: msg.viewportHeight };
+    const connection = createAgentBrowserConnection({
+      session,
+      streamPort,
+      binaryPath: binaryPathRef.current,
+      getStreamUrl: async (port) => (await getPlatform().getAgentBrowserStreamUrl?.(port)) ?? undefined,
+      runCommand: (targetSession, args, targetBinaryPath) => getPlatform().agentBrowserCommand?.(targetSession, args, targetBinaryPath)
+        ?? Promise.resolve({ exitCode: 1, stdout: '', stderr: 'agent-browser commands unavailable' }),
+      canSelectTabs: () => !poppedOutRef.current && !relaunchingRef.current,
+      log: (message) => console.log(message),
+    });
+    connectionRef.current = connection;
+    const unsubscribe = connection.subscribe((event) => {
+      if (event.type === 'connection-open') {
+        liveStreamPortRef.current = event.port;
+        setConnectionLost(false);
+      } else if (event.type === 'connection-close') {
+        if (event.failures >= 3) setConnectionLost(true);
+      } else if (event.type === 'status') {
+        setStatus(event.status);
+        setConnectionLost(event.status.connected === false);
+        const maybeStatus = event.status as StreamStatus & { viewportWidth?: number; viewportHeight?: number };
+        if (typeof maybeStatus.viewportWidth === 'number' && typeof maybeStatus.viewportHeight === 'number') {
+          deviceRef.current = { width: maybeStatus.viewportWidth, height: maybeStatus.viewportHeight };
           maybeDisengageSync();
           publishScreen();
         }
-      } else if (msg.type === 'tabs' && Array.isArray(msg.tabs)) {
-        const next: StreamTab[] = msg.tabs
-          .filter((t: any) => typeof t?.tabId === 'string')
-          .map((t: any) => ({
-            tabId: t.tabId,
-            title: typeof t.title === 'string' ? t.title : null,
-            url: typeof t.url === 'string' ? t.url : '',
-            active: t.active === true,
-          }));
-        // Web-opened tabs (popups, target=_blank) are focused, matching
-        // browser foregrounding. Skip the first message — that's catch-up,
-        // not a popup. While popped out the user drives the headed window
-        // directly, and mid-relaunch the daemon is in flux — in both cases stay
-        // a passive observer and never reach in to switch tabs.
-        const known = knownTabIdsRef.current;
-        if (!poppedOutRef.current && !relaunchingRef.current && known.size > 0) {
-          const fresh = next.filter((t) => !known.has(t.tabId));
-          const newest = fresh[fresh.length - 1];
-          if (newest && !newest.active) runAgentBrowser(['tab', newest.tabId]);
+      } else if (event.type === 'tabs') {
+        rememberActiveTabUrl(event.tabs);
+        setTabs(event.tabs);
+      } else if (event.type === 'frame-pulse') {
+        if (event.metadata?.deviceWidth && event.metadata?.deviceHeight) {
+          deviceRef.current = { width: event.metadata.deviceWidth, height: event.metadata.deviceHeight };
         }
-        knownTabIdsRef.current = new Set(next.map((t) => t.tabId));
-        // DIAG(ab-relaunch): observation while popped out — does the headed
-        // window's stream reach us? Stringified (WebKit hides bare objects) and
-        // deduped by signature so only real tab changes print. Remove once the
-        // transition bug is closed.
-        const sig = JSON.stringify({ p: poppedOutRef.current, w: wsPort, t: next.map((t) => `${t.tabId}:${t.active ? 'A' : '-'}:${t.url}`) });
-        if (sig !== lastTabsSigRef.current) {
-          lastTabsSigRef.current = sig;
-          console.log(`[ab-panel] tabs msg ${sig}`);
+        maybeDisengageSync();
+        publishScreen();
+        if (!poppedOutRef.current && !relaunchingRef.current) screenshotLoop.pulse();
+      }
+    });
+    setHasFrame(false);
+    setConnectionLost(false);
+    return () => {
+      unsubscribe();
+      if (connectionRef.current === connection) connectionRef.current = null;
+      connection.dispose();
+      screenshotLoop.dispose();
+    };
+  }, [streamPort, streamRecoverySeq, session, maybeDisengageSync, publishScreen, drawBitmap, rememberActiveTabUrl]);
+
+  // agent-browser's stream currently publishes the initial headed tab list, but
+  // not every same-tab manual navigation. While popped out, subscribe directly
+  // to Chrome DevTools Protocol target/page events so the Dormouse URL/header
+  // tracks the headed window without polling.
+  useEffect(() => {
+    if (!poppedOut || !session) return;
+    const run = getPlatform().agentBrowserCommand;
+    if (!run) return;
+    let disposed = false;
+    let ws: WebSocket | null = null;
+    let nextId = 1;
+
+    const send = (method: string, params?: Record<string, unknown>) => {
+      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ id: nextId++, method, ...(params ? { params } : {}) }));
+    };
+    const handleTargetInfo = (targetInfo: unknown) => {
+      if (!targetInfo || typeof targetInfo !== 'object') return;
+      const info = targetInfo as { type?: unknown; url?: unknown; title?: unknown };
+      if (info.type !== 'page') return;
+      applyObservedNavigation(
+        typeof info.url === 'string' ? info.url : null,
+        typeof info.title === 'string' ? info.title : null,
+      );
+    };
+    const handleCdpMessage = (raw: unknown) => {
+      if (typeof raw !== 'string') return;
+      let msg: any;
+      try { msg = JSON.parse(raw); } catch { return; }
+      if (msg.method === 'Target.targetCreated' || msg.method === 'Target.targetInfoChanged') {
+        handleTargetInfo(msg.params?.targetInfo);
+      } else if (msg.method === 'Target.targetDestroyed') {
+        console.log(`[ab-panel] cdp target destroyed ${JSON.stringify({ targetId: msg.params?.targetId })}`);
+      } else if (msg.method === 'Page.frameNavigated') {
+        const frame = msg.params?.frame;
+        if (!frame?.parentId) {
+          applyObservedNavigation(
+            typeof frame?.url === 'string' ? frame.url : null,
+            typeof frame?.name === 'string' ? frame.name : null,
+          );
         }
-        setTabs(next);
+      } else if (Array.isArray(msg.result?.targetInfos)) {
+        for (const targetInfo of msg.result.targetInfos) handleTargetInfo(targetInfo);
       }
     };
 
     const connect = async () => {
-      let url: string | null = null;
+      let cdpUrl: string | null = null;
       try {
-        url = (await getPlatform().getAgentBrowserStreamUrl?.(wsPort)) ?? null;
-      } catch {
-        url = null;
+        const result = await run(session, ['get', 'cdp-url'], binaryPathRef.current);
+        if (result.exitCode === 0) cdpUrl = parseCdpUrl(result.stdout);
+        else console.log(`[ab-panel] cdp-url failed ${JSON.stringify({ stderr: result.stderr, stdout: result.stdout })}`);
+      } catch (err) {
+        console.log(`[ab-panel] cdp-url error ${String(err)}`);
       }
-      if (disposed) return;
-      // DIAG(ab-relaunch): which port the panel is actually streaming from.
-      console.log(`[ab-panel] connecting stream ${JSON.stringify({ wsPort, url: url ?? `ws://127.0.0.1:${wsPort}`, poppedOut: poppedOutRef.current })}`);
-      ws = new WebSocket(url ?? `ws://127.0.0.1:${wsPort}`);
-      wsRef.current = ws;
+      if (disposed || !cdpUrl) return;
+      console.log(`[ab-panel] connecting cdp ${JSON.stringify({ cdpUrl })}`);
+      ws = new WebSocket(cdpUrl);
       ws.onopen = () => {
-        failures = 0;
-        setConnectionLost(false);
+        console.log('[ab-panel] cdp open');
+        send('Target.setDiscoverTargets', { discover: true });
+        send('Target.getTargets');
+        // If get cdp-url ever returns a page websocket instead of the browser
+        // websocket, these page-level events are the navigation source.
+        send('Page.enable');
       };
-      ws.onmessage = (ev) => {
-        // Fast-path: a screencast frame is the only large message, and its pixels
-        // aren't displayed (we screenshot instead), so pulse without parsing the
-        // ~150-220 KB payload. Smaller messages (status / tabs) go to handleMessage.
-        const data = ev.data;
-        if (typeof data === 'string' && data.length > FRAME_PULSE_THRESHOLD) {
-          if (!poppedOutRef.current && !relaunchingRef.current) screenshotLoop.pulse();
-          return;
-        }
-        handleMessage(data);
-      };
-      ws.onclose = () => {
-        wsRef.current = null;
-        if (disposed) return;
-        failures += 1;
-        // The port dies with the session, so repeated refusals mean the
-        // browser is gone; keep a slow retry alive in case it comes back on
-        // the same port, but a new `dor ab` updating wsPort is the real path.
-        if (failures >= 3) setConnectionLost(true);
-        retryTimer = setTimeout(connect, Math.min(1000 * 2 ** failures, 10000));
-      };
-      ws.onerror = () => {};
+      ws.onmessage = (ev) => handleCdpMessage(ev.data);
+      ws.onclose = () => { if (!disposed) console.log('[ab-panel] cdp close'); };
+      ws.onerror = () => console.log('[ab-panel] cdp error');
     };
 
-    setHasFrame(false);
-    setConnectionLost(false);
     void connect();
     return () => {
       disposed = true;
-      if (retryTimer !== undefined) clearTimeout(retryTimer);
-      wsRef.current = null;
       ws?.close();
-      screenshotLoop.dispose();
     };
-  }, [wsPort, streamRecoverySeq, runAgentBrowser, maybeDisengageSync, publishScreen, drawBitmap]);
+  }, [poppedOut, session, streamPort, applyObservedNavigation]);
 
   // A persisted panel may restore with a stale wsPort: the agent-browser
   // session is still alive, but the stream server restarted on a new port while
@@ -525,7 +566,17 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
     // it — so the panel ends up streaming an about:blank ghost instead of the
     // headed window. The host hands back the authoritative port when it's done.
     if (relaunchingRef.current) return;
-    if (wsPort && !connectionLost && status?.connected !== false) return;
+    // Once this exact port has opened, a later disconnect is a live stream
+    // failure, not a stale persisted port. Do not ask `stream status` here:
+    // the CLI can spawn a fresh daemon and reset the session, hiding the real
+    // failure and reverting the URL.
+    if (streamPort && liveStreamPortRef.current === streamPort) {
+      if (connectionLost || status?.connected === false) {
+        console.log(`[ab-panel] stream recovery skipped for live port ${JSON.stringify({ session, wsPort: streamPort, connectionLost, connected: status?.connected })}`);
+      }
+      return;
+    }
+    if (streamPort && !connectionLost && status?.connected !== false) return;
     const fn = getPlatform().agentBrowserStreamStatus;
     if (!fn) return;
     let cancelled = false;
@@ -533,14 +584,15 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
       if (cancelled || !res.ok || !res.wsPort) return;
       setConnectionLost(false);
       setStatus(null);
-      if (res.wsPort !== wsPort) {
+      if (res.wsPort !== streamPort) {
+        setStreamPort(res.wsPort);
         api.updateParameters({ wsPort: res.wsPort });
       } else {
         setStreamRecoverySeq((seq) => seq + 1);
       }
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [session, binaryPath, wsPort, connectionLost, status?.connected, api]);
+  }, [session, binaryPath, streamPort, connectionLost, status?.connected, api]);
 
   // --- header: persisted title + browser-chrome (URL / key) ---
 
@@ -564,6 +616,13 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   };
   const chromeSnapshotRef = useRef(chromeSnapshot);
   chromeSnapshotRef.current = chromeSnapshot;
+  const currentRelaunchUrl = useCallback(() => {
+    return [
+      latestRestorableUrlRef.current,
+      chromeSnapshotRef.current.url,
+      paramsUrlRef.current,
+    ].find(isRestorableUrl);
+  }, []);
 
   // Native history nav — `back`/`forward`/`reload` issued like tab actions
   // (allowlisted in agentBrowserCommand). Stable; reads the live closure via
@@ -601,7 +660,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
     });
     // Don't reconcile to the current (headless) port first — it's about to close.
     // Connect to the headed window's fresh port once the relaunch returns it.
-    const url = [paramsUrlRef.current, chromeSnapshotRef.current.url].find(isRestorableUrl);
+    const url = currentRelaunchUrl();
     console.log(`[ab-panel] popOut -> ${JSON.stringify({ session, url })}`);
     fn(session, { rect: paneScreenRect(elRef.current), url }, binaryPathRef.current).then((res) => {
       console.log(`[ab-panel] popOut result ${JSON.stringify(res)}`);
@@ -617,7 +676,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
       if (closeIfSessionMarkedClosed(session)) return;
       void revertUnlessLive();
     });
-  }, [session, api, reconcileStreamPort, closeIfSessionMarkedClosed]);
+  }, [session, api, reconcileStreamPort, closeIfSessionMarkedClosed, currentRelaunchUrl]);
 
   const popIn = useCallback(() => {
     if (closeIfSessionMarkedClosed(session)) return;
@@ -631,7 +690,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
     // Don't reconcile to the current (headed) port first — the host is about to
     // kill that daemon. Querying now would spawn a competing daemon (see the
     // recovery-effect note). Connect to the fresh port the host returns.
-    const url = [paramsUrlRef.current, chromeSnapshotRef.current.url].find(isRestorableUrl);
+    const url = currentRelaunchUrl();
     console.log(`[ab-panel] popIn -> ${JSON.stringify({ session, url })}`);
     fn(session, { url }, binaryPathRef.current).then((res) => {
       console.log(`[ab-panel] popIn result ${JSON.stringify(res)}`);
@@ -644,7 +703,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
       void reconcileStreamPort();
       relaunchingRef.current = false;
     });
-  }, [session, api, reconcileStreamPort, closeIfSessionMarkedClosed]);
+  }, [session, api, reconcileStreamPort, closeIfSessionMarkedClosed, currentRelaunchUrl]);
 
   const bringToFront = useCallback(() => {
     if (!session) return;
@@ -730,6 +789,8 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
     // momentarily a blank/booting page that must not overwrite the real target),
     // and never record a transient about:blank.
     if (!relaunchingRef.current && isRestorableUrl(url) && url !== paramsUrlRef.current) {
+      latestRestorableUrlRef.current = url;
+      paramsUrlRef.current = url;
       api.updateParameters({ url });
     }
   }, [chromeSnapshot.url, api]);
@@ -805,10 +866,10 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   // essential — it otherwise still holds the previous session's pane size and
   // issueSyncToPane would no-op, leaving the fresh browser unsynced (SCALED).
   useEffect(() => {
-    if (!wsPort || !syncEngagedRef.current) return;
+    if (!streamPort || !syncEngagedRef.current) return;
     lastIssuedRef.current = null;
     issueSyncToPane();
-  }, [wsPort, issueSyncToPane]);
+  }, [streamPort, issueSyncToPane]);
 
   // Display-scale (DPR) changes don't resize the pane, so ResizeObserver misses
   // them; a window resize is the available signal. Recompute the indicator and,
@@ -825,8 +886,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   // --- input forwarding (stream-native input_* messages) ---
 
   const send = useCallback((payload: Record<string, unknown>) => {
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+    connectionRef.current?.send(payload);
   }, []);
 
   const toDevice = useCallback((e: { clientX: number; clientY: number }): { x: number; y: number } | null => {
@@ -1074,7 +1134,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   // --- placeholder state ---
 
   const placeholder = (() => {
-    if (!wsPort) return `Waiting for browser session ${session ?? ''} — run dor ab open <url>`;
+    if (!streamPort) return `Waiting for browser session ${session ?? ''} — run dor ab open <url>`;
     if (connectionLost || status?.connected === false) {
       return `Browser session ${session ?? ''} ended — run dor ab open <url> to restart it, or close this surface.`;
     }

@@ -47,8 +47,9 @@ export interface AgentBrowserCommandResult {
  * channel for tab actions, screen-mode resizing (`set viewport` / `set
  * device`), HiDPI frame capture (`screenshot`), navigation (`open <url>`,
  * `reload` / `back` / `forward`), and session teardown, not a general exec
- * path. */
-export const AGENT_BROWSER_ALLOWED_SUBCOMMANDS = ['tab', 'set', 'screenshot', 'open', 'reload', 'back', 'forward', 'close'] as const;
+ * path. `get` is limited host-side to `get cdp-url` for CDP event
+ * subscription while a browser is popped out. */
+export const AGENT_BROWSER_ALLOWED_SUBCOMMANDS = ['tab', 'set', 'screenshot', 'open', 'reload', 'back', 'forward', 'close', 'get'] as const;
 
 export interface AgentBrowserScreenshotResult {
   ok: boolean;

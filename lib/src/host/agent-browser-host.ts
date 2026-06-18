@@ -181,12 +181,24 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       const raw = parsed.data?.tabs ?? parsed.tabs;
       if (!Array.isArray(raw)) return [];
       return raw
-        .filter((t): t is Record<string, unknown> => typeof (t as { tabId?: unknown })?.tabId === 'string')
-        .map((t) => ({
-          tabId: t.tabId as string,
-          url: typeof t.url === 'string' ? t.url : '',
-          active: t.active === true,
-        }));
+        .map((t) => {
+          if (!t || typeof t !== 'object') return null;
+          const record = t as Record<string, unknown>;
+          // Stream `tabs` messages use tabId. Some CLI builds report the same
+          // identifier as `id`, so accept both for post-relaunch cleanup.
+          const tabId = typeof record.tabId === 'string'
+            ? record.tabId
+            : typeof record.id === 'string'
+              ? record.id
+              : null;
+          if (!tabId) return null;
+          return {
+            tabId,
+            url: typeof record.url === 'string' ? record.url : '',
+            active: record.active === true,
+          };
+        })
+        .filter((tab): tab is SessionTab => !!tab);
     } catch {
       return [];
     }
@@ -279,6 +291,9 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     const subcommand = args[0];
     if (!subcommand || !ALLOWED_SUBCOMMANDS.has(subcommand)) {
       return { exitCode: 1, stdout: '', stderr: `agent-browser subcommand '${subcommand ?? ''}' is not allowed from the webview` };
+    }
+    if (subcommand === 'get' && args[1] !== 'cdp-url') {
+      return { exitCode: 1, stdout: '', stderr: `agent-browser get '${args[1] ?? ''}' is not allowed from the webview` };
     }
     // An explicit close (kill / render-swap) tears the session down itself, so
     // it's no longer ours to clean up on shutdown.
