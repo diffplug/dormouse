@@ -80,6 +80,17 @@ struct CommandOutput {
     stderr: String,
 }
 
+// Shape a nonzero-exit failure: prefer the binary's stderr, falling back to a
+// "<label> exited <code>" message when it was silent.
+fn command_error(result: &CommandOutput, label: &str) -> String {
+    let error = result.stderr.trim();
+    if error.is_empty() {
+        format!("{label} exited {}", result.exit_code)
+    } else {
+        error.to_string()
+    }
+}
+
 // The GUI-launched host's PATH is often the login PATH (no nvm/volta shims), so
 // prefer the absolute path `dor ab` resolved in the user's terminal; fall
 // through on ENOENT in case it has gone stale. Mirrors `runWithBinaryFallback`.
@@ -221,14 +232,13 @@ fn resolve_relaunch_url(
 // `dor ab`'s `dormouse.<workspaceId>.<key>` namespacing so it can't collide with
 // a user's own agent-browser sessions.
 fn generate_gui_session() -> String {
-    // 6 random bytes of hex, matching the VS Code host's `randomBytes(6)`.
+    // 6 bytes (48 bits) of hex, matching the VS Code host's `randomBytes(6)`.
+    // The low 48 bits of the spawn-time nanos give per-session uniqueness.
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or_default();
-    let pid = std::process::id() as u128;
-    let mixed = nanos ^ (pid << 64);
-    format!("dormouse.1.gui-{:012x}", mixed & 0xffff_ffff_ffff)
+    format!("dormouse.1.gui-{:012x}", nanos & 0xffff_ffff_ffff)
 }
 
 // ── Result shapes (camelCase to match lib/src/lib/platform/types.ts) ─────────
@@ -341,9 +351,7 @@ pub fn agent_browser_edit(
     ];
     let result = run_with_binary_fallback(&args, binary_path.as_deref());
     if result.exit_code != 0 {
-        let error = result.stderr.trim();
-        let error = if error.is_empty() { format!("eval exited {}", result.exit_code) } else { error.to_string() };
-        return AgentBrowserEditResult { ok: false, text: None, error: Some(error) };
+        return AgentBrowserEditResult { ok: false, text: None, error: Some(command_error(&result, "eval")) };
     }
 
     // eval --json envelope: { success, data: { result }, error }.
@@ -468,9 +476,7 @@ pub fn agent_browser_open(
 
     let open = run_with_binary_fallback(&args, binary_path.as_deref());
     if open.exit_code != 0 {
-        let error = open.stderr.trim();
-        let error = if error.is_empty() { format!("open exited {}", open.exit_code) } else { error.to_string() };
-        return AgentBrowserOpenResult { ok: false, session: None, ws_port: None, binary_path: None, error: Some(error) };
+        return AgentBrowserOpenResult { ok: false, session: None, ws_port: None, binary_path: None, error: Some(command_error(&open, "open")) };
     }
     let ws_port = read_stream_port(&session, binary_path.as_deref());
     AgentBrowserOpenResult {
@@ -482,32 +488,45 @@ pub fn agent_browser_open(
     }
 }
 
-// Pop-out is a relaunch, not a live toggle: Chrome's headed/headless choice is
-// fixed at launch (spec → "Headed Pop-Out"). Close the headless session, then
-// reopen it headed at the active URL. (v1 preserves the active tab URL only;
-// `rect` is accepted but unused — no window positioning today.)
+// Pop-out/pop-in are relaunches, not live toggles: Chrome's headed/headless
+// choice is fixed at launch (spec → "Headed Pop-Out"). Close the session, then
+// reopen it in the requested mode at the active URL. (v1 preserves the active
+// tab URL only.)
+fn relaunch(
+    session: &str,
+    url: Option<&str>,
+    headed: bool,
+    binary_path: Option<&str>,
+) -> AgentBrowserPopResult {
+    if session.is_empty() {
+        return AgentBrowserPopResult { ok: false, ws_port: None, error: Some("session is required".to_string()) };
+    }
+    let resolved = resolve_relaunch_url(session, url, binary_path);
+    run_with_binary_fallback(&["--session".to_string(), session.to_string(), "close".to_string()], binary_path);
+    let mut args = vec!["--session".to_string(), session.to_string()];
+    if headed {
+        args.push("--headed".to_string());
+    }
+    args.push("open".to_string());
+    args.push(resolved);
+    let open = run_with_binary_fallback(&args, binary_path);
+    if open.exit_code != 0 {
+        let label = if headed { "headed open" } else { "open" };
+        return AgentBrowserPopResult { ok: false, ws_port: None, error: Some(command_error(&open, label)) };
+    }
+    let ws_port = read_stream_port(session, binary_path);
+    AgentBrowserPopResult { ok: true, ws_port, error: None }
+}
+
+// Close the headless session and reopen it headed at the active URL. (`rect` is
+// accepted by the adapter but unused — no window positioning today.)
 #[tauri::command]
 pub fn agent_browser_pop_out(
     session: String,
     url: Option<String>,
     binary_path: Option<String>,
 ) -> AgentBrowserPopResult {
-    if session.is_empty() {
-        return AgentBrowserPopResult { ok: false, ws_port: None, error: Some("session is required".to_string()) };
-    }
-    let resolved = resolve_relaunch_url(&session, url.as_deref(), binary_path.as_deref());
-    run_with_binary_fallback(&["--session".to_string(), session.clone(), "close".to_string()], binary_path.as_deref());
-    let open = run_with_binary_fallback(
-        &["--session".to_string(), session.clone(), "--headed".to_string(), "open".to_string(), resolved],
-        binary_path.as_deref(),
-    );
-    if open.exit_code != 0 {
-        let error = open.stderr.trim();
-        let error = if error.is_empty() { format!("headed open exited {}", open.exit_code) } else { error.to_string() };
-        return AgentBrowserPopResult { ok: false, ws_port: None, error: Some(error) };
-    }
-    let ws_port = read_stream_port(&session, binary_path.as_deref());
-    AgentBrowserPopResult { ok: true, ws_port, error: None }
+    relaunch(&session, url.as_deref(), true, binary_path.as_deref())
 }
 
 // The reverse: close the headed session and relaunch it headless at the active
@@ -518,20 +537,5 @@ pub fn agent_browser_pop_in(
     url: Option<String>,
     binary_path: Option<String>,
 ) -> AgentBrowserPopResult {
-    if session.is_empty() {
-        return AgentBrowserPopResult { ok: false, ws_port: None, error: Some("session is required".to_string()) };
-    }
-    let resolved = resolve_relaunch_url(&session, url.as_deref(), binary_path.as_deref());
-    run_with_binary_fallback(&["--session".to_string(), session.clone(), "close".to_string()], binary_path.as_deref());
-    let open = run_with_binary_fallback(
-        &["--session".to_string(), session.clone(), "open".to_string(), resolved],
-        binary_path.as_deref(),
-    );
-    if open.exit_code != 0 {
-        let error = open.stderr.trim();
-        let error = if error.is_empty() { format!("open exited {}", open.exit_code) } else { error.to_string() };
-        return AgentBrowserPopResult { ok: false, ws_port: None, error: Some(error) };
-    }
-    let ws_port = read_stream_port(&session, binary_path.as_deref());
-    AgentBrowserPopResult { ok: true, ws_port, error: None }
+    relaunch(&session, url.as_deref(), false, binary_path.as_deref())
 }

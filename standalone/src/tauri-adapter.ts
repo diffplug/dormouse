@@ -34,6 +34,9 @@ function invoke(cmd: string, args?: Record<string, unknown>): void {
   );
 }
 
+const errMessage = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
+
 /**
  * Platform adapter for the Tauri standalone app.
  *
@@ -234,7 +237,7 @@ export class TauriAdapter implements PlatformAdapter {
     try {
       return await rawInvoke<IframeProxyResult>("iframe_create_proxy_url", { target: targetUrl });
     } catch (err) {
-      return { ok: false, reason: "unreachable", detail: err instanceof Error ? err.message : String(err) };
+      return { ok: false, reason: "unreachable", detail: errMessage(err) };
     }
   }
 
@@ -250,7 +253,7 @@ export class TauriAdapter implements PlatformAdapter {
     try {
       return await rawInvoke<AgentBrowserCommandResult>("agent_browser_command", { session, args, binaryPath });
     } catch (err) {
-      return { exitCode: 1, stdout: "", stderr: err instanceof Error ? err.message : String(err) };
+      return { exitCode: 1, stdout: "", stderr: errMessage(err) };
     }
   }
 
@@ -258,7 +261,7 @@ export class TauriAdapter implements PlatformAdapter {
     try {
       return await rawInvoke<AgentBrowserEditResult>("agent_browser_edit", { session, op, binaryPath });
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      return { ok: false, error: errMessage(err) };
     }
   }
 
@@ -275,7 +278,7 @@ export class TauriAdapter implements PlatformAdapter {
       const mime = opts.format === "png" ? "image/png" : "image/jpeg";
       return { ok: true, bytes: new Uint8Array(buffer), mime };
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      return { ok: false, error: errMessage(err) };
     }
   }
 
@@ -283,7 +286,7 @@ export class TauriAdapter implements PlatformAdapter {
     try {
       return await rawInvoke<AgentBrowserStreamStatusResult>("agent_browser_stream_status", { session, binaryPath });
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      return { ok: false, error: errMessage(err) };
     }
   }
 
@@ -291,7 +294,7 @@ export class TauriAdapter implements PlatformAdapter {
     try {
       return await rawInvoke<AgentBrowserOpenResult>("agent_browser_open", { url, headed: opts.headed, binaryPath });
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      return { ok: false, error: errMessage(err) };
     }
   }
 
@@ -300,7 +303,7 @@ export class TauriAdapter implements PlatformAdapter {
     try {
       return await rawInvoke<AgentBrowserPopResult>("agent_browser_pop_out", { session, url: opts.url, binaryPath });
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      return { ok: false, error: errMessage(err) };
     }
   }
 
@@ -308,7 +311,7 @@ export class TauriAdapter implements PlatformAdapter {
     try {
       return await rawInvoke<AgentBrowserPopResult>("agent_browser_pop_in", { session, url: opts.url, binaryPath });
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      return { ok: false, error: errMessage(err) };
     }
   }
 
