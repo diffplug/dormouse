@@ -47,6 +47,10 @@ type AgentBrowserPanelParams = {
   key?: string;
   wsPort?: number;
   binaryPath?: string;
+  /** The active tab's URL, mirrored from the live session so it persists in the
+   *  layout blob and is available to render-mode swaps and pop-out without a live
+   *  stream. The canonical target for the surface (see dor-iframe.md → Path 1). */
+  url?: string;
   /** Whether sync-to-pane is engaged; persists via the dockview layout blob so
    *  a re-attached surface re-engages sync if it was engaged. Absent on a fresh
    *  surface ⇒ auto-engage (see docs/specs/dor-agent-browser.md). */
@@ -179,6 +183,12 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   binaryPathRef.current = binaryPath;
   const wsPortRef = useRef(wsPort);
   wsPortRef.current = wsPort;
+  // Canonical URL mirror (params.url): kept in a ref so the pop-out / pop-in
+  // callbacks read the latest without re-creating, and prefer it over the live
+  // chrome snapshot, which can be momentarily empty during a relaunch.
+  const paramsUrl = params?.url;
+  const paramsUrlRef = useRef(paramsUrl);
+  paramsUrlRef.current = paramsUrl;
 
   const closeIfSessionMarkedClosed = useCallback((targetSession: string | null | undefined = sessionRef.current): boolean => {
     if (!targetSession || !isAgentBrowserSessionClosed(targetSession)) return false;
@@ -561,7 +571,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       setPoppedOut(false);
       api.updateParameters({ poppedOut: false });
     });
-    const url = chromeSnapshotRef.current.url || undefined;
+    const url = paramsUrlRef.current || chromeSnapshotRef.current.url || undefined;
     fn(session, { rect: paneScreenRect(elRef.current), url }, binaryPathRef.current).then((res) => {
       if (closeIfSessionMarkedClosed(session)) return;
       if (!res.ok) {
@@ -582,7 +592,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     const fn = getPlatform().agentBrowserPopIn;
     if (!session || !fn) return;
     void reconcileStreamPort();
-    const url = chromeSnapshotRef.current.url || undefined;
+    const url = paramsUrlRef.current || chromeSnapshotRef.current.url || undefined;
     fn(session, { url }, binaryPathRef.current).then((res) => {
       if (closeIfSessionMarkedClosed(session)) return;
       if (res.ok) void reconcileStreamPort(res.wsPort);
@@ -659,6 +669,16 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     registrationRef.current?.updateChrome(chromeSnapshotRef.current);
     // displayUrl is a pure function of url, so url covers it.
   }, [chromeSnapshot.url, chromeSnapshot.title, chromeSnapshot.key]);
+
+  // Mirror the active tab's URL into params so it persists in the layout blob and
+  // render-mode swaps / pop-out have a canonical URL even when the live stream is
+  // momentarily without an active tab (see dor-iframe.md → Path 1, "url is
+  // single-homed"). Non-empty changes only; the write sets params.url === url so
+  // it does not re-fire.
+  useEffect(() => {
+    const url = chromeSnapshot.url;
+    if (url && url !== paramsUrlRef.current) api.updateParameters({ url });
+  }, [chromeSnapshot.url, api]);
 
   // Push the render-mode flip (screencast ↔ popout) to the header/modal.
   useEffect(() => { publishScreen(); }, [poppedOut, publishScreen]);

@@ -1562,7 +1562,9 @@ export function Wall({
       // agent-browser → iframe embed: frame the active tab's URL, then the
       // replace closes the now-unneeded headless browser. Webview-only.
       if (currentType === 'agent-browser' && mode === 'embed') {
-        const url = getAgentBrowserScreenController(id)?.chrome().url;
+        // Canonical params.url (mirrored from the chrome snapshot) first; fall
+        // back to the live snapshot for a surface that hasn't reported a tab yet.
+        const url = (typeof params?.url === 'string' && params.url) || getAgentBrowserScreenController(id)?.chrome().url;
         if (!url) return;
         replaceSurface(id, {
           component: 'iframe',
