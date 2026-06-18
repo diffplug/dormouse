@@ -139,7 +139,9 @@ It posts only Dormouse-owned control messages to the parent:
 - `location`: the proxied frame URL after `pushState`/`replaceState`,
   `popstate`, `hashchange`, page show/load, and before same-frame anchor
   navigation. `IframePanel` maps that proxy-origin URL back to the upstream URL
-  before updating pane params and Back/Forward history.
+  before updating iframe chrome and Back/Forward history. It does **not** write
+  pane params or re-resolve the iframe source; in-frame client-side navigation
+  must not become a full page reload.
 
 Every other keystroke and pointer event flows to the tool untouched. The
 embedded tool (a code editor, a VS-Code-web workbench) keeps full keyboard
@@ -321,9 +323,10 @@ new. A panel's `setRenderMode` action routes the cross-type case through
   (e.g. the web host).
 
 Both surfaces register a screen controller, so an `iframe embed` surface shows
-the same browser chrome (URL + chip) as a screencast on capable hosts; its nav
-is reload (re-resolve the proxy) + URL-edit, with back/forward inert (a
-cross-origin frame's history is unreachable).
+the same browser chrome (URL + chip) as a screencast on capable hosts. URL edits
+and Back/Forward update the pane's source URL and re-resolve the proxy; shim
+`location` reports from in-frame navigation update only the displayed URL and the
+panel's small parent-side history. Reload explicitly re-resolves the proxy.
 
 ## Path 2 — Plugin System
 

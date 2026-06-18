@@ -86,13 +86,18 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
   const elRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   usePaneChrome(api, elRef);
-  const url = typeof params?.url === 'string' ? params.url : '';
-  const [history, setHistory] = useState<IframeHistory>(() => ({ entries: url ? [url] : [], index: url ? 0 : -1 }));
+  const sourceUrl = typeof params?.url === 'string' ? params.url : '';
+  const [liveUrl, setLiveUrl] = useState(sourceUrl);
+  const [history, setHistory] = useState<IframeHistory>(() => (
+    sourceUrl ? { entries: [sourceUrl], index: 0 } : { entries: [], index: -1 }
+  ));
   // Mirror the live index into a ref so the back/forward actions stay stable —
   // otherwise chromeActions (and the screen registration depending on it) would
   // churn on every navigation.
   const historyIndexRef = useRef(history.index);
   historyIndexRef.current = history.index;
+  const historyRef = useRef(history);
+  historyRef.current = history;
   // Bumped by the header's reload button to re-resolve the proxy (a cross-origin
   // frame can't be reloaded via its contentWindow).
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -104,28 +109,38 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
   // Back/Forward are real even though the cross-origin frame history itself is
   // not reachable from the parent webview.
   useEffect(() => {
-    if (!url) {
+    if (!sourceUrl) {
+      setLiveUrl('');
       setHistory({ entries: [], index: -1 });
       return;
     }
-    setHistory((prev) => appendHistory(prev, url));
-  }, [url]);
+    setLiveUrl(sourceUrl);
+    setHistory((prev) => appendHistory(prev, sourceUrl));
+  }, [sourceUrl]);
 
   const commitUrl = useCallback((nextUrl: string) => {
     if (!nextUrl) return;
+    setLiveUrl(nextUrl);
     setHistory((prev) => appendHistory(prev, nextUrl));
     api.updateParameters({ url: nextUrl });
     api.setTitle?.(hostPathDisplay(nextUrl, true));
   }, [api]);
 
+  const observeFrameUrl = useCallback((nextUrl: string) => {
+    if (!nextUrl) return;
+    setLiveUrl(nextUrl);
+    setHistory((prev) => appendHistory(prev, nextUrl));
+    api.setTitle?.(hostPathDisplay(nextUrl, true));
+  }, [api]);
+
   const goToHistoryIndex = useCallback((nextIndex: number) => {
-    setHistory((prev) => {
-      if (nextIndex < 0 || nextIndex >= prev.entries.length) return prev;
-      const nextUrl = prev.entries[nextIndex];
-      api.updateParameters({ url: nextUrl });
-      api.setTitle?.(hostPathDisplay(nextUrl, true));
-      return { ...prev, index: nextIndex };
-    });
+    const prev = historyRef.current;
+    if (nextIndex < 0 || nextIndex >= prev.entries.length) return;
+    const nextUrl = prev.entries[nextIndex];
+    setLiveUrl(nextUrl);
+    setHistory({ ...prev, index: nextIndex });
+    api.updateParameters({ url: nextUrl });
+    api.setTitle?.(hostPathDisplay(nextUrl, true));
   }, [api]);
 
   // Ask the host to front the target with its transparent proxy. The returned
@@ -133,20 +148,20 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
   // loopback) so Dormouse — now the server — gets a keyboard side-channel, an
   // accurate focus model, and real error pages. Reachability/frame-refusal are
   // diagnosed by the proxy and shown as a served page inside the frame.
-  const [resolution, setResolution] = useState<Resolution>(() => (url ? { kind: 'resolving' } : { kind: 'empty' }));
+  const [resolution, setResolution] = useState<Resolution>(() => (sourceUrl ? { kind: 'resolving' } : { kind: 'empty' }));
   useEffect(() => {
-    if (!url) {
+    if (!sourceUrl) {
       setResolution({ kind: 'empty' });
       return;
     }
     const createProxy = getPlatform().createIframeProxyUrl;
     if (!createProxy) {
-      setResolution({ kind: 'raw', src: url });
+      setResolution({ kind: 'raw', src: sourceUrl });
       return;
     }
     let cancelled = false;
     setResolution({ kind: 'resolving' });
-    createProxy(url).then(
+    createProxy(sourceUrl).then(
       (result: IframeProxyResult) => {
         if (cancelled) return;
         if (result.ok) setResolution({ kind: 'proxied', src: result.url, origin: originOf(result.url) });
@@ -157,7 +172,7 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
       },
     );
     return () => { cancelled = true; };
-  }, [url, reloadNonce]);
+  }, [sourceUrl, reloadNonce]);
 
   // Register a screen controller so the embed surface shows the unified
   // browser chrome (URL + the far-left chip → Display modal) and can swap back
@@ -194,7 +209,7 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
         syncEngaged: false,
       },
       actions: screenActions,
-      chrome: { url, displayUrl: hostPathDisplay(url), title: api.title ?? null, key: null },
+      chrome: { url: liveUrl, displayUrl: hostPathDisplay(liveUrl), title: api.title ?? null, key: null },
       chromeActions,
       hostCapable: false,
       // embed→popout spawns the new agent-browser headed and mounts it
@@ -204,10 +219,11 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     registrationRef.current = registration;
     return () => { registration.dispose(); registrationRef.current = null; };
   }, [api.id, swapCapable, screenActions, chromeActions]);
-  // Keep the header's URL current as navigate/param changes land.
+  // Keep the header's URL current as navigation and in-frame location changes
+  // land. The iframe src is still driven only by sourceUrl.
   useEffect(() => {
-    registrationRef.current?.updateChrome({ url, displayUrl: hostPathDisplay(url), title: api.title ?? null, key: null });
-  }, [url, api.title]);
+    registrationRef.current?.updateChrome({ url: liveUrl, displayUrl: hostPathDisplay(liveUrl), title: api.title ?? null, key: null });
+  }, [liveUrl, api.title]);
 
   // Trust postMessage from this frame's origin (validated by the Wall's
   // keyboard/focus/location channel) only while the proxied surface is live.
@@ -235,13 +251,13 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
         return;
       }
       if (data?.__dormouse === 'location') {
-        const nextUrl = upstreamUrlFromFrameLocation(data.url, url, proxyOrigin);
-        if (nextUrl) commitUrl(nextUrl);
+        const nextUrl = upstreamUrlFromFrameLocation(data.url, liveUrl || sourceUrl, proxyOrigin);
+        if (nextUrl) observeFrameUrl(nextUrl);
       }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [api, proxyOrigin, actions, url, commitUrl]);
+  }, [api, proxyOrigin, actions, liveUrl, sourceUrl, observeFrameUrl]);
 
   // Raw fallback frames have no injected shim, but focusing a cross-origin
   // iframe still blurs the parent window while the document itself remains
@@ -303,13 +319,13 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
           ref={iframeRef}
           className="block h-full w-full border-0 bg-white"
           src={src}
-          title={api.title ?? url}
+          title={api.title ?? liveUrl}
           allow={IFRAME_ALLOW}
           {...(resolution.kind === 'proxied' ? { sandbox: PROXY_SANDBOX, 'data-dormouse-proxy': 'true' } : {})}
           referrerPolicy="strict-origin-when-cross-origin"
         />
       ) : (
-        <PanelMessage resolution={resolution} url={url} />
+        <PanelMessage resolution={resolution} url={sourceUrl} />
       )}
     </div>
   );

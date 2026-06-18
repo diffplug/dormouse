@@ -124,7 +124,7 @@ describe('IframePanel', () => {
     expect(updateParameters).toHaveBeenLastCalledWith({ url: 'http://example.test/two' });
   });
 
-  it('maps proxied frame location messages back to the upstream URL', async () => {
+  it('maps proxied frame location messages into chrome without updating params', async () => {
     const updateParameters = vi.fn();
     const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen' | 'createIframeProxyUrl'>;
     platform.agentBrowserOpen = vi.fn();
@@ -136,13 +136,14 @@ describe('IframePanel', () => {
     setPlatform(platform);
     await renderPanel(stubActions(), panelProps('iframe-proxied', updateParameters));
 
-    act(() => {
+    await act(async () => {
       window.dispatchEvent(new MessageEvent('message', {
         origin: 'http://127.0.0.1:61234',
         data: { __dormouse: 'location', url: 'http://127.0.0.1:61234/other/?q=1#frag' },
       }));
     });
 
-    expect(updateParameters).toHaveBeenLastCalledWith({ url: 'http://example.test/other/?q=1#frag' });
+    expect(updateParameters).not.toHaveBeenCalled();
+    expect(getAgentBrowserScreenController('iframe-proxied')?.chrome().url).toBe('http://example.test/other/?q=1#frag');
   });
 });
