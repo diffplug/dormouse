@@ -58,11 +58,12 @@ export function releaseDevServerPort(port: number): void {
     return;
   }
   wanted.delete(port);
-  // Drop the stale resolution so a later watcher re-resolves from scratch
-  // rather than briefly flashing a now-defunct pane.
-  const hadResolution = resolutions.delete(port);
+  // Keep the last resolution cached rather than dropping it here: releasing is
+  // also what React StrictMode's mount→cleanup→mount does on every header mount,
+  // and clearing it in this cleanup would blank the chip until the next scan. The
+  // resolution is Wall-owned — a re-wanted port is re-validated (the Wall's
+  // `settled` set drops it) and a now-defunct pane is cleared by that scan.
   emitWanted();
-  if (hadResolution) emitResolutions();
 }
 
 export function getWantedDevServerPorts(): number[] {

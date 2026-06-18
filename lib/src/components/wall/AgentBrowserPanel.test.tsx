@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -68,9 +68,11 @@ afterEach(() => {
 async function renderPanel(props = panelProps('ab-panel')): Promise<void> {
   await act(async () => {
     root.render(
-      <WallActionsContext.Provider value={stubActions()}>
-        <AgentBrowserPanel {...props} />
-      </WallActionsContext.Provider>,
+      <StrictMode>
+        <WallActionsContext.Provider value={stubActions()}>
+          <AgentBrowserPanel {...props} />
+        </WallActionsContext.Provider>
+      </StrictMode>,
     );
   });
 }
@@ -136,9 +138,11 @@ describe('AgentBrowserPanel render mode controller', () => {
     const onSwapRenderMode = vi.fn();
     await act(async () => {
       root.render(
-        <WallActionsContext.Provider value={stubActions({ onSwapRenderMode })}>
-          <AgentBrowserPanel {...panelProps('ab-panel')} />
-        </WallActionsContext.Provider>,
+        <StrictMode>
+          <WallActionsContext.Provider value={stubActions({ onSwapRenderMode })}>
+            <AgentBrowserPanel {...panelProps('ab-panel')} />
+          </WallActionsContext.Provider>
+        </StrictMode>,
       );
     });
 

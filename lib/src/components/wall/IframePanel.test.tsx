@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -58,9 +58,11 @@ afterEach(() => {
 async function renderPanel(actions: WallActions, props = panelProps('iframe-raw')): Promise<HTMLIFrameElement> {
   await act(async () => {
     root.render(
-      <WallActionsContext.Provider value={actions}>
-        <IframePanel {...props} />
-      </WallActionsContext.Provider>,
+      <StrictMode>
+        <WallActionsContext.Provider value={actions}>
+          <IframePanel {...props} />
+        </WallActionsContext.Provider>
+      </StrictMode>,
     );
   });
 
