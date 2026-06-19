@@ -148,4 +148,36 @@ describe('IframePanel', () => {
     expect(updateParameters).not.toHaveBeenCalled();
     expect(getAgentBrowserScreenController('iframe-proxied')?.chrome().url).toBe('http://example.test/other/?q=1#frag');
   });
+
+  it('re-resolves the proxy on Back after an observed in-frame navigation', async () => {
+    const updateParameters = vi.fn();
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen' | 'createIframeProxyUrl'>;
+    platform.agentBrowserOpen = vi.fn();
+    // Fixed URL so the proxy origin stays stable (the message handler gates on
+    // it); re-resolution is observed via the call count, not a changed src.
+    const createProxy = vi.fn(async () => ({ ok: true, url: 'http://127.0.0.1:61234/app' }));
+    platform.createIframeProxyUrl = createProxy;
+    setPlatform(platform);
+    await renderPanel(stubActions(), panelProps('iframe-back', updateParameters));
+
+    // Observe an in-frame navigation: it adds a history entry but, by design,
+    // does not write params.url back, so params.url stays the source URL.
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: 'http://127.0.0.1:61234',
+        data: { __dormouse: 'location', url: 'http://127.0.0.1:61234/other' },
+      }));
+    });
+
+    const callsBeforeBack = createProxy.mock.calls.length;
+    await act(async () => {
+      getAgentBrowserScreenController('iframe-back')?.chromeActions.back();
+    });
+
+    // Back targets the original (still-persisted) URL, so updateParameters is a
+    // no-op write — the proxy must still re-resolve or the frame would keep
+    // showing /other while the chrome shows /app.
+    expect(updateParameters).toHaveBeenLastCalledWith({ url: 'http://example.test/app' });
+    expect(createProxy.mock.calls.length).toBeGreaterThan(callsBeforeBack);
+  });
 });

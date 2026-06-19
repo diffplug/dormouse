@@ -71,6 +71,10 @@ export const IFRAME_SHIM = `(function(){
       post('open-window',{url:String(a.href)});
       return;
     }
+    // Modifier / non-primary clicks (Cmd/Ctrl/Shift/Alt, middle button) open a
+    // new tab/window and leave this frame put — don't report a location the
+    // frame isn't actually showing, or the parent's URL bar + Back history lie.
+    if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||e.button!==0)return;
     post('location',{url:String(a.href)});
   },true);
   // window.open is likewise single-frame-hostile; redirect it to a new pane.

@@ -90,6 +90,13 @@ describe('instrumentHtml', () => {
     // window.open is overridden so popups become a new pane rather than vanishing.
     expect(IFRAME_SHIM).toContain('window.open=function');
   });
+
+  it('does not report a same-frame location for modifier / non-primary clicks', () => {
+    // Cmd/Ctrl/Shift/Alt+click and middle-click open a new tab/window without
+    // navigating the frame, so the shim must bail rather than post a stale
+    // location that would make the parent chrome URL bar lie.
+    expect(IFRAME_SHIM).toContain('e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||e.button!==0');
+  });
 });
 
 describe('isLoopbackHost', () => {

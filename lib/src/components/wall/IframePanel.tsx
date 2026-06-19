@@ -143,6 +143,12 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     setHistory({ ...prev, index: nextIndex });
     api.updateParameters({ url: nextUrl });
     api.setTitle?.(hostPathDisplay(nextUrl, true));
+    // Force a proxy re-resolution so the frame actually reloads. After an
+    // observed in-frame navigation, params.url stays at the source URL, so a
+    // Back to that same URL is a no-op write — without bumping the nonce the
+    // proxy effect (deps: sourceUrl, reloadNonce) wouldn't re-fire and the frame
+    // would keep showing the navigated page while the chrome shows the target.
+    setReloadNonce((n) => n + 1);
   }, [api]);
 
   // Ask the host to front the target with its transparent proxy. The returned
