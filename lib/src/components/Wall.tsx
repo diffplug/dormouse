@@ -1211,6 +1211,7 @@ export function Wall({
         }
         const existingId = findSurfaceIdRunningCommand(command, cwd);
         if (existingId) {
+          const minimized = doorsRef.current.some((door) => door.id === existingId);
           if (booleanParam(params.restart)) {
             const restarted = await restartSurfaceInPlace(existingId, command, cwd);
             if (!restarted.ok) {
@@ -1225,7 +1226,7 @@ export function Wall({
                 surfaceRef: surfaceRefForId(existingId),
                 command,
                 cwd,
-                minimized: doorsRef.current.some((door) => door.id === existingId),
+                minimized,
               },
             });
             return;
@@ -1238,7 +1239,7 @@ export function Wall({
               surfaceRef: surfaceRefForId(existingId),
               command,
               cwd,
-              minimized: doorsRef.current.some((door) => door.id === existingId),
+              minimized,
             },
           });
           return;
