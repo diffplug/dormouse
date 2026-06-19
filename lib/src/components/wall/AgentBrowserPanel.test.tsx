@@ -512,10 +512,12 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
 });
 
 describe('AgentBrowserPanel tab strip actions', () => {
-  // The chip/× act on mousedown, not click: a mousedown selects the pane, which
-  // makes dockview move this panel's DOM, and a real press's mouseup then lands
-  // on the moved node so no `click` is synthesized. Driving these via `click`
-  // here would mask a regression to `onClick` — fire mousedown like a real press.
+  // The chip/× use plain onClick. In the real app a click on an unselected
+  // browser pane used to be lost because selecting the pane moved its DOM
+  // mid-press; that is fixed at the source by giving browser panels dockview's
+  // `renderer:'always'` (Wall.tsx → rendererForParams), so the node stays put and
+  // the click survives. jsdom doesn't move the DOM, so a dispatched click here
+  // just exercises the onClick → selectTab/closeTab wiring.
   async function renderWithTwoTabs(): Promise<ReturnType<typeof vi.fn>> {
     const command = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
     const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand'>;
@@ -539,22 +541,57 @@ describe('AgentBrowserPanel tab strip actions', () => {
   const chipFor = (url: string) => [...container.querySelectorAll('div[title]')]
     .find((e) => e.getAttribute('title') === url && (e.className || '').includes('cursor-pointer')) as HTMLElement;
 
-  it('switches to an inactive tab on chip mousedown', async () => {
+  it('switches to an inactive tab on chip click', async () => {
     const command = await renderWithTwoTabs();
     const chip = chipFor('https://github.com/diffplug/dormouse');
     await act(async () => {
-      chip.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      chip.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
     });
     expect(command).toHaveBeenCalledWith('browser-session', ['tab', 't2'], undefined);
   });
 
-  it('closes a tab on the × button mousedown', async () => {
+  it('closes a tab on the × button click', async () => {
     const command = await renderWithTwoTabs();
     const closeBtn = chipFor('https://github.com/diffplug/dormouse')
       .querySelector('button[aria-label="Close tab"]') as HTMLButtonElement;
     await act(async () => {
-      closeBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      closeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
     });
     expect(command).toHaveBeenCalledWith('browser-session', ['tab', 'close', 't2'], undefined);
+  });
+
+  it('captures a fresh frame when the active tab changes, but not on other tab edits', async () => {
+    // The daemon emits no screencast frame on a tab switch and the dedup'd stream
+    // is otherwise silent, so the panel forces one device screenshot so the canvas
+    // follows the newly-active tab.
+    const screenshot = vi.fn(async () => ({ ok: false as const, error: 'test' }));
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserScreenshot'>;
+    platform.agentBrowserScreenshot = screenshot;
+    setPlatform(platform);
+    const props = {
+      api: { id: 'ab-panel', title: 'Browser', updateParameters: vi.fn(), setTitle: vi.fn() },
+      params: { surfaceType: 'agent-browser', session: 'browser-session', wsPort: 4321 },
+    } as unknown as IDockviewPanelProps<TestPanelParams>;
+    await renderPanel(props);
+    const ws = WebSocketMock.instances[WebSocketMock.instances.length - 1];
+    const tabs = (a: 't1' | 't2', extra = false) => JSON.stringify({ type: 'tabs', tabs: [
+      { tabId: 't1', title: 'Dormouse', url: 'https://dormouse.sh/', active: a === 't1' },
+      { tabId: 't2', title: 'GitHub', url: 'https://github.com/diffplug/dormouse', active: a === 't2' },
+      ...(extra ? [{ tabId: 't3', title: 'GitHub', url: 'https://github.com/diffplug/dormouse', active: false }] : []),
+    ] });
+
+    await act(async () => { ws.emitMessage(tabs('t1')); });
+    await new Promise((r) => setTimeout(r, 40)); // let the priming capture settle
+    screenshot.mockClear();
+
+    // Adding a tab without changing which is active must NOT force a capture.
+    await act(async () => { ws.emitMessage(tabs('t1', true)); });
+    await new Promise((r) => setTimeout(r, 120));
+    expect(screenshot).not.toHaveBeenCalled();
+
+    // Switching the active tab does.
+    await act(async () => { ws.emitMessage(tabs('t2', true)); });
+    await new Promise((r) => setTimeout(r, 120));
+    expect(screenshot).toHaveBeenCalled();
   });
 });

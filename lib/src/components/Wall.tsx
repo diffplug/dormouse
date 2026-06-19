@@ -192,10 +192,14 @@ function componentForSurfaceType(type: DorSurfaceType): string {
   return type === 'terminal' ? 'terminal' : 'browser';
 }
 
-/** Only the iframe renderer needs dockview's `renderer:'always'` (moving an
- *  <iframe> in the DOM reloads it); the screencast canvas tolerates the default. */
-function rendererForParams(params: { renderMode?: unknown }): 'always' | undefined {
-  return resolveRenderMode(params) === 'iframe' ? 'always' : undefined;
+/** Every browser surface uses dockview's `renderer:'always'`. The default
+ *  (`onlyWhenVisible`) detaches/reattaches — i.e. *moves* — the panel DOM on
+ *  activation; that reloads an <iframe>, and for the screencast canvas it moves
+ *  the node mid-press, so a real click's mouseup lands on a different node and no
+ *  `click` is synthesized (tab chips / page links silently did nothing). Keeping
+ *  the panel always-mounted avoids both. Only ever called for 'browser' panels. */
+function rendererForParams(_params: { renderMode?: unknown }): 'always' {
+  return 'always';
 }
 
 function tabComponentForSurfaceType(type: DorSurfaceType): string {

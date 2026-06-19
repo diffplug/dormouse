@@ -465,8 +465,17 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
           publishScreen();
         }
       } else if (event.type === 'tabs') {
+        const prevActiveId = event.previousTabs.find((t) => t.active)?.tabId;
+        const nextActiveId = event.tabs.find((t) => t.active)?.tabId;
         rememberActiveTabUrl(event.tabs);
         setTabs(event.tabs);
+        // Switching the active tab doesn't make the daemon emit a screencast
+        // frame, and the dedup'd stream is otherwise silent on a static page, so
+        // nothing would repaint the canvas onto the newly-active tab. Force one
+        // capture so the surface follows the tab the user just selected.
+        if (nextActiveId && nextActiveId !== prevActiveId && !poppedOutRef.current && !relaunchingRef.current) {
+          screenshotLoop.pulse();
+        }
       } else if (event.type === 'frame-pulse') {
         if (event.metadata?.deviceWidth && event.metadata?.deviceHeight) {
           deviceRef.current = { width: event.metadata.deviceWidth, height: event.metadata.deviceHeight };
@@ -1175,14 +1184,6 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
       {tabs.length >= 2 && (
         <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border bg-surface-raised px-1 py-0.5">
           {tabs.map((tab) => (
-            // Act on mousedown, not click: a mousedown here bubbles to the pane's
-            // onMouseDown → onClickPanel, which selects/focuses the pane and makes
-            // dockview move this panel's DOM. With a real (non-instant) press that
-            // re-layout lands between mousedown and mouseup, so the node the press
-            // started on is gone by release and the browser never synthesizes a
-            // `click` — the chip would silently do nothing. mousedown fires first,
-            // synchronously, before any of that. (The canvas dodges the same trap
-            // the same way via onCanvasMouseDown.)
             <div
               key={tab.tabId}
               title={tab.url}
@@ -1190,15 +1191,14 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
                 'group flex min-w-0 max-w-48 cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-xs',
                 tab.active ? 'bg-terminal-bg text-foreground' : 'text-muted hover:bg-terminal-bg/60',
               )}
-              onMouseDown={(e) => { if (e.button === 0) selectTab(tab); }}
+              onClick={() => selectTab(tab)}
             >
               <span className="truncate">{tabDisplayTitle(tab)}</span>
               <button
                 type="button"
                 aria-label="Close tab"
                 className="shrink-0 rounded px-0.5 text-muted opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
-                onMouseDown={(e) => {
-                  if (e.button !== 0) return;
+                onClick={(e) => {
                   e.stopPropagation();
                   closeTab(tab);
                 }}
