@@ -53,7 +53,7 @@ export function getWebviewHtml(
   // get a duplicate nonce attribute from the regex above.
   html = html.replace(
     '</head>',
-    `    <script nonce="${nonce}">globalThis.__MOUSETERM_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__MOUSETERM_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};</script>\n  </head>`,
+    `    <script nonce="${nonce}">globalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};</script>\n  </head>`,
   );
 
   return html;
