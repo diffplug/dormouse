@@ -510,3 +510,51 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
     expect(sentMouseEvents()).toHaveLength(0);
   });
 });
+
+describe('AgentBrowserPanel tab strip actions', () => {
+  // The chip/× act on mousedown, not click: a mousedown selects the pane, which
+  // makes dockview move this panel's DOM, and a real press's mouseup then lands
+  // on the moved node so no `click` is synthesized. Driving these via `click`
+  // here would mask a regression to `onClick` — fire mousedown like a real press.
+  async function renderWithTwoTabs(): Promise<ReturnType<typeof vi.fn>> {
+    const command = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand'>;
+    platform.agentBrowserCommand = command;
+    setPlatform(platform);
+    const props = {
+      api: { id: 'ab-panel', title: 'Browser', updateParameters: vi.fn(), setTitle: vi.fn() },
+      params: { surfaceType: 'agent-browser', session: 'browser-session', wsPort: 4321 },
+    } as unknown as IDockviewPanelProps<TestPanelParams>;
+    await renderPanel(props);
+    const ws = WebSocketMock.instances[WebSocketMock.instances.length - 1];
+    await act(async () => {
+      ws.emitMessage(JSON.stringify({ type: 'tabs', tabs: [
+        { tabId: 't1', title: 'Dormouse', url: 'https://dormouse.sh/', active: true },
+        { tabId: 't2', title: 'GitHub', url: 'https://github.com/diffplug/dormouse', active: false },
+      ] }));
+    });
+    return command;
+  }
+
+  const chipFor = (url: string) => [...container.querySelectorAll('div[title]')]
+    .find((e) => e.getAttribute('title') === url && (e.className || '').includes('cursor-pointer')) as HTMLElement;
+
+  it('switches to an inactive tab on chip mousedown', async () => {
+    const command = await renderWithTwoTabs();
+    const chip = chipFor('https://github.com/diffplug/dormouse');
+    await act(async () => {
+      chip.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    });
+    expect(command).toHaveBeenCalledWith('browser-session', ['tab', 't2'], undefined);
+  });
+
+  it('closes a tab on the × button mousedown', async () => {
+    const command = await renderWithTwoTabs();
+    const closeBtn = chipFor('https://github.com/diffplug/dormouse')
+      .querySelector('button[aria-label="Close tab"]') as HTMLButtonElement;
+    await act(async () => {
+      closeBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    });
+    expect(command).toHaveBeenCalledWith('browser-session', ['tab', 'close', 't2'], undefined);
+  });
+});
