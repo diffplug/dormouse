@@ -59,14 +59,14 @@ type AgentBrowserPanelParams = {
   binaryPath?: string;
   /** The active tab's URL, mirrored from the live session so it persists in the
    *  layout blob and is available to render-mode swaps and pop-out without a live
-   *  stream. The canonical target for the surface (see dor-browser.md → "Canonical pane state"). */
+   *  stream. The canonical target for the surface (see dor-browser.md → "Canonical Params"). */
   url?: string;
   /** Whether sync-to-pane is engaged; persists via the dockview layout blob so
    *  a re-attached surface re-engages sync if it was engaged. Absent on a fresh
    *  surface ⇒ auto-engage (see docs/specs/dor-browser.md). */
   syncEngaged?: boolean;
   /** Whether this session is currently popped out to a headed OS window
-   *  (docs/specs/dor-browser.md → "Headed pop-out"). Persists via the
+   *  (docs/specs/dor-browser.md → "Pop-Out"). Persists via the
    *  layout blob so a re-attached surface re-renders the stub. */
   poppedOut?: boolean;
 };
@@ -801,8 +801,8 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
 
   // Mirror the active tab's URL into params so it persists in the layout blob and
   // render-mode swaps / pop-out have a canonical URL even when the live stream is
-  // momentarily without an active tab (see dor-browser.md → "Canonical pane state", "url is
-  // single-homed"). Non-empty changes only; the write sets params.url === url so
+  // momentarily without an active tab (see dor-browser.md → "Canonical Params":
+  // `url` is the canonical target). Non-empty changes only; the write sets params.url === url so
   // it does not re-fire.
   useEffect(() => {
     const url = chromeSnapshot.url;

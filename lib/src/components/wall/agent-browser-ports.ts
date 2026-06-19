@@ -1,6 +1,6 @@
 /**
  * Dev-server port → terminal-pane correlation store
- * (docs/specs/dor-browser.md → "Dev-server connection").
+ * (docs/specs/dor-browser.md → "Dev-Server Chip").
  *
  * A browser surface header can't see other panes' open ports, so the
  * correlation lives in the Wall: it watches which loopback ports headers are

@@ -22,7 +22,7 @@ import { setDevServerResolution } from '../components/wall/agent-browser-ports';
 
 /**
  * Playground for the agent-browser surface's browser-chrome header
- * (docs/specs/dor-browser.md → "Browser-chrome header").
+ * (docs/specs/dor-browser.md → "Browser Chrome").
  *
  * `SurfacePaneHeader` decides "this is a browser surface" purely from the
  * presence of a screen controller for its `api.id`, and reads URL / key from

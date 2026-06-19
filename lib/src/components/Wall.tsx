@@ -993,7 +993,7 @@ export function Wall({
 
   /**
    * Replace a content surface's renderer in place, preserving its dock slot
-   * (docs/specs/dor-browser.md → "Render-mode transitions"). Adds the
+   * (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). Adds the
    * new panel `within` the old one, closes the old surface's session if any,
    * then removes the old panel and selects the new. The generalized form of
    * createContentSurface's replace-untouched-terminal branch.
@@ -1624,7 +1624,7 @@ export function Wall({
       if (!api) return;
       // A new-tab request from the iframe shim → open the URL as a new iframe
       // browser pane, split next to the source (docs/specs/dor-browser.md →
-      // "New tab → new pane").
+      // "Iframe Shim").
       const reference = buildDorSurfaces(api).find((s) => s.id === id);
       if (!reference) return;
       createContentSurface({

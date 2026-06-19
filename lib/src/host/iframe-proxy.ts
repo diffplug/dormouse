@@ -1,6 +1,6 @@
 /**
  * Host-agnostic transparent proxy for the iframe surface
- * (docs/specs/dor-browser.md → "The transparent proxy").
+ * (docs/specs/dor-browser.md → "Iframe Renderer").
  *
  * Instead of pointing the `<iframe>` at a `dor iframe <url>` target directly —
  * where a cross-origin frame owns the keyboard, hides load errors, and can be

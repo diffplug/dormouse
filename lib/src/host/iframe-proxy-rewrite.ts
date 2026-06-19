@@ -1,6 +1,6 @@
 /**
  * Pure, dependency-free helpers for the iframe transparent proxy
- * (docs/specs/dor-browser.md → "The transparent proxy").
+ * (docs/specs/dor-browser.md → "Iframe Renderer").
  *
  * Split out from the Node server (`iframe-proxy.ts`) so the policy/rewriting
  * logic is shared by every host that runs the proxy (VS Code extension host,

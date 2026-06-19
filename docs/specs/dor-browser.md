@@ -159,7 +159,10 @@ Sync state is the only Dormouse-specific resolution state that persists
 (`syncEngaged`). Device/custom viewport state lives in agent-browser itself.
 `SYNCED`/`SCALED` is derived from viewport CSS dimensions versus pane CSS
 dimensions; DPR is issued but not part of the comparison because stream frames
-are CSS-resolution.
+are CSS-resolution. Sync coexists with external `set viewport`/`set device`
+last-writer-wins: Dormouse disengages sync (→ `SCALED`) only after a frame first
+confirms its own issued size landed, so a resize transient is not mistaken for an
+external override.
 
 Swap behavior:
 
@@ -216,15 +219,20 @@ The stream WebSocket provides:
 - tab snapshots,
 - native `input_mouse` / `input_keyboard` input.
 
-Dormouse does not render the stream JPEG by default. It treats frame messages as
-change pulses, captures a crisp device-resolution screenshot through the host's
-`agentBrowserScreenshot`, and draws that to canvas with latest-only backpressure.
-If the host cannot screenshot, it falls back to the stream frame path.
+Dormouse does not render the stream JPEG by default. The screencast is
+CSS-resolution only — Chromium's `Page.startScreencast` captures in DIP with no
+DPR knob, so its frames upscale to mush on HiDPI; this is a Chromium limit, not
+agent-browser's, so owning the CDP connection wouldn't change it. So Dormouse
+treats frame messages as change pulses, captures a crisp device-resolution
+screenshot through the host's `agentBrowserScreenshot`, and draws that to canvas
+with latest-only backpressure. If the host cannot screenshot, it falls back to the
+stream frame path.
 
 Important input details:
 
 - `input_keyboard.text` is always sent; non-text keys use `text: ""`.
-- `windowsVirtualKeyCode` comes from a real key map.
+- `windowsVirtualKeyCode` comes from a real key map, never `key.charCodeAt(0)`
+  (`.` is char 46 = VK_DELETE, so periods would otherwise become Delete presses).
 - Local paste is replayed as per-character key input.
 - macOS select-all/copy/cut use the purpose-built host `agentBrowserEdit`
   channel. Undo/redo is not emulated.
@@ -246,7 +254,10 @@ Bring to front if a host implements `agentBrowserBringToFront`.
 State carried in v1: only the active non-blank URL. Other tabs, DOM state,
 scroll, form inputs, session storage, and cookies/logins are not preserved across
 the relaunch. The host kills the daemon before reopening so the headed/headless
-mode actually changes, then reads a new stream port.
+mode actually changes, then reads a new stream port. Dormouse supplies that
+active-tab URL; the host trusts it and does not query the daemon during the
+close/reopen gap, because a `stream status` or tab query there can spawn a
+competing blank daemon.
 
 While popped out, Dormouse keeps a stream/CDP observer so URL/header state follows
 same-tab navigation and so a headed window close can auto-revert to headless.
@@ -364,8 +375,8 @@ Source of truth: `IFRAME_SHIM` in
   allowing scripts, same-origin within the proxy origin, forms, popups, modals,
   downloads, and common device/clipboard permissions.
 
-Source of truth: `IframePanel.tsx`, `lib/src/lib/use-window-focused.ts`,
-`lib/src/lib/terminal-registry.ts`.
+Source of truth: `IframePanel.tsx`, `lib/src/components/wall/use-window-focused.ts`,
+`lib/src/lib/terminal-lifecycle.ts` (`registerSurfaceFocusHandle`).
 
 ## Iframe Host Capability And CSP
 

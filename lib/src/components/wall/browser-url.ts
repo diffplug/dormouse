@@ -1,6 +1,6 @@
 /**
  * Small URL helpers for the agent-browser surface header
- * (see docs/specs/dor-browser.md → "Browser-chrome header").
+ * (see docs/specs/dor-browser.md → "Browser Chrome").
  *
  * The header shows a tab's URL as host+path (Chrome-style, the scheme and any
  * query/hash dropped) and, when that URL is loopback, correlates its port to a

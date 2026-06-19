@@ -8,7 +8,7 @@ export function useWindowFocused(): boolean {
     // though the app hasn't been backgrounded — the focused element is just an
     // <iframe> *inside* this document, so `document.hasFocus()` stays true.
     // Reading it instead of blindly setting false keeps headers/attention live
-    // when an iframe takes focus (docs/specs/dor-browser.md → "Accurate focus model").
+    // when an iframe takes focus (docs/specs/dor-browser.md → "Iframe Focus And Rendering Notes").
     const onBlur = () => setFocused(document.hasFocus());
     window.addEventListener('focus', onFocus);
     window.addEventListener('blur', onBlur);

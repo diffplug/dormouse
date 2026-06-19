@@ -88,7 +88,7 @@ export interface AgentBrowserStreamStatusResult {
 }
 
 /** Result of spawning a managed agent-browser session for a render swap
- *  (docs/specs/dor-browser.md → "Render-mode transitions"). */
+ *  (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). */
 export interface AgentBrowserOpenResult {
   ok: boolean;
   /** The resolved/namespaced session name the new surface should bind to. */
@@ -102,7 +102,7 @@ export interface AgentBrowserOpenResult {
 }
 
 /** Result of a headed/headless relaunch (docs/specs/dor-browser.md →
- *  "Headed pop-out"). The Chrome process is replaced, so the stream port
+ *  "Pop-Out"). The Chrome process is replaced, so the stream port
  *  changes; the session name is preserved. */
 export interface AgentBrowserPopResult {
   ok: boolean;
@@ -183,8 +183,8 @@ export interface PlatformAdapter {
   // host), where the panel falls back to a raw, uninstrumented `<iframe>`.
   createIframeProxyUrl?(targetUrl: string): Promise<IframeProxyResult>;
 
-  // Render-swap support (docs/specs/dor-browser.md → "Render-mode transitions";
-  // docs/specs/dor-browser.md → "Headed pop-out"). All optional
+  // Render-swap support (docs/specs/dor-browser.md → "Display Modal And Render Swaps";
+  // docs/specs/dor-browser.md → "Pop-Out"). All optional
   // so hosts degrade: the modal hides whatever isn't backed by a capability.
   //
   // Spawn a managed agent-browser session and open <url> — backs swapping an

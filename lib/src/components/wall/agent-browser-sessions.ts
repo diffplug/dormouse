@@ -3,7 +3,7 @@
  * or a render-swap away from the screencast/popout backend), so a popped-out
  * surface's auto-revert doesn't resurrect a session that's being torn down.
  *
- * The race (docs/specs/dor-browser.md → "Headed pop-out → Lifecycle"):
+ * The race (docs/specs/dor-browser.md → "Pop-Out"):
  * killing or swapping a popped-out surface issues `agent-browser … close`, which
  * drops the headed stream. The panel's auto-revert reads that dropped stream as
  * "the user closed the window" and relaunches the session headless — bringing

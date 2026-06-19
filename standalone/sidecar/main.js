@@ -16,7 +16,7 @@ const { createDorControlServer } = require('./dor-control-server');
 const { createIframeProxyUrl } = require('./iframe-proxy.cjs');
 // Same pattern: lib/src/host/agent-browser-host.ts is the single source of truth
 // for the agent-browser host capabilities, run here exactly as the VS Code
-// extension host runs it. See docs/specs/dor-browser.md → "Agent-browser host capabilities".
+// extension host runs it. See docs/specs/dor-browser.md → "Agent-Browser Host Capabilities".
 const { createAgentBrowserHost } = require('./agent-browser-host.cjs');
 
 const agentBrowser = createAgentBrowserHost({

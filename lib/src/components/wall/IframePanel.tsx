@@ -23,7 +23,7 @@ type IframePanelParams = {
 
 // Sandbox the proxied frame so a tool's `if (top !== self) top.location = …`
 // framebust cannot navigate the Wall away — allow-top-navigation is omitted on
-// purpose (docs/specs/dor-browser.md → "The transparent proxy"). Everything else a local
+// purpose (docs/specs/dor-browser.md → "Iframe Renderer"). Everything else a local
 // dev tool needs is granted; allow-same-origin is safe here because the frame's
 // origin (the loopback proxy) is never same-origin with the host webview.
 const PROXY_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads';
@@ -89,7 +89,7 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
   const sourceUrl = typeof params?.url === 'string' ? params.url : '';
   const [liveUrl, setLiveUrl] = useState(sourceUrl);
   // A new-tab/window request from the proxy shim, pending the user's choice to
-  // open it as a new pane (docs/specs/dor-browser.md → "New tab → new pane").
+  // open it as a new pane (docs/specs/dor-browser.md → "Iframe Shim").
   const [pendingOpenUrl, setPendingOpenUrl] = useState<string | null>(null);
   const [history, setHistory] = useState<IframeHistory>(() => (
     sourceUrl ? { entries: [sourceUrl], index: 0 } : { entries: [], index: -1 }

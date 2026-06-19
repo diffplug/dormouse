@@ -1,6 +1,6 @@
 /**
  * Host-agnostic agent-browser support (docs/specs/dor-browser.md →
- * "Agent-browser host capabilities"). The single source of truth for both hosts:
+ * "Agent-Browser Host Capabilities"). The single source of truth for both hosts:
  *
  *   - VS Code: the extension host imports this directly
  *     (`vscode-ext/src/agent-browser-host.ts`).
@@ -24,7 +24,7 @@
  * 4. `streamStatus` — reads the current stream port so restored panels recover
  *    from a stale persisted `wsPort`.
  * 5. `open` — spawns a managed namespaced session and opens a url, backing a
- *    render swap (docs/specs/dor-browser.md → "Render-mode transitions").
+ *    render swap (docs/specs/dor-browser.md → "Display Modal And Render Swaps").
  * 6. `popOut` / `popIn` — relaunch a session headed/headless at its live active
  *    url (Chrome's mode is fixed at launch, so this is a close + relaunch).
  * 7. `closePoppedOut` — close every still-headed window, called from each host's
@@ -366,7 +366,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   }
 
   // Spawn a managed session and open <url> — backs swapping an iframe embed up
-  // to a live screencast (docs/specs/dor-browser.md → "Render-mode transitions"). With `headed`,
+  // to a live screencast (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). With `headed`,
   // the process launches headed in one shot so embed→popout doesn't open a
   // headless browser only to tear it down.
   async function open(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
