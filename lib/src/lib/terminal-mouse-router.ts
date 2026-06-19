@@ -241,6 +241,17 @@ export function attachTerminalMouseRouter({
   };
 
   const onWindowMouseMove = (ev: MouseEvent) => {
+    // A mouse drag is kept alive only by the window 'mouseup' below. When the
+    // button is released outside our iframe, that mouseup is delivered to the
+    // host document and never reaches us, leaving the drag stuck. The next move
+    // we see (e.g. when the pointer re-enters) reports no buttons held — treat
+    // that as the mouseup we missed and finalize the drag in place. A genuine
+    // drag that leaves and re-enters still holding the button reports buttons===1,
+    // so this never fires mid-drag.
+    if (ev.buttons === 0 && (pendingDrag || isDragging(id))) {
+      finishPendingOrActiveDrag(ev);
+      return;
+    }
     updatePendingOrActiveDrag(ev);
   };
 
