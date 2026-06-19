@@ -33,6 +33,7 @@ import {
   ensureTerminalPaneState,
   fillTerminalProcessCwdByPtyId,
   finishLaunchedCommandByPtyId,
+  getTerminalPaneState,
   recordTerminalOutputByPtyId,
   recordTerminalUserInputByPtyId,
   removeTerminalPaneState,
@@ -307,6 +308,34 @@ export function setPendingShellOpts(id: string, opts: PendingShellOpts): void {
   pendingShellOpts.set(id, opts);
 }
 
+const LAUNCH_PROMPT_POLL_MS = 100;
+const LAUNCH_PROMPT_TIMEOUT_MS = 15_000;
+
+// `dor split/ensure -- <command>` spawns a real interactive shell (see
+// createSplitSurface) and types the command into it, rather than running
+// `shell -c command`. That leaves a live shell behind the command, so
+// `dor ensure --restart` can Ctrl+C the command and have the shell survive and
+// return to a prompt instead of the whole pty exiting. But we must wait for the
+// shell to actually reach a prompt first, or the keystrokes land in shell
+// startup. seedLaunchedCommand primed currentCommand with the command; it clears
+// the moment the shell draws its first prompt (integration promptStart, or the
+// keystroke heuristic for shells without it) — that's the signal it can take
+// input. On timeout we send it anyway as a best effort rather than drop it.
+function typeCommandWhenPromptReady(id: string, command: string): void {
+  let elapsed = 0;
+  const timer = setInterval(() => {
+    if (!registry.has(id)) {
+      clearInterval(timer);
+      return;
+    }
+    const ready = getTerminalPaneState(id).currentCommand === null;
+    if (ready || (elapsed += LAUNCH_PROMPT_POLL_MS) >= LAUNCH_PROMPT_TIMEOUT_MS) {
+      clearInterval(timer);
+      getPlatform().writePty(id, `${command}\r`);
+    }
+  }, LAUNCH_PROMPT_POLL_MS);
+}
+
 export function getOrCreateTerminal(id: string): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
@@ -329,6 +358,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   });
   if (shellOpts?.command) {
     seedLaunchedCommand(id, shellOpts.command, shellOpts.cwd);
+    typeCommandWhenPromptReady(id, shellOpts.command);
   }
   seedProcessCwdAfterSpawn(id);
 

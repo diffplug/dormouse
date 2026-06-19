@@ -351,18 +351,6 @@ function dorCommandString(args: string[] | undefined): string | undefined {
   return buildShellCommandForKind(shellCommandKind(shell, PLATFORM_STRING), args);
 }
 
-/** Wrap an already-quoted command string in the target shell's launch flags. */
-function commandShellArgs(shell: string | undefined, command: string): string[] {
-  switch (shellCommandKind(shell, PLATFORM_STRING)) {
-    case 'cmd':
-      return ['/d', '/s', '/c', command];
-    case 'powershell':
-      return ['-NoLogo', '-NoProfile', '-Command', command];
-    case 'posix':
-      return ['-lc', command];
-  }
-}
-
 function ShellSpawnNotice({
   notice,
   paneElements,
@@ -910,9 +898,15 @@ export function Wall({
     const inheritedCwd = cwd ?? (sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined);
 
     if (command) {
+      // Spawn a real interactive shell and type the command into it once it
+      // reaches a prompt (see typeCommandWhenPromptReady in the lifecycle), rather
+      // than launching `shell -c command`. A `-c` invocation has no prompt behind
+      // it: the command *is* the shell's whole job, so `dor ensure --restart`'s
+      // Ctrl+C would interrupt the command and take the shell down with it (the
+      // pty exits) instead of returning to a prompt the command can be re-run at.
       setPendingShellOpts(newId, {
         shell: defaults?.shell,
-        args: commandShellArgs(defaults?.shell, command),
+        args: defaults?.args,
         cwd: inheritedCwd,
         untouched: false,
         command,
