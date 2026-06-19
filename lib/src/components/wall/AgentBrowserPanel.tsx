@@ -279,14 +279,14 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
     }
 
     const currentSession = sessionRef.current;
-    const fn = getPlatform().agentBrowserStreamStatus;
-    if (!currentSession || !fn) {
+    const platform = getPlatform();
+    if (!currentSession || !platform.agentBrowserStreamStatus) {
       setStreamRecoverySeq((seq) => seq + 1);
       return false;
     }
 
     try {
-      const res = await fn(currentSession, binaryPathRef.current);
+      const res = await platform.agentBrowserStreamStatus(currentSession, binaryPathRef.current);
       if (closeIfSessionMarkedClosed(currentSession)) return false;
       if (!res.ok || !res.wsPort) return false;
       if (res.wsPort !== wsPortRef.current) {
@@ -501,8 +501,8 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   // tracks the headed window without polling.
   useEffect(() => {
     if (!poppedOut || !session) return;
-    const run = getPlatform().agentBrowserCommand;
-    if (!run) return;
+    const platform = getPlatform();
+    if (!platform.agentBrowserCommand) return;
     let disposed = false;
     let ws: WebSocket | null = null;
     let nextId = 1;
@@ -543,7 +543,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
     const connect = async () => {
       let cdpUrl: string | null = null;
       try {
-        const result = await run(session, ['get', 'cdp-url'], binaryPathRef.current);
+        const result = await platform.agentBrowserCommand(session, ['get', 'cdp-url'], binaryPathRef.current);
         if (result.exitCode === 0) cdpUrl = parseCdpUrl(result.stdout);
         else console.log(`[ab-panel] cdp-url failed ${JSON.stringify({ stderr: result.stderr, stdout: result.stdout })}`);
       } catch (err) {
@@ -596,10 +596,10 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
       return;
     }
     if (streamPort && !connectionLost && status?.connected !== false) return;
-    const fn = getPlatform().agentBrowserStreamStatus;
-    if (!fn) return;
+    const platform = getPlatform();
+    if (!platform.agentBrowserStreamStatus) return;
     let cancelled = false;
-    fn(session, binaryPath).then((res) => {
+    platform.agentBrowserStreamStatus(session, binaryPath).then((res) => {
       if (cancelled || !res.ok || !res.wsPort) return;
       setConnectionLost(false);
       setStatus(null);
@@ -663,8 +663,8 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   // and to auto-revert when the window closes. The new Chrome process gets a
   // fresh stream port, which we write into params so the WS reconnects. ---
   const popOut = useCallback(() => {
-    const fn = getPlatform().agentBrowserPopOut;
-    if (!session || !fn) return;
+    const platform = getPlatform();
+    if (!session || !platform.agentBrowserPopOut) return;
     if (closeIfSessionMarkedClosed(session)) return;
     headedConnectedRef.current = false;
     relaunchingRef.current = true;
@@ -681,7 +681,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
     // Connect to the headed window's fresh port once the relaunch returns it.
     const url = currentRelaunchUrl();
     console.log(`[ab-panel] popOut -> ${JSON.stringify({ session, url })}`);
-    fn(session, { rect: paneScreenRect(elRef.current), url }, binaryPathRef.current).then((res) => {
+    platform.agentBrowserPopOut(session, { rect: paneScreenRect(elRef.current), url }, binaryPathRef.current).then((res) => {
       console.log(`[ab-panel] popOut result ${JSON.stringify(res)}`);
       if (closeIfSessionMarkedClosed(session)) return;
       if (!res.ok) {
@@ -704,14 +704,14 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
     relaunchingRef.current = true;
     setPoppedOut(false);
     api.updateParameters({ renderMode: 'ab-screencast' });
-    const fn = getPlatform().agentBrowserPopIn;
-    if (!session || !fn) { relaunchingRef.current = false; return; }
+    const platform = getPlatform();
+    if (!session || !platform.agentBrowserPopIn) { relaunchingRef.current = false; return; }
     // Don't reconcile to the current (headed) port first — the host is about to
     // kill that daemon. Querying now would spawn a competing daemon (see the
     // recovery-effect note). Connect to the fresh port the host returns.
     const url = currentRelaunchUrl();
     console.log(`[ab-panel] popIn -> ${JSON.stringify({ session, url })}`);
-    fn(session, { url }, binaryPathRef.current).then((res) => {
+    platform.agentBrowserPopIn(session, { url }, binaryPathRef.current).then((res) => {
       console.log(`[ab-panel] popIn result ${JSON.stringify(res)}`);
       if (closeIfSessionMarkedClosed(session)) { relaunchingRef.current = false; return; }
       if (res.ok) void reconcileStreamPort(res.wsPort);

@@ -1591,10 +1591,10 @@ export function Wall({
         const chromeUrl = getAgentBrowserScreenController(id)?.chrome().url;
         const url = (typeof chromeUrl === 'string' && chromeUrl)
           || (typeof params?.url === 'string' ? params.url : undefined);
-        const open = getPlatform().agentBrowserOpen;
-        if (!url || !open) return;
+        const platform = getPlatform();
+        if (!url || !platform.agentBrowserOpen) return;
         const headed = mode === 'ab-popout';
-        open(url, { headed }, lastAgentBrowserBinaryPathRef.current).then((res) => {
+        platform.agentBrowserOpen(url, { headed }, lastAgentBrowserBinaryPathRef.current).then((res) => {
           if (!res.ok || !res.session) return;
           if (res.binaryPath) lastAgentBrowserBinaryPathRef.current = res.binaryPath;
           const nextParams = {
