@@ -1,5 +1,5 @@
 import type { Preview } from '@storybook/react';
-import { useEffect, useLayoutEffect } from 'react';
+import { useEffect, useLayoutEffect, StrictMode } from 'react';
 import { createElement } from 'react';
 import '../src/theme.css';
 import '../src/index.css';
@@ -128,6 +128,9 @@ const preview: Preview = {
     theme: DEFAULT_STORYBOOK_THEME,
   },
   decorators: [
+    // Exercise React StrictMode (dev double-invoke) so story-rendered components
+    // get the same correctness checks as the app entries (lib web + standalone).
+    (Story) => createElement(StrictMode, null, createElement(Story)),
     // Theme switcher: inject --vscode-* CSS variables
     (Story, context) => {
       const requestedThemeName = context.globals.theme as string | undefined;

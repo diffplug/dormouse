@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MobileTerminalUi, type MobileTerminalTouchMode } from './MobileTerminalUi';
@@ -55,11 +55,13 @@ function renderMobileTerminal({
   const renderWith = (mode: MobileTerminalTouchMode) => {
     act(() => {
       root.render(
-        <MobileTerminalUi
-          activeTouchMode={mode}
-          cursorTouchAvailable
-          terminal={<div data-testid="terminal" />}
-        />,
+        <StrictMode>
+          <MobileTerminalUi
+            activeTouchMode={mode}
+            cursorTouchAvailable
+            terminal={<div data-testid="terminal" />}
+          />
+        </StrictMode>,
       );
     });
   };

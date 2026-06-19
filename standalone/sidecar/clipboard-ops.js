@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { execFile } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
 const { promisify } = require('node:util');
 
 const execFileP = promisify(execFile);
@@ -260,10 +260,56 @@ async function readClipboardImageAsFilePath(runtime = {}) {
   return null;
 }
 
+// Write text to the OS clipboard via the platform's native CLI (stdin), mirroring
+// the native reads above. Backs the agent-browser host's edit channel: copy/cut
+// land the grabbed selection on the user's real clipboard (the VS Code host uses
+// vscode.env.clipboard.writeText for the same purpose).
+function writeViaStdin(cmd, args, text, runtime) {
+  const spawnFn = runtime.spawn || spawn;
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawnFn(cmd, args, { stdio: ['pipe', 'ignore', 'ignore'] });
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${cmd} exited ${code}`));
+    });
+    // The tool may exit before we finish writing (EPIPE) — swallow it; `close`
+    // with a nonzero code already reports a real failure.
+    if (child.stdin) {
+      child.stdin.on('error', () => {});
+      child.stdin.end(text);
+    }
+  });
+}
+
+async function writeClipboardText(text, runtime = {}) {
+  const platform = runtime.platform || process.platform;
+  if (platform === 'darwin') return writeViaStdin('pbcopy', [], text, runtime);
+  if (platform === 'win32') return writeViaStdin('clip', [], text, runtime);
+  const env = runtime.env || process.env;
+  const wayland = Boolean(env.WAYLAND_DISPLAY);
+  const attempts = wayland
+    ? [['wl-copy', []], ['xclip', ['-selection', 'clipboard']]]
+    : [['xclip', ['-selection', 'clipboard']], ['wl-copy', []]];
+  let lastErr;
+  for (const [cmd, args] of attempts) {
+    try { return await writeViaStdin(cmd, args, text, runtime); }
+    catch (err) { lastErr = err; }
+  }
+  throw lastErr || new Error('no clipboard write tool available');
+}
+
 module.exports = {
   readClipboardFilePaths,
   readClipboardImageAsFilePath,
   readClipboardText,
+  writeClipboardText,
   parseUriList,
   splitNonEmptyLines,
 };

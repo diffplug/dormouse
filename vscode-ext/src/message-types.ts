@@ -1,7 +1,7 @@
 import type { ActivityNotification, SessionStatus, TodoState } from '../../lib/src/lib/alert-manager';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
-import type { IframeProxyResult, OpenPort } from '../../lib/src/lib/platform/types';
+import type { AgentBrowserStreamStatusResult, IframeProxyResult, OpenPort } from '../../lib/src/lib/platform/types';
 import type { VSCodeWorkbenchCommand } from '../../lib/src/lib/vscode-keybindings';
 
 // Messages from webview → extension host
@@ -21,7 +21,11 @@ export type WebviewMessage =
   | { type: 'agentBrowser:command'; session: string; args: string[]; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:edit'; session: string; op: 'selectAll' | 'copy' | 'cut'; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:screenshot'; session: string; format?: 'jpeg' | 'png'; quality?: number; binaryPath?: string; requestId: string }
+  | { type: 'agentBrowser:streamStatus'; session: string; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:getStreamUrl'; port: number; requestId: string }
+  | { type: 'agentBrowser:open'; url: string; headed?: boolean; binaryPath?: string; requestId: string }
+  | { type: 'agentBrowser:popOut'; session: string; url?: string; rect?: { x: number; y: number; width: number; height: number }; binaryPath?: string; requestId: string }
+  | { type: 'agentBrowser:popIn'; session: string; url?: string; binaryPath?: string; requestId: string }
   | { type: 'iframe:createProxyUrl'; url: string; requestId: string }
   | { type: 'dormouse:init' }
   | { type: 'dormouse:saveState'; state: unknown }
@@ -62,7 +66,10 @@ export type ExtensionMessage =
   | { type: 'agentBrowser:commandResult'; requestId: string; exitCode: number; stdout: string; stderr: string }
   | { type: 'agentBrowser:editResult'; requestId: string; ok: boolean; text?: string; error?: string }
   | { type: 'agentBrowser:screenshotResult'; requestId: string; ok: boolean; bytes?: Uint8Array; mime?: string; error?: string }
+  | ({ type: 'agentBrowser:streamStatusResult'; requestId: string } & AgentBrowserStreamStatusResult)
   | { type: 'agentBrowser:streamUrl'; requestId: string; url: string | null }
+  | { type: 'agentBrowser:openResult'; requestId: string; ok: boolean; session?: string; wsPort?: number; binaryPath?: string; error?: string }
+  | { type: 'agentBrowser:popResult'; requestId: string; ok: boolean; wsPort?: number; error?: string }
   | { type: 'iframe:proxyUrl'; requestId: string; result: IframeProxyResult }
   | {
       type: 'dormouse:newTerminal';

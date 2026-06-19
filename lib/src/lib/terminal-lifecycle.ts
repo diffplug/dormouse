@@ -544,8 +544,8 @@ export function markSessionTouched(id: string): void {
 /**
  * A non-terminal content surface's focus contract, so `focusSession` can drive
  * it like any xterm pane. The iframe surface registers one whose `focus` moves
- * keyboard focus into the instrumented frame (docs/specs/dor-iframe.md → "#3 —
- * the surface registers a focus handle").
+ * keyboard focus into the instrumented frame (docs/specs/dor-browser.md →
+ * "Iframe Focus And Rendering Notes").
  */
 export interface SurfaceFocusHandle {
   focus(): void;

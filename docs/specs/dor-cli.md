@@ -165,10 +165,11 @@ from `command-detail`.
 - `dor read` [impl](../../dor/src/commands/read.ts) [docs](../../dor/test/snapshots/help/read.md)
 - `dor kill` [impl](../../dor/src/commands/kill.ts) [docs](../../dor/test/snapshots/help/kill.md)
 - `dor iframe` — **provisional**; high-fidelity URL embed with structural
-  limitations, see [dor-iframe.md](dor-iframe.md).
+  limitations; the `iframe` renderer of the unified `browser` surface, see
+  [dor-browser.md](dor-browser.md).
   [impl](../../dor/src/commands/iframe.ts) [docs](../../dor/test/snapshots/help/iframe.md)
 - `dor agent-browser` / `dor ab` — delegates to the user's `agent-browser`,
-  rendered in a Dormouse-native surface; see [dor-agent-browser.md](dor-agent-browser.md)
-  (the chosen alternative to the iframe surface)
+  rendered in a Dormouse-native surface; the `ab-screencast` renderer of the
+  unified `browser` surface, see [dor-browser.md](dor-browser.md)
 - `dor list-panes` [impl](../../dor/src/commands/list-panes.ts) [docs](../../dor/test/snapshots/help/list-panes.md)
 - `dor list-pane-surfaces` [impl](../../dor/src/commands/list-pane-surfaces.ts) [docs](../../dor/test/snapshots/help/list-pane-surfaces.md)

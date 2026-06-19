@@ -1,8 +1,8 @@
 /**
  * Per-surface bridge between an agent-browser pane's body (AgentBrowserPanel)
  * and its tab header (SurfacePaneHeader) + the screen modal, which are
- * separate components for one pane (see docs/specs/dor-agent-browser.md →
- * "Screen Indicator & Viewport").
+ * separate components for one pane (see docs/specs/dor-browser.md →
+ * "Render indicator & the Display modal").
  *
  * The panel owns the live state (viewport, pane size, sync) and the action
  * (`runAgentBrowser`); the header and modal only read a snapshot and invoke
@@ -20,8 +20,26 @@ import { useSyncExternalStore } from 'react';
 
 export type ScreenState = 'SYNCED' | 'SCALED';
 
+/** How a web surface is rendered (docs/specs/dor-browser.md → "Canonical Params";
+ *  dor-browser.md → "Pop-Out"). The `ab-` prefix names the engine
+ *  (agent-browser), leaving room for a future engine beside it; `iframe` is the
+ *  engine-less DOM embed:
+ *    - `ab-screencast` — real Chromium to a canvas: agent-drivable, any URL, but
+ *      laggy for a human.
+ *    - `ab-popout`     — the same agent-browser relaunched headed as a native OS
+ *      window: agent-drivable, any URL, native human feel; the in-Dormouse pane
+ *      becomes a stub.
+ *    - `iframe`        — the page's own DOM in a proxied iframe: native + zero-lag,
+ *      but loopback-only and not agent-drivable.
+ *  Absent ⇒ `ab-screencast` — a surface with no explicit mode reads as a
+ *  screencast. */
+export type RenderMode = 'ab-screencast' | 'ab-popout' | 'iframe';
+
 export interface ScreenSnapshot {
   state: ScreenState;
+  /** The surface's current render backend; absent ⇒ `ab-screencast`. Drives the
+   *  far-left chip glyph (frame-corners = iframe; lock = screencast). */
+  renderMode?: RenderMode;
   /** The browser's live CSS viewport + inferred device pixel ratio. */
   viewport: { w: number; h: number; dpr: number };
   /** The pane's CSS pixel size (the canvas render area). */
@@ -40,10 +58,16 @@ export interface ScreenActions {
   applyViewport(w: number, h: number, dpr: number): void;
   /** Open the screen modal for this surface. */
   openModal(): void;
+  /** Swap this surface's render backend in place, preserving the target
+   *  (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). This is
+   *  the single entry point for every mode, including `popout` (relaunch headed
+   *  — docs/specs/dor-browser.md → "Pop-Out"). Absent until the
+   *  swap is wired; the modal hides its Render section without it. */
+  setRenderMode?(mode: RenderMode): void;
 }
 
 /** What the browser-chrome header reads about the active tab
- *  (docs/specs/dor-agent-browser.md → "Browser-chrome header"). Updated on its
+ *  (docs/specs/dor-browser.md → "Browser Chrome"). Updated on its
  *  own cadence (tab stream messages), separate from the screen snapshot which
  *  churns on resize. */
 export interface ChromeSnapshot {
@@ -82,6 +106,9 @@ export interface ScreenController {
   readonly chromeActions: ChromeActions;
   /** Whether the host can run `agentBrowserCommand` (false ⇒ resizes inert). */
   readonly hostCapable: boolean;
+  /** Whether this host/platform can pop the surface out to a headed OS window
+   *  (false/absent on web; gates the modal's `popout` render option). */
+  readonly canPopOut?: boolean;
 }
 
 interface ScreenEntry {
@@ -122,6 +149,7 @@ export function registerAgentBrowserScreen(
     chrome: ChromeSnapshot;
     chromeActions: ChromeActions;
     hostCapable: boolean;
+    canPopOut?: boolean;
   },
 ): ScreenRegistration {
   const entry: ScreenEntry = {
@@ -144,6 +172,7 @@ export function registerAgentBrowserScreen(
       chrome: () => entry.chrome,
       chromeActions: init.chromeActions,
       hostCapable: init.hostCapable,
+      canPopOut: init.canPopOut,
     },
   };
   registry.set(id, entry);
