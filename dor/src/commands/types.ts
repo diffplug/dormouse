@@ -67,6 +67,9 @@ export interface EnsureSurfaceResponse {
   command: string;
   cwd: string;
   minimized: boolean;
+  /** Advisory the host attaches when the surface can't be tracked (e.g. its shell
+   * has no OSC 633 integration). Printed to stderr; never affects stdout. */
+  warning?: string;
 }
 
 export interface SendSurfaceRequest {

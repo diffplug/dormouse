@@ -63,6 +63,15 @@ export function getTerminalPaneState(id: string): TerminalPaneState {
   return paneStates.get(id) ?? createTerminalPaneState();
 }
 
+// True once the pane's shell has emitted real OSC 633/133 boundaries — i.e. its
+// shell integration injection took. `dor ensure -- <command>` types the command
+// into the shell programmatically (bypassing the keystroke heuristic), so only an
+// OSC-driven shell re-reports the running command. Without integration the
+// surface can't be matched or `--restart`ed; callers use this to warn.
+export function isPaneOscDriven(id: string): boolean {
+  return oscDrivenPanes.has(id);
+}
+
 export function ensureTerminalPaneState(id: string, initial?: Partial<TerminalPaneState>): TerminalPaneState {
   const existing = paneStates.get(id);
   if (existing) return existing;

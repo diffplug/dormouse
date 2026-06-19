@@ -259,6 +259,29 @@ test('ensure --restart restarts a matching surface in place', async () => {
   assert.equal(client.requests[0].request.restart, true);
 });
 
+test('ensure prints a host warning to stderr, leaving stdout clean', async () => {
+  const client = {
+    requests: [],
+    async ensureSurface(request) {
+      this.requests.push({ method: 'ensureSurface', request });
+      return {
+        status: 'created',
+        surfaceId: '33333333-3333-4333-8333-333333333333',
+        surfaceRef: 'surface:3',
+        command: 'pnpm dev',
+        cwd: request.cwd,
+        minimized: false,
+        warning: 'surface:3 has no Dormouse shell integration (OSC 633), so dor ensure can\'t detect its command.',
+      };
+    },
+  };
+  const result = await runCli(['ensure', '--', 'pnpm', 'dev'], { client, env: { PWD: '/work/site' } });
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stderr, /^warning: surface:3 has no Dormouse shell integration/);
+  assert.equal(result.stdout, 'created surface:3  "pnpm dev"\n');
+  assert.doesNotMatch(result.stdout, /warning/);
+});
+
 test('ensure json output', async () => {
   await snapshot(
     'ensure-json',

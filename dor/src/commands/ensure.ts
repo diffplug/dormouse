@@ -13,6 +13,7 @@ import {
   renderJson,
   requireControlClient,
   stringParser,
+  writeStderr,
   writeStdout,
 } from './shared.js';
 
@@ -26,8 +27,14 @@ interface EnsureFlags {
 
 // `--restart` makes the host block until a server is interrupted and respawned,
 // which can outlast the client's default 5s request timeout. Give that one
-// command plenty of headroom; everything else keeps the snappy default.
+// command plenty of headroom.
 const RESTART_TIMEOUT_MS = 60_000;
+
+// When ensure *creates* a surface, the host waits for the new shell to report OSC
+// 633 integration so it can warn if the command won't be trackable. That wait can
+// run to ~15s on a shell that never integrates, outlasting the default 5s. Matched
+// surfaces still respond instantly; this only raises the ceiling for the slow case.
+const ENSURE_TIMEOUT_MS = 20_000;
 
 export const ensureCommand: Command = {
   name: 'ensure',
@@ -56,7 +63,7 @@ export const ensureCommand: Command = {
       brief: 'Ensure one surface is running a command.',
       fullDescription: `Ensures one surface in the current workspace is running the given command at the given path. If it's already running, no-op. If it isn't, then it creates a split and runs the command.
 
-Matching uses the command each shell reports it is running via Dormouse shell integration, not process inspection. This captures the typed command (\`npm run dev\`), not the forked child process (\`node .../vite\`), and works for shells the user started by hand as well as shells Dormouse started. The match is exact: \`npm run dev\` and \`npm run dev --host\` are different commands and get separate surfaces. Shells without the integration don't report their command, so ensure can't match them and starts a new surface every time.
+Matching uses the command each shell reports it is running via Dormouse shell integration, not process inspection. This captures the typed command (\`npm run dev\`), not the forked child process (\`node .../vite\`), and works for shells the user started by hand as well as shells Dormouse started. The match is exact: \`npm run dev\` and \`npm run dev --host\` are different commands and get separate surfaces. Shells without the integration don't report their command, so ensure can't match them and starts a new surface every time. When ensure creates a surface whose shell turns out to lack integration, it prints a warning to stderr — that surface can never be matched or restarted on a later call, so repeated ensures will keep spawning duplicates.
 
 A surface matches only while the command is live. Once the command exits and the shell returns to its prompt, the surface no longer matches; the next ensure causes a fresh split rather than reusing the idle shell. Minimized surfaces participate in matching. Closed/killed surfaces do not.
 
@@ -108,7 +115,7 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
     return new Error('dor ensure requires a command after --');
   }
 
-  const client = requireControlClient(this.options, flags.restart === true ? RESTART_TIMEOUT_MS : undefined);
+  const client = requireControlClient(this.options, flags.restart === true ? RESTART_TIMEOUT_MS : ENSURE_TIMEOUT_MS);
   if (client instanceof Error) return client;
 
   try {
@@ -119,6 +126,9 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
       surface: flags.surface,
       cwd: callerWorkingDirectory(flags.cwd, this.options.env),
     });
+    if (response.warning) {
+      writeStderr(this, `warning: ${response.warning}\n`);
+    }
     writeStdout(this, renderEnsureResponse(response, flags.json === true));
     return undefined;
   } catch (error) {

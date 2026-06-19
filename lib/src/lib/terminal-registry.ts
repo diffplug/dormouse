@@ -65,6 +65,7 @@ export {
   fillTerminalProcessCwdByPtyId,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
+  isPaneOscDriven,
   isReservedUserTitle,
   removeTerminalPaneState,
   resetTerminalPaneState,

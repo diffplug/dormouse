@@ -24,6 +24,7 @@ import {
   getDefaultShellOpts,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
+  isPaneOscDriven,
   getActivitySnapshot,
   isUntouched,
   getOrCreateTerminal,
@@ -327,6 +328,20 @@ async function restartSurfaceInPlace(id: string, command: string, cwd: string): 
   );
   if (!restarted) return { ok: false, message: 'command did not restart' };
   return { ok: true, value: undefined };
+}
+
+// A `dor ensure -- <command>` command is typed into the shell programmatically,
+// which bypasses the keystroke heuristic — so only a shell whose integration
+// emits OSC 633 boundaries ever reports the command back. Wait for that signal so
+// the CLI can warn when it's absent. Resolves the moment integration is detected;
+// only a non-integration shell waits out the timeout, which the CLI's create-path
+// request budget (ENSURE_TIMEOUT_MS / RESTART_TIMEOUT_MS) is sized to outlast.
+const INTEGRATION_DETECT_TIMEOUT_MS = 15_000;
+
+async function missingIntegrationWarning(id: string, ref: string): Promise<string | undefined> {
+  const integrated = await waitForTerminalState(id, () => isPaneOscDriven(id), INTEGRATION_DETECT_TIMEOUT_MS);
+  if (integrated) return undefined;
+  return `${ref} has no Dormouse shell integration (OSC 633), so dor ensure can't detect its command; future ensure/--restart calls will spawn a new surface instead of matching or restarting this one.`;
 }
 
 function killConfirmationParam(value: unknown): { mode: 'if-read'; text: string } | { mode: 'dangerously' } | null {
@@ -1309,6 +1324,10 @@ export function Wall({
           detail.respond({ ok: false, error: result.message });
           return;
         }
+        // ensure's idempotency only holds if the new shell reports OSC 633
+        // boundaries — otherwise it can never be matched and the next ensure spawns
+        // a duplicate. Wait for integration and warn the CLI if it never arrives.
+        const warning = await missingIntegrationWarning(result.value.id, result.value.ref);
         detail.respond({
           ok: true,
           result: {
@@ -1318,6 +1337,7 @@ export function Wall({
             command,
             cwd,
             minimized: booleanParam(params.minimized),
+            ...(warning ? { warning } : {}),
           },
         });
         return;
