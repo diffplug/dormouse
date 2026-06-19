@@ -1,5 +1,5 @@
 /**
- * Live agent-browser session viewer (see docs/specs/dor-agent-browser.md).
+ * Live agent-browser session viewer (see docs/specs/dor-browser.md).
  *
  * One WebSocket — the session's stream socket — carries everything: JPEG
  * frames out, `input_mouse`/`input_keyboard` in, plus pushed `status` and
@@ -18,12 +18,15 @@ import {
   registerAgentBrowserScreen,
   type ChromeActions,
   type ChromeSnapshot,
+  type RenderMode,
   type ScreenActions,
   type ScreenRegistration,
   type ScreenSnapshot,
   type ScreenState,
 } from './agent-browser-screen';
 import { hostPathDisplay } from './browser-url';
+import { resolveRenderMode } from './browser-surface';
+import { clearAgentBrowserSessionClosed, isAgentBrowserSessionClosed } from './agent-browser-sessions';
 import {
   EDIT_OPS,
   MOUSE_BUTTONS,
@@ -33,6 +36,12 @@ import {
   virtualKeyCode,
 } from './agent-browser-input';
 import { createScreenshotLoop } from './agent-browser-screenshot-loop';
+import {
+  createAgentBrowserConnection,
+  type AgentBrowserConnection,
+  type AgentBrowserStreamStatus as StreamStatus,
+  type AgentBrowserTab as StreamTab,
+} from './agent-browser-connection';
 import { usePaneChrome } from './use-pane-chrome';
 import {
   ModeContext,
@@ -42,15 +51,37 @@ import {
 
 type AgentBrowserPanelParams = {
   surfaceType?: string;
+  /** Canonical render backend; the BrowserPanel shell also passes it as a prop. */
+  renderMode?: RenderMode;
   session?: string;
   key?: string;
   wsPort?: number;
   binaryPath?: string;
+  /** The active tab's URL, mirrored from the live session so it persists in the
+   *  layout blob and is available to render-mode swaps and pop-out without a live
+   *  stream. The canonical target for the surface (see dor-browser.md → "Canonical Params"). */
+  url?: string;
   /** Whether sync-to-pane is engaged; persists via the dockview layout blob so
    *  a re-attached surface re-engages sync if it was engaged. Absent on a fresh
-   *  surface ⇒ auto-engage (see docs/specs/dor-agent-browser.md). */
+   *  surface ⇒ auto-engage (see docs/specs/dor-browser.md). */
   syncEngaged?: boolean;
+  /** Whether this session is currently popped out to a headed OS window
+   *  (docs/specs/dor-browser.md → "Pop-Out"). Persists via the
+   *  layout blob so a re-attached surface re-renders the stub. */
+  poppedOut?: boolean;
 };
+
+/** Best-effort screen rect for positioning a popped-out window over the pane.
+ *  VS Code webviews can't read true screen coords (the host then centers); on
+ *  standalone, window.screenX/Y offset the pane's viewport rect into screen
+ *  space. */
+function paneScreenRect(el: HTMLElement | null): { x: number; y: number; width: number; height: number } | undefined {
+  if (!el) return undefined;
+  const r = el.getBoundingClientRect();
+  const sx = typeof window.screenX === 'number' ? window.screenX : 0;
+  const sy = typeof window.screenY === 'number' ? window.screenY : 0;
+  return { x: Math.round(sx + r.left), y: Math.round(sy + r.top), width: Math.round(r.width), height: Math.round(r.height) };
+}
 
 // SYNCED is "browser viewport CSS size == pane CSS size". The screencast is
 // always delivered at CSS-pixel resolution — the frame never encodes the
@@ -64,26 +95,28 @@ function dimsMatch(a: { w: number; h: number }, b: { w: number; h: number }): bo
   return Math.abs(a.w - b.w) <= DIM_TOLERANCE && Math.abs(a.h - b.h) <= DIM_TOLERANCE;
 }
 
-// Stream messages above this size are frames (a base64 JPEG — ~150–220 KB at
-// desktop sizes); `status`/`tabs` are well under 16 KB. We display screenshots,
-// not frames, so a frame's payload is discarded — there's no point paying
-// JSON.parse + a throwaway allocation for it (measured ~13 MB/s at 1080p/60fps
-// on an animating page). We pulse on the raw message and read the viewport from
-// the small `status` messages instead. Smaller messages still get parsed, so a
-// rare tiny-viewport frame falling under the cutoff still pulses correctly.
-const FRAME_PULSE_THRESHOLD = 16384;
+// A pop-out/pop-in relaunch restores a single URL. A transient about:blank — a
+// stray tab the close+reopen can momentarily surface, or a freshly-relaunched
+// blank page — must never be treated as the page to restore, or the real URL is
+// lost on the way back in. Mirrors the host's usableRelaunchUrl.
+function isRestorableUrl(url: string | null | undefined): url is string {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  return trimmed !== '' && trimmed !== 'about:blank';
+}
 
-type StreamTab = {
-  tabId: string;
-  title: string | null;
-  url: string;
-  active: boolean;
-};
-
-type StreamStatus = {
-  connected: boolean;
-  screencasting: boolean;
-};
+function parseCdpUrl(stdout: string): string | null {
+  const trimmed = stdout.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as { data?: { result?: unknown }; result?: unknown; url?: unknown };
+    const value = parsed.data?.result ?? parsed.result ?? parsed.url;
+    if (typeof value === 'string' && value.startsWith('ws://')) return value;
+  } catch {
+    // Plain text is the common CLI output.
+  }
+  return trimmed.match(/ws:\/\/\S+/)?.[0] ?? null;
+}
 
 function tabDisplayTitle(tab: StreamTab): string {
   const title = tab.title?.trim();
@@ -91,15 +124,12 @@ function tabDisplayTitle(tab: StreamTab): string {
   return hostPathDisplay(tab.url) || 'untitled';
 }
 
-// Decode a base64 screencast frame to an ImageBitmap (the fallback display path
-// for hosts that can't screenshot). Callers apply their own freshness guard.
-function decodeScreencastFrame(dataBase64: string): Promise<ImageBitmap> {
-  const bytes = Uint8Array.from(atob(dataBase64), (c) => c.charCodeAt(0));
-  return createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
-}
-
-export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrowserPanelParams>) {
+export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: IDockviewPanelProps<AgentBrowserPanelParams> & { renderMode?: RenderMode }) {
   const actions = useContext(WallActionsContext);
+  // Stable handle so the screen controller (registered once) can reach the live
+  // Wall actions — used by setRenderMode to trigger an in-place surface swap.
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const elRef = useRef<HTMLDivElement>(null);
@@ -109,18 +139,51 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
 
   const session = params?.session;
   const wsPort = params?.wsPort;
+  const [streamPort, setStreamPort] = useState(wsPort);
+  useEffect(() => { setStreamPort(wsPort); }, [wsPort]);
   const interactive = mode === 'passthrough' && selectedId === api.id;
   const interactiveRef = useRef(interactive);
   interactiveRef.current = interactive;
+  // A direct mouse click on the canvas should reach the page even when this pane
+  // isn't the selected one yet — the click is what selects it (via the root
+  // `onClickPanel`), but `selectedId` only updates on the next render, so gating
+  // mouse-down/up on `interactive` would swallow the very first click on a
+  // freshly-opened surface (the user clicks, nothing happens, they click again).
+  // Mouse forwarding therefore only requires passthrough mode; keyboard/wheel
+  // still require full `interactive` so a background pane never steals them.
+  const passthrough = mode === 'passthrough';
+  const passthroughRef = useRef(passthrough);
+  passthroughRef.current = passthrough;
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const frameSeqRef = useRef(0);
+  const connectionRef = useRef<AgentBrowserConnection | null>(null);
   const deviceRef = useRef({ width: 1280, height: 720 });
   const [status, setStatus] = useState<StreamStatus | null>(null);
   const [hasFrame, setHasFrame] = useState(false);
   const [connectionLost, setConnectionLost] = useState(false);
+  const [streamRecoverySeq, setStreamRecoverySeq] = useState(0);
   const [tabs, setTabs] = useState<StreamTab[]>([]);
-  const knownTabIdsRef = useRef<Set<string>>(new Set());
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  // Crossing to the single-frame iframe renderer closes all but the active tab;
+  // when others are open the swap is gated behind a typed confirm (overlay below).
+  const [pendingIframeSwap, setPendingIframeSwap] = useState(false);
+  const swapConfirmRef = useRef<HTMLDivElement>(null);
+
+  // Pop-out state: while true the browser runs in a headed OS window and the
+  // pane is a stub. Seeded from params so it survives a re-attach.
+  // poppedOut is derived from the canonical renderMode the shell passes; fall
+  // back to resolving it from params for a direct mount (tests) or a legacy blob.
+  const seededMode = renderModeProp ?? resolveRenderMode(params);
+  const [poppedOut, setPoppedOut] = useState<boolean>(seededMode === 'ab-popout');
+  const poppedOutRef = useRef(poppedOut);
+  poppedOutRef.current = poppedOut;
+  // Gate auto-revert: only treat a dropped stream as "window closed" once the
+  // headed stream has actually connected (avoids reverting mid-relaunch).
+  const headedConnectedRef = useRef(false);
+  // True while a headed↔headless relaunch is in flight. The relaunch closes the
+  // current stream before reopening on a new port, so that expected drop must
+  // not be read as "the headed window closed" (it would auto-revert mid-pop-out).
+  const relaunchingRef = useRef(false);
 
   const binaryPath = params?.binaryPath;
   const runAgentBrowser = useCallback((args: string[]) => {
@@ -146,6 +209,97 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   sessionRef.current = session;
   const binaryPathRef = useRef(binaryPath);
   binaryPathRef.current = binaryPath;
+  const wsPortRef = useRef(streamPort);
+  wsPortRef.current = streamPort;
+  const liveStreamPortRef = useRef<number | null>(null);
+  // Canonical URL mirror (params.url): kept in a ref so the pop-out / pop-in
+  // callbacks read the latest without re-creating, and prefer it over the live
+  // chrome snapshot, which can be momentarily empty during a relaunch.
+  const paramsUrl = params?.url;
+  const paramsUrlRef = useRef(paramsUrl);
+  paramsUrlRef.current = paramsUrl;
+  // The newest non-blank active-tab URL observed from the live stream. This is
+  // deliberately separate from params.url: Dockview param writes can lag a tab
+  // message, but pop-in/auto-revert must carry the page the user just navigated
+  // to in the headed window.
+  const latestRestorableUrlRef = useRef<string | undefined>(isRestorableUrl(paramsUrl) ? paramsUrl : undefined);
+  useEffect(() => {
+    if (isRestorableUrl(paramsUrl)) latestRestorableUrlRef.current = paramsUrl;
+  }, [paramsUrl]);
+  const rememberRestorableUrl = useCallback((url: string | null | undefined) => {
+    if (!isRestorableUrl(url)) return false;
+    latestRestorableUrlRef.current = url;
+    if (!relaunchingRef.current && url !== paramsUrlRef.current) {
+      paramsUrlRef.current = url;
+      api.updateParameters({ url });
+    }
+    return true;
+  }, [api]);
+  const rememberActiveTabUrl = useCallback((next: StreamTab[]) => {
+    const active = next.find((t) => t.active) ?? next[0] ?? null;
+    rememberRestorableUrl(active?.url);
+  }, [rememberRestorableUrl]);
+  const applyObservedNavigation = useCallback((url: string | null | undefined, title?: string | null) => {
+    if (!isRestorableUrl(url)) return;
+    rememberRestorableUrl(url);
+    setTabs((prev) => {
+      if (prev.length === 0) return [{ tabId: 'cdp-active', title: title ?? null, url, active: true }];
+      const activeIndex = Math.max(0, prev.findIndex((tab) => tab.active));
+      const current = prev[activeIndex];
+      if (!current || (current.url === url && (title == null || current.title === title))) return prev;
+      return prev.map((tab, index) => index === activeIndex
+        ? { ...tab, url, title: title ?? tab.title }
+        : tab);
+    });
+  }, [rememberRestorableUrl]);
+
+  const closeIfSessionMarkedClosed = useCallback((targetSession: string | null | undefined = sessionRef.current): boolean => {
+    if (!targetSession || !isAgentBrowserSessionClosed(targetSession)) return false;
+    getPlatform().agentBrowserCommand?.(targetSession, ['close'], binaryPathRef.current).catch(() => {});
+    return true;
+  }, []);
+
+  const reconcileStreamPort = useCallback(async (directPort?: number): Promise<boolean> => {
+    if (closeIfSessionMarkedClosed()) return false;
+    setConnectionLost(false);
+    setStatus(null);
+    setHasFrame(false);
+
+    if (directPort && directPort > 0) {
+      if (directPort !== wsPortRef.current) {
+        setStreamPort(directPort);
+        console.log(`[ab-panel] subscribing to returned stream port ${JSON.stringify({ session: sessionRef.current, wsPort: directPort, previousWsPort: wsPortRef.current })}`);
+      }
+      if (directPort !== wsPort) {
+        api.updateParameters({ wsPort: directPort });
+      } else {
+        setStreamRecoverySeq((seq) => seq + 1);
+      }
+      return true;
+    }
+
+    const currentSession = sessionRef.current;
+    const platform = getPlatform();
+    if (!currentSession || !platform.agentBrowserStreamStatus) {
+      setStreamRecoverySeq((seq) => seq + 1);
+      return false;
+    }
+
+    try {
+      const res = await platform.agentBrowserStreamStatus(currentSession, binaryPathRef.current);
+      if (closeIfSessionMarkedClosed(currentSession)) return false;
+      if (!res.ok || !res.wsPort) return false;
+      if (res.wsPort !== wsPortRef.current) {
+        setStreamPort(res.wsPort);
+        api.updateParameters({ wsPort: res.wsPort });
+      } else {
+        setStreamRecoverySeq((seq) => seq + 1);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }, [api, closeIfSessionMarkedClosed, wsPort]);
 
   // --- display: crisp HiDPI screenshots, paced by stream-frame "pulses" ---
   //
@@ -168,15 +322,6 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
 
   const screenshotCapableRef = useRef(false);
   screenshotCapableRef.current = !!getPlatform().agentBrowserScreenshot && !!session;
-
-  const screenshotLoop = useMemo(() => createScreenshotLoop({
-    getSession: () => sessionRef.current,
-    getBinaryPath: () => binaryPathRef.current,
-    isCapable: () => screenshotCapableRef.current,
-    draw: drawBitmap,
-  }), [drawBitmap]);
-
-  useEffect(() => () => screenshotLoop.dispose(), [screenshotLoop]);
 
   // --- screen indicator (SYNCED/SCALED) + sync-to-pane ---
   //
@@ -204,7 +349,8 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     // DPR can't be read back from frames, so report the density we'd sync to.
     const viewport = { w: device.width, h: device.height, dpr: displayDpr };
     const state: ScreenState = dimsMatch(viewport, paneCss) ? 'SYNCED' : 'SCALED';
-    return { state, viewport, paneCss, displayDpr, syncEngaged: syncEngagedRef.current };
+    const renderMode = poppedOutRef.current ? 'ab-popout' : 'ab-screencast';
+    return { state, viewport, paneCss, displayDpr, syncEngaged: syncEngagedRef.current, renderMode };
   }, []);
 
   // Publish to the registry only when something the header/modal cares about
@@ -220,6 +366,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       prev.viewport.dpr !== next.viewport.dpr ||
       prev.displayDpr !== next.displayDpr ||
       prev.syncEngaged !== next.syncEngaged ||
+      prev.renderMode !== next.renderMode ||
       !dimsMatch(prev.paneCss, next.paneCss);
     if (changed) {
       lastPublishedRef.current = next;
@@ -229,6 +376,10 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
 
   // Push the current pane size to the browser as a native `set viewport`.
   const issueSyncToPane = useCallback(() => {
+    // A popped-out surface is a real headed OS window the user drives directly;
+    // never force its viewport to the (now-stub) pane size. Sync resumes when it
+    // pops back in — the wsPort-change effect re-issues against the fresh session.
+    if (poppedOutRef.current) return;
     // Hosts without agentBrowserCommand (Tauri today) can't drive the viewport;
     // stay silent rather than warn on every resize. The surface just reads
     // SCALED, which is accurate.
@@ -274,126 +425,197 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   // --- stream connection ---
 
   useEffect(() => {
-    if (!wsPort) return;
-    let disposed = false;
-    let ws: WebSocket | null = null;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    let failures = 0;
+    if (!streamPort || !session) return;
 
-    knownTabIdsRef.current = new Set();
+    // Per-connection resource: created here and disposed in this effect's cleanup
+    // so it survives React StrictMode's mount→cleanup→mount double-invoke. A
+    // memoized loop disposed by a separate effect's cleanup would never be
+    // recreated on the re-mount, leaving every frame pulse dropped (disposed loop).
+    const screenshotLoop = createScreenshotLoop({
+      getSession: () => sessionRef.current,
+      getBinaryPath: () => binaryPathRef.current,
+      isCapable: () => screenshotCapableRef.current,
+      draw: drawBitmap,
+    });
 
-    // Fallback only (hosts without the screenshot capability, e.g. Tauri):
-    // render the CSS-resolution screencast frame directly.
-    const drawScreencastFrame = (data: string) => {
-      const seq = ++frameSeqRef.current;
-      decodeScreencastFrame(data).then((bitmap) => {
-        // JPEG decodes are async; drop frames that finished out of order.
-        if (disposed || seq !== frameSeqRef.current) {
-          bitmap.close();
-          return;
-        }
-        drawBitmap(bitmap);
-      }).catch(() => {});
-    };
-
-    const handleMessage = (raw: unknown) => {
-      if (typeof raw !== 'string') return;
-      let msg: any;
-      try {
-        msg = JSON.parse(raw);
-      } catch {
-        return;
-      }
-      if (msg.type === 'frame' && typeof msg.data === 'string') {
-        // The frame carries the browser's live viewport; update it, reconcile
-        // sync, and refresh the indicator (publishScreen self-gates). Then use
-        // the frame as a "page changed" pulse to grab a crisp screenshot — or,
-        // where the host can't screenshot, render the frame itself.
-        if (msg.metadata?.deviceWidth && msg.metadata?.deviceHeight) {
-          deviceRef.current = { width: msg.metadata.deviceWidth, height: msg.metadata.deviceHeight };
-        }
-        maybeDisengageSync();
-        publishScreen();
-        if (screenshotCapableRef.current) screenshotLoop.pulse();
-        else drawScreencastFrame(msg.data);
-      } else if (msg.type === 'status') {
-        setStatus({ connected: msg.connected === true, screencasting: msg.screencasting === true });
-        setConnectionLost(msg.connected === false);
-        if (typeof msg.viewportWidth === 'number' && typeof msg.viewportHeight === 'number') {
-          deviceRef.current = { width: msg.viewportWidth, height: msg.viewportHeight };
+    const connection = createAgentBrowserConnection({
+      session,
+      streamPort,
+      binaryPath: binaryPathRef.current,
+      getStreamUrl: async (port) => (await getPlatform().getAgentBrowserStreamUrl?.(port)) ?? undefined,
+      runCommand: (targetSession, args, targetBinaryPath) => getPlatform().agentBrowserCommand?.(targetSession, args, targetBinaryPath)
+        ?? Promise.resolve({ exitCode: 1, stdout: '', stderr: 'agent-browser commands unavailable' }),
+      canSelectTabs: () => !poppedOutRef.current && !relaunchingRef.current,
+      log: (message) => console.log(message),
+    });
+    connectionRef.current = connection;
+    const unsubscribe = connection.subscribe((event) => {
+      if (event.type === 'connection-open') {
+        liveStreamPortRef.current = event.port;
+        setConnectionLost(false);
+      } else if (event.type === 'connection-close') {
+        if (event.failures >= 3) setConnectionLost(true);
+      } else if (event.type === 'status') {
+        setStatus(event.status);
+        setConnectionLost(event.status.connected === false);
+        const maybeStatus = event.status as StreamStatus & { viewportWidth?: number; viewportHeight?: number };
+        if (typeof maybeStatus.viewportWidth === 'number' && typeof maybeStatus.viewportHeight === 'number') {
+          deviceRef.current = { width: maybeStatus.viewportWidth, height: maybeStatus.viewportHeight };
           maybeDisengageSync();
           publishScreen();
         }
-      } else if (msg.type === 'tabs' && Array.isArray(msg.tabs)) {
-        const next: StreamTab[] = msg.tabs
-          .filter((t: any) => typeof t?.tabId === 'string')
-          .map((t: any) => ({
-            tabId: t.tabId,
-            title: typeof t.title === 'string' ? t.title : null,
-            url: typeof t.url === 'string' ? t.url : '',
-            active: t.active === true,
-          }));
-        // Web-opened tabs (popups, target=_blank) are focused, matching
-        // browser foregrounding. Skip the first message — that's catch-up,
-        // not a popup.
-        const known = knownTabIdsRef.current;
-        if (known.size > 0) {
-          const fresh = next.filter((t) => !known.has(t.tabId));
-          const newest = fresh[fresh.length - 1];
-          if (newest && !newest.active) runAgentBrowser(['tab', newest.tabId]);
+      } else if (event.type === 'tabs') {
+        const prevActiveId = event.previousTabs.find((t) => t.active)?.tabId;
+        const nextActiveId = event.tabs.find((t) => t.active)?.tabId;
+        rememberActiveTabUrl(event.tabs);
+        setTabs(event.tabs);
+        // Switching the active tab doesn't make the daemon emit a screencast
+        // frame, and the dedup'd stream is otherwise silent on a static page, so
+        // nothing would repaint the canvas onto the newly-active tab. Force one
+        // capture so the surface follows the tab the user just selected.
+        if (nextActiveId && nextActiveId !== prevActiveId && !poppedOutRef.current && !relaunchingRef.current) {
+          screenshotLoop.pulse();
         }
-        knownTabIdsRef.current = new Set(next.map((t) => t.tabId));
-        setTabs(next);
+      } else if (event.type === 'frame-pulse') {
+        if (event.metadata?.deviceWidth && event.metadata?.deviceHeight) {
+          deviceRef.current = { width: event.metadata.deviceWidth, height: event.metadata.deviceHeight };
+        }
+        maybeDisengageSync();
+        publishScreen();
+        if (!poppedOutRef.current && !relaunchingRef.current) screenshotLoop.pulse();
+      }
+    });
+    setHasFrame(false);
+    setConnectionLost(false);
+    return () => {
+      unsubscribe();
+      if (connectionRef.current === connection) connectionRef.current = null;
+      connection.dispose();
+      screenshotLoop.dispose();
+    };
+  }, [streamPort, streamRecoverySeq, session, maybeDisengageSync, publishScreen, drawBitmap, rememberActiveTabUrl]);
+
+  // agent-browser's stream currently publishes the initial headed tab list, but
+  // not every same-tab manual navigation. While popped out, subscribe directly
+  // to Chrome DevTools Protocol target/page events so the Dormouse URL/header
+  // tracks the headed window without polling.
+  useEffect(() => {
+    if (!poppedOut || !session) return;
+    const platform = getPlatform();
+    // Bind to a local const: TS doesn't carry the narrowing of an optional
+    // property into the nested `connect` closure, so the direct call wouldn't
+    // typecheck against the `agentBrowserCommand?` signature.
+    const runCommand = platform.agentBrowserCommand;
+    if (!runCommand) return;
+    let disposed = false;
+    let ws: WebSocket | null = null;
+    let nextId = 1;
+
+    const send = (method: string, params?: Record<string, unknown>) => {
+      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ id: nextId++, method, ...(params ? { params } : {}) }));
+    };
+    const handleTargetInfo = (targetInfo: unknown) => {
+      if (!targetInfo || typeof targetInfo !== 'object') return;
+      const info = targetInfo as { type?: unknown; url?: unknown; title?: unknown };
+      if (info.type !== 'page') return;
+      applyObservedNavigation(
+        typeof info.url === 'string' ? info.url : null,
+        typeof info.title === 'string' ? info.title : null,
+      );
+    };
+    const handleCdpMessage = (raw: unknown) => {
+      if (typeof raw !== 'string') return;
+      let msg: any;
+      try { msg = JSON.parse(raw); } catch { return; }
+      if (msg.method === 'Target.targetCreated' || msg.method === 'Target.targetInfoChanged') {
+        handleTargetInfo(msg.params?.targetInfo);
+      } else if (msg.method === 'Target.targetDestroyed') {
+        console.log(`[ab-panel] cdp target destroyed ${JSON.stringify({ targetId: msg.params?.targetId })}`);
+      } else if (msg.method === 'Page.frameNavigated') {
+        const frame = msg.params?.frame;
+        if (!frame?.parentId) {
+          applyObservedNavigation(
+            typeof frame?.url === 'string' ? frame.url : null,
+            typeof frame?.name === 'string' ? frame.name : null,
+          );
+        }
+      } else if (Array.isArray(msg.result?.targetInfos)) {
+        for (const targetInfo of msg.result.targetInfos) handleTargetInfo(targetInfo);
       }
     };
 
     const connect = async () => {
-      let url: string | null = null;
+      let cdpUrl: string | null = null;
       try {
-        url = (await getPlatform().getAgentBrowserStreamUrl?.(wsPort)) ?? null;
-      } catch {
-        url = null;
+        const result = await runCommand(session, ['get', 'cdp-url'], binaryPathRef.current);
+        if (result.exitCode === 0) cdpUrl = parseCdpUrl(result.stdout);
+        else console.log(`[ab-panel] cdp-url failed ${JSON.stringify({ stderr: result.stderr, stdout: result.stdout })}`);
+      } catch (err) {
+        console.log(`[ab-panel] cdp-url error ${String(err)}`);
       }
-      if (disposed) return;
-      ws = new WebSocket(url ?? `ws://127.0.0.1:${wsPort}`);
-      wsRef.current = ws;
+      if (disposed || !cdpUrl) return;
+      console.log(`[ab-panel] connecting cdp ${JSON.stringify({ cdpUrl })}`);
+      ws = new WebSocket(cdpUrl);
       ws.onopen = () => {
-        failures = 0;
-        setConnectionLost(false);
+        console.log('[ab-panel] cdp open');
+        send('Target.setDiscoverTargets', { discover: true });
+        send('Target.getTargets');
+        // If get cdp-url ever returns a page websocket instead of the browser
+        // websocket, these page-level events are the navigation source.
+        send('Page.enable');
       };
-      ws.onmessage = (ev) => {
-        // Fast-path discarded frames: any large message is a screencast frame
-        // whose pixels we don't display, so pulse without parsing the payload.
-        const data = ev.data;
-        if (screenshotCapableRef.current && typeof data === 'string' && data.length > FRAME_PULSE_THRESHOLD) {
-          screenshotLoop.pulse();
-          return;
-        }
-        handleMessage(data);
-      };
-      ws.onclose = () => {
-        wsRef.current = null;
-        if (disposed) return;
-        failures += 1;
-        // The port dies with the session, so repeated refusals mean the
-        // browser is gone; keep a slow retry alive in case it comes back on
-        // the same port, but a new `dor ab` updating wsPort is the real path.
-        if (failures >= 3) setConnectionLost(true);
-        retryTimer = setTimeout(connect, Math.min(1000 * 2 ** failures, 10000));
-      };
-      ws.onerror = () => {};
+      ws.onmessage = (ev) => handleCdpMessage(ev.data);
+      ws.onclose = () => { if (!disposed) console.log('[ab-panel] cdp close'); };
+      ws.onerror = () => console.log('[ab-panel] cdp error');
     };
 
-    setHasFrame(false);
-    setConnectionLost(false);
     void connect();
     return () => {
       disposed = true;
-      if (retryTimer !== undefined) clearTimeout(retryTimer);
-      wsRef.current = null;
       ws?.close();
     };
-  }, [wsPort, runAgentBrowser, maybeDisengageSync, publishScreen, screenshotLoop, drawBitmap]);
+  }, [poppedOut, session, streamPort, applyObservedNavigation]);
+
+  // A persisted panel may restore with a stale wsPort: the agent-browser
+  // session is still alive, but the stream server restarted on a new port while
+  // VS Code/webview state kept the old one. Once the old socket is proven dead
+  // (or no port was persisted), ask the host for the current port and rewrite
+  // panel params so the normal WebSocket effect reconnects.
+  useEffect(() => {
+    if (!session) return;
+    // Critical: do NOT query the daemon mid-relaunch. A pop-out/pop-in close+kills
+    // the daemon before reopening; querying `stream status` in that window spawns
+    // a fresh COMPETING headless daemon on a different port and pins the panel to
+    // it — so the panel ends up streaming an about:blank ghost instead of the
+    // headed window. The host hands back the authoritative port when it's done.
+    if (relaunchingRef.current) return;
+    // Once this exact port has opened, a later disconnect is a live stream
+    // failure, not a stale persisted port. Do not ask `stream status` here:
+    // the CLI can spawn a fresh daemon and reset the session, hiding the real
+    // failure and reverting the URL.
+    if (streamPort && liveStreamPortRef.current === streamPort) {
+      if (connectionLost || status?.connected === false) {
+        console.log(`[ab-panel] stream recovery skipped for live port ${JSON.stringify({ session, wsPort: streamPort, connectionLost, connected: status?.connected })}`);
+      }
+      return;
+    }
+    if (streamPort && !connectionLost && status?.connected !== false) return;
+    const platform = getPlatform();
+    if (!platform.agentBrowserStreamStatus) return;
+    let cancelled = false;
+    platform.agentBrowserStreamStatus(session, binaryPath).then((res) => {
+      if (cancelled || !res.ok || !res.wsPort) return;
+      setConnectionLost(false);
+      setStatus(null);
+      if (res.wsPort !== streamPort) {
+        setStreamPort(res.wsPort);
+        api.updateParameters({ wsPort: res.wsPort });
+      } else {
+        setStreamRecoverySeq((seq) => seq + 1);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [session, binaryPath, streamPort, connectionLost, status?.connected, api]);
 
   // --- header: persisted title + browser-chrome (URL / key) ---
 
@@ -417,6 +639,13 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   };
   const chromeSnapshotRef = useRef(chromeSnapshot);
   chromeSnapshotRef.current = chromeSnapshot;
+  const currentRelaunchUrl = useCallback(() => {
+    return [
+      latestRestorableUrlRef.current,
+      chromeSnapshotRef.current.url,
+      paramsUrlRef.current,
+    ].find(isRestorableUrl);
+  }, []);
 
   // Native history nav — `back`/`forward`/`reload` issued like tab actions
   // (allowlisted in agentBrowserCommand). Stable; reads the live closure via
@@ -433,6 +662,82 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   // Stable across renders (reads refs / stable setters), so the registered
   // controller never goes stale. Engaging always re-issues (clears lastIssued)
   // so it reclaims the viewport even from an external device.
+  // --- Headed Pop-Out: relaunch this session's browser as a native OS window.
+  // The pane becomes a stub; the stream stays connected to observe tabs/status
+  // and to auto-revert when the window closes. The new Chrome process gets a
+  // fresh stream port, which we write into params so the WS reconnects. ---
+  const popOut = useCallback(() => {
+    const platform = getPlatform();
+    if (!session || !platform.agentBrowserPopOut) return;
+    if (closeIfSessionMarkedClosed(session)) return;
+    headedConnectedRef.current = false;
+    relaunchingRef.current = true;
+    setPoppedOut(true);
+    api.updateParameters({ renderMode: 'ab-popout' });
+    // Pop-out failed: revert to in-pane unless the stream came back live anyway.
+    const revertUnlessLive = () => reconcileStreamPort().then((live) => {
+      relaunchingRef.current = false;
+      if (live) return;
+      setPoppedOut(false);
+      api.updateParameters({ renderMode: 'ab-screencast' });
+    });
+    // Don't reconcile to the current (headless) port first — it's about to close.
+    // Connect to the headed window's fresh port once the relaunch returns it.
+    const url = currentRelaunchUrl();
+    console.log(`[ab-panel] popOut -> ${JSON.stringify({ session, url })}`);
+    platform.agentBrowserPopOut(session, { rect: paneScreenRect(elRef.current), url }, binaryPathRef.current).then((res) => {
+      console.log(`[ab-panel] popOut result ${JSON.stringify(res)}`);
+      if (closeIfSessionMarkedClosed(session)) return;
+      if (!res.ok) {
+        void revertUnlessLive();
+        return;
+      }
+      void reconcileStreamPort(res.wsPort);
+      relaunchingRef.current = false;
+    }).catch((err) => {
+      console.log(`[ab-panel] popOut error ${String(err)}`);
+      if (closeIfSessionMarkedClosed(session)) return;
+      void revertUnlessLive();
+    });
+  }, [session, api, reconcileStreamPort, closeIfSessionMarkedClosed, currentRelaunchUrl]);
+
+  const popIn = useCallback(() => {
+    if (closeIfSessionMarkedClosed(session)) return;
+    // Same expected mid-relaunch stream drop as pop-out: suppress screenshot
+    // pulses so none relaunches the just-closed browser at about:blank.
+    relaunchingRef.current = true;
+    setPoppedOut(false);
+    api.updateParameters({ renderMode: 'ab-screencast' });
+    const platform = getPlatform();
+    if (!session || !platform.agentBrowserPopIn) { relaunchingRef.current = false; return; }
+    // Don't reconcile to the current (headed) port first — the host is about to
+    // kill that daemon. Querying now would spawn a competing daemon (see the
+    // recovery-effect note). Connect to the fresh port the host returns.
+    const url = currentRelaunchUrl();
+    console.log(`[ab-panel] popIn -> ${JSON.stringify({ session, url })}`);
+    platform.agentBrowserPopIn(session, { url }, binaryPathRef.current).then((res) => {
+      console.log(`[ab-panel] popIn result ${JSON.stringify(res)}`);
+      if (closeIfSessionMarkedClosed(session)) { relaunchingRef.current = false; return; }
+      if (res.ok) void reconcileStreamPort(res.wsPort);
+      else void reconcileStreamPort();
+      relaunchingRef.current = false;
+    }).catch(() => {
+      if (closeIfSessionMarkedClosed(session)) { relaunchingRef.current = false; return; }
+      void reconcileStreamPort();
+      relaunchingRef.current = false;
+    });
+  }, [session, api, reconcileStreamPort, closeIfSessionMarkedClosed, currentRelaunchUrl]);
+
+  const bringToFront = useCallback(() => {
+    if (!session) return;
+    getPlatform().agentBrowserBringToFront?.(session, binaryPathRef.current)?.catch(() => {});
+  }, [session]);
+
+  const popOutRef = useRef(popOut);
+  popOutRef.current = popOut;
+  const popInRef = useRef(popIn);
+  popInRef.current = popIn;
+
   const screenActions = useMemo<ScreenActions>(() => ({
     engageSync() {
       // Clear lastIssued so the issue below isn't skipped, and issue now rather
@@ -455,6 +760,17 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     openModal() {
       openAgentBrowserScreenModal(api.id);
     },
+    setRenderMode(renderMode) {
+      // agent-browser → iframe is a render swap handled by the Wall;
+      // ab-screencast ↔ ab-popout relaunches this same session, handled in-panel.
+      if (renderMode === 'iframe') {
+        // The iframe renderer is single-frame: only the active tab survives.
+        // Warn + require a typed confirm when other tabs would be closed.
+        if (tabsRef.current.length >= 2) setPendingIframeSwap(true);
+        else actionsRef.current.onSwapRenderMode(api.id, 'iframe');
+      } else if (renderMode === 'ab-popout') popOutRef.current();
+      else if (poppedOutRef.current) popInRef.current(); // ab-popout → ab-screencast
+    },
   }), [api.id, issueSyncToPane]);
 
   useEffect(() => {
@@ -464,6 +780,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
       chrome: chromeSnapshotRef.current,
       chromeActions,
       hostCapable: !!getPlatform().agentBrowserCommand,
+      canPopOut: !!getPlatform().agentBrowserPopOut,
     });
     registrationRef.current = registration;
     lastPublishedRef.current = null;
@@ -481,6 +798,56 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
     registrationRef.current?.updateChrome(chromeSnapshotRef.current);
     // displayUrl is a pure function of url, so url covers it.
   }, [chromeSnapshot.url, chromeSnapshot.title, chromeSnapshot.key]);
+
+  // Mirror the active tab's URL into params so it persists in the layout blob and
+  // render-mode swaps / pop-out have a canonical URL even when the live stream is
+  // momentarily without an active tab (see dor-browser.md → "Canonical Params":
+  // `url` is the canonical target). Non-empty changes only; the write sets params.url === url so
+  // it does not re-fire.
+  useEffect(() => {
+    const url = chromeSnapshot.url;
+    // Track the active tab faithfully so url is always the page the user is on —
+    // this is the source of truth the relaunch (pop-out/pop-in/auto-revert)
+    // reads. Two guards: freeze while a relaunch is in flight (the active tab is
+    // momentarily a blank/booting page that must not overwrite the real target),
+    // and never record a transient about:blank.
+    if (!relaunchingRef.current && isRestorableUrl(url) && url !== paramsUrlRef.current) {
+      latestRestorableUrlRef.current = url;
+      paramsUrlRef.current = url;
+      api.updateParameters({ url });
+    }
+  }, [chromeSnapshot.url, api]);
+
+  // Push the render-mode flip (screencast ↔ popout) to the header/modal.
+  useEffect(() => { publishScreen(); }, [poppedOut, publishScreen]);
+
+  // This surface owns its session again — clear any teardown mark a prior
+  // surface (re-using the same managed name) left behind, so auto-revert works.
+  useEffect(() => {
+    if (session) clearAgentBrowserSessionClosed(session);
+  }, [session]);
+
+  // Auto-revert: once the headed stream has connected, a later disconnect means
+  // the window closed → relaunch headless and resume streaming (spec → Lifecycle).
+  // But a disconnect also happens when Dormouse itself closes the session (pane
+  // kill, or a render-swap away from popout); the closed-session mark tells those
+  // apart so we don't resurrect a session that's being torn down.
+  useEffect(() => {
+    if (!poppedOut) { headedConnectedRef.current = false; return; }
+    // The expected mid-relaunch drop isn't the window closing — ignore it.
+    if (relaunchingRef.current) return;
+    if (status?.connected === true) headedConnectedRef.current = true;
+    else if (headedConnectedRef.current && (status?.connected === false || connectionLost)) {
+      if (sessionRef.current && isAgentBrowserSessionClosed(sessionRef.current)) return;
+      popInRef.current();
+    }
+  }, [poppedOut, status?.connected, connectionLost]);
+
+  // Focus the swap-confirm overlay when it appears so it captures the typed
+  // confirm/cancel keys (the pane's key-forwarder skips in-pane targets).
+  useEffect(() => {
+    if (pendingIframeSwap) swapConfirmRef.current?.focus();
+  }, [pendingIframeSwap]);
 
   // Persist sync state into the panel params so it round-trips through the
   // dockview layout blob (and survives reattach). Skip no-op writes.
@@ -522,10 +889,10 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   // essential — it otherwise still holds the previous session's pane size and
   // issueSyncToPane would no-op, leaving the fresh browser unsynced (SCALED).
   useEffect(() => {
-    if (!wsPort || !syncEngagedRef.current) return;
+    if (!streamPort || !syncEngagedRef.current) return;
     lastIssuedRef.current = null;
     issueSyncToPane();
-  }, [wsPort, issueSyncToPane]);
+  }, [streamPort, issueSyncToPane]);
 
   // Display-scale (DPR) changes don't resize the pane, so ResizeObserver misses
   // them; a window resize is the available signal. Recompute the indicator and,
@@ -542,8 +909,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   // --- input forwarding (stream-native input_* messages) ---
 
   const send = useCallback((payload: Record<string, unknown>) => {
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+    connectionRef.current?.send(payload);
   }, []);
 
   const toDevice = useCallback((e: { clientX: number; clientY: number }): { x: number; y: number } | null => {
@@ -581,7 +947,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   };
 
   const onCanvasMouseDown = (e: React.MouseEvent) => {
-    if (!interactiveRef.current) return;
+    if (!passthroughRef.current) return;
     // preventDefault stops the browser's focus-shift default action (a click
     // on a non-focusable canvas would otherwise blur to <body>), and the
     // explicit focus claims keystrokes for this pane.
@@ -603,7 +969,9 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   };
 
   const onCanvasMouseUp = (e: React.MouseEvent) => {
-    if (!interactiveRef.current) return;
+    // Pair with onCanvasMouseDown: gate on passthrough (not full `interactive`)
+    // so the release of a first, pane-selecting click still completes the click.
+    if (!passthroughRef.current) return;
     e.preventDefault();
     const point = toDevice(e);
     if (!point) return;
@@ -791,7 +1159,7 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
   // --- placeholder state ---
 
   const placeholder = (() => {
-    if (!wsPort) return `Waiting for browser session ${session ?? ''} — run dor ab open <url>`;
+    if (!streamPort) return `Waiting for browser session ${session ?? ''} — run dor ab open <url>`;
     if (connectionLost || status?.connected === false) {
       return `Browser session ${session ?? ''} ended — run dor ab open <url> to restart it, or close this surface.`;
     }
@@ -846,9 +1214,11 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
         </div>
       )}
       <div ref={viewportRef} className="relative flex min-h-0 flex-1 items-center justify-center">
+        {/* Canvas stays mounted across pop-out (its listeners keep their element)
+            — just hidden under the stub while a headed window renders instead. */}
         <canvas
           ref={canvasRef}
-          className={clsx('block max-h-full max-w-full select-none', !hasFrame && 'hidden')}
+          className={clsx('block max-h-full max-w-full select-none', (!hasFrame || poppedOut) && 'hidden')}
           onMouseDown={onCanvasMouseDown}
           onMouseUp={onCanvasMouseUp}
           onMouseMove={onCanvasMouseMove}
@@ -856,8 +1226,64 @@ export function AgentBrowserPanel({ api, params }: IDockviewPanelProps<AgentBrow
             if (interactiveRef.current) e.preventDefault();
           }}
         />
-        {placeholder && (
+        {poppedOut ? (
+          // Popped out to a headed OS window — the pane is a clean stub.
+          <div className="flex flex-col items-center gap-3 px-4 text-center text-sm text-muted">
+            <div>This browser is running in a separate window.</div>
+            <div className="flex gap-2 text-xs">
+              {getPlatform().agentBrowserBringToFront && (
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    bringToFront();
+                  }}
+                  className="rounded border border-border px-2.5 py-1 text-muted transition-colors hover:border-foreground hover:text-foreground"
+                >
+                  Bring to front
+                </button>
+              )}
+              <button
+                type="button"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  popIn();
+                }}
+                className="rounded border border-border px-2.5 py-1 text-muted transition-colors hover:border-foreground hover:text-foreground"
+              >
+                Pop back in
+              </button>
+            </div>
+          </div>
+        ) : placeholder ? (
           <div className="px-4 text-center text-sm text-muted">{placeholder}</div>
+        ) : null}
+        {pendingIframeSwap && (
+          <div
+            ref={swapConfirmRef}
+            tabIndex={-1}
+            className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-terminal-bg/95 px-6 text-center outline-none"
+            onMouseDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'c' || e.key === 'C') {
+                setPendingIframeSwap(false);
+                actions.onSwapRenderMode(api.id, 'iframe');
+              } else if (e.key === 'Escape') {
+                setPendingIframeSwap(false);
+              }
+            }}
+          >
+            <div className="max-w-sm text-sm text-foreground">
+              Switching to the iframe renderer keeps only the active tab.{' '}
+              <span className="font-semibold">{Math.max(0, tabs.length - 1)} other tab{tabs.length - 1 === 1 ? '' : 's'}</span> will be closed.
+            </div>
+            <div className="text-xs text-muted">
+              Press <kbd className="rounded bg-app-bg px-1 py-0.5 font-mono">c</kbd> to continue · <kbd className="rounded bg-app-bg px-1 py-0.5 font-mono">Esc</kbd> to cancel
+            </div>
+          </div>
         )}
       </div>
     </div>

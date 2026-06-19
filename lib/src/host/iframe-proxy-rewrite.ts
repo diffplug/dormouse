@@ -1,6 +1,6 @@
 /**
  * Pure, dependency-free helpers for the iframe transparent proxy
- * (docs/specs/dor-iframe.md → "The Transparent Proxy").
+ * (docs/specs/dor-browser.md → "Iframe Renderer").
  *
  * Split out from the Node server (`iframe-proxy.ts`) so the policy/rewriting
  * logic is shared by every host that runs the proxy (VS Code extension host,
@@ -34,10 +34,22 @@ export const STRIP_RESPONSE_HEADERS = new Set([
 //     only the frame, so the Wall can't see it; this lets it select the pane /
 //     enter passthrough (#3). It's genuine user input, so it can't loop with the
 //     parent's programmatic focus.
+//   - `location`: the proxied frame's current URL. The parent converts it back
+//     to the upstream URL and uses it to keep iframe Back/Forward/Reload chrome
+//     honest.
 export const IFRAME_SHIM = `(function(){
   var P=window.parent;
   if(!P||P===window)return;
-  function post(t){try{P.postMessage({__dormouse:t},'*');}catch(e){}}
+  function post(t,d){try{var m={__dormouse:t};if(d)for(var k in d)m[k]=d[k];P.postMessage(m,'*');}catch(e){}}
+  function postLocation(){post('location',{url:String(location.href)});}
+  function anchorHref(e){
+    var n=e&&e.target;
+    while(n&&n.nodeType===1){
+      if(n.tagName&&String(n.tagName).toLowerCase()==='a'&&n.href)return n;
+      n=n.parentElement;
+    }
+    return null;
+  }
   function tap(s,e){
     var now=Date.now(),side=e.location===1?'left':'right';
     if(s.side==='left'&&side==='right'&&now-s.time<500){s.side=null;return true;}
@@ -49,6 +61,45 @@ export const IFRAME_SHIM = `(function(){
     else if(e.key==='Shift'){if(tap(shift,e))post('leader');}
   },true);
   addEventListener('pointerdown',function(){post('pointerdown');},true);
+  addEventListener('click',function(e){
+    var a=anchorHref(e);
+    if(!a||a.hasAttribute('download'))return;
+    if(a.target&&a.target!=='_self'){
+      // New-tab/window link: the iframe renderer is single-frame, so hand the
+      // URL to Dormouse to open as a new pane instead of letting it vanish.
+      e.preventDefault();
+      post('open-window',{url:String(a.href)});
+      return;
+    }
+    // Modifier / non-primary clicks (Cmd/Ctrl/Shift/Alt, middle button) open a
+    // new tab/window and leave this frame put — don't report a location the
+    // frame isn't actually showing, or the parent's URL bar + Back history lie.
+    if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||e.button!==0)return;
+    // This is the capture phase, before the page's own handlers. Defer a tick
+    // and bail if the page cancelled the click (preventDefault, or an <a> that
+    // fetches instead of navigating) — else we'd report a navigation that never
+    // happened. A real navigation re-reports via the next document's shim, so
+    // nothing is lost if this frame is torn down before the tick fires.
+    var href=String(a.href);
+    setTimeout(function(){if(!e.defaultPrevented)post('location',{url:href});},0);
+  },true);
+  // window.open is likewise single-frame-hostile; redirect it to a new pane.
+  try{window.open=function(u){
+    var url='';try{url=u?String(new URL(String(u),location.href)):'';}catch(_e){url=String(u||'');}
+    post('open-window',{url:url});
+    return null;
+  };}catch(_e){}
+  addEventListener('popstate',postLocation,true);
+  addEventListener('hashchange',postLocation,true);
+  addEventListener('pageshow',postLocation,true);
+  var H=history;
+  if(H&&H.pushState&&H.replaceState){
+    var p=H.pushState,r=H.replaceState;
+    H.pushState=function(){var v=p.apply(this,arguments);setTimeout(postLocation,0);return v;};
+    H.replaceState=function(){var v=r.apply(this,arguments);setTimeout(postLocation,0);return v;};
+  }
+  if(document.readyState==='loading')addEventListener('DOMContentLoaded',postLocation,{once:true});
+  else setTimeout(postLocation,0);
 })();`;
 
 // Drop any in-document CSP (loopback "relax CSP") and inject the shim before

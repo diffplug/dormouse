@@ -13,7 +13,7 @@ import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { PersistedSession } from '../../lib/src/lib/session-types';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
-import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserScreenshot } from './agent-browser-host';
+import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
 import { log } from './log';
 
@@ -386,6 +386,16 @@ export function attachRouter(
           } satisfies ExtensionMessage);
         });
         break;
+      case 'agentBrowser:streamStatus':
+        runAgentBrowserStreamStatus(
+          msg.session,
+          typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
+        ).then((result) => {
+          webview.postMessage({
+            type: 'agentBrowser:streamStatusResult', requestId: msg.requestId, ...result,
+          } satisfies ExtensionMessage);
+        });
+        break;
       case 'agentBrowser:getStreamUrl': {
         const streamPort = Number.isInteger(msg.port) && msg.port > 0 && msg.port <= 65535 ? msg.port : null;
         if (!streamPort) {
@@ -401,6 +411,33 @@ export function attachRouter(
         );
         break;
       }
+      case 'agentBrowser:open':
+        runAgentBrowserOpen(
+          typeof msg.url === 'string' ? msg.url : '',
+          { headed: msg.headed === true },
+          typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
+        ).then((result) => {
+          webview.postMessage({ type: 'agentBrowser:openResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
+        });
+        break;
+      case 'agentBrowser:popOut':
+        runAgentBrowserPopOut(
+          msg.session,
+          { url: typeof msg.url === 'string' ? msg.url : undefined, rect: msg.rect },
+          typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
+        ).then((result) => {
+          webview.postMessage({ type: 'agentBrowser:popResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
+        });
+        break;
+      case 'agentBrowser:popIn':
+        runAgentBrowserPopIn(
+          msg.session,
+          { url: typeof msg.url === 'string' ? msg.url : undefined },
+          typeof msg.binaryPath === 'string' ? msg.binaryPath : undefined,
+        ).then((result) => {
+          webview.postMessage({ type: 'agentBrowser:popResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
+        });
+        break;
       case 'iframe:createProxyUrl':
         createIframeProxyUrl(typeof msg.url === 'string' ? msg.url : '').then(
           (result) => webview.postMessage({

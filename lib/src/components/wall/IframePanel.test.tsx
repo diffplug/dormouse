@@ -1,12 +1,14 @@
 /**
  * @vitest-environment jsdom
  */
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import type { PlatformAdapter } from '../../lib/platform/types';
 import { IframePanel } from './IframePanel';
+import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { WallActionsContext, type WallActions } from './wall-context';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -25,13 +27,14 @@ function stubActions(overrides: Partial<WallActions> = {}): WallActions {
     onStartRename: vi.fn(),
     onFinishRename: vi.fn(() => ({ accepted: true })),
     onCancelRename: vi.fn(),
+    onSwapRenderMode: vi.fn(),
     ...overrides,
   };
 }
 
-function panelProps(id: string): IDockviewPanelProps<{ url: string }> {
+function panelProps(id: string, updateParameters = vi.fn()): IDockviewPanelProps<{ url: string }> {
   return {
-    api: { id, title: 'Raw iframe' },
+    api: { id, title: 'Raw iframe', updateParameters, setTitle: vi.fn() },
     params: { url: 'http://example.test/app' },
   } as unknown as IDockviewPanelProps<{ url: string }>;
 }
@@ -52,12 +55,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function renderPanel(actions: WallActions): Promise<HTMLIFrameElement> {
+async function renderPanel(actions: WallActions, props = panelProps('iframe-raw')): Promise<HTMLIFrameElement> {
   await act(async () => {
     root.render(
-      <WallActionsContext.Provider value={actions}>
-        <IframePanel {...panelProps('iframe-raw')} />
-      </WallActionsContext.Provider>,
+      <StrictMode>
+        <WallActionsContext.Provider value={actions}>
+          <IframePanel {...props} />
+        </WallActionsContext.Provider>
+      </StrictMode>,
     );
   });
 
@@ -95,5 +100,84 @@ describe('IframePanel', () => {
     });
 
     expect(onClickPanel).not.toHaveBeenCalled();
+  });
+
+  it('drives iframe back and forward from the registered chrome actions', async () => {
+    const updateParameters = vi.fn();
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen'>;
+    platform.agentBrowserOpen = vi.fn();
+    setPlatform(platform);
+    await renderPanel(stubActions(), panelProps('iframe-history', updateParameters));
+
+    await act(async () => {
+      getAgentBrowserScreenController('iframe-history')?.chromeActions.navigate('http://example.test/one');
+    });
+    await act(async () => {
+      getAgentBrowserScreenController('iframe-history')?.chromeActions.navigate('http://example.test/two');
+    });
+    await act(async () => {
+      getAgentBrowserScreenController('iframe-history')?.chromeActions.back();
+    });
+    expect(updateParameters).toHaveBeenLastCalledWith({ url: 'http://example.test/one' });
+
+    await act(async () => {
+      getAgentBrowserScreenController('iframe-history')?.chromeActions.forward();
+    });
+    expect(updateParameters).toHaveBeenLastCalledWith({ url: 'http://example.test/two' });
+  });
+
+  it('maps proxied frame location messages into chrome without updating params', async () => {
+    const updateParameters = vi.fn();
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen' | 'createIframeProxyUrl'>;
+    platform.agentBrowserOpen = vi.fn();
+    platform.createIframeProxyUrl = vi.fn(async () => ({
+      ok: true,
+      url: 'http://127.0.0.1:61234/app',
+      upstream: 'http://example.test/app',
+    }));
+    setPlatform(platform);
+    await renderPanel(stubActions(), panelProps('iframe-proxied', updateParameters));
+
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: 'http://127.0.0.1:61234',
+        data: { __dormouse: 'location', url: 'http://127.0.0.1:61234/other/?q=1#frag' },
+      }));
+    });
+
+    expect(updateParameters).not.toHaveBeenCalled();
+    expect(getAgentBrowserScreenController('iframe-proxied')?.chrome().url).toBe('http://example.test/other/?q=1#frag');
+  });
+
+  it('re-resolves the proxy on Back after an observed in-frame navigation', async () => {
+    const updateParameters = vi.fn();
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen' | 'createIframeProxyUrl'>;
+    platform.agentBrowserOpen = vi.fn();
+    // Fixed URL so the proxy origin stays stable (the message handler gates on
+    // it); re-resolution is observed via the call count, not a changed src.
+    const createProxy = vi.fn(async () => ({ ok: true, url: 'http://127.0.0.1:61234/app' }));
+    platform.createIframeProxyUrl = createProxy;
+    setPlatform(platform);
+    await renderPanel(stubActions(), panelProps('iframe-back', updateParameters));
+
+    // Observe an in-frame navigation: it adds a history entry but, by design,
+    // does not write params.url back, so params.url stays the source URL.
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: 'http://127.0.0.1:61234',
+        data: { __dormouse: 'location', url: 'http://127.0.0.1:61234/other' },
+      }));
+    });
+
+    const callsBeforeBack = createProxy.mock.calls.length;
+    await act(async () => {
+      getAgentBrowserScreenController('iframe-back')?.chromeActions.back();
+    });
+
+    // Back targets the original (still-persisted) URL, so updateParameters is a
+    // no-op write — the proxy must still re-resolve or the frame would keep
+    // showing /other while the chrome shows /app.
+    expect(updateParameters).toHaveBeenLastCalledWith({ url: 'http://example.test/app' });
+    expect(createProxy.mock.calls.length).toBeGreaterThan(callsBeforeBack);
   });
 });

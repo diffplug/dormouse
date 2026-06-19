@@ -15,6 +15,7 @@
     "test": "pnpm -r run test",
     "dev:lib": "pnpm --filter dormouse-lib dev",
     "dev:standalone": "pnpm --filter dormouse-standalone tauri dev",
+    "dev:standalone:ab": "pnpm --filter dormouse-standalone dev:agent-browser",
     "dev:website": "pnpm --filter dormouse-website dev",
     "build:vscode": "pnpm --filter dormouse-lib build && pnpm --filter dormouse build:frontend && pnpm --filter dormouse build",
     "build:standalone": "pnpm --filter dormouse-standalone tauri build",

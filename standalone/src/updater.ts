@@ -1,16 +1,41 @@
 import { useSyncExternalStore } from 'react';
-import { check, type Update } from '@tauri-apps/plugin-updater';
-import { getCurrentWindow } from '@tauri-apps/api/window';
-import { getVersion } from '@tauri-apps/api/app';
-import { open } from '@tauri-apps/plugin-shell';
-import { invoke } from '@tauri-apps/api/core';
 import { IS_WINDOWS, PLATFORM_STRING } from 'dormouse-lib/lib/platform';
 import type { UpdateBannerState } from './UpdateBanner';
+import type { Update } from '@tauri-apps/plugin-updater';
 
 const GITHUB_REPO_URL = 'https://github.com/diffplug/dormouse';
+const BROWSER_DEV_HOST = Boolean(import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST);
 
 function openUrl(url: string, context: string): void {
-  open(url).catch((e) => console.error(`[updater] Failed to open ${context}:`, e));
+  if (BROWSER_DEV_HOST) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  import('@tauri-apps/plugin-shell')
+    .then(({ open }) => open(url))
+    .catch((e) => console.error(`[updater] Failed to open ${context}:`, e));
+}
+
+async function checkForUpdate(): Promise<Update | null> {
+  if (BROWSER_DEV_HOST) return null;
+  const { check } = await import('@tauri-apps/plugin-updater');
+  return check();
+}
+
+async function getAppVersion(): Promise<string> {
+  if (BROWSER_DEV_HOST) return 'browser-dev';
+  const { getVersion } = await import('@tauri-apps/api/app');
+  return getVersion();
+}
+
+async function invokeTauri<T>(cmd: string): Promise<T> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<T>(cmd);
+}
+
+async function getAppWindow() {
+  const { getCurrentWindow } = await import('@tauri-apps/api/window');
+  return getCurrentWindow();
 }
 
 // --- State ---
@@ -64,14 +89,16 @@ export function openChangelog(): void {
 }
 
 async function openCurrentVersionChangelog(): Promise<void> {
-  const version = (await getVersion()).trim();
+  const version = (await getAppVersion()).trim();
   openUrl(`https://dormouse.sh/changelog/after/${encodeURIComponent(version)}`, 'changelog');
 }
 
 export async function buildDebugReport(error: string, toVersion: string): Promise<string> {
   const [fromVersion, logTail] = await Promise.all([
-    getVersion().catch(() => ''),
-    invoke<string>('read_update_log').catch((e) => `(failed to read log: ${String(e)})`),
+    getAppVersion().catch(() => ''),
+    BROWSER_DEV_HOST
+      ? Promise.resolve('(update log is unavailable in browser dev)')
+      : invokeTauri<string>('read_update_log').catch((e) => `(failed to read log: ${String(e)})`),
   ]);
 
   return [
@@ -99,11 +126,12 @@ export function openIssueSearch(error: string): void {
 // --- Lifecycle ---
 
 export function startUpdateCheck(): void {
+  if (BROWSER_DEV_HOST) return;
   void runUpdateCheck();
 }
 
 async function runUpdateCheck(): Promise<void> {
-  currentVersion = await getVersion();
+  currentVersion = await getAppVersion();
 
   let hadFailureMarker = false;
 
@@ -143,7 +171,7 @@ async function runUpdateCheck(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 5_000));
 
   try {
-    const update = await check();
+    const update = await checkForUpdate();
     if (!update) {
       registerCloseHandler();
       return;
@@ -210,10 +238,11 @@ export function _resetForTesting(): void {
 let closeHandlerRegistered = false;
 
 function registerCloseHandler(): void {
+  if (BROWSER_DEV_HOST) return;
   if (closeHandlerRegistered) return;
   closeHandlerRegistered = true;
 
-  getCurrentWindow().onCloseRequested(async (event) => {
+  getAppWindow().then((appWindow) => appWindow.onCloseRequested(async (event) => {
     const update = pendingUpdate;
     if (!update) return;
 
@@ -238,7 +267,7 @@ function registerCloseHandler(): void {
       // fully exit before launching the installer. (On macOS/Linux open files
       // can be replaced in place, so this is Windows-only.)
       if (IS_WINDOWS) {
-        await invoke('kill_sidecar_now');
+        await invokeTauri('kill_sidecar_now');
       }
       await update.install();
     } catch (e) {
@@ -252,6 +281,6 @@ function registerCloseHandler(): void {
     }
 
     pendingUpdate = null;
-    await getCurrentWindow().close();
-  });
+    await appWindow.close();
+  }));
 }

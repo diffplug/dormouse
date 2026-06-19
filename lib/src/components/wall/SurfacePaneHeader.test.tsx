@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
@@ -45,6 +45,7 @@ function stubActions(overrides: Partial<WallActions> = {}): WallActions {
     onStartRename: vi.fn(),
     onFinishRename: vi.fn(() => ({ accepted: true })),
     onCancelRename: vi.fn(),
+    onSwapRenderMode: vi.fn(),
     ...overrides,
   };
 }
@@ -80,9 +81,11 @@ afterEach(() => {
 function renderHeader(props: IDockviewPanelHeaderProps, actions: WallActions) {
   act(() => {
     root.render(
-      <WallActionsContext.Provider value={actions}>
-        <SurfacePaneHeader {...props} />
-      </WallActionsContext.Provider>,
+      <StrictMode>
+        <WallActionsContext.Provider value={actions}>
+          <SurfacePaneHeader {...props} />
+        </WallActionsContext.Provider>
+      </StrictMode>,
     );
   });
 }

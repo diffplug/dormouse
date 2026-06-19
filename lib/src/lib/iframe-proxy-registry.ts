@@ -1,7 +1,7 @@
 /**
  * Tracks the loopback proxy origins of live iframe surfaces so the Wall's
  * keyboard/focus channel can trust `postMessage` events from instrumented
- * frames (docs/specs/dor-iframe.md → "The keyboard side-channel"). The shim we
+ * frames (docs/specs/dor-browser.md → "Iframe Shim"). The shim we
  * inject calls `parent.postMessage(...)`, which is cross-origin-safe by design;
  * the Wall validates `event.origin` against this set before acting on a
  * forwarded leader chord, so only a frame Dormouse itself served can drive it.
