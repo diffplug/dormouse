@@ -319,7 +319,7 @@ function validateEnsureDelimiter(args: string[]): ParseResult<void> {
 
   for (let index = 0; index < delimiterIndex; index += 1) {
     const arg = args[index];
-    if (arg === '--json' || arg === '--minimize') {
+    if (arg === '--json' || arg === '--minimize' || arg === '--restart') {
       continue;
     }
     if (arg === '--cwd' || arg === '--surface') {

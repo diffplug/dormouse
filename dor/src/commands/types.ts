@@ -53,13 +53,15 @@ export interface EnsureSurfaceRequest {
   /** Raw argv for the command; the host quotes it for the target shell. */
   command: string[];
   minimized: boolean;
+  /** Interrupt and re-run a matching surface in place instead of reusing it. */
+  restart: boolean;
   surface?: string;
   /** Working directory for matching and for the new command; part of the idempotency key. */
   cwd: string;
 }
 
 export interface EnsureSurfaceResponse {
-  status: 'created' | 'existing';
+  status: 'created' | 'existing' | 'restarted';
   surfaceId?: string;
   surfaceRef: string;
   command: string;

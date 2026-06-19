@@ -35,6 +35,7 @@ import {
   createTerminalPaneState,
   deriveSurfaceLabel,
   surfaceRunsCommand,
+  type TerminalPaneState,
 } from '../lib/terminal-state';
 import { orchestrateKill } from '../lib/kill-animation';
 import { getPlatform, PLATFORM_STRING } from '../lib/platform';
@@ -103,6 +104,7 @@ type DorControlParams = {
   key?: unknown;
   lines?: unknown;
   minimized?: unknown;
+  restart?: unknown;
   binaryPath?: unknown;
   pane?: string;
   session?: unknown;
@@ -245,6 +247,60 @@ function readSurfaceText(surfaceId: string, lines: number | undefined, scrollbac
   }
 
   return limitLines(collected.join('\n').replace(/\n+$/, ''), lines);
+}
+
+// `dor ensure --restart` blocks the CLI while we interrupt a live command and
+// re-run it. Rather than guess at timings, poll the integration-derived
+// terminal state: a command is gone once `currentCommand` clears (commandFinish
+// → prompt) and back once the surface reports the same command live again.
+const RESTART_POLL_INTERVAL_MS = 100;
+const RESTART_INTERRUPT_TIMEOUT_MS = 15_000;
+const RESTART_START_TIMEOUT_MS = 15_000;
+
+/** Resolve true once `predicate` holds for the surface's live state, false on timeout. */
+function waitForTerminalState(
+  id: string,
+  predicate: (state: TerminalPaneState) => boolean,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (predicate(getTerminalPaneState(id))) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let elapsed = 0;
+    const timer = setInterval(() => {
+      if (predicate(getTerminalPaneState(id))) {
+        clearInterval(timer);
+        resolve(true);
+      } else if ((elapsed += RESTART_POLL_INTERVAL_MS) >= timeoutMs) {
+        clearInterval(timer);
+        resolve(false);
+      }
+    }, RESTART_POLL_INTERVAL_MS);
+  });
+}
+
+/**
+ * Restart a surface already running `command` in `cwd`: interrupt it (Ctrl+C),
+ * wait for the shell to return to its prompt, type the command again, and wait
+ * for it to go live. Drives the live PTY directly, so it works for minimized
+ * doors too (their PTY keeps running). Returns a message on failure.
+ */
+async function restartSurfaceInPlace(id: string, command: string, cwd: string): Promise<ParseResult<undefined>> {
+  const platform = getPlatform();
+  platform.writePty(id, '\x03');
+  const interrupted = await waitForTerminalState(
+    id,
+    (state) => state.currentCommand === null,
+    RESTART_INTERRUPT_TIMEOUT_MS,
+  );
+  if (!interrupted) return { ok: false, message: 'did not return to a prompt after interrupt' };
+  platform.writePty(id, `${command}\r`);
+  const restarted = await waitForTerminalState(
+    id,
+    (state) => surfaceRunsCommand(state, command, cwd),
+    RESTART_START_TIMEOUT_MS,
+  );
+  if (!restarted) return { ok: false, message: 'command did not restart' };
+  return { ok: true, value: undefined };
 }
 
 function killConfirmationParam(value: unknown): { mode: 'if-read'; text: string } | { mode: 'dangerously' } | null {
@@ -1155,6 +1211,25 @@ export function Wall({
         }
         const existingId = findSurfaceIdRunningCommand(command, cwd);
         if (existingId) {
+          if (booleanParam(params.restart)) {
+            const restarted = await restartSurfaceInPlace(existingId, command, cwd);
+            if (!restarted.ok) {
+              detail.respond({ ok: false, error: `surface '${surfaceRefForId(existingId)}' ${restarted.message}` });
+              return;
+            }
+            detail.respond({
+              ok: true,
+              result: {
+                status: 'restarted',
+                surfaceId: existingId,
+                surfaceRef: surfaceRefForId(existingId),
+                command,
+                cwd,
+                minimized: doorsRef.current.some((door) => door.id === existingId),
+              },
+            });
+            return;
+          }
           detail.respond({
             ok: true,
             result: {

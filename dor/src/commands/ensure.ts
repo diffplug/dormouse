@@ -19,9 +19,15 @@ import {
 interface EnsureFlags {
   readonly json?: boolean;
   readonly minimize?: boolean;
+  readonly restart?: boolean;
   readonly surface?: string;
   readonly cwd?: string;
 }
+
+// `--restart` makes the host block until a server is interrupted and respawned,
+// which can outlast the client's default 5s request timeout. Give that one
+// command plenty of headroom; everything else keeps the snappy default.
+const RESTART_TIMEOUT_MS = 60_000;
 
 export const ensureCommand: Command = {
   name: 'ensure',
@@ -29,15 +35,15 @@ export const ensureCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--surface id|ref|index] [--cwd path]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--surface id|ref|index] [--cwd path] -- <command>...\n',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref|index] [--cwd path]<TO-EOL>',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref|index] [--cwd path] -- <command>...\n',
       ],
     },
     {
       scope: 'command-usage',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--surface id|ref|index] [--cwd path]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--surface id|ref|index] [--cwd path] -- <command>...\n',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref|index] [--cwd path]<TO-EOL>',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref|index] [--cwd path] -- <command>...\n',
       ],
     },
     {
@@ -60,11 +66,14 @@ Two surfaces running the same command in different working directories are disti
 
 --minimize applies only when creating a new surface; it does not minimize an existing match.
 
+--restart applies only to an already-running match: it interrupts the live command (Ctrl+C), waits for the shell to return to its prompt, then re-runs the command in place and blocks until the command is live again. A restarted surface keeps its minimized/visible state. If no surface is running the command, --restart behaves like a plain ensure and creates one.
+
 --surface selects the surface to split only when creating a new surface. If omitted, Dormouse uses the same caller/focused fallback as dor split.
 
 Text output:
   created surface:3  "npm run dev"
   existing surface:3  "npm run dev"
+  restarted surface:3  "npm run dev"
 
 JSON output:
   {
@@ -80,6 +89,7 @@ JSON output:
       flags: {
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
+        restart: { kind: 'boolean', brief: 'Restart a matching surface in place.', optional: true, withNegated: false },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'id|ref|index' },
         cwd: { kind: 'parsed', parse: stringParser, brief: 'Working directory for matching and for the new command.', optional: true, placeholder: 'path' },
       },
@@ -98,13 +108,14 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
     return new Error('dor ensure requires a command after --');
   }
 
-  const client = requireControlClient(this.options);
+  const client = requireControlClient(this.options, flags.restart === true ? RESTART_TIMEOUT_MS : undefined);
   if (client instanceof Error) return client;
 
   try {
     const response = await client.ensureSurface({
       command: commandArgs,
       minimized: flags.minimize === true,
+      restart: flags.restart === true,
       surface: flags.surface,
       cwd: callerWorkingDirectory(flags.cwd, this.options.env),
     });

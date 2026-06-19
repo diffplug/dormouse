@@ -73,8 +73,9 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       // Mirror the host: quote the argv for the target shell, and key on the
       // command so the fixture can exercise both the created and existing paths.
       const command = buildShellCommandForKind('posix', request.command);
+      const isExisting = command === 'pnpm dev:workspace';
       return {
-        status: command === 'pnpm dev:workspace' ? 'existing' : 'created',
+        status: isExisting ? (request.restart ? 'restarted' : 'existing') : 'created',
         surfaceId: '33333333-3333-4333-8333-333333333333',
         surfaceRef: 'surface:3',
         command,
@@ -239,10 +240,23 @@ test('ensure sends command argv and caller cwd to the host', async () => {
     request: {
       command: ['pnpm', 'dev'],
       minimized: false,
+      restart: false,
       surface: undefined,
       cwd: '/work/site',
     },
   }]);
+});
+
+test('ensure --restart restarts a matching surface in place', async () => {
+  const client = fixtureClient();
+  await snapshot(
+    'ensure-restart',
+    await runCli(['ensure', '--restart', '--', 'pnpm', 'dev:workspace'], {
+      client,
+      env: { PWD: '/work/site' },
+    }),
+  );
+  assert.equal(client.requests[0].request.restart, true);
 });
 
 test('ensure json output', async () => {
