@@ -6,6 +6,14 @@ import type { AgentBrowserCommandResult } from '../../lib/platform/types';
 const FRAME_PULSE_THRESHOLD = 16384;
 const DEBUG_RING_LIMIT = 300;
 
+// Fast non-cryptographic string hash (djb2) for cheap byte-identity checks on
+// stream payloads. Used to detect redundant frames/tabs the daemon re-broadcasts.
+function djb2(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return h;
+}
+
 export type AgentBrowserConnectionState = 'connecting' | 'open' | 'closed' | 'failed';
 
 export interface AgentBrowserStreamStatus {
@@ -102,6 +110,17 @@ export class AgentBrowserConnection {
   private pendingNewTab: { tabId: string; initialUrl: string; seenAtMs: number } | null = null;
   private snap: AgentBrowserSnapshot;
 
+  // The agent-browser daemon re-broadcasts the current frame and tab list on a
+  // ~20Hz heartbeat even when nothing changes, so a *static* page would otherwise
+  // drive ~20 device-resolution screenshots/sec (each a child-process spawn) plus
+  // ~20 `setTabs` re-renders/sec. We drop byte-identical re-broadcasts here so an
+  // unchanged page costs nothing downstream (the screenshot loop's own contract:
+  // "a static page produces no pulses, so no shots and no cost"). `0`/`''` are
+  // pre-first-message sentinels, and reset on reconnect so a fresh stream always
+  // re-primes the canvas/tabs.
+  private lastFrameKey = 0;
+  private lastTabsSig = '';
+
   constructor(private readonly deps: AgentBrowserConnectionDeps) {
     this.snap = {
       connection: 'connecting',
@@ -195,6 +214,11 @@ export class AgentBrowserConnection {
     };
     this.socket.onclose = (ev) => {
       this.socket = null;
+      // A reconnected stream re-sends the current frame/tabs; clear the dedupe
+      // sentinels so that first post-reconnect snapshot always re-primes the
+      // canvas and tab list rather than being dropped as a "duplicate".
+      this.lastFrameKey = 0;
+      this.lastTabsSig = '';
       if (this.disposed) return;
       this.failures += 1;
       if (this.failures >= 3) this.patch({ connection: 'failed', connectionLost: true });
@@ -207,9 +231,20 @@ export class AgentBrowserConnection {
     };
   }
 
+  // Drop a frame whose pixels (and device dims) match the previous one — the
+  // daemon's heartbeat re-broadcasts an unchanged page, and redrawing it is pure
+  // cost. Returns true when the frame is a duplicate the caller should ignore.
+  private isDuplicateFrame(payload: string): boolean {
+    const key = djb2(payload) ^ (payload.length | 0);
+    if (key === this.lastFrameKey) return true;
+    this.lastFrameKey = key;
+    return false;
+  }
+
   private handleMessage(raw: unknown): void {
     if (typeof raw !== 'string') return;
     if (raw.length > FRAME_PULSE_THRESHOLD) {
+      if (this.isDuplicateFrame(raw)) return;
       this.emit({ type: 'frame-pulse' });
       return;
     }
@@ -223,6 +258,10 @@ export class AgentBrowserConnection {
       const metadata = msg.metadata?.deviceWidth && msg.metadata?.deviceHeight
         ? { deviceWidth: msg.metadata.deviceWidth as number, deviceHeight: msg.metadata.deviceHeight as number }
         : undefined;
+      // Fold device dims into the identity key so a resize that happens to keep
+      // identical pixels still propagates.
+      const key = metadata ? `${msg.data}@${metadata.deviceWidth}x${metadata.deviceHeight}` : msg.data;
+      if (this.isDuplicateFrame(key)) return;
       this.emit({ type: 'frame-pulse', metadata });
     } else if (msg.type === 'status') {
       const status: AgentBrowserStreamStatus = {
@@ -245,6 +284,14 @@ export class AgentBrowserConnection {
       this.debug('tabs-empty-ignored', { previous: previousTabs.length });
       return;
     }
+
+    // Drop an identical tab-snapshot re-broadcast (same ids, active flags, urls,
+    // titles): it would otherwise re-run tab-selection and force a `setTabs`
+    // re-render every heartbeat. A real change (new/closed tab, navigation,
+    // focus, title) alters the signature and falls through.
+    const fullSig = JSON.stringify(next.map((t) => `${t.tabId}:${t.active ? 'A' : '-'}:${t.url}:${t.title ?? ''}`));
+    if (fullSig === this.lastTabsSig) return;
+    this.lastTabsSig = fullSig;
 
     this.maybeSelectNewTab(next, previousTabs);
     this.knownTabIds = new Set(next.map((t) => t.tabId));
