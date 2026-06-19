@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync, execSync } = require('node:child_process');
+const { execFileSync } = require('node:child_process');
 
 function safeResolve(resolver) {
   try {
@@ -26,13 +26,58 @@ function resolveDefaultShell(platform = process.platform, env = process.env) {
 const LOGIN_ARG_UNSUPPORTED_SHELLS = new Set(['csh', 'tcsh']);
 const ITERM2_COMPAT_VERSION = '3.5.0';
 
+// bash flags that merely select an interactive and/or login shell. When the args
+// are only these, OSC 633 injection can safely replace them: it spawns an
+// interactive shell and the `--init-file` script sources the login profile
+// itself, so it subsumes them — including the `--login -i` that Git Bash on
+// Windows is launched with. Anything else (e.g. `-c <cmd>` or a script file)
+// means the caller wants a specific invocation we must not clobber.
+const BASH_INJECTABLE_ARGS = new Set(['-i', '-l', '--login']);
+
+function bashArgsAreInjectable(shellArgs) {
+  return (shellArgs || []).every((arg) => BASH_INJECTABLE_ARGS.has(arg));
+}
+
+// Build the PowerShell argument list that dot-sources our integration script,
+// or return null to leave the launch untouched. Profiles still load (no
+// -NoProfile). The path is single-quoted so spaces (e.g. "Program Files")
+// survive; it's host-controlled and won't contain a single quote.
+//
+// We key on interactivity rather than "are there args": a launch that already
+// runs a startup command (e.g. the VS "Developer PowerShell", which is
+// `-NoExit -Command "& { Import-Module ... }"`) gets our dot-source appended to
+// that command, so its environment is set up first and our prompt wrapper
+// installs after it. A non-interactive one-off (a -Command/-File/-EncodedCommand
+// without -NoExit) is returned as null so we don't alter it.
+function powerShellIntegratedArgs(shellArgs, script) {
+  const dotSource = `. '${script}'`;
+  const args = [...(shellArgs || [])];
+
+  // No args at all → a plain interactive REPL; add our own dot-source.
+  if (args.length === 0) return ['-NoExit', '-Command', dotSource];
+
+  const is = (arg, ...names) => names.includes(arg.toLowerCase());
+  // Only augment interactive sessions; without -NoExit a command/file runs and
+  // exits, so there's no prompt to wrap.
+  if (!args.some((a) => is(a, '-noexit', '-noe'))) return null;
+  // Command forms we can't safely concatenate onto — leave them alone.
+  if (args.some((a) => is(a, '-encodedcommand', '-ec', '-e', '-file', '-f'))) return null;
+
+  const cmdIdx = args.findIndex((a) => is(a, '-command', '-c'));
+  if (cmdIdx !== -1 && cmdIdx + 1 < args.length) {
+    args[cmdIdx + 1] = `${args[cmdIdx + 1]}; ${dotSource}`;
+    return args;
+  }
+  // Interactive but no inline command (e.g. just `-NoExit`); add ours.
+  return [...args, '-Command', dotSource];
+}
+
 function resolveLoginArg(shell, platform = process.platform) {
   if (platform === 'win32') {
     return [];
   }
 
-  const shellName = path.posix.basename(shell || '').toLowerCase();
-  return LOGIN_ARG_UNSUPPORTED_SHELLS.has(shellName) ? [] : ['-l'];
+  return LOGIN_ARG_UNSUPPORTED_SHELLS.has(shellStem(shell)) ? [] : ['-l'];
 }
 
 function resolveDefaultCwd(platform = process.platform, env = process.env, osModule = os) {
@@ -85,23 +130,55 @@ function resolveShellIntegrationDir(env, runtime = {}) {
   return env.DORMOUSE_SHELL_INTEGRATION_DIR || path.join(runtime.dirname || __dirname, 'shell-integration');
 }
 
+// Basename of a shell path, lowercased and with any `.exe` dropped, handling
+// both `/` and `\` separators so Windows paths (e.g. the absolute pwsh.exe path)
+// resolve correctly — `path.posix.basename` would return a Windows path whole.
+function shellStem(shell) {
+  const base = String(shell || '').split(/[\\/]/).pop() || '';
+  return base.toLowerCase().replace(/\.exe$/, '');
+}
+
+// Translate a Windows path to its WSL mount path (`C:\a\b` -> `/mnt/c/a/b`) so a
+// script on the Windows filesystem can be referenced from inside a distro. Strips
+// the `\\?\` verbatim prefix. Assumes the default automount root (`/mnt`); a
+// distro that remaps it via /etc/wsl.conf won't resolve, and injection is skipped.
+function winPathToWslMount(winPath) {
+  const stripped = String(winPath).replace(/^\\\\\?\\/, '');
+  const match = /^([A-Za-z]):[\\/]([\s\S]*)$/.exec(stripped);
+  if (!match) return null;
+  return `/mnt/${match[1].toLowerCase()}/${match[2].replace(/\\/g, '/')}`;
+}
+
 // Enable OSC 633 shell integration for shells that support reliable injection,
 // returning possibly-modified { env, shellArgs }. The keystroke-based command
 // heuristic remains the fallback for shells we can't inject (cmd.exe, others)
 // or when the scripts aren't present on disk. See docs/specs/terminal-escapes.md.
 //
-// zsh  — injected purely via env (`ZDOTDIR`), as reliable as a PATH prepend. We
-//        point ZDOTDIR at our scripts and pass the user's real ZDOTDIR through
+// zsh        — injected purely via env (`ZDOTDIR`), as reliable as a PATH prepend.
+//        We point ZDOTDIR at our scripts and pass the user's real ZDOTDIR through
 //        `USER_ZDOTDIR`; our dotfiles chain to the user's then install the hooks.
-// bash — injected via `--init-file`, which has no env equivalent. Because that
+// bash       — injected via `--init-file`, which has no env equivalent. Because that
 //        flag and login mode are mutually exclusive, we drop the login flag and
-//        the script replicates login-profile sourcing itself. Skipped when the
-//        caller passed explicit args, since we'd be replacing them.
-function applyShellIntegration(shell, env, shellArgs, integrationDir, hasExplicitArgs, runtime = {}) {
+//        the script replicates login-profile sourcing itself. Injected whenever
+//        the args are only interactive/login flags (so Git Bash, launched with
+//        `--login -i`, is covered too); skipped for specific invocations like
+//        `-c <cmd>`, since we'd be replacing them.
+// PowerShell — injected by dot-sourcing our script via `-Command` (pwsh and
+//        Windows PowerShell). We omit `-NoProfile` so the user's profile loads
+//        first; the dot-sourced script then wraps their `prompt`. Augments an
+//        interactive launch that already runs a startup command (so the VS
+//        "Developer PowerShell" is covered); skips non-interactive one-offs.
+// WSL  — `wsl.exe -d <distro>` launches the distro's login shell, where the
+//        Windows-side injection can't reach. We append a `sh -c` detector that
+//        execs bash with our `--init-file` (the bash script on the Windows FS,
+//        referenced via its `/mnt/...` path) when the user's login shell is bash,
+//        and otherwise execs their login shell unchanged — so non-bash users keep
+//        their shell. bash is the only WSL shell we integrate for now.
+function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = {}) {
   const fsModule = runtime.fsModule || fs;
-  const shellName = path.posix.basename(shell || '').toLowerCase();
+  const stem = shellStem(shell);
 
-  if (shellName === 'zsh') {
+  if (stem === 'zsh') {
     const zshDir = path.join(integrationDir, 'zsh');
     if (fileExists(path.join(zshDir, '.zshrc'), fsModule)) {
       return {
@@ -111,10 +188,43 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, hasExplici
     }
   }
 
-  if (shellName === 'bash' && !hasExplicitArgs) {
+  if (stem === 'bash' && bashArgsAreInjectable(shellArgs)) {
     const script = path.join(integrationDir, 'bash', 'shellIntegration.bash');
     if (fileExists(script, fsModule)) {
       return { env, shellArgs: ['--init-file', script] };
+    }
+  }
+
+  if (stem === 'pwsh' || stem === 'powershell') {
+    const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+    if (fileExists(script, fsModule)) {
+      const integratedArgs = powerShellIntegratedArgs(shellArgs, script);
+      if (integratedArgs) return { env, shellArgs: integratedArgs };
+    }
+  }
+
+  // WSL: only the standard `-d <distro>` launch (the shape the picker emits).
+  if (stem === 'wsl' && shellArgs.length === 2 && shellArgs[0] === '-d') {
+    const script = path.join(integrationDir, 'bash', 'shellIntegration.bash');
+    const mount = winPathToWslMount(script);
+    if (mount && fileExists(script, fsModule)) {
+      // A `sh -c` detector, passed as one argv element so node-pty hands it to
+      // wsl.exe → sh verbatim (no shell-quoting games). It reads the login shell
+      // from /etc/passwd (NSS-independent, unlike getent which flaked on cold
+      // starts) and: steps aside for an explicit zsh/fish login shell; otherwise
+      // execs bash with our init-file when bash exists (covering bash and an empty
+      // detection — the safe default, since bash is near-universal on WSL); and
+      // falls back to the login shell only when bash is absent (e.g. Alpine). The
+      // init-file path is single-quoted for sh so spaces ("Program Files") survive.
+      // One sh statement per line for readability; joined into a single -c string.
+      const detector = [
+        'u=$(whoami 2>/dev/null);',
+        'login=$(grep "^$u:" /etc/passwd 2>/dev/null | cut -d: -f7);',
+        'if command -v bash >/dev/null 2>&1; then',
+        `case "$login" in *zsh|*fish) exec "$login" -l;; *) exec bash --init-file '${mount}' -i;; esac; fi;`,
+        'exec "${login:-/bin/sh}" -l',
+      ].join(' ');
+      return { env, shellArgs: [...shellArgs, '--', 'sh', '-c', detector] };
     }
   }
 
@@ -151,8 +261,7 @@ function resolveSpawnConfig(options, runtime = {}) {
     LC_TERMINAL_VERSION: ITERM2_COMPAT_VERSION,
     DORMOUSE_SURFACE_ID: surfaceId || options?.id || '',
   };
-  const hasExplicitArgs = Boolean(explicitArgs && explicitArgs.length > 0);
-  const integrated = applyShellIntegration(shell, childEnv, shellArgs, integrationDir, hasExplicitArgs, runtime);
+  const integrated = applyShellIntegration(shell, childEnv, shellArgs, integrationDir, runtime);
 
   return {
     cols,
@@ -181,7 +290,7 @@ function fileExists(filePath, fsModule = fs) {
 function detectWindowsShells(runtime = {}) {
   const env = runtime.env || process.env;
   const fsModule = runtime.fsModule || fs;
-  const execSyncFn = runtime.execSync || execSync;
+  const execFileSyncFn = runtime.execFileSync || execFileSync;
   const systemRoot = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows';
   const shells = [];
 
@@ -216,23 +325,34 @@ function detectWindowsShells(runtime = {}) {
     } catch { /* dir doesn't exist */ }
   }
 
-  // WSL distributions
-  try {
-    const wslExe = path.win32.join(systemRoot, 'System32', 'wsl.exe');
-    if (fileExists(wslExe, fsModule)) {
-      const raw = execSyncFn(`"${wslExe}" -l -q`, {
-        encoding: 'utf-16le',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        timeout: 5000,
-      });
-      const distros = raw.split(/\r?\n/)
-        .map((line) => line.replace(/\0/g, '').trim())
-        .filter(Boolean);
-      for (const distro of distros) {
-        shells.push({ name: distro, path: wslExe, args: ['-d', distro] });
+  // WSL distributions. Read from the registry rather than `wsl.exe -l -q`: that
+  // call hangs on its piped stdio when the sidecar has no console (the normal
+  // packaged/GUI launch), so it would hit its timeout and drop every distro. The
+  // registry (`HKCU\...\Lxss\<guid>\DistributionName`) is the same source wsl.exe
+  // reads, mirroring how Windows Terminal enumerates WSL.
+  //
+  // windowsHide (CREATE_NO_WINDOW) below is essential, not cosmetic: the sidecar
+  // is itself spawned CREATE_NO_WINDOW, and a *synchronous* spawn of a console
+  // child without that flag deadlocks on Windows console allocation — that is the
+  // actual reason the old wsl.exe call timed out, and reg.exe times out the same
+  // way without it.
+  const wslExe = path.win32.join(systemRoot, 'System32', 'wsl.exe');
+  if (fileExists(wslExe, fsModule)) {
+    try {
+      const regExe = path.win32.join(systemRoot, 'System32', 'reg.exe');
+      const raw = execFileSyncFn(
+        regExe,
+        ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss', '/s', '/v', 'DistributionName'],
+        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000, windowsHide: true },
+      );
+      for (const line of raw.split(/\r?\n/)) {
+        const match = line.match(/^\s*DistributionName\s+REG_SZ\s+(.+?)\s*$/);
+        if (match) {
+          shells.push({ name: match[1], path: wslExe, args: ['-d', match[1]] });
+        }
       }
-    }
-  } catch { /* WSL not installed or no distros */ }
+    } catch { /* no Lxss key (no distros installed) or reg.exe unavailable */ }
+  }
 
   // Git Bash
   const gitBashPaths = [
@@ -767,7 +887,9 @@ function runPowerShell(script, execFileSyncFn) {
   return execFileSyncFn(
     'powershell.exe',
     ['-NoProfile', '-NonInteractive', '-Command', script],
-    { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: OPEN_PORT_TIMEOUT_MS },
+    // windowsHide: a synchronous spawn of a console child from the CREATE_NO_WINDOW
+    // sidecar deadlocks on console allocation without it (see the WSL note above).
+    { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: OPEN_PORT_TIMEOUT_MS, windowsHide: true },
   );
 }
 
@@ -807,6 +929,7 @@ function windowsListeningPorts(pids, runtime = {}) {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: OPEN_PORT_TIMEOUT_MS,
+      windowsHide: true, // see runPowerShell: avoid the console-allocation deadlock
     });
     return parseNetstatListening(out, pidSet, nameByPid);
   } catch {

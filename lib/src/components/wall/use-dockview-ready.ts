@@ -1,4 +1,4 @@
-import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { useCallback, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type {
   DockviewApi,
   DockviewGroupPanel,
@@ -48,18 +48,34 @@ export function useDockviewReady({
   setSelectedId: Dispatch<SetStateAction<string | null>>;
   onApiReady?: (api: DockviewApi) => void;
 }): (event: DockviewReadyEvent) => void {
+  // handleReady must be idempotent across a dockview remount. React StrictMode
+  // (dev) mounts dockview → fires onReady → disposes it → mounts a fresh dockview
+  // → fires onReady AGAIN, on the same Wall instance (so these refs persist).
+  // Consuming the initial ids/layout on the first pass would leave the surviving
+  // second dockview with nothing to restore — it would fall back to a freshly
+  // generated pane id, dropping the restored session and (in the website
+  // playground) the pane that onApiReady's addPanel references. So resolve the
+  // restoration once and cache it; every onReady replays the same result.
+  const resolvedRef = useRef<{ mode: 'layout' | 'panes'; paneIds: string[] } | null>(null);
+
   return useCallback((e: DockviewReadyEvent) => {
     apiRef.current = e.api;
     setDockviewApi(e.api);
 
-    const restored = initialPaneIdsRef.current;
     const layout = restoredLayoutRef.current;
     const restoredDoors = initialDoorsRef.current;
-    initialPaneIdsRef.current = undefined;
-    restoredLayoutRef.current = undefined;
-    initialDoorsRef.current = [];
     doorsRef.current = restoredDoors;
     setDoors(restoredDoors);
+
+    let resolution = resolvedRef.current;
+    if (!resolution) {
+      const restored = initialPaneIdsRef.current;
+      const hasRestored = !!restored && restored.length > 0;
+      resolution = layout && hasRestored
+        ? { mode: 'layout', paneIds: restored! }
+        : { mode: 'panes', paneIds: hasRestored ? restored! : [generatePaneId()] };
+      resolvedRef.current = resolution;
+    }
 
     const primeDefaultShell = (id: string) => {
       const defaults = getDefaultShellOpts();
@@ -81,24 +97,21 @@ export function useDockviewReady({
       });
     };
 
-    if (layout && restored && restored.length > 0) {
+    if (resolution.mode === 'layout') {
       try {
         e.api.fromJSON(layout as SerializedDockview);
-        setSelectedId(restored[0]);
+        setSelectedId(resolution.paneIds[0]);
       } catch {
-        for (const id of restored) {
+        for (const id of resolution.paneIds) {
           addTerminalPanel(id);
         }
-        setSelectedId(restored[0]);
+        setSelectedId(resolution.paneIds[0]);
       }
     } else {
-      const paneIds = restored && restored.length > 0
-        ? restored
-        : [generatePaneId()];
-      for (const id of paneIds) {
+      for (const id of resolution.paneIds) {
         addTerminalPanel(id);
       }
-      setSelectedId(paneIds[0]);
+      setSelectedId(resolution.paneIds[0]);
     }
 
     e.api.onWillShowOverlay((event) => {
@@ -172,6 +185,7 @@ export function useDockviewReady({
     killInProgressRef,
     modeRef,
     onApiReady,
+    resolvedRef,
     restoredLayoutRef,
     selectPane,
     selectedIdRef,

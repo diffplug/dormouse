@@ -11,7 +11,12 @@ A Session's **View** state places it in one of two containers:
 - **Pane** — a visible container in the content area. The session's terminal output is rendered via xterm.js. The pane has a header with controls and acts as the drag handle for layout rearrangement.
 - **Door** — a minimized container in the baseboard. The session is still alive (PTY running, output buffered) but not visible. The door shows the session's title plus alert and TODO indicators, and looks like a mouse hole cut into the baseboard.
 
-Transitioning between Pane and Door does not alter the Session in any way. Minimizing a pane creates a door; reattaching a door creates a pane. The terminal content, scrollback, and process state are preserved across transitions.
+Transitioning between Pane and Door does not alter the Session in any way.
+Minimizing a pane creates a door; reattaching a door creates a pane. Terminal
+content, scrollback, and process state are preserved across transitions. For
+non-terminal browser surfaces, the backing browser session remains alive while
+the visible viewer resources are released: no canvas, screencast WebSocket,
+screenshot loop, or input forwarding runs while the surface is a Door.
 
 ## Shell layout
 

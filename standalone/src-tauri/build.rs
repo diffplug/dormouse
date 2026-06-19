@@ -7,7 +7,7 @@ use std::{
 };
 
 fn main() {
-    println!("cargo:rerun-if-env-changed=MOUSETERM_NODE_BINARY");
+    println!("cargo:rerun-if-env-changed=DORMOUSE_NODE_BINARY");
     println!("cargo:rerun-if-env-changed=NODE_BINARY");
     println!("cargo:rerun-if-env-changed=PATH");
 
@@ -137,7 +137,7 @@ fn reject_macos_dynamic_node(node_source: &Path) -> Result<(), Box<dyn Error>> {
     let deps = String::from_utf8_lossy(&output.stdout);
     if deps.contains("@rpath/libnode.") {
         return Err(format!(
-            "{} depends on @rpath/libnode*.dylib and cannot be copied as a self-contained Tauri sidecar. Use a standalone Node.js binary, or set MOUSETERM_NODE_BINARY to one.",
+            "{} depends on @rpath/libnode*.dylib and cannot be copied as a self-contained Tauri sidecar. Use a standalone Node.js binary, or set DORMOUSE_NODE_BINARY to one.",
             node_source.display()
         )
         .into());
@@ -196,7 +196,7 @@ fn verify_node_version(
 ) -> Result<(), Box<dyn Error>> {
     if host != target {
         // Can't execute a foreign-arch binary; the operator supplied it via
-        // MOUSETERM_NODE_BINARY and is responsible for matching the pin.
+        // DORMOUSE_NODE_BINARY and is responsible for matching the pin.
         println!(
             "cargo:warning=skipping Node.js version check when cross-compiling to {target}; \
              ensure the bundled runtime is v{pinned}"
@@ -227,14 +227,14 @@ fn verify_node_version(
 }
 
 fn resolve_node_binary(host: &str, target: &str) -> Result<PathBuf, Box<dyn Error>> {
-    if let Some(path) = env::var_os("MOUSETERM_NODE_BINARY").or_else(|| env::var_os("NODE_BINARY"))
+    if let Some(path) = env::var_os("DORMOUSE_NODE_BINARY").or_else(|| env::var_os("NODE_BINARY"))
     {
         return Ok(PathBuf::from(path));
     }
 
     if host != target {
         return Err(format!(
-            "cross-compiling the standalone app requires MOUSETERM_NODE_BINARY for target {target}"
+            "cross-compiling the standalone app requires DORMOUSE_NODE_BINARY for target {target}"
         )
         .into());
     }

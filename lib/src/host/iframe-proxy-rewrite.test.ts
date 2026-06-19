@@ -80,6 +80,29 @@ describe('instrumentHtml', () => {
     expect(IFRAME_SHIM).toContain('__dormouse');
     expect(IFRAME_SHIM).toContain("'leader'");
     expect(IFRAME_SHIM).toContain("'pointerdown'");
+    expect(IFRAME_SHIM).toContain("'location'");
+    expect(IFRAME_SHIM).toContain("addEventListener('click'");
+    expect(IFRAME_SHIM).toContain('pushState');
+  });
+
+  it('intercepts new-tab attempts (target=_blank / window.open) as open-window', () => {
+    expect(IFRAME_SHIM).toContain("'open-window'");
+    // window.open is overridden so popups become a new pane rather than vanishing.
+    expect(IFRAME_SHIM).toContain('window.open=function');
+  });
+
+  it('does not report a same-frame location for modifier / non-primary clicks', () => {
+    // Cmd/Ctrl/Shift/Alt+click and middle-click open a new tab/window without
+    // navigating the frame, so the shim must bail rather than post a stale
+    // location that would make the parent chrome URL bar lie.
+    expect(IFRAME_SHIM).toContain('e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||e.button!==0');
+  });
+
+  it('defers the same-frame location post and skips it when the click was cancelled', () => {
+    // The capture-phase post must wait a tick and respect a page that cancels
+    // the click (preventDefault / fetch-instead-of-navigate), else it reports a
+    // navigation that never happened.
+    expect(IFRAME_SHIM).toContain('if(!e.defaultPrevented)post(\'location\'');
   });
 });
 

@@ -74,13 +74,17 @@ describe('dev-server port store', () => {
     releaseDevServerPort(7000);
   });
 
-  it('clears a resolution once the last watcher releases the port', () => {
+  it('keeps the cached resolution when the last watcher releases the port', () => {
     requestDevServerPort(9999);
     setDevServerResolution(9999, { paneId: 'pane-z', label: 'vite' });
     expect(getDevServerResolution(9999)).not.toBeNull();
 
+    // Releasing drops the "wanted" interest but KEEPS the cached resolution.
+    // Release is also what React StrictMode's mount→cleanup→mount runs on every
+    // header mount; clearing here would blank the chip until the next Wall scan.
+    // The Wall owns clearing stale resolutions (it re-validates re-wanted ports).
     releaseDevServerPort(9999);
-    expect(getDevServerResolution(9999)).toBeNull();
     expect(getWantedDevServerPorts()).not.toContain(9999);
+    expect(getDevServerResolution(9999)).toEqual({ paneId: 'pane-z', label: 'vite' });
   });
 });

@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('node:path');
 
 const {
   create,
@@ -357,7 +358,9 @@ test('resolveSpawnConfig honors non-empty explicit args (e.g. WSL distro flags)'
 const integrationFsModule = {
   statSync(filePath) {
     const p = String(filePath);
-    if (p.endsWith('.zshrc') || p.endsWith('shellIntegration.bash')) return { isFile: () => true };
+    if (p.endsWith('.zshrc') || p.endsWith('shellIntegration.bash') || p.endsWith('shellIntegration.ps1')) {
+      return { isFile: () => true };
+    }
     throw new Error(`ENOENT: ${filePath}`);
   },
 };
@@ -437,6 +440,45 @@ test('resolveSpawnConfig leaves bash login args alone when the caller passed exp
   assert.deepEqual(config.shellArgs, ['-c', 'echo hi']);
 });
 
+test('resolveSpawnConfig injects bash integration for Git Bash despite its --login -i args', () => {
+  const integrationDir = 'C:\\Program Files\\Dormouse\\shell-integration';
+  const config = resolveSpawnConfig(
+    { shell: 'C:\\Program Files\\Git\\bin\\bash.exe', args: ['--login', '-i'] },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: integrationDir,
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  // The --login -i defaults are subsumed by the init-file script, which sources
+  // the login profile itself.
+  const script = path.join(integrationDir, 'bash', 'shellIntegration.bash');
+  assert.deepEqual(config.shellArgs, ['--init-file', script]);
+});
+
+test('resolveSpawnConfig keeps Git Bash login args when the script is not present', () => {
+  const config = resolveSpawnConfig(
+    { shell: 'C:\\Program Files\\Git\\bin\\bash.exe', args: ['--login', '-i'] },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: 'C:\\Program Files\\Dormouse\\shell-integration',
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: { statSync() { throw new Error('ENOENT'); } },
+    },
+  );
+
+  // Fail-safe: no script on disk → the original login/interactive args survive.
+  assert.deepEqual(config.shellArgs, ['--login', '-i']);
+});
+
 test('resolveSpawnConfig falls back to the bash login flag when the script is not present', () => {
   const config = resolveSpawnConfig(undefined, {
     platform: 'linux',
@@ -450,6 +492,195 @@ test('resolveSpawnConfig falls back to the bash login flag when the script is no
   });
 
   assert.deepEqual(config.shellArgs, ['-l']);
+});
+
+test('resolveSpawnConfig injects pwsh integration via -NoExit -Command dot-source', () => {
+  const integrationDir = 'C:\\Program Files\\Dormouse\\shell-integration';
+  const config = resolveSpawnConfig(
+    { shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' },
+    {
+      platform: 'win32',
+      env: {
+        HOME: 'C:\\Users\\tester',
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: integrationDir,
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+  assert.deepEqual(config.shellArgs, ['-NoExit', '-Command', `. '${script}'`]);
+});
+
+test('resolveSpawnConfig injects Windows PowerShell (powershell.exe) too', () => {
+  const integrationDir = 'C:\\Program Files\\Dormouse\\shell-integration';
+  const config = resolveSpawnConfig(
+    {
+      shell: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: integrationDir,
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+  assert.deepEqual(config.shellArgs, ['-NoExit', '-Command', `. '${script}'`]);
+});
+
+test('resolveSpawnConfig merges integration into an interactive pwsh -Command (e.g. Developer PowerShell)', () => {
+  const integrationDir = 'C:\\Program Files\\Dormouse\\shell-integration';
+  const config = resolveSpawnConfig(
+    {
+      shell: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+      args: ['-NoExit', '-Command', '& { Import-Module "C:\\VS\\Launch-VsDevShell.ps1" }'],
+    },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: integrationDir,
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  // The dev-shell command runs first, then our dot-source installs the prompt wrapper.
+  const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+  assert.deepEqual(config.shellArgs, [
+    '-NoExit',
+    '-Command',
+    `& { Import-Module "C:\\VS\\Launch-VsDevShell.ps1" }; . '${script}'`,
+  ]);
+});
+
+test('resolveSpawnConfig adds a -Command to an interactive pwsh launch that has none', () => {
+  const integrationDir = 'C:\\Program Files\\Dormouse\\shell-integration';
+  const config = resolveSpawnConfig(
+    { shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', args: ['-NoExit', '-NoLogo'] },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: integrationDir,
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+  assert.deepEqual(config.shellArgs, ['-NoExit', '-NoLogo', '-Command', `. '${script}'`]);
+});
+
+test('resolveSpawnConfig leaves a non-interactive pwsh one-off alone (-Command without -NoExit)', () => {
+  const config = resolveSpawnConfig(
+    {
+      shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      args: ['-Command', 'Get-Process'],
+    },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: 'C:\\Program Files\\Dormouse\\shell-integration',
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  assert.deepEqual(config.shellArgs, ['-Command', 'Get-Process']);
+});
+
+test('resolveSpawnConfig leaves a pwsh -File invocation alone', () => {
+  const config = resolveSpawnConfig(
+    {
+      shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      args: ['-NoExit', '-File', 'C:\\scripts\\do.ps1'],
+    },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: 'C:\\Program Files\\Dormouse\\shell-integration',
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  assert.deepEqual(config.shellArgs, ['-NoExit', '-File', 'C:\\scripts\\do.ps1']);
+});
+
+test('resolveSpawnConfig falls back to no args when the pwsh script is not present', () => {
+  const config = resolveSpawnConfig(
+    { shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: 'C:\\Program Files\\Dormouse\\shell-integration',
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: { statSync() { throw new Error('ENOENT'); } },
+    },
+  );
+
+  // No injection: win32 has no login flag, so shellArgs stays empty.
+  assert.deepEqual(config.shellArgs, []);
+});
+
+test('resolveSpawnConfig injects WSL bash integration via a sh -c detector', () => {
+  const config = resolveSpawnConfig(
+    { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'] },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: 'C:\\Program Files\\Dormouse\\shell-integration',
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  // -d Ubuntu is preserved; the detector execs bash with our init-file (referenced
+  // by its /mnt path, single-quoted so the "Program Files" space survives).
+  const detector =
+    'u=$(whoami 2>/dev/null); '
+    + 'login=$(grep "^$u:" /etc/passwd 2>/dev/null | cut -d: -f7); '
+    + 'if command -v bash >/dev/null 2>&1; then '
+    + 'case "$login" in *zsh|*fish) exec "$login" -l;; '
+    + "*) exec bash --init-file "
+    + "'/mnt/c/Program Files/Dormouse/shell-integration/bash/shellIntegration.bash' -i;; esac; fi; "
+    + 'exec "${login:-/bin/sh}" -l';
+  assert.deepEqual(config.shellArgs, ['-d', 'Ubuntu', '--', 'sh', '-c', detector]);
+});
+
+test('resolveSpawnConfig leaves a non-standard WSL invocation untouched', () => {
+  const config = resolveSpawnConfig(
+    { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu', '--', 'htop'] },
+    {
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\tester',
+        DORMOUSE_SHELL_INTEGRATION_DIR: 'C:\\Program Files\\Dormouse\\shell-integration',
+      },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  );
+
+  assert.deepEqual(config.shellArgs, ['-d', 'Ubuntu', '--', 'htop']);
 });
 
 test('resolveSpawnConfig leaves other shells untouched (keystroke fallback)', () => {
@@ -548,7 +779,6 @@ test('detectAvailableShells detects PowerShell and cmd on Windows', () => {
       },
       readdirSync() { throw new Error('ENOENT'); },
     },
-    execSync() { throw new Error('not available'); },
   });
 
   assert.equal(shells.length, 2);
@@ -577,7 +807,6 @@ test('detectAvailableShells detects Git Bash on Windows', () => {
       },
       readdirSync() { throw new Error('ENOENT'); },
     },
-    execSync() { throw new Error('not available'); },
   });
 
   const gitBash = shells.find((s) => s.name === 'Git Bash');
@@ -586,7 +815,7 @@ test('detectAvailableShells detects Git Bash on Windows', () => {
   assert.deepEqual(gitBash.args, ['--login', '-i']);
 });
 
-test('detectAvailableShells detects WSL distros on Windows', () => {
+test('detectAvailableShells detects WSL distros from the registry on Windows', () => {
   const existingFiles = new Set([
     'C:\\Windows\\System32\\cmd.exe',
     'C:\\Windows\\System32\\wsl.exe',
@@ -607,9 +836,20 @@ test('detectAvailableShells detects WSL distros on Windows', () => {
       },
       readdirSync() { throw new Error('ENOENT'); },
     },
-    execSync() {
-      // wsl.exe -l -q returns UTF-16LE with null bytes
-      return 'Ubuntu\r\nDebian\r\n';
+    execFileSync(file, args) {
+      // `reg query ...\Lxss /s /v DistributionName` output shape.
+      if (String(file).endsWith('reg.exe')) {
+        return [
+          'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\\{guid-1}',
+          '    DistributionName    REG_SZ    Ubuntu',
+          '',
+          'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\\{guid-2}',
+          '    DistributionName    REG_SZ    Debian',
+          '',
+          'End of search: 2 match(es) found.',
+        ].join('\r\n');
+      }
+      throw new Error(`unexpected execFileSync: ${file} ${args}`);
     },
   });
 
@@ -620,6 +860,26 @@ test('detectAvailableShells detects WSL distros on Windows', () => {
 
   const debian = shells.find((s) => s.name === 'Debian');
   assert.ok(debian, 'Debian WSL should be detected');
+});
+
+test('detectAvailableShells omits WSL when no distros are registered', () => {
+  const shells = detectAvailableShells({
+    platform: 'win32',
+    env: { SystemRoot: 'C:\\Windows', ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+    fsModule: {
+      statSync(p) {
+        if (p === 'C:\\Windows\\System32\\wsl.exe' || p === 'C:\\Windows\\System32\\cmd.exe') {
+          return { isFile: () => true, isDirectory: () => false };
+        }
+        throw new Error('ENOENT');
+      },
+      readdirSync() { throw new Error('ENOENT'); },
+    },
+    // reg.exe exits non-zero when the Lxss key is absent → execFileSync throws.
+    execFileSync() { throw new Error('reg: key not found'); },
+  });
+
+  assert.equal(shells.find((s) => s.path.endsWith('wsl.exe')), undefined);
 });
 
 // ── Open-port discovery ──────────────────────────────────────────────────────

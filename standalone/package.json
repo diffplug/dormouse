@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:agent-browser": "pnpm stage && node scripts/dev-agent-browser.mjs",
     "build": "pnpm stage && tsc -b && vite build",
     "stage": "pnpm stage:dor-cli && pnpm stage:sidecar-proxy",
     "stage:dor-cli": "pnpm --filter dor build && node scripts/stage-dor-cli.mjs",

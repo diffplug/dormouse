@@ -1,6 +1,6 @@
 /**
  * Wall-side driver for the dev-server connection chip
- * (docs/specs/dor-agent-browser.md → "Dev-server connection").
+ * (docs/specs/dor-browser.md → "Dev-Server Chip").
  *
  * A browser-surface header can't see other panes' open ports, so it registers
  * the loopback port it's showing in the shared store (`useDevServerMatch`) and
@@ -36,6 +36,7 @@ import {
   subscribeWantedDevServerPorts,
 } from './agent-browser-ports';
 import type { DooredItem } from './wall-types';
+import { isBrowserParams } from './browser-surface';
 
 // Wait this long after interest changes before scanning, so a tab's open +
 // initial screencast settle first and quick navigation coalesces into one scan.
@@ -49,9 +50,7 @@ const IDLE_TIMEOUT_MS = 2000;
 type ResolveOutcome = 'busy' | 'idle' | 'pending';
 
 function isTerminalParams(params: unknown): boolean {
-  if (!params || typeof params !== 'object') return true;
-  const surfaceType = (params as { surfaceType?: unknown }).surfaceType;
-  return surfaceType !== 'iframe' && surfaceType !== 'agent-browser';
+  return !isBrowserParams(params);
 }
 
 function isTerminalDoor(door: DooredItem): boolean {

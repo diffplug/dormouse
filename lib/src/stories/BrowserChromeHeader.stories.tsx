@@ -12,6 +12,7 @@ import { SurfacePaneHeader } from '../components/wall/SurfacePaneHeader';
 import {
   registerAgentBrowserScreen,
   type ChromeSnapshot,
+  type RenderMode,
   type ScreenRegistration,
   type ScreenSnapshot,
   type ScreenState,
@@ -21,7 +22,7 @@ import { setDevServerResolution } from '../components/wall/agent-browser-ports';
 
 /**
  * Playground for the agent-browser surface's browser-chrome header
- * (docs/specs/dor-agent-browser.md → "Browser-Chrome Header").
+ * (docs/specs/dor-browser.md → "Browser Chrome").
  *
  * `SurfacePaneHeader` decides "this is a browser surface" purely from the
  * presence of a screen controller for its `api.id`, and reads URL / key from
@@ -45,9 +46,13 @@ const loggingActions: WallActions = {
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
+  onSwapRenderMode: (id, mode) => console.log('[story] swap render', id, mode),
 };
 
 interface StoryArgs {
+  /** Render backend — drives the far-left chip glyph: frame = embed, lock =
+   *  screencast (closed when synced, open when scaled). */
+  renderMode: RenderMode;
   /** Drives the SYNCED/SCALED chip + the modal it opens. */
   state: ScreenState;
   /** Active tab URL — also the source of the host+path text and loopback port. */
@@ -74,11 +79,12 @@ function BrowserChromeStory(args: StoryArgs) {
 
   const screenSnapshot: ScreenSnapshot = useMemo(() => ({
     state: args.state,
+    renderMode: args.renderMode,
     viewport: { w: 1280, h: 720, dpr: 1 },
     paneCss: args.state === 'SYNCED' ? { w: 1280, h: 720 } : { w: 980, h: 560 },
     displayDpr: 2,
     syncEngaged: args.state === 'SYNCED',
-  }), [args.state]);
+  }), [args.state, args.renderMode]);
 
   const chromeSnapshot: ChromeSnapshot = useMemo(() => ({
     url: args.url,
@@ -98,6 +104,7 @@ function BrowserChromeStory(args: StoryArgs) {
         applyDevice: (name) => console.log('[story] applyDevice', name),
         applyViewport: (w, h, dpr) => console.log('[story] applyViewport', w, h, dpr),
         openModal: () => console.log('[story] openModal'),
+        setRenderMode: (mode) => console.log('[story] setRenderMode', mode),
       },
       chromeActions: {
         navigate: (url) => console.log('[story] navigate', url),
@@ -158,6 +165,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
   title: 'Components/BrowserChromeHeader',
   component: BrowserChromeStory,
   argTypes: {
+    renderMode: { control: 'inline-radio', options: ['ab-screencast', 'ab-popout', 'iframe'] },
     state: { control: 'radio', options: ['SYNCED', 'SCALED'] },
     url: { control: 'text' },
     htmlTitle: { control: 'text' },
@@ -168,6 +176,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
     selected: { control: 'boolean' },
   },
   args: {
+    renderMode: 'ab-screencast',
     state: 'SYNCED',
     url: 'http://localhost:5173/app',
     htmlTitle: 'Vite + React',
@@ -184,6 +193,20 @@ type Story = StoryObj<typeof BrowserChromeStory>;
 
 /** Everything on at once: key badge + URL + dev-server chip + nav. */
 export const Playground: Story = {};
+
+/** Pop-out render mode — same agent-browser, relaunched as a native OS window;
+ *  the far-left chip becomes the open-window glyph. (The pane body is a stub
+ *  while the window is up, but the header chrome stays live.) */
+export const Popout: Story = {
+  args: { renderMode: 'ab-popout' },
+};
+
+/** Embed (iframe) render mode — the unified chrome is identical to screencast,
+ *  but the far-left chip becomes the frame-corners glyph. Same URL/nav/dev-server
+ *  header; only the chip + body renderer differ. */
+export const Embed: Story = {
+  args: { renderMode: 'iframe' },
+};
 
 /** Letterboxed viewport — the chip reads SCALED (click it for the modal). */
 export const Scaled: Story = {

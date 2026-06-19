@@ -91,7 +91,7 @@ jobs:
             with concrete evidence — file path and line number, API
             response excerpt, or command output. Then do a qualitative
             pass over `.github/workflows/`, `.config/tend.yaml`,
-            `.github/dependabot.yml`, `scripts/`, and any code that
+            `.github/renovate.json`, `scripts/`, and any code that
             touches secrets.
 
             The default `$GH_TOKEN` in this step is a workflow

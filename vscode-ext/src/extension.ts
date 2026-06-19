@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as ptyManager from './pty-manager';
 import { DormouseViewProvider } from './webview-view-provider';
 import { attachRouter, flushAllSessions, getAlertStates } from './message-router';
+import { closePoppedOutSessions } from './agent-browser-host';
 import { getWebviewHtml } from './webview-html';
 import { log } from './log';
 import { mergeAlertStates, refreshSavedSessionStateFromPtys } from './session-state';
@@ -203,6 +204,10 @@ export function activate(context: vscode.ExtensionContext) {
 export async function deactivate() {
   if (!extensionContext) return;
   log.info('[deactivate] starting');
+  // Close any headed pop-out windows first so quitting never orphans a real
+  // Chrome window (spec → "Headed Pop-Out" lifecycle).
+  log.info('[deactivate] closing popped-out browser windows');
+  await closePoppedOutSessions();
   // Save session state while PTYs are still alive — CWD and scrollback
   // queries need live processes. Must happen before gracefulKillAll.
   log.info('[deactivate] flushing sessions from webview');

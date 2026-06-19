@@ -1,9 +1,13 @@
 import { useMemo } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { AgentBrowserScreenModal } from '../components/wall/AgentBrowserScreenModal';
-import type { ScreenController, ScreenSnapshot, ScreenState } from '../components/wall/agent-browser-screen';
+import type { RenderMode, ScreenController, ScreenSnapshot, ScreenState } from '../components/wall/agent-browser-screen';
 
 interface StoryArgs {
+  /** Render backend — `embed` greys out the Screen (viewport) section. */
+  renderMode: RenderMode;
+  /** Whether the host can pop out (gates the "Pop out to window" button). */
+  canPopOut: boolean;
   state: ScreenState;
   /** Browser CSS viewport + inferred DPR. */
   vpW: number;
@@ -26,6 +30,7 @@ function useMockController(args: StoryArgs): ScreenController {
   return useMemo<ScreenController>(() => {
     const snapshot: ScreenSnapshot = {
       state: args.state,
+      renderMode: args.renderMode,
       viewport: { w: args.vpW, h: args.vpH, dpr: args.vpDpr },
       paneCss: { w: args.paneW, h: args.paneH },
       displayDpr: args.displayDpr,
@@ -49,14 +54,16 @@ function useMockController(args: StoryArgs): ScreenController {
         reload: () => console.log('[story] reload'),
       },
       hostCapable: args.hostCapable,
+      canPopOut: args.canPopOut,
       actions: {
         engageSync: () => console.log('[story] engageSync'),
         applyDevice: (name) => console.log('[story] applyDevice', name),
         applyViewport: (w, h, dpr) => console.log('[story] applyViewport', w, h, dpr),
         openModal: () => {},
+        setRenderMode: (mode) => console.log('[story] setRenderMode', mode),
       },
     };
-  }, [args.state, args.vpW, args.vpH, args.vpDpr, args.paneW, args.paneH, args.displayDpr, args.syncEngaged, args.hostCapable]);
+  }, [args.state, args.renderMode, args.vpW, args.vpH, args.vpDpr, args.paneW, args.paneH, args.displayDpr, args.syncEngaged, args.hostCapable, args.canPopOut]);
 }
 
 function AgentBrowserScreenModalStory(args: StoryArgs) {
@@ -73,6 +80,8 @@ const meta: Meta<typeof AgentBrowserScreenModalStory> = {
   title: 'Modals/AgentBrowserScreenModal',
   component: AgentBrowserScreenModalStory,
   argTypes: {
+    renderMode: { control: 'inline-radio', options: ['ab-screencast', 'ab-popout', 'iframe'] },
+    canPopOut: { control: 'boolean' },
     state: { control: 'inline-radio', options: ['SYNCED', 'SCALED'] },
     vpW: { control: 'number' },
     vpH: { control: 'number' },
@@ -82,6 +91,12 @@ const meta: Meta<typeof AgentBrowserScreenModalStory> = {
     displayDpr: { control: 'number' },
     syncEngaged: { control: 'boolean' },
     hostCapable: { control: 'boolean' },
+  },
+  // Defaults shared by every story (each story overrides the viewport knobs);
+  // a swap-capable, pop-out-capable surface so both new affordances show.
+  args: {
+    renderMode: 'ab-screencast',
+    canPopOut: true,
   },
 };
 
@@ -137,5 +152,49 @@ export const HostIncapable: Story = {
     displayDpr: 2,
     syncEngaged: false,
     hostCapable: false,
+  },
+};
+
+// Pop-out render mode: same agent-browser as a native OS window. The Render
+// section pre-selects Pop-out and the Screen section greys out (the window owns
+// its own size).
+export const Popout: Story = {
+  args: {
+    renderMode: 'ab-popout',
+    state: 'SYNCED',
+    vpW: 980, vpH: 560, vpDpr: 2,
+    paneW: 980, paneH: 560,
+    displayDpr: 2,
+    syncEngaged: true,
+    hostCapable: true,
+  },
+};
+
+// Embed (iframe) render mode: the Render section pre-selects Embed and the
+// Screen (viewport) section greys out — the iframe renders at the pane size, so
+// there's nothing to set.
+export const EmbedRender: Story = {
+  args: {
+    renderMode: 'iframe',
+    state: 'SYNCED',
+    vpW: 980, vpH: 560, vpDpr: 2,
+    paneW: 980, paneH: 560,
+    displayDpr: 2,
+    syncEngaged: true,
+    hostCapable: true,
+  },
+};
+
+// Host can't pop out (e.g. the web host) ⇒ the Render section drops the Pop-out
+// option, leaving Screencast / Embed.
+export const NoPopOut: Story = {
+  args: {
+    canPopOut: false,
+    state: 'SYNCED',
+    vpW: 980, vpH: 560, vpDpr: 2,
+    paneW: 980, paneH: 560,
+    displayDpr: 2,
+    syncEngaged: true,
+    hostCapable: true,
   },
 };
