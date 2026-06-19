@@ -3,7 +3,7 @@ import { derivePromptShape, extractCommand } from './terminal-prompt-shape';
 
 describe('derivePromptShape', () => {
   it('reads the zsh terminator and ignores earlier non-alphanumerics', () => {
-    expect(derivePromptShape('ntwigg@ntwigg-mac-2025 mouseterm % ')).toEqual({ terminator: '%', countBefore: 0 });
+    expect(derivePromptShape('ntwigg@ntwigg-mac-2025 dormouse % ')).toEqual({ terminator: '%', countBefore: 0 });
   });
 
   it('reads the cmd.exe terminator as ">" regardless of the path', () => {
@@ -32,7 +32,7 @@ describe('extractCommand', () => {
   const zsh = { terminator: '%', countBefore: 0 };
 
   it('slices the command after the zsh terminator and its space', () => {
-    expect(extractCommand('ntwigg@ntwigg-mac-2025 mouseterm % pnpm dev:website', zsh)).toBe('pnpm dev:website');
+    expect(extractCommand('ntwigg@ntwigg-mac-2025 dormouse % pnpm dev:website', zsh)).toBe('pnpm dev:website');
   });
 
   it('slices the command with no space after the cmd.exe terminator', () => {
@@ -49,7 +49,7 @@ describe('extractCommand', () => {
   });
 
   it('returns null for a bare prompt with nothing typed', () => {
-    expect(extractCommand('ntwigg@mac mouseterm % ', zsh)).toBeNull();
+    expect(extractCommand('ntwigg@mac dormouse % ', zsh)).toBeNull();
   });
 
   it('returns null when the line lacks enough terminators to be this prompt', () => {
