@@ -144,6 +144,16 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   const interactive = mode === 'passthrough' && selectedId === api.id;
   const interactiveRef = useRef(interactive);
   interactiveRef.current = interactive;
+  // A direct mouse click on the canvas should reach the page even when this pane
+  // isn't the selected one yet — the click is what selects it (via the root
+  // `onClickPanel`), but `selectedId` only updates on the next render, so gating
+  // mouse-down/up on `interactive` would swallow the very first click on a
+  // freshly-opened surface (the user clicks, nothing happens, they click again).
+  // Mouse forwarding therefore only requires passthrough mode; keyboard/wheel
+  // still require full `interactive` so a background pane never steals them.
+  const passthrough = mode === 'passthrough';
+  const passthroughRef = useRef(passthrough);
+  passthroughRef.current = passthrough;
 
   const connectionRef = useRef<AgentBrowserConnection | null>(null);
   const deviceRef = useRef({ width: 1280, height: 720 });
@@ -924,7 +934,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   };
 
   const onCanvasMouseDown = (e: React.MouseEvent) => {
-    if (!interactiveRef.current) return;
+    if (!passthroughRef.current) return;
     // preventDefault stops the browser's focus-shift default action (a click
     // on a non-focusable canvas would otherwise blur to <body>), and the
     // explicit focus claims keystrokes for this pane.
@@ -946,7 +956,9 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   };
 
   const onCanvasMouseUp = (e: React.MouseEvent) => {
-    if (!interactiveRef.current) return;
+    // Pair with onCanvasMouseDown: gate on passthrough (not full `interactive`)
+    // so the release of a first, pane-selecting click still completes the click.
+    if (!passthroughRef.current) return;
     e.preventDefault();
     const point = toDevice(e);
     if (!point) return;

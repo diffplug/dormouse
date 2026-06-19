@@ -9,7 +9,7 @@ import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { AgentBrowserPopResult, AgentBrowserStreamStatusResult, PlatformAdapter } from '../../lib/platform/types';
 import { AgentBrowserPanel } from './AgentBrowserPanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
-import { WallActionsContext, type WallActions } from './wall-context';
+import { ModeContext, SelectedIdContext, WallActionsContext, type WallActions } from './wall-context';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -452,5 +452,61 @@ describe('AgentBrowserPanel render mode controller', () => {
     });
 
     expect(onSwapRenderMode).toHaveBeenCalledWith('ab-panel', 'iframe');
+  });
+});
+
+describe('AgentBrowserPanel canvas input forwarding', () => {
+  // The pane that `dor ab open` creates is not the selected pane (the terminal
+  // is), so the FIRST click on the browser surface must still reach the page —
+  // it is the click that selects the pane. Mouse-down/up therefore gate on
+  // passthrough mode alone, not full `interactive` (mode && selected).
+  async function renderWithMode(mode: 'passthrough' | 'command', selectedId: string | null): Promise<HTMLCanvasElement> {
+    const props = {
+      api: { id: 'ab-panel', title: 'Browser', updateParameters: vi.fn(), setTitle: vi.fn() },
+      params: { surfaceType: 'agent-browser', session: 'browser-session', wsPort: 4321 },
+    } as unknown as IDockviewPanelProps<TestPanelParams>;
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <WallActionsContext.Provider value={stubActions()}>
+            <ModeContext.Provider value={mode}>
+              <SelectedIdContext.Provider value={selectedId}>
+                <AgentBrowserPanel {...props} />
+              </SelectedIdContext.Provider>
+            </ModeContext.Provider>
+          </WallActionsContext.Provider>
+        </StrictMode>,
+      );
+    });
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    // jsdom has no layout — give the canvas a frame grid + box so toDevice maps.
+    canvas.width = 1280;
+    canvas.height = 720;
+    canvas.getBoundingClientRect = () => ({ width: 1280, height: 720, left: 0, top: 0, right: 1280, bottom: 720, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    return canvas;
+  }
+
+  const sentMouseEvents = () => WebSocketMock.instances
+    .flatMap((ws) => ws.sent)
+    .filter((m) => m.includes('"type":"input_mouse"'));
+
+  it('forwards a click to the page when in passthrough mode even if the pane is not selected', async () => {
+    const canvas = await renderWithMode('passthrough', 'some-other-pane');
+    await act(async () => {
+      canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 50, button: 0 }));
+      canvas.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 100, clientY: 50, button: 0 }));
+    });
+    const events = sentMouseEvents();
+    expect(events.some((m) => m.includes('"eventType":"mousePressed"'))).toBe(true);
+    expect(events.some((m) => m.includes('"eventType":"mouseReleased"'))).toBe(true);
+  });
+
+  it('does not forward canvas clicks in command mode', async () => {
+    const canvas = await renderWithMode('command', null);
+    await act(async () => {
+      canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 50, button: 0 }));
+      canvas.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 100, clientY: 50, button: 0 }));
+    });
+    expect(sentMouseEvents()).toHaveLength(0);
   });
 });
