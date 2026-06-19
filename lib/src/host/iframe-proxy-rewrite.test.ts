@@ -97,6 +97,13 @@ describe('instrumentHtml', () => {
     // location that would make the parent chrome URL bar lie.
     expect(IFRAME_SHIM).toContain('e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||e.button!==0');
   });
+
+  it('defers the same-frame location post and skips it when the click was cancelled', () => {
+    // The capture-phase post must wait a tick and respect a page that cancels
+    // the click (preventDefault / fetch-instead-of-navigate), else it reports a
+    // navigation that never happened.
+    expect(IFRAME_SHIM).toContain('if(!e.defaultPrevented)post(\'location\'');
+  });
 });
 
 describe('isLoopbackHost', () => {

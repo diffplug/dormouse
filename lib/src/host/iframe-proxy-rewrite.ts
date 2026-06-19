@@ -75,7 +75,13 @@ export const IFRAME_SHIM = `(function(){
     // new tab/window and leave this frame put — don't report a location the
     // frame isn't actually showing, or the parent's URL bar + Back history lie.
     if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||e.button!==0)return;
-    post('location',{url:String(a.href)});
+    // This is the capture phase, before the page's own handlers. Defer a tick
+    // and bail if the page cancelled the click (preventDefault, or an <a> that
+    // fetches instead of navigating) — else we'd report a navigation that never
+    // happened. A real navigation re-reports via the next document's shim, so
+    // nothing is lost if this frame is torn down before the tick fires.
+    var href=String(a.href);
+    setTimeout(function(){if(!e.defaultPrevented)post('location',{url:href});},0);
   },true);
   // window.open is likewise single-frame-hostile; redirect it to a new pane.
   try{window.open=function(u){

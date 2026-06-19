@@ -502,7 +502,11 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   useEffect(() => {
     if (!poppedOut || !session) return;
     const platform = getPlatform();
-    if (!platform.agentBrowserCommand) return;
+    // Bind to a local const: TS doesn't carry the narrowing of an optional
+    // property into the nested `connect` closure, so the direct call wouldn't
+    // typecheck against the `agentBrowserCommand?` signature.
+    const runCommand = platform.agentBrowserCommand;
+    if (!runCommand) return;
     let disposed = false;
     let ws: WebSocket | null = null;
     let nextId = 1;
@@ -543,7 +547,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
     const connect = async () => {
       let cdpUrl: string | null = null;
       try {
-        const result = await platform.agentBrowserCommand(session, ['get', 'cdp-url'], binaryPathRef.current);
+        const result = await runCommand(session, ['get', 'cdp-url'], binaryPathRef.current);
         if (result.exitCode === 0) cdpUrl = parseCdpUrl(result.stdout);
         else console.log(`[ab-panel] cdp-url failed ${JSON.stringify({ stderr: result.stderr, stdout: result.stdout })}`);
       } catch (err) {
