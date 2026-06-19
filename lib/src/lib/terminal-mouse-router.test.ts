@@ -330,4 +330,74 @@ describe('terminal-mouse-router: override suppression', () => {
     expect(getMouseSelectionState('t1').selection).toBeNull();
     cleanup();
   });
+
+  function mousePointer(overrides: Partial<PointerEvent> = {}): FakePointerEvent {
+    return pointerEvent({ pointerType: 'mouse', ...overrides });
+  }
+
+  // Drives a left-button mouse press into an active selection drag (capture +
+  // pendingDrag created on press, drag begun once movement crosses threshold).
+  function startMouseDrag(element: FakeElement) {
+    element.emit('pointerdown', mousePointer({ clientX: 5, clientY: 5 }));
+    element.emit('mousedown', mouseEvent({ clientX: 5, clientY: 5 }));
+    windowHost.emit('mousemove', mouseEvent({ clientX: 25, clientY: 15 }));
+  }
+
+  it('captures the mouse pointer on a left-button press over terminal-owned content', () => {
+    const { cleanup, element } = createHarness(windowHost);
+
+    element.emit('pointerdown', mousePointer({ clientX: 5, clientY: 5 }));
+
+    expect(element.setPointerCapture).toHaveBeenCalledWith(1);
+    cleanup();
+  });
+
+  it('does not capture the mouse pointer for non-left buttons', () => {
+    const { cleanup, element } = createHarness(windowHost);
+
+    element.emit('pointerdown', mousePointer({ button: 2 }));
+
+    expect(element.setPointerCapture).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it('finalizes a mouse drag from a captured pointerup when the button is released outside the iframe', () => {
+    vi.useFakeTimers();
+    const { cleanup, element } = createHarness(windowHost);
+
+    startMouseDrag(element);
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ dragging: true });
+
+    // Released outside the iframe: only the captured pointerup reaches us, never
+    // the compatibility mouseup. The deferred finalize ends the drag in place.
+    windowHost.emit('pointerup', mousePointer({ clientX: 500, clientY: 500 }));
+    expect(element.releasePointerCapture).toHaveBeenCalledWith(1);
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ dragging: true });
+
+    vi.runAllTimers();
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ dragging: false });
+
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  it('lets the inside mouseup finalize and no-ops the deferred pointerup finalize', () => {
+    vi.useFakeTimers();
+    const { cleanup, element } = createHarness(windowHost);
+
+    startMouseDrag(element);
+
+    // Released inside: pointerup is followed by the compatibility mouseup, which
+    // finalizes through the normal path and cancels the deferred finalize.
+    windowHost.emit('pointerup', mousePointer({ clientX: 25, clientY: 15 }));
+    windowHost.emit('mouseup', mouseEvent({ clientX: 25, clientY: 15 }));
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ dragging: false });
+
+    // The deferred finalize must be a harmless no-op now.
+    expect(() => vi.runAllTimers()).not.toThrow();
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ dragging: false });
+
+    vi.useRealTimers();
+    cleanup();
+  });
 });

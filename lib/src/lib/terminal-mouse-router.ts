@@ -91,6 +91,14 @@ export function attachTerminalMouseRouter({
   let lastTouchTap: { time: number; x: number; y: number } | null = null;
   // True while the active drag is block-mode (Alt on desktop, double-tap on touch).
   let dragBlock = false;
+  // Set while we hold pointer capture for a mouse drag. Chromium delivers the
+  // captured pointerup across the iframe boundary even when the button is
+  // released over the host page, which lets us finalize an outside release at
+  // once instead of waiting for the window-mousemove heal.
+  let mouseDragPointerId: number | null = null;
+  // True between a captured mouse pointerup we saw and the compatibility mouseup
+  // we expect to follow it for an *inside* release; see onWindowPointerUp.
+  let awaitingOutsideMouseUp = false;
 
   const terminalOwnsEvent = (ev: MouseEvent | PointerEvent) => {
     const state = getMouseSelectionState(id);
@@ -208,7 +216,26 @@ export function attachTerminalMouseRouter({
   };
 
   const onPointerDown = (ev: PointerEvent) => {
-    if (ev.pointerType === 'mouse') return;
+    if (ev.pointerType === 'mouse') {
+      // Capture the mouse pointer for left-button presses on terminal-owned
+      // content so a selection drag released *outside* our iframe still reports
+      // back. Chromium delivers the captured pointerup across the frame boundary
+      // even when the button comes up over the host page, letting onWindowPointerUp
+      // finalize the drag immediately rather than waiting for the cursor to wander
+      // back in (the window-mousemove heal). Engines that don't honor cross-frame
+      // capture get no such pointerup and fall back to that heal.
+      if (ev.button !== 0) return;
+      const { terminalOwns } = terminalOwnsEvent(ev);
+      if (!terminalOwns) return;
+      try {
+        element.setPointerCapture(ev.pointerId);
+        mouseDragPointerId = ev.pointerId;
+      } catch {
+        // Best-effort continuity aid; the heal still covers us if capture is rejected.
+        mouseDragPointerId = null;
+      }
+      return;
+    }
     if (!ev.isPrimary) return;
     // Double-tap = this press lands soon after, and near, the previous touch that
     // ended as a tap. Recording only on a tap release (not on a drag) keeps two
@@ -241,13 +268,14 @@ export function attachTerminalMouseRouter({
   };
 
   const onWindowMouseMove = (ev: MouseEvent) => {
-    // A mouse drag is kept alive only by the window 'mouseup' below. When the
-    // button is released outside our iframe, that mouseup is delivered to the
-    // host document and never reaches us, leaving the drag stuck. The next move
-    // we see (e.g. when the pointer re-enters) reports no buttons held — treat
-    // that as the mouseup we missed and finalize the drag in place. A genuine
-    // drag that leaves and re-enters still holding the button reports buttons===1,
-    // so this never fires mid-drag.
+    // Backstop for engines that don't deliver a cross-frame captured pointerup
+    // (see onPointerDown). A mouse drag is otherwise kept alive only by the
+    // window 'mouseup' below, and when the button is released outside our iframe
+    // that mouseup is delivered to the host document and never reaches us,
+    // leaving the drag stuck. The next move we see (e.g. when the pointer
+    // re-enters) reports no buttons held — treat that as the mouseup we missed
+    // and finalize the drag in place. A genuine drag that leaves and re-enters
+    // still holding the button reports buttons===1, so this never fires mid-drag.
     if (ev.buttons === 0 && (pendingDrag || isDragging(id))) {
       finishPendingOrActiveDrag(ev);
       return;
@@ -256,6 +284,9 @@ export function attachTerminalMouseRouter({
   };
 
   const onWindowMouseUp = (ev: MouseEvent) => {
+    // The button came up inside the iframe; cancel any pending outside-release
+    // finalize (see onWindowPointerUp) and end the drag through the normal path.
+    awaitingOutsideMouseUp = false;
     finishPendingOrActiveDrag(ev);
   };
 
@@ -266,7 +297,32 @@ export function attachTerminalMouseRouter({
   };
 
   const onWindowPointerUp = (ev: PointerEvent) => {
-    if (ev.pointerType === 'mouse') return;
+    if (ev.pointerType === 'mouse') {
+      if (mouseDragPointerId !== ev.pointerId) return;
+      mouseDragPointerId = null;
+      // Capture auto-releases on pointerup, but be explicit.
+      try {
+        element.releasePointerCapture(ev.pointerId);
+      } catch {
+        // already released
+      }
+      if (!(pendingDrag || isDragging(id))) return;
+      // Defer to a macrotask, not a microtask: the compatibility mouseup for an
+      // inside release is dispatched in this same task (right after this
+      // pointerup), and a microtask would run before it. If that mouseup
+      // arrives, onWindowMouseUp finalizes through the established path and
+      // clears this flag; only when it doesn't — the button was released outside
+      // the iframe, where Chromium still delivers this captured pointerup — do we
+      // finalize here.
+      awaitingOutsideMouseUp = true;
+      const releaseEvent = ev;
+      setTimeout(() => {
+        if (!awaitingOutsideMouseUp) return;
+        awaitingOutsideMouseUp = false;
+        finishPendingOrActiveDrag(releaseEvent);
+      }, 0);
+      return;
+    }
     if (activePointerId !== ev.pointerId) return;
     finishPendingOrActiveDrag(ev);
     activePointerId = null;
