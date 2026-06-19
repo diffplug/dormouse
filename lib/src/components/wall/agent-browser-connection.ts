@@ -1,4 +1,9 @@
 import type { AgentBrowserCommandResult } from '../../lib/platform/types';
+import { type AgentBrowserTab, parseAgentBrowserTabs } from '../../lib/agent-browser-tab';
+
+// Re-exported so existing importers keep resolving the tab type/parser from here.
+export type { AgentBrowserTab };
+export { parseAgentBrowserTabs };
 
 // Stream messages above this size are frames (a base64 JPEG); status/tabs are
 // small JSON control messages. Consumers display screenshots, so large frames
@@ -21,13 +26,6 @@ export interface AgentBrowserStreamStatus {
   screencasting: boolean;
   viewportWidth?: number;
   viewportHeight?: number;
-}
-
-export interface AgentBrowserTab {
-  tabId: string;
-  title: string | null;
-  url: string;
-  active: boolean;
 }
 
 export interface AgentBrowserFramePulse {
@@ -71,28 +69,6 @@ export interface AgentBrowserConnectionDeps {
   runCommand?: (session: string, args: string[], binaryPath?: string) => Promise<AgentBrowserCommandResult>;
   canSelectTabs?: () => boolean;
   log?: (message: string) => void;
-}
-
-function parseTabRecord(record: unknown): AgentBrowserTab | null {
-  if (!record || typeof record !== 'object') return null;
-  const t = record as Record<string, unknown>;
-  const tabId = typeof t.tabId === 'string'
-    ? t.tabId
-    : typeof t.id === 'string'
-      ? t.id
-      : null;
-  if (!tabId) return null;
-  return {
-    tabId,
-    title: typeof t.title === 'string' ? t.title : null,
-    url: typeof t.url === 'string' ? t.url : '',
-    active: t.active === true,
-  };
-}
-
-export function parseAgentBrowserTabs(raw: unknown): AgentBrowserTab[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.map(parseTabRecord).filter((tab): tab is AgentBrowserTab => !!tab);
 }
 
 export function createAgentBrowserConnection(deps: AgentBrowserConnectionDeps): AgentBrowserConnection {

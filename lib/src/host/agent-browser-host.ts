@@ -40,6 +40,7 @@ import * as path from 'path';
 import { promises as fs } from 'fs';
 import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
+import { type AgentBrowserTab, parseAgentBrowserTabs } from '../lib/agent-browser-tab';
 import {
   AGENT_BROWSER_ALLOWED_SUBCOMMANDS,
   type AgentBrowserCommandResult,
@@ -168,37 +169,16 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     return trimmed;
   }
 
-  interface SessionTab { tabId: string; url: string; active: boolean }
-
   // Enumerate a session's tabs via `tab list --json`. Envelope mirrors the rest
-  // of the CLI parsing here: { tabs } or { data: { tabs } }. Returns [] on any
+  // of the CLI parsing here: { tabs } or { data: { tabs } }; the record parse is
+  // shared with the live stream (parseAgentBrowserTabs). Returns [] on any
   // failure so callers degrade gracefully.
-  async function listTabs(session: string, binaryPath?: string): Promise<SessionTab[]> {
+  async function listTabs(session: string, binaryPath?: string): Promise<AgentBrowserTab[]> {
     const result = await runWithBinaryFallback(['--session', session, 'tab', 'list', '--json'], binaryPath);
     if (result.exitCode !== 0) return [];
     try {
       const parsed = JSON.parse(result.stdout) as { tabs?: unknown; data?: { tabs?: unknown } };
-      const raw = parsed.data?.tabs ?? parsed.tabs;
-      if (!Array.isArray(raw)) return [];
-      return raw
-        .map((t) => {
-          if (!t || typeof t !== 'object') return null;
-          const record = t as Record<string, unknown>;
-          // Stream `tabs` messages use tabId. Some CLI builds report the same
-          // identifier as `id`, so accept both for post-relaunch cleanup.
-          const tabId = typeof record.tabId === 'string'
-            ? record.tabId
-            : typeof record.id === 'string'
-              ? record.id
-              : null;
-          if (!tabId) return null;
-          return {
-            tabId,
-            url: typeof record.url === 'string' ? record.url : '',
-            active: record.active === true,
-          };
-        })
-        .filter((tab): tab is SessionTab => !!tab);
+      return parseAgentBrowserTabs(parsed.data?.tabs ?? parsed.tabs);
     } catch {
       return [];
     }

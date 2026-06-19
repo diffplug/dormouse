@@ -121,20 +121,19 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     setHistory((prev) => appendHistory(prev, sourceUrl));
   }, [sourceUrl]);
 
-  const commitUrl = useCallback((nextUrl: string) => {
+  // Show a URL in the frame chrome + history. `persist` writes it back to the
+  // panel params (a real navigation we initiated); an observed frame URL does
+  // not, since params stay the source/restore URL.
+  const applyFrameUrl = useCallback((nextUrl: string, persist: boolean) => {
     if (!nextUrl) return;
     setLiveUrl(nextUrl);
     setHistory((prev) => appendHistory(prev, nextUrl));
-    api.updateParameters({ url: nextUrl });
+    if (persist) api.updateParameters({ url: nextUrl });
     api.setTitle?.(hostPathDisplay(nextUrl, true));
   }, [api]);
 
-  const observeFrameUrl = useCallback((nextUrl: string) => {
-    if (!nextUrl) return;
-    setLiveUrl(nextUrl);
-    setHistory((prev) => appendHistory(prev, nextUrl));
-    api.setTitle?.(hostPathDisplay(nextUrl, true));
-  }, [api]);
+  const commitUrl = useCallback((nextUrl: string) => applyFrameUrl(nextUrl, true), [applyFrameUrl]);
+  const observeFrameUrl = useCallback((nextUrl: string) => applyFrameUrl(nextUrl, false), [applyFrameUrl]);
 
   const goToHistoryIndex = useCallback((nextIndex: number) => {
     const prev = historyRef.current;
