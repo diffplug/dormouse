@@ -13,7 +13,7 @@ import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 
 export class VSCodeAdapter implements PlatformAdapter {
   private vscode: ReturnType<typeof acquireVsCodeApi>;
-  private hostState: unknown = (globalThis as typeof globalThis & { __MOUSETERM_HOST_STATE__?: unknown }).__MOUSETERM_HOST_STATE__ ?? null;
+  private hostState: unknown = (globalThis as typeof globalThis & { __DORMOUSE_HOST_STATE__?: unknown }).__DORMOUSE_HOST_STATE__ ?? null;
   private dataHandlers = new Set<(detail: { id: string; data: string }) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
@@ -38,8 +38,8 @@ export class VSCodeAdapter implements PlatformAdapter {
     // the first terminal on startup (which spawns synchronously on Wall
     // mount) picks up the selected shell, not the platform default.
     const injectedShell = (globalThis as typeof globalThis & {
-      __MOUSETERM_SELECTED_SHELL__?: { shell?: string; args?: string[] } | null;
-    }).__MOUSETERM_SELECTED_SHELL__;
+      __DORMOUSE_SELECTED_SHELL__?: { shell?: string; args?: string[] } | null;
+    }).__DORMOUSE_SELECTED_SHELL__;
     if (injectedShell?.shell) {
       setDefaultShellOpts({ shell: injectedShell.shell, args: injectedShell.args });
     }
