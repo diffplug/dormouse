@@ -42,15 +42,12 @@ parameters, not separate surface types:
 | **Render: `ab-screencast` / `ab-popout`** | `dor ab open <url>` — today | (possible, rarely wanted) |
 | **Render: `iframe`** (proxy + shim iframe) | `dor iframe <localhost>` — today | **the plugin system (Path 2)** |
 
-- **Render axis** = *how* you see it, the pane's `renderMode`. The agent-browser
-  engine offers two (`ab-screencast` — real Chromium to a canvas, agent-drivable,
-  any URL, laggy; `ab-popout` — the same session relaunched headed as an OS
-  window); `iframe` is the engine-less DOM embed (the page's own DOM, zero-lag,
-  loopback-only, not agent-drivable). The `ab-` prefix names the *engine*, leaving
-  room for a future engine (`xyz-screencast`) beside it; `iframe` carries no
-  engine.
-- **Target axis** = *what* you point at. A bare URL, vs. a URL whose backend
-  process Dormouse spawns and reaps (Path 2 — *Plugin system*, below).
+- **Render axis** = *how* you see it (`renderMode`). The `ab-` prefix names the
+  *engine* — real Chromium, as a screencast to a canvas or as a headed OS window —
+  leaving room for a future `xyz-screencast`; `iframe` is the engine-less DOM
+  embed (zero-lag, loopback-only, not agent-drivable).
+- **Target axis** = *what* you point at: a bare URL, vs. a URL whose backend
+  Dormouse spawns and reaps (Path 2 — *Plugin system*, below).
 
 The proxy + shim substrate lives **entirely in the `iframe` render backend**,
 which is why both target-axis paths reuse it unchanged — they differ only in which
@@ -147,18 +144,10 @@ Left→right, matching a real browser so it reads as "browser-ish":
  chip  refresh      badge    (host+path)      connection          (collapse)  kill
 ```
 
-- **Render/screen chip → far left.** Its glyph reflects the render mode + sync
-  state (see *Render indicator & the Display modal*) and clicking opens the
-  Display modal; it sits at the very left edge, out of the way of the nav
-  controls.
-- **Back / forward / refresh** sit where Chrome puts them, immediately left of
-  the URL.
-- **URL is the primary text**, replacing the HTML title. A flexible spacer lives
-  after the URL/connection so the layout buttons stay right-aligned.
-
-Priority order under width pressure: **chip + URL/connection always visible; nav
-buttons collapse next (below ~360px); split/zoom collapse first (below 420px);
-kill always stays.**
+The chip opens the Display modal; the URL replaces the HTML title with a flexible
+spacer after it keeping the layout buttons right-aligned. Priority order under
+width pressure: **chip + URL/connection always visible; nav buttons collapse next
+(below ~360px); split/zoom collapse first (below 420px); kill always stays.**
 
 ### URL over HTML title
 
@@ -201,31 +190,22 @@ only tool that owns both the browser surface and the terminals, and the building
 block is `PlatformAdapter.getOpenPorts(id)` (the TCP ports a terminal's process
 tree is listening on).
 
-Mechanics & wrinkles:
+Mechanics (the non-obvious parts):
 
-- **Where it lives.** A panel can't see other panes' ports, so correlation lives
-  in the **Wall** (`use-dev-server-ports.ts` driving a shared store,
-  `agent-browser-ports.ts`); the header consumes the resolved `{ paneId, label }`
-  and clicks back into the Wall (`onFocusPane`) to focus the pane.
-- **Which binds match.** A pane owns the port when it listens on it with a
-  localhost-reachable bind — loopback (`127.0.0.1` / `::1`) **or** any-interface
-  (`0.0.0.0` / `::`, which still answers `localhost`). A bind on one specific
-  non-loopback interface does not match.
-- **Cost — strictly off the hot path.** `getOpenPorts` shells out (`lsof` /
-  PowerShell), so a scan never runs synchronously on tab-open: it's **debounced +
-  idle-scheduled** (`requestIdleCallback`) so the opening tab's first screenshots
-  come first. It **scans once, then settles** — a matched port is remembered and
-  not rescanned; we only keep retrying (slow idle poll) while a wanted port is
-  still *unmatched* (the dev server may start after the tab). A **surface reload**
-  un-settles and re-validates, but optimistically — the current chip stays until
-  the rescan disagrees. At most one scan is in flight; visible panes and minimized
-  doors are both scanned (both keep live ptys).
-- **Fallbacks (degrade to just the URL):** non-loopback URL; no pane listening on
-  the port; a bind on a specific non-loopback interface; a tunneled/proxied
-  domain; or two+ panes claiming the port (ambiguous).
-- **Bidirectional (later):** a terminal serving a port could conversely show
-  "viewed in `surface:3`". Out of scope for now; the port store would make it
-  cheap.
+- **Lives in the Wall** — a panel can't see other panes' ports, so correlation
+  runs in `use-dev-server-ports.ts` → a shared store (`agent-browser-ports.ts`);
+  the header consumes `{ paneId, label }` and calls `onFocusPane`.
+- **Which binds match** — loopback (`127.0.0.1` / `::1`) **or** any-interface
+  (`0.0.0.0` / `::`, which still answers `localhost`); a specific non-loopback
+  interface does not.
+- **Off the hot path** — `getOpenPorts` shells out (`lsof` / PowerShell), so it's
+  debounced + `requestIdleCallback`-scheduled, letting the opening tab's
+  screenshots land first. It **scans once, then settles**: a matched port isn't
+  rescanned; only a still-unmatched wanted port keeps polling (the dev server may
+  start late). A reload re-validates optimistically (chip stays until the rescan
+  disagrees). One scan in flight; visible panes and minimized doors both scan.
+- **Degrades to just the URL** when: non-loopback; nobody listening; a non-loopback
+  bind; a tunneled/proxied domain; or ≥2 panes claim the port (ambiguous).
 
 ### Back / forward / refresh
 
@@ -763,56 +743,36 @@ streamed surface is the portable baseline.
 
 ## Agent-browser host capabilities
 
-These follow the *Host plumbing pattern* above; the logic is the one shared module
-`lib/src/host/agent-browser-host.ts`, run by both real hosts.
+Signatures live in `lib/src/lib/platform/types.ts`; the logic is the one shared
+module `lib/src/host/agent-browser-host.ts`, run by both real hosts (per *Host
+plumbing pattern*). The non-obvious points per method:
 
-- **`agentBrowserCommand(session, args)`** — runs the user's agent-browser
-  binary for tab actions (`tab <n>`, `tab close`, `tab new`), screen-mode
-  resizing (`set viewport`, `set device`), navigation (`open <url>`, `reload`,
-  `back`, `forward`), and lifecycle (`close`). The host validates `args[0]`
-  against an allowlist (`tab`, `set`, `screenshot`, `open`, `reload`, `back`,
-  `forward`, `close`); this is not a general exec channel.
-- **`agentBrowserScreenshot(session, { format, quality })`** — captures one
-  device-resolution frame via `agent-browser screenshot` (which honors the
-  session DPR, unlike the screencast) and returns the raw bytes. (VS Code hands
-  the webview a `Uint8Array` via structured clone; the standalone base64s them
-  over the sidecar stdio, decoded back to raw bytes by the Rust forwarder, so the
-  webview still receives an `ArrayBuffer`.) Drives the crisp display path; absent
-  ⇒ the panel falls back to rendering screencast frames.
-- **`agentBrowserStreamStatus(session)`** — reads the current `stream status
-  --json` port for an existing session so restored panels can recover from a
-  stale persisted `wsPort`. This is intentionally narrower than adding `stream`
-  to `agentBrowserCommand`'s allowlist.
+- **`agentBrowserCommand(session, args)`** — the only exec channel, `args[0]`
+  allowlisted to `tab` / `set` / `screenshot` / `open` / `reload` / `back` /
+  `forward` / `close`. Backs tab actions, navigation, resizing, and lifecycle.
+- **`agentBrowserScreenshot`** — one device-resolution frame (honors DPR, unlike
+  the screencast); drives the crisp display path, absent ⇒ fall back to screencast
+  frames. VS Code sends a `Uint8Array`; standalone base64s it over sidecar stdio.
+- **`agentBrowserStreamStatus`** — current `stream status --json` port, for
+  stale-`wsPort` recovery; deliberately narrower than allowlisting `stream`.
 - **`agentBrowserEdit(session, op)`** — host-owned `eval` for the macOS editing
-  chords (select-all/copy/cut) the stream input path can't dispatch.
-- **`getAgentBrowserStreamUrl(port)`** — returns the WebSocket URL the webview
-  should use for the session stream (see *VS Code webview CSP and stream origin*).
-- **`agentBrowserOpen(url, { headed })`** — spawns a fresh managed session
-  (`dormouse.1.gui-<hex>`) and opens `url`, optionally headed, returning
-  `{ session, wsPort }`. Backs a render-swap from `iframe` up to a live
-  screencast/popout, where the webview can't resolve/run the binary itself.
-- **`agentBrowserPopOut(session, { url, rect })`** / **`agentBrowserPopIn(session,
-  { url })`** — relaunch a session headed / headless at the active tab URL
-  observed by the panel's live `tabs` stream, returning the new `wsPort`.
-  Dormouse is the source of truth for this URL: the panel ignores transient
-  `about:blank` values, mirrors the latest real active-tab URL into panel
-  params, and also keeps a local ref so a just-arrived headed-window navigation
-  wins over stale persisted params. The host trusts that supplied URL and does
-  not query the daemon during close/reopen, because `stream status` / tab queries
-  in the gap can spawn a competing blank daemon. Chrome's headed/headless choice
-  is fixed at launch, so pop-out is a close + relaunch rather than a live toggle;
-  `rect` is accepted but unused (no window positioning today). After relaunch,
-  the host best-effort closes stray blank tabs when a real tab is also present,
-  accepting either stream-style `tabId` or CLI-style `id` fields from
-  `tab list --json`.
-- **`agentBrowserBringToFront(session)`** — raise the headed OS window. Optional
-  and **unimplemented today**, so the stub's *Bring to front* button stays hidden.
+  chords the stream input path can't dispatch (see *Input*).
+- **`getAgentBrowserStreamUrl(port)`** — the stream WebSocket URL (see *VS Code
+  webview CSP and stream origin*).
+- **`agentBrowserOpen(url, { headed })`** — spawn a fresh `gui-<hex>` session;
+  backs an `iframe → ab-*` swap where the webview can't run the binary.
+- **`agentBrowserPopOut` / `agentBrowserPopIn`** — headed/headless relaunch at a
+  Dormouse-supplied active-tab URL. The host trusts that URL and does **not** query
+  the daemon during the close/reopen gap (a `stream status` / tab query there can
+  spawn a competing blank daemon); it best-effort closes stray blank tabs after,
+  accepting `tabId` or `id` from `tab list --json`. `rect` is accepted but unused.
+- **`agentBrowserBringToFront`** — raise the headed window; unimplemented, so the
+  stub button stays hidden.
 
-> **Footgun:** in the VS Code adapter these methods use `this.requestResponse`
-> internally and are **bound in the adapter constructor**, because the panel calls
-> some through detached references (`getPlatform().agentBrowserScreenshot`) which
-> would otherwise drop `this`. (The Tauri adapter routes through a module-level
-> `invoke`, so it has no such binding concern.)
+> **Footgun:** in the VS Code adapter these are **bound in the constructor** (they
+> use `this.requestResponse`) because the panel calls some through detached
+> references (`getPlatform().agentBrowserScreenshot`). The Tauri adapter routes
+> through a module-level `invoke`, so it has no such concern.
 
 ### VS Code webview CSP and stream origin
 
@@ -838,25 +798,24 @@ the host for a short-lived, one-use relay URL
 requests without a matching token/port grant. The standalone (Tauri) webview
 connects directly — its origin is allowed.
 
-## Implementation touchpoints
+## Code map
 
-| Piece | Location |
-| --- | --- |
-| `dor ab` command (passthrough + `--key` intercept) | `dor/src/commands/agent-browser.ts` |
-| Control method `surface.agentBrowser` request/response | `dor/src/commands/types.ts`, `dor/src/control-client.ts` |
-| Shell + render swap | `lib/src/components/wall/BrowserPanel.tsx`, `lib/src/components/Wall.tsx` (`replaceSurface` / `onSwapRenderMode`) |
-| Surface component (canvas viewer + tab strip + screenshot loop + sync tracking + render indicator + chrome snapshot + pop-out stub + auto-revert) | `lib/src/components/wall/AgentBrowserPanel.tsx` |
-| Single-session stream connection (WebSocket lifecycle + tab/status/frame-pulse parsing + debug ring + visible-only resource boundary) | `lib/src/components/wall/agent-browser-connection.ts` |
-| Browser-chrome header (render/screen chip + back/fwd/reload + URL + key badge + dev-server chip) | `lib/src/components/wall/SurfacePaneHeader.tsx` |
-| Display modal (Render swap + Resolution; issues native `set …`) | `lib/src/components/wall/AgentBrowserScreenModal.tsx` |
-| Per-surface teardown guard (auto-revert vs kill/swap) | `lib/src/components/wall/agent-browser-sessions.ts` |
-| Per-surface screen+chrome bridge (header↔body↔modal) + modal host | `lib/src/components/wall/agent-browser-screen.ts`, `lib/src/components/AgentBrowserScreenModalHost.tsx` |
-| URL display/loopback-port parsing | `lib/src/components/wall/browser-url.ts` |
-| Dev-server port→pane store (consumed by the header) + Wall-side correlation driver | `lib/src/components/wall/agent-browser-ports.ts`, `lib/src/components/wall/use-dev-server-ports.ts` |
-| Surface registration + control handler + key→session registry + `onFocusPane` | `lib/src/components/Wall.tsx` |
-| Host capability logic — **single source of truth, run by both hosts** | `lib/src/host/agent-browser-host.ts` (+ types/allowlist in `lib/src/lib/platform/types.ts`) |
-| Host wiring — VS Code | `lib/src/lib/platform/vscode-adapter.ts`, `vscode-ext/src/agent-browser-host.ts` (thin: instantiates the shared host + owns the VS-Code-only stream relay), `vscode-ext/src/message-router.ts` |
-| Host wiring — standalone | `standalone/src/tauri-adapter.ts` → thin forwarders in `standalone/src-tauri/src/lib.rs` → the Node sidecar (`standalone/sidecar/main.js`, running the bundled `agent-browser-host.cjs`), exactly like the iframe proxy |
+Most files are named inline at point of use; the entry points worth knowing up
+front:
+
+- **CLI** `dor/src/commands/agent-browser.ts` (passthrough + `--key` intercept);
+  control method `surface.agentBrowser` in `dor/src/commands/types.ts`.
+- **Shell + swap** `BrowserPanel.tsx`; `Wall.tsx` owns `replaceSurface` /
+  `onSwapRenderMode`, the key→session registry, and `onFocusPane`.
+- **Renderer** `AgentBrowserPanel.tsx` (canvas + tab strip + screenshot loop +
+  sync) over `agent-browser-connection.ts` (one daemon's WebSocket, parsing,
+  debug ring); chrome in `SurfacePaneHeader.tsx`, Display modal in
+  `AgentBrowserScreenModal.tsx`, screen+chrome bridge in `agent-browser-screen.ts`.
+- **Host** single source of truth `lib/src/host/agent-browser-host.ts` (+ allowlist
+  in `lib/src/lib/platform/types.ts`), run by both hosts per *Host plumbing
+  pattern*; VS Code adds the stream relay (`vscode-ext/src/agent-browser-host.ts`),
+  standalone forwards through `tauri-adapter.ts` → `src-tauri/src/lib.rs` →
+  `sidecar/main.js`.
 
 ---
 
@@ -1176,12 +1135,9 @@ passthrough harder than most.
 # Future work
 
 - **Profile persistence** — a stable user-data-dir or `agent-browser state
-  save`/`load`. Makes pop-out usable for authenticated sites, benefits the
-  streamed surface too (logins survive daemon restarts), and **retires the
-  silent-tab-drop limitation**: every render-mode swap within agent-browser is a
-  Chrome relaunch that today carries only the active tab's URL (see *Render-mode
-  transitions* and *State carried (v1)*), so `ab-screencast` ↔ `ab-popout` closes
-  all other tabs. Profile persistence makes the relaunch carry the full tab set.
+  save`/`load`. Makes pop-out usable for authenticated sites, lets logins survive
+  daemon restarts, and **retires the silent-tab-drop limitation** (*Render-mode
+  transitions*) by carrying the full tab set across a relaunch.
 - **Re-trigger sync from the CLI** — a Dormouse-reserved `dor ab` verb, at the
   cost of the first non-passthrough subcommand.
 - **Undo/redo chords** — blocked on the upstream stream-input `commands` fix.
@@ -1191,5 +1147,3 @@ passthrough harder than most.
   *Plugin system*).
 - **Bidirectional dev-server chip** — a terminal serving a port could show "viewed
   in `surface:3`"; the port store would make it cheap.
-</content>
-</invoke>
