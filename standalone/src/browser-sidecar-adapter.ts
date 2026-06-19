@@ -48,6 +48,19 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.alertManager.onStateChange((id, state) => {
       for (const handler of this.alertStateHandlers) handler({ id, ...state });
     });
+
+    // Some of these get called through detached references (e.g. the iframe
+    // panel does `const createProxy = getPlatform().createIframeProxyUrl`), which
+    // drops `this` and makes the internal `this.host` access throw. The VS Code
+    // adapter binds for the same reason; mirror it so any call style is safe.
+    this.createIframeProxyUrl = this.createIframeProxyUrl.bind(this);
+    this.agentBrowserCommand = this.agentBrowserCommand.bind(this);
+    this.agentBrowserEdit = this.agentBrowserEdit.bind(this);
+    this.agentBrowserScreenshot = this.agentBrowserScreenshot.bind(this);
+    this.agentBrowserStreamStatus = this.agentBrowserStreamStatus.bind(this);
+    this.agentBrowserOpen = this.agentBrowserOpen.bind(this);
+    this.agentBrowserPopOut = this.agentBrowserPopOut.bind(this);
+    this.agentBrowserPopIn = this.agentBrowserPopIn.bind(this);
   }
 
   async init(): Promise<void> {
