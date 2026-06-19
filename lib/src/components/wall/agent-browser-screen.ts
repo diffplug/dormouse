@@ -1,8 +1,8 @@
 /**
  * Per-surface bridge between an agent-browser pane's body (AgentBrowserPanel)
  * and its tab header (SurfacePaneHeader) + the screen modal, which are
- * separate components for one pane (see docs/specs/dor-agent-browser.md →
- * "Screen Indicator & Viewport").
+ * separate components for one pane (see docs/specs/dor-browser.md →
+ * "Render indicator & the Display modal").
  *
  * The panel owns the live state (viewport, pane size, sync) and the action
  * (`runAgentBrowser`); the header and modal only read a snapshot and invoke
@@ -20,8 +20,8 @@ import { useSyncExternalStore } from 'react';
 
 export type ScreenState = 'SYNCED' | 'SCALED';
 
-/** How a web surface is rendered (docs/specs/dor-iframe.md → "Render Backends";
- *  dor-agent-browser.md → "Headed Pop-Out"). The `ab-` prefix names the engine
+/** How a web surface is rendered (docs/specs/dor-browser.md → "Two axes";
+ *  dor-browser.md → "Headed pop-out"). The `ab-` prefix names the engine
  *  (agent-browser), leaving room for a future engine beside it; `iframe` is the
  *  engine-less DOM embed:
  *    - `ab-screencast` — real Chromium to a canvas: agent-drivable, any URL, but
@@ -59,15 +59,15 @@ export interface ScreenActions {
   /** Open the screen modal for this surface. */
   openModal(): void;
   /** Swap this surface's render backend in place, preserving the target
-   *  (docs/specs/dor-iframe.md → "Path 1 — Swappable Render Backend"). This is
+   *  (docs/specs/dor-browser.md → "Render-mode transitions"). This is
    *  the single entry point for every mode, including `popout` (relaunch headed
-   *  — docs/specs/dor-agent-browser.md → "Headed Pop-Out"). Absent until the
+   *  — docs/specs/dor-browser.md → "Headed pop-out"). Absent until the
    *  swap is wired; the modal hides its Render section without it. */
   setRenderMode?(mode: RenderMode): void;
 }
 
 /** What the browser-chrome header reads about the active tab
- *  (docs/specs/dor-agent-browser.md → "Browser-chrome header"). Updated on its
+ *  (docs/specs/dor-browser.md → "Browser-chrome header"). Updated on its
  *  own cadence (tab stream messages), separate from the screen snapshot which
  *  churns on resize. */
 export interface ChromeSnapshot {

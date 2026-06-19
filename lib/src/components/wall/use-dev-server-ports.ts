@@ -1,6 +1,6 @@
 /**
  * Wall-side driver for the dev-server connection chip
- * (docs/specs/dor-agent-browser.md → "Dev-server connection").
+ * (docs/specs/dor-browser.md → "Dev-server connection").
  *
  * A browser-surface header can't see other panes' open ports, so it registers
  * the loopback port it's showing in the shared store (`useDevServerMatch`) and

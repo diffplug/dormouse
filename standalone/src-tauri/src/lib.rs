@@ -330,7 +330,7 @@ fn iframe_create_proxy_url(
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
-// ── agent-browser host (docs/specs/dor-agent-browser.md → "Host capabilities").
+// ── agent-browser host (docs/specs/dor-browser.md → "Agent-browser host capabilities").
 // Thin forwarders to the Node sidecar, which runs the shared
 // lib/src/host/agent-browser-host.ts — the very same module the VS Code
 // extension host runs. Mirrors iframe_create_proxy_url; the logic lives in lib,

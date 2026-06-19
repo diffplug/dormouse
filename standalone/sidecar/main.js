@@ -12,11 +12,11 @@ const { create } = require('./pty-core');
 const clipboard = require('./clipboard-ops');
 const { createDorControlServer } = require('./dor-control-server');
 // Built from lib/src/host/iframe-proxy.ts (shared with the VS Code host) by
-// scripts/build-sidecar-proxy.mjs. See docs/specs/dor-iframe.md.
+// scripts/build-sidecar-proxy.mjs. See docs/specs/dor-browser.md.
 const { createIframeProxyUrl } = require('./iframe-proxy.cjs');
 // Same pattern: lib/src/host/agent-browser-host.ts is the single source of truth
 // for the agent-browser host capabilities, run here exactly as the VS Code
-// extension host runs it. See docs/specs/dor-agent-browser.md → "Host capabilities".
+// extension host runs it. See docs/specs/dor-browser.md → "Agent-browser host capabilities".
 const { createAgentBrowserHost } = require('./agent-browser-host.cjs');
 
 const agentBrowser = createAgentBrowserHost({

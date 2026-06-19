@@ -1,6 +1,6 @@
 /**
- * The single dockview component for every browser surface (docs/specs/dor-iframe.md
- * → "Path 1 — One `browser` surface, swappable renderer").
+ * The single dockview component for every browser surface (docs/specs/dor-browser.md
+ * → "Render-mode transitions").
  *
  * One surface, swappable renderer: it reads the canonical `renderMode` and mounts
  * the matching child — `IframePanel` for `iframe`, `AgentBrowserPanel` for

@@ -1,6 +1,6 @@
 /**
  * Extension-host wiring for the agent-browser surface
- * (docs/specs/dor-agent-browser.md → "Host capabilities").
+ * (docs/specs/dor-browser.md → "Agent-browser host capabilities").
  *
  * The capability logic itself is host-agnostic and lives in
  * `lib/src/host/agent-browser-host.ts` (shared verbatim with the standalone

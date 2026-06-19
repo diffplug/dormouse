@@ -1,6 +1,6 @@
 /**
  * Result of asking the host to front a `dor iframe` target with its transparent
- * proxy (docs/specs/dor-iframe.md → "The Transparent Proxy"). On `ok` the panel
+ * proxy (docs/specs/dor-browser.md → "The transparent proxy"). On `ok` the panel
  * points the `<iframe>` at `url` — a loopback proxy origin that fetches the
  * target, strips frame-blocking headers (loopback only), and injects the
  * Dormouse shim. On failure `reason` says why there is nothing to frame:

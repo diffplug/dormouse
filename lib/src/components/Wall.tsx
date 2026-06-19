@@ -954,7 +954,7 @@ export function Wall({
         params,
         // Keep iframes mounted across (de)activation — dockview's default
         // onlyWhenVisible renderer detaches/reattaches panel DOM, and moving an
-        // <iframe> in the DOM reloads it (docs/specs/dor-iframe.md).
+        // <iframe> in the DOM reloads it (docs/specs/dor-browser.md).
         renderer,
         position: { referencePanel: referencePanel.id, direction: 'within' },
       });
@@ -993,7 +993,7 @@ export function Wall({
 
   /**
    * Replace a content surface's renderer in place, preserving its dock slot
-   * (docs/specs/dor-iframe.md → "Path 1 — Swappable Render Backend"). Adds the
+   * (docs/specs/dor-browser.md → "Render-mode transitions"). Adds the
    * new panel `within` the old one, closes the old surface's session if any,
    * then removes the old panel and selects the new. The generalized form of
    * createContentSurface's replace-untouched-terminal branch.
@@ -1623,8 +1623,8 @@ export function Wall({
       const api = apiRef.current;
       if (!api) return;
       // A new-tab request from the iframe shim → open the URL as a new iframe
-      // browser pane, split next to the source (docs/specs/dor-iframe.md →
-      // "New tab from the iframe renderer → new pane").
+      // browser pane, split next to the source (docs/specs/dor-browser.md →
+      // "New tab → new pane").
       const reference = buildDorSurfaces(api).find((s) => s.id === id);
       if (!reference) return;
       createContentSurface({

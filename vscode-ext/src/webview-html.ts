@@ -30,13 +30,13 @@ export function getWebviewHtml(
     `font-src ${webview.cspSource}`,
     `img-src ${webview.cspSource} data: blob:`,
     // ws: entries cover the agent-browser stream relay (frames + input for
-    // browser surfaces; see docs/specs/dor-agent-browser.md).
+    // browser surfaces; see docs/specs/dor-browser.md).
     `connect-src ${webview.cspSource} ws://127.0.0.1:* ws://localhost:*`,
     // `dor iframe` frames its target through a loopback transparent proxy that
     // the extension host stands up (iframe-proxy-host.ts), so the only origin we
     // ever embed is 127.0.0.1/localhost on an OS-assigned port. Without a
     // frame-src override the `default-src 'none'` fallback blocks the frame
-    // outright, leaving a blank (white) pane. See docs/specs/dor-iframe.md.
+    // outright, leaving a blank (white) pane. See docs/specs/dor-browser.md.
     `frame-src http://127.0.0.1:* http://localhost:*`,
   ].join('; ');
 

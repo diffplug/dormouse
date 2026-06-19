@@ -241,8 +241,8 @@ export class TauriAdapter implements PlatformAdapter {
     }
   }
 
-  // --- agent-browser host capabilities (see docs/specs/dor-agent-browser.md →
-  // "Host capabilities"). Each invokes the matching Rust command, which runs the
+  // --- agent-browser host capabilities (see docs/specs/dor-browser.md →
+  // "Agent-browser host capabilities"). Each invokes the matching Rust command, which runs the
   // user's agent-browser binary (binaryPath → DORMOUSE_AGENT_BROWSER_BIN → PATH,
   // mirroring the VS Code host's runWithBinaryFallback). Note there is no
   // getAgentBrowserStreamUrl here: the agent-browser stream server accepts the

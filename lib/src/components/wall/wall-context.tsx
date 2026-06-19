@@ -40,14 +40,14 @@ export interface WallActions {
   onFinishRename: (id: string, value: string) => SetTerminalUserTitleResult;
   onCancelRename: () => void;
   /** Swap a surface's render backend in place, preserving the target URL
-   *  (docs/specs/dor-iframe.md → "Path 1"). agent-browser ↔ iframe is a
+   *  (docs/specs/dor-browser.md → "Render-mode transitions"). agent-browser ↔ iframe is a
    *  surface-type replacement; screencast ↔ popout is handled inside the
    *  agent-browser panel and does not route here. */
   onSwapRenderMode: (id: string, mode: RenderMode) => void;
   /** Open a URL as a new iframe browser pane, split next to `id`. The iframe
    *  renderer is single-frame, so a page's new-tab request (target=_blank /
    *  window.open, surfaced by the proxy shim) becomes a new pane
-   *  (docs/specs/dor-iframe.md → "New tab from the iframe renderer → new pane"). */
+   *  (docs/specs/dor-browser.md → "New tab → new pane"). */
   onOpenBrowserPane?: (id: string, url: string) => void;
 }
 

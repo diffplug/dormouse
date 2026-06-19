@@ -3,7 +3,7 @@
 // TypeScript source while the sidecar itself stays plain CJS.
 //   - lib/src/host/iframe-proxy.ts        → sidecar/iframe-proxy.cjs
 //   - lib/src/host/agent-browser-host.ts  → sidecar/agent-browser-host.cjs
-// See docs/specs/dor-iframe.md and docs/specs/dor-agent-browser.md.
+// See docs/specs/dor-browser.md.
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

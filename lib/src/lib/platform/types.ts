@@ -63,7 +63,7 @@ export interface AgentBrowserScreenshotResult {
 
 /** Native editing operations that the stream's input_keyboard path cannot
  * trigger on macOS (CDP drops the `commands` field — see
- * docs/specs/dor-agent-browser.md and the upstream issue). The host owns the
+ * docs/specs/dor-browser.md and the upstream issue). The host owns the
  * exact JS for each; the webview only picks one of these names, so this stays
  * a purpose-built channel rather than an arbitrary-eval one. */
 export type AgentBrowserEditOp = 'selectAll' | 'copy' | 'cut';
@@ -88,7 +88,7 @@ export interface AgentBrowserStreamStatusResult {
 }
 
 /** Result of spawning a managed agent-browser session for a render swap
- *  (docs/specs/dor-iframe.md → "Path 1 — Swappable Render Backend"). */
+ *  (docs/specs/dor-browser.md → "Render-mode transitions"). */
 export interface AgentBrowserOpenResult {
   ok: boolean;
   /** The resolved/namespaced session name the new surface should bind to. */
@@ -101,8 +101,8 @@ export interface AgentBrowserOpenResult {
   error?: string;
 }
 
-/** Result of a headed/headless relaunch (docs/specs/dor-agent-browser.md →
- *  "Headed Pop-Out"). The Chrome process is replaced, so the stream port
+/** Result of a headed/headless relaunch (docs/specs/dor-browser.md →
+ *  "Headed pop-out"). The Chrome process is replaced, so the stream port
  *  changes; the session name is preserved. */
 export interface AgentBrowserPopResult {
   ok: boolean;
@@ -148,7 +148,7 @@ export interface PlatformAdapter {
   // VS Code-only escape hatch for mirrored workbench shortcuts from webviews.
   runWorkbenchCommand?(command: VSCodeWorkbenchCommand): void;
 
-  // agent-browser surface support (see docs/specs/dor-agent-browser.md).
+  // agent-browser surface support (see docs/specs/dor-browser.md).
   // Runs the user's agent-browser binary against a session; the host validates
   // args[0] against AGENT_BROWSER_ALLOWED_SUBCOMMANDS. `binaryPath` is the
   // absolute path resolved by `dor ab` in the invoking terminal — the host's
@@ -176,15 +176,15 @@ export interface PlatformAdapter {
   // URL; absent or null falls back to ws://127.0.0.1:<port>.
   getAgentBrowserStreamUrl?(port: number): Promise<string | null>;
 
-  // iframe surface support (see docs/specs/dor-iframe.md → "The Transparent
-  // Proxy"). Stands up a loopback proxy in front of a `dor iframe` target and
+  // iframe surface support (see docs/specs/dor-browser.md → "The transparent
+  // proxy"). Stands up a loopback proxy in front of a `dor iframe` target and
   // returns the proxy URL the panel should frame, or a structured reason it
   // could not. Absent on hosts with no process to run a proxy (e.g. the web
   // host), where the panel falls back to a raw, uninstrumented `<iframe>`.
   createIframeProxyUrl?(targetUrl: string): Promise<IframeProxyResult>;
 
-  // Render-swap support (docs/specs/dor-iframe.md → "Path 1 — Swappable Render
-  // Backend"; docs/specs/dor-agent-browser.md → "Headed Pop-Out"). All optional
+  // Render-swap support (docs/specs/dor-browser.md → "Render-mode transitions";
+  // docs/specs/dor-browser.md → "Headed pop-out"). All optional
   // so hosts degrade: the modal hides whatever isn't backed by a capability.
   //
   // Spawn a managed agent-browser session and open <url> — backs swapping an

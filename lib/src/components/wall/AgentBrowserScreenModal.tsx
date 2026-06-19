@@ -1,7 +1,7 @@
 /**
- * Display modal for a web surface (docs/specs/dor-agent-browser.md → "Screen
- * Indicator & Viewport → The modal"; docs/specs/dor-iframe.md → "Path 1 —
- * Swappable Render Backend"). Opened from the header's far-left chip, it is the
+ * Display modal for a web surface (docs/specs/dor-browser.md → "Render
+ * indicator & the Display modal"; docs/specs/dor-browser.md → "Render-mode
+ * transitions"). Opened from the header's far-left chip, it is the
  * single place that owns *how* a surface renders:
  *
  *   - Render — swap the backend in place, preserving the target:
