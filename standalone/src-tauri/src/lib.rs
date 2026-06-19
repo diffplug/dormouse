@@ -511,19 +511,51 @@ fn kill_sidecar_now(state: tauri::State<'_, SidecarState>) {
     kill_sidecar_and_wait(&state.child);
 }
 
+// Normal app quit should let the Node sidecar run its shutdown handler first:
+// that handler closes headed agent-browser pop-out windows before killing PTYs.
+// If the sidecar is wedged, fall back to the same hard kill path so quit remains
+// bounded.
+fn shutdown_sidecar_and_wait(state: &SidecarState) {
+    const POLL_INTERVAL: Duration = Duration::from_millis(20);
+    const MAX_POLLS: u32 = 125;
+
+    append_log("[sidecar] requesting graceful shutdown");
+    send_to_sidecar(
+        state,
+        serde_json::json!({ "event": "sidecar:shutdown", "data": {} }).to_string(),
+    );
+
+    let Ok(mut guard) = state.child.lock() else {
+        return;
+    };
+    for _ in 0..MAX_POLLS {
+        match guard.try_wait() {
+            Ok(Some(status)) => {
+                append_log(format!(
+                    "[sidecar] confirmed graceful exit (status: {status})"
+                ));
+                return;
+            }
+            Ok(None) => std::thread::sleep(POLL_INTERVAL),
+            Err(err) => {
+                append_log(format!(
+                    "[sidecar] wait error during graceful shutdown: {err}"
+                ));
+                return;
+            }
+        }
+    }
+
+    append_log("[sidecar] graceful shutdown timed out (~2.5s); killing");
+    let _ = guard.start_kill();
+}
+
 // Job Object on Windows / process group on Unix — kill propagates to the
 // sidecar's grandchildren (the spawned shells). On Unix this is SIGKILL to
 // the whole process group, which is more thorough than the previous
 // SIGTERM-to-just-node path that left node-pty grandchildren orphaned.
-fn kill_sidecar(child: &SharedChild) {
-    if let Ok(mut guard) = child.lock() {
-        append_log(format!("[sidecar] killing (pid={})", guard.id()));
-        let _ = guard.start_kill();
-    }
-}
-
-// Like `kill_sidecar`, but blocks until the process has actually exited. The
-// updater calls this before launching the Windows NSIS installer: NSIS
+//
+// The updater calls this before launching the Windows NSIS installer: NSIS
 // overwrites files inside the bundled sidecar (e.g. node-pty's `conpty.node`),
 // and Windows refuses to overwrite a native module the live sidecar still has
 // loaded — surfacing as "Error opening file for writing". Releasing those
@@ -962,8 +994,8 @@ pub fn run() {
         .run(|app, event| {
             if let RunEvent::Exit = event {
                 if let Some(state) = app.try_state::<SidecarState>() {
-                    append_log("[app] exit — killing sidecar");
-                    kill_sidecar(&state.child);
+                    append_log("[app] exit — shutting down sidecar");
+                    shutdown_sidecar_and_wait(&state);
                 }
             }
         });

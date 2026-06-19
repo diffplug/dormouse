@@ -687,8 +687,9 @@ decoupled:
 - **Kill the pane / `dor kill`** → the only teardown.
 - **Dormouse/editor quits** → headed windows are cleaned up; no orphans. The
   shared host tracks popped-out sessions and closes them from each host's
-  shutdown — VS Code's `deactivate()`, the sidecar's `shutdown()` — so neither
-  host leaves a detached Chrome window behind.
+  shutdown — VS Code's `deactivate()`, standalone's Tauri `RunEvent::Exit`
+  sends the sidecar `sidecar:shutdown`, and the sidecar's `shutdown()` runs
+  `closePoppedOut()` — so neither host leaves a detached Chrome window behind.
 
 **Not built yet.** Window **positioning** over the pane (no host acts on the pane
 `rect` it's passed yet, so Chrome places the window), **Bring to front**, and any

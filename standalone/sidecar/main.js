@@ -63,6 +63,7 @@ rl.on('line', (line) => {
       case 'pty:getScrollback': mgr.getScrollback(data.id, data.requestId); break;
       case 'pty:getShells':  mgr.getShells(data.requestId); break;
       case 'pty:gracefulKillAll': mgr.gracefulKillAll(data.timeout); break;
+      case 'sidecar:shutdown': shutdown(); break;
       case 'dor:controlResponse': dorControl?.respond(data); break;
       case 'iframe:createProxyUrl':
         // Log to stderr — stdout is the JSON-lines protocol channel.
