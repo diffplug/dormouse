@@ -89,7 +89,7 @@ Elements from left to right:
 - ArrowLineDownIcon `minimize [m]`
 - XIcon `kill [x]` (hover turns error-red)
 
-The alert bell and TODO pill are defined in `docs/specs/alert.md` (visual states, interaction, context menu, and hardening). The mouse-reporting override icon (Phosphor `CursorClickIcon` / `SelectionSlashIcon`) is defined in `docs/specs/mouse-and-clipboard.md`.
+The alert bell and TODO pill are defined in `docs/specs/alert.md` (visual states, interaction, context menu, and hardening). The mouse-reporting override icon (Phosphor `CursorClickIcon` / `CursorTextIcon`) is defined in `docs/specs/mouse-and-clipboard.md`.
 
 ### Pane body
 
