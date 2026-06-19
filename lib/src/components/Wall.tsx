@@ -1588,7 +1588,9 @@ export function Wall({
       // affordances). ab-popout spawns headed directly so the new surface mounts
       // already popped-out (no headless launch + immediate relaunch flash).
       if (currentType === 'iframe' && (mode === 'ab-screencast' || mode === 'ab-popout')) {
-        const url = typeof params?.url === 'string' ? params.url : undefined;
+        const chromeUrl = getAgentBrowserScreenController(id)?.chrome().url;
+        const url = (typeof chromeUrl === 'string' && chromeUrl)
+          || (typeof params?.url === 'string' ? params.url : undefined);
         const open = getPlatform().agentBrowserOpen;
         if (!url || !open) return;
         const headed = mode === 'ab-popout';
@@ -1599,6 +1601,7 @@ export function Wall({
             surfaceType: 'browser',
             renderMode: mode,
             session: res.session,
+            url,
             ...(res.wsPort !== undefined ? { wsPort: res.wsPort } : {}),
             ...(res.binaryPath !== undefined ? { binaryPath: res.binaryPath } : {}),
             syncEngaged: true,
