@@ -8,7 +8,7 @@ import {
   ArrowsOutIcon,
   BellIcon,
   CursorClickIcon,
-  SelectionSlashIcon,
+  CursorTextIcon,
   SplitHorizontalIcon,
   SplitVerticalIcon,
   XIcon,
@@ -329,7 +329,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
               >
                 <span className="relative flex items-center justify-center">
                   {inOverride ? (
-                    <SelectionSlashIcon size={14} />
+                    <CursorTextIcon size={14} />
                   ) : (
                     <CursorClickIcon size={14} />
                   )}

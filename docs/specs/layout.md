@@ -87,13 +87,14 @@ Elements from left to right:
 - Alert bell button (reflects session activity status)
 - TODO pill (if todo state is set; hidden in minimal tier)
 - Flexible gap
+- Mouse-reporting override icon (only when the inside program requests mouse reporting; hidden in minimal tier)
 - SplitHorizontalIcon `split left/right [|]` (full tier only)
 - SplitVerticalIcon `split top/bottom [-]` (full tier only)
 - ArrowsOutIcon / ArrowsInIcon `zoom / unzoom [z]` (full tier only)
 - ArrowLineDownIcon `minimize [m]`
 - XIcon `kill [x]` (hover turns error-red)
 
-The alert bell and TODO pill are defined in `docs/specs/alert.md` (visual states, interaction, context menu, and hardening).
+The alert bell and TODO pill are defined in `docs/specs/alert.md` (visual states, interaction, context menu, and hardening). The mouse-reporting override icon (Phosphor `CursorClickIcon` / `CursorTextIcon`) is defined in `docs/specs/mouse-and-clipboard.md`.
 
 ### Pane body
 
@@ -103,9 +104,11 @@ The pane body paints `--color-terminal-bg` on the React pane wrapper and the `Te
 
 The header adapts to available width via ResizeObserver in three tiers:
 
-- **Full** (>280px): all controls visible — alert, TODO, split, zoom, minimize, kill
-- **Compact** (160–280px): SplitH/SplitV/Zoom hidden; alert, TODO, minimize, kill visible
-- **Minimal** (<160px): SplitH/SplitV/Zoom and TODO pill hidden; alert, minimize, kill visible. Session name truncates with ellipsis as needed.
+- **Full** (>280px): all controls visible — alert, TODO, mouse-override icon, split, zoom, minimize, kill
+- **Compact** (160–280px): SplitH/SplitV/Zoom hidden; alert, TODO, mouse-override icon, minimize, kill visible
+- **Minimal** (<160px): SplitH/SplitV/Zoom, TODO pill, and mouse-override icon hidden; alert, minimize, kill visible. Session name truncates with ellipsis as needed.
+
+The mouse-override icon only appears when the inside program has requested mouse reporting (per `docs/specs/mouse-and-clipboard.md`); when present, it follows the tier visibility above.
 
 ## Baseboard
 
