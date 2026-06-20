@@ -1,6 +1,14 @@
 {
   "direct": [
     {
+      "name": "base64",
+      "version": "0.22.1",
+      "license": "MIT OR Apache-2.0",
+      "author": "Marshall Pierce <marshall@mpierce.org>",
+      "homepage": "https://github.com/marshallpierce/rust-base64",
+      "declaredName": "base64"
+    },
+    {
       "name": "process-wrap",
       "version": "9.1.0",
       "license": "MIT OR Apache-2.0",
@@ -148,13 +156,6 @@
       "version": "0.21.7",
       "license": "MIT OR Apache-2.0",
       "author": "Alice Maz <alice@alicemaz.com>, Marshall Pierce <marshall@mpierce.org>",
-      "homepage": "https://github.com/marshallpierce/rust-base64"
-    },
-    {
-      "name": "base64",
-      "version": "0.22.1",
-      "license": "MIT OR Apache-2.0",
-      "author": "Marshall Pierce <marshall@mpierce.org>",
       "homepage": "https://github.com/marshallpierce/rust-base64"
     },
     {
