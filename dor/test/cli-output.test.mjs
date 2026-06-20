@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCli } from '../dist/cli.js';
 import { buildShellCommandForKind, shellCommandKind } from '../dist/commands/shell-quote.js';
+import { msysToWindowsCwd } from '../dist/commands/ensure.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const snapshotsDir = join(__dirname, 'snapshots');
@@ -280,6 +281,15 @@ test('ensure prints a host warning to stderr, leaving stdout clean', async () =>
   assert.match(result.stderr, /^warning: surface:3 has no Dormouse shell integration/);
   assert.equal(result.stdout, 'created surface:3  "pnpm dev"\n');
   assert.doesNotMatch(result.stdout, /warning/);
+});
+
+test('msysToWindowsCwd folds a Git Bash POSIX PWD to a Windows drive on win32', () => {
+  assert.equal(msysToWindowsCwd('/c/Users/me/site', 'win32'), 'C:\\Users\\me\\site');
+  assert.equal(msysToWindowsCwd('/d/work', 'win32'), 'D:\\work');
+  // Already-native paths (some MSYS builds export `C:/...`) and non-win32
+  // platforms are left for resolvePath to handle.
+  assert.equal(msysToWindowsCwd('C:/Users/me/site', 'win32'), 'C:/Users/me/site');
+  assert.equal(msysToWindowsCwd('/c/Users/me/site', 'linux'), '/c/Users/me/site');
 });
 
 test('ensure json output', async () => {
