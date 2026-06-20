@@ -31,7 +31,7 @@ export function parseIdFormat(value: string): IdFormat {
   throw new SyntaxError(`invalid --id-format '${value}'`);
 }
 
-function resolveControlClient(options: CliOptions): ParseResult<ControlClient> {
+function resolveControlClient(options: CliOptions, timeoutMs?: number): ParseResult<ControlClient> {
   if (options.client) return { ok: true, value: options.client };
 
   const env = options.env ?? {};
@@ -47,12 +47,16 @@ function resolveControlClient(options: CliOptions): ParseResult<ControlClient> {
       socketPath,
       token,
       surfaceId: env.DORMOUSE_SURFACE_ID,
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
     }),
   };
 }
 
-export function requireControlClient(options: CliOptions): ControlClient | Error {
-  const result = resolveControlClient(options);
+// `timeoutMs` overrides the client's default request timeout for commands that
+// intentionally block the host (e.g. `dor ensure --restart` waits for a server
+// to die and respawn). Ignored when a client is injected (tests).
+export function requireControlClient(options: CliOptions, timeoutMs?: number): ControlClient | Error {
+  const result = resolveControlClient(options, timeoutMs);
   return result.ok ? result.value : new Error(result.message);
 }
 

@@ -5,7 +5,7 @@ Invocation: `dor --help`
 ```text
 USAGE
   dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref|index] [-- <command>...]
-  dor ensure [--json] [--minimize] [--surface id|ref|index] [--cwd path] -- <command>...
+  dor ensure [--json] [--minimize] [--restart] [--surface id|ref|index] [--cwd path] -- <command>...
   dor version
   dor send [--key value] [--raw] [--sequence json] [--stdin] [--surface id|ref|index] [--text value] [<text>]
   dor read [--json] [--lines count] [--scrollback] [--surface id|ref|index]

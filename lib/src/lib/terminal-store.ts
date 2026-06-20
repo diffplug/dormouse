@@ -46,6 +46,13 @@ export interface PendingShellOpts {
   untouched?: boolean;
   /** Raw command string launched via `-lc`/`/c`, seeded as the pane's command run. */
   command?: string;
+  /**
+   * `dor ensure` surface: the command must only be typed once OSC 633 shell
+   * integration is confirmed, and dropped (never typed) otherwise — so a shell
+   * with no integration (e.g. cmd.exe) can't half-run an untrackable command.
+   * `dor split` leaves this unset and types best-effort into any shell.
+   */
+  requireIntegration?: boolean;
 }
 
 export const registry = new Map<string, TerminalEntry>();

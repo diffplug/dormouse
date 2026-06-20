@@ -9,6 +9,7 @@ const {
   parseCwdFromLsof,
   resolveSpawnConfig,
   withPrependedPath,
+  canonicalizeWindowsCwd,
   buildDescendantSet,
   parseProcStatPpid,
   parsePsPairs,
@@ -153,6 +154,62 @@ test('resolveSpawnConfig preserves explicit cwd', () => {
   assert.equal(config.cols, 120);
   assert.equal(config.rows, 40);
   assert.deepEqual(config.shellArgs, ['-l']);
+});
+
+test('canonicalizeWindowsCwd folds MSYS drive, slashes, and drive-letter case', () => {
+  assert.equal(canonicalizeWindowsCwd('/c/Users/me/app'), 'C:\\Users\\me\\app');
+  assert.equal(canonicalizeWindowsCwd('c:/Users/me/app'), 'C:\\Users\\me\\app');
+  assert.equal(canonicalizeWindowsCwd('c:\\Users\\me\\app'), 'C:\\Users\\me\\app');
+  assert.equal(canonicalizeWindowsCwd('C:\\Users\\me\\app'), 'C:\\Users\\me\\app');
+  // Non-drive paths (POSIX dirs, UNC, empty) pass through unchanged.
+  assert.equal(canonicalizeWindowsCwd('/home/me/app'), '/home/me/app');
+  assert.equal(canonicalizeWindowsCwd('\\\\server\\share'), '\\\\server\\share');
+  assert.equal(canonicalizeWindowsCwd(undefined), undefined);
+});
+
+test('resolveSpawnConfig canonicalizes a Git Bash POSIX cwd on Windows', () => {
+  let checkedPath = null;
+  const config = resolveSpawnConfig(
+    { cwd: '/c/Users/me/app', cols: 80, rows: 24 },
+    {
+      platform: 'win32',
+      env: { COMSPEC: 'C:\\Windows\\System32\\cmd.exe' },
+      fsModule: { statSync: (p) => { checkedPath = p; return { isDirectory: () => true }; } },
+      osModule: { homedir: () => 'C:\\Users\\me', tmpdir: () => 'C:\\Temp' },
+    },
+  );
+  // The POSIX form is resolved to a real Windows path before the directory check,
+  // so the shell starts in the requested dir instead of silently falling back.
+  assert.equal(checkedPath, 'C:\\Users\\me\\app');
+  assert.equal(config.cwd, 'C:\\Users\\me\\app');
+  assert.equal(config.cwdWarning, null);
+});
+
+test('resolveSpawnConfig upper-cases a lowercase Windows drive so child cwd casing is stable', () => {
+  const config = resolveSpawnConfig(
+    { cwd: 'c:\\Users\\me\\app' },
+    {
+      platform: 'win32',
+      env: {},
+      fsModule: { statSync: () => ({ isDirectory: () => true }) },
+      osModule: { homedir: () => 'C:\\Users\\me', tmpdir: () => 'C:\\Temp' },
+    },
+  );
+  assert.equal(config.cwd, 'C:\\Users\\me\\app');
+});
+
+test('resolveSpawnConfig leaves a POSIX cwd untouched off Windows', () => {
+  const config = resolveSpawnConfig(
+    { cwd: '/c/Users/me/app' },
+    {
+      platform: 'linux',
+      env: { SHELL: '/bin/bash' },
+      fsModule: { statSync: () => ({ isDirectory: () => true }) },
+      osModule: { homedir: () => '/home/me', tmpdir: () => '/tmp' },
+    },
+  );
+  // `/c/Users/me/app` is a legitimate path on Linux; never rewrite it.
+  assert.equal(config.cwd, '/c/Users/me/app');
 });
 
 test('resolveSpawnConfig skips -l for csh-style shells that reject it', () => {

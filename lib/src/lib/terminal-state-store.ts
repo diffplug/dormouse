@@ -63,6 +63,15 @@ export function getTerminalPaneState(id: string): TerminalPaneState {
   return paneStates.get(id) ?? createTerminalPaneState();
 }
 
+// True once the pane's shell has emitted real OSC 633/133 boundaries — i.e. its
+// shell integration injection took. `dor ensure -- <command>` types the command
+// into the shell programmatically (bypassing the keystroke heuristic), so only an
+// OSC-driven shell re-reports the running command. Without integration the
+// surface can't be matched or `--restart`ed; callers use this to warn.
+export function isPaneOscDriven(id: string): boolean {
+  return oscDrivenPanes.has(id);
+}
+
 export function ensureTerminalPaneState(id: string, initial?: Partial<TerminalPaneState>): TerminalPaneState {
   const existing = paneStates.get(id);
   if (existing) return existing;
@@ -161,13 +170,19 @@ export function recordTerminalUserInputByPtyId(ptyId: string, input: string, rea
   recordTerminalUserInput(resolvePaneStateIdByPtyId(ptyId), input, reader);
 }
 
-// A command Dormouse launched into a pane (dor split/ensure `-- <command>`) runs
-// under a non-interactive `-lc` shell, so the OSC 633 integration never loads
-// and neither the OSC path nor the keystroke heuristic ever reports it. Seed the
-// command run ourselves at spawn so the pane reports what it's running — needed
-// for `dor ensure` to match a surface it (or a prior ensure) created. Sourced as
-// `user_input` so it does not mark the pane OSC-driven. `finishLaunchedCommand`
-// (on pty exit) clears it, preserving the liveness half of the match.
+// `dor split/ensure -- <command>` spawns a real interactive shell and types the
+// command into it once it reaches a prompt (see typeCommandWhenPromptReady),
+// rather than running `shell -c command`. We seed that command here at spawn,
+// before it is typed, for two reasons. First, it is the readiness sentinel:
+// typeCommandWhenPromptReady waits for this currentCommand to clear, which
+// happens when the shell draws its first prompt (OSC promptStart, or the
+// keystroke heuristic's prompt detector for shells without integration) — the
+// signal the shell can take input. Second, it bridges the matching window until
+// the command is typed and the integration re-reports it via OSC 633, so
+// `dor ensure` can match a surface it (or a prior ensure) created. Sourced as
+// `user_input` so it does not mark the pane OSC-driven and so the first-prompt
+// detector treats it as a finished command and clears it. `finishLaunchedCommand`
+// (on pty exit) also clears it, preserving the liveness half of the match.
 export function seedLaunchedCommand(id: string, command: string, cwdPath?: string): void {
   const events: TerminalSemanticEvent[] = [];
   const cwd = cwdPath ? cwdFromManualPath(cwdPath) : null;
