@@ -260,27 +260,18 @@ test('ensure --restart restarts a matching surface in place', async () => {
   assert.equal(client.requests[0].request.restart, true);
 });
 
-test('ensure prints a host warning to stderr, leaving stdout clean', async () => {
+test('ensure surfaces a host error (no integration) to stderr with exit 1', async () => {
   const client = {
     requests: [],
     async ensureSurface(request) {
       this.requests.push({ method: 'ensureSurface', request });
-      return {
-        status: 'created',
-        surfaceId: '33333333-3333-4333-8333-333333333333',
-        surfaceRef: 'surface:3',
-        command: 'pnpm dev',
-        cwd: request.cwd,
-        minimized: false,
-        warning: 'surface:3 has no Dormouse shell integration (OSC 633), so dor ensure can\'t detect its command.',
-      };
+      throw new Error('dor ensure requires OSC 633 shell integration, which cmd.exe does not provide. Run it from a shell with Dormouse integration, such as Git Bash or PowerShell.');
     },
   };
   const result = await runCli(['ensure', '--', 'pnpm', 'dev'], { client, env: { PWD: '/work/site' } });
-  assert.equal(result.exitCode, 0);
-  assert.match(result.stderr, /^warning: surface:3 has no Dormouse shell integration/);
-  assert.equal(result.stdout, 'created surface:3  "pnpm dev"\n');
-  assert.doesNotMatch(result.stdout, /warning/);
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /^Error: dor ensure requires OSC 633 shell integration, which cmd\.exe does not provide/);
+  assert.equal(result.stdout, '');
 });
 
 test('msysToWindowsCwd folds a Git Bash POSIX PWD to a Windows drive on win32', () => {

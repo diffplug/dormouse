@@ -34,6 +34,7 @@ import {
   fillTerminalProcessCwdByPtyId,
   finishLaunchedCommandByPtyId,
   getTerminalPaneState,
+  isPaneOscDriven,
   recordTerminalOutputByPtyId,
   recordTerminalUserInputByPtyId,
   removeTerminalPaneState,
@@ -310,6 +311,10 @@ export function setPendingShellOpts(id: string, opts: PendingShellOpts): void {
 
 const LAUNCH_PROMPT_POLL_MS = 100;
 const LAUNCH_PROMPT_TIMEOUT_MS = 15_000;
+// `dor ensure` only types into a shell once OSC 633 integration is confirmed, on
+// a tighter budget — and drops the command rather than blindly typing it into a
+// shell that can never be tracked (see the requireIntegration branch below).
+const INTEGRATION_TYPE_TIMEOUT_MS = 8_000;
 
 // `dor split/ensure -- <command>` spawns a real interactive shell (see
 // createSplitSurface) and types the command into it, rather than running
@@ -317,21 +322,36 @@ const LAUNCH_PROMPT_TIMEOUT_MS = 15_000;
 // `dor ensure --restart` can Ctrl+C the command and have the shell survive and
 // return to a prompt instead of the whole pty exiting. But we must wait for the
 // shell to actually reach a prompt first, or the keystrokes land in shell
-// startup. seedLaunchedCommand primed currentCommand with the command; it clears
-// the moment the shell draws its first prompt (integration promptStart, or the
-// keystroke heuristic for shells without it) — that's the signal it can take
-// input. On timeout we send it anyway as a best effort rather than drop it.
-function typeCommandWhenPromptReady(id: string, command: string): void {
+// startup.
+//
+// `dor split` (requireIntegration=false): wait for any first prompt —
+// seedLaunchedCommand primed currentCommand, which clears the moment the shell
+// draws its first prompt (integration promptStart, or the keystroke heuristic
+// for shells without it). On timeout we type anyway as best effort.
+//
+// `dor ensure` (requireIntegration=true): wait specifically for OSC 633 (the
+// only signal that makes the surface trackable), and on timeout DROP the
+// command. The ensure handler kills the surface and errors in that case, so a
+// shell with no integration (e.g. cmd.exe) never half-runs an untrackable
+// command.
+function typeCommandWhenPromptReady(id: string, command: string, requireIntegration: boolean): void {
+  const timeoutMs = requireIntegration ? INTEGRATION_TYPE_TIMEOUT_MS : LAUNCH_PROMPT_TIMEOUT_MS;
   let elapsed = 0;
   const timer = setInterval(() => {
     if (!registry.has(id)) {
       clearInterval(timer);
       return;
     }
-    const ready = getTerminalPaneState(id).currentCommand === null;
-    if (ready || (elapsed += LAUNCH_PROMPT_POLL_MS) >= LAUNCH_PROMPT_TIMEOUT_MS) {
+    const ready = requireIntegration
+      ? isPaneOscDriven(id)
+      : getTerminalPaneState(id).currentCommand === null;
+    if (ready) {
       clearInterval(timer);
       getPlatform().writePty(id, `${command}\r`);
+    } else if ((elapsed += LAUNCH_PROMPT_POLL_MS) >= timeoutMs) {
+      clearInterval(timer);
+      // Best effort for split; drop for ensure (the handler kills + errors).
+      if (!requireIntegration) getPlatform().writePty(id, `${command}\r`);
     }
   }, LAUNCH_PROMPT_POLL_MS);
 }
@@ -358,7 +378,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   });
   if (shellOpts?.command) {
     seedLaunchedCommand(id, shellOpts.command, shellOpts.cwd);
-    typeCommandWhenPromptReady(id, shellOpts.command);
+    typeCommandWhenPromptReady(id, shellOpts.command, shellOpts.requireIntegration === true);
   }
   seedProcessCwdAfterSpawn(id);
 

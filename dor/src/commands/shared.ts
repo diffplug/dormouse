@@ -82,7 +82,3 @@ export function wantsIds(idFormat: IdFormat): boolean {
 export function writeStdout(context: DorCommandContext, stdout: string): void {
   context.process.stdout.write(stdout);
 }
-
-export function writeStderr(context: DorCommandContext, stderr: string): void {
-  context.process.stderr.write(stderr);
-}

@@ -312,6 +312,11 @@ function waitForTerminalState(
  * doors too (their PTY keeps running). Returns a message on failure.
  */
 async function restartSurfaceInPlace(id: string, command: string, cwd: string): Promise<ParseResult<undefined>> {
+  // A match is by construction OSC-driven (surfaceRunsCommand only matches a
+  // shell that reports its command), so this never fires on the real path — but
+  // it guarantees we never fire Ctrl+C into a non-integration shell (e.g. cmd.exe
+  // popping `Terminate batch job (Y/N)?`).
+  if (!isPaneOscDriven(id)) return { ok: false, message: 'has no Dormouse shell integration to restart' };
   const platform = getPlatform();
   platform.writePty(id, '\x03');
   const interrupted = await waitForTerminalState(
@@ -332,16 +337,17 @@ async function restartSurfaceInPlace(id: string, command: string, cwd: string): 
 
 // A `dor ensure -- <command>` command is typed into the shell programmatically,
 // which bypasses the keystroke heuristic — so only a shell whose integration
-// emits OSC 633 boundaries ever reports the command back. Wait for that signal so
-// the CLI can warn when it's absent. Resolves the moment integration is detected;
-// only a non-integration shell waits out the timeout, which the CLI's create-path
-// request budget (ENSURE_TIMEOUT_MS / RESTART_TIMEOUT_MS) is sized to outlast.
-const INTEGRATION_DETECT_TIMEOUT_MS = 15_000;
+// emits OSC 633 boundaries ever reports the command back, which is what makes the
+// surface matchable/restartable. `dor ensure` requires it. We give the shell this
+// long to draw its first integrated prompt (headroom for a cold-start shell
+// loading a profile / under AV) before concluding it has no integration.
+const INTEGRATION_DETECT_TIMEOUT_MS = 8_000;
 
-async function missingIntegrationWarning(id: string, ref: string): Promise<string | undefined> {
-  const integrated = await waitForTerminalState(id, () => isPaneOscDriven(id), INTEGRATION_DETECT_TIMEOUT_MS);
-  if (integrated) return undefined;
-  return `${ref} has no Dormouse shell integration (OSC 633), so dor ensure can't detect its command; future ensure/--restart calls will spawn a new surface instead of matching or restarting this one.`;
+// Shown to the user (via the CLI's stderr) when `dor ensure` can't run because the
+// target shell has no OSC 633 integration. `shell` is a display name when known.
+function missingIntegrationError(shell?: string): string {
+  const name = (shell ?? '').replace(/\\/g, '/').split('/').pop() || 'this shell';
+  return `dor ensure requires OSC 633 shell integration, which ${name} does not provide. Run it from a shell with Dormouse integration, such as Git Bash or PowerShell.`;
 }
 
 function killConfirmationParam(value: unknown): { mode: 'if-read'; text: string } | { mode: 'dangerously' } | null {
@@ -913,12 +919,14 @@ export function Wall({
     minimized,
     referenceId,
     cwd,
+    requireIntegration,
   }: {
     command?: string;
     direction: DorResolvedSplitDirection;
     minimized: boolean;
     referenceId: string;
     cwd?: string;
+    requireIntegration?: boolean;
   }): ParseResult<{
     id: string;
     ref: string;
@@ -948,6 +956,7 @@ export function Wall({
         cwd: inheritedCwd,
         untouched: false,
         command,
+        ...(requireIntegration ? { requireIntegration: true } : {}),
       });
     } else if (defaults?.shell || inheritedCwd) {
       setPendingShellOpts(newId, {
@@ -1310,6 +1319,16 @@ export function Wall({
           });
           return;
         }
+        // ensure needs OSC 633 to track the command. cmd.exe provably has none,
+        // so when the configured shell is explicitly cmd, fail immediately without
+        // even spawning a split. Only short-circuit on an explicit shell — an
+        // unset shell classifies as 'cmd' on Windows but the sidecar may actually
+        // spawn PowerShell, so let those fall through to the generic OSC wait.
+        const ensureShell = getDefaultShellOpts()?.shell;
+        if (ensureShell && shellCommandKind(ensureShell, PLATFORM_STRING) === 'cmd') {
+          detail.respond({ ok: false, error: missingIntegrationError(ensureShell) });
+          return;
+        }
         const resolved = resolveSplitTarget();
         if (!resolved) return;
         const direction = dorDirectionForDockview(pickSplitDirection(resolved.panel));
@@ -1319,15 +1338,28 @@ export function Wall({
           minimized: booleanParam(params.minimized),
           referenceId: resolved.target.id,
           cwd,
+          requireIntegration: true,
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });
           return;
         }
-        // ensure's idempotency only holds if the new shell reports OSC 633
-        // boundaries — otherwise it can never be matched and the next ensure spawns
-        // a duplicate. Wait for integration and warn the CLI if it never arrives.
-        const warning = await missingIntegrationWarning(result.value.id, result.value.ref);
+        // ensure is only useful if the new shell reports OSC 633 — otherwise it
+        // can never be matched or restarted. A non-cmd shell can still lack
+        // integration (misconfigured, exotic); wait for the signal, and if it
+        // never arrives kill the throwaway split and fail cleanly rather than
+        // half-run an untrackable command. typeCommandWhenPromptReady drops the
+        // command in the same case, so nothing executes.
+        const integrated = await waitForTerminalState(
+          result.value.id,
+          () => isPaneOscDriven(result.value.id),
+          INTEGRATION_DETECT_TIMEOUT_MS,
+        );
+        if (!integrated) {
+          killPaneImmediately(result.value.id);
+          detail.respond({ ok: false, error: missingIntegrationError(ensureShell) });
+          return;
+        }
         detail.respond({
           ok: true,
           result: {
@@ -1337,7 +1369,6 @@ export function Wall({
             command,
             cwd,
             minimized: booleanParam(params.minimized),
-            ...(warning ? { warning } : {}),
           },
         });
         return;

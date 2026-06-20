@@ -94,6 +94,8 @@ import * as platformModule from './platform';
 import { makeAlertScenario, type FakePtyAdapter, type FakeScenario } from './platform';
 import {
   DEFAULT_ACTIVITY_STATE,
+  applyTerminalSemanticEvents,
+  isPaneOscDriven,
   mountElement,
   clearSessionAttention,
   clearSessionTodo,
@@ -1005,5 +1007,57 @@ describe('pending shell opts → spawnPty', () => {
 
     const options = spawnSpy.mock.calls[0]?.[1] as { cwd?: string } | undefined;
     expect(options?.cwd).toBeUndefined();
+  });
+});
+
+describe('typeCommandWhenPromptReady — dor ensure requires OSC 633', () => {
+  beforeEach(installRegistryTestGlobals);
+  afterEach(uninstallRegistryTestGlobals);
+
+  // Capture what gets typed into the pty (the command injection routes through
+  // writePty → the input handler).
+  function captureTypedInput(id: string): string[] {
+    const typed: string[] = [];
+    fakePlatform.setInputHandler(id, (data) => typed.push(data));
+    return typed;
+  }
+
+  it('drops the command when OSC 633 never arrives (no half-run on cmd.exe-like shells)', () => {
+    const id = 'ensure-no-osc';
+    setPendingShellOpts(id, { command: 'pnpm dev', requireIntegration: true });
+    getOrCreateTerminal(id);
+    const typed = captureTypedInput(id);
+
+    vi.advanceTimersByTime(8_100); // past the 8s integration window, no OSC applied
+
+    expect(typed).not.toContain('pnpm dev\r');
+  });
+
+  it('types the command once OSC 633 is detected', () => {
+    const id = 'ensure-osc';
+    setPendingShellOpts(id, { command: 'pnpm dev', requireIntegration: true });
+    getOrCreateTerminal(id);
+    const typed = captureTypedInput(id);
+
+    vi.advanceTimersByTime(2_000);
+    expect(typed).not.toContain('pnpm dev\r'); // not yet integrated
+
+    // A real OSC 633 prompt boundary marks the pane OSC-driven.
+    applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
+    expect(isPaneOscDriven(id)).toBe(true);
+    vi.advanceTimersByTime(200); // let the next poll fire
+
+    expect(typed.filter((data) => data === 'pnpm dev\r')).toHaveLength(1);
+  });
+
+  it('split (no requireIntegration) still types best-effort without OSC', () => {
+    const id = 'split-no-osc';
+    setPendingShellOpts(id, { command: 'pnpm dev' });
+    getOrCreateTerminal(id);
+    const typed = captureTypedInput(id);
+
+    vi.advanceTimersByTime(15_100); // split's best-effort timeout
+
+    expect(typed).toContain('pnpm dev\r');
   });
 });
