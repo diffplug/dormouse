@@ -123,7 +123,9 @@ fn set_macos_dock_icon() {
 
     let mtm = unsafe { MainThreadMarker::new_unchecked() };
     let app = NSApplication::sharedApplication(mtm);
-    let data = NSData::with_bytes(include_bytes!("../icons/128x128@2x.png"));
+    // The largest size exploded from icon.icns (1024×1024) — it carries the
+    // built-in transparent padding the bundle's edge-to-edge 128x128@2x.png lacks.
+    let data = NSData::with_bytes(include_bytes!("../icons/dock-icon.png"));
     let Some(app_icon) = NSImage::initWithData(NSImage::alloc(), &data) else {
         append_log("[app] failed to create macOS dock icon image");
         return;
