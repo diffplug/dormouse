@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCli } from '../dist/cli.js';
 import { buildShellCommandForKind, shellCommandKind } from '../dist/commands/shell-quote.js';
@@ -522,14 +522,20 @@ test('agent-browser resolves the binary on PATH to an absolute binaryPath', asyn
   const { tmpdir } = await import('node:os');
   const dir = await mkdtemp(join(tmpdir(), 'dor-ab-'));
   try {
-    const binPath = join(dir, 'agent-browser');
+    // On Windows a bare name isn't executable and resolveBinaryPath walks
+    // PATHEXT (.cmd/.exe/.bat), so the on-disk shim must carry one of those
+    // extensions — mirroring how agent-browser actually installs there.
+    const ext = process.platform === 'win32' ? '.cmd' : '';
+    const binPath = join(dir, `agent-browser${ext}`);
     await write(binPath, '#!/bin/sh\n', { mode: 0o755 });
     const ab = fakeAgentBrowser();
     const client = fixtureClient();
     await runCli(['ab', 'snapshot'], {
       client,
       execAgentBrowser: ab.exec,
-      env: { PATH: `/nonexistent:${dir}` },
+      // Join with the platform PATH delimiter (`;` on Windows, `:` elsewhere) —
+      // resolveBinaryPath splits on the same, so a POSIX-only `:` would hide dir.
+      env: { PATH: ['/nonexistent', dir].join(delimiter) },
     });
     assert.equal(client.requests[0].request.binaryPath, binPath);
   } finally {

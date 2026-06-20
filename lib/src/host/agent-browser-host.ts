@@ -38,7 +38,14 @@
 import * as os from 'os';
 import * as path from 'path';
 import { promises as fs } from 'fs';
-import { spawn } from 'child_process';
+// cross-spawn, not child_process — on Windows a bare command name never resolves
+// a `.cmd`/`.bat` PATH shim (Node spawn ignores PATHEXT → ENOENT), and Node >=22
+// refuses to spawn a `.cmd` directly even by full path (EINVAL, the
+// CVE-2024-27980 hardening). agent-browser ships as a `.cmd` shim, so both bite;
+// the GUI host hits this even for the absolute `binaryPath` dor ab resolved.
+// cross-spawn routes through cmd.exe with correct escaping and is a no-op on
+// POSIX. See docs/specs/dor-cli.md → "Spawning External Binaries".
+import spawn from 'cross-spawn';
 import { randomBytes } from 'crypto';
 import { type AgentBrowserTab, parseAgentBrowserTabs } from '../lib/agent-browser-tab';
 import {

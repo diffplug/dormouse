@@ -60,6 +60,34 @@ Public PTY env:
 `DORMOUSE_CLI_BIN` is host-internal spawn configuration. Terminals should rely
 on `PATH`, not on that variable.
 
+## Spawning External Binaries
+
+Any time Dormouse spawns an external/user-installed binary — `dor ab` driving
+`agent-browser`, the agent-browser host running tab/eval/screenshot commands, dev
+harnesses launching `pnpm`/`agent-browser` — it goes through **`cross-spawn`**,
+never raw `node:child_process` `spawn`. This is mandatory for correctness on
+Windows, where two distinct failures bite a naive spawn:
+
+- **ENOENT on a bare name.** Node's `spawn` does not consult `PATHEXT`, so a bare
+  `agent-browser` never resolves the `agent-browser.cmd` PATH shim that npm/vfox
+  installs. (`agent-browser` works from a POSIX shell only because the file there
+  is a real executable with a shebang; on Windows it is a `.cmd`.)
+- **EINVAL on a `.cmd` even by full path.** Node ≥22 refuses to spawn `.cmd`/
+  `.bat` files without a shell (the CVE-2024-27980 hardening), so resolving the
+  absolute `.cmd` path and spawning it directly still fails.
+
+`cross-spawn` resolves the command via `PATH`/`PATHEXT` and routes `.cmd`/`.bat`
+through `cmd.exe` with correct argument escaping, and is a transparent passthrough
+on POSIX. Use it with the same `(command, args, options)` signature as
+`child_process.spawn`; it is bundled into `dist/dor.js` and the sidecar `.cjs`
+by esbuild.
+
+Caveat: a literal `%VAR%` inside an argument can still be expanded by `cmd.exe`
+when it passes through a `.cmd` shim — an unavoidable Windows batch limitation, not
+something `cross-spawn` (or any wrapper) can fully prevent. Our forwarded
+arguments (URLs, selectors, and the host's hardcoded `eval` scripts) contain no
+`%VAR%` patterns, so this does not arise in practice.
+
 ## Host Plumbing
 
 ### Standalone

@@ -16,7 +16,13 @@
  */
 
 import { buildCommand } from '@stricli/core';
-import { spawn } from 'node:child_process';
+// cross-spawn, not node:child_process — on Windows a bare command name never
+// resolves a `.cmd`/`.bat` PATH shim (Node spawn ignores PATHEXT → ENOENT), and
+// Node >=22 refuses to spawn a `.cmd` directly even by full path (EINVAL, the
+// CVE-2024-27980 hardening). agent-browser ships as a `.cmd` shim, so both bite.
+// cross-spawn routes through cmd.exe with correct escaping and is a no-op
+// passthrough on POSIX. See docs/specs/dor-cli.md → "Spawning External Binaries".
+import spawn from 'cross-spawn';
 import { existsSync } from 'node:fs';
 import type {
   CliEnv,
@@ -33,6 +39,33 @@ import { fail, requireControlClient, stringParser } from './shared.js';
 const WORKSPACE_ID = '1';
 
 const INSTALL_HINT = 'npm i -g agent-browser';
+const INSTALL_DOCS = 'https://agent-browser.dev';
+const BIN_ENV = 'DORMOUSE_AGENT_BROWSER_BIN';
+
+// Extensions a bare command name can carry on Windows, in PATH-search order.
+// Shared by resolveBinaryPath (PATH walk) and existsCandidate (explicit path).
+const WINDOWS_BIN_EXTS = ['.cmd', '.exe', '.bat'];
+
+/**
+ * Clear, multi-line guidance shown when the user's agent-browser binary is
+ * absent. `binary` is named only when it differs from the default, so a custom
+ * DORMOUSE_AGENT_BROWSER_BIN that points nowhere still tells the user what was
+ * looked for.
+ */
+function missingBinaryMessage(binary: string): string {
+  const lookedFor = binary === 'agent-browser' ? '' : ` (looked for '${binary}')`;
+  return [
+    `agent-browser is not installed${lookedFor}.`,
+    '',
+    'dor ab drives your own agent-browser binary, which Dormouse never bundles.',
+    'Install it, then re-run your command:',
+    '',
+    `    ${INSTALL_HINT}`,
+    '',
+    `More: ${INSTALL_DOCS}`,
+    `Already installed? Make sure it's on your PATH, or set ${BIN_ENV} to its full path.`,
+  ].join('\n');
+}
 
 // agent-browser session names become filesystem paths (socket dir), so `/` is
 // not usable as a namespace separator — the daemon fails to start. Dots keep
@@ -160,12 +193,29 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
   const binary = env.DORMOUSE_AGENT_BROWSER_BIN || 'agent-browser';
   const exec = options.execAgentBrowser ?? execAgentBrowserProcess;
 
+  // Resolve the binary to an absolute path once: it both proves the install
+  // present (below) and travels to the host as `binaryPath` (a GUI host may not
+  // share this terminal's PATH). undefined means "not found on PATH" — or, for
+  // an explicit path, simply "returned verbatim", which agentBrowserIsMissing
+  // re-checks on disk.
+  const binaryPath = resolveBinaryPath(binary, env);
+
+  // Detect a missing install deterministically, before spawning. A failed spawn
+  // on Windows emits BOTH 'error' (ENOENT) and 'close' (a libuv error code); if
+  // 'close' wins that race the process resolves with a bogus exit code and no
+  // output, so `dor ab` would print nothing at all. Checking the filesystem
+  // ourselves sidesteps that ordering. Skipped when a stub exec is injected
+  // (tests), which supplies its own ENOENT behavior via the catch below.
+  if (options.execAgentBrowser === undefined && agentBrowserIsMissing(binary, env, binaryPath)) {
+    return fail(missingBinaryMessage(binary));
+  }
+
   let result: AgentBrowserExecResult;
   try {
     result = await exec(binary, ['--session', session, ...rest]);
   } catch (error) {
     if (isMissingBinaryError(error)) {
-      return fail(`agent-browser was not found (looked for '${binary}'). Install it with: ${INSTALL_HINT}`);
+      return fail(missingBinaryMessage(binary));
     }
     return fail(error instanceof Error ? error.message : String(error));
   }
@@ -179,11 +229,8 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
       try {
         const status = await exec(binary, ['--session', session, 'stream', 'status', '--json']);
         const wsPort = parseStreamPort(status.stdout);
-        // The Dormouse host (e.g. a GUI-launched VS Code extension host) may
-        // not share this terminal's PATH, so resolve the binary to an
-        // absolute path here, where the user's environment is authoritative,
-        // and pass it along for host-side tab/close commands.
-        const binaryPath = resolveBinaryPath(binary, env);
+        // Pass the absolute path resolved above so the host (which may not share
+        // this terminal's PATH) can run host-side tab/close commands.
         await client.agentBrowserSurface({
           key,
           session,
@@ -217,7 +264,7 @@ export function resolveBinaryPath(binary: string, env: CliEnv): string | undefin
   const pathVar = env.PATH;
   if (!pathVar) return undefined;
   const isWindows = process.platform === 'win32';
-  const names = isWindows ? [`${binary}.cmd`, `${binary}.exe`, `${binary}.bat`] : [binary];
+  const names = isWindows ? WINDOWS_BIN_EXTS.map((ext) => `${binary}${ext}`) : [binary];
   for (const dir of pathVar.split(isWindows ? ';' : ':')) {
     if (!dir) continue;
     for (const name of names) {
@@ -242,6 +289,31 @@ function isMissingBinaryError(error: unknown): boolean {
   return !!error && typeof error === 'object' && (error as { code?: unknown }).code === 'ENOENT';
 }
 
+/**
+ * Whether the binary can be proven absent without spawning it, given the path
+ * `resolveBinaryPath` already produced for it. Returns true only when the absence
+ * is certain; ambiguous cases (no PATH to search) fall through to the spawn,
+ * which still rejects with ENOENT.
+ */
+function agentBrowserIsMissing(binary: string, env: CliEnv, resolvedPath: string | undefined): boolean {
+  // Explicit path (e.g. a DORMOUSE_AGENT_BROWSER_BIN override): resolveBinaryPath
+  // hands such a path back verbatim without touching disk, so check it (and
+  // Windows launcher extensions) directly.
+  if (binary.includes('/') || binary.includes('\\')) {
+    return !existsCandidate(binary, process.platform === 'win32');
+  }
+  // Bare name: resolvedPath is the PATH walk's result. Without a PATH to search
+  // we can't prove anything, so let the spawn decide.
+  if (!env.PATH) return false;
+  return resolvedPath === undefined;
+}
+
+function existsCandidate(path: string, isWindows: boolean): boolean {
+  if (existsSync(path)) return true;
+  if (!isWindows) return false;
+  return WINDOWS_BIN_EXTS.some((ext) => existsSync(`${path}${ext}`));
+}
+
 // agent-browser talks to a daemon, so forwarded commands return quickly;
 // buffering output until exit keeps this transport-agnostic with runCli's
 // captured stdout/stderr at the cost of not streaming long-running output.
@@ -250,11 +322,18 @@ function execAgentBrowserProcess(binary: string, args: string[]): Promise<AgentB
     const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
+    // A failed spawn races 'error' against 'close' on Windows (both fire);
+    // latch on the first so the loser can't overwrite the outcome — otherwise a
+    // 'close' carrying a bogus exit code could swallow the ENOENT.
+    let settled = false;
+    const settle = (apply: () => void): void => {
+      if (settled) return;
+      settled = true;
+      apply();
+    };
     child.stdout.on('data', (chunk: unknown) => { stdout += String(chunk); });
     child.stderr.on('data', (chunk: unknown) => { stderr += String(chunk); });
-    child.on('error', reject);
-    child.on('close', (code: number | null) => {
-      resolve({ exitCode: code ?? 1, stdout, stderr });
-    });
+    child.on('error', (error: Error) => settle(() => reject(error)));
+    child.on('close', (code: number | null) => settle(() => resolve({ exitCode: code ?? 1, stdout, stderr })));
   });
 }

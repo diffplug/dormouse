@@ -19,6 +19,7 @@
     "@xterm/addon-unicode-graphemes": "0.5.0-beta.219",
     "@xterm/xterm": "6.1.0-beta.219",
     "clsx": "^2.1.1",
+    "cross-spawn": "^7.0.6",
     "dockview-react": "^5.1.0",
     "fflate": "0.8.3",
     "jsonc-parser": "3.3.1",

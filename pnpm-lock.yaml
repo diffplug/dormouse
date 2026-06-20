@@ -17,6 +17,9 @@ importers:
       '@stricli/core':
         specifier: ^1.2.7
         version: 1.2.7
+      cross-spawn:
+        specifier: ^7.0.6
+        version: 7.0.6
     devDependencies:
       esbuild:
         specifier: ^0.28.0
@@ -42,6 +45,9 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      cross-spawn:
+        specifier: ^7.0.6
+        version: 7.0.6
       dockview-react:
         specifier: ^5.1.0
         version: 5.2.0(react@19.2.6)
@@ -155,6 +161,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.0.2
         version: 6.0.2(vite@8.0.14(esbuild@0.28.0)(jiti@2.7.0))
+      cross-spawn:
+        specifier: ^7.0.6
+        version: 7.0.6
       esbuild:
         specifier: ^0.28.0
         version: 0.28.0

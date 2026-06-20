@@ -5,7 +5,7 @@ stdout:
   "surface_id": "33333333-3333-4333-8333-333333333333",
   "surface_ref": "surface:3",
   "command": "pnpm dev",
-  "cwd": "/Users/me/projects/site",
+  "cwd": "C:\\Users\\me\\projects\\site",
   "minimized": true
 }
 

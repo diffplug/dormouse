@@ -34,6 +34,16 @@ declare module 'node:child_process' {
   }): ChildProcess;
 }
 
+// cross-spawn ships no types and dor avoids @types/node, so declare the one call
+// shape we use. Drop-in for the node:child_process spawn above; returns the same
+// minimal ChildProcess.
+declare module 'cross-spawn' {
+  import type { ChildProcess } from 'node:child_process';
+  export default function spawn(command: string, args: readonly string[], options: {
+    stdio: readonly ['ignore', 'pipe', 'pipe'];
+  }): ChildProcess;
+}
+
 declare module 'node:fs' {
   export function existsSync(path: string): boolean;
 }
