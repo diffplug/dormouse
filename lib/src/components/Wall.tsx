@@ -1702,6 +1702,7 @@ export function Wall({
             {/* Kill confirmation overlay — centered over the pane being killed */}
             {confirmKill && (
               <KillConfirmOverlay
+                apiRef={apiRef}
                 confirmKill={confirmKill}
                 paneElements={paneElements}
                 onCancel={() => rejectKill()}
