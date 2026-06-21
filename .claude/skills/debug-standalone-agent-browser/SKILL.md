@@ -67,6 +67,15 @@ agent-browser --session <outer-session> get text body
 agent-browser --session <outer-session> screenshot /private/tmp/dormouse.png
 ```
 
+### Run `dor` by typing into Dormouse — never from your own shell
+
+`dor` commands (`dor ab open`, `dor split`, …) must be **typed into the Dormouse terminal under test** (the xterm — see *Typing into xterm* and *Submitting (Enter)* below), exactly as a user would. Do **not** run the staged `dor` (or `node .../dor.js`) from your own shell, even if you point it at the harness's `DORMOUSE_CONTROL_SOCKET`/`DORMOUSE_CONTROL_TOKEN`. Two ways it breaks:
+
+- **Wrong instance.** Your dev shell is often itself running *inside the installed Dormouse*, so it inherits that app's `DORMOUSE_SURFACE_ID`, `DORMOUSE_CONTROL_SOCKET`, and `DORMOUSE_CONTROL_TOKEN`. A bare `dor` then drives (or errors against) the **installed** app, not the harness — e.g. `Warning: could not open the Dormouse browser surface: surface '<stale-id>' was not found`.
+- **Wrong / missing caller surface.** `dor` resolves its target from `DORMOUSE_SURFACE_ID` (the pane it runs in), then the focused surface. Typed into the xterm, that variable is the harness pane, so surface targeting *and the split-vs-replace behavior match real usage*: `dor ab open` **splits** next to a **touched** terminal but **replaces** an **untouched** one (`createContentSurface`'s `replaceUntouchedTerminal`). Any input into a terminal touches it, so a user who typed the command gets a split — but an externally-run `dor` leaves the terminal untouched (and has no caller pane), so you get a replace and the flow no longer matches what the user sees.
+
+So to reproduce a user flow faithfully: `keyboard inserttext` the `dor …` line into the xterm, submit it with the synthetic Enter, then watch the harness log / DOM for the result.
+
 ### Command/mouse subcommands are limited
 
 - `agent-browser keyboard` accepts only `type` and `inserttext` (there is **no** `keyboard press`).
