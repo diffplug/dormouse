@@ -4,9 +4,6 @@ type ThemePalette = Record<VscodeThemeKind, string | null>;
 
 export const THEME_KINDS: readonly VscodeThemeKind[] = ['dark', 'light', 'hcDark', 'hcLight'];
 
-export const NULL_COLOR = Symbol('null-color');
-export type ResolvedColor = string | typeof NULL_COLOR;
-
 const REGISTRY_DEFAULTS: Record<string, ThemePalette> = {
   '--vscode-foreground': {
     dark: '#CCCCCC',
@@ -332,18 +329,10 @@ export const RESOLUTION_RULES: readonly ResolutionRule[] = [
   { name: '--vscode-terminal-ansiBrightWhite' },
 ];
 
-export function registryDefault(name: string, themeKind: VscodeThemeKind): ResolvedColor {
-  const defaults = REGISTRY_DEFAULTS[name];
-  if (!defaults) return NULL_COLOR;
-
-  const value = defaults[themeKind];
-  if (value) return value;
-  return NULL_COLOR;
-}
-
 export function registryDefaultValue(name: string, themeKind: VscodeThemeKind): string | null {
-  const value = registryDefault(name, themeKind);
-  return value === NULL_COLOR ? null : value;
+  const defaults = REGISTRY_DEFAULTS[name];
+  if (!defaults) return null;
+  return defaults[themeKind] || null;
 }
 
 export function coerceThemeKind(themeKind: VscodeThemeKind | 'dark' | 'light'): VscodeThemeKind {
