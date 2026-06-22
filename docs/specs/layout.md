@@ -147,7 +147,7 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 
 ### Passthrough mode
 - All keyboard input routes to the active session's xterm.js instance
-- Only the mode-exit gesture (LCmd → RCmd) is intercepted
+- Only the mode-exit gesture (LCmd → RCmd, or LShift → RShift) is intercepted
 - In the VS Code host, selected workbench chords are mirrored: xterm still processes the key, and Dormouse also asks the extension host to run the matching VS Code command. See [the VS Code host spec](vscode.md) for the allowlist.
 - Selection overlay shows 2px solid border with glow
 - Terminal has DOM focus
@@ -166,8 +166,8 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 - Focus is deferred via `requestAnimationFrame` to prevent dockview from stealing it
 
 **Enter command mode:**
-- Left Cmd keydown, then Right Cmd keydown within 500ms
-- Detected via capture-phase `keydown` listener on `e.key === 'Meta'` and `e.location` (1 = left, 2 = right)
+- Left Cmd keydown, then Right Cmd keydown within 500ms — or the same left-then-right gesture with Shift (Left Shift, then Right Shift within 500ms)
+- Detected via capture-phase `keydown` listener on `e.key === 'Meta'` (or `e.key === 'Shift'`) and `e.location` (1 = left, 2 = right). The Meta and Shift tracks are independent, so a Left Cmd followed by a Right Shift does not trigger.
 - Works even when xterm has DOM focus because listener uses capture phase
 
 ## Keyboard shortcuts (command mode)
