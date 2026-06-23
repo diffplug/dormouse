@@ -458,9 +458,8 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
       } else if (event.type === 'status') {
         setStatus(event.status);
         setConnectionLost(event.status.connected === false);
-        const maybeStatus = event.status as StreamStatus & { viewportWidth?: number; viewportHeight?: number };
-        if (typeof maybeStatus.viewportWidth === 'number' && typeof maybeStatus.viewportHeight === 'number') {
-          deviceRef.current = { width: maybeStatus.viewportWidth, height: maybeStatus.viewportHeight };
+        if (typeof event.status.viewportWidth === 'number' && typeof event.status.viewportHeight === 'number') {
+          deviceRef.current = { width: event.status.viewportWidth, height: event.status.viewportHeight };
           maybeDisengageSync();
           publishScreen();
         }
