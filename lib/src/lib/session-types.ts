@@ -358,3 +358,12 @@ export function activeWorkspaceSession(window: PersistedWindow): PersistedSessio
   const active = window.workspaces.find((ws) => ws.id === window.activeWorkspaceId);
   return (active ?? window.workspaces[0]).session;
 }
+
+/** Return a copy of the Window with the active Workspace's session replaced,
+ *  preserving every other Workspace. */
+export function replaceActiveSession(window: PersistedWindow, session: PersistedSession): PersistedWindow {
+  return {
+    ...window,
+    workspaces: window.workspaces.map((ws) => (ws.id === window.activeWorkspaceId ? { ...ws, session } : ws)),
+  };
+}
