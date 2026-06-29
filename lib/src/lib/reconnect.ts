@@ -119,10 +119,14 @@ function getSavedResumePlan(savedState: unknown, liveIds: string[]): ReconnectRe
   const savedSet = new Set(saved.panes.map((p) => p.id));
   if (!liveIds.every((id) => savedSet.has(id))) return null;
 
-  const doors = (saved.doors ?? []).filter((item) => liveSet.has(item.id));
+  // Browser surfaces have no PTY, so they never appear in the live-PTY set. Keep
+  // them anyway — they are reconstructed from the saved layout blob / door
+  // params (docs/specs/transport.md). Omitting them would drop the saved layout
+  // (the visible-pane mismatch below) and lose minimized browser doors.
+  const doors = (saved.doors ?? []).filter((item) => liveSet.has(item.id) || item.component === 'browser');
   const doorIds = new Set(doors.map((item) => item.id));
   const paneIds = saved.panes
-    .filter((pane) => liveSet.has(pane.id) && !doorIds.has(pane.id))
+    .filter((pane) => !doorIds.has(pane.id) && (liveSet.has(pane.id) || pane.surfaceType === 'browser'))
     .map((pane) => pane.id);
   const layoutPanelIds = getLayoutPanelIds(saved.layout);
   const layoutMatchesVisiblePanes =

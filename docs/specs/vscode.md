@@ -106,6 +106,8 @@ PTY lifecycle, buffering, the reconnection sequence, and the full message protoc
 ### Workspaces
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers and `docs/specs/alert.md` for the union status.
+>
+> **Not yet implemented (stage 2b).** The webview↔Workspace mapping is the conceptual frame; VS Code already partitions PTYs per webview, but Dormouse does not yet compute a per-Workspace union or reflect it onto native chrome (see the "Not yet implemented" bullet below). Stage 2a (`surfaceType` persistence, browser-surface restore/resume) is implemented and adapter-agnostic.
 
 In VS Code, **one webview is one Workspace**. The bottom-panel `WebviewView` ("Dormouse") is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. Unlike standalone, several Workspaces are visible at once, and VS Code — not Dormouse — owns their tabs, creation, and closing: opening a Dormouse editor tab creates a Workspace and closing the tab closes it, so Dormouse adds no create/rename/close affordances here. A webview owns the terminal Sessions whose PTYs its router tracks (`ownedPtyIds`, `docs/specs/transport.md`) plus any browser surfaces rendered in it; together those are the Workspace's Surfaces.
 

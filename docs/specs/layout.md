@@ -148,6 +148,8 @@ Extreme case: a single door with a very long title, with more doors on both side
 ## Workspaces
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers and `docs/specs/alert.md` for the union status. VS Code's per-webview mapping is in `docs/specs/vscode.md`.
+>
+> **Not yet implemented (stages 2b/3).** This section is specified ahead of the code. The app today runs one implicit Workspace; the container, switching, and strip land behind a feature flag (the glossary's Implementation status has the staging). Stage 2a — `surfaceType` persistence and the browser-surface restore/resume fixes — is implemented.
 
 A **Workspace** is one Wall's worth of Surfaces (terminal Sessions and browser surfaces) plus its layout, with a user-facing name. The standalone Window hosts several Workspaces but mounts only one — the **active** Workspace — at a time. Each Workspace owns its own Content (dockview layout) and Baseboard (doors).
 

@@ -1,5 +1,5 @@
 import type { PlatformAdapter } from './platform/types';
-import { readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession } from './session-types';
+import { readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceType } from './session-types';
 import { detectResumeCommand } from './resume-patterns';
 import { getLivePersistedAlertState, getTerminalPaneState, isUntouched, resolveTerminalSessionId } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
@@ -15,20 +15,20 @@ function getPreviousPaneMap(platform: PlatformAdapter): Map<string, PersistedPan
 export async function saveSession(
   platform: PlatformAdapter,
   layout: unknown,
-  panes: Array<{ id: string; title: string }>,
+  panes: Array<{ id: string; title: string; surfaceType?: PersistedSurfaceType }>,
   doors: PersistedDoor[] = [],
 ): Promise<void> {
   const previousPanes = getPreviousPaneMap(platform);
-  const allPanes = new Map<string, { id: string; title: string }>();
+  const allPanes = new Map<string, { id: string; title: string; surfaceType: PersistedSurfaceType }>();
   for (const pane of panes) {
-    allPanes.set(pane.id, { id: pane.id, title: persistedVisiblePaneTitle(pane.title) });
+    allPanes.set(pane.id, { id: pane.id, title: persistedVisiblePaneTitle(pane.title), surfaceType: pane.surfaceType ?? 'terminal' });
   }
   const persistedDoors = doors.map((door) => ({
     ...door,
     title: persistedDoorTitle(door.id, door.title, door.component),
   }));
   for (const item of persistedDoors) {
-    allPanes.set(item.id, { id: item.id, title: item.title });
+    allPanes.set(item.id, { id: item.id, title: item.title, surfaceType: item.component === 'browser' ? 'browser' : 'terminal' });
   }
 
   const persisted: PersistedPane[] = await Promise.all(
@@ -49,6 +49,9 @@ export async function saveSession(
         resumeCommand: resolvedScrollback ? detectResumeCommand(resolvedScrollback) : null,
         untouched: isUntouched(pane.id),
         alert: liveAlert ?? previousPane?.alert ?? null,
+        // Record the kind only for browser surfaces; absent reads as 'terminal'
+        // (docs/specs/transport.md), keeping terminal snapshots byte-identical.
+        ...(pane.surfaceType === 'browser' ? { surfaceType: 'browser' as const } : {}),
       };
     }),
   );

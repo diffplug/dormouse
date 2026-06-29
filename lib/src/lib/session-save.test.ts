@@ -206,4 +206,38 @@ describe('saveSession', () => {
       ],
     });
   });
+
+  it('records surfaceType only for browser surfaces, leaving terminal panes unmarked', async () => {
+    const platform = createPlatform(null);
+
+    await saveSession(platform, { root: true }, [
+      { id: 'pane-term', title: 'Terminal', surfaceType: 'terminal' },
+      { id: 'pane-web', title: 'localhost', surfaceType: 'browser' },
+    ]);
+
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    const term = saved.panes.find((p) => p.id === 'pane-term')!;
+    const web = saved.panes.find((p) => p.id === 'pane-web')!;
+    expect('surfaceType' in term).toBe(false);
+    expect(web.surfaceType).toBe('browser');
+  });
+
+  it('records surfaceType browser for a minimized browser door', async () => {
+    const platform = createPlatform(null);
+
+    await saveSession(platform, { root: true }, [], [{
+      id: 'door-web',
+      title: 'localhost',
+      component: 'browser',
+      params: { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173' },
+      neighborId: null,
+      direction: 'right',
+      remainingPaneIds: [],
+      layoutAtMinimize: null,
+      layoutAtMinimizeSignature: 'empty',
+    }]);
+
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    expect(saved.panes.find((p) => p.id === 'door-web')!.surfaceType).toBe('browser');
+  });
 });

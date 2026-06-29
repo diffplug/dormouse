@@ -76,6 +76,13 @@ A Workspace projects a **union status** over its member Surfaces' Activity (tran
 
 The union is **display-only**: it is derived from member Activity, never enters the Activity state machine, and never itself fires a ring. Minimized (`Doored`) and unmounted (inactive-Workspace) Surfaces are included, because their Activity (Session) or persisted params (browser Surface) survive minimize/unmount (I2, I3).
 
+### Implementation status
+
+This vocabulary is the target model; it lands in stages, so parts of it are specified ahead of the code. As of this spec:
+
+- **Implemented** — **Pane** and **Surface** as first-class concepts, the terminal/browser surface kinds and their per-axis participation, `surfaceType` in the persisted snapshot, and the restore/resume handling that keeps browser Surfaces (no stray PTY, saved layout preserved; `docs/specs/transport.md`). A browser Surface's user-set `todo` already round-trips to the activity store live.
+- **Not yet implemented** — the **Workspace** and **Window** containers themselves: `PersistedWorkspace` / `PersistedWindow`, the container verbs (`switchWorkspace` / `createWorkspace` / `closeWorkspace` / `renameWorkspace`), the union projection, and the standalone workspace strip. The app today runs exactly one implicit Workspace per Window. The container layer lands behind a feature flag (**stage 2b**, dormant in-app), the switching UI follows (**stage 3**), and real multi-Workspace support comes last (**stage 4**). Container/union/strip passages below and in the area specs are forward-looking until then.
+
 ## Layers
 
 | Layer | Tracks | Owner |

@@ -292,4 +292,63 @@ describe('resumeOrRestore', () => {
       layout,
     });
   });
+
+  it('keeps the saved layout and a visible browser pane when only terminals have live PTYs', async () => {
+    const layout = { panels: { 'pane-term': {}, 'pane-web': {} } };
+    const saved: PersistedSession = {
+      version: 3,
+      layout,
+      panes: [
+        { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'pane-web', title: 'localhost', cwd: null, scrollback: null, resumeCommand: null, surfaceType: 'browser' },
+      ],
+    };
+
+    const result = await resumeOrRestore(createPlatform([
+      { id: 'pane-term', alive: true },
+    ], saved));
+
+    expect(result).toEqual({
+      paneIds: ['pane-term', 'pane-web'],
+      doors: [],
+      layout,
+    });
+    // The browser pane has no PTY and is never resumed as a terminal.
+    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledTimes(1);
+    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('pane-term', 'pane-term-replay', expect.anything());
+  });
+
+  it('keeps a minimized browser door alive across resume despite having no PTY', async () => {
+    const layout = { panels: { 'pane-term': {} } };
+    const doors = [{
+      id: 'door-web',
+      title: 'localhost',
+      component: 'browser',
+      params: { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173' },
+      neighborId: 'pane-term',
+      direction: 'right' as const,
+      remainingPaneIds: ['pane-term'],
+      layoutAtMinimize: layout,
+      layoutAtMinimizeSignature: 'sig',
+    }];
+    const saved: PersistedSession = {
+      version: 3,
+      layout,
+      doors,
+      panes: [
+        { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'door-web', title: 'localhost', cwd: null, scrollback: null, resumeCommand: null, surfaceType: 'browser' },
+      ],
+    };
+
+    const result = await resumeOrRestore(createPlatform([
+      { id: 'pane-term', alive: true },
+    ], saved));
+
+    expect(result).toEqual({
+      paneIds: ['pane-term'],
+      doors,
+      layout,
+    });
+  });
 });

@@ -470,6 +470,21 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
+  it('Browser surface: TODO toggles on a pane id with no registry entry (no PTY/xterm)', () => {
+    // A browser Surface (iframe / agent-browser) has no registry entry. The
+    // `t` shortcut still routes toggleSessionTodo to the AlertManager, which
+    // creates an entry for any id; the state round-trips back and is primed
+    // into the activity store so the door / union can show it.
+    const browserId = 'pane-browser';
+    expect(getActivity(browserId).todo).toBe(false);
+
+    toggleSessionTodo(browserId);
+    expect(getActivity(browserId).todo).toBe(true);
+
+    toggleSessionTodo(browserId);
+    expect(getActivity(browserId).todo).toBe(false);
+  });
+
   it('Story 8: disable alerts clears ring and stops tracking', () => {
     const id = 'story-8';
     createSession(id);

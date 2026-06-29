@@ -4,6 +4,7 @@ import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
 import { saveSession } from '../../lib/session-save';
 import { UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
+import { isBrowserParams } from './browser-surface';
 import type { DooredItem, WallSelectionKind } from './wall-types';
 
 export function useSessionPersistence({
@@ -27,7 +28,11 @@ export function useSessionPersistence({
     const api = apiRef.current;
     if (!api) return Promise.resolve();
 
-    const panes = api.panels.map((p) => ({ id: p.id, title: p.title ?? UNNAMED_PANEL_TITLE }));
+    const panes = api.panels.map((p) => ({
+      id: p.id,
+      title: p.title ?? UNNAMED_PANEL_TITLE,
+      surfaceType: isBrowserParams(p.params) ? ('browser' as const) : ('terminal' as const),
+    }));
     return saveSession(getPlatform(), api.toJSON(), panes, doorsRef.current ?? []);
   }, [apiRef, doorsRef]);
 

@@ -9,6 +9,14 @@ export interface PersistedAlertState {
   notification?: ActivityNotification | null;
 }
 
+/**
+ * Surface kind recorded per pane (`docs/specs/glossary.md`). Absent reads as
+ * `'terminal'`. A `'browser'` pane has no PTY, scrollback, or registry entry; it
+ * is reconstructed from the dockview `layout` blob, so restore/resume must route
+ * it differently from a terminal (see `session-restore.ts`, `reconnect.ts`).
+ */
+export type PersistedSurfaceType = 'terminal' | 'browser';
+
 export interface PersistedPane {
   id: string;
   cwd: string | null;
@@ -17,6 +25,7 @@ export interface PersistedPane {
   resumeCommand: string | null;
   untouched: boolean;
   alert?: PersistedAlertState | null;
+  surfaceType?: PersistedSurfaceType;
 }
 
 export interface PersistedDoor {
@@ -124,6 +133,7 @@ function isPersistedPaneShape(value: unknown): boolean {
     (typeof value.scrollback === 'string' || value.scrollback === null) &&
     (typeof value.resumeCommand === 'string' || value.resumeCommand === null) &&
     (value.untouched === undefined || typeof value.untouched === 'boolean') &&
+    (value.surfaceType === undefined || value.surfaceType === 'terminal' || value.surfaceType === 'browser') &&
     (value.alert === undefined || isPersistedAlertShape(value.alert))
   );
 }

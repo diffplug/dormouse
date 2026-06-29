@@ -16,6 +16,10 @@ export function restoreSession(platform: PlatformAdapter): RestoredSession | nul
   const shellOpts = getDefaultShellOpts();
 
   for (const pane of saved.panes) {
+    // Browser surfaces have no PTY or xterm; the dockview layout blob recreates
+    // them via fromJSON (docs/specs/transport.md). Calling restoreTerminal here
+    // would mint a stray PTY + xterm for the pane id that never gets mounted.
+    if (pane.surfaceType === 'browser') continue;
     restoreTerminal(pane.id, {
       cwd: pane.cwd,
       scrollback: pane.scrollback,

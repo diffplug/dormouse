@@ -176,6 +176,8 @@ Clearing behavior:
 ## Workspace union
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers.
+>
+> **Not yet implemented (stage 2b).** The union projection and its surfacing are specified ahead of the code. The implemented piece (stage 2a) is that a browser Surface's user-set `todo` round-trips to the activity store live, so its door shows the TODO pill — the same input the union will read once it exists.
 
 A Workspace projects a **union status** over the attention state of the Surfaces it contains (terminal Sessions and browser Surfaces alike — see `docs/specs/glossary.md`):
 

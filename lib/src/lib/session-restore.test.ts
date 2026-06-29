@@ -102,4 +102,22 @@ describe('restoreSession', () => {
       untouched: true,
     }));
   });
+
+  it('does not spawn a terminal for a browser surface, but keeps it in paneIds', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      layout: { panels: { 'pane-term': {}, 'pane-web': {} } },
+      panes: [
+        { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
+        { id: 'pane-web', title: 'localhost', cwd: null, scrollback: null, resumeCommand: null, untouched: false, surfaceType: 'browser' },
+      ],
+    };
+
+    const result = restoreSession(createPlatform(saved));
+
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledTimes(1);
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith('pane-term', expect.objectContaining({ title: 'Terminal' }));
+    // The browser pane stays in paneIds so the layout blob recreates and selects it.
+    expect(result?.paneIds).toEqual(['pane-term', 'pane-web']);
+  });
 });
