@@ -317,23 +317,44 @@ function existsCandidate(path: string, isWindows: boolean): boolean {
 // agent-browser talks to a daemon, so forwarded commands return quickly;
 // buffering output until exit keeps this transport-agnostic with runCli's
 // captured stdout/stderr at the cost of not streaming long-running output.
+//
+// Grace window for 'close' to win after 'exit' before we resolve anyway. See
+// execAgentBrowserProcess: long enough that a normal command's stdio drains
+// (its output was written before the process exited), short enough that the
+// daemon-holds-the-pipe case doesn't feel like a hang.
+const CLOSE_GRACE_MS = 250;
+
 function execAgentBrowserProcess(binary: string, args: string[]): Promise<AgentBrowserExecResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
-    // A failed spawn races 'error' against 'close' on Windows (both fire);
-    // latch on the first so the loser can't overwrite the outcome — otherwise a
-    // 'close' carrying a bogus exit code could swallow the ENOENT.
+    // A failed spawn races 'error' against the exit events; latch on the first so
+    // the loser can't overwrite the outcome (e.g. a stray exit code swallowing an
+    // ENOENT). clearTimeout drops the grace timer so it can't keep the event loop
+    // alive after we've already settled.
     let settled = false;
+    let graceTimer: number | undefined;
     const settle = (apply: () => void): void => {
       if (settled) return;
       settled = true;
+      if (graceTimer !== undefined) clearTimeout(graceTimer);
       apply();
     };
     child.stdout.on('data', (chunk: unknown) => { stdout += String(chunk); });
     child.stderr.on('data', (chunk: unknown) => { stderr += String(chunk); });
     child.on('error', (error: Error) => settle(() => reject(error)));
-    child.on('close', (code: number | null) => settle(() => resolve({ exitCode: code ?? 1, stdout, stderr })));
+    const finish = (code: number | null): void => settle(() => resolve({ exitCode: code ?? 1, stdout, stderr }));
+    // 'close' is the clean path: the process exited AND its stdio reached EOF, so
+    // all output is captured. But `agent-browser open` leaves a detached daemon
+    // that on Windows inherits our stdout/stderr pipes — they never reach EOF and
+    // 'close' never fires, so waiting on it alone hangs forever. Fall back to
+    // 'exit' (which fires when the foreground process ends regardless of the
+    // lingering pipe), giving 'close' a short grace to win first so a normal
+    // command's full output is still flushed before we resolve.
+    child.on('close', (code: number | null) => finish(code));
+    child.on('exit', (code: number | null) => {
+      graceTimer = setTimeout(() => finish(code), CLOSE_GRACE_MS);
+    });
   });
 }

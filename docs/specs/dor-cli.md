@@ -95,6 +95,20 @@ something `cross-spawn` (or any wrapper) can fully prevent. Our forwarded
 arguments (URLs, selectors, and the host's hardcoded `eval` scripts) contain no
 `%VAR%` patterns, so this does not arise in practice.
 
+### Resolve on `exit`, not `close`
+
+When buffering a spawned command's output, resolve on the child's **`exit`**
+event, not `close`. `agent-browser open` launches a long-lived per-session daemon
+that on Windows inherits the parent's stdout/stderr pipes; those pipes never reach
+EOF while the daemon lives, so `close` (which waits for stdio to drain) never
+fires and the spawn hangs forever. `exit` fires when the foreground process ends
+regardless of the lingering pipe. The two spawn helpers
+(`dor/src/commands/agent-browser.ts`, `lib/src/host/agent-browser-host.ts`) wait
+for `close` but fall back to `exit` after a short grace (`CLOSE_GRACE_MS`), so a
+normal command's full output still flushes while the daemon case can't hang.
+(POSIX dodges this because the daemon double-forks and detaches from the inherited
+fds, closing the pipe — which is why this never surfaced on macOS.)
+
 ## Host Plumbing
 
 ### Standalone

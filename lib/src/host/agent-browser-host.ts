@@ -73,6 +73,9 @@ const EDIT_SCRIPTS: Record<AgentBrowserEditOp, string> = {
 
 const STREAM_PORT_READ_ATTEMPTS = 4;
 const STREAM_PORT_READ_DELAY_MS = 150;
+// Grace for 'close' to fire after 'exit' before resolving anyway, so a daemon
+// holding the inherited stdio pipes can't hang the spawn. See spawnAgentBrowser.
+const CLOSE_GRACE_MS = 250;
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface AgentBrowserHostDeps {
@@ -130,18 +133,33 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
       let stdout = '';
       let stderr = '';
+      let settled = false;
+      let graceTimer: ReturnType<typeof setTimeout> | undefined;
+      const settle = (apply: () => void): void => {
+        if (settled) return;
+        settled = true;
+        if (graceTimer !== undefined) clearTimeout(graceTimer);
+        apply();
+      };
       child.stdout.on('data', (chunk) => { stdout += String(chunk); });
       child.stderr.on('data', (chunk) => { stderr += String(chunk); });
-      child.on('error', (err: NodeJS.ErrnoException) => {
+      child.on('error', (err: NodeJS.ErrnoException) => settle(() => {
         if (err.code === 'ENOENT') {
           resolve('ENOENT');
           return;
         }
         log(`[agent-browser] spawn failed: ${err.message}`);
         resolve({ exitCode: 1, stdout: '', stderr: err.message });
-      });
-      child.on('close', (code) => {
-        resolve({ exitCode: code ?? 1, stdout, stderr });
+      }));
+      const finish = (code: number | null): void => settle(() => resolve({ exitCode: code ?? 1, stdout, stderr }));
+      // Resolve on 'close' (clean: process exited and stdio drained), but fall
+      // back to 'exit' because `agent-browser open` leaves a detached daemon that
+      // on Windows inherits these pipes, so they never reach EOF and 'close' never
+      // fires. The grace lets 'close' win first so normal commands keep full
+      // output. See dor/src/commands/agent-browser.ts for the matching rationale.
+      child.on('close', (code) => finish(code));
+      child.on('exit', (code) => {
+        graceTimer = setTimeout(() => finish(code), CLOSE_GRACE_MS);
       });
     });
   }

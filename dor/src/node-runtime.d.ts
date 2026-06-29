@@ -26,6 +26,7 @@ declare module 'node:child_process' {
     stdout: ChildProcessStream;
     stderr: ChildProcessStream;
     on(event: 'error', listener: (error: Error) => void): void;
+    on(event: 'exit', listener: (code: number | null) => void): void;
     on(event: 'close', listener: (code: number | null) => void): void;
   }
 
