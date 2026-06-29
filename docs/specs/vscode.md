@@ -1,6 +1,6 @@
 # Dormouse VS Code Integration Spec
 
-> See `docs/specs/glossary.md` for Session / Pane / Door vocabulary. See `docs/specs/transport.md` for the PTY lifecycle, message protocol, persisted-session types, and adapter-agnostic invariants that VS Code shares with the standalone and fake adapters. This spec covers the VS Code-specific layer: panel/view registration, persistence APIs, theme integration, CSP, build, and dream-architecture commands.
+> See `docs/specs/glossary.md` for Session / Surface / Pane / Door vocabulary. See `docs/specs/transport.md` for the PTY lifecycle, message protocol, persisted-session types, and adapter-agnostic invariants that VS Code shares with the standalone and fake adapters. This spec covers the VS Code-specific layer: panel/view registration, persistence APIs, theme integration, CSP, build, and dream-architecture commands.
 
 ## What's built
 
@@ -107,11 +107,11 @@ PTY lifecycle, buffering, the reconnection sequence, and the full message protoc
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers and `docs/specs/alert.md` for the union status.
 
-In VS Code, **one webview is one Workspace**. The bottom-panel `WebviewView` ("Dormouse") is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. Unlike standalone, several Workspaces are visible at once, and VS Code — not Dormouse — owns their tabs, creation, and closing: opening a Dormouse editor tab creates a Workspace and closing the tab closes it, so Dormouse adds no create/rename/close affordances here. Each webview already contains exactly the Sessions whose PTYs its router owns (`ownedPtyIds`, `docs/specs/transport.md`), so a Workspace's Session set is the webview's owned-PTY set.
+In VS Code, **one webview is one Workspace**. The bottom-panel `WebviewView` ("Dormouse") is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. Unlike standalone, several Workspaces are visible at once, and VS Code — not Dormouse — owns their tabs, creation, and closing: opening a Dormouse editor tab creates a Workspace and closing the tab closes it, so Dormouse adds no create/rename/close affordances here. A webview owns the terminal Sessions whose PTYs its router tracks (`ownedPtyIds`, `docs/specs/transport.md`) plus any browser surfaces rendered in it; together those are the Workspace's Surfaces.
 
 #### Surfacing union status on native chrome
 
-The host computes each Workspace's union status (`ringing` / `todo` / `count`) from the module-level `AlertManager` filtered to that router's `ownedPtyIds`, and reflects it onto VS Code chrome. No new webview↔host message is needed — the host already receives every PTY's alert state.
+The host computes each Workspace's union status (`ringing` / `todo` / `count`) from the module-level `AlertManager`, scoped to that webview's Surfaces — its `ownedPtyIds` (terminal ring + TODO) plus its browser surfaces (TODO only; a browser surface never rings). Surface TODO already rides the existing alert-state channel keyed by surface id, so no new webview↔host message is needed — the host already receives every Surface's alert state.
 
 - **Editor tab (`WebviewPanel`):** reassign `panel.iconPath` between normal / ringing / TODO icon variants, and optionally fold the Workspace name or a status marker into `panel.title`. Both properties are writable after creation (`title: string`, `iconPath?: Uri | { light, dark }`).
 - **Sidebar/panel view (`WebviewView`):** set `view.badge = { value: count, tooltip }` for a numeric attention badge on the activity-bar icon, visible even when the view is collapsed; `view.description` may carry status text. `view.title` is writable too but stays "Dormouse". `ViewBadge` is numeric only (no custom color or glyph), so the editor-tab icon swap carries the ringing-vs-TODO distinction the badge cannot.

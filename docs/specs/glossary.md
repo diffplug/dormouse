@@ -4,35 +4,77 @@ This glossary is the canonical vocabulary for states, entities, and transitions 
 
 ## The core idea
 
-A **Session** is the durable unit. A Session's state lives on six orthogonal axes — change one without touching the others. A caller holding a `SessionId` can reason about each axis independently.
+A **Surface** is the durable occupant of a Pane — what a user thinks of as "the content in this slot." A Surface is one of two kinds:
+
+- a **terminal Surface**, which Dormouse calls a **Session**: a PTY-backed shell with scrollback and semantic terminal state. This is the unit the six-axis model below describes.
+- a **browser Surface**: a web view rendered as an `iframe` or an agent-browser screencast / pop-out (`docs/specs/dor-browser.md`). It participates in only a subset of the axes — see [Panes and Surfaces](#panes-and-surfaces).
+
+A **Session**'s state lives on six orthogonal axes — change one without touching the others. A caller holding a `SessionId` can reason about each axis independently. Unless a passage says "Surface" or "browser Surface," it is describing a Session.
 
 The **Liskov contract**: a Session is substitutable across most operations regardless of which states it currently occupies. `kill` and `rename` work universally. State-gated operations (`write`, `focus`) document their preconditions in glossary terms rather than failing silently.
 
+## Panes and Surfaces
+
+The unit of *layout* is a **Pane**; the unit of *content* is a **Surface**.
+
+| Term | Is | Owner |
+|---|---|---|
+| **Pane** | A slot in the tiling layout (one dockview panel). Holds one or more Surfaces, exactly one selected. | `lib/src/components/Wall.tsx` (dockview) |
+| **Surface** | The content in a Pane: a **terminal** (a Session) or a **browser** Surface. | `Wall.tsx`; browser surfaces per `docs/specs/dor-browser.md` |
+
+Today every Pane holds exactly one Surface, but the model reserves multiple Surfaces per Pane (a future in-pane surface strip) — which is why a Surface ref (`surface:N`) is distinct from a Pane ref (`pane:N`).
+
+**Surface kinds** — the `type` a `dor` handle reports, derived from the Pane's params, never stored on the id:
+
+| Kind | Sub-kinds | Backed by |
+|---|---|---|
+| `terminal` | — | a PTY + xterm.js instance — i.e. a **Session** |
+| `browser` | `iframe`, `ab-screencast`, `ab-popout` | an iframe proxy grant, or an agent-browser daemon session (`docs/specs/dor-browser.md`) |
+
+A **Session** runs the full six-axis model below. A **browser Surface** participates only where a web view meaningfully can:
+
+| Axis | Terminal Surface (Session) | Browser Surface |
+|---|---|---|
+| **View** | full | full — `Paned` / `Zoomed` / `Doored` / `Hidden` all apply |
+| **Activity** | full machine (ring + TODO) | **TODO only** — a user may flag it; it never auto-rings (no BEL/OSC source) |
+| **Snapshot** | scrollback, cwd, alert | its `surfaceType` + render params (`docs/specs/transport.md`) |
+| **Process** | PTY (`Live`/`Exited`/`Tombstoned`/`Absent`) | none — host lifetime is the agent-browser session or proxy grant, keyed outside the Pane id |
+| **Registry** | xterm Terminal + persistent DOM element | none — DOM owned by dockview (`renderer:'always'`); focus via a lightweight handle |
+| **Link** | resume / replay over the live PTY | none — rebuilt from persisted params, not replayed |
+
+The containment hierarchy the `dor` CLI handle model commits to (`docs/specs/dor-cli.md`):
+
+```
+Window ⊃ Workspace ⊃ Pane ⊃ Surface  (terminal = Session | browser)
+```
+
+**Surface identity:** a Surface's id is its dockview panel id. For a terminal Surface that id *is* the `SessionId` and is stable (I1). A browser Surface's id is **not** preserved across a render-mode swap: switching `iframe` ⇄ `ab-screencast` ⇄ `ab-popout` replaces the Surface in the same Pane slot (new id), preserving only the slot and target URL (`docs/specs/dor-browser.md`).
+
 ## Containers
 
-A Session never floats free: it belongs to exactly one **Workspace**, and every Workspace belongs to one **Window**. These are containers, not Session layers — they group Sessions rather than describing a single Session's state, so they sit beside the six axes above, not on them.
+A Surface never floats free: it sits in a **Pane**, every Pane belongs to exactly one **Workspace**, and every Workspace belongs to one **Window**. Workspace and Window are containers, not Session layers — they group Surfaces rather than describing one Surface's state, so they sit beside the six axes above, not on them.
 
 | Container | Holds | Owner |
 |---|---|---|
 | **Window** | One or more Workspaces. The OS frame (the standalone Tauri window) or the host frame (a VS Code window). | host (Tauri / VS Code) |
-| **Workspace** | A named set of Sessions plus its View layout (dockview snapshot + doors). Exactly one **Wall** renders one Workspace. | `lib/src/components/Wall.tsx` at render time; persisted per `docs/specs/transport.md` |
+| **Workspace** | A named set of Panes and their Surfaces, plus the layout that arranges them (dockview snapshot + doors). Exactly one **Wall** renders one Workspace. | `lib/src/components/Wall.tsx` at render time; persisted per `docs/specs/transport.md` |
 
-A **Workspace** is the durable grouping a user thinks of as "a window's worth of panes." It has a `WorkspaceId`, a user-facing `name`, the Sessions it contains, and the layout that arranges them. The pre-workspace model had exactly one implicit Workspace per Window; the model now allows several.
+A **Workspace** is the durable grouping a user thinks of as "a window's worth of panes." It has a `WorkspaceId`, a user-facing `name`, the Surfaces it contains, and the layout that arranges them. The pre-workspace model had exactly one implicit Workspace per Window; the model now allows several.
 
 How many are visible at once is host-specific:
 
-- **Standalone** hosts many Workspaces in one Window but mounts only one at a time — the **active** Workspace. Switching mounts the target Workspace's Sessions and unmounts the previous one's; Process stays `Live` and Activity keeps flowing. Workspaces appear as a tab strip (see `docs/specs/layout.md`).
-- **VS Code** maps one Workspace to one webview: the sidebar/panel `WebviewView` is the default Workspace, and each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. Several are visible at once. PTY ownership already partitions Sessions per webview (`docs/specs/transport.md`); see `docs/specs/vscode.md`.
+- **Standalone** hosts many Workspaces in one Window but mounts only one at a time — the **active** Workspace. Switching mounts the target Workspace's Surfaces and unmounts the previous one's; PTYs stay `Live` and Activity keeps flowing. Workspaces appear as a tab strip (see `docs/specs/layout.md`).
+- **VS Code** maps one Workspace to one webview: the sidebar/panel `WebviewView` is the default Workspace, and each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. Several are visible at once. A webview owns its terminal Sessions' PTYs (`ownedPtyIds`, `docs/specs/transport.md`) plus its own browser Surfaces; see `docs/specs/vscode.md`.
 
 ### Workspace union status
 
-A Workspace projects a **union status** over its member Sessions' Activity (transition rules in `docs/specs/alert.md`):
+A Workspace projects a **union status** over its member Surfaces' Activity (transition rules in `docs/specs/alert.md`):
 
-- `ringing` — any member Session has `status === 'ALERT_RINGING'`.
-- `todo` — any member Session has `todo === true`.
-- `count` — number of member Sessions currently owing attention (ringing or `todo`), for hosts that show a numeric badge.
+- `ringing` — any member Surface has `status === 'ALERT_RINGING'`. Only terminal Sessions ring.
+- `todo` — any member Surface has `todo === true`: a terminal Session, or a browser Surface a user has flagged.
+- `count` — number of member Surfaces currently owing attention (ringing or `todo`), for hosts that show a numeric badge.
 
-The union is **display-only**: it is derived from member Activity, never enters the Activity state machine, and never itself fires a ring. Minimized (`Doored`) and unmounted (inactive-Workspace) Sessions are included, because their Registry and Activity entries survive minimize/unmount (I2, I3).
+The union is **display-only**: it is derived from member Activity, never enters the Activity state machine, and never itself fires a ring. Minimized (`Doored`) and unmounted (inactive-Workspace) Surfaces are included, because their Activity (Session) or persisted params (browser Surface) survive minimize/unmount (I2, I3).
 
 ## Layers
 
@@ -40,7 +82,7 @@ The union is **display-only**: it is derived from member Activity, never enters 
 |---|---|---|
 | **Process** | PTY life on the host | `vscode-ext/src/pty-manager.ts` |
 | **Registry** | xterm.js Terminal + persistent DOM element + cached Activity state | `lib/src/lib/terminal-registry.ts` facade, backed by `terminal-store.ts`, `terminal-lifecycle.ts`, and `session-activity-store.ts` |
-| **View** | Where and how the session renders | `lib/src/components/Wall.tsx` plus `lib/src/components/wall/` |
+| **View** | Where and how a Surface renders (terminal and browser alike) | `lib/src/components/Wall.tsx` plus `lib/src/components/wall/` |
 | **Link** | Webview ↔ host relationship | `lib/src/lib/reconnect.ts` |
 | **Activity** | Alert / attention state machine | `lib/src/lib/alert-manager.ts` |
 | **Snapshot** | Persisted-to-disk projection | `lib/src/lib/session-save.ts` / `session-restore.ts` |
@@ -74,7 +116,7 @@ A **Session** is the tuple of its `SessionId` plus one state per layer. `Session
 | `Paned` | Rendered as a pane in the content area (dockview group) |
 | `Zoomed` | Subset of `Paned` — the selected pane is maximized |
 | `Doored` | Rendered as a door on the baseboard |
-| `Hidden` | In neither pane nor door — the webview is closed, the Session belongs to an inactive Workspace (standalone), or the Session is mid-transition. Process and Activity are unaffected. |
+| `Hidden` | In neither pane nor door — the webview is closed, the Surface belongs to an inactive Workspace (standalone), or the Surface is mid-transition. Process and Activity are unaffected. |
 
 ### Link
 
@@ -90,6 +132,8 @@ A **Session** is the tuple of its `SessionId` plus one state per layer. `Session
 Keep the existing state machine (see `docs/specs/alert.md` for transition rules):
 
 `WATCHING_DISABLED` · `NOTHING_TO_SHOW` · `MIGHT_BE_BUSY` · `BUSY` · `OSC_NOTIF_BUSY` · `COMMAND_EXIT_ARMED` · `MIGHT_NEED_ATTENTION` · `ALERT_RINGING`
+
+Terminal Sessions run this machine. A browser Surface has no machine: it carries only an optional user-set `todo` and never reaches `ALERT_RINGING` (there is no BEL/OSC source to ring it).
 
 ### Snapshot
 
@@ -108,15 +152,15 @@ A user verb is an intentional action that produces a single observable change.
 | Verb | Effect |
 |---|---|
 | `spawn` | Create a new Session (Process: Absent → Live) |
-| `kill` | Request termination (Process: Live → Tombstoned, Registry: Mounted → Disposed, View: any → Hidden) |
+| `kill` | Terminate a Surface. Terminal: Process Live → Tombstoned, Registry Mounted → Disposed. Browser: closes its agent-browser session or iframe proxy grant. Either way View: any → Hidden. |
 | `minimize` | Pane → Door (View: Paned → Doored) |
 | `reattach` | Door → Pane (View: Doored → Paned) |
 | `rename` | Update title; layer-agnostic |
 | `zoom` / `unzoom` | Paned ↔ Zoomed |
 | `swap` | Exchange Registry entries across two View slots without touching Processes |
-| `switchWorkspace` | Activate a different Workspace: mount its Sessions, unmount the previously active Workspace's (standalone). View: target's Sessions Hidden → Paned/Doored, previous active's Paned/Doored → Hidden. Process and Activity unchanged. |
+| `switchWorkspace` | Activate a different Workspace: mount its Surfaces, unmount the previously active Workspace's (standalone). View: target's Surfaces Hidden → Paned/Doored, previous active's Paned/Doored → Hidden. Process and Activity unchanged. |
 | `createWorkspace` | Add a new Workspace to the Window; standalone makes it active and spawns its first pane |
-| `closeWorkspace` | Remove a Workspace, `kill`-ing each member Session |
+| `closeWorkspace` | Remove a Workspace, `kill`-ing each member Surface |
 | `renameWorkspace` | Update a Workspace's `name`; touches no Session |
 
 ### System verbs
@@ -153,9 +197,10 @@ A caller holding a `SessionId` can issue universal operations without branching.
 - I4: `Registry: Orphaned` is transient. Steady states are `Mounted` or `Disposed`.
 - I5: `kill` is universally valid. It always terminates at (Process: Tombstoned, Registry: Disposed, View: Hidden).
 - I6: `rename` is universally valid including when `Process = Exited` and `View = Doored`.
-- I7: Every Session belongs to exactly one Workspace; every Workspace belongs to one Window.
-- I8: `switchWorkspace` preserves Process and Activity for both Workspaces. Mounting an inactive Workspace's Sessions must not fire a fresh ring, the same rule as `mount` / `reattach` in I3.
-- I9: A Workspace's union status is a pure projection of its members' Activity. It has no independent state and is destroyed with the Workspace.
+- I7: Every Surface sits in exactly one Pane; every Pane and its Surfaces belong to exactly one Workspace; every Workspace belongs to one Window.
+- I8: `switchWorkspace` preserves Process and Activity for both Workspaces. Mounting an inactive Workspace's Surfaces must not fire a fresh ring, the same rule as `mount` / `reattach` in I3.
+- I9: A Workspace's union status is a pure projection of its member Surfaces' Activity. It has no independent state and is destroyed with the Workspace.
+- I10: A terminal Surface's id is its stable `SessionId` (I1). A browser Surface's id is *not* preserved across a render-mode swap: the swap replaces the Surface in the same Pane slot, preserving only the slot and target URL.
 
 ## Retired / overloaded terms
 
@@ -167,9 +212,10 @@ Use glossary names instead of these. The left column retains a meaning only wher
 | **reconnect** | Retired. Live-PTY case → **resume**; cold start → **restore**. |
 | **restore** | Keeps its meaning for cold-start rehydrate. Do not use it for Door→Pane (that is **reattach**) or for alert-manager seeding (that is **seed**). |
 | **attach** | Retired at the DOM layer (was `attachTerminal`) → **mount**. User-level "reattach" (Door→Pane) keeps the `re-` prefix. |
-| **session** | Keeps its meaning as the durable identity. Do not use it for the Activity projection (that is `ActivityState`, not `SessionUiState`). |
-| **terminal** | Keeps its meaning for the `xterm.Terminal` instance. Prose meaning "the whole thing" is **Session**. |
-| **panel / pane** | Prefer **pane**. Use "panel" only when quoting dockview's own API (`api.panels`, `addPanel`). |
+| **session** | The durable identity of a **terminal Surface**. Do not use it for the Activity projection (that is `ActivityState`, not `SessionUiState`), nor for the agent-browser daemon's lowercase `session` string (`dormouse.1.<key>`), which is not a Dormouse durable unit. |
+| **terminal** | Keeps its meaning for the `xterm.Terminal` instance. Prose meaning "the whole thing" is **Session** (a terminal Surface). |
+| **surface** | A glossary term, not retired: the durable occupant of a Pane (a terminal Session or a browser Surface). Use **Session** only for the terminal kind; use **Surface** when a statement holds for both. |
+| **panel / pane** | Prefer **pane** for the layout slot. Use "panel" only when quoting dockview's own API (`api.panels`, `addPanel`). |
 
 ## Naming conventions
 
@@ -178,4 +224,5 @@ Use glossary names instead of these. The left column retains a meaning only wher
 - Event kind strings match the verb: `'minimizeChange'`, not `'detachChange'`.
 - A persisted type is `Persisted<Shape>` where `<Shape>` is the glossary noun (`PersistedPane`, `PersistedDoor`, `PersistedWorkspace`, `PersistedWindow`).
 - A handle type is `<Layer>State` (`ActivityState`, not `SessionUiState`).
+- Surface kinds are lowercase strings: the CLI `SurfaceType` is `'terminal' | 'iframe' | 'agent-browser'`; the component-level split is `'terminal' | 'browser'`. A browser Surface records its kind via `surfaceType` on its persisted per-pane record (`docs/specs/transport.md`).
 - Container names are `PascalCase` nouns (`Workspace`, `Window`); their ids are `WorkspaceId` and `WindowId`. Container verbs keep the container as a suffix (`createWorkspace`, `switchWorkspace`) to stay distinct from the layer-agnostic Session `rename`.

@@ -1,8 +1,9 @@
 # Dor CLI
 
-> See `docs/specs/glossary.md` for canonical Session and Pane vocabulary.
-> `dor` uses `surface` for user-facing CLI handles. Pane remains layout
-> vocabulary in the implementation and in existing compatibility commands.
+> See `docs/specs/glossary.md` for canonical Surface / Session / Pane vocabulary.
+> A **Surface** (the durable occupant of a Pane — a terminal Session or a browser
+> surface) is `dor`'s user-facing CLI handle. Pane remains layout vocabulary in the
+> implementation and in existing compatibility commands.
 
 Dormouse bundles a `dor` CLI into every terminal it launches. The CLI is the
 public API; any socket used underneath it is private host plumbing.
@@ -116,10 +117,12 @@ that owns that surface when one is available.
 Dormouse supports multiple Workspaces within one Window (`docs/specs/glossary.md`):
 standalone hosts several Workspaces with one active, and VS Code maps each webview
 to a Workspace. The handle model therefore reserves `workspace:<n|name>` and
-`window:<n>` refs. Each visible Pane has one selected surface. Most surfaces are
-terminals; `dor iframe` introduces a non-terminal iframe surface. User-facing `dor`
-commands should expose surface handles; Pane remains layout vocabulary and
-compatibility-command terminology.
+`window:<n>` refs. The full containment hierarchy is `Window ⊃ Workspace ⊃ Pane ⊃
+Surface`. Each visible Pane has one selected Surface; a Surface is a terminal (a
+Session) or a browser surface — the `iframe` / agent-browser renderers of `dor`'s
+unified `browser` surface (`docs/specs/dor-browser.md`). User-facing `dor` commands
+expose Surface handles; Pane remains layout vocabulary and compatibility-command
+terminology.
 
 Invariants:
 

@@ -27,8 +27,8 @@ In the VS Code extension host, selected workbench chords are mirrored: the termi
 | `m` or `d` | Minimize / reattach | Minimize the selected pane to the baseboard, or reattach a minimized door. |
 | `k` or `x` | Kill | Kill the selected pane or door. Prompts for a random character to confirm. |
 | `,` | Rename | Enter rename mode for the selected pane's title. |
-| `a` | Toggle alert | Dismiss or toggle the bell alert for the selected pane. |
-| `t` | Toggle todo | Toggle the TODO marker on or off for the selected pane. |
+| `a` | Toggle alert | Dismiss or toggle the bell alert for the selected pane. Meaningful only for a terminal Surface — a browser surface has no bell to ring (`docs/specs/glossary.md`). |
+| `t` | Toggle todo | Toggle the TODO marker on or off for the selected pane's Surface. Works on any Surface — a terminal Session or a browser surface. |
 
 ## Navigation (command mode)
 

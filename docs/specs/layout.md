@@ -4,21 +4,23 @@
 
 ## Conceptual model
 
+A **Pane** holds a **Surface** — the content in that layout slot. A Surface is either a **terminal Session** or a **browser surface** (`iframe` / agent-browser); `docs/specs/glossary.md` is canonical for the Pane / Surface / Session model and `docs/specs/dor-browser.md` for browser surfaces. This spec uses "Session" where a statement is terminal-specific and "Surface" where it holds for both kinds.
+
 A **Session** is a single PTY instance — a running shell process with its scrollback, environment, and semantic terminal state. Sessions are managed by the terminal registry and persist independently of how they are displayed. Each session also carries Activity state (projected alert status, optional TODO flag, and optional protocol notification detail). CWD, foreground-command lifecycle, command titles, terminal titles, header derivation, and grouping keys are defined in `docs/specs/terminal-state.md`.
 
-A Session's **View** state places it in one of two containers:
+A Surface's **View** state places it in one of two containers:
 
-- **Pane** — a visible container in the content area. The session's terminal output is rendered via xterm.js. The pane has a header with controls and acts as the drag handle for layout rearrangement.
-- **Door** — a minimized container in the baseboard. The session is still alive (PTY running, output buffered) but not visible. The door shows the session's title plus alert and TODO indicators, and looks like a mouse hole cut into the baseboard.
+- **Pane** — a visible container in the content area. A terminal Surface renders its output via xterm.js; a browser surface renders through `BrowserPanel`. The pane has a header with controls and acts as the drag handle for layout rearrangement.
+- **Door** — a minimized container in the baseboard. The Surface is still alive (a terminal's PTY keeps running and buffering output; a browser surface's backing session or proxy grant stays alive) but not visible. The door shows the Surface's title plus alert and TODO indicators, and looks like a mouse hole cut into the baseboard.
 
-Transitioning between Pane and Door does not alter the Session in any way.
+Transitioning between Pane and Door does not alter the Surface in any way.
 Minimizing a pane creates a door; reattaching a door creates a pane. Terminal
 content, scrollback, and process state are preserved across transitions. For
 non-terminal browser surfaces, the backing browser session remains alive while
 the visible viewer resources are released: no canvas, screencast WebSocket,
 screenshot loop, or input forwarding runs while the surface is a Door.
 
-A **Workspace** is the named group of Sessions rendered by a single **Wall**, together with their layout (see `docs/specs/glossary.md`). A Window may hold several Workspaces. This spec covers how Workspaces are presented and switched in the standalone app — the tab strip and the one-Wall-per-Workspace mounting below. VS Code maps each Workspace to its own webview instead; see `docs/specs/vscode.md`.
+A **Workspace** is the named group of Surfaces rendered by a single **Wall**, together with their layout (see `docs/specs/glossary.md`). A Window may hold several Workspaces. This spec covers how Workspaces are presented and switched in the standalone app — the tab strip and the one-Wall-per-Workspace mounting below. VS Code maps each Workspace to its own webview instead; see `docs/specs/vscode.md`.
 
 ## Shell layout
 
@@ -147,7 +149,7 @@ Extreme case: a single door with a very long title, with more doors on both side
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers and `docs/specs/alert.md` for the union status. VS Code's per-webview mapping is in `docs/specs/vscode.md`.
 
-A **Workspace** is one Wall's worth of Sessions plus its layout, with a user-facing name. The standalone Window hosts several Workspaces but mounts only one — the **active** Workspace — at a time. Each Workspace owns its own Content (dockview layout) and Baseboard (doors).
+A **Workspace** is one Wall's worth of Surfaces (terminal Sessions and browser surfaces) plus its layout, with a user-facing name. The standalone Window hosts several Workspaces but mounts only one — the **active** Workspace — at a time. Each Workspace owns its own Content (dockview layout) and Baseboard (doors).
 
 ### Workspace strip (standalone)
 
@@ -155,13 +157,13 @@ The standalone app bar (`standalone/src/AppBar.tsx`) carries a horizontal **work
 
 ### Switching
 
-Activating another Workspace (`switchWorkspace`) mounts the target Workspace's Sessions into the Wall — rebuilding its dockview layout and reattaching its doors — and unmounts the previously active Workspace's Sessions. This reuses the `mount` / `unmount` registry ops: the Registry entry and PTY survive `unmount`, so Process stays `Live`. Because Activity keeps flowing for unmounted Sessions, an inactive Workspace's tab can begin ringing or showing TODO while the user is elsewhere. Mounting must not fire a fresh ring (glossary I8, mirroring the minimize/reattach rule I3).
+Activating another Workspace (`switchWorkspace`) mounts the target Workspace's Surfaces into the Wall — rebuilding its dockview layout and reattaching its doors — and unmounts the previously active Workspace's Surfaces. For a terminal Surface this reuses the `mount` / `unmount` registry ops: the Registry entry and PTY survive `unmount`, so Process stays `Live`. A browser surface's backing agent-browser session or proxy grant likewise survives while its viewer resources are released. Because a terminal's Activity keeps flowing while unmounted, an inactive Workspace's tab can begin ringing or showing TODO while the user is elsewhere. Mounting must not fire a fresh ring (glossary I8, mirroring the minimize/reattach rule I3).
 
 ### Lifecycle
 
 - **Create** (`createWorkspace`): adds a new Workspace, gives it a default name (`Workspace N`), makes it active, and spawns a single fresh pane — matching the empty-state behavior in Session persistence below.
-- **Close** (`closeWorkspace`): `kill`s each member Session and removes the Workspace. Closing a Workspace that contains touched Sessions confirms first (reusing the kill-confirm vocabulary); the exact confirmation surface is settled in the Storybook UI pass. The last remaining Workspace cannot be closed — there is always one active Workspace, just as there is always one visible pane (corner case #10).
-- **Rename** (`renameWorkspace`): edits the Workspace `name` only. It does not touch any Session title or the per-pane inline rename.
+- **Close** (`closeWorkspace`): `kill`s each member Surface and removes the Workspace. Closing a Workspace that contains touched Surfaces confirms first (reusing the kill-confirm vocabulary); the exact confirmation surface is settled in the Storybook UI pass. The last remaining Workspace cannot be closed — there is always one active Workspace, just as there is always one visible pane (corner case #10).
+- **Rename** (`renameWorkspace`): edits the Workspace `name` only. It does not touch any Surface title or the per-pane inline rename.
 
 Concrete switch/create/close/rename keyboard shortcuts are chosen alongside the Storybook UI pass. Command mode is the natural home for them, following the tmux *window* bindings the rest of the keymap mirrors (a Dormouse Workspace is the analogue of a tmux window).
 
@@ -304,7 +306,7 @@ User-pin titles must not start with `<idle>` (the sentinel that prefixes the aut
 
 ## Session lifecycle and terminal registry
 
-Pane IDs are session IDs. `TerminalPane` calls `getOrCreateTerminal(id)` on React mount and `unmountElement(id)` on React unmount. The session (xterm.js instance, PTY, DOM element) persists in the registry across mount/unmount cycles — the DOM element is detached from its container but the Registry entry stays `Mounted`.
+For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getOrCreateTerminal(id)` on React mount and `unmountElement(id)` on React unmount. The session (xterm.js instance, PTY, DOM element) persists in the registry across mount/unmount cycles — the DOM element is detached from its container but the Registry entry stays `Mounted`. A browser surface's pane ID is a Surface id with no registry entry or PTY (`docs/specs/glossary.md`); its DOM is owned by dockview and it is reconstructed from persisted params, not from the registry.
 
 - **Create**: `getOrCreateTerminal` spawns xterm.js + UnicodeGraphemesAddon + FitAddon + PTY, returns existing if already created. The xterm instance sets `allowProposedApi: true` because UnicodeGraphemesAddon activates through xterm's proposed Unicode API.
 - **Resume**: `resumeTerminal` creates xterm entry and writes replay data without spawning a new PTY. Used when the webview is recreated while the host retains Live PTYs (Link: Severed → Resuming → Live).

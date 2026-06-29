@@ -177,16 +177,16 @@ Clearing behavior:
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers.
 
-A Workspace projects a **union status** over the Activity of the Sessions it contains:
+A Workspace projects a **union status** over the Activity of the Surfaces it contains (terminal Sessions and browser Surfaces alike — see `docs/specs/glossary.md`):
 
-- `ringing` — any member Session's public `status` is `ALERT_RINGING`.
-- `todo` — any member Session has `todo === true`.
-- `count` — number of member Sessions owing attention (ringing or `todo`), for the numeric badge a host may show.
+- `ringing` — any member Surface's public `status` is `ALERT_RINGING`. Only terminal Sessions ring; a browser Surface has no BEL/OSC source and never reaches `ALERT_RINGING`.
+- `todo` — any member Surface has `todo === true`. A terminal Session or a browser Surface may be flagged.
+- `count` — number of member Surfaces owing attention (ringing or `todo`), for the numeric badge a host may show.
 
 Rules:
 
-- The union is **display-only** and derived. It never enters the per-Session Activity state machine, never fires a fresh ring, and produces no sound or notification of its own; it only mirrors member state. Every ringing/TODO transition above remains per-Session.
-- Membership includes minimized (`Doored`) Sessions and, in standalone, the Sessions of inactive (unmounted) Workspaces. Their Activity entries survive minimize and unmount (glossary I2/I3), so a backgrounded Session can light up its Workspace's indicator.
+- The union is **display-only** and derived. It never enters the per-Surface Activity state machine, never fires a fresh ring, and produces no sound or notification of its own; it only mirrors member state. Every ringing/TODO transition above remains per-Surface.
+- Membership includes minimized (`Doored`) Surfaces and, in standalone, the Surfaces of inactive (unmounted) Workspaces. A terminal Session's Activity survives minimize and unmount (glossary I2/I3) and a browser Surface's `todo` survives in its persisted params, so a backgrounded Surface can light up its Workspace's indicator.
 - Attention suppression needs no special-casing: a per-Session ring is already suppressed while that Session is attended, so the union simply reflects whatever rings survive.
 
 Where the union surfaces is host-specific:
