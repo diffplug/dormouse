@@ -93,7 +93,7 @@ Non-obvious message contracts:
 
 VS Code-only workbench chord mirroring uses `dormouse:runWorkbenchCommand` from webview to host. The host validates the requested command against the allowlist in `lib/src/lib/vscode-keybindings.ts` (see [the VS Code host spec](vscode.md)) before calling `vscode.commands.executeCommand`; generic command execution over the webview boundary is not allowed.
 
-Workspace union status (`docs/specs/alert.md`) adds no new message. Standalone computes it in-webview — the app bar's workspace strip and the Walls share one webview, so the strip reads the activity store directly. VS Code computes it host-side from the module-level `AlertManager` filtered to each router's `ownedPtyIds`, then writes it onto native chrome; the host already receives every PTY's alert state (`docs/specs/vscode.md`).
+Workspace union status (`docs/specs/alert.md`) adds no new message. Standalone computes it in-webview — the app bar's workspace strip and the Walls share one webview, so the strip reads the activity store and browser-surface state directly. VS Code computes only the host-visible native-chrome projection from the module-level `AlertManager` filtered to each router's `ownedPtyIds`, then writes it onto native chrome; the host already receives every PTY's alert state, but it does not receive browser-surface TODO without a future webview→host Surface-state message (`docs/specs/vscode.md`).
 
 | Direction | Message | Source type | Contract |
 | --- | --- | --- | --- |
