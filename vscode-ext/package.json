@@ -114,7 +114,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
-    "@types/vscode": "1.125.0",
+    "@types/vscode": "1.85.0",
     "@vitejs/plugin-react": "^6.0.2",
     "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.28.0",
