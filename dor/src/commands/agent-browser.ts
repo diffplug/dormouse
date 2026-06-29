@@ -346,7 +346,8 @@ function execAgentBrowserProcess(binary: string, args: string[]): Promise<AgentB
     child.stdout.on('data', (chunk: unknown) => { stdout += String(chunk); });
     child.stderr.on('data', (chunk: unknown) => { stderr += String(chunk); });
     child.on('error', (error: Error) => settle(() => reject(error)));
-    const finish = (code: number | null): void => settle(() => resolve({ exitCode: code ?? 1, stdout, stderr }));
+    const finish = (code: number | null, out: string, err: string): void =>
+      settle(() => resolve({ exitCode: code ?? 1, stdout: out, stderr: err }));
     // 'close' is the clean path: the process exited AND its stdio reached EOF, so
     // all output is captured. But `agent-browser open` leaves a detached daemon
     // that on Windows inherits our stdout/stderr pipes — they never reach EOF and
@@ -354,9 +355,17 @@ function execAgentBrowserProcess(binary: string, args: string[]): Promise<AgentB
     // 'exit' (which fires when the foreground process ends regardless of the
     // lingering pipe), giving 'close' a short grace to win first so a normal
     // command's full output is still flushed before we resolve.
-    child.on('close', (code: number | null) => finish(code));
+    child.on('close', (code: number | null) => finish(code, stdout, stderr));
     child.on('exit', (code: number | null) => {
-      graceTimer = setTimeout(() => finish(code), CLOSE_GRACE_MS);
+      // Snapshot now: the foreground command has produced all its output. The
+      // surviving daemon keeps our inherited pipes open and may scribble into
+      // them during the grace below (this is how `dor ab open` printed a burst
+      // of blank lines on Windows) — resolve with the exit-time snapshot so that
+      // post-command noise is excluded. 'close', if it wins, still uses the live
+      // buffers since without a lingering daemon there's nothing extra to drop.
+      const out = stdout;
+      const err = stderr;
+      graceTimer = setTimeout(() => finish(code, out, err), CLOSE_GRACE_MS);
     });
   });
 }

@@ -153,15 +153,20 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
         log(`[agent-browser] spawn failed: ${err.message}`);
         resolve({ exitCode: 1, stdout: '', stderr: err.message });
       }));
-      const finish = (code: number | null): void => settle(() => resolve({ exitCode: code ?? 1, stdout, stderr }));
+      const finish = (code: number | null, out: string, err: string): void =>
+        settle(() => resolve({ exitCode: code ?? 1, stdout: out, stderr: err }));
       // Resolve on 'close' (clean: process exited and stdio drained), but fall
       // back to 'exit' because `agent-browser open` leaves a detached daemon that
       // on Windows inherits these pipes, so they never reach EOF and 'close' never
       // fires. The grace lets 'close' win first so normal commands keep full
       // output. See dor/src/commands/agent-browser.ts for the matching rationale.
-      child.on('close', (code) => finish(code));
+      child.on('close', (code) => finish(code, stdout, stderr));
       child.on('exit', (code) => {
-        graceTimer = setTimeout(() => finish(code), CLOSE_GRACE_MS);
+        // Snapshot at exit so output the surviving daemon writes into the
+        // inherited pipes during the grace doesn't leak into the result.
+        const out = stdout;
+        const err = stderr;
+        graceTimer = setTimeout(() => finish(code, out, err), CLOSE_GRACE_MS);
       });
     });
   }
