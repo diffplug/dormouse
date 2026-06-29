@@ -147,7 +147,7 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 
 ### Passthrough mode
 - All keyboard input routes to the active session's xterm.js instance
-- Only the mode-exit gesture (LCmd → RCmd) is intercepted
+- Only the mode-exit gesture (LCmd → RCmd, or LShift → RShift) is intercepted
 - In the VS Code host, selected workbench chords are mirrored: xterm still processes the key, and Dormouse also asks the extension host to run the matching VS Code command. See [the VS Code host spec](vscode.md) for the allowlist.
 - Selection overlay shows 2px solid border with glow
 - Terminal has DOM focus
@@ -166,8 +166,8 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 - Focus is deferred via `requestAnimationFrame` to prevent dockview from stealing it
 
 **Enter command mode:**
-- Left Cmd keydown, then Right Cmd keydown within 500ms
-- Detected via capture-phase `keydown` listener on `e.key === 'Meta'` and `e.location` (1 = left, 2 = right)
+- Left Cmd keydown, then Right Cmd keydown within 500ms — or the same left-then-right gesture with Shift (Left Shift, then Right Shift within 500ms)
+- Detected via capture-phase `keydown` listener on `e.key === 'Meta'` (or `e.key === 'Shift'`) and `e.location` (1 = left, 2 = right). The Meta and Shift tracks are independent, so a Left Cmd followed by a Right Shift does not trigger.
 - Works even when xterm has DOM focus because listener uses capture phase
 
 ## Keyboard shortcuts (command mode)
@@ -176,13 +176,13 @@ All handled in a single capture-phase `keydown` listener on `window`. Every hand
 
 | Key | On pane | On door |
 |-----|---------|---------|
-| `"` | Horizontal split — new pane to the right | — |
-| `%` | Vertical split — new pane below | — |
+| `\|` / `%` | Horizontal split — new pane to the right | — |
+| `-` / `"` | Vertical split — new pane below | — |
 | Arrow keys | Spatial navigation between panes | Left/Right between doors, Up to panes |
 | `Cmd/Ctrl+Arrow` | Swap session content with neighbor | — |
 | `Enter` | Enter passthrough mode | Restore session + enter passthrough |
 | `,` | Inline rename | — |
-| `x` | Kill with confirmation | Restore session + kill confirmation |
+| `x` / `k` | Kill with confirmation | Restore session + kill confirmation |
 | `d` | Minimize to door | Restore session (stay in command) |
 | `z` | Toggle maximize/restore | — |
 | `t` | Toggle TODO flag | — |
@@ -190,11 +190,11 @@ All handled in a single capture-phase `keydown` listener on `window`. Every hand
 
 ### Split cwd inheritance
 
-When a split is initiated from an existing pane (via `"`/`%`, the header split buttons, or `Cmd/Ctrl+Click` on a split icon), the new pane spawns with its source pane's last-known cwd as the spawn directory. The source cwd is read from `getTerminalPaneState(sourceId).cwd`; remote cwds (`isRemote === true`, e.g. an OSC 7 path reported over ssh) are ignored because they aren't usable as a local spawn cwd. When no source cwd is known, when the split has no source pane (initial pane creation), or when the source is remote, the host's default cwd applies. The inherited cwd rides through `setPendingShellOpts` alongside the inherited shell selection and is consumed by `getOrCreateTerminal` on the next `platform.spawnPty`.
+When a split is initiated from an existing pane (via `|`/`%`/`-`/`"`, the header split buttons, or `Cmd/Ctrl+Click` on a split icon), the new pane spawns with its source pane's last-known cwd as the spawn directory. The source cwd is read from `getTerminalPaneState(sourceId).cwd`; remote cwds (`isRemote === true`, e.g. an OSC 7 path reported over ssh) are ignored because they aren't usable as a local spawn cwd. When no source cwd is known, when the split has no source pane (initial pane creation), or when the source is remote, the host's default cwd applies. The inherited cwd rides through `setPendingShellOpts` alongside the inherited shell selection and is consumed by `getOrCreateTerminal` on the next `platform.spawnPty`.
 
 ### Kill confirmation
 
-Pressing `x` (or clicking the kill button) enters command mode and shows a pane-centered semi-transparent overlay (`KillConfirmOverlay` → `KillConfirmCard`) with a random uppercase letter (A-Z, excluding X). Typing that letter confirms the kill (destroys session, removes pane). Cancel with Escape key, clicking the `[ESC] to cancel` button, or clicking another panel. Any other key triggers a shake animation (400ms `shake-x` keyframe) then auto-dismisses the confirmation.
+Pressing `x` (or clicking the kill button) enters command mode and shows a pane-centered semi-transparent overlay (`KillConfirmOverlay` → `KillConfirmModal`) with a random lowercase letter (a-z, excluding x). Typing that letter confirms the kill (destroys session, removes pane). Cancel with Escape key, clicking the `[ESC] to cancel` button, or clicking another panel. Any other key triggers a shake animation (400ms `shake-x` keyframe) then auto-dismisses the confirmation.
 
 Untouched sessions skip this confirmation. A newly spawned shell starts `untouched: true`; the first user-originated PTY input flips it to false. Inputs that count include printable keys, Enter, control keys, keyboard CSI such as arrows/history, paste, and file-drop path insertion. Replay-time terminal reports, synthetic terminal reports, and stripped mouse-report-only input do not count. Killing an untouched pane runs the normal kill animation/dispose path immediately. Killing an untouched door first reattaches it only far enough to reuse the same pane removal path, then kills it without showing the confirmation overlay.
 
