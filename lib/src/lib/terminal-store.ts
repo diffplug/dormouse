@@ -44,7 +44,7 @@ export interface PendingShellOpts {
   cwd?: string;
   title?: string;
   untouched?: boolean;
-  /** Raw command string launched via `-lc`/`/c`, seeded as the pane's command run. */
+  /** Raw command string typed into the spawned interactive shell once it reaches a prompt; seeded as the pane's command run. */
   command?: string;
   /**
    * `dor ensure` surface: the command must only be typed once OSC 633 shell
