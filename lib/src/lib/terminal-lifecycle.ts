@@ -33,6 +33,8 @@ import {
   ensureTerminalPaneState,
   fillTerminalProcessCwdByPtyId,
   finishLaunchedCommandByPtyId,
+  getTerminalPaneState,
+  isPaneOscDriven,
   recordTerminalOutputByPtyId,
   recordTerminalUserInputByPtyId,
   removeTerminalPaneState,
@@ -307,6 +309,53 @@ export function setPendingShellOpts(id: string, opts: PendingShellOpts): void {
   pendingShellOpts.set(id, opts);
 }
 
+const LAUNCH_PROMPT_POLL_MS = 100;
+const LAUNCH_PROMPT_TIMEOUT_MS = 15_000;
+// `dor ensure` only types into a shell once OSC 633 integration is confirmed, on
+// a tighter budget — and drops the command rather than blindly typing it into a
+// shell that can never be tracked (see the requireIntegration branch below).
+const INTEGRATION_TYPE_TIMEOUT_MS = 8_000;
+
+// `dor split/ensure -- <command>` spawns a real interactive shell (see
+// createSplitSurface) and types the command into it, rather than running
+// `shell -c command`. That leaves a live shell behind the command, so
+// `dor ensure --restart` can Ctrl+C the command and have the shell survive and
+// return to a prompt instead of the whole pty exiting. But we must wait for the
+// shell to actually reach a prompt first, or the keystrokes land in shell
+// startup.
+//
+// `dor split` (requireIntegration=false): wait for any first prompt —
+// seedLaunchedCommand primed currentCommand, which clears the moment the shell
+// draws its first prompt (integration promptStart, or the keystroke heuristic
+// for shells without it). On timeout we type anyway as best effort.
+//
+// `dor ensure` (requireIntegration=true): wait specifically for OSC 633 (the
+// only signal that makes the surface trackable), and on timeout DROP the
+// command. The ensure handler kills the surface and errors in that case, so a
+// shell with no integration (e.g. cmd.exe) never half-runs an untrackable
+// command.
+function typeCommandWhenPromptReady(id: string, command: string, requireIntegration: boolean): void {
+  const timeoutMs = requireIntegration ? INTEGRATION_TYPE_TIMEOUT_MS : LAUNCH_PROMPT_TIMEOUT_MS;
+  let elapsed = 0;
+  const timer = setInterval(() => {
+    if (!registry.has(id)) {
+      clearInterval(timer);
+      return;
+    }
+    const ready = requireIntegration
+      ? isPaneOscDriven(id)
+      : getTerminalPaneState(id).currentCommand === null;
+    if (ready) {
+      clearInterval(timer);
+      getPlatform().writePty(id, `${command}\r`);
+    } else if ((elapsed += LAUNCH_PROMPT_POLL_MS) >= timeoutMs) {
+      clearInterval(timer);
+      // Best effort for split; drop for ensure (the handler kills + errors).
+      if (!requireIntegration) getPlatform().writePty(id, `${command}\r`);
+    }
+  }, LAUNCH_PROMPT_POLL_MS);
+}
+
 export function getOrCreateTerminal(id: string): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
@@ -329,6 +378,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   });
   if (shellOpts?.command) {
     seedLaunchedCommand(id, shellOpts.command, shellOpts.cwd);
+    typeCommandWhenPromptReady(id, shellOpts.command, shellOpts.requireIntegration === true);
   }
   seedProcessCwdAfterSpawn(id);
 
@@ -511,7 +561,36 @@ export function markSessionTouched(id: string): void {
   entry.untouched = false;
 }
 
+/**
+ * A non-terminal content surface's focus contract, so `focusSession` can drive
+ * it like any xterm pane. The iframe surface registers one whose `focus` moves
+ * keyboard focus into the instrumented frame (docs/specs/dor-browser.md →
+ * "Iframe Focus And Rendering Notes").
+ */
+export interface SurfaceFocusHandle {
+  focus(): void;
+  blur(): void;
+}
+
+const surfaceFocusHandles = new Map<string, SurfaceFocusHandle>();
+
+export function registerSurfaceFocusHandle(id: string, handle: SurfaceFocusHandle): () => void {
+  surfaceFocusHandles.set(id, handle);
+  return () => {
+    if (surfaceFocusHandles.get(id) === handle) surfaceFocusHandles.delete(id);
+  };
+}
+
 export function focusSession(id: string, focused: boolean): void {
+  // Non-terminal surfaces (iframe) aren't in the xterm registry — route to
+  // their focus handle so onClickPanel → enterTerminalMode focuses them too.
+  const handle = surfaceFocusHandles.get(id);
+  if (handle) {
+    if (focused) handle.focus();
+    else handle.blur();
+    return;
+  }
+
   const entry = registry.get(id);
   if (!entry) return;
 

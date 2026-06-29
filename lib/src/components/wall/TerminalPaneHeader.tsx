@@ -8,7 +8,7 @@ import {
   ArrowsOutIcon,
   BellIcon,
   CursorClickIcon,
-  SelectionSlashIcon,
+  CursorTextIcon,
   SplitHorizontalIcon,
   SplitVerticalIcon,
   XIcon,
@@ -209,7 +209,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
       className={tabVariant({ state: isActiveHeader ? 'active' : 'inactive' })}
       onMouseDown={() => actions.onClickPanel(api.id)}
     >
-      <div className="flex flex-1 min-w-0 items-center gap-1.5">
+      <div className="flex flex-1 min-w-0 items-center gap-1.5 overflow-hidden">
         {isRenaming ? (
           <input
             data-renaming-input-for={api.id}
@@ -315,7 +315,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
       </div>
       {!isRenaming && (
         <>
-          {showMouseIcon && (
+          {showMouseIcon && tier !== 'minimal' && (
             <div className="ml-1 shrink-0">
               <HeaderActionButton
                 className="flex h-5 min-w-5 items-center justify-center rounded transition-colors shrink-0 hover:bg-current/10"
@@ -329,7 +329,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
               >
                 <span className="relative flex items-center justify-center">
                   {inOverride ? (
-                    <SelectionSlashIcon size={14} />
+                    <CursorTextIcon size={14} />
                   ) : (
                     <CursorClickIcon size={14} />
                   )}
@@ -359,6 +359,14 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
               >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
             </div>
           )}
+          {/*
+            Minimize + close are the highest-priority controls: they must stay
+            visible no matter how narrow the header gets. They sit last (so
+            nothing fixed-width is to their right to push them off) and every
+            other element yields first — the title/bell region clips via
+            `overflow-hidden`, split/zoom drop below the `full` tier, and the
+            mouse icon drops at the `minimal` tier.
+          */}
           <div className="ml-1 flex shrink-0 items-center gap-0.5">
             <HeaderActionButton
               className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"

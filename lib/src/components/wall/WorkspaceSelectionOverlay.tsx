@@ -5,7 +5,7 @@ import {
   TERMINAL_SELECTION_BORDER_RADIUS,
 } from '../design';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
-import { resolvePaneElement } from '../../lib/spatial-nav';
+import { resolvePaneGroupElement } from '../../lib/spatial-nav';
 import type { WallMode, WallSelectionKind } from './wall-types';
 import { DoorElementsContext, PaneElementsContext, WindowFocusedContext } from './wall-context';
 import { MarchingAntsRect } from './MarchingAntsRect';
@@ -36,7 +36,7 @@ export function WorkspaceSelectionOverlay({ apiRef, selectedId, selectedType, mo
     const update = () => {
       const targetEl = selectedType === 'door'
         ? doorElements.get(selectedId)
-        : resolvePaneElement(paneElements.get(selectedId));
+        : resolvePaneGroupElement(api, selectedId, paneElements);
       if (!targetEl) return;
 
       const targetRect = targetEl.getBoundingClientRect();
@@ -52,7 +52,7 @@ export function WorkspaceSelectionOverlay({ apiRef, selectedId, selectedType, mo
     update();
 
     const ro = new ResizeObserver(update);
-    const panelEl = resolvePaneElement(paneElements.get(selectedId));
+    const panelEl = resolvePaneGroupElement(api, selectedId, paneElements);
     if (panelEl) ro.observe(panelEl);
     const doorEl = doorElements.get(selectedId);
     if (doorEl) ro.observe(doorEl);

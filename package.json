@@ -2,7 +2,7 @@
   "name": "dormouse-root",
   "private": true,
   "license": "FSL-1.1-MIT",
-  "packageManager": "pnpm@11.0.6",
+  "packageManager": "pnpm@11.9.0",
   "devEngines": {
     "runtime": {
       "name": "node",
@@ -15,6 +15,7 @@
     "test": "pnpm -r run test",
     "dev:lib": "pnpm --filter dormouse-lib dev",
     "dev:standalone": "pnpm --filter dormouse-standalone tauri dev",
+    "dev:standalone:ab": "pnpm --filter dormouse-standalone dev:agent-browser",
     "dev:website": "pnpm --filter dormouse-website dev",
     "build:vscode": "pnpm --filter dormouse-lib build && pnpm --filter dormouse build:frontend && pnpm --filter dormouse build",
     "build:standalone": "pnpm --filter dormouse-standalone tauri build",

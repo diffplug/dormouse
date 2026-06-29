@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import {
   TerminalPaneHeader,
@@ -10,6 +11,7 @@ import {
 } from '../components/Wall';
 import type { ActivityNotification } from '../lib/alert-manager';
 import type { SetTerminalUserTitleResult } from '../lib/terminal-registry';
+import { removeMouseSelectionState, setMouseReporting, setOverride } from '../lib/mouse-selection';
 
 const SESSION_ID = 'tab-story';
 
@@ -22,9 +24,11 @@ const noopActions: WallActions = {
   onSplitV: () => {},
   onZoom: () => {},
   onClickPanel: () => {},
+  onFocusPane: () => {},
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
+  onSwapRenderMode: () => {},
 };
 
 function actionsRejecting(reason: 'empty' | 'reserved'): WallActions {
@@ -57,6 +61,7 @@ function TabStory({
   isRenaming = false,
   width = 360,
   reducedMotion = false,
+  mouseCaptured = false,
   actions = noopActions,
 }: {
   title?: string;
@@ -65,9 +70,18 @@ function TabStory({
   isRenaming?: boolean;
   width?: number;
   reducedMotion?: boolean;
+  /** Simulate a TUI capturing the mouse, which surfaces the mouse-override icon. */
+  mouseCaptured?: boolean;
   actions?: WallActions;
 }) {
   const mockApi = { id: SESSION_ID, title } as any;
+
+  useEffect(() => {
+    if (!mouseCaptured) return;
+    setMouseReporting(SESSION_ID, 'any');
+    setOverride(SESSION_ID, 'temporary');
+    return () => removeMouseSelectionState(SESSION_ID);
+  }, [mouseCaptured]);
 
   return (
     <ModeContext.Provider value={mode}>
@@ -131,6 +145,51 @@ async function submitReservedRename() {
   await wait(50);
 }
 
+/**
+ * Confirms the minimize + close controls are the top-priority elements of the
+ * header: they must render and stay fully inside the header bounds (never
+ * clipped or pushed out) no matter how narrow it gets. Throws — so the failure
+ * surfaces in Storybook's Interactions panel — if either control is missing,
+ * collapsed to zero size, or sticking outside the header's horizontal extent.
+ */
+async function assertControlsVisible({ canvasElement }: { canvasElement: HTMLElement }) {
+  const CONTROLS = [
+    ['Minimize', '[aria-label="Minimize"]'],
+    ['Kill', '[aria-label="Kill"]'],
+  ] as const;
+  const EPS = 0.5;
+
+  // Returns a human-readable reason the controls aren't fully visible yet, or
+  // null once every control is rendered and sits inside the header bounds.
+  const violation = (): string | null => {
+    const header = canvasElement.querySelector<HTMLElement>('.bg-app-bg');
+    if (!header) return 'header container not found';
+    const bounds = header.getBoundingClientRect();
+    for (const [name, selector] of CONTROLS) {
+      const el = canvasElement.querySelector<HTMLElement>(selector);
+      if (!el) return `${name} button is not rendered`;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return `${name} button collapsed to zero size (hidden)`;
+      if (r.left < bounds.left - EPS || r.right > bounds.right + EPS) {
+        return `${name} button is clipped: button x=[${r.left.toFixed(1)}, ${r.right.toFixed(1)}] `
+          + `exceeds header x=[${bounds.left.toFixed(1)}, ${bounds.right.toFixed(1)}]`;
+      }
+    }
+    return null;
+  };
+
+  // Poll until the primed state (two rAFs) and the ResizeObserver-driven tier
+  // have settled, instead of guessing a fixed delay. Surface the last reason if
+  // it never settles within the timeout.
+  const start = performance.now();
+  let reason = violation();
+  while (reason && performance.now() - start < 1000) {
+    await wait(16);
+    reason = violation();
+  }
+  if (reason) throw new Error(reason);
+}
+
 const NOTIFICATIONS = {
   osc9BodyOnly: {
     source: 'OSC 9',
@@ -174,6 +233,7 @@ const meta: Meta<typeof TabStory> = {
     title: { control: 'text' },
     width: { control: 'number' },
     reducedMotion: { control: 'boolean' },
+    mouseCaptured: { control: 'boolean' },
   },
   args: {
     title: 'build-server',
@@ -182,6 +242,7 @@ const meta: Meta<typeof TabStory> = {
     isRenaming: false,
     width: 360,
     reducedMotion: false,
+    mouseCaptured: false,
   },
 };
 
@@ -369,4 +430,57 @@ export const RenameRejectedReserved: Story = {
     todo: false,
   }),
   play: submitReservedRename,
+};
+
+// --- Minimize + close stay visible as the header shrinks -------------------
+//
+// These stories drive the header down to (and below) the `minimal` tier and
+// assert in their play function that the minimize and close controls remain
+// rendered and fully inside the header bounds. The assertion uses live layout
+// geometry, so it confirms the controls in the real Storybook browser.
+
+export const NarrowControlsVisible: Story = {
+  args: {
+    width: 110,
+  },
+  parameters: primedState({
+    status: 'NOTHING_TO_SHOW',
+    todo: false,
+  }),
+  play: assertControlsVisible,
+};
+
+export const ExtremelyNarrowControlsVisible: Story = {
+  args: {
+    width: 76,
+  },
+  parameters: primedState({
+    status: 'ALERT_RINGING',
+    todo: true,
+  }),
+  play: assertControlsVisible,
+};
+
+export const NarrowWithMouseCaptureControlsVisible: Story = {
+  args: {
+    width: 120,
+    mouseCaptured: true,
+  },
+  parameters: primedState({
+    status: 'NOTHING_TO_SHOW',
+    todo: false,
+  }),
+  play: assertControlsVisible,
+};
+
+export const NarrowLongTitleControlsVisible: Story = {
+  args: {
+    title: 'my-extremely-long-running-background-process-with-a-very-descriptive-name',
+    width: 130,
+  },
+  parameters: primedState({
+    status: 'ALERT_RINGING',
+    todo: true,
+  }),
+  play: assertControlsVisible,
 };

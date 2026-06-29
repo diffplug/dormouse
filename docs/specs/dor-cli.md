@@ -148,12 +148,14 @@ snapshots where available, then returns `workspace:1` and `window:1`. Once
 `workspace:<n>` / `window:<n>` membership defined above; until then it reports the
 single active Workspace.
 
-Command tails captured after `--` are quoted by `dor` before the private control
-request is sent. `dor` detects the invoking shell from its parent process when
-possible, falls back to shell environment variables, and assumes the target
-surface will use the same shell family. The quoted command string is sent as
-`command`, so output, JSON responses, default `ensure` titles, and the launched
-command all show the same debuggable text.
+Command tails captured after `--` are sent as raw argv arrays (`command:
+string[]`); the host — not `dor` — quotes them for the target shell. `dor`
+cannot know which shell the target surface runs, so it forwards argv unquoted
+and the host (`lib/src/components/Wall.tsx`, `dorCommandString`) detects the
+target shell, picks a quoting style with
+[`shellCommandKind` / `buildShellCommandForKind`](../../dor/src/commands/shell-quote.ts)
+(`cmd` / `posix` / `powershell`), and renders a single command string used for
+output, JSON responses, default `ensure` titles, and the launched command alike.
 
 User-facing command docs live in the generated help snapshots. Implementation
 details live in the command files. When `stricli` cannot express a desired
@@ -171,6 +173,12 @@ from `command-detail`.
 - `dor send` [impl](../../dor/src/commands/send.ts) [docs](../../dor/test/snapshots/help/send.md)
 - `dor read` [impl](../../dor/src/commands/read.ts) [docs](../../dor/test/snapshots/help/read.md)
 - `dor kill` [impl](../../dor/src/commands/kill.ts) [docs](../../dor/test/snapshots/help/kill.md)
-- `dor iframe` [impl](../../dor/src/commands/iframe.ts) [docs](../../dor/test/snapshots/help/iframe.md)
+- `dor iframe` — **provisional**; high-fidelity URL embed with structural
+  limitations; the `iframe` renderer of the unified `browser` surface, see
+  [dor-browser.md](dor-browser.md).
+  [impl](../../dor/src/commands/iframe.ts) [docs](../../dor/test/snapshots/help/iframe.md)
+- `dor agent-browser` / `dor ab` — delegates to the user's `agent-browser`,
+  rendered in a Dormouse-native surface; the `ab-screencast` renderer of the
+  unified `browser` surface, see [dor-browser.md](dor-browser.md)
 - `dor list-panes` [impl](../../dor/src/commands/list-panes.ts) [docs](../../dor/test/snapshots/help/list-panes.md)
 - `dor list-pane-surfaces` [impl](../../dor/src/commands/list-pane-surfaces.ts) [docs](../../dor/test/snapshots/help/list-pane-surfaces.md)

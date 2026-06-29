@@ -9,6 +9,7 @@ import {
   COMMAND_FAIL_GLYPH,
   DEFAULT_IDLE_TITLE,
   deriveHeader,
+  deriveSurfaceLabel,
   buildAppTitleResolver,
   groupTerminalPanes,
   notificationDisplayTitle,
@@ -295,6 +296,16 @@ describe('header and grouping derivation', () => {
     });
   });
 
+  it('deriveSurfaceLabel composes deriveHeader + resolveDisplayPrimary for one pane', () => {
+    // A real command label wins; the fallback title is ignored.
+    const running = runningPane('/repo/app', 'pnpm test --watch');
+    expect(deriveSurfaceLabel(running, [running], () => null, 'door title')).toBe('pnpm test --watch');
+    // An idle pane stays <idle> (resolveDisplayPrimary substitutes the fallback
+    // only for the generic command title, not for idle).
+    const idle = createTerminalPaneState();
+    expect(deriveSurfaceLabel(idle, [idle], () => null, 'door title')).toBe(DEFAULT_IDLE_TITLE);
+  });
+
   it('lets fresh app-sent terminal titles override running command labels', () => {
     const pane = reduceTerminalState(
       runningPane('/repo/app', 'lazygit'),
@@ -530,6 +541,18 @@ describe('surfaceRunsCommand (dor ensure matching)', () => {
     const pane = runningPane('/repo/app', 'pnpm dev:website');
     expect(surfaceRunsCommand(pane, 'pnpm dev:website', '/repo/app')).toBe(true);
     expect(surfaceRunsCommand(pane, 'pnpm dev:website', '/repo/app/')).toBe(false);
+  });
+
+  it('matches across the Windows/Git-Bash cwd dialect split', () => {
+    // Git Bash reports its cwd as POSIX (`/c/Users/...`) via OSC, while the dor
+    // CLI sends the native Windows path (`C:\Users\...`) for the same directory.
+    const bashPane = runningPane('/c/Users/me/app', 'pnpm dev:website');
+    expect(surfaceRunsCommand(bashPane, 'pnpm dev:website', 'C:\\Users\\me\\app')).toBe(true);
+    // Drive-letter case and slash direction are folded too.
+    const winPane = runningPane('c:/Users/me/app', 'pnpm dev:website');
+    expect(surfaceRunsCommand(winPane, 'pnpm dev:website', 'C:\\Users\\me\\app')).toBe(true);
+    // Genuinely different directories still do not match.
+    expect(surfaceRunsCommand(bashPane, 'pnpm dev:website', 'C:\\Users\\me\\other')).toBe(false);
   });
 });
 

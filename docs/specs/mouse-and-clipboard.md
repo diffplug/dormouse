@@ -27,7 +27,7 @@ The terminal makes the current regime visible in the pane header, provides a way
 
 ## 1. The Mouse Icon (Header Indicator)
 
-**Visibility.** No icon when the inside program has not requested mouse reporting; a **Mouse icon** (Phosphor `CursorClickIcon`) when it has; replaced by a **No-Mouse icon** (Phosphor `SelectionSlashIcon`) in the same header location while the user has activated an override.
+**Visibility.** No icon when the inside program has not requested mouse reporting; a **Mouse icon** (Phosphor `CursorClickIcon`) when it has; replaced by a **No-Mouse icon** (Phosphor `CursorTextIcon`) in the same header location while the user has activated an override.
 
 **Click.** Clicking the Mouse icon activates a **temporary override** (see §2). Clicking the No-Mouse icon ends the override immediately and restores mouse reporting to the inside program.
 

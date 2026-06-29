@@ -46,12 +46,14 @@ export {
   markSessionTouched,
   mountElement,
   refitSession,
+  registerSurfaceFocusHandle,
   restoreTerminal,
   resumeTerminal,
   setPendingShellOpts,
   swapTerminals,
   unmountElement,
 } from './terminal-lifecycle';
+export type { SurfaceFocusHandle } from './terminal-lifecycle';
 
 export { setDefaultShellOpts, getDefaultShellOpts } from './shell-defaults';
 
@@ -63,6 +65,7 @@ export {
   fillTerminalProcessCwdByPtyId,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
+  isPaneOscDriven,
   isReservedUserTitle,
   removeTerminalPaneState,
   resetTerminalPaneState,

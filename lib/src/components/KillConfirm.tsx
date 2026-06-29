@@ -1,5 +1,6 @@
-import { useRef } from 'react';
-import { resolvePaneElement } from '../lib/spatial-nav';
+import { useRef, type RefObject } from 'react';
+import type { DockviewApi } from 'dockview-react';
+import { resolvePaneGroupElement } from '../lib/spatial-nav';
 import { ModalFrame, Shortcut } from './design';
 
 export type KillExit = 'shake' | 'confirm';
@@ -70,12 +71,16 @@ export function KillConfirmModal({
   );
 }
 
-export function KillConfirmOverlay({ confirmKill, paneElements, onCancel }: {
+export function KillConfirmOverlay({ apiRef, confirmKill, paneElements, onCancel }: {
+  apiRef: RefObject<DockviewApi | null>;
   confirmKill: ConfirmKill;
   paneElements: Map<string, HTMLElement>;
   onCancel: () => void;
 }) {
-  const panelEl = resolvePaneElement(paneElements.get(confirmKill.id));
+  // Center over the whole pane (header + content) like a terminal — browser
+  // panes render in an overlay layer with no groupview ancestor. See
+  // resolvePaneGroupElement.
+  const panelEl = resolvePaneGroupElement(apiRef.current, confirmKill.id, paneElements);
   return (
     <KillConfirmModal
       char={confirmKill.char}

@@ -48,9 +48,11 @@ const noopActions: WallActions = {
   onSplitV: () => {},
   onZoom: () => {},
   onClickPanel: () => {},
+  onFocusPane: () => {},
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
+  onSwapRenderMode: () => {},
 };
 
 const meta: Meta<typeof ShellCwdMatrix> = {

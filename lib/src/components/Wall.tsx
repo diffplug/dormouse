@@ -9,6 +9,9 @@ import {
 import 'dockview-react/dist/styles/dockview.css';
 import { Baseboard } from './Baseboard';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
+import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
+import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
+import { markAgentBrowserSessionClosed } from './wall/agent-browser-sessions';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import {
   clearSessionAttention,
@@ -21,6 +24,7 @@ import {
   getDefaultShellOpts,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
+  isPaneOscDriven,
   getActivitySnapshot,
   isUntouched,
   getOrCreateTerminal,
@@ -32,9 +36,9 @@ import {
 import {
   buildAppTitleResolver,
   createTerminalPaneState,
-  deriveHeader,
-  resolveDisplayPrimary,
+  deriveSurfaceLabel,
   surfaceRunsCommand,
+  type TerminalPaneState,
 } from '../lib/terminal-state';
 import { orchestrateKill } from '../lib/kill-animation';
 import { getPlatform, PLATFORM_STRING } from '../lib/platform';
@@ -53,14 +57,16 @@ import type { PersistedDoor } from '../lib/session-types';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import { TerminalPanel } from './wall/TerminalPanel';
 import { TerminalPaneHeader } from './wall/TerminalPaneHeader';
-import { AgentBrowserPanel } from './wall/AgentBrowserPanel';
-import { IframePanel } from './wall/IframePanel';
+import { BrowserPanel } from './wall/BrowserPanel';
+import { resolveRenderMode, isAgentBrowserParams, isBrowserParams } from './wall/browser-surface';
+import { hostPathDisplay } from './wall/browser-url';
 import { SurfacePaneHeader } from './wall/SurfacePaneHeader';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { useDockviewReady } from './wall/use-dockview-ready';
 import { pickSplitDirection } from './wall/dockview-helpers';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
+import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
 import { useWindowFocused } from './wall/use-window-focused';
 import {
   DialogKeyboardContext,
@@ -98,14 +104,19 @@ type DorControlParams = {
   direction?: unknown;
   input?: unknown;
   inputCount?: unknown;
+  key?: unknown;
   lines?: unknown;
   minimized?: unknown;
+  restart?: unknown;
+  binaryPath?: unknown;
   pane?: string;
+  session?: unknown;
   surface?: unknown;
   url?: unknown;
   workspace?: string;
   window?: string;
   scrollback?: unknown;
+  wsPort?: unknown;
 };
 
 // The webview view of a control request: the shared wire payload, but with
@@ -159,25 +170,39 @@ function persistedPanelTitle(title: string | null | undefined): string {
 }
 
 function surfaceTypeFromParams(params: unknown): DorSurfaceType {
-  if (params && typeof params === 'object' && !Array.isArray(params)) {
-    const surfaceType = (params as { surfaceType?: unknown }).surfaceType;
-    if (surfaceType === 'iframe' || surfaceType === 'agent-browser') return surfaceType;
-  }
-  return 'terminal';
+  if (!isBrowserParams(params)) return 'terminal';
+  // The CLI surface type tracks the *renderer* (iframe vs agent-browser) so
+  // `dor` output stays informative even though both are one 'browser' surface.
+  return resolveRenderMode(params) === 'iframe' ? 'iframe' : 'agent-browser';
 }
 
-function iframeTitle(url: string): string {
-  try {
-    const parsed = new URL(url);
-    const path = parsed.pathname === '/' ? '' : parsed.pathname;
-    return `${parsed.host}${path}${parsed.search}`;
-  } catch {
-    return url;
-  }
+/** Killing or swapping away from an agent-browser surface closes its session —
+ *  surface lifetime and browser lifetime are bound (spec → Lifecycle). No-op
+ *  for other surface types. */
+function closeAgentBrowserSession(params: unknown): void {
+  if (!isAgentBrowserParams(params)) return;
+  const p = params as { session?: unknown; binaryPath?: unknown };
+  if (typeof p.session !== 'string') return;
+  const binaryPath = typeof p.binaryPath === 'string' ? p.binaryPath : undefined;
+  // Mark before issuing the close so a popped-out surface's auto-revert sees
+  // the impending teardown and doesn't relaunch the session we're killing.
+  markAgentBrowserSessionClosed(p.session);
+  getPlatform().agentBrowserCommand?.(p.session, ['close'], binaryPath).catch(() => {});
 }
 
 function componentForSurfaceType(type: DorSurfaceType): string {
-  return type;
+  // iframe + agent-browser both render through the unified BrowserPanel.
+  return type === 'terminal' ? 'terminal' : 'browser';
+}
+
+/** Every browser surface uses dockview's `renderer:'always'`. The default
+ *  (`onlyWhenVisible`) detaches/reattaches — i.e. *moves* — the panel DOM on
+ *  activation; that reloads an <iframe>, and for the screencast canvas it moves
+ *  the node mid-press, so a real click's mouseup lands on a different node and no
+ *  `click` is synthesized (tab chips / page links silently did nothing). Keeping
+ *  the panel always-mounted avoids both. Only ever called for 'browser' panels. */
+function rendererForParams(_params: { renderMode?: unknown }): 'always' {
+  return 'always';
 }
 
 function tabComponentForSurfaceType(type: DorSurfaceType): string {
@@ -251,6 +276,80 @@ function readSurfaceText(surfaceId: string, lines: number | undefined, scrollbac
   return limitLines(collected.join('\n').replace(/\n+$/, ''), lines);
 }
 
+// `dor ensure --restart` blocks the CLI while we interrupt a live command and
+// re-run it. Rather than guess at timings, poll the integration-derived
+// terminal state: a command is gone once `currentCommand` clears (commandFinish
+// → prompt) and back once the surface reports the same command live again.
+const RESTART_POLL_INTERVAL_MS = 100;
+const RESTART_INTERRUPT_TIMEOUT_MS = 15_000;
+const RESTART_START_TIMEOUT_MS = 15_000;
+
+/** Resolve true once `predicate` holds for the surface's live state, false on timeout. */
+function waitForTerminalState(
+  id: string,
+  predicate: (state: TerminalPaneState) => boolean,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (predicate(getTerminalPaneState(id))) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let elapsed = 0;
+    const timer = setInterval(() => {
+      if (predicate(getTerminalPaneState(id))) {
+        clearInterval(timer);
+        resolve(true);
+      } else if ((elapsed += RESTART_POLL_INTERVAL_MS) >= timeoutMs) {
+        clearInterval(timer);
+        resolve(false);
+      }
+    }, RESTART_POLL_INTERVAL_MS);
+  });
+}
+
+/**
+ * Restart a surface already running `command` in `cwd`: interrupt it (Ctrl+C),
+ * wait for the shell to return to its prompt, type the command again, and wait
+ * for it to go live. Drives the live PTY directly, so it works for minimized
+ * doors too (their PTY keeps running). Returns a message on failure.
+ */
+async function restartSurfaceInPlace(id: string, command: string, cwd: string): Promise<ParseResult<undefined>> {
+  // A match is by construction OSC-driven (surfaceRunsCommand only matches a
+  // shell that reports its command), so this never fires on the real path — but
+  // it guarantees we never fire Ctrl+C into a non-integration shell (e.g. cmd.exe
+  // popping `Terminate batch job (Y/N)?`).
+  if (!isPaneOscDriven(id)) return { ok: false, message: 'has no Dormouse shell integration to restart' };
+  const platform = getPlatform();
+  platform.writePty(id, '\x03');
+  const interrupted = await waitForTerminalState(
+    id,
+    (state) => state.currentCommand === null,
+    RESTART_INTERRUPT_TIMEOUT_MS,
+  );
+  if (!interrupted) return { ok: false, message: 'did not return to a prompt after interrupt' };
+  platform.writePty(id, `${command}\r`);
+  const restarted = await waitForTerminalState(
+    id,
+    (state) => surfaceRunsCommand(state, command, cwd),
+    RESTART_START_TIMEOUT_MS,
+  );
+  if (!restarted) return { ok: false, message: 'command did not restart' };
+  return { ok: true, value: undefined };
+}
+
+// A `dor ensure -- <command>` command is typed into the shell programmatically,
+// which bypasses the keystroke heuristic — so only a shell whose integration
+// emits OSC 633 boundaries ever reports the command back, which is what makes the
+// surface matchable/restartable. `dor ensure` requires it. We give the shell this
+// long to draw its first integrated prompt (headroom for a cold-start shell
+// loading a profile / under AV) before concluding it has no integration.
+const INTEGRATION_DETECT_TIMEOUT_MS = 8_000;
+
+// Shown to the user (via the CLI's stderr) when `dor ensure` can't run because the
+// target shell has no OSC 633 integration. `shell` is a display name when known.
+function missingIntegrationError(shell?: string): string {
+  const name = (shell ?? '').replace(/\\/g, '/').split('/').pop() || 'this shell';
+  return `dor ensure requires OSC 633 shell integration, which ${name} does not provide. Run it from a shell with Dormouse integration, such as Git Bash or PowerShell.`;
+}
+
 function killConfirmationParam(value: unknown): { mode: 'if-read'; text: string } | { mode: 'dangerously' } | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const confirmation = value as { mode?: unknown; text?: unknown };
@@ -299,18 +398,6 @@ function dorCommandString(args: string[] | undefined): string | undefined {
   return buildShellCommandForKind(shellCommandKind(shell, PLATFORM_STRING), args);
 }
 
-/** Wrap an already-quoted command string in the target shell's launch flags. */
-function commandShellArgs(shell: string | undefined, command: string): string[] {
-  switch (shellCommandKind(shell, PLATFORM_STRING)) {
-    case 'cmd':
-      return ['/d', '/s', '/c', command];
-    case 'powershell':
-      return ['-NoLogo', '-NoProfile', '-Command', command];
-    case 'posix':
-      return ['-lc', command];
-  }
-}
-
 function ShellSpawnNotice({
   notice,
   paneElements,
@@ -340,7 +427,10 @@ function ShellSpawnNotice({
   );
 }
 
-const components = { terminal: TerminalPanel, iframe: IframePanel, 'agent-browser': AgentBrowserPanel };
+// One body component for every browser surface; the legacy 'iframe' /
+// 'agent-browser' names alias to it so dockview layouts persisted before the
+// unification still resolve on restore.
+const components = { terminal: TerminalPanel, browser: BrowserPanel, iframe: BrowserPanel, 'agent-browser': BrowserPanel };
 const tabComponents = { terminal: TerminalPaneHeader, surface: SurfacePaneHeader };
 
 // --- Main component ---
@@ -503,7 +593,9 @@ export function Wall({
 
   const killPaneImmediately = useCallback((id: string) => {
     const api = apiRef.current;
-    if (!api?.getPanel(id)) return;
+    const panel = api?.getPanel(id);
+    if (!api || !panel) return;
+    closeAgentBrowserSession(panel.params);
     orchestrateKill(api, id, selectPane, setSelectedId, killInProgressRef, overlayElRef);
     fireEvent({ type: 'kill', id });
   }, [fireEvent, selectPane]);
@@ -594,7 +686,13 @@ export function Wall({
   }, []);
 
   useEffect(() => {
-    const handleBlur = () => clearSessionAttention();
+    // An iframe surface taking focus blurs this window without backgrounding the
+    // app (document.hasFocus() stays true). Only clear cross-session attention
+    // on a real blur, else focusing an iframe wipes attention (spec → "#2").
+    const handleBlur = () => {
+      if (document.hasFocus()) return;
+      clearSessionAttention();
+    };
     window.addEventListener('blur', handleBlur);
     return () => window.removeEventListener('blur', handleBlur);
   }, []);
@@ -627,6 +725,9 @@ export function Wall({
     selectedIdRef,
     selectedTypeRef,
   });
+
+  // --- Dev-server port → pane correlation (browser header connection chip) ---
+  useDevServerPortCorrelation({ apiRef, doorsRef });
 
   // --- Reattach ---
 
@@ -749,9 +850,8 @@ export function Wall({
     return panels.map((panel, index) => {
       const type = surfaceTypeFromParams(panel.params);
       const state = panelStates[index] ?? createTerminalPaneState();
-      const derived = deriveHeader(state, panelStates, { appTitleForPane });
       const title = type === 'terminal'
-        ? resolveDisplayPrimary(derived.primary, panel.title ?? panel.id)
+        ? deriveSurfaceLabel(state, panelStates, appTitleForPane, panel.title ?? panel.id)
         : (panel.title ?? panel.id);
 
       return {
@@ -819,12 +919,14 @@ export function Wall({
     minimized,
     referenceId,
     cwd,
+    requireIntegration,
   }: {
     command?: string;
     direction: DorResolvedSplitDirection;
     minimized: boolean;
     referenceId: string;
     cwd?: string;
+    requireIntegration?: boolean;
   }): ParseResult<{
     id: string;
     ref: string;
@@ -842,12 +944,19 @@ export function Wall({
     const inheritedCwd = cwd ?? (sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined);
 
     if (command) {
+      // Spawn a real interactive shell and type the command into it once it
+      // reaches a prompt (see typeCommandWhenPromptReady in the lifecycle), rather
+      // than launching `shell -c command`. A `-c` invocation has no prompt behind
+      // it: the command *is* the shell's whole job, so `dor ensure --restart`'s
+      // Ctrl+C would interrupt the command and take the shell down with it (the
+      // pty exits) instead of returning to a prompt the command can be re-run at.
       setPendingShellOpts(newId, {
         shell: defaults?.shell,
-        args: commandShellArgs(defaults?.shell, command),
+        args: defaults?.args,
         cwd: inheritedCwd,
         untouched: false,
         command,
+        ...(requireIntegration ? { requireIntegration: true } : {}),
       });
     } else if (defaults?.shell || inheritedCwd) {
       setPendingShellOpts(newId, {
@@ -879,14 +988,21 @@ export function Wall({
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId) } };
   }, [generatePaneId, minimizePane, selectPane, surfaceRefForId]);
 
-  const createIframeSurface = useCallback(({
+  /**
+   * Create a non-terminal content surface (iframe, agent-browser) next to a
+   * reference surface: an untouched terminal caller is replaced in place,
+   * anything else gets a split (the `dor iframe` placement rule).
+   */
+  const createContentSurface = useCallback(({
     minimized,
+    params,
     reference,
-    url,
+    title,
   }: {
     minimized: boolean;
+    params: Record<string, unknown>;
     reference: DorSurface;
-    url: string;
+    title: string;
   }): ParseResult<{
     id: string;
     ref: string;
@@ -897,18 +1013,23 @@ export function Wall({
     const referencePanel = api.getPanel(reference.id);
     if (!referencePanel) return { ok: false, message: `surface '${reference.ref}' is not visible` };
 
+    // One component for every browser surface; the renderer is derived per mode.
+    const component = 'browser';
+    const renderer = rendererForParams(params);
     const newId = generatePaneId();
-    const title = iframeTitle(url);
-    const params = { surfaceType: 'iframe', url };
     const replaceUntouchedTerminal = reference.type === 'terminal' && isUntouched(reference.id);
 
     if (replaceUntouchedTerminal) {
       api.addPanel({
         id: newId,
-        component: 'iframe',
+        component,
         tabComponent: 'surface',
         title,
         params,
+        // Keep iframes mounted across (de)activation — dockview's default
+        // onlyWhenVisible renderer detaches/reattaches panel DOM, and moving an
+        // <iframe> in the DOM reloads it (docs/specs/dor-browser.md).
+        renderer,
         position: { referencePanel: referencePanel.id, direction: 'within' },
       });
       disposeSession(reference.id);
@@ -922,10 +1043,11 @@ export function Wall({
     freshlySpawnedRef.current.set(newId, dockDirection === 'below' ? 'top' : 'left');
     api.addPanel({
       id: newId,
-      component: 'iframe',
+      component,
       tabComponent: 'surface',
       title,
       params,
+      renderer,
       position: { referencePanel: referencePanel.id, direction: dockDirection },
     });
     selectPane(newId);
@@ -937,6 +1059,57 @@ export function Wall({
     if (minimized) minimizePane(newId);
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'created' } };
   }, [generatePaneId, minimizePane, selectPane, surfaceRefForId]);
+
+  // The last binary path a `dor ab` surface resolved on a terminal's PATH.
+  // Re-used to spawn an agent-browser when swapping an iframe embed up to a
+  // screencast, since the webview/host PATH may not find the binary itself.
+  const lastAgentBrowserBinaryPathRef = useRef<string | undefined>(undefined);
+
+  /**
+   * Replace a content surface's renderer in place, preserving its dock slot
+   * (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). Adds the
+   * new panel `within` the old one, closes the old surface's session if any,
+   * then removes the old panel and selects the new. The generalized form of
+   * createContentSurface's replace-untouched-terminal branch.
+   */
+  const replaceSurface = useCallback((oldId: string, next: {
+    params: Record<string, unknown>;
+    title: string;
+  }): string | null => {
+    const api = apiRef.current;
+    const panel = api?.getPanel(oldId);
+    if (!api || !panel) return null;
+    closeAgentBrowserSession(panel.params);
+    const newId = generatePaneId();
+    api.addPanel({
+      id: newId,
+      component: 'browser',
+      tabComponent: 'surface',
+      title: next.title,
+      params: next.params,
+      renderer: rendererForParams(next.params),
+      position: { referencePanel: panel, direction: 'within' },
+    });
+    api.removePanel(panel);
+    selectPane(newId);
+    return newId;
+  }, [generatePaneId, selectPane]);
+
+  /**
+   * The agent-browser session ↔ surface registry, derived from panel/door
+   * params rather than kept as separate state so it survives webview reloads.
+   * Returns the surface bound to `session`, or null if none exists.
+   */
+  const findAgentBrowserSurface = useCallback((session: string): { id: string; minimized: boolean } | null => {
+    const isMatch = (params: unknown) =>
+      isAgentBrowserParams(params) && (params as { session?: unknown }).session === session;
+
+    const panel = apiRef.current?.panels.find((candidate) => isMatch(candidate.params));
+    if (panel) return { id: panel.id, minimized: false };
+    const door = doorsRef.current.find((candidate) => isMatch(candidate.params));
+    if (door) return { id: door.id, minimized: true };
+    return null;
+  }, []);
 
   // Listen for external "new terminal" requests (e.g. from the standalone AppBar)
   useEffect(() => {
@@ -1113,6 +1286,26 @@ export function Wall({
         }
         const existingId = findSurfaceIdRunningCommand(command, cwd);
         if (existingId) {
+          const minimized = doorsRef.current.some((door) => door.id === existingId);
+          if (booleanParam(params.restart)) {
+            const restarted = await restartSurfaceInPlace(existingId, command, cwd);
+            if (!restarted.ok) {
+              detail.respond({ ok: false, error: `surface '${surfaceRefForId(existingId)}' ${restarted.message}` });
+              return;
+            }
+            detail.respond({
+              ok: true,
+              result: {
+                status: 'restarted',
+                surfaceId: existingId,
+                surfaceRef: surfaceRefForId(existingId),
+                command,
+                cwd,
+                minimized,
+              },
+            });
+            return;
+          }
           detail.respond({
             ok: true,
             result: {
@@ -1121,9 +1314,19 @@ export function Wall({
               surfaceRef: surfaceRefForId(existingId),
               command,
               cwd,
-              minimized: doorsRef.current.some((door) => door.id === existingId),
+              minimized,
             },
           });
+          return;
+        }
+        // ensure needs OSC 633 to track the command. cmd.exe provably has none,
+        // so when the configured shell is explicitly cmd, fail immediately without
+        // even spawning a split. Only short-circuit on an explicit shell — an
+        // unset shell classifies as 'cmd' on Windows but the sidecar may actually
+        // spawn PowerShell, so let those fall through to the generic OSC wait.
+        const ensureShell = getDefaultShellOpts()?.shell;
+        if (ensureShell && shellCommandKind(ensureShell, PLATFORM_STRING) === 'cmd') {
+          detail.respond({ ok: false, error: missingIntegrationError(ensureShell) });
           return;
         }
         const resolved = resolveSplitTarget();
@@ -1135,9 +1338,26 @@ export function Wall({
           minimized: booleanParam(params.minimized),
           referenceId: resolved.target.id,
           cwd,
+          requireIntegration: true,
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });
+          return;
+        }
+        // ensure is only useful if the new shell reports OSC 633 — otherwise it
+        // can never be matched or restarted. A non-cmd shell can still lack
+        // integration (misconfigured, exotic); wait for the signal, and if it
+        // never arrives kill the throwaway split and fail cleanly rather than
+        // half-run an untrackable command. typeCommandWhenPromptReady drops the
+        // command in the same case, so nothing executes.
+        const integrated = await waitForTerminalState(
+          result.value.id,
+          () => isPaneOscDriven(result.value.id),
+          INTEGRATION_DETECT_TIMEOUT_MS,
+        );
+        if (!integrated) {
+          killPaneImmediately(result.value.id);
+          detail.respond({ ok: false, error: missingIntegrationError(ensureShell) });
           return;
         }
         detail.respond({
@@ -1253,10 +1473,11 @@ export function Wall({
           detail.respond({ ok: false, error: target.message });
           return;
         }
-        const result = createIframeSurface({
+        const result = createContentSurface({
           minimized: booleanParam(params.minimized),
+          params: { surfaceType: 'browser', renderMode: 'iframe', url },
           reference: target.value,
-          url,
+          title: hostPathDisplay(url, true),
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });
@@ -1275,12 +1496,89 @@ export function Wall({
         return;
       }
 
+      if (detail.method === 'surface.agentBrowser') {
+        const session = stringParam(params.session);
+        if (!session) {
+          detail.respond({ ok: false, error: 'session is required' });
+          return;
+        }
+        const key = stringParam(params.key);
+        const wsPort = numberParam(params.wsPort);
+        const binaryPath = stringParam(params.binaryPath);
+        // Remember the resolved binary so an embed→screencast swap can spawn one.
+        if (binaryPath) lastAgentBrowserBinaryPathRef.current = binaryPath;
+        const refreshedParams = {
+          ...(wsPort !== undefined ? { wsPort } : {}),
+          ...(binaryPath !== undefined ? { binaryPath } : {}),
+        };
+
+        const existing = findAgentBrowserSurface(session);
+        if (existing) {
+          // Reuse: refresh the stream port (OS-assigned, churns across session
+          // restarts) so the panel reconnects to the live stream, and the
+          // resolved binary path alongside it.
+          if (!existing.minimized && Object.keys(refreshedParams).length > 0) {
+            api.getPanel(existing.id)?.api.updateParameters(refreshedParams);
+          } else if (existing.minimized && Object.keys(refreshedParams).length > 0) {
+            const nextDoors = doorsRef.current.map((door) => door.id === existing.id
+              ? { ...door, params: { ...door.params, ...refreshedParams } }
+              : door);
+            doorsRef.current = nextDoors;
+            setDoors(nextDoors);
+          }
+          detail.respond({
+            ok: true,
+            result: {
+              status: 'existing',
+              surfaceId: existing.id,
+              surfaceRef: surfaceRefForId(existing.id),
+              session,
+              minimized: existing.minimized,
+            },
+          });
+          return;
+        }
+
+        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        const result = createContentSurface({
+          minimized: booleanParam(params.minimized),
+          params: {
+            surfaceType: 'browser',
+            renderMode: 'ab-screencast',
+            session,
+            ...(key !== undefined ? { key } : {}),
+            ...refreshedParams,
+          },
+          reference: target.value,
+          title: key ?? session,
+        });
+        if (!result.ok) {
+          detail.respond({ ok: false, error: result.message });
+          return;
+        }
+        detail.respond({
+          ok: true,
+          result: {
+            status: result.value.status,
+            surfaceId: result.value.id,
+            surfaceRef: result.value.ref,
+            session,
+            minimized: booleanParam(params.minimized),
+          },
+        });
+        return;
+      }
+
       detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
     };
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, createIframeSurface, createSplitSurface, findSurfaceIdRunningCommand, killPaneImmediately, resolveVisibleSurface, surfaceRefForId]);
+  }, [buildDorSurfaces, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, resolveVisibleSurface, surfaceRefForId]);
 
   const addSplitPanel = useCallback((
     id: string | null,
@@ -1356,6 +1654,16 @@ export function Wall({
       setConfirmKill(null);
       enterTerminalMode(id);
     },
+    onFocusPane: (id: string) => {
+      setConfirmKill(null);
+      // Visible pane → jump straight in; minimized (a door) → reattach first.
+      if (apiRef.current?.getPanel(id)) {
+        enterTerminalMode(id);
+        return;
+      }
+      const door = doorsRef.current.find((item) => item.id === id);
+      if (door) handleReattachRef.current(door, { enterPassthrough: true });
+    },
     onStartRename: (id: string) => {
       setRenamingPaneId(id);
     },
@@ -1375,7 +1683,79 @@ export function Wall({
     onCancelRename: () => {
       setRenamingPaneId(null);
     },
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately]);
+    onSwapRenderMode: (id, mode) => {
+      const api = apiRef.current;
+      const panel = api?.getPanel(id);
+      if (!api || !panel) return;
+      const params = panel.params as Record<string, unknown> | undefined;
+      const currentType = surfaceTypeFromParams(params);
+
+      // agent-browser → iframe: frame the active tab's URL, then the replace
+      // closes the now-unneeded headless browser. Webview-only.
+      if (currentType === 'agent-browser' && mode === 'iframe') {
+        // Canonical params.url (mirrored from the chrome snapshot) first; fall
+        // back to the live snapshot for a surface that hasn't reported a tab yet.
+        const url = (typeof params?.url === 'string' && params.url) || getAgentBrowserScreenController(id)?.chrome().url;
+        if (!url) return;
+        replaceSurface(id, {
+          params: { surfaceType: 'browser', renderMode: 'iframe', url },
+          title: hostPathDisplay(url, true),
+        });
+        return;
+      }
+
+      // iframe → live agent-browser (ab-screencast or ab-popout): the host must
+      // spawn a session for the URL (absent ⇒ inert, like other host-gated
+      // affordances). ab-popout spawns headed directly so the new surface mounts
+      // already popped-out (no headless launch + immediate relaunch flash).
+      if (currentType === 'iframe' && (mode === 'ab-screencast' || mode === 'ab-popout')) {
+        const chromeUrl = getAgentBrowserScreenController(id)?.chrome().url;
+        const url = (typeof chromeUrl === 'string' && chromeUrl)
+          || (typeof params?.url === 'string' ? params.url : undefined);
+        const platform = getPlatform();
+        if (!url || !platform.agentBrowserOpen) return;
+        const headed = mode === 'ab-popout';
+        platform.agentBrowserOpen(url, { headed }, lastAgentBrowserBinaryPathRef.current).then((res) => {
+          if (!res.ok || !res.session) return;
+          if (res.binaryPath) lastAgentBrowserBinaryPathRef.current = res.binaryPath;
+          const nextParams = {
+            surfaceType: 'browser',
+            renderMode: mode,
+            session: res.session,
+            url,
+            ...(res.wsPort !== undefined ? { wsPort: res.wsPort } : {}),
+            ...(res.binaryPath !== undefined ? { binaryPath: res.binaryPath } : {}),
+            syncEngaged: true,
+          };
+          const nextId = replaceSurface(id, {
+            params: nextParams,
+            title: hostPathDisplay(url, true),
+          });
+          if (!nextId) {
+            closeAgentBrowserSession(nextParams);
+            console.warn(`[dormouse] failed to replace iframe surface '${id}' with agent-browser surface`);
+          }
+        }).catch((err) => {
+          console.warn('[dormouse] failed to swap iframe surface to agent-browser:', err);
+        });
+      }
+    },
+    onOpenBrowserPane: (id, url) => {
+      const api = apiRef.current;
+      if (!api) return;
+      // A new-tab request from the iframe shim → open the URL as a new iframe
+      // browser pane, split next to the source (docs/specs/dor-browser.md →
+      // "Iframe Shim").
+      const reference = buildDorSurfaces(api).find((s) => s.id === id);
+      if (!reference) return;
+      createContentSurface({
+        minimized: false,
+        params: { surfaceType: 'browser', renderMode: 'iframe', url },
+        reference,
+        title: hostPathDisplay(url, true),
+      });
+    },
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface]);
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
 
@@ -1443,6 +1823,7 @@ export function Wall({
             {/* Kill confirmation overlay — centered over the pane being killed */}
             {confirmKill && (
               <KillConfirmOverlay
+                apiRef={apiRef}
                 confirmKill={confirmKill}
                 paneElements={paneElements}
                 onCancel={() => rejectKill()}
@@ -1456,6 +1837,10 @@ export function Wall({
             />
 
             <ExternalLinkModalHost onKeyboardActiveChange={setDialogKeyboardActive} />
+            <AgentBrowserScreenModalHost
+              onKeyboardActiveChange={setDialogKeyboardActive}
+              resolveLabel={surfaceRefForId}
+            />
 
           </div>
           </DialogKeyboardContext.Provider>

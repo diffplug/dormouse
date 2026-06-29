@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: agent-browser was not found (looked for 'agent-browser'). Install it with: npm i -g agent-browser

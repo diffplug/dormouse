@@ -17,6 +17,25 @@ declare module 'node:child_process' {
     encoding: 'utf8';
     timeout?: number;
   }): string;
+
+  export interface ChildProcessStream {
+    on(event: 'data', listener: (chunk: unknown) => void): void;
+  }
+
+  export interface ChildProcess {
+    stdout: ChildProcessStream;
+    stderr: ChildProcessStream;
+    on(event: 'error', listener: (error: Error) => void): void;
+    on(event: 'close', listener: (code: number | null) => void): void;
+  }
+
+  export function spawn(command: string, args: readonly string[], options: {
+    stdio: readonly ['ignore', 'pipe', 'pipe'];
+  }): ChildProcess;
+}
+
+declare module 'node:fs' {
+  export function existsSync(path: string): boolean;
 }
 
 declare module 'node:path' {

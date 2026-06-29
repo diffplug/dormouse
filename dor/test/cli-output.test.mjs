@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCli } from '../dist/cli.js';
 import { buildShellCommandForKind, shellCommandKind } from '../dist/commands/shell-quote.js';
+import { msysToWindowsCwd } from '../dist/commands/ensure.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const snapshotsDir = join(__dirname, 'snapshots');
@@ -73,8 +74,9 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       // Mirror the host: quote the argv for the target shell, and key on the
       // command so the fixture can exercise both the created and existing paths.
       const command = buildShellCommandForKind('posix', request.command);
+      const isExisting = command === 'pnpm dev:workspace';
       return {
-        status: command === 'pnpm dev:workspace' ? 'existing' : 'created',
+        status: isExisting ? (request.restart ? 'restarted' : 'existing') : 'created',
         surfaceId: '33333333-3333-4333-8333-333333333333',
         surfaceRef: 'surface:3',
         command,
@@ -129,6 +131,30 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         url: request.url,
         minimized: request.minimized,
       };
+    },
+    async agentBrowserSurface(request) {
+      this.requests.push({ method: 'agentBrowserSurface', request });
+      return {
+        status: 'created',
+        surfaceId: '33333333-3333-4333-8333-333333333333',
+        surfaceRef: 'surface:3',
+        session: request.session,
+        minimized: false,
+      };
+    },
+  };
+}
+
+function fakeAgentBrowser({ exitCode = 0, stdout = '✓ ok\n', stderr = '' } = {}) {
+  const calls = [];
+  return {
+    calls,
+    exec: async (binary, args) => {
+      calls.push([binary, ...args]);
+      if (args.includes('stream')) {
+        return { exitCode: 0, stdout: '{"success":true,"data":{"port":61141}}\n', stderr: '' };
+      }
+      return { exitCode, stdout, stderr };
     },
   };
 }
@@ -215,10 +241,46 @@ test('ensure sends command argv and caller cwd to the host', async () => {
     request: {
       command: ['pnpm', 'dev'],
       minimized: false,
+      restart: false,
       surface: undefined,
       cwd: '/work/site',
     },
   }]);
+});
+
+test('ensure --restart restarts a matching surface in place', async () => {
+  const client = fixtureClient();
+  await snapshot(
+    'ensure-restart',
+    await runCli(['ensure', '--restart', '--', 'pnpm', 'dev:workspace'], {
+      client,
+      env: { PWD: '/work/site' },
+    }),
+  );
+  assert.equal(client.requests[0].request.restart, true);
+});
+
+test('ensure surfaces a host error (no integration) to stderr with exit 1', async () => {
+  const client = {
+    requests: [],
+    async ensureSurface(request) {
+      this.requests.push({ method: 'ensureSurface', request });
+      throw new Error('dor ensure requires OSC 633 shell integration, which cmd.exe does not provide. Run it from a shell with Dormouse integration, such as Git Bash or PowerShell.');
+    },
+  };
+  const result = await runCli(['ensure', '--', 'pnpm', 'dev'], { client, env: { PWD: '/work/site' } });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /^Error: dor ensure requires OSC 633 shell integration, which cmd\.exe does not provide/);
+  assert.equal(result.stdout, '');
+});
+
+test('msysToWindowsCwd folds a Git Bash POSIX PWD to a Windows drive on win32', () => {
+  assert.equal(msysToWindowsCwd('/c/Users/me/site', 'win32'), 'C:\\Users\\me\\site');
+  assert.equal(msysToWindowsCwd('/d/work', 'win32'), 'D:\\work');
+  // Already-native paths (some MSYS builds export `C:/...`) and non-win32
+  // platforms are left for resolvePath to handle.
+  assert.equal(msysToWindowsCwd('C:/Users/me/site', 'win32'), 'C:/Users/me/site');
+  assert.equal(msysToWindowsCwd('/c/Users/me/site', 'linux'), '/c/Users/me/site');
 });
 
 test('ensure json output', async () => {
@@ -397,6 +459,120 @@ test('iframe json output', async () => {
 
 test('iframe invalid url output', async () => {
   await snapshot('iframe-invalid-url', await runCli(['iframe', 'localhost:5173'], { client: fixtureClient() }));
+});
+
+test('agent-browser passthrough output', async () => {
+  const ab = fakeAgentBrowser({ stdout: '✓ \n  http://localhost:5173\n' });
+  await snapshot(
+    'agent-browser-passthrough',
+    await runCli(['ab', 'open', 'http://localhost:5173'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
+  );
+});
+
+test('agent-browser resolves --key to a namespaced session and opens a surface', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', '--key', 'storybook', 'open', 'http://localhost:6006'], { client, execAgentBrowser: ab.exec });
+  assert.deepEqual(ab.calls, [
+    ['agent-browser', '--session', 'dormouse.1.storybook', 'open', 'http://localhost:6006'],
+    ['agent-browser', '--session', 'dormouse.1.storybook', 'stream', 'status', '--json'],
+  ]);
+  assert.deepEqual(client.requests, [{
+    method: 'agentBrowserSurface',
+    request: { key: 'storybook', session: 'dormouse.1.storybook', wsPort: 61141 },
+  }]);
+});
+
+test('agent-browser defaults to --key default', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['agent-browser', 'open', 'http://localhost:5173'], { client, execAgentBrowser: ab.exec });
+  assert.equal(ab.calls[0][2], 'dormouse.1.default');
+  assert.deepEqual(client.requests[0].request, { key: 'default', session: 'dormouse.1.default', wsPort: 61141 });
+});
+
+test('agent-browser raw --session skips key namespacing', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', '--session', 'mine', 'snapshot'], { client, execAgentBrowser: ab.exec });
+  assert.equal(ab.calls[0][2], 'mine');
+  assert.deepEqual(client.requests[0].request, { key: undefined, session: 'mine', wsPort: 61141 });
+});
+
+test('agent-browser close skips surface management', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', 'close'], { client, execAgentBrowser: ab.exec });
+  assert.deepEqual(ab.calls, [['agent-browser', '--session', 'dormouse.1.default', 'close']]);
+  assert.deepEqual(client.requests, []);
+});
+
+test('agent-browser without a control endpoint stays a pure passthrough', async () => {
+  const ab = fakeAgentBrowser();
+  const result = await runCli(['ab', 'open', 'http://localhost:5173'], { execAgentBrowser: ab.exec });
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, '');
+  assert.deepEqual(ab.calls, [['agent-browser', '--session', 'dormouse.1.default', 'open', 'http://localhost:5173']]);
+});
+
+test('agent-browser forwards child exit code and skips surface on failure', async () => {
+  const ab = fakeAgentBrowser({ exitCode: 1, stderr: '✗ boom\n' });
+  const client = fixtureClient();
+  const result = await runCli(['ab', 'open', 'nope'], { client, execAgentBrowser: ab.exec });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stderr, '✗ boom\n');
+  assert.deepEqual(client.requests, []);
+});
+
+test('agent-browser key/session conflict output', async () => {
+  const ab = fakeAgentBrowser();
+  await snapshot(
+    'agent-browser-key-session-conflict',
+    await runCli(['ab', '--key', 'a', '--session', 'b', 'open', 'x'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
+  );
+});
+
+test('agent-browser missing binary output', async () => {
+  const enoent = Object.assign(new Error("spawn agent-browser ENOENT"), { code: 'ENOENT' });
+  await snapshot(
+    'agent-browser-missing-binary',
+    await runCli(['ab', 'open', 'http://localhost:5173'], {
+      client: fixtureClient(),
+      execAgentBrowser: async () => { throw enoent; },
+    }),
+  );
+});
+
+test('agent-browser respects DORMOUSE_AGENT_BROWSER_BIN and forwards it as binaryPath', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', 'snapshot'], {
+    client,
+    execAgentBrowser: ab.exec,
+    env: { DORMOUSE_AGENT_BROWSER_BIN: '/opt/custom/agent-browser' },
+  });
+  assert.equal(ab.calls[0][0], '/opt/custom/agent-browser');
+  assert.equal(client.requests[0].request.binaryPath, '/opt/custom/agent-browser');
+});
+
+test('agent-browser resolves the binary on PATH to an absolute binaryPath', async () => {
+  const { mkdtemp, writeFile: write, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const dir = await mkdtemp(join(tmpdir(), 'dor-ab-'));
+  try {
+    const binPath = join(dir, 'agent-browser');
+    await write(binPath, '#!/bin/sh\n', { mode: 0o755 });
+    const ab = fakeAgentBrowser();
+    const client = fixtureClient();
+    await runCli(['ab', 'snapshot'], {
+      client,
+      execAgentBrowser: ab.exec,
+      env: { PATH: `/nonexistent:${dir}` },
+    });
+    assert.equal(client.requests[0].request.binaryPath, binPath);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('list-panes text output', async () => {

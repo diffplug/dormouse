@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import { CaretDownIcon, MinusIcon, CornersOutIcon, CornersInIcon, XIcon, PlusIcon, CheckIcon } from '@phosphor-icons/react';
 import { ThemePicker } from '../../lib/src/components/ThemePicker';
 import { PopupButtonRow, chromeButton } from '../../lib/src/components/design';
@@ -16,15 +15,56 @@ interface AppBarProps {
   shells: ShellEntry[];
 }
 
-const appWindow = getCurrentWindow();
+type AppWindow = {
+  isFocused(): Promise<boolean>;
+  onFocusChanged(handler: (event: { payload: boolean }) => void): Promise<() => void>;
+  isMaximized(): Promise<boolean>;
+  onResized(handler: () => void): Promise<() => void>;
+  minimize(): Promise<void>;
+  toggleMaximize(): Promise<void>;
+  close(): Promise<void>;
+};
+
+let appWindowPromise: Promise<AppWindow | null> | null = null;
+
+function getAppWindow(): Promise<AppWindow | null> {
+  if (import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST) {
+    return Promise.resolve(null);
+  }
+  appWindowPromise ??= import('@tauri-apps/api/window')
+    .then(({ getCurrentWindow }) => getCurrentWindow() as AppWindow);
+  return appWindowPromise;
+}
 
 function useAppWindowFocused(): boolean {
   const [focused, setFocused] = useState(() => document.hasFocus());
 
   useEffect(() => {
-    appWindow.isFocused().then(setFocused);
-    const unlisten = appWindow.onFocusChanged(({ payload }) => setFocused(payload));
-    return () => { unlisten.then(fn => fn()); };
+    let cancelled = false;
+    let cleanup: (() => void) | null = null;
+
+    const onFocus = () => setFocused(true);
+    const onBlur = () => setFocused(false);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
+
+    getAppWindow().then((appWindow) => {
+      if (cancelled || !appWindow) return;
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+      appWindow.isFocused().then((next) => {
+        if (!cancelled) setFocused(next);
+      });
+      const unlisten = appWindow.onFocusChanged(({ payload }) => setFocused(payload));
+      cleanup = () => { unlisten.then(fn => fn()); };
+    });
+
+    return () => {
+      cancelled = true;
+      cleanup?.();
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+    };
   }, []);
 
   return focused;
@@ -48,15 +88,27 @@ function Tip({ label, children }: { label: string; children: React.ReactNode }) 
 // ── Windows/Linux window buttons ───────────────────────────────────────────
 
 function WinControls() {
+  const [appWindow, setAppWindow] = useState<AppWindow | null>(null);
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+    getAppWindow().then((win) => {
+      if (!cancelled) setAppWindow(win);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!appWindow) return;
     appWindow.isMaximized().then(setMaximized);
     const unlisten = appWindow.onResized(() => {
       appWindow.isMaximized().then(setMaximized);
     });
     return () => { unlisten.then(fn => fn()); };
-  }, []);
+  }, [appWindow]);
+
+  if (!appWindow) return null;
 
   return (
     <div className="flex items-stretch self-stretch">

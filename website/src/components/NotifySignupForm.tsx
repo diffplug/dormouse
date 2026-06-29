@@ -53,7 +53,10 @@ export function NotifySignupForm() {
             type="email"
             name="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (message) setMessage("");
+            }}
             placeholder="you@example.com"
             required
             autoComplete="email"

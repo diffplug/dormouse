@@ -81,8 +81,20 @@ if [[ "${1:-}" != "--no-install" ]]; then
         echo "After that, 'dogfood:standalone' will work from then on."
         exit 1
       fi
+      if pgrep -x dormouse >/dev/null 2>&1; then
+        osascript -e 'tell application id "sh.dormouse.standalone" to quit' \
+          >/dev/null 2>&1 || true
+        for _ in {1..50}; do
+          pgrep -x dormouse >/dev/null 2>&1 || break
+          sleep 0.1
+        done
+        pkill -x dormouse >/dev/null 2>&1 || true
+      fi
       rm -rf "$INSTALL_DIR"
       cp -r "$RELEASE_DIR/bundle/macos/Dormouse Terminal.app" "$INSTALL_DIR"
+      touch "$INSTALL_DIR"
+      /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+        -f "$INSTALL_DIR" >/dev/null 2>&1 || true
       echo "✦ Installed to $INSTALL_DIR"
       ;;
     *)

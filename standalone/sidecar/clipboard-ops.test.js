@@ -6,9 +6,37 @@ const {
   readClipboardFilePaths,
   readClipboardImageAsFilePath,
   readClipboardText,
+  writeClipboardText,
   parseUriList,
   splitNonEmptyLines,
 } = require('./clipboard-ops');
+
+// A fake child_process.spawn for writeClipboardText: records (cmd, args) and the
+// text written to stdin, then fires `close`/`error` asynchronously like a real
+// process. `behavior(cmd)` chooses the outcome per command ({ code } | { error }).
+function fakeSpawn(behavior) {
+  const calls = [];
+  const writes = [];
+  const spawn = (cmd, args) => {
+    calls.push([cmd, args]);
+    const handlers = {};
+    return {
+      on(event, cb) { handlers[event] = cb; return this; },
+      stdin: {
+        on() {},
+        end(text) {
+          writes.push([cmd, text]);
+          const res = (behavior ? behavior(cmd) : null) || {};
+          queueMicrotask(() => {
+            if (res.error) handlers.error?.(res.error);
+            else handlers.close?.(res.code ?? 0);
+          });
+        },
+      },
+    };
+  };
+  return { spawn, calls, writes };
+}
 
 function fakeOs(tmp = '/tmp/test') {
   return { tmpdir: () => tmp };
@@ -282,4 +310,41 @@ test('readClipboardImageAsFilePath on linux writes buffer from exec stdout', asy
   assert.equal(result, path.join('/t', 'dormouse-drops-dir-0', 'uuid-L-clipboard.png'));
   assert.equal(fs.writes.length, 1);
   assert.deepEqual(fs.writes[0][2], { mode: 0o600 });
+});
+
+test('writeClipboardText on mac shells out to pbcopy via stdin', async () => {
+  const f = fakeSpawn();
+  await writeClipboardText('copied!', { platform: 'darwin', spawn: f.spawn });
+  assert.deepEqual(f.calls, [['pbcopy', []]]);
+  assert.deepEqual(f.writes, [['pbcopy', 'copied!']]);
+});
+
+test('writeClipboardText on windows shells out to clip', async () => {
+  const f = fakeSpawn();
+  await writeClipboardText('x', { platform: 'win32', spawn: f.spawn });
+  assert.deepEqual(f.calls, [['clip', []]]);
+});
+
+test('writeClipboardText on linux prefers xclip in X11', async () => {
+  const f = fakeSpawn();
+  await writeClipboardText('hi', { platform: 'linux', env: {}, spawn: f.spawn });
+  assert.equal(f.calls[0][0], 'xclip');
+  assert.deepEqual(f.calls[0][1], ['-selection', 'clipboard']);
+});
+
+test('writeClipboardText on linux prefers wl-copy under Wayland', async () => {
+  const f = fakeSpawn();
+  await writeClipboardText('hi', { platform: 'linux', env: { WAYLAND_DISPLAY: 'wayland-0' }, spawn: f.spawn });
+  assert.equal(f.calls[0][0], 'wl-copy');
+});
+
+test('writeClipboardText on linux falls back when the first tool fails', async () => {
+  const f = fakeSpawn((cmd) => (cmd === 'xclip' ? { code: 1 } : { code: 0 }));
+  await writeClipboardText('hi', { platform: 'linux', env: {}, spawn: f.spawn });
+  assert.deepEqual(f.calls.map((c) => c[0]), ['xclip', 'wl-copy']);
+});
+
+test('writeClipboardText rejects when the tool exits nonzero', async () => {
+  const f = fakeSpawn(() => ({ code: 1 }));
+  await assert.rejects(writeClipboardText('hi', { platform: 'darwin', spawn: f.spawn }));
 });

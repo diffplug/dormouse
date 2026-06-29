@@ -9,6 +9,31 @@ export function resolvePaneElement(element: HTMLElement | null | undefined): HTM
   return (element.closest('[class*="groupview"]') as HTMLElement | null) ?? element;
 }
 
+/**
+ * Resolve the dockview *group* element (`dv-groupview`: tab header + content) for
+ * a pane id, so selection/spatial bounds cover the whole pane like a terminal.
+ *
+ * Terminal panes mount their body INSIDE the `dv-groupview`, so climbing via
+ * `closest('[class*="groupview"]')` finds the full group. Browser surfaces use
+ * dockview's `renderer:'always'`, which mounts the body in a `dv-render-overlay`
+ * layer that is a *sibling* of the groupviews and sits only over the content area
+ * (below the ~30px tab header). From there the climb finds no groupview and falls
+ * back to the shorter body — making the command-mode highlight 30px short and
+ * shifted down (diffplug/dormouse: browser highlight not "exactly like a regular
+ * terminal"). The panel's `group.element` is the authoritative groupview for
+ * either renderer, so prefer it; climb the DOM only as a fallback for transient
+ * states where the panel isn't in the api yet.
+ */
+export function resolvePaneGroupElement(
+  api: DockviewApi | null,
+  id: string,
+  paneElements: Map<string, HTMLElement>,
+): HTMLElement | null {
+  const groupEl = api?.getPanel(id)?.group?.element ?? null;
+  if (groupEl?.isConnected) return groupEl;
+  return resolvePaneElement(paneElements.get(id));
+}
+
 /** Find the closest adjacent panel to use as a restore anchor.
  *  Returns the neighbor ID and the direction the current panel was relative to it,
  *  which matches Dockview's addPanel position.direction semantics. For example,
@@ -20,7 +45,7 @@ export function findReattachNeighbor(
   api: DockviewApi,
   paneElements: Map<string, HTMLElement>,
 ): { neighborId: string | null; direction: DoorDirection } {
-  const currentEl = resolvePaneElement(paneElements.get(currentId));
+  const currentEl = resolvePaneGroupElement(api, currentId, paneElements);
   if (!currentEl) return { neighborId: null, direction: 'right' };
 
   const c = currentEl.getBoundingClientRect();
@@ -33,7 +58,7 @@ export function findReattachNeighbor(
 
   for (const panel of api.panels) {
     if (panel.id === currentId) continue;
-    const el = resolvePaneElement(paneElements.get(panel.id));
+    const el = resolvePaneGroupElement(api, panel.id, paneElements);
     if (!el) continue;
     const r = el.getBoundingClientRect();
 
@@ -82,7 +107,7 @@ export function findPaneInDirection(
   api: DockviewApi,
   paneElements: Map<string, HTMLElement>,
 ): string | null {
-  const currentEl = resolvePaneElement(paneElements.get(currentId));
+  const currentEl = resolvePaneGroupElement(api, currentId, paneElements);
   if (!currentEl) return null;
   const c = currentEl.getBoundingClientRect();
   const isHorizontal = direction === 'ArrowLeft' || direction === 'ArrowRight';
@@ -91,7 +116,7 @@ export function findPaneInDirection(
 
   for (const panel of api.panels) {
     if (panel.id === currentId) continue;
-    const el = resolvePaneElement(paneElements.get(panel.id));
+    const el = resolvePaneGroupElement(api, panel.id, paneElements);
     if (!el) continue;
     const r = el.getBoundingClientRect();
 

@@ -1,10 +1,14 @@
 const fs = require('node:fs');
 const net = require('node:net');
 
-// The server timeout outlasts the dor client's own 5s deadline so the client
-// always controls the outcome; this timer only exists to release a pending
-// entry when the webview never answers at all.
-function createDorControlServer({ socketPath, token, send, timeoutMs = 10000 }) {
+// The server timeout must outlast the dor client's own deadline so the client
+// always controls the outcome — its longest is `dor ensure --restart` at 60s, so
+// 65s clears it. (A shorter server timeout would fire first and send the client a
+// spurious "timed out waiting for surface.ensure" while the webview was still
+// legitimately working, e.g. waiting on shell integration or a server restart.)
+// In practice socket close reaps pending entries the instant the client gives up;
+// this timer only releases a pending entry if the webview never answers at all.
+function createDorControlServer({ socketPath, token, send, timeoutMs = 65000 }) {
   if (!socketPath || !token) return null;
 
   const pending = new Map();

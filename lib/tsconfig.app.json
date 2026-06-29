@@ -21,5 +21,7 @@
     }
   },
   "include": ["src"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+  // The pure rewrite helpers typecheck here (DOM provides URL); the Node proxy
+  // server is esbuild-only (bundled per host), like the rest of our host code.
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/host/iframe-proxy.ts", "src/host/agent-browser-host.ts"]
 }
