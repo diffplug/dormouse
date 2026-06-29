@@ -31,7 +31,7 @@ jobs:
     environment:
       name: security-audit
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
 
@@ -55,7 +55,7 @@ jobs:
           exit 1
 
       - name: Audit against SECURITY.md
-        uses: anthropics/claude-code-action@4d7e1f0cd85743fdc93b1c8040ab54395da024e2 # v1
+        uses: anthropics/claude-code-action@a92e7c70a4da9793dc164451d829089dc057a464 # v1
         env:
           # `claude-code-action` resets `GH_TOKEN` to its own internal
           # workflow token, so setting `GH_TOKEN` at this scope is
