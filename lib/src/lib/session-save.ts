@@ -34,6 +34,19 @@ export async function saveSession(
   const persisted: PersistedPane[] = await Promise.all(
     [...allPanes.values()].map(async (pane) => {
       const previousPane = previousPanes.get(pane.id);
+      if (pane.surfaceType === 'browser') {
+        return {
+          id: pane.id,
+          title: pane.title,
+          cwd: null,
+          scrollback: null,
+          resumeCommand: null,
+          untouched: false,
+          alert: null,
+          surfaceType: 'browser' as const,
+        };
+      }
+
       const liveAlert = getLivePersistedAlertState(pane.id);
       const sessionId = resolveTerminalSessionId(pane.id);
       const [scrollback, cwd] = await Promise.all([
@@ -49,9 +62,6 @@ export async function saveSession(
         resumeCommand: resolvedScrollback ? detectResumeCommand(resolvedScrollback) : null,
         untouched: isUntouched(pane.id),
         alert: liveAlert ?? previousPane?.alert ?? null,
-        // Record the kind only for browser surfaces; absent reads as 'terminal'
-        // (docs/specs/transport.md), keeping terminal snapshots byte-identical.
-        ...(pane.surfaceType === 'browser' ? { surfaceType: 'browser' as const } : {}),
       };
     }),
   );

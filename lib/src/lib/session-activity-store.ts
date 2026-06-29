@@ -103,6 +103,24 @@ export function clearPrimedActivity(id?: string): void {
   notifyActivityListeners();
 }
 
+function setLocalSurfaceTodo(id: string, todo: boolean): void {
+  if (!todo) {
+    if (!primedActivityStates.delete(id)) return;
+    notifyActivityListeners();
+    return;
+  }
+
+  const current = readActivity(id) ?? DEFAULT_ACTIVITY_STATE;
+  primedActivityStates.set(id, {
+    ...current,
+    status: 'WATCHING_DISABLED',
+    watchingEnabled: false,
+    todo: true,
+    notification: null,
+  });
+  notifyActivityListeners();
+}
+
 export function consumePrimedActivity(id: string): Partial<ActivityState> | undefined {
   const primed = primedActivityStates.get(id);
   if (primed) {
@@ -187,13 +205,25 @@ export function clearSessionAttention(id?: string): void {
 }
 
 export function toggleSessionTodo(id: string): void {
+  if (!registry.has(id)) {
+    setLocalSurfaceTodo(id, !getActivity(id).todo);
+    return;
+  }
   getPlatform().alertToggleTodo(resolveTerminalSessionId(id));
 }
 
 export function markSessionTodo(id: string): void {
+  if (!registry.has(id)) {
+    setLocalSurfaceTodo(id, true);
+    return;
+  }
   getPlatform().alertMarkTodo(resolveTerminalSessionId(id));
 }
 
 export function clearSessionTodo(id: string): void {
+  if (!registry.has(id)) {
+    setLocalSurfaceTodo(id, false);
+    return;
+  }
   getPlatform().alertClearTodo(resolveTerminalSessionId(id));
 }

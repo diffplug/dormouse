@@ -220,6 +220,10 @@ describe('saveSession', () => {
     const web = saved.panes.find((p) => p.id === 'pane-web')!;
     expect('surfaceType' in term).toBe(false);
     expect(web.surfaceType).toBe('browser');
+    expect(platform.getScrollback).toHaveBeenCalledWith('pane-term');
+    expect(platform.getCwd).toHaveBeenCalledWith('pane-term');
+    expect(platform.getScrollback).not.toHaveBeenCalledWith('pane-web');
+    expect(platform.getCwd).not.toHaveBeenCalledWith('pane-web');
   });
 
   it('records surfaceType browser for a minimized browser door', async () => {
@@ -239,5 +243,7 @@ describe('saveSession', () => {
 
     const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
     expect(saved.panes.find((p) => p.id === 'door-web')!.surfaceType).toBe('browser');
+    expect(platform.getScrollback).not.toHaveBeenCalledWith('door-web');
+    expect(platform.getCwd).not.toHaveBeenCalledWith('door-web');
   });
 });

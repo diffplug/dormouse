@@ -472,17 +472,20 @@ describe('terminal-registry alert behavior', () => {
 
   it('Browser surface: TODO toggles on a pane id with no registry entry (no PTY/xterm)', () => {
     // A browser Surface (iframe / agent-browser) has no registry entry. The
-    // `t` shortcut still routes toggleSessionTodo to the AlertManager, which
-    // creates an entry for any id; the state round-trips back and is primed
-    // into the activity store so the door / union can show it.
+    // `t` shortcut stores TODO in the local activity store instead of sending a
+    // PTY alert message; VS Code only forwards alert state for owned PTYs.
     const browserId = 'pane-browser';
+    const alertToggleSpy = vi.spyOn(fakePlatform, 'alertToggleTodo');
     expect(getActivity(browserId).todo).toBe(false);
 
     toggleSessionTodo(browserId);
     expect(getActivity(browserId).todo).toBe(true);
+    expect(alertToggleSpy).not.toHaveBeenCalled();
 
     toggleSessionTodo(browserId);
     expect(getActivity(browserId).todo).toBe(false);
+    expect(alertToggleSpy).not.toHaveBeenCalled();
+    alertToggleSpy.mockRestore();
   });
 
   it('Story 8: disable alerts clears ring and stops tracking', () => {
