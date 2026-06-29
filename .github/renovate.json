@@ -55,6 +55,18 @@
       "matchManagers": ["npm"],
       "matchPackageNames": ["@types/vscode"],
       "allowedVersions": "1.85.0"
+    },
+    {
+      "description": "tend manages its own action version (the tend bot opens its own update PRs); don't let Renovate bump max-sixty/tend",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["max-sixty/tend"],
+      "enabled": false
+    },
+    {
+      "description": "Node version is governed by devEngines in package.json; don't let Renovate bump node in GitHub Actions workflows",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["node"],
+      "enabled": false
     }
   ]
 }
