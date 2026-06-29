@@ -192,7 +192,7 @@ Rules:
 Where the union surfaces is host-specific:
 
 - **Standalone:** each inactive Workspace's tab in the strip shows the union `ringing` bell and `todo` pill, reusing the Door indicator vocabulary (`bellIconClass`, the TODO pill). The **active** Workspace's tab shows no union indicator — its rings and TODOs are already visible on its own panes and doors. See `docs/specs/layout.md`.
-- **VS Code:** the host reflects each Workspace's union onto the webview's native chrome — an editor tab's icon (and optionally title) and the sidebar view's numeric badge. See `docs/specs/vscode.md`.
+- **VS Code:** the host reflects the **terminal** portion of each Workspace's union onto the webview's native chrome — an editor tab's icon (and optionally title) and the sidebar view's numeric badge. Browser-surface TODO stays webview-local and is not shown on native chrome until a future webview→host Surface-state channel exists. See `docs/specs/vscode.md`.
 
 This spec fixes the projection and the surfacing rules; the exact visual treatment of the standalone strip is settled in the Storybook UI pass.
 
