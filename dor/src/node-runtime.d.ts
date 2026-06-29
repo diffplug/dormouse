@@ -32,6 +32,7 @@ declare module 'node:child_process' {
 
   export function spawn(command: string, args: readonly string[], options: {
     stdio: readonly ['ignore', 'pipe', 'pipe'];
+    windowsHide?: boolean;
   }): ChildProcess;
 }
 
@@ -42,6 +43,7 @@ declare module 'cross-spawn' {
   import type { ChildProcess } from 'node:child_process';
   export default function spawn(command: string, args: readonly string[], options: {
     stdio: readonly ['ignore', 'pipe', 'pipe'];
+    windowsHide?: boolean;
   }): ChildProcess;
 }
 

@@ -326,7 +326,9 @@ const CLOSE_GRACE_MS = 250;
 
 function execAgentBrowserProcess(binary: string, args: string[]): Promise<AgentBrowserExecResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    // windowsHide: cross-spawn runs `.cmd` shims through cmd.exe; without this
+    // each spawn flashes a console window that steals focus. No-op off Windows.
+    const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let stdout = '';
     let stderr = '';
     // A failed spawn races 'error' against the exit events; latch on the first so

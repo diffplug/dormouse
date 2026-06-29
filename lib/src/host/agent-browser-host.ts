@@ -130,7 +130,9 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
 
   function spawnAgentBrowser(binary: string, args: string[]): Promise<AgentBrowserCommandResult | 'ENOENT'> {
     return new Promise((resolve) => {
-      const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      // windowsHide: cross-spawn runs `.cmd` shims through cmd.exe; without this
+      // each spawn flashes a console window that steals focus. No-op off Windows.
+      const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
       let stdout = '';
       let stderr = '';
       let settled = false;
