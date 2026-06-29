@@ -13,6 +13,8 @@ A Session's **View** state places it in one of two containers:
 
 Transitioning between Pane and Door does not alter the Session in any way. Minimizing a pane creates a door; reattaching a door creates a pane. The terminal content, scrollback, and process state are preserved across transitions.
 
+A **Workspace** is the named group of Sessions rendered by a single **Wall**, together with their layout (see `docs/specs/glossary.md`). A Window may hold several Workspaces. This spec covers how Workspaces are presented and switched in the standalone app — the tab strip and the one-Wall-per-Workspace mounting below. VS Code maps each Workspace to its own webview instead; see `docs/specs/vscode.md`.
+
 ## Shell layout
 
 There are two areas:
@@ -132,6 +134,28 @@ Doors are measured in a hidden off-screen container first:
 Clicking an overflow arrow reveals one door in that direction. A longer title may push more doors off the opposite side.
 
 Extreme case: a single door with a very long title, with more doors on both sides. Show both arrows with counts, and the single door with as much title as fits (ellipsis for the rest).
+
+## Workspaces
+
+> See `docs/specs/glossary.md` for the Workspace / Window containers and `docs/specs/alert.md` for the union status. VS Code's per-webview mapping is in `docs/specs/vscode.md`.
+
+A **Workspace** is one Wall's worth of Sessions plus its layout, with a user-facing name. The standalone Window hosts several Workspaces but mounts only one — the **active** Workspace — at a time. Each Workspace owns its own Content (dockview layout) and Baseboard (doors).
+
+### Workspace strip (standalone)
+
+The standalone app bar (`standalone/src/AppBar.tsx`) carries a horizontal **workspace strip**: one tab per Workspace, living in the app bar's draggable region at the top of the window. Each tab shows the Workspace `name` and, for **inactive** Workspaces, the union `ringing` bell and `todo` pill from `docs/specs/alert.md`, reusing the Door indicator vocabulary. The **active** Workspace's tab shows no union indicator: its alerts are already visible on its own panes and doors. Exact tab visuals are settled in the Storybook UI pass.
+
+### Switching
+
+Activating another Workspace (`switchWorkspace`) mounts the target Workspace's Sessions into the Wall — rebuilding its dockview layout and reattaching its doors — and unmounts the previously active Workspace's Sessions. This reuses the `mount` / `unmount` registry ops: the Registry entry and PTY survive `unmount`, so Process stays `Live`. Because Activity keeps flowing for unmounted Sessions, an inactive Workspace's tab can begin ringing or showing TODO while the user is elsewhere. Mounting must not fire a fresh ring (glossary I8, mirroring the minimize/reattach rule I3).
+
+### Lifecycle
+
+- **Create** (`createWorkspace`): adds a new Workspace, gives it a default name (`Workspace N`), makes it active, and spawns a single fresh pane — matching the empty-state behavior in Session persistence below.
+- **Close** (`closeWorkspace`): `kill`s each member Session and removes the Workspace. Closing a Workspace that contains touched Sessions confirms first (reusing the kill-confirm vocabulary); the exact confirmation surface is settled in the Storybook UI pass. The last remaining Workspace cannot be closed — there is always one active Workspace, just as there is always one visible pane (corner case #10).
+- **Rename** (`renameWorkspace`): edits the Workspace `name` only. It does not touch any Session title or the per-pane inline rename.
+
+Concrete switch/create/close/rename keyboard shortcuts are chosen alongside the Storybook UI pass. Command mode is the natural home for them, following the tmux *window* bindings the rest of the keymap mirrors (a Dormouse Workspace is the analogue of a tmux window).
 
 ## Modes
 
@@ -287,6 +311,8 @@ Pane IDs are session IDs. `TerminalPane` calls `getOrCreateTerminal(id)` on Reac
 ### Session persistence
 
 Layout, scrollback, cwd, minimized items, user-pinned titles, untouched state, and alert state are saved to persistent storage via a debounced save (500ms). Derived command/app labels shown on minimized doors are display-only and are not persisted as user-pinned titles. Saves are triggered by layout changes, panel add/remove, and a 30s periodic interval. Saves are flushed immediately on PTY exit, `pagehide`, and extension shutdown requests.
+
+In standalone, each Workspace's snapshot is wrapped in a Window snapshot that records every Workspace (name + layout) and which one is active, so all Workspaces — not just the mounted one — survive a restart. VS Code persists one Workspace per webview exactly as today (one snapshot per `WebviewView` / `WebviewPanel`). The persisted container types (`PersistedWorkspace`, `PersistedWindow`) and their migration live in `docs/specs/transport.md`.
 
 Saved snapshots are read through `readPersistedSession()`, which accepts the canonical object shape and defensively parses a JSON-stringified blob before validation and migration. This keeps malformed storage inert while covering hosts that hand back serialized JSON instead of the parsed object.
 

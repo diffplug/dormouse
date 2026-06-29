@@ -103,6 +103,21 @@ VS Code-specific consequences:
 
 PTY lifecycle, buffering, the reconnection sequence, and the full message protocol live in `docs/specs/transport.md`.
 
+### Workspaces
+
+> See `docs/specs/glossary.md` for the Workspace / Window containers and `docs/specs/alert.md` for the union status.
+
+In VS Code, **one webview is one Workspace**. The bottom-panel `WebviewView` ("Dormouse") is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. Unlike standalone, several Workspaces are visible at once, and VS Code — not Dormouse — owns their tabs, creation, and closing: opening a Dormouse editor tab creates a Workspace and closing the tab closes it, so Dormouse adds no create/rename/close affordances here. Each webview already contains exactly the Sessions whose PTYs its router owns (`ownedPtyIds`, `docs/specs/transport.md`), so a Workspace's Session set is the webview's owned-PTY set.
+
+#### Surfacing union status on native chrome
+
+The host computes each Workspace's union status (`ringing` / `todo` / `count`) from the module-level `AlertManager` filtered to that router's `ownedPtyIds`, and reflects it onto VS Code chrome. No new webview↔host message is needed — the host already receives every PTY's alert state.
+
+- **Editor tab (`WebviewPanel`):** reassign `panel.iconPath` between normal / ringing / TODO icon variants, and optionally fold the Workspace name or a status marker into `panel.title`. Both properties are writable after creation (`title: string`, `iconPath?: Uri | { light, dark }`).
+- **Sidebar/panel view (`WebviewView`):** set `view.badge = { value: count, tooltip }` for a numeric attention badge on the activity-bar icon, visible even when the view is collapsed; `view.description` may carry status text. `view.title` is writable too but stays "Dormouse". `ViewBadge` is numeric only (no custom color or glyph), so the editor-tab icon swap carries the ringing-vs-TODO distinction the badge cannot.
+
+Reflection updates on every `AlertManager.onStateChange` for an owned PTY and on router attach/detach (a Workspace gaining or losing Sessions). When a Workspace's union is clear, the badge is set to `undefined` and the icon returns to the normal variant. Icon artwork is settled in the Storybook/asset pass.
+
 ### Shell selection
 
 The VS Code view title contributes `Dormouse: Select Shell` and `Dormouse: New Terminal`. The selected shell name is mirrored into the `WebviewView.description`, and `dormouse:selectedShell` keeps the webview's default-shell slot current for split/spawn/restore paths.
@@ -213,3 +228,4 @@ vscode.commands.executeCommand('setContext', 'dormouse.mode', 'normal');
 - Commands not registered: `dormouse.newPane`, `closePane`, `nextPane`, `prevPane`, `enterTerminalMode`, `enterNormalMode`, `listSessions`, `reattach`
 - No status bar item showing active session count
 - No QuickPick for listing/reattaching PTY sessions
+- Workspace union status not yet reflected onto `panel.iconPath` / `panel.title` (editor tabs) or `view.badge` / `view.description` (bottom-panel view) — the model and chrome contract are in the Workspaces section above

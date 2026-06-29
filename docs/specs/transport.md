@@ -77,6 +77,8 @@ Non-obvious message contracts:
 
 VS Code-only workbench chord mirroring uses `dormouse:runWorkbenchCommand` from webview to host. The host validates the requested command against the allowlist in `lib/src/lib/vscode-keybindings.ts` (see [the VS Code host spec](vscode.md)) before calling `vscode.commands.executeCommand`; generic command execution over the webview boundary is not allowed.
 
+Workspace union status (`docs/specs/alert.md`) adds no new message. Standalone computes it in-webview — the app bar's workspace strip and the Walls share one webview, so the strip reads the activity store directly. VS Code computes it host-side from the module-level `AlertManager` filtered to each router's `ownedPtyIds`, then writes it onto native chrome; the host already receives every PTY's alert state (`docs/specs/vscode.md`).
+
 | Direction | Message | Source type | Contract |
 | --- | --- | --- | --- |
 | Webview → host | `dormouse:openExternal` | `WebviewMessage` | Request the host to open a user-confirmed external URI from an OSC 8 hyperlink. Hosts must revalidate and reject malformed, control-character-bearing, or blocked pseudo-scheme targets (`javascript:`, `data:`, `blob:`, `about:`). |
@@ -90,7 +92,11 @@ The OSC parsing/stripping rules that produce `pty:data` and `terminal:semanticEv
 
 ## Persisted session types
 
-Source of truth: `lib/src/lib/session-types.ts` defines the persisted-session interfaces (`PersistedSession` v3, `PersistedPane`, `PersistedAlertState`, `PersistedDoor`) and their v1→v2→v3 migrations.
+Source of truth: `lib/src/lib/session-types.ts` defines the persisted-session interfaces (`PersistedSession`, `PersistedPane`, `PersistedAlertState`, `PersistedDoor`, `PersistedWorkspace`, `PersistedWindow`) and their migrations.
+
+A **Workspace** persists as a `PersistedWorkspace`: a `WorkspaceId`, a user-facing `name`, and the Workspace's `PersistedSession` (its panes, doors, and dockview layout). The standalone Window persists as a `PersistedWindow`: the ordered list of `PersistedWorkspace` plus the active `WorkspaceId`. VS Code does not use `PersistedWindow`; each webview persists exactly one `PersistedSession` — its single Workspace — through the same per-surface state API as today (`workspaceState` for the view, `vscode.setState()` per editor panel; see `docs/specs/vscode.md`).
+
+Versioning and migration: introducing the Window container advances the standalone top-level snapshot version. A pre-workspace `PersistedSession` (v3) migrates to a single `PersistedWorkspace` named `Workspace 1`, marked active, inside a `PersistedWindow`. The standalone reader applies this migration; a host that hands back a bare `PersistedSession` (VS Code, or legacy standalone storage) is read as one Workspace. Migrations stay additive — older shapes keep flowing v1→v2→v3→(window) without losing panes, doors, or alert state.
 
 Every saved-session entry point must pass through `readPersistedSession()`. That reader accepts both the canonical parsed object and a JSON-stringified session blob before validating/migrating; this covers host state APIs that may hand back the inner serialized JSON string.
 

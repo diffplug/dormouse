@@ -173,6 +173,29 @@ Clearing behavior:
 
 `attentionDismissedRing` exists so the next bell click after an attention-based dismissal opens the dialog instead of silently disabling WATCHING.
 
+## Workspace union
+
+> See `docs/specs/glossary.md` for the Workspace / Window containers.
+
+A Workspace projects a **union status** over the Activity of the Sessions it contains:
+
+- `ringing` — any member Session's public `status` is `ALERT_RINGING`.
+- `todo` — any member Session has `todo === true`.
+- `count` — number of member Sessions owing attention (ringing or `todo`), for the numeric badge a host may show.
+
+Rules:
+
+- The union is **display-only** and derived. It never enters the per-Session Activity state machine, never fires a fresh ring, and produces no sound or notification of its own; it only mirrors member state. Every ringing/TODO transition above remains per-Session.
+- Membership includes minimized (`Doored`) Sessions and, in standalone, the Sessions of inactive (unmounted) Workspaces. Their Activity entries survive minimize and unmount (glossary I2/I3), so a backgrounded Session can light up its Workspace's indicator.
+- Attention suppression needs no special-casing: a per-Session ring is already suppressed while that Session is attended, so the union simply reflects whatever rings survive.
+
+Where the union surfaces is host-specific:
+
+- **Standalone:** each inactive Workspace's tab in the strip shows the union `ringing` bell and `todo` pill, reusing the Door indicator vocabulary (`bellIconClass`, the TODO pill). The **active** Workspace's tab shows no union indicator — its rings and TODOs are already visible on its own panes and doors. See `docs/specs/layout.md`.
+- **VS Code:** the host reflects each Workspace's union onto the webview's native chrome — an editor tab's icon (and optionally title) and the sidebar view's numeric badge. See `docs/specs/vscode.md`.
+
+This spec fixes the projection and the surfacing rules; the exact visual treatment of the standalone strip is settled in the Storybook UI pass.
+
 ## UI Contract
 
 ### Pane Header
