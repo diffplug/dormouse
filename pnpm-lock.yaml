@@ -43,8 +43,8 @@ importers:
         specifier: ^2.1.1
         version: 2.1.1
       dockview-react:
-        specifier: ^6.0.0
-        version: 6.6.1(react@19.2.7)
+        specifier: ^5.1.0
+        version: 5.2.0(react@19.2.7)
       fflate:
         specifier: 0.8.3
         version: 0.8.3
@@ -125,8 +125,8 @@ importers:
         specifier: 6.1.0-beta.288
         version: 6.1.0-beta.288
       dockview-react:
-        specifier: ^6.0.0
-        version: 6.6.1(react@19.2.7)
+        specifier: ^5.1.0
+        version: 5.2.0(react@19.2.7)
       dormouse-lib:
         specifier: workspace:*
         version: link:../lib
@@ -2374,14 +2374,14 @@ packages:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
 
-  dockview-core@6.6.1:
-    resolution: {integrity: sha512-WuNoO2wl3rGI8MaTuvmfgViek4WafHLD9Kf//Hw69g8TgAHSpAWr6RW15kU6U9vwtQxIi/YBxQNcIA5RzQ46Fw==}
+  dockview-core@5.2.0:
+    resolution: {integrity: sha512-Gib8yhK2Ng7w47ASvbUZ7GdhBYbeXEflbIDxf/vobdQBMrN/QXmPaouSsSSkEx5YH0N8ap8GYljfvqjug7h5Fg==}
 
-  dockview-react@6.6.1:
-    resolution: {integrity: sha512-zF/CQzAxjA2mlSTnDt2rbBe49uG33mvg1DPitNCPrIhhDulyiiBG1A1pRyjVx4MJbVh1xx5gAYbNRwu+mCR7CQ==}
+  dockview-react@5.2.0:
+    resolution: {integrity: sha512-xJU5EiViiYYoP0ez5KxN8I+5CWSiPC27KVgVJBpRYRYJN6wKjMUpUqqSHwTlN1PGw5OzCu7UGQlUl1RQew74ag==}
 
-  dockview@6.6.1:
-    resolution: {integrity: sha512-vBnxWVk0f665z1Zyx598l/BMUjHD3SK5V4XorxpYGjaSREM8lLc8O6ylgKTtw+ZnCOMYOhcwov9x0ubfFazvMw==}
+  dockview@5.2.0:
+    resolution: {integrity: sha512-Eh+SWt+AydcyeVmYkwP+Yxax0XpYSQfXsc4Rad9k+6QEddkSCn4hcjsdxp9lLsw/CaMy39jHawbDVxPMC4kvTg==}
     peerDependencies:
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
@@ -5945,17 +5945,17 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
-  dockview-core@6.6.1: {}
+  dockview-core@5.2.0: {}
 
-  dockview-react@6.6.1(react@19.2.7):
+  dockview-react@5.2.0(react@19.2.7):
     dependencies:
-      dockview: 6.6.1(react@19.2.7)
+      dockview: 5.2.0(react@19.2.7)
     transitivePeerDependencies:
       - react
 
-  dockview@6.6.1(react@19.2.7):
+  dockview@5.2.0(react@19.2.7):
     dependencies:
-      dockview-core: 6.6.1
+      dockview-core: 5.2.0
       react: 19.2.7
 
   doctrine@3.0.0:

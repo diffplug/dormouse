@@ -67,6 +67,12 @@
       "matchManagers": ["github-actions"],
       "matchPackageNames": ["node"],
       "enabled": false
+    },
+    {
+      "description": "dockview-react is slated for removal; stay on ^5.1.0 and don't churn through major breaking changes (e.g. v6) on a dependency that's getting kicked out",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["dockview-react"],
+      "enabled": false
     }
   ]
 }
