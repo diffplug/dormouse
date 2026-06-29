@@ -110,7 +110,7 @@
     "publish:openvsx": "ovsx publish --no-dependencies"
   },
   "dependencies": {
-    "node-pty": "1.2.0-beta.13"
+    "node-pty": "1.2.0-beta.14"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
