@@ -9,6 +9,30 @@
       "declaredName": "base64"
     },
     {
+      "name": "objc2",
+      "version": "0.6.4",
+      "license": "MIT",
+      "author": "Mads Marquart <mads@marquart.dk>",
+      "homepage": "https://github.com/madsmtm/objc2",
+      "declaredName": "objc2"
+    },
+    {
+      "name": "objc2-app-kit",
+      "version": "0.3.2",
+      "license": "MIT OR Zlib OR Apache-2.0",
+      "author": null,
+      "homepage": "https://github.com/madsmtm/objc2",
+      "declaredName": "objc2-app-kit"
+    },
+    {
+      "name": "objc2-foundation",
+      "version": "0.3.2",
+      "license": "MIT",
+      "author": null,
+      "homepage": "https://github.com/madsmtm/objc2",
+      "declaredName": "objc2-foundation"
+    },
+    {
       "name": "process-wrap",
       "version": "9.1.0",
       "license": "MIT OR Apache-2.0",
@@ -1461,20 +1485,6 @@
       "homepage": "https://github.com/rust-num/num-traits"
     },
     {
-      "name": "objc2",
-      "version": "0.6.4",
-      "license": "MIT",
-      "author": "Mads Marquart <mads@marquart.dk>",
-      "homepage": "https://github.com/madsmtm/objc2"
-    },
-    {
-      "name": "objc2-app-kit",
-      "version": "0.3.2",
-      "license": "MIT OR Zlib OR Apache-2.0",
-      "author": null,
-      "homepage": "https://github.com/madsmtm/objc2"
-    },
-    {
       "name": "objc2-cloud-kit",
       "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
@@ -1535,13 +1545,6 @@
       "version": "0.1.1",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart <mads@marquart.dk>",
-      "homepage": "https://github.com/madsmtm/objc2"
-    },
-    {
-      "name": "objc2-foundation",
-      "version": "0.3.2",
-      "license": "MIT",
-      "author": null,
       "homepage": "https://github.com/madsmtm/objc2"
     },
     {
