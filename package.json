@@ -2,7 +2,7 @@
   "name": "dormouse-root",
   "private": true,
   "license": "FSL-1.1-MIT",
-  "packageManager": "pnpm@11.0.6",
+  "packageManager": "pnpm@11.9.0",
   "devEngines": {
     "runtime": {
       "name": "node",
