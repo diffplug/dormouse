@@ -60,6 +60,13 @@ Public PTY env:
 `DORMOUSE_CLI_BIN` is host-internal spawn configuration. Terminals should rely
 on `PATH`, not on that variable.
 
+On Windows, `DORMOUSE_CLI_BIN` and `DORMOUSE_CLI_JS` must be plain paths, never
+`\\?\` verbatim paths. The standalone host derives them from Tauri's
+`resource_dir()`, which returns a verbatim prefix in the bundled/dev layout; the
+host strips it (`dor_cli_paths_from_root`). `dor.cmd` is reached through
+`DORMOUSE_CLI_BIN` on `PATH`, and cmd.exe cannot execute a batch file via a
+verbatim path — it fails with "The system cannot find the path specified."
+
 ## Spawning External Binaries
 
 Any time Dormouse spawns an external/user-installed binary — `dor ab` driving
