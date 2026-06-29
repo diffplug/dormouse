@@ -17,7 +17,7 @@ jobs:
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 22
+          node-version-file: package.json
 
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
@@ -38,26 +38,13 @@ jobs:
 
       # `cargo check` runs standalone/src-tauri/build.rs, which fails the build
       # unless the Node.js on PATH exactly matches package.json's
-      # devEngines.runtime.version pin. A bare `node-version: 22` tracks whatever
-      # 22.x the runner image ships, so a runner Node bump (e.g. 22.22.3 →
-      # 22.23.0) breaks the smoketest even though the pin is unchanged. Drive
-      # setup-node from the pin so the exact version is provisioned, mirroring
-      # release.yml's build-standalone job.
-      - name: Read pinned Node.js version
-        id: node-pin
-        shell: bash
-        run: |
-          set -euo pipefail
-          version=$(jq -r '.devEngines.runtime.version' package.json)
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "ERROR: package.json devEngines.runtime.version is not MAJOR.MINOR.PATCH, got: '$version'" >&2
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
+      # devEngines.runtime.version pin. setup-node's node-version-file reads that
+      # exact pin from package.json (volta.node → devEngines.runtime →
+      # engines.node), so the smoketest can't drift off the pin the way a bare
+      # `node-version: 22` would when the runner image bumps its 22.x.
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: ${{ steps.node-pin.outputs.version }}
+          node-version-file: package.json
 
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
