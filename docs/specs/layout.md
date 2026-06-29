@@ -149,7 +149,7 @@ Extreme case: a single door with a very long title, with more doors on both side
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers and `docs/specs/alert.md` for the union status. VS Code's per-webview mapping is in `docs/specs/vscode.md`.
 >
-> **Not yet implemented (stages 2b/3).** This section is specified ahead of the code. The app today runs one implicit Workspace; the container, switching, and strip land behind a feature flag (the glossary's Implementation status has the staging). Stage 2a — `surfaceType` persistence and the browser-surface restore/resume fixes — is implemented.
+> **Partially implemented.** The container and model exist behind the `dormouse.flags.workspaces` flag (stage 2b, dormant): the standalone persists a `PersistedWindow` and the workspace model holds the list + active id (`docs/specs/transport.md`, glossary Implementation status). Still **not built**: the **strip UI** below (stage 3) and the actual Wall **mount/unmount when switching** (stage 4) — today `setActiveWorkspace` changes the active id in the model but does not re-render the Wall. The app runs one implicit Workspace with the flag off (the default).
 
 A **Workspace** is one Wall's worth of Surfaces (terminal Sessions and browser surfaces) plus its layout, with a user-facing name. The standalone Window hosts several Workspaces but mounts only one — the **active** Workspace — at a time. Each Workspace owns its own Content (dockview layout) and Baseboard (doors).
 
