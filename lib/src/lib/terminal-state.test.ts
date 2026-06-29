@@ -542,6 +542,18 @@ describe('surfaceRunsCommand (dor ensure matching)', () => {
     expect(surfaceRunsCommand(pane, 'pnpm dev:website', '/repo/app')).toBe(true);
     expect(surfaceRunsCommand(pane, 'pnpm dev:website', '/repo/app/')).toBe(false);
   });
+
+  it('matches across the Windows/Git-Bash cwd dialect split', () => {
+    // Git Bash reports its cwd as POSIX (`/c/Users/...`) via OSC, while the dor
+    // CLI sends the native Windows path (`C:\Users\...`) for the same directory.
+    const bashPane = runningPane('/c/Users/me/app', 'pnpm dev:website');
+    expect(surfaceRunsCommand(bashPane, 'pnpm dev:website', 'C:\\Users\\me\\app')).toBe(true);
+    // Drive-letter case and slash direction are folded too.
+    const winPane = runningPane('c:/Users/me/app', 'pnpm dev:website');
+    expect(surfaceRunsCommand(winPane, 'pnpm dev:website', 'C:\\Users\\me\\app')).toBe(true);
+    // Genuinely different directories still do not match.
+    expect(surfaceRunsCommand(bashPane, 'pnpm dev:website', 'C:\\Users\\me\\other')).toBe(false);
+  });
 });
 
 function cwd(path: string, host?: string): CwdState {

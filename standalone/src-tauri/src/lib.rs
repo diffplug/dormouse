@@ -115,6 +115,27 @@ fn append_log(message: impl AsRef<str>) {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn set_macos_dock_icon() {
+    use objc2::{AllocAnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
+
+    let mtm = unsafe { MainThreadMarker::new_unchecked() };
+    let app = NSApplication::sharedApplication(mtm);
+    // The largest size exploded from icon.icns (1024×1024) — it carries the
+    // built-in transparent padding the bundle's edge-to-edge 128x128@2x.png lacks.
+    let data = NSData::with_bytes(include_bytes!("../icons/dock-icon.png"));
+    let Some(app_icon) = NSImage::initWithData(NSImage::alloc(), &data) else {
+        append_log("[app] failed to create macOS dock icon image");
+        return;
+    };
+
+    unsafe {
+        app.setApplicationIconImage(Some(&app_icon));
+    }
+}
+
 fn read_log_tail(max_bytes: usize) -> Result<String, String> {
     let path = log_path();
     let contents = std::fs::read_to_string(path)
@@ -991,13 +1012,16 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building Dormouse")
-        .run(|app, event| {
-            if let RunEvent::Exit = event {
+        .run(|app, event| match event {
+            #[cfg(target_os = "macos")]
+            RunEvent::Ready => set_macos_dock_icon(),
+            RunEvent::Exit => {
                 if let Some(state) = app.try_state::<SidecarState>() {
                     append_log("[app] exit — shutting down sidecar");
                     shutdown_sidecar_and_wait(&state);
                 }
             }
+            _ => {}
         });
 }
 

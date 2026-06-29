@@ -176,8 +176,8 @@ export interface PlatformAdapter {
   // URL; absent or null falls back to ws://127.0.0.1:<port>.
   getAgentBrowserStreamUrl?(port: number): Promise<string | null>;
 
-  // iframe surface support (see docs/specs/dor-browser.md → "The transparent
-  // proxy"). Stands up a loopback proxy in front of a `dor iframe` target and
+  // iframe surface support (see docs/specs/dor-browser.md → "Iframe
+  // Renderer"). Stands up a loopback proxy in front of a `dor iframe` target and
   // returns the proxy URL the panel should frame, or a structured reason it
   // could not. Absent on hosts with no process to run a proxy (e.g. the web
   // host), where the panel falls back to a raw, uninstrumented `<iframe>`.

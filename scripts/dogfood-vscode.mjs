@@ -21,11 +21,39 @@ function run(command, { ignoreFailure = false, stdio = 'inherit', env = process.
   return result;
 }
 
+// Install the packaged VSIX. VS Code installs by renaming the extension folder,
+// and on Windows a running VS Code instance keeps the current extension's native
+// modules (node-pty) loaded, locking that folder — so the rename fails with EPERM
+// and a cryptic retry/stack trace. Capture the output and, on that lock, print a
+// plain "close VS Code and retry" instead of the raw error.
+function installVsix() {
+  const result = spawnSync('code --install-extension dormouse.vsix --force', {
+    cwd: extDir,
+    shell: true,
+    env: codeEnv,
+    encoding: 'utf8',
+  });
+  process.stdout.write(result.stdout ?? '');
+  process.stderr.write(result.stderr ?? '');
+  if (result.status === 0) return;
+
+  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+  if (/EPERM|operation not permitted|restart VS ?Code/i.test(output)) {
+    console.error('\n──────────────────────────────────────────────────────────────');
+    console.error("Couldn't install: VS Code is holding the old Dormouse extension");
+    console.error('files open (its node-pty native modules lock the extension dir).');
+    console.error('→ Quit ALL VS Code windows, then re-run `pnpm dogfood:vscode`.');
+    console.error('  The .vsix is already built at vscode-ext/dormouse.vsix.');
+    console.error('──────────────────────────────────────────────────────────────');
+  }
+  process.exit(result.status ?? 1);
+}
+
 // Remove the legacy extension if present; ignore failure when it isn't installed.
 run('code --uninstall-extension diffplug.mouseterm', { ignoreFailure: true, stdio: 'ignore', env: codeEnv });
 
 run('pnpm package');
-run('code --install-extension dormouse.vsix --force', { env: codeEnv });
+installVsix();
 
 rmSync(vsix, { force: true });
 

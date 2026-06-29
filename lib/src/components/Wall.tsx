@@ -24,6 +24,7 @@ import {
   getDefaultShellOpts,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
+  isPaneOscDriven,
   getActivitySnapshot,
   isUntouched,
   getOrCreateTerminal,
@@ -37,6 +38,7 @@ import {
   createTerminalPaneState,
   deriveSurfaceLabel,
   surfaceRunsCommand,
+  type TerminalPaneState,
 } from '../lib/terminal-state';
 import { orchestrateKill } from '../lib/kill-animation';
 import { getPlatform, PLATFORM_STRING } from '../lib/platform';
@@ -105,6 +107,7 @@ type DorControlParams = {
   key?: unknown;
   lines?: unknown;
   minimized?: unknown;
+  restart?: unknown;
   binaryPath?: unknown;
   pane?: string;
   session?: unknown;
@@ -273,6 +276,80 @@ function readSurfaceText(surfaceId: string, lines: number | undefined, scrollbac
   return limitLines(collected.join('\n').replace(/\n+$/, ''), lines);
 }
 
+// `dor ensure --restart` blocks the CLI while we interrupt a live command and
+// re-run it. Rather than guess at timings, poll the integration-derived
+// terminal state: a command is gone once `currentCommand` clears (commandFinish
+// → prompt) and back once the surface reports the same command live again.
+const RESTART_POLL_INTERVAL_MS = 100;
+const RESTART_INTERRUPT_TIMEOUT_MS = 15_000;
+const RESTART_START_TIMEOUT_MS = 15_000;
+
+/** Resolve true once `predicate` holds for the surface's live state, false on timeout. */
+function waitForTerminalState(
+  id: string,
+  predicate: (state: TerminalPaneState) => boolean,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (predicate(getTerminalPaneState(id))) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let elapsed = 0;
+    const timer = setInterval(() => {
+      if (predicate(getTerminalPaneState(id))) {
+        clearInterval(timer);
+        resolve(true);
+      } else if ((elapsed += RESTART_POLL_INTERVAL_MS) >= timeoutMs) {
+        clearInterval(timer);
+        resolve(false);
+      }
+    }, RESTART_POLL_INTERVAL_MS);
+  });
+}
+
+/**
+ * Restart a surface already running `command` in `cwd`: interrupt it (Ctrl+C),
+ * wait for the shell to return to its prompt, type the command again, and wait
+ * for it to go live. Drives the live PTY directly, so it works for minimized
+ * doors too (their PTY keeps running). Returns a message on failure.
+ */
+async function restartSurfaceInPlace(id: string, command: string, cwd: string): Promise<ParseResult<undefined>> {
+  // A match is by construction OSC-driven (surfaceRunsCommand only matches a
+  // shell that reports its command), so this never fires on the real path — but
+  // it guarantees we never fire Ctrl+C into a non-integration shell (e.g. cmd.exe
+  // popping `Terminate batch job (Y/N)?`).
+  if (!isPaneOscDriven(id)) return { ok: false, message: 'has no Dormouse shell integration to restart' };
+  const platform = getPlatform();
+  platform.writePty(id, '\x03');
+  const interrupted = await waitForTerminalState(
+    id,
+    (state) => state.currentCommand === null,
+    RESTART_INTERRUPT_TIMEOUT_MS,
+  );
+  if (!interrupted) return { ok: false, message: 'did not return to a prompt after interrupt' };
+  platform.writePty(id, `${command}\r`);
+  const restarted = await waitForTerminalState(
+    id,
+    (state) => surfaceRunsCommand(state, command, cwd),
+    RESTART_START_TIMEOUT_MS,
+  );
+  if (!restarted) return { ok: false, message: 'command did not restart' };
+  return { ok: true, value: undefined };
+}
+
+// A `dor ensure -- <command>` command is typed into the shell programmatically,
+// which bypasses the keystroke heuristic — so only a shell whose integration
+// emits OSC 633 boundaries ever reports the command back, which is what makes the
+// surface matchable/restartable. `dor ensure` requires it. We give the shell this
+// long to draw its first integrated prompt (headroom for a cold-start shell
+// loading a profile / under AV) before concluding it has no integration.
+const INTEGRATION_DETECT_TIMEOUT_MS = 8_000;
+
+// Shown to the user (via the CLI's stderr) when `dor ensure` can't run because the
+// target shell has no OSC 633 integration. `shell` is a display name when known.
+function missingIntegrationError(shell?: string): string {
+  const name = (shell ?? '').replace(/\\/g, '/').split('/').pop() || 'this shell';
+  return `dor ensure requires OSC 633 shell integration, which ${name} does not provide. Run it from a shell with Dormouse integration, such as Git Bash or PowerShell.`;
+}
+
 function killConfirmationParam(value: unknown): { mode: 'if-read'; text: string } | { mode: 'dangerously' } | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const confirmation = value as { mode?: unknown; text?: unknown };
@@ -319,18 +396,6 @@ function dorCommandString(args: string[] | undefined): string | undefined {
   if (!args || args.join('').trim() === '') return undefined;
   const shell = getDefaultShellOpts()?.shell;
   return buildShellCommandForKind(shellCommandKind(shell, PLATFORM_STRING), args);
-}
-
-/** Wrap an already-quoted command string in the target shell's launch flags. */
-function commandShellArgs(shell: string | undefined, command: string): string[] {
-  switch (shellCommandKind(shell, PLATFORM_STRING)) {
-    case 'cmd':
-      return ['/d', '/s', '/c', command];
-    case 'powershell':
-      return ['-NoLogo', '-NoProfile', '-Command', command];
-    case 'posix':
-      return ['-lc', command];
-  }
 }
 
 function ShellSpawnNotice({
@@ -854,12 +919,14 @@ export function Wall({
     minimized,
     referenceId,
     cwd,
+    requireIntegration,
   }: {
     command?: string;
     direction: DorResolvedSplitDirection;
     minimized: boolean;
     referenceId: string;
     cwd?: string;
+    requireIntegration?: boolean;
   }): ParseResult<{
     id: string;
     ref: string;
@@ -877,12 +944,19 @@ export function Wall({
     const inheritedCwd = cwd ?? (sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined);
 
     if (command) {
+      // Spawn a real interactive shell and type the command into it once it
+      // reaches a prompt (see typeCommandWhenPromptReady in the lifecycle), rather
+      // than launching `shell -c command`. A `-c` invocation has no prompt behind
+      // it: the command *is* the shell's whole job, so `dor ensure --restart`'s
+      // Ctrl+C would interrupt the command and take the shell down with it (the
+      // pty exits) instead of returning to a prompt the command can be re-run at.
       setPendingShellOpts(newId, {
         shell: defaults?.shell,
-        args: commandShellArgs(defaults?.shell, command),
+        args: defaults?.args,
         cwd: inheritedCwd,
         untouched: false,
         command,
+        ...(requireIntegration ? { requireIntegration: true } : {}),
       });
     } else if (defaults?.shell || inheritedCwd) {
       setPendingShellOpts(newId, {
@@ -1212,6 +1286,26 @@ export function Wall({
         }
         const existingId = findSurfaceIdRunningCommand(command, cwd);
         if (existingId) {
+          const minimized = doorsRef.current.some((door) => door.id === existingId);
+          if (booleanParam(params.restart)) {
+            const restarted = await restartSurfaceInPlace(existingId, command, cwd);
+            if (!restarted.ok) {
+              detail.respond({ ok: false, error: `surface '${surfaceRefForId(existingId)}' ${restarted.message}` });
+              return;
+            }
+            detail.respond({
+              ok: true,
+              result: {
+                status: 'restarted',
+                surfaceId: existingId,
+                surfaceRef: surfaceRefForId(existingId),
+                command,
+                cwd,
+                minimized,
+              },
+            });
+            return;
+          }
           detail.respond({
             ok: true,
             result: {
@@ -1220,9 +1314,19 @@ export function Wall({
               surfaceRef: surfaceRefForId(existingId),
               command,
               cwd,
-              minimized: doorsRef.current.some((door) => door.id === existingId),
+              minimized,
             },
           });
+          return;
+        }
+        // ensure needs OSC 633 to track the command. cmd.exe provably has none,
+        // so when the configured shell is explicitly cmd, fail immediately without
+        // even spawning a split. Only short-circuit on an explicit shell — an
+        // unset shell classifies as 'cmd' on Windows but the sidecar may actually
+        // spawn PowerShell, so let those fall through to the generic OSC wait.
+        const ensureShell = getDefaultShellOpts()?.shell;
+        if (ensureShell && shellCommandKind(ensureShell, PLATFORM_STRING) === 'cmd') {
+          detail.respond({ ok: false, error: missingIntegrationError(ensureShell) });
           return;
         }
         const resolved = resolveSplitTarget();
@@ -1234,9 +1338,26 @@ export function Wall({
           minimized: booleanParam(params.minimized),
           referenceId: resolved.target.id,
           cwd,
+          requireIntegration: true,
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });
+          return;
+        }
+        // ensure is only useful if the new shell reports OSC 633 — otherwise it
+        // can never be matched or restarted. A non-cmd shell can still lack
+        // integration (misconfigured, exotic); wait for the signal, and if it
+        // never arrives kill the throwaway split and fail cleanly rather than
+        // half-run an untrackable command. typeCommandWhenPromptReady drops the
+        // command in the same case, so nothing executes.
+        const integrated = await waitForTerminalState(
+          result.value.id,
+          () => isPaneOscDriven(result.value.id),
+          INTEGRATION_DETECT_TIMEOUT_MS,
+        );
+        if (!integrated) {
+          killPaneImmediately(result.value.id);
+          detail.respond({ ok: false, error: missingIntegrationError(ensureShell) });
           return;
         }
         detail.respond({
@@ -1702,6 +1823,7 @@ export function Wall({
             {/* Kill confirmation overlay — centered over the pane being killed */}
             {confirmKill && (
               <KillConfirmOverlay
+                apiRef={apiRef}
                 confirmKill={confirmKill}
                 paneElements={paneElements}
                 onCancel={() => rejectKill()}

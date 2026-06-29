@@ -49,6 +49,30 @@
       "matchManagers": ["npm", "cargo"],
       "matchUpdateTypes": ["major"],
       "minimumReleaseAge": "14 days"
+    },
+    {
+      "description": "Pin @types/vscode to match engines.vscode (^1.85.0) so the typed API surface never outruns the declared minimum VS Code runtime",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["@types/vscode"],
+      "allowedVersions": "1.85.0"
+    },
+    {
+      "description": "tend manages its own action version (the tend bot opens its own update PRs); don't let Renovate bump max-sixty/tend",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["max-sixty/tend"],
+      "enabled": false
+    },
+    {
+      "description": "Node version is governed by devEngines in package.json; don't let Renovate bump node in GitHub Actions workflows",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["node"],
+      "enabled": false
+    },
+    {
+      "description": "dockview-react is slated for removal; stay on ^5.1.0 and don't churn through major breaking changes (e.g. v6) on a dependency that's getting kicked out",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["dockview-react"],
+      "enabled": false
     }
   ]
 }

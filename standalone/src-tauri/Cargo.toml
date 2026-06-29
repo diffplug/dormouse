@@ -26,6 +26,11 @@ process-wrap = { version = "9", features = ["std"] }
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Win32_System_Threading"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSImage"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSData"] }
+
 [profile.release]
 strip = true
 lto = true

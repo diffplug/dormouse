@@ -5,6 +5,7 @@ import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCli } from '../dist/cli.js';
 import { buildShellCommandForKind, shellCommandKind } from '../dist/commands/shell-quote.js';
+import { msysToWindowsCwd } from '../dist/commands/ensure.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const snapshotsDir = join(__dirname, 'snapshots');
@@ -73,8 +74,9 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       // Mirror the host: quote the argv for the target shell, and key on the
       // command so the fixture can exercise both the created and existing paths.
       const command = buildShellCommandForKind('posix', request.command);
+      const isExisting = command === 'pnpm dev:workspace';
       return {
-        status: command === 'pnpm dev:workspace' ? 'existing' : 'created',
+        status: isExisting ? (request.restart ? 'restarted' : 'existing') : 'created',
         surfaceId: '33333333-3333-4333-8333-333333333333',
         surfaceRef: 'surface:3',
         command,
@@ -239,10 +241,46 @@ test('ensure sends command argv and caller cwd to the host', async () => {
     request: {
       command: ['pnpm', 'dev'],
       minimized: false,
+      restart: false,
       surface: undefined,
       cwd: '/work/site',
     },
   }]);
+});
+
+test('ensure --restart restarts a matching surface in place', async () => {
+  const client = fixtureClient();
+  await snapshot(
+    'ensure-restart',
+    await runCli(['ensure', '--restart', '--', 'pnpm', 'dev:workspace'], {
+      client,
+      env: { PWD: '/work/site' },
+    }),
+  );
+  assert.equal(client.requests[0].request.restart, true);
+});
+
+test('ensure surfaces a host error (no integration) to stderr with exit 1', async () => {
+  const client = {
+    requests: [],
+    async ensureSurface(request) {
+      this.requests.push({ method: 'ensureSurface', request });
+      throw new Error('dor ensure requires OSC 633 shell integration, which cmd.exe does not provide. Run it from a shell with Dormouse integration, such as Git Bash or PowerShell.');
+    },
+  };
+  const result = await runCli(['ensure', '--', 'pnpm', 'dev'], { client, env: { PWD: '/work/site' } });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /^Error: dor ensure requires OSC 633 shell integration, which cmd\.exe does not provide/);
+  assert.equal(result.stdout, '');
+});
+
+test('msysToWindowsCwd folds a Git Bash POSIX PWD to a Windows drive on win32', () => {
+  assert.equal(msysToWindowsCwd('/c/Users/me/site', 'win32'), 'C:\\Users\\me\\site');
+  assert.equal(msysToWindowsCwd('/d/work', 'win32'), 'D:\\work');
+  // Already-native paths (some MSYS builds export `C:/...`) and non-win32
+  // platforms are left for resolvePath to handle.
+  assert.equal(msysToWindowsCwd('C:/Users/me/site', 'win32'), 'C:/Users/me/site');
+  assert.equal(msysToWindowsCwd('/c/Users/me/site', 'linux'), '/c/Users/me/site');
 });
 
 test('ensure json output', async () => {

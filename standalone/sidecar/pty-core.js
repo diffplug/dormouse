@@ -100,6 +100,23 @@ function directoryExists(cwd, fsModule = fs) {
   }
 }
 
+// Win32 only. The cwd we're handed can be in a non-native spelling: Git Bash
+// inherits a POSIX path (`/c/Users/...`) that `statSync` can't resolve — so the
+// directory check below fails and the shell silently falls back to the home dir —
+// and VS Code's `workspaceFolder.fsPath` often carries a lowercase drive
+// (`c:\...`). Whatever spelling we pass propagates verbatim into `process.cwd()`
+// of the shell and of anything launched in it (e.g. Claude Code, which keys
+// per-directory state case-sensitively, so `c:\` vs `C:\` fragments its history).
+// Fold to one canonical Windows form: MSYS drive -> `X:\`, slashes unified,
+// drive letter upper-cased. Non-drive paths (UNC, already-relative) pass through.
+function canonicalizeWindowsCwd(cwd) {
+  if (!cwd) return cwd;
+  const withDrive = cwd.replace(/^\/([A-Za-z])\//, (_match, drive) => `${drive}:/`);
+  if (!/^[A-Za-z]:[\\/]/.test(withDrive)) return cwd;
+  const unified = withDrive.replace(/\//g, '\\');
+  return unified.charAt(0).toUpperCase() + unified.slice(1);
+}
+
 function pathEnvKey(env) {
   return Object.prototype.hasOwnProperty.call(env, 'Path') ? 'Path' : 'PATH';
 }
@@ -232,7 +249,7 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = 
 }
 
 function resolveSpawnConfig(options, runtime = {}) {
-  const { cols = 80, rows = 30, cwd, shell: explicitShell, args: explicitArgs, surfaceId } = options || {};
+  const { cols = 80, rows = 30, cwd: requestedCwd, shell: explicitShell, args: explicitArgs, surfaceId } = options || {};
   const env = {
     ...(runtime.env || process.env),
     ...(options?.env || {}),
@@ -240,6 +257,10 @@ function resolveSpawnConfig(options, runtime = {}) {
   const platform = runtime.platform || process.platform;
   const osModule = runtime.osModule || os;
   const fsModule = runtime.fsModule || fs;
+  // Normalize the requested cwd into a native spelling before it reaches the OS,
+  // so the directory check resolves and the casing the shell (and its children)
+  // perceives is stable. See canonicalizeWindowsCwd.
+  const cwd = platform === 'win32' ? canonicalizeWindowsCwd(requestedCwd) : requestedCwd;
   const defaultCwd = resolveDefaultCwd(platform, env, osModule);
   const missingExplicitCwd = Boolean(cwd) && !directoryExists(cwd, fsModule);
   const shell = explicitShell || resolveDefaultShell(platform, env);
@@ -276,6 +297,7 @@ function resolveSpawnConfig(options, runtime = {}) {
 
 module.exports.resolveSpawnConfig = resolveSpawnConfig;
 module.exports.withPrependedPath = withPrependedPath;
+module.exports.canonicalizeWindowsCwd = canonicalizeWindowsCwd;
 
 // ── Shell detection ────────────────────────────────────────────────────────
 

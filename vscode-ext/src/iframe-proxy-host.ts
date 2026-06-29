@@ -2,8 +2,8 @@
  * VS Code extension-host binding for the iframe transparent proxy.
  *
  * The proxy itself is host-agnostic and lives in `lib/src/host/iframe-proxy.ts`
- * (shared with the Tauri sidecar — see docs/specs/dor-browser.md → "The
- * transparent proxy"). This file only injects the VS Code logger; the
+ * (shared with the Tauri sidecar — see docs/specs/dor-browser.md → "Iframe
+ * Renderer"). This file only injects the VS Code logger; the
  * message-router calls `createIframeProxyUrl` exactly as before.
  */
 import { createIframeProxyUrl as createProxy } from '../../lib/src/host/iframe-proxy';
