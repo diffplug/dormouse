@@ -17,6 +17,7 @@ import type {
 } from "dormouse-lib/lib/platform/types";
 import { AlertManager, type SessionStatus } from "dormouse-lib/lib/alert-manager";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
+import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
@@ -428,9 +429,12 @@ export class TauriAdapter implements PlatformAdapter {
 
   private static STATE_KEY = 'dormouse.session';
 
+  // Persisted blob is a PersistedWindow when the workspaces flag is on, a bare
+  // PersistedSession when off (docs/specs/transport.md). The window-persistence
+  // helpers own the translation + JSON/storage plumbing.
   saveState(state: unknown): void {
     try {
-      localStorage.setItem(TauriAdapter.STATE_KEY, JSON.stringify(state));
+      saveSessionState(localStorage, TauriAdapter.STATE_KEY, state);
     } catch {
       console.error('[tauri-adapter] Failed to save session state');
     }
@@ -438,8 +442,7 @@ export class TauriAdapter implements PlatformAdapter {
 
   getState(): unknown {
     try {
-      const raw = localStorage.getItem(TauriAdapter.STATE_KEY);
-      return raw ? JSON.parse(raw) : null;
+      return loadSessionState(localStorage, TauriAdapter.STATE_KEY);
     } catch {
       return null;
     }

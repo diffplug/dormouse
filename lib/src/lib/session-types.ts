@@ -71,6 +71,34 @@ export interface PersistedSession {
   layout: unknown; // SerializedDockview — kept as `unknown` to avoid dockview dep in types
 }
 
+export type WorkspaceId = string;
+
+/**
+ * A named Workspace (one Wall's worth of Surfaces + its layout) as persisted
+ * inside a `PersistedWindow` (`docs/specs/glossary.md`). Stage 2b. The inner
+ * `session` keeps its own v3 versioning; the Window wraps it.
+ */
+export interface PersistedWorkspace {
+  id: WorkspaceId;
+  name: string;
+  session: PersistedSession;
+}
+
+/**
+ * The standalone Window's persisted snapshot: an ordered list of Workspaces and
+ * which one is active. VS Code does NOT use this — each webview persists exactly
+ * one bare `PersistedSession` (`docs/specs/vscode.md`). Stage 2b.
+ */
+export interface PersistedWindow {
+  version: 1;
+  workspaces: PersistedWorkspace[];
+  activeWorkspaceId: WorkspaceId;
+}
+
+/** Default id/name for the single Workspace a pre-workspace snapshot migrates to. */
+export const DEFAULT_WORKSPACE_ID: WorkspaceId = 'workspace-1';
+export const DEFAULT_WORKSPACE_NAME = 'Workspace 1';
+
 type PersistedPaneInput = Omit<PersistedPane, 'untouched'> & { untouched?: boolean };
 
 interface PersistedSessionV3Input {
@@ -283,4 +311,76 @@ function parseJsonString(raw: unknown): unknown {
   } catch {
     return raw;
   }
+}
+
+// --- Window container (stage 2b) ---
+
+// Structural gate only: a v1 Window with a workspaces array and an active id.
+// Each Workspace element is validated (and dropped if bad) per-item in
+// readPersistedWindow, so malformed elements don't reject the whole Window.
+function isPersistedWindowShape(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    value.version === 1 &&
+    Array.isArray(value.workspaces) &&
+    typeof value.activeWorkspaceId === 'string'
+  );
+}
+
+/** Wrap a single `PersistedSession` as a one-Workspace `PersistedWindow`. */
+export function wrapSessionInWindow(
+  session: PersistedSession,
+  id: WorkspaceId = DEFAULT_WORKSPACE_ID,
+  name: string = DEFAULT_WORKSPACE_NAME,
+): PersistedWindow {
+  return { version: 1, workspaces: [{ id, name, session }], activeWorkspaceId: id };
+}
+
+/**
+ * Read a persisted Window snapshot. Accepts a canonical `PersistedWindow`, a
+ * JSON-stringified one, or a bare `PersistedSession` (any version) — the
+ * pre-workspace shape — which migrates to a single Workspace named `Workspace 1`
+ * (`docs/specs/transport.md`). Returns null when nothing usable is present.
+ *
+ * Each inner session is normalized/migrated through `readPersistedSession`. If
+ * `activeWorkspaceId` does not match any Workspace, the first Workspace is made
+ * active so the snapshot stays usable.
+ */
+export function readPersistedWindow(raw: unknown): PersistedWindow | null {
+  const value = parseJsonString(raw);
+  if (!isRecord(value)) return null;
+
+  if (isPersistedWindowShape(value)) {
+    const workspaces = (value.workspaces as unknown[])
+      .map((ws): PersistedWorkspace | null => {
+        if (!isRecord(ws) || typeof ws.id !== 'string' || typeof ws.name !== 'string') return null;
+        const session = readPersistedSession(ws.session);
+        return session ? { id: ws.id, name: ws.name, session } : null;
+      })
+      .filter((ws): ws is PersistedWorkspace => ws !== null);
+    if (workspaces.length === 0) return null;
+    const activeWorkspaceId = workspaces.some((ws) => ws.id === value.activeWorkspaceId)
+      ? (value.activeWorkspaceId as WorkspaceId)
+      : workspaces[0].id;
+    return { version: 1, workspaces, activeWorkspaceId };
+  }
+
+  // Pre-workspace bare PersistedSession → single-Workspace window.
+  const session = readPersistedSession(value);
+  return session ? wrapSessionInWindow(session) : null;
+}
+
+/** The active Workspace's session, or the first Workspace's as a fallback. */
+export function activeWorkspaceSession(window: PersistedWindow): PersistedSession {
+  const active = window.workspaces.find((ws) => ws.id === window.activeWorkspaceId);
+  return (active ?? window.workspaces[0]).session;
+}
+
+/** Return a copy of the Window with the active Workspace's session replaced,
+ *  preserving every other Workspace. */
+export function replaceActiveSession(window: PersistedWindow, session: PersistedSession): PersistedWindow {
+  return {
+    ...window,
+    workspaces: window.workspaces.map((ws) => (ws.id === window.activeWorkspaceId ? { ...ws, session } : ws)),
+  };
 }
