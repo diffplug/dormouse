@@ -1,5 +1,5 @@
 import type { PlatformAdapter, PtyInfo } from './platform/types';
-import { resumeTerminal } from './terminal-registry';
+import { restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
 import { readPersistedSession, type PersistedDoor } from './session-types';
 import { restoreSession } from './session-restore';
 
@@ -102,6 +102,7 @@ function getSavedPaneResumeInfo(savedState: unknown, liveIds: string[]): Map<str
   const liveSet = new Set(liveIds);
   const result = new Map<string, { title: string; untouched: boolean }>();
   for (const pane of saved.panes) {
+    restoreBrowserSurfaceTodo(pane);
     if (!liveSet.has(pane.id)) continue;
     result.set(pane.id, { title: pane.title, untouched: pane.untouched });
   }
@@ -135,7 +136,7 @@ function getSavedResumePlan(savedState: unknown, liveIds: string[]): ReconnectRe
     layoutPanelIds.every((id) => paneIds.includes(id));
 
   return {
-    paneIds,
+    paneIds: layoutMatchesVisiblePanes ? paneIds : paneIds.filter((id) => liveSet.has(id)),
     doors,
     layout: layoutMatchesVisiblePanes ? saved.layout : undefined,
   };

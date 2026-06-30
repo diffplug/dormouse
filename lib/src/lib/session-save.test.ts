@@ -3,6 +3,7 @@ import type { PlatformAdapter } from './platform/types';
 import type { PersistedSession } from './session-types';
 
 const terminalRegistryMocks = vi.hoisted(() => ({
+  getActivity: vi.fn(),
   getLivePersistedAlertState: vi.fn(),
   getTerminalPaneState: vi.fn(),
   isUntouched: vi.fn(),
@@ -10,6 +11,7 @@ const terminalRegistryMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('./terminal-registry', () => ({
+  getActivity: terminalRegistryMocks.getActivity,
   getLivePersistedAlertState: terminalRegistryMocks.getLivePersistedAlertState,
   getTerminalPaneState: terminalRegistryMocks.getTerminalPaneState,
   isUntouched: terminalRegistryMocks.isUntouched,
@@ -69,6 +71,12 @@ function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
 describe('saveSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    terminalRegistryMocks.getActivity.mockReturnValue({
+      status: 'WATCHING_DISABLED',
+      watchingEnabled: false,
+      todo: false,
+      notification: null,
+    });
     terminalRegistryMocks.resolveTerminalSessionId.mockImplementation((id: string) => id);
     terminalRegistryMocks.getLivePersistedAlertState.mockReturnValue(null);
     terminalRegistryMocks.getTerminalPaneState.mockReturnValue({ titleCandidates: {} });
@@ -220,6 +228,10 @@ describe('saveSession', () => {
     const web = saved.panes.find((p) => p.id === 'pane-web')!;
     expect('surfaceType' in term).toBe(false);
     expect(web.surfaceType).toBe('browser');
+    expect(platform.getScrollback).toHaveBeenCalledWith('pane-term');
+    expect(platform.getCwd).toHaveBeenCalledWith('pane-term');
+    expect(platform.getScrollback).not.toHaveBeenCalledWith('pane-web');
+    expect(platform.getCwd).not.toHaveBeenCalledWith('pane-web');
   });
 
   it('records surfaceType browser for a minimized browser door', async () => {
@@ -239,5 +251,29 @@ describe('saveSession', () => {
 
     const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
     expect(saved.panes.find((p) => p.id === 'door-web')!.surfaceType).toBe('browser');
+    expect(platform.getScrollback).not.toHaveBeenCalledWith('door-web');
+    expect(platform.getCwd).not.toHaveBeenCalledWith('door-web');
+  });
+
+  it('persists local browser surface TODO state in the browser pane alert field', async () => {
+    const platform = createPlatform(null);
+    terminalRegistryMocks.getActivity.mockReturnValue({
+      status: 'WATCHING_DISABLED',
+      watchingEnabled: false,
+      todo: true,
+      notification: null,
+    });
+
+    await saveSession(platform, { root: true }, [
+      { id: 'pane-web', title: 'localhost', surfaceType: 'browser' },
+    ]);
+
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    expect(saved.panes.find((p) => p.id === 'pane-web')!.alert).toEqual({
+      status: 'WATCHING_DISABLED',
+      watchingEnabled: false,
+      todo: true,
+      notification: null,
+    });
   });
 });

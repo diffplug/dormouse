@@ -97,8 +97,10 @@ import {
   applyTerminalSemanticEvents,
   isPaneOscDriven,
   mountElement,
+  clearLocalSurfaceActivity,
   clearSessionAttention,
   clearSessionTodo,
+  restoreBrowserSurfaceTodo,
   disposeAllSessions,
   disposeSession,
   unmountElement,
@@ -472,17 +474,50 @@ describe('terminal-registry alert behavior', () => {
 
   it('Browser surface: TODO toggles on a pane id with no registry entry (no PTY/xterm)', () => {
     // A browser Surface (iframe / agent-browser) has no registry entry. The
-    // `t` shortcut still routes toggleSessionTodo to the AlertManager, which
-    // creates an entry for any id; the state round-trips back and is primed
-    // into the activity store so the door / union can show it.
+    // `t` shortcut stores TODO in the local activity store instead of sending a
+    // PTY alert message; VS Code only forwards alert state for owned PTYs.
     const browserId = 'pane-browser';
+    const alertToggleSpy = vi.spyOn(fakePlatform, 'alertToggleTodo');
     expect(getActivity(browserId).todo).toBe(false);
 
     toggleSessionTodo(browserId);
     expect(getActivity(browserId).todo).toBe(true);
+    expect(alertToggleSpy).not.toHaveBeenCalled();
 
     toggleSessionTodo(browserId);
     expect(getActivity(browserId).todo).toBe(false);
+    expect(alertToggleSpy).not.toHaveBeenCalled();
+    alertToggleSpy.mockRestore();
+  });
+
+  it('Browser surface: restoreBrowserSurfaceTodo replays a persisted TODO; clearLocalSurfaceActivity drops it', () => {
+    const browserId = 'pane-browser-restore';
+
+    // Only browser panes whose persisted alert carries a TODO are replayed.
+    restoreBrowserSurfaceTodo({ id: browserId, surfaceType: 'browser', alert: { status: 'WATCHING_DISABLED', todo: false } });
+    expect(getActivity(browserId).todo).toBe(false);
+    restoreBrowserSurfaceTodo({ id: 'pane-term-x', surfaceType: 'terminal', alert: { status: 'WATCHING_DISABLED', todo: true } });
+    expect(getActivity('pane-term-x').todo).toBe(false);
+
+    restoreBrowserSurfaceTodo({ id: browserId, surfaceType: 'browser', alert: { status: 'WATCHING_DISABLED', todo: true } });
+    expect(getActivity(browserId).todo).toBe(true);
+
+    // Killing/replacing the pane clears the local surface activity entirely.
+    clearLocalSurfaceActivity(browserId);
+    expect(getActivity(browserId).todo).toBe(false);
+  });
+
+  it('Browser surface: a reused id prefers a live PTY over a stale local-surface TODO', () => {
+    const id = 'reused-id';
+    restoreBrowserSurfaceTodo({ id, surfaceType: 'browser', alert: { status: 'WATCHING_DISABLED', todo: true } });
+    expect(getActivity(id).todo).toBe(true);
+
+    // A terminal later minted with the same id wins: the stale browser TODO is
+    // ignored rather than leaking onto the PTY's activity.
+    createSession(id);
+    expect(getActivity(id).todo).toBe(false);
+
+    clearLocalSurfaceActivity(id);
   });
 
   it('Story 8: disable alerts clears ring and stops tracking', () => {

@@ -1,7 +1,7 @@
 import type { PlatformAdapter } from './platform/types';
-import { readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceType } from './session-types';
+import { browserPersistedPane, readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceType } from './session-types';
 import { detectResumeCommand } from './resume-patterns';
-import { getLivePersistedAlertState, getTerminalPaneState, isUntouched, resolveTerminalSessionId } from './terminal-registry';
+import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched, resolveTerminalSessionId } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 
 function getPreviousPaneMap(platform: PlatformAdapter): Map<string, PersistedPane> {
@@ -34,6 +34,13 @@ export async function saveSession(
   const persisted: PersistedPane[] = await Promise.all(
     [...allPanes.values()].map(async (pane) => {
       const previousPane = previousPanes.get(pane.id);
+      if (pane.surfaceType === 'browser') {
+        // The activity store already holds this surface's TODO; persist it as the
+        // alert blob (ActivityState is assignable to PersistedAlertState).
+        const activity = getActivity(pane.id);
+        return browserPersistedPane(pane, activity.todo ? activity : null);
+      }
+
       const liveAlert = getLivePersistedAlertState(pane.id);
       const sessionId = resolveTerminalSessionId(pane.id);
       const [scrollback, cwd] = await Promise.all([
@@ -49,9 +56,6 @@ export async function saveSession(
         resumeCommand: resolvedScrollback ? detectResumeCommand(resolvedScrollback) : null,
         untouched: isUntouched(pane.id),
         alert: liveAlert ?? previousPane?.alert ?? null,
-        // Record the kind only for browser surfaces; absent reads as 'terminal'
-        // (docs/specs/transport.md), keeping terminal snapshots byte-identical.
-        ...(pane.surfaceType === 'browser' ? { surfaceType: 'browser' as const } : {}),
       };
     }),
   );

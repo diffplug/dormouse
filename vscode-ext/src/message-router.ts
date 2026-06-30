@@ -501,6 +501,7 @@ export function attachRouter(
         // because other routers may own PTYs in the global pool.
         if (reconnectable.size === 0 && options?.savedSession) {
           for (const pane of options.savedSession.panes) {
+            if (pane.surfaceType === 'browser') continue;
             if (!globalOwnedPtyIds.has(pane.id)) {
               claim(pane.id);
             }

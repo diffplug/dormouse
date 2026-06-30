@@ -6,12 +6,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:agent-browser": "pnpm stage && node scripts/dev-agent-browser.mjs",
-    "build": "pnpm stage && tsc -b && vite build",
-    "stage": "pnpm stage:dor-cli && pnpm stage:sidecar-proxy",
+    "dev:agent-browser": "pnpm run stage && node scripts/dev-agent-browser.mjs",
+    "build": "pnpm run stage && tsc -b && vite build",
+    "stage": "pnpm run stage:dor-cli && pnpm run stage:sidecar-proxy",
     "stage:dor-cli": "pnpm --filter dor build && node scripts/stage-dor-cli.mjs",
     "stage:sidecar-proxy": "node scripts/build-sidecar-proxy.mjs",
-    "tauri": "pnpm stage && tauri",
+    "tauri": "pnpm run stage && tauri",
     "test": "vitest run"
   },
   "dependencies": {
@@ -34,6 +34,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
+    "cross-spawn": "^7.0.6",
     "esbuild": "^0.28.0",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4.3.0",

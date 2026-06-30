@@ -2,4 +2,12 @@ exitCode: 1
 stdout:
 
 stderr:
-Error: agent-browser was not found (looked for 'agent-browser'). Install it with: npm i -g agent-browser
+Error: agent-browser is not installed.
+
+dor ab drives your own agent-browser binary, which Dormouse never bundles.
+Install it, then re-run your command:
+
+    npm i -g agent-browser
+
+More: https://agent-browser.dev
+Already installed? Make sure it's on your PATH, or set DORMOUSE_AGENT_BROWSER_BIN to its full path.
