@@ -8,6 +8,7 @@ import { getWebviewHtml } from './webview-html';
 import { log } from './log';
 import { mergeAlertStates, refreshSavedSessionStateFromPtys } from './session-state';
 import { readPersistedSession } from '../../lib/src/lib/session-types';
+import { workspaceTitle } from './workspace-chrome';
 import { resolveSelectedShell, setSelectedShellPath, getSelectedShellPath } from './shell-selection';
 import type { ExtensionMessage } from './message-types';
 
@@ -53,6 +54,9 @@ function setupPanel(
     killOnDispose: true,
     savedSession: readPersistedSession(initialState),
     getSelectedShell,
+    // Reflect this panel's Workspace union onto the editor-tab title
+    // (`<title> 🔔 [TODO]`). Icon stays the Dormouse mascot.
+    onUnion: (union) => { panel.title = workspaceTitle(union); },
     // Panels persist via vscode.setState() (per-panel, managed by VS Code).
     // Don't write to workspaceState — that's for the WebviewView only.
   });
