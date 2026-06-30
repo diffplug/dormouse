@@ -1,8 +1,9 @@
 # Dor Browser Surface
 
-> See `docs/specs/glossary.md` for canonical Session and Pane vocabulary, and
-> `docs/specs/dor-cli.md` for the shared `dor` CLI, surface handle model, and
-> host control plumbing this surface builds on.
+> See `docs/specs/glossary.md` for canonical Surface / Session / Pane vocabulary
+> (a browser pane is a **browser Surface**), and `docs/specs/dor-cli.md` for the
+> shared `dor` CLI, surface handle model, and host control plumbing this surface
+> builds on.
 
 Dormouse has one dockview component for web content: `BrowserPanel`, persisted as
 `surfaceType: 'browser'` with a swappable `renderMode`.

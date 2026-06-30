@@ -15,6 +15,7 @@ import { markAgentBrowserSessionClosed } from './wall/agent-browser-sessions';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import {
   clearSessionAttention,
+  clearLocalSurfaceActivity,
   disposeSession,
   dismissOrToggleAlert,
   focusSession,
@@ -598,6 +599,7 @@ export function Wall({
     if (!api || !panel) return;
     closeAgentBrowserSession(panel.params);
     orchestrateKill(api, id, selectPane, setSelectedId, killInProgressRef, overlayElRef);
+    clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
   }, [fireEvent, selectPane]);
 
@@ -1092,6 +1094,7 @@ export function Wall({
       position: { referencePanel: panel, direction: 'within' },
     });
     api.removePanel(panel);
+    clearLocalSurfaceActivity(oldId);
     selectPane(newId);
     return newId;
   }, [generatePaneId, selectPane]);

@@ -3,11 +3,13 @@ import type { PlatformAdapter, PtyInfo } from './platform/types';
 import type { PersistedSession } from './session-types';
 
 const terminalRegistryMocks = vi.hoisted(() => ({
+  restoreBrowserSurfaceTodo: vi.fn(),
   resumeTerminal: vi.fn(),
   restoreTerminal: vi.fn(),
 }));
 
 vi.mock('./terminal-registry', () => ({
+  restoreBrowserSurfaceTodo: terminalRegistryMocks.restoreBrowserSurfaceTodo,
   resumeTerminal: terminalRegistryMocks.resumeTerminal,
   restoreTerminal: terminalRegistryMocks.restoreTerminal,
 }));
@@ -289,6 +291,122 @@ describe('resumeOrRestore', () => {
     expect(result).toEqual({
       paneIds: ['pane-a', 'pane-b'],
       doors: [],
+      layout,
+    });
+  });
+
+  it('keeps the saved layout and a visible browser pane when only terminals have live PTYs', async () => {
+    const layout = { panels: { 'pane-term': {}, 'pane-web': {} } };
+    const saved: PersistedSession = {
+      version: 3,
+      layout,
+      panes: [
+        { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'pane-web', title: 'localhost', cwd: null, scrollback: null, resumeCommand: null, surfaceType: 'browser' },
+      ],
+    };
+
+    const result = await resumeOrRestore(createPlatform([
+      { id: 'pane-term', alive: true },
+    ], saved));
+
+    expect(result).toEqual({
+      paneIds: ['pane-term', 'pane-web'],
+      doors: [],
+      layout,
+    });
+    // The browser pane has no PTY and is never resumed as a terminal.
+    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledTimes(1);
+    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('pane-term', 'pane-term-replay', expect.anything());
+  });
+
+  it('restores browser surface TODO from the persisted alert during live resume', async () => {
+    const layout = { panels: { 'pane-term': {}, 'pane-web': {} } };
+    const saved: PersistedSession = {
+      version: 3,
+      layout,
+      panes: [
+        { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null },
+        {
+          id: 'pane-web',
+          title: 'localhost',
+          cwd: null,
+          scrollback: null,
+          resumeCommand: null,
+          surfaceType: 'browser',
+          alert: { status: 'WATCHING_DISABLED', watchingEnabled: false, todo: true, notification: null },
+        },
+      ],
+    };
+
+    await resumeOrRestore(createPlatform([
+      { id: 'pane-term', alive: true },
+    ], saved));
+
+    // Resume delegates the browser pane to restoreBrowserSurfaceTodo, which owns
+    // routing the persisted TODO into the local activity store (verified against
+    // the real store in terminal-registry.alert.test.ts).
+    expect(terminalRegistryMocks.restoreBrowserSurfaceTodo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'pane-web',
+        surfaceType: 'browser',
+        alert: expect.objectContaining({ todo: true }),
+      }),
+    );
+  });
+
+  it('drops visible browser panes from terminal fallback when the saved layout is rejected', async () => {
+    const saved: PersistedSession = {
+      version: 3,
+      layout: { panels: { 'pane-term': {}, 'stale-term': {}, 'pane-web': {} } },
+      panes: [
+        { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'stale-term', title: 'Stale terminal', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'pane-web', title: 'localhost', cwd: null, scrollback: null, resumeCommand: null, surfaceType: 'browser' },
+      ],
+    };
+
+    const result = await resumeOrRestore(createPlatform([
+      { id: 'pane-term', alive: true },
+    ], saved));
+
+    expect(result).toEqual({
+      paneIds: ['pane-term'],
+      doors: [],
+      layout: undefined,
+    });
+  });
+
+  it('keeps a minimized browser door alive across resume despite having no PTY', async () => {
+    const layout = { panels: { 'pane-term': {} } };
+    const doors = [{
+      id: 'door-web',
+      title: 'localhost',
+      component: 'browser',
+      params: { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173' },
+      neighborId: 'pane-term',
+      direction: 'right' as const,
+      remainingPaneIds: ['pane-term'],
+      layoutAtMinimize: layout,
+      layoutAtMinimizeSignature: 'sig',
+    }];
+    const saved: PersistedSession = {
+      version: 3,
+      layout,
+      doors,
+      panes: [
+        { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'door-web', title: 'localhost', cwd: null, scrollback: null, resumeCommand: null, surfaceType: 'browser' },
+      ],
+    };
+
+    const result = await resumeOrRestore(createPlatform([
+      { id: 'pane-term', alive: true },
+    ], saved));
+
+    expect(result).toEqual({
+      paneIds: ['pane-term'],
+      doors,
       layout,
     });
   });

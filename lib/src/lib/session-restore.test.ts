@@ -4,11 +4,13 @@ import type { PersistedSession } from './session-types';
 
 const terminalRegistryMocks = vi.hoisted(() => ({
   getDefaultShellOpts: vi.fn(),
+  restoreBrowserSurfaceTodo: vi.fn(),
   restoreTerminal: vi.fn(),
 }));
 
 vi.mock('./terminal-registry', () => ({
   getDefaultShellOpts: terminalRegistryMocks.getDefaultShellOpts,
+  restoreBrowserSurfaceTodo: terminalRegistryMocks.restoreBrowserSurfaceTodo,
   restoreTerminal: terminalRegistryMocks.restoreTerminal,
 }));
 
@@ -101,5 +103,56 @@ describe('restoreSession', () => {
     expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith('pane-a', expect.objectContaining({
       untouched: true,
     }));
+  });
+
+  it('does not spawn a terminal for a browser surface, but keeps it in paneIds', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      layout: { panels: { 'pane-term': {}, 'pane-web': {} } },
+      panes: [
+        { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
+        { id: 'pane-web', title: 'localhost', cwd: null, scrollback: null, resumeCommand: null, untouched: false, surfaceType: 'browser' },
+      ],
+    };
+
+    const result = restoreSession(createPlatform(saved));
+
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledTimes(1);
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith('pane-term', expect.objectContaining({ title: 'Terminal' }));
+    // The browser pane stays in paneIds so the layout blob recreates and selects it.
+    expect(result?.paneIds).toEqual(['pane-term', 'pane-web']);
+  });
+
+  it('restores browser surface TODO from the persisted alert during cold restore', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      layout: { panels: { 'pane-web': {} } },
+      panes: [
+        {
+          id: 'pane-web',
+          title: 'localhost',
+          cwd: null,
+          scrollback: null,
+          resumeCommand: null,
+          untouched: false,
+          surfaceType: 'browser',
+          alert: { status: 'WATCHING_DISABLED', watchingEnabled: false, todo: true, notification: null },
+        },
+      ],
+    };
+
+    restoreSession(createPlatform(saved));
+
+    expect(terminalRegistryMocks.restoreTerminal).not.toHaveBeenCalled();
+    // Cold restore delegates the browser pane to restoreBrowserSurfaceTodo, which
+    // owns routing the persisted TODO into the local activity store (verified
+    // against the real store in terminal-registry.alert.test.ts).
+    expect(terminalRegistryMocks.restoreBrowserSurfaceTodo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'pane-web',
+        surfaceType: 'browser',
+        alert: expect.objectContaining({ todo: true }),
+      }),
+    );
   });
 });
