@@ -1,7 +1,7 @@
 import type { SessionStatus } from './activity-monitor';
 import type { AlertButtonActionResult } from './alert-manager';
 import type { AlertStateDetail } from './platform/types';
-import type { PersistedAlertState } from './session-types';
+import type { PersistedAlertState, PersistedPane } from './session-types';
 import { getPlatform } from './platform';
 import {
   getEntryByPtyId,
@@ -21,7 +21,18 @@ export const DEFAULT_ACTIVITY_STATE: ActivityState = {
 
 const activityListeners = new Set<() => void>();
 let cachedSnapshot: Map<string, ActivityState> | null = null;
+
+// Transient staging for activity that arrives *before* a terminal registry entry
+// exists. Consumed and deleted when the entry is minted (consumePrimedActivity).
 const primedActivityStates = new Map<string, Partial<ActivityState>>();
+
+// Persistent activity for non-PTY surfaces (browser iframes / agent-browser).
+// A browser surface never gets a registry entry, so — unlike primedActivityStates
+// — this is its permanent home: keyed by pane id, written when its TODO toggles
+// or is restored, and cleared only when the pane is killed or replaced
+// (clearLocalSurfaceActivity). Kept separate so terminal creation never consumes
+// it and a no-arg primed reset never wipes it.
+const localSurfaceActivity = new Map<string, ActivityState>();
 
 export function notifyActivityListeners(): void {
   cachedSnapshot = null;
@@ -37,7 +48,7 @@ export function getActivitySnapshot(): Map<string, ActivityState> {
   if (cachedSnapshot) return cachedSnapshot;
 
   const snapshot = new Map<string, ActivityState>();
-  const ids = new Set<string>([...registry.keys(), ...primedActivityStates.keys()]);
+  const ids = new Set<string>([...registry.keys(), ...primedActivityStates.keys(), ...localSurfaceActivity.keys()]);
   for (const id of ids) {
     const state = readActivity(id);
     if (state) {
@@ -67,10 +78,13 @@ function readLiveActivity(id: string): ActivityState | null {
 function readActivity(id: string): ActivityState | null {
   const primedState = primedActivityStates.get(id);
   const liveState = readLiveActivity(id);
+  const localState = localSurfaceActivity.get(id);
 
-  if (!liveState && !primedState) return null;
+  if (!liveState && !primedState && !localState) return null;
+  // A live PTY is authoritative, so it outranks a stale local-surface entry left
+  // behind if an id is reused; primed staging overrides on top.
   return {
-    ...(liveState ?? DEFAULT_ACTIVITY_STATE),
+    ...(liveState ?? localState ?? DEFAULT_ACTIVITY_STATE),
     ...primedState,
   };
 }
@@ -103,22 +117,36 @@ export function clearPrimedActivity(id?: string): void {
   notifyActivityListeners();
 }
 
+/**
+ * Drop the activity for a non-PTY surface. Called when a browser pane is killed
+ * or replaced (Wall.tsx) so its TODO doesn't outlive the pane or leak onto a
+ * later terminal that reuses the id.
+ */
+export function clearLocalSurfaceActivity(id: string): void {
+  if (!localSurfaceActivity.delete(id)) return;
+  notifyActivityListeners();
+}
+
 function setLocalSurfaceTodo(id: string, todo: boolean): void {
   if (!todo) {
-    if (!primedActivityStates.delete(id)) return;
-    notifyActivityListeners();
+    clearLocalSurfaceActivity(id);
     return;
   }
 
-  const current = readActivity(id) ?? DEFAULT_ACTIVITY_STATE;
-  primedActivityStates.set(id, {
-    ...current,
-    status: 'WATCHING_DISABLED',
-    watchingEnabled: false,
-    todo: true,
-    notification: null,
-  });
+  localSurfaceActivity.set(id, { ...DEFAULT_ACTIVITY_STATE, todo: true });
   notifyActivityListeners();
+}
+
+/**
+ * Restore a browser surface's persisted TODO into the local activity store.
+ * Browser surfaces have no PTY, so the TODO is reconstructed from the saved pane
+ * (the `alert` blob) rather than replayed from a PTY alert. Shared by the cold
+ * restore (session-restore.ts) and live resume (reconnect.ts) paths.
+ */
+export function restoreBrowserSurfaceTodo(pane: Pick<PersistedPane, 'id' | 'surfaceType' | 'alert'>): void {
+  if (pane.surfaceType === 'browser' && pane.alert?.todo === true) {
+    setLocalSurfaceTodo(pane.id, true);
+  }
 }
 
 export function consumePrimedActivity(id: string): Partial<ActivityState> | undefined {

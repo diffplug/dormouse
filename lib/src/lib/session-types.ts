@@ -28,6 +28,29 @@ export interface PersistedPane {
   surfaceType?: PersistedSurfaceType;
 }
 
+/**
+ * Build the persisted record for a browser surface. Browser panes have no PTY,
+ * so the terminal-only fields (cwd/scrollback/resumeCommand/untouched) are always
+ * blank; the dockview `layout` blob reconstructs the surface and `alert` carries
+ * the optional TODO. Single source of truth shared by the renderer save path
+ * (`session-save.ts`) and the VS Code host refresh (`vscode-ext/session-state.ts`).
+ */
+export function browserPersistedPane(
+  pane: { id: string; title: string },
+  alert: PersistedAlertState | null,
+): PersistedPane {
+  return {
+    id: pane.id,
+    title: pane.title,
+    cwd: null,
+    scrollback: null,
+    resumeCommand: null,
+    untouched: false,
+    alert,
+    surfaceType: 'browser',
+  };
+}
+
 export interface PersistedDoor {
   id: string;
   title: string;

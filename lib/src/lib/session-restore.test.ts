@@ -4,13 +4,13 @@ import type { PersistedSession } from './session-types';
 
 const terminalRegistryMocks = vi.hoisted(() => ({
   getDefaultShellOpts: vi.fn(),
-  primeActivity: vi.fn(),
+  restoreBrowserSurfaceTodo: vi.fn(),
   restoreTerminal: vi.fn(),
 }));
 
 vi.mock('./terminal-registry', () => ({
   getDefaultShellOpts: terminalRegistryMocks.getDefaultShellOpts,
-  primeActivity: terminalRegistryMocks.primeActivity,
+  restoreBrowserSurfaceTodo: terminalRegistryMocks.restoreBrowserSurfaceTodo,
   restoreTerminal: terminalRegistryMocks.restoreTerminal,
 }));
 
@@ -123,7 +123,7 @@ describe('restoreSession', () => {
     expect(result?.paneIds).toEqual(['pane-term', 'pane-web']);
   });
 
-  it('primes browser surface TODO state from persisted alert during cold restore', () => {
+  it('restores browser surface TODO from the persisted alert during cold restore', () => {
     const saved: PersistedSession = {
       version: 3,
       layout: { panels: { 'pane-web': {} } },
@@ -144,11 +144,15 @@ describe('restoreSession', () => {
     restoreSession(createPlatform(saved));
 
     expect(terminalRegistryMocks.restoreTerminal).not.toHaveBeenCalled();
-    expect(terminalRegistryMocks.primeActivity).toHaveBeenCalledWith('pane-web', {
-      status: 'WATCHING_DISABLED',
-      watchingEnabled: false,
-      todo: true,
-      notification: null,
-    });
+    // Cold restore delegates the browser pane to restoreBrowserSurfaceTodo, which
+    // owns routing the persisted TODO into the local activity store (verified
+    // against the real store in terminal-registry.alert.test.ts).
+    expect(terminalRegistryMocks.restoreBrowserSurfaceTodo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'pane-web',
+        surfaceType: 'browser',
+        alert: expect.objectContaining({ todo: true }),
+      }),
+    );
   });
 });

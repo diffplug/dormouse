@@ -3,13 +3,13 @@ import type { PlatformAdapter, PtyInfo } from './platform/types';
 import type { PersistedSession } from './session-types';
 
 const terminalRegistryMocks = vi.hoisted(() => ({
-  primeActivity: vi.fn(),
+  restoreBrowserSurfaceTodo: vi.fn(),
   resumeTerminal: vi.fn(),
   restoreTerminal: vi.fn(),
 }));
 
 vi.mock('./terminal-registry', () => ({
-  primeActivity: terminalRegistryMocks.primeActivity,
+  restoreBrowserSurfaceTodo: terminalRegistryMocks.restoreBrowserSurfaceTodo,
   resumeTerminal: terminalRegistryMocks.resumeTerminal,
   restoreTerminal: terminalRegistryMocks.restoreTerminal,
 }));
@@ -320,7 +320,7 @@ describe('resumeOrRestore', () => {
     expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('pane-term', 'pane-term-replay', expect.anything());
   });
 
-  it('primes browser surface TODO state from persisted alert during live resume', async () => {
+  it('restores browser surface TODO from the persisted alert during live resume', async () => {
     const layout = { panels: { 'pane-term': {}, 'pane-web': {} } };
     const saved: PersistedSession = {
       version: 3,
@@ -343,12 +343,16 @@ describe('resumeOrRestore', () => {
       { id: 'pane-term', alive: true },
     ], saved));
 
-    expect(terminalRegistryMocks.primeActivity).toHaveBeenCalledWith('pane-web', {
-      status: 'WATCHING_DISABLED',
-      watchingEnabled: false,
-      todo: true,
-      notification: null,
-    });
+    // Resume delegates the browser pane to restoreBrowserSurfaceTodo, which owns
+    // routing the persisted TODO into the local activity store (verified against
+    // the real store in terminal-registry.alert.test.ts).
+    expect(terminalRegistryMocks.restoreBrowserSurfaceTodo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'pane-web',
+        surfaceType: 'browser',
+        alert: expect.objectContaining({ todo: true }),
+      }),
+    );
   });
 
   it('drops visible browser panes from terminal fallback when the saved layout is rejected', async () => {

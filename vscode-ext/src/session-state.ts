@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
 import type { AlertState } from '../../lib/src/lib/alert-manager';
-import { readPersistedSession, type PersistedAlertState, type PersistedPane, type PersistedSession } from '../../lib/src/lib/session-types';
+import { browserPersistedPane, readPersistedSession, type PersistedAlertState, type PersistedPane, type PersistedSession } from '../../lib/src/lib/session-types';
 import { log } from './log';
 
 const SESSION_STATE_KEY = 'dormouse.session';
@@ -61,14 +61,7 @@ export async function refreshSavedSessionStateFromPtys(
     saved.panes.map(async (pane) => {
       if (pane.surfaceType === 'browser') {
         log.info(`[session] ${pane.id}: browser surface, skipping PTY refresh`);
-        return {
-          ...pane,
-          cwd: null,
-          scrollback: null,
-          resumeCommand: null,
-          untouched: false,
-          alert: pane.alert ?? null,
-        };
+        return browserPersistedPane(pane, pane.alert ?? null);
       }
 
       const alert = toPersistedAlert(alertStates?.get(pane.id), pane.alert);
