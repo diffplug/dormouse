@@ -1,4 +1,3 @@
-import { EventEmitter } from 'events';
 import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -9,10 +8,11 @@ type SpawnResult = { stdout?: string; stderr?: string; code?: number };
 
 const spawnMock = vi.hoisted(() => vi.fn());
 
-// The host spawns via cross-spawn (default export) for cross-platform `.cmd`
-// resolution; mock that, not node:child_process.
-vi.mock('cross-spawn', () => ({
-  default: spawnMock,
+// The host spawns through dor-lib-common's spawnAndCapture; mock that boundary,
+// not its internal cross-spawn (spawnAndCapture's own behavior is covered by
+// dor-lib-common's tests).
+vi.mock('dor-lib-common', () => ({
+  spawnAndCapture: spawnMock,
 }));
 
 function enqueueSpawnResults(results: SpawnResult[]) {
@@ -20,18 +20,12 @@ function enqueueSpawnResults(results: SpawnResult[]) {
   spawnMock.mockImplementation((binary: string, args: string[]) => {
     const result = queue.shift();
     if (!result) throw new Error(`unexpected spawn: ${binary} ${args.join(' ')}`);
-    const child = new EventEmitter() as EventEmitter & {
-      stdout: EventEmitter;
-      stderr: EventEmitter;
-    };
-    child.stdout = new EventEmitter();
-    child.stderr = new EventEmitter();
-    queueMicrotask(() => {
-      if (result.stdout) child.stdout.emit('data', result.stdout);
-      if (result.stderr) child.stderr.emit('data', result.stderr);
-      child.emit('close', result.code ?? 0);
+    return Promise.resolve({
+      ok: true as const,
+      exitCode: result.code ?? 0,
+      stdout: result.stdout ?? '',
+      stderr: result.stderr ?? '',
     });
-    return child;
   });
 }
 
@@ -71,7 +65,6 @@ describe('agent-browser host relaunch', () => {
     expect(spawnMock).toHaveBeenCalledWith(
       '/usr/local/bin/agent-browser',
       ['--session', 'dormouse.1.default', 'tab', 'close', 'blank-tab'],
-      expect.anything(),
     );
   });
 });
