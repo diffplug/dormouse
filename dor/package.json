@@ -12,7 +12,7 @@
     "dist"
   ],
   "scripts": {
-    "prebuild": "node ../scripts/generate-dor-version.mjs",
+    "prebuild": "pnpm --filter dor-lib-common build && node ../scripts/generate-dor-version.mjs",
     "build": "tsc -p tsconfig.json && esbuild src/dor.ts --bundle --format=esm --platform=node --outfile=dist/dor.js --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\"",
     "test": "pnpm run build && node --test test/*.test.mjs"
   },
@@ -22,6 +22,6 @@
   },
   "dependencies": {
     "@stricli/core": "^1.2.7",
-    "cross-spawn": "^7.0.6"
+    "dor-lib-common": "workspace:*"
   }
 }

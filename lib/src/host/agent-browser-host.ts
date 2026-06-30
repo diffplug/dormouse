@@ -38,14 +38,18 @@
 import * as os from 'os';
 import * as path from 'path';
 import { promises as fs } from 'fs';
-// cross-spawn, not child_process — on Windows a bare command name never resolves
-// a `.cmd`/`.bat` PATH shim (Node spawn ignores PATHEXT → ENOENT), and Node >=22
-// refuses to spawn a `.cmd` directly even by full path (EINVAL, the
-// CVE-2024-27980 hardening). agent-browser ships as a `.cmd` shim, so both bite;
-// the GUI host hits this even for the absolute `binaryPath` dor ab resolved.
-// cross-spawn routes through cmd.exe with correct escaping and is a no-op on
-// POSIX. See docs/specs/dor-cli.md → "Spawning External Binaries".
-import spawn from 'cross-spawn';
+// All external spawns go through dor-lib-common's spawnAndCapture, which owns the
+// Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close). The
+// GUI host needs it even for the absolute `binaryPath` dor ab resolved.
+// See docs/specs/dor-cli.md → "Spawning External Binaries".
+import {
+  spawnAndCapture,
+  parseStreamPort,
+  sessionForKey,
+  streamStatusArgs,
+  AGENT_BROWSER_BIN_ENV,
+  DEFAULT_AGENT_BROWSER_BIN,
+} from 'dor-lib-common';
 import { randomBytes } from 'crypto';
 import { type AgentBrowserTab, parseAgentBrowserTabs } from '../lib/agent-browser-tab';
 import {
@@ -73,9 +77,6 @@ const EDIT_SCRIPTS: Record<AgentBrowserEditOp, string> = {
 
 const STREAM_PORT_READ_ATTEMPTS = 4;
 const STREAM_PORT_READ_DELAY_MS = 150;
-// Grace for 'close' to fire after 'exit' before resolving anyway, so a daemon
-// holding the inherited stdio pipes can't hang the spawn. See spawnAgentBrowser.
-const CLOSE_GRACE_MS = 250;
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface AgentBrowserHostDeps {
@@ -110,84 +111,44 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
 
   // The host's PATH is often the GUI login PATH (no nvm/volta shims), so prefer
   // the absolute path `dor ab` resolved in the user's terminal; fall through on
-  // ENOENT in case it has gone stale.
+  // ENOENT (binary missing) to the next candidate in case it has gone stale.
   async function runWithBinaryFallback(args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
     const candidates = [...new Set([
       binaryPath,
-      process.env.DORMOUSE_AGENT_BROWSER_BIN,
-      'agent-browser',
+      process.env[AGENT_BROWSER_BIN_ENV],
+      DEFAULT_AGENT_BROWSER_BIN,
     ].filter((c): c is string => !!c))];
 
     let lastError = '';
     for (const binary of candidates) {
-      const result = await spawnAgentBrowser(binary, args);
-      if (result !== 'ENOENT') return result;
+      const result = await spawnAndCapture(binary, args);
+      if (result.ok) {
+        return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+      }
+      // Missing binary: record it and try the next candidate. Any other spawn
+      // failure is real — surface it rather than masking it behind a fallback.
+      if (result.error.code !== 'ENOENT') {
+        log(`[agent-browser] spawn failed: ${result.error.message}`);
+        return { exitCode: 1, stdout: '', stderr: result.error.message };
+      }
       lastError = `'${binary}' was not found`;
       log(`[agent-browser] ${lastError}; trying next candidate`);
     }
     return { exitCode: 1, stdout: '', stderr: `agent-browser binary not found (${lastError})` };
   }
 
-  function spawnAgentBrowser(binary: string, args: string[]): Promise<AgentBrowserCommandResult | 'ENOENT'> {
-    return new Promise((resolve) => {
-      // windowsHide: cross-spawn runs `.cmd` shims through cmd.exe; without this
-      // each spawn flashes a console window that steals focus. No-op off Windows.
-      const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-      let stdout = '';
-      let stderr = '';
-      let settled = false;
-      let graceTimer: ReturnType<typeof setTimeout> | undefined;
-      const settle = (apply: () => void): void => {
-        if (settled) return;
-        settled = true;
-        if (graceTimer !== undefined) clearTimeout(graceTimer);
-        apply();
-      };
-      child.stdout.on('data', (chunk) => { stdout += String(chunk); });
-      child.stderr.on('data', (chunk) => { stderr += String(chunk); });
-      child.on('error', (err: NodeJS.ErrnoException) => settle(() => {
-        if (err.code === 'ENOENT') {
-          resolve('ENOENT');
-          return;
-        }
-        log(`[agent-browser] spawn failed: ${err.message}`);
-        resolve({ exitCode: 1, stdout: '', stderr: err.message });
-      }));
-      const finish = (code: number | null, out: string, err: string): void =>
-        settle(() => resolve({ exitCode: code ?? 1, stdout: out, stderr: err }));
-      // Resolve on 'close' (clean: process exited and stdio drained), but fall
-      // back to 'exit' because `agent-browser open` leaves a detached daemon that
-      // on Windows inherits these pipes, so they never reach EOF and 'close' never
-      // fires. The grace lets 'close' win first so normal commands keep full
-      // output. See dor/src/commands/agent-browser.ts for the matching rationale.
-      child.on('close', (code) => finish(code, stdout, stderr));
-      child.on('exit', (code) => {
-        // Snapshot at exit so output the surviving daemon writes into the
-        // inherited pipes during the grace doesn't leak into the result.
-        const out = stdout;
-        const err = stderr;
-        graceTimer = setTimeout(() => finish(code, out, err), CLOSE_GRACE_MS);
-      });
-    });
-  }
-
-  // Read a session's stream WebSocket port via `stream status --json`. Mirrors
-  // the parse in dor/src/commands/agent-browser.ts: { port } or { data: { port } }.
-  // Right after `open` / `--headed open` (a fresh spawn, a pop-out, or a pop-in
-  // relaunch) the daemon may not have published the port yet; a single read
-  // would then return undefined and leave the panel pinned to a stale port — it
-  // reads "ended" though the session is live. Retry briefly to close that window.
+  // Read a session's stream WebSocket port via `stream status --json` (parsed by
+  // dor-lib-common's parseStreamPort). Right after `open` / `--headed open` (a
+  // fresh spawn, a pop-out, or a pop-in relaunch) the daemon may not have
+  // published the port yet; a single read would then return undefined and leave
+  // the panel pinned to a stale port — it reads "ended" though the session is
+  // live. Retry briefly to close that window.
   async function readStreamPort(session: string, binaryPath?: string): Promise<number | undefined> {
     for (let attempt = 0; attempt < STREAM_PORT_READ_ATTEMPTS; attempt++) {
-      const result = await runWithBinaryFallback(['--session', session, 'stream', 'status', '--json'], binaryPath);
+      const result = await runWithBinaryFallback(streamStatusArgs(session), binaryPath);
       if (result.exitCode === 0) {
-        try {
-          const parsed = JSON.parse(result.stdout) as { port?: unknown; data?: { port?: unknown } };
-          const port = parsed.data?.port ?? parsed.port;
-          if (typeof port === 'number' && Number.isFinite(port)) return port;
-        } catch {
-          // malformed output — fall through and retry
-        }
+        const port = parseStreamPort(result.stdout);
+        if (port !== undefined) return port;
       }
       if (attempt < STREAM_PORT_READ_ATTEMPTS - 1) await delay(STREAM_PORT_READ_DELAY_MS);
     }
@@ -283,10 +244,10 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   }
 
   // A fresh managed session for a surface spawned from the GUI (no `--key`),
-  // mirroring `dor ab`'s `dormouse.<workspaceId>.<key>` namespacing so it can't
-  // collide with a user's own agent-browser sessions.
+  // using dor ab's workspace-scoped sessionForKey namespacing so it can't collide
+  // with a user's own agent-browser sessions.
   function generateGuiSession(): string {
-    return `dormouse.1.gui-${randomBytes(6).toString('hex')}`;
+    return sessionForKey(`gui-${randomBytes(6).toString('hex')}`);
   }
 
   // Reused per session so we don't litter tmp with one file per frame; the panel

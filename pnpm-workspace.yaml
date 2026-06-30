@@ -1,5 +1,6 @@
 packages:
   - dor
+  - dor-lib-common
   - lib
   - standalone
   - standalone/sidecar
