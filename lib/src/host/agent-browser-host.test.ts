@@ -9,8 +9,10 @@ type SpawnResult = { stdout?: string; stderr?: string; code?: number };
 
 const spawnMock = vi.hoisted(() => vi.fn());
 
-vi.mock('child_process', () => ({
-  spawn: spawnMock,
+// The host spawns via cross-spawn (default export) for cross-platform `.cmd`
+// resolution; mock that, not node:child_process.
+vi.mock('cross-spawn', () => ({
+  default: spawnMock,
 }));
 
 function enqueueSpawnResults(results: SpawnResult[]) {

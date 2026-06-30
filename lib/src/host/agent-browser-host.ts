@@ -38,7 +38,14 @@
 import * as os from 'os';
 import * as path from 'path';
 import { promises as fs } from 'fs';
-import { spawn } from 'child_process';
+// cross-spawn, not child_process — on Windows a bare command name never resolves
+// a `.cmd`/`.bat` PATH shim (Node spawn ignores PATHEXT → ENOENT), and Node >=22
+// refuses to spawn a `.cmd` directly even by full path (EINVAL, the
+// CVE-2024-27980 hardening). agent-browser ships as a `.cmd` shim, so both bite;
+// the GUI host hits this even for the absolute `binaryPath` dor ab resolved.
+// cross-spawn routes through cmd.exe with correct escaping and is a no-op on
+// POSIX. See docs/specs/dor-cli.md → "Spawning External Binaries".
+import spawn from 'cross-spawn';
 import { randomBytes } from 'crypto';
 import { type AgentBrowserTab, parseAgentBrowserTabs } from '../lib/agent-browser-tab';
 import {
@@ -66,6 +73,9 @@ const EDIT_SCRIPTS: Record<AgentBrowserEditOp, string> = {
 
 const STREAM_PORT_READ_ATTEMPTS = 4;
 const STREAM_PORT_READ_DELAY_MS = 150;
+// Grace for 'close' to fire after 'exit' before resolving anyway, so a daemon
+// holding the inherited stdio pipes can't hang the spawn. See spawnAgentBrowser.
+const CLOSE_GRACE_MS = 250;
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface AgentBrowserHostDeps {
@@ -120,21 +130,43 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
 
   function spawnAgentBrowser(binary: string, args: string[]): Promise<AgentBrowserCommandResult | 'ENOENT'> {
     return new Promise((resolve) => {
-      const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      // windowsHide: cross-spawn runs `.cmd` shims through cmd.exe; without this
+      // each spawn flashes a console window that steals focus. No-op off Windows.
+      const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
       let stdout = '';
       let stderr = '';
+      let settled = false;
+      let graceTimer: ReturnType<typeof setTimeout> | undefined;
+      const settle = (apply: () => void): void => {
+        if (settled) return;
+        settled = true;
+        if (graceTimer !== undefined) clearTimeout(graceTimer);
+        apply();
+      };
       child.stdout.on('data', (chunk) => { stdout += String(chunk); });
       child.stderr.on('data', (chunk) => { stderr += String(chunk); });
-      child.on('error', (err: NodeJS.ErrnoException) => {
+      child.on('error', (err: NodeJS.ErrnoException) => settle(() => {
         if (err.code === 'ENOENT') {
           resolve('ENOENT');
           return;
         }
         log(`[agent-browser] spawn failed: ${err.message}`);
         resolve({ exitCode: 1, stdout: '', stderr: err.message });
-      });
-      child.on('close', (code) => {
-        resolve({ exitCode: code ?? 1, stdout, stderr });
+      }));
+      const finish = (code: number | null, out: string, err: string): void =>
+        settle(() => resolve({ exitCode: code ?? 1, stdout: out, stderr: err }));
+      // Resolve on 'close' (clean: process exited and stdio drained), but fall
+      // back to 'exit' because `agent-browser open` leaves a detached daemon that
+      // on Windows inherits these pipes, so they never reach EOF and 'close' never
+      // fires. The grace lets 'close' win first so normal commands keep full
+      // output. See dor/src/commands/agent-browser.ts for the matching rationale.
+      child.on('close', (code) => finish(code, stdout, stderr));
+      child.on('exit', (code) => {
+        // Snapshot at exit so output the surviving daemon writes into the
+        // inherited pipes during the grace doesn't leak into the result.
+        const out = stdout;
+        const err = stderr;
+        graceTimer = setTimeout(() => finish(code, out, err), CLOSE_GRACE_MS);
       });
     });
   }

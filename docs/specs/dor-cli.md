@@ -60,6 +60,56 @@ Public PTY env:
 `DORMOUSE_CLI_BIN` is host-internal spawn configuration. Terminals should rely
 on `PATH`, not on that variable.
 
+On Windows, `DORMOUSE_CLI_BIN` and `DORMOUSE_CLI_JS` must be plain paths, never
+`\\?\` verbatim paths. The standalone host derives them from Tauri's
+`resource_dir()`, which returns a verbatim prefix in the bundled/dev layout; the
+host strips it once at the boundary (`resolve_sidecar_path`), so every derived
+path is plain. `dor.cmd` is reached through
+`DORMOUSE_CLI_BIN` on `PATH`, and cmd.exe cannot execute a batch file via a
+verbatim path — it fails with "The system cannot find the path specified."
+
+## Spawning External Binaries
+
+Any time Dormouse spawns an external/user-installed binary — `dor ab` driving
+`agent-browser`, the agent-browser host running tab/eval/screenshot commands, dev
+harnesses launching `pnpm`/`agent-browser` — it goes through **`cross-spawn`**,
+never raw `node:child_process` `spawn`. This is mandatory for correctness on
+Windows, where two distinct failures bite a naive spawn:
+
+- **ENOENT on a bare name.** Node's `spawn` does not consult `PATHEXT`, so a bare
+  `agent-browser` never resolves the `agent-browser.cmd` PATH shim that npm/vfox
+  installs. (`agent-browser` works from a POSIX shell only because the file there
+  is a real executable with a shebang; on Windows it is a `.cmd`.)
+- **EINVAL on a `.cmd` even by full path.** Node ≥22 refuses to spawn `.cmd`/
+  `.bat` files without a shell (the CVE-2024-27980 hardening), so resolving the
+  absolute `.cmd` path and spawning it directly still fails.
+
+`cross-spawn` resolves the command via `PATH`/`PATHEXT` and routes `.cmd`/`.bat`
+through `cmd.exe` with correct argument escaping, and is a transparent passthrough
+on POSIX. Use it with the same `(command, args, options)` signature as
+`child_process.spawn`; it is bundled into `dist/dor.js` and the sidecar `.cjs`
+by esbuild.
+
+Caveat: a literal `%VAR%` inside an argument can still be expanded by `cmd.exe`
+when it passes through a `.cmd` shim — an unavoidable Windows batch limitation, not
+something `cross-spawn` (or any wrapper) can fully prevent. Our forwarded
+arguments (URLs, selectors, and the host's hardcoded `eval` scripts) contain no
+`%VAR%` patterns, so this does not arise in practice.
+
+### Resolve on `exit`, not `close`
+
+When buffering a spawned command's output, resolve on the child's **`exit`**
+event, not `close`. `agent-browser open` launches a long-lived per-session daemon
+that on Windows inherits the parent's stdout/stderr pipes; those pipes never reach
+EOF while the daemon lives, so `close` (which waits for stdio to drain) never
+fires and the spawn hangs forever. `exit` fires when the foreground process ends
+regardless of the lingering pipe. The two spawn helpers
+(`dor/src/commands/agent-browser.ts`, `lib/src/host/agent-browser-host.ts`) wait
+for `close` but fall back to `exit` after a short grace (`CLOSE_GRACE_MS`), so a
+normal command's full output still flushes while the daemon case can't hang.
+(POSIX dodges this because the daemon double-forks and detaches from the inherited
+fds, closing the pipe — which is why this never surfaced on macOS.)
+
 ## Host Plumbing
 
 ### Standalone

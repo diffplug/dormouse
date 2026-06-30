@@ -4,7 +4,11 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
+// cross-spawn, not node:child_process: this script spawns `pnpm` and
+// `agent-browser`, which are `.cmd` shims on Windows that a bare-name spawn
+// can't resolve (ENOENT) and Node >=22 won't run directly (EINVAL). cross-spawn
+// handles both and is a no-op on POSIX. See docs/specs/dor-cli.md.
+import spawn from 'cross-spawn';
 import { createInterface } from 'node:readline';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

@@ -1,5 +1,12 @@
 #!/bin/sh
 if [ -n "${DORMOUSE_NODE:-}" ] && [ -n "${DORMOUSE_CLI_JS:-}" ]; then
+  # DORMOUSE_NODE is the editor's Electron binary, which only behaves as Node
+  # when ELECTRON_RUN_AS_NODE is set. Set it here rather than relying on the
+  # ambient env to carry it: terminals routinely strip it (so Electron apps
+  # launched from a shell don't misbehave), and without it Electron launches its
+  # GUI, ignores the script, and exits 0 — so `dor` would silently do nothing.
+  ELECTRON_RUN_AS_NODE=1
+  export ELECTRON_RUN_AS_NODE
   exec "$DORMOUSE_NODE" "$DORMOUSE_CLI_JS" "$@"
 fi
 

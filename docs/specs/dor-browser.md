@@ -191,6 +191,12 @@ The binary is resolved from `DORMOUSE_AGENT_BROWSER_BIN` or `PATH`. If present,
 `dor ab` resolves an absolute `binaryPath` and passes it to the host because GUI
 hosts may not share the terminal's shell PATH.
 
+Both `dor ab` and the host spawn `agent-browser` through `cross-spawn`, never raw
+`child_process` — on Windows it ships as a `.cmd` shim that a bare-name spawn
+can't find (ENOENT) and Node ≥22 won't run directly (EINVAL), so even the
+absolute `binaryPath` must go through it. See docs/specs/dor-cli.md → "Spawning
+External Binaries".
+
 Managed identity:
 
 - Default is `--key default`.
