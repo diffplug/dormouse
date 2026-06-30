@@ -107,18 +107,20 @@ PTY lifecycle, buffering, the reconnection sequence, and the full message protoc
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers and `docs/specs/alert.md` for the union status.
 >
-> **Not yet implemented (VS Code side).** The webview↔Workspace mapping is the conceptual frame; VS Code already partitions PTYs per webview. The union *projection* exists as a shared primitive (`computeWorkspaceUnion`, stage 2b), but VS Code does not yet feed it per webview or reflect the result onto native chrome (see the "Not yet implemented" bullet below). The stage-2b Window persistence container is standalone-only and does not touch VS Code, which keeps one bare `PersistedSession` per webview. Stage 2a (`surfaceType` persistence, browser-surface restore/resume) is implemented and adapter-agnostic.
+> Each webview's union is computed host-side and reflected onto native chrome (see "Surfacing union status" below) — implemented. It is currently always-on: the extension host has no `localStorage` to read the standalone workspaces flag, so whether to add a host-side gate is a merge-time decision. The stage-2b Window persistence container is standalone-only and does not touch VS Code, which keeps one bare `PersistedSession` per webview.
 
 In VS Code, **one webview is one Workspace**. The bottom-panel `WebviewView` ("Dormouse") is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. Unlike standalone, several Workspaces are visible at once, and VS Code — not Dormouse — owns their tabs, creation, and closing: opening a Dormouse editor tab creates a Workspace and closing the tab closes it, so Dormouse adds no create/rename/close affordances here. A webview owns the terminal Sessions whose PTYs its router tracks (`ownedPtyIds`, `docs/specs/transport.md`) plus any browser surfaces rendered in it; together those are the Workspace's Surfaces.
 
 #### Surfacing union status on native chrome
 
-The host computes each Workspace's native-chrome attention projection (`ringing` / `todo` / `count`) from the module-level `AlertManager`, scoped to that webview's `ownedPtyIds`. That means VS Code native chrome reflects terminal Session ring + TODO only. Browser-surface TODO remains webview-local Surface state and is not included in `panel.iconPath`, `panel.title`, or `view.badge` unless a future webview→host Surface-state channel is added; the existing `alert:state` channel is keyed by PTY-backed Session ids only.
+The host computes each webview's union (`ringing` / `todo`) from the module-level `AlertManager` scoped to that router's `ownedPtyIds` (`computeWorkspaceUnion`), delivered via the `attachRouter` `onUnion` callback. Because `ownedPtyIds` are PTY-backed terminals, **VS Code chrome reflects terminal Session ring + TODO only**; a browser surface's TODO stays webview-local until a future webview→host Surface-state channel exists (the `alert:state` channel is keyed by PTY-backed Session ids).
 
-- **Editor tab (`WebviewPanel`):** reassign `panel.iconPath` between normal / ringing / TODO icon variants, and optionally fold the Workspace name or a status marker into `panel.title`. Both properties are writable after creation (`title: string`, `iconPath?: Uri | { light, dark }`).
-- **Sidebar/panel view (`WebviewView`):** set `view.badge = { value: count, tooltip }` for a numeric attention badge on the activity-bar icon, visible even when the view is collapsed; `view.description` may carry status text. `view.title` is writable too but stays "Dormouse". `ViewBadge` is numeric only (no custom color or glyph), so the editor-tab icon swap carries the ringing-vs-TODO distinction the badge cannot.
+The two hosting primitives expose different chrome, so each uses what it supports, following the in-app `<title> <bell> [TODO]` pattern where possible:
 
-Reflection updates on every `AlertManager.onStateChange` for an owned PTY and on router attach/detach (a Workspace gaining or losing Sessions). When a Workspace's union is clear, the badge is set to `undefined` and the icon returns to the normal variant. Icon artwork is settled in the Storybook/asset pass.
+- **Editor tab (`WebviewPanel`):** `panel.title` gains the suffix — `Dormouse` + ` 🔔` (ringing) + ` [TODO]` (todo), both when both apply. The bell is an emoji stand-in for the in-app bell icon (a tab title is plain text); `[TODO]` is the bracketed word. `panel.iconPath` stays the Dormouse mascot. (`workspaceTitle` in `workspace-chrome.ts`.)
+- **Panel view (`WebviewView`):** a presence **badge** — `view.badge.value = 1` whenever anything owes attention, `0` to clear it (ring-vs-TODO in the tooltip; `workspaceBadge`). `view.title` is *not* used: on this single-view **bottom-panel** container VS Code shows the static container title (`viewsContainers[].title`), which has no runtime API, so the title can't carry status — the badge is the only runtime indicator that surfaces. **Clear with `0`, not `undefined`:** VS Code hides a 0-value badge but does not clear one set to `undefined` on a panel container. `view.description` stays the shell name.
+
+Reflection updates on every owned-PTY `AlertManager.onStateChange` and on `claim` / `release` (a webview gaining or losing a PTY). Source of truth: `attachRouter` `onUnion` / `notifyUnion` in `message-router.ts`; `extension.ts` (panel title), `webview-view-provider.ts` (view badge), `workspace-chrome.ts` (formatting).
 
 ### Shell selection
 
@@ -230,4 +232,3 @@ vscode.commands.executeCommand('setContext', 'dormouse.mode', 'normal');
 - Commands not registered: `dormouse.newPane`, `closePane`, `nextPane`, `prevPane`, `enterTerminalMode`, `enterNormalMode`, `listSessions`, `reattach`
 - No status bar item showing active session count
 - No QuickPick for listing/reattaching PTY sessions
-- Workspace union status not yet reflected onto `panel.iconPath` / `panel.title` (editor tabs) or `view.badge` / `view.description` (bottom-panel view) — the model and chrome contract are in the Workspaces section above

@@ -9,6 +9,8 @@ import {
 } from '../../lib/src/lib/terminal-protocol';
 import { normalizeExternalUri } from '../../lib/src/lib/external-links';
 import { VSCODE_WORKBENCH_COMMANDS } from '../../lib/src/lib/vscode-keybindings';
+import { computeWorkspaceUnion, type WorkspaceUnion } from '../../lib/src/lib/workspace-union';
+import type { ActivityState } from '../../lib/src/lib/session-activity-store';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { PersistedSession } from '../../lib/src/lib/session-types';
 import type { WebviewMessage, ExtensionMessage } from './message-types';
@@ -139,6 +141,10 @@ export function attachRouter(
     onSaveState?: (state: unknown) => void;
     savedSession?: PersistedSession | null;
     getSelectedShell?: () => { shell?: string; args?: string[] } | null;
+    // Called with this webview's Workspace union status whenever it changes
+    // (owned-PTY alert state, or a PTY claimed/released). The host reflects it
+    // onto native chrome (tab title / view badge). See docs/specs/vscode.md.
+    onUnion?: (union: WorkspaceUnion) => void;
   },
 ): vscode.Disposable {
   const reconnect = options?.reconnect ?? false;
@@ -156,11 +162,24 @@ export function attachRouter(
   function claim(id: string): void {
     ownedPtyIds.add(id);
     globalOwnedPtyIds.add(id);
+    notifyUnion();
   }
 
   function release(id: string): void {
     ownedPtyIds.delete(id);
     globalOwnedPtyIds.delete(id);
+    notifyUnion();
+  }
+
+  // Project this webview's Workspace union over its owned PTYs and hand it to
+  // the host so it can update native chrome. Reuses the shared projection so the
+  // rule (only terminals ring; any surface may TODO; count owing attention)
+  // matches everywhere (docs/specs/alert.md).
+  function notifyUnion(): void {
+    if (!options?.onUnion) return;
+    const states = new Map<string, ActivityState>();
+    for (const id of ownedPtyIds) states.set(id, alertManager.getState(id));
+    options.onUnion(computeWorkspaceUnion(ownedPtyIds, states));
   }
 
   function resolveFlushRequest(requestId: string): void {
@@ -259,6 +278,7 @@ export function attachRouter(
         notification: state.notification,
         attentionDismissedRing: state.attentionDismissedRing,
       } satisfies ExtensionMessage);
+      notifyUnion();
     });
 
     return () => {
