@@ -6,6 +6,7 @@ import { getSavedSessionState, saveSessionState, mergeAlertStates } from './sess
 import type { ExtensionMessage } from './message-types';
 import * as ptyManager from './pty-manager';
 import { resolveSelectedShell } from './shell-selection';
+import { workspaceBadge } from './workspace-chrome';
 import { log } from './log';
 
 export class DormouseViewProvider implements vscode.WebviewViewProvider {
@@ -77,6 +78,14 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
         void saveSessionState(this.context, mergeAlertStates(state, getAlertStates()));
       },
       getSelectedShell: () => this.selectedShell,
+      // Reflect this view's Workspace union onto the panel container's badge.
+      // On a single-view panel container VS Code shows the static container
+      // title, so view.title can't carry the status (docs/specs/vscode.md); the
+      // badge is the only runtime indicator that surfaces here. It's a presence
+      // flag (1 when anything owes attention). Description stays the shell name.
+      onUnion: (union) => {
+        if (this.view) this.view.badge = workspaceBadge(union);
+      },
     });
 
     view.onDidDispose(() => {
