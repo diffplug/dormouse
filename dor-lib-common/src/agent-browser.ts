@@ -1,6 +1,7 @@
-/** Workspace id baked into managed agent-browser session names. Hardcoded until
- * Dormouse exposes real workspaces; encoded now to avoid a later rename. */
-export const AGENT_BROWSER_WORKSPACE_ID = '1';
+// Workspace id baked into managed agent-browser session names. Hardcoded until
+// Dormouse exposes real workspaces; encoded now to avoid a later rename. Private:
+// callers build session names through sessionForKey, never by hand.
+const WORKSPACE_ID = '1';
 
 /** Env var that overrides which agent-browser binary to run; shared so `dor ab`
  * and the host key off the same name. */
@@ -22,7 +23,7 @@ export function streamStatusArgs(session: string): string[] {
  * readable. Shared by `dor ab` (--key resolution) and the lib host (GUI sessions).
  */
 export function sessionForKey(key: string): string {
-  return `dormouse.${AGENT_BROWSER_WORKSPACE_ID}.${key}`;
+  return `dormouse.${WORKSPACE_ID}.${key}`;
 }
 
 /**

@@ -111,7 +111,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
 
   // The host's PATH is often the GUI login PATH (no nvm/volta shims), so prefer
   // the absolute path `dor ab` resolved in the user's terminal; fall through on
-  // ENOENT in case it has gone stale.
+  // ENOENT (binary missing) to the next candidate in case it has gone stale.
   async function runWithBinaryFallback(args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
     const candidates = [...new Set([
       binaryPath,
@@ -121,23 +121,20 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
 
     let lastError = '';
     for (const binary of candidates) {
-      const result = await spawnAgentBrowser(binary, args);
-      if (result !== 'ENOENT') return result;
+      const result = await spawnAndCapture(binary, args);
+      if (result.ok) {
+        return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+      }
+      // Missing binary: record it and try the next candidate. Any other spawn
+      // failure is real — surface it rather than masking it behind a fallback.
+      if (result.error.code !== 'ENOENT') {
+        log(`[agent-browser] spawn failed: ${result.error.message}`);
+        return { exitCode: 1, stdout: '', stderr: result.error.message };
+      }
       lastError = `'${binary}' was not found`;
       log(`[agent-browser] ${lastError}; trying next candidate`);
     }
     return { exitCode: 1, stdout: '', stderr: `agent-browser binary not found (${lastError})` };
-  }
-
-  async function spawnAgentBrowser(binary: string, args: string[]): Promise<AgentBrowserCommandResult | 'ENOENT'> {
-    const result = await spawnAndCapture(binary, args);
-    if (result.ok) {
-      return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
-    }
-    // A missing binary lets runWithBinaryFallback try the next candidate.
-    if (result.error.code === 'ENOENT') return 'ENOENT';
-    log(`[agent-browser] spawn failed: ${result.error.message}`);
-    return { exitCode: 1, stdout: '', stderr: result.error.message };
   }
 
   // Read a session's stream WebSocket port via `stream status --json` (parsed by

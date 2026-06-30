@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "pretest": "pnpm --filter dor-lib-common build",
     "test": "vitest run",
     "test:watch": "vitest",
     "storybook": "storybook dev -p 6006 --no-open --ci",
