@@ -4,3 +4,4 @@ export type {
   SpawnCaptureSuccess,
   SpawnCaptureFailure,
 } from './spawn.js';
+export { parseStreamPort } from './agent-browser.js';

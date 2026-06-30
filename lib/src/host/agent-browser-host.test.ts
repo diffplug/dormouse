@@ -8,10 +8,12 @@ type SpawnResult = { stdout?: string; stderr?: string; code?: number };
 
 const spawnMock = vi.hoisted(() => vi.fn());
 
-// The host spawns through dor-lib-common's spawnAndCapture; mock that boundary,
-// not its internal cross-spawn (spawnAndCapture's own behavior is covered by
-// dor-lib-common's tests).
-vi.mock('dor-lib-common', () => ({
+// The host spawns through dor-lib-common's spawnAndCapture; mock just that
+// boundary (not its internal cross-spawn — spawnAndCapture's own behavior is
+// covered by dor-lib-common's tests), keeping the package's other real exports
+// (e.g. parseStreamPort).
+vi.mock('dor-lib-common', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('dor-lib-common')>()),
   spawnAndCapture: spawnMock,
 }));
 

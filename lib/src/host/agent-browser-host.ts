@@ -42,7 +42,7 @@ import { promises as fs } from 'fs';
 // Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close). The
 // GUI host needs it even for the absolute `binaryPath` dor ab resolved.
 // See docs/specs/dor-cli.md → "Spawning External Binaries".
-import { spawnAndCapture } from 'dor-lib-common';
+import { spawnAndCapture, parseStreamPort } from 'dor-lib-common';
 import { randomBytes } from 'crypto';
 import { type AgentBrowserTab, parseAgentBrowserTabs } from '../lib/agent-browser-tab';
 import {
@@ -133,23 +133,18 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     return { exitCode: 1, stdout: '', stderr: result.error.message };
   }
 
-  // Read a session's stream WebSocket port via `stream status --json`. Mirrors
-  // the parse in dor/src/commands/agent-browser.ts: { port } or { data: { port } }.
-  // Right after `open` / `--headed open` (a fresh spawn, a pop-out, or a pop-in
-  // relaunch) the daemon may not have published the port yet; a single read
-  // would then return undefined and leave the panel pinned to a stale port — it
-  // reads "ended" though the session is live. Retry briefly to close that window.
+  // Read a session's stream WebSocket port via `stream status --json` (parsed by
+  // dor-lib-common's parseStreamPort). Right after `open` / `--headed open` (a
+  // fresh spawn, a pop-out, or a pop-in relaunch) the daemon may not have
+  // published the port yet; a single read would then return undefined and leave
+  // the panel pinned to a stale port — it reads "ended" though the session is
+  // live. Retry briefly to close that window.
   async function readStreamPort(session: string, binaryPath?: string): Promise<number | undefined> {
     for (let attempt = 0; attempt < STREAM_PORT_READ_ATTEMPTS; attempt++) {
       const result = await runWithBinaryFallback(['--session', session, 'stream', 'status', '--json'], binaryPath);
       if (result.exitCode === 0) {
-        try {
-          const parsed = JSON.parse(result.stdout) as { port?: unknown; data?: { port?: unknown } };
-          const port = parsed.data?.port ?? parsed.port;
-          if (typeof port === 'number' && Number.isFinite(port)) return port;
-        } catch {
-          // malformed output — fall through and retry
-        }
+        const port = parseStreamPort(result.stdout);
+        if (port !== undefined) return port;
       }
       if (attempt < STREAM_PORT_READ_ATTEMPTS - 1) await delay(STREAM_PORT_READ_DELAY_MS);
     }

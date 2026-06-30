@@ -19,7 +19,7 @@ import { buildCommand } from '@stricli/core';
 // All external spawns go through dor-lib-common's spawnAndCapture, which owns the
 // Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close).
 // See docs/specs/dor-cli.md → "Spawning External Binaries".
-import { spawnAndCapture } from 'dor-lib-common';
+import { spawnAndCapture, parseStreamPort } from 'dor-lib-common';
 import { existsSync } from 'node:fs';
 import type {
   CliEnv,
@@ -270,16 +270,6 @@ export function resolveBinaryPath(binary: string, env: CliEnv): string | undefin
     }
   }
   return undefined;
-}
-
-function parseStreamPort(stdout: string): number | undefined {
-  try {
-    const parsed = JSON.parse(stdout) as { port?: unknown; data?: { port?: unknown } };
-    const port = parsed.data?.port ?? parsed.port;
-    return typeof port === 'number' && Number.isFinite(port) ? port : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function isMissingBinaryError(error: unknown): boolean {
