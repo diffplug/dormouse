@@ -1,7 +1,7 @@
 import type { PlatformAdapter } from './platform/types';
 import { readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceType } from './session-types';
 import { detectResumeCommand } from './resume-patterns';
-import { getLivePersistedAlertState, getTerminalPaneState, isUntouched, resolveTerminalSessionId } from './terminal-registry';
+import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched, resolveTerminalSessionId } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 
 function getPreviousPaneMap(platform: PlatformAdapter): Map<string, PersistedPane> {
@@ -35,6 +35,7 @@ export async function saveSession(
     [...allPanes.values()].map(async (pane) => {
       const previousPane = previousPanes.get(pane.id);
       if (pane.surfaceType === 'browser') {
+        const activity = getActivity(pane.id);
         return {
           id: pane.id,
           title: pane.title,
@@ -42,7 +43,14 @@ export async function saveSession(
           scrollback: null,
           resumeCommand: null,
           untouched: false,
-          alert: null,
+          alert: activity.todo
+            ? {
+              status: 'WATCHING_DISABLED' as const,
+              watchingEnabled: false,
+              todo: true,
+              notification: null,
+            }
+            : null,
           surfaceType: 'browser' as const,
         };
       }

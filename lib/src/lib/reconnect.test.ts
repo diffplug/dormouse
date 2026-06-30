@@ -3,11 +3,13 @@ import type { PlatformAdapter, PtyInfo } from './platform/types';
 import type { PersistedSession } from './session-types';
 
 const terminalRegistryMocks = vi.hoisted(() => ({
+  primeActivity: vi.fn(),
   resumeTerminal: vi.fn(),
   restoreTerminal: vi.fn(),
 }));
 
 vi.mock('./terminal-registry', () => ({
+  primeActivity: terminalRegistryMocks.primeActivity,
   resumeTerminal: terminalRegistryMocks.resumeTerminal,
   restoreTerminal: terminalRegistryMocks.restoreTerminal,
 }));
@@ -316,6 +318,37 @@ describe('resumeOrRestore', () => {
     // The browser pane has no PTY and is never resumed as a terminal.
     expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledTimes(1);
     expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('pane-term', 'pane-term-replay', expect.anything());
+  });
+
+  it('primes browser surface TODO state from persisted alert during live resume', async () => {
+    const layout = { panels: { 'pane-term': {}, 'pane-web': {} } };
+    const saved: PersistedSession = {
+      version: 3,
+      layout,
+      panes: [
+        { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null },
+        {
+          id: 'pane-web',
+          title: 'localhost',
+          cwd: null,
+          scrollback: null,
+          resumeCommand: null,
+          surfaceType: 'browser',
+          alert: { status: 'WATCHING_DISABLED', watchingEnabled: false, todo: true, notification: null },
+        },
+      ],
+    };
+
+    await resumeOrRestore(createPlatform([
+      { id: 'pane-term', alive: true },
+    ], saved));
+
+    expect(terminalRegistryMocks.primeActivity).toHaveBeenCalledWith('pane-web', {
+      status: 'WATCHING_DISABLED',
+      watchingEnabled: false,
+      todo: true,
+      notification: null,
+    });
   });
 
   it('drops visible browser panes from terminal fallback when the saved layout is rejected', async () => {

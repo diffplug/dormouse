@@ -1,5 +1,5 @@
 import type { PlatformAdapter, PtyInfo } from './platform/types';
-import { resumeTerminal } from './terminal-registry';
+import { primeActivity, resumeTerminal } from './terminal-registry';
 import { readPersistedSession, type PersistedDoor } from './session-types';
 import { restoreSession } from './session-restore';
 
@@ -102,6 +102,14 @@ function getSavedPaneResumeInfo(savedState: unknown, liveIds: string[]): Map<str
   const liveSet = new Set(liveIds);
   const result = new Map<string, { title: string; untouched: boolean }>();
   for (const pane of saved.panes) {
+    if (pane.surfaceType === 'browser' && pane.alert?.todo === true) {
+      primeActivity(pane.id, {
+        status: 'WATCHING_DISABLED',
+        watchingEnabled: false,
+        todo: true,
+        notification: null,
+      });
+    }
     if (!liveSet.has(pane.id)) continue;
     result.set(pane.id, { title: pane.title, untouched: pane.untouched });
   }

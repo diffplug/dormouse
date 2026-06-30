@@ -36,7 +36,7 @@ export function mergeAlertStates(state: unknown, alertStates: Map<string, AlertS
   return {
     ...parsed,
     panes: parsed.panes.map((pane) => pane.surfaceType === 'browser'
-      ? { ...pane, alert: null }
+      ? pane
       : {
         ...pane,
         alert: toPersistedAlert(alertStates.get(pane.id), pane.alert),
@@ -67,7 +67,7 @@ export async function refreshSavedSessionStateFromPtys(
           scrollback: null,
           resumeCommand: null,
           untouched: false,
-          alert: null,
+          alert: pane.alert ?? null,
         };
       }
 

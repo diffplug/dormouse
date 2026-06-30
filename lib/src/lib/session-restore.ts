@@ -1,6 +1,6 @@
 import type { PlatformAdapter } from './platform/types';
 import { readPersistedSession, type PersistedDoor } from './session-types';
-import { getDefaultShellOpts, restoreTerminal } from './terminal-registry';
+import { getDefaultShellOpts, primeActivity, restoreTerminal } from './terminal-registry';
 
 export interface RestoredSession {
   paneIds: string[];
@@ -19,7 +19,17 @@ export function restoreSession(platform: PlatformAdapter): RestoredSession | nul
     // Browser surfaces have no PTY or xterm; the dockview layout blob recreates
     // them via fromJSON (docs/specs/transport.md). Calling restoreTerminal here
     // would mint a stray PTY + xterm for the pane id that never gets mounted.
-    if (pane.surfaceType === 'browser') continue;
+    if (pane.surfaceType === 'browser') {
+      if (pane.alert?.todo === true) {
+        primeActivity(pane.id, {
+          status: 'WATCHING_DISABLED',
+          watchingEnabled: false,
+          todo: true,
+          notification: null,
+        });
+      }
+      continue;
+    }
     restoreTerminal(pane.id, {
       cwd: pane.cwd,
       scrollback: pane.scrollback,

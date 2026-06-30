@@ -4,11 +4,13 @@ import type { PersistedSession } from './session-types';
 
 const terminalRegistryMocks = vi.hoisted(() => ({
   getDefaultShellOpts: vi.fn(),
+  primeActivity: vi.fn(),
   restoreTerminal: vi.fn(),
 }));
 
 vi.mock('./terminal-registry', () => ({
   getDefaultShellOpts: terminalRegistryMocks.getDefaultShellOpts,
+  primeActivity: terminalRegistryMocks.primeActivity,
   restoreTerminal: terminalRegistryMocks.restoreTerminal,
 }));
 
@@ -119,5 +121,34 @@ describe('restoreSession', () => {
     expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith('pane-term', expect.objectContaining({ title: 'Terminal' }));
     // The browser pane stays in paneIds so the layout blob recreates and selects it.
     expect(result?.paneIds).toEqual(['pane-term', 'pane-web']);
+  });
+
+  it('primes browser surface TODO state from persisted alert during cold restore', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      layout: { panels: { 'pane-web': {} } },
+      panes: [
+        {
+          id: 'pane-web',
+          title: 'localhost',
+          cwd: null,
+          scrollback: null,
+          resumeCommand: null,
+          untouched: false,
+          surfaceType: 'browser',
+          alert: { status: 'WATCHING_DISABLED', watchingEnabled: false, todo: true, notification: null },
+        },
+      ],
+    };
+
+    restoreSession(createPlatform(saved));
+
+    expect(terminalRegistryMocks.restoreTerminal).not.toHaveBeenCalled();
+    expect(terminalRegistryMocks.primeActivity).toHaveBeenCalledWith('pane-web', {
+      status: 'WATCHING_DISABLED',
+      watchingEnabled: false,
+      todo: true,
+      notification: null,
+    });
   });
 });
