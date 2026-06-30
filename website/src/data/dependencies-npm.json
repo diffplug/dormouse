@@ -8,14 +8,14 @@
   },
   {
     "name": "@stricli/core",
-    "version": "1.2.7",
+    "version": "1.2.8",
     "license": "Apache-2.0",
     "author": "Michael Molisani <mmolisani@bloomberg.net>",
     "homepage": "https://github.com/bloomberg/stricli/tree/main/packages/core"
   },
   {
     "name": "@tauri-apps/api",
-    "version": "2.11.0",
+    "version": "2.11.1",
     "license": "MIT OR Apache-2.0",
     "author": "Tauri Apps Contributors",
     "homepage": "https://github.com/tauri-apps/tauri#readme"
@@ -36,21 +36,21 @@
   },
   {
     "name": "@xterm/addon-fit",
-    "version": "0.12.0-beta.219",
+    "version": "0.12.0-beta.288",
     "license": "MIT",
     "author": "The xterm.js authors",
     "homepage": "https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit"
   },
   {
     "name": "@xterm/addon-unicode-graphemes",
-    "version": "0.5.0-beta.219",
+    "version": "0.5.0-beta.288",
     "license": "MIT",
     "author": "The xterm.js authors",
     "homepage": "https://github.com/xtermjs/xterm.js/tree/master/addons/addon-unicode-graphemes"
   },
   {
     "name": "@xterm/xterm",
-    "version": "6.1.0-beta.219",
+    "version": "6.1.0-beta.288",
     "license": "MIT",
     "author": "Christopher Jeffrey, SourceLair Private Company, xterm.js authors",
     "homepage": "https://github.com/xtermjs/xterm.js"
@@ -61,6 +61,13 @@
     "license": "MIT",
     "author": "Luke Edwards",
     "homepage": "https://github.com/lukeed/clsx"
+  },
+  {
+    "name": "cross-spawn",
+    "version": "7.0.6",
+    "license": "MIT",
+    "author": "André Cruz <andre@moxy.studio>",
+    "homepage": "https://github.com/moxystudio/node-cross-spawn"
   },
   {
     "name": "dockview",
@@ -91,6 +98,13 @@
     "homepage": "https://101arrowz.github.io/fflate"
   },
   {
+    "name": "isexe",
+    "version": "2.0.0",
+    "license": "ISC",
+    "author": "Isaac Z. Schlueter <i@izs.me> (http://blog.izs.me/)",
+    "homepage": "https://github.com/isaacs/isexe#readme"
+  },
+  {
     "name": "jsonc-parser",
     "version": "3.3.1",
     "license": "MIT",
@@ -106,21 +120,28 @@
   },
   {
     "name": "node-pty",
-    "version": "1.2.0-beta.13",
+    "version": "1.2.0-beta.14",
     "license": "MIT",
     "author": "Microsoft Corporation",
     "homepage": "https://github.com/microsoft/node-pty"
   },
   {
+    "name": "path-key",
+    "version": "3.1.1",
+    "license": "MIT",
+    "author": "Sindre Sorhus",
+    "homepage": "https://github.com/sindresorhus/path-key"
+  },
+  {
     "name": "react",
-    "version": "19.2.6",
+    "version": "19.2.7",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
   },
   {
     "name": "react-dom",
-    "version": "19.2.6",
+    "version": "19.2.7",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
@@ -131,6 +152,20 @@
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
+  },
+  {
+    "name": "shebang-command",
+    "version": "2.0.0",
+    "license": "MIT",
+    "author": "Kevin Mårtensson",
+    "homepage": "https://github.com/kevva/shebang-command"
+  },
+  {
+    "name": "shebang-regex",
+    "version": "3.0.0",
+    "license": "MIT",
+    "author": "Sindre Sorhus",
+    "homepage": "https://github.com/sindresorhus/shebang-regex"
   },
   {
     "name": "Solarized & Selenized",
@@ -159,5 +194,12 @@
     "license": "MIT",
     "author": "Microsoft Corporation",
     "homepage": "https://github.com/microsoft/vscode/tree/main/extensions"
+  },
+  {
+    "name": "which",
+    "version": "2.0.2",
+    "license": "ISC",
+    "author": "Isaac Z. Schlueter <i@izs.me> (http://blog.izs.me)",
+    "homepage": "https://github.com/isaacs/node-which"
   }
 ]
