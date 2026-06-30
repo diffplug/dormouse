@@ -177,7 +177,7 @@ Clearing behavior:
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers.
 >
-> **Partially implemented.** The union *projection* is a pure function — `computeWorkspaceUnion(surfaceIds, activitySnapshot)` in `lib/src/lib/workspace-union.ts` (stage 2b). **VS Code surfacing is implemented**: the editor-tab title and the bottom-panel view badge reflect the union (terminal ring/TODO only; `docs/specs/vscode.md`). Still not built: the **standalone strip indicators** (stage 3). A browser Surface's user-set `todo` round-trips to the activity store live (stage 2a), so it is counted by the projection and shows on the surface's door today.
+> **Partially implemented.** The union *projection* is a pure function — `computeWorkspaceUnion(surfaceIds, activitySnapshot)` in `lib/src/lib/workspace-union.ts` (stage 2b). **VS Code surfacing is implemented**: the editor-tab title and the bottom-panel view badge reflect the union (terminal ring/TODO only; `docs/specs/vscode.md`). Still not built: the **standalone strip indicators** (stage 3). A browser Surface's user-set `todo` round-trips to the activity store live and persists across restart (stage 2a), so it is counted by the projection and shows on the surface's door today.
 
 A Workspace projects a **union status** over the attention state of the Surfaces it contains (terminal Sessions and browser Surfaces alike — see `docs/specs/glossary.md`):
 
@@ -188,7 +188,7 @@ A Workspace projects a **union status** over the attention state of the Surfaces
 Rules:
 
 - The union is **display-only** and derived. It never enters the terminal Activity state machine, never fires a fresh ring, and produces no sound or notification of its own; it only mirrors member state. Every terminal ringing/TODO transition above remains per-Session, and every browser TODO transition remains per-browser Surface.
-- Membership includes minimized (`Doored`) Surfaces and, in standalone, the Surfaces of inactive (unmounted) Workspaces. A terminal Session's Activity survives minimize and unmount (glossary I2/I3) and a browser Surface's `todo` survives in its persisted params, so a backgrounded Surface can light up its Workspace's indicator.
+- Membership includes minimized (`Doored`) Surfaces and, in standalone, the Surfaces of inactive (unmounted) Workspaces. A terminal Session's Activity survives minimize and unmount (glossary I2/I3) and a browser Surface's `todo` survives in its persisted `alert` blob, so a backgrounded Surface can light up its Workspace's indicator.
 - Attention suppression needs no special-casing: a per-Session ring is already suppressed while that Session is attended, so the union simply reflects whatever rings survive.
 
 Where the union surfaces is host-specific:
