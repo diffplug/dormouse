@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { activeSessionFromStored, storedValueForSession } from './window-persistence';
+import { activeSessionFromStored, loadSessionState, saveSessionState, storedValueForSession } from './window-persistence';
 import {
   DEFAULT_WORKSPACE_ID,
   wrapSessionInWindow,
@@ -91,6 +91,63 @@ describe('window-persistence', () => {
     it('load returns null for unusable stored input', () => {
       expect(activeSessionFromStored(null)).toBeNull();
       expect(activeSessionFromStored({ junk: true })).toBeNull();
+    });
+  });
+
+  describe('storage round trip (loadSessionState / saveSessionState)', () => {
+    function spyStorage(initial: string | null = null) {
+      let value = initial;
+      const getItem = vi.fn((_key: string) => value);
+      const setItem = vi.fn((_key: string, next: string) => { value = next; });
+      const storage = { getItem, setItem, removeItem: vi.fn() } as unknown as Storage;
+      return { storage, getItem, setItem };
+    }
+
+    it('flag off: saves the bare session WITHOUT reading the existing blob', () => {
+      setWorkspacesEnabled(false);
+      const { storage, getItem, setItem } = spyStorage(JSON.stringify(sessionB));
+      saveSessionState(storage, 'k', sessionA);
+      // The efficiency win: no wasted read/parse of the (scrollback-bearing) blob.
+      expect(getItem).not.toHaveBeenCalled();
+      expect(JSON.parse(setItem.mock.calls[0]![1])).toEqual(sessionA);
+    });
+
+    it('flag off: load returns the bare stored session', () => {
+      setWorkspacesEnabled(false);
+      const { storage } = spyStorage(JSON.stringify(sessionA));
+      expect(loadSessionState(storage, 'k')).toEqual(sessionA);
+    });
+
+    it('flag on: save wraps into a Window and load round-trips the active session', () => {
+      setWorkspacesEnabled(true);
+      const { storage } = spyStorage();
+      saveSessionState(storage, 'k', sessionA);
+      const stored = JSON.parse((storage.getItem('k'))!) as PersistedWindow;
+      expect(stored.version).toBe(1);
+      expect(stored.activeWorkspaceId).toBe(DEFAULT_WORKSPACE_ID);
+      expect(loadSessionState(storage, 'k')).toEqual(sessionA);
+    });
+
+    it('flag on: save preserves other Workspaces by reading the existing Window', () => {
+      setWorkspacesEnabled(true);
+      const existing: PersistedWindow = {
+        version: 1,
+        activeWorkspaceId: 'ws-b',
+        workspaces: [
+          { id: 'ws-a', name: 'A', session: sessionA },
+          { id: 'ws-b', name: 'B', session: sessionA },
+        ],
+      };
+      const { storage } = spyStorage(JSON.stringify(existing));
+      saveSessionState(storage, 'k', sessionB);
+      const stored = JSON.parse((storage.getItem('k'))!) as PersistedWindow;
+      expect(stored.workspaces.find((w) => w.id === 'ws-a')!.session).toEqual(sessionA);
+      expect(stored.workspaces.find((w) => w.id === 'ws-b')!.session).toEqual(sessionB);
+    });
+
+    it('load returns null when storage is empty', () => {
+      const { storage } = spyStorage(null);
+      expect(loadSessionState(storage, 'k')).toBeNull();
     });
   });
 });

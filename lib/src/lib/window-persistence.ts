@@ -41,3 +41,29 @@ export function storedValueForSession(existingStored: unknown, session: unknown)
   const existingWindow = readPersistedWindow(existingStored);
   return existingWindow ? replaceActiveSession(existingWindow, next) : wrapSessionInWindow(next);
 }
+
+// Storage-level round trip shared by the standalone adapters (Tauri + the
+// browser-dev sidecar). Owns the JSON parse/stringify and the `Storage` access
+// so each adapter's get/save collapses to one call instead of re-implementing
+// the read-merge-write dance.
+
+/** Read the stored blob and return the `PersistedSession` to restore (or null). */
+export function loadSessionState(storage: Storage, key: string): unknown {
+  const raw = storage.getItem(key);
+  if (raw === null) return null;
+  return activeSessionFromStored(JSON.parse(raw));
+}
+
+/** Persist `session` under `key`, merging into the active Workspace when the flag is on. */
+export function saveSessionState(storage: Storage, key: string, session: unknown): void {
+  // Flag off (the default): store the bare session without reading the existing
+  // blob — its previous value is irrelevant, so skip parsing the (potentially
+  // large, scrollback-bearing) stored snapshot.
+  if (!isWorkspacesEnabled()) {
+    storage.setItem(key, JSON.stringify(session));
+    return;
+  }
+  const raw = storage.getItem(key);
+  const existing = raw === null ? null : JSON.parse(raw);
+  storage.setItem(key, JSON.stringify(storedValueForSession(existing, session)));
+}

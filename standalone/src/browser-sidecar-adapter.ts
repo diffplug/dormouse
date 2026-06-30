@@ -14,7 +14,7 @@ import type {
 } from "dormouse-lib/lib/platform/types";
 import { AlertManager, type SessionStatus } from "dormouse-lib/lib/alert-manager";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
-import { activeSessionFromStored, storedValueForSession } from "dormouse-lib/lib/window-persistence";
+import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
@@ -220,19 +220,16 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private static STATE_KEY = 'dormouse.browser-sidecar.session';
 
   // See TauriAdapter: PersistedWindow when the workspaces flag is on, bare
-  // PersistedSession when off; the helpers translate (docs/specs/transport.md).
+  // PersistedSession when off; the helpers own the translation + JSON/storage
+  // plumbing (docs/specs/transport.md).
   saveState(state: unknown): void {
-    try {
-      const raw = localStorage.getItem(BrowserSidecarAdapter.STATE_KEY);
-      const existing = raw ? JSON.parse(raw) : null;
-      localStorage.setItem(BrowserSidecarAdapter.STATE_KEY, JSON.stringify(storedValueForSession(existing, state)));
-    } catch { console.error('[browser-sidecar] Failed to save session state'); }
+    try { saveSessionState(localStorage, BrowserSidecarAdapter.STATE_KEY, state); }
+    catch { console.error('[browser-sidecar] Failed to save session state'); }
   }
 
   getState(): unknown {
     try {
-      const raw = localStorage.getItem(BrowserSidecarAdapter.STATE_KEY);
-      return activeSessionFromStored(raw ? JSON.parse(raw) : null);
+      return loadSessionState(localStorage, BrowserSidecarAdapter.STATE_KEY);
     } catch {
       return null;
     }

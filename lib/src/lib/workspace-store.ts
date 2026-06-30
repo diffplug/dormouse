@@ -27,7 +27,6 @@ function defaultState(): WorkspacesState {
 
 let state: WorkspacesState = defaultState();
 const listeners = new Set<() => void>();
-let idSeq = 0;
 
 function emit(next: WorkspacesState): void {
   state = next;
@@ -50,10 +49,9 @@ export function getActiveWorkspaceId(): WorkspaceId {
   return state.activeId;
 }
 
-/** A process-unique WorkspaceId. Never collides with `DEFAULT_WORKSPACE_ID`. */
+/** A process-unique WorkspaceId. The random suffix never equals `DEFAULT_WORKSPACE_ID`. */
 export function generateWorkspaceId(): WorkspaceId {
-  idSeq += 1;
-  return `workspace-${idSeq}-${Math.random().toString(36).slice(2, 8)}`;
+  return `workspace-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 /** "Workspace N", one past the highest existing `Workspace <n>` name. */
@@ -118,6 +116,5 @@ export function closeWorkspace(id: WorkspaceId): boolean {
 
 /** Reset to the single default Workspace (fresh start / tests). */
 export function resetWorkspaces(): void {
-  idSeq = 0;
   emit(defaultState());
 }

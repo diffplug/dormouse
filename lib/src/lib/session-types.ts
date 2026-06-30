@@ -315,21 +315,14 @@ function parseJsonString(raw: unknown): unknown {
 
 // --- Window container (stage 2b) ---
 
-// Structural check only — id/name strings and a session object. Whether the
-// inner session is actually readable is decided per-Workspace in
-// readPersistedWindow, which drops unreadable ones rather than rejecting the
-// whole Window.
-function isPersistedWorkspaceShape(value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  return typeof value.id === 'string' && typeof value.name === 'string' && isRecord(value.session);
-}
-
+// Structural gate only: a v1 Window with a workspaces array and an active id.
+// Each Workspace element is validated (and dropped if bad) per-item in
+// readPersistedWindow, so malformed elements don't reject the whole Window.
 function isPersistedWindowShape(value: unknown): boolean {
-  if (!isRecord(value) || value.version !== 1) return false;
   return (
+    isRecord(value) &&
+    value.version === 1 &&
     Array.isArray(value.workspaces) &&
-    value.workspaces.length > 0 &&
-    value.workspaces.every(isPersistedWorkspaceShape) &&
     typeof value.activeWorkspaceId === 'string'
   );
 }
@@ -358,8 +351,9 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
   if (!isRecord(value)) return null;
 
   if (isPersistedWindowShape(value)) {
-    const workspaces = (value.workspaces as PersistedWorkspace[])
-      .map((ws) => {
+    const workspaces = (value.workspaces as unknown[])
+      .map((ws): PersistedWorkspace | null => {
+        if (!isRecord(ws) || typeof ws.id !== 'string' || typeof ws.name !== 'string') return null;
         const session = readPersistedSession(ws.session);
         return session ? { id: ws.id, name: ws.name, session } : null;
       })
