@@ -74,7 +74,7 @@ A Workspace projects a **union status** over its member Surfaces' Activity (tran
 - `todo` — any member Surface has `todo === true`: a terminal Session, or a browser Surface a user has flagged.
 - `count` — number of member Surfaces currently owing attention (ringing or `todo`), for hosts that show a numeric badge.
 
-The union is **display-only**: it is derived from member Activity, never enters the Activity state machine, and never itself fires a ring. Minimized (`Doored`) and unmounted (inactive-Workspace) Surfaces are included, because their Activity (Session) or persisted params (browser Surface) survive minimize/unmount (I2, I3).
+The union is **display-only**: it is derived from member Activity, never enters the Activity state machine, and never itself fires a ring. Minimized (`Doored`) and unmounted (inactive-Workspace) Surfaces are included, because their Activity (Session) or persisted `alert` blob (browser Surface) survive minimize/unmount (I2, I3).
 
 ### Implementation status
 
