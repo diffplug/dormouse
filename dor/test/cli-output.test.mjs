@@ -159,14 +159,29 @@ function fakeAgentBrowser({ exitCode = 0, stdout = '✓ ok\n', stderr = '' } = {
   };
 }
 
+// Snapshots are authored in their Unix form, and CI compares against them exactly.
+// On Windows, any path the CLI resolves through node:path comes back drive-prefixed
+// with backslash separators (and JSON output escapes each backslash as `\\`), so e.g.
+// `--cwd /Users/me/projects/site` renders as `C:\\Users\\me\\projects\\site`. Smudge
+// such paths back to their Unix form as the output is captured — like a git smudge
+// filter on the way in — so a snapshot regenerated on Windows still writes the Unix
+// form, and the comparison below stays byte-exact rather than platform-aware.
+// Deliberately narrow: it only fires on win32 and only rewrites a `X:\...` token, so
+// it can't touch escapes like `\n` that share the backslash but aren't paths.
+function smudgeWindowsPaths(text) {
+  if (process.platform !== 'win32') return text;
+  return text.replace(/[A-Za-z]:(?:\\{1,2}[^"\\]+)+/g, (path) =>
+    path.slice(2).replace(/\\{1,2}/g, '/'));
+}
+
 async function snapshot(name, result) {
-  const actual = [
+  const actual = smudgeWindowsPaths([
     `exitCode: ${result.exitCode}`,
     'stdout:',
     result.stdout,
     'stderr:',
     result.stderr,
-  ].join('\n');
+  ].join('\n'));
   const path = join(snapshotsDir, `${name}.snap`);
   if (updateSnapshots) {
     await mkdir(snapshotsDir, { recursive: true });
@@ -236,6 +251,9 @@ test('ensure text output', async () => {
 test('ensure sends command argv and caller cwd to the host', async () => {
   const client = fixtureClient();
   await runCli(['ensure', '--', 'pnpm', 'dev'], { client, env: { PWD: '/work/site' } });
+  // On win32 resolvePath drive-prefixes the POSIX PWD (`C:\work\site`); smudge it
+  // back so this expectation is written once in its Unix form, like the snapshots.
+  client.requests[0].request.cwd = smudgeWindowsPaths(client.requests[0].request.cwd);
   assert.deepEqual(client.requests, [{
     method: 'ensureSurface',
     request: {
