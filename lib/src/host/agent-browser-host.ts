@@ -42,7 +42,7 @@ import { promises as fs } from 'fs';
 // Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close). The
 // GUI host needs it even for the absolute `binaryPath` dor ab resolved.
 // See docs/specs/dor-cli.md → "Spawning External Binaries".
-import { spawnAndCapture, parseStreamPort } from 'dor-lib-common';
+import { spawnAndCapture, parseStreamPort, sessionForKey } from 'dor-lib-common';
 import { randomBytes } from 'crypto';
 import { type AgentBrowserTab, parseAgentBrowserTabs } from '../lib/agent-browser-tab';
 import {
@@ -240,10 +240,10 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   }
 
   // A fresh managed session for a surface spawned from the GUI (no `--key`),
-  // mirroring `dor ab`'s `dormouse.<workspaceId>.<key>` namespacing so it can't
-  // collide with a user's own agent-browser sessions.
+  // using dor ab's workspace-scoped sessionForKey namespacing so it can't collide
+  // with a user's own agent-browser sessions.
   function generateGuiSession(): string {
-    return `dormouse.1.gui-${randomBytes(6).toString('hex')}`;
+    return sessionForKey(`gui-${randomBytes(6).toString('hex')}`);
   }
 
   // Reused per session so we don't litter tmp with one file per frame; the panel

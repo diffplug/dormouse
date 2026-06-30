@@ -19,7 +19,7 @@ import { buildCommand } from '@stricli/core';
 // All external spawns go through dor-lib-common's spawnAndCapture, which owns the
 // Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close).
 // See docs/specs/dor-cli.md → "Spawning External Binaries".
-import { spawnAndCapture, parseStreamPort } from 'dor-lib-common';
+import { spawnAndCapture, parseStreamPort, sessionForKey } from 'dor-lib-common';
 import { existsSync } from 'node:fs';
 import type {
   CliEnv,
@@ -31,9 +31,6 @@ import type {
   ParseResult,
 } from './types.js';
 import { fail, requireControlClient, stringParser } from './shared.js';
-
-/** Hardcoded until Dormouse exposes real workspaces; encoded now to avoid a rename. */
-const WORKSPACE_ID = '1';
 
 const INSTALL_HINT = 'npm i -g agent-browser';
 const INSTALL_DOCS = 'https://agent-browser.dev';
@@ -64,14 +61,10 @@ function missingBinaryMessage(binary: string): string {
   ].join('\n');
 }
 
-// agent-browser session names become filesystem paths (socket dir), so `/` is
-// not usable as a namespace separator — the daemon fails to start. Dots keep
-// the managed namespace readable: dormouse.<workspaceId>.<key>.
+// A managed --key becomes part of an agent-browser session name (see
+// sessionForKey in dor-lib-common), which becomes a filesystem path — so `/` is
+// not usable; restrict to a readable, path-safe charset.
 const KEY_PATTERN = /^[A-Za-z0-9._-]+$/;
-
-export function sessionForKey(key: string): string {
-  return `dormouse.${WORKSPACE_ID}.${key}`;
-}
 
 export const agentBrowserCommand: Command = {
   name: 'agent-browser',
