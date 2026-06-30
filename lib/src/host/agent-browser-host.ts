@@ -42,7 +42,14 @@ import { promises as fs } from 'fs';
 // Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close). The
 // GUI host needs it even for the absolute `binaryPath` dor ab resolved.
 // See docs/specs/dor-cli.md → "Spawning External Binaries".
-import { spawnAndCapture, parseStreamPort, sessionForKey } from 'dor-lib-common';
+import {
+  spawnAndCapture,
+  parseStreamPort,
+  sessionForKey,
+  streamStatusArgs,
+  AGENT_BROWSER_BIN_ENV,
+  DEFAULT_AGENT_BROWSER_BIN,
+} from 'dor-lib-common';
 import { randomBytes } from 'crypto';
 import { type AgentBrowserTab, parseAgentBrowserTabs } from '../lib/agent-browser-tab';
 import {
@@ -108,8 +115,8 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   async function runWithBinaryFallback(args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
     const candidates = [...new Set([
       binaryPath,
-      process.env.DORMOUSE_AGENT_BROWSER_BIN,
-      'agent-browser',
+      process.env[AGENT_BROWSER_BIN_ENV],
+      DEFAULT_AGENT_BROWSER_BIN,
     ].filter((c): c is string => !!c))];
 
     let lastError = '';
@@ -141,7 +148,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // live. Retry briefly to close that window.
   async function readStreamPort(session: string, binaryPath?: string): Promise<number | undefined> {
     for (let attempt = 0; attempt < STREAM_PORT_READ_ATTEMPTS; attempt++) {
-      const result = await runWithBinaryFallback(['--session', session, 'stream', 'status', '--json'], binaryPath);
+      const result = await runWithBinaryFallback(streamStatusArgs(session), binaryPath);
       if (result.exitCode === 0) {
         const port = parseStreamPort(result.stdout);
         if (port !== undefined) return port;

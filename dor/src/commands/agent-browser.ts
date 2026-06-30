@@ -19,7 +19,14 @@ import { buildCommand } from '@stricli/core';
 // All external spawns go through dor-lib-common's spawnAndCapture, which owns the
 // Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close).
 // See docs/specs/dor-cli.md → "Spawning External Binaries".
-import { spawnAndCapture, parseStreamPort, sessionForKey } from 'dor-lib-common';
+import {
+  spawnAndCapture,
+  parseStreamPort,
+  sessionForKey,
+  streamStatusArgs,
+  AGENT_BROWSER_BIN_ENV,
+  DEFAULT_AGENT_BROWSER_BIN,
+} from 'dor-lib-common';
 import { existsSync } from 'node:fs';
 import type {
   CliEnv,
@@ -34,7 +41,6 @@ import { fail, requireControlClient, stringParser } from './shared.js';
 
 const INSTALL_HINT = 'npm i -g agent-browser';
 const INSTALL_DOCS = 'https://agent-browser.dev';
-const BIN_ENV = 'DORMOUSE_AGENT_BROWSER_BIN';
 
 // Extensions a bare command name can carry on Windows, in PATH-search order.
 // Shared by resolveBinaryPath (PATH walk) and existsCandidate (explicit path).
@@ -47,7 +53,7 @@ const WINDOWS_BIN_EXTS = ['.cmd', '.exe', '.bat'];
  * looked for.
  */
 function missingBinaryMessage(binary: string): string {
-  const lookedFor = binary === 'agent-browser' ? '' : ` (looked for '${binary}')`;
+  const lookedFor = binary === DEFAULT_AGENT_BROWSER_BIN ? '' : ` (looked for '${binary}')`;
   return [
     `agent-browser is not installed${lookedFor}.`,
     '',
@@ -57,7 +63,7 @@ function missingBinaryMessage(binary: string): string {
     `    ${INSTALL_HINT}`,
     '',
     `More: ${INSTALL_DOCS}`,
-    `Already installed? Make sure it's on your PATH, or set ${BIN_ENV} to its full path.`,
+    `Already installed? Make sure it's on your PATH, or set ${AGENT_BROWSER_BIN_ENV} to its full path.`,
   ].join('\n');
 }
 
@@ -180,7 +186,7 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
   const { key, session, rest } = flags.value;
 
   const env = options.env ?? {};
-  const binary = env.DORMOUSE_AGENT_BROWSER_BIN || 'agent-browser';
+  const binary = env[AGENT_BROWSER_BIN_ENV] || DEFAULT_AGENT_BROWSER_BIN;
   const exec = options.execAgentBrowser ?? execAgentBrowserProcess;
 
   // Resolve the binary to an absolute path once: it both proves the install
@@ -217,7 +223,7 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
     // passthrough rather than nagging about the missing surface.
     if (!(client instanceof Error)) {
       try {
-        const status = await exec(binary, ['--session', session, 'stream', 'status', '--json']);
+        const status = await exec(binary, streamStatusArgs(session));
         const wsPort = parseStreamPort(status.stdout);
         // Pass the absolute path resolved above so the host (which may not share
         // this terminal's PATH) can run host-side tab/close commands.

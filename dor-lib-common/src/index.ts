@@ -4,4 +4,11 @@ export type {
   SpawnCaptureSuccess,
   SpawnCaptureFailure,
 } from './spawn.js';
-export { parseStreamPort, sessionForKey, AGENT_BROWSER_WORKSPACE_ID } from './agent-browser.js';
+export {
+  parseStreamPort,
+  sessionForKey,
+  streamStatusArgs,
+  AGENT_BROWSER_WORKSPACE_ID,
+  AGENT_BROWSER_BIN_ENV,
+  DEFAULT_AGENT_BROWSER_BIN,
+} from './agent-browser.js';
