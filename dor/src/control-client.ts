@@ -18,6 +18,7 @@ import type {
   SplitSurfaceRequest,
   SplitSurfaceResponse,
 } from './commands/types.js';
+import { SURFACE_CONTROL_METHODS, type SurfaceControlMethod } from './protocol.js';
 import type { DorControlResult } from './protocol.js';
 
 export interface SocketControlClientOptions {
@@ -47,38 +48,38 @@ export class SocketControlClient implements ControlClient {
   }
 
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse> {
-    return this.request<ListSurfacesResponse>('surface.list', request);
+    return this.request<ListSurfacesResponse>(SURFACE_CONTROL_METHODS.list, request);
   }
 
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse> {
-    return this.request<SplitSurfaceResponse>('surface.split', request);
+    return this.request<SplitSurfaceResponse>(SURFACE_CONTROL_METHODS.split, request);
   }
 
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse> {
-    return this.request<EnsureSurfaceResponse>('surface.ensure', request);
+    return this.request<EnsureSurfaceResponse>(SURFACE_CONTROL_METHODS.ensure, request);
   }
 
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse> {
-    return this.request<SendSurfaceResponse>('surface.send', request);
+    return this.request<SendSurfaceResponse>(SURFACE_CONTROL_METHODS.send, request);
   }
 
   readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse> {
-    return this.request<ReadSurfaceResponse>('surface.read', request);
+    return this.request<ReadSurfaceResponse>(SURFACE_CONTROL_METHODS.read, request);
   }
 
   killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse> {
-    return this.request<KillSurfaceResponse>('surface.kill', request);
+    return this.request<KillSurfaceResponse>(SURFACE_CONTROL_METHODS.kill, request);
   }
 
   iframeSurface(request: IframeSurfaceRequest): Promise<IframeSurfaceResponse> {
-    return this.request<IframeSurfaceResponse>('surface.iframe', request);
+    return this.request<IframeSurfaceResponse>(SURFACE_CONTROL_METHODS.iframe, request);
   }
 
   agentBrowserSurface(request: AgentBrowserSurfaceRequest): Promise<AgentBrowserSurfaceResponse> {
-    return this.request<AgentBrowserSurfaceResponse>('surface.agentBrowser', request);
+    return this.request<AgentBrowserSurfaceResponse>(SURFACE_CONTROL_METHODS.agentBrowser, request);
   }
 
-  private request<T>(method: string, params: unknown): Promise<T> {
+  private request<T>(method: SurfaceControlMethod, params: unknown): Promise<T> {
     const requestId = `dor-${this.idBase}-${++this.nextRequestId}`;
     return new Promise((resolve, reject) => {
       const socket = createConnection({ path: this.socketPath });
