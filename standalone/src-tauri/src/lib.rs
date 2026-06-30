@@ -638,7 +638,13 @@ fn resolve_sidecar_path(resource_dir: Option<PathBuf>, manifest_dir: &Path) -> P
         for prefix in &["sidecar", "_up_/sidecar"] {
             let path = dir.join(prefix).join("main.js");
             if path.is_file() {
-                return path;
+                // resource_dir() hands back a `\\?\` verbatim path in the
+                // bundled/dev layout. Normalize once here, at the boundary, so
+                // every consumer (the node script arg, the dor-cli paths derived
+                // from this path's parent) gets a plain path. cmd.exe can't
+                // execute a batch file via a verbatim path; Rust's APIs accept
+                // both, so stripping is always safe.
+                return strip_windows_verbatim_prefix(&path.to_string_lossy()).unwrap_or(path);
             }
         }
     }
@@ -655,14 +661,6 @@ fn strip_windows_verbatim_prefix(path_string: &str) -> Option<PathBuf> {
     }
 
     None
-}
-
-fn sidecar_script_arg_path(path: &Path) -> PathBuf {
-    if let Some(path) = strip_windows_verbatim_prefix(&path.to_string_lossy()) {
-        return path;
-    }
-
-    path.to_path_buf()
 }
 
 fn resolve_node_binary_path() -> Result<PathBuf, String> {
@@ -709,13 +707,6 @@ fn dor_control_token() -> String {
 }
 
 fn dor_cli_paths_from_root(root: PathBuf) -> DorCliPaths {
-    // The root can arrive with a Windows `\\?\` verbatim prefix (Tauri's
-    // resource_dir() returns one in the bundled/dev layout). These paths become
-    // DORMOUSE_CLI_BIN (prepended to PATH) and DORMOUSE_CLI_JS, both consumed by
-    // the `dor.cmd` batch launcher. cmd.exe cannot execute a batch file via a
-    // verbatim path, so `dor` would fail with "The system cannot find the path
-    // specified." Strip it here, mirroring sidecar_script_arg_path.
-    let root = strip_windows_verbatim_prefix(&root.to_string_lossy()).unwrap_or(root);
     DorCliPaths {
         bin_dir: root.join("bin"),
         entrypoint: root.join("dist").join("dor.js"),
@@ -741,7 +732,6 @@ fn resolve_dor_cli_paths(sidecar_path: &Path, manifest_dir: &Path) -> DorCliPath
 fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sidecar_path = resolve_sidecar_path(app.path().resource_dir().ok(), manifest_dir);
-    let sidecar_arg_path = sidecar_script_arg_path(&sidecar_path);
     let node_path = resolve_node_binary_path()?;
     let dor_cli_paths = resolve_dor_cli_paths(&sidecar_path, manifest_dir);
     let dor_control_socket = dor_control_socket_path();
@@ -749,10 +739,6 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     append_log(format!(
         "[sidecar] resolved script: {}",
         sidecar_path.display()
-    ));
-    append_log(format!(
-        "[sidecar] script argument: {}",
-        sidecar_arg_path.display()
     ));
     append_log(format!("[sidecar] node binary: {}", node_path.display()));
     append_log(format!(
@@ -766,7 +752,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     append_log(format!("[dor] control socket: {dor_control_socket}"));
 
     let mut wrap = CommandWrap::with_new(&node_path, |c| {
-        c.arg(&sidecar_arg_path)
+        c.arg(&sidecar_path)
             .env("DORMOUSE_NODE", &node_path)
             .env("DORMOUSE_CLI_BIN", &dor_cli_paths.bin_dir)
             .env("DORMOUSE_CLI_JS", &dor_cli_paths.entrypoint)
@@ -1200,31 +1186,25 @@ mod tests {
         assert_eq!(resolved.entrypoint, dor_root.join("dist").join("dor.js"));
     }
 
-    // resource_dir() hands us a `\\?\` verbatim sidecar path on Windows; the
-    // derived dor-cli paths must NOT keep that prefix, or cmd.exe can't launch
+    // resource_dir() hands us a `\\?\` verbatim path on Windows. resolve_sidecar_path
+    // is the single normalization boundary: it must strip the prefix so every
+    // downstream consumer (the node script arg, and the dor-cli paths derived from
+    // this path's parent) gets a plain path — otherwise cmd.exe can't launch
     // `dor.cmd` reached through DORMOUSE_CLI_BIN on PATH.
     #[test]
     #[cfg(windows)]
-    fn strips_verbatim_prefix_from_bundled_dor_cli_paths() {
-        let resource_dir = TempDir::new("dor-cli-verbatim");
-        let sidecar_dir = resource_dir.path().join("sidecar");
-        let sidecar_path = sidecar_dir.join("main.js");
-        let dor_root = sidecar_dir.join("dor-cli");
-        let dor_entrypoint = dor_root.join("dist").join("dor.js");
-
-        fs::create_dir_all(dor_entrypoint.parent().unwrap()).expect("failed to create dor dist");
-        fs::create_dir_all(dor_root.join("bin")).expect("failed to create dor bin");
+    fn resolve_sidecar_path_strips_verbatim_prefix() {
+        let resource_dir = TempDir::new("sidecar-verbatim");
+        let sidecar_path = resource_dir.path().join("sidecar").join("main.js");
+        fs::create_dir_all(sidecar_path.parent().unwrap()).expect("failed to create sidecar dir");
         fs::write(&sidecar_path, "console.log('sidecar');").expect("failed to create sidecar");
-        fs::write(&dor_entrypoint, "console.log('dor');").expect("failed to create dor entrypoint");
 
-        // A verbatim path to the same real file; is_file() still resolves it.
-        let verbatim_sidecar = PathBuf::from(format!(r"\\?\{}", sidecar_path.display()));
+        // A verbatim resource dir to the same real tree; is_file() still resolves it.
+        let verbatim_resource = PathBuf::from(format!(r"\\?\{}", resource_dir.path().display()));
         let resolved =
-            resolve_dor_cli_paths(&verbatim_sidecar, Path::new("/repo/standalone/src-tauri"));
+            resolve_sidecar_path(Some(verbatim_resource), Path::new("/repo/standalone/src-tauri"));
 
-        assert_eq!(resolved.bin_dir, dor_root.join("bin"));
-        assert_eq!(resolved.entrypoint, dor_entrypoint);
-        assert!(!resolved.bin_dir.to_string_lossy().contains(r"\\?\"));
-        assert!(!resolved.entrypoint.to_string_lossy().contains(r"\\?\"));
+        assert_eq!(resolved, sidecar_path);
+        assert!(!resolved.to_string_lossy().contains(r"\\?\"));
     }
 }

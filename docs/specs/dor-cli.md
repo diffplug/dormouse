@@ -63,7 +63,8 @@ on `PATH`, not on that variable.
 On Windows, `DORMOUSE_CLI_BIN` and `DORMOUSE_CLI_JS` must be plain paths, never
 `\\?\` verbatim paths. The standalone host derives them from Tauri's
 `resource_dir()`, which returns a verbatim prefix in the bundled/dev layout; the
-host strips it (`dor_cli_paths_from_root`). `dor.cmd` is reached through
+host strips it once at the boundary (`resolve_sidecar_path`), so every derived
+path is plain. `dor.cmd` is reached through
 `DORMOUSE_CLI_BIN` on `PATH`, and cmd.exe cannot execute a batch file via a
 verbatim path — it fails with "The system cannot find the path specified."
 
