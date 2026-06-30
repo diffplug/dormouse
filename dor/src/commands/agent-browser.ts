@@ -16,13 +16,17 @@
  */
 
 import { buildCommand } from '@stricli/core';
-// cross-spawn, not node:child_process — on Windows a bare command name never
-// resolves a `.cmd`/`.bat` PATH shim (Node spawn ignores PATHEXT → ENOENT), and
-// Node >=22 refuses to spawn a `.cmd` directly even by full path (EINVAL, the
-// CVE-2024-27980 hardening). agent-browser ships as a `.cmd` shim, so both bite.
-// cross-spawn routes through cmd.exe with correct escaping and is a no-op
-// passthrough on POSIX. See docs/specs/dor-cli.md → "Spawning External Binaries".
-import spawn from 'cross-spawn';
+// All external spawns go through dor-lib-common's spawnAndCapture, which owns the
+// Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close).
+// See docs/specs/dor-cli.md → "Spawning External Binaries".
+import {
+  spawnAndCapture,
+  parseStreamPort,
+  sessionForKey,
+  streamStatusArgs,
+  AGENT_BROWSER_BIN_ENV,
+  DEFAULT_AGENT_BROWSER_BIN,
+} from 'dor-lib-common';
 import { existsSync } from 'node:fs';
 import type {
   CliEnv,
@@ -35,12 +39,8 @@ import type {
 } from './types.js';
 import { fail, requireControlClient, stringParser } from './shared.js';
 
-/** Hardcoded until Dormouse exposes real workspaces; encoded now to avoid a rename. */
-const WORKSPACE_ID = '1';
-
 const INSTALL_HINT = 'npm i -g agent-browser';
 const INSTALL_DOCS = 'https://agent-browser.dev';
-const BIN_ENV = 'DORMOUSE_AGENT_BROWSER_BIN';
 
 // Extensions a bare command name can carry on Windows, in PATH-search order.
 // Shared by resolveBinaryPath (PATH walk) and existsCandidate (explicit path).
@@ -53,7 +53,7 @@ const WINDOWS_BIN_EXTS = ['.cmd', '.exe', '.bat'];
  * looked for.
  */
 function missingBinaryMessage(binary: string): string {
-  const lookedFor = binary === 'agent-browser' ? '' : ` (looked for '${binary}')`;
+  const lookedFor = binary === DEFAULT_AGENT_BROWSER_BIN ? '' : ` (looked for '${binary}')`;
   return [
     `agent-browser is not installed${lookedFor}.`,
     '',
@@ -63,18 +63,14 @@ function missingBinaryMessage(binary: string): string {
     `    ${INSTALL_HINT}`,
     '',
     `More: ${INSTALL_DOCS}`,
-    `Already installed? Make sure it's on your PATH, or set ${BIN_ENV} to its full path.`,
+    `Already installed? Make sure it's on your PATH, or set ${AGENT_BROWSER_BIN_ENV} to its full path.`,
   ].join('\n');
 }
 
-// agent-browser session names become filesystem paths (socket dir), so `/` is
-// not usable as a namespace separator — the daemon fails to start. Dots keep
-// the managed namespace readable: dormouse.<workspaceId>.<key>.
+// A managed --key becomes part of an agent-browser session name (see
+// sessionForKey in dor-lib-common), which becomes a filesystem path — so `/` is
+// not usable; restrict to a readable, path-safe charset.
 const KEY_PATTERN = /^[A-Za-z0-9._-]+$/;
-
-export function sessionForKey(key: string): string {
-  return `dormouse.${WORKSPACE_ID}.${key}`;
-}
 
 export const agentBrowserCommand: Command = {
   name: 'agent-browser',
@@ -190,7 +186,7 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
   const { key, session, rest } = flags.value;
 
   const env = options.env ?? {};
-  const binary = env.DORMOUSE_AGENT_BROWSER_BIN || 'agent-browser';
+  const binary = env[AGENT_BROWSER_BIN_ENV] || DEFAULT_AGENT_BROWSER_BIN;
   const exec = options.execAgentBrowser ?? execAgentBrowserProcess;
 
   // Resolve the binary to an absolute path once: it both proves the install
@@ -227,7 +223,7 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
     // passthrough rather than nagging about the missing surface.
     if (!(client instanceof Error)) {
       try {
-        const status = await exec(binary, ['--session', session, 'stream', 'status', '--json']);
+        const status = await exec(binary, streamStatusArgs(session));
         const wsPort = parseStreamPort(status.stdout);
         // Pass the absolute path resolved above so the host (which may not share
         // this terminal's PATH) can run host-side tab/close commands.
@@ -275,16 +271,6 @@ export function resolveBinaryPath(binary: string, env: CliEnv): string | undefin
   return undefined;
 }
 
-function parseStreamPort(stdout: string): number | undefined {
-  try {
-    const parsed = JSON.parse(stdout) as { port?: unknown; data?: { port?: unknown } };
-    const port = parsed.data?.port ?? parsed.port;
-    return typeof port === 'number' && Number.isFinite(port) ? port : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 function isMissingBinaryError(error: unknown): boolean {
   return !!error && typeof error === 'object' && (error as { code?: unknown }).code === 'ENOENT';
 }
@@ -314,58 +300,15 @@ function existsCandidate(path: string, isWindows: boolean): boolean {
   return WINDOWS_BIN_EXTS.some((ext) => existsSync(`${path}${ext}`));
 }
 
-// agent-browser talks to a daemon, so forwarded commands return quickly;
-// buffering output until exit keeps this transport-agnostic with runCli's
-// captured stdout/stderr at the cost of not streaming long-running output.
-//
-// Grace window for 'close' to win after 'exit' before we resolve anyway. See
-// execAgentBrowserProcess: long enough that a normal command's stdio drains
-// (its output was written before the process exited), short enough that the
-// daemon-holds-the-pipe case doesn't feel like a hang.
-const CLOSE_GRACE_MS = 250;
-
-function execAgentBrowserProcess(binary: string, args: string[]): Promise<AgentBrowserExecResult> {
-  return new Promise((resolve, reject) => {
-    // windowsHide: cross-spawn runs `.cmd` shims through cmd.exe; without this
-    // each spawn flashes a console window that steals focus. No-op off Windows.
-    const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-    let stdout = '';
-    let stderr = '';
-    // A failed spawn races 'error' against the exit events; latch on the first so
-    // the loser can't overwrite the outcome (e.g. a stray exit code swallowing an
-    // ENOENT). clearTimeout drops the grace timer so it can't keep the event loop
-    // alive after we've already settled.
-    let settled = false;
-    let graceTimer: number | undefined;
-    const settle = (apply: () => void): void => {
-      if (settled) return;
-      settled = true;
-      if (graceTimer !== undefined) clearTimeout(graceTimer);
-      apply();
-    };
-    child.stdout.on('data', (chunk: unknown) => { stdout += String(chunk); });
-    child.stderr.on('data', (chunk: unknown) => { stderr += String(chunk); });
-    child.on('error', (error: Error) => settle(() => reject(error)));
-    const finish = (code: number | null, out: string, err: string): void =>
-      settle(() => resolve({ exitCode: code ?? 1, stdout: out, stderr: err }));
-    // 'close' is the clean path: the process exited AND its stdio reached EOF, so
-    // all output is captured. But `agent-browser open` leaves a detached daemon
-    // that on Windows inherits our stdout/stderr pipes — they never reach EOF and
-    // 'close' never fires, so waiting on it alone hangs forever. Fall back to
-    // 'exit' (which fires when the foreground process ends regardless of the
-    // lingering pipe), giving 'close' a short grace to win first so a normal
-    // command's full output is still flushed before we resolve.
-    child.on('close', (code: number | null) => finish(code, stdout, stderr));
-    child.on('exit', (code: number | null) => {
-      // Snapshot now: the foreground command has produced all its output. The
-      // surviving daemon keeps our inherited pipes open and may scribble into
-      // them during the grace below (this is how `dor ab open` printed a burst
-      // of blank lines on Windows) — resolve with the exit-time snapshot so that
-      // post-command noise is excluded. 'close', if it wins, still uses the live
-      // buffers since without a lingering daemon there's nothing extra to drop.
-      const out = stdout;
-      const err = stderr;
-      graceTimer = setTimeout(() => finish(code, out, err), CLOSE_GRACE_MS);
-    });
-  });
+// The default exec: delegate the spawn/capture/Windows handling to
+// spawnAndCapture, and adapt its never-throws result to this call site's
+// throw-on-spawn-failure contract (callers catch ENOENT via isMissingBinaryError).
+async function execAgentBrowserProcess(binary: string, args: string[]): Promise<AgentBrowserExecResult> {
+  const result = await spawnAndCapture(binary, args);
+  if (!result.ok) {
+    const error: Error & { code?: string } = new Error(result.error.message);
+    error.code = result.error.code;
+    throw error;
+  }
+  return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 }

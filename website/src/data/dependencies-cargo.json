@@ -50,7 +50,7 @@
     },
     {
       "name": "serde_json",
-      "version": "1.0.149",
+      "version": "1.0.150",
       "license": "MIT OR Apache-2.0",
       "author": "Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>",
       "homepage": "https://github.com/serde-rs/json",
@@ -58,7 +58,7 @@
     },
     {
       "name": "tauri",
-      "version": "2.11.2",
+      "version": "2.11.3",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
@@ -66,7 +66,7 @@
     },
     {
       "name": "tauri-build",
-      "version": "2.6.2",
+      "version": "2.6.3",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
@@ -2361,14 +2361,14 @@
     },
     {
       "name": "tauri-codegen",
-      "version": "2.6.2",
+      "version": "2.6.3",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/"
     },
     {
       "name": "tauri-macros",
-      "version": "2.6.2",
+      "version": "2.6.3",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/"
@@ -2382,21 +2382,21 @@
     },
     {
       "name": "tauri-runtime",
-      "version": "2.11.2",
+      "version": "2.11.3",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/"
     },
     {
       "name": "tauri-runtime-wry",
-      "version": "2.11.2",
+      "version": "2.11.3",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/"
     },
     {
       "name": "tauri-utils",
-      "version": "2.9.2",
+      "version": "2.9.3",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/"
@@ -2641,7 +2641,7 @@
     },
     {
       "name": "tray-icon",
-      "version": "0.23.1",
+      "version": "0.24.1",
       "license": "MIT OR Apache-2.0",
       "author": null,
       "homepage": "https://github.com/tauri-apps/tray-icon"

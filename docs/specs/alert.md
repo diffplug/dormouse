@@ -177,7 +177,7 @@ Clearing behavior:
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers.
 >
-> **Not yet implemented (stage 2b).** The union projection and its surfacing are specified ahead of the code. The implemented piece (stage 2a) is that a browser Surface's user-set `todo` round-trips to the activity store live and persists across restart, so its door shows the TODO pill — the same input the union will read once it exists.
+> **Partially implemented.** The union *projection* is implemented as a pure function — `computeWorkspaceUnion(surfaceIds, activitySnapshot)` in `lib/src/lib/workspace-union.ts` (stage 2b). Its **surfacing** is not built yet: the standalone strip indicators (stage 3) and the VS Code per-webview union + native-chrome reflection (`docs/specs/vscode.md`). A browser Surface's user-set `todo` already round-trips to the activity store live and persists across restart (stage 2a), so it is counted by the projection and shows on the surface's door today.
 
 A Workspace projects a **union status** over the attention state of the Surfaces it contains (terminal Sessions and browser Surfaces alike — see `docs/specs/glossary.md`):
 

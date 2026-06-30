@@ -72,10 +72,14 @@ verbatim path — it fails with "The system cannot find the path specified."
 ## Spawning External Binaries
 
 Any time Dormouse spawns an external/user-installed binary — `dor ab` driving
-`agent-browser`, the agent-browser host running tab/eval/screenshot commands, dev
-harnesses launching `pnpm`/`agent-browser` — it goes through **`cross-spawn`**,
-never raw `node:child_process` `spawn`. This is mandatory for correctness on
-Windows, where two distinct failures bite a naive spawn:
+`agent-browser`, the agent-browser host running tab/eval/screenshot commands — it
+goes through **`spawnAndCapture` from the `dor-lib-common` package**, never raw
+`node:child_process` `spawn`. That helper is the single home for the hard-won
+Windows recipe, shared by `dor` and the `lib` host (which otherwise have no common
+code); both packages depend on `dor-lib-common`. It owns three concerns:
+
+**1. cross-spawn, not raw spawn.** Two distinct failures bite a naive spawn on
+Windows:
 
 - **ENOENT on a bare name.** Node's `spawn` does not consult `PATHEXT`, so a bare
   `agent-browser` never resolves the `agent-browser.cmd` PATH shim that npm/vfox
@@ -87,29 +91,30 @@ Windows, where two distinct failures bite a naive spawn:
 
 `cross-spawn` resolves the command via `PATH`/`PATHEXT` and routes `.cmd`/`.bat`
 through `cmd.exe` with correct argument escaping, and is a transparent passthrough
-on POSIX. Use it with the same `(command, args, options)` signature as
-`child_process.spawn`; it is bundled into `dist/dor.js` and the sidecar `.cjs`
-by esbuild.
+on POSIX. Caveat: a literal `%VAR%` inside an argument can still be expanded by
+`cmd.exe` when it passes through a `.cmd` shim — an unavoidable Windows batch
+limitation. Our forwarded arguments (URLs, selectors, the host's hardcoded `eval`
+scripts) contain no `%VAR%` patterns, so this does not arise in practice.
 
-Caveat: a literal `%VAR%` inside an argument can still be expanded by `cmd.exe`
-when it passes through a `.cmd` shim — an unavoidable Windows batch limitation, not
-something `cross-spawn` (or any wrapper) can fully prevent. Our forwarded
-arguments (URLs, selectors, and the host's hardcoded `eval` scripts) contain no
-`%VAR%` patterns, so this does not arise in practice.
+**2. `windowsHide`.** cross-spawn runs `.cmd` shims through `cmd.exe`; without
+`windowsHide` each spawn flashes a console window that steals focus — and the
+panel's screenshot loop spawns one per stream-frame pulse, so a live page would
+flicker windows several times a second.
 
-### Resolve on `exit`, not `close`
+**3. Resolve on `exit`, not `close`, with an exit-time snapshot.** `agent-browser
+open` launches a long-lived per-session daemon that on Windows inherits the
+parent's stdout/stderr pipes; those pipes never reach EOF while the daemon lives,
+so `close` (which waits for stdio to drain) never fires and a `close`-only wait
+hangs forever. `spawnAndCapture` waits for `close` but falls back to `exit` after
+a short grace, and resolves the grace path with the output snapshotted at `exit`
+so the daemon's post-command scribbles don't leak into the result. (POSIX dodges
+the whole thing because the daemon double-forks and detaches from the inherited
+fds, closing the pipe — which is why none of this surfaced on macOS.)
 
-When buffering a spawned command's output, resolve on the child's **`exit`**
-event, not `close`. `agent-browser open` launches a long-lived per-session daemon
-that on Windows inherits the parent's stdout/stderr pipes; those pipes never reach
-EOF while the daemon lives, so `close` (which waits for stdio to drain) never
-fires and the spawn hangs forever. `exit` fires when the foreground process ends
-regardless of the lingering pipe. The two spawn helpers
-(`dor/src/commands/agent-browser.ts`, `lib/src/host/agent-browser-host.ts`) wait
-for `close` but fall back to `exit` after a short grace (`CLOSE_GRACE_MS`), so a
-normal command's full output still flushes while the daemon case can't hang.
-(POSIX dodges this because the daemon double-forks and detaches from the inherited
-fds, closing the pipe — which is why this never surfaced on macOS.)
+Resolution: `dor-lib-common`'s package `exports` point at its built `dist` (clean,
+Node-type-free `.d.ts` for `dor`'s `tsc`, which deliberately avoids `@types/node`);
+every esbuild/Vite consumer (`dist/dor.js`, the sidecar `.cjs`, vscode-ext) inlines
+it. `dor`'s `prebuild` builds `dor-lib-common` first so its `.d.ts` exists.
 
 ## Host Plumbing
 

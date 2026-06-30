@@ -44,6 +44,7 @@ import {
 import { orchestrateKill } from '../lib/kill-animation';
 import { getPlatform, PLATFORM_STRING } from '../lib/platform';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
+import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import type {
   Surface as DorSurface,
   SplitDirection as DorSplitDirection,
@@ -1223,7 +1224,7 @@ export function Wall({
         return { target: target.value, panel };
       };
 
-      if (detail.method === 'surface.list') {
+      if (detail.method === SURFACE_CONTROL_METHODS.list) {
         const surfaces = buildDorSurfaces(api);
         detail.respond({
           ok: true,
@@ -1236,7 +1237,7 @@ export function Wall({
         return;
       }
 
-      if (detail.method === 'surface.split') {
+      if (detail.method === SURFACE_CONTROL_METHODS.split) {
         const directionParam = parseDorSplitDirection(params.direction);
         if (!directionParam) {
           detail.respond({ ok: false, error: `invalid split direction '${String(params.direction)}'` });
@@ -1276,7 +1277,7 @@ export function Wall({
         return;
       }
 
-      if (detail.method === 'surface.ensure') {
+      if (detail.method === SURFACE_CONTROL_METHODS.ensure) {
         const command = dorCommandString(stringArrayParam(params.command));
         if (!command) {
           detail.respond({ ok: false, error: 'command cannot be empty' });
@@ -1377,7 +1378,7 @@ export function Wall({
         return;
       }
 
-      if (detail.method === 'surface.send') {
+      if (detail.method === SURFACE_CONTROL_METHODS.send) {
         const input = stringParam(params.input);
         if (input === undefined) {
           detail.respond({ ok: false, error: 'input is required' });
@@ -1405,7 +1406,7 @@ export function Wall({
         return;
       }
 
-      if (detail.method === 'surface.read') {
+      if (detail.method === SURFACE_CONTROL_METHODS.read) {
         const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
         if (!target.ok) {
           detail.respond({ ok: false, error: target.message });
@@ -1430,7 +1431,7 @@ export function Wall({
         return;
       }
 
-      if (detail.method === 'surface.kill') {
+      if (detail.method === SURFACE_CONTROL_METHODS.kill) {
         const confirmation = killConfirmationParam(params.confirmation);
         if (!confirmation) {
           detail.respond({ ok: false, error: 'invalid kill confirmation' });
@@ -1465,7 +1466,7 @@ export function Wall({
         return;
       }
 
-      if (detail.method === 'surface.iframe') {
+      if (detail.method === SURFACE_CONTROL_METHODS.iframe) {
         const url = stringParam(params.url);
         if (!url) {
           detail.respond({ ok: false, error: 'url is required' });
@@ -1499,7 +1500,7 @@ export function Wall({
         return;
       }
 
-      if (detail.method === 'surface.agentBrowser') {
+      if (detail.method === SURFACE_CONTROL_METHODS.agentBrowser) {
         const session = stringParam(params.session);
         if (!session) {
           detail.respond({ ok: false, error: 'session is required' });
