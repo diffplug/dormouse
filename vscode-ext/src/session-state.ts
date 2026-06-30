@@ -35,10 +35,12 @@ export function mergeAlertStates(state: unknown, alertStates: Map<string, AlertS
   if (!parsed || !Array.isArray(parsed.panes)) return state;
   return {
     ...parsed,
-    panes: parsed.panes.map((pane) => ({
-      ...pane,
-      alert: toPersistedAlert(alertStates.get(pane.id), pane.alert),
-    })),
+    panes: parsed.panes.map((pane) => pane.surfaceType === 'browser'
+      ? { ...pane, alert: null }
+      : {
+        ...pane,
+        alert: toPersistedAlert(alertStates.get(pane.id), pane.alert),
+      }),
   };
 }
 
@@ -57,6 +59,18 @@ export async function refreshSavedSessionStateFromPtys(
 
   const panes = await Promise.all(
     saved.panes.map(async (pane) => {
+      if (pane.surfaceType === 'browser') {
+        log.info(`[session] ${pane.id}: browser surface, skipping PTY refresh`);
+        return {
+          ...pane,
+          cwd: null,
+          scrollback: null,
+          resumeCommand: null,
+          untouched: false,
+          alert: null,
+        };
+      }
+
       const alert = toPersistedAlert(alertStates?.get(pane.id), pane.alert);
 
       if (!ptys.has(pane.id)) {
