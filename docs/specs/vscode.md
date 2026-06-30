@@ -1,6 +1,6 @@
 # Dormouse VS Code Integration Spec
 
-> See `docs/specs/glossary.md` for Session / Pane / Door vocabulary. See `docs/specs/transport.md` for the PTY lifecycle, message protocol, persisted-session types, and adapter-agnostic invariants that VS Code shares with the standalone and fake adapters. This spec covers the VS Code-specific layer: panel/view registration, persistence APIs, theme integration, CSP, build, and dream-architecture commands.
+> See `docs/specs/glossary.md` for Session / Surface / Pane / Door vocabulary. See `docs/specs/transport.md` for the PTY lifecycle, message protocol, persisted-session types, and adapter-agnostic invariants that VS Code shares with the standalone and fake adapters. This spec covers the VS Code-specific layer: panel/view registration, persistence APIs, theme integration, CSP, build, and dream-architecture commands.
 
 ## What's built
 
@@ -102,6 +102,23 @@ VS Code-specific consequences:
 - Multiple VS Code windows each get their own extension host process, and therefore their own pty-host child process.
 
 PTY lifecycle, buffering, the reconnection sequence, and the full message protocol live in `docs/specs/transport.md`.
+
+### Workspaces
+
+> See `docs/specs/glossary.md` for the Workspace / Window containers and `docs/specs/alert.md` for the union status.
+>
+> **Not yet implemented (stage 2b).** The webview↔Workspace mapping is the conceptual frame; VS Code already partitions PTYs per webview, but Dormouse does not yet compute a per-Workspace union or reflect it onto native chrome (see the "Not yet implemented" bullet below). Stage 2a (`surfaceType` persistence, browser-surface restore/resume) is implemented and adapter-agnostic.
+
+In VS Code, **one webview is one Workspace**. The bottom-panel `WebviewView` ("Dormouse") is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. Unlike standalone, several Workspaces are visible at once, and VS Code — not Dormouse — owns their tabs, creation, and closing: opening a Dormouse editor tab creates a Workspace and closing the tab closes it, so Dormouse adds no create/rename/close affordances here. A webview owns the terminal Sessions whose PTYs its router tracks (`ownedPtyIds`, `docs/specs/transport.md`) plus any browser surfaces rendered in it; together those are the Workspace's Surfaces.
+
+#### Surfacing union status on native chrome
+
+The host computes each Workspace's native-chrome attention projection (`ringing` / `todo` / `count`) from the module-level `AlertManager`, scoped to that webview's `ownedPtyIds`. That means VS Code native chrome reflects terminal Session ring + TODO only. Browser-surface TODO remains webview-local Surface state and is not included in `panel.iconPath`, `panel.title`, or `view.badge` unless a future webview→host Surface-state channel is added; the existing `alert:state` channel is keyed by PTY-backed Session ids only.
+
+- **Editor tab (`WebviewPanel`):** reassign `panel.iconPath` between normal / ringing / TODO icon variants, and optionally fold the Workspace name or a status marker into `panel.title`. Both properties are writable after creation (`title: string`, `iconPath?: Uri | { light, dark }`).
+- **Sidebar/panel view (`WebviewView`):** set `view.badge = { value: count, tooltip }` for a numeric attention badge on the activity-bar icon, visible even when the view is collapsed; `view.description` may carry status text. `view.title` is writable too but stays "Dormouse". `ViewBadge` is numeric only (no custom color or glyph), so the editor-tab icon swap carries the ringing-vs-TODO distinction the badge cannot.
+
+Reflection updates on every `AlertManager.onStateChange` for an owned PTY and on router attach/detach (a Workspace gaining or losing Sessions). When a Workspace's union is clear, the badge is set to `undefined` and the icon returns to the normal variant. Icon artwork is settled in the Storybook/asset pass.
 
 ### Shell selection
 
@@ -213,3 +230,4 @@ vscode.commands.executeCommand('setContext', 'dormouse.mode', 'normal');
 - Commands not registered: `dormouse.newPane`, `closePane`, `nextPane`, `prevPane`, `enterTerminalMode`, `enterNormalMode`, `listSessions`, `reattach`
 - No status bar item showing active session count
 - No QuickPick for listing/reattaching PTY sessions
+- Workspace union status not yet reflected onto `panel.iconPath` / `panel.title` (editor tabs) or `view.badge` / `view.description` (bottom-panel view) — the model and chrome contract are in the Workspaces section above

@@ -78,7 +78,8 @@ The mobile UI is split into fixed and flexible regions:
 
 The mobile session header and pane content come from `MobileWall`, a mobile
 composition that displays one active terminal session at a time. Desktop `Wall`
-remains the tiling workspace; mobile does not expose split-pane layout. The
+remains the tiling workspace layout; mobile does not expose split-pane layout or
+multiple Workspaces. The
 mobile wrapper owns the two selectors and the fixed-height reserve. The selector
 block should use one divider between the Touch and Input rows, with no divider
 above Touch and no divider below Input. The mobile session header should not use

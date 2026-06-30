@@ -2,7 +2,7 @@
 
 > See `docs/specs/glossary.md` for Session / Pane / Door vocabulary. This spec uses it throughout.
 
-Alert state belongs to the **Session** Activity layer. It survives Pane <-> Door movement and is destroyed with the Session.
+Terminal alert state belongs to the **Session** Activity layer. It survives Pane <-> Door movement and is destroyed with the Session. This spec also defines how the Workspace union counts browser-surface TODO flags: a browser Surface has no Session Activity machine, can never ring, and carries only a user-set TODO flag as Surface state that is destroyed with that browser Surface.
 
 Dormouse can owe the user attention in three ways:
 
@@ -22,7 +22,7 @@ Terminal-report and command-exit alerts do not require WATCHING to be enabled. A
 
 ## Public State
 
-Source of truth: `AlertState` / `ActivityNotification` in `lib/src/lib/alert-manager.ts` and `SessionStatus` in `lib/src/lib/activity-monitor.ts` define the public Activity state. Internal state is deliberately split into independent tracks (`watchingStatus`, `protocolStatus`, `commandExitStatus`, plus `progress` and `commandExitWatch` companion state) so each axis evolves without entangling the others.
+Source of truth: `AlertState` / `ActivityNotification` in `lib/src/lib/alert-manager.ts` and `SessionStatus` in `lib/src/lib/activity-monitor.ts` define the public Activity state for terminal Sessions. Internal state is deliberately split into independent tracks (`watchingStatus`, `protocolStatus`, `commandExitStatus`, plus `progress` and `commandExitWatch` companion state) so each axis evolves without entangling the others.
 
 Public `status` is a projection — first match wins:
 
@@ -172,6 +172,31 @@ Clearing behavior:
 - Destroying the Session clears all alert, TODO, notification, attention, protocol, and command-exit state.
 
 `attentionDismissedRing` exists so the next bell click after an attention-based dismissal opens the dialog instead of silently disabling WATCHING.
+
+## Workspace union
+
+> See `docs/specs/glossary.md` for the Workspace / Window containers.
+>
+> **Not yet implemented (stage 2b).** The union projection and its surfacing are specified ahead of the code. The implemented piece (stage 2a) is that a browser Surface's user-set `todo` round-trips to the activity store live, so its door shows the TODO pill — the same input the union will read once it exists.
+
+A Workspace projects a **union status** over the attention state of the Surfaces it contains (terminal Sessions and browser Surfaces alike — see `docs/specs/glossary.md`):
+
+- `ringing` — any member terminal Session's public `status` is `ALERT_RINGING`. Only terminal Sessions ring; a browser Surface has no BEL/OSC source and never reaches `ALERT_RINGING`.
+- `todo` — any member Surface has `todo === true`. A terminal Session or a browser Surface may be flagged.
+- `count` — number of member Surfaces owing attention (ringing or `todo`), for the numeric badge a host may show.
+
+Rules:
+
+- The union is **display-only** and derived. It never enters the terminal Activity state machine, never fires a fresh ring, and produces no sound or notification of its own; it only mirrors member state. Every terminal ringing/TODO transition above remains per-Session, and every browser TODO transition remains per-browser Surface.
+- Membership includes minimized (`Doored`) Surfaces and, in standalone, the Surfaces of inactive (unmounted) Workspaces. A terminal Session's Activity survives minimize and unmount (glossary I2/I3) and a browser Surface's `todo` survives in its persisted params, so a backgrounded Surface can light up its Workspace's indicator.
+- Attention suppression needs no special-casing: a per-Session ring is already suppressed while that Session is attended, so the union simply reflects whatever rings survive.
+
+Where the union surfaces is host-specific:
+
+- **Standalone:** each inactive Workspace's tab in the strip shows the union `ringing` bell and `todo` pill, reusing the Door indicator vocabulary (`bellIconClass`, the TODO pill). The **active** Workspace's tab shows no union indicator — its rings and TODOs are already visible on its own panes and doors. See `docs/specs/layout.md`.
+- **VS Code:** the host reflects the **terminal** portion of each Workspace's union onto the webview's native chrome — an editor tab's icon (and optionally title) and the sidebar view's numeric badge. Browser-surface TODO stays webview-local and is not shown on native chrome until a future webview→host Surface-state channel exists. See `docs/specs/vscode.md`.
+
+This spec fixes the projection and the surfacing rules; the exact visual treatment of the standalone strip is settled in the Storybook UI pass.
 
 ## UI Contract
 

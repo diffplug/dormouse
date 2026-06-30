@@ -1,5 +1,5 @@
 import type { PlatformAdapter, PtyInfo } from './platform/types';
-import { resumeTerminal } from './terminal-registry';
+import { restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
 import { readPersistedSession, type PersistedDoor } from './session-types';
 import { restoreSession } from './session-restore';
 
@@ -102,6 +102,7 @@ function getSavedPaneResumeInfo(savedState: unknown, liveIds: string[]): Map<str
   const liveSet = new Set(liveIds);
   const result = new Map<string, { title: string; untouched: boolean }>();
   for (const pane of saved.panes) {
+    restoreBrowserSurfaceTodo(pane);
     if (!liveSet.has(pane.id)) continue;
     result.set(pane.id, { title: pane.title, untouched: pane.untouched });
   }
@@ -119,10 +120,14 @@ function getSavedResumePlan(savedState: unknown, liveIds: string[]): ReconnectRe
   const savedSet = new Set(saved.panes.map((p) => p.id));
   if (!liveIds.every((id) => savedSet.has(id))) return null;
 
-  const doors = (saved.doors ?? []).filter((item) => liveSet.has(item.id));
+  // Browser surfaces have no PTY, so they never appear in the live-PTY set. Keep
+  // them anyway — they are reconstructed from the saved layout blob / door
+  // params (docs/specs/transport.md). Omitting them would drop the saved layout
+  // (the visible-pane mismatch below) and lose minimized browser doors.
+  const doors = (saved.doors ?? []).filter((item) => liveSet.has(item.id) || item.component === 'browser');
   const doorIds = new Set(doors.map((item) => item.id));
   const paneIds = saved.panes
-    .filter((pane) => liveSet.has(pane.id) && !doorIds.has(pane.id))
+    .filter((pane) => !doorIds.has(pane.id) && (liveSet.has(pane.id) || pane.surfaceType === 'browser'))
     .map((pane) => pane.id);
   const layoutPanelIds = getLayoutPanelIds(saved.layout);
   const layoutMatchesVisiblePanes =
@@ -131,7 +136,7 @@ function getSavedResumePlan(savedState: unknown, liveIds: string[]): ReconnectRe
     layoutPanelIds.every((id) => paneIds.includes(id));
 
   return {
-    paneIds,
+    paneIds: layoutMatchesVisiblePanes ? paneIds : paneIds.filter((id) => liveSet.has(id)),
     doors,
     layout: layoutMatchesVisiblePanes ? saved.layout : undefined,
   };

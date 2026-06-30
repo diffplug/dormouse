@@ -221,7 +221,8 @@ The system uses **raised surfaces**, not "cards." There are no nested cards. The
 
 ### Navigation
 
-The system has no traditional top-nav. Two surfaces play navigational roles:
+The system has no traditional product top-nav. Three surfaces play navigational roles:
+- **Workspace strip** (standalone app bar, top): horizontal tabs, one per Workspace, for switching between Workspaces within one window. Inactive tabs carry the union alert/TODO indicators (bell + TODO pill) borrowed from the Door vocabulary; the active tab carries none. This is standalone app-bar chrome around the Wall — see `docs/specs/layout.md` and `docs/specs/alert.md` — and its exact visual treatment is being designed in Storybook. VS Code surfaces the same status on its own native tab/badge chrome instead (`docs/specs/vscode.md`).
 - **Baseboard** (bottom of the app): horizontal strip of doors representing minimized panes plus chrome action buttons. Doors are the primary navigation affordance to a minimized terminal. Button style: `h-5 rounded px-1.5 text-sm font-medium font-mono text-muted` with `hover:bg-surface-raised hover:text-foreground transition-colors`.
 - **Pane Header (TerminalPaneHeader)**: the tab-replacing strip at the top of each pane. Tab-bar styling is stripped from dockview entirely (`--dv-tabs-and-actions-container-*` overrides); the React header IS the tab.
 

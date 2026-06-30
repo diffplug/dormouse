@@ -1,8 +1,9 @@
 # Dor CLI
 
-> See `docs/specs/glossary.md` for canonical Session and Pane vocabulary.
-> `dor` uses `surface` for user-facing CLI handles. Pane remains layout
-> vocabulary in the implementation and in existing compatibility commands.
+> See `docs/specs/glossary.md` for canonical Surface / Session / Pane vocabulary.
+> A **Surface** (the durable occupant of a Pane — a terminal Session or a browser
+> surface) is `dor`'s user-facing CLI handle. Pane remains layout vocabulary in the
+> implementation and in existing compatibility commands.
 
 Dormouse bundles a `dor` CLI into every terminal it launches. The CLI is the
 public API; any socket used underneath it is private host plumbing.
@@ -163,11 +164,15 @@ that owns that surface when one is available.
 
 ## Handle Model
 
-Dormouse currently exposes one workspace and one window internally, but no
-workspace/window targeting CLI flags. Each visible Pane has one selected
-surface. Most surfaces are terminals; `dor iframe` introduces a non-terminal
-iframe surface. User-facing `dor` commands should expose surface handles; Pane
-remains layout vocabulary and compatibility-command terminology.
+Dormouse supports multiple Workspaces within one Window (`docs/specs/glossary.md`):
+standalone hosts several Workspaces with one active, and VS Code maps each webview
+to a Workspace. The handle model therefore reserves `workspace:<n|name>` and
+`window:<n>` refs. The full containment hierarchy is `Window ⊃ Workspace ⊃ Pane ⊃
+Surface`. Each visible Pane has one selected Surface; a Surface is a terminal (a
+Session) or a browser surface — the `iframe` / agent-browser renderers of `dor`'s
+unified `browser` surface (`docs/specs/dor-browser.md`). User-facing `dor` commands
+expose Surface handles; Pane remains layout vocabulary and compatibility-command
+terminology.
 
 Invariants:
 
@@ -180,14 +185,21 @@ Invariants:
   `surface:1`, `pane:2`.
 - List output defaults to refs; commands that list handles accept
   `--id-format refs|uuids|both`.
-- Workspace/window refs and target flags will be added only when Dormouse
-  actually supports them.
+- Workspace/window refs are defined now that Dormouse supports multiple
+  Workspaces: `workspace:<n>` (and `workspace:<name>` when exactly one Workspace
+  matches) and `window:<n>` select a container. A `--workspace` target flag and
+  `dor workspace` management commands (list / new / rename / close / switch) are
+  the next handles to expose; like every other command they ship with their
+  snapshot-tested help and the control methods that back them, not ahead of them.
 
 ## Current Implemented Commands
 
 Implemented commands call private `surface.*` control methods. `surface.list`
 derives its response from current Dockview panels plus terminal state/activity
-snapshots where available, then returns `workspace:1` and `window:1`.
+snapshots where available, then returns `workspace:1` and `window:1`. Once
+`surface.list` is made Workspace-aware it tags each surface with the real
+`workspace:<n>` / `window:<n>` membership defined above; until then it reports the
+single active Workspace.
 
 Command tails captured after `--` are sent as raw argv arrays (`command:
 string[]`); the host — not `dor` — quotes them for the target shell. `dor`

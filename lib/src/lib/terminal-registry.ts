@@ -14,6 +14,7 @@ export type {
 } from './terminal-state';
 
 export {
+  clearLocalSurfaceActivity,
   clearPrimedActivity,
   clearSessionAttention,
   clearSessionTodo,
@@ -28,6 +29,7 @@ export {
   markSessionAttention,
   markSessionTodo,
   primeActivity,
+  restoreBrowserSurfaceTodo,
   subscribeToActivity,
   toggleSessionAlert,
   toggleSessionTodo,
