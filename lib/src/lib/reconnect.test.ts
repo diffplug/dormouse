@@ -318,6 +318,28 @@ describe('resumeOrRestore', () => {
     expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('pane-term', 'pane-term-replay', expect.anything());
   });
 
+  it('drops visible browser panes from terminal fallback when the saved layout is rejected', async () => {
+    const saved: PersistedSession = {
+      version: 3,
+      layout: { panels: { 'pane-term': {}, 'stale-term': {}, 'pane-web': {} } },
+      panes: [
+        { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'stale-term', title: 'Stale terminal', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'pane-web', title: 'localhost', cwd: null, scrollback: null, resumeCommand: null, surfaceType: 'browser' },
+      ],
+    };
+
+    const result = await resumeOrRestore(createPlatform([
+      { id: 'pane-term', alive: true },
+    ], saved));
+
+    expect(result).toEqual({
+      paneIds: ['pane-term'],
+      doors: [],
+      layout: undefined,
+    });
+  });
+
   it('keeps a minimized browser door alive across resume despite having no PTY', async () => {
     const layout = { panels: { 'pane-term': {} } };
     const doors = [{

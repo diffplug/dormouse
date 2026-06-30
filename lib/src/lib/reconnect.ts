@@ -135,7 +135,7 @@ function getSavedResumePlan(savedState: unknown, liveIds: string[]): ReconnectRe
     layoutPanelIds.every((id) => paneIds.includes(id));
 
   return {
-    paneIds,
+    paneIds: layoutMatchesVisiblePanes ? paneIds : paneIds.filter((id) => liveSet.has(id)),
     doors,
     layout: layoutMatchesVisiblePanes ? saved.layout : undefined,
   };
