@@ -77,8 +77,6 @@ export class ActivityMonitor {
         // If they haven't (view hidden, or just not focused), new output from
         // e.g. a shell prompt shouldn't silently dismiss the alert.
         if (!this.hasAttention()) return;
-        this.firstOutputAt = now;
-        this.outputCountSinceAttention = 1;
         this.enterMightBeBusy();
         break;
     }
