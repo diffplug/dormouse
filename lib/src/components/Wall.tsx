@@ -10,6 +10,7 @@ import 'dockview-react/dist/styles/dockview.css';
 import { Baseboard } from './Baseboard';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
 import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
+import { RemotePairingModalHost } from '../remote/host/RemotePairingModalHost';
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { markAgentBrowserSessionClosed } from './wall/agent-browser-sessions';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
@@ -1845,6 +1846,7 @@ export function Wall({
               onKeyboardActiveChange={setDialogKeyboardActive}
               resolveLabel={surfaceRefForId}
             />
+            <RemotePairingModalHost onKeyboardActiveChange={setDialogKeyboardActive} />
 
           </div>
           </DialogKeyboardContext.Provider>
