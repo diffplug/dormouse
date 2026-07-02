@@ -22,6 +22,7 @@ import { readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import type { Context, MiddlewareHandler } from 'hono';
 import { createNodeWebSocket } from '@hono/node-ws';
 import type { NodeWebSocket } from '@hono/node-ws';
@@ -164,6 +165,12 @@ export function createApp(config: AppConfig): CreatedApp {
   // The WS relay routes need the http server that `serve()` builds later, so the
   // adapter is created here and `injectWebSocket` is handed back to the caller.
   const { upgradeWebSocket, injectWebSocket } = createNodeWebSocket({ app });
+
+  // The Host (standalone webview) and dev Pocket builds call the API from
+  // other origins, so preflights must succeed. Permissive CORS is safe here:
+  // every endpoint is gated by the setup password or a bearer token, and no
+  // cookies exist for a foreign origin to ride on.
+  app.use('/api/*', cors({ origin: '*', allowHeaders: ['Content-Type', 'Authorization'] }));
 
   // Shared greeting, kept from the skeleton so `lib` and `server` stay agreed.
   app.get(HELLO_ROUTE, (c) => c.json(helloResponse()));
