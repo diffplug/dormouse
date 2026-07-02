@@ -33,6 +33,36 @@ attached surface costs one stream.
 
 ---
 
+# v1 scope
+
+v1 is the smallest protocol that lets a phone **sign in, pick a pane, see it
+live, and type into it** — the phone column of the table above, and only it:
+
+* Hello (version + capabilities)
+* `directory.watch`, snapshot-only (no deltas, no thumbnails)
+* `surface.attach` / `surface.detach`, one attachment per session
+* Terminal: attach-is-the-resize, live data + semantic events,
+  `terminal.write`/`terminal.resize`, last-attach-wins tethering
+* Browser: screencast frames at Host-chosen fixed quality, pointer + key input
+* One implicit grant: every paired session has full input (selfhost is
+  single-user), no layout operations
+
+Everything else is future work, staged in likely order of arrival:
+
+1. **In-flight command replay** — first follow-up after v1 (see Terminal)
+2. **Semantic command scrollback** — v2 (see Terminal)
+3. **Directory thumbnails**
+4. **Graded grants + layout mutations** (observe-only viewers, remote
+   split/kill with Host-side confirm)
+5. **The wall: VR** (`wall.watch`, multi-attach, wall lease)
+6. **WebRTC transport + app-layer encryption**
+7. **Audio**
+
+Each future item is additive — a new method, event, or optional field — so
+nothing in the v1 protocol changes shape when it lands.
+
+---
+
 # Terminology
 
 Reuses the existing surface model (`dor/src/protocol.ts`,
@@ -107,11 +137,12 @@ the protocol can grow without breaking older Pockets.
 interface ClientHello {
   protocolVersion: 1;
   viewer: 'phone' | 'vr' | 'desktop';
-  /** What the client can render / wants to do. */
+  /** What the client can render / wants to do. v1 phones send
+   *  { screencast: ['jpeg'], input: true, wall: false }. */
   capabilities: {
     screencast: ReadonlyArray<'jpeg' | 'webp'>;
-    input: boolean;              // false = observe-only client
-    wall: boolean;               // wants wall.watch (VR)
+    input: boolean;
+    wall: boolean;
   };
 }
 
@@ -119,7 +150,8 @@ interface ClientHello {
 interface HostHello {
   protocolVersion: 1;
   hostId: string;
-  /** What this session is allowed to do; see Input authority. */
+  /** v1: always { input: true, layout: false } — selfhost is single-user, so
+   *  every paired session is the owner. Graded grants are future work. */
   grants: { input: boolean; layout: boolean };
 }
 ```
@@ -151,26 +183,26 @@ interface DirectoryEntry {
   hasTODO: boolean;
 }
 
-// events on the subscription
 type DirectoryEvent =
-  | { event: 'directory.snapshot'; data: { entries: DirectoryEntry[] } }
-  | { event: 'directory.upsert';   data: { entry: DirectoryEntry } }
-  | { event: 'directory.remove';   data: { paneRef: string } };
+  | { event: 'directory.snapshot'; data: { entries: DirectoryEntry[] } };
 ```
 
-Thumbnails are requested separately (`directory.thumbnail { paneRef }` →
-single downscaled frame / terminal screen render) so the picker stays cheap on
-cellular and thumbnails are fetched only for what is on screen.
+Snapshot-only, deliberately: a directory is dozens of entries at most, so on
+any change the Host coalesces and resends the whole thing. Delta events are a
+future optimization there is no current reason to pay for.
+
+Thumbnails are future work; in v1 the picker renders from titles, activity,
+and the `ringing`/`hasTODO` badges.
 
 ---
 
 # Attaching to a surface
 
 `surface.attach { surfaceId, ... }` opens the surface's stream (terminals add
-their dimensions — see below); `surface.detach { surfaceId }` closes it. The
-phone holds one attachment; VR holds one per visible panel. Attachment is
-view-state only with one deliberate exception: attaching to a terminal takes
-size authority.
+their dimensions — see below); `surface.detach { surfaceId }` closes it. v1
+allows one attachment per session (the phone's model); lifting that cap for VR
+is future work. Attachment is view-state only with one deliberate exception:
+attaching to a terminal takes size authority.
 
 ## Terminal surfaces
 
@@ -190,11 +222,9 @@ dimensions and there is no snapshot transfer:
 3. If the requested size happens to equal the current size, the Host forces
    the repaint anyway: `SIGWINCH` alone first (most TUIs refetch size and
    repaint), then a quick rows±1 bounce if no output follows.
-4. If a command is mid-flight, its output so far is replayed before the live
-   stream (see In-flight replay).
 
 Normal-screen history does not regenerate on resize; it is deliberately absent
-from v1 and arrives as semantic scrollback in v2 (below).
+from v1 (see Future work below).
 
 ```ts
 // client → host
@@ -203,13 +233,8 @@ from v1 and arrives as semantic scrollback in v2 (below).
 // host → client, the attach result
 interface TerminalAttachResult {
   cols: number; rows: number;     // the size the PTY now has
-  /** Present when a command is running; its output since commandStart. */
-  inflight?: {
-    commandLine: string | null;
-    startedAt: number;
-    bytes: string;                // base64, tail-capped
-    truncated: boolean;
-  };
+  // Reserved: `inflight` (in-flight replay) and `blocks` (semantic
+  // scrollback) land here additively — see Future work.
 }
 
 // then a stream of:
@@ -225,16 +250,6 @@ type TerminalInput =
   | { method: 'terminal.resize'; params: { surfaceId: string; cols: number; rows: number } };
 ```
 
-### In-flight replay (v1)
-
-The most common reason to open a pane on the phone is a command that is still
-running — "is my build done?" — and a resize repaint shows nothing for a
-command quietly writing a log. The Host therefore retains the output of the
-current command from its `commandStart` boundary (OSC 133/633, with the
-existing keystroke-heuristic fallback), tail-capped to a fixed byte budget;
-attach replays it before the live stream begins. The buffer is dropped at the
-next prompt — v1 remembers the in-flight command only, never history.
-
 ### Size authority: last-attach-wins
 
 A terminal has one size, and the most recent size writer owns it: attaching
@@ -245,13 +260,31 @@ pane — the Host's wall pane, other attached viewers — greys out and shows on
 instead of fighting over `SIGWINCH`. Interacting with a tethered pane is how a
 display takes it back.
 
-### Future work (v2): semantic command scrollback
+### Future work: in-flight replay, then semantic scrollback
 
-History arrives as structure the Host already extracts, not as emulator state:
-OSC 133/633 segmentation gives per-command boundaries, alt-screen spans are
-already tracked and stripped, and the v1 in-flight buffer is the same capture
-mechanism retained for one command instead of K. v2 keeps the last K commands
-per pane:
+**In-flight replay (first follow-up after v1).** The most common reason to
+open a pane on the phone is a command that is still running — "is my build
+done?" — and a resize repaint shows nothing for a command quietly writing a
+log. (Dormouse's primary workload, agent TUIs, do repaint on resize — which is
+what makes this deferrable at all.) The Host retains the output of the current
+command from its `commandStart` boundary (OSC 133/633, with the existing
+keystroke-heuristic fallback), tail-capped to a fixed byte budget, dropped at
+the next prompt; attach replays it via the reserved `inflight` field:
+
+```ts
+inflight?: {
+  commandLine: string | null;
+  startedAt: number;
+  bytes: string;                // base64, tail-capped
+  truncated: boolean;
+}
+```
+
+**Semantic command scrollback (v2).** History arrives as structure the Host
+already extracts, not as emulator state: OSC 133/633 segmentation gives
+per-command boundaries, alt-screen spans are already tracked and stripped, and
+the in-flight buffer is the same capture mechanism retained for K commands
+instead of one:
 
 ```ts
 interface CommandBlock {
@@ -267,9 +300,8 @@ interface CommandBlock {
 
 Attach then also delivers recent blocks, and the client renders them at its
 own width — collapsible cards on the phone, panels in VR — rather than
-replaying a fixed-width terminal. Additive by construction: an extra field on
-`TerminalAttachResult` plus a `terminal.block` event, so nothing in the v1
-protocol changes shape.
+replaying a fixed-width terminal. Additive by construction: a `blocks` field
+on `TerminalAttachResult` plus a `terminal.block` event.
 
 ## Browser surfaces (`agent-browser`)
 
@@ -285,13 +317,13 @@ type BrowserEvent =
 // the host maps them through the screencast scale into CDP input.
 type BrowserInput =
   | { method: 'browser.pointer'; params: { surfaceId: string; kind: 'tap' | 'down' | 'move' | 'up' | 'scroll'; x: number; y: number; dx?: number; dy?: number } }
-  | { method: 'browser.key';     params: { surfaceId: string; text?: string; key?: string; modifiers?: number } }
-  | { method: 'browser.navigate'; params: { surfaceId: string; url: string } };
+  | { method: 'browser.key';     params: { surfaceId: string; text?: string; key?: string; modifiers?: number } };
 ```
 
-Quality adapts per attachment (`browser.quality { surfaceId, maxFps,
-maxDimension, quality }`): the phone asks for less than a headset does, and a
-background VR panel asks for less than the one being looked at.
+In v1 the Host picks fixed, phone-appropriate screencast parameters (JPEG,
+capped dimension and frame rate). Per-attachment quality negotiation
+(`browser.quality`) and remote navigation (`browser.navigate`) are future
+work — a phone can drive the page's own UI in the meantime.
 
 ## Iframe surfaces
 
@@ -304,26 +336,28 @@ exist, so support can be added cleanly later — it is not on the critical path.
 
 # Input authority
 
-Layered, consistent with "the Host is the final authority":
+v1 is deliberately flat: selfhost is single-user, so every paired session is
+the owner and gets full input (`grants: { input: true, layout: false }`). No
+session gets layout operations. The Host UI still shows connected viewers and
+can kill any session live; in-flight input is dropped the moment it does.
 
-1. **Pairing-time**: the ACL record's approval can carry a standing grant
+Future work — graded grants, layered so "the Host is the final authority"
+holds at every step:
+
+1. **Pairing-time**: the ACL record's approval carries a standing grant
    (observe-only vs interactive) chosen in the Host's approval UI.
-2. **Session-time**: `HostHello.grants` reports what this session actually
-   got; a client that asked for input may still receive `input: false`.
-3. **Always**: the Host UI shows connected viewers and can revoke a grant or
-   kill the session live; in-flight input is dropped the moment it does.
-
-Destructive layout operations (`surface.kill`) additionally require the
-`layout` grant and are confirmed on the Host the same way local kills are
-(KillConfirm), unless the Host user has opted that session into unattended
-control.
+2. **Session-time**: `HostHello.grants` reports what the session actually got.
+3. **Layout**: destructive operations (`surface.kill`) require the `layout`
+   grant and are confirmed on the Host the same way local kills are
+   (KillConfirm), unless the Host user opts a session into unattended control.
 
 ---
 
-# The wall (VR)
+# The wall (VR) — future work
 
-VR does not stream the desktop; it *is* the desktop. The headset runs the same
-web UI (`lib`) against remote data sources instead of local ones.
+Nothing in this section is v1. VR does not stream the desktop; it *is* the
+desktop: the headset runs the same web UI (`lib`) against remote data sources
+instead of local ones.
 
 ## Layout replication
 
@@ -381,13 +415,13 @@ time; the Host user can always reclaim it locally. Phones never need it.
 
 # Multi-viewer semantics
 
-* Any number of observe-only viewers; streams fan out per attachment.
-* Input is not locked to one viewer — grants are per-session, and interleaved
-  typing is no worse than two keyboards on one machine. Terminal size is
-  last-attach-wins (see Size authority); the wall lease is the only other
-  exclusive resource (primary display).
-* Every viewer is visible on the Host (label from the ACL record, e.g.
-  `iPhone Safari`), with per-viewer disconnect.
+Concurrent sessions need no special machinery in v1: attach state is
+per-session, streams fan out per attachment, and terminal size is
+last-attach-wins with the tether display resolving contention. Every viewer is
+visible on the Host (label from the ACL record, e.g. `iPhone Safari`), with
+per-viewer disconnect. Interleaved typing from two granted sessions is no
+worse than two keyboards on one machine; the wall lease (future) is the only
+exclusive resource.
 
 ---
 
@@ -395,10 +429,10 @@ time; the Host user can always reclaim it locally. Phones never need it.
 
 * Terminal output is already coalesced host-side; the remote stream reuses
   that batching and adds a per-session byte budget with tail-drop + resync
-  (an implicit re-attach: repaint via resize plus in-flight replay) rather
-  than unbounded buffering on a bad link.
+  (an implicit re-attach: repaint via resize) rather than unbounded buffering
+  on a bad link.
 * Screencast frames are droppable by design; only the newest frame matters.
-* The directory is metadata-only; thumbnails are pull, not push.
+* The directory is metadata-only.
 * Detach on backgrounding: when the phone app/PWA loses visibility, the client
   detaches streams but keeps the control channel; reattach is one message.
 
