@@ -6,6 +6,7 @@ node_modules/
 dist/
 dor/src/generated-version.ts
 lib/dist/
+lib/dist-pocket/
 *.tsbuildinfo
 
 # Vite cache

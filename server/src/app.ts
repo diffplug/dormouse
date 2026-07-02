@@ -17,11 +17,15 @@
  */
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { join, relative } from 'node:path';
 
 import { Hono } from 'hono';
 import type { Context, MiddlewareHandler } from 'hono';
 import { createNodeWebSocket } from '@hono/node-ws';
 import type { NodeWebSocket } from '@hono/node-ws';
+import { serveStatic } from '@hono/node-server/serve-static';
 import {
   API_ROUTES,
   HELLO_ROUTE,
@@ -64,6 +68,12 @@ export interface AppConfig {
   readonly origin: string;
   /** Directory holding `account.json`. */
   readonly stateDir: string;
+  /**
+   * Directory of the built Pocket web app (`lib`'s `dist-pocket`). When it
+   * exists it is served statically at `/*`; otherwise `GET /` is a stub telling
+   * you how to build it. API and `/ws` routes always take precedence.
+   */
+  readonly pocketDir?: string;
   /** Injectable clock (epoch ms) for tests; defaults to `Date.now`. */
   readonly now?: () => number;
 }
@@ -154,9 +164,6 @@ export function createApp(config: AppConfig): CreatedApp {
   // The WS relay routes need the http server that `serve()` builds later, so the
   // adapter is created here and `injectWebSocket` is handed back to the caller.
   const { upgradeWebSocket, injectWebSocket } = createNodeWebSocket({ app });
-
-  // GET / — stub landing page; slice 5 replaces this with the Pocket web app.
-  app.get('/', (c) => c.text('Dormouse selfhost server'));
 
   // Shared greeting, kept from the skeleton so `lib` and `server` stay agreed.
   app.get(HELLO_ROUTE, (c) => c.json(helloResponse()));
@@ -375,7 +382,37 @@ export function createApp(config: AppConfig): CreatedApp {
     }),
   );
 
+  // --- Static Pocket app: GET /* fallback, registered LAST so every API and
+  //     /ws route above wins. Missing build → a stub with the build command.
+  registerPocketServing(app, config.pocketDir);
+
   return { app, sessions, requireSession, hub, injectWebSocket };
+}
+
+/** Message shown at `GET /` when the Pocket app has not been built yet. */
+const POCKET_MISSING_MESSAGE =
+  'Dormouse selfhost server. The Pocket web app is not built yet — run ' +
+  '`pnpm --filter dormouse-lib build:pocket` (or set DORMOUSE_POCKET_DIR).';
+
+/**
+ * Serve the built Pocket app from `pocketDir` at `/*`, falling back to
+ * `index.html` for any non-file GET (the app is a single page). When the
+ * directory or its `index.html` is absent, keep the old stub at `GET /`.
+ */
+function registerPocketServing(app: Hono<AppEnv>, pocketDir?: string): void {
+  const indexHtmlPath = pocketDir ? join(pocketDir, 'index.html') : null;
+  if (!pocketDir || !indexHtmlPath || !existsSync(indexHtmlPath)) {
+    app.get('/', (c) => c.text(POCKET_MISSING_MESSAGE));
+    return;
+  }
+  // `serveStatic` joins its `root` onto the request path relative to cwd, so a
+  // path relative to cwd is the portable way to point it at an arbitrary dir.
+  const root = relative(process.cwd(), pocketDir) || '.';
+  app.get('/*', serveStatic({ root }));
+  app.get('*', async (c) => {
+    const html = await readFile(indexHtmlPath, 'utf8').catch(() => null);
+    return html ? c.html(html) : c.notFound();
+  });
 }
 
 // ---------------------------------------------------------------------------

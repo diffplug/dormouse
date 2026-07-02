@@ -4,6 +4,9 @@
  * `app.ts` so the app itself stays testable without touching env or the network.
  */
 
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { serve } from '@hono/node-server';
 
 import { createApp } from './app.js';
@@ -21,7 +24,13 @@ if (!setupPassword) {
 const origin = process.env.DORMOUSE_ORIGIN ?? `http://localhost:${port}`;
 const stateDir = process.env.DORMOUSE_STATE_DIR ?? './data';
 
-const { app, injectWebSocket } = createApp({ setupPassword, origin, stateDir });
+// Default to `lib/dist-pocket` resolved from this compiled file's location
+// (server/dist/index.js → repo root two levels up), so it works regardless of
+// the process's cwd. Override with DORMOUSE_POCKET_DIR.
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const pocketDir = process.env.DORMOUSE_POCKET_DIR ?? join(repoRoot, 'lib', 'dist-pocket');
+
+const { app, injectWebSocket } = createApp({ setupPassword, origin, stateDir, pocketDir });
 
 const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`server listening on http://localhost:${info.port} (origin ${origin})`);

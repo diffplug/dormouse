@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:pocket": "vite --config vite.pocket.config.ts",
     "build": "tsc -b && vite build",
+    "build:pocket": "vite build --config vite.pocket.config.ts",
     "preview": "vite preview",
     "pretest": "pnpm --filter dor-lib-common build && pnpm --filter server-lib-common build",
     "test": "vitest run",

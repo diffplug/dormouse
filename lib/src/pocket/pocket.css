@@ -1,0 +1,362 @@
+/*
+ * Self-contained dark theme for Dormouse Pocket. The Pocket app is served
+ * standalone (not inside VSCode / the wall), so it does not depend on the
+ * `--vscode-*` token system the main `lib` app uses; it just mirrors that
+ * dark, terminal-forward look with plain CSS variables.
+ */
+
+:root {
+  --pk-bg: #16181d;
+  --pk-surface: #1e2128;
+  --pk-surface-raised: #262a33;
+  --pk-border: #333844;
+  --pk-fg: #e6e8ec;
+  --pk-muted: #9aa1ad;
+  --pk-accent: #4a9eff;
+  --pk-accent-fg: #0b1220;
+  --pk-danger: #f0616d;
+  --pk-ok: #3fb98a;
+  --pk-ring: #4a9eff;
+  --pk-font: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--pk-bg);
+  color: var(--pk-fg);
+  font-family: var(--pk-font);
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+#pocket-root {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.pk-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* --- Header --- */
+.pk-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  padding-top: max(12px, env(safe-area-inset-top));
+  background: var(--pk-surface);
+  border-bottom: 1px solid var(--pk-border);
+  flex: 0 0 auto;
+}
+
+.pk-header h1 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pk-header .pk-sub {
+  font-size: 12px;
+  color: var(--pk-muted);
+  font-weight: 400;
+}
+
+/* --- Scrolling content --- */
+.pk-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 14px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pk-body.pk-center {
+  justify-content: center;
+}
+
+/* --- Cards / list rows --- */
+.pk-card {
+  background: var(--pk-surface);
+  border: 1px solid var(--pk-border);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.pk-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: var(--pk-surface);
+  border: 1px solid var(--pk-border);
+  border-radius: 12px;
+  padding: 14px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.pk-row:active {
+  background: var(--pk-surface-raised);
+}
+
+.pk-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.pk-row-title {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pk-row-secondary {
+  font-size: 12px;
+  color: var(--pk-muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pk-row-actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* --- Badges --- */
+.pk-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--pk-border);
+  color: var(--pk-muted);
+  white-space: nowrap;
+}
+
+.pk-badge.online {
+  color: var(--pk-ok);
+  border-color: color-mix(in srgb, var(--pk-ok) 45%, transparent);
+}
+
+.pk-badge.offline {
+  color: var(--pk-muted);
+}
+
+.pk-badge.ringing {
+  color: var(--pk-danger);
+  border-color: color-mix(in srgb, var(--pk-danger) 45%, transparent);
+}
+
+.pk-badge.todo {
+  color: var(--pk-accent);
+  border-color: color-mix(in srgb, var(--pk-accent) 45%, transparent);
+}
+
+.pk-badge.activity {
+  text-transform: capitalize;
+}
+
+/* --- Buttons --- */
+.pk-btn {
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 10px;
+  border: 1px solid var(--pk-border);
+  background: var(--pk-surface-raised);
+  color: var(--pk-fg);
+  padding: 10px 14px;
+  cursor: pointer;
+  min-height: 42px;
+}
+
+.pk-btn:active {
+  filter: brightness(1.15);
+}
+
+.pk-btn:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.pk-btn.primary {
+  background: var(--pk-accent);
+  color: var(--pk-accent-fg);
+  border-color: transparent;
+}
+
+.pk-btn.ghost {
+  background: transparent;
+}
+
+.pk-btn.small {
+  padding: 8px 12px;
+  min-height: 36px;
+  font-size: 13px;
+}
+
+.pk-btn.block {
+  width: 100%;
+}
+
+/* --- Forms --- */
+.pk-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.pk-field label {
+  font-size: 12px;
+  color: var(--pk-muted);
+}
+
+.pk-input {
+  font: inherit;
+  font-size: 16px; /* >=16px prevents iOS zoom-on-focus */
+  background: var(--pk-bg);
+  color: var(--pk-fg);
+  border: 1px solid var(--pk-border);
+  border-radius: 10px;
+  padding: 12px;
+  width: 100%;
+}
+
+.pk-input:focus {
+  outline: 2px solid var(--pk-ring);
+  outline-offset: -1px;
+}
+
+/* --- Misc text --- */
+.pk-title {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.pk-lead {
+  color: var(--pk-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.pk-error {
+  color: var(--pk-danger);
+  font-size: 13px;
+  background: color-mix(in srgb, var(--pk-danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--pk-danger) 40%, transparent);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.pk-empty {
+  color: var(--pk-muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 32px 12px;
+}
+
+.pk-disclosure {
+  background: transparent;
+  border: none;
+  color: var(--pk-accent);
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.pk-spinner {
+  color: var(--pk-muted);
+  font-size: 13px;
+}
+
+/* --- Terminal view --- */
+.pk-term-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  background: #000;
+  overflow: hidden;
+}
+
+.pk-term-host {
+  position: absolute;
+  inset: 0;
+  padding: 4px;
+}
+
+.pk-term-closed {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--pk-muted);
+  font-size: 13px;
+  background: color-mix(in srgb, #000 70%, transparent);
+}
+
+.pk-keybar {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+  background: var(--pk-surface);
+  border-top: 1px solid var(--pk-border);
+  overflow-x: auto;
+}
+
+.pk-key {
+  font: inherit;
+  font-size: 13px;
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--pk-border);
+  background: var(--pk-surface-raised);
+  color: var(--pk-fg);
+  cursor: pointer;
+  padding: 0 12px;
+}
+
+.pk-key:active {
+  background: var(--pk-accent);
+  color: var(--pk-accent-fg);
+}
+
+.pk-key.wide {
+  flex: 1 0 auto;
+}
