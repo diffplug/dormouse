@@ -38,3 +38,7 @@ export const RandomChar: Story = {
 export const Shaking: Story = {
   args: { char: 'G', exit: 'shake' },
 };
+
+export const Confirming: Story = {
+  args: { char: 'G', exit: 'confirm' },
+};
