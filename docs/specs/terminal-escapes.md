@@ -49,6 +49,7 @@ Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js c
 | `OSC 2 ; <title> ST` | Window title | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 7 ; file://host/path ST` | CWD (xterm-style URI) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 8 ; <params> ; <URI> ST ... OSC 8 ; ; ST` | Explicit hyperlink region; passed through to xterm.js for rendering, then opened only after Dormouse shows the real target in a confirmation dialog. | This spec |
+| `OSC 10 ; ? ST` / `OSC 11 ; ? ST` / `OSC 12 ; ? ST` | Foreground / background / cursor color **query**. Dormouse answers from the active terminal theme with `OSC <code> ; rgb:RRRR/GGGG/BBBB ST` (16-bit channels) and consumes the query, so background-detecting TUIs (e.g. Codex's adaptive composer "pill") see the real colors instead of assuming dark. The parser needs the theme colors: the **standalone** frontend adapter reads them directly (`getTerminalTheme()`); the **VS Code** extension-host parser has no DOM, so the webview pushes them up via `dormouse:themeColors` (see [vscode.md](vscode.md#osc-color-query-answering)). Only the `?` (report) form is intercepted; color *set* requests pass through to xterm.js. Until the theme is known (before the first push, or if unparseable) the query falls through to xterm.js. | This spec |
 | `OSC 9 ; <message> ST` | iTerm2 legacy notification | [alert.md](alert.md#osc-9) |
 | `OSC 9 ; 4 ; <state> [; <progress>] ST` | iTerm2 progress | [alert.md](alert.md#osc-94-progress) |
 | `OSC 9 ; 9 ; <cwd> ST` | CWD (Windows Terminal / ConEmu) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
@@ -61,6 +62,10 @@ Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js c
 | `OSC 1337 ; CurrentDir=<cwd> ST` | CWD (iTerm2 compatibility) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 
 Some sequences are dual-purpose. The notification rows for `OSC 9 ; <message> ST`, `OSC 99` (`p=title`/`p=body`), and `OSC 777 ; notify` also feed the title-candidate channel in `terminal-state.md` — see its [Title candidate diagnostics](terminal-state.md#supported-osc-inputs) table. Only the OSC 9 *message* form can become a header/door label; OSC 99 and OSC 777 candidates are stored for the diagnostic popup only. The OSC 9 *progress* form (`OSC 9 ; 4`) carries no text and never contributes a title candidate.
+
+#### OSC color queries on Windows require the bundled ConPTY
+
+OSC 10/11/12 answering only works if the program's query actually reaches the consumer. On Windows that depends on the ConPTY backend node-pty uses: the **in-box `CreatePseudoConsole`** silently swallows color queries (they never reach the consumer, so nothing can answer and TUIs fall back to a dark background), while node-pty's **bundled OpenConsole** (`conpty.dll`, currently 1.25.x) forwards them to the consumer — the same passthrough Windows Terminal relies on. So `pty-core.js` spawns with `useConptyDll: true` on Windows; the parser then replies from the active theme (standalone reads it directly, VS Code from the webview-pushed colors — see the OSC 10/11/12 row above). That requires `node-pty/prebuilds/<arch>/conpty.node` plus its sibling `conpty/{conpty.dll,OpenConsole.exe}` to ship: standalone bundles them via the Tauri `resources: ["../sidecar/**/*"]` glob; the VS Code extension via `cp -RL node_modules/node-pty dist/node-pty`. macOS/Linux PTYs forward queries natively, so the flag is Windows-only. `useConptyDll: true` also has an installer consequence on Windows — see [auto-update.md](auto-update.md#sidecar-teardown-on-windows).
 
 ### OSC 8 hyperlinks
 
@@ -117,6 +122,7 @@ Environment for spawned PTYs:
 | `TERM_PROGRAM_VERSION` | Dormouse's chosen iTerm2 compatibility version, not the package version |
 | `LC_TERMINAL` | `iTerm2` only if needed by real-world shell integrations |
 | `LC_TERMINAL_VERSION` | same compatibility version as `TERM_PROGRAM_VERSION` |
+| `COLORTERM` | `truecolor` — advertise 24-bit color, which xterm.js renders. The PTY is spawned as `xterm-256color` with no other depth hint, so env-sniffing tools (e.g. `supports-color`) would otherwise assume 256/ANSI-16 and quantize RGB output to the nearest palette entry. Truecolor-aware TUIs (Codex's composer pill, syntax highlighters) then render smooth RGB. Windows Terminal is recognized as truecolor via `WT_SESSION`; Dormouse isn't, so it advertises `COLORTERM` explicitly. This is a color-*depth* signal, **independent** of the light/dark *background* detection (OSC color queries above) that drives those TUIs' theme choice. Not iTerm2-identity-specific. |
 
 Device/version query:
 

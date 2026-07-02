@@ -1,5 +1,6 @@
 import type { ActivityNotification, SessionStatus, TodoState } from '../../lib/src/lib/alert-manager';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
+import type { TerminalColors } from '../../lib/src/lib/terminal-protocol';
 import type { DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
 import type { AgentBrowserStreamStatusResult, IframeProxyResult, OpenPort } from '../../lib/src/lib/platform/types';
 import type { VSCodeWorkbenchCommand } from '../../lib/src/lib/vscode-keybindings';
@@ -28,6 +29,7 @@ export type WebviewMessage =
   | { type: 'agentBrowser:popIn'; session: string; url?: string; binaryPath?: string; requestId: string }
   | { type: 'iframe:createProxyUrl'; url: string; requestId: string }
   | { type: 'dormouse:init' }
+  | ({ type: 'dormouse:themeColors' } & TerminalColors)
   | { type: 'dormouse:saveState'; state: unknown }
   | { type: 'dormouse:flushSessionSaveDone'; requestId: string }
   | ({ type: 'dor:controlResponse' } & DorControlResponsePayload)

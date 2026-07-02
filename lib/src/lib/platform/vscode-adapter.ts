@@ -8,6 +8,7 @@ import {
 import {
   applyTerminalSemanticEventsByPtyId,
 } from '../terminal-state-store';
+import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
 import type { DorControlResult } from 'dor/protocol';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 
@@ -47,6 +48,12 @@ export class VSCodeAdapter implements PlatformAdapter {
     if (injectedShell?.shell) {
       setDefaultShellOpts({ shell: injectedShell.shell, args: injectedShell.args });
     }
+
+    // The extension-host parser has no DOM, so it can't read the theme to answer
+    // OSC 10/11/12 color queries. Push the resolved colors up whenever the theme
+    // changes (initial push happens in requestInit) so it can — matching the
+    // standalone frontend adapter. See docs/specs/terminal-escapes.md.
+    onTerminalThemeChange(() => this.pushThemeColors());
 
     window.addEventListener('message', (event: MessageEvent) => {
       const msg = event.data;
@@ -334,6 +341,19 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   requestInit(): void {
     this.vscode.postMessage({ type: 'dormouse:init' });
+    this.pushThemeColors();
+  }
+
+  /** Send the resolved terminal theme colors to the extension host so its
+   *  parser can answer OSC 10/11/12 color queries (it has no DOM of its own). */
+  private pushThemeColors(): void {
+    const theme = getTerminalTheme();
+    this.vscode.postMessage({
+      type: 'dormouse:themeColors',
+      foreground: theme.foreground,
+      background: theme.background,
+      cursor: theme.cursor,
+    });
   }
 
   onPtyList(handler: (detail: { ptys: PtyInfo[] }) => void): void {

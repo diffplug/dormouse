@@ -1,5 +1,6 @@
 import { Terminal } from '@xterm/xterm';
 import { registry } from './terminal-store';
+import type { TerminalColorProvider } from './terminal-protocol';
 
 export function getTerminalTheme(): Record<string, string> {
   const style = getComputedStyle(document.body);
@@ -28,6 +29,13 @@ export function getTerminalTheme(): Record<string, string> {
   };
 }
 
+/**
+ * Answers OSC 10/11/12 foreground/background/cursor color queries from the live
+ * xterm theme. Read lazily per query so it tracks theme changes. Frontend
+ * platform adapters pass this to their `TerminalProtocolParser`s.
+ */
+export const themeColorProvider: TerminalColorProvider = (target) => getTerminalTheme()[target] ?? null;
+
 const XTERM_HOST_SELECTOR = '.xterm-screen, .xterm-scrollable-element, .xterm-viewport';
 let xtermSelectorWarned = false;
 
@@ -55,6 +63,18 @@ export function paintTerminalHost(element: HTMLDivElement, terminal: Terminal, b
 
 let themeObserverStarted = false;
 let lastAppliedThemeKey: string | null = null;
+const themeChangeListeners = new Set<() => void>();
+
+/**
+ * Subscribe to terminal theme changes, fired by the shared theme observer when
+ * the resolved theme actually changes. The VS Code adapter uses this to push
+ * current colors to the extension host (which has no DOM) so its parser can
+ * answer OSC color queries. Returns an unsubscribe function.
+ */
+export function onTerminalThemeChange(listener: () => void): () => void {
+  themeChangeListeners.add(listener);
+  return () => { themeChangeListeners.delete(listener); };
+}
 
 export function startThemeObserver(): void {
   if (themeObserverStarted) return;
@@ -69,6 +89,7 @@ export function startThemeObserver(): void {
       entry.terminal.options.theme = theme;
       paintTerminalHost(entry.element, entry.terminal, theme.background);
     }
+    for (const listener of themeChangeListeners) listener();
   });
 
   observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });

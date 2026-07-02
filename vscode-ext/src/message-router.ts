@@ -6,6 +6,8 @@ import {
   collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
+  type TerminalColorProvider,
+  type TerminalColors,
 } from '../../lib/src/lib/terminal-protocol';
 import { normalizeExternalUri } from '../../lib/src/lib/external-links';
 import { VSCODE_WORKBENCH_COMMANDS } from '../../lib/src/lib/vscode-keybindings';
@@ -39,6 +41,13 @@ const ALLOWED_WORKBENCH_COMMANDS = new Set<string>(VSCODE_WORKBENCH_COMMANDS);
 // across webview collapse/expand cycles.
 const alertManager = new AlertManager();
 const alertProtocolParsers = new Map<string, TerminalProtocolParser>();
+
+// The extension-host parser has no DOM, so webviews push their resolved terminal
+// theme colors (see VSCodeAdapter.pushThemeColors). Cached here and read lazily
+// per query so the parser can answer OSC 10/11/12 like the standalone adapter;
+// null until the first push, in which case queries fall through to xterm.js.
+let latestThemeColors: TerminalColors | null = null;
+const themeColorProvider: TerminalColorProvider = (target) => latestThemeColors?.[target] ?? null;
 
 // Subscribers that want each PTY chunk *after* OSC sequences have been parsed
 // out (display path). Decoupled from ptyManager.addCallbacks so we only run
@@ -117,7 +126,7 @@ ptyManager.onDorControlRequest((request) => {
 function getAlertProtocolParser(id: string): TerminalProtocolParser {
   let parser = alertProtocolParsers.get(id);
   if (!parser) {
-    parser = new TerminalProtocolParser();
+    parser = new TerminalProtocolParser(themeColorProvider);
     alertProtocolParsers.set(id, parser);
   }
   return parser;
@@ -274,7 +283,7 @@ export function attachRouter(
     switch (msg.type) {
       case 'pty:spawn': {
         claim(msg.id);
-        alertProtocolParsers.set(msg.id, new TerminalProtocolParser());
+        alertProtocolParsers.set(msg.id, new TerminalProtocolParser(themeColorProvider));
         const spawnOptions = { ...msg.options };
         if (!spawnOptions.cwd) {
           spawnOptions.cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -448,6 +457,10 @@ export function attachRouter(
             result: { ok: false, reason: 'unreachable', detail: err?.message ?? String(err) },
           } satisfies ExtensionMessage),
         );
+        break;
+      case 'dormouse:themeColors':
+        // Webview reports its resolved terminal theme; cache for OSC color replies.
+        latestThemeColors = { foreground: msg.foreground, background: msg.background, cursor: msg.cursor };
         break;
       case 'dormouse:init': {
         // Webview has (re-)initialized — subscribe to live events.
