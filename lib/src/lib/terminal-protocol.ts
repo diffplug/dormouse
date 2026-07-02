@@ -1,4 +1,5 @@
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
+import { parseColor } from './css-color';
 import {
   cwdFromOsc1337,
   cwdFromOsc633,
@@ -466,31 +467,14 @@ function isKnownUnsupportedIterm2Osc(content: string): boolean {
 /**
  * Build the reply to an OSC 10/11/12 color query: `ESC ] <code> ; rgb:RRRR/GGGG/BBBB ST`,
  * matching the 16-bit-per-channel shape xterm/Windows Terminal emit (each 8-bit
- * channel is doubled, e.g. `0c` → `0c0c`). Returns null if `hex` is missing or
- * not a parseable `#rgb` / `#rrggbb` / `#rrggbbaa` color.
+ * channel is doubled, e.g. `0c` → `0c0c`). Returns null if `color` is missing or
+ * not a parseable CSS color (see `parseColor`).
  */
-export function formatOscColorResponse(code: string, hex: string | null): string | null {
-  const rgb = hex ? parseHexColor(hex) : null;
+export function formatOscColorResponse(code: string, color: string | null): string | null {
+  const rgb = color ? parseColor(color) : null;
   if (!rgb) return null;
-  const channel = (v: number) => v.toString(16).padStart(2, '0').repeat(2);
+  const channel = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0').repeat(2);
   return `\x1b]${code};rgb:${channel(rgb.r)}/${channel(rgb.g)}/${channel(rgb.b)}\x1b\\`;
-}
-
-function parseHexColor(input: string): { r: number; g: number; b: number } | null {
-  const s = input.trim();
-  const short = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(s);
-  if (short) {
-    return {
-      r: parseInt(short[1] + short[1], 16),
-      g: parseInt(short[2] + short[2], 16),
-      b: parseInt(short[3] + short[3], 16),
-    };
-  }
-  const long = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})(?:[0-9a-fA-F]{2})?$/.exec(s);
-  if (long) {
-    return { r: parseInt(long[1], 16), g: parseInt(long[2], 16), b: parseInt(long[3], 16) };
-  }
-  return null;
 }
 
 function commandStartEvent(source: CommandRunSource): TerminalProtocolEvent {

@@ -417,11 +417,13 @@ describe('formatOscColorResponse', () => {
     expect(formatOscColorResponse('11', '#0c0c0c')).toBe('\x1b]11;rgb:0c0c/0c0c/0c0c\x1b\\');
     expect(formatOscColorResponse('11', '#abc')).toBe('\x1b]11;rgb:aaaa/bbbb/cccc\x1b\\');
     expect(formatOscColorResponse('11', '#272822ff')).toBe('\x1b]11;rgb:2727/2828/2222\x1b\\');
+    // Theme colors can be rgb()/rgba() too (parseColor handles them).
+    expect(formatOscColorResponse('10', 'rgb(255, 0, 12)')).toBe('\x1b]10;rgb:ffff/0000/0c0c\x1b\\');
   });
 
   it('returns null for missing or unparseable colors', () => {
     expect(formatOscColorResponse('11', null)).toBeNull();
-    expect(formatOscColorResponse('11', 'rgb(1,2,3)')).toBeNull();
+    expect(formatOscColorResponse('11', 'transparent')).toBeNull();
     expect(formatOscColorResponse('11', '#12')).toBeNull();
   });
 });
