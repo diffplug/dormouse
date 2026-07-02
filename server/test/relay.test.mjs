@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { WS_ROUTES, WS_TOKEN_PARAM } from 'server-lib-common';
+import { WS_ROUTES, WS_TOKEN_PARAM, hashPasskeyPublicKey } from 'server-lib-common';
 
 import { connectClient, connectHost, freshApp, startServer, wsConnect } from './helpers.mjs';
 
@@ -20,25 +20,26 @@ async function relay() {
   return { app: created.app, server, close: () => server.close() };
 }
 
-const PAIRING_REQUEST = {
-  accountId: 'owner',
-  passkeyCredentialId: 'cred-1',
-  passkeyPublicKeyHash: 'hash-1',
-  devicePublicKey: 'device-1',
-  requestedLabel: 'iPhone Safari',
-};
-
 test('pair round-trips client→host with a stamped clientId, pair-result routes back', async () => {
   const { app, server, close } = await relay();
   try {
     const { host, socket: hostWs } = await connectHost(app, server);
-    const { socket: clientWs } = await connectClient(app, server);
+    const { socket: clientWs, authenticator } = await connectClient(app, server);
 
-    clientWs.send({ t: 'pair', hostId: host.hostId, request: PAIRING_REQUEST });
+    // Slice 3 verifies pair frames server-side, so the request must reference
+    // the session's real (registered) passkey rather than a synthetic one.
+    const pairingRequest = {
+      accountId: 'owner',
+      passkeyCredentialId: authenticator.credentialId,
+      passkeyPublicKeyHash: await hashPasskeyPublicKey(authenticator.publicKey),
+      devicePublicKey: 'device-1',
+      requestedLabel: 'iPhone Safari',
+    };
+    clientWs.send({ t: 'pair', hostId: host.hostId, request: pairingRequest });
     const forwarded = await hostWs.take();
     assert.equal(forwarded.t, 'pair');
     assert.equal(typeof forwarded.clientId, 'string');
-    assert.deepEqual(forwarded.request, PAIRING_REQUEST);
+    assert.deepEqual(forwarded.request, pairingRequest);
 
     const record = { hostId: host.hostId, accountId: 'owner' };
     hostWs.send({ t: 'pair-result', clientId: forwarded.clientId, approved: true, record });

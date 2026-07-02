@@ -17,6 +17,11 @@
  *
  * `clientId` is a server-assigned secret: it is stamped onto every host-bound
  * frame so the Host can address replies, but is never sent to the client.
+ *
+ * Slice 3 layers *verification* on top without reshaping any of this: the hub
+ * consults an injected {@link HandshakeGate} before relaying the two
+ * security-critical Client frames (`pair`, `connect2`) and remembers each Host
+ * challenge it relays, but the routing and session model are untouched.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -28,6 +33,8 @@ import type {
   ServerToClientFrame,
   ServerToHostFrame,
 } from 'server-lib-common';
+
+import type { HandshakeGate } from './handshake.js';
 
 /**
  * The slice of a WebSocket the hub actually uses. `WSContext` from
@@ -58,6 +65,11 @@ export interface ClientConn {
 export class RelayHub {
   readonly #hosts = new Map<string, HostConn>();
   readonly #clients = new Map<string, ClientConn>();
+  readonly #gate: HandshakeGate;
+
+  constructor(gate: HandshakeGate) {
+    this.#gate = gate;
+  }
 
   /** True while a socket for `hostId` is connected — drives `GET /api/hosts` presence. */
   isHostOnline(hostId: string): boolean {
@@ -71,12 +83,21 @@ export class RelayHub {
    * so an existing one is displaced and closed; the displaced socket's `close`
    * event is ignored by {@link unregisterHost} because the map already points
    * at the new connection (a generation guard).
+   *
+   * A replacement also invalidates every session established with the OLD Host
+   * process: the new process has a fresh ACL and no memory of them, so their
+   * in-flight `msg` frames must never be treated as authorized. Slice 2 did this
+   * only on disconnect; because the displaced socket's `close` is a no-op here,
+   * the invalidation has to happen at replacement time too.
    */
   registerHost(hostId: string, socket: RelaySocket): HostConn {
     const conn: HostConn = { hostId, socket };
     const existing = this.#hosts.get(hostId);
     this.#hosts.set(hostId, conn);
-    if (existing) safeClose(existing.socket, 4000, 'replaced by a newer host connection');
+    if (existing) {
+      this.#dropClientsOf(hostId);
+      safeClose(existing.socket, 4000, 'replaced by a newer host connection');
+    }
     return conn;
   }
 
@@ -98,8 +119,16 @@ export class RelayHub {
         return;
       case 'challenge':
         // The client's `challenge` frame carries the originating hostId (the
-        // host frame does not — the hub knows it from the socket).
+        // host frame does not — the hub knows it from the socket). The server
+        // also remembers the challenge so it can do its half of `connect2`
+        // freshness validation before forwarding.
         if (client) {
+          this.#gate.observeChallenge(
+            client.clientId,
+            host.hostId,
+            frame.challenge,
+            frame.expiresAt,
+          );
           this.#toClient(client, {
             t: 'challenge',
             hostId: host.hostId,
@@ -142,8 +171,17 @@ export class RelayHub {
   unregisterHost(host: HostConn): void {
     if (this.#hosts.get(host.hostId) !== host) return; // already replaced
     this.#hosts.delete(host.hostId);
+    this.#dropClientsOf(host.hostId);
+  }
+
+  /**
+   * Tell every client bound to `hostId` its Host is gone and clear its session,
+   * so no `msg` can flow to a Host that is no longer the one it handshook with.
+   * Used on both Host disconnect and Host replacement.
+   */
+  #dropClientsOf(hostId: string): void {
     for (const client of this.#clients.values()) {
-      if (client.hostId === host.hostId) {
+      if (client.hostId === hostId) {
         this.#toClient(client, { t: 'host-gone' });
         client.hostId = null;
         client.established = false;
@@ -161,8 +199,13 @@ export class RelayHub {
     return conn;
   }
 
-  /** Handle one raw frame from a Client socket. Malformed/unknown frames get an `error`. */
-  onClientFrame(client: ClientConn, raw: string): void {
+  /**
+   * Handle one raw frame from a Client socket. Malformed/unknown frames get an
+   * `error`. Async because `pair` and `connect2` consult the {@link HandshakeGate}
+   * (account lookups, crypto); the WS handler serializes calls per socket so
+   * frames from one client stay in order.
+   */
+  async onClientFrame(client: ClientConn, raw: string): Promise<void> {
     const frame = parseFrame<ClientFrame>(raw);
     if (!frame || typeof frame.t !== 'string') {
       this.#toClient(client, { t: 'error', error: 'malformed frame' });
@@ -176,8 +219,7 @@ export class RelayHub {
           this.#toClient(client, { t: 'error', error: 'missing hostId' });
           return;
         }
-        const host = this.#hosts.get(frame.hostId);
-        if (!host) {
+        if (!this.#hosts.has(frame.hostId)) {
           this.#toClient(client, { t: 'error', error: `host ${frame.hostId} is offline` });
           return;
         }
@@ -187,11 +229,35 @@ export class RelayHub {
           client.established = false;
         }
         client.hostId = frame.hostId;
+
+        if (frame.t === 'connect') {
+          const host = this.#hosts.get(frame.hostId);
+          if (host) this.#toHost(host, { t: 'connect', clientId: client.clientId });
+          return;
+        }
         if (frame.t === 'pair') {
-          this.#toHost(host, { t: 'pair', clientId: client.clientId, request: frame.request });
-        } else if (frame.t === 'connect') {
-          this.#toHost(host, { t: 'connect', clientId: client.clientId });
-        } else {
+          // Only relay a pairing request the authenticated session could have
+          // made: the owner account, a registered credential, a matching key
+          // hash. A forged request is answered locally and never reaches the Host.
+          const check = await this.#gate.checkPair(frame.request);
+          if (!check.ok) {
+            this.#toClient(client, { t: 'pair-result', approved: false, error: check.error });
+            return;
+          }
+          const host = this.#hosts.get(frame.hostId);
+          if (host) this.#toHost(host, { t: 'pair', clientId: client.clientId, request: frame.request });
+          return;
+        }
+        // connect2: the server verifies the assertion (against the STORED key)
+        // and challenge freshness before forwarding. On failure the client gets
+        // a denial and the Host's challenge stays unburned.
+        const check = await this.#gate.checkConnect2(client.clientId, frame.request);
+        if (!check.ok) {
+          this.#toClient(client, { t: 'decision', allowed: false, failures: check.failures });
+          return;
+        }
+        const host = this.#hosts.get(frame.hostId);
+        if (host) {
           this.#toHost(host, { t: 'connect2', clientId: client.clientId, request: frame.request });
         }
         return;
@@ -212,6 +278,7 @@ export class RelayHub {
   /** Tear down a Client socket: tell its Host `client-gone`, then forget it. */
   unregisterClient(client: ClientConn): void {
     this.#clients.delete(client.clientId);
+    this.#gate.forgetClient(client.clientId);
     if (client.hostId !== null) {
       const host = this.#hosts.get(client.hostId);
       if (host) this.#toHost(host, { t: 'client-gone', clientId: client.clientId });

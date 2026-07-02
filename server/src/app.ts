@@ -50,6 +50,7 @@ import type {
   SigninFinishResponse,
 } from 'server-lib-common';
 
+import { Handshake } from './handshake.js';
 import { RelayHub } from './relay.js';
 import type { ClientConn, HostConn } from './relay.js';
 import { AccountStore, DuplicateCredentialError, HostStore } from './state.js';
@@ -135,7 +136,9 @@ export function createApp(config: AppConfig): CreatedApp {
   const accounts = new AccountStore(config.stateDir, now);
   const hostStore = new HostStore(config.stateDir, now);
   const sessions = new SessionStore(now);
-  const hub = new RelayHub();
+  // Server-side handshake policy layered on the transport-dumb hub (slice 3).
+  const handshake = new Handshake(accounts, { origin: config.origin, rpId, now });
+  const hub = new RelayHub(handshake);
   // Separate issuers per flow: a setup challenge cannot be redeemed at sign-in.
   const setupChallenges = new HostChallengeIssuer({ now });
   const signinChallenges = new HostChallengeIssuer({ now });
@@ -350,12 +353,20 @@ export function createApp(config: AppConfig): CreatedApp {
     },
     upgradeWebSocket(() => {
       let conn: ClientConn | undefined;
+      // `onClientFrame` is async (pair/connect2 verification), so serialize
+      // frames from this socket through a promise chain — a client's frames
+      // must be processed in the order they arrived, not raced by the gate.
+      let chain: Promise<void> = Promise.resolve();
       return {
         onOpen: (_evt, ws) => {
           conn = hub.registerClient(ws);
         },
         onMessage: (evt) => {
-          if (conn && typeof evt.data === 'string') hub.onClientFrame(conn, evt.data);
+          if (conn && typeof evt.data === 'string') {
+            const c = conn;
+            const data = evt.data;
+            chain = chain.then(() => hub.onClientFrame(c, data)).catch(() => undefined);
+          }
         },
         onClose: () => {
           if (conn) hub.unregisterClient(conn);
