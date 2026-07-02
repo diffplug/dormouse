@@ -41,6 +41,49 @@ test('findActive requires passkey AND device key on the same record', () => {
   assert.equal(acl.findActive({ passkeyCredentialId: 'cred-2', devicePublicKey: 'device-1' }), undefined);
 });
 
+test('authorize returns the record when both halves match', () => {
+  const { acl } = makeAcl();
+  const record = acl.approve(CLIENT);
+  const auth = acl.authorize({ passkeyCredentialId: 'cred-1', devicePublicKey: 'device-1' });
+  assert.deepEqual(auth, { record });
+});
+
+test('authorize explains a miss by which half is unpaired', () => {
+  const { acl } = makeAcl();
+  acl.approve(CLIENT);
+  assert.deepEqual(
+    acl.authorize({ passkeyCredentialId: 'cred-2', devicePublicKey: 'device-1' }),
+    { record: null, reasons: ['passkey-not-paired'] },
+  );
+  assert.deepEqual(
+    acl.authorize({ passkeyCredentialId: 'cred-1', devicePublicKey: 'device-2' }),
+    { record: null, reasons: ['device-not-paired'] },
+  );
+  assert.deepEqual(
+    acl.authorize({ passkeyCredentialId: 'cred-2', devicePublicKey: 'device-2' }),
+    { record: null, reasons: ['passkey-not-paired', 'device-not-paired'] },
+  );
+});
+
+test('authorize reports a pairing mismatch when both halves are paired separately', () => {
+  const { acl } = makeAcl();
+  acl.approve(CLIENT);
+  acl.approve({ ...CLIENT, passkeyCredentialId: 'cred-2', devicePublicKey: 'device-2' });
+  assert.deepEqual(
+    acl.authorize({ passkeyCredentialId: 'cred-1', devicePublicKey: 'device-2' }),
+    { record: null, reasons: ['pairing-mismatch'] },
+  );
+});
+
+test('authorize does not match revoked records', () => {
+  const { acl } = makeAcl();
+  acl.approve(CLIENT);
+  acl.revokeDevice('device-1');
+  const auth = acl.authorize({ passkeyCredentialId: 'cred-1', devicePublicKey: 'device-1' });
+  assert.equal(auth.record, null);
+  assert.deepEqual(auth.reasons, ['passkey-not-paired', 'device-not-paired']);
+});
+
 test('hasActivePasskey / hasActiveDevice track each half individually', () => {
   const { acl } = makeAcl();
   acl.approve(CLIENT);

@@ -145,6 +145,23 @@ test('a substituted passkey public key is denied', async () => {
   assert.ok(decision.failures.includes('passkey-key-mismatch'));
 });
 
+test('a malformed passkey public key denies cleanly instead of throwing', async () => {
+  const setup = await pairedSetup();
+  // Paired credential + paired device (a compromised server knows both), but
+  // garbage where the SPKI key belongs. Must be a decision, never a crash.
+  const request = await setup.client.buildConnectRequest(setup.host, {
+    accountId: ACCOUNT,
+    authenticator: setup.authenticator,
+  });
+  const decision = await setup.host.handleConnect({
+    ...request,
+    passkey: { ...request.passkey, publicKey: '!!!not-base64url!!!' },
+  });
+  assert.equal(decision.allowed, false);
+  assert.deepEqual(decision.failures, ['passkey-assertion-invalid', 'passkey-key-mismatch']);
+  assert.deepEqual(decision.passkey, { ok: false, reason: 'public-key-invalid' });
+});
+
 test('a request for a different account than the pairing is denied', async () => {
   const setup = await pairedSetup();
   const decision = await connect(setup, { request: { accountId: 'account-2' } });

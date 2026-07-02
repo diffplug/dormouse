@@ -41,11 +41,28 @@ export interface HostAclOptions {
   readonly now?: () => number;
 }
 
+/** Why {@link HostAcl.authorize} found no active record for a (passkey, device) pair. */
+export type AclAuthorizationMiss = 'passkey-not-paired' | 'device-not-paired' | 'pairing-mismatch';
+
+/**
+ * The result of {@link HostAcl.authorize}: either the single active record that
+ * matches both identities, or the reason(s) none does. Because a record is the
+ * conjunction of a passkey and a device, a miss is explained entirely by which
+ * half (if either) is paired — knowledge that belongs here with the record
+ * model rather than reconstructed by every caller.
+ */
+export type AclAuthorization =
+  | { readonly record: HostAclRecord }
+  | { readonly record: null; readonly reasons: readonly AclAuthorizationMiss[] };
+
+/** A stored record whose `revokedAt` is writable; every other field stays readonly. */
+type MutableAclRecord = HostAclRecord & { revokedAt: number | null };
+
 export class HostAcl {
   readonly hostId: string;
   readonly #now: () => number;
   /** Mutable record objects stay private; every public API returns copies. */
-  #records: Array<HostAclRecord & { revokedAt: number | null }> = [];
+  #records: MutableAclRecord[] = [];
 
   constructor(hostId: string, options: HostAclOptions = {}) {
     this.hostId = hostId;
@@ -111,6 +128,27 @@ export class HostAcl {
     return found ? { ...found } : undefined;
   }
 
+  /**
+   * The connection-time authorization lookup: the active record matching BOTH
+   * identities, or — when none does — exactly why, derived from whether each
+   * identity is independently paired. Keeps the "a record is passkey ∧ device"
+   * rule next to the record model instead of in the connection layer.
+   */
+  authorize(query: {
+    readonly passkeyCredentialId: string;
+    readonly devicePublicKey: string;
+  }): AclAuthorization {
+    const found = this.#findActive(query.passkeyCredentialId, query.devicePublicKey);
+    if (found) return { record: { ...found } };
+    const reasons: AclAuthorizationMiss[] = [];
+    const passkeyPaired = this.hasActivePasskey(query.passkeyCredentialId);
+    const devicePaired = this.hasActiveDevice(query.devicePublicKey);
+    if (!passkeyPaired) reasons.push('passkey-not-paired');
+    if (!devicePaired) reasons.push('device-not-paired');
+    if (passkeyPaired && devicePaired) reasons.push('pairing-mismatch');
+    return { record: null, reasons };
+  }
+
   hasActivePasskey(passkeyCredentialId: string): boolean {
     return this.#records.some(
       (record) => record.revokedAt === null && record.passkeyCredentialId === passkeyCredentialId,
@@ -136,7 +174,7 @@ export class HostAcl {
   #findActive(
     passkeyCredentialId: string,
     devicePublicKey: string,
-  ): (HostAclRecord & { revokedAt: number | null }) | undefined {
+  ): MutableAclRecord | undefined {
     return this.#records.find(
       (record) =>
         record.revokedAt === null &&

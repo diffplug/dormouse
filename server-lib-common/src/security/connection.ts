@@ -98,65 +98,66 @@ export async function authorizeConnection(
   request: ConnectionRequest,
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<ConnectionDecision> {
-  const failures: ConnectionFailure[] = [];
-
-  // 5 (freshness half): burn the challenge before any other work.
-  if (!host.challenges.consume(request.challenge)) {
-    failures.push('challenge-invalid');
-  }
-
-  // 1: fresh user presence — a WebAuthn assertion over this same challenge.
-  const passkey = await verifyPasskeyAssertion(
-    request.passkey.assertion,
-    request.passkey.publicKey,
-    {
-      challenge: request.challenge,
-      origin: host.policy.origin,
-      rpId: host.policy.rpId,
-      requireUserVerification: host.policy.requireUserVerification,
-    },
-    crypto,
-  );
-  if (!passkey.ok) failures.push('passkey-assertion-invalid');
+  // 5 (freshness half): burn the challenge before any other work, so it can
+  // never be presented twice whatever the rest of the decision does.
+  const challengeValid = host.challenges.consume(request.challenge);
 
   // 3 + 4: both identities must sit on the same active ACL record.
-  const passkeyCredentialId = request.passkey.assertion.credentialId;
-  const record = host.acl.findActive({
-    passkeyCredentialId,
+  const auth = host.acl.authorize({
+    passkeyCredentialId: request.passkey.assertion.credentialId,
     devicePublicKey: request.devicePublicKey,
   });
-  if (!record) {
-    const passkeyPaired = host.acl.hasActivePasskey(passkeyCredentialId);
-    const devicePaired = host.acl.hasActiveDevice(request.devicePublicKey);
-    if (!passkeyPaired) failures.push('passkey-not-paired');
-    if (!devicePaired) failures.push('device-not-paired');
-    if (passkeyPaired && devicePaired) failures.push('pairing-mismatch');
-  } else {
-    if ((await hashPasskeyPublicKey(request.passkey.publicKey, crypto)) !== record.passkeyPublicKeyHash) {
-      failures.push('passkey-key-mismatch');
-    }
-    if (record.accountId !== request.accountId) {
-      failures.push('account-mismatch');
-    }
-  }
 
-  // 5 (identity half): the paired device key must have signed this challenge.
-  const signatureValid = await verifyDeviceChallengeSignature(
-    {
-      hostId: host.hostId,
-      challenge: request.challenge,
-      devicePublicKey: request.devicePublicKey,
-    },
+  // The remaining checks are independent and every layer is always evaluated
+  // (we never short-circuit on the first failure), so run the crypto
+  // concurrently rather than in series. Hashing the presented passkey key only
+  // means anything against a matched record, so it is skipped otherwise.
+  // The challenge must come after the spread so nothing on the policy object
+  // can ever override the freshness binding.
+  const passkeyPromise = verifyPasskeyAssertion(
+    request.passkey.assertion,
+    request.passkey.publicKey,
+    { ...host.policy, challenge: request.challenge },
+    crypto,
+  );
+  const signaturePromise = verifyDeviceChallengeSignature(
+    { hostId: host.hostId, challenge: request.challenge, devicePublicKey: request.devicePublicKey },
     request.deviceSignature,
     crypto,
   );
+  // The catch is attached at creation: this promise is attacker-rejectable (a
+  // malformed publicKey is not base64url), and it must never sit rejected and
+  // unhandled while the earlier awaits run. null can't equal the stored hash,
+  // so a malformed key denies as a mismatch.
+  const keyHashPromise = auth.record
+    ? hashPasskeyPublicKey(request.passkey.publicKey, crypto).catch(() => null)
+    : undefined;
+
+  const passkey = await passkeyPromise;
+  const signatureValid = await signaturePromise;
+  const presentedKeyHash = await keyHashPromise;
+
+  // Assemble every failure, in spec order.
+  const failures: ConnectionFailure[] = [];
+  if (!challengeValid) failures.push('challenge-invalid');
+  if (!passkey.ok) failures.push('passkey-assertion-invalid');
+  if (auth.record === null) {
+    failures.push(...auth.reasons);
+  } else {
+    if (presentedKeyHash !== auth.record.passkeyPublicKeyHash) {
+      failures.push('passkey-key-mismatch');
+    }
+    if (auth.record.accountId !== request.accountId) {
+      failures.push('account-mismatch');
+    }
+  }
   if (!signatureValid) failures.push('device-signature-invalid');
 
   const allowed = failures.length === 0;
   return {
     allowed,
     failures,
-    record: allowed ? (record ?? null) : null,
+    record: allowed ? auth.record : null,
     passkey,
   };
 }
