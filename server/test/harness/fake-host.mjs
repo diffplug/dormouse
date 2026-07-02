@@ -24,9 +24,15 @@ import {
   HostAcl,
   HostChallengeIssuer,
   PairingCeremony,
+  REMOTE_EVENTS,
+  REMOTE_METHODS,
   WS_ROUTES,
   WS_TOKEN_PARAM,
   authorizeConnection,
+  fromBase64Url,
+  toBase64Url,
+  utf8Decode,
+  utf8Encode,
 } from 'server-lib-common';
 
 export class FakeHost extends EventEmitter {
@@ -42,6 +48,18 @@ export class FakeHost extends EventEmitter {
     this.established = new Set();
     /** clientId → pairingId awaiting a manual approve/deny (autoApprove off). */
     this.pending = new Map();
+    /**
+     * A tiny synthetic terminal directory so the remote adapter is testable
+     * without a real Host: two in-memory "echo shells" addressable by surfaceId.
+     */
+    this.surfaces = [
+      { surfaceId: 'srf-zsh', paneRef: 'pane-zsh', title: 'zsh', cols: 80, rows: 24 },
+      { surfaceId: 'srf-vim', paneRef: 'pane-vim', title: 'vim', cols: 80, rows: 24 },
+    ];
+    /** clientId → directory-watch subId (the request id it was opened with). */
+    this.directorySubs = new Map();
+    /** clientId → { surfaceId, subId } for the one attached surface, if any. */
+    this.attachments = new Map();
 
     const wsBase = serverUrl.replace(/^http/, 'ws');
     this.ws = new WebSocket(`${wsBase}${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${hostToken}`);
@@ -115,6 +133,8 @@ export class FakeHost extends EventEmitter {
       case 'client-gone': {
         this.established.delete(clientId);
         this.pending.delete(clientId);
+        this.directorySubs.delete(clientId);
+        this.attachments.delete(clientId);
         this.emit('client-gone', { clientId });
         return;
       }
@@ -123,28 +143,125 @@ export class FakeHost extends EventEmitter {
     }
   }
 
-  /** Minimal remote-api v1: answer `hello`, refuse everything else with ok:false. */
+  /**
+   * Remote-api v1 with a synthetic directory + echo terminal. `hello` answers
+   * capabilities; `directory.watch` snapshots the fake surfaces; `surface.attach`
+   * streams a size banner; `terminal.write` echoes bytes back (treating `\r` as a
+   * newline and re-drawing a prompt); `terminal.resize` notes the new size;
+   * `surface.detach` silences the stream. Unknown methods echo ok:false.
+   */
   #handleRemoteApi(clientId, data) {
     const request = data;
     if (!request || typeof request.requestId !== 'string' || typeof request.method !== 'string') {
       return;
     }
-    let response;
-    if (request.method === 'hello') {
-      response = {
-        requestId: request.requestId,
-        ok: true,
-        result: { protocolVersion: 1, hostId: this.hostId, grants: { input: true, layout: true } },
-      };
-    } else {
-      response = {
-        requestId: request.requestId,
-        ok: false,
-        error: `unknown method: ${request.method}`,
-      };
+    const { requestId, method, params } = request;
+
+    const respond = (response) => {
+      this.emit('msg', { clientId, request, response });
+      this.#send({ t: 'msg', clientId, data: response });
+    };
+    const ok = (result = {}) => respond({ requestId, ok: true, result });
+    const fail = (error) => respond({ requestId, ok: false, error });
+
+    switch (method) {
+      case REMOTE_METHODS.hello:
+        ok({ protocolVersion: 1, hostId: this.hostId, grants: { input: true, layout: true } });
+        return;
+
+      case REMOTE_METHODS.directoryWatch: {
+        // Host convention: the subscription id is the request's own requestId.
+        this.directorySubs.set(clientId, requestId);
+        ok({ subId: requestId });
+        this.#event(clientId, requestId, REMOTE_EVENTS.directorySnapshot, {
+          entries: this.#directoryEntries(),
+        });
+        return;
+      }
+
+      case REMOTE_METHODS.surfaceAttach: {
+        const surface = this.#surface(params?.surfaceId);
+        if (!surface) return fail(`no such surface: ${params?.surfaceId ?? '(none)'}`);
+        surface.cols = clampInt(params.cols, surface.cols);
+        surface.rows = clampInt(params.rows, surface.rows);
+        this.attachments.set(clientId, { surfaceId: surface.surfaceId, subId: requestId });
+        ok({ cols: surface.cols, rows: surface.rows });
+        this.#emitData(
+          clientId,
+          requestId,
+          `\r\n[fake-host] attached ${surface.title} (${surface.cols}x${surface.rows})\r\n$ `,
+        );
+        return;
+      }
+
+      case REMOTE_METHODS.terminalWrite: {
+        const surface = this.#surface(params?.surfaceId);
+        if (!surface) return fail(`no such surface: ${params?.surfaceId ?? '(none)'}`);
+        ok();
+        const attachment = this.attachments.get(clientId);
+        if (!attachment || attachment.surfaceId !== surface.surfaceId) return; // detached → silent
+        const input = utf8Decode(fromBase64Url(params.bytes));
+        const echoed = input.includes('\r') ? `${input.replace(/\r/g, '\r\n')}$ ` : input;
+        this.#emitData(clientId, attachment.subId, echoed);
+        return;
+      }
+
+      case REMOTE_METHODS.terminalResize: {
+        const surface = this.#surface(params?.surfaceId);
+        if (!surface) return fail(`no such surface: ${params?.surfaceId ?? '(none)'}`);
+        surface.cols = clampInt(params.cols, surface.cols);
+        surface.rows = clampInt(params.rows, surface.rows);
+        ok({ cols: surface.cols, rows: surface.rows });
+        const attachment = this.attachments.get(clientId);
+        if (!attachment || attachment.surfaceId !== surface.surfaceId) return;
+        this.#emitData(
+          clientId,
+          attachment.subId,
+          `\r\n[fake-host] resized to ${surface.cols}x${surface.rows}\r\n`,
+        );
+        return;
+      }
+
+      case REMOTE_METHODS.surfaceDetach: {
+        ok();
+        this.attachments.delete(clientId); // stops any further terminal.data
+        return;
+      }
+
+      default:
+        fail(`unknown method: ${method}`);
+        return;
     }
-    this.emit('msg', { clientId, request, response });
-    this.#send({ t: 'msg', clientId, data: response });
+  }
+
+  /** A directory snapshot of the synthetic surfaces. */
+  #directoryEntries() {
+    return this.surfaces.map((surface, index) => ({
+      paneRef: surface.paneRef,
+      surfaceId: surface.surfaceId,
+      type: 'terminal',
+      title: surface.title,
+      focused: index === 0,
+      activity: 'prompt',
+      ringing: false,
+      hasTODO: false,
+    }));
+  }
+
+  #surface(surfaceId) {
+    return this.surfaces.find((surface) => surface.surfaceId === surfaceId);
+  }
+
+  /** Send a remote-api event to a client, wrapped in a `msg` relay frame. */
+  #event(clientId, subId, event, eventData) {
+    this.#send({ t: 'msg', clientId, data: { subId, event, data: eventData } });
+  }
+
+  /** Emit a `terminal.data` event with `text` as base64url utf8 PTY bytes. */
+  #emitData(clientId, subId, text) {
+    this.#event(clientId, subId, REMOTE_EVENTS.terminalData, {
+      bytes: toBase64Url(utf8Encode(text)),
+    });
   }
 
   /** Local approval on the Host: the only path that writes to the ACL. */
@@ -175,4 +292,9 @@ export class FakeHost extends EventEmitter {
       /* already closing */
     }
   }
+}
+
+/** Coerce a requested terminal dimension to a positive integer, else `fallback`. */
+function clampInt(value, fallback) {
+  return Number.isFinite(value) ? Math.max(1, Math.floor(value)) : fallback;
 }

@@ -14,7 +14,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { fromBase64Url, toBase64Url, utf8Encode } from 'server-lib-common';
 import '@xterm/xterm/css/xterm.css';
-import type { PocketClient } from './pocket-client';
+import type { PocketClient } from '../remote/client/pocket-client';
 
 const TERMINAL_THEME = {
   background: '#000000',

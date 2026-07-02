@@ -17,13 +17,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  REMOTE_EVENTS,
+  REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
   WS_ROUTES,
   WS_TOKEN_PARAM,
+  fromBase64Url,
   generateDeviceKeyPair,
   hashPasskeyPublicKey,
   signDeviceChallenge,
   toBase64Url,
+  utf8Decode,
+  utf8Encode,
 } from 'server-lib-common';
 
 import {
@@ -380,6 +385,96 @@ test('a Host restart invalidates an established session (host-gone, then msg blo
     p.socket.send({ t: 'msg', data: helloRequest('r2') });
     assert.ok(await p.socket.quiet(), 'the old session no longer relays msg');
     assert.equal(msgs.length, 0, 'the restarted Host receives nothing from the stale client');
+  } finally {
+    await close();
+  }
+});
+
+// --- Synthetic directory + echo terminal over the real wire -----------------
+
+/** Pair + connect an established phone session, ready for `msg` traffic. */
+async function establish(p, hostId) {
+  assert.equal((await pair(p, hostId)).approved, true);
+  const challengeFrame = await connect(p, hostId);
+  assert.equal((await connect2(p, hostId, challengeFrame.challenge)).decision.allowed, true);
+}
+
+/** Send a remote-api request over a `msg` frame. */
+function remote(p, requestId, method, params) {
+  p.socket.send({ t: 'msg', data: { requestId, method, params } });
+}
+
+/** Decode a `terminal.data` event frame's base64url utf8 PTY bytes to a string. */
+function eventText(frame) {
+  return utf8Decode(fromBase64Url(frame.data.data.bytes));
+}
+
+test('remote terminal: directory snapshot, attach banner, echo write, resize, detach silences', async () => {
+  const { app, server, host, close } = await boot();
+  try {
+    const p = await phone(app, server);
+    await establish(p, host.hostId);
+
+    // directory.watch → ack (subId === requestId) then a snapshot event.
+    remote(p, 'dw', REMOTE_METHODS.directoryWatch, {});
+    const watchAck = await p.socket.take();
+    assert.equal(watchAck.data.requestId, 'dw');
+    assert.equal(watchAck.data.ok, true);
+    assert.equal(watchAck.data.result.subId, 'dw');
+
+    const snapshot = await p.socket.take();
+    assert.equal(snapshot.data.subId, 'dw');
+    assert.equal(snapshot.data.event, REMOTE_EVENTS.directorySnapshot);
+    const entries = snapshot.data.data.entries;
+    assert.equal(entries.length, 2);
+    assert.equal(entries[0].type, 'terminal');
+    const surfaceId = entries[0].surfaceId;
+
+    // surface.attach → authoritative size + a banner terminal.data event.
+    remote(p, 'at', REMOTE_METHODS.surfaceAttach, { surfaceId, cols: 100, rows: 40 });
+    const attachAck = await p.socket.take();
+    assert.equal(attachAck.data.requestId, 'at');
+    assert.equal(attachAck.data.ok, true);
+    assert.deepEqual(attachAck.data.result, { cols: 100, rows: 40 });
+
+    const banner = await p.socket.take();
+    assert.equal(banner.data.subId, 'at');
+    assert.equal(banner.data.event, REMOTE_EVENTS.terminalData);
+    const bannerText = eventText(banner);
+    assert.match(bannerText, /attached/);
+    assert.match(bannerText, /100x40/);
+
+    // terminal.write → ack + the bytes echoed back (with a redrawn prompt).
+    remote(p, 'wr', REMOTE_METHODS.terminalWrite, {
+      surfaceId,
+      bytes: toBase64Url(utf8Encode('echo hi\r')),
+    });
+    assert.equal((await p.socket.take()).data.ok, true);
+    const echo = await p.socket.take();
+    assert.equal(echo.data.event, REMOTE_EVENTS.terminalData);
+    const echoText = eventText(echo);
+    assert.match(echoText, /echo hi/);
+    assert.ok(echoText.endsWith('$ '), 'the \\r redraws a fake prompt');
+
+    // terminal.resize → ack + a size-note terminal.data event.
+    remote(p, 'rs', REMOTE_METHODS.terminalResize, { surfaceId, cols: 120, rows: 50 });
+    const resizeAck = await p.socket.take();
+    assert.equal(resizeAck.data.ok, true);
+    assert.deepEqual(resizeAck.data.result, { cols: 120, rows: 50 });
+    assert.match(eventText(await p.socket.take()), /resized to 120x50/);
+
+    // surface.detach → ack, then a write is acked but produces no more data.
+    remote(p, 'dt', REMOTE_METHODS.surfaceDetach, { surfaceId });
+    assert.equal((await p.socket.take()).data.ok, true);
+
+    remote(p, 'wr2', REMOTE_METHODS.terminalWrite, {
+      surfaceId,
+      bytes: toBase64Url(utf8Encode('ping\r')),
+    });
+    const writeAck2 = await p.socket.take();
+    assert.equal(writeAck2.data.requestId, 'wr2');
+    assert.equal(writeAck2.data.ok, true);
+    assert.ok(await p.socket.quiet(), 'detach silences the stream: no terminal.data after detach');
   } finally {
     await close();
   }

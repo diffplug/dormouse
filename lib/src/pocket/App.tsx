@@ -13,9 +13,9 @@ import {
   PocketClient,
   type ConnectDecision,
   type PocketSocket,
-} from './pocket-client';
-import { browserWebAuthn } from './webauthn';
-import { getOrCreateDeviceKey } from './device-key';
+} from '../remote/client/pocket-client';
+import { browserWebAuthn } from '../remote/client/webauthn';
+import { getOrCreateDeviceKey } from '../remote/client/device-key';
 import { PocketTerminal } from './PocketTerminal';
 import './pocket.css';
 
