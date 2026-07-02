@@ -214,3 +214,44 @@ Slices 1–3 are pure Node with full automated coverage; browsers only enter at
 slice 4. After slice 5 the POC is in daily-use territory, and everything
 after that (browser surfaces, in-flight replay, thumbnails, WebRTC) is
 already staged in remote-api.md as additive follow-ups.
+
+---
+
+# Running the POC
+
+All five slices are implemented. To test end to end:
+
+**1. Server + Pocket** (one terminal):
+
+```sh
+DORMOUSE_SETUP_PASSWORD=hunter2 pnpm dev:pocket-server
+```
+
+Builds the Pocket app (`lib/dist-pocket`) and the server, then serves both on
+`:3000`. Other env vars per Configuration above; for a real phone set
+`DORMOUSE_ORIGIN` to your TLS origin (e.g. via `tailscale serve`) — WebAuthn
+needs a secure context, and only `localhost` is exempt.
+
+**2. Host** (the laptop being controlled): `pnpm dev:standalone`, then enroll
+once from the devtools console of the standalone webview:
+
+```js
+await window.dormouseRemoteHost.enroll('http://localhost:3000', 'hunter2', 'My Laptop')
+```
+
+Enrollment persists in localStorage; on later launches the host connects by
+itself. (`status()` / `clearEnrollment()` on the same object.) For a headless
+stand-in host instead:
+`DORMOUSE_SETUP_PASSWORD=hunter2 node server/scripts/fake-host.mjs http://localhost:3000`
+(auto-approves pairing; answers `hello` only — no real terminals).
+
+**3. Phone** (or any other browser profile): open the server origin →
+First-time setup (password + label) creates the passkey and signs you in →
+Hosts → **Pair** → approve in the modal on the laptop → **Connect** (one
+biometric prompt) → pick a pane → type.
+
+POC limitations to know about: pair/connect only works from the browser that
+registered the passkey (the passkey public key is stored client-side at
+registration); clearing site data destroys the device key → re-pair, per the
+security model; a dropped WebSocket sends you back to the Hosts view —
+reconnect by tapping Connect again.
