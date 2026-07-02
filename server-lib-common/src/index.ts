@@ -12,6 +12,7 @@
  * connection authorization.
  */
 
+export * from './remote/wire.js';
 export * from './security/webcrypto.js';
 export * from './security/bytes.js';
 export * from './security/ecdsa.js';
