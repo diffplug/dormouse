@@ -55,21 +55,36 @@ Reuses the existing surface model (`dor/src/protocol.ts`,
 
 ## Channels
 
-An authorized session (the output of `authorizeConnection`) is bound to:
+v1 transport is **WebSocket relay only**: one WebSocket per session, relayed
+through the Server, bound to the `sessionId` issued by `authorizeConnection`.
+Control messages and media frames share the socket:
 
-1. **Control channel** — ordered, reliable, JSON messages. Carries requests,
-   responses, and event subscriptions. WebSocket relayed by the Server, or a
-   WebRTC data channel once rendezvous completes (the Server signals; per the
-   security model it is never trusted with authorization).
-2. **Media channels** — per-attached-surface streams. Terminal data rides the
-   control channel (it is small and ordering matters). Browser screencasts
-   prefer an unreliable/unordered channel (WebRTC data channel or video track)
-   so a dropped frame is skipped, not queued behind.
+* **Control** — requests, responses, and event subscriptions. Terminal data
+  rides here too (it is small and ordering matters).
+* **Media** — browser screencast frames. A dropped frame must be skipped, not
+  queued behind: the Host keeps at most the newest frame per attachment and
+  sends it only when the socket drains, so a slow link degrades to a lower
+  frame rate instead of growing a buffer.
 
-Every channel carries the `sessionId` issued at connection time. Future
-hardening (see the security model's PRF section): pin the WebRTC DTLS
-fingerprint inside the device-key-signed connect payload so even the signaling
-Server cannot man-in-the-middle the media path.
+Future upgrades, none of which change the API surface: WebRTC rendezvous for
+latency (the Server signals but, per the security model, is never trusted with
+authorization — pin the DTLS fingerprint inside the device-key-signed connect
+payload), and app-layer encryption so the relaying Server sees only
+ciphertext.
+
+## Server deployment modes
+
+The Server always ships in two modes; the remote API and the security model
+are identical in both — the modes differ only in how accounts come to exist.
+
+* **Selfhost** — an env-var sets a setup password; presenting it allows the
+  system's only user to create their account and register the first passkey.
+  Sign-in from then on is passkey-only. No database: accounts, passkey
+  credentials, and revocation state live in local files.
+* **SaaS multitenant** — anyone can create an account with email + passkey.
+
+v1 ships selfhost only. Selfhost is not a stepping stone: it remains a
+supported mode alongside SaaS permanently.
 
 ## Envelope
 
@@ -121,7 +136,7 @@ attaching to anything.
 interface DirectoryEntry {
   paneRef: string;
   surfaceId: string;            // the selected surface in the pane
-  type: 'terminal' | 'agent-browser' | 'iframe';
+  type: 'terminal' | 'agent-browser';  // iframe surfaces are not listed (unsupported)
   title: string;                // derived title, same one the wall header shows
   focused: boolean;             // focused on the host
   // Terminal-only, from the existing semantic-event model (terminal-state.ts):
@@ -130,8 +145,10 @@ interface DirectoryEntry {
   cwd?: string;
   // Browser-only:
   url?: string;
-  /** The pane is ringing/alerting on the host (alert-manager). */
-  attention: boolean;
+  /** The pane's alert is ringing on the host (alert-manager). */
+  ringing: boolean;
+  /** The pane has an outstanding TODO waiting for the user. */
+  hasTODO: boolean;
 }
 
 // events on the subscription
@@ -212,11 +229,10 @@ background VR panel asks for less than the one being looked at.
 
 ## Iframe surfaces
 
-Not streamable in v1 — the pane is a live DOM pointed at a Host-local URL.
-Remote viewers get a placeholder card (title + URL) in the directory and wall.
-Future: tunnel the existing iframe-proxy (`lib/src/host/iframe-proxy.ts`)
-through the session so remote clients can load the same proxied URL; or fall
-back to rendering the page in agent-browser and screencasting it.
+Not supported. Iframe surfaces are omitted from the directory and refuse
+attachment; wall snapshots still list them (the layout must be truthful) and
+VR renders an inert placeholder. Nothing else in the protocol assumes they
+exist, so support can be added cleanly later — it is not on the critical path.
 
 ---
 
@@ -321,16 +337,11 @@ time; the Host user can always reclaim it locally. Phones never need it.
 
 # Open questions
 
-* **Transport v1**: start WebSocket-relay-only (simplest, works everywhere,
-  Server sees only ciphertext if we add app-layer encryption) and add WebRTC
-  later, or bite off WebRTC rendezvous immediately for latency?
 * **Terminal snapshot format**: serialize the emulator state (fast attach,
   version-coupled) vs replay a scrollback tail of raw PTY bytes (simple,
   renderer-agnostic, slower for huge scrollback)?
-* **Browser media**: screencast frames over a data channel are simple and
-  match agent-browser today; a WebRTC video track would be smoother for VR.
-  Possibly phone=frames, VR=track, negotiated in the hello.
-* **Iframe surfaces**: how much of the iframe-proxy is safe to expose through
-  the tunnel (it can reach Host-local services)? May need its own grant.
+* **Browser media**: screencast frames over the WebSocket are v1; when WebRTC
+  arrives, a video track would be smoother for VR. Possibly phone=frames,
+  VR=track, negotiated in the hello.
 * **Audio**: browser surfaces can produce audio; VR will want it (spatial,
   per-panel). Out of scope for v1.
