@@ -1,25 +1,29 @@
 /**
- * Dormouse Pocket — the phone-side app (docs/specs/server.md "Pocket side").
+ * Dormouse Pocket — the phone-side app (docs/specs/pocket-app.md).
  *
- * A tiny four-view flow over {@link PocketClient}: sign in (or first-time
- * passkey setup) → pick a host (pair once, then connect) → pick a pane from the
- * live directory → drive it in the terminal view. All protocol work lives in
- * the client; this file is just state + buttons.
+ * Auth screens over {@link PocketClient} — sign in (or first-time passkey setup)
+ * → pick a host (pair once, then connect) — then, on a successful connect, the
+ * real mobile experience: a {@link RemotePtyAdapter} over the session drives
+ * `MobileTerminalUi`/`MobileWall` (the same composition the website playground
+ * proves out with `FakePtyAdapter`). No bespoke terminal UI.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { DirectoryEntry } from 'server-lib-common';
 import {
   PocketClient,
   type ConnectDecision,
   type PocketSocket,
-} from '../remote/client/pocket-client';
-import { browserWebAuthn } from '../remote/client/webauthn';
-import { getOrCreateDeviceKey } from '../remote/client/device-key';
-import { PocketTerminal } from './PocketTerminal';
+} from '../client/pocket-client';
+import { browserWebAuthn } from '../client/webauthn';
+import { getOrCreateDeviceKey } from '../client/device-key';
+import { RemotePtyAdapter } from '../client/remote-adapter';
+import { setPlatform } from '../../lib/platform';
+import { disposeAllSessions, initAlertStateReceiver } from '../../lib/terminal-registry';
+import { PocketWall } from './PocketWall';
+import '../../index.css';
 import './pocket.css';
 
-type Phase = 'auth' | 'hosts' | 'picker' | 'terminal';
+type Phase = 'auth' | 'hosts' | 'wall';
 
 interface HostView {
   hostId: string;
@@ -48,8 +52,7 @@ export default function App(): React.ReactElement {
   const [busy, setBusy] = useState<string | null>(null);
   const [hosts, setHosts] = useState<HostView[]>([]);
   const [activeHost, setActiveHost] = useState<HostView | null>(null);
-  const [entries, setEntries] = useState<DirectoryEntry[]>([]);
-  const [surface, setSurface] = useState<{ surfaceId: string; title: string } | null>(null);
+  const adapterRef = useRef<RemotePtyAdapter | null>(null);
   const socketOpened = useRef(false);
 
   const run = useCallback(async (label: string, fn: () => Promise<void>) => {
@@ -73,15 +76,23 @@ export default function App(): React.ReactElement {
     setPhase('hosts');
   }, [client]);
 
+  /** Tear down the live session and return to the hosts list. */
+  const teardownAdapter = useCallback(() => {
+    void adapterRef.current?.dispose();
+    adapterRef.current = null;
+    disposeAllSessions();
+  }, []);
+
+  // Socket drop / host-gone: dispose the adapter and fall back to Hosts.
   useEffect(() => {
     client.setOnHostGone(() => {
+      teardownAdapter();
       setError('The host disconnected.');
-      setSurface(null);
-      setEntries([]);
+      setActiveHost(null);
       setPhase('hosts');
     });
     return () => client.setOnHostGone(null);
-  }, [client]);
+  }, [client, teardownAdapter]);
 
   const onConnect = (host: HostView) =>
     run('connect', async () => {
@@ -90,9 +101,18 @@ export default function App(): React.ReactElement {
         throw new Error(`Connection denied${decision.failures ? `: ${decision.failures.join(', ')}` : ''}`);
       }
       await client.hello();
-      await client.watchDirectory(setEntries);
+
+      // Stand up the remote adapter as the platform, prep a clean registry,
+      // then start watching the directory before the wall renders.
+      const adapter = new RemotePtyAdapter(client);
+      adapterRef.current = adapter;
+      setPlatform(adapter);
+      disposeAllSessions();
+      initAlertStateReceiver();
+      await adapter.init();
+
       setActiveHost(host);
-      setPhase('picker');
+      setPhase('wall');
     });
 
   const onPair = (host: HostView) =>
@@ -102,6 +122,12 @@ export default function App(): React.ReactElement {
       setHosts((prev) => [...prev]); // reflect the new paired state
     });
 
+  const leaveWall = () => {
+    teardownAdapter();
+    setActiveHost(null);
+    setPhase('hosts');
+  };
+
   // --- Views ---------------------------------------------------------------
 
   if (phase === 'auth') {
@@ -109,10 +135,11 @@ export default function App(): React.ReactElement {
       <SetupOrSignin
         busy={busy}
         error={error}
-        onSignin={() => run('signin', async () => {
-          await client.signin();
-          await loadHosts();
-        })}
+        onSignin={() =>
+          run('signin', async () => {
+            await client.signin();
+            await loadHosts();
+          })}
         onSetup={(password, label) =>
           run('setup', async () => {
             await client.setup(password, label);
@@ -137,49 +164,18 @@ export default function App(): React.ReactElement {
     );
   }
 
-  if (phase === 'picker' && activeHost) {
-    return (
-      <PickerView
-        host={activeHost}
-        entries={entries}
-        error={error}
-        onBack={() => {
-          setEntries([]);
-          setActiveHost(null);
-          setPhase('hosts');
-        }}
-        onPick={(entry) => {
-          setSurface({ surfaceId: entry.surfaceId, title: entry.title });
-          setPhase('terminal');
-        }}
-      />
-    );
-  }
-
-  if (phase === 'terminal' && surface) {
+  if (phase === 'wall' && activeHost && adapterRef.current) {
     return (
       <div className="pk-app">
         <header className="pk-header">
-          <button
-            type="button"
-            className="pk-btn ghost small"
-            onClick={() => {
-              setSurface(null);
-              setPhase('picker');
-            }}
-          >
-            ‹ Panes
+          <button type="button" className="pk-btn ghost small" onClick={leaveWall}>
+            ‹ Hosts
           </button>
-          <h1>{surface.title || 'Terminal'}</h1>
+          <h1>{activeHost.label || activeHost.hostId}</h1>
         </header>
-        <PocketTerminal
-          client={client}
-          surfaceId={surface.surfaceId}
-          onBack={() => {
-            setSurface(null);
-            setPhase('picker');
-          }}
-        />
+        <div className="pk-wall-host">
+          <PocketWall adapter={adapterRef.current} />
+        </div>
       </div>
     );
   }
@@ -342,60 +338,6 @@ function HostsView({
               </div>
             );
           })
-        )}
-      </div>
-    </div>
-  );
-}
-
-// --- PickerView ------------------------------------------------------------
-
-function PickerView({
-  host,
-  entries,
-  error,
-  onBack,
-  onPick,
-}: {
-  host: HostView;
-  entries: DirectoryEntry[];
-  error: string | null;
-  onBack: () => void;
-  onPick: (entry: DirectoryEntry) => void;
-}): React.ReactElement {
-  return (
-    <div className="pk-app">
-      <header className="pk-header">
-        <button type="button" className="pk-btn ghost small" onClick={onBack}>
-          ‹ Hosts
-        </button>
-        <h1>
-          {host.label || host.hostId} <span className="pk-sub">panes</span>
-        </h1>
-      </header>
-      <div className="pk-body">
-        {error ? <div className="pk-error">{error}</div> : null}
-        {entries.length === 0 ? (
-          <div className="pk-empty">Waiting for panes…</div>
-        ) : (
-          entries.map((entry) => (
-            <button
-              type="button"
-              className="pk-row"
-              key={entry.surfaceId}
-              onClick={() => onPick(entry)}
-            >
-              <div className="pk-row-main">
-                <div className="pk-row-title">{entry.title || 'Terminal'}</div>
-                {entry.cwd ? <div className="pk-row-secondary">{entry.cwd}</div> : null}
-              </div>
-              {entry.activity ? (
-                <span className="pk-badge activity">{entry.activity}</span>
-              ) : null}
-              {entry.hasTODO ? <span className="pk-badge todo">TODO</span> : null}
-              {entry.ringing ? <span className="pk-badge ringing">●</span> : null}
-            </button>
-          ))
         )}
       </div>
     </div>

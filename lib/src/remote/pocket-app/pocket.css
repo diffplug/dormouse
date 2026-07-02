@@ -1,8 +1,9 @@
 /*
- * Self-contained dark theme for Dormouse Pocket. The Pocket app is served
- * standalone (not inside VSCode / the wall), so it does not depend on the
- * `--vscode-*` token system the main `lib` app uses; it just mirrors that
- * dark, terminal-forward look with plain CSS variables.
+ * Dark, phone-first styling for the Dormouse Pocket auth views (setup/signin →
+ * hosts). Self-contained plain-CSS variables, independent of the `--vscode-*`
+ * token system the wall uses — the two never overlap (auth uses `pk-*`, the wall
+ * lives inside `MobileTerminalUi`). Imported after `index.css`, so these
+ * unlayered rules win over Tailwind's layered preflight.
  */
 
 :root {
@@ -19,10 +20,6 @@
   --pk-ring: #4a9eff;
   --pk-font: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   color-scheme: dark;
-}
-
-* {
-  box-sizing: border-box;
 }
 
 html,
@@ -93,6 +90,14 @@ body {
 
 .pk-body.pk-center {
   justify-content: center;
+}
+
+/* --- Wall host: the flex slot MobileTerminalUi fills below the app header --- */
+.pk-wall-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* --- Cards / list rows --- */
@@ -168,20 +173,6 @@ body {
 
 .pk-badge.offline {
   color: var(--pk-muted);
-}
-
-.pk-badge.ringing {
-  color: var(--pk-danger);
-  border-color: color-mix(in srgb, var(--pk-danger) 45%, transparent);
-}
-
-.pk-badge.todo {
-  color: var(--pk-accent);
-  border-color: color-mix(in srgb, var(--pk-accent) 45%, transparent);
-}
-
-.pk-badge.activity {
-  text-transform: capitalize;
 }
 
 /* --- Buttons --- */
@@ -295,68 +286,4 @@ body {
   padding: 8px 0;
   cursor: pointer;
   text-align: left;
-}
-
-.pk-spinner {
-  color: var(--pk-muted);
-  font-size: 13px;
-}
-
-/* --- Terminal view --- */
-.pk-term-wrap {
-  flex: 1 1 auto;
-  min-height: 0;
-  position: relative;
-  background: #000;
-  overflow: hidden;
-}
-
-.pk-term-host {
-  position: absolute;
-  inset: 0;
-  padding: 4px;
-}
-
-.pk-term-closed {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: var(--pk-muted);
-  font-size: 13px;
-  background: color-mix(in srgb, #000 70%, transparent);
-}
-
-.pk-keybar {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 6px;
-  padding: 8px;
-  padding-bottom: max(8px, env(safe-area-inset-bottom));
-  background: var(--pk-surface);
-  border-top: 1px solid var(--pk-border);
-  overflow-x: auto;
-}
-
-.pk-key {
-  font: inherit;
-  font-size: 13px;
-  flex: 0 0 auto;
-  min-width: 44px;
-  min-height: 40px;
-  border-radius: 8px;
-  border: 1px solid var(--pk-border);
-  background: var(--pk-surface-raised);
-  color: var(--pk-fg);
-  cursor: pointer;
-  padding: 0 12px;
-}
-
-.pk-key:active {
-  background: var(--pk-accent);
-  color: var(--pk-accent-fg);
-}
-
-.pk-key.wide {
-  flex: 1 0 auto;
 }
