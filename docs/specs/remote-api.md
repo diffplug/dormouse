@@ -166,29 +166,56 @@ cellular and thumbnails are fetched only for what is on screen.
 
 # Attaching to a surface
 
-`surface.attach { surfaceId }` opens the surface's stream;
-`surface.detach { surfaceId }` closes it. The phone holds one attachment; VR
-holds one per visible panel. Attachment is view-state only — it never changes
-what runs on the Host.
+`surface.attach { surfaceId, ... }` opens the surface's stream (terminals add
+their dimensions — see below); `surface.detach { surfaceId }` closes it. The
+phone holds one attachment; VR holds one per visible panel. Attachment is
+view-state only with one deliberate exception: attaching to a terminal takes
+size authority.
 
 ## Terminal surfaces
 
 Replicated, not screencast: the client renders its own xterm from the same
 data the host UI consumes.
 
+### Attach is the resize (v1)
+
+The remote is virtually always a different size than the Host, and a resize is
+exactly what makes a terminal paint itself — so attach carries the client's
+dimensions and there is no snapshot transfer:
+
+1. Client attaches with `{ cols, rows }`.
+2. Host resizes the PTY (last-attach-wins; see Size authority). `SIGWINCH`
+   makes full-screen TUIs repaint completely and shells redraw their prompt
+   line, filling the client's screen from the live stream alone.
+3. If the requested size happens to equal the current size, the Host forces
+   the repaint anyway: `SIGWINCH` alone first (most TUIs refetch size and
+   repaint), then a quick rows±1 bounce if no output follows.
+4. If a command is mid-flight, its output so far is replayed before the live
+   stream (see In-flight replay).
+
+Normal-screen history does not regenerate on resize; it is deliberately absent
+from v1 and arrives as semantic scrollback in v2 (below).
+
 ```ts
-// host → client, once per attach
-interface TerminalAttachSnapshot {
-  cols: number; rows: number;
-  /** Serialized screen + scrollback tail, ready to feed the renderer. */
-  screenState: string;
-  scrollbackLines: number;      // how much history the snapshot carries
+// client → host
+{ method: 'surface.attach', params: { surfaceId: string, cols: number, rows: number } }
+
+// host → client, the attach result
+interface TerminalAttachResult {
+  cols: number; rows: number;     // the size the PTY now has
+  /** Present when a command is running; its output since commandStart. */
+  inflight?: {
+    commandLine: string | null;
+    startedAt: number;
+    bytes: string;                // base64, tail-capped
+    truncated: boolean;
+  };
 }
 
 // then a stream of:
 type TerminalEvent =
   | { event: 'terminal.data';     data: { bytes: string /* base64 */ } }
-  | { event: 'terminal.resize';   data: { cols: number; rows: number } }
+  | { event: 'terminal.resize';   data: { cols: number; rows: number } }   // another display took authority
   | { event: 'terminal.semantic'; data: TerminalSemanticEvent }  // cwd/activity/title, as today
   | { event: 'terminal.closed';   data: { exitCode?: number } };
 
@@ -198,12 +225,51 @@ type TerminalInput =
   | { method: 'terminal.resize'; params: { surfaceId: string; cols: number; rows: number } };
 ```
 
-**Resize authority.** A terminal has one size; the Host owns it by default and
-remote viewers reflow/scale to fit (the mobile UI already renders at foreign
-sizes). A viewer with the input grant may request `terminal.resize`; the Host
-applies it only when no local view is displaying the pane, or when the session
-holds the wall lease (see VR below). This avoids two screens fighting over
-`SIGWINCH`.
+### In-flight replay (v1)
+
+The most common reason to open a pane on the phone is a command that is still
+running — "is my build done?" — and a resize repaint shows nothing for a
+command quietly writing a log. The Host therefore retains the output of the
+current command from its `commandStart` boundary (OSC 133/633, with the
+existing keystroke-heuristic fallback), tail-capped to a fixed byte budget;
+attach replays it before the live stream begins. The buffer is dropped at the
+next prompt — v1 remembers the in-flight command only, never history.
+
+### Size authority: last-attach-wins
+
+A terminal has one size, and the most recent size writer owns it: attaching
+with dimensions and `terminal.resize` both take authority, and the Host user
+interacting with the pane locally reclaims it. Every other display of that
+pane — the Host's wall pane, other attached viewers — greys out and shows only
+**"tethering to \<device\>"** (the ACL record's label, e.g. `iPhone Safari`)
+instead of fighting over `SIGWINCH`. Interacting with a tethered pane is how a
+display takes it back.
+
+### Future work (v2): semantic command scrollback
+
+History arrives as structure the Host already extracts, not as emulator state:
+OSC 133/633 segmentation gives per-command boundaries, alt-screen spans are
+already tracked and stripped, and the v1 in-flight buffer is the same capture
+mechanism retained for one command instead of K. v2 keeps the last K commands
+per pane:
+
+```ts
+interface CommandBlock {
+  commandLine: string | null;
+  cwd: string | null;
+  exitCode: number | null;      // null while still running
+  startedAt: number;
+  finishedAt: number | null;
+  bytes: string;                // output, tail-capped, alt-screen spans stripped
+  truncated: boolean;
+}
+```
+
+Attach then also delivers recent blocks, and the client renders them at its
+own width — collapsible cards on the phone, panels in VR — rather than
+replaying a fixed-width terminal. Additive by construction: an extra field on
+`TerminalAttachResult` plus a `terminal.block` event, so nothing in the v1
+protocol changes shape.
 
 ## Browser surfaces (`agent-browser`)
 
@@ -304,9 +370,11 @@ their request/response shapes so the Host dispatches both through one handler.
 
 ## Wall lease
 
-A VR session may request `wall.lease`. Holding the lease means the headset is
-the primary display: it wins resize authority for the terminals it displays,
-and the Host UI may dim to a "being driven remotely" state. One lease at a
+A VR session may request `wall.lease`, declaring itself the primary display.
+Sizing needs no lease — last-attach-wins already hands VR the panes it
+displays — so the lease is presentational: the Host UI tethers wholesale
+("tethering to \<device\>") instead of pane by pane, and panes created on the
+Host while the lease is held open tethered to the leaseholder. One lease at a
 time; the Host user can always reclaim it locally. Phones never need it.
 
 ---
@@ -315,8 +383,9 @@ time; the Host user can always reclaim it locally. Phones never need it.
 
 * Any number of observe-only viewers; streams fan out per attachment.
 * Input is not locked to one viewer — grants are per-session, and interleaved
-  typing is no worse than two keyboards on one machine. The wall lease is the
-  only exclusive resource (sizing/primary-display).
+  typing is no worse than two keyboards on one machine. Terminal size is
+  last-attach-wins (see Size authority); the wall lease is the only other
+  exclusive resource (primary display).
 * Every viewer is visible on the Host (label from the ACL record, e.g.
   `iPhone Safari`), with per-viewer disconnect.
 
@@ -326,8 +395,8 @@ time; the Host user can always reclaim it locally. Phones never need it.
 
 * Terminal output is already coalesced host-side; the remote stream reuses
   that batching and adds a per-session byte budget with tail-drop + resync
-  (send a fresh `TerminalAttachSnapshot`) rather than unbounded buffering on a
-  bad link.
+  (an implicit re-attach: repaint via resize plus in-flight replay) rather
+  than unbounded buffering on a bad link.
 * Screencast frames are droppable by design; only the newest frame matters.
 * The directory is metadata-only; thumbnails are pull, not push.
 * Detach on backgrounding: when the phone app/PWA loses visibility, the client
@@ -337,9 +406,6 @@ time; the Host user can always reclaim it locally. Phones never need it.
 
 # Open questions
 
-* **Terminal snapshot format**: serialize the emulator state (fast attach,
-  version-coupled) vs replay a scrollback tail of raw PTY bytes (simple,
-  renderer-agnostic, slower for huge scrollback)?
 * **Browser media**: screencast frames over the WebSocket are v1; when WebRTC
   arrives, a video track would be smoother for VR. Possibly phone=frames,
   VR=track, negotiated in the hello.
