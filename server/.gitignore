@@ -1,0 +1,2 @@
+# Selfhost server runtime state (accounts, passkeys, host tokens) — never commit.
+data/
