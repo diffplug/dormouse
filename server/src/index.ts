@@ -21,8 +21,11 @@ if (!setupPassword) {
 const origin = process.env.DORMOUSE_ORIGIN ?? `http://localhost:${port}`;
 const stateDir = process.env.DORMOUSE_STATE_DIR ?? './data';
 
-const { app } = createApp({ setupPassword, origin, stateDir });
+const { app, injectWebSocket } = createApp({ setupPassword, origin, stateDir });
 
-serve({ fetch: app.fetch, port }, (info) => {
+const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`server listening on http://localhost:${info.port} (origin ${origin})`);
 });
+
+// Bind the relay's WS upgrade handler onto the running server (@hono/node-ws).
+injectWebSocket(server);

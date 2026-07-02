@@ -19,12 +19,16 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 import { Hono } from 'hono';
-import type { MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
+import { createNodeWebSocket } from '@hono/node-ws';
+import type { NodeWebSocket } from '@hono/node-ws';
 import {
   API_ROUTES,
   HELLO_ROUTE,
   HostChallengeIssuer,
   SELFHOST_ACCOUNT_ID,
+  WS_ROUTES,
+  WS_TOKEN_PARAM,
   fromBase64Url,
   getWebCrypto,
   helloResponse,
@@ -33,6 +37,9 @@ import {
   verifyPasskeyAssertion,
 } from 'server-lib-common';
 import type {
+  HostEnrollRequest,
+  HostEnrollResponse,
+  HostsResponse,
   PasskeyAssertion,
   SetupBeginRequest,
   SetupBeginResponse,
@@ -43,7 +50,10 @@ import type {
   SigninFinishResponse,
 } from 'server-lib-common';
 
-import { AccountStore, DuplicateCredentialError } from './state.js';
+import { RelayHub } from './relay.js';
+import type { ClientConn, HostConn } from './relay.js';
+import { AccountStore, DuplicateCredentialError, HostStore } from './state.js';
+import type { StoredHost } from './state.js';
 
 /** Runtime configuration; see `index.ts` for how env maps onto this. */
 export interface AppConfig {
@@ -63,7 +73,7 @@ export interface Session {
   readonly expiresAt: number;
 }
 
-type AppEnv = { Variables: { session: Session } };
+type AppEnv = { Variables: { session: Session; host: StoredHost } };
 
 /** Sessions live 12 hours (server.md: "hours-scale TTL"). */
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -107,15 +117,25 @@ export class SessionStore {
 export interface CreatedApp {
   readonly app: Hono<AppEnv>;
   readonly sessions: SessionStore;
-  /** Middleware for session-gated routes (slice 2's `/api/hosts`, etc.). */
+  /** Middleware for session-gated routes (`/api/hosts`, etc.). */
   readonly requireSession: MiddlewareHandler<AppEnv>;
+  /** The relay hub; exposed so `/api/hosts` presence and tests can read it. */
+  readonly hub: RelayHub;
+  /**
+   * Bind the WS relay onto the http server returned by `serve()`. `index.ts`
+   * (and tests) MUST call this after `serve()`, per the `@hono/node-ws` pattern
+   * — the WebSocket routes are inert until the upgrade handler is injected.
+   */
+  readonly injectWebSocket: NodeWebSocket['injectWebSocket'];
 }
 
 export function createApp(config: AppConfig): CreatedApp {
   const now = config.now ?? (() => Date.now());
   const rpId = new URL(config.origin).hostname;
   const accounts = new AccountStore(config.stateDir, now);
+  const hostStore = new HostStore(config.stateDir, now);
   const sessions = new SessionStore(now);
+  const hub = new RelayHub();
   // Separate issuers per flow: a setup challenge cannot be redeemed at sign-in.
   const setupChallenges = new HostChallengeIssuer({ now });
   const signinChallenges = new HostChallengeIssuer({ now });
@@ -128,6 +148,9 @@ export function createApp(config: AppConfig): CreatedApp {
     typeof provided === 'string' && timingSafeEqual(sha256(provided), expectedPasswordHash);
 
   const app = new Hono<AppEnv>();
+  // The WS relay routes need the http server that `serve()` builds later, so the
+  // adapter is created here and `injectWebSocket` is handed back to the caller.
+  const { upgradeWebSocket, injectWebSocket } = createNodeWebSocket({ app });
 
   // GET / — stub landing page; slice 5 replaces this with the Pocket web app.
   app.get('/', (c) => c.text('Dormouse selfhost server'));
@@ -242,7 +265,27 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.json(res);
   });
 
-  // Exported for slice 2: gate a route on a valid `Authorization: Bearer` token.
+  // --- Host enrollment: password-gated, appends to hosts.json --------------
+
+  app.post(API_ROUTES.hostEnroll, async (c) => {
+    const body = await readJson<HostEnrollRequest>(c);
+    if (!body || !passwordOk(body.password)) {
+      await delay(PASSWORD_FAILURE_DELAY_MS);
+      return c.json({ error: 'invalid setup password' }, 401);
+    }
+    const label = typeof body.label === 'string' ? body.label : '';
+    const host = await hostStore.enroll(label);
+    // The Host enforces `origin`/`rpId` as its ConnectionPolicy (server.md).
+    const res: HostEnrollResponse = {
+      hostId: host.hostId,
+      hostToken: host.hostToken,
+      origin: config.origin,
+      rpId,
+    };
+    return c.json(res);
+  });
+
+  // Gate a route on a valid `Authorization: Bearer` session token.
   const requireSession: MiddlewareHandler<AppEnv> = async (c, next) => {
     const header = c.req.header('Authorization') ?? '';
     const match = /^Bearer (.+)$/.exec(header);
@@ -252,7 +295,76 @@ export function createApp(config: AppConfig): CreatedApp {
     await next();
   };
 
-  return { app, sessions, requireSession };
+  // --- Host presence: enrolled hosts + whether each is connected -----------
+
+  app.get(API_ROUTES.hosts, requireSession, async (c) => {
+    const hosts = await hostStore.list();
+    const res: HostsResponse = {
+      hosts: hosts.map((h) => ({
+        hostId: h.hostId,
+        label: h.label,
+        online: hub.isHostOnline(h.hostId),
+      })),
+    };
+    return c.json(res);
+  });
+
+  // --- The relay: one host socket per hostId, many client sockets ----------
+  // Auth rides the `token` query param (browsers cannot set WS headers). A bad
+  // token short-circuits with 401 here, so `injectWebSocket` never upgrades it.
+
+  app.get(
+    WS_ROUTES.host,
+    async (c, next) => {
+      const token = c.req.query(WS_TOKEN_PARAM);
+      const host = token ? await hostStore.findByToken(token) : undefined;
+      if (!host) return c.json({ error: 'unknown host token' }, 401);
+      c.set('host', host);
+      return next();
+    },
+    upgradeWebSocket((c) => {
+      // The auth middleware above ran on this same context and stashed `host`.
+      const host = (c as Context<AppEnv>).get('host');
+      let conn: HostConn | undefined;
+      return {
+        onOpen: (_evt, ws) => {
+          conn = hub.registerHost(host.hostId, ws);
+        },
+        onMessage: (evt) => {
+          if (conn && typeof evt.data === 'string') hub.onHostFrame(conn, evt.data);
+        },
+        onClose: () => {
+          if (conn) hub.unregisterHost(conn);
+        },
+      };
+    }),
+  );
+
+  app.get(
+    WS_ROUTES.client,
+    (c, next) => {
+      const token = c.req.query(WS_TOKEN_PARAM);
+      const session = token ? sessions.validate(token) : null;
+      if (!session) return c.json({ error: 'unauthorized' }, 401);
+      return next();
+    },
+    upgradeWebSocket(() => {
+      let conn: ClientConn | undefined;
+      return {
+        onOpen: (_evt, ws) => {
+          conn = hub.registerClient(ws);
+        },
+        onMessage: (evt) => {
+          if (conn && typeof evt.data === 'string') hub.onClientFrame(conn, evt.data);
+        },
+        onClose: () => {
+          if (conn) hub.unregisterClient(conn);
+        },
+      };
+    }),
+  );
+
+  return { app, sessions, requireSession, hub, injectWebSocket };
 }
 
 // ---------------------------------------------------------------------------

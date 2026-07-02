@@ -1,24 +1,23 @@
 /**
- * Persistent account state for the selfhost POC (docs/specs/server.md, "State
- * files"). The entire durable footprint of slice 1 is one file:
+ * Persistent state for the selfhost POC (docs/specs/server.md, "State files"):
  *
  *   $DORMOUSE_STATE_DIR/account.json
  *     { accountId: "owner", passkeys: [{ credentialId, publicKey, label, createdAt }] }
+ *   $DORMOUSE_STATE_DIR/hosts.json
+ *     [{ hostId, hostToken, label, enrolledAt }]
  *
- * Deliberately not a database: one account, a handful of passkeys, hand-editable
- * for revocation. Writes go through a temp-file-plus-rename so a crash mid-write
- * can never leave a half-written (and therefore unparseable) account.json, and
- * mutations are serialized through a promise chain so two concurrent
- * registrations cannot clobber each other's append (read-modify-write races).
- *
- * `hosts.json` is intentionally absent — it arrives in slice 2.
+ * Deliberately not a database: one account, a handful of passkeys and hosts,
+ * hand-editable for revocation. Writes go through a temp-file-plus-rename so a
+ * crash mid-write can never leave a half-written (and therefore unparseable)
+ * file, and mutations are serialized through a promise chain so two concurrent
+ * appends cannot clobber each other (read-modify-write races).
  */
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
-import { SELFHOST_ACCOUNT_ID } from 'server-lib-common';
+import { SELFHOST_ACCOUNT_ID, toBase64Url } from 'server-lib-common';
 
 /** A registered passkey as stored on disk. `publicKey` is base64url SPKI. */
 export interface StoredPasskey {
@@ -102,6 +101,82 @@ export class AccountStore {
     await mkdir(this.#stateDir, { recursive: true });
     const tmp = `${this.#path}.${randomUUID()}.tmp`;
     await writeFile(tmp, `${JSON.stringify(account, null, 2)}\n`, 'utf8');
+    await rename(tmp, this.#path);
+  }
+}
+
+/** An enrolled Host as stored in `hosts.json`. `hostToken` is the WS bearer secret. */
+export interface StoredHost {
+  readonly hostId: string;
+  readonly hostToken: string;
+  readonly label: string;
+  readonly enrolledAt: number;
+}
+
+/**
+ * Persistent host enrollment (`hosts.json`). Mirrors {@link AccountStore}: an
+ * append-only JSON array, atomic writes, and a mutex so concurrent enrollments
+ * cannot lose a write. Revocation is deleting a line by hand (POC guardrail).
+ */
+export class HostStore {
+  readonly #stateDir: string;
+  readonly #path: string;
+  readonly #now: () => number;
+  /** Serializes mutations so overlapping enrollments do not lose writes. */
+  #tail: Promise<unknown> = Promise.resolve();
+
+  constructor(stateDir: string, now: () => number = () => Date.now()) {
+    this.#stateDir = stateDir;
+    this.#path = join(stateDir, 'hosts.json');
+    this.#now = now;
+  }
+
+  /** Read `hosts.json`, or `[]` if no host has been enrolled yet. */
+  async list(): Promise<StoredHost[]> {
+    let raw: string;
+    try {
+      raw = await readFile(this.#path, 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw err;
+    }
+    return JSON.parse(raw) as StoredHost[];
+  }
+
+  /** Look up an enrolled host by its bearer token (the `/ws/host` credential). */
+  async findByToken(hostToken: string): Promise<StoredHost | undefined> {
+    const hosts = await this.list();
+    return hosts.find((h) => h.hostToken === hostToken);
+  }
+
+  /**
+   * Enroll a new host: mint a random `hostId` (16 bytes) and `hostToken`
+   * (32 bytes), both base64url, append them, and return the record. Runs under
+   * the mutex.
+   */
+  enroll(label: string): Promise<StoredHost> {
+    const run = async (): Promise<StoredHost> => {
+      const hosts = await this.list();
+      const host: StoredHost = {
+        hostId: toBase64Url(randomBytes(16)),
+        hostToken: toBase64Url(randomBytes(32)),
+        label,
+        enrolledAt: this.#now(),
+      };
+      hosts.push(host);
+      await this.#writeAtomic(hosts);
+      return host;
+    };
+    // Chain regardless of prior resolve/reject so one failure cannot wedge the queue.
+    const result = this.#tail.then(run, run);
+    this.#tail = result.catch(() => undefined);
+    return result;
+  }
+
+  async #writeAtomic(hosts: StoredHost[]): Promise<void> {
+    await mkdir(this.#stateDir, { recursive: true });
+    const tmp = `${this.#path}.${randomUUID()}.tmp`;
+    await writeFile(tmp, `${JSON.stringify(hosts, null, 2)}\n`, 'utf8');
     await rename(tmp, this.#path);
   }
 }
