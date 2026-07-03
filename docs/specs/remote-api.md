@@ -1,5 +1,7 @@
 # Remote Surface API
 
+> See `docs/specs/glossary.md` for the canonical Pane / Surface / Session model; this spec uses that vocabulary and adds only remote-specific terms (Viewer, and the wire-level `DirectoryEntry` projection of a pane).
+
 This spec sketches the API a Client uses to view and control a Host's surfaces
 after a session has been authorized by the
 [remote security model](./remote-security-model.md). Nothing here weakens that
@@ -65,15 +67,14 @@ nothing in the v1 protocol changes shape when it lands.
 
 # Terminology
 
-Reuses the existing surface model (`dor/src/protocol.ts`,
-`dor/src/commands/types.ts`):
+`docs/specs/glossary.md` is canonical for **Pane** and **Surface**; the wire
+shapes reuse the existing surface model (`dor/src/protocol.ts`,
+`dor/src/commands/types.ts`). Remote-specific usage:
 
-* **Surface** — the unit of content: `terminal`, `agent-browser`, or `iframe`.
-  Identified by `surfaceId`; carries `ref`, `paneRef`, `title`, `focused`,
-  `indexInPane`, `selectedInPane`.
-* **Pane** — a tile on the wall holding one or more surfaces (one selected).
-  The phone's picker lists panes; attaching to a pane means attaching to its
-  selected surface.
+* **Surface** — identified on the wire by `surfaceId`; carries `ref`,
+  `paneRef`, `title`, `focused`, `indexInPane`, `selectedInPane`.
+* **Pane** — the phone's picker lists panes; attaching to a pane means
+  attaching to its selected surface.
 * **Wall** — the full layout tree (workspaces → windows → panes) plus geometry.
   Only VR consumes this.
 * **Viewer** — one connected Client session. Multiple viewers may coexist; the
