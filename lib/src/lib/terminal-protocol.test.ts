@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectTerminalSemanticEvents, ITERM2_DEVICE_ATTRIBUTES_RESPONSE, TerminalProtocolParser } from './terminal-protocol';
+import { collectTerminalSemanticEvents, formatOscColorResponse, ITERM2_DEVICE_ATTRIBUTES_RESPONSE, TerminalProtocolParser } from './terminal-protocol';
 import { createTerminalPaneState, deriveHeader, reduceTerminalState, type TerminalSemanticEvent } from './terminal-state';
 
 describe('TerminalProtocolParser', () => {
@@ -351,6 +351,80 @@ describe('TerminalProtocolParser', () => {
 
     expect(parser.process('\x1b[')).toEqual({ visibleData: '', events: [] });
     expect(parser.process('31mred')).toEqual({ visibleData: '\x1b[31mred', events: [] });
+  });
+
+  it('answers an OSC 11 background color query from the theme and consumes it', () => {
+    const parser = new TerminalProtocolParser((target) => (target === 'background' ? '#272822' : null));
+    const result = parser.process('before\x1b]11;?\x1b\\after');
+
+    // Query is consumed (not forwarded to xterm), and we reply with rgb: bytes.
+    expect(result.visibleData).toBe('beforeafter');
+    expect(result.events).toEqual([
+      { kind: 'response', data: '\x1b]11;rgb:2727/2828/2222\x1b\\' },
+    ]);
+  });
+
+  it('answers OSC 10 foreground and OSC 12 cursor queries', () => {
+    const provider = (target: 'foreground' | 'background' | 'cursor') =>
+      ({ foreground: '#ccc', background: '#000', cursor: '#aeafad' })[target];
+    const fg = new TerminalProtocolParser(provider).process('\x1b]10;?\x07');
+    const cursor = new TerminalProtocolParser(provider).process('\x1b]12;?\x07');
+
+    expect(fg.events).toEqual([{ kind: 'response', data: '\x1b]10;rgb:cccc/cccc/cccc\x1b\\' }]);
+    expect(cursor.events).toEqual([{ kind: 'response', data: '\x1b]12;rgb:aeae/afaf/adad\x1b\\' }]);
+  });
+
+  it('buffers a split OSC 11 background query and still answers it', () => {
+    const parser = new TerminalProtocolParser(() => '#1e1e1e');
+
+    expect(parser.process('\x1b]11;')).toEqual({ visibleData: '', events: [] });
+    const result = parser.process('?\x1b\\done');
+
+    expect(result.visibleData).toBe('done');
+    expect(result.events).toEqual([
+      { kind: 'response', data: '\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\' },
+    ]);
+  });
+
+  it('forwards OSC 11 color queries to xterm when no theme provider is supplied', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('\x1b]11;?\x1b\\');
+
+    // No provider (e.g. VS Code host parser): leave the query for xterm.js.
+    expect(result.visibleData).toBe('\x1b]11;?\x1b\\');
+    expect(result.events).toEqual([]);
+  });
+
+  it('forwards OSC 11 color *set* requests rather than answering them', () => {
+    const parser = new TerminalProtocolParser(() => '#272822');
+    const result = parser.process('\x1b]11;rgb:00/00/00\x1b\\');
+
+    expect(result.visibleData).toBe('\x1b]11;rgb:00/00/00\x1b\\');
+    expect(result.events).toEqual([]);
+  });
+
+  it('forwards the query unchanged when the theme color is unparseable', () => {
+    const parser = new TerminalProtocolParser(() => 'transparent');
+    const result = parser.process('\x1b]11;?\x07');
+
+    expect(result.visibleData).toBe('\x1b]11;?\x07');
+    expect(result.events).toEqual([]);
+  });
+});
+
+describe('formatOscColorResponse', () => {
+  it('expands 8-bit channels to the 16-bit rgb: reply shape', () => {
+    expect(formatOscColorResponse('11', '#0c0c0c')).toBe('\x1b]11;rgb:0c0c/0c0c/0c0c\x1b\\');
+    expect(formatOscColorResponse('11', '#abc')).toBe('\x1b]11;rgb:aaaa/bbbb/cccc\x1b\\');
+    expect(formatOscColorResponse('11', '#272822ff')).toBe('\x1b]11;rgb:2727/2828/2222\x1b\\');
+    // Theme colors can be rgb()/rgba() too (parseColor handles them).
+    expect(formatOscColorResponse('10', 'rgb(255, 0, 12)')).toBe('\x1b]10;rgb:ffff/0000/0c0c\x1b\\');
+  });
+
+  it('returns null for missing or unparseable colors', () => {
+    expect(formatOscColorResponse('11', null)).toBeNull();
+    expect(formatOscColorResponse('11', 'transparent')).toBeNull();
+    expect(formatOscColorResponse('11', '#12')).toBeNull();
   });
 });
 

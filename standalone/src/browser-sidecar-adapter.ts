@@ -21,6 +21,7 @@ import {
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
 } from "dormouse-lib/lib/terminal-protocol";
+import { themeColorProvider } from "dormouse-lib/lib/terminal-theme";
 import { applyTerminalSemanticEventsByPtyId } from "dormouse-lib/lib/terminal-state-store";
 import type { DorControlRequestPayload, DorControlResult } from "dor/protocol";
 import { BrowserSidecarHost } from "./browser-sidecar-host";
@@ -88,7 +89,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   }
 
   spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[] }): void {
-    this.protocolParsers.set(id, new TerminalProtocolParser());
+    this.protocolParsers.set(id, new TerminalProtocolParser(themeColorProvider));
     this.host.send("pty_spawn", { id, options });
   }
 
@@ -279,7 +280,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private getProtocolParser(id: string): TerminalProtocolParser {
     let parser = this.protocolParsers.get(id);
     if (!parser) {
-      parser = new TerminalProtocolParser();
+      parser = new TerminalProtocolParser(themeColorProvider);
       this.protocolParsers.set(id, parser);
     }
     return parser;

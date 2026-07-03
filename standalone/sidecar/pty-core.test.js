@@ -43,6 +43,7 @@ test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
   assert.equal(config.env.TERM_PROGRAM_VERSION, '3.5.0');
   assert.equal(config.env.LC_TERMINAL, 'iTerm2');
   assert.equal(config.env.LC_TERMINAL_VERSION, '3.5.0');
+  assert.equal(config.env.COLORTERM, 'truecolor');
   assert.deepEqual(config.shellArgs, ['-l']);
 });
 
@@ -129,6 +130,7 @@ test('resolveSpawnConfig uses Windows shell and profile defaults', () => {
   assert.equal(config.env.TERM_PROGRAM_VERSION, '3.5.0');
   assert.equal(config.env.LC_TERMINAL, 'iTerm2');
   assert.equal(config.env.LC_TERMINAL_VERSION, '3.5.0');
+  assert.equal(config.env.COLORTERM, 'truecolor');
   assert.deepEqual(config.shellArgs, []);
 });
 

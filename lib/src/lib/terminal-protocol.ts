@@ -1,4 +1,5 @@
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
+import { parseColor } from './css-color';
 import {
   cwdFromOsc1337,
   cwdFromOsc633,
@@ -15,6 +16,19 @@ export type TerminalProtocolEvent =
   | { kind: 'progress'; progress: ProtocolProgressUpdate }
   | { kind: 'response'; data: string }
   | { kind: 'semantic'; event: TerminalSemanticEvent };
+
+/** The terminal colors an OSC 10/11/12 query can ask about. */
+export type TerminalColorTarget = 'foreground' | 'background' | 'cursor';
+
+/** A resolved value for each queryable terminal color, as CSS color strings. */
+export type TerminalColors = Record<TerminalColorTarget, string>;
+
+/**
+ * Resolves the active terminal theme color for an OSC 10/11/12 query, returned
+ * as a CSS hex string (e.g. `#1e1e1e` / `#1e1e1eff` / `#abc`). Return `null` to
+ * decline (the query is then forwarded to xterm.js unchanged).
+ */
+export type TerminalColorProvider = (target: TerminalColorTarget) => string | null;
 
 export interface TerminalProtocolAlertSink {
   notifyFromProtocol(id: string, notification: ActivityNotification): void;
@@ -51,6 +65,15 @@ export const ITERM2_DEVICE_ATTRIBUTES_RESPONSE = `\x1bP>|iTerm2 ${ITERM2_COMPAT_
 export class TerminalProtocolParser {
   private pending = '';
   private osc99Pending = new Map<string, Osc99PendingNotification>();
+
+  /**
+   * @param colorProvider Resolves the active terminal theme color for OSC
+   *   10/11/12 background/foreground/cursor *queries*. Frontend adapters pass a
+   *   provider backed by the live xterm theme, so TUIs (e.g. Codex) can detect
+   *   the real terminal background. Host-side parsers (VS Code extension host)
+   *   omit it, leaving such queries to xterm.js as before.
+   */
+  constructor(private readonly colorProvider?: TerminalColorProvider) {}
 
   process(data: string): TerminalProtocolParseResult {
     if (this.pending === '' && !NEEDS_PARSE_RE.test(data)) {
@@ -108,8 +131,27 @@ export class TerminalProtocolParser {
     if (content === '2' || content.startsWith('2;')) return parseOscTitle(content, 'osc2');
     if (content === '99' || content.startsWith('99;')) return this.parseOsc99(content);
     if (content === '777' || content.startsWith('777;')) return this.parseOsc777(content);
+    const colorResponse = this.parseColorQuery(content);
+    if (colorResponse) return colorResponse;
     if (isKnownUnsupportedIterm2Osc(content)) return [];
     return null;
+  }
+
+  private parseColorQuery(content: string): TerminalProtocolEvent[] | null {
+    // OSC 10/11/12 ; ? — foreground / background / cursor color *query*. Codex
+    // (and other TUIs) query the terminal background to blend adaptive UI — its
+    // composer "pill" — against it; with no answer it assumes dark and paints a
+    // near-black fill that is unreadable on a light theme. xterm.js does not
+    // reliably answer these in our pipeline (especially on Windows ConPTY), so
+    // we answer from the active theme ourselves, like the iTerm2 CSI > q reply.
+    // Only the report ('?') form is intercepted; color *set* requests and the
+    // no-provider/unparseable cases fall through (null) to xterm.js unchanged.
+    const match = /^(10|11|12);\?$/.exec(content);
+    if (!match || !this.colorProvider) return null;
+    const code = match[1];
+    const target: TerminalColorTarget = code === '10' ? 'foreground' : code === '11' ? 'background' : 'cursor';
+    const data = formatOscColorResponse(code, this.colorProvider(target));
+    return data ? [{ kind: 'response', data }] : null;
   }
 
   private parseOsc9(content: string): TerminalProtocolEvent[] {
@@ -418,6 +460,19 @@ function isKnownUnsupportedIterm2Osc(content: string): boolean {
     content === '52' ||
     content.startsWith('52;')
   );
+}
+
+/**
+ * Build the reply to an OSC 10/11/12 color query: `ESC ] <code> ; rgb:RRRR/GGGG/BBBB ST`,
+ * matching the 16-bit-per-channel shape xterm/Windows Terminal emit (each 8-bit
+ * channel is doubled, e.g. `0c` → `0c0c`). Returns null if `color` is missing or
+ * not a parseable CSS color (see `parseColor`).
+ */
+export function formatOscColorResponse(code: string, color: string | null): string | null {
+  const rgb = color ? parseColor(color) : null;
+  if (!rgb) return null;
+  const channel = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0').repeat(2);
+  return `\x1b]${code};rgb:${channel(rgb.r)}/${channel(rgb.g)}/${channel(rgb.b)}\x1b\\`;
 }
 
 function commandStartEvent(source: CommandRunSource): TerminalProtocolEvent {
