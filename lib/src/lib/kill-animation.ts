@@ -24,9 +24,18 @@ export function orchestrateKill(
 
   const bareRemove = () => {
     killInProgressRef.current = true;
-    disposeSession(killedId);
-    api.removePanel(panel);
-    killInProgressRef.current = false;
+    try {
+      disposeSession(killedId);
+      // A competing remover can beat this finalize to the panel — a double-fired
+      // confirm kill's second orchestrateKill, a dor-CLI kill, or a render swap.
+      // Removing a stale panel throws deep in dockview ('invalid operation'), so
+      // re-resolve by id and only remove the exact object we captured.
+      if (api.getPanel(killedId) === panel) api.removePanel(panel);
+    } finally {
+      // A throw must not strand this flag: it gates the auto-spawn delay skip in
+      // onDidRemovePanel, and a stuck true skips that delay forever after.
+      killInProgressRef.current = false;
+    }
     if (api.panels.length > 0) selectPane(api.panels[0].id);
     else setSelectedId(null);
   };
