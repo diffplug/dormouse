@@ -35,3 +35,14 @@ export function setWorkspacesEnabled(enabled: boolean): void {
     // No localStorage: nothing to persist.
   }
 }
+
+export const AB_DEBUG_LOGS_FLAG_KEY = 'dormouse.flags.abDebugLogs';
+
+/** Whether the agent-browser high-rate `[ab-panel]`/`[agent-browser]` stream and
+ *  screenshot console diagnostics are emitted. Off by default: they fire per
+ *  frame (~20Hz) and are only useful when actively debugging. Read once at module
+ *  load by hot-loop callers, so toggling needs a reload. The connection's
+ *  always-on debug ring (`debugSnapshot()`) is unaffected. */
+export function isAbDebugLogsEnabled(): boolean {
+  return readBoolFlag(AB_DEBUG_LOGS_FLAG_KEY);
+}

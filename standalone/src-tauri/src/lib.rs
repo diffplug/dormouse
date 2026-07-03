@@ -454,9 +454,12 @@ fn agent_browser_pop_in(
     )
 }
 
-// Screenshot returns raw image bytes. The sidecar base64s them over the
-// JSON-lines stdio; decode back to a raw tauri::ipc::Response so the webview
-// gets an ArrayBuffer (the path the panel decodes with createImageBitmap).
+// The sidecar hands back the screenshot's temp-file PATH (bytes no longer ride
+// the JSON-lines stdio shared with PTY traffic). Read the file here and return a
+// raw tauri::ipc::Response so the webview gets an ArrayBuffer (the path the panel
+// decodes with createImageBitmap). A base64 `bytesBase64` field is kept as a
+// fallback for a stale sidecar bundle (dev-time version skew), but the path
+// branch is preferred.
 #[tauri::command]
 fn agent_browser_screenshot(
     state: tauri::State<'_, SidecarState>,
@@ -477,10 +480,16 @@ fn agent_browser_screenshot(
             .unwrap_or("screenshot failed")
             .to_string());
     }
+    if let Some(path) = result.get("path").and_then(JsonValue::as_str) {
+        let bytes = std::fs::read(path)
+            .map_err(|err| format!("could not read screenshot file '{path}': {err}"))?;
+        return Ok(tauri::ipc::Response::new(bytes));
+    }
+    // Fallback: an older sidecar bundle still base64s the bytes over stdio.
     let b64 = result
         .get("bytesBase64")
         .and_then(JsonValue::as_str)
-        .ok_or("screenshot returned no bytes")?;
+        .ok_or("screenshot returned no path or bytes")?;
     let bytes = BASE64
         .decode(b64)
         .map_err(|err| format!("bad screenshot base64: {err}"))?;

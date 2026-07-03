@@ -184,6 +184,38 @@ describe('parking', () => {
   });
 });
 
+describe('re-attach repaint', () => {
+  it('schedules a repaint capture when re-attaching to a live connection', async () => {
+    vi.useFakeTimers();
+    try {
+      const screenshot = vi.fn(async () => ({ ok: true as const, bytes: new Uint8Array([1, 2, 3]), mime: 'image/jpeg' }));
+      const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserScreenshot'>;
+      platform.agentBrowserScreenshot = screenshot;
+      setPlatform(platform);
+      vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 4, height: 4, close: vi.fn() })));
+
+      const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 4321 });
+      const first = makeSink();
+      const h1 = controller.attachView(first);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(streamSocket(4321)?.readyState).toBe(1);
+
+      // Detach but stay within the park debounce, so the connection (and its
+      // screenshot loop) survive.
+      h1.detach();
+      screenshot.mockClear();
+
+      // Re-attach to that live, unparked connection → one repaint capture, so a
+      // view remounted within the debounce doesn't sit blank.
+      controller.attachView(makeSink());
+      await vi.advanceTimersByTimeAsync(300);
+      expect(screenshot).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('param-write buffering', () => {
   it('buffers writes while detached and flushes them on the next attach', async () => {
     const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand'>;

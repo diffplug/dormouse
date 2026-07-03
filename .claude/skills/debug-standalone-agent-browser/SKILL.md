@@ -147,7 +147,18 @@ For click targeting, see **Clicking a link inside the screencast** above (1:1 ca
 
 ## What To Watch
 
-In the harness terminal, correlate:
+The high-rate `[ab-panel]`/`[agent-browser]` stream and screenshot console
+diagnostics are now **off by default** — they fire per frame (~20Hz). Enable them
+before a run and reload (the flag is read once at module load):
+
+```js
+localStorage.setItem('dormouse.flags.abDebugLogs', 'true'); // then reload
+```
+
+The connection's always-on `debugSnapshot()` ring is unaffected, and the
+`stalled`/`failed`/`error` screenshot warnings stay unconditional.
+
+In the harness terminal, correlate (with the flag on):
 
 - `[sidecar] ...` for sidecar behavior
 - `[browser log] [ab-panel] connecting stream ...`

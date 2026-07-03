@@ -746,7 +746,11 @@ describe('AgentBrowserPanel tab strip actions', () => {
     ] });
 
     await act(async () => { ws.emitMessage(tabs('t1')); });
-    await new Promise((r) => setTimeout(r, 40)); // let the priming capture settle
+    // Let the loop go fully idle before measuring tab-driven captures. Besides the
+    // priming capture, StrictMode remounts the panel, and the re-attach repaint
+    // pulse (a live connection survives the detach) schedules a throttled
+    // follow-up capture ~one shot-interval later — drain it before mockClear.
+    await new Promise((r) => setTimeout(r, 250));
     screenshot.mockClear();
 
     // Adding a tab without changing which is active must NOT force a capture.

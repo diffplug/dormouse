@@ -22,6 +22,7 @@
  */
 import { getPlatform } from '../../lib/platform';
 import { readTextFromClipboard } from '../../lib/clipboard';
+import { isAbDebugLogsEnabled } from '../../lib/feature-flags';
 import {
   registerAgentBrowserScreen,
   type ChromeActions,
@@ -54,6 +55,17 @@ import {
 // immediately, so flipping quickly between dockview tabs — or a StrictMode
 // unmount→remount — doesn't tear down and rebuild the stream connection.
 export const HIDDEN_PARK_DELAY_MS = 1000;
+
+// The high-rate `[ab-panel]` stream/screenshot diagnostics fire per frame
+// (~20Hz), so the flag is read ONCE at module load and cached: toggling needs a
+// reload, which is the right trade for a hot loop. The connection's always-on
+// debug ring is unaffected. `localStorage.setItem('dormouse.flags.abDebugLogs',
+// 'true')` + reload to enable.
+let abDebugLogsEnabled: boolean | undefined;
+function abDebugLog(message: string): void {
+  if (abDebugLogsEnabled === undefined) abDebugLogsEnabled = isAbDebugLogsEnabled();
+  if (abDebugLogsEnabled) console.log(message);
+}
 
 // SYNCED is "browser viewport CSS size == pane CSS size". The screencast is
 // always delivered at CSS-pixel resolution — the frame never encodes the
@@ -229,6 +241,17 @@ export class AgentBrowserSurfaceController {
   private resizeObserver: ResizeObserver | null = null;
   private resizeTimer: ReturnType<typeof setTimeout> | undefined;
 
+  // --- cached pane size (avoid per-frame forced layout) ---
+  // computeScreenSnapshot() and maybeDisengageSync() run on EVERY non-duplicate
+  // stream frame (~20Hz); a getBoundingClientRect() there forces layout each
+  // time. A ResizeObserver active for the whole attach duration keeps the pane's
+  // content-box size cached (the viewport div has no border/padding, so
+  // contentRect matches the gBCR those hot paths used to read). null ⇒ no attached
+  // view — treat as 0×0 / skip, matching the old no-element behavior. The
+  // correctness-critical reads in issueSyncToPane / paneScreenRect stay live gBCR.
+  private paneSize: { w: number; h: number } | null = null;
+  private paneSizeObserver: ResizeObserver | null = null;
+
   // --- canonical URL tracking ---
   // The newest non-blank active-tab URL observed from the live stream. Kept
   // separate from paramsUrl: Dockview param writes can lag a tab message, but
@@ -255,6 +278,11 @@ export class AgentBrowserSurfaceController {
   // --- view binding ---
   private sink: AgentBrowserViewSink | null = null;
   private attachToken: object | null = null;
+  // Bumped on every attachView. A fresh view mounts a blank canvas; the screenshot
+  // loop folds this into its byte-dedup key so an identical capture still repaints
+  // the new canvas (otherwise the loop would skip the redundant bytes and leave it
+  // blank until the page changes).
+  private drawGeneration = 0;
   // Param writes buffered while detached (a minimized popped-out pane can still
   // observe URL changes); flushed on the next attach.
   private pendingParams = new Map<string, unknown>();
@@ -399,9 +427,41 @@ export class AgentBrowserSurfaceController {
   }
 
   private onWindowResize = (): void => {
+    // A display-scale (DPR) change doesn't resize the pane, so ResizeObserver
+    // misses it; refresh the cache off the window-resize signal too.
+    this.refreshPaneSize();
     if (this.syncEngaged) this.issueSyncToPane();
     this.publishScreen();
   };
+
+  // --- cached pane size ---
+
+  private refreshPaneSize(): void {
+    const el = this.sink?.viewport;
+    if (!el) { this.paneSize = null; return; }
+    const rect = el.getBoundingClientRect();
+    this.paneSize = { w: Math.round(rect.width), h: Math.round(rect.height) };
+  }
+
+  private setupPaneSizeObserver(): void {
+    this.teardownPaneSizeObserver();
+    const el = this.sink?.viewport;
+    if (!el) { this.paneSize = null; return; }
+    // Seed synchronously (ResizeObserver's first callback is async, and the test
+    // stub never fires) so the first frame reads a real size, not 0×0.
+    this.refreshPaneSize();
+    const observer = new ResizeObserver((entries) => {
+      const cr = entries[entries.length - 1]?.contentRect;
+      if (cr) this.paneSize = { w: Math.round(cr.width), h: Math.round(cr.height) };
+    });
+    observer.observe(el);
+    this.paneSizeObserver = observer;
+  }
+
+  private teardownPaneSizeObserver(): void {
+    this.paneSizeObserver?.disconnect();
+    this.paneSizeObserver = null;
+  }
 
   // --- view attachment ---
 
@@ -409,6 +469,12 @@ export class AgentBrowserSurfaceController {
     const token = {};
     this.attachToken = token;
     this.sink = sink;
+    // A fresh canvas mounts blank; bump the draw generation so the screenshot
+    // loop repaints it even if the next capture's bytes match the last frame.
+    this.drawGeneration += 1;
+    // Seed + observe the pane size cache before ensureStarted so the first
+    // computeScreenSnapshot reads a real size.
+    this.setupPaneSizeObserver();
     this.ensureStarted();
     // Flush param writes / title buffered while detached.
     if (this.pendingParams.size > 0) {
@@ -423,6 +489,13 @@ export class AgentBrowserSurfaceController {
     this.updateParkState();
     this.reconcile();
     this.publishScreen();
+    // After a (re)attach, if a live in-pane connection exists, force one capture
+    // so a view remounted within the park debounce repaints instead of sitting
+    // blank — the connection's own frame dedup swallows the heartbeat rebroadcast,
+    // and the bumped generation defeats the screenshot loop's byte dedup.
+    if (!this.parked && !this.relaunching && !this.poppedOut && this.connection) {
+      this.screenshotLoop?.pulse();
+    }
     return {
       // Guard by identity: a stale handle's detach must no-op if a newer view
       // has already attached (StrictMode attach A → detach A → attach B can
@@ -432,6 +505,10 @@ export class AgentBrowserSurfaceController {
         this.sink = null;
         this.attachToken = null;
         this.teardownResizeObserver();
+        // The observed viewport died with the unmount; drop the cache so the hot
+        // paths fall back to the no-element (0×0 / skip) behavior.
+        this.teardownPaneSizeObserver();
+        this.paneSize = null;
         // The canvas DOM died with the unmount; on reattach a fresh canvas
         // mounts blank, so drop hasFrame to match the minimize/reattach
         // placeholder → first-screenshot sequence.
@@ -555,6 +632,10 @@ export class AgentBrowserSurfaceController {
       getBinaryPath: () => this.binaryPath,
       isCapable: () => !!getPlatform().agentBrowserScreenshot && !!this.session,
       draw: this.drawBitmap,
+      // A re-attach bumps drawGeneration so a fresh (blank) canvas repaints even
+      // when the capture bytes are identical to the last displayed frame.
+      getDrawGeneration: () => this.drawGeneration,
+      log: abDebugLog,
     });
     const connection = createAgentBrowserConnection({
       session,
@@ -564,7 +645,7 @@ export class AgentBrowserSurfaceController {
       runCommand: (targetSession, args, targetBinaryPath) => getPlatform().agentBrowserCommand?.(targetSession, args, targetBinaryPath)
         ?? Promise.resolve({ exitCode: 1, stdout: '', stderr: 'agent-browser commands unavailable' }),
       canSelectTabs: () => !this.poppedOut && !this.relaunching,
-      log: (message) => console.log(message),
+      log: abDebugLog,
     });
     this.connection = connection;
     this.screenshotLoop = screenshotLoop;
@@ -667,7 +748,7 @@ export class AgentBrowserSurfaceController {
       if (msg.method === 'Target.targetCreated' || msg.method === 'Target.targetInfoChanged') {
         handleTargetInfo(msg.params?.targetInfo);
       } else if (msg.method === 'Target.targetDestroyed') {
-        console.log(`[ab-panel] cdp target destroyed ${JSON.stringify({ targetId: msg.params?.targetId })}`);
+        abDebugLog(`[ab-panel] cdp target destroyed ${JSON.stringify({ targetId: msg.params?.targetId })}`);
       } else if (msg.method === 'Page.frameNavigated') {
         const frame = msg.params?.frame;
         if (!frame?.parentId) {
@@ -686,15 +767,15 @@ export class AgentBrowserSurfaceController {
       try {
         const result = await runCommand(session, ['get', 'cdp-url'], this.binaryPath);
         if (result.exitCode === 0) cdpUrl = parseCdpUrl(result.stdout);
-        else console.log(`[ab-panel] cdp-url failed ${JSON.stringify({ stderr: result.stderr, stdout: result.stdout })}`);
+        else abDebugLog(`[ab-panel] cdp-url failed ${JSON.stringify({ stderr: result.stderr, stdout: result.stdout })}`);
       } catch (err) {
-        console.log(`[ab-panel] cdp-url error ${String(err)}`);
+        abDebugLog(`[ab-panel] cdp-url error ${String(err)}`);
       }
       if (disposed || !cdpUrl) return;
-      console.log(`[ab-panel] connecting cdp ${JSON.stringify({ cdpUrl })}`);
+      abDebugLog(`[ab-panel] connecting cdp ${JSON.stringify({ cdpUrl })}`);
       ws = new WebSocket(cdpUrl);
       ws.onopen = () => {
-        console.log('[ab-panel] cdp open');
+        abDebugLog('[ab-panel] cdp open');
         send('Target.setDiscoverTargets', { discover: true });
         send('Target.getTargets');
         // If get cdp-url ever returns a page websocket instead of the browser
@@ -702,8 +783,8 @@ export class AgentBrowserSurfaceController {
         send('Page.enable');
       };
       ws.onmessage = (ev) => handleCdpMessage(ev.data);
-      ws.onclose = () => { if (!disposed) console.log('[ab-panel] cdp close'); };
-      ws.onerror = () => console.log('[ab-panel] cdp error');
+      ws.onclose = () => { if (!disposed) abDebugLog('[ab-panel] cdp close'); };
+      ws.onerror = () => abDebugLog('[ab-panel] cdp error');
     };
 
     void connect();
@@ -739,7 +820,7 @@ export class AgentBrowserSurfaceController {
     // and reverting the URL.
     if (this.streamPort && this.liveStreamPort === this.streamPort) {
       if (this.connectionLost || this.status?.connected === false) {
-        console.log(`[ab-panel] stream recovery skipped for live port ${JSON.stringify({ session, wsPort: this.streamPort, connectionLost: this.connectionLost, connected: this.status?.connected })}`);
+        abDebugLog(`[ab-panel] stream recovery skipped for live port ${JSON.stringify({ session, wsPort: this.streamPort, connectionLost: this.connectionLost, connected: this.status?.connected })}`);
       }
       return;
     }
@@ -771,7 +852,7 @@ export class AgentBrowserSurfaceController {
     if (directPort && directPort > 0) {
       if (directPort !== this.streamPort) {
         this.setStreamPort(directPort);
-        console.log(`[ab-panel] subscribing to returned stream port ${JSON.stringify({ session: this.session, wsPort: directPort, previousWsPort: this.wsPort })}`);
+        abDebugLog(`[ab-panel] subscribing to returned stream port ${JSON.stringify({ session: this.session, wsPort: directPort, previousWsPort: this.wsPort })}`);
       }
       if (directPort !== this.wsPort) this.writeParams({ wsPort: directPort });
       else this.bumpRecovery();
@@ -959,10 +1040,12 @@ export class AgentBrowserSurfaceController {
   // --- screen indicator (SYNCED/SCALED) + sync-to-pane ---
 
   private computeScreenSnapshot(): ScreenSnapshot {
-    const rect = this.sink?.viewport.getBoundingClientRect();
+    // Read the cached pane size (updated by the ResizeObserver / window resize)
+    // rather than forcing layout on every frame. null ⇒ no attached view ⇒ 0×0.
+    const pane = this.paneSize;
     const displayDpr = window.devicePixelRatio || 1;
     const device = this.device;
-    const paneCss = { w: rect ? Math.round(rect.width) : 0, h: rect ? Math.round(rect.height) : 0 };
+    const paneCss = { w: pane?.w ?? 0, h: pane?.h ?? 0 };
     // DPR can't be read back from frames, so report the density we'd sync to.
     const viewport = { w: device.width, h: device.height, dpr: displayDpr };
     const state: ScreenState = dimsMatch(viewport, paneCss) ? 'SYNCED' : 'SCALED';
@@ -1026,10 +1109,10 @@ export class AgentBrowserSurfaceController {
   private maybeDisengageSync(): void {
     if (!this.syncEngaged) return;
     const issued = this.lastIssued;
-    const el = this.sink?.viewport;
-    if (!issued || !el) return;
-    const rect = el.getBoundingClientRect();
-    const pane = { w: Math.round(rect.width), h: Math.round(rect.height) };
+    // Cached pane size (this runs per frame — no forced layout). null ⇒ detached,
+    // same skip as the old no-element guard.
+    const pane = this.paneSize;
+    if (!issued || !pane) return;
     // Mid-resize: we haven't issued for the pane's current size yet.
     if (!dimsMatch(issued, pane)) return;
     const device = { w: this.device.width, h: this.device.height };
@@ -1098,9 +1181,9 @@ export class AgentBrowserSurfaceController {
     // Don't reconcile to the current (headless) port first — it's about to close.
     // Connect to the headed window's fresh port once the relaunch returns it.
     const url = this.currentRelaunchUrl();
-    console.log(`[ab-panel] popOut -> ${JSON.stringify({ session, url })}`);
+    abDebugLog(`[ab-panel] popOut -> ${JSON.stringify({ session, url })}`);
     platform.agentBrowserPopOut(session, { rect: paneScreenRect(this.sink?.viewport), url }, this.binaryPath).then((res) => {
-      console.log(`[ab-panel] popOut result ${JSON.stringify(res)}`);
+      abDebugLog(`[ab-panel] popOut result ${JSON.stringify(res)}`);
       if (this.closeIfSessionMarkedClosed(session)) return;
       if (!res.ok) {
         void revertUnlessLive();
@@ -1109,7 +1192,7 @@ export class AgentBrowserSurfaceController {
       void this.reconcileStreamPort(res.wsPort);
       this.relaunching = false;
     }).catch((err) => {
-      console.log(`[ab-panel] popOut error ${String(err)}`);
+      abDebugLog(`[ab-panel] popOut error ${String(err)}`);
       if (this.closeIfSessionMarkedClosed(session)) return;
       void revertUnlessLive();
     });
@@ -1129,9 +1212,9 @@ export class AgentBrowserSurfaceController {
     // kill that daemon. Querying now would spawn a competing daemon. Connect to
     // the fresh port the host returns.
     const url = this.currentRelaunchUrl();
-    console.log(`[ab-panel] popIn -> ${JSON.stringify({ session, url })}`);
+    abDebugLog(`[ab-panel] popIn -> ${JSON.stringify({ session, url })}`);
     platform.agentBrowserPopIn(session, { url }, this.binaryPath).then((res) => {
-      console.log(`[ab-panel] popIn result ${JSON.stringify(res)}`);
+      abDebugLog(`[ab-panel] popIn result ${JSON.stringify(res)}`);
       if (this.closeIfSessionMarkedClosed(session)) { this.relaunching = false; return; }
       if (res.ok) void this.reconcileStreamPort(res.wsPort);
       else void this.reconcileStreamPort();
@@ -1272,6 +1355,8 @@ export class AgentBrowserSurfaceController {
     this.disposed = true;
     if (this.parkTimer) { clearTimeout(this.parkTimer); this.parkTimer = undefined; }
     this.teardownResizeObserver();
+    this.teardownPaneSizeObserver();
+    this.paneSize = null;
     if (this.connection) {
       this.connectionUnsub?.();
       this.connectionUnsub = null;

@@ -87,10 +87,17 @@ export interface AgentBrowserHostDeps {
   log?: (message: string) => void;
 }
 
+/** Path-only capture result — the bytes stay on disk for the caller to read
+ *  (the standalone Rust forwarder reads the file itself; see `screenshotToFile`). */
+export type AgentBrowserScreenshotFileResult =
+  | { ok: true; path: string; mime: string }
+  | { ok: false; error: string };
+
 export interface AgentBrowserHost {
   command(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult>;
   edit(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult>;
   screenshot(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult>;
+  screenshotToFile(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotFileResult>;
   streamStatus(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult>;
   open(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult>;
   popOut(session: string, opts: { rect?: { x: number; y: number; width: number; height: number }; url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult>;
@@ -315,15 +322,21 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
 
   // Capture one device-resolution frame via the user's agent-browser
   // `screenshot` command (which honors the session's viewport/DPR, unlike the
-  // CSS-resolution screencast) and return the raw image bytes. agent-browser
-  // writes a file and reports the path; we read it back and hand the bytes to
-  // the caller (the VS Code host structured-clones them to the webview; the
-  // sidecar base64s them over stdio to Rust, which returns a raw Response).
-  async function screenshot(
+  // CSS-resolution screencast). agent-browser writes the frame to a temp file and
+  // reports its path; this returns that PATH without reading the bytes.
+  //
+  // The two hosts read the file differently, and that split is the whole point of
+  // keeping this path-only:
+  //   - VS Code: `screenshot()` (below) reads the bytes here and structured-clones
+  //     them to the webview.
+  //   - Standalone: the sidecar hands this path to Rust, which reads the file
+  //     itself and returns a raw Response — so the ~100-700KB of image bytes never
+  //     ride the JSON-lines stdio pipe shared with all PTY terminal traffic.
+  async function screenshotToFile(
     session: string,
     opts: { format?: 'jpeg' | 'png'; quality?: number },
     binaryPath?: string,
-  ): Promise<AgentBrowserScreenshotResult> {
+  ): Promise<AgentBrowserScreenshotFileResult> {
     if (typeof session !== 'string' || !session) {
       return { ok: false, error: 'session is required' };
     }
@@ -340,11 +353,24 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       log(`[agent-browser] screenshot failed (exit ${result.exitCode}): ${result.stderr.trim() || result.stdout.trim()}`);
       return { ok: false, error: result.stderr.trim() || `screenshot exited ${result.exitCode}` };
     }
+    return { ok: true, path: out, mime: format === 'png' ? 'image/png' : 'image/jpeg' };
+  }
+
+  // Byte-returning wrapper over screenshotToFile for the VS Code host (structured
+  // clone to the webview). The standalone sidecar deliberately does NOT use this;
+  // it forwards the path so Rust reads the file off the stdio hot path.
+  async function screenshot(
+    session: string,
+    opts: { format?: 'jpeg' | 'png'; quality?: number },
+    binaryPath?: string,
+  ): Promise<AgentBrowserScreenshotResult> {
+    const shot = await screenshotToFile(session, opts, binaryPath);
+    if (!shot.ok) return { ok: false, error: shot.error };
     try {
-      const buffer = await fs.readFile(out);
+      const buffer = await fs.readFile(shot.path);
       // A Uint8Array view over exactly this file's bytes.
       const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-      return { ok: true, bytes, mime: format === 'png' ? 'image/png' : 'image/jpeg' };
+      return { ok: true, bytes, mime: shot.mime };
     } catch (err) {
       log(`[agent-browser] screenshot read failed: ${err instanceof Error ? err.message : String(err)}`);
       return { ok: false, error: `could not read screenshot file: ${err instanceof Error ? err.message : String(err)}` };
@@ -448,5 +474,5 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     ));
   }
 
-  return { command, edit, screenshot, streamStatus, open, popOut, popIn, closePoppedOut };
+  return { command, edit, screenshot, screenshotToFile, streamStatus, open, popOut, popIn, closePoppedOut };
 }

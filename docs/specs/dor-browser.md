@@ -265,8 +265,15 @@ DPR knob, so its frames upscale to mush on HiDPI; this is a Chromium limit, not
 agent-browser's, so owning the CDP connection wouldn't change it. So Dormouse
 treats frame messages as change pulses, captures a crisp device-resolution
 screenshot through the host's `agentBrowserScreenshot`, and draws that to canvas
-with latest-only backpressure. If the host cannot screenshot, it falls back to the
-stream frame path.
+with latest-only backpressure. A capture whose bytes are identical to the last
+displayed frame (a static page the daemon keeps re-pulsing) costs no decode or
+draw; a re-attach bumps a draw generation so a fresh blank canvas still repaints.
+If the host cannot screenshot, it falls back to the stream frame path.
+
+The high-rate `[ab-panel]`/`[agent-browser]` stream and screenshot console
+diagnostics sit behind the `dormouse.flags.abDebugLogs` localStorage flag, read
+once at module load (reload to apply); the connection's `debugSnapshot()` ring is
+always on as the post-hoc tool.
 
 Important input details:
 
@@ -321,7 +328,10 @@ Capabilities:
   allowlist is `AGENT_BROWSER_ALLOWED_SUBCOMMANDS` in
   `lib/src/lib/platform/types.ts`; host-side `get` is further limited to
   `get cdp-url`.
-- `agentBrowserScreenshot`: one device-resolution JPEG/PNG frame.
+- `agentBrowserScreenshot`: one device-resolution JPEG/PNG frame. VS Code
+  structured-clones the bytes to the webview. Standalone hands Rust the capture's
+  temp-file PATH over the sidecar stdio; Rust reads the file itself, so the image
+  bytes never ride the JSON-lines pipe shared with PTY terminal traffic.
 - `agentBrowserStreamStatus`: current stream port for stale-`wsPort` recovery.
 - `agentBrowserEdit`: select-all/copy/cut via fixed host-owned JS and OS
   clipboard write.
@@ -493,3 +503,15 @@ Source of truth: `lib/src/lib/platform/types.ts`,
 - Plugin/backend target axis: spawn, health-check, proxy, and reap a local web
   process such as `openvscode-server`.
 - Optional terminal-side "this port is viewed by surface:N" indicator.
+- Replace the spawn-per-shot CLI screenshot with a persistent host-side CDP
+  capture channel. Measured against agent-browser 0.27.3 (headless, attach
+  dance + correct-target selection): naive `Page.captureScreenshot` is
+  byte-identical to the CLI at DPR 1 and tracks external `set viewport`
+  automatically, but returns CSS-resolution frames at DPR>1 — the crisp-HiDPI
+  point of this path — unless the client re-applies
+  `Emulation.setDeviceMetricsOverride`, which Dormouse can only do correctly
+  while sync-to-pane owns the values (an external `set device`/`set viewport`
+  DPR is unrecoverable from frames). `captureBeyondViewport:true` bypasses
+  emulation and crashed the headless daemon in testing; `clip.scale` returns
+  blank frames. Adopt only with a daemon-side answer (e.g. an upstream verb
+  exposing current viewport+DPR, or a daemon-owned capture channel).
