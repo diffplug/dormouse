@@ -15,6 +15,14 @@ export default defineConfig({
   root: fileURLToPath(new URL("./pocket", import.meta.url)),
   resolve: {
     dedupe: ["react", "react-dom"],
+    alias: {
+      // The Pocket app imports the remote modules, which import
+      // `server-lib-common`; its package `exports` resolve to a `dist` that a
+      // clean checkout has not built yet (this vite-only build has no `tsc -b`
+      // step to generate it). Alias to source, same as the website and
+      // Storybook configs.
+      "server-lib-common": fileURLToPath(new URL("../server-lib-common/src", import.meta.url)),
+    },
   },
   build: {
     outDir: fileURLToPath(new URL("./dist-pocket", import.meta.url)),
