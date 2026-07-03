@@ -25,6 +25,11 @@ const config: StorybookConfig = {
       // any Wall-importing story fails with "Failed to resolve import 'dor/…'".
       // Safe next to `dormouse-lib`: a string alias only matches `dor` or `dor/…`.
       dor: path.resolve(here, '..', '..', 'dor', 'src'),
+      // Same reason: `Wall` → `RemotePairingModalHost` pulls in the remote host
+      // modules, which import `server-lib-common`. Its package `exports` point
+      // at a `dist` the Storybook/Chromatic job never builds, so alias the bare
+      // specifier to source too.
+      'server-lib-common': path.resolve(here, '..', '..', 'server-lib-common', 'src'),
     };
     return config;
   },
