@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  DEFAULT_PAIRING_TTL_MS,
   concatBytes,
   ecdsaRawToDer,
   generateDeviceKeyPair,
@@ -139,7 +140,10 @@ describe('RemoteHost frame handling', () => {
   let savedRecords: HostAclRecord[] = [];
   let approvals: PendingPairing[] = [];
 
-  function makeHost(loadAcl: () => HostAclRecord[] = () => []) {
+  function makeHost(
+    loadAcl: () => HostAclRecord[] = () => [],
+    now: () => number = () => Date.now(),
+  ) {
     savedRecords = [];
     approvals = [];
     const host = new RemoteHost({
@@ -152,6 +156,7 @@ describe('RemoteHost frame handling', () => {
       },
       requestApproval: (pending) => approvals.push(pending),
       dismissApproval: () => {},
+      now,
     });
     host.start();
     socket.open();
@@ -205,6 +210,34 @@ describe('RemoteHost frame handling', () => {
 
     const result = socket.frames('pair-result')[0]!;
     expect(result).toMatchObject({ clientId: 'c1', approved: false });
+    expect(result.record).toBeUndefined();
+    expect(savedRecords).toEqual([]);
+  });
+
+  it('expired approval → pair-result approved:false, ACL untouched', () => {
+    let now = 1_000;
+    makeHost(() => [], () => now);
+    socket.receive({
+      t: 'pair',
+      clientId: 'c1',
+      request: {
+        accountId: 'owner',
+        passkeyCredentialId: 'cred-1',
+        passkeyPublicKeyHash: 'hash-1',
+        devicePublicKey: 'device-1',
+        requestedLabel: 'iPhone Safari',
+      } satisfies PairingRequest,
+    });
+    now += DEFAULT_PAIRING_TTL_MS;
+
+    approvals[0]!.approve();
+
+    const result = socket.frames('pair-result')[0]!;
+    expect(result).toMatchObject({
+      clientId: 'c1',
+      approved: false,
+      error: 'pairing approval expired',
+    });
     expect(result.record).toBeUndefined();
     expect(savedRecords).toEqual([]);
   });

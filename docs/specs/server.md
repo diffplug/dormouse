@@ -175,7 +175,9 @@ A `remote-host` module in `lib`, active in standalone:
   `authorizeConnection` — all straight from `server-lib-common`, running in
   the webview.
 * **Pairing approval modal**: shows the requested label + account; Approve /
-  Deny. (Same modal pattern as KillConfirm.)
+  Deny. (Same modal pattern as KillConfirm.) If the Host user approves after
+  the pairing ticket expires, the Host sends `pair-result approved:false` with
+  an error and dismisses the modal; the ACL is untouched.
 * **Terminal bridge**: `directory.watch` snapshots come from the existing
   terminal registry/state store (title, activity, cwd, exitCode, ringing,
   hasTODO — all already tracked); `surface.attach` resizes the PTY through

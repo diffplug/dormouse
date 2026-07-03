@@ -21,6 +21,7 @@
 import {
   HostAcl,
   HostChallengeIssuer,
+  PairingError,
   PairingCeremony,
   WS_ROUTES,
   WS_TOKEN_PARAM,
@@ -262,7 +263,13 @@ export class RemoteHost {
     let record: HostAclRecord;
     try {
       record = this.#ceremony.approve(pairingId, { approvedBy: 'host-user', label });
-    } catch {
+    } catch (error) {
+      this.#send({
+        t: 'pair-result',
+        clientId,
+        approved: false,
+        error: pairingApprovalError(error),
+      });
       this.#dismissApproval(clientId);
       return;
     }
@@ -328,4 +335,13 @@ export class RemoteHost {
     this.#sessions.delete(clientId);
     this.#dismissApproval(clientId);
   }
+}
+
+function pairingApprovalError(error: unknown): string {
+  if (error instanceof PairingError) {
+    return error.code === 'expired'
+      ? 'pairing approval expired'
+      : 'pairing approval is no longer pending';
+  }
+  return 'pairing approval failed';
 }
