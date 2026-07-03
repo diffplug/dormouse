@@ -19,6 +19,7 @@ import {
 
 class WebSocketMock {
   static instances: WebSocketMock[] = [];
+  static failPorts = new Set<number>();
   static OPEN = 1;
 
   onopen: ((event: Event) => void) | null = null;
@@ -30,6 +31,11 @@ class WebSocketMock {
 
   constructor(public url: string) {
     WebSocketMock.instances.push(this);
+    const port = Number(new URL(url).port);
+    if (WebSocketMock.failPorts.has(port)) {
+      queueMicrotask(() => this.close());
+      return;
+    }
     queueMicrotask(() => this.onopen?.(new Event('open')));
   }
 
@@ -77,6 +83,7 @@ beforeEach(() => {
   vi.stubGlobal('WebSocket', WebSocketMock);
   vi.stubGlobal('ResizeObserver', ResizeObserverMock);
   WebSocketMock.instances = [];
+  WebSocketMock.failPorts = new Set<number>();
   setPlatform(new FakePtyAdapter());
 });
 
@@ -312,6 +319,40 @@ describe('stale-port recovery gating', () => {
     streamSocket(1111)?.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false }));
     await flushMicrotasks();
     expect(streamStatus).not.toHaveBeenCalled();
+  });
+
+  it('clears live-port memory while parked so unpark can recover a changed stream port', async () => {
+    vi.useFakeTimers();
+    try {
+      const streamStatus = vi.fn<PlatformAdapter['agentBrowserStreamStatus']>(async () => ({ ok: true, wsPort: 2222 }));
+      const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserStreamStatus'>;
+      platform.agentBrowserStreamStatus = streamStatus;
+      setPlatform(platform);
+
+      const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111 });
+      const sink = makeSink();
+      controller.attachView(sink);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(streamSocket(1111)?.readyState).toBe(1);
+      streamStatus.mockClear();
+
+      controller.setVisible(false);
+      await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
+      expect(controller.isParked()).toBe(true);
+
+      WebSocketMock.failPorts.add(1111);
+      controller.setVisible(true);
+      await vi.advanceTimersByTimeAsync(0);
+
+      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(4000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(streamStatus).toHaveBeenCalledWith('sess', undefined);
+      expect(sink.updateParameters).toHaveBeenCalledWith({ wsPort: 2222 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not query the daemon while a relaunch is in flight', async () => {

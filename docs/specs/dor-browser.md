@@ -243,13 +243,16 @@ goes off-screen — or whose view unmounts (minimize) — parks after a ~1s debo
 (so quick tab-flipping or a StrictMode remount doesn't thrash the connection):
 the connection and screenshot loop are disposed while the daemon/session stays
 alive, and daemon-side frame streaming stops on its own because clients trigger
-it. Becoming visible (or reattaching) reconnects and re-primes from the stream's
-re-broadcast frame/tabs (the last good frame is kept on screen across an unpark
-rather than blanking to the placeholder; a fresh reattach mounts a blank canvas,
-so it shows the placeholder until the first screenshot). Popped-out panes are
-exempt from parking so their stream/CDP observer keeps running and window-close
-auto-revert still works — now even while minimized, because the controller (and
-its observer) outlive the panel unmount, where before it silently did not.
+it. Parking also clears the controller's "this stream port opened live" marker,
+so a reattach that fails to reconnect can ask `stream status` and adopt a daemon
+port that changed while the pane was hidden. Becoming visible (or reattaching)
+reconnects and re-primes from the stream's re-broadcast frame/tabs (the last good
+frame is kept on screen across an unpark rather than blanking to the placeholder;
+a fresh reattach mounts a blank canvas, so it shows the placeholder until the
+first screenshot). Popped-out panes are exempt from parking so their stream/CDP
+observer keeps running and window-close auto-revert still works — now even while
+minimized, because the controller (and its observer) outlive the panel unmount,
+where before it silently did not.
 Caveat: `AGENT_BROWSER_IDLE_TIMEOUT_MS` (daemon self-exit when idle) would defeat
 "alive while parked" and must not be set for Dormouse-managed sessions.
 

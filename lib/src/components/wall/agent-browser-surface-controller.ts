@@ -597,7 +597,9 @@ export class AgentBrowserSurfaceController {
     if (this.parked === parked) return;
     this.parked = parked;
     // A parked pane holds no stream/screenshot loop; the daemon/session stays
-    // alive and re-broadcasts on reconnect.
+    // alive and re-broadcasts on reconnect. Treat unpark like a fresh mount for
+    // stale-port recovery: the daemon may have moved while no client was alive.
+    if (parked) this.liveStreamPort = null;
     this.reconcile();
     this.maybeRecoverStalePort();
     // issueSyncToPane no-ops while parked, so a resize that happened behind a
