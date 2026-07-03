@@ -610,7 +610,14 @@ export function Wall({
   const acceptKill = useCallback(() => {
     const ck = confirmKillRef.current;
     if (!ck || ck.exit) return;
-    setConfirmKill({ ...ck, exit: 'confirm' });
+    const staged = { ...ck, exit: 'confirm' as const };
+    // Written to the ref synchronously, not just via setState: the ref otherwise
+    // updates on the NEXT render, so a second confirm keydown arriving before
+    // React flushes would pass this guard and kill the same pane twice (two
+    // orchestrateKill animations racing one animationend — the second removePanel
+    // then throws dockview's 'invalid operation' on the already-removed panel).
+    confirmKillRef.current = staged;
+    setConfirmKill(staged);
     killPaneImmediately(ck.id);
     confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
   }, [killPaneImmediately]);
