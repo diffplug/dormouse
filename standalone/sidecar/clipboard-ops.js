@@ -5,7 +5,17 @@ const crypto = require('node:crypto');
 const { execFile, spawn } = require('node:child_process');
 const { promisify } = require('node:util');
 
-const execFileP = promisify(execFile);
+const rawExecFileP = promisify(execFile);
+
+// Always spawn helper CLIs (powershell, clip, pbpaste, xclip, ...) with the
+// console window hidden. On Windows the sidecar runs as a windowless GUI child,
+// so spawning a console subprocess without CREATE_NO_WINDOW allocates a fresh
+// console window that flickers on screen and steals focus — several per paste,
+// since doPaste reads file paths + text (+ image) concurrently. windowsHide maps
+// to CREATE_NO_WINDOW in libuv and is a harmless no-op on macOS/Linux.
+function execFileP(cmd, args, options) {
+  return rawExecFileP(cmd, args, { ...options, windowsHide: true });
+}
 
 const MAX_BUFFER = 16 * 1024 * 1024;
 
@@ -269,7 +279,7 @@ function writeViaStdin(cmd, args, text, runtime) {
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawnFn(cmd, args, { stdio: ['pipe', 'ignore', 'ignore'] });
+      child = spawnFn(cmd, args, { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true });
     } catch (err) {
       reject(err);
       return;
