@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "dev:pocket": "vite --config vite.pocket.config.ts",
+    "prebuild": "pnpm --filter server-lib-common build",
     "build": "tsc -b && vite build",
     "build:pocket": "vite build --config vite.pocket.config.ts",
     "preview": "vite preview",
