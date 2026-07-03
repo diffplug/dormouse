@@ -45,7 +45,7 @@ export type Connect2Check =
  */
 export interface HandshakeGate {
   /** Verify a `pair` request before relaying it to the Host. */
-  checkPair(request: PairingRequest): Promise<PairCheck>;
+  checkPair(request: unknown): Promise<PairCheck>;
   /** Remember the Host challenge the server just relayed to a client (freshness half). */
   observeChallenge(clientId: string, hostId: string, challenge: string, expiresAt: number): void;
   /** Verify a `connect2` request before relaying it to the Host. */
@@ -85,8 +85,8 @@ export class Handshake implements HandshakeGate {
     this.#now = config.now ?? (() => Date.now());
   }
 
-  async checkPair(request: PairingRequest): Promise<PairCheck> {
-    if (!request || typeof request !== 'object') {
+  async checkPair(request: unknown): Promise<PairCheck> {
+    if (!isPairingRequest(request)) {
       return { ok: false, error: 'malformed pairing request' };
     }
     if (request.accountId !== SELFHOST_ACCOUNT_ID) {
@@ -160,4 +160,16 @@ export class Handshake implements HandshakeGate {
 
     return failures.length === 0 ? { ok: true } : { ok: false, failures };
   }
+}
+
+function isPairingRequest(request: unknown): request is PairingRequest {
+  return (
+    !!request &&
+    typeof request === 'object' &&
+    typeof (request as PairingRequest).accountId === 'string' &&
+    typeof (request as PairingRequest).passkeyCredentialId === 'string' &&
+    typeof (request as PairingRequest).passkeyPublicKeyHash === 'string' &&
+    typeof (request as PairingRequest).devicePublicKey === 'string' &&
+    typeof (request as PairingRequest).requestedLabel === 'string'
+  );
 }

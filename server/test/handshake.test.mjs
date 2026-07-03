@@ -269,6 +269,27 @@ test('server rejects a pair for a credential not on the account, without forward
   }
 });
 
+test('server rejects a malformed pair shape before forwarding', async () => {
+  const { app, server, host, fakeHost, close } = await boot();
+  try {
+    const p = await phone(app, server);
+    const pairs = collect(fakeHost, 'pair');
+    const request = await buildPairingRequest(p);
+    delete request.devicePublicKey;
+    request.requestedLabel = 42;
+
+    p.socket.send({ t: 'pair', hostId: host.hostId, request });
+    const result = await p.socket.take();
+
+    assert.equal(result.t, 'pair-result');
+    assert.equal(result.approved, false);
+    assert.match(result.error, /malformed pairing request/);
+    assert.equal(pairs.length, 0, 'the Host never saw the malformed pair request');
+  } finally {
+    await close();
+  }
+});
+
 test('server rejects connect2 when the assertion is bound to a different challenge', async () => {
   const { app, server, host, fakeHost, close } = await boot();
   try {

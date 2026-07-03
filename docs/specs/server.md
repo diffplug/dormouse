@@ -127,8 +127,10 @@ phone                        server                        host (laptop)
 The `pair-request` carries the `PairingRequest` shape from `server-lib-common`
 (`accountId`, `passkeyCredentialId`, `passkeyPublicKeyHash`,
 `devicePublicKey`, `requestedLabel`). The server checks the session's
-credential matches, then relays; the Host runs `PairingCeremony` and only
-local approval writes the ACL.
+credential matches and rejects malformed requests before relaying; the Host runs
+`PairingCeremony` and only local approval writes the ACL. A malformed
+`PairingRequest` is answered locally with `pair-result approved:false` and is
+never shown in the Host approval UI.
 
 ## Connect (every session)
 
