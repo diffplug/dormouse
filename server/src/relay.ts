@@ -103,6 +103,11 @@ export class RelayHub {
 
   /** Handle one raw frame from a Host socket. Unknown/malformed frames are ignored. */
   onHostFrame(host: HostConn, raw: string): void {
+    // Only the socket the map points at speaks for a hostId: a socket displaced
+    // by registerHost can still deliver queued frames, and treating them as
+    // current would resurrect sessions the replacement just invalidated (a late
+    // `decision` re-establishing, or `msg` data from the dead host process).
+    if (this.#hosts.get(host.hostId) !== host) return;
     const frame = parseFrame<HostFrame>(raw);
     if (!frame || typeof frame.t !== 'string' || typeof frame.clientId !== 'string') return;
     // Every host frame addresses a specific client; if it has already gone,
