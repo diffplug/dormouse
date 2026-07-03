@@ -138,3 +138,18 @@ test('late replies from a host the client left are ignored', async () => {
   assert.equal(client.hostId, 'h2');
   assert.equal(client.established, false, 'stale host decision must not establish');
 });
+
+test('rebinding a client tells the previous host client-gone', async () => {
+  const hub = new RelayHub(openGate);
+  const hostA = hub.registerHost('h1', fakeSocket());
+  const hostB = hub.registerHost('h2', fakeSocket());
+  const { client } = await establishedClient(hub, hostA, 'h1');
+
+  await hub.onClientFrame(client, JSON.stringify({ t: 'connect', hostId: 'h2' }));
+
+  assert.deepEqual(hostA.socket.sent.at(-1), { t: 'client-gone', clientId: client.clientId });
+  assert.equal(hostB.socket.sent.at(-1)?.t, 'connect');
+  assert.equal(hostB.socket.sent.at(-1)?.clientId, client.clientId);
+  assert.equal(client.hostId, 'h2');
+  assert.equal(client.established, false);
+});

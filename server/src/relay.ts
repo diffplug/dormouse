@@ -227,6 +227,12 @@ export class RelayHub {
         }
         // Binding to a (new) host, or re-attempting `connect`, drops any prior
         // established session — a client holds at most one at a time.
+        if (client.hostId !== null && client.hostId !== frame.hostId) {
+          const previousHost = this.#hosts.get(client.hostId);
+          if (previousHost) {
+            this.#toHost(previousHost, { t: 'client-gone', clientId: client.clientId });
+          }
+        }
         if (client.hostId !== frame.hostId || frame.t === 'connect') {
           client.established = false;
         }

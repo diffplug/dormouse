@@ -109,6 +109,9 @@ The relay keeps one current Host binding per Client socket. Host-originated
 handshake replies and `msg` frames are routed only when the frame comes from
 that current Host; late replies from a previous Host are ignored and cannot
 re-establish an old session.
+When a Client socket binds to a different Host, the relay sends `client-gone`
+to the previous live Host before replacing the binding, so Host-side pairing UI,
+remote-api sessions, and watchers are disposed immediately.
 
 ## Pairing (phone ↔ laptop, first time)
 
