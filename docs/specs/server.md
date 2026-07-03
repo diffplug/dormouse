@@ -105,6 +105,11 @@ The server routes JSON envelopes between client sockets and host sockets
 (`@hono/node-ws`). Before a session is authorized it only forwards an
 allowlist of handshake types; after authorization it is a dumb pipe.
 
+The relay keeps one current Host binding per Client socket. Host-originated
+handshake replies and `msg` frames are routed only when the frame comes from
+that current Host; late replies from a previous Host are ignored and cannot
+re-establish an old session.
+
 ## Pairing (phone ↔ laptop, first time)
 
 ```

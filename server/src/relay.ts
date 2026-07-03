@@ -114,6 +114,11 @@ export class RelayHub {
     // there is nothing to route (and no session to establish).
     const client = this.#clients.get(frame.clientId);
     if (!client) return;
+    // Host replies are only meaningful while the client is still bound to that
+    // host. A client socket may leave host A for host B before A answers; late
+    // handshake replies from A must not reach the active client or re-establish
+    // an old session.
+    if (client.hostId !== host.hostId) return;
     switch (frame.t) {
       case 'pair-result':
         this.#toClient(client, {

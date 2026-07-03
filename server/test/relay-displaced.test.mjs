@@ -107,3 +107,34 @@ test('a displaced socket is also ignored after the replacement disconnects', asy
   );
   assert.equal(client.established, false, 'stale socket cannot speak for an offline host');
 });
+
+test('late replies from a host the client left are ignored', async () => {
+  const hub = new RelayHub(openGate);
+  const hostA = hub.registerHost('h1', fakeSocket());
+  const hostB = hub.registerHost('h2', fakeSocket());
+  const clientSocket = fakeSocket();
+  const client = hub.registerClient(clientSocket);
+
+  await hub.onClientFrame(client, JSON.stringify({ t: 'connect', hostId: 'h1' }));
+  assert.equal(hostA.socket.sent.at(-1)?.t, 'connect');
+  await hub.onClientFrame(client, JSON.stringify({ t: 'connect', hostId: 'h2' }));
+  assert.equal(client.hostId, 'h2');
+  assert.equal(hostB.socket.sent.at(-1)?.t, 'connect');
+
+  hub.onHostFrame(
+    hostA,
+    JSON.stringify({ t: 'challenge', clientId: client.clientId, challenge: 'stale', expiresAt: 9e15 }),
+  );
+  hub.onHostFrame(
+    hostA,
+    JSON.stringify({ t: 'pair-result', clientId: client.clientId, approved: true }),
+  );
+  hub.onHostFrame(
+    hostA,
+    JSON.stringify({ t: 'decision', clientId: client.clientId, allowed: true }),
+  );
+
+  assert.deepEqual(clientSocket.sent, [], 'stale host replies must not reach the client');
+  assert.equal(client.hostId, 'h2');
+  assert.equal(client.established, false, 'stale host decision must not establish');
+});
