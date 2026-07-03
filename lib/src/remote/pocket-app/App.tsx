@@ -25,7 +25,7 @@ import './pocket.css';
 
 type Phase = 'auth' | 'hosts' | 'wall';
 
-interface HostView {
+export interface HostView {
   hostId: string;
   label: string;
   online: boolean;
@@ -185,7 +185,7 @@ export default function App(): React.ReactElement {
 
 // --- SetupOrSignin ---------------------------------------------------------
 
-function SetupOrSignin({
+export function SetupOrSignin({
   busy,
   error,
   onSignin,
@@ -274,7 +274,7 @@ function SetupOrSignin({
 
 // --- HostsView -------------------------------------------------------------
 
-function HostsView({
+export function HostsView({
   hosts,
   busy,
   error,
