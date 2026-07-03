@@ -206,6 +206,11 @@ export class PocketClient {
 
   // --- Relay socket --------------------------------------------------------
 
+  /** True while a live relay socket exists; false after any close. */
+  get socketOpen(): boolean {
+    return this.#ws !== null;
+  }
+
   /** Open the `/ws/client` relay socket; resolves once it is open. */
   openSocket(): Promise<void> {
     const token = this.#requireToken();
@@ -372,12 +377,17 @@ export class PocketClient {
   }
 
   close(): void {
+    const ws = this.#ws;
+    // Null BEFORE closing: #onClose reads `#ws === null` as "intentional
+    // close", and while real sockets emit their close event asynchronously,
+    // test fakes may emit synchronously from within close().
+    this.#ws = null;
+    this.#connectedHostId = null;
     try {
-      this.#ws?.close();
+      ws?.close();
     } catch {
       // already closing
     }
-    this.#ws = null;
   }
 
   // --- Internals -----------------------------------------------------------
@@ -428,6 +438,7 @@ export class PocketClient {
         this.#onMsg(frame.data);
         return;
       case 'host-gone':
+        this.#connectedHostId = null;
         this.#onHostGone?.();
         this.#rejectAll(new Error('host disconnected'));
         return;
@@ -456,8 +467,17 @@ export class PocketClient {
   }
 
   #onClose(): void {
+    // `close()` nulls #ws before the event fires, so a non-null #ws here means
+    // the socket died on us (server restart, network drop) rather than being
+    // closed intentionally.
+    const unexpected = this.#ws !== null;
+    const hadSession = this.#connectedHostId !== null;
+    this.#ws = null; // never reuse a closed socket; openSocket() makes a fresh one
     this.#connectedHostId = null;
     this.#rejectAll(new Error('relay socket closed'));
+    // A close without a `host-gone` frame is still host loss for an established
+    // session — the app must leave the wall instead of idling on a dead stream.
+    if (unexpected && hadSession) this.#onHostGone?.();
   }
 
   /** Fail every awaited handshake frame and in-flight request (avoids hangs). */

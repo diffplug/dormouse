@@ -480,6 +480,53 @@ test('remote terminal: directory snapshot, attach banner, echo write, resize, de
   }
 });
 
+test('remote terminal: a stale detach for the previous surface does not kill the new attachment', async () => {
+  const { app, server, host, close } = await boot();
+  try {
+    const p = await phone(app, server);
+    await establish(p, host.hostId);
+
+    remote(p, 'dw', REMOTE_METHODS.directoryWatch, {});
+    await p.socket.take(); // watch ack
+    const snapshot = await p.socket.take();
+    const [a, b] = snapshot.data.data.entries;
+
+    // Rapid pane switch: attach A, then attach B (replacing A).
+    remote(p, 'atA', REMOTE_METHODS.surfaceAttach, { surfaceId: a.surfaceId, cols: 80, rows: 24 });
+    await p.socket.take(); // attach A ack
+    await p.socket.take(); // banner A
+    remote(p, 'atB', REMOTE_METHODS.surfaceAttach, { surfaceId: b.surfaceId, cols: 80, rows: 24 });
+    await p.socket.take(); // attach B ack
+    await p.socket.take(); // banner B
+
+    // A stale detach naming the OLD surface must be an idempotent no-op.
+    remote(p, 'dtA', REMOTE_METHODS.surfaceDetach, { surfaceId: a.surfaceId });
+    assert.equal((await p.socket.take()).data.ok, true);
+
+    // B's stream is still live: a write still echoes.
+    remote(p, 'wr', REMOTE_METHODS.terminalWrite, {
+      surfaceId: b.surfaceId,
+      bytes: toBase64Url(utf8Encode('still here\r')),
+    });
+    assert.equal((await p.socket.take()).data.ok, true);
+    const echo = await p.socket.take();
+    assert.equal(echo.data.event, REMOTE_EVENTS.terminalData);
+    assert.match(eventText(echo), /still here/);
+
+    // Detaching the CURRENT surface silences it.
+    remote(p, 'dtB', REMOTE_METHODS.surfaceDetach, { surfaceId: b.surfaceId });
+    assert.equal((await p.socket.take()).data.ok, true);
+    remote(p, 'wr2', REMOTE_METHODS.terminalWrite, {
+      surfaceId: b.surfaceId,
+      bytes: toBase64Url(utf8Encode('gone\r')),
+    });
+    assert.equal((await p.socket.take()).data.ok, true);
+    assert.ok(await p.socket.quiet(), 'no terminal.data after a matching detach');
+  } finally {
+    await close();
+  }
+});
+
 // A short settle so no test leaves an in-flight frame racing teardown.
 test.after?.(async () => {
   await sleep(10);

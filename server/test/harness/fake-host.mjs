@@ -224,8 +224,13 @@ export class FakeHost extends EventEmitter {
       }
 
       case REMOTE_METHODS.surfaceDetach: {
+        // Detach names its surface: a stale detach for a pane the client
+        // already switched away from must not kill the newer attachment.
+        const attachment = this.attachments.get(clientId);
+        if (attachment && attachment.surfaceId === params?.surfaceId) {
+          this.attachments.delete(clientId); // stops any further terminal.data
+        }
         ok();
-        this.attachments.delete(clientId); // stops any further terminal.data
         return;
       }
 

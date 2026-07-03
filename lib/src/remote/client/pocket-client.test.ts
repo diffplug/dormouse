@@ -117,6 +117,12 @@ class FakeSocket implements PocketSocket {
     this.#emit('close', { code: 1000 });
   }
 
+  /** Simulate the server/network dropping the connection (no client `close()`). */
+  drop(): void {
+    this.readyState = 3;
+    this.#emit('close', { code: 1006 });
+  }
+
   fireOpen(): void {
     this.readyState = 1;
     this.#emit('open', {});
@@ -294,6 +300,65 @@ describe('connect', () => {
     expect(decision.allowed).toBe(false);
     expect(decision.failures).toEqual(['device-not-paired']);
     expect(client.connectedHostId).toBeNull();
+  });
+});
+
+/** Drive the full connect dance until the session is established. */
+async function connectEstablished(harness: Harness): Promise<void> {
+  const { client, socket } = harness;
+  const connecting = client.connect('h1');
+  await nextSent(socket, (f) => f.t === 'connect');
+  socket.server({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(7), expiresAt: 9e15 });
+  await nextSent(socket, (f) => f.t === 'connect2');
+  socket.server({ t: 'decision', allowed: true });
+  await connecting;
+}
+
+describe('socket lifecycle', () => {
+  it('an unexpected close fires host-gone for an established session and resets the socket', async () => {
+    const harness = await signedIn();
+    await connectEstablished(harness);
+    let hostGone = 0;
+    harness.client.setOnHostGone(() => hostGone++);
+
+    harness.socket.drop();
+    expect(hostGone).toBe(1);
+    expect(harness.client.socketOpen).toBe(false);
+    expect(harness.client.connectedHostId).toBeNull();
+  });
+
+  it('an intentional close() does not fire host-gone', async () => {
+    const harness = await signedIn();
+    await connectEstablished(harness);
+    let hostGone = 0;
+    harness.client.setOnHostGone(() => hostGone++);
+
+    harness.client.close();
+    expect(hostGone).toBe(0);
+    expect(harness.client.socketOpen).toBe(false);
+  });
+
+  it('a host-gone frame followed by a socket close fires host-gone exactly once', async () => {
+    const harness = await signedIn();
+    await connectEstablished(harness);
+    let hostGone = 0;
+    harness.client.setOnHostGone(() => hostGone++);
+
+    harness.socket.server({ t: 'host-gone' });
+    expect(hostGone).toBe(1);
+    expect(harness.client.connectedHostId).toBeNull();
+    harness.socket.drop();
+    expect(hostGone).toBe(1);
+  });
+
+  it('an unexpected close without an established session resets state silently', async () => {
+    const harness = await signedIn();
+    let hostGone = 0;
+    harness.client.setOnHostGone(() => hostGone++);
+
+    harness.socket.drop();
+    expect(hostGone).toBe(0);
+    expect(harness.client.socketOpen).toBe(false);
   });
 });
 

@@ -245,7 +245,13 @@ export class RemoteApiSession {
   }
 
   #detach(request: RemoteRequest): void {
-    this.#teardownAttachment();
+    // Detach names its surface: a stale detach for a pane the client already
+    // switched away from must not kill the newer attachment. Detaching a
+    // surface that is not the current attachment is an idempotent no-op.
+    const params = request.params as { surfaceId?: string } | undefined;
+    if (this.#attachment && this.#attachment.surfaceId === params?.surfaceId) {
+      this.#teardownAttachment();
+    }
     this.#ok(request, {});
   }
 

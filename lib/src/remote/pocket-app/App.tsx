@@ -53,7 +53,6 @@ export default function App(): React.ReactElement {
   const [hosts, setHosts] = useState<HostView[]>([]);
   const [activeHost, setActiveHost] = useState<HostView | null>(null);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
-  const socketOpened = useRef(false);
 
   const run = useCallback(async (label: string, fn: () => Promise<void>) => {
     setError(null);
@@ -68,9 +67,10 @@ export default function App(): React.ReactElement {
   }, []);
 
   const loadHosts = useCallback(async () => {
-    if (!socketOpened.current) {
+    // The client nulls its socket on any close, so this self-heals after a
+    // server restart or network drop instead of reusing a dead socket.
+    if (!client.socketOpen) {
       await client.openSocket();
-      socketOpened.current = true;
     }
     setHosts(await client.listHosts());
     setPhase('hosts');

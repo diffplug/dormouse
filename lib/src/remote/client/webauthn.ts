@@ -38,9 +38,11 @@ function toBufferSource(bytes: Uint8Array): ArrayBuffer {
 
 /**
  * Create a discoverable ES256 passkey. `attestation: 'none'` keeps the server
- * dependency-free (it trusts the browser-provided SPKI key); `residentKey`
- * and `userVerification` are `'preferred'` so it works on the widest range of
- * authenticators while still preferring a resident, verified credential.
+ * dependency-free (it trusts the browser-provided SPKI key). `residentKey`
+ * is `'required'`: sign-in discovers credentials with an empty
+ * `allowCredentials`, so a non-resident credential (which `'preferred'` can
+ * silently produce) would register fine and then never be able to sign in —
+ * better to fail here, where re-running setup is a one-tap recovery.
  */
 async function registerPasskey(
   challenge: string,
@@ -57,7 +59,12 @@ async function registerPasskey(
         displayName: accountId,
       },
       pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
-      authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' },
+      authenticatorSelection: {
+        residentKey: 'required',
+        // WebAuthn L1 authenticators ignore `residentKey`; this is its spelling.
+        requireResidentKey: true,
+        userVerification: 'preferred',
+      },
       attestation: 'none',
     },
   })) as PublicKeyCredential | null;
