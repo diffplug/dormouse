@@ -7,6 +7,7 @@
  * Dormouse terminal pane. Both jobs are pure string parsing kept out of the
  * components so they can be unit-tested directly.
  */
+import type { AgentBrowserTab } from '../../lib/agent-browser-tab';
 
 /** Host + path of a URL (e.g. `localhost:5173/app`) — the browser header's
  *  primary text, and the iframe surface's title. Pass `includeSearch` to keep
@@ -20,6 +21,14 @@ export function hostPathDisplay(rawUrl: string, includeSearch = false): string {
   } catch {
     return rawUrl || '';
   }
+}
+
+/** A tab's display label for the browser tab strip and surface title: its
+ *  trimmed page title, falling back to the URL's host+path, then 'untitled'. */
+export function tabDisplayTitle(tab: AgentBrowserTab): string {
+  const title = tab.title?.trim();
+  if (title) return title;
+  return hostPathDisplay(tab.url) || 'untitled';
 }
 
 /** Path only (e.g. `/app`), used when a dev-server chip already shows the

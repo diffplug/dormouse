@@ -17,10 +17,9 @@ import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
 import { isEditableTarget } from '../../lib/dom';
 import type { RenderMode } from './agent-browser-screen';
-import { hostPathDisplay } from './browser-url';
+import { tabDisplayTitle } from './browser-url';
 import { resolveRenderMode } from './browser-surface';
 import { MOUSE_BUTTONS, MOUSE_BUTTON_MASKS, modifiers } from './agent-browser-input';
-import type { AgentBrowserTab as StreamTab } from './agent-browser-connection';
 import {
   acquireAgentBrowserSurfaceController,
   type AgentBrowserSurfaceParams,
@@ -37,12 +36,6 @@ import {
 } from './wall-context';
 
 type AgentBrowserPanelParams = AgentBrowserSurfaceParams;
-
-function tabDisplayTitle(tab: StreamTab): string {
-  const title = tab.title?.trim();
-  if (title) return title;
-  return hostPathDisplay(tab.url) || 'untitled';
-}
 
 export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: IDockviewPanelProps<AgentBrowserPanelParams> & { renderMode?: RenderMode }) {
   const actions = useContext(WallActionsContext);
@@ -93,10 +86,12 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   const passthroughRef = useRef(passthrough);
   passthroughRef.current = passthrough;
 
-  // Feed later param changes into the controller (diffed internally).
+  // Feed later param changes into the controller (diffed internally). renderMode
+  // is deliberately omitted: the controller owns poppedOut (seeded once from
+  // seededMode at acquire above) and never reacts to a later renderMode param.
   useEffect(() => {
-    controller.updateParams({ session, wsPort, binaryPath, url, syncEngaged, key, renderMode: seededMode });
-  }, [controller, session, wsPort, binaryPath, url, syncEngaged, key, seededMode]);
+    controller.updateParams({ session, wsPort, binaryPath, url, syncEngaged, key });
+  }, [controller, session, wsPort, binaryPath, url, syncEngaged, key]);
 
   // Lend the controller this view's live DOM bindings. Last attach wins; the
   // detach is identity-guarded inside the controller so a stale StrictMode

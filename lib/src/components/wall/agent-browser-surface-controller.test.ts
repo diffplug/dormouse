@@ -180,7 +180,7 @@ describe('parking', () => {
     await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
     expect(socket?.readyState).toBe(3);
     expect(streamSockets(4321).length).toBe(1);
-    expect(controller.snapshot().parked).toBe(true);
+    expect(controller.isParked()).toBe(true);
   });
 });
 
@@ -289,7 +289,7 @@ describe('stale-port recovery gating', () => {
 
       controller.setVisible(false);
       await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
-      expect(controller.snapshot().parked).toBe(true);
+      expect(controller.isParked()).toBe(true);
       expect(streamStatus).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();

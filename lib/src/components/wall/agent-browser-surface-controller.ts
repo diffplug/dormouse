@@ -34,7 +34,7 @@ import {
   type ScreenState,
   openAgentBrowserScreenModal,
 } from './agent-browser-screen';
-import { hostPathDisplay } from './browser-url';
+import { hostPathDisplay, tabDisplayTitle } from './browser-url';
 import { resolveRenderMode } from './browser-surface';
 import { clearAgentBrowserSessionClosed, isAgentBrowserSessionClosed } from './agent-browser-sessions';
 import {
@@ -102,12 +102,6 @@ function parseCdpUrl(stdout: string): string | null {
   return trimmed.match(/ws:\/\/\S+/)?.[0] ?? null;
 }
 
-function tabDisplayTitle(tab: StreamTab): string {
-  const title = tab.title?.trim();
-  if (title) return title;
-  return hostPathDisplay(tab.url) || 'untitled';
-}
-
 /** Best-effort screen rect for positioning a popped-out window over the pane.
  *  VS Code webviews can't read true screen coords (the host then centers); on
  *  standalone, window.screenX/Y offset the pane's viewport rect into screen
@@ -163,16 +157,17 @@ export interface AgentBrowserViewSink {
   requestIframeSwap(): void;
 }
 
-/** The single view-facing snapshot, consumed via `useSyncExternalStore`. */
+/** The single view-facing snapshot, consumed via `useSyncExternalStore`. Only
+ *  fields the view actually renders live here — parked state is read by tests via
+ *  `isParked()`, and session comes straight from params, so neither belongs in
+ *  the snapshot (keeping `parked` out also avoids a wasted re-render per park). */
 export interface AgentBrowserViewSnapshot {
   tabs: StreamTab[];
   status: StreamStatus | null;
   connectionLost: boolean;
   hasFrame: boolean;
   poppedOut: boolean;
-  parked: boolean;
   streamPort: number | undefined;
-  session: string | undefined;
 }
 
 const EMPTY_TABS: StreamTab[] = [];
@@ -238,7 +233,8 @@ export class AgentBrowserSurfaceController {
   // taken effect yet — not an external override.
   private syncConfirmed = false;
   private lastPublishedScreen: ScreenSnapshot | null = null;
-  private resizeObserver: ResizeObserver | null = null;
+  // Debounce for pushing a pane resize back to the browser as a `set viewport`
+  // (armed by the pane-size observer below, only while sync is engaged).
   private resizeTimer: ReturnType<typeof setTimeout> | undefined;
 
   // --- cached pane size (avoid per-frame forced layout) ---
@@ -249,6 +245,8 @@ export class AgentBrowserSurfaceController {
   // contentRect matches the gBCR those hot paths used to read). null ⇒ no attached
   // view — treat as 0×0 / skip, matching the old no-element behavior. The
   // correctness-critical reads in issueSyncToPane / paneScreenRect stay live gBCR.
+  // The same observer also drives viewport-sync (debounced), so there is one
+  // observer on the pane, not two.
   private paneSize: { w: number; h: number } | null = null;
   private paneSizeObserver: ResizeObserver | null = null;
 
@@ -373,9 +371,7 @@ export class AgentBrowserSurfaceController {
       connectionLost: this.connectionLost,
       hasFrame: this.hasFrame,
       poppedOut: this.poppedOut,
-      parked: this.parked,
       streamPort: this.streamPort,
-      session: this.session,
     };
   }
 
@@ -389,9 +385,7 @@ export class AgentBrowserSurfaceController {
       prev.connectionLost === this.connectionLost &&
       prev.hasFrame === this.hasFrame &&
       prev.poppedOut === this.poppedOut &&
-      prev.parked === this.parked &&
-      prev.streamPort === this.streamPort &&
-      prev.session === this.session
+      prev.streamPort === this.streamPort
     ) return;
     this.viewSnapshot = this.buildViewSnapshot();
     for (const listener of this.viewListeners) listener();
@@ -453,6 +447,16 @@ export class AgentBrowserSurfaceController {
     const observer = new ResizeObserver((entries) => {
       const cr = entries[entries.length - 1]?.contentRect;
       if (cr) this.paneSize = { w: Math.round(cr.width), h: Math.round(cr.height) };
+      // While syncing, push the new pane size to the browser (debounced). The
+      // inner re-check drops a resize whose sync was disengaged mid-debounce.
+      if (!this.syncEngaged) return;
+      if (this.resizeTimer) clearTimeout(this.resizeTimer);
+      this.resizeTimer = setTimeout(() => {
+        this.resizeTimer = undefined;
+        if (!this.syncEngaged) return;
+        this.issueSyncToPane();
+        this.publishScreen();
+      }, 200);
     });
     observer.observe(el);
     this.paneSizeObserver = observer;
@@ -461,6 +465,7 @@ export class AgentBrowserSurfaceController {
   private teardownPaneSizeObserver(): void {
     this.paneSizeObserver?.disconnect();
     this.paneSizeObserver = null;
+    if (this.resizeTimer) { clearTimeout(this.resizeTimer); this.resizeTimer = undefined; }
   }
 
   // --- view attachment ---
@@ -485,7 +490,10 @@ export class AgentBrowserSurfaceController {
       sink.setTitle(this.pendingTitle);
       this.pendingTitle = null;
     }
-    this.setupResizeObserver();
+    // The pane-size observer fires on observe and (when syncing) debounces a
+    // `set viewport`; issue once explicitly too so re-engaging at an unchanged
+    // size still reclaims the viewport. issueSyncToPane no-ops when not capable.
+    if (this.syncEngaged) this.issueSyncToPane();
     this.updateParkState();
     this.reconcile();
     this.publishScreen();
@@ -504,9 +512,8 @@ export class AgentBrowserSurfaceController {
         if (this.disposed || this.attachToken !== token) return;
         this.sink = null;
         this.attachToken = null;
-        this.teardownResizeObserver();
-        // The observed viewport died with the unmount; drop the cache so the hot
-        // paths fall back to the no-element (0×0 / skip) behavior.
+        // The observed viewport died with the unmount; drop the cache (and the
+        // pending sync debounce) so the hot paths fall back to no-element behavior.
         this.teardownPaneSizeObserver();
         this.paneSize = null;
         // The canvas DOM died with the unmount; on reattach a fresh canvas
@@ -580,10 +587,15 @@ export class AgentBrowserSurfaceController {
     }, HIDDEN_PARK_DELAY_MS);
   }
 
+  /** Whether the pane is parked (hidden/detached long enough to shed its stream).
+   *  Not in the view snapshot — exposed for tests. */
+  isParked(): boolean {
+    return this.parked;
+  }
+
   private setParked(parked: boolean): void {
     if (this.parked === parked) return;
     this.parked = parked;
-    this.emitView();
     // A parked pane holds no stream/screenshot loop; the daemon/session stays
     // alive and re-broadcasts on reconnect.
     this.reconcile();
@@ -955,7 +967,9 @@ export class AgentBrowserSurfaceController {
     }
     // Reflect the flip in the indicator immediately.
     this.publishScreen();
-    this.setupResizeObserver();
+    // The always-on pane-size observer reads syncEngaged at fire time, so there
+    // is nothing to (re)wire here. Engaging issues a sync via engageSync; a
+    // pending debounce that outlives a disengage is dropped by its own re-check.
   }
 
   // --- canonical URL tracking ---
@@ -1123,31 +1137,6 @@ export class AgentBrowserSurfaceController {
     // Frame differs from what we issued: a pre-landing stale frame until
     // confirmed; an external override once confirmed.
     if (this.syncConfirmed) this.setSyncEngaged(false);
-  }
-
-  private setupResizeObserver(): void {
-    this.teardownResizeObserver();
-    if (!this.syncEngaged) return;
-    const el = this.sink?.viewport;
-    if (!el) return;
-    // ResizeObserver fires once on observe, giving the initial sync; the explicit
-    // issue below covers re-engaging at an unchanged size.
-    const observer = new ResizeObserver(() => {
-      if (this.resizeTimer) clearTimeout(this.resizeTimer);
-      this.resizeTimer = setTimeout(() => {
-        this.issueSyncToPane();
-        this.publishScreen();
-      }, 200);
-    });
-    observer.observe(el);
-    this.resizeObserver = observer;
-    this.issueSyncToPane();
-  }
-
-  private teardownResizeObserver(): void {
-    this.resizeObserver?.disconnect();
-    this.resizeObserver = null;
-    if (this.resizeTimer) { clearTimeout(this.resizeTimer); this.resizeTimer = undefined; }
   }
 
   // --- relaunch: pop-out / pop-in / bring-to-front + auto-revert ---
@@ -1354,7 +1343,6 @@ export class AgentBrowserSurfaceController {
     if (this.disposed) return;
     this.disposed = true;
     if (this.parkTimer) { clearTimeout(this.parkTimer); this.parkTimer = undefined; }
-    this.teardownResizeObserver();
     this.teardownPaneSizeObserver();
     this.paneSize = null;
     if (this.connection) {
