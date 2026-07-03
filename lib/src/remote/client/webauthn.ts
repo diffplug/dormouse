@@ -28,12 +28,6 @@ export interface WebAuthnClient {
 }
 
 /**
- * Create a discoverable ES256 passkey. `attestation: 'none'` keeps the server
- * dependency-free (it trusts the browser-provided SPKI key); `residentKey`
- * and `userVerification` are `'preferred'` so it works on the widest range of
- * authenticators while still preferring a resident, verified credential.
- */
-/**
  * Copy into a fresh `ArrayBuffer`-backed view. WebAuthn's `BufferSource`
  * parameters demand `ArrayBuffer` (not `SharedArrayBuffer`), which the generic
  * `Uint8Array` from the byte helpers does not satisfy under recent TS libs.
@@ -42,6 +36,12 @@ function toBufferSource(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
+/**
+ * Create a discoverable ES256 passkey. `attestation: 'none'` keeps the server
+ * dependency-free (it trusts the browser-provided SPKI key); `residentKey`
+ * and `userVerification` are `'preferred'` so it works on the widest range of
+ * authenticators while still preferring a resident, verified credential.
+ */
 async function registerPasskey(
   challenge: string,
   rpId: string,

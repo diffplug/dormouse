@@ -29,6 +29,7 @@ import {
   WS_ROUTES,
   WS_TOKEN_PARAM,
   authorizeConnection,
+  clampTerminalDimension,
   fromBase64Url,
   toBase64Url,
   utf8Decode,
@@ -182,8 +183,8 @@ export class FakeHost extends EventEmitter {
       case REMOTE_METHODS.surfaceAttach: {
         const surface = this.#surface(params?.surfaceId);
         if (!surface) return fail(`no such surface: ${params?.surfaceId ?? '(none)'}`);
-        surface.cols = clampInt(params.cols, surface.cols);
-        surface.rows = clampInt(params.rows, surface.rows);
+        surface.cols = clampTerminalDimension(params.cols, surface.cols);
+        surface.rows = clampTerminalDimension(params.rows, surface.rows);
         this.attachments.set(clientId, { surfaceId: surface.surfaceId, subId: requestId });
         ok({ cols: surface.cols, rows: surface.rows });
         this.#emitData(
@@ -209,8 +210,8 @@ export class FakeHost extends EventEmitter {
       case REMOTE_METHODS.terminalResize: {
         const surface = this.#surface(params?.surfaceId);
         if (!surface) return fail(`no such surface: ${params?.surfaceId ?? '(none)'}`);
-        surface.cols = clampInt(params.cols, surface.cols);
-        surface.rows = clampInt(params.rows, surface.rows);
+        surface.cols = clampTerminalDimension(params.cols, surface.cols);
+        surface.rows = clampTerminalDimension(params.rows, surface.rows);
         ok({ cols: surface.cols, rows: surface.rows });
         const attachment = this.attachments.get(clientId);
         if (!attachment || attachment.surfaceId !== surface.surfaceId) return;
@@ -294,7 +295,3 @@ export class FakeHost extends EventEmitter {
   }
 }
 
-/** Coerce a requested terminal dimension to a positive integer, else `fallback`. */
-function clampInt(value, fallback) {
-  return Number.isFinite(value) ? Math.max(1, Math.floor(value)) : fallback;
-}

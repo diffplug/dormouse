@@ -224,3 +224,14 @@ export interface TerminalResizeParams {
   cols: number;
   rows: number;
 }
+
+/**
+ * Coerce a requested terminal dimension (cols or rows) to a positive integer,
+ * falling back to `fallback` when the value is absent or not finite. Shared so
+ * the Host api, the client adapter, and the test harness all sanitize sizes the
+ * same way.
+ */
+export function clampTerminalDimension(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.floor(value));
+}

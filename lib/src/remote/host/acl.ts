@@ -41,11 +41,21 @@ export function saveAclRecords(hostId: string, records: readonly HostAclRecord[]
   }
 }
 
-/** Rehydrate a live `HostAcl` from persisted records. */
-export function loadHostAcl(hostId: string): HostAcl {
+/**
+ * Rehydrate a live `HostAcl` from persisted records, falling back to an empty
+ * ACL if the stored records cannot be reconciled with `hostId`. `loadRecords`
+ * is injectable so callers (and tests) can supply their own source.
+ */
+export function loadHostAcl(
+  hostId: string,
+  loadRecords: (hostId: string) => HostAclRecord[] = loadAclRecords,
+): HostAcl {
   try {
-    return HostAcl.fromRecords(hostId, loadAclRecords(hostId));
-  } catch {
+    return HostAcl.fromRecords(hostId, loadRecords(hostId));
+  } catch (error) {
+    // Fail closed but loudly: an empty ACL silently de-pairs every client, so
+    // "all my devices vanished" must at least be explicable from the console.
+    console.warn(`remote-host: could not load ACL for ${hostId}; starting empty`, error);
     return new HostAcl(hostId);
   }
 }

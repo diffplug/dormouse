@@ -41,29 +41,68 @@ export class DuplicateCredentialError extends Error {
   }
 }
 
-export class AccountStore {
+/**
+ * A tiny JSON-file store: the whole file is one JSON value, written through a
+ * temp-file-plus-rename so a crash mid-write can never leave a half-written
+ * (unparseable) file, with mutations serialized through a promise chain so two
+ * concurrent read-modify-writes cannot clobber each other. Subclasses layer
+ * their find/append logic on top. Deliberately not a database (see the module
+ * header).
+ */
+abstract class JsonFileStore {
   readonly #stateDir: string;
   readonly #path: string;
-  readonly #now: () => number;
-  /** Serializes mutations so overlapping appends do not lose writes. */
+  /** Wall clock, injectable for deterministic tests. */
+  protected readonly now: () => number;
+  /** Serializes mutations so overlapping writes do not lose each other. */
   #tail: Promise<unknown> = Promise.resolve();
 
-  constructor(stateDir: string, now: () => number = () => Date.now()) {
+  constructor(stateDir: string, fileName: string, now: () => number) {
     this.#stateDir = stateDir;
-    this.#path = join(stateDir, 'account.json');
-    this.#now = now;
+    this.#path = join(stateDir, fileName);
+    this.now = now;
   }
 
-  /** Read `account.json`, or `null` if the account has not been created yet. */
-  async load(): Promise<Account | null> {
+  /** Read and parse the file, or `fallback` if it does not exist yet. */
+  protected async read<T>(fallback: T): Promise<T> {
     let raw: string;
     try {
       raw = await readFile(this.#path, 'utf8');
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return fallback;
       throw err;
     }
-    return JSON.parse(raw) as Account;
+    return JSON.parse(raw) as T;
+  }
+
+  /** Overwrite the whole file atomically (temp file + rename). */
+  protected async writeAtomic(value: unknown): Promise<void> {
+    await mkdir(this.#stateDir, { recursive: true });
+    const tmp = `${this.#path}.${randomUUID()}.tmp`;
+    await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    await rename(tmp, this.#path);
+  }
+
+  /**
+   * Run `mutate` under the mutex. It is chained onto the tail regardless of
+   * whether the previous op resolved or rejected, so one failure cannot wedge
+   * the queue.
+   */
+  protected mutate<R>(mutate: () => Promise<R>): Promise<R> {
+    const result = this.#tail.then(mutate, mutate);
+    this.#tail = result.catch(() => undefined);
+    return result;
+  }
+}
+
+export class AccountStore extends JsonFileStore {
+  constructor(stateDir: string, now: () => number = () => Date.now()) {
+    super(stateDir, 'account.json', now);
+  }
+
+  /** Read `account.json`, or `null` if the account has not been created yet. */
+  load(): Promise<Account | null> {
+    return this.read<Account | null>(null);
   }
 
   /** Look up a stored passkey by its base64url credential id. */
@@ -78,7 +117,7 @@ export class AccountStore {
    * credential id already exists. Runs under the mutex.
    */
   appendPasskey(passkey: Omit<StoredPasskey, 'createdAt'>): Promise<Account> {
-    const run = async (): Promise<Account> => {
+    return this.mutate(async () => {
       const account: Account = (await this.load()) ?? {
         accountId: SELFHOST_ACCOUNT_ID,
         passkeys: [],
@@ -86,22 +125,10 @@ export class AccountStore {
       if (account.passkeys.some((p) => p.credentialId === passkey.credentialId)) {
         throw new DuplicateCredentialError(passkey.credentialId);
       }
-      account.passkeys.push({ ...passkey, createdAt: this.#now() });
-      await this.#writeAtomic(account);
+      account.passkeys.push({ ...passkey, createdAt: this.now() });
+      await this.writeAtomic(account);
       return account;
-    };
-    // Chain onto the tail regardless of whether the previous op resolved or
-    // rejected, so one failed append does not wedge the queue.
-    const result = this.#tail.then(run, run);
-    this.#tail = result.catch(() => undefined);
-    return result;
-  }
-
-  async #writeAtomic(account: Account): Promise<void> {
-    await mkdir(this.#stateDir, { recursive: true });
-    const tmp = `${this.#path}.${randomUUID()}.tmp`;
-    await writeFile(tmp, `${JSON.stringify(account, null, 2)}\n`, 'utf8');
-    await rename(tmp, this.#path);
+    });
   }
 }
 
@@ -118,29 +145,14 @@ export interface StoredHost {
  * append-only JSON array, atomic writes, and a mutex so concurrent enrollments
  * cannot lose a write. Revocation is deleting a line by hand (POC guardrail).
  */
-export class HostStore {
-  readonly #stateDir: string;
-  readonly #path: string;
-  readonly #now: () => number;
-  /** Serializes mutations so overlapping enrollments do not lose writes. */
-  #tail: Promise<unknown> = Promise.resolve();
-
+export class HostStore extends JsonFileStore {
   constructor(stateDir: string, now: () => number = () => Date.now()) {
-    this.#stateDir = stateDir;
-    this.#path = join(stateDir, 'hosts.json');
-    this.#now = now;
+    super(stateDir, 'hosts.json', now);
   }
 
   /** Read `hosts.json`, or `[]` if no host has been enrolled yet. */
-  async list(): Promise<StoredHost[]> {
-    let raw: string;
-    try {
-      raw = await readFile(this.#path, 'utf8');
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
-      throw err;
-    }
-    return JSON.parse(raw) as StoredHost[];
+  list(): Promise<StoredHost[]> {
+    return this.read<StoredHost[]>([]);
   }
 
   /** Look up an enrolled host by its bearer token (the `/ws/host` credential). */
@@ -155,28 +167,17 @@ export class HostStore {
    * the mutex.
    */
   enroll(label: string): Promise<StoredHost> {
-    const run = async (): Promise<StoredHost> => {
+    return this.mutate(async () => {
       const hosts = await this.list();
       const host: StoredHost = {
         hostId: toBase64Url(randomBytes(16)),
         hostToken: toBase64Url(randomBytes(32)),
         label,
-        enrolledAt: this.#now(),
+        enrolledAt: this.now(),
       };
       hosts.push(host);
-      await this.#writeAtomic(hosts);
+      await this.writeAtomic(hosts);
       return host;
-    };
-    // Chain regardless of prior resolve/reject so one failure cannot wedge the queue.
-    const result = this.#tail.then(run, run);
-    this.#tail = result.catch(() => undefined);
-    return result;
-  }
-
-  async #writeAtomic(hosts: StoredHost[]): Promise<void> {
-    await mkdir(this.#stateDir, { recursive: true });
-    const tmp = `${this.#path}.${randomUUID()}.tmp`;
-    await writeFile(tmp, `${JSON.stringify(hosts, null, 2)}\n`, 'utf8');
-    await rename(tmp, this.#path);
+    });
   }
 }

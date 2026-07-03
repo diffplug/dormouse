@@ -47,17 +47,10 @@ import {
   type TerminalResizeEvent,
 } from 'server-lib-common';
 import type { WebAuthnClient } from './webauthn';
+import type { RemoteWebSocket } from '../ws';
 
 /** The slice of a WebSocket the client uses; a browser `WebSocket` satisfies it. */
-export interface PocketSocket {
-  send(data: string): void;
-  close(): void;
-  addEventListener(
-    type: 'open' | 'message' | 'close' | 'error',
-    handler: (ev: unknown) => void,
-  ): void;
-  readyState: number;
-}
+export type PocketSocket = RemoteWebSocket;
 
 /**
  * Persistent per-device state. Passkey public keys are stashed at registration

@@ -27,7 +27,7 @@ function startFromEnrollment(enrollment: HostEnrollment): RemoteHost {
       new RemoteApiSession({
         hostId: opts.hostId,
         // The controller sends the untyped remote-api payload inside a `msg`.
-        send: (payload) => opts.send(payload),
+        send: opts.send,
       }),
   });
   host.start();

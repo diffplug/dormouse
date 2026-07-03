@@ -105,56 +105,48 @@ export class RelayHub {
   onHostFrame(host: HostConn, raw: string): void {
     const frame = parseFrame<HostFrame>(raw);
     if (!frame || typeof frame.t !== 'string' || typeof frame.clientId !== 'string') return;
+    // Every host frame addresses a specific client; if it has already gone,
+    // there is nothing to route (and no session to establish).
     const client = this.#clients.get(frame.clientId);
+    if (!client) return;
     switch (frame.t) {
       case 'pair-result':
-        if (client) {
-          this.#toClient(client, {
-            t: 'pair-result',
-            approved: frame.approved,
-            record: frame.record,
-            error: frame.error,
-          });
-        }
+        this.#toClient(client, {
+          t: 'pair-result',
+          approved: frame.approved,
+          record: frame.record,
+          error: frame.error,
+        });
         return;
       case 'challenge':
         // The client's `challenge` frame carries the originating hostId (the
         // host frame does not — the hub knows it from the socket). The server
         // also remembers the challenge so it can do its half of `connect2`
         // freshness validation before forwarding.
-        if (client) {
-          this.#gate.observeChallenge(
-            client.clientId,
-            host.hostId,
-            frame.challenge,
-            frame.expiresAt,
-          );
-          this.#toClient(client, {
-            t: 'challenge',
-            hostId: host.hostId,
-            challenge: frame.challenge,
-            expiresAt: frame.expiresAt,
-          });
-        }
+        this.#gate.observeChallenge(client.clientId, host.hostId, frame.challenge, frame.expiresAt);
+        this.#toClient(client, {
+          t: 'challenge',
+          hostId: host.hostId,
+          challenge: frame.challenge,
+          expiresAt: frame.expiresAt,
+        });
         return;
       case 'decision':
         // The Host is the final authority: an allowed decision is what
         // establishes the (host, client) session and unblocks `msg`.
-        if (frame.allowed && client) {
+        if (frame.allowed) {
           client.hostId = host.hostId;
           client.established = true;
         }
-        if (client) {
-          this.#toClient(client, {
-            t: 'decision',
-            allowed: frame.allowed,
-            failures: frame.failures,
-          });
-        }
+        this.#toClient(client, {
+          t: 'decision',
+          allowed: frame.allowed,
+          failures: frame.failures,
+        });
         return;
       case 'msg':
         // Blocked unless this exact host/client pair has an established session.
-        if (client && client.established && client.hostId === host.hostId) {
+        if (client.established && client.hostId === host.hostId) {
           this.#toClient(client, { t: 'msg', data: frame.data });
         }
         return;

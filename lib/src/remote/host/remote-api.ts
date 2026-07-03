@@ -20,6 +20,7 @@
 import {
   REMOTE_EVENTS,
   REMOTE_METHODS,
+  clampTerminalDimension,
   fromBase64Url,
   toBase64Url,
   utf8Decode,
@@ -35,6 +36,7 @@ import {
 } from 'server-lib-common';
 import { getPlatform } from '../../lib/platform';
 import { registry } from '../../lib/terminal-store';
+import type { TerminalEntry } from '../../lib/terminal-store';
 import { subscribeToActivity } from '../../lib/session-activity-store';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
 import { collectDirectorySnapshot } from './directory-collect';
@@ -127,6 +129,23 @@ export class RemoteApiSession {
     this.#send({ subId, event, data });
   }
 
+  /**
+   * Resolve the live terminal a `surface.*` request targets, or fail the request
+   * (and return null) if the params or the surface are missing. Shared by
+   * attach/write/resize so the not-found contract lives in one place.
+   */
+  #resolveSurface<P extends { surfaceId: string }>(
+    request: RemoteRequest,
+  ): { params: P; entry: TerminalEntry } | null {
+    const params = request.params as P | undefined;
+    const entry = params ? registry.get(params.surfaceId) : undefined;
+    if (!params || !entry) {
+      this.#fail(request, `no such surface: ${params?.surfaceId ?? '(none)'}`);
+      return null;
+    }
+    return { params, entry };
+  }
+
   // --- Methods ---
 
   #hello(request: RemoteRequest): void {
@@ -180,18 +199,16 @@ export class RemoteApiSession {
   }
 
   #attach(request: RemoteRequest): void {
-    const params = request.params as AttachParams | undefined;
-    const entry = params ? registry.get(params.surfaceId) : undefined;
-    if (!params || !entry) {
-      return this.#fail(request, `no such surface: ${params?.surfaceId ?? '(none)'}`);
-    }
+    const resolved = this.#resolveSurface<AttachParams>(request);
+    if (!resolved) return;
+    const { params, entry } = resolved;
     // v1: one attachment per session — replace any prior stream.
     this.#teardownAttachment();
 
     const ptyId = entry.ptyId;
     const term = entry.terminal;
-    const cols = clampDimension(params.cols, term.cols);
-    const rows = clampDimension(params.rows, term.rows);
+    const cols = clampTerminalDimension(params.cols, term.cols);
+    const rows = clampTerminalDimension(params.rows, term.rows);
     const platform = getPlatform();
 
     // Attach-is-the-resize: resizing the real xterm fires its onResize handler,
@@ -233,25 +250,21 @@ export class RemoteApiSession {
   }
 
   #write(request: RemoteRequest): void {
-    const params = request.params as TerminalWriteParams | undefined;
-    const entry = params ? registry.get(params.surfaceId) : undefined;
-    if (!params || !entry) {
-      return this.#fail(request, `no such surface: ${params?.surfaceId ?? '(none)'}`);
-    }
+    const resolved = this.#resolveSurface<TerminalWriteParams>(request);
+    if (!resolved) return;
+    const { params, entry } = resolved;
     // Feed the existing PTY input path; the local echo returns via onPtyData.
     getPlatform().writePty(entry.ptyId, utf8Decode(fromBase64Url(params.bytes)));
     this.#ok(request, {});
   }
 
   #resize(request: RemoteRequest): void {
-    const params = request.params as TerminalResizeParams | undefined;
-    const entry = params ? registry.get(params.surfaceId) : undefined;
-    if (!params || !entry) {
-      return this.#fail(request, `no such surface: ${params?.surfaceId ?? '(none)'}`);
-    }
+    const resolved = this.#resolveSurface<TerminalResizeParams>(request);
+    if (!resolved) return;
+    const { params, entry } = resolved;
     const term = entry.terminal;
-    const cols = clampDimension(params.cols, term.cols);
-    const rows = clampDimension(params.rows, term.rows);
+    const cols = clampTerminalDimension(params.cols, term.cols);
+    const rows = clampTerminalDimension(params.rows, term.rows);
     if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows);
     const result: TerminalAttachResult = { cols: term.cols, rows: term.rows };
     this.#ok(request, result);
@@ -264,9 +277,4 @@ export class RemoteApiSession {
     platform.offPtyExit(this.#attachment.onExit);
     this.#attachment = null;
   }
-}
-
-function clampDimension(value: number, fallback: number): number {
-  if (!Number.isFinite(value)) return fallback;
-  return Math.max(1, Math.floor(value));
 }

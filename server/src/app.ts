@@ -161,6 +161,20 @@ export function createApp(config: AppConfig): CreatedApp {
   const passwordOk = (provided: unknown): boolean =>
     typeof provided === 'string' && timingSafeEqual(sha256(provided), expectedPasswordHash);
 
+  // Read a JSON body and enforce the setup password. Returns the parsed body, or
+  // a ready 401 `Response` (after the standard failure delay) the caller returns
+  // as-is — so the three password-gated routes share one policy.
+  async function readPasswordGated<T extends { password: unknown }>(
+    c: Context<AppEnv>,
+  ): Promise<T | Response> {
+    const body = await readJson<T>(c);
+    if (!body || !passwordOk(body.password)) {
+      await delay(PASSWORD_FAILURE_DELAY_MS);
+      return c.json({ error: 'invalid setup password' }, 401);
+    }
+    return body;
+  }
+
   const app = new Hono<AppEnv>();
   // The WS relay routes need the http server that `serve()` builds later, so the
   // adapter is created here and `injectWebSocket` is handed back to the caller.
@@ -178,22 +192,16 @@ export function createApp(config: AppConfig): CreatedApp {
   // --- Setup: password-gated passkey registration -------------------------
 
   app.post(API_ROUTES.setupBegin, async (c) => {
-    const body = await readJson<SetupBeginRequest>(c);
-    if (!body || !passwordOk(body.password)) {
-      await delay(PASSWORD_FAILURE_DELAY_MS);
-      return c.json({ error: 'invalid setup password' }, 401);
-    }
+    const body = await readPasswordGated<SetupBeginRequest>(c);
+    if (body instanceof Response) return body;
     const { challenge } = setupChallenges.issue();
     const res: SetupBeginResponse = { challenge, rpId, accountId: SELFHOST_ACCOUNT_ID };
     return c.json(res);
   });
 
   app.post(API_ROUTES.setupFinish, async (c) => {
-    const body = await readJson<SetupFinishRequest>(c);
-    if (!body || !passwordOk(body.password)) {
-      await delay(PASSWORD_FAILURE_DELAY_MS);
-      return c.json({ error: 'invalid setup password' }, 401);
-    }
+    const body = await readPasswordGated<SetupFinishRequest>(c);
+    if (body instanceof Response) return body;
 
     // Decode and sanity-check clientDataJSON — we do NOT parse attestation
     // (attestation: 'none'); the browser already handed us the public key.
@@ -285,11 +293,8 @@ export function createApp(config: AppConfig): CreatedApp {
   // --- Host enrollment: password-gated, appends to hosts.json --------------
 
   app.post(API_ROUTES.hostEnroll, async (c) => {
-    const body = await readJson<HostEnrollRequest>(c);
-    if (!body || !passwordOk(body.password)) {
-      await delay(PASSWORD_FAILURE_DELAY_MS);
-      return c.json({ error: 'invalid setup password' }, 401);
-    }
+    const body = await readPasswordGated<HostEnrollRequest>(c);
+    if (body instanceof Response) return body;
     const label = typeof body.label === 'string' ? body.label : '';
     const host = await hostStore.enroll(label);
     // The Host enforces `origin`/`rpId` as its ConnectionPolicy (server.md).
@@ -416,6 +421,10 @@ function registerPocketServing(app: Hono<AppEnv>, pocketDir?: string): void {
   // path relative to cwd is the portable way to point it at an arbitrary dir.
   const root = relative(process.cwd(), pocketDir) || '.';
   app.get('/*', serveStatic({ root }));
+  // Re-read the SPA shell per deep-link fallback: a Pocket rebuild swaps in an
+  // index.html referencing new content-hashed assets, and a cached copy would
+  // keep pointing at deleted files until the server restarts. The fallback is
+  // not a hot path, and a read failure degrades to a 404 instead of a crash.
   app.get('*', async (c) => {
     const html = await readFile(indexHtmlPath, 'utf8').catch(() => null);
     return html ? c.html(html) : c.notFound();

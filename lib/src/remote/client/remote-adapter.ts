@@ -46,6 +46,7 @@
  */
 
 import {
+  clampTerminalDimension,
   fromBase64Url,
   toBase64Url,
   utf8Decode,
@@ -101,8 +102,6 @@ export class RemotePtyAdapter implements PlatformAdapter {
 
   /** Latest directory snapshot, in Host order. */
   #entries: DirectoryEntry[] = [];
-  /** surfaceId → entry, for O(1) lookups. */
-  #panes = new Map<string, DirectoryEntry>();
 
   /** Memoized directory.watch start; also the "started" guard. */
   #watchPromise: Promise<void> | null = null;
@@ -173,7 +172,7 @@ export class RemotePtyAdapter implements PlatformAdapter {
 
   /** The directory entry for a surface, or undefined. */
   getPaneEntry(surfaceId: string): DirectoryEntry | undefined {
-    return this.#panes.get(surfaceId);
+    return this.#entries.find((entry) => entry.surfaceId === surfaceId);
   }
 
   /** Subscribe to directory snapshots; returns an unsubscribe fn. */
@@ -197,7 +196,6 @@ export class RemotePtyAdapter implements PlatformAdapter {
 
   #onSnapshot(entries: DirectoryEntry[]): void {
     this.#entries = entries;
-    this.#panes = new Map(entries.map((entry) => [entry.surfaceId, entry]));
     this.#emitPtyList();
     for (const listener of this.#directoryListeners) listener(entries);
   }
@@ -364,7 +362,8 @@ export class RemotePtyAdapter implements PlatformAdapter {
 
 /** Coerce a requested size to positive integers, falling back to `fallback`. */
 function normalizeSize(cols: number | undefined, rows: number | undefined, fallback: Size): Size {
-  const c = cols !== undefined && Number.isFinite(cols) ? Math.max(1, Math.floor(cols)) : fallback.cols;
-  const r = rows !== undefined && Number.isFinite(rows) ? Math.max(1, Math.floor(rows)) : fallback.rows;
-  return { cols: c, rows: r };
+  return {
+    cols: clampTerminalDimension(cols, fallback.cols),
+    rows: clampTerminalDimension(rows, fallback.rows),
+  };
 }

@@ -33,7 +33,8 @@ import {
   type ServerToHostFrame,
 } from 'server-lib-common';
 import type { HostEnrollment } from './enrollment';
-import { loadAclRecords, saveAclRecords } from './acl';
+import type { RemoteWebSocket } from '../ws';
+import { loadHostAcl, saveAclRecords } from './acl';
 import {
   enqueuePairingApproval,
   resolvePairingApproval,
@@ -47,12 +48,7 @@ export interface RemoteApiSessionLike {
 }
 
 /** Minimal WebSocket surface, so tests can inject a fake. */
-export interface WebSocketLike {
-  send(data: string): void;
-  close(): void;
-  addEventListener(type: 'open' | 'message' | 'close' | 'error', handler: (ev: unknown) => void): void;
-  readyState: number;
-}
+export type WebSocketLike = RemoteWebSocket;
 
 export type RemoteHostStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'stopped';
 
@@ -110,10 +106,7 @@ export class RemoteHost {
     this.#enrollment = options.enrollment;
     this.#policy = { rpId: options.enrollment.rpId, origin: options.enrollment.origin };
     this.#now = options.now ?? (() => Date.now());
-    this.#acl = HostAcl.fromRecords(
-      options.enrollment.hostId,
-      (options.loadAcl ?? loadAclRecords)(options.enrollment.hostId),
-    );
+    this.#acl = loadHostAcl(options.enrollment.hostId, options.loadAcl);
     this.#challenges = new HostChallengeIssuer({ now: this.#now });
     this.#ceremony = new PairingCeremony(this.#acl, { now: this.#now });
 
