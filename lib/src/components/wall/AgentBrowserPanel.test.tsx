@@ -9,6 +9,7 @@ import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { AgentBrowserPopResult, AgentBrowserStreamStatusResult, PlatformAdapter } from '../../lib/platform/types';
 import { AgentBrowserPanel, HIDDEN_PARK_DELAY_MS } from './AgentBrowserPanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
+import { disposeAllAgentBrowserSurfaceControllers } from './agent-browser-surface-controller';
 import { ModeContext, SelectedIdContext, WallActionsContext, type WallActions } from './wall-context';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -101,6 +102,10 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root.unmount());
+  // Controllers now outlive panel unmount and this suite reuses the id
+  // 'ab-panel', so release them or the next test would reuse a stale controller
+  // bound to old platform mocks.
+  disposeAllAgentBrowserSurfaceControllers();
   container.remove();
   vi.restoreAllMocks();
   setPlatform(new FakePtyAdapter());

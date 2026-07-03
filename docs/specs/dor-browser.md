@@ -83,11 +83,17 @@ Surface lifetime owns backing resources:
   the same path.
 - A popped-out window closing is normally auto-reverted to headless, but the
   closed-session mark prevents Dormouse-initiated kill/swap from resurrecting it.
+- Killing or swapping an agent-browser pane also disposes its surface controller
+  (`disposeAgentBrowserSurfaceController`), releasing the connection, screenshot
+  loop, CDP observer, timers, and screen registration. This is the immediate
+  per-surface teardown hook Future Work still lists generally; it exists today
+  for agent-browser surfaces.
 - Iframe proxy grants are currently reclaimed by the proxy idle sweep, not by an
   immediate per-surface teardown hook.
 
 Source of truth: `Wall.tsx` (`killPaneImmediately`, `closeAgentBrowserSession`,
 `replaceSurface`), `lib/src/components/wall/agent-browser-sessions.ts`,
+`lib/src/components/wall/agent-browser-surface-controller.ts`,
 `lib/src/host/iframe-proxy.ts` (`GRANT_IDLE_TTL_MS`, `MAX_GRANTS`).
 
 ## Browser Chrome
@@ -215,24 +221,37 @@ Source of truth: `dor/src/commands/agent-browser.ts`,
 
 ### Agent-Browser Connection
 
-Each visible agent-browser surface owns one `AgentBrowserConnection` for
-`{ session, streamPort, binaryPath }`. Minimize unmounts the panel and disposes
-the connection; the agent-browser daemon/session stays alive and reattaches from
-persisted params.
+Each agent-browser surface's live client state lives in a surface-id-keyed
+controller registry (`agent-browser-surface-controller.ts`, mirroring
+`terminal-lifecycle.ts`); `AgentBrowserPanel` is a thin view that mounts a
+canvas, feeds params/visibility, forwards DOM input, and subscribes to one
+snapshot via `useSyncExternalStore`. The controller owns one
+`AgentBrowserConnection` for `{ session, streamPort, binaryPath }` paired with
+its screenshot loop, and it is SURFACE-scoped rather than panel-scoped: it
+survives panel unmount (minimize, dockview layout churn, React StrictMode). So
+minimize no longer synchronously disposes the connection — the view detaches,
+which counts as hidden and parks the connection after the ~1s debounce, reaching
+the same zero-resource end state with less thrash. The agent-browser
+daemon/session stays alive throughout and reattaches from persisted params. The
+controller's client resources are released only at pane kill or a render swap
+away from the renderer (`disposeAgentBrowserSurfaceController` in `Wall.tsx`).
 
 Hidden-but-mounted panes park too. Browser panels use `renderer: 'always'`, so
 an inactive dockview tab or a backgrounded window stays mounted and would keep
 its ~20Hz stream plus per-pulse screenshot loop running for nothing. A pane that
-goes off-screen parks after a ~1s debounce (so quick tab-flipping doesn't thrash
-the connection): the connection and screenshot loop are disposed while the
-daemon/session stays alive, and daemon-side frame streaming stops on its own
-because clients trigger it. Becoming visible reconnects and re-primes from the
-stream's re-broadcast frame/tabs (the last good frame is kept on screen across
-the reconnect rather than blanking to the placeholder). Popped-out panes are
+goes off-screen — or whose view unmounts (minimize) — parks after a ~1s debounce
+(so quick tab-flipping or a StrictMode remount doesn't thrash the connection):
+the connection and screenshot loop are disposed while the daemon/session stays
+alive, and daemon-side frame streaming stops on its own because clients trigger
+it. Becoming visible (or reattaching) reconnects and re-primes from the stream's
+re-broadcast frame/tabs (the last good frame is kept on screen across an unpark
+rather than blanking to the placeholder; a fresh reattach mounts a blank canvas,
+so it shows the placeholder until the first screenshot). Popped-out panes are
 exempt from parking so their stream/CDP observer keeps running and window-close
-auto-revert still works. Caveat: `AGENT_BROWSER_IDLE_TIMEOUT_MS` (daemon
-self-exit when idle) would defeat "alive while parked" and must not be set for
-Dormouse-managed sessions.
+auto-revert still works — now even while minimized, because the controller (and
+its observer) outlive the panel unmount, where before it silently did not.
+Caveat: `AGENT_BROWSER_IDLE_TIMEOUT_MS` (daemon self-exit when idle) would defeat
+"alive while parked" and must not be set for Dormouse-managed sessions.
 
 The stream WebSocket provides:
 
@@ -263,9 +282,9 @@ the in-body tab strip appears for two or more. Tab select/close actions go
 through `agentBrowserCommand`.
 
 Source of truth: `lib/src/components/wall/AgentBrowserPanel.tsx`,
-`agent-browser-connection.ts`, `agent-browser-screenshot-loop.ts`,
-`agent-browser-input.ts`, `agent-browser-tab.ts`,
-`use-surface-visibility.ts`, and their tests.
+`agent-browser-surface-controller.ts`, `agent-browser-connection.ts`,
+`agent-browser-screenshot-loop.ts`, `agent-browser-input.ts`,
+`agent-browser-tab.ts`, `use-surface-visibility.ts`, and their tests.
 
 ### Pop-Out
 
@@ -450,9 +469,9 @@ Source of truth: `lib/src/lib/platform/types.ts`,
 - Chrome/modal: `SurfacePaneHeader.tsx`, `AgentBrowserScreenModal.tsx`,
   `agent-browser-screen.ts`, `browser-url.ts`.
 - Agent-browser renderer: `AgentBrowserPanel.tsx`,
-  `agent-browser-connection.ts`, `agent-browser-input.ts`,
-  `agent-browser-screenshot-loop.ts`, `agent-browser-tab.ts`,
-  `agent-browser-sessions.ts`.
+  `agent-browser-surface-controller.ts`, `agent-browser-connection.ts`,
+  `agent-browser-input.ts`, `agent-browser-screenshot-loop.ts`,
+  `agent-browser-tab.ts`, `agent-browser-sessions.ts`.
 - Iframe renderer/proxy: `IframePanel.tsx`, `iframe-proxy-registry.ts`,
   `lib/src/host/iframe-proxy.ts`, `lib/src/host/iframe-proxy-rewrite.ts`,
   `lib/src/lib/platform/iframe-proxy-types.ts`.
@@ -469,7 +488,8 @@ Source of truth: `lib/src/lib/platform/types.ts`,
 - Upstream support for stream keyboard `commands`, replacing the host edit
   workaround and enabling undo/redo.
 - General per-surface teardown hook for iframe proxy grants and future
-  Dormouse-owned backend processes.
+  Dormouse-owned backend processes. (Agent-browser surfaces already dispose their
+  controller on kill/swap; iframe proxy grants still wait on the idle sweep.)
 - Plugin/backend target axis: spawn, health-check, proxy, and reap a local web
   process such as `openvscode-server`.
 - Optional terminal-side "this port is viewed by surface:N" indicator.

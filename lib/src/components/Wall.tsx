@@ -12,6 +12,7 @@ import { ExternalLinkModalHost } from './ExternalLinkModalHost';
 import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { markAgentBrowserSessionClosed } from './wall/agent-browser-sessions';
+import { disposeAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import {
   clearSessionAttention,
@@ -598,6 +599,9 @@ export function Wall({
     const panel = api?.getPanel(id);
     if (!api || !panel) return;
     closeAgentBrowserSession(panel.params);
+    // Release the surface's client-side controller (connection, loops, timers,
+    // screen registration). A safe no-op for iframe/terminal surfaces.
+    disposeAgentBrowserSurfaceController(id);
     orchestrateKill(api, id, selectPane, setSelectedId, killInProgressRef, overlayElRef);
     clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
@@ -1083,6 +1087,9 @@ export function Wall({
     const panel = api?.getPanel(oldId);
     if (!api || !panel) return null;
     closeAgentBrowserSession(panel.params);
+    // The old renderer's controller is going away with this swap; release its
+    // client-side resources (no-op for a non-agent-browser surface).
+    disposeAgentBrowserSurfaceController(oldId);
     const newId = generatePaneId();
     api.addPanel({
       id: newId,
