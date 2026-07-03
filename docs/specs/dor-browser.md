@@ -220,6 +220,20 @@ Each visible agent-browser surface owns one `AgentBrowserConnection` for
 the connection; the agent-browser daemon/session stays alive and reattaches from
 persisted params.
 
+Hidden-but-mounted panes park too. Browser panels use `renderer: 'always'`, so
+an inactive dockview tab or a backgrounded window stays mounted and would keep
+its ~20Hz stream plus per-pulse screenshot loop running for nothing. A pane that
+goes off-screen parks after a ~1s debounce (so quick tab-flipping doesn't thrash
+the connection): the connection and screenshot loop are disposed while the
+daemon/session stays alive, and daemon-side frame streaming stops on its own
+because clients trigger it. Becoming visible reconnects and re-primes from the
+stream's re-broadcast frame/tabs (the last good frame is kept on screen across
+the reconnect rather than blanking to the placeholder). Popped-out panes are
+exempt from parking so their stream/CDP observer keeps running and window-close
+auto-revert still works. Caveat: `AGENT_BROWSER_IDLE_TIMEOUT_MS` (daemon
+self-exit when idle) would defeat "alive while parked" and must not be set for
+Dormouse-managed sessions.
+
 The stream WebSocket provides:
 
 - frame pulses and status,
@@ -250,7 +264,8 @@ through `agentBrowserCommand`.
 
 Source of truth: `lib/src/components/wall/AgentBrowserPanel.tsx`,
 `agent-browser-connection.ts`, `agent-browser-screenshot-loop.ts`,
-`agent-browser-input.ts`, `agent-browser-tab.ts`, and their tests.
+`agent-browser-input.ts`, `agent-browser-tab.ts`,
+`use-surface-visibility.ts`, and their tests.
 
 ### Pop-Out
 

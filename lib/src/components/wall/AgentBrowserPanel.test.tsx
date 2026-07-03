@@ -7,7 +7,7 @@ import type { IDockviewPanelProps } from 'dockview-react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { AgentBrowserPopResult, AgentBrowserStreamStatusResult, PlatformAdapter } from '../../lib/platform/types';
-import { AgentBrowserPanel } from './AgentBrowserPanel';
+import { AgentBrowserPanel, HIDDEN_PARK_DELAY_MS } from './AgentBrowserPanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { ModeContext, SelectedIdContext, WallActionsContext, type WallActions } from './wall-context';
 
@@ -452,6 +452,166 @@ describe('AgentBrowserPanel render mode controller', () => {
     });
 
     expect(onSwapRenderMode).toHaveBeenCalledWith('ab-panel', 'iframe');
+  });
+});
+
+describe('AgentBrowserPanel visibility parking', () => {
+  // Build an api mock carrying the dockview visibility surface (isVisible +
+  // onDidVisibilityChange) that the minimal mocks above deliberately omit, plus
+  // a `fireVisibility` hook the test can drive.
+  function panelPropsWithVisibility(
+    params: TestPanelParams,
+    updateParameters = vi.fn(),
+  ): { props: IDockviewPanelProps<TestPanelParams>; fireVisibility: (isVisible: boolean) => void } {
+    const listeners = new Set<(e: { isVisible: boolean }) => void>();
+    let isVisible = true;
+    const api = {
+      id: 'ab-panel',
+      title: 'Browser',
+      updateParameters,
+      setTitle: vi.fn(),
+      get isVisible() { return isVisible; },
+      onDidVisibilityChange(listener: (e: { isVisible: boolean }) => void) {
+        listeners.add(listener);
+        return { dispose() { listeners.delete(listener); } };
+      },
+    };
+    const fireVisibility = (next: boolean) => {
+      isVisible = next;
+      for (const listener of [...listeners]) listener({ isVisible: next });
+    };
+    return { props: { api, params } as unknown as IDockviewPanelProps<TestPanelParams>, fireVisibility };
+  }
+
+  const streamSockets = (port: number) =>
+    WebSocketMock.instances.filter((ws) => ws.url === `ws://127.0.0.1:${port}`);
+  const liveStreamSocket = (port: number) => streamSockets(port).at(-1);
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('parks a hidden panel: closes the stream and opens no replacement', async () => {
+    const { props, fireVisibility } = panelPropsWithVisibility({
+      surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
+    });
+    await renderPanel(props);
+
+    const socket = liveStreamSocket(4321);
+    expect(socket?.readyState).toBe(1);
+    const before = streamSockets(4321).length;
+
+    await act(async () => { fireVisibility(false); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
+
+    // The live socket is torn down and nothing reconnects while hidden.
+    expect(socket?.readyState).toBe(3);
+    expect(streamSockets(4321).length).toBe(before);
+  });
+
+  it('never queries stream status while parked', async () => {
+    const streamStatus = vi.fn<PlatformAdapter['agentBrowserStreamStatus']>(async () => ({ ok: false }));
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserStreamStatus'>;
+    platform.agentBrowserStreamStatus = streamStatus;
+    setPlatform(platform);
+
+    // No wsPort ⇒ the stale-port recovery effect is the code path that would
+    // query the daemon; the parked guard must suppress it.
+    const { props, fireVisibility } = panelPropsWithVisibility({
+      surfaceType: 'browser', session: 'browser-session',
+    });
+    await renderPanel(props);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    streamStatus.mockClear();
+
+    await act(async () => { fireVisibility(false); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
+
+    expect(streamStatus).not.toHaveBeenCalled();
+  });
+
+  it('reconnects and repaints from the stream when it becomes visible again', async () => {
+    const screenshot = vi.fn(async () => ({ ok: false as const, error: 'test' }));
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserScreenshot'>;
+    platform.agentBrowserScreenshot = screenshot;
+    setPlatform(platform);
+
+    const { props, fireVisibility } = panelPropsWithVisibility({
+      surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
+    });
+    await renderPanel(props);
+
+    await act(async () => { fireVisibility(false); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
+    const parkedCount = streamSockets(4321).length;
+
+    await act(async () => { fireVisibility(true); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    // A fresh socket to the same port replaces the parked one.
+    expect(streamSockets(4321).length).toBeGreaterThan(parkedCount);
+    const reconnected = liveStreamSocket(4321);
+    expect(reconnected?.readyState).toBe(1);
+
+    // A frame pulse over the reconnected stream drives a device screenshot.
+    screenshot.mockClear();
+    await act(async () => {
+      reconnected?.emitMessage(JSON.stringify({ type: 'frame', data: 'x'.repeat(32) }));
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(screenshot).toHaveBeenCalled();
+  });
+
+  it('does not park a popped-out panel while it is hidden', async () => {
+    const { props, fireVisibility } = panelPropsWithVisibility({
+      surfaceType: 'browser', renderMode: 'ab-popout', session: 'browser-session', wsPort: 1111,
+    });
+    await renderPanel(props);
+
+    const socket = liveStreamSocket(1111);
+    expect(socket?.readyState).toBe(1);
+
+    await act(async () => { fireVisibility(false); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
+
+    // Popped out is exempt: the stream observer that drives window-close
+    // auto-revert must keep running.
+    expect(socket?.readyState).toBe(1);
+  });
+
+  it('parks when the document is hidden even if the panel tab is visible', async () => {
+    const { props } = panelPropsWithVisibility({
+      surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
+    });
+    await renderPanel(props);
+
+    const socket = liveStreamSocket(4321);
+    expect(socket?.readyState).toBe(1);
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    try {
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
+      expect(socket?.readyState).toBe(3);
+    } finally {
+      delete (document as unknown as { visibilityState?: unknown }).visibilityState;
+    }
+  });
+
+  it('does not park when a hide is reversed within the delay', async () => {
+    const { props, fireVisibility } = panelPropsWithVisibility({
+      surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
+    });
+    await renderPanel(props);
+
+    const socket = liveStreamSocket(4321);
+    expect(socket?.readyState).toBe(1);
+
+    await act(async () => { fireVisibility(false); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS / 2); });
+    await act(async () => { fireVisibility(true); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS); });
+
+    expect(socket?.readyState).toBe(1);
   });
 });
 

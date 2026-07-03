@@ -43,6 +43,7 @@ import {
   type AgentBrowserTab as StreamTab,
 } from './agent-browser-connection';
 import { usePaneChrome } from './use-pane-chrome';
+import { useSurfaceVisibility } from './use-surface-visibility';
 import {
   ModeContext,
   SelectedIdContext,
@@ -90,6 +91,11 @@ function paneScreenRect(el: HTMLElement | null): { x: number; y: number; width: 
 // in the match; we still *issue* displayDpr so the page renders at the right
 // density. Dims can be a pixel off after rounding, so compare with a tolerance.
 const DIM_TOLERANCE = 1;
+
+// A hidden-but-mounted pane parks after this delay rather than immediately, so
+// flipping quickly between dockview tabs doesn't tear down and rebuild the
+// stream connection on every flip.
+export const HIDDEN_PARK_DELAY_MS = 1000;
 
 function dimsMatch(a: { w: number; h: number }, b: { w: number; h: number }): boolean {
   return Math.abs(a.w - b.w) <= DIM_TOLERANCE && Math.abs(a.h - b.h) <= DIM_TOLERANCE;
@@ -185,6 +191,25 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   // not be read as "the headed window closed" (it would auto-revert mid-pop-out).
   const relaunchingRef = useRef(false);
 
+  // Park hidden-but-mounted panes: under `renderer: 'always'` an inactive
+  // dockview tab (or a backgrounded window) stays mounted and would keep its
+  // ~20Hz stream + per-pulse screenshot loop running for nothing. Parking
+  // disposes both while the daemon/session stays alive; unparking reconnects.
+  // Popped out is exempt — its stream/CDP observer is what detects a headed
+  // window close and drives auto-revert, so parking it would break auto-revert.
+  const visible = useSurfaceVisibility(api);
+  const [parked, setParked] = useState(false);
+  const parkedRef = useRef(parked);
+  parkedRef.current = parked;
+  useEffect(() => {
+    if (visible || poppedOut) {
+      setParked(false);
+      return;
+    }
+    const timer = setTimeout(() => setParked(true), HIDDEN_PARK_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [visible, poppedOut]);
+
   const binaryPath = params?.binaryPath;
   const runAgentBrowser = useCallback((args: string[]) => {
     if (!session) return;
@@ -212,6 +237,11 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   const wsPortRef = useRef(streamPort);
   wsPortRef.current = streamPort;
   const liveStreamPortRef = useRef<number | null>(null);
+  // The `session:streamPort` the connection effect last (re)connected to. An
+  // unpark reconnects to the same identity, so the last good frame is still
+  // valid and must not be blanked to the placeholder; only a real identity
+  // change (new session/port) resets `hasFrame`.
+  const lastConnectedIdentityRef = useRef<string | null>(null);
   // Canonical URL mirror (params.url): kept in a ref so the pop-out / pop-in
   // callbacks read the latest without re-creating, and prefer it over the live
   // chrome snapshot, which can be momentarily empty during a relaunch.
@@ -376,6 +406,10 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
 
   // Push the current pane size to the browser as a native `set viewport`.
   const issueSyncToPane = useCallback(() => {
+    // A parked (hidden) pane must not drive the browser viewport: its rect can be
+    // degenerate depending on how dockview hides it. The unpark effect below
+    // reconciles any resize that happened while parked.
+    if (parkedRef.current) return;
     // A popped-out surface is a real headed OS window the user drives directly;
     // never force its viewport to the (now-stub) pane size. Sync resumes when it
     // pops back in — the wsPort-change effect re-issues against the fresh session.
@@ -425,7 +459,9 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   // --- stream connection ---
 
   useEffect(() => {
-    if (!streamPort || !session) return;
+    // Parked panes hold no stream/screenshot loop; unparking re-runs this effect
+    // and reconnects, and the daemon re-broadcasts the current frame/tabs.
+    if (!streamPort || !session || parked) return;
 
     // Per-connection resource: created here and disposed in this effect's cleanup
     // so it survives React StrictMode's mount→cleanup→mount double-invoke. A
@@ -484,7 +520,14 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
         if (!poppedOutRef.current && !relaunchingRef.current) screenshotLoop.pulse();
       }
     });
-    setHasFrame(false);
+    // Unparking reconnects to the same session/port; the last good frame is still
+    // valid, so only blank to the placeholder when the identity actually changed
+    // (new session/port). The stale frame is replaced by the first reconnect shot.
+    const identity = `${session}:${streamPort}`;
+    if (lastConnectedIdentityRef.current !== identity) {
+      lastConnectedIdentityRef.current = identity;
+      setHasFrame(false);
+    }
     setConnectionLost(false);
     return () => {
       unsubscribe();
@@ -492,7 +535,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
       connection.dispose();
       screenshotLoop.dispose();
     };
-  }, [streamPort, streamRecoverySeq, session, maybeDisengageSync, publishScreen, drawBitmap, rememberActiveTabUrl]);
+  }, [streamPort, streamRecoverySeq, session, parked, maybeDisengageSync, publishScreen, drawBitmap, rememberActiveTabUrl]);
 
   // agent-browser's stream currently publishes the initial headed tab list, but
   // not every same-tab manual navigation. While popped out, subscribe directly
@@ -582,6 +625,10 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   // panel params so the normal WebSocket effect reconnects.
   useEffect(() => {
     if (!session) return;
+    // A parked pane must never query the daemon: a `stream status` at the wrong
+    // moment can spawn a competing daemon (see below), and it's a pointless CLI
+    // spawn per hidden pane. Recovery resumes when the pane unparks.
+    if (parked) return;
     // Critical: do NOT query the daemon mid-relaunch. A pop-out/pop-in close+kills
     // the daemon before reopening; querying `stream status` in that window spawns
     // a fresh COMPETING headless daemon on a different port and pins the panel to
@@ -614,7 +661,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
       }
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [session, binaryPath, streamPort, connectionLost, status?.connected, api]);
+  }, [session, binaryPath, streamPort, connectionLost, status?.connected, parked, api]);
 
   // --- header: persisted title + browser-chrome (URL / key) ---
 
@@ -892,6 +939,13 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
     lastIssuedRef.current = null;
     issueSyncToPane();
   }, [streamPort, issueSyncToPane]);
+
+  // issueSyncToPane no-ops while parked, so a resize that happened behind a
+  // hidden tab was never pushed to the browser. Reconcile on unpark; lastIssued
+  // makes this a no-op when the pane size didn't actually change.
+  useEffect(() => {
+    if (!parked && syncEngagedRef.current) issueSyncToPane();
+  }, [parked, issueSyncToPane]);
 
   // Display-scale (DPR) changes don't resize the pane, so ResizeObserver misses
   // them; a window resize is the available signal. Recompute the indicator and,
