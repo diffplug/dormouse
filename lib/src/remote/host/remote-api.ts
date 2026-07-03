@@ -146,6 +146,12 @@ export class RemoteApiSession {
     return { params, entry };
   }
 
+  #requireAttached(request: RemoteRequest, surfaceId: string): boolean {
+    if (this.#attachment?.surfaceId === surfaceId) return true;
+    this.#fail(request, `surface is not attached: ${surfaceId}`);
+    return false;
+  }
+
   // --- Methods ---
 
   #hello(request: RemoteRequest): void {
@@ -272,6 +278,7 @@ export class RemoteApiSession {
     const resolved = this.#resolveSurface<TerminalWriteParams>(request);
     if (!resolved) return;
     const { params, entry } = resolved;
+    if (!this.#requireAttached(request, params.surfaceId)) return;
     // Feed the existing PTY input path; the local echo returns via onPtyData.
     getPlatform().writePty(entry.ptyId, utf8Decode(fromBase64Url(params.bytes)));
     this.#ok(request, {});
@@ -281,6 +288,7 @@ export class RemoteApiSession {
     const resolved = this.#resolveSurface<TerminalResizeParams>(request);
     if (!resolved) return;
     const { params, entry } = resolved;
+    if (!this.#requireAttached(request, params.surfaceId)) return;
     const term = entry.terminal;
     const cols = clampTerminalDimension(params.cols, term.cols);
     const rows = clampTerminalDimension(params.rows, term.rows);

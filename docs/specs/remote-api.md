@@ -251,6 +251,11 @@ type TerminalInput =
   | { method: 'terminal.resize'; params: { surfaceId: string; cols: number; rows: number } };
 ```
 
+`terminal.write` and `terminal.resize` are valid only for the session's current
+attachment. A stale request for a detached surface, or a request for a
+background surface listed in the directory but not attached by this session, is
+rejected and must not reach the PTY or change its size.
+
 ### Size authority: last-attach-wins
 
 A terminal has one size, and the most recent size writer owns it: attaching

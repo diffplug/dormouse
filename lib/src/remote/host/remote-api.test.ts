@@ -3,7 +3,9 @@ import {
   REMOTE_EVENTS,
   REMOTE_METHODS,
   fromBase64Url,
+  toBase64Url,
   utf8Decode,
+  utf8Encode,
   type RemoteEventMsg,
   type RemoteResponse,
 } from 'server-lib-common';
@@ -21,8 +23,7 @@ class RepaintOnResizePlatform {
   readonly resizePty = vi.fn((id: string, cols: number, rows: number) => {
     this.emitData(id, `pty-resize:${cols}x${rows}`);
   });
-
-  writePty(): void {}
+  readonly writePty = vi.fn();
 
   onPtyData(handler: DataHandler): void {
     this.dataHandlers.add(handler);
@@ -51,8 +52,13 @@ class RepaintOnResizePlatform {
   }
 }
 
-function registerSurface(platform: RepaintOnResizePlatform, cols: number, rows: number): void {
-  const ptyId = 'pty-1';
+function registerSurface(
+  platform: RepaintOnResizePlatform,
+  cols: number,
+  rows: number,
+  surfaceId = 'surface-1',
+  ptyId = 'pty-1',
+): void {
   const terminal = {
     cols,
     rows,
@@ -63,17 +69,17 @@ function registerSurface(platform: RepaintOnResizePlatform, cols: number, rows: 
     }),
   };
 
-  registry.set('surface-1', {
+  registry.set(surfaceId, {
     ptyId,
     terminal,
   } as unknown as TerminalEntry);
 }
 
-function attach(session: RemoteApiSession, cols: number, rows: number): void {
+function attach(session: RemoteApiSession, cols: number, rows: number, surfaceId = 'surface-1'): void {
   session.handle({
     requestId: 'attach-1',
     method: REMOTE_METHODS.surfaceAttach,
-    params: { surfaceId: 'surface-1', cols, rows },
+    params: { surfaceId, cols, rows },
   });
 }
 
@@ -134,5 +140,65 @@ describe('RemoteApiSession surface.attach', () => {
 
     vi.advanceTimersByTime(60);
     expect(platform.resizePty).toHaveBeenNthCalledWith(2, 'pty-1', 80, 24);
+  });
+
+  it('rejects write and resize unless the surface is the current attachment', () => {
+    const platform = new RepaintOnResizePlatform();
+    setPlatform(platform.asAdapter());
+    registerSurface(platform, 80, 24, 'surface-1', 'pty-1');
+    registerSurface(platform, 100, 30, 'surface-2', 'pty-2');
+    const sent: SentPayload[] = [];
+    const session = new RemoteApiSession({ hostId: 'host-1', send: (payload) => sent.push(payload) });
+
+    attach(session, 80, 24, 'surface-1');
+    sent.length = 0;
+
+    session.handle({
+      requestId: 'write-background',
+      method: REMOTE_METHODS.terminalWrite,
+      params: { surfaceId: 'surface-2', bytes: toBase64Url(utf8Encode('invisible\r')) },
+    });
+    session.handle({
+      requestId: 'resize-background',
+      method: REMOTE_METHODS.terminalResize,
+      params: { surfaceId: 'surface-2', cols: 120, rows: 40 },
+    });
+
+    expect(platform.writePty).not.toHaveBeenCalled();
+    expect((registry.get('surface-2')!.terminal as { cols: number; rows: number }).cols).toBe(100);
+    expect(sent).toEqual([
+      {
+        requestId: 'write-background',
+        ok: false,
+        error: 'surface is not attached: surface-2',
+      },
+      {
+        requestId: 'resize-background',
+        ok: false,
+        error: 'surface is not attached: surface-2',
+      },
+    ]);
+
+    session.handle({
+      requestId: 'detach',
+      method: REMOTE_METHODS.surfaceDetach,
+      params: { surfaceId: 'surface-1' },
+    });
+    sent.length = 0;
+
+    session.handle({
+      requestId: 'write-detached',
+      method: REMOTE_METHODS.terminalWrite,
+      params: { surfaceId: 'surface-1', bytes: toBase64Url(utf8Encode('stale\r')) },
+    });
+
+    expect(platform.writePty).not.toHaveBeenCalled();
+    expect(sent).toEqual([
+      {
+        requestId: 'write-detached',
+        ok: false,
+        error: 'surface is not attached: surface-1',
+      },
+    ]);
   });
 });

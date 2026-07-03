@@ -409,7 +409,7 @@ function eventText(frame) {
   return utf8Decode(fromBase64Url(frame.data.data.bytes));
 }
 
-test('remote terminal: directory snapshot, attach banner, echo write, resize, detach silences', async () => {
+test('remote terminal: directory snapshot, attach banner, echo write, resize, detach blocks input', async () => {
   const { app, server, host, close } = await boot();
   try {
     const p = await phone(app, server);
@@ -463,7 +463,7 @@ test('remote terminal: directory snapshot, attach banner, echo write, resize, de
     assert.deepEqual(resizeAck.data.result, { cols: 120, rows: 50 });
     assert.match(eventText(await p.socket.take()), /resized to 120x50/);
 
-    // surface.detach → ack, then a write is acked but produces no more data.
+    // surface.detach → ack, then stale input is rejected and produces no data.
     remote(p, 'dt', REMOTE_METHODS.surfaceDetach, { surfaceId });
     assert.equal((await p.socket.take()).data.ok, true);
 
@@ -473,8 +473,9 @@ test('remote terminal: directory snapshot, attach banner, echo write, resize, de
     });
     const writeAck2 = await p.socket.take();
     assert.equal(writeAck2.data.requestId, 'wr2');
-    assert.equal(writeAck2.data.ok, true);
-    assert.ok(await p.socket.quiet(), 'detach silences the stream: no terminal.data after detach');
+    assert.equal(writeAck2.data.ok, false);
+    assert.match(writeAck2.data.error, /not attached/);
+    assert.ok(await p.socket.quiet(), 'detach blocks input: no terminal.data after detach');
   } finally {
     await close();
   }
@@ -520,7 +521,9 @@ test('remote terminal: a stale detach for the previous surface does not kill the
       surfaceId: b.surfaceId,
       bytes: toBase64Url(utf8Encode('gone\r')),
     });
-    assert.equal((await p.socket.take()).data.ok, true);
+    const detachedWrite = await p.socket.take();
+    assert.equal(detachedWrite.data.ok, false);
+    assert.match(detachedWrite.data.error, /not attached/);
     assert.ok(await p.socket.quiet(), 'no terminal.data after a matching detach');
   } finally {
     await close();

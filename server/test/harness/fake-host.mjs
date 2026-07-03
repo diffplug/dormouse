@@ -148,8 +148,9 @@ export class FakeHost extends EventEmitter {
    * Remote-api v1 with a synthetic directory + echo terminal. `hello` answers
    * capabilities; `directory.watch` snapshots the fake surfaces; `surface.attach`
    * streams a size banner; `terminal.write` echoes bytes back (treating `\r` as a
-   * newline and re-drawing a prompt); `terminal.resize` notes the new size;
-   * `surface.detach` silences the stream. Unknown methods echo ok:false.
+   * newline and re-drawing a prompt); `terminal.resize` notes the new size. Input
+   * and resize only apply to the currently attached surface. Unknown methods echo
+   * ok:false.
    */
   #handleRemoteApi(clientId, data) {
     const request = data;
@@ -198,9 +199,11 @@ export class FakeHost extends EventEmitter {
       case REMOTE_METHODS.terminalWrite: {
         const surface = this.#surface(params?.surfaceId);
         if (!surface) return fail(`no such surface: ${params?.surfaceId ?? '(none)'}`);
-        ok();
         const attachment = this.attachments.get(clientId);
-        if (!attachment || attachment.surfaceId !== surface.surfaceId) return; // detached → silent
+        if (!attachment || attachment.surfaceId !== surface.surfaceId) {
+          return fail(`surface is not attached: ${surface.surfaceId}`);
+        }
+        ok();
         const input = utf8Decode(fromBase64Url(params.bytes));
         const echoed = input.includes('\r') ? `${input.replace(/\r/g, '\r\n')}$ ` : input;
         this.#emitData(clientId, attachment.subId, echoed);
@@ -210,11 +213,13 @@ export class FakeHost extends EventEmitter {
       case REMOTE_METHODS.terminalResize: {
         const surface = this.#surface(params?.surfaceId);
         if (!surface) return fail(`no such surface: ${params?.surfaceId ?? '(none)'}`);
+        const attachment = this.attachments.get(clientId);
+        if (!attachment || attachment.surfaceId !== surface.surfaceId) {
+          return fail(`surface is not attached: ${surface.surfaceId}`);
+        }
         surface.cols = clampTerminalDimension(params.cols, surface.cols);
         surface.rows = clampTerminalDimension(params.rows, surface.rows);
         ok({ cols: surface.cols, rows: surface.rows });
-        const attachment = this.attachments.get(clientId);
-        if (!attachment || attachment.surfaceId !== surface.surfaceId) return;
         this.#emitData(
           clientId,
           attachment.subId,
@@ -299,4 +304,3 @@ export class FakeHost extends EventEmitter {
     }
   }
 }
-
