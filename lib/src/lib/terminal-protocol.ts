@@ -146,8 +146,6 @@ export class TerminalProtocolParser {
     // we answer from the active theme ourselves, like the iTerm2 CSI > q reply.
     // Only the report ('?') form is intercepted; color *set* requests and the
     // no-provider/unparseable cases fall through (null) to xterm.js unchanged.
-    // Match only the report ('?') form; color *set* requests fail the regex and
-    // fall through to xterm.js unchanged, as does the no-provider case.
     const match = /^(10|11|12);\?$/.exec(content);
     if (!match || !this.colorProvider) return null;
     const code = match[1];
