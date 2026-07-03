@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "dev:agent-browser": "pnpm run stage && node scripts/dev-agent-browser.mjs",
+    "prebuild": "pnpm --filter server-lib-common build",
     "build": "pnpm run stage && tsc -b && vite build",
     "stage": "pnpm run stage:dor-cli && pnpm run stage:sidecar-proxy",
     "stage:dor-cli": "pnpm --filter dor build && node scripts/stage-dor-cli.mjs",

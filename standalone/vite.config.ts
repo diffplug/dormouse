@@ -5,6 +5,7 @@ import path from "path";
 
 const libDir = path.resolve(__dirname, "../lib");
 const dorDir = path.resolve(__dirname, "../dor");
+const serverLibCommonDir = path.resolve(__dirname, "../server-lib-common");
 
 // https://v2.tauri.app/start/frontend/vite/
 const host = process.env.TAURI_DEV_HOST;
@@ -20,6 +21,11 @@ export default defineConfig({
       // path; Vite governs lib files by lib's (paths-less) tsconfig, and `dor`
       // has no package exports, so resolve it explicitly the same way as lib.
       dor: path.resolve(dorDir, "src"),
+      // lib source imports the remote modules, which import `server-lib-common`;
+      // its package exports point at dist, which a clean standalone checkout
+      // build has not necessarily produced yet. Match the Pocket and website
+      // builds by resolving it directly to source.
+      "server-lib-common": path.resolve(serverLibCommonDir, "src"),
     },
   },
   // Tauri expects a fixed port; fail if that port is not available
@@ -29,8 +35,8 @@ export default defineConfig({
     strictPort: true,
     hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
     fs: {
-      // Allow serving files from the lib and dor workspace packages
-      allow: [libDir, dorDir, "."],
+      // Allow serving files from the source-aliased workspace packages.
+      allow: [libDir, dorDir, serverLibCommonDir, "."],
     },
   },
   // Tauri CLI reads this env var to know where the dev server is
