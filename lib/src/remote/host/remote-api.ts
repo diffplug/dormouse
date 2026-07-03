@@ -210,10 +210,36 @@ export class RemoteApiSession {
     const cols = clampTerminalDimension(params.cols, term.cols);
     const rows = clampTerminalDimension(params.rows, term.rows);
     const platform = getPlatform();
+    const subId = request.requestId;
+    const pendingEvents: Array<{ event: string; data: unknown }> = [];
+    let streaming = false;
+    const emitOrBuffer = (event: string, data: unknown): void => {
+      if (streaming) {
+        this.#event(subId, event, data);
+      } else {
+        pendingEvents.push({ event, data });
+      }
+    };
+    const onData = (detail: { id: string; data: string }): void => {
+      if (detail.id !== ptyId) return;
+      // The PTY delivers strings on this path; be defensive about the Uint8Array
+      // path some adapters use. Either way it goes out as base64url PTY bytes.
+      const raw: unknown = detail.data;
+      const bytes = typeof raw === 'string' ? utf8Encode(raw) : (raw as Uint8Array);
+      emitOrBuffer(REMOTE_EVENTS.terminalData, { bytes: toBase64Url(bytes) });
+    };
+    const onExit = (detail: { id: string; exitCode: number }): void => {
+      if (detail.id !== ptyId) return;
+      emitOrBuffer(REMOTE_EVENTS.terminalClosed, { exitCode: detail.exitCode });
+    };
+    platform.onPtyData(onData);
+    platform.onPtyExit(onExit);
+    this.#attachment = { surfaceId: params.surfaceId, ptyId, subId, onData, onExit };
 
     // Attach-is-the-resize: resizing the real xterm fires its onResize handler,
     // which drives resizePty → SIGWINCH → the TUI/shell repaints, and that
-    // repaint is what fills the client's screen (no snapshot transfer).
+    // repaint is what fills the client's screen (no snapshot transfer). The
+    // stream is subscribed first because some PTYs repaint synchronously.
     if (term.cols !== cols || term.rows !== rows) {
       term.resize(cols, rows);
     } else {
@@ -223,25 +249,12 @@ export class RemoteApiSession {
       setTimeout(() => platform.resizePty(ptyId, cols, rows), FORCE_REPAINT_BOUNCE_MS);
     }
 
-    const subId = request.requestId;
-    const onData = (detail: { id: string; data: string }): void => {
-      if (detail.id !== ptyId) return;
-      // The PTY delivers strings on this path; be defensive about the Uint8Array
-      // path some adapters use. Either way it goes out as base64url PTY bytes.
-      const raw: unknown = detail.data;
-      const bytes = typeof raw === 'string' ? utf8Encode(raw) : (raw as Uint8Array);
-      this.#event(subId, REMOTE_EVENTS.terminalData, { bytes: toBase64Url(bytes) });
-    };
-    const onExit = (detail: { id: string; exitCode: number }): void => {
-      if (detail.id !== ptyId) return;
-      this.#event(subId, REMOTE_EVENTS.terminalClosed, { exitCode: detail.exitCode });
-    };
-    platform.onPtyData(onData);
-    platform.onPtyExit(onExit);
-    this.#attachment = { surfaceId: params.surfaceId, ptyId, subId, onData, onExit };
-
     const result: TerminalAttachResult = { cols: term.cols, rows: term.rows };
     this.#ok(request, result);
+    streaming = true;
+    for (const event of pendingEvents) {
+      this.#event(subId, event.event, event.data);
+    }
   }
 
   #detach(request: RemoteRequest): void {
