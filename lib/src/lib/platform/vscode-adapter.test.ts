@@ -10,6 +10,19 @@ vi.mock('../terminal-state-store', () => ({
   removeTerminalPaneState: terminalStateStoreMocks.removeTerminalPaneState,
 }));
 
+const terminalThemeMocks = vi.hoisted(() => ({
+  getTerminalTheme: vi.fn(() => ({ foreground: '#eeeeee', background: '#111111', cursor: '#abcabc' })),
+  listeners: new Set<() => void>(),
+}));
+
+vi.mock('../terminal-theme', () => ({
+  getTerminalTheme: terminalThemeMocks.getTerminalTheme,
+  onTerminalThemeChange: (cb: () => void) => {
+    terminalThemeMocks.listeners.add(cb);
+    return () => terminalThemeMocks.listeners.delete(cb);
+  },
+}));
+
 import {
   collectTerminalSemanticEvents,
   TerminalProtocolParser,
@@ -23,6 +36,8 @@ describe('VSCodeAdapter PTY exit handling', () => {
   beforeEach(() => {
     windowTarget = new EventTarget();
     postMessage = vi.fn();
+    terminalThemeMocks.listeners.clear();
+    terminalThemeMocks.getTerminalTheme.mockReturnValue({ foreground: '#eeeeee', background: '#111111', cursor: '#abcabc' });
     class TestCustomEvent<T = unknown> extends Event {
       readonly detail: T;
 
@@ -67,6 +82,29 @@ describe('VSCodeAdapter PTY exit handling', () => {
 
     expect(terminalStateStoreMocks.removeTerminalPaneState).not.toHaveBeenCalled();
     expect(postMessage).toHaveBeenCalledWith({ type: 'pty:kill', id: 'pane-1' });
+  });
+
+  it('pushes resolved theme colors to the extension host on init and on theme change', () => {
+    const adapter = new VSCodeAdapter();
+
+    adapter.requestInit();
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'dormouse:themeColors',
+      foreground: '#eeeeee',
+      background: '#111111',
+      cursor: '#abcabc',
+    });
+
+    // A VS Code theme switch fires the observer, which re-pushes current colors.
+    postMessage.mockClear();
+    terminalThemeMocks.getTerminalTheme.mockReturnValue({ foreground: '#000000', background: '#ffffff', cursor: '#ff0000' });
+    for (const listener of terminalThemeMocks.listeners) listener();
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'dormouse:themeColors',
+      foreground: '#000000',
+      background: '#ffffff',
+      cursor: '#ff0000',
+    });
   });
 
   it('posts external hyperlink open requests to the extension host', () => {

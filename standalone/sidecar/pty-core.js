@@ -280,6 +280,14 @@ function resolveSpawnConfig(options, runtime = {}) {
     TERM_PROGRAM_VERSION: ITERM2_COMPAT_VERSION,
     LC_TERMINAL: 'iTerm2',
     LC_TERMINAL_VERSION: ITERM2_COMPAT_VERSION,
+    // Advertise 24-bit color. xterm.js renders full truecolor, but the PTY is
+    // spawned as `xterm-256color` with no other depth signal, so tools that gate
+    // truecolor on env (e.g. supports-color) otherwise assume 256/ANSI-16 and
+    // quantize RGB output. Windows Terminal is recognized as truecolor via
+    // WT_SESSION; we aren't, so we advertise it explicitly. This is a color
+    // *depth* signal only — light/dark *background* detection is separate (see
+    // the OSC 10/11/12 color-query handling in terminal-protocol.ts).
+    COLORTERM: 'truecolor',
     DORMOUSE_SURFACE_ID: surfaceId || options?.id || '',
   };
   const integrated = applyShellIntegration(shell, childEnv, shellArgs, integrationDir, runtime);
@@ -1039,6 +1047,14 @@ module.exports.create = function create(send, ptyModule) {
         rows: config.rows,
         cwd: config.cwd,
         env: config.env,
+        // Use node-pty's bundled OpenConsole (conpty.dll) on Windows instead of
+        // the in-box CreatePseudoConsole. The in-box conhost *swallows* programs'
+        // OSC 10/11/12 color queries (they never reach us, so we can't answer and
+        // TUIs assume a dark background); the bundled OpenConsole forwards them to
+        // the consumer, letting our protocol parser reply from the active theme —
+        // the same passthrough Windows Terminal relies on. Verified end-to-end on
+        // Windows. Ignored by node-pty on non-Windows platforms.
+        useConptyDll: process.platform === 'win32',
       });
     } catch (err) {
       console.error(`[pty-core] spawn failed for ${id}:`, err.message);
