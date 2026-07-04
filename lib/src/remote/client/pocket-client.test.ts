@@ -123,6 +123,7 @@ function recordingWebAuthn(): {
 
 class FakeSocket implements PocketSocket {
   readyState = 0;
+  closeEmits = true;
   readonly sent: Array<Record<string, unknown>> = [];
   readonly #handlers = new Map<string, Array<(ev: unknown) => void>>();
 
@@ -138,13 +139,13 @@ class FakeSocket implements PocketSocket {
 
   close(): void {
     this.readyState = 3;
-    this.#emit('close', { code: 1000 });
+    if (this.closeEmits) this.emitClose(1000);
   }
 
   /** Simulate the server/network dropping the connection (no client `close()`). */
   drop(): void {
     this.readyState = 3;
-    this.#emit('close', { code: 1006 });
+    this.emitClose(1006);
   }
 
   fireOpen(): void {
@@ -155,6 +156,10 @@ class FakeSocket implements PocketSocket {
   /** Simulate the server sending a frame to this client. */
   server(frame: unknown): void {
     this.#emit('message', { data: JSON.stringify(frame) });
+  }
+
+  emitClose(code = 1000): void {
+    this.#emit('close', { code });
   }
 
   #emit(type: string, ev: unknown): void {
@@ -453,6 +458,45 @@ describe('socket lifecycle', () => {
     harness.socket.drop();
     expect(hostGone).toBe(0);
     expect(harness.client.socketOpen).toBe(false);
+  });
+
+  it('ignores host-gone and close events from a stale socket after reconnecting', async () => {
+    const sockets = [new FakeSocket(), new FakeSocket()];
+    const harness = makeClient(
+      { ...AUTH_ROUTES },
+      { createWebSocket: () => sockets.shift() ?? new FakeSocket() },
+    );
+    const first = sockets[0]!;
+    const second = sockets[1]!;
+
+    await harness.client.setup('pw', 'My Phone');
+    await harness.client.signin();
+
+    const firstOpen = harness.client.openSocket();
+    first.fireOpen();
+    await firstOpen;
+    await connectEstablished({ ...harness, socket: first });
+
+    first.closeEmits = false;
+    harness.client.close();
+
+    const secondOpen = harness.client.openSocket();
+    second.fireOpen();
+    await secondOpen;
+    await connectEstablished({ ...harness, socket: second });
+
+    let hostGone = 0;
+    harness.client.setOnHostGone(() => hostGone++);
+
+    first.server({ t: 'host-gone' });
+    expect(hostGone).toBe(0);
+    expect(harness.client.connectedHostId).toBe('h1');
+    expect(harness.client.socketOpen).toBe(true);
+
+    first.emitClose();
+    expect(hostGone).toBe(0);
+    expect(harness.client.connectedHostId).toBe('h1');
+    expect(harness.client.socketOpen).toBe(true);
   });
 });
 
