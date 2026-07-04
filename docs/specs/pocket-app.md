@@ -31,6 +31,10 @@ One mobile terminal experience in `lib`, three consumers: the website
 playground (fake adapter), the real Pocket (remote adapter), and whatever
 comes later. Everything not in the PTY core no-ops or is absent — the
 interface is designed for capability degradation.
+Pocket hides `MobileWall`'s local Kill affordance: remote panes are
+Host-owned, and v1 grants no phone-side kill/layout authority. Closing a local
+xterm view without a Host-side close would leave the Host attachment live and
+the phone view inconsistent.
 
 Adapter-specific extras (the same pattern as `FakePtyAdapter`'s scenario
 controls): the concrete `RemotePtyAdapter` exposes `setActivePane(id)` — the
