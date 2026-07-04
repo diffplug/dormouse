@@ -68,6 +68,8 @@ Specs are written ahead of the code on purpose: a new component's spec starts as
 - **Reservations.** When unbuilt design constrains present code — a reserved wire field, a reserved ref grammar, an additive-evolution guarantee — state that constraint in the body, marked `Reserved:`, pointing at the `## Future` item it serves. Test: if deleting the sentence would let someone break future compatibility today, it belongs in the body.
 - **Promotion is part of done.** Implementing a staged item is not finished until its text moves above the fold — rewritten from "will" to "is", with `Source of truth:` added — and the built portion is deleted from `## Future`. Never leave completed plan text (build orders, phase lists) below the fold; delete it — git history keeps the record.
 
+The mechanically checkable parts of these conventions are enforced by `scripts/spec-lint.mjs` (`pnpm lint:specs`, also the first step of the root `pnpm test`): every spec indexed here, `## Future` last, relative links/anchors resolving, and backticked repo paths existing on disk.
+
 ## Design
 
 See [PRODUCT.md](PRODUCT.md) for users, brand personality, and aesthetic direction (including the anti-references), and [DESIGN.md](DESIGN.md) for the full design system — tokens, named rules, and component vocabulary. Key principles:
