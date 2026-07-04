@@ -61,6 +61,8 @@ Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js c
 | `OSC 777 ; notify ; <title> ; <body> ST` | rxvt/WezTerm notification | [alert.md](alert.md#osc-777) |
 | `OSC 1337 ; CurrentDir=<cwd> ST` | CWD (iTerm2 compatibility) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 
+(`BEL` is not itself an OSC; it has a row here because a standalone `BEL` is parsed and stripped at the same PTY data boundary as the OSCs.)
+
 Some sequences are dual-purpose. The notification rows for `OSC 9 ; <message> ST`, `OSC 99` (`p=title`/`p=body`), and `OSC 777 ; notify` also feed the title-candidate channel in `terminal-state.md` — see its [Title candidate diagnostics](terminal-state.md#supported-osc-inputs) table. Only the OSC 9 *message* form can become a header/door label; OSC 99 and OSC 777 candidates are stored for the diagnostic popup only. The OSC 9 *progress* form (`OSC 9 ; 4`) carries no text and never contributes a title candidate.
 
 #### OSC color queries on Windows require the bundled ConPTY
@@ -150,9 +152,7 @@ Injection is wired in `resolveSpawnConfig` (`standalone/sidecar/pty-core.js`) an
 
 ### Keystroke fallback
 
-When injection isn't possible (cmd.exe, an unknown shell, or scripts not present) or simply doesn't take, Dormouse falls back to its keystroke heuristic: it watches what the user types and synthesizes `commandStart{source:'user_input'}` (see `recordTerminalUserInput` in `lib/src/lib/terminal-state-store.ts` and [terminal-state.md](terminal-state.md)). This fallback has no real exit codes and only a best-effort idle transition.
-
-The two are mutually exclusive **per pane**: the first genuine OSC 633/133 boundary a pane sees (a real prompt-start lands before the first command is typed) flips that pane to "OSC-driven" and retires the keystroke heuristic for it, so the two never both report the same command. Prompt boundaries that the heuristic *itself* synthesizes are flagged so they don't trip this detection. This is what makes the fallback fire "only if injection fails."
+When injection isn't possible (cmd.exe, an unknown shell, or scripts not present) or simply doesn't take, Dormouse falls back to its keystroke heuristic: it reads the submitted command off the rendered prompt line and synthesizes `commandStart{source:'user_input'}`. This fallback has no real exit codes and only a best-effort idle transition. The fallback rules — prompt-shape learning, submit parsing, and the per-pane promotion that retires the heuristic on the first authentic OSC boundary (which is what makes it fire "only if injection fails") — are owned by [terminal-state.md](terminal-state.md#keystroke-fallback).
 
 > Packaging caveat: the zsh scripts are dotfiles (`.zshrc`, `.zshenv`, `.zprofile`). Confirm the VS Code `.vsix` actually includes `dist/shell-integration/.z*` — if a packaging step strips dotfiles, VS Code silently degrades to the keystroke fallback.
 

@@ -48,6 +48,8 @@ These do not count as attention: mere visibility, command-mode selection, hover,
 
 Attention is lost when the attention timer expires, the app loses focus, the attended Session is minimized or destroyed, or another Session becomes attended. `T_USER_ATTENTION` also acts as the minimum runtime for command-exit alerts.
 
+Source of truth: `cfg.alert` in `lib/src/cfg.ts` defines `T_USER_ATTENTION` and the other timer defaults and their purpose.
+
 ## WATCHING Track
 
 WATCHING is the user-controlled output/silence monitor. It starts fresh when enabled and is disposed when disabled. Meaningful output excludes resize redraw noise during `T_RESIZE_DEBOUNCE`; theme changes, remounts, DOM reparenting, selection, and focus changes are not output.
@@ -60,8 +62,6 @@ WATCHING is the user-controlled output/silence monitor. It starts fresh when ena
 | `BUSY` | Enough output has arrived to treat the Session as doing work. |
 | `MIGHT_NEED_ATTENTION` | A busy Session went quiet. Debounce state. |
 | `ALERT_RINGING` | WATCHING observed likely completion while the Session lacked attention. |
-
-Source of truth: `cfg.alert` in `lib/src/cfg.ts` defines timer defaults and their purpose.
 
 Source of truth: `ActivityMonitor` in `lib/src/lib/activity-monitor.ts` implements the transitions. The invariants the implementation must honor:
 
