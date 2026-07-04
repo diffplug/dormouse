@@ -43,7 +43,7 @@ contract) and `lib/src/remote/host/remote-api.ts` (the Host implementation):
 * `directory.watch`, snapshot-only (no deltas, no thumbnails), terminal
   entries only
 * `surface.attach` / `surface.detach`, one attachment per session
-* Terminal: attach-is-the-resize, live data + semantic events,
+* Terminal: attach-is-the-resize, live data,
   `terminal.write`/`terminal.resize`, last-attach-wins size authority
 * One implicit grant: every paired session has full input (selfhost is
   single-user), no layout operations
@@ -228,9 +228,19 @@ interface TerminalAttachResult {
 // then a stream of:
 type TerminalEvent =
   | { event: 'terminal.data';     data: { bytes: string /* base64url */ } }
+  | { event: 'terminal.closed';   data: { exitCode?: number } }
+  // Reserved in wire.ts — defined but not yet emitted by the Host:
   | { event: 'terminal.resize';   data: { cols: number; rows: number } }   // another display took authority
-  | { event: 'terminal.semantic'; data: TerminalSemanticEvent }  // cwd/activity/title, as today
-  | { event: 'terminal.closed';   data: { exitCode?: number } };
+  | { event: 'terminal.semantic'; data: TerminalSemanticEvent };
+```
+
+The Host currently emits only `terminal.data` and `terminal.closed`.
+`terminal.resize` and `terminal.semantic` are reserved wire shapes with no
+emitter yet: a viewer is not notified when another display takes size
+authority, and semantic state (activity/cwd/title) reaches the client only
+through `directory.snapshot`.
+
+```ts
 
 // client → host (requires the input grant)
 type TerminalInput =

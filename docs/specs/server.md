@@ -70,8 +70,8 @@ $DORMOUSE_STATE_DIR/
 ```
 
 That is the entire persistent state. The Host's ACL is not here — it lives on
-the Host (platform `saveState`), which is the whole point of the security
-model.
+the Host, in webview `localStorage` (`lib/src/lib/local-json-store.ts`),
+which is the whole point of the security model.
 
 ## WebAuthn without a WebAuthn library
 
@@ -99,14 +99,14 @@ protection.
 This also makes the server fully testable without a browser: the
 `SimAuthenticator` harness in `server-lib-common` produces real assertions,
 so `node --test` can drive setup → pairing → connect end to end via
-`app.request()` and a pair of in-process WebSockets.
+`app.request()` and real WebSockets against an ephemeral-port server.
 
 ## HTTP API
 
 | Route                            | Auth           | Does                                              |
 | -------------------------------- | -------------- | ------------------------------------------------- |
 | `GET /*`                         | —              | Serves the Pocket web app (static build of `lib`'s pocket entry) |
-| `POST /api/setup/begin`          | setup password | `{ challenge }` for registration; rejects if the account already has a passkey (add more by re-presenting the password) |
+| `POST /api/setup/begin`          | setup password | `{ challenge }` for registration. Only the password gates it — re-presenting the password adds another passkey to the account |
 | `POST /api/setup/finish`         | setup password | `{ credentialId, publicKey, clientDataJSON }` → creates/updates `account.json` |
 | `POST /api/signin/begin`         | —              | `{ challenge }` for sign-in                        |
 | `POST /api/signin/finish`        | —              | full assertion → verified → `{ sessionToken }` (random, in-memory, hours-scale TTL) |
@@ -155,8 +155,11 @@ phone                        server                        host (laptop)
 
 The `pair-request` carries the `PairingRequest` shape from `server-lib-common`
 (`accountId`, `passkeyCredentialId`, `passkeyPublicKeyHash`,
-`devicePublicKey`, `requestedLabel`). The server checks the session's
-credential matches and rejects malformed requests before relaying; the Host runs
+`devicePublicKey`, `requestedLabel`). The server checks the request's
+credential is a registered passkey of the account (and that its public-key
+hash matches the stored key) and rejects malformed requests before relaying —
+an account-level check; the `/ws/client` session is not bound to one
+credential. The Host runs
 `PairingCeremony` and only local approval writes the ACL. A malformed
 `PairingRequest` is answered locally with `pair-result approved:false` and is
 never shown in the Host approval UI.
@@ -187,8 +190,9 @@ final authority regardless of what the server claims to have checked.
 
 Exactly the protocol-v1 scope of [remote-api.md](./remote-api.md)
 (terminal-only): `hello`, `directory.watch` (snapshot-only), one
-`surface.attach` (attach-is-the-resize), `terminal.data`/`semantic`/`resize`/
-`closed` out, `terminal.write`/`terminal.resize` in.
+`surface.attach` (attach-is-the-resize), `terminal.data`/`terminal.closed`
+out (`terminal.semantic`/`terminal.resize` are reserved wire shapes with no
+emitter yet — see remote-api.md), `terminal.write`/`terminal.resize` in.
 
 ## Host side (`lib` + `standalone`)
 
@@ -196,8 +200,9 @@ A `remote-host` module in `lib`, active in standalone:
 
 * **Enrollment** (settings UI, once): server URL + setup password →
   `POST /api/host/enroll` → persist `{ serverUrl, hostId, hostToken, origin,
-  rpId }` via the platform adapter; open and maintain `GET /ws/host`.
-* **Security**: `HostAcl` (persisted with `saveState`/`getState` as
+  rpId }` in webview `localStorage` (`local-json-store.ts` — deliberately no
+  platform-adapter dependency); open and maintain `GET /ws/host`.
+* **Security**: `HostAcl` (persisted to `localStorage` as
   `records()`/`fromRecords`), `HostChallengeIssuer`, `PairingCeremony`, and
   `authorizeConnection` — all straight from `server-lib-common`, running in
   the webview.
@@ -230,13 +235,15 @@ Served by the server, built from `lib`:
 ## Testing
 
 The security and relay layers are covered without a browser: `node --test`
-drives setup → pairing → connect end to end through the real server via
-`app.request()` and in-process WebSockets, using the `SimAuthenticator` /
-`SimHost` harness from `server-lib-common` (register, sign-in, wrong password,
-replayed challenge, wrong origin, unpaired device, revoked record, plus relay
-echo and token/session rejection). `server/test/harness/fake-host.mjs` is the
-automated-test fake host; `server/scripts/fake-host.mjs` is a separate manual
-dev stand-in (see Running it below). Browser-dependent layers — the
+drives setup → pairing → connect end to end through the real server —
+`app.request()` for HTTP routes, real WebSockets against an ephemeral-port
+server for the relay — using `SimAuthenticator` (from `server-lib-common`)
+plus the `FakeHost` harness in `server/test/harness/fake-host.mjs` (register,
+sign-in, wrong password, replayed challenge, wrong origin, plus relay routing
+and token/session rejection). Revoked-record denial is covered at the unit
+level in `server-lib-common`'s own tests, not through the relay.
+`server/scripts/fake-host.mjs` is a manual dev stand-in built on the same
+`FakeHost` class (see Running it below). Browser-dependent layers — the
 standalone host module and the Pocket terminal view — are dogfooded rather
 than automated.
 
@@ -266,8 +273,10 @@ Enrollment persists in localStorage; on later launches the host connects by
 itself. (`status()` / `clearEnrollment()` on the same object.) For a headless
 stand-in host instead:
 `DORMOUSE_SETUP_PASSWORD=hunter2 node server/scripts/fake-host.mjs http://localhost:3000`
-(auto-approves pairing; answers `hello` only — no real terminals; distinct
-from the automated-test harness `server/test/harness/fake-host.mjs`).
+(auto-approves pairing and serves the same synthetic echo terminals as the
+test harness — it instantiates `FakeHost` from
+`server/test/harness/fake-host.mjs`; only the auto-approval and logging
+differ).
 
 **3. Phone** (or any other browser profile): open the server origin →
 First-time setup (password + label) creates the passkey and signs you in →

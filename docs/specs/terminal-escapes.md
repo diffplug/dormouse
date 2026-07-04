@@ -122,7 +122,7 @@ Environment for spawned PTYs:
 |---|---|
 | `TERM_PROGRAM` | `iTerm.app` |
 | `TERM_PROGRAM_VERSION` | Dormouse's chosen iTerm2 compatibility version, not the package version |
-| `LC_TERMINAL` | `iTerm2` only if needed by real-world shell integrations |
+| `LC_TERMINAL` | `iTerm2` — set unconditionally on every spawned PTY (some real-world shell integrations key off it rather than `TERM_PROGRAM`) |
 | `LC_TERMINAL_VERSION` | same compatibility version as `TERM_PROGRAM_VERSION` |
 | `COLORTERM` | `truecolor` — advertise 24-bit color, which xterm.js renders. The PTY is spawned as `xterm-256color` with no other depth hint, so env-sniffing tools (e.g. `supports-color`) would otherwise assume 256/ANSI-16 and quantize RGB output to the nearest palette entry. Truecolor-aware TUIs (Codex's composer pill, syntax highlighters) then render smooth RGB. Windows Terminal is recognized as truecolor via `WT_SESSION`; Dormouse isn't, so it advertises `COLORTERM` explicitly. This is a color-*depth* signal, **independent** of the light/dark *background* detection (OSC color queries above) that drives those TUIs' theme choice. Not iTerm2-identity-specific. |
 

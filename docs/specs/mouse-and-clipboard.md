@@ -52,7 +52,7 @@ The temporary override ends on the **next mouse-up event inside the terminal con
 
 **Auto-clear on reporting off.** If the inside program stops requesting mouse reporting (e.g. exits or sends DECRST `?1000l`/`?1002l`/`?1003l`) while either override is active, the override is cleared. The icon and banner are removed because there is no longer anything to override.
 
-**No keyboard activation.** The Mouse icon, No-Mouse icon, and banner buttons are mouse-only. They are not keyboard-activatable.
+**No designed keyboard path.** The Mouse icon, No-Mouse icon, and banner buttons are mouse-first: no keybinding or focus management targets them. They are plain buttons, so focus-based activation is not actively prevented — making them properly keyboard-activatable is listed in §9.1.
 
 ---
 
@@ -66,7 +66,7 @@ Selection is available whenever the terminal is handling mouse events — that i
 - On touch or pen surfaces, a primary pointer tap-and-drag follows the same
   terminal selection path as mouse drag. Non-primary touch pointers are ignored.
 - The selection is rendered by the terminal in a compositor layer **above** the cell grid, not by writing into the grid. This avoids conflicts with programs redrawing the screen.
-- The selection rectangle is drawn as a single perimeter outline tracing the union of selected cells. Color is taken from `--vscode-focusBorder` with fallbacks to terminal foreground and selection background.
+- The selection rectangle is drawn as a single perimeter outline tracing the union of selected cells. Color comes from `--color-focus-ring` (the dynamic pick in `docs/specs/theme.md`: chromatic `focusBorder`, else chromatic active-header background), with a final hardcoded cornflower-blue fallback in `SelectionOverlay.tsx`.
 
 ### 3.2 Selection Shapes
 
@@ -232,9 +232,9 @@ Paste behavior differs by platform to match each OS's native convention.
 |----------------|-----------------------------------------------------------------------------------|
 | **Cmd+V**      | Terminal intercepts and performs a bracketed paste.                               |
 | **Cmd+Shift+V**| Terminal intercepts and performs a bracketed paste. (Alias for Cmd+V.)            |
-| **Ctrl+V**     | Not intercepted. Forwarded to the inside program as the raw control byte `0x16`.  |
+| **Ctrl+V**     | Also intercepted — paste, same as Cmd+V. Not forwarded as the raw control byte `0x16`. |
 
-macOS users have a clean separation: Cmd is the paste modifier, Ctrl passes through to the program.
+The paste chord accepts either modifier on every platform (the interception deliberately shadows readline's `quoted-insert` — see §8.3 for sending a literal `0x16`). Copy keeps the clean macOS separation — only `⌘C` is intercepted, `Ctrl+C` passes through (§4.2) — but paste does not.
 
 #### 8.2.2 Windows and Linux
 
@@ -245,19 +245,19 @@ macOS users have a clean separation: Cmd is the paste modifier, Ctrl passes thro
 
 Because Ctrl+V is needed as both the paste shortcut (universal user expectation) and as the raw control byte `0x16` (for shell `quoted-insert`, vim literal-next, etc.), Ctrl+V is always intercepted; the raw byte is not sent to the inside program by this key. Users needing to send `0x16` can use the shell mechanism in §8.3.
 
-### 8.3 Sending `0x16` on Windows and Linux (Ctrl+Q)
+### 8.3 Sending `0x16` (Ctrl+Q)
 
-Users needing to insert a literal control character at a shell prompt can use the existing readline feature: press **Ctrl+Q**, then the desired key. This is a feature of bash, zsh, fish, and other readline-aware shells; the terminal does nothing special to enable it. The terminal provides no equivalent for programs that do not support Ctrl+Q-style `quoted-insert` (e.g. vim insert mode).
+Because Ctrl+V is intercepted on every platform, users needing to insert a literal control character at a shell prompt use the existing readline feature: press **Ctrl+Q**, then the desired key. This is a feature of bash, zsh, fish, and other readline-aware shells; the terminal does nothing special to enable it. The terminal provides no equivalent for programs that do not support Ctrl+Q-style `quoted-insert` (e.g. vim insert mode).
 
 ### 8.4 Platform Detection
 
-Platform is detected at startup from `navigator.userAgentData.platform` (preferred), `navigator.platform`, or the user-agent string, matched against `/Mac|iPhone|iPad/`. The result is exposed as the `IS_MAC` constant in `lib/src/lib/platform/index.ts` and consulted by every place that selects between Cmd and Ctrl conventions.
+Platform is detected at startup from `navigator.userAgentData.platform` (preferred), `navigator.platform`, or the user-agent string, matched against `/Mac|iPhone|iPad/i`. The result is exposed as the `IS_MAC` constant in `lib/src/lib/platform/index.ts` and consulted where behavior splits by platform — the copy chord (§4.2) and hint strings; the paste chord accepts both modifiers everywhere (§8.2).
 
 ### 8.5 Bracketed Paste
 
 When the inside program has opted in via `\e[?2004h` (tracked as the `bracketedPaste` field on the per-terminal mouse-selection state), the terminal writes `\e[200~`, then the clipboard content, then `\e[201~`, to the PTY. Otherwise the content is written without brackets. This is standard xterm behavior; it allows shells and TUIs to distinguish pasted content from typed input.
 
-The bracketed-paste mode is read at paste time from xterm's public `terminal.modes.bracketedPasteMode`, kept in sync via a parser hook on `CSI ? ... h`/`l` (see `lib/src/lib/mouse-mode-observer.ts`).
+The bracketed-paste mode is read at paste time from the per-terminal mouse-selection state's `bracketedPaste` field, which `lib/src/lib/mouse-mode-observer.ts` keeps in sync with xterm's public `terminal.modes.bracketedPasteMode` via a parser hook on `CSI ? ... h`/`l`.
 
 ### 8.6 Paste Content
 
@@ -265,7 +265,7 @@ Paste reads the clipboard in three tiers, falling through in order:
 
 1. **File references.** The platform adapter checks for OS file references (Finder/Explorer Copy of a file) via the sidecar/extension host. If present, each path is shell-escaped and the space-joined list is written to the PTY with a trailing space so the next token starts cleanly. Files are checked first so that a file-ref clipboard never reaches `navigator.clipboard.readText()` — on macOS WKWebView that call can trigger a native paste-permission popup when the clipboard came from another app.
 2. **Plain text.** `navigator.clipboard.readText()`. If non-empty, the string is written to the PTY (with bracketed-paste wrapping when enabled by the inside program).
-3. **Raw image data.** If neither of the above matches and the clipboard holds image bytes (e.g. a `Cmd+Shift+4` screenshot), the bytes are written to a newly-created private temp directory as `<uuid>.png` and that single path is pasted as in tier 1. On Unix-like systems the temp directory is owner-only and the image file is written owner-readable/writable to avoid exposing clipboard screenshots to other local users.
+3. **Raw image data.** If neither of the above matches and the clipboard holds image bytes (e.g. a `Cmd+Shift+4` screenshot), the bytes are written to a newly-created private temp directory as `<uuid>-clipboard.png` and that single path is pasted as in tier 1. On Unix-like systems the temp directory is owner-only and the image file is written owner-readable/writable to avoid exposing clipboard screenshots to other local users.
 
 Each tier is implemented by one of two backends. The **VSCode build** (all platforms) and the **standalone/Tauri build on macOS and Linux** use a shared Node module (`standalone/sidecar/clipboard-ops.js`) that shells out to the OS-native clipboard tool: `osascript` on macOS, `Get-Clipboard` on Windows, `wl-paste`/`xclip` on Linux — reached through the sidecar (Tauri) or the extension host (VSCode). The **standalone/Tauri build on Windows** instead reads the Win32 clipboard directly in Rust (`standalone/src-tauri/src/clipboard_win.rs`: `CF_HDROP` for file paths, `CF_UNICODETEXT` for text, `CF_DIB` for an image saved as a `.bmp` temp file — note the extension differs from the sidecar path's `.png`), because the sidecar's `Get-Clipboard` spawns a `powershell.exe` child that pops a console window on the windowless GUI process — several per paste. If every tier comes back empty, paste is a silent no-op.
 
@@ -273,7 +273,7 @@ Content-aware transformations, paste history, credential warnings, and middle-cl
 
 ### 8.7 Drag-to-Paste
 
-Dragging files onto a terminal pane mirrors the paste chain above: escaped paths are typed at the current prompt, space-joined with a trailing space. Tauri receives the drop natively via `WindowEvent::DragDrop` and routes paths to the focused pane.
+Dragging files onto a terminal pane mirrors the paste chain above: escaped paths are typed at the current prompt, space-joined with a trailing space. Tauri receives the drop natively via `WindowEvent::DragDrop` and routes paths to the focused pane — but this wiring is **inert today**: `tauri.conf.json` sets `dragDropEnabled: false` (required so HTML5 drag-and-drop inside the webview — dockview pane dragging — keeps working; tauri-apps/tauri#14373, dormouse#38), so the native handler never fires and drag-to-paste is currently unavailable in the standalone build.
 
 Drag-to-paste is **not supported in the VSCode build**: VSCode's `WebviewView` (sidebar/panel) is excluded from external-file drop routing by the workbench, so the webview iframe never receives `dragover`/`drop` events for files dragged from the OS. See §9.2. VSCode users paste instead (§8.1/§8.5).
 

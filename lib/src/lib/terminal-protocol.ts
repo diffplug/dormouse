@@ -70,8 +70,10 @@ export class TerminalProtocolParser {
    * @param colorProvider Resolves the active terminal theme color for OSC
    *   10/11/12 background/foreground/cursor *queries*. Frontend adapters pass a
    *   provider backed by the live xterm theme, so TUIs (e.g. Codex) can detect
-   *   the real terminal background. Host-side parsers (VS Code extension host)
-   *   omit it, leaving such queries to xterm.js as before.
+   *   the real terminal background. The VS Code extension-host parser passes a
+   *   provider fed by webview-pushed colors (`dormouse:themeColors`); until the
+   *   first push the provider returns null and the query falls through to
+   *   xterm.js.
    */
   constructor(private readonly colorProvider?: TerminalColorProvider) {}
 

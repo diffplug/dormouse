@@ -195,9 +195,9 @@ If you edit `CHANGELOG.md` manually outside `/release-notes` and want to preview
 | `OVSX_PAT` | `vscode-extension-publish` GitHub environment secret | OpenVSX publish |
 | `GITHUB_TOKEN` | GitHub Actions (automatic) | Artifact upload |
 | `APPLE_SIGNING_IDENTITY` | Local keychain | macOS codesign |
-| `APPLE_ID` | Local env / prompted | Notarization |
+| `APPLE_ID` | Hardcoded in `sign-and-deploy.sh` | Notarization |
 | `APPLE_SIGN_PASS` | Local env / prompted | Notarization password |
 | `APPLE_TEAM_ID` | Local env / hardcoded | Notarization |
 | `EV_SIGN_PIN` | Local env / prompted | Windows PIV signing |
-| `TAURI_SIGNING_PRIVATE_KEY` | Local env | Tauri update signatures |
+| `TAURI_SIGNING_PRIVATE_KEY` | Local env / prompted | Tauri update signatures |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Local env / prompted | Tauri update key password |

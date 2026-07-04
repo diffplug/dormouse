@@ -311,10 +311,14 @@ Switching to Type should focus the hidden input and open the native keyboard
 where browser policy allows. Switching away from Type should blur the hidden
 input so the app keyboard UI is visible again.
 
-Tapping the **Type** selector must focus the hidden input synchronously during
-the tap/click handler. Do not defer this focus to `requestAnimationFrame` or a
-timer, because mobile browsers may then treat it as no longer user-initiated and
-refuse to open the native keyboard.
+Tapping the **Type** selector focuses the hidden input synchronously during
+the tap/click handler — the user-gesture-linked call is what makes mobile
+browsers open the native keyboard; focus deferred to `requestAnimationFrame`
+or a timer may be treated as not user-initiated and refused. A follow-up
+effect additionally re-asserts focus via rAF and staggered timers as best
+effort — it helps after re-renders, and is the only focus path when Type is
+the initial mode with no tap (where strict browsers may keep the keyboard
+closed until the first real tap).
 
 ## Type mode input
 

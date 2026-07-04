@@ -13,9 +13,9 @@ In the VS Code extension host, selected workbench chords are mirrored: the termi
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| Left ⌘ → Right ⌘ (within 500 ms) | Toggle mode | Tap left Command, then right Command within 500 ms to swap between command and passthrough mode. |
-| Left Shift → Right Shift (within 500 ms) | Toggle mode | Same as above, but with the Shift keys. |
-| `Enter` (command) | Enter passthrough mode | Switch the selected pane into passthrough (or reattach a minimized door). |
+| Left ⌘ → Right ⌘ (within 500 ms) | Enter command mode | Tap left Command, then right Command within 500 ms while in passthrough. The gesture only exits passthrough — it does nothing in command mode. |
+| Left Shift → Right Shift (within 500 ms) | Enter command mode | Same as above, but with the Shift keys. |
+| `Enter` (command) | Enter passthrough mode | Switch the selected pane into passthrough (or reattach a minimized door). Clicking a pane also enters passthrough. |
 
 ## Pane actions (command mode)
 
@@ -25,7 +25,7 @@ In the VS Code extension host, selected workbench chords are mirrored: the termi
 | `-` or `"` | Split top/bottom | Split the selected pane into two stacked panes. |
 | `z` | Toggle zoom | Fullscreen the selected pane, or return to the normal layout. |
 | `m` or `d` | Minimize / reattach | Minimize the selected pane to the baseboard, or reattach a minimized door. |
-| `k` or `x` | Kill | Kill the selected pane or door. Prompts for a random character to confirm. |
+| `k` or `x` | Kill | Kill the selected pane or door. Prompts for a random character to confirm; untouched (never-typed-in) panes and doors are killed immediately without the prompt. |
 | `,` | Rename | Enter rename mode for the selected pane's title. |
 | `a` | Toggle alert | Dismiss or toggle the bell alert for the selected pane. Meaningful only for a terminal Surface — a browser surface has no bell to ring (`docs/specs/glossary.md`). |
 | `t` | Toggle todo | Toggle the TODO marker on or off for the selected pane's Surface. Works on any Surface — a terminal Session or a browser surface. |
@@ -35,7 +35,7 @@ In the VS Code extension host, selected workbench chords are mirrored: the termi
 | Key | Action | Description |
 |-----|--------|-------------|
 | `↑` / `↓` / `←` / `→` | Move selection | Move selection to the adjacent pane or door. Press the opposite direction to return. |
-| `⌘↑` / `⌘↓` / `⌘←` / `⌘→` (macOS)<br>`Ctrl`+arrows (others) | Swap terminals | Swap terminal sessions between two panes — layout and titles swap; selection follows the terminal. |
+| `⌘`+arrows or `Ctrl`+arrows | Swap terminals | Swap terminal sessions between two panes — layout and titles swap; selection follows the terminal. Either modifier works on every platform. |
 
 ## Selection & drag
 
@@ -51,10 +51,9 @@ In the VS Code extension host, selected workbench chords are mirrored: the termi
 |-----|--------|-------------|
 | `⌘C` (macOS) / `Ctrl+C` (others) | Copy raw | Copy selected text as-is, without rewrapping. Requires a finalized selection. |
 | `⌘⇧C` (macOS) / `Ctrl+Shift+C` (others) | Copy rewrapped | Copy selected text with rewrapping for single-line display. |
-| `⌘V` / `⌘⇧V` (macOS) | Paste | Paste clipboard contents into the terminal. |
-| `Ctrl+V` / `Ctrl+Shift+V` (others) | Paste | Paste clipboard contents into the terminal. |
+| `⌘V` / `⌘⇧V` / `Ctrl+V` / `Ctrl+Shift+V` | Paste | Paste clipboard contents into the terminal. The Ctrl variants are intercepted on every platform, macOS included. |
 
-On macOS, `Ctrl+C` / `Ctrl+V` pass through to the running program; only the ⌘-prefixed variants are intercepted.
+On macOS, `Ctrl+C` passes through to the running program (only `⌘C` copies); `Ctrl+V` is intercepted for paste everywhere — use the shell's `quoted-insert` (`Ctrl+Q`) to send a literal `0x16` (`docs/specs/mouse-and-clipboard.md` §8.3).
 
 ## Dialogs & prompts
 

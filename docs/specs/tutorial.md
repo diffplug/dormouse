@@ -44,7 +44,7 @@ Every pane gets a `TutorialShell` input handler via `PlaygroundShellRegistry`; t
 
 ## Menu and navigation behavior
 
-The desktop runner opens at a top-level menu; Pocket starts inside Gesture navigation and Esc returns to its menu. Selecting a section drills into its item list, showing `[N/M complete]` per section. Inside a section, items render `✓` (green, complete), `●` (yellow active marker — intentionally static so runner re-renders don't feed the activity monitor), or `·` (dim, later). Esc / `q` / Ctrl+C pops back one screen (section → menu → exit); re-running `tut` re-enters. `Reset progress` returns to the profile's initial screen.
+The desktop runner opens at a top-level menu; Pocket starts inside Gesture navigation and Esc returns to its menu. Selecting a section drills into its item list, showing `[N/M complete]` per section. Inside a section, items render `✓` (green, complete), `●` (yellow active marker — intentionally static so runner re-renders don't feed the activity monitor), or `·` (dim, later). Esc / `q` pop back one screen (section → menu → exit); Ctrl+C exits the runner immediately from any screen; re-running `tut` re-enters. `Reset progress` returns to the profile's initial screen.
 
 Below the sections the menu lists `Starred on GitHub` (persisted separately, calls `onOpenGithub`) and `🐭 FlappyTerm 🐭`. Flappy is `[LOCKED N/M]` until all section checklist items are complete (the star and Flappy rows don't count toward `N/M`), then shows `[High score: N]` and unlocks a runner-local mini-game. The game-over screen cross-links the other surface: desktop `p` → `onOpenPocket`, Pocket `n` → `onNotifyPocket`. The page wires these callbacks (and their URLs) in `PocketTerminalExperience.tsx` and the desktop playground page.
 
@@ -66,7 +66,7 @@ is all the playground needs. Minimum useful behavior:
 
 * Echo typed characters and maintain a command-line buffer; Enter submits,
   Backspace edits.
-* Gesture-generated arrow keys, Escape, and Tab produce visible behavior.
+* Up/Down arrows recall command history at the shell prompt; Escape, Tab, and Left/Right are no-ops at the base prompt (full-screen runners like `ascii-splash` give them behavior).
 * When a fake full-screen app such as `ascii-splash`, `splash`, `changelog`, or
   `tut` is running, `Ctrl+C` sends `\x03` to that app; if the app exits, the
   terminal returns to the fake shell prompt instead of restarting the app.
@@ -100,7 +100,7 @@ These exist in `dormouse-lib` (or `MobileTerminalUi`) specifically so the browse
 
 ## Theme Picker
 
-Implemented in `dormouse-lib/lib/themes` and `dormouse-lib/components/ThemePicker`. Bundled themes are GitHub variants only; users can install more from OpenVSX via the dropdown footer (`Install theme from OpenVSX`). Installed rows have an `X` delete control (requires browser confirmation); deleting the active installed theme falls back to the first bundled theme.
+Implemented in `dormouse-lib/lib/themes` and `dormouse-lib/components/ThemePicker`. Bundled themes are a small built-in VS Code set (`bundled.json`: Dark/Light Visual Studio, Monokai, Quiet Light, Red, Kimbie Dark, Abyss, and Selenized variants); users can install more from OpenVSX via the dropdown footer (`Install theme from OpenVSX`). Installed rows have an `X` delete control (requires browser confirmation); deleting the active installed theme falls back to the page's `defaultThemeId` (Kimbie Dark on the playground/Pocket pages), with the first bundled theme as last resort.
 
 The picker is labeled `Theme:` and appears on `/playground/desktop` (inside the theme-aware `SiteHeader`), `/playground/pocket` mobile (floating over the terminal), and the desktop Pocket page (standalone appbar variant). `/pocket` redirects before rendering one.
 

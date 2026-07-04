@@ -132,7 +132,7 @@ CWD:
 
 Non-OSC CWD sources:
 
-- `process` — adapter polled the PTY's process for its working directory. Used when no OSC source has reported recently.
+- `process` — adapter polled the PTY's process for its working directory. Applied only while no OSC source has ever reported for the pane (see CWD precedence below — the rule is source-based, not time-based).
 - `manual` — caller seeded the CWD directly (e.g., session restore from saved state, or a known spawn directory). Produced by `cwdFromManualPath()`.
 
 Command lifecycle:

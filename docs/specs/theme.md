@@ -120,7 +120,8 @@ the VSCode terminal defaults before those values are read:
 
 The `terminal-theme.ts` body/html `MutationObserver` re-reads these values
 when the body class or style changes, so applying a theme updates existing
-terminals. `terminal-registry.ts` remains the public facade for callers.
+terminals. Adapters use the `terminal-theme.ts` API directly — it is not
+re-exported through the `terminal-registry` facade.
 
 ## Theme data
 
@@ -194,8 +195,9 @@ When changing theme behavior:
 - Keep xterm.js terminal colors sourced from `--vscode-terminal-*` variables,
   not from Dormouse chrome tokens.
 - Keep debugger dynamic-pick reporting and runtime dynamic-palette picks sharing
-  `pickDoorPair()`, `pickFocusRing()`, and `pickAlarmColor()`; do not fork those
-  rules in UI code.
+  `pickDoorPair()` and `pickFocusRing()`, and keep the alarm tint on
+  `pickAlarmColor()` — do not fork those rules in UI code. (The debugger does
+  not report alarm picks today.)
 - Do not add hardcoded color defaults or CSS variable fallback chains to
   `lib/src/theme.css`; fix the theme data or runtime host instead.
 - Avoid reintroducing a pass-through `--mt-*` layer or one-off tokens for tabs,

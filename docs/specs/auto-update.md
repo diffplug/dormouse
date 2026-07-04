@@ -9,7 +9,9 @@ app launch
   │
   ├─ check for post-install markers in localStorage
   │    ├─ success marker → show "Updated to vX.Y.Z" banner (auto-dismisses after 10s)
-  │    ├─ failure marker → show "Update failed." banner with debug action
+  │    ├─ failure marker → show "Update failed" banner with debug action, then STOP —
+  │    │    the update check is skipped this launch (re-prompting for the version that
+  │    │    just failed would unmount an open debug dialog)
   │    └─ no marker → continue
   │
   ├─ wait 5 seconds
@@ -61,7 +63,7 @@ When a notice has follow-up actions, it uses ` · ` as the separator between the
 
 All states are dismissible via [×]. Dismissing an unapproved `available` notice means no update is downloaded or installed in that session. Dismissing a `downloading` or `downloaded` notice hides it for the session only — it does not cancel an already-approved download/install.
 
-The notice matches the Baseboard's existing text style (9px mono, `text-muted`). It's pushed right via `ml-auto` so it doesn't compete with doors or the shortcut hint on the left.
+The notice matches the Baseboard's existing text style (`text-sm font-mono text-muted` — 12px via the theme.css `text-sm` override). It's pushed right via `ml-auto` so it doesn't compete with doors or the shortcut hint on the left.
 
 ### Threading
 

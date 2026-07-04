@@ -17,7 +17,7 @@ Tauri app process (Rust — standalone/src-tauri/src/lib.rs)
     ├── dor-control-server.js  — dor CLI control socket (docs/specs/dor-cli.md)
     ├── iframe-proxy.cjs       — bundled from lib/src/host/iframe-proxy.ts (docs/specs/dor-browser.md)
     ├── agent-browser-host.cjs — bundled from lib/src/host/agent-browser-host.ts (docs/specs/dor-browser.md)
-    ├── clipboard-ops.js       — OS clipboard tiers, macOS/Linux only here (docs/specs/mouse-and-clipboard.md §8.6)
+    ├── clipboard-ops.js       — OS clipboard: paste-read tiers for macOS/Linux (Windows reads go native in Rust); agent-browser clipboard writes on all platforms (docs/specs/mouse-and-clipboard.md §8.6, docs/specs/dor-browser.md)
     └── shell-integration/     — injected shell hook scripts (docs/specs/terminal-escapes.md)
 ```
 
@@ -117,11 +117,14 @@ controls (minimize / maximize / close via `@tauri-apps/api/window`, with
 window-focus tracking dimming the bar). The shell controls are:
 
 - **`[+]`** — spawns a new terminal with the currently selected shell
-  (`dormouse:newTerminal`).
+  (dispatches the `dormouse:new-terminal` CustomEvent that `Wall` listens
+  for; the VS Code equivalent is the `dormouse:newTerminal` postMessage in
+  `docs/specs/transport.md`).
 - **Shell dropdown** — lists `getAvailableShells()`; picking a different
-  shell updates `setDefaultShellOpts` and posts `dormouse:newTerminal` with
-  `replaceUntouched: true, announce: true`, so an untouched selected terminal
-  is replaced in place (`docs/specs/layout.md`, Shell selection replacement).
+  shell updates `setDefaultShellOpts` and dispatches `dormouse:new-terminal`
+  with `replaceUntouched: true, announce: true`, so an untouched selected
+  terminal is replaced in place (`docs/specs/layout.md`, Shell selection
+  replacement).
 
 The workspace strip lands here when the workspaces rollout reaches stage 3 —
 `docs/specs/layout.md` `## Future` (workspaces-rollout).
@@ -138,10 +141,12 @@ persists separately through the theme store (`docs/specs/theme.md`).
 
 ## File drop
 
-Tauri receives OS file drops natively (`WindowEvent::DragDrop` in `lib.rs`)
-and routes the dropped paths to the focused pane as escaped, space-joined
-paste input — behavior specified in `docs/specs/mouse-and-clipboard.md`
-(§8.7 Drag-to-Paste).
+The `WindowEvent::DragDrop` handler in `lib.rs` routes dropped paths to the
+focused pane as escaped, space-joined paste input — but it is **inert
+today**: `tauri.conf.json` sets `dragDropEnabled: false` so HTML5
+drag-and-drop inside the webview (dockview pane dragging) keeps working
+(tauri-apps/tauri#14373, dormouse#38). Behavior and status are specified in
+`docs/specs/mouse-and-clipboard.md` (§8.7 Drag-to-Paste).
 
 ## Logging
 
@@ -161,10 +166,11 @@ root `package.json` for the `dev:standalone*` orchestration.
 - `stage` = `stage:dor-cli` (build + stage the dor CLI, `docs/specs/dor-cli.md`)
   plus `stage:sidecar-proxy` (`build-sidecar-proxy.mjs` bundles the
   `lib/src/host/` sources into the sidecar `.cjs` files).
-- The `tauri` script runs `standalone/scripts/tauri.mjs`, which assembles the
-  webview CSP (`standalone/scripts/csp.mjs`) before delegating to the Tauri
-  CLI — including the `DORMOUSE_REMOTE_CONNECT_SRC` build-time override for
-  self-host relay origins (`docs/specs/server.md`, Host webview CSP).
+- The `tauri` script runs `standalone/scripts/tauri.mjs`, which rewrites the
+  webview CSP via `standalone/scripts/csp.mjs` when the
+  `DORMOUSE_REMOTE_CONNECT_SRC` build-time override for self-host relay
+  origins is set (`docs/specs/server.md`, Host webview CSP), then delegates
+  to the Tauri CLI.
 - The Tauri bundle ships the whole sidecar via the `../sidecar/**/*` resources
   glob — including node-pty's prebuilds + bundled ConPTY and the
   shell-integration scripts (`docs/specs/terminal-escapes.md`).

@@ -56,9 +56,10 @@ Non-goals:
   presence, and establishes/terminates control sessions. **The Host is the
   final authority for access decisions.**
 * **Server** — the coordinating service: account management, passkey
-  registration, WebAuthn challenge generation, signaling/rendezvous, and
-  revocation propagation. The Server is not the final authority for Host
-  access.
+  registration, WebAuthn challenge generation, and signaling/rendezvous. The
+  Server is not the final authority for Host access. (Revocation today is
+  local state editing — see `docs/specs/server.md` Guardrails; Server-pushed
+  revocation propagation is staged in [Future](#future).)
 
 ## Trust Model
 
@@ -122,8 +123,8 @@ Each Host maintains a local authorization list. **The ACL is authoritative**;
 the Server cannot unilaterally grant access.
 
 The record schema (source of truth: `HostAclRecord` / `HostAcl` in
-`server-lib-common/src/security/acl.ts`; persisted on the Host through the
-platform `saveState`, `docs/specs/server.md`):
+`server-lib-common/src/security/acl.ts`; persisted on the Host in webview
+`localStorage` via `lib/src/lib/local-json-store.ts`, `docs/specs/server.md`):
 
 ```ts
 interface HostAclRecord {
@@ -231,6 +232,13 @@ Dormouse is designed so that:
 The Host remains the final authority throughout the system.
 
 ## Future
+
+### Revocation propagation
+
+The Server pushing revocations to Hosts. Today `HostAcl.revokeDevice` /
+`revokePasskey` exist but have no callers, and no relay frame carries a
+revocation — revoking is hand-editing state (`docs/specs/server.md`,
+Guardrails) and takes effect at the Host's next `authorizeConnection`.
 
 ### Storage-durability hardening
 

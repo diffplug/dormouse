@@ -26,8 +26,8 @@ export const STRIP_RESPONSE_HEADERS = new Set([
 
 // The fixed, Dormouse-owned shim — like agent-browser's EDIT_SCRIPTS, never
 // user-supplied, so it is not an eval vector. Injected inline into served HTML
-// (loopback CSP is dropped, so an inline script runs). It posts two things to
-// the Wall and nothing else (every other keystroke flows to the tool):
+// (loopback CSP is dropped, so an inline script runs). It posts four message
+// kinds to the Wall and nothing else (every other keystroke flows to the tool):
 //   - `leader`: the reserved dual-tap ⌘/⇧ chord (matching handle-dual-tap.ts),
 //     so the global chord keeps working with the frame focused (#1).
 //   - `pointerdown`: a click landed in the frame. A cross-origin click reaches

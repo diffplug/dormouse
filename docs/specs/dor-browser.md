@@ -275,7 +275,9 @@ screenshot through the host's `agentBrowserScreenshot`, and draws that to canvas
 with latest-only backpressure. A capture whose bytes are identical to the last
 displayed frame (a static page the daemon keeps re-pulsing) costs no decode or
 draw; a re-attach bumps a draw generation so a fresh blank canvas still repaints.
-If the host cannot screenshot, it falls back to the stream frame path.
+A host without `agentBrowserScreenshot` renders only the placeholder — stream
+frame bytes are discarded by design (the connection reduces every frame message
+to a `frame-pulse`), so there is no frame-drawing fallback path.
 
 The high-rate `[ab-panel]`/`[agent-browser]` stream and screenshot console
 diagnostics sit behind the `dormouse.flags.abDebugLogs` localStorage flag, read
