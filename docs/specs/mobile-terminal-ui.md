@@ -1,61 +1,29 @@
-# Mobile Terminal Website Prototype Spec
+# Mobile Terminal UI
 
 > See `docs/specs/glossary.md` for Session / Pane / Door vocabulary. This spec uses it throughout.
 
-## 1. Overview
-
-This document specifies the `/playground/pocket` mobile terminal prototype.
-
-The prototype tests one core idea:
+The mobile terminal composition: `MobileTerminalUi` (the wrapper owning touch
+modes, input modes, and the keyboard reserve) around `MobileWall` (one visible
+terminal Session at a time, with session switching). The core idea:
 
 ```text
 Stable terminal viewport + mobile session viewport + explicit touch mode + explicit input mode.
 ```
 
-The app should feel like a lightweight mobile terminal playground. It does not
-need remote sessions, SSH, user accounts, or production infrastructure.
+Touch modes make pane touches explicit; input modes make the reserve area
+explicit. Desktop `Wall` remains the tiling workspace layout; mobile does not
+expose split-pane layout or multiple Workspaces.
 
-The website `/playground/pocket` prototype exposes a small floating theme
-switcher above the terminal. It uses the shared Dormouse `ThemePicker`. On
-desktop, `/playground/pocket` shows a share-to-phone page instead of the
-interactive terminal. The `/pocket` route temporarily redirects to
-`/playground/pocket`; this is a launch-state redirect, not the future real
-tethering environment.
+Three consumers compose these components today: the website Pocket playground
+(`FakePtyAdapter`; page wiring in `docs/specs/tutorial.md`), the real Pocket
+app (`RemotePtyAdapter`; `docs/specs/pocket-app.md`), and Storybook stories.
 
-`/playground/pocket` uses the same fake playground terminal stack as
-`/playground/desktop`: `PlaygroundShellRegistry` attaches a `TutorialShell` to
-every spawned pane, and the same fake commands dispatch to browser-side runners.
-The first mobile session auto-runs `tut` with the Pocket tutorial profile; a
-second `changelog` session auto-runs `changelog` for the tutorial's copy/paste
-coverage.
+> History: this component was designed and validated through the website
+> `/playground/pocket` prototype (originally specced as `mobile-ui.md`; see git
+> history). The prototype's goals and success criteria are retired; the
+> page-level wiring lives in `docs/specs/tutorial.md`.
 
-## 2. Prototype Goals
-
-Primary goals:
-
-* Keep the terminal viewport stable when the native phone keyboard opens or closes.
-* Let the user explicitly choose what terminal touches mean.
-* Let the user explicitly choose what appears in the stable reserve area.
-* Show one terminal session at a time on mobile, with session switching available from the reserve controls.
-* Test normal mobile text entry using the native phone keyboard.
-* Provide enough terminal behavior to evaluate typing, Enter, Backspace, arrows, Escape, Tab, and app interruption.
-* Keep the implementation small and easy to iterate on.
-
-Non-goals:
-
-* Remote shell support.
-* SSH support.
-* WebSocket transport.
-* User accounts.
-* Session persistence.
-* Command history storage.
-* A real draft/scratchpad workflow.
-* Mobile split-pane layout.
-* Multi-touch gestures.
-* Production security hardening.
-* Full accessibility implementation.
-
-## 3. Core Layout
+## Core layout
 
 The mobile UI is split into fixed and flexible regions:
 
@@ -77,26 +45,24 @@ The mobile UI is split into fixed and flexible regions:
 ```
 
 The mobile session header and pane content come from `MobileWall`, a mobile
-composition that displays one active terminal session at a time. Desktop `Wall`
-remains the tiling workspace layout; mobile does not expose split-pane layout or
-multiple Workspaces. The
-mobile wrapper owns the two selectors and the fixed-height reserve. The selector
+composition that displays one active terminal session at a time. The mobile
+wrapper owns the two selectors and the fixed-height reserve. The selector
 block should use one divider between the Touch and Input rows, with no divider
-above Touch and no divider below Input. The mobile session header should not use
-the desktop terminal title corner radius; it is a flush mobile bar. The alert
-bell sits immediately after the title before secondary title detail. The mobile
-header keeps a minimize button, and in the `/playground/pocket` prototype that
-action opens the Sessions reserve instead of creating a desktop Door. The Touch
-row and its selector tray should sit on `terminal-bg` so they read as part of
-the terminal surface above. The Input row and reserve area should sit on
-`header-inactive-bg` with `header-inactive-fg`, so the lower input controls are
-distinct from the terminal while still following the selected theme.
+above Touch and no divider below Input. The mobile session header should not
+use the desktop terminal title corner radius; it is a flush mobile bar. The
+alert bell sits immediately after the title before secondary title detail. The
+mobile header keeps a minimize button; in the website Pocket playground that
+action opens the Sessions reserve instead of creating a desktop Door. The
+Touch row and its selector tray should sit on `terminal-bg` so they read as
+part of the terminal surface above. The Input row and reserve area should sit
+on `header-inactive-bg` with `header-inactive-fg`, so the lower input controls
+are distinct from the terminal while still following the selected theme.
 
 The root height must not be recalculated from `window.visualViewport` on every
-keyboard resize. The reserve area is intentionally stable so the terminal region
-does not bounce while the OS keyboard animates.
+keyboard resize. The reserve area is intentionally stable so the terminal
+region does not bounce while the OS keyboard animates.
 
-## 4. Touch Mode Selector
+## Touch mode selector
 
 The touch selector controls what happens when the user touches the pane content
 area. It is always visible between the terminal content and the input mode
@@ -104,7 +70,7 @@ selector.
 
 The selector must be self-labeling through segmented buttons that include both
 an icon and a short mode label. Icon-only touch controls are too hard to
-discover in this prototype.
+discover.
 
 Source of truth: `TOUCH_MODES` in `lib/src/components/MobileTerminalUi.tsx`
 defines touch-mode button labels and icons.
@@ -140,19 +106,21 @@ touch-scroll fallback.
 Select mode must route touch and pen drags through the shared terminal
 mouse-selection router, not through a mobile-only selection implementation, so
 selection geometry, smart token extension, copy popups, rewrapped copy, and TUI
-mouse-capture override rules match desktop behavior.
+mouse-capture override rules match desktop behavior
+(`docs/specs/mouse-and-clipboard.md`).
 
-Gesture mode intentionally consumes primary mouse/trackpad clicks in addition to
-touch input. This keeps the `/playground/pocket` prototype usable in desktop
-browsers, narrow desktop viewports, and Storybook without a touchscreen. A primary
+Gesture mode intentionally consumes primary mouse/trackpad clicks in addition
+to touch input. This keeps the composition usable in desktop browsers, narrow
+desktop viewports, and Storybook without a touchscreen. A primary
 mouse/trackpad click in pane content must start radial gesture handling, call
-`preventDefault()`, stop propagation, and capture that pointer; it is not passed
-through to the embedded `Wall`, xterm, or dockview for focus, selection, or pane
-interaction. Non-primary mouse buttons are ignored by gesture handling so their
-browser or host behavior can continue. Users who want terminal selection or TUI
-mouse input must choose Select or Mouse mode explicitly.
+`preventDefault()`, stop propagation, and capture that pointer; it is not
+passed through to the embedded `Wall`, xterm, or dockview for focus,
+selection, or pane interaction. Non-primary mouse buttons are ignored by
+gesture handling so their browser or host behavior can continue. Users who
+want terminal selection or TUI mouse input must choose Select or Mouse mode
+explicitly.
 
-## 5. Gesture Mode
+## Gesture mode
 
 Gesture mode is the default pane-content touch behavior. Tapping the pane content
 opens a radial menu offset from the touch origin. The menu should appear in the
@@ -285,9 +253,13 @@ Root gesture menu:
 ```text
 Esc      ⌃C*               ▲                n Backspace
 Quit**                                                     Paste*
+```
 
+```text
                            ◀                ▶
+```
 
+```text
 ⬆︎Tab                     ▼                  y ⬆︎Enter
 Tab Space                                   Enter
 ```
@@ -309,7 +281,7 @@ Source of truth: `MOBILE_TERMINAL_KEY_SEQUENCES` in
 mapping; `MOBILE_GESTURE_GROUPS` and `MOBILE_GESTURE_QUIT_GROUP` in
 `lib/src/lib/mobile-gesture-menu.ts` define root and quit submenu actions.
 
-## 6. Input Mode Selector
+## Input mode selector
 
 The input mode selector controls what appears in the reserve area. It is always
 visible and has four items:
@@ -332,7 +304,8 @@ icons, and placeholder copy.
 | Type | The reserve area displays the Type reserve placeholder copy and focuses the hidden terminal input. Every typed key is echoed into the terminal as it happens. |
 | Draft | The entire reserve area displays the Draft reserve placeholder copy. |
 
-Default input mode is **Type**.
+Default input mode is **Type**. Recent and Draft are placeholder-only today —
+the real features are staged (see [Future](#future)).
 
 Switching to Type should focus the hidden input and open the native keyboard
 where browser policy allows. Switching away from Type should blur the hidden
@@ -343,7 +316,7 @@ the tap/click handler. Do not defer this focus to `requestAnimationFrame` or a
 timer, because mobile browsers may then treat it as no longer user-initiated and
 refuse to open the native keyboard.
 
-## 7. Type Mode Input
+## Type mode input
 
 Use a hidden or visually minimal input configured for terminal-style typing:
 
@@ -368,38 +341,7 @@ Required behavior:
 * Input supports mobile keyboard behavior and IME composition.
 * The app does not depend only on `keydown` for text input.
 
-## 8. Terminal Playground Behavior
-
-A fake shell is acceptable for v0.
-
-Minimum useful behavior:
-
-* Echo typed characters.
-* Maintain a command line buffer.
-* Enter submits the current command.
-* Backspace edits the current command.
-* Gesture-generated arrow keys produce visible behavior.
-* Escape and Tab produce visible behavior.
-* When a fake full-screen app such as `ascii-splash`, `splash`, `changelog`, or
-  `tut` is running, `Ctrl+C` sends `\x03` to that app; if the app exits, the
-  terminal returns to the fake shell prompt instead of restarting the app.
-* New panes created from the wall get the same fake shell behavior and prompt as
-  regular `/playground/desktop` panes.
-
-Example commands:
-
-```text
-help
-clear
-echo hello
-ascii-splash
-changelog
-tut
-```
-
-The shell only needs enough behavior to test the mobile controls.
-
-## 9. Keyboard Reserve
+## Keyboard reserve
 
 The keyboard reserve area has a stable height. It should not be recomputed from
 `visualViewport` while the native keyboard animates.
@@ -410,7 +352,7 @@ UI: session list, or the Recent/Type/Draft reserve placeholder copy.
 When the OS keyboard is visible, the OS keyboard may cover or occupy that same
 physical area. This is preferred over resizing the whole app around the keyboard.
 
-## 10. Touch Interactions
+## Touch interactions
 
 Required interactions:
 
@@ -433,87 +375,35 @@ focus to `requestAnimationFrame`, the wrapper must also repeat that blur shortly
 after the touch. The only mobile UI surfaces that should open the native
 keyboard are the Type selector and the Type reserve area.
 
-Not required for v0:
+## Copy and paste
 
-* Long-press key repeat.
-* Multi-touch gestures.
-* Trackpad mode.
-* A full command history UI.
-* A real draft editor.
+Keep copy and paste minimal:
 
-## 11. Copy And Paste
-
-Keep copy and paste minimal.
-
-Prototype behavior:
-
-* Text selection mode should allow the existing terminal selection and copy/paste flows to work.
+* Text selection mode should allow the existing terminal selection and copy/paste flows to work (`docs/specs/mouse-and-clipboard.md`).
 * Let users paste through the native browser/OS paste flow where possible.
 * No custom mobile clipboard manager is required.
 * No multi-line paste review is required.
 
-## 12. Recommended v0 Scope
+## Files
 
-Build exactly this:
+| File | Role |
+|------|------|
+| `lib/src/components/MobileTerminalUi.tsx` | The mobile wrapper: touch/input mode state, selectors, keyboard reserve, hidden Type input, key sequences (`MOBILE_TERMINAL_KEY_SEQUENCES`) |
+| `lib/src/components/MobileWall.tsx` | One-active-session mobile wall composition and session-row helpers (`useMobileWallSessionItems`) |
+| `lib/src/components/MobileGestureRadialMenu.tsx` | Radial menu rendering: keypad layout, group opacity, completion animation |
+| `lib/src/lib/mobile-gesture-menu.ts` | Gesture geometry (radii, option directions) and root/quit action groups |
 
-* One mobile terminal playground screen with one visible session at a time.
-* Floating theme switcher using the shared Dormouse theme picker.
-* Touch mode selector:
-
-```text
-Gestures | Select | Mouse
-```
-
-* Input mode selector:
-
-```text
-Sessions | Recent | Type | Draft
-```
-
-* Stable keyboard reserve area.
-* Sessions reserve content: active session rows with alert and TODO state.
-* Recent reserve content: the Recent reserve placeholder copy.
-* Draft reserve content: the Draft reserve placeholder copy.
-* Type mode native mobile keyboard input.
-* Gesture mode radial menu for arrows, navigation keys, Esc, Tab, Enter, simple vim-like keys, confirmed Ctrl+C, confirmed Paste, and Quit breakout.
-* Pocket `tut` starts directly in the Gesture navigation section, uses the title `Dormouse Pocket Tutorial`, and credits gesture items from radial-menu input callbacks rather than from native keyboard input.
-* Simple local playground terminal behavior.
-
-## 13. Prototype Success Criteria
-
-The prototype should answer these questions:
-
-1. Does the terminal viewport feel stable when the mobile keyboard opens and closes?
-2. Is the touch mode selector understandable and reachable?
-3. Is Gesture mode fast and understandable enough for arrows, navigation keys, and common TUI exits?
-4. Is text selection discoverable and reliable on mobile?
-5. Is Mouse mode useful when a TUI captures mouse events?
-6. Does native keyboard Type mode feel acceptable for terminal text entry?
-7. Does the stable keyboard reserve feel better than resizing the whole UI?
-8. Is the UI too cramped in portrait orientation?
-
-## 14. Product Principle
-
-The v0 prototype should stay focused:
-
-```text
-Touch modes make pane touches explicit.
-Input modes make the reserve area explicit.
-Everything else waits.
-```
-
-## 15. Future
+## Future
 
 Potential later additions:
 
-* Real recent commands.
-* Draft scratchpad.
+* Real recent commands (the Recent reserve is placeholder copy today).
+* Draft scratchpad (the Draft reserve is placeholder copy today).
 * Dual-pane copy/paste.
 * Pinned snippets.
 * Ctrl+D and Ctrl+Z app-key buttons.
 * Alt and modifier behavior.
 * Long-press key repeat.
-* SSH sessions.
-* Multi-session support.
-
-Remote backend PTY, user accounts, and the production security model — listed here when this was a website-only prototype — now exist as the Pocket app (`docs/specs/pocket-app.md`, `docs/specs/remote-security-model.md`); the prototype itself intentionally stays on `FakePtyAdapter`.
+* Multi-touch gestures.
+* Trackpad mode.
+* Multi-session support (more than one visible session).

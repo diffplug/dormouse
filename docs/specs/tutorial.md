@@ -59,6 +59,24 @@ Two keys are intercepted by `TutRunner` while a specific section is open — the
 
 Pocket reuses `cp-select`/`cp-raw`/`cp-rewrap` but drops `cp-override`: in Select mode it auto-overrides mouse capture for every mounted pane whose TUI is capturing the mouse, so it never asks the user to click the cursor icon. It also renders a non-counted live prompt above the checklist that reflects the current touch mode (yellow while Select is inactive, green once active); it is not stored or checkmarked.
 
+## Fake shell behavior
+
+Every playground pane gets a `TutorialShell` (see Architecture); a fake shell
+is all the playground needs. Minimum useful behavior:
+
+* Echo typed characters and maintain a command-line buffer; Enter submits,
+  Backspace edits.
+* Gesture-generated arrow keys, Escape, and Tab produce visible behavior.
+* When a fake full-screen app such as `ascii-splash`, `splash`, `changelog`, or
+  `tut` is running, `Ctrl+C` sends `\x03` to that app; if the app exits, the
+  terminal returns to the fake shell prompt instead of restarting the app.
+* New panes created from the wall get the same fake shell behavior and prompt
+  as regular `/playground/desktop` panes.
+
+Example commands: `help`, `clear`, `echo hello`, `ascii-splash`, `changelog`,
+`tut`. The shell only needs enough behavior to exercise the tutorial and the
+mobile controls.
+
 ## Storage
 
 `TutorialState` persists to `localStorage`. Unknown ids in a stored payload are filtered on load, so renaming an id is a one-way reset for that item. Both profiles share the completion key; profile totals count only that profile's items.
