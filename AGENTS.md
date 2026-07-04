@@ -70,7 +70,7 @@ Specs are written ahead of the code on purpose: a new component's spec starts as
 
 ## Design
 
-See [DESIGN.md](DESIGN.md) for full design context. Key principles:
+See [PRODUCT.md](PRODUCT.md) for users, brand personality, and aesthetic direction (including the anti-references), and [DESIGN.md](DESIGN.md) for the full design system — tokens, named rules, and component vocabulary. Key principles:
 
 1. **Native first** — Inside VSCode, feel indistinguishable from a built-in feature. Use the host's theme tokens.
 2. **Information density without intimidation** — Dense for power users, approachable for beginners. Progressive disclosure.
