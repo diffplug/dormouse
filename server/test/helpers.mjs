@@ -30,9 +30,20 @@ export function makeClock(startMs = 1_700_000_000_000) {
   };
 }
 
-export async function freshApp({ password = PASSWORD, origin = ORIGIN, now } = {}) {
+export async function freshApp({
+  password = PASSWORD,
+  origin = ORIGIN,
+  now,
+  requireUserVerification,
+} = {}) {
   const stateDir = await mkdtemp(join(tmpdir(), 'dormouse-server-'));
-  const created = createApp({ setupPassword: password, origin, stateDir, now });
+  const created = createApp({
+    setupPassword: password,
+    origin,
+    stateDir,
+    now,
+    requireUserVerification,
+  });
   return { ...created, stateDir, origin, rpId: new URL(origin).hostname };
 }
 
@@ -55,6 +66,12 @@ export function newAuthenticator() {
 /** Build registration clientDataJSON exactly as a browser would (webauthn.create). */
 export function registrationClientData({ challenge, origin = ORIGIN, type = 'webauthn.create' }) {
   return toBase64Url(utf8Encode(JSON.stringify({ type, challenge, origin, crossOrigin: false })));
+}
+
+/** Serialize an unpadded base64url challenge the way some browsers do in clientDataJSON. */
+export function padBase64Url(text) {
+  const rem = text.length % 4;
+  return rem === 0 ? text : `${text}${'='.repeat(4 - rem)}`;
 }
 
 /** begin → finish registration for `authenticator`; returns the finish Response. */

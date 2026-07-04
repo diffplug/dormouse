@@ -21,6 +21,7 @@ function entry(surfaceId: string, over: Partial<DirectoryEntry> = {}): Directory
     type: 'terminal',
     title: surfaceId,
     focused: false,
+    alive: true,
     ringing: false,
     hasTODO: false,
     ...over,

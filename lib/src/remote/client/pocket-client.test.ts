@@ -19,6 +19,7 @@ import {
 } from 'server-lib-common';
 
 import {
+  hasRecoverablePairingFailure,
   PocketClient,
   type PocketSocket,
   type PocketStorage,
@@ -92,8 +93,31 @@ function memoryStorage(): PocketStorage {
   return {
     getPasskeyPublicKey: (id) => passkeys.get(id) ?? null,
     setPasskeyPublicKey: (id, pk) => void passkeys.set(id, pk),
+    knownCredentialIds: () => [...passkeys.keys()],
     isPaired: (hostId) => paired.has(hostId),
     markPaired: (hostId) => void paired.add(hostId),
+    unmarkPaired: (hostId) => void paired.delete(hostId),
+  };
+}
+
+/**
+ * A {@link WebAuthnClient} that records the `allowCredentials` each
+ * `getAssertion` is scoped to, so tests can assert connect narrows selection.
+ */
+function recordingWebAuthn(): {
+  webauthn: WebAuthnClient;
+  assertionAllowLists: Array<readonly string[] | undefined>;
+} {
+  const assertionAllowLists: Array<readonly string[] | undefined> = [];
+  return {
+    assertionAllowLists,
+    webauthn: {
+      registerPasskey: fakeWebAuthn.registerPasskey,
+      async getAssertion(_challenge, _rpId, allowCredentials): Promise<PasskeyAssertion> {
+        assertionAllowLists.push(allowCredentials);
+        return assertion;
+      },
+    },
   };
 }
 
@@ -203,6 +227,13 @@ async function signedIn(overrides: Partial<PocketClientDeps> = {}): Promise<Harn
   return harness;
 }
 
+async function pairApproved(client: PocketClient, socket: FakeSocket): Promise<void> {
+  const pairing = client.pair('h1', 'iPhone');
+  await nextSent(socket, (f) => f.t === 'pair');
+  socket.server({ t: 'pair-result', approved: true, record: { hostId: 'h1' } });
+  await pairing;
+}
+
 // --- Tests -----------------------------------------------------------------
 
 describe('setup + signin', () => {
@@ -265,6 +296,14 @@ describe('pair', () => {
 });
 
 describe('connect', () => {
+  it('classifies ACL miss failures as recoverable stale pairing', () => {
+    expect(hasRecoverablePairingFailure(['device-not-paired'])).toBe(true);
+    expect(hasRecoverablePairingFailure(['pairing-mismatch'])).toBe(true);
+    expect(hasRecoverablePairingFailure(['passkey-not-paired'])).toBe(true);
+    expect(hasRecoverablePairingFailure(['challenge-invalid'])).toBe(false);
+    expect(hasRecoverablePairingFailure(undefined)).toBe(false);
+  });
+
   it('challenge → one assertion + device signature → connect2 → allowed', async () => {
     const { client, socket, device } = await signedIn();
     const connecting = client.connect('h1');
@@ -289,8 +328,45 @@ describe('connect', () => {
     expect(client.connectedHostId).toBe('h1');
   });
 
+  it('scopes the connect assertion to the stored credential and resolves its public key', async () => {
+    const { webauthn, assertionAllowLists } = recordingWebAuthn();
+    const { client, socket } = await signedIn({ webauthn });
+
+    const connecting = client.connect('h1');
+    await nextSent(socket, (f) => f.t === 'connect');
+    socket.server({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(7), expiresAt: 9e15 });
+    const connect2 = await nextSent(socket, (f) => f.t === 'connect2');
+    socket.server({ t: 'decision', allowed: true });
+
+    const decision = await connecting;
+    expect(decision.allowed).toBe(true);
+    // sign-in discovers (empty list); connect scopes to the credential setup stored.
+    expect(assertionAllowLists.at(-1)).toEqual([CREDENTIAL_ID]);
+    // ...so the stored public key is the one placed into the connect2 request.
+    const request = connect2.request as { passkey: { publicKey: string } };
+    expect(request.passkey.publicKey).toBe(PASSKEY_PUBLIC_KEY);
+  });
+
+  it('rejects a second waiter for an already-pending frame type', async () => {
+    const { client, socket } = await signedIn();
+    const first = client.connect('h1');
+    // Once the first connect is awaiting its challenge, a second overlapping
+    // connect must not silently queue behind it.
+    await nextSent(socket, (f) => f.t === 'connect');
+    await expect(client.connect('h1')).rejects.toThrow(/already awaiting/);
+
+    // The first handshake still completes normally.
+    socket.server({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(7), expiresAt: 9e15 });
+    await nextSent(socket, (f) => f.t === 'connect2');
+    socket.server({ t: 'decision', allowed: true });
+    expect((await first).allowed).toBe(true);
+  });
+
   it('resolves not-allowed with failures on a denied decision', async () => {
     const { client, socket } = await signedIn();
+    await pairApproved(client, socket);
+    expect(client.isPaired('h1')).toBe(true);
+
     const connecting = client.connect('h1');
     await nextSent(socket, (f) => f.t === 'connect');
     socket.server({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(3), expiresAt: 9e15 });
@@ -299,7 +375,25 @@ describe('connect', () => {
     const decision = await connecting;
     expect(decision.allowed).toBe(false);
     expect(decision.failures).toEqual(['device-not-paired']);
+    expect(decision.pairingStale).toBe(true);
+    expect(client.isPaired('h1')).toBe(false);
     expect(client.connectedHostId).toBeNull();
+  });
+
+  it('keeps the paired marker for non-pairing denials', async () => {
+    const { client, socket } = await signedIn();
+    await pairApproved(client, socket);
+
+    const connecting = client.connect('h1');
+    await nextSent(socket, (f) => f.t === 'connect');
+    socket.server({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(4), expiresAt: 9e15 });
+    await nextSent(socket, (f) => f.t === 'connect2');
+    socket.server({ t: 'decision', allowed: false, failures: ['challenge-invalid'] });
+
+    const decision = await connecting;
+    expect(decision.allowed).toBe(false);
+    expect(decision.pairingStale).toBeUndefined();
+    expect(client.isPaired('h1')).toBe(true);
   });
 });
 

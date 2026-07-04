@@ -523,6 +523,7 @@ function getCwdForPid(pid, runtime = {}) {
     const out = execFileSyncFn('lsof', ['-a', '-d', 'cwd', '-p', String(pid), '-Fn'], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true, // see runPowerShell: avoid the console-allocation deadlock
     });
     return parseCwdFromLsof(out, pid);
   } catch { /* fallback */ }
@@ -637,6 +638,7 @@ function getDescendantPids(rootPid, runtime = {}) {
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'ignore'],
         timeout: OPEN_PORT_TIMEOUT_MS,
+        windowsHide: true, // see runPowerShell: avoid the console-allocation deadlock
       });
       return [...buildDescendantSet(parsePsPairs(out), rootPid)];
     } catch {
@@ -844,7 +846,7 @@ function macListeningPorts(pids, runtime = {}) {
     const out = execFileSyncFn(
       'lsof',
       ['-nP', '-a', '-iTCP', '-sTCP:LISTEN', '-p', pids.join(','), '-Fpcnt'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: OPEN_PORT_TIMEOUT_MS },
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: OPEN_PORT_TIMEOUT_MS, windowsHide: true },
     );
     return parseLsofListening(out);
   } catch {

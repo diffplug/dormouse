@@ -14,7 +14,7 @@
  */
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { join } from 'node:path';
 
 import { SELFHOST_ACCOUNT_ID, toBase64Url } from 'server-lib-common';
@@ -95,6 +95,11 @@ abstract class JsonFileStore {
   }
 }
 
+/** Fixed-length SHA-256 digest, so timing-safe compares never branch on length. */
+function sha256(text: string): Buffer {
+  return createHash('sha256').update(text, 'utf8').digest();
+}
+
 export class AccountStore extends JsonFileStore {
   constructor(stateDir: string, now: () => number = () => Date.now()) {
     super(stateDir, 'account.json', now);
@@ -155,10 +160,21 @@ export class HostStore extends JsonFileStore {
     return this.read<StoredHost[]>([]);
   }
 
-  /** Look up an enrolled host by its bearer token (the `/ws/host` credential). */
+  /**
+   * Look up an enrolled host by its bearer token (the `/ws/host` credential).
+   * The token is a secret, so it is compared with a constant-time digest
+   * compare (mirroring the setup-password path in app.ts) rather than `===`,
+   * whose early-exit leaks byte positions. Every host is checked without an
+   * early break so the work does not depend on which entry matches.
+   */
   async findByToken(hostToken: string): Promise<StoredHost | undefined> {
     const hosts = await this.list();
-    return hosts.find((h) => h.hostToken === hostToken);
+    const providedHash = sha256(hostToken);
+    let match: StoredHost | undefined;
+    for (const h of hosts) {
+      if (timingSafeEqual(sha256(h.hostToken), providedHash)) match = h;
+    }
+    return match;
   }
 
   /**

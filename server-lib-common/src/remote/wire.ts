@@ -184,6 +184,13 @@ export interface DirectoryEntry {
   focused: boolean;
   activity?: 'unknown' | 'prompt' | 'editing' | 'running' | 'finished';
   exitCode?: number;
+  /**
+   * The pane's PTY process is still alive. A registry surface whose process has
+   * exited (Dormouse keeps it open showing "[Process exited…]" until closed)
+   * reports `alive: false` — distinct from `exitCode`, which is the last
+   * shell-integration command's status, not process lifetime.
+   */
+  alive: boolean;
   cwd?: string;
   ringing: boolean;
   hasTODO: boolean;

@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -68,5 +68,46 @@ describe('agent-browser host relaunch', () => {
       '/usr/local/bin/agent-browser',
       ['--session', 'dormouse.1.default', 'tab', 'close', 'blank-tab'],
     );
+  });
+});
+
+describe('agent-browser host screenshot transport', () => {
+  // Block body (not `() => spawnMock.mockReset()`): an arrow returning the mock
+  // makes vitest register it as a teardown hook and call it — a phantom spawn.
+  beforeEach(() => { spawnMock.mockReset(); });
+
+  it('screenshotToFile returns the path + mime without reading the bytes', async () => {
+    const shotPath = join(tmpdir(), 'dormouse-ab-shot-shotfile.jpg');
+    rmSync(shotPath, { force: true }); // no capture ran, so no file should exist
+    // Only the CLI spawn happens — no file is written by the mock.
+    enqueueSpawnResults([{}]); // screenshot exits 0
+
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+    const result = await host.screenshotToFile('shotfile', { format: 'jpeg', quality: 85 }, '/usr/local/bin/agent-browser');
+
+    expect(result).toEqual({ ok: true, path: shotPath, mime: 'image/jpeg' });
+    // The capture never touched the filesystem: the path points at a file that
+    // does not exist (the mock spawned nothing that would create it).
+    expect(existsSync(shotPath)).toBe(false);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock).toHaveBeenCalledWith('/usr/local/bin/agent-browser', [
+      '--session', 'shotfile', 'screenshot', shotPath,
+      '--screenshot-format', 'jpeg', '--screenshot-quality', '85',
+    ]);
+  });
+
+  it('screenshot() still reads the file and returns the raw bytes', async () => {
+    const shotPath = join(tmpdir(), 'dormouse-ab-shot-shotbytes.jpg');
+    const payload = Uint8Array.from([0xff, 0xd8, 0xff, 0x01, 0x02, 0x03]);
+    writeFileSync(shotPath, payload); // stand in for agent-browser writing the frame
+    enqueueSpawnResults([{}]); // screenshot exits 0
+
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+    const result = await host.screenshot('shotbytes', { format: 'jpeg', quality: 85 }, '/usr/local/bin/agent-browser');
+
+    expect(result.ok).toBe(true);
+    expect(result.mime).toBe('image/jpeg');
+    expect(Array.from(result.bytes ?? [])).toEqual(Array.from(payload));
+    rmSync(shotPath, { force: true });
   });
 });

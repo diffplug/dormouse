@@ -17,6 +17,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  DEFAULT_CHALLENGE_TTL_MS,
   REMOTE_EVENTS,
   REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
@@ -36,6 +37,7 @@ import {
   RP_ID,
   enrollHost,
   freshApp,
+  makeClock,
   newAuthenticator,
   ownerSession,
   sleep,
@@ -43,12 +45,13 @@ import {
   wsConnect,
 } from './helpers.mjs';
 import { FakeHost } from './harness/fake-host.mjs';
+import { Handshake } from '../dist/handshake.js';
 
 // --- Fixtures --------------------------------------------------------------
 
 /** Boot a server + one enrolled `FakeHost`, ready to accept clients. */
-async function boot({ autoApprove = true } = {}) {
-  const created = await freshApp();
+async function boot({ autoApprove = true, requireUserVerification } = {}) {
+  const created = await freshApp({ requireUserVerification });
   const server = await startServer(created);
   const { body: host } = await enrollHost(created.app, { label: 'Laptop' });
   const fakeHost = await startFakeHost(server, host, { autoApprove });
@@ -375,6 +378,135 @@ test('server rejects a replayed connect2 (same challenge twice) before forwardin
     assert.equal(replay.allowed, false);
     assert.ok(replay.failures.includes('challenge-invalid'), JSON.stringify(replay.failures));
     assert.equal(decisions.length, 1, 'the Host never saw the replay');
+  } finally {
+    await close();
+  }
+});
+
+test('server derives relayed challenge expiry from its own observation clock', async () => {
+  const clock = makeClock();
+  const authenticator = await newAuthenticator();
+  const gate = new Handshake(
+    {
+      findPasskey: async (credentialId) =>
+        credentialId === authenticator.credentialId
+          ? {
+              credentialId,
+              publicKey: authenticator.publicKey,
+              label: 'Test Passkey',
+              createdAt: clock.now(),
+            }
+          : undefined,
+    },
+    { origin: ORIGIN, rpId: RP_ID, now: clock.now },
+  );
+  const challenge = toBase64Url(globalThis.crypto.getRandomValues(new Uint8Array(32)));
+
+  gate.observeChallenge(
+    'client-1',
+    'host-1',
+    challenge,
+    clock.now() - DEFAULT_CHALLENGE_TTL_MS,
+  );
+  clock.advance(DEFAULT_CHALLENGE_TTL_MS - 1);
+
+  const assertion = await authenticator.assert({ challenge, origin: ORIGIN, rpId: RP_ID });
+  const result = await gate.checkConnect2('client-1', 'host-1', {
+    accountId: SELFHOST_ACCOUNT_ID,
+    devicePublicKey: 'device-public-key',
+    challenge,
+    deviceSignature: 'device-signature',
+    passkey: {
+      publicKey: authenticator.publicKey,
+      assertion,
+    },
+  });
+
+  assert.deepEqual(result, { ok: true });
+});
+
+test('server rejects a connect2 that answers a different Host challenge', async () => {
+  const clock = makeClock();
+  const authenticator = await newAuthenticator();
+  const gate = new Handshake(
+    {
+      findPasskey: async (credentialId) =>
+        credentialId === authenticator.credentialId
+          ? {
+              credentialId,
+              publicKey: authenticator.publicKey,
+              label: 'Test Passkey',
+              createdAt: clock.now(),
+            }
+          : undefined,
+    },
+    { origin: ORIGIN, rpId: RP_ID, now: clock.now },
+  );
+  const challenge = toBase64Url(globalThis.crypto.getRandomValues(new Uint8Array(32)));
+  gate.observeChallenge('client-1', 'host-a', challenge, clock.now() + DEFAULT_CHALLENGE_TTL_MS);
+
+  const assertion = await authenticator.assert({ challenge, origin: ORIGIN, rpId: RP_ID });
+  const result = await gate.checkConnect2('client-1', 'host-b', {
+    accountId: SELFHOST_ACCOUNT_ID,
+    devicePublicKey: 'device-public-key',
+    challenge,
+    deviceSignature: 'device-signature',
+    passkey: {
+      publicKey: authenticator.publicKey,
+      assertion,
+    },
+  });
+
+  assert.deepEqual(result, { ok: false, failures: ['challenge-invalid'] });
+});
+
+// --- requireUserVerification: Server mirrors the Host's UV demand -----------
+
+test('requireUserVerification: server rejects a UV-absent connect2 before forwarding (mirrors the Host)', async () => {
+  // The Host enforces UV via ConnectionPolicy.requireUserVerification; the server
+  // must demand the same, or the two verifiers silently disagree the moment UV
+  // is turned on. With UV required, a presence-only assertion is rejected here —
+  // before the Host is ever consulted.
+  const { app, server, host, fakeHost, close } = await boot({ requireUserVerification: true });
+  try {
+    const p = await phone(app, server);
+    assert.equal((await pair(p, host.hostId)).approved, true);
+    const decisions = collect(fakeHost, 'decision');
+
+    const challengeFrame = await connect(p, host.hostId);
+    // A well-formed assertion whose ONLY defect is the missing user-verification
+    // flag (user present, but no biometric/PIN).
+    const { decision } = await connect2(p, host.hostId, challengeFrame.challenge, {
+      assertion: { userVerified: false },
+    });
+
+    assert.equal(decision.allowed, false);
+    assert.ok(
+      decision.failures.includes('passkey-assertion-invalid'),
+      JSON.stringify(decision.failures),
+    );
+    assert.equal(decisions.length, 0, 'rejected before forwarding — Host challenge stays unburned');
+  } finally {
+    await close();
+  }
+});
+
+test('default (UV not configured): a UV-absent connect2 is still allowed (unchanged behavior)', async () => {
+  // The knob defaults to off: exactly the same UV-absent assertion the strict
+  // server rejects above is accepted end to end, proving the fix adds no
+  // behavior change for existing deployments.
+  const { app, server, host, fakeHost, close } = await boot();
+  try {
+    const p = await phone(app, server);
+    assert.equal((await pair(p, host.hostId)).approved, true);
+
+    const challengeFrame = await connect(p, host.hostId);
+    const { decision } = await connect2(p, host.hostId, challengeFrame.challenge, {
+      assertion: { userVerified: false },
+    });
+
+    assert.deepEqual(decision, { t: 'decision', allowed: true });
+    assert.equal(fakeHost.established.size, 1, 'the Host established the session');
   } finally {
     await close();
   }

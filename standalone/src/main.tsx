@@ -104,6 +104,7 @@ async function bootstrap() {
         restoredLayout={result.layout}
         initialDoors={result.doors}
         baseboardNotice={<ConnectedUpdateBanner />}
+        enableRemoteHost
       />
     </StrictMode>,
   );

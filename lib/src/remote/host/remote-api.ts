@@ -52,9 +52,12 @@ const FORCE_REPAINT_BOUNCE_MS = 60;
 interface Attachment {
   surfaceId: string;
   ptyId: string;
+  entry: TerminalEntry;
   subId: string;
   onData: (detail: { id: string; data: string }) => void;
   onExit: (detail: { id: string; exitCode: number }) => void;
+  /** Pending same-size repaint bounce (see FORCE_REPAINT_BOUNCE_MS), if any. */
+  bounceTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export interface RemoteApiSessionOptions {
@@ -146,10 +149,22 @@ export class RemoteApiSession {
     return { params, entry };
   }
 
-  #requireAttached(request: RemoteRequest, surfaceId: string): boolean {
-    if (this.#attachment?.surfaceId === surfaceId) return true;
+  #requireAttached(request: RemoteRequest, surfaceId: string): Attachment | null {
+    if (this.#attachment?.surfaceId === surfaceId) return this.#attachment;
     this.#fail(request, `surface is not attached: ${surfaceId}`);
-    return false;
+    return null;
+  }
+
+  #attachedParams<P extends { surfaceId: string }>(
+    request: RemoteRequest,
+  ): { params: P; attachment: Attachment } | null {
+    const params = request.params as P | undefined;
+    if (!params || typeof params.surfaceId !== 'string') {
+      this.#fail(request, `no such surface: ${params?.surfaceId ?? '(none)'}`);
+      return null;
+    }
+    const attachment = this.#requireAttached(request, params.surfaceId);
+    return attachment ? { params, attachment } : null;
   }
 
   // --- Methods ---
@@ -236,11 +251,28 @@ export class RemoteApiSession {
     };
     const onExit = (detail: { id: string; exitCode: number }): void => {
       if (detail.id !== ptyId) return;
+      // Deliver the close to the client first, then drop the attachment so a
+      // later write/resize for this surface fails safe with "not attached"
+      // instead of touching the now-dead PTY / disposed xterm (the pre-pin code
+      // re-resolved via the registry and got that fail-safe for free). Teardown
+      // offPtyExit(onExit)s mid-callback, which is safe — this handler, having
+      // filtered to its own ptyId, won't fire again — and nulls #attachment so
+      // #requireAttached fails and the bounce timer + PTY listeners are cleaned.
       emitOrBuffer(REMOTE_EVENTS.terminalClosed, { exitCode: detail.exitCode });
+      this.#teardownAttachment();
     };
     platform.onPtyData(onData);
     platform.onPtyExit(onExit);
-    this.#attachment = { surfaceId: params.surfaceId, ptyId, subId, onData, onExit };
+    const attachment: Attachment = {
+      surfaceId: params.surfaceId,
+      ptyId,
+      entry,
+      subId,
+      onData,
+      onExit,
+      bounceTimer: null,
+    };
+    this.#attachment = attachment;
 
     // Attach-is-the-resize: resizing the real xterm fires its onResize handler,
     // which drives resizePty → SIGWINCH → the TUI/shell repaints, and that
@@ -250,9 +282,22 @@ export class RemoteApiSession {
       term.resize(cols, rows);
     } else {
       // Same size: force one repaint with a quick rows bounce on the PTY only,
-      // leaving the already-correct local xterm buffer untouched.
-      platform.resizePty(ptyId, cols, Math.max(1, rows - 1));
-      setTimeout(() => platform.resizePty(ptyId, cols, rows), FORCE_REPAINT_BOUNCE_MS);
+      // leaving the already-correct local xterm buffer untouched. Bounce away
+      // from `rows` in whichever direction stays >= 1 (a 1-row surface must
+      // bounce up, since rows-1 would be an identical no-op that fires no
+      // SIGWINCH and so never repaints).
+      const bounced = rows > 1 ? rows - 1 : rows + 1;
+      platform.resizePty(ptyId, cols, bounced);
+      // The restore runs ~60ms later, so the client may detach, re-attach at a
+      // different size, or dispose the session first. Cancel on teardown and,
+      // as a backstop, re-check this is still the current attachment before
+      // touching the PTY — a stale restore would clobber the newer size owner
+      // (last-attach-wins) or resize a detached/exited PTY.
+      attachment.bounceTimer = setTimeout(() => {
+        attachment.bounceTimer = null;
+        if (this.#attachment !== attachment) return;
+        platform.resizePty(ptyId, cols, rows);
+      }, FORCE_REPAINT_BOUNCE_MS);
     }
 
     const result: TerminalAttachResult = { cols: term.cols, rows: term.rows };
@@ -275,20 +320,19 @@ export class RemoteApiSession {
   }
 
   #write(request: RemoteRequest): void {
-    const resolved = this.#resolveSurface<TerminalWriteParams>(request);
+    const resolved = this.#attachedParams<TerminalWriteParams>(request);
     if (!resolved) return;
-    const { params, entry } = resolved;
-    if (!this.#requireAttached(request, params.surfaceId)) return;
+    const { params, attachment } = resolved;
     // Feed the existing PTY input path; the local echo returns via onPtyData.
-    getPlatform().writePty(entry.ptyId, utf8Decode(fromBase64Url(params.bytes)));
+    getPlatform().writePty(attachment.ptyId, utf8Decode(fromBase64Url(params.bytes)));
     this.#ok(request, {});
   }
 
   #resize(request: RemoteRequest): void {
-    const resolved = this.#resolveSurface<TerminalResizeParams>(request);
+    const resolved = this.#attachedParams<TerminalResizeParams>(request);
     if (!resolved) return;
-    const { params, entry } = resolved;
-    if (!this.#requireAttached(request, params.surfaceId)) return;
+    const { params, attachment } = resolved;
+    const entry = attachment.entry;
     const term = entry.terminal;
     const cols = clampTerminalDimension(params.cols, term.cols);
     const rows = clampTerminalDimension(params.rows, term.rows);
@@ -299,6 +343,10 @@ export class RemoteApiSession {
 
   #teardownAttachment(): void {
     if (!this.#attachment) return;
+    if (this.#attachment.bounceTimer) {
+      clearTimeout(this.#attachment.bounceTimer);
+      this.#attachment.bounceTimer = null;
+    }
     const platform = getPlatform();
     platform.offPtyData(this.#attachment.onData);
     platform.offPtyExit(this.#attachment.onExit);

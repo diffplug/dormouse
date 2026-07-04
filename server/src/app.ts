@@ -67,6 +67,14 @@ export interface AppConfig {
   readonly setupPassword: string;
   /** External origin, e.g. `https://dormouse.tailnet.ts.net`; source of `rpId`. */
   readonly origin: string;
+  /**
+   * Demand the authenticator's user-verification flag (biometric/PIN) on the
+   * relay's connection-handshake assertions, mirroring the Host's
+   * `ConnectionPolicy.requireUserVerification` so Server and Host cannot disagree
+   * on what a valid assertion is. Omitted/false keeps the current presence-only
+   * behavior; a deployment opts in explicitly (env → config in `index.ts`).
+   */
+  readonly requireUserVerification?: boolean;
   /** Directory holding `account.json`. */
   readonly stateDir: string;
   /**
@@ -143,12 +151,19 @@ export interface CreatedApp {
 
 export function createApp(config: AppConfig): CreatedApp {
   const now = config.now ?? (() => Date.now());
-  const rpId = new URL(config.origin).hostname;
+  const originUrl = new URL(config.origin);
+  const origin = originUrl.origin;
+  const rpId = originUrl.hostname;
   const accounts = new AccountStore(config.stateDir, now);
   const hostStore = new HostStore(config.stateDir, now);
   const sessions = new SessionStore(now);
   // Server-side handshake policy layered on the transport-dumb hub (slice 3).
-  const handshake = new Handshake(accounts, { origin: config.origin, rpId, now });
+  const handshake = new Handshake(accounts, {
+    origin,
+    rpId,
+    requireUserVerification: config.requireUserVerification,
+    now,
+  });
   const hub = new RelayHub(handshake);
   // Separate issuers per flow: a setup challenge cannot be redeemed at sign-in.
   const setupChallenges = new HostChallengeIssuer({ now });
@@ -210,10 +225,11 @@ export function createApp(config: AppConfig): CreatedApp {
     if (clientData.type !== 'webauthn.create') {
       return c.json({ error: 'clientData type must be webauthn.create' }, 400);
     }
-    if (typeof clientData.challenge !== 'string' || !setupChallenges.consume(clientData.challenge)) {
+    const challenge = normalizeChallenge(clientData.challenge);
+    if (!challenge || !setupChallenges.consume(challenge)) {
       return c.json({ error: 'unrecognized or expired challenge' }, 400);
     }
-    if (clientData.origin !== config.origin) {
+    if (clientData.origin !== origin) {
       return c.json({ error: 'origin mismatch' }, 400);
     }
 
@@ -267,15 +283,21 @@ export function createApp(config: AppConfig): CreatedApp {
     if (!clientData || typeof clientData.challenge !== 'string') {
       return c.json({ error: 'malformed clientDataJSON' }, 400);
     }
-    const challenge = clientData.challenge;
+    const challenge = normalizeChallenge(clientData.challenge);
+    if (!challenge) {
+      return c.json({ error: 'malformed clientDataJSON' }, 400);
+    }
     if (!signinChallenges.consume(challenge)) {
       return c.json({ error: 'unrecognized or expired challenge' }, 400);
     }
 
     const result = await verifyPasskeyAssertion(assertion as PasskeyAssertion, stored.publicKey, {
       challenge,
-      origin: config.origin,
+      origin,
       rpId,
+      // Same server-wide UV policy the connect handshake enforces, so sign-in
+      // is not a softer path than a remote connect when UV is required.
+      requireUserVerification: config.requireUserVerification,
     });
     if (!result.ok) {
       return c.json({ error: `assertion rejected: ${result.reason}` }, 401);
@@ -301,7 +323,7 @@ export function createApp(config: AppConfig): CreatedApp {
     const res: HostEnrollResponse = {
       hostId: host.hostId,
       hostToken: host.hostToken,
-      origin: config.origin,
+      origin,
       rpId,
     };
     return c.json(res);
@@ -460,6 +482,16 @@ function decodeClientData(
     const parsed: unknown = JSON.parse(utf8Decode(fromBase64Url(clientDataJSON)));
     if (typeof parsed !== 'object' || parsed === null) return null;
     return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Canonicalize browser-serialized base64url challenges before single-use lookup. */
+function normalizeChallenge(challenge: unknown): string | null {
+  if (typeof challenge !== 'string') return null;
+  try {
+    return toBase64Url(fromBase64Url(challenge));
   } catch {
     return null;
   }

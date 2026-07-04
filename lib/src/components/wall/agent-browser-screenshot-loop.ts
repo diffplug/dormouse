@@ -1,10 +1,27 @@
 import { getPlatform } from '../../lib/platform';
 
+// Fast non-cryptographic hash (djb2, xor length) over the raw screenshot bytes —
+// the byte analogue of the connection's frame dedup. A static page the daemon
+// keeps re-pulsing produces byte-identical captures, so this lets us skip the
+// decode+draw entirely.
+function djb2Bytes(bytes: Uint8Array): number {
+  let h = 5381;
+  for (let i = 0; i < bytes.length; i++) h = ((h << 5) + h + bytes[i]) | 0;
+  return (h ^ (bytes.length | 0)) | 0;
+}
+
 export interface ScreenshotLoopDeps {
   getSession: () => string | undefined;
   getBinaryPath: () => string | undefined;
   isCapable: () => boolean;
   draw: (bitmap: ImageBitmap) => void;
+  /** A monotonic draw-target generation. Included in the byte-dedup key so a
+   *  fresh canvas (bumped on re-attach) still repaints even when the bytes match
+   *  the last displayed frame. Absent ⇒ generation 0 (dedup on bytes alone). */
+  getDrawGeneration?: () => number;
+  /** Optional gated logger for the high-rate per-shot start/done diagnostics;
+   *  absent ⇒ silent. Warnings (stall/failure/error) stay unconditional. */
+  log?: (message: string) => void;
 }
 
 export interface ScreenshotLoop {
@@ -34,8 +51,17 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
   let avgMs = 120;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
+  // The `bytes:generation` of the frame currently on the canvas. Skips decoding a
+  // capture we've already displayed onto this same draw target.
+  let lastDrawnKey: string | null = null;
 
   const display = (bytes: Uint8Array, mime: string, mySeq: number) => {
+    // Identical bytes drawn onto the same canvas generation → nothing to repaint;
+    // skip the decode. A fresh canvas bumps the generation, so the same bytes
+    // still draw after a re-attach.
+    const gen = deps.getDrawGeneration?.() ?? 0;
+    const key = `${djb2Bytes(bytes)}:${gen}`;
+    if (key === lastDrawnKey) return;
     // The bytes are ArrayBuffer-backed (readFile → structured clone); narrow off
     // the ArrayBufferLike default so they satisfy BlobPart.
     const part = bytes as Uint8Array<ArrayBuffer>;
@@ -45,6 +71,9 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
         bitmap.close();
         return;
       }
+      // Record only once actually drawn, so a shot dropped by the seq guard never
+      // suppresses a later identical capture that must still paint.
+      lastDrawnKey = key;
       deps.draw(bitmap);
     }).catch((err) => console.warn('[agent-browser] screenshot decode failed:', err));
   };
@@ -57,7 +86,7 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
     dirty = false;
     const mySeq = ++seq;
     lastStart = performance.now();
-    console.log(`[agent-browser] screenshot start ${JSON.stringify({ session, seq: mySeq })}`);
+    deps.log?.(`[agent-browser] screenshot start ${JSON.stringify({ session, seq: mySeq })}`);
     // Watchdog: a capture that never resolves (a wedged host round-trip) must not
     // pin `inFlight` forever and silently freeze the screencast. Free the slot and
     // retry after a generous bound; a late resolve is dropped by the seq guard.
@@ -74,7 +103,7 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
       settled = true;
       clearTimeout(watchdog);
       const elapsedMs = performance.now() - lastStart;
-      console.log(`[agent-browser] screenshot done ${JSON.stringify({ session, seq: mySeq, ok: res.ok, bytes: res.bytes?.byteLength ?? 0, elapsedMs: Math.round(elapsedMs), dirty })}`);
+      deps.log?.(`[agent-browser] screenshot done ${JSON.stringify({ session, seq: mySeq, ok: res.ok, bytes: res.bytes?.byteLength ?? 0, elapsedMs: Math.round(elapsedMs), dirty })}`);
       avgMs = avgMs * 0.6 + elapsedMs * 0.4;
       inFlight = false;
       if (res.ok && res.bytes) display(res.bytes, res.mime || 'image/jpeg', mySeq);

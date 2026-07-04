@@ -221,7 +221,8 @@ export class RelayHub {
           this.#toClient(client, { t: 'error', error: 'missing hostId' });
           return;
         }
-        if (!this.#hosts.has(frame.hostId)) {
+        const host = this.#hosts.get(frame.hostId);
+        if (!host) {
           this.#toClient(client, { t: 'error', error: `host ${frame.hostId} is offline` });
           return;
         }
@@ -239,8 +240,7 @@ export class RelayHub {
         client.hostId = frame.hostId;
 
         if (frame.t === 'connect') {
-          const host = this.#hosts.get(frame.hostId);
-          if (host) this.#toHost(host, { t: 'connect', clientId: client.clientId });
+          this.#toHost(host, { t: 'connect', clientId: client.clientId });
           return;
         }
         if (frame.t === 'pair') {
@@ -248,26 +248,24 @@ export class RelayHub {
           // made: the owner account, a registered credential, a matching key
           // hash. A forged request is answered locally and never reaches the Host.
           const check = await this.#gate.checkPair(frame.request);
+          if (!this.#isCurrentClientHost(client, frame.hostId, host)) return;
           if (!check.ok) {
             this.#toClient(client, { t: 'pair-result', approved: false, error: check.error });
             return;
           }
-          const host = this.#hosts.get(frame.hostId);
-          if (host) this.#toHost(host, { t: 'pair', clientId: client.clientId, request: frame.request });
+          this.#toHost(host, { t: 'pair', clientId: client.clientId, request: frame.request });
           return;
         }
         // connect2: the server verifies the assertion (against the STORED key)
         // and challenge freshness before forwarding. On failure the client gets
         // a denial and the Host's challenge stays unburned.
-        const check = await this.#gate.checkConnect2(client.clientId, frame.request);
+        const check = await this.#gate.checkConnect2(client.clientId, frame.hostId, frame.request);
+        if (!this.#isCurrentClientHost(client, frame.hostId, host)) return;
         if (!check.ok) {
           this.#toClient(client, { t: 'decision', allowed: false, failures: check.failures });
           return;
         }
-        const host = this.#hosts.get(frame.hostId);
-        if (host) {
-          this.#toHost(host, { t: 'connect2', clientId: client.clientId, request: frame.request });
-        }
+        this.#toHost(host, { t: 'connect2', clientId: client.clientId, request: frame.request });
         return;
       }
       case 'msg':
@@ -301,6 +299,14 @@ export class RelayHub {
 
   #toHost(host: HostConn, frame: ServerToHostFrame): void {
     safeSend(host.socket, frame);
+  }
+
+  #isCurrentClientHost(client: ClientConn, hostId: string, host: HostConn): boolean {
+    return (
+      this.#clients.get(client.clientId) === client &&
+      client.hostId === hostId &&
+      this.#hosts.get(hostId) === host
+    );
   }
 }
 

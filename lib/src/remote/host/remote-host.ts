@@ -51,6 +51,16 @@ export interface RemoteApiSessionLike {
 /** Minimal WebSocket surface, so tests can inject a fake. */
 export type WebSocketLike = RemoteWebSocket;
 
+/** Per-client lifecycle state tracked by the Host, keyed by clientId. */
+interface ClientState {
+  /** True once the Host allowed this client's connection — the `msg` gate. */
+  established: boolean;
+  /** The in-flight pairing awaiting local approval, if any. */
+  pending?: PendingPairing;
+  /** The remote-api handler, created on the first authorized `msg`. */
+  session?: RemoteApiSessionLike;
+}
+
 export type RemoteHostStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'stopped';
 
 export interface RemoteHostOptions {
@@ -90,12 +100,13 @@ export class RemoteHost {
   readonly #now: () => number;
   readonly #reconnect: boolean;
 
-  /** clientIds whose connection the Host allowed — the `msg` gate on this side. */
-  readonly #established = new Set<string>();
-  /** clientId → the in-flight pairing awaiting local approval. */
-  readonly #pending = new Map<string, PendingPairing>();
-  /** clientId → its remote-api handler, created on first authorized `msg`. */
-  readonly #sessions = new Map<string, RemoteApiSessionLike>();
+  /**
+   * Per-client lifecycle state keyed by clientId. Folding the three concerns
+   * (allowed connection, in-flight pairing, live session) into one record makes
+   * teardown a single `delete` — no handler can leave the collections out of
+   * sync.
+   */
+  readonly #clients = new Map<string, ClientState>();
 
   #ws: WebSocketLike | null = null;
   #status: RemoteHostStatus = 'idle';
@@ -195,11 +206,21 @@ export class RemoteHost {
 
   /** Connection-scoped state resets on a dropped socket (the ACL persists). */
   #dropTransientState(): void {
-    for (const session of this.#sessions.values()) session.dispose();
-    this.#sessions.clear();
-    for (const clientId of this.#pending.keys()) this.#dismissApproval(clientId);
-    this.#pending.clear();
-    this.#established.clear();
+    for (const state of this.#clients.values()) state.session?.dispose();
+    for (const [clientId, state] of this.#clients) {
+      if (state.pending) this.#dismissApproval(clientId);
+    }
+    this.#clients.clear();
+  }
+
+  /** Get or create the per-client state record for `clientId`. */
+  #clientState(clientId: string): ClientState {
+    let state = this.#clients.get(clientId);
+    if (!state) {
+      state = { established: false };
+      this.#clients.set(clientId, state);
+    }
+    return state;
   }
 
   #send(frame: HostFrame): void {
@@ -253,13 +274,15 @@ export class RemoteHost {
       approve: (label) => this.#approvePairing(clientId, ticket.pairingId, label),
       deny: (error) => this.#denyPairing(clientId, ticket.pairingId, error),
     };
-    this.#pending.set(clientId, pending);
+    this.#clientState(clientId).pending = pending;
     this.#requestApproval(pending);
   }
 
   /** The local approval — the ONLY path that writes the ACL. */
   #approvePairing(clientId: string, pairingId: string, label?: string): void {
-    if (!this.#pending.delete(clientId)) return; // already resolved
+    const state = this.#clients.get(clientId);
+    if (!state?.pending) return; // already resolved
+    state.pending = undefined;
     let record: HostAclRecord;
     try {
       record = this.#ceremony.approve(pairingId, { approvedBy: 'host-user', label });
@@ -279,7 +302,9 @@ export class RemoteHost {
   }
 
   #denyPairing(clientId: string, pairingId: string, error = 'pairing denied by host'): void {
-    if (!this.#pending.delete(clientId)) return;
+    const state = this.#clients.get(clientId);
+    if (!state?.pending) return;
+    state.pending = undefined;
     try {
       this.#ceremony.deny(pairingId);
     } catch {
@@ -304,7 +329,7 @@ export class RemoteHost {
       },
       request,
     );
-    if (decision.allowed) this.#established.add(clientId);
+    if (decision.allowed) this.#clientState(clientId).established = true;
     // `failures` is optional on the wire; omit it on an allowed decision.
     this.#send({
       t: 'decision',
@@ -315,24 +340,23 @@ export class RemoteHost {
   }
 
   #onMsg(clientId: string, data: unknown): void {
-    if (!this.#established.has(clientId)) return; // never before an allowed decision
-    let session = this.#sessions.get(clientId);
+    const state = this.#clients.get(clientId);
+    if (!state?.established) return; // never before an allowed decision
+    let session = state.session;
     if (!session) {
       if (!this.#createSession) return;
       session = this.#createSession({
         hostId: this.#enrollment.hostId,
         send: (payload) => this.#send({ t: 'msg', clientId, data: payload }),
       });
-      this.#sessions.set(clientId, session);
+      state.session = session;
     }
     session.handle(data);
   }
 
   #onClientGone(clientId: string): void {
-    this.#established.delete(clientId);
-    this.#pending.delete(clientId);
-    this.#sessions.get(clientId)?.dispose();
-    this.#sessions.delete(clientId);
+    this.#clients.get(clientId)?.session?.dispose();
+    this.#clients.delete(clientId);
     this.#dismissApproval(clientId);
   }
 }

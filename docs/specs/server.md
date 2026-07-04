@@ -40,6 +40,25 @@ real phone, put the server behind TLS (`tailscale serve` is the intended
 selfhost path, any reverse proxy works). The server itself always speaks
 plain HTTP.
 
+`DORMOUSE_ORIGIN` is parsed once and normalized with `URL.origin`; WebAuthn
+clientData checks, passkey assertion verification, and the Host enrollment
+policy all use that normalized origin.
+
+## Host webview CSP (self-host builds)
+
+The standalone Host is a Tauri app, and its webview `connect-src` bounds where
+the Host can reach a relay server. The shipped binary is scoped to the SaaS
+origin only (`https://*.dormouse.sh wss://*.dormouse.sh`, plus localhost for
+dev), so a compromised webview cannot exfiltrate to an arbitrary host. A
+self-host server on a different origin is therefore reached only by a custom
+build: set `DORMOUSE_REMOTE_CONNECT_SRC` when building
+(`pnpm --filter dormouse-standalone tauri build`) to the CSP sources for your
+server, e.g. `https://dormouse.example.com wss://dormouse.example.com` (or a
+tailnet wildcard `https://*.ts.net wss://*.ts.net`). It replaces the default
+SaaS sources; localhost and the rest of the policy are untouched. The default
+is deliberately not internet-wide — widening it is an explicit, per-build
+opt-in.
+
 ## State files
 
 ```
@@ -71,6 +90,11 @@ Two facts keep the server dependency-free:
 
 Server-issued challenges (registration, sign-in) reuse `HostChallengeIssuer`
 — it is a generic single-use/TTL challenge store despite the name.
+
+Before a challenge is consumed, the server canonicalizes the browser's
+`clientDataJSON.challenge` by decoded base64url bytes, so padded browser
+serializations redeem the issued challenge without weakening single-use replay
+protection.
 
 This also makes the server fully testable without a browser: the
 `SimAuthenticator` harness in `server-lib-common` produces real assertions,
@@ -107,6 +131,16 @@ re-establish an old session.
 When a Client socket binds to a different Host, the relay sends `client-gone`
 to the previous live Host before replacing the binding, so Host-side pairing UI,
 remote-api sessions, and watchers are disposed immediately.
+
+Client-originated `pair` and `connect2` frames are also rechecked after their
+async validation work: if the Client disconnected, rebound, or the Host socket
+was replaced while validation was pending, the stale result is dropped.
+
+For `connect2`, the server remembers the last Host challenge it relayed to a
+Client with a relay-local expiry derived from the server's observation time
+(`DEFAULT_CHALLENGE_TTL_MS`). The Host's `expiresAt` is still forwarded to the
+Client, but the server never compares its own clock to that Host wall-clock
+timestamp.
 
 ### Pairing (phone ↔ laptop, first time)
 

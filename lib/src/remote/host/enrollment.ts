@@ -11,6 +11,7 @@
  */
 
 import { API_ROUTES, type HostEnrollResponse } from 'server-lib-common';
+import { loadJson, saveJson } from '../../lib/local-json-store';
 
 export interface HostEnrollment {
   /** Origin the Server is reachable at, e.g. `https://dormouse.tailnet.ts.net`. */
@@ -40,14 +41,8 @@ function isEnrollment(value: unknown): value is HostEnrollment {
 }
 
 export function getEnrollment(): HostEnrollment | null {
-  try {
-    const raw = globalThis.localStorage?.getItem(ENROLLMENT_KEY);
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    return isEnrollment(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+  // Missing key / malformed JSON / failed guard all collapse to `null`.
+  return loadJson<HostEnrollment, null>(ENROLLMENT_KEY, null, isEnrollment);
 }
 
 export function clearEnrollment(): void {
@@ -59,11 +54,7 @@ export function clearEnrollment(): void {
 }
 
 function saveEnrollment(enrollment: HostEnrollment): void {
-  try {
-    globalThis.localStorage?.setItem(ENROLLMENT_KEY, JSON.stringify(enrollment));
-  } catch {
-    // No localStorage: the caller still gets the in-memory enrollment back.
-  }
+  saveJson(ENROLLMENT_KEY, enrollment);
 }
 
 /**

@@ -17,7 +17,7 @@ Tauri app process (Rust — standalone/src-tauri/src/lib.rs)
     ├── dor-control-server.js  — dor CLI control socket (docs/specs/dor-cli.md)
     ├── iframe-proxy.cjs       — bundled from lib/src/host/iframe-proxy.ts (docs/specs/dor-browser.md)
     ├── agent-browser-host.cjs — bundled from lib/src/host/agent-browser-host.ts (docs/specs/dor-browser.md)
-    ├── clipboard-ops.js       — OS clipboard tiers (docs/specs/mouse-and-clipboard.md §8.6)
+    ├── clipboard-ops.js       — OS clipboard tiers, macOS/Linux only here (docs/specs/mouse-and-clipboard.md §8.6)
     └── shell-integration/     — injected shell hook scripts (docs/specs/terminal-escapes.md)
 ```
 
@@ -46,8 +46,9 @@ Source of truth: `standalone/src/main.tsx` (`bootstrap()`).
 5. `resumeOrRestore(platform)` runs the priority-based recovery from
    `docs/specs/transport.md`.
 6. `startUpdateCheck()` (`docs/specs/auto-update.md`), then render `AppBar` +
-   `App`, threading `<ConnectedUpdateBanner />` through the `baseboardNotice`
-   slot.
+   `App` with `enableRemoteHost` (activating the remote Host module —
+   enrollment, pairing modal, relay socket; `docs/specs/server.md` Host side),
+   threading `<ConnectedUpdateBanner />` through the `baseboardNotice` slot.
 
 ## Rust ↔ sidecar bridge
 
@@ -63,7 +64,12 @@ stderr, which Rust appends to the log file). Webview → Rust is the Tauri
 `pty_get_scrollback` / `get_available_shells`, `dor_control_response`,
 `iframe_create_proxy_url`, the `agent_browser_*` family, the `clipboard`
 readers, `read_update_log`, and `kill_sidecar_now` — each a thin forwarder to
-the corresponding sidecar message. Request/response commands block on the
+the corresponding sidecar message, with two carve-outs: on Windows the
+clipboard readers skip the sidecar and read the Win32 clipboard natively
+(`clipboard_win.rs`; behavior in `docs/specs/mouse-and-clipboard.md` §8.6),
+and `agent_browser_screenshot` receives a temp-file *path* from the sidecar
+and reads the bytes in Rust so images never ride the JSON-lines pipe shared
+with PTY traffic (`docs/specs/dor-browser.md`). Request/response commands block on the
 sidecar's reply with a timeout; `OPEN_PORT_TIMEOUT_MS` in `lib.rs` mirrors the
 constant in `lib/src/lib/platform/types.ts` and the two must stay in sync.
 Sidecar events (`pty:*`, dor control requests, async results) are emitted to
@@ -155,6 +161,10 @@ root `package.json` for the `dev:standalone*` orchestration.
 - `stage` = `stage:dor-cli` (build + stage the dor CLI, `docs/specs/dor-cli.md`)
   plus `stage:sidecar-proxy` (`build-sidecar-proxy.mjs` bundles the
   `lib/src/host/` sources into the sidecar `.cjs` files).
+- The `tauri` script runs `standalone/scripts/tauri.mjs`, which assembles the
+  webview CSP (`standalone/scripts/csp.mjs`) before delegating to the Tauri
+  CLI — including the `DORMOUSE_REMOTE_CONNECT_SRC` build-time override for
+  self-host relay origins (`docs/specs/server.md`, Host webview CSP).
 - The Tauri bundle ships the whole sidecar via the `../sidecar/**/*` resources
   glob — including node-pty's prebuilds + bundled ConPTY and the
   shell-integration scripts (`docs/specs/terminal-escapes.md`).
@@ -171,6 +181,8 @@ root `package.json` for the `dev:standalone*` orchestration.
 | File | Role |
 |------|------|
 | `standalone/src-tauri/src/lib.rs` | Rust backend: sidecar spawn/supervision, invoke commands, event forwarding, file drop, logging, dock icon, exit teardown |
+| `standalone/src-tauri/src/clipboard_win.rs` | Native Win32 clipboard reads on Windows (owned by `docs/specs/mouse-and-clipboard.md`) |
+| `standalone/scripts/tauri.mjs`, `csp.mjs` | Tauri CLI wrapper assembling the webview CSP (`DORMOUSE_REMOTE_CONNECT_SRC`) |
 | `standalone/src-tauri/tauri.conf.json` | Window config, dev/build commands, sidecar resources glob, updater config |
 | `standalone/src/main.tsx` | Webview bootstrap (boot sequence above) |
 | `standalone/src/AppBar.tsx` | Titlebar: shell dropdown, theme picker, window controls |

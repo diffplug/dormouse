@@ -14,7 +14,9 @@ import {
   PASSWORD,
   RP_ID,
   freshApp,
+  enrollHost,
   newAuthenticator,
+  padBase64Url,
   post,
   readAccount,
   register,
@@ -102,6 +104,22 @@ test('setup/finish rejects a replayed challenge', async () => {
   assert.match((await replay.json()).error, /challenge/);
 });
 
+test('setup/finish accepts a padded base64url clientData challenge', async () => {
+  const { app } = await freshApp();
+  const authenticator = await newAuthenticator();
+  const begin = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
+  const { challenge } = await begin.json();
+
+  const res = await post(app, API_ROUTES.setupFinish, {
+    password: PASSWORD,
+    credentialId: authenticator.credentialId,
+    publicKey: authenticator.publicKey,
+    clientDataJSON: registrationClientData({ challenge: padBase64Url(challenge) }),
+    label: 'x',
+  });
+  assert.equal(res.status, 200);
+});
+
 test('setup/finish rejects a mismatched origin in clientDataJSON', async () => {
   const { app } = await freshApp();
   const authenticator = await newAuthenticator();
@@ -169,4 +187,26 @@ test('origin/rpId derive from config', async () => {
   assert.equal(body.accountId, 'owner');
   assert.equal(typeof body.challenge, 'string');
   assert.equal(new URL(ORIGIN).hostname, RP_ID);
+});
+
+test('configured origin is normalized for setup and Host policy', async () => {
+  const { app } = await freshApp({ origin: 'https://Example.COM/' });
+  const authenticator = await newAuthenticator();
+  const begin = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
+  const { challenge, rpId } = await begin.json();
+  assert.equal(rpId, 'example.com');
+
+  const finish = await post(app, API_ROUTES.setupFinish, {
+    password: PASSWORD,
+    credentialId: authenticator.credentialId,
+    publicKey: authenticator.publicKey,
+    clientDataJSON: registrationClientData({ challenge, origin: 'https://example.com' }),
+    label: 'x',
+  });
+  assert.equal(finish.status, 200);
+
+  const { res, body } = await enrollHost(app);
+  assert.equal(res.status, 200);
+  assert.equal(body.origin, 'https://example.com');
+  assert.equal(body.rpId, 'example.com');
 });

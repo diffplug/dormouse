@@ -3,6 +3,7 @@ import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 // cross-spawn, not node:child_process: this script spawns `pnpm` and
 // `agent-browser`, which are `.cmd` shims on Windows that a bare-name spawn
@@ -93,7 +94,18 @@ const invokeMap = {
   iframe_create_proxy_url: ({ target }) => requestSidecar('iframe:createProxyUrl', { target }, 'iframe:proxyUrl', (data) => data.result),
   agent_browser_command: ({ session, args, binaryPath }) => requestSidecar('agentBrowser:command', { session, args, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_edit: ({ session, op, binaryPath }) => requestSidecar('agentBrowser:edit', { session, op, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  agent_browser_screenshot: ({ session, format, quality, binaryPath }) => requestSidecar('agentBrowser:screenshot', { session, format, quality, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
+  agent_browser_screenshot: async ({ session, format, quality, binaryPath }) => {
+    const result = await requestSidecar('agentBrowser:screenshot', { session, format, quality, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000);
+    // The sidecar now returns a temp-file PATH (bytes stay off the stdio pipe).
+    // Production reads that file in Rust; this dev bridge has no Rust, so read it
+    // in Node and re-encode to the base64 the browser-sidecar adapter expects —
+    // base64 over the dev WebSocket is fine.
+    if (result && result.ok && typeof result.path === 'string') {
+      const bytes = await readFile(result.path);
+      return { ok: true, mime: result.mime, bytesBase64: bytes.toString('base64') };
+    }
+    return result;
+  },
   agent_browser_stream_status: ({ session, binaryPath }) => requestSidecar('agentBrowser:streamStatus', { session, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_open: ({ url, headed, binaryPath }) => requestSidecar('agentBrowser:open', { url, headed, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_pop_out: ({ session, url, rect, binaryPath }) => requestSidecar('agentBrowser:popOut', { session, url, rect, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),

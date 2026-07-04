@@ -25,6 +25,7 @@ function input(partial: Partial<DirectoryPaneInput> = {}): DirectoryPaneInput {
     surfaceId: 'p1',
     title: 'shell',
     focused: false,
+    alive: true,
     pane: pane(),
     ringing: false,
     hasTODO: false,
@@ -52,12 +53,24 @@ describe('buildDirectoryEntry', () => {
       title: 'pnpm dev',
       focused: true,
       activity: 'running',
+      alive: true,
       cwd: '/home/me/project',
       ringing: true,
       hasTODO: true,
     });
     // No exitCode field while running.
     expect('exitCode' in entry).toBe(false);
+  });
+
+  it('passes alive straight through (true for a live pane, false for an exited one)', () => {
+    expect(buildDirectoryEntry(input({ alive: true })).alive).toBe(true);
+    // An exited pane lingering in the registry: exitCode may still be present,
+    // but alive is independently false.
+    const dead = buildDirectoryEntry(
+      input({ alive: false, pane: pane({ activity: { kind: 'finished', exitCode: 0 } as ShellActivity }) }),
+    );
+    expect(dead.alive).toBe(false);
+    expect(dead.exitCode).toBe(0);
   });
 
   it('includes exitCode only when a finished command has a real code', () => {

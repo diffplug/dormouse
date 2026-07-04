@@ -82,14 +82,16 @@ rl.on('line', (line) => {
         }));
         break;
       case 'agentBrowser:screenshot':
-        // Raw bytes can't ride the JSON-lines stdio, so base64 here; the Rust
-        // forwarder decodes back to a raw tauri::ipc::Response for the webview.
+        // Return the temp-file PATH, not the bytes: a ~100-700KB base64 line would
+        // otherwise ride the JSON-lines stdio pipe shared with all PTY traffic
+        // (head-of-line blocking terminal output on every frame). Rust reads the
+        // file itself and returns a raw tauri::ipc::Response for the webview.
         respondAsync('agentBrowser:result', data.requestId, async () => {
-          const shot = await agentBrowser.screenshot(
+          const shot = await agentBrowser.screenshotToFile(
             data.session, { format: data.format, quality: data.quality }, data.binaryPath,
           );
           if (!shot.ok) return { result: { ok: false, error: shot.error } };
-          return { result: { ok: true, mime: shot.mime, bytesBase64: Buffer.from(shot.bytes).toString('base64') } };
+          return { result: { ok: true, mime: shot.mime, path: shot.path } };
         });
         break;
       case 'agentBrowser:streamStatus':

@@ -22,6 +22,7 @@
  */
 
 import {
+  DEFAULT_CHALLENGE_TTL_MS,
   SELFHOST_ACCOUNT_ID,
   hashPasskeyPublicKey,
   verifyPasskeyAssertion,
@@ -48,8 +49,12 @@ export interface HandshakeGate {
   checkPair(request: unknown): Promise<PairCheck>;
   /** Remember the Host challenge the server just relayed to a client (freshness half). */
   observeChallenge(clientId: string, hostId: string, challenge: string, expiresAt: number): void;
-  /** Verify a `connect2` request before relaying it to the Host. */
-  checkConnect2(clientId: string, request: ConnectionRequest): Promise<Connect2Check>;
+  /** Verify a `connect2` request before relaying it to the target Host. */
+  checkConnect2(
+    clientId: string,
+    targetHostId: string,
+    request: ConnectionRequest,
+  ): Promise<Connect2Check>;
   /** Drop any remembered challenge for a client that disconnected. */
   forgetClient(clientId: string): void;
 }
@@ -59,14 +64,25 @@ export interface HandshakeConfig {
   readonly origin: string;
   /** Relying-party id the assertion must be scoped to. */
   readonly rpId: string;
+  /**
+   * Demand the authenticator's user-verification flag (biometric/PIN), not just
+   * user presence. This must mirror the Host's `ConnectionPolicy.requireUserVerification`
+   * (connection.ts `authorizeConnection`): both verifiers evaluate the same
+   * assertion, so if only one demands UV they silently disagree on what a valid
+   * assertion is. Undefined/false keeps the current presence-only behavior.
+   */
+  readonly requireUserVerification?: boolean;
   /** Injectable clock (epoch ms) for tests; defaults to `Date.now`. */
   readonly now?: () => number;
+  /** Relay-side TTL for Host challenges observed by the server. */
+  readonly relayedChallengeTtlMs?: number;
 }
 
 /** The last Host challenge the server relayed to a client. */
 interface RelayedChallenge {
   readonly hostId: string;
   readonly challenge: string;
+  /** Server-local expiry, derived when the relay observed the challenge. */
   readonly expiresAt: number;
 }
 
@@ -74,7 +90,9 @@ export class Handshake implements HandshakeGate {
   readonly #accounts: AccountStore;
   readonly #origin: string;
   readonly #rpId: string;
+  readonly #requireUserVerification: boolean;
   readonly #now: () => number;
+  readonly #relayedChallengeTtlMs: number;
   /** clientId → the last Host challenge relayed to it; consumed single-use. */
   readonly #relayed = new Map<string, RelayedChallenge>();
 
@@ -82,7 +100,9 @@ export class Handshake implements HandshakeGate {
     this.#accounts = accounts;
     this.#origin = config.origin;
     this.#rpId = config.rpId;
+    this.#requireUserVerification = config.requireUserVerification ?? false;
     this.#now = config.now ?? (() => Date.now());
+    this.#relayedChallengeTtlMs = config.relayedChallengeTtlMs ?? DEFAULT_CHALLENGE_TTL_MS;
   }
 
   async checkPair(request: unknown): Promise<PairCheck> {
@@ -106,15 +126,23 @@ export class Handshake implements HandshakeGate {
     return { ok: true };
   }
 
-  observeChallenge(clientId: string, hostId: string, challenge: string, expiresAt: number): void {
-    this.#relayed.set(clientId, { hostId, challenge, expiresAt });
+  observeChallenge(clientId: string, hostId: string, challenge: string, _hostExpiresAt: number): void {
+    this.#relayed.set(clientId, {
+      hostId,
+      challenge,
+      expiresAt: this.#now() + this.#relayedChallengeTtlMs,
+    });
   }
 
   forgetClient(clientId: string): void {
     this.#relayed.delete(clientId);
   }
 
-  async checkConnect2(clientId: string, request: ConnectionRequest): Promise<Connect2Check> {
+  async checkConnect2(
+    clientId: string,
+    targetHostId: string,
+    request: ConnectionRequest,
+  ): Promise<Connect2Check> {
     const failures: ConnectionFailure[] = [];
 
     // (d) Freshness half: the request must answer the exact Host challenge the
@@ -124,6 +152,7 @@ export class Handshake implements HandshakeGate {
     this.#relayed.delete(clientId);
     const challengeFresh =
       relayed !== undefined &&
+      relayed.hostId === targetHostId &&
       typeof request?.challenge === 'string' &&
       relayed.challenge === request.challenge &&
       this.#now() < relayed.expiresAt;
@@ -152,6 +181,9 @@ export class Handshake implements HandshakeGate {
         challenge: request.challenge,
         origin: this.#origin,
         rpId: this.#rpId,
+        // Mirror the Host's UV demand so Server and Host cannot drift on what a
+        // valid assertion is (connection.ts `authorizeConnection`).
+        requireUserVerification: this.#requireUserVerification,
       });
       if (!result.ok) failures.push('passkey-assertion-invalid');
     } else {

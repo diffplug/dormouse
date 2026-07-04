@@ -27,6 +27,11 @@ use process_wrap::std::ProcessGroup;
 #[cfg(windows)]
 use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 
+// Native Win32 clipboard reads, so a paste never spawns a console-window-popping
+// PowerShell child. macOS/Linux keep the sidecar path (no console flicker there).
+#[cfg(windows)]
+mod clipboard_win;
+
 type SidecarSender = mpsc::Sender<String>;
 type PendingRequests = Arc<Mutex<HashMap<String, mpsc::Sender<JsonValue>>>>;
 type SharedChild = Arc<Mutex<Box<dyn ChildWrapper + Send + Sync>>>;
@@ -454,9 +459,12 @@ fn agent_browser_pop_in(
     )
 }
 
-// Screenshot returns raw image bytes. The sidecar base64s them over the
-// JSON-lines stdio; decode back to a raw tauri::ipc::Response so the webview
-// gets an ArrayBuffer (the path the panel decodes with createImageBitmap).
+// The sidecar hands back the screenshot's temp-file PATH (bytes no longer ride
+// the JSON-lines stdio shared with PTY traffic). Read the file here and return a
+// raw tauri::ipc::Response so the webview gets an ArrayBuffer (the path the panel
+// decodes with createImageBitmap). A base64 `bytesBase64` field is kept as a
+// fallback for a stale sidecar bundle (dev-time version skew), but the path
+// branch is preferred.
 #[tauri::command]
 fn agent_browser_screenshot(
     state: tauri::State<'_, SidecarState>,
@@ -477,49 +485,82 @@ fn agent_browser_screenshot(
             .unwrap_or("screenshot failed")
             .to_string());
     }
+    if let Some(path) = result.get("path").and_then(JsonValue::as_str) {
+        let bytes = std::fs::read(path)
+            .map_err(|err| format!("could not read screenshot file '{path}': {err}"))?;
+        return Ok(tauri::ipc::Response::new(bytes));
+    }
+    // Fallback: an older sidecar bundle still base64s the bytes over stdio.
     let b64 = result
         .get("bytesBase64")
         .and_then(JsonValue::as_str)
-        .ok_or("screenshot returned no bytes")?;
+        .ok_or("screenshot returned no path or bytes")?;
     let bytes = BASE64
         .decode(b64)
         .map_err(|err| format!("bad screenshot base64: {err}"))?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+// Clipboard reads run natively on Windows (see clipboard_win) to avoid the
+// console-window flicker of shelling out to PowerShell; other platforms keep the
+// sidecar path (pbpaste/xclip never pop a console window).
 #[tauri::command]
 fn read_clipboard_file_paths(
     state: tauri::State<'_, SidecarState>,
 ) -> Result<Vec<String>, String> {
-    let response =
-        request_from_sidecar_timeout(&state, "clipboard:readFiles", serde_json::json!({}), Duration::from_secs(5))?;
-    Ok(response
-        .get("paths")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default())
+    #[cfg(windows)]
+    {
+        let _ = &state;
+        return Ok(clipboard_win::read_file_paths());
+    }
+    #[cfg(not(windows))]
+    {
+        let response =
+            request_from_sidecar_timeout(&state, "clipboard:readFiles", serde_json::json!({}), Duration::from_secs(5))?;
+        Ok(response
+            .get("paths")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default())
+    }
 }
 
 #[tauri::command]
 fn read_clipboard_image_as_file_path(
     state: tauri::State<'_, SidecarState>,
 ) -> Result<Option<String>, String> {
-    let response =
-        request_from_sidecar_timeout(&state, "clipboard:readImage", serde_json::json!({}), Duration::from_secs(10))?;
-    Ok(response
-        .get("path")
-        .and_then(|path| path.as_str().map(String::from)))
+    #[cfg(windows)]
+    {
+        let _ = &state;
+        return Ok(clipboard_win::read_image_as_file_path());
+    }
+    #[cfg(not(windows))]
+    {
+        let response =
+            request_from_sidecar_timeout(&state, "clipboard:readImage", serde_json::json!({}), Duration::from_secs(10))?;
+        Ok(response
+            .get("path")
+            .and_then(|path| path.as_str().map(String::from)))
+    }
 }
 
 #[tauri::command]
 fn read_clipboard_text(
     state: tauri::State<'_, SidecarState>,
 ) -> Result<String, String> {
-    let response =
-        request_from_sidecar_timeout(&state, "clipboard:readText", serde_json::json!({}), Duration::from_secs(5))?;
-    Ok(response
-        .get("text")
-        .and_then(|v| v.as_str().map(String::from))
-        .unwrap_or_default())
+    #[cfg(windows)]
+    {
+        let _ = &state;
+        return Ok(clipboard_win::read_text().unwrap_or_default());
+    }
+    #[cfg(not(windows))]
+    {
+        let response =
+            request_from_sidecar_timeout(&state, "clipboard:readText", serde_json::json!({}), Duration::from_secs(5))?;
+        Ok(response
+            .get("text")
+            .and_then(|v| v.as_str().map(String::from))
+            .unwrap_or_default())
+    }
 }
 
 #[tauri::command]

@@ -16,6 +16,8 @@ export interface DirectoryPaneInput {
   title: string;
   /** Focused on the Host. */
   focused: boolean;
+  /** The pane's PTY process is still alive (not a lingering exited surface). */
+  alive: boolean;
   pane: TerminalPaneState;
   /** The pane's alert is ringing on the Host (alert-manager). */
   ringing: boolean;
@@ -37,6 +39,7 @@ export function buildDirectoryEntry(input: DirectoryPaneInput): DirectoryEntry {
     focused: input.focused,
     activity: pane.activity.kind,
     ...(exitCode !== undefined ? { exitCode } : {}),
+    alive: input.alive,
     ...(cwd ? { cwd } : {}),
     ringing: input.ringing,
     hasTODO: input.hasTODO,

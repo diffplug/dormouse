@@ -147,6 +147,7 @@ interface DirectoryEntry {
   // From the existing semantic-event model (terminal-state.ts):
   activity?: 'unknown' | 'prompt' | 'editing' | 'running' | 'finished';
   exitCode?: number;
+  alive: boolean;               // the PTY process is still alive (see below)
   cwd?: string;
   /** The pane's alert is ringing on the host (alert-manager). */
   ringing: boolean;
@@ -168,6 +169,18 @@ thumbnails are staged (see [Future](#future)). Browser panes are not listed;
 iframe surfaces additionally refuse attachment by design (see
 [Future](#future) for browser remoting — iframe surfaces are not on the
 critical path even there).
+
+`alive` reflects real PTY-process liveness: it is `true` while the pane's
+process is running and `false` once that process has exited. Dormouse keeps an
+exited pane open in the Host registry (rendering "[Process exited with code N]")
+until the user closes it, so such a surface is still *listed* but reports
+`alive: false` — the phone's picker uses this to stop offering a dead pane as
+attachable (attaching would transfer nothing).
+
+This is distinct from `exitCode`, which is the last finished command's
+shell-integration semantic status, not PTY lifetime. A pane can report
+`alive: true` with an `exitCode` set (a command finished but the shell lives on),
+and a pane reporting `alive: false` may carry no `exitCode` at all.
 
 ## Attaching to a surface
 
@@ -229,6 +242,13 @@ type TerminalInput =
 attachment. A stale request for a detached surface, or a request for a
 background surface listed in the directory but not attached by this session, is
 rejected and must not reach the PTY or change its size.
+The attachment is bound to the terminal selected at `surface.attach` time:
+after a Host-side pane swap moves that terminal to another pane, the remote
+stream, `terminal.write`, and `terminal.resize` keep targeting the same PTY
+rather than re-resolving the old `surfaceId` through the current registry slot.
+When that PTY exits, the Host emits `terminal.closed` and then drops the
+attachment, so a later `terminal.write`/`terminal.resize` for the surface is
+rejected ("surface is not attached") instead of acting on the disposed terminal.
 
 #### Size authority: last-attach-wins
 

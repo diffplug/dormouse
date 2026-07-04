@@ -203,8 +203,10 @@ export class RemotePtyAdapter implements PlatformAdapter {
   #emitPtyList(): void {
     const ptys: PtyInfo[] = this.#entries.map((entry) => ({
       id: entry.surfaceId,
-      alive: entry.exitCode === undefined,
-      ...(entry.exitCode === undefined ? {} : { exitCode: entry.exitCode }),
+      // `entry.alive` is real PTY-process liveness (a lingering exited surface
+      // reports false), NOT `entry.exitCode` — that is the last command's
+      // shell-integration status, which deriving alive from was the bug.
+      alive: entry.alive,
     }));
     for (const handler of this.#listHandlers) handler({ ptys });
   }
@@ -297,7 +299,12 @@ export class RemotePtyAdapter implements PlatformAdapter {
 
   #emitExit(id: string, exitCode?: number): void {
     if (this.#attached?.surfaceId === id) this.#attached = null;
-    for (const handler of this.#exitHandlers) handler({ id, exitCode: exitCode ?? 0 });
+    // An absent exitCode is an UNKNOWN termination (signal-only, killed, or a
+    // non-selfhost Host that never reports one) — not a clean exit. Coercing it
+    // to 0 would paint an abnormal close as success. Map it to the same -1
+    // sentinel the local path uses (terminal-lifecycle.ts `exitCode ?? -1`),
+    // which renders as a nonzero "failure" exit, so remote and local agree.
+    for (const handler of this.#exitHandlers) handler({ id, exitCode: exitCode ?? -1 });
   }
 
   // --- Degraded capabilities (absent PTY features) -------------------------

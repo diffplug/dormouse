@@ -131,6 +131,7 @@ export function PocketWall({ adapter }: { adapter: RemotePtyAdapter }): React.Re
           activeSessionId={activePaneId ?? undefined}
           onActiveSessionChange={setActivePaneId}
           onSessionMinimize={() => setKeyboardMode('sessions')}
+          showKillButton={false}
         />
       }
       interactive

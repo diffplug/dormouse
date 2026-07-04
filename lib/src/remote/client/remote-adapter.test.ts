@@ -82,6 +82,7 @@ function entry(surfaceId: string, over: Partial<DirectoryEntry> = {}): Directory
     type: 'terminal',
     title: surfaceId,
     focused: false,
+    alive: true,
     ringing: false,
     hasTODO: false,
     ...over,
@@ -89,7 +90,7 @@ function entry(surfaceId: string, over: Partial<DirectoryEntry> = {}): Directory
 }
 
 describe('RemotePtyAdapter directory', () => {
-  it('turns a snapshot into onPtyList (alive from exitCode) and getDirectoryEntries', async () => {
+  it('turns a snapshot into onPtyList without treating command exitCode as PTY death', async () => {
     const client = new FakeClient();
     const adapter = new RemotePtyAdapter(client);
     const lists: PtyInfo[][] = [];
@@ -101,12 +102,33 @@ describe('RemotePtyAdapter directory', () => {
     expect(lists).toEqual([
       [
         { id: 's1', alive: true },
-        { id: 's2', alive: false, exitCode: 0 },
+        { id: 's2', alive: true },
       ],
     ]);
     expect(adapter.getDirectoryEntries().map((e) => e.surfaceId)).toEqual(['s1', 's2']);
     expect(adapter.getDirectoryEntries()[0].title).toBe('zsh');
     expect(adapter.getPaneEntry('s2')?.exitCode).toBe(0);
+  });
+
+  it('carries the entry alive bit into onPtyList (a dead pane is not attachable)', async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    const lists: PtyInfo[][] = [];
+    adapter.onPtyList(({ ptys }) => lists.push(ptys));
+
+    await adapter.init();
+    // s2's PTY has exited (lingering surface) → alive:false, even with exitCode 0.
+    client.pushSnapshot([
+      entry('s1', { alive: true }),
+      entry('s2', { alive: false, exitCode: 0 }),
+    ]);
+
+    expect(lists).toEqual([
+      [
+        { id: 's1', alive: true },
+        { id: 's2', alive: false },
+      ],
+    ]);
   });
 
   it('notifies subscribeDirectory listeners until they unsubscribe', async () => {
@@ -219,6 +241,33 @@ describe('RemotePtyAdapter attach / active pane', () => {
     // Once closed the pane is no longer attached, so writes are dropped.
     adapter.writePty('s1', 'x');
     expect(client.writes).toHaveLength(0);
+  });
+
+  it('terminal.closed with an omitted exitCode surfaces the unknown-exit sentinel (-1), not 0', async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    const exits: Array<{ id: string; exitCode: number }> = [];
+    adapter.onPtyExit((d) => exits.push(d));
+
+    await adapter.setActivePane('s1', 80, 24);
+    // TerminalClosedEvent.exitCode is optional on the wire; a signal-only /
+    // killed / non-selfhost close forwards no code. It must not read as 0.
+    client.lastAttach().handlers.onClosed?.(undefined);
+
+    expect(exits).toEqual([{ id: 's1', exitCode: -1 }]);
+    expect(adapter.activeSurfaceId).toBeNull();
+  });
+
+  it('terminal.closed with a present exitCode passes it through unchanged (incl. 0)', async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    const exits: Array<{ id: string; exitCode: number }> = [];
+    adapter.onPtyExit((d) => exits.push(d));
+
+    await adapter.setActivePane('s1', 80, 24);
+    client.lastAttach().handlers.onClosed?.(0);
+
+    expect(exits).toEqual([{ id: 's1', exitCode: 0 }]);
   });
 });
 
