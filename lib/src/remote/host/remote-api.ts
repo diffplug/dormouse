@@ -250,8 +250,12 @@ export class RemoteApiSession {
       term.resize(cols, rows);
     } else {
       // Same size: force one repaint with a quick rows bounce on the PTY only,
-      // leaving the already-correct local xterm buffer untouched.
-      platform.resizePty(ptyId, cols, Math.max(1, rows - 1));
+      // leaving the already-correct local xterm buffer untouched. Bounce away
+      // from `rows` in whichever direction stays >= 1 (a 1-row surface must
+      // bounce up, since rows-1 would be an identical no-op that fires no
+      // SIGWINCH and so never repaints).
+      const bounced = rows > 1 ? rows - 1 : rows + 1;
+      platform.resizePty(ptyId, cols, bounced);
       setTimeout(() => platform.resizePty(ptyId, cols, rows), FORCE_REPAINT_BOUNCE_MS);
     }
 

@@ -51,8 +51,17 @@ export default function App(): React.ReactElement {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [hosts, setHosts] = useState<HostView[]>([]);
+  const [pairedIds, setPairedIds] = useState<Set<string>>(() => new Set());
   const [activeHost, setActiveHost] = useState<HostView | null>(null);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
+
+  // The client nulls its socket on any close, so an action taken after a
+  // server restart / network drop must reopen it rather than reuse a dead
+  // socket (which would throw 'relay socket is not open'). Every user action
+  // that sends a frame funnels through here so it self-heals.
+  const ensureSocket = useCallback(async () => {
+    if (!client.socketOpen) await client.openSocket();
+  }, [client]);
 
   const run = useCallback(async (label: string, fn: () => Promise<void>) => {
     setError(null);
@@ -67,14 +76,12 @@ export default function App(): React.ReactElement {
   }, []);
 
   const loadHosts = useCallback(async () => {
-    // The client nulls its socket on any close, so this self-heals after a
-    // server restart or network drop instead of reusing a dead socket.
-    if (!client.socketOpen) {
-      await client.openSocket();
-    }
-    setHosts(await client.listHosts());
+    await ensureSocket();
+    const list = await client.listHosts();
+    setHosts(list);
+    setPairedIds(new Set(list.filter((h) => client.isPaired(h.hostId)).map((h) => h.hostId)));
     setPhase('hosts');
-  }, [client]);
+  }, [client, ensureSocket]);
 
   /** Tear down the live session and return to the hosts list. */
   const teardownAdapter = useCallback(() => {
@@ -96,6 +103,7 @@ export default function App(): React.ReactElement {
 
   const onConnect = (host: HostView) =>
     run('connect', async () => {
+      await ensureSocket();
       const decision: ConnectDecision = await client.connect(host.hostId);
       if (!decision.allowed) {
         throw new Error(`Connection denied${decision.failures ? `: ${decision.failures.join(', ')}` : ''}`);
@@ -117,9 +125,10 @@ export default function App(): React.ReactElement {
 
   const onPair = (host: HostView) =>
     run('pair', async () => {
+      await ensureSocket();
       const result = await client.pair(host.hostId, DEVICE_LABEL);
       if (!result.approved) throw new Error(result.error ?? 'Pairing was denied.');
-      setHosts((prev) => [...prev]); // reflect the new paired state
+      setPairedIds((prev) => new Set(prev).add(host.hostId));
     });
 
   const leaveWall = () => {
@@ -156,7 +165,7 @@ export default function App(): React.ReactElement {
         hosts={hosts}
         busy={busy}
         error={error}
-        isPaired={(id) => client.isPaired(id)}
+        isPaired={(id) => pairedIds.has(id)}
         onRefresh={() => run('refresh', loadHosts)}
         onPair={onPair}
         onConnect={onConnect}

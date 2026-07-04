@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
+import { useRef, useState, useEffect, useCallback, useMemo, lazy, Suspense, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import {
   DockviewReact,
@@ -10,7 +10,15 @@ import 'dockview-react/dist/styles/dockview.css';
 import { Baseboard } from './Baseboard';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
 import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
-import { RemotePairingModalHost } from '../remote/host/RemotePairingModalHost';
+// Remote-host code (relay/WebSocket/enrollment + the window.dormouseRemoteHost
+// console hook) is loaded and mounted only when the embedding runtime opts in
+// via `enableRemoteHost` — see the mount below. Lazy so it stays out of the
+// website playground and vscode webview bundles, which never enable it.
+const RemotePairingModalHost = lazy(() =>
+  import('../remote/host/RemotePairingModalHost').then((m) => ({
+    default: m.RemotePairingModalHost,
+  })),
+);
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { markAgentBrowserSessionClosed } from './wall/agent-browser-sessions';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
@@ -447,6 +455,7 @@ export function Wall({
   onEvent,
   baseboardNotice,
   showBaseboard = true,
+  enableRemoteHost = false,
 }: {
   initialPaneIds?: string[];
   initialMode?: WallMode;
@@ -456,6 +465,13 @@ export function Wall({
   onEvent?: (event: WallEvent) => void;
   baseboardNotice?: ReactNode;
   showBaseboard?: boolean;
+  /**
+   * Opt in to the remote-control Host (the "Pocket" pairing seam). Only the
+   * standalone desktop/sidecar runtime sets this; the website playground and
+   * vscode webview leave it off so the remote-host stack and its
+   * `window.dormouseRemoteHost` console hook never load there.
+   */
+  enableRemoteHost?: boolean;
 } = {}) {
   const apiRef = useRef<DockviewApi | null>(null);
   const [dockviewApi, setDockviewApi] = useState<DockviewApi | null>(null);
@@ -1846,7 +1862,11 @@ export function Wall({
               onKeyboardActiveChange={setDialogKeyboardActive}
               resolveLabel={surfaceRefForId}
             />
-            <RemotePairingModalHost onKeyboardActiveChange={setDialogKeyboardActive} />
+            {enableRemoteHost ? (
+              <Suspense fallback={null}>
+                <RemotePairingModalHost onKeyboardActiveChange={setDialogKeyboardActive} />
+              </Suspense>
+            ) : null}
 
           </div>
           </DialogKeyboardContext.Provider>
