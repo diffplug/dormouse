@@ -157,11 +157,12 @@ export const REMOTE_METHODS = {
   terminalResize: 'terminal.resize',
 } as const;
 
+// Events are dispatched by name, so future events (size-authority notify,
+// per-attachment semantics — staged in remote-api.md ## Future) land here
+// additively; old clients ignore names they don't know.
 export const REMOTE_EVENTS = {
   directorySnapshot: 'directory.snapshot',
   terminalData: 'terminal.data',
-  terminalResize: 'terminal.resize',
-  terminalSemantic: 'terminal.semantic',
   terminalClosed: 'terminal.closed',
 } as const;
 
@@ -212,10 +213,6 @@ export interface TerminalAttachResult {
 export interface TerminalDataEvent {
   /** Base64url PTY output bytes. */
   bytes: string;
-}
-export interface TerminalResizeEvent {
-  cols: number;
-  rows: number;
 }
 export interface TerminalClosedEvent {
   exitCode?: number;

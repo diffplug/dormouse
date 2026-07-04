@@ -228,20 +228,17 @@ interface TerminalAttachResult {
 // then a stream of:
 type TerminalEvent =
   | { event: 'terminal.data';     data: { bytes: string /* base64url */ } }
-  | { event: 'terminal.closed';   data: { exitCode?: number } }
-  // Reserved in wire.ts — defined but not yet emitted by the Host:
-  | { event: 'terminal.resize';   data: { cols: number; rows: number } }   // another display took authority
-  | { event: 'terminal.semantic'; data: TerminalSemanticEvent };
+  | { event: 'terminal.closed';   data: { exitCode?: number } };
 ```
 
-The Host currently emits only `terminal.data` and `terminal.closed`.
-`terminal.resize` and `terminal.semantic` are reserved wire shapes with no
-emitter yet: a viewer is not notified when another display takes size
-authority, and semantic state (activity/cwd/title) reaches the client only
-through `directory.snapshot`.
+These two are the whole v1 stream. A viewer is not notified when another
+display takes size authority, and semantic state (activity/cwd/title) reaches
+the client only through `directory.snapshot` — the host→client
+`terminal.resize` and `terminal.semantic` events are staged in
+[Future](#future) (item 5) and land additively, since events are dispatched by
+name.
 
 ```ts
-
 // client → host (requires the input grant)
 type TerminalInput =
   | { method: 'terminal.write';  params: { surfaceId: string; bytes: string } }
@@ -387,6 +384,19 @@ instead of fighting over `SIGWINCH`. Interacting with a tethered pane is how a
 display takes authority back. Alongside it: the Host UI shows connected
 viewers (label from the ACL record) with per-viewer disconnect, and in-flight
 input is dropped the moment a session is killed.
+
+The wire half, landing additively as new event names:
+
+```ts
+// host → client: another display took size authority over your attachment
+{ event: 'terminal.resize';   data: { cols: number; rows: number } }
+// host → client: live cwd/activity/title for the attached pane
+{ event: 'terminal.semantic'; data: TerminalSemanticEvent }
+```
+
+`terminal.resize` is what lets an attached viewer show its own tether state
+instead of rendering garbled wrap until re-attach; `terminal.semantic` frees
+the attached pane's header from the coalesced `directory.snapshot` cadence.
 
 ### 6. Graded grants and layout mutations
 

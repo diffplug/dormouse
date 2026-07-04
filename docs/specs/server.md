@@ -191,8 +191,8 @@ final authority regardless of what the server claims to have checked.
 Exactly the protocol-v1 scope of [remote-api.md](./remote-api.md)
 (terminal-only): `hello`, `directory.watch` (snapshot-only), one
 `surface.attach` (attach-is-the-resize), `terminal.data`/`terminal.closed`
-out (`terminal.semantic`/`terminal.resize` are reserved wire shapes with no
-emitter yet — see remote-api.md), `terminal.write`/`terminal.resize` in.
+out, `terminal.write`/`terminal.resize` in. (Host→client size-authority and
+semantic events are staged in remote-api.md `## Future`.)
 
 ## Host side (`lib` + `standalone`)
 

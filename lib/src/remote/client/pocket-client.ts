@@ -44,7 +44,6 @@ import {
   type TerminalAttachResult,
   type TerminalClosedEvent,
   type TerminalDataEvent,
-  type TerminalResizeEvent,
 } from 'server-lib-common';
 import type { WebAuthnClient } from './webauthn';
 import type { RemoteWebSocket } from '../ws';
@@ -85,7 +84,6 @@ export interface PocketClientDeps {
 export interface TerminalHandlers {
   /** Base64url PTY output bytes. */
   onData(bytes: string): void;
-  onResize?(cols: number, rows: number): void;
   onClosed?(exitCode?: number): void;
 }
 
@@ -347,11 +345,6 @@ export class PocketClient {
           case REMOTE_EVENTS.terminalData:
             handlers.onData((event.data as TerminalDataEvent).bytes);
             return;
-          case REMOTE_EVENTS.terminalResize: {
-            const data = event.data as TerminalResizeEvent;
-            handlers.onResize?.(data.cols, data.rows);
-            return;
-          }
           case REMOTE_EVENTS.terminalClosed:
             handlers.onClosed?.((event.data as TerminalClosedEvent).exitCode);
             return;
