@@ -251,7 +251,15 @@ export class RemoteApiSession {
     };
     const onExit = (detail: { id: string; exitCode: number }): void => {
       if (detail.id !== ptyId) return;
+      // Deliver the close to the client first, then drop the attachment so a
+      // later write/resize for this surface fails safe with "not attached"
+      // instead of touching the now-dead PTY / disposed xterm (the pre-pin code
+      // re-resolved via the registry and got that fail-safe for free). Teardown
+      // offPtyExit(onExit)s mid-callback, which is safe — this handler, having
+      // filtered to its own ptyId, won't fire again — and nulls #attachment so
+      // #requireAttached fails and the bounce timer + PTY listeners are cleaned.
       emitOrBuffer(REMOTE_EVENTS.terminalClosed, { exitCode: detail.exitCode });
+      this.#teardownAttachment();
     };
     platform.onPtyData(onData);
     platform.onPtyExit(onExit);

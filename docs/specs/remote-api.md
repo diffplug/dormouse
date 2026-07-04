@@ -272,6 +272,9 @@ The attachment is bound to the terminal selected at `surface.attach` time:
 after a Host-side pane swap moves that terminal to another pane, the remote
 stream, `terminal.write`, and `terminal.resize` keep targeting the same PTY
 rather than re-resolving the old `surfaceId` through the current registry slot.
+When that PTY exits, the Host emits `terminal.closed` and then drops the
+attachment, so a later `terminal.write`/`terminal.resize` for the surface is
+rejected ("surface is not attached") instead of acting on the disposed terminal.
 
 ### Size authority: last-attach-wins
 

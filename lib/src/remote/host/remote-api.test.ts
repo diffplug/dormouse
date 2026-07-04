@@ -47,6 +47,12 @@ class RepaintOnResizePlatform {
     }
   }
 
+  emitExit(id: string, exitCode: number): void {
+    for (const handler of this.exitHandlers) {
+      handler({ id, exitCode });
+    }
+  }
+
   asAdapter(): PlatformAdapter {
     return this as unknown as PlatformAdapter;
   }
@@ -305,6 +311,58 @@ describe('RemoteApiSession surface.attach', () => {
         requestId: 'resize-after-swap',
         ok: true,
         result: { cols: 120, rows: 40 },
+      },
+    ]);
+  });
+
+  it('tears down the attachment when the attached PTY exits', () => {
+    const platform = new RepaintOnResizePlatform();
+    setPlatform(platform.asAdapter());
+    registerSurface(platform, 80, 24, 'surface-1', 'pty-1');
+    const sent: SentPayload[] = [];
+    const session = new RemoteApiSession({ hostId: 'host-1', send: (payload) => sent.push(payload) });
+
+    attach(session, 100, 30, 'surface-1');
+    sent.length = 0;
+
+    // The attached PTY exits (process death, or the pane disposed on the Host).
+    platform.emitExit('pty-1', 0);
+
+    // The client is told the terminal closed...
+    expect(sent).toEqual([
+      {
+        subId: 'attach-1',
+        event: REMOTE_EVENTS.terminalClosed,
+        data: { exitCode: 0 },
+      },
+    ]);
+    sent.length = 0;
+
+    // ...and the attachment is gone, so a later write/resize for that surface
+    // fails safe instead of touching the dead PTY / disposed xterm.
+    session.handle({
+      requestId: 'write-after-exit',
+      method: REMOTE_METHODS.terminalWrite,
+      params: { surfaceId: 'surface-1', bytes: toBase64Url(utf8Encode('ghost\r')) },
+    });
+    session.handle({
+      requestId: 'resize-after-exit',
+      method: REMOTE_METHODS.terminalResize,
+      params: { surfaceId: 'surface-1', cols: 120, rows: 40 },
+    });
+
+    expect(platform.writePty).not.toHaveBeenCalled();
+    expect(platform.resizePty).not.toHaveBeenCalled();
+    expect(sent).toEqual([
+      {
+        requestId: 'write-after-exit',
+        ok: false,
+        error: 'surface is not attached: surface-1',
+      },
+      {
+        requestId: 'resize-after-exit',
+        ok: false,
+        error: 'surface is not attached: surface-1',
       },
     ]);
   });
