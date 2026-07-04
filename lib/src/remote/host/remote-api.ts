@@ -52,6 +52,7 @@ const FORCE_REPAINT_BOUNCE_MS = 60;
 interface Attachment {
   surfaceId: string;
   ptyId: string;
+  entry: TerminalEntry;
   subId: string;
   onData: (detail: { id: string; data: string }) => void;
   onExit: (detail: { id: string; exitCode: number }) => void;
@@ -148,10 +149,22 @@ export class RemoteApiSession {
     return { params, entry };
   }
 
-  #requireAttached(request: RemoteRequest, surfaceId: string): boolean {
-    if (this.#attachment?.surfaceId === surfaceId) return true;
+  #requireAttached(request: RemoteRequest, surfaceId: string): Attachment | null {
+    if (this.#attachment?.surfaceId === surfaceId) return this.#attachment;
     this.#fail(request, `surface is not attached: ${surfaceId}`);
-    return false;
+    return null;
+  }
+
+  #attachedParams<P extends { surfaceId: string }>(
+    request: RemoteRequest,
+  ): { params: P; attachment: Attachment } | null {
+    const params = request.params as P | undefined;
+    if (!params || typeof params.surfaceId !== 'string') {
+      this.#fail(request, `no such surface: ${params?.surfaceId ?? '(none)'}`);
+      return null;
+    }
+    const attachment = this.#requireAttached(request, params.surfaceId);
+    return attachment ? { params, attachment } : null;
   }
 
   // --- Methods ---
@@ -245,6 +258,7 @@ export class RemoteApiSession {
     const attachment: Attachment = {
       surfaceId: params.surfaceId,
       ptyId,
+      entry,
       subId,
       onData,
       onExit,
@@ -298,20 +312,19 @@ export class RemoteApiSession {
   }
 
   #write(request: RemoteRequest): void {
-    const resolved = this.#resolveSurface<TerminalWriteParams>(request);
+    const resolved = this.#attachedParams<TerminalWriteParams>(request);
     if (!resolved) return;
-    const { params, entry } = resolved;
-    if (!this.#requireAttached(request, params.surfaceId)) return;
+    const { params, attachment } = resolved;
     // Feed the existing PTY input path; the local echo returns via onPtyData.
-    getPlatform().writePty(entry.ptyId, utf8Decode(fromBase64Url(params.bytes)));
+    getPlatform().writePty(attachment.ptyId, utf8Decode(fromBase64Url(params.bytes)));
     this.#ok(request, {});
   }
 
   #resize(request: RemoteRequest): void {
-    const resolved = this.#resolveSurface<TerminalResizeParams>(request);
+    const resolved = this.#attachedParams<TerminalResizeParams>(request);
     if (!resolved) return;
-    const { params, entry } = resolved;
-    if (!this.#requireAttached(request, params.surfaceId)) return;
+    const { params, attachment } = resolved;
+    const entry = attachment.entry;
     const term = entry.terminal;
     const cols = clampTerminalDimension(params.cols, term.cols);
     const rows = clampTerminalDimension(params.rows, term.rows);

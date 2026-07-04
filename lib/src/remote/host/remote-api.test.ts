@@ -255,4 +255,57 @@ describe('RemoteApiSession surface.attach', () => {
       },
     ]);
   });
+
+  it('keeps write and resize pinned to the attached terminal after pane swaps', () => {
+    const platform = new RepaintOnResizePlatform();
+    setPlatform(platform.asAdapter());
+    registerSurface(platform, 80, 24, 'surface-1', 'pty-1');
+    registerSurface(platform, 100, 30, 'surface-2', 'pty-2');
+    const sent: SentPayload[] = [];
+    const session = new RemoteApiSession({ hostId: 'host-1', send: (payload) => sent.push(payload) });
+
+    attach(session, 90, 25, 'surface-1');
+    const attachedEntry = registry.get('surface-1')!;
+    const swappedInEntry = registry.get('surface-2')!;
+    registry.set('surface-1', swappedInEntry);
+    registry.set('surface-2', attachedEntry);
+    sent.length = 0;
+
+    session.handle({
+      requestId: 'write-after-swap',
+      method: REMOTE_METHODS.terminalWrite,
+      params: { surfaceId: 'surface-1', bytes: toBase64Url(utf8Encode('still-attached\r')) },
+    });
+
+    expect(platform.writePty).toHaveBeenCalledWith('pty-1', 'still-attached\r');
+    expect(platform.writePty).not.toHaveBeenCalledWith('pty-2', expect.any(String));
+
+    session.handle({
+      requestId: 'resize-after-swap',
+      method: REMOTE_METHODS.terminalResize,
+      params: { surfaceId: 'surface-1', cols: 120, rows: 40 },
+    });
+
+    expect((attachedEntry.terminal as { cols: number; rows: number }).cols).toBe(120);
+    expect((attachedEntry.terminal as { cols: number; rows: number }).rows).toBe(40);
+    expect((swappedInEntry.terminal as { cols: number; rows: number }).cols).toBe(100);
+    expect((swappedInEntry.terminal as { cols: number; rows: number }).rows).toBe(30);
+    expect(sent).toEqual([
+      {
+        requestId: 'write-after-swap',
+        ok: true,
+        result: {},
+      },
+      {
+        subId: 'attach-1',
+        event: REMOTE_EVENTS.terminalData,
+        data: { bytes: toBase64Url(utf8Encode('terminal-resize:120x40')) },
+      },
+      {
+        requestId: 'resize-after-swap',
+        ok: true,
+        result: { cols: 120, rows: 40 },
+      },
+    ]);
+  });
 });

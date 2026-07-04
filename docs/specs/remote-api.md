@@ -259,6 +259,10 @@ type TerminalInput =
 attachment. A stale request for a detached surface, or a request for a
 background surface listed in the directory but not attached by this session, is
 rejected and must not reach the PTY or change its size.
+The attachment is bound to the terminal selected at `surface.attach` time:
+after a Host-side pane swap moves that terminal to another pane, the remote
+stream, `terminal.write`, and `terminal.resize` keep targeting the same PTY
+rather than re-resolving the old `surfaceId` through the current registry slot.
 
 ### Size authority: last-attach-wins
 
