@@ -13,7 +13,7 @@
     "stage:dor-cli": "pnpm --filter dor build && node scripts/stage-dor-cli.mjs",
     "stage:sidecar-proxy": "node scripts/build-sidecar-proxy.mjs",
     "tauri": "pnpm run stage && node scripts/tauri.mjs",
-    "test": "vitest run"
+    "test": "vitest run && node --test scripts/*.test.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
