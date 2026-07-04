@@ -14,6 +14,7 @@ import {
   PASSWORD,
   RP_ID,
   freshApp,
+  enrollHost,
   newAuthenticator,
   post,
   readAccount,
@@ -169,4 +170,26 @@ test('origin/rpId derive from config', async () => {
   assert.equal(body.accountId, 'owner');
   assert.equal(typeof body.challenge, 'string');
   assert.equal(new URL(ORIGIN).hostname, RP_ID);
+});
+
+test('configured origin is normalized for setup and Host policy', async () => {
+  const { app } = await freshApp({ origin: 'https://Example.COM/' });
+  const authenticator = await newAuthenticator();
+  const begin = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
+  const { challenge, rpId } = await begin.json();
+  assert.equal(rpId, 'example.com');
+
+  const finish = await post(app, API_ROUTES.setupFinish, {
+    password: PASSWORD,
+    credentialId: authenticator.credentialId,
+    publicKey: authenticator.publicKey,
+    clientDataJSON: registrationClientData({ challenge, origin: 'https://example.com' }),
+    label: 'x',
+  });
+  assert.equal(finish.status, 200);
+
+  const { res, body } = await enrollHost(app);
+  assert.equal(res.status, 200);
+  assert.equal(body.origin, 'https://example.com');
+  assert.equal(body.rpId, 'example.com');
 });

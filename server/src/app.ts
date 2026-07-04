@@ -151,13 +151,15 @@ export interface CreatedApp {
 
 export function createApp(config: AppConfig): CreatedApp {
   const now = config.now ?? (() => Date.now());
-  const rpId = new URL(config.origin).hostname;
+  const originUrl = new URL(config.origin);
+  const origin = originUrl.origin;
+  const rpId = originUrl.hostname;
   const accounts = new AccountStore(config.stateDir, now);
   const hostStore = new HostStore(config.stateDir, now);
   const sessions = new SessionStore(now);
   // Server-side handshake policy layered on the transport-dumb hub (slice 3).
   const handshake = new Handshake(accounts, {
-    origin: config.origin,
+    origin,
     rpId,
     requireUserVerification: config.requireUserVerification,
     now,
@@ -226,7 +228,7 @@ export function createApp(config: AppConfig): CreatedApp {
     if (typeof clientData.challenge !== 'string' || !setupChallenges.consume(clientData.challenge)) {
       return c.json({ error: 'unrecognized or expired challenge' }, 400);
     }
-    if (clientData.origin !== config.origin) {
+    if (clientData.origin !== origin) {
       return c.json({ error: 'origin mismatch' }, 400);
     }
 
@@ -287,7 +289,7 @@ export function createApp(config: AppConfig): CreatedApp {
 
     const result = await verifyPasskeyAssertion(assertion as PasskeyAssertion, stored.publicKey, {
       challenge,
-      origin: config.origin,
+      origin,
       rpId,
       // Same server-wide UV policy the connect handshake enforces, so sign-in
       // is not a softer path than a remote connect when UV is required.
@@ -317,7 +319,7 @@ export function createApp(config: AppConfig): CreatedApp {
     const res: HostEnrollResponse = {
       hostId: host.hostId,
       hostToken: host.hostToken,
-      origin: config.origin,
+      origin,
       rpId,
     };
     return c.json(res);

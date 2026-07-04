@@ -77,6 +77,21 @@ test('sign-in rejects an assertion for a foreign origin', async () => {
   assert.match((await res.json()).error, /origin/);
 });
 
+test('sign-in accepts the browser-normalized origin for a normalized config', async () => {
+  const { app } = await freshApp({ origin: 'https://Example.COM/' });
+  const authenticator = await SimAuthenticator.create({ rpId: 'example.com' });
+  assert.equal(
+    (await register(app, authenticator, { origin: 'https://example.com' })).status,
+    200,
+  );
+
+  const { res } = await signin(app, authenticator, {
+    origin: 'https://example.com',
+    rpId: 'example.com',
+  });
+  assert.equal(res.status, 200);
+});
+
 test('an expired session token no longer validates', async () => {
   const clock = makeClock();
   const { app, sessions } = await freshApp({ now: clock.now });

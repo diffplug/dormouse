@@ -38,6 +38,9 @@ WebAuthn requires a secure context: `localhost` works for development; for a
 real phone, put the server behind TLS (`tailscale serve` is the intended
 selfhost path, any reverse proxy works). The server itself always speaks
 plain HTTP.
+`DORMOUSE_ORIGIN` is parsed once and normalized with `URL.origin`; WebAuthn
+clientData checks, passkey assertion verification, and the Host enrollment
+policy all use that normalized origin.
 
 # State files
 
