@@ -259,7 +259,7 @@ export class RelayHub {
         // connect2: the server verifies the assertion (against the STORED key)
         // and challenge freshness before forwarding. On failure the client gets
         // a denial and the Host's challenge stays unburned.
-        const check = await this.#gate.checkConnect2(client.clientId, frame.request);
+        const check = await this.#gate.checkConnect2(client.clientId, frame.hostId, frame.request);
         if (!this.#isCurrentClientHost(client, frame.hostId, host)) return;
         if (!check.ok) {
           this.#toClient(client, { t: 'decision', allowed: false, failures: check.failures });

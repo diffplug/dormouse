@@ -49,8 +49,12 @@ export interface HandshakeGate {
   checkPair(request: unknown): Promise<PairCheck>;
   /** Remember the Host challenge the server just relayed to a client (freshness half). */
   observeChallenge(clientId: string, hostId: string, challenge: string, expiresAt: number): void;
-  /** Verify a `connect2` request before relaying it to the Host. */
-  checkConnect2(clientId: string, request: ConnectionRequest): Promise<Connect2Check>;
+  /** Verify a `connect2` request before relaying it to the target Host. */
+  checkConnect2(
+    clientId: string,
+    targetHostId: string,
+    request: ConnectionRequest,
+  ): Promise<Connect2Check>;
   /** Drop any remembered challenge for a client that disconnected. */
   forgetClient(clientId: string): void;
 }
@@ -134,7 +138,11 @@ export class Handshake implements HandshakeGate {
     this.#relayed.delete(clientId);
   }
 
-  async checkConnect2(clientId: string, request: ConnectionRequest): Promise<Connect2Check> {
+  async checkConnect2(
+    clientId: string,
+    targetHostId: string,
+    request: ConnectionRequest,
+  ): Promise<Connect2Check> {
     const failures: ConnectionFailure[] = [];
 
     // (d) Freshness half: the request must answer the exact Host challenge the
@@ -144,6 +152,7 @@ export class Handshake implements HandshakeGate {
     this.#relayed.delete(clientId);
     const challengeFresh =
       relayed !== undefined &&
+      relayed.hostId === targetHostId &&
       typeof request?.challenge === 'string' &&
       relayed.challenge === request.challenge &&
       this.#now() < relayed.expiresAt;

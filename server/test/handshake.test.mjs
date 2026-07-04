@@ -411,7 +411,7 @@ test('server derives relayed challenge expiry from its own observation clock', a
   clock.advance(DEFAULT_CHALLENGE_TTL_MS - 1);
 
   const assertion = await authenticator.assert({ challenge, origin: ORIGIN, rpId: RP_ID });
-  const result = await gate.checkConnect2('client-1', {
+  const result = await gate.checkConnect2('client-1', 'host-1', {
     accountId: SELFHOST_ACCOUNT_ID,
     devicePublicKey: 'device-public-key',
     challenge,
@@ -423,6 +423,41 @@ test('server derives relayed challenge expiry from its own observation clock', a
   });
 
   assert.deepEqual(result, { ok: true });
+});
+
+test('server rejects a connect2 that answers a different Host challenge', async () => {
+  const clock = makeClock();
+  const authenticator = await newAuthenticator();
+  const gate = new Handshake(
+    {
+      findPasskey: async (credentialId) =>
+        credentialId === authenticator.credentialId
+          ? {
+              credentialId,
+              publicKey: authenticator.publicKey,
+              label: 'Test Passkey',
+              createdAt: clock.now(),
+            }
+          : undefined,
+    },
+    { origin: ORIGIN, rpId: RP_ID, now: clock.now },
+  );
+  const challenge = toBase64Url(globalThis.crypto.getRandomValues(new Uint8Array(32)));
+  gate.observeChallenge('client-1', 'host-a', challenge, clock.now() + DEFAULT_CHALLENGE_TTL_MS);
+
+  const assertion = await authenticator.assert({ challenge, origin: ORIGIN, rpId: RP_ID });
+  const result = await gate.checkConnect2('client-1', 'host-b', {
+    accountId: SELFHOST_ACCOUNT_ID,
+    devicePublicKey: 'device-public-key',
+    challenge,
+    deviceSignature: 'device-signature',
+    passkey: {
+      publicKey: authenticator.publicKey,
+      assertion,
+    },
+  });
+
+  assert.deepEqual(result, { ok: false, failures: ['challenge-invalid'] });
 });
 
 // --- requireUserVerification: Server mirrors the Host's UV demand -----------
