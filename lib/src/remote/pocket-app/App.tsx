@@ -141,6 +141,7 @@ export default function App(): React.ReactElement {
 
   const leaveWall = () => {
     teardownAdapter();
+    client.close();
     setActiveHost(null);
     setPhase('hosts');
   };
