@@ -38,6 +38,12 @@ v1 protocol allows one attachment per session, so pane switching is
 detach → attach, and the attach repaint (resize) redraws the screen. Badges
 for non-attached panes come from `directory.watch` without attaching.
 
+Pocket's local "paired" host marker is optimistic cache, not authority. When a
+connect denial reports an ACL miss (`passkey-not-paired`,
+`device-not-paired`, or `pairing-mismatch`), Pocket clears that marker and
+shows Pair again so expected Host ACL resets, revocations, or browser
+device-key loss recover through the normal pairing ceremony.
+
 # Module layout
 
 ```

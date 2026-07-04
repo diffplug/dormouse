@@ -106,6 +106,14 @@ export default function App(): React.ReactElement {
       await ensureSocket();
       const decision: ConnectDecision = await client.connect(host.hostId);
       if (!decision.allowed) {
+        if (decision.pairingStale) {
+          setPairedIds((prev) => {
+            if (!prev.has(host.hostId)) return prev;
+            const next = new Set(prev);
+            next.delete(host.hostId);
+            return next;
+          });
+        }
         throw new Error(`Connection denied${decision.failures ? `: ${decision.failures.join(', ')}` : ''}`);
       }
       await client.hello();

@@ -19,6 +19,7 @@ import {
 } from 'server-lib-common';
 
 import {
+  hasRecoverablePairingFailure,
   PocketClient,
   type PocketSocket,
   type PocketStorage,
@@ -95,6 +96,7 @@ function memoryStorage(): PocketStorage {
     knownCredentialIds: () => [...passkeys.keys()],
     isPaired: (hostId) => paired.has(hostId),
     markPaired: (hostId) => void paired.add(hostId),
+    unmarkPaired: (hostId) => void paired.delete(hostId),
   };
 }
 
@@ -225,6 +227,13 @@ async function signedIn(overrides: Partial<PocketClientDeps> = {}): Promise<Harn
   return harness;
 }
 
+async function pairApproved(client: PocketClient, socket: FakeSocket): Promise<void> {
+  const pairing = client.pair('h1', 'iPhone');
+  await nextSent(socket, (f) => f.t === 'pair');
+  socket.server({ t: 'pair-result', approved: true, record: { hostId: 'h1' } });
+  await pairing;
+}
+
 // --- Tests -----------------------------------------------------------------
 
 describe('setup + signin', () => {
@@ -287,6 +296,14 @@ describe('pair', () => {
 });
 
 describe('connect', () => {
+  it('classifies ACL miss failures as recoverable stale pairing', () => {
+    expect(hasRecoverablePairingFailure(['device-not-paired'])).toBe(true);
+    expect(hasRecoverablePairingFailure(['pairing-mismatch'])).toBe(true);
+    expect(hasRecoverablePairingFailure(['passkey-not-paired'])).toBe(true);
+    expect(hasRecoverablePairingFailure(['challenge-invalid'])).toBe(false);
+    expect(hasRecoverablePairingFailure(undefined)).toBe(false);
+  });
+
   it('challenge → one assertion + device signature → connect2 → allowed', async () => {
     const { client, socket, device } = await signedIn();
     const connecting = client.connect('h1');
@@ -347,6 +364,9 @@ describe('connect', () => {
 
   it('resolves not-allowed with failures on a denied decision', async () => {
     const { client, socket } = await signedIn();
+    await pairApproved(client, socket);
+    expect(client.isPaired('h1')).toBe(true);
+
     const connecting = client.connect('h1');
     await nextSent(socket, (f) => f.t === 'connect');
     socket.server({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(3), expiresAt: 9e15 });
@@ -355,7 +375,25 @@ describe('connect', () => {
     const decision = await connecting;
     expect(decision.allowed).toBe(false);
     expect(decision.failures).toEqual(['device-not-paired']);
+    expect(decision.pairingStale).toBe(true);
+    expect(client.isPaired('h1')).toBe(false);
     expect(client.connectedHostId).toBeNull();
+  });
+
+  it('keeps the paired marker for non-pairing denials', async () => {
+    const { client, socket } = await signedIn();
+    await pairApproved(client, socket);
+
+    const connecting = client.connect('h1');
+    await nextSent(socket, (f) => f.t === 'connect');
+    socket.server({ t: 'challenge', hostId: 'h1', challenge: b64uChallenge(4), expiresAt: 9e15 });
+    await nextSent(socket, (f) => f.t === 'connect2');
+    socket.server({ t: 'decision', allowed: false, failures: ['challenge-invalid'] });
+
+    const decision = await connecting;
+    expect(decision.allowed).toBe(false);
+    expect(decision.pairingStale).toBeUndefined();
+    expect(client.isPaired('h1')).toBe(true);
   });
 });
 

@@ -65,6 +65,7 @@ export interface PocketStorage {
   knownCredentialIds(): string[];
   isPaired(hostId: string): boolean;
   markPaired(hostId: string): void;
+  unmarkPaired(hostId: string): void;
 }
 
 export interface PocketClientDeps {
@@ -91,6 +92,8 @@ export interface TerminalHandlers {
 export interface ConnectDecision {
   readonly allowed: boolean;
   readonly failures?: readonly ConnectionFailure[];
+  /** True when a denial means the local paired marker is stale and the user can re-pair. */
+  readonly pairingStale?: boolean;
 }
 
 export interface PairResult {
@@ -299,8 +302,18 @@ export class PocketClient {
       ServerToClientFrame,
       { t: 'decision' }
     >;
-    if (decisionFrame.allowed) this.#connectedHostId = hostId;
-    return { allowed: decisionFrame.allowed, failures: decisionFrame.failures };
+    const pairingStale =
+      !decisionFrame.allowed && hasRecoverablePairingFailure(decisionFrame.failures);
+    if (decisionFrame.allowed) {
+      this.#connectedHostId = hostId;
+    } else if (pairingStale) {
+      this.#storage.unmarkPaired(hostId);
+    }
+    return {
+      allowed: decisionFrame.allowed,
+      failures: decisionFrame.failures,
+      ...(pairingStale ? { pairingStale: true } : {}),
+    };
   }
 
   // --- Remote-api v1 -------------------------------------------------------
@@ -541,6 +554,18 @@ export const PASSKEY_UNAVAILABLE_MESSAGE =
   "This device does not hold the passkey's public key, so it cannot pair or connect. " +
   'Pair from the device that first created the passkey (POC limitation).';
 
+const RECOVERABLE_PAIRING_FAILURES = new Set<ConnectionFailure>([
+  'passkey-not-paired',
+  'device-not-paired',
+  'pairing-mismatch',
+]);
+
+export function hasRecoverablePairingFailure(
+  failures: readonly ConnectionFailure[] | undefined,
+): boolean {
+  return failures?.some((failure) => RECOVERABLE_PAIRING_FAILURES.has(failure)) ?? false;
+}
+
 function uuid(): string {
   return globalThis.crypto.randomUUID();
 }
@@ -565,5 +590,6 @@ export function localStoragePocketStorage(): PocketStorage {
     },
     isPaired: (hostId) => globalThis.localStorage.getItem(PAIRED_PREFIX + hostId) === '1',
     markPaired: (hostId) => globalThis.localStorage.setItem(PAIRED_PREFIX + hostId, '1'),
+    unmarkPaired: (hostId) => globalThis.localStorage.removeItem(PAIRED_PREFIX + hostId),
   };
 }
