@@ -42,6 +42,21 @@ plain HTTP.
 clientData checks, passkey assertion verification, and the Host enrollment
 policy all use that normalized origin.
 
+## Host webview CSP (self-host builds)
+
+The standalone Host is a Tauri app, and its webview `connect-src` bounds where
+the Host can reach a relay server. The shipped binary is scoped to the SaaS
+origin only (`https://*.dormouse.sh wss://*.dormouse.sh`, plus localhost for
+dev), so a compromised webview cannot exfiltrate to an arbitrary host. A
+self-host server on a different origin is therefore reached only by a custom
+build: set `DORMOUSE_REMOTE_CONNECT_SRC` when building
+(`pnpm --filter dormouse-standalone tauri build`) to the CSP sources for your
+server, e.g. `https://dormouse.example.com wss://dormouse.example.com` (or a
+tailnet wildcard `https://*.ts.net wss://*.ts.net`). It replaces the default
+SaaS sources; localhost and the rest of the policy are untouched. The default
+is deliberately not internet-wide — widening it is an explicit, per-build
+opt-in.
+
 # State files
 
 ```

@@ -12,7 +12,7 @@
     "stage": "pnpm run stage:dor-cli && pnpm run stage:sidecar-proxy",
     "stage:dor-cli": "pnpm --filter dor build && node scripts/stage-dor-cli.mjs",
     "stage:sidecar-proxy": "node scripts/build-sidecar-proxy.mjs",
-    "tauri": "pnpm run stage && tauri",
+    "tauri": "pnpm run stage && node scripts/tauri.mjs",
     "test": "vitest run"
   },
   "dependencies": {
