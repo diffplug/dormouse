@@ -13,16 +13,17 @@ one protocol, not two:
 
 * **Phone (Dormouse Pocket)** — the user sees a directory of the Host's active
   panes, picks one, and views/controls just that one. Shipped.
-* **VR headset** — the client runs the entire Dormouse UI remotely: the full
-  wall layout, every surface live at once. Future — see [Future](#future).
+* **VR headset** — the client runs the entire Dormouse UI remotely: the Host's
+  whole Window — every Workspace's layout, every surface live at once. Future —
+  see [Future](#future).
 
-| Capability            | Phone            | VR (future)      |
-| --------------------- | ---------------- | ---------------- |
-| `directory.watch`     | yes (the picker) | optional         |
-| `surface.attach`      | one at a time    | many at once     |
-| `wall.watch` (layout) | no               | yes              |
-| Layout mutations      | no               | yes              |
-| Input                 | to attached pane | to any surface   |
+| Capability              | Phone            | VR (future)      |
+| ----------------------- | ---------------- | ---------------- |
+| `directory.watch`       | yes (the picker) | optional         |
+| `surface.attach`        | one at a time    | many at once     |
+| `window.watch` (layout) | no               | yes              |
+| Layout mutations        | no               | yes              |
+| Input                   | to attached pane | to any surface   |
 
 Design principle, and a standing constraint on everything staged below:
 **replicate state, don't stream a desktop.** Terminals are sent as PTY data and
@@ -62,8 +63,10 @@ shapes reuse the existing surface model (`dor/src/protocol.ts`,
 * **Pane** — the phone's picker lists panes; attaching to a pane means
   attaching to its selected surface.
 * **Viewer** — one connected Client session. Multiple viewers may coexist.
-* **Wall** — the full layout tree plus geometry, consumed only by VR
-  (future; see [Future](#future)).
+* **Window** — the Host's full layout tree (its Workspaces, their Panes and
+  Surfaces) plus geometry, consumed only by VR (future; see
+  [Future](#future)). The glossary reserves **Wall** for the renderer of a
+  single Workspace, so the VR subscription replicates the *Window*.
 
 ## Transport
 
@@ -124,7 +127,7 @@ interface HelloResult {
 ```
 
 Reserved: a `capabilities` field on the client hello (what the client can
-render — screencast formats, wall support) lands additively when browser
+render — screencast formats, window support) lands additively when browser
 surfaces arrive; see [Future](#future).
 
 ## Directory (the phone's picker)
@@ -139,7 +142,7 @@ interface DirectoryEntry {
   paneRef: string;
   surfaceId: string;            // the selected surface in the pane
   type: 'terminal';
-  title: string;                // derived title, same one the wall header shows
+  title: string;                // derived title, same one the Wall's pane header shows
   focused: boolean;             // focused on the host
   // From the existing semantic-event model (terminal-state.ts):
   activity?: 'unknown' | 'prompt' | 'editing' | 'running' | 'finished';
@@ -248,7 +251,7 @@ and layout mutations are staged — see [Future](#future).
 Concurrent sessions need no special machinery: attach state is per-session,
 streams fan out per attachment, and terminal size is last-attach-wins.
 Interleaved typing from two granted sessions is no worse than two keyboards on
-one machine; the wall lease (future) is the only exclusive resource. Showing
+one machine; the window lease (future) is the only exclusive resource. Showing
 connected viewers on the Host UI (label from the ACL record, e.g. `iPhone
 Safari`) with per-viewer disconnect is staged with the tethering display — see
 [Future](#future).
@@ -265,8 +268,9 @@ Browser remoting was specified alongside protocol-v1 but the shipped slice is
 terminal-only, so it is now the first staged item. The existing screencast
 path (`docs/specs/dor-browser.md`), made remote:
 
-* The client hello gains the reserved `capabilities` field:
-  `{ screencast: ['jpeg' | 'webp'], input: boolean, wall: boolean }`.
+* The client hello gains the reserved `capabilities` field
+  (what the client can render — screencast formats, window support):
+  `{ screencast: ['jpeg' | 'webp'], input: boolean, window: boolean }`.
 * `DirectoryEntry` gains browser entries — `type: 'browser'` (the canonical
   component-level kind, `docs/specs/glossary.md` Naming conventions) plus a
   browser-only `url` field.
@@ -294,7 +298,7 @@ dimension and frame rate) at first; per-attachment quality negotiation
 phone can drive the page's own UI in the meantime.
 
 Iframe surfaces stay unsupported even here: omitted from the directory,
-refusing attachment; wall snapshots still list them (the layout must be
+refusing attachment; Window snapshots still list them (the layout must be
 truthful) and VR renders an inert placeholder. Nothing else in the protocol
 assumes they exist, so support can be added cleanly later.
 
@@ -347,7 +351,7 @@ on `TerminalAttachResult` plus a `terminal.block` event.
 ### 5. Tethering display and viewer visibility
 
 While a remote session holds size authority, every other display of that pane
-— the Host's wall pane, other attached viewers — greys out and shows only
+— the pane in the Host's own Wall, other attached viewers — greys out and shows only
 **"tethering to \<device\>"** (the ACL record's label, e.g. `iPhone Safari`)
 instead of fighting over `SIGWINCH`. Interacting with a tethered pane is how a
 display takes authority back. Alongside it: the Host UI shows connected
@@ -366,33 +370,34 @@ Layered so "the Host is the final authority" holds at every step:
    grant and are confirmed on the Host the same way local kills are
    (KillConfirm), unless the Host user opts a session into unattended control.
 
-### 7. The wall (VR)
+### 7. The Window (VR)
 
 VR does not stream the desktop; it *is* the desktop: the headset runs the same
 web UI (`lib`) against remote data sources instead of local ones.
 
-`wall.watch` subscribes to the layout tree plus geometry:
+`window.watch` subscribes to the Host Window's layout tree plus geometry. A
+session connects to one Host, hence one Window, so the snapshot follows the
+glossary containment directly (`Window ⊃ Workspace ⊃ Pane ⊃ Surface`):
 
 ```ts
-interface WallSnapshot {
+interface WindowSnapshot {
   workspaces: Array<{
     ref: string; name: string;
-    windows: Array<{
-      ref: string;
-      panes: Array<{
-        paneRef: string;
-        /** Normalized rect within the window, for initial spatial placement. */
-        rect: { x: number; y: number; w: number; h: number };
-        surfaces: Surface[];      // the existing Surface shape
-      }>;
+    panes: Array<{
+      paneRef: string;
+      /** Normalized rect within the Workspace's Wall, for initial spatial placement. */
+      rect: { x: number; y: number; w: number; h: number };
+      surfaces: Surface[];      // the existing Surface shape
     }>;
   }>;
+  /** Which Workspace the Host has mounted locally. */
+  activeWorkspaceRef: string;
   focusedSurfaceId: string | null;
 }
 
-type WallEvent =
-  | { event: 'wall.snapshot'; data: WallSnapshot }
-  | { event: 'wall.changed';  data: WallSnapshot };  // coalesced; layouts are small
+type WindowEvent =
+  | { event: 'window.snapshot'; data: WindowSnapshot }
+  | { event: 'window.changed';  data: WindowSnapshot };  // coalesced; layouts are small
 ```
 
 The rects seed VR placement; after that the headset owns spatial arrangement
@@ -410,9 +415,9 @@ surface.kill     surface.read      surface.focus
 These are the same methods the dor CLI speaks today; the remote API reuses
 their request/response shapes so the Host dispatches both through one handler.
 
-**Wall lease.** A VR session may request `wall.lease`, declaring itself the
-primary display. Sizing needs no lease — last-attach-wins already hands VR the
-panes it displays — so the lease is presentational: the Host UI tethers
+**Window lease.** A VR session may request `window.lease`, declaring itself
+the primary display. Sizing needs no lease — last-attach-wins already hands VR
+the panes it displays — so the lease is presentational: the Host UI tethers
 wholesale ("tethering to \<device\>") instead of pane by pane, and panes
 created on the Host while the lease is held open tethered to the leaseholder.
 One lease at a time; the Host user can always reclaim it locally. Phones never

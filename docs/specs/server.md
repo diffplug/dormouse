@@ -1,4 +1,4 @@
-# Server (selfhost POC)
+# Server (selfhost)
 
 > See `docs/specs/glossary.md` for Session / Pane / Surface vocabulary; this spec uses it for what the relay exposes.
 
@@ -15,7 +15,7 @@ browser-surface support — **terminal-only**. The heavy lifting is already
 done: every security primitive lives in `server-lib-common`, and the terminal
 UI lives in `lib`/`standalone`.
 
-## POC guardrails
+## Guardrails
 
 * One account (`accountId: "owner"`), created once with the setup password.
 * Terminal surfaces only — exactly remote-api.md's **protocol-v1** (browser
@@ -92,7 +92,7 @@ so `node --test` can drive setup → pairing → connect end to end via
 | `GET /ws/client`                 | session token  | A Client's relay socket                            |
 
 The setup password is compared in constant time with a small fixed delay on
-failure; that is the extent of POC hardening.
+failure; that is the extent of the hardening today.
 
 ## Relay
 
@@ -202,11 +202,11 @@ drives setup → pairing → connect end to end through the real server via
 replayed challenge, wrong origin, unpaired device, revoked record, plus relay
 echo and token/session rejection). `server/test/harness/fake-host.mjs` is the
 automated-test fake host; `server/scripts/fake-host.mjs` is a separate manual
-dev stand-in (see Running the POC below). Browser-dependent layers — the
+dev stand-in (see Running it below). Browser-dependent layers — the
 standalone host module and the Pocket terminal view — are dogfooded rather
 than automated.
 
-## Running the POC
+## Running it
 
 The loop at the top of this spec is implemented end to end. To test:
 
@@ -240,7 +240,7 @@ First-time setup (password + label) creates the passkey and signs you in →
 Hosts → **Pair** → approve in the modal on the laptop → **Connect** (one
 biometric prompt) → pick a pane → type.
 
-POC limitations to know about: pair/connect only works from the browser that
+Limitations to know about: pair/connect only works from the browser that
 registered the passkey (the passkey public key is stored client-side at
 registration); clearing site data destroys the device key → re-pair, per the
 security model; a dropped WebSocket sends you back to the Hosts view —
