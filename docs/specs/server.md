@@ -112,6 +112,9 @@ re-establish an old session.
 When a Client socket binds to a different Host, the relay sends `client-gone`
 to the previous live Host before replacing the binding, so Host-side pairing UI,
 remote-api sessions, and watchers are disposed immediately.
+Client-originated `pair` and `connect2` frames are also rechecked after their
+async validation work: if the Client disconnected, rebound, or the Host socket
+was replaced while validation was pending, the stale result is dropped.
 
 ## Pairing (phone ↔ laptop, first time)
 

@@ -31,6 +31,14 @@ function fakeSocket() {
   };
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
 /** Register a client, bind it to `hostId`, and establish via a host decision. */
 async function establishedClient(hub, hostConn, hostId) {
   const socket = fakeSocket();
@@ -152,4 +160,96 @@ test('rebinding a client tells the previous host client-gone', async () => {
   assert.equal(hostB.socket.sent.at(-1)?.clientId, client.clientId);
   assert.equal(client.hostId, 'h2');
   assert.equal(client.established, false);
+});
+
+test('pair is not forwarded after async validation if the host was replaced', async () => {
+  const pairCheck = deferred();
+  let started;
+  const pairStarted = new Promise((resolve) => {
+    started = resolve;
+  });
+  const gate = {
+    ...openGate,
+    checkPair: async () => {
+      started();
+      return pairCheck.promise;
+    },
+  };
+  const hub = new RelayHub(gate);
+  const oldHost = hub.registerHost('h1', fakeSocket());
+  const clientSocket = fakeSocket();
+  const client = hub.registerClient(clientSocket);
+
+  const routing = hub.onClientFrame(client, JSON.stringify({ t: 'pair', hostId: 'h1', request: {} }));
+  await pairStarted;
+
+  const newHost = hub.registerHost('h1', fakeSocket());
+  pairCheck.resolve({ ok: true });
+  await routing;
+
+  assert.equal(oldHost.socket.closed, true);
+  assert.ok(clientSocket.sent.some((f) => f.t === 'host-gone'));
+  assert.equal(oldHost.socket.sent.some((f) => f.t === 'pair'), false);
+  assert.equal(newHost.socket.sent.some((f) => f.t === 'pair'), false);
+});
+
+test('pair is not forwarded after async validation if the client disconnected', async () => {
+  const pairCheck = deferred();
+  let started;
+  const pairStarted = new Promise((resolve) => {
+    started = resolve;
+  });
+  const gate = {
+    ...openGate,
+    checkPair: async () => {
+      started();
+      return pairCheck.promise;
+    },
+  };
+  const hub = new RelayHub(gate);
+  const host = hub.registerHost('h1', fakeSocket());
+  const client = hub.registerClient(fakeSocket());
+
+  const routing = hub.onClientFrame(client, JSON.stringify({ t: 'pair', hostId: 'h1', request: {} }));
+  await pairStarted;
+
+  hub.unregisterClient(client);
+  pairCheck.resolve({ ok: true });
+  await routing;
+
+  assert.deepEqual(host.socket.sent, [{ t: 'client-gone', clientId: client.clientId }]);
+});
+
+test('connect2 is not forwarded after async validation if the host was replaced', async () => {
+  const connectCheck = deferred();
+  let started;
+  const connectStarted = new Promise((resolve) => {
+    started = resolve;
+  });
+  const gate = {
+    ...openGate,
+    checkConnect2: async () => {
+      started();
+      return connectCheck.promise;
+    },
+  };
+  const hub = new RelayHub(gate);
+  const oldHost = hub.registerHost('h1', fakeSocket());
+  const clientSocket = fakeSocket();
+  const client = hub.registerClient(clientSocket);
+
+  const routing = hub.onClientFrame(
+    client,
+    JSON.stringify({ t: 'connect2', hostId: 'h1', request: {} }),
+  );
+  await connectStarted;
+
+  const newHost = hub.registerHost('h1', fakeSocket());
+  connectCheck.resolve({ ok: true });
+  await routing;
+
+  assert.equal(oldHost.socket.closed, true);
+  assert.ok(clientSocket.sent.some((f) => f.t === 'host-gone'));
+  assert.equal(oldHost.socket.sent.some((f) => f.t === 'connect2'), false);
+  assert.equal(newHost.socket.sent.some((f) => f.t === 'connect2'), false);
 });
