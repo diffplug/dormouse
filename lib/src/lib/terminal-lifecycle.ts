@@ -405,6 +405,7 @@ export function resumeTerminal(
   }
   if (exitInfo && !exitInfo.alive) {
     entry.terminal.write(`\r\n[Process exited with code ${exitInfo.exitCode ?? -1}]\r\n`);
+    entry.exited = true;
   }
   const savedTitle = exitInfo?.title?.trim();
   if (savedTitle && savedTitle !== UNNAMED_PANEL_TITLE) {
