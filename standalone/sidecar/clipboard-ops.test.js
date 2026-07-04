@@ -17,8 +17,8 @@ const {
 function fakeSpawn(behavior) {
   const calls = [];
   const writes = [];
-  const spawn = (cmd, args) => {
-    calls.push([cmd, args]);
+  const spawn = (cmd, args, options) => {
+    calls.push([cmd, args, options]);
     const handlers = {};
     return {
       on(event, cb) { handlers[event] = cb; return this; },
@@ -315,14 +315,20 @@ test('readClipboardImageAsFilePath on linux writes buffer from exec stdout', asy
 test('writeClipboardText on mac shells out to pbcopy via stdin', async () => {
   const f = fakeSpawn();
   await writeClipboardText('copied!', { platform: 'darwin', spawn: f.spawn });
-  assert.deepEqual(f.calls, [['pbcopy', []]]);
+  assert.deepEqual(f.calls.map((c) => [c[0], c[1]]), [['pbcopy', []]]);
   assert.deepEqual(f.writes, [['pbcopy', 'copied!']]);
 });
 
 test('writeClipboardText on windows shells out to clip', async () => {
   const f = fakeSpawn();
   await writeClipboardText('x', { platform: 'win32', spawn: f.spawn });
-  assert.deepEqual(f.calls, [['clip', []]]);
+  assert.deepEqual(f.calls.map((c) => [c[0], c[1]]), [['clip', []]]);
+});
+
+test('writeClipboardText spawns with windowsHide so no console window flickers', async () => {
+  const f = fakeSpawn();
+  await writeClipboardText('x', { platform: 'win32', spawn: f.spawn });
+  assert.equal(f.calls[0][2].windowsHide, true);
 });
 
 test('writeClipboardText on linux prefers xclip in X11', async () => {

@@ -355,7 +355,7 @@ test('getCwdForPid uses lsof with -a and parses the target pid cwd', () => {
   assert.deepEqual(calls, [{
     file: 'lsof',
     args: ['-a', '-d', 'cwd', '-p', '4242', '-Fn'],
-    options: { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] },
+    options: { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true },
   }]);
 });
 
