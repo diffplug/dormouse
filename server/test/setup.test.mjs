@@ -16,6 +16,7 @@ import {
   freshApp,
   enrollHost,
   newAuthenticator,
+  padBase64Url,
   post,
   readAccount,
   register,
@@ -101,6 +102,22 @@ test('setup/finish rejects a replayed challenge', async () => {
   });
   assert.equal(replay.status, 400);
   assert.match((await replay.json()).error, /challenge/);
+});
+
+test('setup/finish accepts a padded base64url clientData challenge', async () => {
+  const { app } = await freshApp();
+  const authenticator = await newAuthenticator();
+  const begin = await post(app, API_ROUTES.setupBegin, { password: PASSWORD });
+  const { challenge } = await begin.json();
+
+  const res = await post(app, API_ROUTES.setupFinish, {
+    password: PASSWORD,
+    credentialId: authenticator.credentialId,
+    publicKey: authenticator.publicKey,
+    clientDataJSON: registrationClientData({ challenge: padBase64Url(challenge) }),
+    label: 'x',
+  });
+  assert.equal(res.status, 200);
 });
 
 test('setup/finish rejects a mismatched origin in clientDataJSON', async () => {

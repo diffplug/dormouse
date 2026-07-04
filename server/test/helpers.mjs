@@ -68,6 +68,12 @@ export function registrationClientData({ challenge, origin = ORIGIN, type = 'web
   return toBase64Url(utf8Encode(JSON.stringify({ type, challenge, origin, crossOrigin: false })));
 }
 
+/** Serialize an unpadded base64url challenge the way some browsers do in clientDataJSON. */
+export function padBase64Url(text) {
+  const rem = text.length % 4;
+  return rem === 0 ? text : `${text}${'='.repeat(4 - rem)}`;
+}
+
 /** begin → finish registration for `authenticator`; returns the finish Response. */
 export async function register(
   app,

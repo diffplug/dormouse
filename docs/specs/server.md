@@ -75,6 +75,10 @@ Two facts keep the server dependency-free:
 
 Server-issued challenges (registration, sign-in) reuse `HostChallengeIssuer`
 — it is a generic single-use/TTL challenge store despite the name.
+Before a challenge is consumed, the server canonicalizes the browser's
+`clientDataJSON.challenge` by decoded base64url bytes, so padded browser
+serializations redeem the issued challenge without weakening single-use replay
+protection.
 
 This also makes the server fully testable without a browser: the
 `SimAuthenticator` harness in `server-lib-common` produces real assertions,

@@ -225,7 +225,8 @@ export function createApp(config: AppConfig): CreatedApp {
     if (clientData.type !== 'webauthn.create') {
       return c.json({ error: 'clientData type must be webauthn.create' }, 400);
     }
-    if (typeof clientData.challenge !== 'string' || !setupChallenges.consume(clientData.challenge)) {
+    const challenge = normalizeChallenge(clientData.challenge);
+    if (!challenge || !setupChallenges.consume(challenge)) {
       return c.json({ error: 'unrecognized or expired challenge' }, 400);
     }
     if (clientData.origin !== origin) {
@@ -282,7 +283,10 @@ export function createApp(config: AppConfig): CreatedApp {
     if (!clientData || typeof clientData.challenge !== 'string') {
       return c.json({ error: 'malformed clientDataJSON' }, 400);
     }
-    const challenge = clientData.challenge;
+    const challenge = normalizeChallenge(clientData.challenge);
+    if (!challenge) {
+      return c.json({ error: 'malformed clientDataJSON' }, 400);
+    }
     if (!signinChallenges.consume(challenge)) {
       return c.json({ error: 'unrecognized or expired challenge' }, 400);
     }
@@ -478,6 +482,16 @@ function decodeClientData(
     const parsed: unknown = JSON.parse(utf8Decode(fromBase64Url(clientDataJSON)));
     if (typeof parsed !== 'object' || parsed === null) return null;
     return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Canonicalize browser-serialized base64url challenges before single-use lookup. */
+function normalizeChallenge(challenge: unknown): string | null {
+  if (typeof challenge !== 'string') return null;
+  try {
+    return toBase64Url(fromBase64Url(challenge));
   } catch {
     return null;
   }

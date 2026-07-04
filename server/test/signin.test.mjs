@@ -11,7 +11,17 @@ import { Hono } from 'hono';
 import { API_ROUTES } from 'server-lib-common';
 import { SimAuthenticator } from '../../server-lib-common/test/harness/actors.mjs';
 
-import { freshApp, makeClock, newAuthenticator, post, register, signin } from './helpers.mjs';
+import {
+  ORIGIN,
+  RP_ID,
+  freshApp,
+  makeClock,
+  newAuthenticator,
+  padBase64Url,
+  post,
+  register,
+  signin,
+} from './helpers.mjs';
 
 test('sign-in happy path mints a session the store accepts', async () => {
   const { app, sessions } = await freshApp();
@@ -53,6 +63,23 @@ test('sign-in rejects a replayed challenge/assertion', async () => {
   const replay = await post(app, API_ROUTES.signinFinish, { assertion });
   assert.equal(replay.status, 400);
   assert.match((await replay.json()).error, /challenge/);
+});
+
+test('sign-in accepts a padded base64url clientData challenge', async () => {
+  const { app } = await freshApp();
+  const authenticator = await newAuthenticator();
+  assert.equal((await register(app, authenticator)).status, 200);
+
+  const begin = await post(app, API_ROUTES.signinBegin, {});
+  const { challenge } = await begin.json();
+  const assertion = await authenticator.assert({
+    challenge,
+    origin: ORIGIN,
+    rpId: RP_ID,
+    tamper: { challenge: padBase64Url(challenge) },
+  });
+  const res = await post(app, API_ROUTES.signinFinish, { assertion });
+  assert.equal(res.status, 200);
 });
 
 test('sign-in rejects a tampered signature', async () => {
