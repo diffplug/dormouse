@@ -89,7 +89,7 @@ function entry(surfaceId: string, over: Partial<DirectoryEntry> = {}): Directory
 }
 
 describe('RemotePtyAdapter directory', () => {
-  it('turns a snapshot into onPtyList (alive from exitCode) and getDirectoryEntries', async () => {
+  it('turns a snapshot into onPtyList without treating command exitCode as PTY death', async () => {
     const client = new FakeClient();
     const adapter = new RemotePtyAdapter(client);
     const lists: PtyInfo[][] = [];
@@ -101,7 +101,7 @@ describe('RemotePtyAdapter directory', () => {
     expect(lists).toEqual([
       [
         { id: 's1', alive: true },
-        { id: 's2', alive: false, exitCode: 0 },
+        { id: 's2', alive: true },
       ],
     ]);
     expect(adapter.getDirectoryEntries().map((e) => e.surfaceId)).toEqual(['s1', 's2']);

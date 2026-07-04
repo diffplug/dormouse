@@ -195,6 +195,10 @@ future optimization there is no current reason to pay for.
 Thumbnails are future work; in v1 the picker renders from titles, activity,
 and the `ringing`/`hasTODO` badges.
 
+Terminal directory `exitCode` is the last finished command's semantic status,
+not PTY lifetime. A listed terminal is still a live Host registry surface until
+its attachment emits `terminal.closed`.
+
 ---
 
 # Attaching to a surface

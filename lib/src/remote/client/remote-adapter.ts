@@ -203,8 +203,9 @@ export class RemotePtyAdapter implements PlatformAdapter {
   #emitPtyList(): void {
     const ptys: PtyInfo[] = this.#entries.map((entry) => ({
       id: entry.surfaceId,
-      alive: entry.exitCode === undefined,
-      ...(entry.exitCode === undefined ? {} : { exitCode: entry.exitCode }),
+      // Directory entries are live Host registry surfaces. `entry.exitCode` is
+      // the last command's semantic status, not the PTY process lifetime.
+      alive: true,
     }));
     for (const handler of this.#listHandlers) handler({ ptys });
   }
