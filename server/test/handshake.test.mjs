@@ -17,6 +17,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  DEFAULT_CHALLENGE_TTL_MS,
   REMOTE_EVENTS,
   REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
@@ -36,6 +37,7 @@ import {
   RP_ID,
   enrollHost,
   freshApp,
+  makeClock,
   newAuthenticator,
   ownerSession,
   sleep,
@@ -43,6 +45,7 @@ import {
   wsConnect,
 } from './helpers.mjs';
 import { FakeHost } from './harness/fake-host.mjs';
+import { Handshake } from '../dist/handshake.js';
 
 // --- Fixtures --------------------------------------------------------------
 
@@ -378,6 +381,48 @@ test('server rejects a replayed connect2 (same challenge twice) before forwardin
   } finally {
     await close();
   }
+});
+
+test('server derives relayed challenge expiry from its own observation clock', async () => {
+  const clock = makeClock();
+  const authenticator = await newAuthenticator();
+  const gate = new Handshake(
+    {
+      findPasskey: async (credentialId) =>
+        credentialId === authenticator.credentialId
+          ? {
+              credentialId,
+              publicKey: authenticator.publicKey,
+              label: 'Test Passkey',
+              createdAt: clock.now(),
+            }
+          : undefined,
+    },
+    { origin: ORIGIN, rpId: RP_ID, now: clock.now },
+  );
+  const challenge = toBase64Url(globalThis.crypto.getRandomValues(new Uint8Array(32)));
+
+  gate.observeChallenge(
+    'client-1',
+    'host-1',
+    challenge,
+    clock.now() - DEFAULT_CHALLENGE_TTL_MS,
+  );
+  clock.advance(DEFAULT_CHALLENGE_TTL_MS - 1);
+
+  const assertion = await authenticator.assert({ challenge, origin: ORIGIN, rpId: RP_ID });
+  const result = await gate.checkConnect2('client-1', {
+    accountId: SELFHOST_ACCOUNT_ID,
+    devicePublicKey: 'device-public-key',
+    challenge,
+    deviceSignature: 'device-signature',
+    passkey: {
+      publicKey: authenticator.publicKey,
+      assertion,
+    },
+  });
+
+  assert.deepEqual(result, { ok: true });
 });
 
 // --- requireUserVerification: Server mirrors the Host's UV demand -----------

@@ -122,6 +122,11 @@ remote-api sessions, and watchers are disposed immediately.
 Client-originated `pair` and `connect2` frames are also rechecked after their
 async validation work: if the Client disconnected, rebound, or the Host socket
 was replaced while validation was pending, the stale result is dropped.
+For `connect2`, the server remembers the last Host challenge it relayed to a
+Client with a relay-local expiry derived from the server's observation time
+(`DEFAULT_CHALLENGE_TTL_MS`). The Host's `expiresAt` is still forwarded to the
+Client, but the server never compares its own clock to that Host wall-clock
+timestamp.
 
 ## Pairing (phone ↔ laptop, first time)
 

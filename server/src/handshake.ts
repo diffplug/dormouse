@@ -22,6 +22,7 @@
  */
 
 import {
+  DEFAULT_CHALLENGE_TTL_MS,
   SELFHOST_ACCOUNT_ID,
   hashPasskeyPublicKey,
   verifyPasskeyAssertion,
@@ -69,12 +70,15 @@ export interface HandshakeConfig {
   readonly requireUserVerification?: boolean;
   /** Injectable clock (epoch ms) for tests; defaults to `Date.now`. */
   readonly now?: () => number;
+  /** Relay-side TTL for Host challenges observed by the server. */
+  readonly relayedChallengeTtlMs?: number;
 }
 
 /** The last Host challenge the server relayed to a client. */
 interface RelayedChallenge {
   readonly hostId: string;
   readonly challenge: string;
+  /** Server-local expiry, derived when the relay observed the challenge. */
   readonly expiresAt: number;
 }
 
@@ -84,6 +88,7 @@ export class Handshake implements HandshakeGate {
   readonly #rpId: string;
   readonly #requireUserVerification: boolean;
   readonly #now: () => number;
+  readonly #relayedChallengeTtlMs: number;
   /** clientId → the last Host challenge relayed to it; consumed single-use. */
   readonly #relayed = new Map<string, RelayedChallenge>();
 
@@ -93,6 +98,7 @@ export class Handshake implements HandshakeGate {
     this.#rpId = config.rpId;
     this.#requireUserVerification = config.requireUserVerification ?? false;
     this.#now = config.now ?? (() => Date.now());
+    this.#relayedChallengeTtlMs = config.relayedChallengeTtlMs ?? DEFAULT_CHALLENGE_TTL_MS;
   }
 
   async checkPair(request: unknown): Promise<PairCheck> {
@@ -116,8 +122,12 @@ export class Handshake implements HandshakeGate {
     return { ok: true };
   }
 
-  observeChallenge(clientId: string, hostId: string, challenge: string, expiresAt: number): void {
-    this.#relayed.set(clientId, { hostId, challenge, expiresAt });
+  observeChallenge(clientId: string, hostId: string, challenge: string, _hostExpiresAt: number): void {
+    this.#relayed.set(clientId, {
+      hostId,
+      challenge,
+      expiresAt: this.#now() + this.#relayedChallengeTtlMs,
+    });
   }
 
   forgetClient(clientId: string): void {
