@@ -106,6 +106,10 @@ Header contract:
   HTML title is tooltip/secondary state.
 - Clicking the URL opens an inline editor. `normalizeNavUrl` keeps explicit
   schemes, uses `http://` for bare loopback hosts, and `https://` otherwise.
+  For an iframe-rendered pane a bare remote hostname therefore resolves to
+  `https://`, which the proxy cannot instrument — the pane shows the scheme
+  error with its `dor ab` hint. This is intended: remote sites are steered to
+  the agent-browser renderer rather than silently proxied over plain HTTP.
 - Back, forward, and reload are always enabled. Agent-browser sends native
   `back` / `forward` / `reload`; iframe uses parent-side history and re-resolves
   the proxy on reload/back/forward.
@@ -445,6 +449,16 @@ Source of truth: `lib/src/lib/platform/types.ts`,
   `vscode-ext/src/agent-browser-host.ts`, `vscode-ext/src/iframe-proxy-host.ts`,
   `standalone/src/tauri-adapter.ts`, `standalone/src-tauri/src/lib.rs`,
   `standalone/sidecar/main.js`.
+
+## Maintainer checklist
+
+When changing browser-surface behavior:
+
+- `renderMode` is canonical. Never reintroduce `surfaceType: 'iframe' | 'agent-browser'` or `poppedOut` as stored state — extend the `resolveRenderMode` migration instead, and update the kind-mapping table in `docs/specs/glossary.md` if adding a render mode.
+- Every browser panel keeps dockview `renderer: 'always'` — moving iframe DOM reloads it, and moving the screencast canvas mid-click breaks click synthesis.
+- A new agent-browser subcommand must be added to `AGENT_BROWSER_ALLOWED_SUBCOMMANDS` (`lib/src/lib/platform/types.ts`); the host-side allowlist is the security boundary, not the CLI.
+- External-binary spawns go through `spawnAndCapture` (`dor-lib-common`), never raw `child_process` — see `docs/specs/dor-cli.md` → Spawning External Binaries.
+- New kill/swap/teardown paths must run `closeAgentBrowserSession` and respect the closed-session mark so pop-out auto-revert cannot resurrect a killed session.
 
 ## Future
 

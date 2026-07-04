@@ -428,6 +428,17 @@ The deferred spawn also only calls `selectPane` if selection is null. The kill h
 | `lib/src/index.css` | Dockview theme overrides — separator/sash/border removal, background flattening |
 | `lib/src/theme.css` | Two-layer VSCode theme token system (`@theme --color-*` → `--vscode-*`) and Tailwind v4 `@theme` integration |
 
+## Maintainer checklist
+
+When changing layout behavior:
+
+- Changing a command-mode binding or the mode-switch gesture: update the shortcut table here **and** `docs/specs/shortcuts.md` in the same edit.
+- Pane-header changes: this spec owns placement and sizing only. Bell/TODO behavior and visual states belong to `docs/specs/alert.md`; the mouse-override icon and banner to `docs/specs/mouse-and-clipboard.md`; the derived label to `docs/specs/terminal-state.md`.
+- Persisted-shape changes (`PersistedPane` / `PersistedDoor` / layout blobs) belong to `docs/specs/transport.md` — add the migration note there.
+- New pane chrome uses tokens from `lib/src/components/design.tsx` (see AGENTS.md Design); never raw color classes.
+- Pane animations stay on `clip-path`, not `transform`, so `getBoundingClientRect` remains accurate for the selection overlay; respect reduced-motion.
+- Anything workspace-strip or switching related stays under `## Future` (workspaces-rollout) until built.
+
 ## Future
 
 **Scope: workspaces-rollout** — the remaining stages of the multi-Workspace feature. The model, container verbs, persistence, and union projection are implemented, dormant behind `dormouse.flags.workspaces` (see [Workspaces](#workspaces) above; persisted containers in `docs/specs/transport.md`, union projection in `docs/specs/alert.md`). This ledger is the single home for what remains; other specs link here rather than restating it.

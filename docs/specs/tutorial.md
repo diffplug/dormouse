@@ -94,28 +94,28 @@ The Playground is the primary dogfood surface for `docs/specs/mouse-and-clipboar
 
 | Spec § | Feature | Status | Why |
 |---|---|---|---|
-| §1 | Mouse icon visible when program requests reporting | ✅ | `ascii-splash` emits `\x1b[?1000h` / `?1002h` / `?1003h` / `?1006h`. |
-| §2 | Temporary/permanent override, banner, Make-permanent / Cancel | ✅ | Use the header mouse icon while `ascii-splash` is active. |
-| §3.1–§3.3 | Drag, Alt-block shape, "Hold Alt" hint | ✅ | Works on any visible text. |
-| §3.3 | "Press e to select the full URL/path" hint | ❌ | No qualifying tokens in the live scenarios. |
-| §3.4 | Pure-scroll follows, cancel-on-change, cancel-on-resize | ⚠️ | `ascii-splash` makes cancel-on-change and resize observable; scenarios too short for pure-scroll. |
-| §3.5 | Scrollback-origin / cross-boundary drags | ⚠️ | Scrollback too short to exercise. |
-| §3.6 | Keyboard routing during drag | ✅ | With override active on `ascii-splash`, drag-time keyboard consumption is observable. |
-| §3.7 | Popup on mouse-up, new-drag-replaces | ✅ | Any selection. |
-| §4.1.1 | Copy Raw | ✅ | Any selection. |
-| §4.1.2 | Copy Rewrapped (paragraph unwrap) | ✅ | `ChangelogRunner` renders wrapped item lines that exercise the rewrap path. |
-| §4.2 | Cmd+C / Cmd+Shift+C | ✅ | Any selection. |
-| §4.3 | Esc / click-outside dismiss | ✅ | Any selection popup. |
-| §5 | Smart-extension (URL / abs path / rel path / Windows path / error location) | ❌ | No matching tokens in the scenarios. |
-| §5.3 | Press `e` to extend | ❌ | Blocked on §5 coverage. |
-| §8.2 | Cmd+V / Cmd+Shift+V / Ctrl+V / Ctrl+Shift+V paste | ⚠️ | Fires and writes to the fake PTY, but `TutorialShell.handleInput` echoes char-by-char and ignores bracketed-paste markers. |
-| §8.5 | Bracketed paste wraps `\e[200~ … \e[201~` | ❌ | No scenario emits `\x1b[?2004h`, so `bracketedPaste` stays `false`. |
+| [§1](mouse-and-clipboard.md#1-the-mouse-icon-header-indicator) | Mouse icon visible when program requests reporting | ✅ | `ascii-splash` emits `\x1b[?1000h` / `?1002h` / `?1003h` / `?1006h`. |
+| [§2](mouse-and-clipboard.md#2-override-state) | Temporary/permanent override, banner, Make-permanent / Cancel | ✅ | Use the header mouse icon while `ascii-splash` is active. |
+| [§3.1–§3.3](mouse-and-clipboard.md#31-initiating-a-selection) | Drag, Alt-block shape, "Hold Alt" hint | ✅ | Works on any visible text. |
+| [§3.3](mouse-and-clipboard.md#33-selection-hint-text) | "Press e to select the full URL/path" hint | ❌ | No qualifying tokens in the live scenarios. |
+| [§3.4](mouse-and-clipboard.md#34-selection-follows-content) | Pure-scroll follows, cancel-on-change, cancel-on-resize | ⚠️ | `ascii-splash` makes cancel-on-change and resize observable; scenarios too short for pure-scroll. |
+| [§3.5](mouse-and-clipboard.md#35-selection-in-the-live-region-vs-scrollback) | Scrollback-origin / cross-boundary drags | ⚠️ | Scrollback too short to exercise. |
+| [§3.6](mouse-and-clipboard.md#36-during-a-drag) | Keyboard routing during drag | ✅ | With override active on `ascii-splash`, drag-time keyboard consumption is observable. |
+| [§3.7](mouse-and-clipboard.md#37-ending-a-selection) | Popup on mouse-up, new-drag-replaces | ✅ | Any selection. |
+| [§4.1.1](mouse-and-clipboard.md#411-copy-raw) | Copy Raw | ✅ | Any selection. |
+| [§4.1.2](mouse-and-clipboard.md#412-copy-rewrapped) | Copy Rewrapped (paragraph unwrap) | ✅ | `ChangelogRunner` renders wrapped item lines that exercise the rewrap path. |
+| [§4.2](mouse-and-clipboard.md#42-keyboard-shortcuts) | Cmd+C / Cmd+Shift+C | ✅ | Any selection. |
+| [§4.3](mouse-and-clipboard.md#43-dismissing-the-popup) | Esc / click-outside dismiss | ✅ | Any selection popup. |
+| [§5](mouse-and-clipboard.md#5-smart-extension-url--path-detection) | Smart-extension (URL / abs path / rel path / Windows path / error location) | ❌ | No matching tokens in the scenarios. |
+| [§5.3](mouse-and-clipboard.md#53-extension-action) | Press `e` to extend | ❌ | Blocked on §5 coverage. |
+| [§8.2](mouse-and-clipboard.md#82-paste-keybindings) | Cmd+V / Cmd+Shift+V / Ctrl+V / Ctrl+Shift+V paste | ⚠️ | Fires and writes to the fake PTY, but `TutorialShell.handleInput` echoes char-by-char and ignores bracketed-paste markers. |
+| [§8.5](mouse-and-clipboard.md#85-bracketed-paste) | Bracketed paste wraps `\e[200~ … \e[201~` | ❌ | No scenario emits `\x1b[?2004h`, so `bracketedPaste` stays `false`. |
 
-`§3.6` auto-scroll and `§8.7` right-click paste are deferred in the implementation itself — not Playground gaps.
+Auto-scroll during a drag and right-click paste are deferred in the implementation itself ([§9. Future](mouse-and-clipboard.md#9-future)) — not Playground gaps.
 
 ## Future
 
 Two follow-up scenarios from the previous remediation plan remain useful and can be added without changing the three sections (expanding or replacing the `tut-boxed` neighbor):
 
-1. **`SCENARIO_BRACKETED_PASTE_TUI`** — closes §8.5. Emits `\x1b[?2004h` and an idle ANSI-framed view.
-2. **`SCENARIO_SMART_TOKENS`** — closes the §3.3 hint and §5.1–§5.3. Prints one of each shape from `lib/src/lib/smart-token.ts`'s `PATTERNS`.
+1. **`SCENARIO_BRACKETED_PASTE_TUI`** — closes [§8.5](mouse-and-clipboard.md#85-bracketed-paste). Emits `\x1b[?2004h` and an idle ANSI-framed view.
+2. **`SCENARIO_SMART_TOKENS`** — closes the [§3.3](mouse-and-clipboard.md#33-selection-hint-text) hint and [§5.1–§5.3](mouse-and-clipboard.md#51-detection). Prints one of each shape from `lib/src/lib/smart-token.ts`'s `PATTERNS`.
