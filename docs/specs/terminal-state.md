@@ -204,7 +204,7 @@ first authentic OSC boundary ──▶ pane promoted to OSC-driven; fallback ret
 - **Synthesized idle transitions.** Visible output that looks like a returned shell prompt always refreshes the learned prompt shape, but only synthesizes the idle prompt transition when `currentCommand.source === "user_input"`. This keeps shape learning available for all shells while scoping the finish/start synthesis to shells that do not emit command finish/start OSCs (OSC-tracked shells drive their own boundaries).
 - **Per-pane retirement.** The keystroke fallback and real OSC 633/133 integration are mutually exclusive per pane. The first authentic OSC boundary a pane emits (`promptStart`/`promptEnd`/`commandFinish` always, or a `commandStart` whose source is an OSC boundary — not `user_input`) promotes the pane to **OSC-driven**, after which the keystroke path stops recording: `recordTerminalUserInput` early-returns and no further `user_input` `commandStart`/`commandLine` is synthesized, so injected shells never double-count. The synthesized prompt markers the fallback itself emits are passed with a `keystrokeHeuristic` flag so they do **not** trigger promotion — otherwise the fallback would retire the very path that emits them. The flag is per-pane runtime state, seeded fresh and cleared on pane reset/removal; it is not persisted.
 
-CWD precedence:
+### CWD precedence
 
 - OSC-sourced CWD (`osc7`, `osc9_9`, `osc633`, `osc1337`) wins over everything. Once an OSC has reported a directory, only a later OSC can replace it.
 - Process-polled CWD (`process`) updates only when the current source is `null`, `manual`, or another `process` reading. It fills the gap when the shell does not emit OSC 7 / 633;P / 1337 / 9;9.
