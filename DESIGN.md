@@ -134,7 +134,7 @@ This system has no "primary" accent in the brand sense. The closest analogue is 
 - **Terminal Background / Foreground** (`var(--vscode-terminal-background)` / `var(--vscode-terminal-foreground)`): the terminal content surface and xterm default text. Orthogonal to the chrome.
 - **Error** (`var(--vscode-terminal-ansiRed)`): destructive actions and kill-confirm letter flash.
 - **Success** (`var(--vscode-terminal-ansiGreen)`): TODO check, theme-store install confirm.
-- **Alarm** (`var(--vscode-terminal-ansiYellow)` initial; runtime-rotated): bell-ringing alert tint. Per-surface OKLCH hue-rotation by `use-dynamic-palette.ts` from the bg the bell sits on, so the alert pops off any header.
+- **Alarm** (`var(--vscode-terminal-ansiYellow)` baseline; runtime-overridden): bell-ringing alert tint. `computeDynamicPalette()` replaces each `--color-alarm-vs-*` token with plain white or black by the OKLab lightness of the bg the bell sits on (active header, inactive header, or door), so the ringing bell stays maximally legible on any surface.
 
 ### Fixed Exception
 - **Window Close Hover** (`#b92a1b`): the only literal color in the whole system. Native OS close-button hover on Windows/Linux chrome buttons; matches the platform convention across themes.
