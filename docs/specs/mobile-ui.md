@@ -492,7 +492,17 @@ The prototype should answer these questions:
 7. Does the stable keyboard reserve feel better than resizing the whole UI?
 8. Is the UI too cramped in portrait orientation?
 
-## 14. Future Work
+## 14. Product Principle
+
+The v0 prototype should stay focused:
+
+```text
+Touch modes make pane touches explicit.
+Input modes make the reserve area explicit.
+Everything else waits.
+```
+
+## 15. Future
 
 Potential later additions:
 
@@ -503,19 +513,7 @@ Potential later additions:
 * Ctrl+D and Ctrl+Z app-key buttons.
 * Alt and modifier behavior.
 * Long-press key repeat.
-* Remote backend PTY.
 * SSH sessions.
-* User accounts.
-* Session persistence.
 * Multi-session support.
-* Production security model.
 
-## 15. Product Principle
-
-The v0 prototype should stay focused:
-
-```text
-Touch modes make pane touches explicit.
-Input modes make the reserve area explicit.
-Everything else waits.
-```
+Remote backend PTY, user accounts, and the production security model — listed here when this was a website-only prototype — now exist as the Pocket app (`docs/specs/pocket-app.md`, `docs/specs/remote-security-model.md`); the prototype itself intentionally stays on `FakePtyAdapter`.

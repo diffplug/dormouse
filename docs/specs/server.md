@@ -1,12 +1,14 @@
 # Server (selfhost POC)
 
+> See `docs/specs/glossary.md` for Session / Pane / Surface vocabulary; this spec uses it for what the relay exposes.
+
 The coordinating Server from the
 [remote security model](./remote-security-model.md), in its selfhost mode, cut
 down to the smallest thing that completes this loop:
 
 > Run the server with a setup password. Visit it, present the password, create
-> a passkey. Pair your phone with your laptop's Dormouse Terminal. Move a
-> running terminal session from the laptop to the phone.
+> a passkey. Pair your phone with your laptop's Dormouse Terminal. Pick up a
+> running terminal session from the laptop on the phone.
 
 One Node process (Hono, as the `server` package already is). No database. No
 browser-surface support — **terminal-only**. The heavy lifting is already
@@ -16,16 +18,15 @@ UI lives in `lib`/`standalone`.
 ## POC guardrails
 
 * One account (`accountId: "owner"`), created once with the setup password.
-* Terminal surfaces only; the remote-api v1 subset minus browser surfaces.
+* Terminal surfaces only — exactly remote-api.md's **protocol-v1** (browser
+  remoting is staged in that spec's `## Future`).
 * Revocation is editing a JSON file by hand; no management UI.
 * A dropped WebSocket is handled by reloading the page / reconnecting the
   host. No resume protocol.
 * Everything transient (challenges, sessions, relay state) is in memory; a
   server restart just means everyone reconnects.
 
----
-
-# Configuration
+## Configuration
 
 | Env var                   | Meaning                                                    |
 | ------------------------- | ---------------------------------------------------------- |
@@ -39,7 +40,7 @@ real phone, put the server behind TLS (`tailscale serve` is the intended
 selfhost path, any reverse proxy works). The server itself always speaks
 plain HTTP.
 
-# State files
+## State files
 
 ```
 $DORMOUSE_STATE_DIR/
@@ -53,9 +54,7 @@ That is the entire persistent state. The Host's ACL is not here — it lives on
 the Host (platform `saveState`), which is the whole point of the security
 model.
 
----
-
-# WebAuthn without a WebAuthn library
+## WebAuthn without a WebAuthn library
 
 Two facts keep the server dependency-free:
 
@@ -78,9 +77,7 @@ This also makes the server fully testable without a browser: the
 so `node --test` can drive setup → pairing → connect end to end via
 `app.request()` and a pair of in-process WebSockets.
 
----
-
-# HTTP API
+## HTTP API
 
 | Route                            | Auth           | Does                                              |
 | -------------------------------- | -------------- | ------------------------------------------------- |
@@ -97,9 +94,7 @@ so `node --test` can drive setup → pairing → connect end to end via
 The setup password is compared in constant time with a small fixed delay on
 failure; that is the extent of POC hardening.
 
----
-
-# Relay
+## Relay
 
 The server routes JSON envelopes between client sockets and host sockets
 (`@hono/node-ws`). Before a session is authorized it only forwards an
@@ -113,7 +108,7 @@ When a Client socket binds to a different Host, the relay sends `client-gone`
 to the previous live Host before replacing the binding, so Host-side pairing UI,
 remote-api sessions, and watchers are disposed immediately.
 
-## Pairing (phone ↔ laptop, first time)
+### Pairing (phone ↔ laptop, first time)
 
 ```
 phone                        server                        host (laptop)
@@ -132,7 +127,7 @@ credential matches and rejects malformed requests before relaying; the Host runs
 `PairingRequest` is answered locally with `pair-result approved:false` and is
 never shown in the Host approval UI.
 
-## Connect (every session)
+### Connect (every session)
 
 ```
 phone                        server                        host
@@ -154,16 +149,14 @@ per connection. The server verifies the assertion against the stored passkey
 and drops the request on failure; the Host's `authorizeConnection` remains the
 final authority regardless of what the server claims to have checked.
 
-## After authorization: remote-api v1, terminal-only
+### After authorization: remote-api protocol-v1
 
-Exactly the v1 scope of [remote-api.md](./remote-api.md) minus browser
-surfaces: `hello`, `directory.watch` (snapshot-only), one `surface.attach`
-(attach-is-the-resize), `terminal.data`/`semantic`/`resize`/`closed` out,
-`terminal.write`/`terminal.resize` in.
+Exactly the protocol-v1 scope of [remote-api.md](./remote-api.md)
+(terminal-only): `hello`, `directory.watch` (snapshot-only), one
+`surface.attach` (attach-is-the-resize), `terminal.data`/`semantic`/`resize`/
+`closed` out, `terminal.write`/`terminal.resize` in.
 
----
-
-# Host side (`lib` + `standalone`)
+## Host side (`lib` + `standalone`)
 
 A `remote-host` module in `lib`, active in standalone:
 
@@ -183,10 +176,11 @@ A `remote-host` module in `lib`, active in standalone:
   hasTODO — all already tracked); `surface.attach` resizes the PTY through
   the existing resize path and subscribes to its data stream;
   `terminal.write` feeds the existing input path.
-* **Tethering**: while a remote session holds size authority, the local pane
-  greys out to "tethering to \<label\>"; local interaction reclaims it.
+* **Size authority**: last-attach-wins holds at the PTY level through the
+  existing resize path. The "tethering to \<label\>" grey-out display on the
+  local pane is staged — see remote-api.md `## Future`.
 
-# Pocket side (phone)
+## Pocket side (phone)
 
 Served by the server, built from `lib`:
 
@@ -199,39 +193,22 @@ Served by the server, built from `lib`:
 * Picker renders `directory.snapshot`; tapping a pane attaches with the
   phone's cols/rows and reuses the existing mobile terminal UI (xterm).
 
----
+## Testing
 
-# Build order — five slices, each testable
+The security and relay layers are covered without a browser: `node --test`
+drives setup → pairing → connect end to end through the real server via
+`app.request()` and in-process WebSockets, using the `SimAuthenticator` /
+`SimHost` harness from `server-lib-common` (register, sign-in, wrong password,
+replayed challenge, wrong origin, unpaired device, revoked record, plus relay
+echo and token/session rejection). `server/test/harness/fake-host.mjs` is the
+automated-test fake host; `server/scripts/fake-host.mjs` is a separate manual
+dev stand-in (see Running the POC below). Browser-dependent layers — the
+standalone host module and the Pocket terminal view — are dogfooded rather
+than automated.
 
-1. **Accounts & passkeys.** Setup/sign-in endpoints + `account.json` +
-   static-serving stub. Tests: `node --test` with `SimAuthenticator` against
-   `app.request()` — register, sign in, wrong password, replayed challenge,
-   wrong origin. Manual: create a real passkey at `localhost:3000`.
-2. **Relay & host enrollment.** `hosts.json`, host/client sockets, envelope
-   routing, presence in `GET /api/hosts`. Tests: two in-process WebSockets
-   echo through the relay; token/session rejection.
-3. **Security handshake over the relay.** A headless fake host (a Node script
-   wiring `server-lib-common` exactly as the harness's `SimHost` does) +
-   `SimAuthenticator` client: full pairing ceremony and connect through the
-   real server, plus the deny cases (unpaired device, revoked record, replayed
-   challenge). Still no browser anywhere.
-4. **Standalone host module.** Enrollment settings, approval modal, ACL
-   persistence, host socket. Dogfood: pair a second browser profile (or the
-   phone) against your real standalone app and watch the modal + ACL.
-5. **Terminal bridge + Pocket terminal view.** Directory, attach-is-the-resize,
-   write/resize, tether display, mobile terminal UI hookup. Dogfood — the
-   actual goal: pick up a running session from your laptop on your phone.
+## Running the POC
 
-Slices 1–3 are pure Node with full automated coverage; browsers only enter at
-slice 4. After slice 5 the POC is in daily-use territory, and everything
-after that (browser surfaces, in-flight replay, thumbnails, WebRTC) is
-already staged in remote-api.md as additive follow-ups.
-
----
-
-# Running the POC
-
-All five slices are implemented. To test end to end:
+The loop at the top of this spec is implemented end to end. To test:
 
 **1. Server + Pocket** (one terminal):
 
@@ -255,7 +232,8 @@ Enrollment persists in localStorage; on later launches the host connects by
 itself. (`status()` / `clearEnrollment()` on the same object.) For a headless
 stand-in host instead:
 `DORMOUSE_SETUP_PASSWORD=hunter2 node server/scripts/fake-host.mjs http://localhost:3000`
-(auto-approves pairing; answers `hello` only — no real terminals).
+(auto-approves pairing; answers `hello` only — no real terminals; distinct
+from the automated-test harness `server/test/harness/fake-host.mjs`).
 
 **3. Phone** (or any other browser profile): open the server origin →
 First-time setup (password + label) creates the passkey and signs you in →
@@ -267,3 +245,7 @@ registered the passkey (the passkey public key is stored client-side at
 registration); clearing site data destroys the device key → re-pair, per the
 security model; a dropped WebSocket sends you back to the Hosts view —
 reconnect by tapping Connect again.
+
+Everything past this loop (browser surfaces, in-flight replay, thumbnails,
+the tethering display, WebRTC) is staged in remote-api.md `## Future` as
+additive follow-ups.

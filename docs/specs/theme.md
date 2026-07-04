@@ -1,5 +1,7 @@
 # Theme Spec
 
+> See `docs/specs/glossary.md` for Pane / Door vocabulary used in the surface hierarchy below.
+
 Dormouse's theme contract is intentionally small: render the terminal chrome
 with VSCode-appropriate surfaces, and render terminal content with
 theme-appropriate xterm.js colors.

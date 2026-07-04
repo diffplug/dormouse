@@ -37,10 +37,6 @@ In the VS Code extension host, selected workbench chords are mirrored: the termi
 | `↑` / `↓` / `←` / `→` | Move selection | Move selection to the adjacent pane or door. Press the opposite direction to return. |
 | `⌘↑` / `⌘↓` / `⌘←` / `⌘→` (macOS)<br>`Ctrl`+arrows (others) | Swap terminals | Swap terminal sessions between two panes — layout and titles swap; selection follows the terminal. |
 
-## Workspaces (command mode)
-
-> Workspace switch / create / close / rename shortcuts are being finalized in the Storybook UI pass, following the tmux *window* bindings the rest of the keymap mirrors. They are listed here once bound. See `docs/specs/layout.md` and `docs/specs/glossary.md` for the Workspace model.
-
 ## Selection & drag
 
 | Key | Action | Description |
@@ -76,3 +72,7 @@ On macOS, `Ctrl+C` / `Ctrl+V` pass through to the running program; only the ⌘-
 - Primary keyboard handler: `lib/src/components/wall/use-wall-keyboard.ts` (command-mode key dispatch, mode toggle, dialog key handlers)
 - Selection popup copy bindings: `lib/src/components/SelectionPopup.tsx`
 - Alt-to-toggle-block selection: `lib/src/lib/terminal-mouse-router.ts`
+
+## Future
+
+Workspace switch / create / close / rename shortcuts (command mode) are staged with the workspaces rollout — see `docs/specs/layout.md` `## Future` (workspaces-rollout). They follow the tmux *window* bindings the rest of the keymap mirrors and are listed here once bound.

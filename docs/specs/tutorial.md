@@ -1,5 +1,7 @@
 # Playground Tutorial
 
+> See `docs/specs/glossary.md` for Session / Pane vocabulary. This spec uses it for the playground's pane layout and detection wiring.
+
 The website playground has canonical device-specific routes:
 
 - `/playground` is a client-side dispatcher. It picks Pocket for coarse-pointer devices or narrow viewports and Desktop otherwise, then replaces the history entry with `/playground/desktop` or `/playground/pocket`. The exact media query lives in `website/src/lib/playground-routing.ts`.
@@ -110,6 +112,8 @@ The Playground is the primary dogfood surface for `docs/specs/mouse-and-clipboar
 | §8.5 | Bracketed paste wraps `\e[200~ … \e[201~` | ❌ | No scenario emits `\x1b[?2004h`, so `bracketedPaste` stays `false`. |
 
 `§3.6` auto-scroll and `§8.7` right-click paste are deferred in the implementation itself — not Playground gaps.
+
+## Future
 
 Two follow-up scenarios from the previous remediation plan remain useful and can be added without changing the three sections (expanding or replacing the `tut-boxed` neighbor):
 

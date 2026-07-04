@@ -14,7 +14,7 @@ Our security model is based on two independent security primitives between the C
 
 This separation ensures that account-level compromise is insufficient for host access. Adding a new passkey to an account, or compromising the coordinating server, does not authorize a new client: the host will reject any client that has not been locally paired.
 
-# Goals
+## Goals
 
 Dormouse enables a user to control a Host (Dormouse Terminal) from a Client (Dormouse Pocket) using only web technologies.
 
@@ -37,9 +37,9 @@ Non-goals:
 
 ---
 
-# Terminology
+## Terminology
 
-## Client (Dormouse Pocket)
+### Client (Dormouse Pocket)
 
 A browser or installed PWA used to initiate remote-control sessions.
 
@@ -50,7 +50,7 @@ Responsibilities:
 * Establish connections to Hosts
 * Sign Host challenges
 
-## Host (Dormouse Terminal)
+### Host (Dormouse Terminal)
 
 The machine being remotely controlled.
 
@@ -63,7 +63,7 @@ Responsibilities:
 
 The Host is the final authority for access decisions.
 
-## Server
+### Server
 
 The coordinating service used for accounts, authentication, signaling, and session establishment.
 
@@ -79,7 +79,7 @@ The Server is not the final authority for Host access.
 
 ---
 
-# Trust Model
+## Trust Model
 
 Dormouse intentionally separates:
 
@@ -96,9 +96,9 @@ A successful connection requires all layers to agree.
 
 ---
 
-# Passkeys
+## Passkeys
 
-## Purpose
+### Purpose
 
 Passkeys verify fresh user presence.
 
@@ -111,7 +111,7 @@ Fresh user presence is validated by:
 
 A passkey authenticates a user account but does not grant access to any Host.
 
-## Important Property
+### Important Property
 
 Passkeys are frequently synchronized credentials.
 
@@ -130,9 +130,9 @@ Therefore:
 
 ---
 
-# Device Keys
+## Device Keys
 
-## Purpose
+### Purpose
 
 Device keys establish long-lived Client identity.
 
@@ -144,7 +144,7 @@ This prevents:
 * Synced passkeys from automatically becoming trusted devices
 * Server-only compromise from granting Host access
 
-## Generation
+### Generation
 
 Each Client generates an asymmetric keypair:
 
@@ -154,7 +154,7 @@ Each Client generates an asymmetric keypair:
 
 The public key is used as the Client identifier.
 
-## Storage
+### Storage
 
 Recommended implementation:
 
@@ -165,7 +165,7 @@ Recommended implementation:
 
 The private key never leaves browser storage under normal operation.
 
-## Security Properties
+### Security Properties
 
 Strengths:
 
@@ -185,9 +185,9 @@ Device-key loss is considered a recoverable event.
 
 ---
 
-# Host Authorization
+## Host Authorization
 
-## Host ACL
+### Host ACL
 
 Each Host maintains a local authorization list.
 
@@ -215,7 +215,7 @@ Authorized Clients:
   Device Key 3
 ```
 
-## ACL Record
+### ACL Record
 
 Recommended fields:
 
@@ -235,21 +235,21 @@ The exact schema may evolve.
 
 ---
 
-# Pairing Ceremony
+## Pairing Ceremony
 
-## Purpose
+### Purpose
 
 Establish trust between one Client and one Host.
 
 Pairing requires physical access to the Host.
 
-## Security Property
+### Security Property
 
 A newly-added passkey is not automatically trusted.
 
 The Client must still complete Host pairing.
 
-## Flow
+### Flow
 
 1. Client authenticates using a passkey.
 2. Client presents its device public key.
@@ -268,9 +268,9 @@ No other Hosts are affected.
 
 ---
 
-# Connection Establishment
+## Connection Establishment
 
-## Requirements
+### Requirements
 
 A connection succeeds only if:
 
@@ -282,7 +282,7 @@ A connection succeeds only if:
 
 All requirements are mandatory.
 
-## Flow
+### Flow
 
 1. Client requests connection.
 2. Server validates account state.
@@ -299,13 +299,17 @@ All requirements are mandatory.
 
 The Host makes the final decision.
 
+One host challenge feeds both the passkey assertion and the device-key
+signature, so connecting costs the user a single biometric prompt per
+connection (the concrete sequence lives in `docs/specs/server.md` "Connect").
+
 ---
 
-# Storage Durability
+## Storage Durability
 
-## iOS
+### iOS
 
-### Browser Tab
+#### Browser Tab
 
 Durability is limited.
 
@@ -313,7 +317,7 @@ Browser-managed storage may be removed after periods of inactivity.
 
 Do not treat browser-tab storage as permanent.
 
-### Installed PWA
+#### Installed PWA
 
 Preferred mode.
 
@@ -324,15 +328,15 @@ Recommended behavior:
 * Generate device key only while running as an installed PWA.
 * Pair only after installation.
 
-## Android
+### Android
 
-### Browser Tab
+#### Browser Tab
 
 Generally durable.
 
 Suitable for casual use.
 
-### Installed PWA
+#### Installed PWA
 
 Preferred mode.
 
@@ -340,7 +344,7 @@ Provides the strongest web-only durability guarantees.
 
 ---
 
-# Installed PWA Detection
+## Installed PWA Detection
 
 Dormouse can detect whether it is currently running as an installed application:
 
@@ -358,7 +362,7 @@ It does not indicate whether the application was previously installed.
 
 ---
 
-# Device Key Loss
+## Device Key Loss
 
 Device-key loss is expected.
 
@@ -381,25 +385,7 @@ No security compromise occurs.
 
 ---
 
-# Future: WebAuthn PRF
-
-WebAuthn PRF is a future enhancement.
-
-Potential uses include:
-
-* End-to-end session key derivation
-* Reduced trust in the Server
-* Stronger cryptographic channel binding
-* Offline operation
-* Noise-style authenticated key exchange
-
-PRF is not required for the core Dormouse security model.
-
-The MVP relies only on standard WebAuthn assertions and device-key authorization.
-
----
-
-# Security Guarantees
+## Security Guarantees
 
 Dormouse is designed so that:
 
@@ -411,3 +397,20 @@ Dormouse is designed so that:
 * Every access decision is ultimately made by the Host.
 
 The Host remains the final authority throughout the system.
+
+---
+
+## Future
+
+### WebAuthn PRF
+
+WebAuthn PRF is a future enhancement. Potential uses include:
+
+* End-to-end session key derivation
+* Reduced trust in the Server
+* Stronger cryptographic channel binding
+* Offline operation
+* Noise-style authenticated key exchange
+
+PRF is not required for the core Dormouse security model. The shipped system
+relies only on standard WebAuthn assertions and device-key authorization.

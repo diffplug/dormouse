@@ -283,7 +283,7 @@ Right-click and OS Edit-menu paste are not currently implemented; users paste vi
 
 ---
 
-## 9. Out of Scope / Future Considerations
+## 9. Future
 
 The following are explicitly not implemented today; they may be added in response to user feedback.
 

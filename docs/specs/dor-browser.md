@@ -446,7 +446,7 @@ Source of truth: `lib/src/lib/platform/types.ts`,
   `standalone/src/tauri-adapter.ts`, `standalone/src-tauri/src/lib.rs`,
   `standalone/sidecar/main.js`.
 
-## Future Work
+## Future
 
 - Stable agent-browser profile/state persistence so pop-out preserves logins,
   cookies, tabs, DOM state, and scroll.

@@ -177,7 +177,7 @@ Clearing behavior:
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers.
 >
-> **Partially implemented.** The union *projection* is a pure function — `computeWorkspaceUnion(surfaceIds, activitySnapshot)` in `lib/src/lib/workspace-union.ts` (stage 2b). **VS Code surfacing is implemented**: the editor-tab title and the bottom-panel view badge reflect the union (terminal ring/TODO only; `docs/specs/vscode.md`). Still not built: the **standalone strip indicators** (stage 3). A browser Surface's user-set `todo` round-trips to the activity store live and persists across restart (stage 2a), so it is counted by the projection and shows on the surface's door today.
+> The union *projection* is a pure function — `computeWorkspaceUnion(surfaceIds, activitySnapshot)` in `lib/src/lib/workspace-union.ts`. **VS Code surfacing is implemented**: the editor-tab title and the bottom-panel view badge reflect the union (terminal ring/TODO only; `docs/specs/vscode.md`). A browser Surface's user-set `todo` round-trips to the activity store live and persists across restart, so it is counted by the projection and shows on the surface's door today. The **standalone strip indicators** are staged — see `docs/specs/layout.md` `## Future` (workspaces-rollout).
 
 A Workspace projects a **union status** over the attention state of the Surfaces it contains (terminal Sessions and browser Surfaces alike — see `docs/specs/glossary.md`):
 
@@ -193,10 +193,8 @@ Rules:
 
 Where the union surfaces is host-specific:
 
-- **Standalone:** each inactive Workspace's tab in the strip shows the union `ringing` bell and `todo` pill, reusing the Door indicator vocabulary (`bellIconClass`, the TODO pill). The **active** Workspace's tab shows no union indicator — its rings and TODOs are already visible on its own panes and doors. See `docs/specs/layout.md`.
-- **VS Code:** the host reflects the **terminal** portion of each Workspace's union onto the webview's native chrome — an editor tab's icon (and optionally title) and the sidebar view's numeric badge. Browser-surface TODO stays webview-local and is not shown on native chrome until a future webview→host Surface-state channel exists. See `docs/specs/vscode.md`.
-
-This spec fixes the projection and the surfacing rules; the exact visual treatment of the standalone strip is settled in the Storybook UI pass.
+- **Standalone:** the workspace strip that will show per-tab union indicators is staged with the rest of the strip UI — the behavioral rules live in `docs/specs/layout.md` `## Future` (workspaces-rollout). Today a browser Surface's `todo` shows on its own door, and terminal rings/TODOs show on their panes and doors as specified above.
+- **VS Code:** the host reflects the **terminal** portion of each Workspace's union onto the webview's native chrome — an editor tab's icon (and optionally title) and the sidebar view's numeric badge. Browser-surface TODO stays webview-local; surfacing it on native chrome needs the webview→host Surface-state channel staged in `docs/specs/vscode.md` `## Future`. See `docs/specs/vscode.md`.
 
 ## UI Contract
 

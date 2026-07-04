@@ -20,7 +20,7 @@ non-terminal browser surfaces, the backing browser session remains alive while
 the visible viewer resources are released: no canvas, screencast WebSocket,
 screenshot loop, or input forwarding runs while the surface is a Door.
 
-A **Workspace** is the named group of Surfaces rendered by a single **Wall**, together with their layout (see `docs/specs/glossary.md`). A Window may hold several Workspaces. This spec covers how Workspaces are presented and switched in the standalone app — the tab strip and the one-Wall-per-Workspace mounting below. VS Code maps each Workspace to its own webview instead; see `docs/specs/vscode.md`.
+A **Workspace** is the named group of Surfaces rendered by a single **Wall**, together with their layout (see `docs/specs/glossary.md`). A Window may hold several Workspaces. This spec owns the standalone Workspace presentation; the strip UI and real switching are staged in [Future](#future) (**Scope: workspaces-rollout**). VS Code maps each Workspace to its own webview instead; see `docs/specs/vscode.md`.
 
 ## Shell layout
 
@@ -118,7 +118,7 @@ The mouse-override icon only appears when the inside program has requested mouse
 
 Below the content area is the baseboard (`h-7`, 28px). It is visible by default and has no top divider. The dockview area ends 2px above it, leaving a narrow theme-colored gap that keeps rounded pane corners distinct from the baseboard. Its horizontal padding matches the Dockview wrapper's 6px inset, so doors align with the panes above. When empty, it shows keyboard shortcut hints when there are no doors and the container is wider than 350px (currently: `LCmd → RCmd to enter command mode`).
 
-`Wall` accepts `showBaseboard={false}` for constrained embedders such as the website mobile Tether prototype, where a separate bottom navigation owns the area below the terminal and door workflows are outside the prototype scope. The main app shell keeps the default `showBaseboard=true`.
+`Wall` accepts `showBaseboard={false}` for constrained embedders such as the website's mobile Pocket playground, where a separate bottom navigation owns the area below the terminal and door workflows are outside the prototype scope. The main app shell keeps the default `showBaseboard=true`.
 
 When a session is minimized, it becomes a **door** on the baseboard. The door displays the same derived terminal label as the pane header, a TODO badge (if set), and an alert bell icon with activity dot. It uses the bottom edge of the window as its bottom border, with left, top, and right borders using the shared terminal top radius from `lib/src/components/design.tsx` — resembling a mouse hole and matching pane rounding. Door dimensions: `min-w-[68px] max-w-[220px] h-6`.
 
@@ -126,7 +126,7 @@ When a session is minimized, it becomes a **door** on the baseboard. The door di
 
 - **Clicking a door** (in any mode): restores the session into the content area as a pane and enters passthrough mode. The terminal gets focus immediately.
 - **Enter** on a door (command mode): same as clicking — restores and enters passthrough mode.
-- **d** on a door (command mode): restores the session into a pane but stays in command mode. This is the inverse of pressing `d` on a pane (which minimizes it), making `d` a toggle.
+- **m** or **d** on a door (command mode): restores the session into a pane but stays in command mode. This is the inverse of pressing `m`/`d` on a pane (which minimizes it), making them toggles.
 - **x** on a door (command mode): restores the session into a pane, then immediately shows the kill confirmation.
 - **Arrow keys** can navigate to doors from panes (see Navigation).
 
@@ -148,26 +148,12 @@ Extreme case: a single door with a very long title, with more doors on both side
 ## Workspaces
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers and `docs/specs/alert.md` for the union status. VS Code's per-webview mapping is in `docs/specs/vscode.md`.
->
-> **Partially implemented.** The container and model exist behind the `dormouse.flags.workspaces` flag (stage 2b, dormant): the standalone persists a `PersistedWindow` and the workspace model holds the list + active id (`docs/specs/transport.md`, glossary Implementation status). Still **not built**: the **strip UI** below (stage 3) and the actual Wall **mount/unmount when switching** (stage 4) — today `setActiveWorkspace` changes the active id in the model but does not re-render the Wall. The app runs one implicit Workspace with the flag off (the default).
 
 A **Workspace** is one Wall's worth of Surfaces (terminal Sessions and browser surfaces) plus its layout, with a user-facing name. The standalone Window hosts several Workspaces but mounts only one — the **active** Workspace — at a time. Each Workspace owns its own Content (dockview layout) and Baseboard (doors).
 
-### Workspace strip (standalone)
+What exists today lives behind the `dormouse.flags.workspaces` flag (`WORKSPACES_FLAG_KEY` in `lib/src/lib/feature-flags.ts`, **off by default**): the in-memory workspace model and its container verbs (`createWorkspace` / `closeWorkspace` / `renameWorkspace` / `setActiveWorkspace` in `lib/src/lib/workspace-store.ts`), the union projection (`computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`), and Window persistence (`PersistedWindow`, `docs/specs/transport.md`). `setActiveWorkspace` changes the active id in the model but does not yet re-render the Wall, and the single-Workspace cap is still in place. With the flag off, the app persists a bare `PersistedSession` and runs exactly one implicit Workspace — byte-identical to pre-workspace behavior.
 
-The standalone app bar (`standalone/src/AppBar.tsx`) carries a horizontal **workspace strip**: one tab per Workspace, living in the app bar's draggable region at the top of the window. Each tab shows the Workspace `name` and, for **inactive** Workspaces, the union `ringing` bell and `todo` pill from `docs/specs/alert.md`, reusing the Door indicator vocabulary. The **active** Workspace's tab shows no union indicator: its alerts are already visible on its own panes and doors. Exact tab visuals are settled in the Storybook UI pass.
-
-### Switching
-
-Activating another Workspace (`switchWorkspace`) mounts the target Workspace's Surfaces into the Wall — rebuilding its dockview layout and reattaching its doors — and unmounts the previously active Workspace's Surfaces. For a terminal Surface this reuses the `mount` / `unmount` registry ops: the Registry entry and PTY survive `unmount`, so Process stays `Live`. A browser surface's backing agent-browser session or proxy grant likewise survives while its viewer resources are released. Because a terminal's Activity keeps flowing while unmounted, an inactive Workspace's tab can begin ringing or showing TODO while the user is elsewhere. Mounting must not fire a fresh ring (glossary I8, mirroring the minimize/reattach rule I3).
-
-### Lifecycle
-
-- **Create** (`createWorkspace`): adds a new Workspace, gives it a default name (`Workspace N`), makes it active, and spawns a single fresh pane — matching the empty-state behavior in Session persistence below.
-- **Close** (`closeWorkspace`): `kill`s each member Surface and removes the Workspace. Closing a Workspace that contains touched Surfaces confirms first (reusing the kill-confirm vocabulary); the exact confirmation surface is settled in the Storybook UI pass. The last remaining Workspace cannot be closed — there is always one active Workspace, just as there is always one visible pane (corner case #10).
-- **Rename** (`renameWorkspace`): edits the Workspace `name` only. It does not touch any Surface title or the per-pane inline rename.
-
-Concrete switch/create/close/rename keyboard shortcuts are chosen alongside the Storybook UI pass. Command mode is the natural home for them, following the tmux *window* bindings the rest of the keymap mirrors (a Dormouse Workspace is the analogue of a tmux window).
+The strip UI, real switching, and lifecycle UX are staged in [Future](#future) — this spec's `## Future` is the single rollout ledger for the feature; other specs link here.
 
 ## Modes
 
@@ -211,7 +197,7 @@ All handled in a single capture-phase `keydown` listener on `window`. Every hand
 | `Enter` | Enter passthrough mode | Restore session + enter passthrough |
 | `,` | Inline rename | — |
 | `x` / `k` | Kill with confirmation | Restore session + kill confirmation |
-| `d` | Minimize to door | Restore session (stay in command) |
+| `m` / `d` | Minimize to door | Restore session (stay in command) |
 | `z` | Toggle maximize/restore | — |
 | `t` | Toggle TODO flag | — |
 | `a` | Dismiss or toggle alert | — |
@@ -440,3 +426,23 @@ The deferred spawn also only calls `selectPane` if selection is null. The kill h
 | `lib/src/lib/resume-patterns.ts` | Detects resumable commands (`claude --resume`, etc.) in scrollback |
 | `lib/src/index.css` | Dockview theme overrides — separator/sash/border removal, background flattening |
 | `lib/src/theme.css` | Two-layer VSCode theme token system (`@theme --color-*` → `--vscode-*`) and Tailwind v4 `@theme` integration |
+
+## Future
+
+**Scope: workspaces-rollout** — the remaining stages of the multi-Workspace feature. The model, container verbs, persistence, and union projection are implemented, dormant behind `dormouse.flags.workspaces` (see [Workspaces](#workspaces) above; persisted containers in `docs/specs/transport.md`, union projection in `docs/specs/alert.md`). This ledger is the single home for what remains; other specs link here rather than restating it.
+
+### Stage 3 — workspace strip and switching UI (standalone)
+
+The standalone app bar (`standalone/src/AppBar.tsx`) grows a horizontal **workspace strip**: one tab per Workspace, living in the app bar's draggable region at the top of the window. Each tab shows the Workspace `name` and, for **inactive** Workspaces, the union `ringing` bell and `todo` pill from `docs/specs/alert.md`, reusing the Door indicator vocabulary. The **active** Workspace's tab shows no union indicator: its alerts are already visible on its own panes and doors. Exact tab visuals are settled in the Storybook UI pass.
+
+Concrete switch/create/close/rename keyboard shortcuts are chosen alongside the Storybook UI pass. Command mode is the natural home for them, following the tmux *window* bindings the rest of the keymap mirrors (a Dormouse Workspace is the analogue of a tmux window). `docs/specs/shortcuts.md` lists them once bound.
+
+### Stage 4 — real switching and multi-Workspace activation
+
+Activating another Workspace (`switchWorkspace`) mounts the target Workspace's Surfaces into the Wall — rebuilding its dockview layout and reattaching its doors — and unmounts the previously active Workspace's Surfaces. For a terminal Surface this reuses the `mount` / `unmount` registry ops: the Registry entry and PTY survive `unmount`, so Process stays `Live`. A browser surface's backing agent-browser session or proxy grant likewise survives while its viewer resources are released. Because a terminal's Activity keeps flowing while unmounted, an inactive Workspace's tab can begin ringing or showing TODO while the user is elsewhere. Mounting must not fire a fresh ring (glossary I8, mirroring the minimize/reattach rule I3).
+
+Stage 4 also lifts the single-Workspace cap and wires the lifecycle UX:
+
+- **Create** (`createWorkspace`): adds a new Workspace, gives it a default name (`Workspace N`), makes it active, and spawns a single fresh pane — matching the empty-state behavior in Session persistence above.
+- **Close** (`closeWorkspace`): `kill`s each member Surface and removes the Workspace. Closing a Workspace that contains touched Surfaces confirms first (reusing the kill-confirm vocabulary); the exact confirmation surface is settled in the Storybook UI pass. The last remaining Workspace cannot be closed — there is always one active Workspace, just as there is always one visible pane (corner case #10).
+- **Rename** (`renameWorkspace`): edits the Workspace `name` only. It does not touch any Surface title or the per-pane inline rename.
