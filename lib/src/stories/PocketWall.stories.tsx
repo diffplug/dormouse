@@ -20,6 +20,7 @@ const SINGLE_SESSION: DirectoryEntry[] = [
     title: 'zsh',
     focused: true,
     activity: 'prompt',
+    alive: true,
     ringing: false,
     hasTODO: false,
   },

@@ -82,6 +82,7 @@ function entry(surfaceId: string, over: Partial<DirectoryEntry> = {}): Directory
     type: 'terminal',
     title: surfaceId,
     focused: false,
+    alive: true,
     ringing: false,
     hasTODO: false,
     ...over,
@@ -107,6 +108,27 @@ describe('RemotePtyAdapter directory', () => {
     expect(adapter.getDirectoryEntries().map((e) => e.surfaceId)).toEqual(['s1', 's2']);
     expect(adapter.getDirectoryEntries()[0].title).toBe('zsh');
     expect(adapter.getPaneEntry('s2')?.exitCode).toBe(0);
+  });
+
+  it('carries the entry alive bit into onPtyList (a dead pane is not attachable)', async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    const lists: PtyInfo[][] = [];
+    adapter.onPtyList(({ ptys }) => lists.push(ptys));
+
+    await adapter.init();
+    // s2's PTY has exited (lingering surface) → alive:false, even with exitCode 0.
+    client.pushSnapshot([
+      entry('s1', { alive: true }),
+      entry('s2', { alive: false, exitCode: 0 }),
+    ]);
+
+    expect(lists).toEqual([
+      [
+        { id: 's1', alive: true },
+        { id: 's2', alive: false },
+      ],
+    ]);
   });
 
   it('notifies subscribeDirectory listeners until they unsubscribe', async () => {

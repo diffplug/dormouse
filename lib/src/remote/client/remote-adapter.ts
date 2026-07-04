@@ -203,9 +203,10 @@ export class RemotePtyAdapter implements PlatformAdapter {
   #emitPtyList(): void {
     const ptys: PtyInfo[] = this.#entries.map((entry) => ({
       id: entry.surfaceId,
-      // Directory entries are live Host registry surfaces. `entry.exitCode` is
-      // the last command's semantic status, not the PTY process lifetime.
-      alive: true,
+      // `entry.alive` is real PTY-process liveness (a lingering exited surface
+      // reports false), NOT `entry.exitCode` — that is the last command's
+      // shell-integration status, which deriving alive from was the bug.
+      alive: entry.alive,
     }));
     for (const handler of this.#listHandlers) handler({ ptys });
   }

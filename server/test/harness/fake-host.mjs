@@ -254,6 +254,7 @@ export class FakeHost extends EventEmitter {
       title: surface.title,
       focused: index === 0,
       activity: 'prompt',
+      alive: true,
       ringing: false,
       hasTODO: false,
     }));

@@ -175,6 +175,7 @@ interface DirectoryEntry {
   // Terminal-only, from the existing semantic-event model (terminal-state.ts):
   activity?: 'unknown' | 'prompt' | 'editing' | 'running' | 'finished';
   exitCode?: number;
+  alive: boolean;               // the PTY process is still alive (see below)
   cwd?: string;
   // Browser-only:
   url?: string;
@@ -195,9 +196,17 @@ future optimization there is no current reason to pay for.
 Thumbnails are future work; in v1 the picker renders from titles, activity,
 and the `ringing`/`hasTODO` badges.
 
-Terminal directory `exitCode` is the last finished command's semantic status,
-not PTY lifetime. A listed terminal is still a live Host registry surface until
-its attachment emits `terminal.closed`.
+`alive` reflects real PTY-process liveness: it is `true` while the pane's
+process is running and `false` once that process has exited. Dormouse keeps an
+exited pane open in the Host registry (rendering "[Process exited with code N]")
+until the user closes it, so such a surface is still *listed* but reports
+`alive: false` — the phone's picker uses this to stop offering a dead pane as
+attachable (attaching would transfer nothing).
+
+This is distinct from `exitCode`, which is the last finished command's
+shell-integration semantic status, not PTY lifetime. A pane can report
+`alive: true` with an `exitCode` set (a command finished but the shell lives on),
+and a pane reporting `alive: false` may carry no `exitCode` at all.
 
 ---
 
