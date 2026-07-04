@@ -35,7 +35,12 @@ import {
 import { getTerminalInstance, refitSession } from '../../lib/terminal-registry';
 import { doPaste } from '../../lib/clipboard';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
-import { activatePane, directorySessionItems, directoryWallSessions } from './wall-model';
+import {
+  activatePane,
+  attachableDirectoryEntries,
+  directorySessionItems,
+  directoryWallSessions,
+} from './wall-model';
 
 /** Same default theme the website playground restores, unless the user picked one. */
 const POCKET_THEME_ID = 'vscode.theme-kimbie-dark.kimbie-dark';
@@ -61,6 +66,7 @@ export function PocketWall({ adapter }: { adapter: RemotePtyAdapter }): React.Re
   const [activePaneId, setActivePaneId] = useState<string | null>(null);
   const [touchMode, setTouchMode] = useState<MobileTerminalTouchMode>('gestures');
   const [keyboardMode, setKeyboardMode] = useState<MobileTerminalKeyboardMode>('type');
+  const attachableEntries = useMemo(() => attachableDirectoryEntries(entries), [entries]);
 
   // Track the live directory. Re-read on subscribe in case a snapshot landed
   // between the initial render and this effect.
@@ -71,9 +77,9 @@ export function PocketWall({ adapter }: { adapter: RemotePtyAdapter }): React.Re
 
   // Default to (and stay on a valid) pane as the directory changes.
   useEffect(() => {
-    if (activePaneId && entries.some((entry) => entry.surfaceId === activePaneId)) return;
-    setActivePaneId(entries[0]?.surfaceId ?? null);
-  }, [entries, activePaneId]);
+    if (activePaneId && attachableEntries.some((entry) => entry.surfaceId === activePaneId)) return;
+    setActivePaneId(attachableEntries[0]?.surfaceId ?? null);
+  }, [attachableEntries, activePaneId]);
 
   // One attachment at a time: on every active-pane change, attach it with the
   // pane's current xterm dims (if it exists yet), then refit through the now-
@@ -85,10 +91,10 @@ export function PocketWall({ adapter }: { adapter: RemotePtyAdapter }): React.Re
     void activatePane(adapter, activePaneId, dims, refitSession);
   }, [adapter, activePaneId]);
 
-  const wallSessions = useMemo(() => directoryWallSessions(entries), [entries]);
+  const wallSessions = useMemo(() => directoryWallSessions(attachableEntries), [attachableEntries]);
   const sessionItems = useMemo(
-    () => directorySessionItems(entries, activePaneId),
-    [entries, activePaneId],
+    () => directorySessionItems(attachableEntries, activePaneId),
+    [attachableEntries, activePaneId],
   );
 
   const mouseStates = useSyncExternalStore(
