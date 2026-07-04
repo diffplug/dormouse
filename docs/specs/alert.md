@@ -263,6 +263,19 @@ Security requirements:
 - Bell, TODO, preview, and dialog controls must remain keyboard reachable; dialogs trap focus and support `Escape`.
 - Tooltips, dialog copy, and future localized TODO labels must wrap in narrow layouts.
 
+## Files
+
+| File | Role |
+|------|------|
+| `lib/src/lib/activity-monitor.ts` | Per-Session WATCHING state machine (output/silence timers) |
+| `lib/src/lib/alert-manager.ts` | `AlertManager`: protocol + command-exit tracks, attention, TODO, notification storage, status projection |
+| `lib/src/lib/terminal-protocol.ts` | Notification/progress OSC parsing (`OSC 9` / `9;4` / `99` / `777`, BEL), sanitization limits, OSC 99 chunk state |
+| `lib/src/lib/session-activity-store.ts` | React activity snapshot store, primed alert state, platform delegates |
+| `lib/src/lib/workspace-union.ts` | `computeWorkspaceUnion` projection |
+| `lib/src/components/bell-icon-class.ts` | Bell tilt/animation mapping from public status |
+| `lib/src/components/wall/TerminalPaneHeader.tsx` | Bell button, TODO pill, notification preview and dialog |
+| `lib/src/components/Door.tsx` | Door bell + TODO display |
+
 ## References
 
 - iTerm2 proprietary escape codes (OSC 9, OSC 9;4): https://iterm2.com/documentation-escape-codes.html

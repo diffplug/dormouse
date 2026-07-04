@@ -283,6 +283,24 @@ Right-click and OS Edit-menu paste are not currently implemented; users paste vi
 
 ---
 
+## Files
+
+| File | Role |
+|------|------|
+| `lib/src/lib/mouse-selection.ts` | Per-terminal selection / override / bracketed-paste state store |
+| `lib/src/lib/mouse-mode-observer.ts` | DECSET/DECRST parser hook; syncs mouse-reporting and bracketed-paste modes |
+| `lib/src/lib/terminal-mouse-router.ts` | Drag routing, smart-token hinting, Alt shape toggle |
+| `lib/src/lib/clipboard.ts` | Copy/paste entry points and the tiered paste chain |
+| `lib/src/lib/rewrap.ts` | Copy Rewrapped transformations |
+| `lib/src/lib/selection-text.ts` | Selected-cell text extraction |
+| `lib/src/lib/smart-token.ts` | URL / path / error-location patterns (`PATTERNS`) |
+| `lib/src/components/SelectionOverlay.tsx` | Perimeter outline and drag hints |
+| `lib/src/components/SelectionPopup.tsx` | Copy popup and shortcut labels |
+| `lib/src/components/wall/MouseOverrideBanner.tsx` | Temporary-override banner |
+| `standalone/sidecar/clipboard-ops.js` | OS-native clipboard tiers (file refs / text / image) |
+
+---
+
 ## 9. Future
 
 The following are explicitly not implemented today; they may be added in response to user feedback.

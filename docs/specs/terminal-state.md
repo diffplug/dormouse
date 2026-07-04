@@ -243,3 +243,11 @@ Source of truth: `statusBucket()` in `lib/src/lib/terminal-state.ts` projects th
 
 Directory group keys use `cwdIdentity(cwd)` so remote hosts and Windows/POSIX path kinds remain distinct.
 Windows UNC display labels keep `\\server\share\` as the path root and do not repeat the server/share in the trailing path segments.
+
+## Files
+
+| File | Role |
+|------|------|
+| `lib/src/lib/terminal-state.ts` | Pure semantic model: types, reducer, CWD precedence, header derivation, grouping |
+| `lib/src/lib/terminal-state-store.ts` | React-facing store; PTY-id → pane-id resolution; keystroke fallback recording (`recordTerminalUserInput`) |
+| `lib/src/lib/terminal-protocol.ts` | Semantic OSC parsing that emits `TerminalSemanticEvent` (parsing location rules in `docs/specs/terminal-escapes.md`) |
