@@ -1,0 +1,78 @@
+import type { Meta, StoryObj } from '@storybook/react';
+import type { ReactNode } from 'react';
+// Importing from App.tsx runs its `index.css` / `pocket.css` side-effect imports,
+// so the `pk-*` styles and `:root` palette are loaded for these stories.
+import { SetupOrSignin } from '../remote/pocket-app/App';
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// The first-time-setup panel is internal state (`useState(showSetup)`), toggled
+// by the `+ First-time setup` disclosure. Click it so the setup fields render.
+async function openSetup({ canvasElement }: { canvasElement: HTMLElement }) {
+  await wait(50);
+  const disclosure = Array.from(canvasElement.querySelectorAll<HTMLButtonElement>('button')).find(
+    (button) => button.textContent?.includes('First-time setup'),
+  );
+  disclosure?.click();
+  await wait(50);
+}
+
+// Phone-sized frame with the pocket dark background, matching the real app shell.
+function PhoneFrame({ children }: { children: ReactNode }) {
+  return (
+    <div
+      className="overflow-hidden border border-border shadow-2xl"
+      style={{ width: 390, height: 760, background: 'var(--pk-bg)' }}
+    >
+      {children}
+    </div>
+  );
+}
+
+const meta: Meta<typeof SetupOrSignin> = {
+  title: 'Pocket/SetupOrSignin',
+  component: SetupOrSignin,
+  parameters: { layout: 'centered' },
+  args: {
+    busy: null,
+    error: null,
+    onSignin: () => {},
+    onSetup: () => {},
+  },
+  decorators: [
+    (Story) => (
+      <PhoneFrame>
+        <Story />
+      </PhoneFrame>
+    ),
+  ],
+};
+
+export default meta;
+type Story = StoryObj<typeof SetupOrSignin>;
+
+// Idle: welcome copy, "Sign in with passkey", setup collapsed.
+export const Welcome: Story = {};
+
+// Disclosure opened → setup password + label fields + "Create passkey & sign in".
+export const SetupExpanded: Story = {
+  play: openSetup,
+};
+
+// Sign-in in flight: primary button reads "Signing in…" and is disabled.
+export const SigningIn: Story = {
+  args: { busy: 'signin' },
+};
+
+// Account creation in flight: setup panel open with the button reading "Creating…".
+export const CreatingAccount: Story = {
+  args: { busy: 'setup' },
+  play: openSetup,
+};
+
+// Failed sign-in: the red `pk-error` banner above the button.
+export const Error: Story = {
+  args: { error: 'Passkey sign-in was cancelled.' },
+};

@@ -43,6 +43,7 @@ export interface MobileWallProps {
   onActiveSessionChange?: (id: string) => void;
   onSessionMinimize?: (id: string) => void;
   onSessionKill?: (id: string) => void;
+  showKillButton?: boolean;
   className?: string;
 }
 
@@ -98,6 +99,7 @@ export function MobileWall({
   onActiveSessionChange,
   onSessionMinimize,
   onSessionKill,
+  showKillButton = true,
   className,
 }: MobileWallProps) {
   const [internalSessions, setInternalSessions] = useState<MobileWallSession[]>(() => controlledSessions ?? [DEFAULT_MOBILE_SESSION]);
@@ -161,6 +163,7 @@ export function MobileWall({
         session={activeItem}
         onMinimize={() => onSessionMinimize?.(activeItem.id)}
         onKill={() => killSession(activeItem.id)}
+        showKillButton={showKillButton}
       />
       <div className="min-h-0 flex-1 overflow-hidden bg-terminal-bg">
         <TerminalPane id={activeItem.id} isFocused />
@@ -173,10 +176,12 @@ function MobileWallHeader({
   session,
   onMinimize,
   onKill,
+  showKillButton,
 }: {
   session: MobileTerminalSessionItem;
   onMinimize: () => void;
   onKill: () => void;
+  showKillButton: boolean;
 }) {
   const status = session.status ?? 'WATCHING_DISABLED';
   const todoPill = useTodoPillContent(session.todo === true);
@@ -235,14 +240,16 @@ function MobileWallHeader({
         >
           <ArrowLineDownIcon size={14} />
         </HeaderActionButton>
-        <HeaderActionButton
-          className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-error/10 hover:text-error"
-          onClick={onKill}
-          ariaLabel="Kill"
-          tooltip="Kill"
-        >
-          <XIcon size={14} />
-        </HeaderActionButton>
+        {showKillButton ? (
+          <HeaderActionButton
+            className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-error/10 hover:text-error"
+            onClick={onKill}
+            ariaLabel="Kill"
+            tooltip="Kill"
+          >
+            <XIcon size={14} />
+          </HeaderActionButton>
+        ) : null}
       </div>
     </div>
   );

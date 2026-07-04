@@ -7,12 +7,13 @@
   "scripts": {
     "dev": "vite",
     "dev:agent-browser": "pnpm run stage && node scripts/dev-agent-browser.mjs",
+    "prebuild": "pnpm --filter server-lib-common build",
     "build": "pnpm run stage && tsc -b && vite build",
     "stage": "pnpm run stage:dor-cli && pnpm run stage:sidecar-proxy",
     "stage:dor-cli": "pnpm --filter dor build && node scripts/stage-dor-cli.mjs",
     "stage:sidecar-proxy": "node scripts/build-sidecar-proxy.mjs",
-    "tauri": "pnpm run stage && tauri",
-    "test": "vitest run"
+    "tauri": "pnpm run stage && node scripts/tauri.mjs",
+    "test": "vitest run && node --test scripts/*.test.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

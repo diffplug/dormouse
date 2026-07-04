@@ -167,6 +167,10 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
   const handleExit = (detail: { id: string; exitCode: number }) => {
     if (detail.id !== id) return;
     terminal.write(`\r\n[Process exited with code ${detail.exitCode}]\r\n`);
+    // The PTY process is dead but the pane lingers in the registry; mark it so
+    // the directory reports this surface as `alive: false` to the phone.
+    const entry = registry.get(id);
+    if (entry) entry.exited = true;
     // The process is gone, so any command we seeded for this pane is no longer
     // live; clear it so `dor ensure` stops matching a dead surface.
     finishLaunchedCommandByPtyId(id, detail.exitCode);

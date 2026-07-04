@@ -17,7 +17,8 @@
     "noFallthroughCasesInSwitch": true,
     "paths": {
       "dormouse-lib/*": ["../lib/src/*"],
-      "dor/*": ["../dor/src/*"]
+      "dor/*": ["../dor/src/*"],
+      "server-lib-common": ["../server-lib-common/src/index.ts"]
     }
   },
   "include": ["src"]

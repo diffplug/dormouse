@@ -11,6 +11,11 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "dormouse-lib": path.resolve(__dirname, "../lib/src"),
+      // The desktop playground bundles `Wall`, which pulls in the remote host
+      // modules (`RemotePairingModalHost` → remote/host/*); those import
+      // `server-lib-common`, whose package `exports` resolve to a `dist` this
+      // build never compiles. Alias it to source, exactly like `dormouse-lib`.
+      "server-lib-common": path.resolve(__dirname, "../server-lib-common/src"),
       "ascii-splash-internal": path.resolve(
         __dirname,
         "node_modules/ascii-splash/dist",

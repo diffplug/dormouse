@@ -27,15 +27,17 @@ export default function App({
   restoredLayout,
   initialDoors,
   baseboardNotice,
+  enableRemoteHost,
 }: {
   initialPaneIds?: string[];
   restoredLayout?: unknown;
   initialDoors?: PersistedDoor[];
   baseboardNotice?: ReactNode;
+  enableRemoteHost?: boolean;
 }) {
   return (
     <ErrorBoundary>
-      <Wall initialPaneIds={initialPaneIds} restoredLayout={restoredLayout} initialDoors={initialDoors} baseboardNotice={baseboardNotice} />
+      <Wall initialPaneIds={initialPaneIds} restoredLayout={restoredLayout} initialDoors={initialDoors} baseboardNotice={baseboardNotice} enableRemoteHost={enableRemoteHost} />
       <ThemeDebuggerGlobal />
     </ErrorBoundary>
   );
