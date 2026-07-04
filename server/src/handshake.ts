@@ -59,6 +59,14 @@ export interface HandshakeConfig {
   readonly origin: string;
   /** Relying-party id the assertion must be scoped to. */
   readonly rpId: string;
+  /**
+   * Demand the authenticator's user-verification flag (biometric/PIN), not just
+   * user presence. This must mirror the Host's `ConnectionPolicy.requireUserVerification`
+   * (connection.ts `authorizeConnection`): both verifiers evaluate the same
+   * assertion, so if only one demands UV they silently disagree on what a valid
+   * assertion is. Undefined/false keeps the current presence-only behavior.
+   */
+  readonly requireUserVerification?: boolean;
   /** Injectable clock (epoch ms) for tests; defaults to `Date.now`. */
   readonly now?: () => number;
 }
@@ -74,6 +82,7 @@ export class Handshake implements HandshakeGate {
   readonly #accounts: AccountStore;
   readonly #origin: string;
   readonly #rpId: string;
+  readonly #requireUserVerification: boolean;
   readonly #now: () => number;
   /** clientId → the last Host challenge relayed to it; consumed single-use. */
   readonly #relayed = new Map<string, RelayedChallenge>();
@@ -82,6 +91,7 @@ export class Handshake implements HandshakeGate {
     this.#accounts = accounts;
     this.#origin = config.origin;
     this.#rpId = config.rpId;
+    this.#requireUserVerification = config.requireUserVerification ?? false;
     this.#now = config.now ?? (() => Date.now());
   }
 
@@ -152,6 +162,9 @@ export class Handshake implements HandshakeGate {
         challenge: request.challenge,
         origin: this.#origin,
         rpId: this.#rpId,
+        // Mirror the Host's UV demand so Server and Host cannot drift on what a
+        // valid assertion is (connection.ts `authorizeConnection`).
+        requireUserVerification: this.#requireUserVerification,
       });
       if (!result.ok) failures.push('passkey-assertion-invalid');
     } else {

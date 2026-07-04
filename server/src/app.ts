@@ -67,6 +67,14 @@ export interface AppConfig {
   readonly setupPassword: string;
   /** External origin, e.g. `https://dormouse.tailnet.ts.net`; source of `rpId`. */
   readonly origin: string;
+  /**
+   * Demand the authenticator's user-verification flag (biometric/PIN) on the
+   * relay's connection-handshake assertions, mirroring the Host's
+   * `ConnectionPolicy.requireUserVerification` so Server and Host cannot disagree
+   * on what a valid assertion is. Omitted/false keeps the current presence-only
+   * behavior; a deployment opts in explicitly (env → config in `index.ts`).
+   */
+  readonly requireUserVerification?: boolean;
   /** Directory holding `account.json`. */
   readonly stateDir: string;
   /**
@@ -148,7 +156,12 @@ export function createApp(config: AppConfig): CreatedApp {
   const hostStore = new HostStore(config.stateDir, now);
   const sessions = new SessionStore(now);
   // Server-side handshake policy layered on the transport-dumb hub (slice 3).
-  const handshake = new Handshake(accounts, { origin: config.origin, rpId, now });
+  const handshake = new Handshake(accounts, {
+    origin: config.origin,
+    rpId,
+    requireUserVerification: config.requireUserVerification,
+    now,
+  });
   const hub = new RelayHub(handshake);
   // Separate issuers per flow: a setup challenge cannot be redeemed at sign-in.
   const setupChallenges = new HostChallengeIssuer({ now });
@@ -276,6 +289,9 @@ export function createApp(config: AppConfig): CreatedApp {
       challenge,
       origin: config.origin,
       rpId,
+      // Same server-wide UV policy the connect handshake enforces, so sign-in
+      // is not a softer path than a remote connect when UV is required.
+      requireUserVerification: config.requireUserVerification,
     });
     if (!result.ok) {
       return c.json({ error: `assertion rejected: ${result.reason}` }, 401);

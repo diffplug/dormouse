@@ -55,6 +55,8 @@ interface Attachment {
   subId: string;
   onData: (detail: { id: string; data: string }) => void;
   onExit: (detail: { id: string; exitCode: number }) => void;
+  /** Pending same-size repaint bounce (see FORCE_REPAINT_BOUNCE_MS), if any. */
+  bounceTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export interface RemoteApiSessionOptions {
@@ -240,7 +242,15 @@ export class RemoteApiSession {
     };
     platform.onPtyData(onData);
     platform.onPtyExit(onExit);
-    this.#attachment = { surfaceId: params.surfaceId, ptyId, subId, onData, onExit };
+    const attachment: Attachment = {
+      surfaceId: params.surfaceId,
+      ptyId,
+      subId,
+      onData,
+      onExit,
+      bounceTimer: null,
+    };
+    this.#attachment = attachment;
 
     // Attach-is-the-resize: resizing the real xterm fires its onResize handler,
     // which drives resizePty → SIGWINCH → the TUI/shell repaints, and that
@@ -256,7 +266,16 @@ export class RemoteApiSession {
       // SIGWINCH and so never repaints).
       const bounced = rows > 1 ? rows - 1 : rows + 1;
       platform.resizePty(ptyId, cols, bounced);
-      setTimeout(() => platform.resizePty(ptyId, cols, rows), FORCE_REPAINT_BOUNCE_MS);
+      // The restore runs ~60ms later, so the client may detach, re-attach at a
+      // different size, or dispose the session first. Cancel on teardown and,
+      // as a backstop, re-check this is still the current attachment before
+      // touching the PTY — a stale restore would clobber the newer size owner
+      // (last-attach-wins) or resize a detached/exited PTY.
+      attachment.bounceTimer = setTimeout(() => {
+        attachment.bounceTimer = null;
+        if (this.#attachment !== attachment) return;
+        platform.resizePty(ptyId, cols, rows);
+      }, FORCE_REPAINT_BOUNCE_MS);
     }
 
     const result: TerminalAttachResult = { cols: term.cols, rows: term.rows };
@@ -303,6 +322,10 @@ export class RemoteApiSession {
 
   #teardownAttachment(): void {
     if (!this.#attachment) return;
+    if (this.#attachment.bounceTimer) {
+      clearTimeout(this.#attachment.bounceTimer);
+      this.#attachment.bounceTimer = null;
+    }
     const platform = getPlatform();
     platform.offPtyData(this.#attachment.onData);
     platform.offPtyExit(this.#attachment.onExit);

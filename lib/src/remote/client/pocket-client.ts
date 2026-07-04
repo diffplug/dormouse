@@ -61,6 +61,8 @@ export type PocketSocket = RemoteWebSocket;
 export interface PocketStorage {
   getPasskeyPublicKey(credentialId: string): string | null;
   setPasskeyPublicKey(credentialId: string, publicKey: string): void;
+  /** Credential ids this device has stored a public key for (may be empty). */
+  knownCredentialIds(): string[];
   isPaired(hostId: string): boolean;
   markPaired(hostId: string): void;
 }
@@ -125,8 +127,14 @@ export class PocketClient {
   #deviceKey: DeviceKeyPair | null = null;
   #onHostGone: (() => void) | null = null;
 
-  /** Handshake frames (`pair-result`/`challenge`/`decision`) awaited FIFO by type. */
-  readonly #waiters = new Map<string, Waiter[]>();
+  /**
+   * The single in-flight handshake waiter per frame type
+   * (`pair-result`/`challenge`/`decision`). The handshake awaits exactly one of
+   * each in strict sequence and the App's single-flight guard forbids overlap,
+   * so at most one waiter per type is ever pending — {@link #expect} throws if a
+   * second is registered rather than silently queueing it.
+   */
+  readonly #waiters = new Map<string, Waiter>();
   /** In-flight remote-api requests, keyed by `requestId`. */
   readonly #pending = new Map<string, PendingRequest>();
   /** Live event subscriptions, keyed by `subId`. */
@@ -261,7 +269,15 @@ export class PocketClient {
     >;
     const challenge = challengeFrame.challenge;
 
-    const assertion = await this.#webauthn.getAssertion(challenge, this.#requireRpId());
+    // Scope the assertion to credentials this device has a stored public key for.
+    // With several synced passkeys for one rpId, an empty allowCredentials lets
+    // the OS pick a credential whose public key we never stored — an unverifiable
+    // dead end below. An empty list here (first-time flows) preserves discovery.
+    const assertion = await this.#webauthn.getAssertion(
+      challenge,
+      this.#requireRpId(),
+      this.#storage.knownCredentialIds(),
+    );
     const deviceSignature = await signDeviceChallenge(device.privateKey, {
       hostId,
       challenge,
@@ -378,11 +394,10 @@ export class PocketClient {
 
   close(): void {
     const ws = this.#ws;
-    // Null BEFORE closing: #onClose reads `#ws === null` as "intentional
-    // close", and while real sockets emit their close event asynchronously,
-    // test fakes may emit synchronously from within close().
-    this.#ws = null;
-    this.#connectedHostId = null;
+    // Tear down BEFORE closing the socket: #onClose reads `#ws === null` as an
+    // intentional close (no host-gone), and while real sockets emit their close
+    // event asynchronously, test fakes may emit it synchronously from close().
+    this.#teardown('relay socket closed', { notifyGone: false });
     try {
       ws?.close();
     } catch {
@@ -411,10 +426,9 @@ export class PocketClient {
   }
 
   #expect(type: 'pair-result' | 'challenge' | 'decision'): Promise<ServerToClientFrame> {
+    if (this.#waiters.has(type)) throw new Error(`already awaiting a '${type}' frame`);
     return new Promise((resolve, reject) => {
-      const list = this.#waiters.get(type) ?? [];
-      list.push({ resolve, reject });
-      this.#waiters.set(type, list);
+      this.#waiters.set(type, { resolve, reject });
     });
   }
 
@@ -430,8 +444,11 @@ export class PocketClient {
       case 'pair-result':
       case 'challenge':
       case 'decision': {
-        const waiter = this.#waiters.get(frame.t)?.shift();
-        waiter?.resolve(frame);
+        const waiter = this.#waiters.get(frame.t);
+        if (waiter) {
+          this.#waiters.delete(frame.t);
+          waiter.resolve(frame);
+        }
         return;
       }
       case 'msg':
@@ -467,22 +484,31 @@ export class PocketClient {
   }
 
   #onClose(): void {
-    // `close()` nulls #ws before the event fires, so a non-null #ws here means
-    // the socket died on us (server restart, network drop) rather than being
-    // closed intentionally.
+    // `close()` tears down and nulls #ws before the event fires, so a non-null
+    // #ws here means the socket died on us (server restart, network drop) rather
+    // than an intentional close. An unexpected drop of an established session is
+    // still host loss — the app must leave the wall instead of idling on a dead
+    // stream — even without a `host-gone` frame.
     const unexpected = this.#ws !== null;
     const hadSession = this.#connectedHostId !== null;
+    this.#teardown('relay socket closed', { notifyGone: unexpected && hadSession });
+  }
+
+  /**
+   * Reset all socket-bound state and fail pending work. The one real difference
+   * between an intentional {@link close} and an unexpected drop is whether to
+   * fire `onHostGone`, made explicit here via `notifyGone`.
+   */
+  #teardown(reason: string, { notifyGone }: { notifyGone: boolean }): void {
     this.#ws = null; // never reuse a closed socket; openSocket() makes a fresh one
     this.#connectedHostId = null;
-    this.#rejectAll(new Error('relay socket closed'));
-    // A close without a `host-gone` frame is still host loss for an established
-    // session — the app must leave the wall instead of idling on a dead stream.
-    if (unexpected && hadSession) this.#onHostGone?.();
+    this.#rejectAll(new Error(reason));
+    if (notifyGone) this.#onHostGone?.();
   }
 
   /** Fail every awaited handshake frame and in-flight request (avoids hangs). */
   #rejectAll(error: Error): void {
-    for (const list of this.#waiters.values()) for (const waiter of list) waiter.reject(error);
+    for (const waiter of this.#waiters.values()) waiter.reject(error);
     this.#waiters.clear();
     for (const pending of this.#pending.values()) pending.reject(error);
     this.#pending.clear();
@@ -528,6 +554,15 @@ export function localStoragePocketStorage(): PocketStorage {
       globalThis.localStorage.getItem(PASSKEY_PREFIX + credentialId),
     setPasskeyPublicKey: (credentialId, publicKey) =>
       globalThis.localStorage.setItem(PASSKEY_PREFIX + credentialId, publicKey),
+    knownCredentialIds: () => {
+      const store = globalThis.localStorage;
+      const ids: string[] = [];
+      for (let i = 0; i < store.length; i++) {
+        const key = store.key(i);
+        if (key?.startsWith(PASSKEY_PREFIX)) ids.push(key.slice(PASSKEY_PREFIX.length));
+      }
+      return ids;
+    },
     isPaired: (hostId) => globalThis.localStorage.getItem(PAIRED_PREFIX + hostId) === '1',
     markPaired: (hostId) => globalThis.localStorage.setItem(PAIRED_PREFIX + hostId, '1'),
   };

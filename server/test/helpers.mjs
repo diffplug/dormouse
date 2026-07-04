@@ -30,9 +30,20 @@ export function makeClock(startMs = 1_700_000_000_000) {
   };
 }
 
-export async function freshApp({ password = PASSWORD, origin = ORIGIN, now } = {}) {
+export async function freshApp({
+  password = PASSWORD,
+  origin = ORIGIN,
+  now,
+  requireUserVerification,
+} = {}) {
   const stateDir = await mkdtemp(join(tmpdir(), 'dormouse-server-'));
-  const created = createApp({ setupPassword: password, origin, stateDir, now });
+  const created = createApp({
+    setupPassword: password,
+    origin,
+    stateDir,
+    now,
+    requireUserVerification,
+  });
   return { ...created, stateDir, origin, rpId: new URL(origin).hostname };
 }
 

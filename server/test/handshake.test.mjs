@@ -47,8 +47,8 @@ import { FakeHost } from './harness/fake-host.mjs';
 // --- Fixtures --------------------------------------------------------------
 
 /** Boot a server + one enrolled `FakeHost`, ready to accept clients. */
-async function boot({ autoApprove = true } = {}) {
-  const created = await freshApp();
+async function boot({ autoApprove = true, requireUserVerification } = {}) {
+  const created = await freshApp({ requireUserVerification });
   const server = await startServer(created);
   const { body: host } = await enrollHost(created.app, { label: 'Laptop' });
   const fakeHost = await startFakeHost(server, host, { autoApprove });
@@ -375,6 +375,58 @@ test('server rejects a replayed connect2 (same challenge twice) before forwardin
     assert.equal(replay.allowed, false);
     assert.ok(replay.failures.includes('challenge-invalid'), JSON.stringify(replay.failures));
     assert.equal(decisions.length, 1, 'the Host never saw the replay');
+  } finally {
+    await close();
+  }
+});
+
+// --- requireUserVerification: Server mirrors the Host's UV demand -----------
+
+test('requireUserVerification: server rejects a UV-absent connect2 before forwarding (mirrors the Host)', async () => {
+  // The Host enforces UV via ConnectionPolicy.requireUserVerification; the server
+  // must demand the same, or the two verifiers silently disagree the moment UV
+  // is turned on. With UV required, a presence-only assertion is rejected here —
+  // before the Host is ever consulted.
+  const { app, server, host, fakeHost, close } = await boot({ requireUserVerification: true });
+  try {
+    const p = await phone(app, server);
+    assert.equal((await pair(p, host.hostId)).approved, true);
+    const decisions = collect(fakeHost, 'decision');
+
+    const challengeFrame = await connect(p, host.hostId);
+    // A well-formed assertion whose ONLY defect is the missing user-verification
+    // flag (user present, but no biometric/PIN).
+    const { decision } = await connect2(p, host.hostId, challengeFrame.challenge, {
+      assertion: { userVerified: false },
+    });
+
+    assert.equal(decision.allowed, false);
+    assert.ok(
+      decision.failures.includes('passkey-assertion-invalid'),
+      JSON.stringify(decision.failures),
+    );
+    assert.equal(decisions.length, 0, 'rejected before forwarding — Host challenge stays unburned');
+  } finally {
+    await close();
+  }
+});
+
+test('default (UV not configured): a UV-absent connect2 is still allowed (unchanged behavior)', async () => {
+  // The knob defaults to off: exactly the same UV-absent assertion the strict
+  // server rejects above is accepted end to end, proving the fix adds no
+  // behavior change for existing deployments.
+  const { app, server, host, fakeHost, close } = await boot();
+  try {
+    const p = await phone(app, server);
+    assert.equal((await pair(p, host.hostId)).approved, true);
+
+    const challengeFrame = await connect(p, host.hostId);
+    const { decision } = await connect2(p, host.hostId, challengeFrame.challenge, {
+      assertion: { userVerified: false },
+    });
+
+    assert.deepEqual(decision, { t: 'decision', allowed: true });
+    assert.equal(fakeHost.established.size, 1, 'the Host established the session');
   } finally {
     await close();
   }

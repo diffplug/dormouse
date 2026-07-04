@@ -24,7 +24,16 @@ export interface PasskeyRegistration {
 /** The two authenticator operations the Pocket client needs; faked in tests. */
 export interface WebAuthnClient {
   registerPasskey(challenge: string, rpId: string, accountId: string): Promise<PasskeyRegistration>;
-  getAssertion(challenge: string, rpId: string): Promise<PasskeyAssertion>;
+  /**
+   * Get an assertion bound to `challenge`. Pass `allowCredentials` (base64url
+   * credential ids) to scope selection to specific passkeys; leave it empty to
+   * discover any of the account's resident credentials.
+   */
+  getAssertion(
+    challenge: string,
+    rpId: string,
+    allowCredentials?: readonly string[],
+  ): Promise<PasskeyAssertion>;
 }
 
 /**
@@ -80,16 +89,26 @@ async function registerPasskey(
 }
 
 /**
- * Get an assertion from any of the account's discoverable passkeys (empty
- * `allowCredentials`), bound to `challenge`. One call feeds both the sign-in
- * and the connect handshakes, so the user sees a single biometric prompt.
+ * Get an assertion bound to `challenge`. Sign-in leaves `allowCredentials` empty
+ * to discover any of the account's resident passkeys; connect passes the stored
+ * credential id(s) so the authenticator selects a passkey this device can verify
+ * (with several synced passkeys for one rpId, an empty list lets the OS pick one
+ * whose public key we never stored). One call feeds both handshakes, so the user
+ * sees a single biometric prompt.
  */
-async function getAssertion(challenge: string, rpId: string): Promise<PasskeyAssertion> {
+async function getAssertion(
+  challenge: string,
+  rpId: string,
+  allowCredentials: readonly string[] = [],
+): Promise<PasskeyAssertion> {
   const credential = (await navigator.credentials.get({
     publicKey: {
       challenge: toBufferSource(fromBase64Url(challenge)),
       rpId,
-      allowCredentials: [],
+      allowCredentials: allowCredentials.map((id) => ({
+        type: 'public-key',
+        id: toBufferSource(fromBase64Url(id)),
+      })),
       userVerification: 'preferred',
     },
   })) as PublicKeyCredential | null;

@@ -220,6 +220,33 @@ describe('RemotePtyAdapter attach / active pane', () => {
     adapter.writePty('s1', 'x');
     expect(client.writes).toHaveLength(0);
   });
+
+  it('terminal.closed with an omitted exitCode surfaces the unknown-exit sentinel (-1), not 0', async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    const exits: Array<{ id: string; exitCode: number }> = [];
+    adapter.onPtyExit((d) => exits.push(d));
+
+    await adapter.setActivePane('s1', 80, 24);
+    // TerminalClosedEvent.exitCode is optional on the wire; a signal-only /
+    // killed / non-selfhost close forwards no code. It must not read as 0.
+    client.lastAttach().handlers.onClosed?.(undefined);
+
+    expect(exits).toEqual([{ id: 's1', exitCode: -1 }]);
+    expect(adapter.activeSurfaceId).toBeNull();
+  });
+
+  it('terminal.closed with a present exitCode passes it through unchanged (incl. 0)', async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    const exits: Array<{ id: string; exitCode: number }> = [];
+    adapter.onPtyExit((d) => exits.push(d));
+
+    await adapter.setActivePane('s1', 80, 24);
+    client.lastAttach().handlers.onClosed?.(0);
+
+    expect(exits).toEqual([{ id: 's1', exitCode: 0 }]);
+  });
 });
 
 describe('RemotePtyAdapter dispose', () => {

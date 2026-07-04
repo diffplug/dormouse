@@ -9,6 +9,7 @@
  */
 
 import { HostAcl, type HostAclRecord } from 'server-lib-common';
+import { loadJson, saveJson } from '../../lib/local-json-store';
 
 export const ACL_KEY_PREFIX = 'dormouse.remote-host.acl.';
 
@@ -18,27 +19,17 @@ function aclKey(hostId: string): string {
 
 /** Load the persisted records for a host, dropping anything malformed. */
 export function loadAclRecords(hostId: string): HostAclRecord[] {
-  try {
-    const raw = globalThis.localStorage?.getItem(aclKey(hostId));
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    // Only keep records for this host; fromRecords rejects a mismatched hostId.
-    return parsed.filter(
-      (record): record is HostAclRecord =>
-        !!record && typeof record === 'object' && (record as HostAclRecord).hostId === hostId,
-    );
-  } catch {
-    return [];
-  }
+  // Missing key / malformed JSON / non-array all collapse to `[]`.
+  const parsed = loadJson<unknown[]>(aclKey(hostId), [], Array.isArray);
+  // Only keep records for this host; fromRecords rejects a mismatched hostId.
+  return parsed.filter(
+    (record): record is HostAclRecord =>
+      !!record && typeof record === 'object' && (record as HostAclRecord).hostId === hostId,
+  );
 }
 
 export function saveAclRecords(hostId: string, records: readonly HostAclRecord[]): void {
-  try {
-    globalThis.localStorage?.setItem(aclKey(hostId), JSON.stringify(records));
-  } catch {
-    // No localStorage: the in-memory ACL still works for this session.
-  }
+  saveJson(aclKey(hostId), records);
 }
 
 /**

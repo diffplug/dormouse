@@ -142,6 +142,60 @@ describe('RemoteApiSession surface.attach', () => {
     expect(platform.resizePty).toHaveBeenNthCalledWith(2, 'pty-1', 80, 24);
   });
 
+  it('does not fire the same-size bounce restore after detaching', () => {
+    vi.useFakeTimers();
+    const platform = new RepaintOnResizePlatform();
+    setPlatform(platform.asAdapter());
+    registerSurface(platform, 80, 24);
+    const sent: SentPayload[] = [];
+    const session = new RemoteApiSession({ hostId: 'host-1', send: (payload) => sent.push(payload) });
+
+    attach(session, 80, 24);
+
+    // The synchronous bounce away from `rows` has fired; the restore is pending.
+    expect(platform.resizePty).toHaveBeenNthCalledWith(1, 'pty-1', 80, 23);
+    expect(platform.resizePty).toHaveBeenCalledTimes(1);
+
+    // Detach inside the ~60ms window, before the restore fires.
+    session.handle({
+      requestId: 'detach',
+      method: REMOTE_METHODS.surfaceDetach,
+      params: { surfaceId: 'surface-1' },
+    });
+
+    vi.advanceTimersByTime(60);
+
+    // The stale restore must never touch the now-detached PTY.
+    expect(platform.resizePty).toHaveBeenCalledTimes(1);
+    expect(platform.resizePty).not.toHaveBeenCalledWith('pty-1', 80, 24);
+  });
+
+  it('does not let a stale bounce restore clobber a newer attachment', () => {
+    vi.useFakeTimers();
+    const platform = new RepaintOnResizePlatform();
+    setPlatform(platform.asAdapter());
+    registerSurface(platform, 80, 24, 'surface-1', 'pty-1');
+    registerSurface(platform, 80, 24, 'surface-2', 'pty-2');
+    const sent: SentPayload[] = [];
+    const session = new RemoteApiSession({ hostId: 'host-1', send: (payload) => sent.push(payload) });
+
+    // First attach schedules a restore bounce for pty-1.
+    attach(session, 80, 24, 'surface-1');
+    expect(platform.resizePty).toHaveBeenNthCalledWith(1, 'pty-1', 80, 23);
+
+    // Re-attaching to a different surface replaces the attachment (last-attach-wins)
+    // and must cancel the prior pty-1 restore.
+    attach(session, 80, 24, 'surface-2');
+    expect(platform.resizePty).toHaveBeenNthCalledWith(2, 'pty-2', 80, 23);
+
+    vi.advanceTimersByTime(60);
+
+    // Only the current attachment's restore fires; pty-1's stale restore does not.
+    expect(platform.resizePty).toHaveBeenNthCalledWith(3, 'pty-2', 80, 24);
+    expect(platform.resizePty).toHaveBeenCalledTimes(3);
+    expect(platform.resizePty).not.toHaveBeenCalledWith('pty-1', 80, 24);
+  });
+
   it('rejects write and resize unless the surface is the current attachment', () => {
     const platform = new RepaintOnResizePlatform();
     setPlatform(platform.asAdapter());

@@ -24,9 +24,8 @@ export function collectDirectorySnapshot(): DirectoryEntry[] {
   const appTitleForPane = buildAppTitleResolver(paneStates, activityStates);
 
   const ids = [...registry.keys()];
-  // The wall derives titles across all visible panes so duplicates disambiguate;
-  // feed it the same set here. Reuse these per-pane states below rather than
-  // re-fetching (each miss would allocate a fresh default twice).
+  // Reuse these per-pane states in the map below rather than re-fetching (each
+  // miss would allocate a fresh default twice).
   const allPanes = ids.map((id) => getTerminalPaneState(id));
   const active = typeof document !== 'undefined' ? document.activeElement : null;
 
@@ -37,8 +36,16 @@ export function collectDirectorySnapshot(): DirectoryEntry[] {
     const activity = activityStates.get(id);
     const element = registry.get(id)?.element ?? null;
     const focused = !!element && !!active && element.contains(active);
+    // The directory entry shows only the derived `primary`; it has no
+    // secondary/cwd-disambiguation field. `deriveHeader`'s `primary` is a pure
+    // per-pane value (`headerPrimary`) computed independently of the pane list
+    // it's given — that list drives only `secondary`, which this path discards.
+    // Feeding the full set here would rerun deriveHeader's O(n) same-primary
+    // scan (and `shortestUniqueCwdLabels`) once per pane, i.e. O(n²) per
+    // 150ms-debounced snapshot, to build a value nothing reads. Compare the
+    // pane against only itself so that scan is O(1); `primary` is identical.
     const title = resolveDisplayPrimary(
-      deriveHeader(pane, allPanes, { appTitleForPane }).primary,
+      deriveHeader(pane, [pane], { appTitleForPane }).primary,
       null,
     );
     return {
