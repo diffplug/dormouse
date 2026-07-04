@@ -1,11 +1,11 @@
 # Keyboard Shortcuts
 
-Complete reference for Dormouse's keyboard shortcuts. Shortcuts are grouped by the mode/context in which they apply.
+Quick-reference index of Dormouse's keyboard shortcuts, grouped by the mode/context in which they apply. This file is a derived convenience table: `docs/specs/layout.md` owns command-mode dispatch and mode switching, and `docs/specs/mouse-and-clipboard.md` owns selection/copy/paste. Change behavior there first, then keep this table in sync.
 
-Dormouse has two modes:
+Dormouse has two modes (`docs/specs/glossary.md` owns the names):
 
-- **Command mode** — keys drive pane and workspace layout. (Internally `command`; this reference previously called it "Workspace mode," renamed to free the word "Workspace" for the pane-group container — see `docs/specs/glossary.md`.)
-- **Terminal mode** (a.k.a. "passthrough" mode) — keys go to the running program, except copy/paste and the mode-switch gesture.
+- **Command mode** — keys drive pane and workspace layout.
+- **Passthrough mode** — keys go to the running program, except copy/paste and the mode-switch gesture.
 
 In the VS Code extension host, selected workbench chords are mirrored: the terminal receives the key, and Dormouse also runs the matching VS Code workbench command. See [the VS Code host spec](vscode.md) for the exact allowlist.
 
@@ -13,9 +13,9 @@ In the VS Code extension host, selected workbench chords are mirrored: the termi
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| Left ⌘ → Right ⌘ (within 500 ms) | Toggle mode | Tap left Command, then right Command within 500 ms to swap between command and terminal mode. |
+| Left ⌘ → Right ⌘ (within 500 ms) | Toggle mode | Tap left Command, then right Command within 500 ms to swap between command and passthrough mode. |
 | Left Shift → Right Shift (within 500 ms) | Toggle mode | Same as above, but with the Shift keys. |
-| `Enter` (command) | Enter terminal mode | Switch the selected pane into passthrough (or reattach a minimized door). |
+| `Enter` (command) | Enter passthrough mode | Switch the selected pane into passthrough (or reattach a minimized door). |
 
 ## Pane actions (command mode)
 

@@ -183,6 +183,7 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 - Left Cmd keydown, then Right Cmd keydown within 500ms — or the same left-then-right gesture with Shift (Left Shift, then Right Shift within 500ms)
 - Detected via capture-phase `keydown` listener on `e.key === 'Meta'` (or `e.key === 'Shift'`) and `e.location` (1 = left, 2 = right). The Meta and Shift tracks are independent, so a Left Cmd followed by a Right Shift does not trigger.
 - Works even when xterm has DOM focus because listener uses capture phase
+- On keyboards without a right Meta key (common on Windows/Linux laptops), the Shift track is the available gesture; both tracks are always active.
 
 ## Keyboard shortcuts (command mode)
 
@@ -446,3 +447,7 @@ Stage 4 also lifts the single-Workspace cap and wires the lifecycle UX:
 - **Create** (`createWorkspace`): adds a new Workspace, gives it a default name (`Workspace N`), makes it active, and spawns a single fresh pane — matching the empty-state behavior in Session persistence above.
 - **Close** (`closeWorkspace`): `kill`s each member Surface and removes the Workspace. Closing a Workspace that contains touched Surfaces confirms first (reusing the kill-confirm vocabulary); the exact confirmation surface is settled in the Storybook UI pass. The last remaining Workspace cannot be closed — there is always one active Workspace, just as there is always one visible pane (corner case #10).
 - **Rename** (`renameWorkspace`): edits the Workspace `name` only. It does not touch any Surface title or the per-pane inline rename.
+
+### Platform-aware baseboard hint
+
+The empty-baseboard shortcut hint is a static `LCmd → RCmd to enter command mode` string (`Baseboard.tsx`). On Windows/Linux — and on any keyboard without a right Meta key — it should offer the Shift gesture instead.

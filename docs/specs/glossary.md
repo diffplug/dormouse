@@ -11,7 +11,7 @@ A **Surface** is the durable occupant of a Pane — what a user thinks of as "th
 
 A **Session**'s state lives on six orthogonal axes — change one without touching the others. A caller holding a `SessionId` can reason about each axis independently. Unless a passage says "Surface" or "browser Surface," it is describing a Session.
 
-The **Liskov contract**: a Session is substitutable across most operations regardless of which states it currently occupies. `kill` and `rename` work universally. State-gated operations (`write`, `focus`) document their preconditions in glossary terms rather than failing silently.
+The **Liskov contract**: a Session is substitutable across most operations regardless of which states it currently occupies. `kill` and `rename` work universally. State-gated operations (`write`, `focus`) have their preconditions documented in glossary terms (see [Liskov contract](#liskov-contract)).
 
 ## Panes and Surfaces
 
@@ -30,6 +30,17 @@ Today every Pane holds exactly one Surface, but the model reserves multiple Surf
 |---|---|---|
 | `terminal` | — | a PTY + xterm.js instance — i.e. a **Session** |
 | `browser` | `iframe`, `ab-screencast`, `ab-popout` | an iframe proxy grant, or an agent-browser daemon session (`docs/specs/dor-browser.md`) |
+
+Three related enums name a Surface's kind at different layers. This table is the canonical mapping:
+
+| Surface | Persisted `surfaceType` (`docs/specs/transport.md`) | `renderMode` (`docs/specs/dor-browser.md`) | CLI `SurfaceType` (`dor`, legacy/derived) |
+|---|---|---|---|
+| terminal Session | `'terminal'` (the default, omitted from the row) | — | `terminal` |
+| browser, iframe renderer | `'browser'` | `iframe` | `iframe` |
+| browser, screencast renderer | `'browser'` | `ab-screencast` | `agent-browser` |
+| browser, popped-out renderer | `'browser'` | `ab-popout` | `agent-browser` |
+
+For browser Surfaces `renderMode` is canonical; the CLI column is derived from it for backwards-compatible `dor` output and is never stored.
 
 A **Session** runs the full six-axis model below. A **browser Surface** participates only where a web view meaningfully can:
 
@@ -79,6 +90,17 @@ The union is **display-only**: it is derived from member Activity, never enters 
 ### Implementation status
 
 This vocabulary is the target model, so parts of it are specified ahead of the code. The Pane / Surface model, surface kinds, and their persistence are live. The Workspace / Window containers are implemented but dormant behind the `dormouse.flags.workspaces` flag (off by default — the app runs one implicit Workspace); the standalone workspace strip and real `switchWorkspace` mounting are not built. The rollout ledger — what remains and in what order — lives in `docs/specs/layout.md` `## Future` (**Scope: workspaces-rollout**); this glossary does not track it.
+
+## Modes
+
+A Wall is always in exactly one input mode. `docs/specs/layout.md` owns the switching gestures and per-mode behavior; these are the canonical names:
+
+| Mode | Meaning |
+|---|---|
+| **passthrough** | Keyboard input routes to the selected Session's terminal. Only copy/paste and the mode-switch gesture are intercepted. |
+| **command** | Keyboard input drives navigation and layout commands; the Session receives nothing. |
+
+Do not introduce aliases — "terminal mode", "normal mode", and "navigation mode" all mean one of the two names above.
 
 ## Layers
 
@@ -182,7 +204,7 @@ A system verb is a lifecycle transition driven by the runtime.
 
 ## Liskov contract
 
-Every Registry API declares its layer preconditions. Calls against a gated state fail with a typed error rather than silently no-op.
+Every Registry API has layer preconditions, declared here:
 
 | Category | Valid when | Examples |
 |---|---|---|
@@ -191,7 +213,7 @@ Every Registry API declares its layer preconditions. Calls against a gated state
 | **Process-gated** | `Process = Live` | `write`, `resize` |
 | **Registry-gated** | `Registry = Mounted` | `refit` |
 
-A caller holding a `SessionId` can issue universal operations without branching. Gated operations are explicit: the caller checks the relevant layer first or catches the typed error.
+A caller holding a `SessionId` can issue universal operations without branching. Gated operations are explicit: the caller checks the relevant layer first. Uniform typed-error enforcement of these preconditions is staged — see [Future](#future).
 
 ## Invariants
 
@@ -220,6 +242,9 @@ Use glossary names instead of these. The left column retains a meaning only wher
 | **terminal** | Keeps its meaning for the `xterm.Terminal` instance. Prose meaning "the whole thing" is **Session** (a terminal Surface). |
 | **surface** | A glossary term, not retired: the durable occupant of a Pane (a terminal Session or a browser Surface). Use **Session** only for the terminal kind; use **Surface** when a statement holds for both. |
 | **panel / pane** | Prefer **pane** for the layout slot. Use "panel" only when quoting dockview's own API (`api.panels`, `addPanel`). |
+| **tether** | Remote-control term only: a display showing "tethering to \<device\>" has ceded terminal size authority to a remote viewer (`docs/specs/remote-api.md`). Not a layout term — do not use it for Pane/Door relationships. |
+
+Remote-only vocabulary (**Viewer**, the wire-level `DirectoryEntry` projection) is defined in `docs/specs/remote-api.md` § Terminology.
 
 ## Naming conventions
 
@@ -228,5 +253,9 @@ Use glossary names instead of these. The left column retains a meaning only wher
 - Event kind strings match the verb: `'minimizeChange'`, not `'detachChange'`.
 - A persisted type is `Persisted<Shape>` where `<Shape>` is the glossary noun (`PersistedPane`, `PersistedDoor`, `PersistedWorkspace`, `PersistedWindow`).
 - A handle type is `<Layer>State` (`ActivityState`, not `SessionUiState`).
-- Surface kinds are lowercase strings: the CLI `SurfaceType` is `'terminal' | 'iframe' | 'agent-browser'`; the component-level split is `'terminal' | 'browser'`. A browser Surface records its kind via `surfaceType` on its persisted per-pane record (`docs/specs/transport.md`).
+- Surface kinds are lowercase strings; the kind-enum mapping table in [Panes and Surfaces](#panes-and-surfaces) is canonical for how the persisted `surfaceType`, `renderMode`, and CLI `SurfaceType` relate.
 - Container names are `PascalCase` nouns (`Workspace`, `Window`); their ids are `WorkspaceId` and `WindowId`. Container verbs keep the container as a suffix (`createWorkspace`, `switchWorkspace`) to stay distinct from the layer-agnostic Session `rename`.
+
+## Future
+
+- **Typed precondition errors.** The Liskov contract's enforcement mechanism: a Registry call against a gated state (e.g. `write` on a non-`Live` Process) fails with a typed error naming the violated precondition, instead of relying on each call site's ad-hoc handling.
