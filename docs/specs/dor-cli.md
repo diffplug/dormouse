@@ -69,6 +69,28 @@ path is plain. `dor.cmd` is reached through
 `DORMOUSE_CLI_BIN` on `PATH`, and cmd.exe cannot execute a batch file via a
 verbatim path — it fails with "The system cannot find the path specified."
 
+`dor.cmd` (and any `.cmd`/`.bat`) must be checked out with **CRLF** line endings:
+cmd.exe misparses LF-only batch files, dropping the leading character of each
+line (`setlocal` → `tlocal`, `if not` → `not`) — so the launcher spews errors
+even when it otherwise runs. A `.gitattributes` rule (`*.cmd text eol=crlf`)
+enforces this; the POSIX `dor` launcher is pinned to `eol=lf`. Both host staging
+copies bytes verbatim (`scripts/stage-dor-cli.mjs`), so the checked-out endings
+are what ship.
+
+### Git Bash PATH survival
+
+`DORMOUSE_CLI_BIN` is prepended to the spawned PTY's `PATH` by the shared PTY
+core (`withPrependedPath` in `standalone/sidecar/pty-core.js`). On Windows that
+prepend must survive Git Bash / MSYS login. `/etc/profile` rebuilds `PATH` from
+an exported `ORIGINAL_PATH` whenever that variable is already set, only capturing
+the live `PATH` into it when it is unset. `ORIGINAL_PATH` leaks into the host env
+whenever the host (VS Code, the standalone app) was itself launched from a Git
+Bash session, and that inherited value predates our prepend — so a login shell
+would silently drop `dor` from `PATH`. The core strips `ORIGINAL_PATH` from the
+child env on win32 (`withoutInheritedMsysOriginalPath`), forcing the shell to
+recapture the exact `PATH` we hand node-pty. cmd.exe / PowerShell never read
+`ORIGINAL_PATH`, so the strip is a no-op for them.
+
 ## Spawning External Binaries
 
 Any time Dormouse spawns an external/user-installed binary — `dor ab` driving

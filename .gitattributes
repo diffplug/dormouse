@@ -1,3 +1,11 @@
 *.png binary
 *.webp binary
 *.mp4 binary
+
+# Windows batch launchers must be CRLF: cmd.exe misparses LF-only .cmd/.bat
+# files (it drops the leading character of lines — `setlocal` -> `tlocal`),
+# which corrupts the staged `dor.cmd` launcher. See docs/specs/dor-cli.md.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+# The POSIX `dor` launcher (no extension) must stay LF.
+dor/bin/dor text eol=lf

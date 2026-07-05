@@ -142,6 +142,24 @@ function withoutInternalDormouseEnv(env) {
   return next;
 }
 
+// Win32 only. Git Bash / MSYS `/etc/profile` reconstructs PATH from an
+// exported `ORIGINAL_PATH` whenever that variable is already set, and only
+// captures the live PATH into it when it is unset. `ORIGINAL_PATH` leaks into
+// our env whenever the host (VS Code, the standalone app) was itself launched
+// from a Git Bash session — and that inherited value predates the
+// DORMOUSE_CLI_BIN prepend below, so a login shell would silently rebuild PATH
+// without `dor` on it. Dropping it makes the shell recapture the exact PATH we
+// hand node-pty (dor-cli/bin included), the same as a first-login Git Bash.
+// Harmless for cmd.exe / PowerShell, which never read ORIGINAL_PATH.
+function withoutInheritedMsysOriginalPath(env, platform = process.platform) {
+  if (platform !== 'win32' || !Object.prototype.hasOwnProperty.call(env, 'ORIGINAL_PATH')) {
+    return env;
+  }
+  const next = { ...env };
+  delete next.ORIGINAL_PATH;
+  return next;
+}
+
 // Directory holding the per-shell OSC 633 integration scripts. Shipped next to
 // this file (standalone bundles it via the tauri `../sidecar/**/*` resources
 // glob); `DORMOUSE_SHELL_INTEGRATION_DIR` overrides it for hosts that stage the
@@ -276,7 +294,10 @@ function resolveSpawnConfig(options, runtime = {}) {
   // Resolve the integration dir from the original env before the internal
   // DORMOUSE_* vars are stripped below.
   const integrationDir = resolveShellIntegrationDir(env, runtime);
-  const envWithCliPath = withoutInternalDormouseEnv(withPrependedPath(env, env.DORMOUSE_CLI_BIN, platform));
+  const envWithCliPath = withoutInheritedMsysOriginalPath(
+    withoutInternalDormouseEnv(withPrependedPath(env, env.DORMOUSE_CLI_BIN, platform)),
+    platform,
+  );
   const childEnv = {
     ...envWithCliPath,
     TERM_PROGRAM: 'iTerm.app',

@@ -101,6 +101,49 @@ test('resolveSpawnConfig applies per-spawn dor CLI env overrides', () => {
   assert.equal(config.env.DORMOUSE_SURFACE_ID, 'pane-1');
 });
 
+test('resolveSpawnConfig drops inherited Git Bash ORIGINAL_PATH on win32', () => {
+  // ORIGINAL_PATH leaks in when the host was launched from Git Bash; if left in
+  // place, /etc/profile rebuilds PATH from it and drops the dor-cli prepend.
+  const config = resolveSpawnConfig(
+    { surfaceId: 'pane-1' },
+    {
+      platform: 'win32',
+      env: {
+        Path: 'C:\\Windows\\System32',
+        ORIGINAL_PATH: '/mingw64/bin:/usr/bin:/c/Windows/System32',
+        DORMOUSE_CLI_BIN: 'C:\\Dormouse\\dor-cli\\bin',
+      },
+      osModule: {
+        homedir: () => 'C:\\Users\\tester',
+        tmpdir: () => 'C:\\Temp',
+      },
+    },
+  );
+
+  assert.equal(config.env.Path, 'C:\\Dormouse\\dor-cli\\bin;C:\\Windows\\System32');
+  assert.equal(config.env.ORIGINAL_PATH, undefined);
+});
+
+test('resolveSpawnConfig keeps ORIGINAL_PATH on non-win32', () => {
+  const config = resolveSpawnConfig(
+    { surfaceId: 'pane-1' },
+    {
+      platform: 'linux',
+      env: {
+        PATH: '/usr/bin',
+        ORIGINAL_PATH: '/whatever',
+        DORMOUSE_CLI_BIN: '/opt/dor-cli/bin',
+      },
+      osModule: {
+        homedir: () => '/home/tester',
+        tmpdir: () => '/tmp/fallback',
+      },
+    },
+  );
+
+  assert.equal(config.env.ORIGINAL_PATH, '/whatever');
+});
+
 test('withPrependedPath preserves Windows Path casing', () => {
   const env = withPrependedPath(
     { Path: 'C:\\Windows\\System32' },
