@@ -1151,9 +1151,14 @@ export function Wall({
         disposeSession(reference.id);
         api.removePanel(referencePanel);
         // Replacing the caller's own pane removes it, so settleFocusAfterAdd
-        // falls through to select the new surface.
+        // falls through to select the new surface (selectedType='pane').
         settleFocusAfterAdd(api, caller, newId, selectPane);
-        if (minimized) minimizePane(newId, { select: !focusNeutral });
+        // In that case a minimize must move selection onto the resulting door
+        // rather than leave selectedType='pane' pointing at a door id (the
+        // overlay would keep a stale rect). Otherwise the caller kept focus, so
+        // the door stays unselected as elsewhere.
+        const callerReplaced = !caller || !api.getPanel(caller.id);
+        if (minimized) minimizePane(newId, { select: !focusNeutral || callerReplaced });
       });
       return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'replaced' } };
     }
