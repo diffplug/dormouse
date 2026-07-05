@@ -1053,6 +1053,21 @@ export function Wall({
     } finally {
       suppressActivationSelectRef.current = false;
     }
+    // Adding the pane re-parents the caller's grid subtree, which blurs its xterm
+    // textarea. Selection never moved, so TerminalPane's focus effect does not
+    // re-run to reclaim it — the caller would silently stop receiving keystrokes
+    // until clicked. Re-assert its focus, deferred to beat dockview's own
+    // post-split focus handling (cf. the click-focus rAF in enterTerminalMode),
+    // and only while it is still the selected pane in passthrough — the exact
+    // condition under which TerminalPane keeps a pane focused.
+    if (focusNeutral && restoreActivePanel) {
+      const callerId = restoreActivePanel.id;
+      requestAnimationFrame(() => {
+        if (modeRef.current === 'passthrough' && selectedIdRef.current === callerId) {
+          focusSession(callerId, true);
+        }
+      });
+    }
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId) } };
   }, [generatePaneId, minimizePane, selectPane, surfaceRefForId]);
 
