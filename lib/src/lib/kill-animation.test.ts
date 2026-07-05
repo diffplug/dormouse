@@ -99,8 +99,8 @@ describe('orchestrateKill', () => {
 
     // Two confirm keydowns processed before a re-render: both invocations arm a
     // listener on the same killed group element.
-    orchestrateKill(api, 'a', selectPane, setSelectedId, killInProgressRef, { current: null });
-    orchestrateKill(api, 'a', selectPane, setSelectedId, killInProgressRef, { current: null });
+    orchestrateKill(api, 'a', true, selectPane, setSelectedId, killInProgressRef, { current: null });
+    orchestrateKill(api, 'a', true, selectPane, setSelectedId, killInProgressRef, { current: null });
 
     // One real animationend fires BOTH listeners → two finalizes race.
     dispatchAnimationEnd(killedEl, FADE);
@@ -119,7 +119,7 @@ describe('orchestrateKill', () => {
     const setSelectedId = vi.fn();
     const killInProgressRef = { current: false };
 
-    orchestrateKill(api, 'a', selectPane, setSelectedId, killInProgressRef, { current: null });
+    orchestrateKill(api, 'a', true, selectPane, setSelectedId, killInProgressRef, { current: null });
 
     // A CLI kill / replaceSurface removes the panel before the animation ends.
     evict('a');
@@ -143,13 +143,31 @@ describe('orchestrateKill', () => {
     const setSelectedId = vi.fn();
     const killInProgressRef = { current: false };
 
-    orchestrateKill(api, 'a', selectPane, setSelectedId, killInProgressRef, { current: null });
+    orchestrateKill(api, 'a', true, selectPane, setSelectedId, killInProgressRef, { current: null });
     dispatchAnimationEnd(killedEl, FADE);
 
     expect(removePanel).toHaveBeenCalledTimes(1);
     expect(removePanel).toHaveBeenCalledWith(killedPanel);
     expect(killInProgressRef.current).toBe(false);
     expect(selectPane).toHaveBeenCalledWith('b');
+  });
+
+  it('killing an unselected pane removes it but leaves selection untouched', () => {
+    const { api, removePanel, elementOf, panelOf } = makeApi(['a', 'b']);
+    const killedEl = elementOf('a');
+    const killedPanel = panelOf('a');
+    const selectPane = vi.fn();
+    const setSelectedId = vi.fn();
+    const killInProgressRef = { current: false };
+
+    // `dor kill surface:a` while the user is on 'b': wasSelected is false.
+    orchestrateKill(api, 'a', false, selectPane, setSelectedId, killInProgressRef, { current: null });
+    dispatchAnimationEnd(killedEl, FADE);
+
+    expect(removePanel).toHaveBeenCalledWith(killedPanel);
+    // Selection tail is skipped — the user's selection stays where it was.
+    expect(selectPane).not.toHaveBeenCalled();
+    expect(setSelectedId).not.toHaveBeenCalled();
   });
 
   it('reduced-motion sync path removes the panel synchronously', () => {
@@ -161,7 +179,7 @@ describe('orchestrateKill', () => {
     const killInProgressRef = { current: false };
 
     // No animationend needed: reduced motion finalizes inline.
-    orchestrateKill(api, 'a', selectPane, setSelectedId, killInProgressRef, { current: null });
+    orchestrateKill(api, 'a', true, selectPane, setSelectedId, killInProgressRef, { current: null });
 
     expect(removePanel).toHaveBeenCalledTimes(1);
     expect(removePanel).toHaveBeenCalledWith(killedPanel);

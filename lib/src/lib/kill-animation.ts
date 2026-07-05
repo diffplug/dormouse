@@ -10,10 +10,16 @@ import { prefersReducedMotion } from './ui-geometry';
  * killInProgressRef is set across api.removePanel so the onDidRemovePanel
  * auto-spawn handler skips its own 440ms delay — otherwise a last-pane kill
  * stacks two 440ms waits.
+ *
+ * wasSelected says whether the killed pane was the selected one. Only then does
+ * the selection move to a survivor; killing a background surface (e.g. `dor kill
+ * surface:3`, or the header kill button on an unselected pane) leaves selection
+ * where the user left it.
  */
 export function orchestrateKill(
   api: DockviewApi,
   killedId: string,
+  wasSelected: boolean,
   selectPane: (id: string) => void,
   setSelectedId: (id: string | null) => void,
   killInProgressRef: { current: boolean },
@@ -36,6 +42,8 @@ export function orchestrateKill(
       // onDidRemovePanel, and a stuck true skips that delay forever after.
       killInProgressRef.current = false;
     }
+    // Killing a pane the user wasn't on must not steal their selection.
+    if (!wasSelected) return;
     if (api.panels.length > 0) selectPane(api.panels[0].id);
     else setSelectedId(null);
   };

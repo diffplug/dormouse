@@ -627,7 +627,10 @@ export function Wall({
     // Release the surface's client-side controller (connection, loops, timers,
     // screen registration). A safe no-op for iframe/terminal surfaces.
     disposeAgentBrowserSurfaceController(id);
-    orchestrateKill(api, id, selectPane, setSelectedId, killInProgressRef, overlayElRef);
+    // Only a kill of the selected pane should move selection; `dor kill` of a
+    // background surface (or the header button on an unselected pane) leaves it.
+    const wasSelected = selectedIdRef.current === id;
+    orchestrateKill(api, id, wasSelected, selectPane, setSelectedId, killInProgressRef, overlayElRef);
     clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
   }, [fireEvent, selectPane]);
@@ -1446,19 +1449,11 @@ export function Wall({
           INTEGRATION_DETECT_TIMEOUT_MS,
         );
         if (!integrated) {
-          // Tear down the throwaway split without disturbing focus. The pane was
-          // never selected (focus-neutral create), so a plain dispose + remove —
-          // not killPaneImmediately, whose kill animation reselects panels[0] —
-          // leaves the caller's selection and DOM focus exactly where ensure found it.
-          // (In the rare `--minimize` create the pane is already a door with no
-          // panel to remove; as before, ensure leaves that door in place.)
-          const throwaway = api.getPanel(result.value.id);
-          if (throwaway) {
-            disposeSession(result.value.id);
-            api.removePanel(throwaway);
-            clearLocalSurfaceActivity(result.value.id);
-            onEventRef.current?.({ type: 'kill', id: result.value.id });
-          }
+          // Tear down the throwaway split. The focus-neutral create never selected
+          // it, so killPaneImmediately's wasSelected gate leaves the caller's
+          // selection where ensure found it. (A `--minimize` create already made it
+          // a door with no panel; killPaneImmediately no-ops there, leaving it.)
+          killPaneImmediately(result.value.id);
           detail.respond({ ok: false, error: missingIntegrationError(ensureShell) });
           return;
         }
