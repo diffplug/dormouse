@@ -603,6 +603,10 @@ const identifyEnv = {
   DORMOUSE_SURFACE_ID: '22222222-2222-4222-8222-222222222222',
   DORMOUSE_CLI_JS: '/opt/dormouse/dor-cli/dist/dor.js',
   DORMOUSE_NODE: '/opt/dormouse/node',
+  DORMOUSE_HOST: 'vscode',
+  DORMOUSE_HOST_WORKSPACE: '/Users/me/projects/site',
+  // The control socket is private host plumbing (the CLI is the public API),
+  // so identify must not echo it — the snapshot proves the field is absent.
   DORMOUSE_CONTROL_SOCKET: '/tmp/dormouse-control.sock',
 };
 

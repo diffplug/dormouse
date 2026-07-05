@@ -18,8 +18,9 @@ stdout:
     "window_ref": "window:1",
     "workspace_ref": "workspace:1"
   },
-  "node_path": "/opt/dormouse/node",
-  "socket_path": "/tmp/dormouse-control.sock"
+  "host": "vscode",
+  "host_workspace": "/Users/me/projects/site",
+  "node_path": "/opt/dormouse/node"
 }
 
 stderr:

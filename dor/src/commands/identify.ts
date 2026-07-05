@@ -1,4 +1,4 @@
-/** cmux-inspired identity dump: caller/focused surfaces plus control endpoint paths. */
+/** Identity dump: caller/focused surfaces plus the hosting app (kind, workspace, runtime paths). */
 
 import { buildCommand } from '@stricli/core';
 import type {
@@ -28,11 +28,11 @@ export const identifyCommand: Command = {
     docs: {
       brief: 'Print JSON identifying this terminal within Dormouse.',
       customUsage: ['[--id-format refs|uuids|both]'],
-      fullDescription: `Inspired by cmux identify.
+      fullDescription: `Prints a JSON object describing where this dor invocation sits within Dormouse: the caller surface (resolved from DORMOUSE_SURFACE_ID), the focused surface, and the hosting app.
 
-Prints a JSON object describing where this dor invocation sits within Dormouse: the caller surface (resolved from DORMOUSE_SURFACE_ID), the focused surface, and the control endpoint paths injected into the terminal's environment.
+host is "vscode" or "standalone". host_workspace is what the owning VS Code window has open — the .code-workspace file when one is loaded, else the root workspace folder; it is always null under the standalone app.
 
-caller is null when no visible surface matches the invoking terminal (e.g. it was minimized to a Door); focused is null when no surface is focused. Path fields are null when the corresponding environment variable is absent.
+caller is null when no visible surface matches the invoking terminal (e.g. it was minimized to a Door); focused is null when no surface is focused. Environment-derived fields are null when the corresponding variable is absent.
 
 Output is always JSON:
   {
@@ -46,8 +46,9 @@ Output is always JSON:
     },
     "cli_js_path": "/path/to/dor-cli/dist/dor.js",
     "focused": { ... },
-    "node_path": "/path/to/node",
-    "socket_path": "/path/to/dormouse-control.sock"
+    "host": "vscode",
+    "host_workspace": "/path/to/project",
+    "node_path": "/path/to/node"
   }`,
     },
     parameters: {
@@ -85,8 +86,9 @@ async function runIdentifyCommand(
       caller: renderIdentitySurface(caller, response, idFormat),
       cli_js_path: env.DORMOUSE_CLI_JS ?? null,
       focused: renderIdentitySurface(focused, response, idFormat),
+      host: env.DORMOUSE_HOST ?? null,
+      host_workspace: env.DORMOUSE_HOST_WORKSPACE ?? null,
       node_path: env.DORMOUSE_NODE ?? null,
-      socket_path: env.DORMOUSE_CONTROL_SOCKET ?? null,
     };
     writeStdout(context, renderJson(payload));
     return undefined;
