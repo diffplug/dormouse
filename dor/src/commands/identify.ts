@@ -78,10 +78,7 @@ async function runIdentifyCommand(
     const response = await client.listSurfaces({});
     const env = context.options.env ?? {};
     const idFormat = flags.idFormat ?? 'refs';
-    const callerSurfaceId = env.DORMOUSE_SURFACE_ID;
-    const caller = callerSurfaceId
-      ? response.surfaces.find((surface) => surface.id === callerSurfaceId) ?? null
-      : null;
+    const caller = response.surfaces.find((surface) => surface.id === env.DORMOUSE_SURFACE_ID) ?? null;
     const focused = response.surfaces.find((surface) => surface.focused) ?? null;
 
     const payload = {
