@@ -24,9 +24,10 @@ export interface TerminalEntry {
   isReplaying: boolean;
   untouched: boolean;
   /**
-   * The PTY process has exited (onPtyExit fired) but the pane lingers in the
-   * registry showing "[Process exited…]". The directory reports this surface as
-   * `alive: false` so the phone's picker stops offering it as attachable.
+   * The PTY process has exited (onPtyExit fired or resume restored it as
+   * exited) but the pane lingers in the registry showing "[Process exited…]".
+   * The directory reports this surface as `alive: false` so the phone's picker
+   * stops offering it as attachable.
    */
   exited?: boolean;
 }

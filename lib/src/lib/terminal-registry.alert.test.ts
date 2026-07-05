@@ -123,6 +123,7 @@ import {
   toggleSessionTodo,
 } from './terminal-registry';
 import { pasteFilePaths } from './clipboard';
+import { registry } from './terminal-store';
 
 interface MockTerminalInstance {
   writes: string[];
@@ -342,6 +343,16 @@ describe('terminal-registry alert behavior', () => {
     expect(isUntouched('resume-legacy')).toBe(false);
     expect(isUntouched('restore-untouched')).toBe(true);
     expect(isUntouched('restore-legacy')).toBe(false);
+  });
+
+  it('marks restored exited sessions as exited in the registry', () => {
+    const entry = resumeTerminal('resume-exited', null, {
+      alive: false,
+      exitCode: 42,
+    }) as TestTerminalEntry;
+
+    expect(entry.terminal.writes).toContain('\r\n[Process exited with code 42]\r\n');
+    expect(registry.get('resume-exited')?.exited).toBe(true);
   });
 
   it('Story 1: quick response never becomes busy', () => {

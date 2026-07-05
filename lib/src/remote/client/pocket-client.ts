@@ -228,10 +228,20 @@ export class PocketClient {
     const url = `${this.#wsBase}${WS_ROUTES.client}?${WS_TOKEN_PARAM}=${encodeURIComponent(token)}`;
     const ws = this.#createWebSocket(url);
     this.#ws = ws;
-    ws.addEventListener('message', (ev) => this.#onFrame((ev as { data?: unknown }).data));
-    ws.addEventListener('close', () => this.#onClose());
+    const isCurrent = () => this.#ws === ws;
+    ws.addEventListener('message', (ev) => {
+      if (!isCurrent()) return;
+      this.#onFrame((ev as { data?: unknown }).data);
+    });
+    ws.addEventListener('close', () => this.#onClose(ws));
     return new Promise((resolve, reject) => {
-      ws.addEventListener('open', () => resolve());
+      ws.addEventListener('open', () => {
+        if (!isCurrent()) {
+          reject(new Error('relay socket superseded'));
+          return;
+        }
+        resolve();
+      });
       ws.addEventListener('error', () => reject(new Error('relay socket error')));
       ws.addEventListener('close', () => reject(new Error('relay socket closed before open')));
     });
@@ -496,7 +506,8 @@ export class PocketClient {
     }
   }
 
-  #onClose(): void {
+  #onClose(ws: PocketSocket): void {
+    if (this.#ws !== ws) return;
     // `close()` tears down and nulls #ws before the event fires, so a non-null
     // #ws here means the socket died on us (server restart, network drop) rather
     // than an intentional close. An unexpected drop of an established session is

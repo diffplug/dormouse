@@ -10,6 +10,10 @@
  *     in `MobileTerminalUi` shows. On the remote side, badge state is
  *     Host-authoritative and rides the directory (not local terminal parsing),
  *     so this replaces `useMobileWallSessionItems` rather than layering on it.
+ *
+ * The Host may keep exited panes in the directory with `alive:false`. Those are
+ * historical entries, not attach targets, so the Pocket wall filters them out
+ * before rendering selectable sessions or defaulting the active pane.
  */
 
 import type { DirectoryEntry } from 'server-lib-common';
@@ -24,9 +28,16 @@ function paneTitle(entry: DirectoryEntry): string {
   return entry.title || DEFAULT_TITLE;
 }
 
+export function attachableDirectoryEntries(entries: DirectoryEntry[]): DirectoryEntry[] {
+  return entries.filter((entry) => entry.alive);
+}
+
 /** The `{id,title}` sessions `MobileWall` mounts, in Host order. */
 export function directoryWallSessions(entries: DirectoryEntry[]): MobileWallSession[] {
-  return entries.map((entry) => ({ id: entry.surfaceId, title: paneTitle(entry) }));
+  return attachableDirectoryEntries(entries).map((entry) => ({
+    id: entry.surfaceId,
+    title: paneTitle(entry),
+  }));
 }
 
 /**
@@ -39,7 +50,7 @@ export function directorySessionItems(
   entries: DirectoryEntry[],
   activeSurfaceId: string | null,
 ): MobileTerminalSessionItem[] {
-  return entries.map((entry) => ({
+  return attachableDirectoryEntries(entries).map((entry) => ({
     id: entry.surfaceId,
     title: paneTitle(entry),
     secondary: secondaryLine(entry),

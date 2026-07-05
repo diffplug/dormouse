@@ -9,6 +9,7 @@ import type { DirectoryEntry } from 'server-lib-common';
 
 import {
   activatePane,
+  attachableDirectoryEntries,
   directorySessionItems,
   directoryWallSessions,
   type PaneActivator,
@@ -39,6 +40,28 @@ describe('directoryWallSessions', () => {
 
   it('falls back to a default title when the Host sends an empty one', () => {
     expect(directoryWallSessions([entry('s1', { title: '' })])).toEqual([{ id: 's1', title: 'Terminal' }]);
+  });
+
+  it('skips exited entries because they are not attachable', () => {
+    expect(
+      directoryWallSessions([
+        entry('dead-first', { alive: false }),
+        entry('live-second', { title: 'ssh' }),
+      ]),
+    ).toEqual([{ id: 'live-second', title: 'ssh' }]);
+  });
+});
+
+describe('attachableDirectoryEntries', () => {
+  it('keeps only alive entries in Host order', () => {
+    expect(
+      attachableDirectoryEntries([
+        entry('dead-a', { alive: false }),
+        entry('live-b'),
+        entry('dead-c', { alive: false }),
+        entry('live-d'),
+      ]).map((item) => item.surfaceId),
+    ).toEqual(['live-b', 'live-d']);
   });
 });
 
@@ -73,6 +96,16 @@ describe('directorySessionItems', () => {
   it('prefers cwd over activity for the secondary line', () => {
     const [item] = directorySessionItems([entry('s1', { activity: 'running', cwd: '/tmp' })], null);
     expect(item.secondary).toBe('/tmp');
+  });
+
+  it('does not expose dead entries as selectable sessions', () => {
+    const items = directorySessionItems(
+      [entry('s1', { alive: false }), entry('s2', { title: 'alive' })],
+      's1',
+    );
+    expect(items).toEqual([
+      { id: 's2', title: 'alive', secondary: null, active: false, status: undefined, todo: false },
+    ]);
   });
 });
 
