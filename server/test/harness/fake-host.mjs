@@ -168,7 +168,8 @@ export class FakeHost extends EventEmitter {
 
     switch (method) {
       case REMOTE_METHODS.hello:
-        ok({ protocolVersion: 1, hostId: this.hostId, grants: { input: true, layout: true } });
+        // Mirror the shipped Host: protocol-v1 grants no layout authority.
+        ok({ protocolVersion: 1, hostId: this.hostId, grants: { input: true, layout: false } });
         return;
 
       case REMOTE_METHODS.directoryWatch: {

@@ -273,6 +273,28 @@ describe('AlertManager in isolation', () => {
     });
   });
 
+  it('opens the dialog after an attention-dismissed ring even when WATCHING is disabled', () => {
+    const id = 'attention-dismissed-watching-disabled';
+
+    // A protocol ring needs no WATCHING; attending it dismisses the ring and
+    // sets attentionDismissedRing while status falls back to WATCHING_DISABLED.
+    manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
+    expect(manager.getState(id).status).toBe('ALERT_RINGING');
+    manager.attend(id);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'WATCHING_DISABLED',
+      todo: true,
+    });
+
+    // The next bell click must open the dialog, not silently enable WATCHING.
+    expect(manager.dismissOrToggleAlert(id, 'WATCHING_DISABLED')).toBe('dismissed');
+    expect(manager.getState(id).watchingEnabled).toBe(false);
+
+    // Flag consumed: the click after that enables WATCHING as usual.
+    expect(manager.dismissOrToggleAlert(id, 'WATCHING_DISABLED')).toBe('enabled');
+    expect(manager.getState(id).watchingEnabled).toBe(true);
+  });
+
   it('protocol completion is suppressed while the user has attention', () => {
     const id = 'osc-progress-attention';
 

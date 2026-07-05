@@ -92,6 +92,9 @@ export function startThemeObserver(): void {
     for (const listener of themeChangeListeners) listener();
   });
 
+  // class + style on both roots, matching the resolver's observer
+  // (vscode-color-observer.ts) so a theme signaled via an <html> class
+  // mutation also refreshes the terminal palette.
   observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
 }

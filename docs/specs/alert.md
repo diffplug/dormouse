@@ -135,10 +135,10 @@ Supported keys:
 
 `title` and `body` chunks append to the pending notification. Completion rings once if the sanitized title or body is nonempty. If `i` is omitted, only a complete single-sequence notification is meaningful.
 
-Management payloads do not ring:
+Management payloads contribute no notification content:
 
 - `p=?` sends a support response advertising the support payload defined in `lib/src/lib/terminal-protocol.ts` (`OSC99_SUPPORT_PAYLOAD`).
-- `p=close`, `p=alive`, `p=icon`, and `p=buttons` are consumed or ignored without creating notification UI.
+- `p=close`, `p=alive`, `p=icon`, and `p=buttons` are consumed or ignored without creating notification UI of their own. Like any chunk, one carrying the (default) `d=1` done flag still completes a pending same-`i` notification, which may then ring on its previously accumulated title/body — kitty's done-flag semantics apply regardless of the final chunk's payload type.
 
 Source of truth: `lib/src/lib/terminal-protocol.ts` defines the pending OSC 99 chunk TTL and max-pending-id cap.
 

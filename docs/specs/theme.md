@@ -118,8 +118,8 @@ the VSCode terminal defaults before those values are read:
 - The 16 ANSI colors from `terminal.ansiBlack` through
   `terminal.ansiBrightWhite`.
 
-The `terminal-theme.ts` body/html `MutationObserver` re-reads these values
-when the body class or style changes, so applying a theme updates existing
+The `terminal-theme.ts` `MutationObserver` re-reads these values on class or
+style mutations of `body` or `html`, so applying a theme updates existing
 terminals. Adapters use the `terminal-theme.ts` API directly — it is not
 re-exported through the `terminal-registry` facade.
 

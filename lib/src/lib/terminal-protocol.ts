@@ -59,6 +59,9 @@ const OSC99_PENDING_BODY_LIMIT = 16_384;
 const OSC99_SUPPORT_PAYLOAD = 'o=always:p=title,body';
 const OSC99_RESPONSE_ID_RE = /^[^\s:;\x00-\x1f\x7f-\x9f]+$/;
 const TERMINAL_BELL_NOTIFICATION: ActivityNotification = { source: 'BEL', title: 'Terminal bell', body: null };
+// Mirrors ITERM2_COMPAT_VERSION in standalone/sidecar/pty-core.js — keep in
+// sync (terminal-escapes.md: one compatibility version across env and device
+// responses).
 export const ITERM2_COMPAT_VERSION = '3.5.0';
 export const ITERM2_DEVICE_ATTRIBUTES_RESPONSE = `\x1bP>|iTerm2 ${ITERM2_COMPAT_VERSION}\x1b\\`;
 
