@@ -666,7 +666,7 @@ export function Wall({
   enterTerminalModeRef.current = enterTerminalMode;
 
   /** Minimize a pane: capture neighbor context, remove from dockview, add to doors state */
-  const minimizePane = useCallback((id: string) => {
+  const minimizePane = useCallback((id: string, opts?: { select?: boolean }) => {
     const api = apiRef.current;
     if (!api) return;
     const panel = api.getPanel(id);
@@ -703,9 +703,13 @@ export function Wall({
     setDoors(nextDoors);
 
     // Keep the minimized session selected as a door so the user can track where it went.
-    modeRef.current = 'command';
-    setMode('command');
-    selectDoor(id);
+    // A focus-neutral creation (`dor ensure --minimize`) opts out: it must leave the
+    // caller's mode and selection untouched (see createSplitSurface's focusNeutral).
+    if (opts?.select !== false) {
+      modeRef.current = 'command';
+      setMode('command');
+      selectDoor(id);
+    }
   }, [selectDoor]);
 
   /** Exit terminal mode */
@@ -951,6 +955,7 @@ export function Wall({
     referenceId,
     cwd,
     requireIntegration,
+    focusNeutral,
   }: {
     command?: string;
     direction: DorResolvedSplitDirection;
@@ -958,6 +963,9 @@ export function Wall({
     referenceId: string;
     cwd?: string;
     requireIntegration?: boolean;
+    // `dor ensure` must never move focus: create the pane without selecting or
+    // activating it, leaving the caller's selection, mode, and DOM focus intact.
+    focusNeutral?: boolean;
   }): ParseResult<{
     id: string;
     ref: string;
@@ -1005,8 +1013,12 @@ export function Wall({
       tabComponent: 'terminal',
       title: UNNAMED_PANEL_TITLE,
       position: { referencePanel: referencePanel.id, direction: dockDirection },
+      // `inactive` suppresses dockview's auto-activation (and the resulting
+      // onDidActivePanelChange that would flip selection to the new pane), the
+      // dockview half of keeping `dor ensure` focus-neutral.
+      ...(focusNeutral ? { inactive: true } : {}),
     });
-    selectPane(newId);
+    if (!focusNeutral) selectPane(newId);
     onEventRef.current?.({
       type: 'split',
       direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
@@ -1014,7 +1026,7 @@ export function Wall({
     });
     if (minimized) {
       getOrCreateTerminal(newId);
-      minimizePane(newId);
+      minimizePane(newId, { select: !focusNeutral });
     }
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId) } };
   }, [generatePaneId, minimizePane, selectPane, surfaceRefForId]);
@@ -1374,6 +1386,8 @@ export function Wall({
           referenceId: resolved.target.id,
           cwd,
           requireIntegration: true,
+          // ensure never steals focus from the caller, matched or freshly created.
+          focusNeutral: true,
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });
@@ -1391,7 +1405,19 @@ export function Wall({
           INTEGRATION_DETECT_TIMEOUT_MS,
         );
         if (!integrated) {
-          killPaneImmediately(result.value.id);
+          // Tear down the throwaway split without disturbing focus. The pane was
+          // added inactive and never selected, so a plain dispose + remove — not
+          // killPaneImmediately, whose kill animation reselects panels[0] — leaves
+          // the caller's selection and DOM focus exactly where ensure found them.
+          // (In the rare `--minimize` create the pane is already a door with no
+          // panel to remove; as before, ensure leaves that door in place.)
+          const throwaway = api.getPanel(result.value.id);
+          if (throwaway) {
+            disposeSession(result.value.id);
+            api.removePanel(throwaway);
+            clearLocalSurfaceActivity(result.value.id);
+            onEventRef.current?.({ type: 'kill', id: result.value.id });
+          }
           detail.respond({ ok: false, error: missingIntegrationError(ensureShell) });
           return;
         }
