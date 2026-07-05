@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  PAIRING_STALE_PRESENCE_ERROR,
   SELFHOST_ACCOUNT_ID,
   generateDeviceKeyPair,
   hashPasskeyPublicKey,
@@ -292,6 +293,46 @@ describe('pair', () => {
     expect(result.approved).toBe(false);
     expect(result.error).toBe('denied by host');
     expect(client.isPaired('h1')).toBe(false);
+  });
+
+  it('re-asserts presence and retries once on a stale-presence denial', async () => {
+    const harness = makeClient({
+      ...AUTH_ROUTES,
+      '/api/reauth/begin': () => ({ json: { challenge: b64uChallenge(7), rpId: RP_ID } }),
+      '/api/reauth/finish': () => ({ json: { presenceVerifiedAt: 123 } }),
+    });
+    const { client, socket, calls } = harness;
+    await client.setup('pw', 'My Phone');
+    await client.signin();
+    const open = client.openSocket();
+    socket.fireOpen();
+    await open;
+
+    const pairing = client.pair('h1', 'iPhone');
+    await nextSent(socket, (f) => f.t === 'pair');
+    socket.server({ t: 'pair-result', approved: false, error: PAIRING_STALE_PRESENCE_ERROR });
+
+    // The client re-auths (bearer-authorized begin + finish) and re-sends the
+    // SAME pairing request; approve the retry.
+    const retry = await (async () => {
+      for (let i = 0; i < 200; i++) {
+        const pairs = socket.sent.filter((f) => f.t === 'pair');
+        if (pairs.length >= 2) return pairs[1]!;
+        await new Promise((r) => setTimeout(r, 2));
+      }
+      throw new Error('no retry pair frame was sent');
+    })();
+    const first = socket.sent.find((f) => f.t === 'pair')!;
+    expect(retry.request).toEqual(first.request);
+    socket.server({ t: 'pair-result', approved: true, record: { hostId: 'h1' } });
+
+    const result = await pairing;
+    expect(result.approved).toBe(true);
+    expect(client.isPaired('h1')).toBe(true);
+    for (const route of ['/api/reauth/begin', '/api/reauth/finish']) {
+      const call = calls.find((c) => c.url.endsWith(route))!;
+      expect(call.headers.authorization).toBe('Bearer tok-abc');
+    }
   });
 });
 

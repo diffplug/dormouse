@@ -159,11 +159,25 @@ side); the user approves locally on the Host; the Host writes the
 `HostAclRecord` binding the passkey credential identity to the device public
 key. The Client is now trusted by that Host and no other.
 
-Source of truth: `PairingRequest` / `PairingTicket` / `PairingCeremony` in
-`server-lib-common/src/security/pairing.ts` (tickets are single-use with a
-`DEFAULT_PAIRING_TTL_MS` = 5-minute TTL; approval after expiry fails without
-touching the ACL). The wire sequence — who relays what — is the pairing
-diagram in `docs/specs/server.md`.
+**Presence for pairing is server-attested plus Host-approved.** The Server
+relays a pairing request only while the session's last server-verified
+passkey assertion is within `PAIRING_PRESENCE_WINDOW_MS` (30 seconds;
+sign-in, re-auth, and the connect handshake all refresh the stamp — `checkPair`
+in `server/src/handshake.ts`). A stale session is answered with
+`PAIRING_STALE_PRESENCE_ERROR`; the Client re-asserts with one WebAuthn prompt
+(`/api/reauth/begin` + `/api/reauth/finish`, refreshing the same session and
+relay socket) and retries. The Host does not re-verify an assertion at pairing
+time — its stronger control is the mandatory local approval, which connect
+lacks (there `authorizeConnection` verifies presence itself). Under Server
+compromise, a forged freshness stamp gets an attacker no further than the
+human staring at the approval modal.
+
+Source of truth: `PairingRequest` / `PairingTicket` / `PairingCeremony` /
+`PAIRING_PRESENCE_WINDOW_MS` in `server-lib-common/src/security/pairing.ts`
+(tickets are single-use with a `DEFAULT_PAIRING_TTL_MS` = 5-minute TTL;
+approval after expiry fails without touching the ACL — the presence window
+gates the *request*, not the approver's deliberation). The wire sequence —
+who relays what — is the pairing diagram in `docs/specs/server.md`.
 
 ## Connection Establishment
 

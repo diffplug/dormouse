@@ -110,6 +110,8 @@ so `node --test` can drive setup → pairing → connect end to end via
 | `POST /api/setup/finish`         | setup password | `{ credentialId, publicKey, clientDataJSON }` → creates/updates `account.json` |
 | `POST /api/signin/begin`         | —              | `{ challenge }` for sign-in                        |
 | `POST /api/signin/finish`        | —              | full assertion → verified → `{ sessionToken }` (random, in-memory, hours-scale TTL) |
+| `POST /api/reauth/begin`         | session token  | `{ challenge }` to re-assert presence on the current session |
+| `POST /api/reauth/finish`        | session token  | full assertion → verified (same checks as sign-in) → refreshes the session's presence stamp; the token and relay socket are kept |
 | `POST /api/host/enroll`          | setup password | `{ label }` → `{ hostId, hostToken, origin, rpId }`; appends to `hosts.json` |
 | `GET /api/hosts`                 | session token  | Enrolled hosts + whether each is currently connected |
 | `GET /ws/host`                   | host token     | The Host's relay socket                            |
@@ -159,10 +161,15 @@ The `pair-request` carries the `PairingRequest` shape from `server-lib-common`
 credential is a registered passkey of the account (and that its public-key
 hash matches the stored key) and rejects malformed requests before relaying —
 an account-level check; the `/ws/client` session is not bound to one
-credential. The Host runs
-`PairingCeremony` and only local approval writes the ACL. A malformed
-`PairingRequest` is answered locally with `pair-result approved:false` and is
-never shown in the Host approval UI.
+credential. The server also requires **fresh presence**: the session's last
+verified assertion (sign-in, re-auth, or a connect handshake) must be within
+`PAIRING_PRESENCE_WINDOW_MS`, else the request is answered locally with
+`pair-result approved:false, error: 'stale-presence'` and the Pocket client
+re-asserts via `/api/reauth/*` (one biometric prompt) and retries
+(`docs/specs/remote-security-model.md`, Pairing Ceremony). The Host runs
+`PairingCeremony` and only local approval writes the ACL. A malformed or
+stale `PairingRequest` is answered locally and is never shown in the Host
+approval UI.
 
 ### Connect (every session)
 

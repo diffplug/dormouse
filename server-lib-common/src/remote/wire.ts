@@ -18,6 +18,8 @@ export const API_ROUTES = {
   setupFinish: '/api/setup/finish',
   signinBegin: '/api/signin/begin',
   signinFinish: '/api/signin/finish',
+  reauthBegin: '/api/reauth/begin',
+  reauthFinish: '/api/reauth/finish',
   hostEnroll: '/api/host/enroll',
   hosts: '/api/hosts',
 } as const;
@@ -72,6 +74,21 @@ export interface SigninFinishResponse {
   sessionToken: string;
   accountId: string;
   expiresAt: number;
+}
+
+/**
+ * Re-assert presence on an existing session (session-token auth; begin reuses
+ * the {@link SigninBeginResponse} shape). Used when pairing reports
+ * `PAIRING_STALE_PRESENCE_ERROR` (pairing.ts): one WebAuthn prompt refreshes
+ * the session's presence stamp without re-minting the token or the relay
+ * socket.
+ */
+export interface ReauthFinishRequest {
+  assertion: PasskeyAssertion;
+}
+export interface ReauthFinishResponse {
+  /** Epoch ms the session's presence stamp was refreshed to. */
+  presenceVerifiedAt: number;
 }
 
 export interface HostEnrollRequest {

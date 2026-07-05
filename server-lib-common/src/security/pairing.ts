@@ -5,9 +5,16 @@
  * models the local approval UI on the Host. The Server can relay a pairing
  * *request*, but only someone at the Host can turn it into authorization.
  *
- * Integration contract: the Host must verify a fresh passkey assertion for
- * the requesting account (see passkey.ts) before calling {@link begin} — a
- * pairing request is meaningless unless the user just proved presence.
+ * Integration contract: presence for pairing is server-attested plus
+ * Host-approved. The Server relays a pairing request only while the session's
+ * last server-verified passkey assertion is within
+ * {@link PAIRING_PRESENCE_WINDOW_MS} (sign-in, re-auth, and the connect2
+ * handshake all refresh the stamp); a stale session is answered with
+ * {@link PAIRING_STALE_PRESENCE_ERROR} and the Client re-asserts with one
+ * WebAuthn prompt, then retries. The Host does not re-verify an assertion at
+ * pairing time — its stronger control is the mandatory local approval below,
+ * unlike connect, where `authorizeConnection` verifies presence itself
+ * (docs/specs/remote-security-model.md, Pairing Ceremony).
  */
 
 import { toBase64Url } from './bytes.js';
@@ -15,6 +22,17 @@ import { getWebCrypto, type WebCryptoLike } from './webcrypto.js';
 import { HostAcl, type HostAclRecord } from './acl.js';
 
 export const DEFAULT_PAIRING_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * How recent the session's last server-verified passkey assertion must be for
+ * the Server to relay a pairing request. Tight on purpose: it covers
+ * "sign in, then tap Pair", and anything slower costs exactly one extra
+ * biometric prompt via re-auth.
+ */
+export const PAIRING_PRESENCE_WINDOW_MS = 30_000;
+
+/** `pair-result.error` code telling the Client to re-assert presence and retry. */
+export const PAIRING_STALE_PRESENCE_ERROR = 'stale-presence';
 const PAIRING_ID_BYTE_LENGTH = 16;
 
 /** What a Client submits to request pairing (after passkey authentication). */
