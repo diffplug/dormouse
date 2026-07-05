@@ -400,6 +400,22 @@ function spawnDirectionForDockview(direction: DockviewSplitDirection): SpawnDire
   return direction === 'above' || direction === 'below' ? 'top' : 'left';
 }
 
+// After a surface-adding op, settle dockview's active group. `caller` is set
+// (by runSurfaceAdd) only on the focus-neutral path: hand the active group back
+// to it so the new pane renders without stealing focus — unless the caller was
+// the pane just replaced in place (it's gone), in which case focus follows to the
+// new surface. Non-focus-neutral adds pass `caller` undefined and select the new
+// pane outright.
+function settleFocusAfterAdd(
+  api: DockviewApi,
+  caller: IDockviewPanel | undefined,
+  newId: string,
+  selectPane: (id: string) => void,
+): void {
+  if (caller && api.getPanel(caller.id)) caller.api.setActive();
+  else selectPane(newId);
+}
+
 /**
  * Quote a raw argv into a single command string for the target pane's shell.
  * This is the one place the command is quoted; the CLI sends argv unquoted
@@ -961,17 +977,24 @@ export function Wall({
     return ids.find((id) => surfaceRunsCommand(getTerminalPaneState(id), command, cwdPath)) ?? null;
   }, []);
 
-  // Run a surface-adding `add` without moving focus off the caller — the shared
-  // machinery behind focus-neutral `dor ensure` / `dor iframe` / `dor ab`. dockview
-  // renders a pane only once it becomes its group's active panel, so `add` must
-  // activate the new pane; the onDidActivePanelChange listener would then follow
-  // it, so we suppress that listener for the duration. `add` receives the caller
-  // panel (the active pane at entry) and is responsible for handing activation back
-  // to it. Afterward we re-assert the caller's xterm focus, which the add re-parents
-  // away: deferred past dockview's own post-split focus handling, and only while the
-  // caller is still the selected pane in passthrough — the condition TerminalPane
-  // uses for isFocused. See docs/specs/layout.md corner case #12.
-  const addKeepingCallerFocus = useCallback((add: (caller: IDockviewPanel | undefined) => void) => {
+  // Run a surface-adding `add`, focus-neutrally when asked — the shared machinery
+  // behind focus-neutral `dor ensure` / `dor iframe` / `dor ab` (vs. plain `dor
+  // split`). When not focus-neutral, `add` runs directly with no caller. When it
+  // is: dockview renders a pane only once it becomes its group's active panel, so
+  // `add` must activate the new pane and the onDidActivePanelChange listener would
+  // follow it — we suppress that listener for the duration and pass `add` the caller
+  // panel (the active pane at entry) so it can hand activation straight back (via
+  // settleFocusAfterAdd). Adding the pane re-parents the caller's grid subtree,
+  // blurring its focus; since selection never moved, TerminalPane's effect won't
+  // reclaim it, so we re-assert focus here — deferred past dockview's own post-split
+  // focus handling, and only while the caller is still the selected pane in
+  // passthrough (the condition TerminalPane uses for isFocused). See
+  // docs/specs/layout.md corner case #12.
+  const runSurfaceAdd = useCallback((
+    focusNeutral: boolean | undefined,
+    add: (caller: IDockviewPanel | undefined) => void,
+  ) => {
+    if (!focusNeutral) { add(undefined); return; }
     const caller = apiRef.current?.activePanel ?? undefined;
     suppressActivationSelectRef.current = true;
     try {
@@ -1050,11 +1073,11 @@ export function Wall({
     const dockDirection = dockviewDirectionForDor(direction);
     freshlySpawnedRef.current.set(newId, spawnDirectionForDockview(dockDirection));
 
-    // Add the pane, then either focus it (default) or — for `dor ensure` — hand the
-    // active group back to the caller so it renders without stealing focus. dockview
-    // renders a pane only once active in its group, so we can't add it `inactive`;
-    // addKeepingCallerFocus handles the listener suppression and focus re-assert.
-    const add = (caller: IDockviewPanel | undefined) => {
+    // dockview renders a pane only once active in its group, so we can't add it
+    // `inactive`; runSurfaceAdd adds it active and, when focus-neutral, hands the
+    // active group back to the caller (settleFocusAfterAdd) so it renders without
+    // stealing focus. `dor split` (not focus-neutral) just selects the new pane.
+    runSurfaceAdd(focusNeutral, (caller) => {
       api.addPanel({
         id: newId,
         component: 'terminal',
@@ -1062,8 +1085,7 @@ export function Wall({
         title: UNNAMED_PANEL_TITLE,
         position: { referencePanel: referencePanel.id, direction: dockDirection },
       });
-      if (focusNeutral) caller?.api.setActive();
-      else selectPane(newId);
+      settleFocusAfterAdd(api, caller, newId, selectPane);
       onEventRef.current?.({
         type: 'split',
         direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
@@ -1073,11 +1095,9 @@ export function Wall({
         getOrCreateTerminal(newId);
         minimizePane(newId, { select: !focusNeutral });
       }
-    };
-    if (focusNeutral) addKeepingCallerFocus(add);
-    else add(undefined);
+    });
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId) } };
-  }, [addKeepingCallerFocus, generatePaneId, minimizePane, selectPane, surfaceRefForId]);
+  }, [runSurfaceAdd, generatePaneId, minimizePane, selectPane, surfaceRefForId]);
 
   /**
    * Create a non-terminal content surface (iframe, agent-browser) next to a
@@ -1114,15 +1134,8 @@ export function Wall({
     const newId = generatePaneId();
     const replaceUntouchedTerminal = reference.type === 'terminal' && isUntouched(reference.id);
 
-    // Focus-neutral hands the active group back to the caller — unless the caller
-    // is the pane being replaced, in which case focus follows to the replacement.
-    const settleFocus = (caller: IDockviewPanel | undefined) => {
-      if (focusNeutral && caller && api.getPanel(caller.id)) caller.api.setActive();
-      else selectPane(newId);
-    };
-
     if (replaceUntouchedTerminal) {
-      const add = (caller: IDockviewPanel | undefined) => {
+      runSurfaceAdd(focusNeutral, (caller) => {
         api.addPanel({
           id: newId,
           component,
@@ -1137,17 +1150,17 @@ export function Wall({
         });
         disposeSession(reference.id);
         api.removePanel(referencePanel);
-        settleFocus(caller);
+        // Replacing the caller's own pane removes it, so settleFocusAfterAdd
+        // falls through to select the new surface.
+        settleFocusAfterAdd(api, caller, newId, selectPane);
         if (minimized) minimizePane(newId, { select: !focusNeutral });
-      };
-      if (focusNeutral) addKeepingCallerFocus(add);
-      else add(undefined);
+      });
       return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'replaced' } };
     }
 
     const dockDirection = pickSplitDirection(referencePanel);
     freshlySpawnedRef.current.set(newId, dockDirection === 'below' ? 'top' : 'left');
-    const add = (caller: IDockviewPanel | undefined) => {
+    runSurfaceAdd(focusNeutral, (caller) => {
       api.addPanel({
         id: newId,
         component,
@@ -1157,18 +1170,16 @@ export function Wall({
         renderer,
         position: { referencePanel: referencePanel.id, direction: dockDirection },
       });
-      settleFocus(caller);
+      settleFocusAfterAdd(api, caller, newId, selectPane);
       onEventRef.current?.({
         type: 'split',
         direction: dockDirection === 'right' ? 'horizontal' : 'vertical',
         source: 'dor',
       });
       if (minimized) minimizePane(newId, { select: !focusNeutral });
-    };
-    if (focusNeutral) addKeepingCallerFocus(add);
-    else add(undefined);
+    });
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'created' } };
-  }, [addKeepingCallerFocus, generatePaneId, minimizePane, selectPane, surfaceRefForId]);
+  }, [runSurfaceAdd, generatePaneId, minimizePane, selectPane, surfaceRefForId]);
 
   // The last binary path a `dor ab` surface resolved on a terminal's PATH.
   // Re-used to spawn an agent-browser when swapping an iframe embed up to a

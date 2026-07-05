@@ -78,7 +78,7 @@ otherwise split next to the reference surface. `dor iframe` also accepts
 Both open the surface **focus-neutrally** (like `dor ensure`): it renders in the
 background and the caller keeps focus — except when replacing the caller's own
 untouched pane, where focus follows to the replacement. `createContentSurface`'s
-`focusNeutral` routes through the shared `addKeepingCallerFocus` helper (see
+`focusNeutral` routes through the shared `runSurfaceAdd` helper (see
 `docs/specs/layout.md` corner case #12).
 
 Surface lifetime owns backing resources:
