@@ -4,7 +4,7 @@ How the phone client (Dormouse Pocket) is structured and deployed. Companion
 to [remote-api.md](./remote-api.md) (the protocol) and
 [server.md](./server.md) (the selfhost server).
 
-# The seam: the remote session is a platform adapter
+## The seam: the remote session is a platform adapter
 
 `lib` renders every Dormouse surface through a `PlatformAdapter`
 (`lib/src/lib/platform/types.ts`). The adapter's PTY core — `writePty`,
@@ -27,10 +27,13 @@ So the Pocket app is NOT a bespoke terminal UI. It is:
 
 — the exact composition the website playground already proves out with
 `FakePtyAdapter` (`website/src/components/PocketTerminalExperience.tsx`).
-One mobile terminal experience in `lib`, three consumers: the website
-playground (fake adapter), the real Pocket (remote adapter), and whatever
-comes later. Everything not in the PTY core no-ops or is absent — the
-interface is designed for capability degradation.
+Source of truth: `lib/src/remote/pocket-app/PocketWall.tsx` composes
+`MobileTerminalUi` + `MobileWall` over the remote adapter. One mobile terminal
+experience in `lib`, three consumers: the website playground (fake adapter),
+the real Pocket (remote adapter), and whatever comes later. Everything not in
+the PTY core no-ops or is absent — the interface is designed for capability
+degradation.
+
 Pocket hides `MobileWall`'s local Kill affordance: remote panes are
 Host-owned, and v1 grants no phone-side kill/layout authority. Closing a local
 xterm view without a Host-side close would leave the Host attachment live and
@@ -48,7 +51,7 @@ connect denial reports an ACL miss (`passkey-not-paired`,
 shows Pair again so expected Host ACL resets, revocations, or browser
 device-key loss recover through the normal pairing ceremony.
 
-# Module layout
+## Module layout
 
 ```
 lib/src/remote/
@@ -64,33 +67,29 @@ lib/src/remote/
 The server (`server/`) stays the only dynamic code: accounts, relay, and
 static serving of the built Pocket bundle.
 
-# Deployment: same-origin, always
+## Deployment: same-origin, always
 
 WebAuthn binds passkeys to the serving origin, and Chrome's Private Network
 Access rules are progressively blocking public-site → private-network fetches.
 Both point the same way: **the Pocket app is always served same-origin with
 its API.** One lib-owned bundle, two deployments:
 
-* **Selfhost (now):** the Node server serves the bundle (`lib/dist-pocket`).
-  Selfhost auth never depends on dormouse.dev existing.
-* **SaaS (later):** CloudFlare serves the static site and routes `/api/*` and
-  `/ws/*` to the dynamic backend (CloudFlare proxies WebSockets). The same
-  bundle mounts at the site origin; rpId is the site's. The dynamic surface
-  is two path prefixes — everything else stays static.
+* **Selfhost (shipped):** the Node server serves the bundle
+  (`lib/dist-pocket`). Selfhost auth never depends on dormouse.dev existing.
+* **SaaS (staged — see [Future](#future)):** CloudFlare serves the static site
+  and routes `/api/*` and `/ws/*` to the dynamic backend (CloudFlare proxies
+  WebSockets). The same bundle mounts at the site origin; rpId is the site's.
+  The dynamic surface is two path prefixes — everything else stays static.
 
 The website keeps its playground and marketing pages fully static in both
 worlds and shares all terminal UI through `lib`; it never duplicates Pocket
 code.
 
-# Phases
+## Future
 
-1. **RemotePtyAdapter + real Pocket UI** — move the protocol modules to
-   `remote/client/`, add the adapter, rebuild the Pocket entry as
-   auth views + `MobileTerminalUi`/`MobileWall`, delete the bespoke terminal
-   UI from the POC. Protocol and server untouched. The fake host harness
-   grows a synthetic directory + echo terminal so the adapter is testable
-   end-to-end without a real host.
-2. **Dedupe the composition** — extract the thin wiring shared by the
-   website's `PocketTerminalExperience` and the Pocket shell so the two
-   cannot drift.
-3. **CloudFlare routing** — deferred until SaaS; nothing in 1–2 needs rework.
+1. **Dedupe the composition** — extract the thin wiring shared by the
+   website's `PocketTerminalExperience` and the Pocket shell
+   (`PocketWall.tsx`) so the two cannot drift. Today each wires
+   `MobileTerminalUi` + `MobileWall` independently.
+2. **CloudFlare routing** — the SaaS deployment above; deferred until SaaS.
+   Nothing in the shipped architecture needs rework for it.

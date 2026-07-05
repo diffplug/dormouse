@@ -17,6 +17,7 @@
 
 import {
   API_ROUTES,
+  PAIRING_STALE_PRESENCE_ERROR,
   REMOTE_EVENTS,
   REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
@@ -34,6 +35,7 @@ import {
   type HostAclRecord,
   type HostsResponse,
   type PairingRequest,
+  type ReauthFinishResponse,
   type RemoteEventMsg,
   type RemoteResponse,
   type ServerToClientFrame,
@@ -44,7 +46,6 @@ import {
   type TerminalAttachResult,
   type TerminalClosedEvent,
   type TerminalDataEvent,
-  type TerminalResizeEvent,
 } from 'server-lib-common';
 import type { WebAuthnClient } from './webauthn';
 import type { RemoteWebSocket } from '../ws';
@@ -85,7 +86,6 @@ export interface PocketClientDeps {
 export interface TerminalHandlers {
   /** Base64url PTY output bytes. */
   onData(bytes: string): void;
-  onResize?(cols: number, rows: number): void;
   onClosed?(exitCode?: number): void;
 }
 
@@ -260,11 +260,31 @@ export class PocketClient {
       devicePublicKey: device.devicePublicKey,
       requestedLabel: label,
     };
+    let result = await this.#sendPair(hostId, request);
+    if (!result.approved && result.error === PAIRING_STALE_PRESENCE_ERROR) {
+      // Pairing presence went stale (> PAIRING_PRESENCE_WINDOW_MS since the
+      // last server-verified assertion). One WebAuthn prompt refreshes the
+      // session's stamp; then retry once. (remote-security-model.md, Pairing.)
+      await this.#reauth();
+      result = await this.#sendPair(hostId, request);
+    }
+    if (result.approved) this.#storage.markPaired(hostId);
+    return result;
+  }
+
+  async #sendPair(hostId: string, request: PairingRequest): Promise<PairResult> {
     const awaited = this.#expect('pair-result');
     this.#send({ t: 'pair', hostId, request });
     const frame = (await awaited) as Extract<ServerToClientFrame, { t: 'pair-result' }>;
-    if (frame.approved) this.#storage.markPaired(hostId);
     return { approved: frame.approved, record: frame.record, error: frame.error };
+  }
+
+  /** Refresh the session's server-verified presence with one WebAuthn prompt. */
+  async #reauth(): Promise<void> {
+    const auth = { authorization: `Bearer ${this.#requireToken()}` };
+    const begin = await this.#api<SigninBeginResponse>(API_ROUTES.reauthBegin, {}, { headers: auth });
+    const assertion = await this.#webauthn.getAssertion(begin.challenge, begin.rpId);
+    await this.#api<ReauthFinishResponse>(API_ROUTES.reauthFinish, { assertion }, { headers: auth });
   }
 
   /**
@@ -357,11 +377,6 @@ export class PocketClient {
           case REMOTE_EVENTS.terminalData:
             handlers.onData((event.data as TerminalDataEvent).bytes);
             return;
-          case REMOTE_EVENTS.terminalResize: {
-            const data = event.data as TerminalResizeEvent;
-            handlers.onResize?.(data.cols, data.rows);
-            return;
-          }
           case REMOTE_EVENTS.terminalClosed:
             handlers.onClosed?.((event.data as TerminalClosedEvent).exitCode);
             return;

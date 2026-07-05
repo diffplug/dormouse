@@ -48,6 +48,8 @@ These do not count as attention: mere visibility, command-mode selection, hover,
 
 Attention is lost when the attention timer expires, the app loses focus, the attended Session is minimized or destroyed, or another Session becomes attended. `T_USER_ATTENTION` also acts as the minimum runtime for command-exit alerts.
 
+Source of truth: `cfg.alert` in `lib/src/cfg.ts` defines `T_USER_ATTENTION` and the other timer defaults and their purpose.
+
 ## WATCHING Track
 
 WATCHING is the user-controlled output/silence monitor. It starts fresh when enabled and is disposed when disabled. Meaningful output excludes resize redraw noise during `T_RESIZE_DEBOUNCE`; theme changes, remounts, DOM reparenting, selection, and focus changes are not output.
@@ -60,8 +62,6 @@ WATCHING is the user-controlled output/silence monitor. It starts fresh when ena
 | `BUSY` | Enough output has arrived to treat the Session as doing work. |
 | `MIGHT_NEED_ATTENTION` | A busy Session went quiet. Debounce state. |
 | `ALERT_RINGING` | WATCHING observed likely completion while the Session lacked attention. |
-
-Source of truth: `cfg.alert` in `lib/src/cfg.ts` defines timer defaults and their purpose.
 
 Source of truth: `ActivityMonitor` in `lib/src/lib/activity-monitor.ts` implements the transitions. The invariants the implementation must honor:
 
@@ -135,10 +135,10 @@ Supported keys:
 
 `title` and `body` chunks append to the pending notification. Completion rings once if the sanitized title or body is nonempty. If `i` is omitted, only a complete single-sequence notification is meaningful.
 
-Management payloads do not ring:
+Management payloads contribute no notification content:
 
 - `p=?` sends a support response advertising the support payload defined in `lib/src/lib/terminal-protocol.ts` (`OSC99_SUPPORT_PAYLOAD`).
-- `p=close`, `p=alive`, `p=icon`, and `p=buttons` are consumed or ignored without creating notification UI.
+- `p=close`, `p=alive`, `p=icon`, and `p=buttons` are consumed or ignored without creating notification UI of their own. Like any chunk, one carrying the (default) `d=1` done flag still completes a pending same-`i` notification, which may then ring on its previously accumulated title/body — kitty's done-flag semantics apply regardless of the final chunk's payload type.
 
 Source of truth: `lib/src/lib/terminal-protocol.ts` defines the pending OSC 99 chunk TTL and max-pending-id cap.
 
@@ -177,7 +177,7 @@ Clearing behavior:
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers.
 >
-> **Partially implemented.** The union *projection* is a pure function — `computeWorkspaceUnion(surfaceIds, activitySnapshot)` in `lib/src/lib/workspace-union.ts` (stage 2b). **VS Code surfacing is implemented**: the editor-tab title and the bottom-panel view badge reflect the union (terminal ring/TODO only; `docs/specs/vscode.md`). Still not built: the **standalone strip indicators** (stage 3). A browser Surface's user-set `todo` round-trips to the activity store live and persists across restart (stage 2a), so it is counted by the projection and shows on the surface's door today.
+> The union *projection* is a pure function — `computeWorkspaceUnion(surfaceIds, activitySnapshot)` in `lib/src/lib/workspace-union.ts`. **VS Code surfacing is implemented**: the editor-tab title and the bottom-panel view badge reflect the union (terminal ring/TODO only; `docs/specs/vscode.md`). A browser Surface's user-set `todo` round-trips to the activity store live and persists across restart, so it is counted by the projection and shows on the surface's door today. The **standalone strip indicators** are staged — see `docs/specs/layout.md` `## Future` (workspaces-rollout).
 
 A Workspace projects a **union status** over the attention state of the Surfaces it contains (terminal Sessions and browser Surfaces alike — see `docs/specs/glossary.md`):
 
@@ -193,10 +193,8 @@ Rules:
 
 Where the union surfaces is host-specific:
 
-- **Standalone:** each inactive Workspace's tab in the strip shows the union `ringing` bell and `todo` pill, reusing the Door indicator vocabulary (`bellIconClass`, the TODO pill). The **active** Workspace's tab shows no union indicator — its rings and TODOs are already visible on its own panes and doors. See `docs/specs/layout.md`.
-- **VS Code:** the host reflects the **terminal** portion of each Workspace's union onto the webview's native chrome — an editor tab's icon (and optionally title) and the sidebar view's numeric badge. Browser-surface TODO stays webview-local and is not shown on native chrome until a future webview→host Surface-state channel exists. See `docs/specs/vscode.md`.
-
-This spec fixes the projection and the surfacing rules; the exact visual treatment of the standalone strip is settled in the Storybook UI pass.
+- **Standalone:** the workspace strip that will show per-tab union indicators is staged with the rest of the strip UI — the behavioral rules live in `docs/specs/layout.md` `## Future` (workspaces-rollout). Today a browser Surface's `todo` shows on its own door, and terminal rings/TODOs show on their panes and doors as specified above.
+- **VS Code:** the host reflects the **terminal** portion of each Workspace's union onto the webview's native chrome — an editor tab's icon (and optionally title) and the sidebar view's numeric badge. Browser-surface TODO stays webview-local; surfacing it on native chrome needs the webview→host Surface-state channel staged in `docs/specs/vscode.md` `## Future`. See `docs/specs/vscode.md`.
 
 ## UI Contract
 
@@ -264,6 +262,19 @@ Security requirements:
 - Ringing must not rely on color alone, and `prefers-reduced-motion` must be respected.
 - Bell, TODO, preview, and dialog controls must remain keyboard reachable; dialogs trap focus and support `Escape`.
 - Tooltips, dialog copy, and future localized TODO labels must wrap in narrow layouts.
+
+## Files
+
+| File | Role |
+|------|------|
+| `lib/src/lib/activity-monitor.ts` | Per-Session WATCHING state machine (output/silence timers) |
+| `lib/src/lib/alert-manager.ts` | `AlertManager`: protocol + command-exit tracks, attention, TODO, notification storage, status projection |
+| `lib/src/lib/terminal-protocol.ts` | Notification/progress OSC parsing (`OSC 9` / `9;4` / `99` / `777`, BEL), sanitization limits, OSC 99 chunk state |
+| `lib/src/lib/session-activity-store.ts` | React activity snapshot store, primed alert state, platform delegates |
+| `lib/src/lib/workspace-union.ts` | `computeWorkspaceUnion` projection |
+| `lib/src/components/bell-icon-class.ts` | Bell tilt/animation mapping from public status |
+| `lib/src/components/wall/TerminalPaneHeader.tsx` | Bell button, TODO pill, notification preview and dialog |
+| `lib/src/components/Door.tsx` | Door bell + TODO display |
 
 ## References
 

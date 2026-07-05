@@ -34,7 +34,7 @@ import type {
   ServerToHostFrame,
 } from 'server-lib-common';
 
-import type { HandshakeGate } from './handshake.js';
+import type { HandshakeGate, PresenceSession } from './handshake.js';
 
 /**
  * The slice of a WebSocket the hub actually uses. `WSContext` from
@@ -56,6 +56,8 @@ export interface HostConn {
 export interface ClientConn {
   readonly clientId: string;
   readonly socket: RelaySocket;
+  /** The authenticated session behind this socket; the gate reads/refreshes its presence stamp. */
+  readonly session: PresenceSession;
   /** The Host this client is currently talking to, or `null` if unbound. */
   hostId: string | null;
   /** Whether `msg` frames may flow — set true only by an allowed Host decision. */
@@ -194,9 +196,9 @@ export class RelayHub {
   // --- Client lifecycle -----------------------------------------------------
 
   /** Register a freshly-opened Client socket with a fresh secret `clientId`. */
-  registerClient(socket: RelaySocket): ClientConn {
+  registerClient(socket: RelaySocket, session: PresenceSession): ClientConn {
     const clientId = toBase64Url(randomBytes(16));
-    const conn: ClientConn = { clientId, socket, hostId: null, established: false };
+    const conn: ClientConn = { clientId, socket, session, hostId: null, established: false };
     this.#clients.set(clientId, conn);
     return conn;
   }
@@ -246,8 +248,9 @@ export class RelayHub {
         if (frame.t === 'pair') {
           // Only relay a pairing request the authenticated session could have
           // made: the owner account, a registered credential, a matching key
-          // hash. A forged request is answered locally and never reaches the Host.
-          const check = await this.#gate.checkPair(frame.request);
+          // hash, and fresh session presence. A forged or stale request is
+          // answered locally and never reaches the Host.
+          const check = await this.#gate.checkPair(frame.request, client.session);
           if (!this.#isCurrentClientHost(client, frame.hostId, host)) return;
           if (!check.ok) {
             this.#toClient(client, { t: 'pair-result', approved: false, error: check.error });
@@ -259,7 +262,12 @@ export class RelayHub {
         // connect2: the server verifies the assertion (against the STORED key)
         // and challenge freshness before forwarding. On failure the client gets
         // a denial and the Host's challenge stays unburned.
-        const check = await this.#gate.checkConnect2(client.clientId, frame.hostId, frame.request);
+        const check = await this.#gate.checkConnect2(
+          client.clientId,
+          frame.hostId,
+          frame.request,
+          client.session,
+        );
         if (!this.#isCurrentClientHost(client, frame.hostId, host)) return;
         if (!check.ok) {
           this.#toClient(client, { t: 'decision', allowed: false, failures: check.failures });

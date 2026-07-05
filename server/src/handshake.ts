@@ -6,8 +6,10 @@
  *
  *   - `pair`:     the pairing request must be consistent with the authenticated
  *                 session — the owner account, a registered passkey credential,
- *                 and the matching stored public-key hash. Otherwise the server
- *                 refuses to relay it to the Host at all.
+ *                 and the matching stored public-key hash — and the session's
+ *                 presence must be fresh: its last server-verified assertion
+ *                 within PAIRING_PRESENCE_WINDOW_MS (pairing.ts). Otherwise the
+ *                 server refuses to relay it to the Host at all.
  *   - `connect2`: the WebAuthn assertion must verify against the STORED passkey
  *                 public key (not the one the request carries), over the exact
  *                 Host challenge the server just relayed to this client. This is
@@ -23,6 +25,8 @@
 
 import {
   DEFAULT_CHALLENGE_TTL_MS,
+  PAIRING_PRESENCE_WINDOW_MS,
+  PAIRING_STALE_PRESENCE_ERROR,
   SELFHOST_ACCOUNT_ID,
   hashPasskeyPublicKey,
   verifyPasskeyAssertion,
@@ -33,6 +37,16 @@ import type { AccountStore } from './state.js';
 
 /** Result of {@link HandshakeGate.checkPair}. */
 export type PairCheck = { readonly ok: true } | { readonly ok: false; readonly error: string };
+
+/**
+ * The slice of the app's `Session` the gate reads and refreshes: the epoch-ms
+ * timestamp of the last assertion the Server verified for it. Mutable — a
+ * verified `connect2` refreshes it, and `/api/reauth/finish` refreshes it out
+ * of band.
+ */
+export interface PresenceSession {
+  lastVerifiedPresence: number;
+}
 
 /** Result of {@link HandshakeGate.checkConnect2}. Failures reuse the Host's vocabulary. */
 export type Connect2Check =
@@ -45,8 +59,8 @@ export type Connect2Check =
  * transport-dumb.
  */
 export interface HandshakeGate {
-  /** Verify a `pair` request before relaying it to the Host. */
-  checkPair(request: unknown): Promise<PairCheck>;
+  /** Verify a `pair` request (contents + session presence) before relaying it to the Host. */
+  checkPair(request: unknown, session: PresenceSession): Promise<PairCheck>;
   /** Remember the Host challenge the server just relayed to a client (freshness half). */
   observeChallenge(clientId: string, hostId: string, challenge: string, expiresAt: number): void;
   /** Verify a `connect2` request before relaying it to the target Host. */
@@ -54,6 +68,7 @@ export interface HandshakeGate {
     clientId: string,
     targetHostId: string,
     request: ConnectionRequest,
+    session: PresenceSession,
   ): Promise<Connect2Check>;
   /** Drop any remembered challenge for a client that disconnected. */
   forgetClient(clientId: string): void;
@@ -76,6 +91,8 @@ export interface HandshakeConfig {
   readonly now?: () => number;
   /** Relay-side TTL for Host challenges observed by the server. */
   readonly relayedChallengeTtlMs?: number;
+  /** Presence window for pairing; defaults to `PAIRING_PRESENCE_WINDOW_MS`. */
+  readonly pairingPresenceWindowMs?: number;
 }
 
 /** The last Host challenge the server relayed to a client. */
@@ -93,6 +110,7 @@ export class Handshake implements HandshakeGate {
   readonly #requireUserVerification: boolean;
   readonly #now: () => number;
   readonly #relayedChallengeTtlMs: number;
+  readonly #pairingPresenceWindowMs: number;
   /** clientId → the last Host challenge relayed to it; consumed single-use. */
   readonly #relayed = new Map<string, RelayedChallenge>();
 
@@ -103,9 +121,10 @@ export class Handshake implements HandshakeGate {
     this.#requireUserVerification = config.requireUserVerification ?? false;
     this.#now = config.now ?? (() => Date.now());
     this.#relayedChallengeTtlMs = config.relayedChallengeTtlMs ?? DEFAULT_CHALLENGE_TTL_MS;
+    this.#pairingPresenceWindowMs = config.pairingPresenceWindowMs ?? PAIRING_PRESENCE_WINDOW_MS;
   }
 
-  async checkPair(request: unknown): Promise<PairCheck> {
+  async checkPair(request: unknown, session: PresenceSession): Promise<PairCheck> {
     if (!isPairingRequest(request)) {
       return { ok: false, error: 'malformed pairing request' };
     }
@@ -122,6 +141,12 @@ export class Handshake implements HandshakeGate {
     const expectedHash = await hashPasskeyPublicKey(stored.publicKey);
     if (request.passkeyPublicKeyHash !== expectedHash) {
       return { ok: false, error: 'passkey public key hash does not match the registered key' };
+    }
+    // Presence half for pairing (server-attested; remote-security-model.md,
+    // Pairing Ceremony): the session's last verified assertion must be recent.
+    // The Pocket client maps this error to one re-assert prompt and a retry.
+    if (this.#now() - session.lastVerifiedPresence > this.#pairingPresenceWindowMs) {
+      return { ok: false, error: PAIRING_STALE_PRESENCE_ERROR };
     }
     return { ok: true };
   }
@@ -142,6 +167,7 @@ export class Handshake implements HandshakeGate {
     clientId: string,
     targetHostId: string,
     request: ConnectionRequest,
+    session: PresenceSession,
   ): Promise<Connect2Check> {
     const failures: ConnectionFailure[] = [];
 
@@ -190,7 +216,11 @@ export class Handshake implements HandshakeGate {
       failures.push('passkey-assertion-invalid');
     }
 
-    return failures.length === 0 ? { ok: true } : { ok: false, failures };
+    if (failures.length > 0) return { ok: false, failures };
+    // Any server-verified assertion refreshes the session's presence stamp, so
+    // "connect to host A, then pair host B moments later" needs no re-prompt.
+    session.lastVerifiedPresence = this.#now();
+    return { ok: true };
   }
 }
 

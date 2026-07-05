@@ -20,7 +20,7 @@ non-terminal browser surfaces, the backing browser session remains alive while
 the visible viewer resources are released: no canvas, screencast WebSocket,
 screenshot loop, or input forwarding runs while the surface is a Door.
 
-A **Workspace** is the named group of Surfaces rendered by a single **Wall**, together with their layout (see `docs/specs/glossary.md`). A Window may hold several Workspaces. This spec covers how Workspaces are presented and switched in the standalone app — the tab strip and the one-Wall-per-Workspace mounting below. VS Code maps each Workspace to its own webview instead; see `docs/specs/vscode.md`.
+A **Workspace** is the named group of Surfaces rendered by a single **Wall**, together with their layout (see `docs/specs/glossary.md`). A Window may hold several Workspaces. This spec owns the standalone Workspace presentation; the strip UI and real switching are staged in [Future](#future) (**Scope: workspaces-rollout**). VS Code maps each Workspace to its own webview instead; see `docs/specs/vscode.md`.
 
 ## Shell layout
 
@@ -116,9 +116,9 @@ The mouse-override icon only appears when the inside program has requested mouse
 
 ## Baseboard
 
-Below the content area is the baseboard (`h-7`, 28px). It is visible by default and has no top divider. The dockview area ends 2px above it, leaving a narrow theme-colored gap that keeps rounded pane corners distinct from the baseboard. Its horizontal padding matches the Dockview wrapper's 6px inset, so doors align with the panes above. When empty, it shows keyboard shortcut hints when there are no doors and the container is wider than 350px (currently: `LCmd → RCmd to enter command mode`).
+Below the content area is the baseboard (`h-7`, 28px). It is visible by default and has no top divider. The dockview area ends 2px above it, leaving a narrow theme-colored gap that keeps rounded pane corners distinct from the baseboard. Its horizontal padding matches the Dockview wrapper's 6px inset, so doors align with the panes above. When empty, it shows keyboard shortcut hints when there are no doors and the container is wider than 350px — platform-aware: `LCmd → RCmd to enter command mode` on macOS, `LShift → RShift to enter command mode` elsewhere (`Baseboard.tsx`).
 
-`Wall` accepts `showBaseboard={false}` for constrained embedders such as the website mobile Tether prototype, where a separate bottom navigation owns the area below the terminal and door workflows are outside the prototype scope. The main app shell keeps the default `showBaseboard=true`.
+`Wall` accepts `showBaseboard={false}` for constrained embedders such as the website's mobile Pocket playground, where a separate bottom navigation owns the area below the terminal and door workflows are outside the prototype scope. The main app shell keeps the default `showBaseboard=true`.
 
 When a session is minimized, it becomes a **door** on the baseboard. The door displays the same derived terminal label as the pane header, a TODO badge (if set), and an alert bell icon with activity dot. It uses the bottom edge of the window as its bottom border, with left, top, and right borders using the shared terminal top radius from `lib/src/components/design.tsx` — resembling a mouse hole and matching pane rounding. Door dimensions: `min-w-[68px] max-w-[220px] h-6`.
 
@@ -126,7 +126,7 @@ When a session is minimized, it becomes a **door** on the baseboard. The door di
 
 - **Clicking a door** (in any mode): restores the session into the content area as a pane and enters passthrough mode. The terminal gets focus immediately.
 - **Enter** on a door (command mode): same as clicking — restores and enters passthrough mode.
-- **d** on a door (command mode): restores the session into a pane but stays in command mode. This is the inverse of pressing `d` on a pane (which minimizes it), making `d` a toggle.
+- **m** or **d** on a door (command mode): restores the session into a pane but stays in command mode. This is the inverse of pressing `m`/`d` on a pane (which minimizes it), making them toggles.
 - **x** on a door (command mode): restores the session into a pane, then immediately shows the kill confirmation.
 - **Arrow keys** can navigate to doors from panes (see Navigation).
 
@@ -148,26 +148,12 @@ Extreme case: a single door with a very long title, with more doors on both side
 ## Workspaces
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers and `docs/specs/alert.md` for the union status. VS Code's per-webview mapping is in `docs/specs/vscode.md`.
->
-> **Partially implemented.** The container and model exist behind the `dormouse.flags.workspaces` flag (stage 2b, dormant): the standalone persists a `PersistedWindow` and the workspace model holds the list + active id (`docs/specs/transport.md`, glossary Implementation status). Still **not built**: the **strip UI** below (stage 3) and the actual Wall **mount/unmount when switching** (stage 4) — today `setActiveWorkspace` changes the active id in the model but does not re-render the Wall. The app runs one implicit Workspace with the flag off (the default).
 
 A **Workspace** is one Wall's worth of Surfaces (terminal Sessions and browser surfaces) plus its layout, with a user-facing name. The standalone Window hosts several Workspaces but mounts only one — the **active** Workspace — at a time. Each Workspace owns its own Content (dockview layout) and Baseboard (doors).
 
-### Workspace strip (standalone)
+What exists today lives behind the `dormouse.flags.workspaces` flag (`WORKSPACES_FLAG_KEY` in `lib/src/lib/feature-flags.ts`, **off by default**): the in-memory workspace model and its container verbs (`createWorkspace` / `closeWorkspace` / `renameWorkspace` / `setActiveWorkspace` in `lib/src/lib/workspace-store.ts`), the union projection (`computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`), and Window persistence (`PersistedWindow`, `docs/specs/transport.md`). `setActiveWorkspace` changes the active id in the model but does not yet re-render the Wall, and the single-Workspace cap is still in place. With the flag off, the app persists a bare `PersistedSession` and runs exactly one implicit Workspace — byte-identical to pre-workspace behavior.
 
-The standalone app bar (`standalone/src/AppBar.tsx`) carries a horizontal **workspace strip**: one tab per Workspace, living in the app bar's draggable region at the top of the window. Each tab shows the Workspace `name` and, for **inactive** Workspaces, the union `ringing` bell and `todo` pill from `docs/specs/alert.md`, reusing the Door indicator vocabulary. The **active** Workspace's tab shows no union indicator: its alerts are already visible on its own panes and doors. Exact tab visuals are settled in the Storybook UI pass.
-
-### Switching
-
-Activating another Workspace (`switchWorkspace`) mounts the target Workspace's Surfaces into the Wall — rebuilding its dockview layout and reattaching its doors — and unmounts the previously active Workspace's Surfaces. For a terminal Surface this reuses the `mount` / `unmount` registry ops: the Registry entry and PTY survive `unmount`, so Process stays `Live`. A browser surface's backing agent-browser session or proxy grant likewise survives while its viewer resources are released. Because a terminal's Activity keeps flowing while unmounted, an inactive Workspace's tab can begin ringing or showing TODO while the user is elsewhere. Mounting must not fire a fresh ring (glossary I8, mirroring the minimize/reattach rule I3).
-
-### Lifecycle
-
-- **Create** (`createWorkspace`): adds a new Workspace, gives it a default name (`Workspace N`), makes it active, and spawns a single fresh pane — matching the empty-state behavior in Session persistence below.
-- **Close** (`closeWorkspace`): `kill`s each member Surface and removes the Workspace. Closing a Workspace that contains touched Surfaces confirms first (reusing the kill-confirm vocabulary); the exact confirmation surface is settled in the Storybook UI pass. The last remaining Workspace cannot be closed — there is always one active Workspace, just as there is always one visible pane (corner case #10).
-- **Rename** (`renameWorkspace`): edits the Workspace `name` only. It does not touch any Surface title or the per-pane inline rename.
-
-Concrete switch/create/close/rename keyboard shortcuts are chosen alongside the Storybook UI pass. Command mode is the natural home for them, following the tmux *window* bindings the rest of the keymap mirrors (a Dormouse Workspace is the analogue of a tmux window).
+The strip UI, real switching, and lifecycle UX are staged in [Future](#future) — this spec's `## Future` is the single rollout ledger for the feature; other specs link here.
 
 ## Modes
 
@@ -177,7 +163,7 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 - All keyboard input routes to the active session's xterm.js instance
 - Only the mode-exit gesture (LCmd → RCmd, or LShift → RShift) is intercepted
 - In the VS Code host, selected workbench chords are mirrored: xterm still processes the key, and Dormouse also asks the extension host to run the matching VS Code command. See [the VS Code host spec](vscode.md) for the allowlist.
-- Selection overlay shows 2px solid border with glow
+- Selection overlay shows a 1px solid border
 - Terminal has DOM focus
 
 ### Command mode
@@ -197,6 +183,7 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 - Left Cmd keydown, then Right Cmd keydown within 500ms — or the same left-then-right gesture with Shift (Left Shift, then Right Shift within 500ms)
 - Detected via capture-phase `keydown` listener on `e.key === 'Meta'` (or `e.key === 'Shift'`) and `e.location` (1 = left, 2 = right). The Meta and Shift tracks are independent, so a Left Cmd followed by a Right Shift does not trigger.
 - Works even when xterm has DOM focus because listener uses capture phase
+- On keyboards without a right Meta key (common on Windows/Linux laptops), the Shift track is the available gesture; both tracks are always active.
 
 ## Keyboard shortcuts (command mode)
 
@@ -211,7 +198,7 @@ All handled in a single capture-phase `keydown` listener on `window`. Every hand
 | `Enter` | Enter passthrough mode | Restore session + enter passthrough |
 | `,` | Inline rename | — |
 | `x` / `k` | Kill with confirmation | Restore session + kill confirmation |
-| `d` | Minimize to door | Restore session (stay in command) |
+| `m` / `d` | Minimize to door | Restore session (stay in command) |
 | `z` | Toggle maximize/restore | — |
 | `t` | Toggle TODO flag | — |
 | `a` | Dismiss or toggle alert | — |
@@ -224,14 +211,14 @@ When a split is initiated from an existing pane (via `|`/`%`/`-`/`"`, the header
 
 Pressing `x` (or clicking the kill button) enters command mode and shows a pane-centered semi-transparent overlay (`KillConfirmOverlay` → `KillConfirmModal`) with a random lowercase letter (a-z, excluding x). Typing that letter confirms the kill (destroys session, removes pane). Cancel with Escape key, clicking the `[ESC] to cancel` button, or clicking another panel. Any other key triggers a shake animation (400ms `shake-x` keyframe) then auto-dismisses the confirmation.
 
-Untouched sessions skip this confirmation. A newly spawned shell starts `untouched: true`; the first user-originated PTY input flips it to false. Inputs that count include printable keys, Enter, control keys, keyboard CSI such as arrows/history, paste, and file-drop path insertion. Replay-time terminal reports, synthetic terminal reports, and stripped mouse-report-only input do not count. Killing an untouched pane runs the normal kill animation/dispose path immediately. Killing an untouched door first reattaches it only far enough to reuse the same pane removal path, then kills it without showing the confirmation overlay.
+Untouched sessions skip this confirmation. A newly spawned shell starts `untouched: true`; the first user-originated PTY input flips it to false. Inputs that count include printable keys, Enter, control keys, keyboard CSI such as arrows/history, paste, and file-drop path insertion. Replay-shaped terminal reports and stripped mouse-report-only input do not count (the untouched gate checks `inputIsReplayTerminalReport`; the broader synthetic-report check gates input recording and alert attention, not this flag). Killing an untouched pane runs the normal kill animation/dispose path immediately. Killing an untouched door first reattaches it only far enough to reuse the same pane removal path, then kills it without showing the confirmation overlay.
 
 ## Selection overlay
 
-A fixed-positioned element rendered on top of dockview. Covers the active element's area inflated by 3px (half the 6px gap) for panes, or 2px for doors.
+A fixed-positioned element rendered on top of dockview. Covers the active element's area inflated by 3px (half the 6px gap) for panes; doors are not inflated.
 
 - A pane or door can be **active** or **inactive**. Only one element is active at a time.
-- **Passthrough:** `border: 2px solid ${color}` + `box-shadow: 0 0 15px color-mix(in srgb, ${color} 30%, transparent)`
+- **Passthrough:** `border: 1px solid ${color}` — no glow
 - **Command:** animated SVG marching-ants border — rounded rectangle path with `stroke-dasharray` animation (10px segment, 60% dash / 40% gap, 0.4s cycle, 2px stroke)
 - Border radius: shared terminal radius from `lib/src/components/design.tsx`: full `0.5rem` for panes, `0.5rem 0.5rem 0 0` for doors
 - Color from CSS custom property `--mt-selection-terminal`
@@ -304,7 +291,7 @@ The name `<span>` is replaced by an `<input>` with:
 - `stopPropagation` on `mousedown`/`click`/`keydown` to prevent panel click or drag
 - All command-mode shortcuts are bypassed while renaming
 
-User-pin titles must not start with `<idle>` (the sentinel that prefixes the auto-generated header for finished panes), and empty values are also rejected. `<unnamed>` is the default panel placeholder but is otherwise allowed as a deliberate user pin. When the user submits a rejected value, the input still closes (so it is not a blocking dialog) and a small auto-dismissing warning popover anchored under the input names the offending value. The popover dismisses on the next pointerdown, scroll, resize, `Escape`, or after 3s.
+Submitted values are rejected when empty or when they fail the `setTerminalUserTitle` validation that also guards title seeding — no titles starting with the `<idle>` sentinel (`docs/specs/transport.md`). `<unnamed>` is the default panel placeholder but is otherwise allowed as a deliberate user pin. When the user submits a rejected value, the input still closes (so it is not a blocking dialog) and a small auto-dismissing warning popover anchored under the input names the offending value. The popover dismisses on the next pointerdown, scroll, resize, `Escape`, or after 3s.
 
 ## Session lifecycle and terminal registry
 
@@ -383,7 +370,7 @@ Case handling is purely rect-based (measure before and after removal), so 2-pane
 
 ### Auto-spawn delay
 
-When `onDidRemovePanel` triggers the "always keep one pane visible" auto-spawn (see corner case #10), the `api.addPanel` call is deferred by 440ms. This lets the outgoing animation (kill ghost crush, or minimize's selection-overlay slide to the door) complete before the replacement's reveal starts — they play sequentially in the same screen region instead of fighting each other. The deferred spawn re-checks `totalPanels` at fire time and becomes a no-op if anything repopulated the pane area during the delay (e.g. a door reattach). If it does create a replacement pane, that pane spawns with the current default shell selection, matching manual splits and the standalone `[+]` action.
+When `onDidRemovePanel` triggers the "always keep one pane visible" auto-spawn (see corner case #10), the `api.addPanel` call is deferred by 440ms **for the minimize path** — letting the selection-overlay slide to the door finish before the replacement's reveal starts. The kill path uses no extra delay (0ms): kill sequencing is already handled inside `orchestrateKill`, which removes the panel only after the fade's `animationend`. Reduced-motion users also get 0ms. The deferred spawn re-checks `totalPanels` at fire time and becomes a no-op if anything repopulated the pane area during the delay (e.g. a door reattach). If it does create a replacement pane, that pane spawns with the current default shell selection, matching manual splits and the standalone `[+]` action.
 
 The deferred spawn also only calls `selectPane` if selection is null. The kill handler clears selection to null, so the new pane takes focus. The minimize flow sets selection to the just-created door; preserving that door focus across the delay is the point.
 
@@ -398,7 +385,7 @@ The deferred spawn also only calls `selectPane` if selection is null. The kill h
 7. **Asymmetric back-navigation**: breadcrumb tracks last direction + origin for opposite-direction return.
 8. **Center drop merges panels**: intercepted at group-level `model.onWillDrop` and converted to a swap.
 9. **Group drag has null panelId**: falls back to `api.getGroup(groupId).activePanel.id`.
-10. **Auto-spawn on empty**: `onDidRemovePanel` creates a new session whenever the last visible pane is removed, whether or not doors exist — there is always a pane visible. The `addPanel` call is delayed 440ms (see "Auto-spawn delay" under Animations) so the outgoing kill/minimize animation finishes first.
+10. **Auto-spawn on empty**: `onDidRemovePanel` creates a new session whenever the last visible pane is removed, whether or not doors exist — there is always a pane visible. The `addPanel` call is delayed 440ms on the minimize path (see "Auto-spawn delay" under Animations); the kill path is sequenced by `orchestrateKill` instead.
 11. **Door focus survives auto-spawn**: `api.addPanel` auto-activates the new panel, firing `onDidActivePanelChange`. When the current selection is a door (e.g., just-minimized last pane), that listener must not flip `selectedId` to the new pane — otherwise `selectedType === 'door'` + `selectedId === newPaneId` desyncs and the door loses its highlight while the `WorkspaceSelectionOverlay` is stuck on the stale door rect. The listener early-returns when `selectedType === 'door'`.
 
 ## Files
@@ -440,3 +427,34 @@ The deferred spawn also only calls `selectPane` if selection is null. The kill h
 | `lib/src/lib/resume-patterns.ts` | Detects resumable commands (`claude --resume`, etc.) in scrollback |
 | `lib/src/index.css` | Dockview theme overrides — separator/sash/border removal, background flattening |
 | `lib/src/theme.css` | Two-layer VSCode theme token system (`@theme --color-*` → `--vscode-*`) and Tailwind v4 `@theme` integration |
+
+## Maintainer checklist
+
+When changing layout behavior:
+
+- Changing a command-mode binding or the mode-switch gesture: update the shortcut table here **and** `docs/specs/shortcuts.md` in the same edit.
+- Pane-header changes: this spec owns placement and sizing only. Bell/TODO behavior and visual states belong to `docs/specs/alert.md`; the mouse-override icon and banner to `docs/specs/mouse-and-clipboard.md`; the derived label to `docs/specs/terminal-state.md`.
+- Persisted-shape changes (`PersistedPane` / `PersistedDoor` / layout blobs) belong to `docs/specs/transport.md` — add the migration note there.
+- New pane chrome uses tokens from `lib/src/components/design.tsx` (see AGENTS.md Design); never raw color classes.
+- Pane animations stay on `clip-path`, not `transform`, so `getBoundingClientRect` remains accurate for the selection overlay; respect reduced-motion.
+- Anything workspace-strip or switching related stays under `## Future` (workspaces-rollout) until built.
+
+## Future
+
+**Scope: workspaces-rollout** — the remaining stages of the multi-Workspace feature. The model, container verbs, persistence, and union projection are implemented, dormant behind `dormouse.flags.workspaces` (see [Workspaces](#workspaces) above; persisted containers in `docs/specs/transport.md`, union projection in `docs/specs/alert.md`). This ledger is the single home for what remains; other specs link here rather than restating it.
+
+### Stage 3 — workspace strip and switching UI (standalone)
+
+The standalone app bar (`standalone/src/AppBar.tsx`) grows a horizontal **workspace strip**: one tab per Workspace, living in the app bar's draggable region at the top of the window. Each tab shows the Workspace `name` and, for **inactive** Workspaces, the union `ringing` bell and `todo` pill from `docs/specs/alert.md`, reusing the Door indicator vocabulary. The **active** Workspace's tab shows no union indicator: its alerts are already visible on its own panes and doors. Exact tab visuals are settled in the Storybook UI pass.
+
+Concrete switch/create/close/rename keyboard shortcuts are chosen alongside the Storybook UI pass. Command mode is the natural home for them, following the tmux *window* bindings the rest of the keymap mirrors (a Dormouse Workspace is the analogue of a tmux window). `docs/specs/shortcuts.md` lists them once bound.
+
+### Stage 4 — real switching and multi-Workspace activation
+
+Activating another Workspace (`switchWorkspace`) mounts the target Workspace's Surfaces into the Wall — rebuilding its dockview layout and reattaching its doors — and unmounts the previously active Workspace's Surfaces. For a terminal Surface this reuses the `mount` / `unmount` registry ops: the Registry entry and PTY survive `unmount`, so Process stays `Live`. A browser surface's backing agent-browser session or proxy grant likewise survives while its viewer resources are released. Because a terminal's Activity keeps flowing while unmounted, an inactive Workspace's tab can begin ringing or showing TODO while the user is elsewhere. Mounting must not fire a fresh ring (glossary I8, mirroring the minimize/reattach rule I3).
+
+Stage 4 also lifts the single-Workspace cap and wires the lifecycle UX:
+
+- **Create** (`createWorkspace`): adds a new Workspace, gives it a default name (`Workspace N`), makes it active, and spawns a single fresh pane — matching the empty-state behavior in Session persistence above.
+- **Close** (`closeWorkspace`): `kill`s each member Surface and removes the Workspace. Closing a Workspace that contains touched Surfaces confirms first (reusing the kill-confirm vocabulary); the exact confirmation surface is settled in the Storybook UI pass. The last remaining Workspace cannot be closed — there is always one active Workspace, just as there is always one visible pane (corner case #10).
+- **Rename** (`renameWorkspace`): edits the Workspace `name` only. It does not touch any Surface title or the per-pane inline rename.

@@ -504,6 +504,14 @@ export class AlertManager {
 
     switch (displayedStatus) {
       case 'WATCHING_DISABLED':
+        // A protocol/command-exit ring needs no WATCHING, so an attention-based
+        // dismissal can land here too; the next click must open the dialog
+        // instead of silently enabling WATCHING (alert.md, attentionDismissedRing).
+        if (entry.attentionDismissedRing) {
+          entry.attentionDismissedRing = false;
+          this.notify(id);
+          return 'dismissed';
+        }
         this.toggleAlert(id);
         return 'enabled';
       case 'ALERT_RINGING':

@@ -86,8 +86,8 @@ Surface lifetime owns backing resources:
 - Killing or swapping an agent-browser pane also disposes its surface controller
   (`disposeAgentBrowserSurfaceController`), releasing the connection, screenshot
   loop, CDP observer, timers, and screen registration. This is the immediate
-  per-surface teardown hook Future Work still lists generally; it exists today
-  for agent-browser surfaces.
+  per-surface teardown hook that [Future](#future) still lists generally; it
+  exists today for agent-browser surfaces.
 - Iframe proxy grants are currently reclaimed by the proxy idle sweep, not by an
   immediate per-surface teardown hook.
 
@@ -112,6 +112,10 @@ Header contract:
   HTML title is tooltip/secondary state.
 - Clicking the URL opens an inline editor. `normalizeNavUrl` keeps explicit
   schemes, uses `http://` for bare loopback hosts, and `https://` otherwise.
+  For an iframe-rendered pane a bare remote hostname therefore resolves to
+  `https://`, which the proxy cannot instrument — the pane shows the scheme
+  error with its `dor ab` hint. This is intended: remote sites are steered to
+  the agent-browser renderer rather than silently proxied over plain HTTP.
 - Back, forward, and reload are always enabled. Agent-browser sends native
   `back` / `forward` / `reload`; iframe uses parent-side history and re-resolves
   the proxy on reload/back/forward.
@@ -271,7 +275,9 @@ screenshot through the host's `agentBrowserScreenshot`, and draws that to canvas
 with latest-only backpressure. A capture whose bytes are identical to the last
 displayed frame (a static page the daemon keeps re-pulsing) costs no decode or
 draw; a re-attach bumps a draw generation so a fresh blank canvas still repaints.
-If the host cannot screenshot, it falls back to the stream frame path.
+A host without `agentBrowserScreenshot` renders only the placeholder — stream
+frame bytes are discarded by design (the connection reduces every frame message
+to a `frame-pulse`), so there is no frame-drawing fallback path.
 
 The high-rate `[ab-panel]`/`[agent-browser]` stream and screenshot console
 diagnostics sit behind the `dormouse.flags.abDebugLogs` localStorage flag, read
@@ -493,7 +499,17 @@ Source of truth: `lib/src/lib/platform/types.ts`,
   `standalone/src/tauri-adapter.ts`, `standalone/src-tauri/src/lib.rs`,
   `standalone/sidecar/main.js`.
 
-## Future Work
+## Maintainer checklist
+
+When changing browser-surface behavior:
+
+- `renderMode` is canonical. Never reintroduce `surfaceType: 'iframe' | 'agent-browser'` or `poppedOut` as stored state — extend the `resolveRenderMode` migration instead, and update the kind-mapping table in `docs/specs/glossary.md` if adding a render mode.
+- Every browser panel keeps dockview `renderer: 'always'` — moving iframe DOM reloads it, and moving the screencast canvas mid-click breaks click synthesis.
+- A new agent-browser subcommand must be added to `AGENT_BROWSER_ALLOWED_SUBCOMMANDS` (`lib/src/lib/platform/types.ts`); the host-side allowlist is the security boundary, not the CLI.
+- External-binary spawns go through `spawnAndCapture` (`dor-lib-common`), never raw `child_process` — see `docs/specs/dor-cli.md` → Spawning External Binaries.
+- New kill/swap/teardown paths must run `closeAgentBrowserSession` **and** dispose the surface controller (`disposeAgentBrowserSurfaceController`), and respect the closed-session mark so pop-out auto-revert cannot resurrect a killed session.
+
+## Future
 
 - Stable agent-browser profile/state persistence so pop-out preserves logins,
   cookies, tabs, DOM state, and scroll.

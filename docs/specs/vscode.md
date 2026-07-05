@@ -107,13 +107,13 @@ PTY lifecycle, buffering, the reconnection sequence, and the full message protoc
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers and `docs/specs/alert.md` for the union status.
 >
-> Each webview's union is computed host-side and reflected onto native chrome (see "Surfacing union status" below) — implemented. It is currently always-on: the extension host has no `localStorage` to read the standalone workspaces flag, so whether to add a host-side gate is a merge-time decision. The stage-2b Window persistence container is standalone-only and does not touch VS Code, which keeps one bare `PersistedSession` per webview.
+> Each webview's union is computed host-side and reflected onto native chrome (see "Surfacing union status" below) — implemented. It is currently always-on: the extension host has no `localStorage` to read the standalone workspaces flag (a host-side gate is an open question — see [Future](#future)). The Window persistence container is standalone-only and does not touch VS Code, which keeps one bare `PersistedSession` per webview.
 
 In VS Code, **one webview is one Workspace**. The bottom-panel `WebviewView` ("Dormouse") is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. Unlike standalone, several Workspaces are visible at once, and VS Code — not Dormouse — owns their tabs, creation, and closing: opening a Dormouse editor tab creates a Workspace and closing the tab closes it, so Dormouse adds no create/rename/close affordances here. A webview owns the terminal Sessions whose PTYs its router tracks (`ownedPtyIds`, `docs/specs/transport.md`) plus any browser surfaces rendered in it; together those are the Workspace's Surfaces.
 
 #### Surfacing union status on native chrome
 
-The host computes each webview's union (`ringing` / `todo`) from the module-level `AlertManager` scoped to that router's `ownedPtyIds` (`computeWorkspaceUnion`), delivered via the `attachRouter` `onUnion` callback. Because `ownedPtyIds` are PTY-backed terminals, **VS Code chrome reflects terminal Session ring + TODO only**; a browser surface's TODO stays webview-local until a future webview→host Surface-state channel exists (the `alert:state` channel is keyed by PTY-backed Session ids).
+The host computes each webview's union (`ringing` / `todo`) from the module-level `AlertManager` scoped to that router's `ownedPtyIds` (`computeWorkspaceUnion`), delivered via the `attachRouter` `onUnion` callback. Because `ownedPtyIds` are PTY-backed terminals, **VS Code chrome reflects terminal Session ring + TODO only**; a browser surface's TODO stays webview-local (the `alert:state` channel is keyed by PTY-backed Session ids; the webview→host Surface-state channel that would lift this is staged — see [Future](#future)).
 
 The two hosting primitives expose different chrome, so each uses what it supports, following the in-app `<title> <bell> [TODO]` pattern where possible:
 
@@ -159,9 +159,9 @@ Example of the pattern:
 --color-header-inactive-fg: var(--vscode-list-inactiveSelectionForeground);
 ```
 
-`theme.css` intentionally has no hardcoded color defaults or CSS variable fallback chains. The resolver duplicates VSCode registry defaults for the Dormouse-consumed color IDs, including `null` default behavior where Dormouse needs a concrete CSS variable. In particular, `list.inactiveSelectionForeground` resolves to normal foreground inheritance, not `list.activeSelectionForeground`; this matches VSCode's list/tree selected-row behavior for built-in Light.
+`theme.css` intentionally has no hardcoded color defaults or CSS variable fallback chains. The resolver duplicates VSCode registry defaults for the Dormouse-consumed color IDs, including `null` default behavior where Dormouse needs a concrete CSS variable; the null-default materialization rules (including the `list.inactiveSelectionForeground` case) are owned by `docs/specs/theme.md` (Runtime model).
 
-A `MutationObserver` in `lib/src/lib/terminal-theme.ts` watches for VS Code theme changes on `body`/`html` (class and style attribute mutations) and live-updates all xterm.js instances. The `terminal-registry.ts` facade still exposes the public lifecycle APIs. The theme resolver has its own observer on the same attributes so derived `--vscode-*` variables stay in sync before xterm rereads the terminal palette.
+A `MutationObserver` in `lib/src/lib/terminal-theme.ts` watches for VS Code theme changes — class + style mutations on both `body` and `html` — and live-updates all xterm.js instances. The `terminal-registry.ts` facade still exposes the public lifecycle APIs. The theme resolver has its own observer on the same roots and attributes (`vscode-color-observer.ts`) so derived `--vscode-*` variables stay in sync before xterm rereads the terminal palette.
 
 `dormouse.debugTheme` focuses the Dormouse WebviewView and posts
 `dormouse:openThemeDebugger` to the webview. `VSCodeAdapter` converts that
@@ -198,7 +198,15 @@ window must be reloaded to pick up changes.
 
 The Vite config for the extension (`vscode-ext/vite.config.ts`) sets `root: ../lib` and `outDir: ./media`, building the shared React frontend directly into the extension's media folder.
 
-## Dream architecture
+## Future
+
+### Webview→host Surface-state channel
+
+Today the host receives only PTY-keyed alert state (`alert:state`), so a browser surface's TODO stays webview-local and native chrome reflects terminal ring/TODO only. A webview→host Surface-state message would let the native-chrome union count browser-surface TODOs too (`docs/specs/alert.md`, `docs/specs/transport.md`).
+
+### Host-side workspaces flag gate
+
+The native-chrome union reflection is always-on because the extension host cannot read the standalone `dormouse.flags.workspaces` localStorage flag. Whether to add a host-side gate gets decided when the workspaces rollout reaches VS Code (`docs/specs/layout.md` `## Future`, workspaces-rollout).
 
 ### Context keys
 
@@ -208,11 +216,11 @@ Set context keys so menus and extensions can target Dormouse state:
 // Set when any Dormouse webview has focus
 vscode.commands.executeCommand('setContext', 'dormouse.active', true);
 
-// Set when Dormouse is in passthrough/terminal mode (keys go to PTY)
-vscode.commands.executeCommand('setContext', 'dormouse.mode', 'terminal');
+// Set when Dormouse is in passthrough mode (keys go to PTY)
+vscode.commands.executeCommand('setContext', 'dormouse.mode', 'passthrough');
 
-// Set when Dormouse is in normal/navigation mode (keys go to Dormouse UI)
-vscode.commands.executeCommand('setContext', 'dormouse.mode', 'normal');
+// Set when Dormouse is in command mode (keys drive Dormouse UI)
+vscode.commands.executeCommand('setContext', 'dormouse.mode', 'command');
 ```
 
 ### Commands
@@ -224,15 +232,13 @@ vscode.commands.executeCommand('setContext', 'dormouse.mode', 'normal');
 | `dormouse.closePane` | Close the focused pane |
 | `dormouse.nextPane` | Focus next pane |
 | `dormouse.prevPane` | Focus previous pane |
-| `dormouse.enterTerminalMode` | Switch to passthrough mode |
-| `dormouse.enterNormalMode` | Switch to navigation mode |
+| `dormouse.enterPassthroughMode` | Switch to passthrough mode |
+| `dormouse.enterCommandMode` | Switch to command mode |
 | `dormouse.listSessions` | Show QuickPick of all live PTY sessions |
 | `dormouse.reattach` | Reattach a minimized PTY to a pane |
 
-### Not yet implemented
+### Other host integrations
 
-- `TerminalProfileProvider` not registered — Dormouse doesn't appear in the terminal `+` dropdown
-- Context keys not set (`dormouse.active`, `dormouse.mode`) — needed for conditional keybindings
-- Commands not registered: `dormouse.newPane`, `closePane`, `nextPane`, `prevPane`, `enterTerminalMode`, `enterNormalMode`, `listSessions`, `reattach`
-- No status bar item showing active session count
-- No QuickPick for listing/reattaching PTY sessions
+- `TerminalProfileProvider` registration, so Dormouse appears in the terminal `+` dropdown
+- A status bar item showing active session count
+- A QuickPick for listing/reattaching PTY sessions

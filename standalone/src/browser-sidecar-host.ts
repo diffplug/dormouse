@@ -1,14 +1,8 @@
 export type BrowserSidecarEvent = { event: string; data: unknown };
 
-type Pending = {
-  resolve: (value: unknown) => void;
-  reject: (error: Error) => void;
-};
-
 export class BrowserSidecarHost {
   private events: EventSource | null = null;
   private readonly eventHandlers = new Set<(event: BrowserSidecarEvent) => void>();
-  private readonly pending = new Map<string, Pending>();
   private nextId = 1;
 
   constructor(private readonly baseUrl: string) {}
@@ -33,8 +27,6 @@ export class BrowserSidecarHost {
   close(): void {
     this.events?.close();
     this.events = null;
-    for (const { reject } of this.pending.values()) reject(new Error('browser sidecar host closed'));
-    this.pending.clear();
   }
 
   onEvent(handler: (event: BrowserSidecarEvent) => void): () => void {
@@ -63,18 +55,9 @@ export class BrowserSidecarHost {
     return body.result as T;
   }
 
+  // Request/response correlation happens over the /invoke HTTP round-trip,
+  // not the SSE stream — every streamed event just fans out to handlers.
   private deliver(event: BrowserSidecarEvent): void {
-    const data = event.data as { requestId?: unknown; error?: unknown };
-    const requestId = typeof data?.requestId === 'string' ? data.requestId : null;
-    if (requestId) {
-      const pending = this.pending.get(requestId);
-      if (pending) {
-        this.pending.delete(requestId);
-        if (typeof data.error === 'string') pending.reject(new Error(data.error));
-        else pending.resolve(event.data);
-        return;
-      }
-    }
     for (const handler of this.eventHandlers) handler(event);
   }
 }

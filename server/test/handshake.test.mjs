@@ -17,7 +17,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  API_ROUTES,
   DEFAULT_CHALLENGE_TTL_MS,
+  PAIRING_PRESENCE_WINDOW_MS,
+  PAIRING_STALE_PRESENCE_ERROR,
   REMOTE_EVENTS,
   REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
@@ -411,18 +414,26 @@ test('server derives relayed challenge expiry from its own observation clock', a
   clock.advance(DEFAULT_CHALLENGE_TTL_MS - 1);
 
   const assertion = await authenticator.assert({ challenge, origin: ORIGIN, rpId: RP_ID });
-  const result = await gate.checkConnect2('client-1', 'host-1', {
-    accountId: SELFHOST_ACCOUNT_ID,
-    devicePublicKey: 'device-public-key',
-    challenge,
-    deviceSignature: 'device-signature',
-    passkey: {
-      publicKey: authenticator.publicKey,
-      assertion,
+  const session = { lastVerifiedPresence: 0 };
+  const result = await gate.checkConnect2(
+    'client-1',
+    'host-1',
+    {
+      accountId: SELFHOST_ACCOUNT_ID,
+      devicePublicKey: 'device-public-key',
+      challenge,
+      deviceSignature: 'device-signature',
+      passkey: {
+        publicKey: authenticator.publicKey,
+        assertion,
+      },
     },
-  });
+    session,
+  );
 
   assert.deepEqual(result, { ok: true });
+  // A verified connect2 refreshes the session's pairing-presence stamp.
+  assert.equal(session.lastVerifiedPresence, clock.now());
 });
 
 test('server rejects a connect2 that answers a different Host challenge', async () => {
@@ -680,6 +691,53 @@ test('remote terminal: a stale detach for the previous surface does not kill the
     assert.ok(await p.socket.quiet(), 'no terminal.data after a matching detach');
   } finally {
     await close();
+  }
+});
+
+test('pairing requires fresh presence: stale session → stale-presence; re-auth → approved', async () => {
+  const clock = makeClock();
+  const created = await freshApp({ now: clock.now });
+  const server = await startServer(created);
+  try {
+    const { body: host } = await enrollHost(created.app, { label: 'Laptop' });
+    const fakeHost = await startFakeHost(server, host, { autoApprove: true });
+    const p = await phone(created.app, server);
+
+    // Let the sign-in's verified presence lapse past the pairing window.
+    clock.advance(PAIRING_PRESENCE_WINDOW_MS + 1);
+
+    const stale = await pair(p, host.hostId);
+    assert.equal(stale.t, 'pair-result');
+    assert.equal(stale.approved, false);
+    assert.equal(stale.error, PAIRING_STALE_PRESENCE_ERROR);
+
+    // Re-assert presence on the SAME session (and the same relay socket):
+    // reauth/begin → WebAuthn assert → reauth/finish.
+    const auth = { 'content-type': 'application/json', authorization: `Bearer ${p.sessionToken}` };
+    const begin = await created.app.request(API_ROUTES.reauthBegin, {
+      method: 'POST',
+      headers: auth,
+      body: '{}',
+    });
+    assert.equal(begin.status, 200);
+    const { challenge } = await begin.json();
+    const assertion = await p.authenticator.assert({ challenge, origin: ORIGIN, rpId: RP_ID });
+    const finish = await created.app.request(API_ROUTES.reauthFinish, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({ assertion }),
+    });
+    assert.equal(finish.status, 200);
+    assert.equal((await finish.json()).presenceVerifiedAt, clock.now());
+
+    // The retry over the same socket is now relayed and auto-approved.
+    const retried = await pair(p, host.hostId);
+    assert.equal(retried.approved, true);
+
+    p.socket.close();
+    fakeHost.close();
+  } finally {
+    await server.close();
   }
 });
 

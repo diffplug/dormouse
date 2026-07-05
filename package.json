@@ -12,7 +12,8 @@
   },
   "scripts": {
     "build": "pnpm run build:vscode && pnpm --filter dormouse-website build",
-    "test": "pnpm -r run test",
+    "test": "node scripts/spec-lint.mjs && pnpm -r run test",
+    "lint:specs": "node scripts/spec-lint.mjs",
     "dev:lib": "pnpm --filter dormouse-lib dev",
     "dev:standalone": "node scripts/free-dev-port.mjs && pnpm --filter dormouse-standalone tauri dev",
     "dev:standalone:ab": "pnpm --filter dormouse-standalone dev:agent-browser",

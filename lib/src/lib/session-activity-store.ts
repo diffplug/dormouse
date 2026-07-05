@@ -192,7 +192,9 @@ export function dismissOrToggleAlert(id: string, displayedStatus: SessionStatus)
   let result: AlertButtonActionResult;
   switch (displayedStatus) {
     case 'WATCHING_DISABLED':
-      result = 'enabled';
+      // Mirrors AlertManager.dismissOrToggleAlert: after an attention-based
+      // dismissal the next click opens the dialog, even from WATCHING_DISABLED.
+      result = entry?.attentionDismissedRing ? 'dismissed' : 'enabled';
       break;
     case 'ALERT_RINGING':
       result = 'dismissed';

@@ -1,5 +1,7 @@
 # Theme Spec
 
+> See `docs/specs/glossary.md` for Pane / Door vocabulary used in the surface hierarchy below.
+
 Dormouse's theme contract is intentionally small: render the terminal chrome
 with VSCode-appropriate surfaces, and render terminal content with
 theme-appropriate xterm.js colors.
@@ -18,7 +20,9 @@ designed to read clearly inside the sidebar host area. Use bg-only chrome for
 panes and doors; do not add borders to make the hierarchy work.
 
 Source of truth: `lib/src/theme.css` defines token→VSCode-key bindings. The
-runtime-picked `--color-door-bg` and `--color-focus-ring` are computed by
+runtime-picked `--color-door-bg` / `--color-door-fg`, `--color-focus-ring`, and
+the per-surface alarm tints
+(`--color-alarm-vs-{header-active,header-inactive,door}`) are computed by
 `computeDynamicPalette()` in `lib/src/lib/themes/dynamic-palette.ts` using OKLab
 distance/chroma helpers from `lib/src/lib/color-contrast.ts`;
 `useDynamicPalette()` in `lib/src/lib/themes/use-dynamic-palette.ts` publishes
@@ -30,10 +34,18 @@ the chosen variables on `document.body`. Public theme helpers are exported from
   `--color-app-bg`.
 - Focus ring prefers a chromatic `focusBorder`, then a chromatic active-header
   background, then the highest contrast fallback.
+- Each alarm tint is plain white or black, picked by the OKLab lightness of
+  the background the ringing bell sits on (`pickAlarmColor`): the active
+  header, the inactive header, or the door. The `--vscode-terminal-ansiYellow`
+  binding in `theme.css` is only the pre-publish baseline. Because
+  `--color-alarm-vs-door` derives from `--color-door-bg`, which the same pass
+  computes, the first pass after a theme change reads the previous door bg —
+  the `MutationObserver` re-fires on the pass's own `body.style` write, so the
+  next pass corrects it.
 - Header-internal text and buttons inherit the header foreground. Do not add
   `text-muted` inside headers; use `hover:bg-current/10` for neutral hover
-  feedback. Semantic exceptions are `text-warning` for ringing alerts and
-  error styling for destructive actions.
+  feedback. Semantic exceptions are the `text-alarm-vs-*` tint for ringing
+  alerts and error styling for destructive actions.
 
 High-contrast VSCode themes may make bg-only chrome look flatter than normal.
 That is accepted; terminal content still uses the theme's terminal palette.
@@ -66,10 +78,12 @@ state saying a theme is active while xterm.js sees fallback colors.
 `--vscode-*` variables also live there. Keep the parallel `@theme`
 declarations so Tailwind can generate utility classes, but treat the body-level
 declarations as the runtime source of truth.
-Dynamic palette tokens (`--color-door-bg`, `--color-door-fg`, and
-`--color-focus-ring`) also have body-level baseline bindings matching the
-`@theme` declarations, so direct CSS-var consumers such as the mobile gesture
-SVG render visibly before `useDynamicPalette()` publishes refined values.
+Dynamic palette tokens (`--color-door-bg`, `--color-door-fg`,
+`--color-focus-ring`, and the three `--color-alarm-vs-*` tokens) also have
+body-level baseline bindings matching the `@theme` declarations, so direct
+CSS-var consumers such as the mobile gesture SVG — and a ringing bell before
+the first dynamic pass — render visibly before `useDynamicPalette()` publishes
+refined values.
 
 `theme.css` must not contain hardcoded color defaults or `var(..., fallback)`
 chains. Runtime hosts plus the shared resolver are responsible for providing
@@ -104,9 +118,10 @@ the VSCode terminal defaults before those values are read:
 - The 16 ANSI colors from `terminal.ansiBlack` through
   `terminal.ansiBrightWhite`.
 
-The `terminal-theme.ts` body/html `MutationObserver` re-reads these values
-when the body class or style changes, so applying a theme updates existing
-terminals. `terminal-registry.ts` remains the public facade for callers.
+The `terminal-theme.ts` `MutationObserver` re-reads these values on class or
+style mutations of `body` or `html`, so applying a theme updates existing
+terminals. Adapters use the `terminal-theme.ts` API directly — it is not
+re-exported through the `terminal-registry` facade.
 
 ## Theme data
 
@@ -132,10 +147,10 @@ defines Storybook's default simulated host theme, with fallback to the first
 bundled theme so a renamed or removed bundle cannot leave stories without theme
 vars.
 The Storybook preview decorator also computes and publishes the dynamic palette
-vars (`--color-door-bg`, `--color-door-fg`, `--color-focus-ring`) through the
+vars (door pair, focus ring, and the `--color-alarm-vs-*` tints) through the
 shared `computeDynamicPalette()` helper, matching the runtime
-`useDynamicPalette()` hook for stories that render doors, baseboards, or focus
-rings outside a full Wall instance.
+`useDynamicPalette()` hook for stories that render doors, baseboards, focus
+rings, or ringing bells outside a full Wall instance.
 
 ## Theme debugger
 
@@ -180,7 +195,9 @@ When changing theme behavior:
 - Keep xterm.js terminal colors sourced from `--vscode-terminal-*` variables,
   not from Dormouse chrome tokens.
 - Keep debugger dynamic-pick reporting and runtime dynamic-palette picks sharing
-  `pickDoorPair()` and `pickFocusRing()`; do not fork those rules in UI code.
+  `pickDoorPair()` and `pickFocusRing()`, and keep the alarm tint on
+  `pickAlarmColor()` — do not fork those rules in UI code. (The debugger does
+  not report alarm picks today.)
 - Do not add hardcoded color defaults or CSS variable fallback chains to
   `lib/src/theme.css`; fix the theme data or runtime host instead.
 - Avoid reintroducing a pass-through `--mt-*` layer or one-off tokens for tabs,

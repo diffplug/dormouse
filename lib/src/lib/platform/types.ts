@@ -164,8 +164,9 @@ export interface PlatformAdapter {
   // stream's screencast is CSS-resolution only (a Chromium limitation —
   // Page.startScreencast ignores deviceScaleFactor), so the panel displays
   // these crisp screenshots instead, using stream frames only as change
-  // signals. Absent on hosts that can't run the binary (degrades to rendering
-  // the screencast frames directly).
+  // signals. Absent on hosts that can't run the binary — the panel then shows
+  // only the placeholder (frame bytes are discarded; there is no frame-drawing
+  // fallback).
   agentBrowserScreenshot?(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult>;
   // Reads the current stream port for an already-running session. This is a
   // purpose-built status channel, not part of agentBrowserCommand's allowlist,

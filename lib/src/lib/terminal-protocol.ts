@@ -59,6 +59,9 @@ const OSC99_PENDING_BODY_LIMIT = 16_384;
 const OSC99_SUPPORT_PAYLOAD = 'o=always:p=title,body';
 const OSC99_RESPONSE_ID_RE = /^[^\s:;\x00-\x1f\x7f-\x9f]+$/;
 const TERMINAL_BELL_NOTIFICATION: ActivityNotification = { source: 'BEL', title: 'Terminal bell', body: null };
+// Mirrors ITERM2_COMPAT_VERSION in standalone/sidecar/pty-core.js — keep in
+// sync (terminal-escapes.md: one compatibility version across env and device
+// responses).
 export const ITERM2_COMPAT_VERSION = '3.5.0';
 export const ITERM2_DEVICE_ATTRIBUTES_RESPONSE = `\x1bP>|iTerm2 ${ITERM2_COMPAT_VERSION}\x1b\\`;
 
@@ -70,8 +73,10 @@ export class TerminalProtocolParser {
    * @param colorProvider Resolves the active terminal theme color for OSC
    *   10/11/12 background/foreground/cursor *queries*. Frontend adapters pass a
    *   provider backed by the live xterm theme, so TUIs (e.g. Codex) can detect
-   *   the real terminal background. Host-side parsers (VS Code extension host)
-   *   omit it, leaving such queries to xterm.js as before.
+   *   the real terminal background. The VS Code extension-host parser passes a
+   *   provider fed by webview-pushed colors (`dormouse:themeColors`); until the
+   *   first push the provider returns null and the query falls through to
+   *   xterm.js.
    */
   constructor(private readonly colorProvider?: TerminalColorProvider) {}
 

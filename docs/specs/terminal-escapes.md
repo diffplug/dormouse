@@ -61,6 +61,8 @@ Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js c
 | `OSC 777 ; notify ; <title> ; <body> ST` | rxvt/WezTerm notification | [alert.md](alert.md#osc-777) |
 | `OSC 1337 ; CurrentDir=<cwd> ST` | CWD (iTerm2 compatibility) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 
+(`BEL` is not itself an OSC; it has a row here because a standalone `BEL` is parsed and stripped at the same PTY data boundary as the OSCs.)
+
 Some sequences are dual-purpose. The notification rows for `OSC 9 ; <message> ST`, `OSC 99` (`p=title`/`p=body`), and `OSC 777 ; notify` also feed the title-candidate channel in `terminal-state.md` — see its [Title candidate diagnostics](terminal-state.md#supported-osc-inputs) table. Only the OSC 9 *message* form can become a header/door label; OSC 99 and OSC 777 candidates are stored for the diagnostic popup only. The OSC 9 *progress* form (`OSC 9 ; 4`) carries no text and never contributes a title candidate.
 
 #### OSC color queries on Windows require the bundled ConPTY
@@ -120,7 +122,7 @@ Environment for spawned PTYs:
 |---|---|
 | `TERM_PROGRAM` | `iTerm.app` |
 | `TERM_PROGRAM_VERSION` | Dormouse's chosen iTerm2 compatibility version, not the package version |
-| `LC_TERMINAL` | `iTerm2` only if needed by real-world shell integrations |
+| `LC_TERMINAL` | `iTerm2` — set unconditionally on every spawned PTY (some real-world shell integrations key off it rather than `TERM_PROGRAM`) |
 | `LC_TERMINAL_VERSION` | same compatibility version as `TERM_PROGRAM_VERSION` |
 | `COLORTERM` | `truecolor` — advertise 24-bit color, which xterm.js renders. The PTY is spawned as `xterm-256color` with no other depth hint, so env-sniffing tools (e.g. `supports-color`) would otherwise assume 256/ANSI-16 and quantize RGB output to the nearest palette entry. Truecolor-aware TUIs (Codex's composer pill, syntax highlighters) then render smooth RGB. Windows Terminal is recognized as truecolor via `WT_SESSION`; Dormouse isn't, so it advertises `COLORTERM` explicitly. This is a color-*depth* signal, **independent** of the light/dark *background* detection (OSC color queries above) that drives those TUIs' theme choice. Not iTerm2-identity-specific. |
 
@@ -142,7 +144,6 @@ A binary on `PATH` only has to be **found**, so it injects via one env var (`DOR
 |---|---|---|---|
 | zsh | `ZDOTDIR` → our dotfiles chain to the user's, then install `precmd`/`preexec` hooks | env (as reliable as the `PATH` prepend) | User's real `ZDOTDIR` is passed through as `USER_ZDOTDIR`; our `.zshrc` hands `ZDOTDIR` back so `.zlogin` and child shells are unaffected. |
 | bash | `--init-file` → our script replicates login-profile sourcing, then installs a `DEBUG`-trap / `PROMPT_COMMAND` hook | shellArgs | `--init-file` and login mode are mutually exclusive, so Dormouse drops `-l` and the script sources `/etc/profile` + the user's profile itself. Injected whenever the launch args are *only* interactive/login flags (`-i`/`-l`/`--login`) — so Git Bash, launched with `--login -i`, is covered too; a specific invocation like `-c <cmd>` is left untouched. Written for bash 3.2 (macOS system bash): no `PS0`, no array `PROMPT_COMMAND`. The `E` command line is the first simple command of a pipeline (a `DEBUG`-trap limitation); boundaries and exit codes stay exact. |
-| fish | `XDG_DATA_DIRS` → fish auto-sources `*/fish/vendor_conf.d/*.fish` | env | (not yet implemented) |
 | PowerShell | `-Command ". '<script>'"` → the dot-sourced script wraps the user's `prompt` and PSReadLine's `PSConsoleHostReadLine` (covers `pwsh` and Windows `powershell.exe`) | shellArgs | `-NoProfile` is *not* passed, so the user's profile loads and defines their prompt before we wrap it. Injected for any **interactive** launch: a bare REPL gets `-NoExit -Command ". '<script>'"`, and a launch that already runs a startup command — e.g. the VS "Developer PowerShell" (`-NoExit -Command "& { Import-Module … }"`) — gets our dot-source *appended* to that command, so its environment is set up first and our wrapper installs after it. Non-interactive one-offs (a `-Command`/`-File`/`-EncodedCommand` without `-NoExit`) are left untouched. PowerShell has no `preexec`, so `E`/`C` (command line + start) are emitted by wrapping `PSConsoleHostReadLine`, which runs just before a submitted command executes — so the running command shows immediately, like bash/zsh. The matching `D` (finish, exit code from `$?`/`$LASTEXITCODE`) is emitted from the next `prompt` render. If PSReadLine is absent, the whole `E`/`C`/`D` triple is reported from the next prompt instead (command line from history): boundaries and exit codes stay exact, but the running command isn't shown until it finishes. |
 | WSL | `wsl.exe -d <distro> -- sh -c <detector>` → the detector execs the distro's bash with our `--init-file` (the Windows bash script, referenced via its `/mnt/...` path) | shellArgs | Windows-side injection can't reach the Linux shell, so we append a command. The detector reads the login shell from `/etc/passwd`: it steps aside for an explicit zsh/fish login shell, execs bash+integration when bash exists (covering bash and an empty detection — the safe default), and falls back to the login shell only when bash is absent (e.g. Alpine). bash is the only WSL shell integrated for now. Assumes the default `/mnt` automount root. |
 | cmd.exe | no per-command hook exists | — | Never gets real OSC 633; always uses the keystroke fallback below. |
@@ -151,9 +152,7 @@ Injection is wired in `resolveSpawnConfig` (`standalone/sidecar/pty-core.js`) an
 
 ### Keystroke fallback
 
-When injection isn't possible (cmd.exe, an unknown shell, or scripts not present) or simply doesn't take, Dormouse falls back to its keystroke heuristic: it watches what the user types and synthesizes `commandStart{source:'user_input'}` (see `recordTerminalUserInput` in `lib/src/lib/terminal-state-store.ts` and [terminal-state.md](terminal-state.md)). This fallback has no real exit codes and only a best-effort idle transition.
-
-The two are mutually exclusive **per pane**: the first genuine OSC 633/133 boundary a pane sees (a real prompt-start lands before the first command is typed) flips that pane to "OSC-driven" and retires the keystroke heuristic for it, so the two never both report the same command. Prompt boundaries that the heuristic *itself* synthesizes are flagged so they don't trip this detection. This is what makes the fallback fire "only if injection fails."
+When injection isn't possible (cmd.exe, an unknown shell, or scripts not present) or simply doesn't take, Dormouse falls back to its keystroke heuristic: it reads the submitted command off the rendered prompt line and synthesizes `commandStart{source:'user_input'}`. This fallback has no real exit codes and only a best-effort idle transition. The fallback rules — prompt-shape learning, submit parsing, and the per-pane promotion that retires the heuristic on the first authentic OSC boundary (which is what makes it fire "only if injection fails") — are owned by [terminal-state.md](terminal-state.md#keystroke-fallback).
 
 > Packaging caveat: the zsh scripts are dotfiles (`.zshrc`, `.zshenv`, `.zprofile`). Confirm the VS Code `.vsix` actually includes `dist/shell-integration/.z*` — if a packaging step strips dotfiles, VS Code silently degrades to the keystroke fallback.
 
@@ -186,3 +185,7 @@ This list is non-exhaustive. Any iTerm2-compatibility OSC family that Dormouse c
 - kitty desktop notifications (OSC 99): https://sw.kovidgoyal.net/kitty/desktop-notifications/
 - kitty keyboard protocol: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
 - WezTerm escape sequences (OSC 777): https://wezterm.org/escape-sequences.html
+
+## Future
+
+- **fish shell integration** — inject via `XDG_DATA_DIRS`: fish auto-sources `*/fish/vendor_conf.d/*.fish`, so the integration ships as a vendor conf file (env channel, as reliable as the `PATH` prepend). Until it lands, fish panes use the keystroke fallback above.

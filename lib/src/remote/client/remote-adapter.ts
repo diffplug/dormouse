@@ -41,8 +41,9 @@
  * non-attached pane are dropped (the Host would reject them anyway), and the
  * attach repaint — not a snapshot transfer — is what fills the client screen.
  * The registry's own `onResize → resizePty` path keeps the attached pane sized;
- * `setActivePane` seeds the first size. Host-initiated `terminal.resize` events
- * are ignored (the PlatformAdapter interface has no inbound-resize channel).
+ * `setActivePane` seeds the first size. Protocol-v1 has no host-initiated
+ * resize event — size-authority notification is staged in remote-api.md
+ * ## Future (the PlatformAdapter interface has no inbound-resize channel).
  */
 
 import {

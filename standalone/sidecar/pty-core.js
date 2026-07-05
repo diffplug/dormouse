@@ -24,6 +24,9 @@ function resolveDefaultShell(platform = process.platform, env = process.env) {
 }
 
 const LOGIN_ARG_UNSUPPORTED_SHELLS = new Set(['csh', 'tcsh']);
+// Mirrors ITERM2_COMPAT_VERSION in lib/src/lib/terminal-protocol.ts — keep in
+// sync (terminal-escapes.md: one compatibility version across env and device
+// responses).
 const ITERM2_COMPAT_VERSION = '3.5.0';
 
 // bash flags that merely select an interactive and/or login shell. When the args

@@ -190,21 +190,18 @@ Invariants:
   `surface:1`, `pane:2`.
 - List output defaults to refs; commands that list handles accept
   `--id-format refs|uuids|both`.
-- Workspace/window refs are defined now that Dormouse supports multiple
-  Workspaces: `workspace:<n>` (and `workspace:<name>` when exactly one Workspace
-  matches) and `window:<n>` select a container. A `--workspace` target flag and
-  `dor workspace` management commands (list / new / rename / close / switch) are
-  the next handles to expose; like every other command they ship with their
-  snapshot-tested help and the control methods that back them, not ahead of them.
+- Reserved: `workspace:<n>` (and `workspace:<name>` when exactly one Workspace
+  matches) and `window:<n>` select a container. The ref grammar is reserved now
+  so surface/pane refs never collide with it; the flag and commands that consume
+  it are staged — see [Future](#future).
 
 ## Current Implemented Commands
 
 Implemented commands call private `surface.*` control methods. `surface.list`
 derives its response from current Dockview panels plus terminal state/activity
-snapshots where available, then returns `workspace:1` and `window:1`. Once
-`surface.list` is made Workspace-aware it tags each surface with the real
-`workspace:<n>` / `window:<n>` membership defined above; until then it reports the
-single active Workspace.
+snapshots where available, then returns `workspace:1` and `window:1` — it
+reports the single active Workspace (Workspace-aware tagging is staged; see
+[Future](#future)).
 
 Command tails captured after `--` are sent as raw argv arrays (`command:
 string[]`); the host — not `dor` — quotes them for the target shell. `dor`
@@ -240,3 +237,16 @@ from `command-detail`.
   unified `browser` surface, see [dor-browser.md](dor-browser.md)
 - `dor list-panes` [impl](../../dor/src/commands/list-panes.ts) [docs](../../dor/test/snapshots/help/list-panes.md)
 - `dor list-pane-surfaces` [impl](../../dor/src/commands/list-pane-surfaces.ts) [docs](../../dor/test/snapshots/help/list-pane-surfaces.md)
+
+## Future
+
+- **Workspace handles and commands** — a `--workspace` target flag and `dor
+  workspace` management commands (list / new / rename / close / switch)
+  consuming the reserved `workspace:<n|name>` / `window:<n>` ref grammar in the
+  handle model above. Like every other command they ship with their
+  snapshot-tested help and the control methods that back them, not ahead of
+  them. Staged with the workspaces rollout (`docs/specs/layout.md` `## Future`,
+  workspaces-rollout).
+- **Workspace-aware `surface.list`** — tags each surface with its real
+  `workspace:<n>` / `window:<n>` membership instead of reporting the single
+  active Workspace.

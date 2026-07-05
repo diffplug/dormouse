@@ -46,6 +46,8 @@ import type {
   HostEnrollResponse,
   HostsResponse,
   PasskeyAssertion,
+  ReauthFinishRequest,
+  ReauthFinishResponse,
   SetupBeginRequest,
   SetupBeginResponse,
   SetupFinishRequest,
@@ -91,6 +93,13 @@ export interface AppConfig {
 export interface Session {
   readonly accountId: string;
   readonly expiresAt: number;
+  /**
+   * Epoch ms of the last passkey assertion the Server verified for this
+   * session — set at sign-in, refreshed by `/api/reauth/finish` and by a
+   * verified `connect2` handshake. Pairing requires it to be within
+   * `PAIRING_PRESENCE_WINDOW_MS` (handshake.ts `checkPair`).
+   */
+  lastVerifiedPresence: number;
 }
 
 type AppEnv = { Variables: { session: Session; host: StoredHost } };
@@ -116,7 +125,11 @@ export class SessionStore {
   /** Mint a fresh session token (32 random bytes, base64url) for an account. */
   mint(accountId: string): { token: string; session: Session } {
     const token = toBase64Url(randomBytes(32));
-    const session: Session = { accountId, expiresAt: this.#now() + SESSION_TTL_MS };
+    const session: Session = {
+      accountId,
+      expiresAt: this.#now() + SESSION_TTL_MS,
+      lastVerifiedPresence: this.#now(),
+    };
     this.#sessions.set(token, session);
     return { token, session };
   }
@@ -266,29 +279,31 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.json(res);
   });
 
-  app.post(API_ROUTES.signinFinish, async (c) => {
-    const body = await readJson<SigninFinishRequest>(c);
-    const assertion = body?.assertion;
+  /**
+   * Shared by sign-in and re-auth: pull the challenge out of the assertion's
+   * own clientDataJSON and consume it (single-use, BEFORE verifying — a
+   * captured assertion can never be replayed even if verification succeeds),
+   * then verify against the STORED passkey for the asserted credential.
+   */
+  const verifyFreshAssertion = async (
+    assertion: SigninFinishRequest['assertion'] | undefined,
+  ): Promise<{ ok: true } | { ok: false; status: 400 | 401 | 404; error: string }> => {
     if (!assertion || typeof assertion.credentialId !== 'string') {
-      return c.json({ error: 'malformed assertion' }, 400);
+      return { ok: false, status: 400, error: 'malformed assertion' };
     }
-
     const stored = await accounts.findPasskey(assertion.credentialId);
-    if (!stored) return c.json({ error: 'unknown credential' }, 404);
+    if (!stored) return { ok: false, status: 404, error: 'unknown credential' };
 
-    // Pull the challenge out of the assertion's own clientDataJSON so we can
-    // consume it (single-use) before verifying. Consuming first guarantees a
-    // captured assertion can never be replayed even if verification succeeds.
     const clientData = decodeClientData(assertion.clientDataJSON);
     if (!clientData || typeof clientData.challenge !== 'string') {
-      return c.json({ error: 'malformed clientDataJSON' }, 400);
+      return { ok: false, status: 400, error: 'malformed clientDataJSON' };
     }
     const challenge = normalizeChallenge(clientData.challenge);
     if (!challenge) {
-      return c.json({ error: 'malformed clientDataJSON' }, 400);
+      return { ok: false, status: 400, error: 'malformed clientDataJSON' };
     }
     if (!signinChallenges.consume(challenge)) {
-      return c.json({ error: 'unrecognized or expired challenge' }, 400);
+      return { ok: false, status: 400, error: 'unrecognized or expired challenge' };
     }
 
     const result = await verifyPasskeyAssertion(assertion as PasskeyAssertion, stored.publicKey, {
@@ -300,8 +315,15 @@ export function createApp(config: AppConfig): CreatedApp {
       requireUserVerification: config.requireUserVerification,
     });
     if (!result.ok) {
-      return c.json({ error: `assertion rejected: ${result.reason}` }, 401);
+      return { ok: false, status: 401, error: `assertion rejected: ${result.reason}` };
     }
+    return { ok: true };
+  };
+
+  app.post(API_ROUTES.signinFinish, async (c) => {
+    const body = await readJson<SigninFinishRequest>(c);
+    const verdict = await verifyFreshAssertion(body?.assertion);
+    if (!verdict.ok) return c.json({ error: verdict.error }, verdict.status);
 
     const { token, session } = sessions.mint(SELFHOST_ACCOUNT_ID);
     const res: SigninFinishResponse = {
@@ -338,6 +360,30 @@ export function createApp(config: AppConfig): CreatedApp {
     c.set('session', session);
     await next();
   };
+
+  // --- Re-auth: refresh an existing session's verified-presence stamp ------
+  // Pairing requires a recent server-verified assertion (PAIRING_PRESENCE_WINDOW_MS;
+  // remote-security-model.md, Pairing Ceremony). When the stamp is stale the
+  // Pocket client calls these to re-assert with one WebAuthn prompt — the same
+  // verification as sign-in, but the session (and the relay socket opened with
+  // its token) is kept rather than re-minted.
+
+  app.post(API_ROUTES.reauthBegin, requireSession, (c) => {
+    const { challenge } = signinChallenges.issue();
+    const res: SigninBeginResponse = { challenge, rpId };
+    return c.json(res);
+  });
+
+  app.post(API_ROUTES.reauthFinish, requireSession, async (c) => {
+    const body = await readJson<ReauthFinishRequest>(c);
+    const verdict = await verifyFreshAssertion(body?.assertion);
+    if (!verdict.ok) return c.json({ error: verdict.error }, verdict.status);
+
+    const session = c.get('session');
+    session.lastVerifiedPresence = now();
+    const res: ReauthFinishResponse = { presenceVerifiedAt: session.lastVerifiedPresence };
+    return c.json(res);
+  });
 
   // --- Host presence: enrolled hosts + whether each is connected -----------
 
@@ -392,7 +438,12 @@ export function createApp(config: AppConfig): CreatedApp {
       if (!session) return c.json({ error: 'unauthorized' }, 401);
       return next();
     },
-    upgradeWebSocket(() => {
+    upgradeWebSocket((c) => {
+      // Re-resolve the Session OBJECT (not just validity — the middleware
+      // already gated that) so the relay can hand the gate a live reference
+      // whose presence stamp reauth/connect2 can refresh.
+      const token = c.req.query(WS_TOKEN_PARAM);
+      const session = token ? sessions.validate(token) : null;
       let conn: ClientConn | undefined;
       // `onClientFrame` is async (pair/connect2 verification), so serialize
       // frames from this socket through a promise chain — a client's frames
@@ -400,7 +451,12 @@ export function createApp(config: AppConfig): CreatedApp {
       let chain: Promise<void> = Promise.resolve();
       return {
         onOpen: (_evt, ws) => {
-          conn = hub.registerClient(ws);
+          if (!session) {
+            // Expired between the middleware check and the upgrade.
+            ws.close(1008, 'unauthorized');
+            return;
+          }
+          conn = hub.registerClient(ws, session);
         },
         onMessage: (evt) => {
           if (conn && typeof evt.data === 'string') {
