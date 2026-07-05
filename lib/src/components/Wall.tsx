@@ -1013,10 +1013,13 @@ export function Wall({
       tabComponent: 'terminal',
       title: UNNAMED_PANEL_TITLE,
       position: { referencePanel: referencePanel.id, direction: dockDirection },
-      // `inactive` suppresses dockview's auto-activation (and the resulting
-      // onDidActivePanelChange that would flip selection to the new pane), the
-      // dockview half of keeping `dor ensure` focus-neutral.
-      ...(focusNeutral ? { inactive: true } : {}),
+      // Keep `dor ensure` focus-neutral: `inactive` suppresses dockview's
+      // auto-activation (and the selecting onDidActivePanelChange). But dockview
+      // renders an inactive panel's content only when its renderer is 'always'
+      // (doAddPanel: skipSetActive skips openPanel unless renderer==='always');
+      // with the default 'onlyWhenVisible' the new pane spawns its shell yet
+      // shows blank. Pair the two so it renders in the background without focus.
+      ...(focusNeutral ? { inactive: true, renderer: 'always' as const } : {}),
     });
     if (!focusNeutral) selectPane(newId);
     onEventRef.current?.({
