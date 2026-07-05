@@ -972,8 +972,9 @@ export function Wall({
     referenceId: string;
     cwd?: string;
     requireIntegration?: boolean;
-    // `dor ensure` must never move focus: create the pane without selecting or
-    // activating it, leaving the caller's selection, mode, and DOM focus intact.
+    // `dor ensure` must never move focus: activate the new pane only transiently
+    // to force a render, then hand activation back to the caller, leaving the
+    // caller's selection, mode, and DOM focus intact.
     focusNeutral?: boolean;
   }): ParseResult<{
     id: string;
@@ -1037,7 +1038,7 @@ export function Wall({
         position: { referencePanel: referencePanel.id, direction: dockDirection },
       });
       if (focusNeutral) {
-        if (restoreActivePanel && restoreActivePanel.id !== newId) restoreActivePanel.api.setActive();
+        if (restoreActivePanel) restoreActivePanel.api.setActive();
       } else {
         selectPane(newId);
       }
@@ -1446,9 +1447,9 @@ export function Wall({
         );
         if (!integrated) {
           // Tear down the throwaway split without disturbing focus. The pane was
-          // added inactive and never selected, so a plain dispose + remove — not
-          // killPaneImmediately, whose kill animation reselects panels[0] — leaves
-          // the caller's selection and DOM focus exactly where ensure found them.
+          // never selected (focus-neutral create), so a plain dispose + remove —
+          // not killPaneImmediately, whose kill animation reselects panels[0] —
+          // leaves the caller's selection and DOM focus exactly where ensure found it.
           // (In the rare `--minimize` create the pane is already a door with no
           // panel to remove; as before, ensure leaves that door in place.)
           const throwaway = api.getPanel(result.value.id);
