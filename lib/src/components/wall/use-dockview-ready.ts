@@ -19,6 +19,7 @@ export function useDockviewReady({
   doorsRef,
   freshlySpawnedRef,
   killInProgressRef,
+  suppressActivationSelectRef,
   selectedIdRef,
   selectedTypeRef,
   modeRef,
@@ -37,6 +38,7 @@ export function useDockviewReady({
   doorsRef: RefObject<DooredItem[]>;
   freshlySpawnedRef: RefObject<Map<string, SpawnDirection>>;
   killInProgressRef: RefObject<boolean>;
+  suppressActivationSelectRef: RefObject<boolean>;
   selectedIdRef: RefObject<string | null>;
   selectedTypeRef: RefObject<WallSelectionKind>;
   modeRef: RefObject<WallMode>;
@@ -148,6 +150,10 @@ export function useDockviewReady({
 
     e.api.onDidActivePanelChange((panel) => {
       if (panel) {
+        // A focus-neutral `dor ensure` create is mid-flight: it briefly activates
+        // the new pane so dockview renders it, then hands activation back to the
+        // caller. Ignore both transitions so selection/mode stay on the caller.
+        if (suppressActivationSelectRef.current) return;
         if (selectedTypeRef.current === 'door') return;
         if (modeRef.current === 'passthrough' && selectedIdRef.current !== panel.id) {
           enterTerminalModeRef.current(panel.id);
@@ -190,6 +196,7 @@ export function useDockviewReady({
     selectPane,
     selectedIdRef,
     selectedTypeRef,
+    suppressActivationSelectRef,
     setDockviewApi,
     setDoors,
     setSelectedId,

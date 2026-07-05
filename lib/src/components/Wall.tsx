@@ -491,6 +491,14 @@ export function Wall({
 
   const killInProgressRef = useRef(false);
 
+  // Set while a focus-neutral `dor ensure` create adds a pane and hands the active
+  // group straight back to the caller. dockview only renders/lays out a pane once
+  // it becomes its group's active panel, so we can't add it `inactive` — we add it
+  // active (it renders) and immediately re-activate the caller. This ref tells the
+  // onDidActivePanelChange listener to ignore that transient activation churn so
+  // selection/mode never leave the caller. See createSplitSurface's focusNeutral.
+  const suppressActivationSelectRef = useRef(false);
+
   // Ref to the WorkspaceSelectionOverlay's root element. orchestrateKill uses it to
   // animate the focus ring in sync with the killed pane's shrink (last-pane case).
   const overlayElRef = useRef<HTMLDivElement | null>(null);
@@ -740,6 +748,7 @@ export function Wall({
     doorsRef,
     freshlySpawnedRef,
     killInProgressRef,
+    suppressActivationSelectRef,
     selectedIdRef,
     selectedTypeRef,
     modeRef,
@@ -1007,29 +1016,42 @@ export function Wall({
 
     const dockDirection = dockviewDirectionForDor(direction);
     freshlySpawnedRef.current.set(newId, spawnDirectionForDockview(dockDirection));
-    api.addPanel({
-      id: newId,
-      component: 'terminal',
-      tabComponent: 'terminal',
-      title: UNNAMED_PANEL_TITLE,
-      position: { referencePanel: referencePanel.id, direction: dockDirection },
-      // Keep `dor ensure` focus-neutral: `inactive` suppresses dockview's
-      // auto-activation (and the selecting onDidActivePanelChange). But dockview
-      // renders an inactive panel's content only when its renderer is 'always'
-      // (doAddPanel: skipSetActive skips openPanel unless renderer==='always');
-      // with the default 'onlyWhenVisible' the new pane spawns its shell yet
-      // shows blank. Pair the two so it renders in the background without focus.
-      ...(focusNeutral ? { inactive: true, renderer: 'always' as const } : {}),
-    });
-    if (!focusNeutral) selectPane(newId);
-    onEventRef.current?.({
-      type: 'split',
-      direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
-      source: 'dor',
-    });
-    if (minimized) {
-      getOrCreateTerminal(newId);
-      minimizePane(newId, { select: !focusNeutral });
+
+    // `dor ensure` must not move focus off the caller. But an `inactive` add can't
+    // do that here: dockview renders and lays out a pane only once it becomes its
+    // group's active panel (group `setActive` → doSetActivePanel), so an inactive
+    // pane runs its shell behind a blank tile until first click. Instead add it
+    // active (it renders normally), then hand the active group straight back to
+    // the caller — the new pane stays active *within its own group*, so it keeps
+    // rendering, while the caller keeps the active group. The guard ref makes the
+    // onDidActivePanelChange listener ignore both activations so selection/mode
+    // (and thus the caller's xterm focus, which follows selectedId) never move.
+    const restoreActivePanel = focusNeutral ? api.activePanel : undefined;
+    if (focusNeutral) suppressActivationSelectRef.current = true;
+    try {
+      api.addPanel({
+        id: newId,
+        component: 'terminal',
+        tabComponent: 'terminal',
+        title: UNNAMED_PANEL_TITLE,
+        position: { referencePanel: referencePanel.id, direction: dockDirection },
+      });
+      if (focusNeutral) {
+        if (restoreActivePanel && restoreActivePanel.id !== newId) restoreActivePanel.api.setActive();
+      } else {
+        selectPane(newId);
+      }
+      onEventRef.current?.({
+        type: 'split',
+        direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
+        source: 'dor',
+      });
+      if (minimized) {
+        getOrCreateTerminal(newId);
+        minimizePane(newId, { select: !focusNeutral });
+      }
+    } finally {
+      suppressActivationSelectRef.current = false;
     }
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId) } };
   }, [generatePaneId, minimizePane, selectPane, surfaceRefForId]);
