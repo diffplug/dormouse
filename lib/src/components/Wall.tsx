@@ -5,6 +5,7 @@ import {
   themeAbyss,
   type DockviewTheme,
   type DockviewApi,
+  type IDockviewPanel,
 } from 'dockview-react';
 import 'dockview-react/dist/styles/dockview.css';
 import { Baseboard } from './Baseboard';
@@ -960,6 +961,34 @@ export function Wall({
     return ids.find((id) => surfaceRunsCommand(getTerminalPaneState(id), command, cwdPath)) ?? null;
   }, []);
 
+  // Run a surface-adding `add` without moving focus off the caller — the shared
+  // machinery behind focus-neutral `dor ensure` / `dor iframe` / `dor ab`. dockview
+  // renders a pane only once it becomes its group's active panel, so `add` must
+  // activate the new pane; the onDidActivePanelChange listener would then follow
+  // it, so we suppress that listener for the duration. `add` receives the caller
+  // panel (the active pane at entry) and is responsible for handing activation back
+  // to it. Afterward we re-assert the caller's xterm focus, which the add re-parents
+  // away: deferred past dockview's own post-split focus handling, and only while the
+  // caller is still the selected pane in passthrough — the condition TerminalPane
+  // uses for isFocused. See docs/specs/layout.md corner case #12.
+  const addKeepingCallerFocus = useCallback((add: (caller: IDockviewPanel | undefined) => void) => {
+    const caller = apiRef.current?.activePanel ?? undefined;
+    suppressActivationSelectRef.current = true;
+    try {
+      add(caller);
+    } finally {
+      suppressActivationSelectRef.current = false;
+    }
+    if (caller) {
+      const callerId = caller.id;
+      requestAnimationFrame(() => {
+        if (modeRef.current === 'passthrough' && selectedIdRef.current === callerId) {
+          focusSession(callerId, true);
+        }
+      });
+    }
+  }, []);
+
   const createSplitSurface = useCallback(({
     command,
     direction,
@@ -1021,18 +1050,11 @@ export function Wall({
     const dockDirection = dockviewDirectionForDor(direction);
     freshlySpawnedRef.current.set(newId, spawnDirectionForDockview(dockDirection));
 
-    // `dor ensure` must not move focus off the caller. But an `inactive` add can't
-    // do that here: dockview renders and lays out a pane only once it becomes its
-    // group's active panel (group `setActive` → doSetActivePanel), so an inactive
-    // pane runs its shell behind a blank tile until first click. Instead add it
-    // active (it renders normally), then hand the active group straight back to
-    // the caller — the new pane stays active *within its own group*, so it keeps
-    // rendering, while the caller keeps the active group. The guard ref makes the
-    // onDidActivePanelChange listener ignore both activations so selection/mode
-    // (and thus the caller's xterm focus, which follows selectedId) never move.
-    const restoreActivePanel = focusNeutral ? api.activePanel : undefined;
-    if (focusNeutral) suppressActivationSelectRef.current = true;
-    try {
+    // Add the pane, then either focus it (default) or — for `dor ensure` — hand the
+    // active group back to the caller so it renders without stealing focus. dockview
+    // renders a pane only once active in its group, so we can't add it `inactive`;
+    // addKeepingCallerFocus handles the listener suppression and focus re-assert.
+    const add = (caller: IDockviewPanel | undefined) => {
       api.addPanel({
         id: newId,
         component: 'terminal',
@@ -1040,11 +1062,8 @@ export function Wall({
         title: UNNAMED_PANEL_TITLE,
         position: { referencePanel: referencePanel.id, direction: dockDirection },
       });
-      if (focusNeutral) {
-        if (restoreActivePanel) restoreActivePanel.api.setActive();
-      } else {
-        selectPane(newId);
-      }
+      if (focusNeutral) caller?.api.setActive();
+      else selectPane(newId);
       onEventRef.current?.({
         type: 'split',
         direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
@@ -1054,26 +1073,11 @@ export function Wall({
         getOrCreateTerminal(newId);
         minimizePane(newId, { select: !focusNeutral });
       }
-    } finally {
-      suppressActivationSelectRef.current = false;
-    }
-    // Adding the pane re-parents the caller's grid subtree, which blurs its xterm
-    // textarea. Selection never moved, so TerminalPane's focus effect does not
-    // re-run to reclaim it — the caller would silently stop receiving keystrokes
-    // until clicked. Re-assert its focus, deferred to beat dockview's own
-    // post-split focus handling (cf. the click-focus rAF in enterTerminalMode),
-    // and only while it is still the selected pane in passthrough — the exact
-    // condition under which TerminalPane keeps a pane focused.
-    if (focusNeutral && restoreActivePanel) {
-      const callerId = restoreActivePanel.id;
-      requestAnimationFrame(() => {
-        if (modeRef.current === 'passthrough' && selectedIdRef.current === callerId) {
-          focusSession(callerId, true);
-        }
-      });
-    }
+    };
+    if (focusNeutral) addKeepingCallerFocus(add);
+    else add(undefined);
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId) } };
-  }, [generatePaneId, minimizePane, selectPane, surfaceRefForId]);
+  }, [addKeepingCallerFocus, generatePaneId, minimizePane, selectPane, surfaceRefForId]);
 
   /**
    * Create a non-terminal content surface (iframe, agent-browser) next to a
@@ -1085,11 +1089,15 @@ export function Wall({
     params,
     reference,
     title,
+    focusNeutral,
   }: {
     minimized: boolean;
     params: Record<string, unknown>;
     reference: DorSurface;
     title: string;
+    // `dor iframe` / `dor ab` pass this to open the surface in the background
+    // without moving focus off the caller, matching `dor ensure`.
+    focusNeutral?: boolean;
   }): ParseResult<{
     id: string;
     ref: string;
@@ -1106,46 +1114,61 @@ export function Wall({
     const newId = generatePaneId();
     const replaceUntouchedTerminal = reference.type === 'terminal' && isUntouched(reference.id);
 
+    // Focus-neutral hands the active group back to the caller — unless the caller
+    // is the pane being replaced, in which case focus follows to the replacement.
+    const settleFocus = (caller: IDockviewPanel | undefined) => {
+      if (focusNeutral && caller && api.getPanel(caller.id)) caller.api.setActive();
+      else selectPane(newId);
+    };
+
     if (replaceUntouchedTerminal) {
+      const add = (caller: IDockviewPanel | undefined) => {
+        api.addPanel({
+          id: newId,
+          component,
+          tabComponent: 'surface',
+          title,
+          params,
+          // Keep iframes mounted across (de)activation — dockview's default
+          // onlyWhenVisible renderer detaches/reattaches panel DOM, and moving an
+          // <iframe> in the DOM reloads it (docs/specs/dor-browser.md).
+          renderer,
+          position: { referencePanel: referencePanel.id, direction: 'within' },
+        });
+        disposeSession(reference.id);
+        api.removePanel(referencePanel);
+        settleFocus(caller);
+        if (minimized) minimizePane(newId, { select: !focusNeutral });
+      };
+      if (focusNeutral) addKeepingCallerFocus(add);
+      else add(undefined);
+      return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'replaced' } };
+    }
+
+    const dockDirection = pickSplitDirection(referencePanel);
+    freshlySpawnedRef.current.set(newId, dockDirection === 'below' ? 'top' : 'left');
+    const add = (caller: IDockviewPanel | undefined) => {
       api.addPanel({
         id: newId,
         component,
         tabComponent: 'surface',
         title,
         params,
-        // Keep iframes mounted across (de)activation — dockview's default
-        // onlyWhenVisible renderer detaches/reattaches panel DOM, and moving an
-        // <iframe> in the DOM reloads it (docs/specs/dor-browser.md).
         renderer,
-        position: { referencePanel: referencePanel.id, direction: 'within' },
+        position: { referencePanel: referencePanel.id, direction: dockDirection },
       });
-      disposeSession(reference.id);
-      api.removePanel(referencePanel);
-      selectPane(newId);
-      if (minimized) minimizePane(newId);
-      return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'replaced' } };
-    }
-
-    const dockDirection = pickSplitDirection(referencePanel);
-    freshlySpawnedRef.current.set(newId, dockDirection === 'below' ? 'top' : 'left');
-    api.addPanel({
-      id: newId,
-      component,
-      tabComponent: 'surface',
-      title,
-      params,
-      renderer,
-      position: { referencePanel: referencePanel.id, direction: dockDirection },
-    });
-    selectPane(newId);
-    onEventRef.current?.({
-      type: 'split',
-      direction: dockDirection === 'right' ? 'horizontal' : 'vertical',
-      source: 'dor',
-    });
-    if (minimized) minimizePane(newId);
+      settleFocus(caller);
+      onEventRef.current?.({
+        type: 'split',
+        direction: dockDirection === 'right' ? 'horizontal' : 'vertical',
+        source: 'dor',
+      });
+      if (minimized) minimizePane(newId, { select: !focusNeutral });
+    };
+    if (focusNeutral) addKeepingCallerFocus(add);
+    else add(undefined);
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'created' } };
-  }, [generatePaneId, minimizePane, selectPane, surfaceRefForId]);
+  }, [addKeepingCallerFocus, generatePaneId, minimizePane, selectPane, surfaceRefForId]);
 
   // The last binary path a `dor ab` surface resolved on a terminal's PATH.
   // Re-used to spawn an agent-browser when swapping an iframe embed up to a
@@ -1575,6 +1598,8 @@ export function Wall({
           params: { surfaceType: 'browser', renderMode: 'iframe', url },
           reference: target.value,
           title: hostPathDisplay(url, true),
+          // `dor iframe` opens the embed in the background; caller keeps focus.
+          focusNeutral: true,
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });
@@ -1652,6 +1677,8 @@ export function Wall({
           },
           reference: target.value,
           title: key ?? session,
+          // `dor ab` opens the screencast in the background; caller keeps focus.
+          focusNeutral: true,
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });
