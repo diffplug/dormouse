@@ -235,6 +235,11 @@ from `command-detail`.
 - `dor agent-browser` / `dor ab` — delegates to the user's `agent-browser`,
   rendered in a Dormouse-native surface; the `ab-screencast` renderer of the
   unified `browser` surface, see [dor-browser.md](dor-browser.md)
+- `dor identify` — cmux-inspired JSON identity dump: caller surface (matched
+  locally against `DORMOUSE_SURFACE_ID`, `null` when not visible), focused
+  surface, and the env-derived control endpoint paths. Composes over
+  `surface.list` — no dedicated control method.
+  [impl](../../dor/src/commands/identify.ts) [docs](../../dor/test/snapshots/help/identify.md)
 - `dor list-panes` [impl](../../dor/src/commands/list-panes.ts) [docs](../../dor/test/snapshots/help/list-panes.md)
 - `dor list-pane-surfaces` [impl](../../dor/src/commands/list-pane-surfaces.ts) [docs](../../dor/test/snapshots/help/list-pane-surfaces.md)
 
