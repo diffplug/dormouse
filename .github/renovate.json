@@ -16,18 +16,32 @@
       "separateMajorMinor": false
     },
     {
+      "description": "Require explicit approval for npm majors so framework migrations and runtime/tooling compatibility get a human review before a branch is created",
       "matchManagers": ["npm"],
-      "matchDepTypes": ["dependencies"],
-      "groupName": "npm-production",
-      "groupSlug": "npm-production",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "React Router framework packages are peered and released together; do not split runtime and build tooling by dependency type",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["react-router", "@react-router/**"],
+      "groupName": "react-router",
+      "groupSlug": "react-router",
       "separateMajorMinor": false
     },
     {
+      "description": "Tailwind core and first-party tooling should be tested together",
       "matchManagers": ["npm"],
-      "matchDepTypes": ["devDependencies"],
-      "groupName": "npm-development",
-      "groupSlug": "npm-development",
+      "matchPackageNames": ["tailwindcss", "@tailwindcss/**"],
+      "groupName": "tailwindcss",
+      "groupSlug": "tailwindcss",
       "separateMajorMinor": false
+    },
+    {
+      "description": "@types/node must track the pinned Node runtime major and must not expose APIs newer than the runtime we bundle",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["@types/node"],
+      "allowedVersions": ">=24 <25"
     },
     {
       "matchManagers": ["cargo"],
