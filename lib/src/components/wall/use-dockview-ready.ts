@@ -8,6 +8,7 @@ import type {
 } from 'dockview-react';
 import { getDefaultShellOpts, setPendingShellOpts, swapTerminals, UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
 import { prefersReducedMotion } from '../../lib/ui-geometry';
+import { withProgrammaticActivation } from '../../lib/programmatic-activation';
 import type { DooredItem, WallMode, WallSelectionKind, SpawnDirection } from './wall-types';
 import { pickSplitDirection, swapPanelTitles } from './dockview-helpers';
 
@@ -172,10 +173,18 @@ export function useDockviewReady({
         const id = generatePaneId();
         primeDefaultShell(id);
         freshlySpawnedRef.current.set(id, 'top-left');
-        e.api.addPanel({ id, component: 'terminal', tabComponent: 'terminal', title: UNNAMED_PANEL_TITLE });
-        if (selectedIdRef.current === null) {
-          selectPane(id);
-        }
+        withProgrammaticActivation(programmaticActivationRef, () => {
+          e.api.addPanel({ id, component: 'terminal', tabComponent: 'terminal', title: UNNAMED_PANEL_TITLE });
+        });
+        // Adopt the replacement only when the current selection no longer points at
+        // anything real: null (the kill tail cleared it) or dangling (selection still
+        // names the removed pane — the 0ms kill timer can beat React's flush of
+        // setSelectedId(null) into selectedIdRef). A valid selection keeps it: a door
+        // (just-minimized last pane, corner case #11) or a live pane stays selected —
+        // the auto-spawn exists to keep a pane visible, not to steal selection.
+        const sel = selectedIdRef.current;
+        const selDangling = sel !== null && selectedTypeRef.current === 'pane' && !e.api.getPanel(sel);
+        if (sel === null || selDangling) selectPane(id);
       };
       setTimeout(spawn, delay);
     });

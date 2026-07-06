@@ -25,12 +25,14 @@
  * selection policy. The kill removal is tagged (`kill-animation.ts`): it decides
  * where selection lands with a live read at removal time, so dockview's
  * activate-the-survivor echo is redundant and muting it just stops a spurious
- * user-intent read. The other two removal-side echoes stay untagged and remain
- * load-bearing: the auto-spawn's `addPanel` echo establishes selection on the
- * replacement pane in passthrough, and `minimizePane`'s removal echo self-heals
- * selection when the user had navigated onto the minimized pane — muting either
- * would strand selection on a gone pane. Add-side mutations that hand activation
- * straight back to the caller always belong inside this wrapper.
+ * user-intent read. The empty-pane auto-spawn's `addPanel` is also tagged
+ * (`use-dockview-ready.ts`): it applies its own adopt-or-leave policy explicitly at
+ * the spawn site (adopt the replacement only when selection is null or dangling on
+ * the removed pane), so its activation echo is redundant too. Only `minimizePane`'s
+ * removal echo stays untagged and load-bearing: it self-heals selection when the
+ * user had navigated onto the minimized pane, and muting it would strand selection
+ * on a gone pane. Add-side mutations that hand activation straight back to the
+ * caller always belong inside this wrapper.
  */
 export type ProgrammaticActivationRef = { current: number };
 
