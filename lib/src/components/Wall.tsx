@@ -76,6 +76,7 @@ import { hostPathDisplay } from './wall/browser-url';
 import { SurfacePaneHeader } from './wall/SurfacePaneHeader';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { useDockviewReady } from './wall/use-dockview-ready';
+import { withProgrammaticActivation } from './wall/programmatic-activation';
 import { pickSplitDirection } from './wall/dockview-helpers';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
@@ -518,13 +519,15 @@ export function Wall({
 
   const killInProgressRef = useRef(false);
 
-  // Set while a focus-neutral `dor ensure` create adds a pane and hands the active
-  // group straight back to the caller. dockview only renders/lays out a pane once
-  // it becomes its group's active panel, so we can't add it `inactive` — we add it
-  // active (it renders) and immediately re-activate the caller. This ref tells the
-  // onDidActivePanelChange listener to ignore that transient activation churn so
-  // selection/mode never leave the caller. See createSplitSurface's focusNeutral.
-  const suppressActivationSelectRef = useRef(false);
+  // "Programmatic activation" tag: depth > 0 while an add-side programmatic
+  // dockview mutation is in flight, so the onDidActivePanelChange listener can
+  // tell that activation churn apart from a genuine user click and leave
+  // selection/mode alone. dockview fires the same event for both. The tag is set
+  // via withProgrammaticActivation around runSurfaceAdd's add (focus-neutral
+  // surface creation, layout.md corner case #12); see programmatic-activation.ts
+  // for the full design rationale (why a depth counter, the synchronicity
+  // assumption, and why removal-side echoes are deliberately not tagged).
+  const programmaticActivationRef = useRef(0);
 
   // Ref to the WorkspaceSelectionOverlay's root element. orchestrateKill uses it to
   // animate the focus ring in sync with the killed pane's shrink (last-pane case).
@@ -836,7 +839,7 @@ export function Wall({
     doorsRef,
     freshlySpawnedRef,
     killInProgressRef,
-    suppressActivationSelectRef,
+    programmaticActivationRef,
     selectedIdRef,
     selectedTypeRef,
     modeRef,
@@ -1050,7 +1053,8 @@ export function Wall({
   // split`). When not focus-neutral, `add` runs directly with no caller. When it
   // is: dockview renders a pane only once it becomes its group's active panel, so
   // `add` must activate the new pane and the onDidActivePanelChange listener would
-  // follow it — we suppress that listener for the duration and pass `add` the caller
+  // follow it — we run `add` inside withProgrammaticActivation so the listener
+  // ignores that activation churn for the duration, and pass `add` the caller
   // panel (the active pane at entry) purely as the activation hand-back target (via
   // settleFocusAfterAdd, which reactivates it); selection policy is decided
   // separately there from the user's selection (selectionReplaced), not the caller.
@@ -1067,12 +1071,7 @@ export function Wall({
     if (!focusNeutral) { add(undefined); return; }
     const caller = apiRef.current?.activePanel ?? undefined;
     const focusId = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
-    suppressActivationSelectRef.current = true;
-    try {
-      add(caller);
-    } finally {
-      suppressActivationSelectRef.current = false;
-    }
+    withProgrammaticActivation(programmaticActivationRef, () => add(caller));
     if (focusId) reassertPaneFocus(focusId);
   }, [reassertPaneFocus]);
 
