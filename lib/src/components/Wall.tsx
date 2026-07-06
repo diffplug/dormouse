@@ -631,6 +631,31 @@ export function Wall({
     if (panel) panel.api.setActive();
   }, []);
 
+  // Restore DOM focus to the selected pane after a dockview mutation (addPanel /
+  // removePanel) re-parents its grid subtree and blurs it. Deferred a frame past
+  // dockview's own post-mutation focus handling. The first gate (selected pane in
+  // passthrough) is TerminalPane's `isFocused` condition, so this only ever heals
+  // the pane the effect itself would keep focused. `document.hasFocus()` keeps a
+  // background `dor` command from yanking cross-frame focus out of the host editor
+  // (VS Code: a webview blur leaves mode/selectedId untouched). The editable-control
+  // check keeps it from yanking in-page focus the user placed deliberately (e.g. the
+  // inline-rename input) — re-parent blur drops focus to `<body>`, so a focused
+  // control means the user chose it; the `xterm-helper-textarea` exemption is the
+  // terminal's own textarea, where re-focusing is idempotent. See docs/specs/layout.md
+  // corner case #12.
+  const reassertPaneFocus = useCallback((id: string) => {
+    requestAnimationFrame(() => {
+      if (modeRef.current !== 'passthrough' || selectedTypeRef.current !== 'pane' || selectedIdRef.current !== id) return;
+      if (!document.hasFocus()) return;
+      const ae = document.activeElement;
+      const inEditableControl = ae instanceof HTMLElement
+        && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)
+        && !ae.classList.contains('xterm-helper-textarea');
+      if (inEditableControl) return;
+      focusSession(id, true);
+    });
+  }, []);
+
   const showShellSpawnNotice = useCallback((id: string, text: string) => {
     if (shellSpawnNoticeTimerRef.current) {
       clearTimeout(shellSpawnNoticeTimerRef.current);
@@ -657,10 +682,15 @@ export function Wall({
     // Only a kill of the selected pane should move selection; `dor kill` of a
     // background surface (or the header button on an unselected pane) leaves it.
     const wasSelected = selectedIdRef.current === id;
-    orchestrateKill(api, id, wasSelected, selectPane, setSelectedId, killInProgressRef, overlayElRef);
+    // removePanel can collapse a branch, re-parenting + blurring the survivor. If
+    // selection is unchanged (background kill), TerminalPane's effect won't heal it,
+    // so re-assert here; for a selected-pane kill the tail's selectPane changes
+    // selection, so the rAF gate no-ops (harmless).
+    const focusId = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
+    orchestrateKill(api, id, wasSelected, selectPane, setSelectedId, killInProgressRef, overlayElRef, focusId ? () => reassertPaneFocus(focusId) : undefined);
     clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
-  }, [fireEvent, selectPane]);
+  }, [fireEvent, selectPane, reassertPaneFocus]);
 
   const acceptKill = useCallback(() => {
     const ck = confirmKillRef.current;
@@ -996,33 +1026,27 @@ export function Wall({
   // panel (the active pane at entry) purely as the activation hand-back target (via
   // settleFocusAfterAdd, which reactivates it); selection policy is decided
   // separately there from the user's selection (selectionReplaced), not the caller.
-  // Adding the pane re-parents the caller's grid subtree,
-  // blurring its focus; since selection never moved, TerminalPane's effect won't
-  // reclaim it, so we re-assert focus here — deferred past dockview's own post-split
-  // focus handling, and only while the caller is still the selected pane in
-  // passthrough (the condition TerminalPane uses for isFocused). See
-  // docs/specs/layout.md corner case #12.
+  // Adding the pane re-parents the selected pane's grid subtree, blurring its focus;
+  // since selection never moved, TerminalPane's effect won't reclaim it, so we
+  // re-assert focus through the shared reassertPaneFocus helper (keyed on the user's
+  // selection, not the caller — matching the selection-based policy; its rAF gate
+  // re-checks selection, so a legitimate selection move like selectionReplaced makes
+  // it a no-op). See docs/specs/layout.md corner case #12.
   const runSurfaceAdd = useCallback((
     focusNeutral: boolean | undefined,
     add: (caller: IDockviewPanel | undefined) => void,
   ) => {
     if (!focusNeutral) { add(undefined); return; }
     const caller = apiRef.current?.activePanel ?? undefined;
+    const focusId = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
     suppressActivationSelectRef.current = true;
     try {
       add(caller);
     } finally {
       suppressActivationSelectRef.current = false;
     }
-    if (caller) {
-      const callerId = caller.id;
-      requestAnimationFrame(() => {
-        if (modeRef.current === 'passthrough' && selectedIdRef.current === callerId) {
-          focusSession(callerId, true);
-        }
-      });
-    }
-  }, []);
+    if (focusId) reassertPaneFocus(focusId);
+  }, [reassertPaneFocus]);
 
   const createSplitSurface = useCallback(({
     command,

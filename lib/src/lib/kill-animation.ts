@@ -15,6 +15,10 @@ import { prefersReducedMotion } from './ui-geometry';
  * the selection move to a survivor; killing a background surface (e.g. `dor kill
  * surface:3`, or the header kill button on an unselected pane) leaves selection
  * where the user left it.
+ *
+ * onRemoved runs once, on every path, immediately after removePanel: collapsing a
+ * branch can re-parent the surviving selected pane's subtree and blur it, so the
+ * caller uses this hook to re-assert focus (Wall passes its guarded rAF helper).
  */
 export function orchestrateKill(
   api: DockviewApi,
@@ -24,6 +28,7 @@ export function orchestrateKill(
   setSelectedId: (id: string | null) => void,
   killInProgressRef: { current: boolean },
   overlayElRef: { current: HTMLElement | null },
+  onRemoved?: () => void,
 ): void {
   const panel = api.getPanel(killedId);
   if (!panel) return;
@@ -42,6 +47,9 @@ export function orchestrateKill(
       // onDidRemovePanel, and a stuck true skips that delay forever after.
       killInProgressRef.current = false;
     }
+    // Re-assert focus once the branch has collapsed — before the selection gate so
+    // it runs on every path (background kill included), where selection is unchanged.
+    onRemoved?.();
     // Killing a pane the user wasn't on must not steal their selection.
     if (!wasSelected) return;
     if (api.panels.length > 0) selectPane(api.panels[0].id);

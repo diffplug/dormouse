@@ -152,22 +152,47 @@ describe('orchestrateKill', () => {
     expect(selectPane).toHaveBeenCalledWith('b');
   });
 
-  it('killing an unselected pane removes it but leaves selection untouched', () => {
+  it('onRemoved fires once on the animated path, only after removePanel', () => {
+    const { api, removePanel, elementOf } = makeApi(['a', 'b']);
+    const killedEl = elementOf('a');
+    const selectPane = vi.fn();
+    const setSelectedId = vi.fn();
+    const killInProgressRef = { current: false };
+    // Assert ordering from inside the spy: removePanel must have run before this.
+    let removedCountAtCallback = -1;
+    const onRemoved = vi.fn(() => { removedCountAtCallback = removePanel.mock.calls.length; });
+
+    orchestrateKill(api, 'a', true, selectPane, setSelectedId, killInProgressRef, { current: null }, onRemoved);
+
+    // The animated path defers removal to animationend: onRemoved must wait too.
+    expect(onRemoved).not.toHaveBeenCalled();
+
+    dispatchAnimationEnd(killedEl, FADE);
+
+    expect(onRemoved).toHaveBeenCalledTimes(1);
+    // removePanel had already been called by the time onRemoved ran.
+    expect(removedCountAtCallback).toBe(1);
+  });
+
+  it('killing an unselected pane removes it but leaves selection untouched, still firing onRemoved', () => {
     const { api, removePanel, elementOf, panelOf } = makeApi(['a', 'b']);
     const killedEl = elementOf('a');
     const killedPanel = panelOf('a');
     const selectPane = vi.fn();
     const setSelectedId = vi.fn();
     const killInProgressRef = { current: false };
+    const onRemoved = vi.fn();
 
     // `dor kill surface:a` while the user is on 'b': wasSelected is false.
-    orchestrateKill(api, 'a', false, selectPane, setSelectedId, killInProgressRef, { current: null });
+    orchestrateKill(api, 'a', false, selectPane, setSelectedId, killInProgressRef, { current: null }, onRemoved);
     dispatchAnimationEnd(killedEl, FADE);
 
     expect(removePanel).toHaveBeenCalledWith(killedPanel);
     // Selection tail is skipped — the user's selection stays where it was.
     expect(selectPane).not.toHaveBeenCalled();
     expect(setSelectedId).not.toHaveBeenCalled();
+    // onRemoved runs before the selection gate, so a background kill still heals focus.
+    expect(onRemoved).toHaveBeenCalledTimes(1);
   });
 
   it('reduced-motion sync path removes the panel synchronously', () => {
