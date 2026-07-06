@@ -631,7 +631,10 @@ export function Wall({
     setSelectedId(id);
     setSelectedType('pane');
     const panel = apiRef.current?.getPanel(id);
-    if (panel) panel.api.setActive();
+    // The echo of our own setActive is not user intent; the refs written above
+    // already neutralized it (selectedIdRef.current === panel.id, so the listener
+    // no-ops), and the tag makes that ordering non-load-bearing.
+    if (panel) withProgrammaticActivation(programmaticActivationRef, () => panel.api.setActive());
   }, []);
 
   // Restore DOM focus to the selected pane after a dockview mutation (addPanel /
@@ -759,7 +762,10 @@ export function Wall({
     // preventing dockview from stealing focus back from xterm
     requestAnimationFrame(() => focusSession(id, true));
     const panel = apiRef.current?.getPanel(id);
-    if (panel) panel.api.setActive();
+    // Same as selectPane: the echo of our own setActive is not user intent; the
+    // refs+mode written above already neutralized it, and the tag makes that
+    // ordering non-load-bearing.
+    if (panel) withProgrammaticActivation(programmaticActivationRef, () => panel.api.setActive());
   }, []);
   const enterTerminalModeRef = useRef(enterTerminalMode);
   enterTerminalModeRef.current = enterTerminalMode;
@@ -889,50 +895,57 @@ export function Wall({
       currentLayoutSignature === item.layoutAtMinimizeSignature &&
       idsMatch(currentPaneIds, reattachPaneIds);
 
-    if (canReattachExactLayout) {
-      const currentTitles = new Map(
-        api.panels.map(panel => [panel.id, panel.title ?? panel.id] as const),
-      );
+    // Reattach mutations (the exact-layout fromJSON restore or the addPanel
+    // fallbacks) activate a pane as a side effect; selection is established
+    // explicitly right after (selectPane / enterTerminalMode below), and
+    // previously only the door guard absorbed these activation echoes. Tag them
+    // so the neutralization is explicit rather than incidental.
+    withProgrammaticActivation(programmaticActivationRef, () => {
+      if (canReattachExactLayout) {
+        const currentTitles = new Map(
+          api.panels.map(panel => [panel.id, panel.title ?? panel.id] as const),
+        );
 
-      // reuseExistingPanels: keep existing panel component instances mounted
-      // rather than destroying and recreating them during deserialization.
-      api.fromJSON(cloneLayout(item.layoutAtMinimize!), { reuseExistingPanels: true });
+        // reuseExistingPanels: keep existing panel component instances mounted
+        // rather than destroying and recreating them during deserialization.
+        api.fromJSON(cloneLayout(item.layoutAtMinimize!), { reuseExistingPanels: true });
 
-      for (const [panelId, title] of currentTitles) {
-        if (panelId === item.id) continue;
-        api.getPanel(panelId)?.api.setTitle(title);
-      }
-    } else {
-      const currentIds = api.panels.map(p => p.id).sort();
-      const layoutUnchanged =
-        item.neighborId &&
-        api.getPanel(item.neighborId) &&
-        idsMatch(currentIds, item.remainingPaneIds);
-
-      if (layoutUnchanged) {
-        // Restore to original position next to the same neighbor
-        api.addPanel({
-          id: item.id,
-          component: item.component ?? 'terminal',
-          tabComponent: item.tabComponent ?? 'terminal',
-          title: item.title,
-          params: item.params,
-          position: { referencePanel: item.neighborId!, direction: item.direction },
-        });
+        for (const [panelId, title] of currentTitles) {
+          if (panelId === item.id) continue;
+          api.getPanel(panelId)?.api.setTitle(title);
+        }
       } else {
-        // Layout changed — split an existing panel based on its aspect ratio
-        const sid = selectedIdRef.current;
-        const refPanel = (sid && api.getPanel(sid)) ?? api.panels[0] ?? null;
-        api.addPanel({
-          id: item.id,
-          component: item.component ?? 'terminal',
-          tabComponent: item.tabComponent ?? 'terminal',
-          title: item.title,
-          params: item.params,
-          position: refPanel ? { referencePanel: refPanel.id, direction: pickSplitDirection(refPanel) } : undefined,
-        });
+        const currentIds = api.panels.map(p => p.id).sort();
+        const layoutUnchanged =
+          item.neighborId &&
+          api.getPanel(item.neighborId) &&
+          idsMatch(currentIds, item.remainingPaneIds);
+
+        if (layoutUnchanged) {
+          // Restore to original position next to the same neighbor
+          api.addPanel({
+            id: item.id,
+            component: item.component ?? 'terminal',
+            tabComponent: item.tabComponent ?? 'terminal',
+            title: item.title,
+            params: item.params,
+            position: { referencePanel: item.neighborId!, direction: item.direction },
+          });
+        } else {
+          // Layout changed — split an existing panel based on its aspect ratio
+          const sid = selectedIdRef.current;
+          const refPanel = (sid && api.getPanel(sid)) ?? api.panels[0] ?? null;
+          api.addPanel({
+            id: item.id,
+            component: item.component ?? 'terminal',
+            tabComponent: item.tabComponent ?? 'terminal',
+            title: item.title,
+            params: item.params,
+            position: refPanel ? { referencePanel: refPanel.id, direction: pickSplitDirection(refPanel) } : undefined,
+          });
+        }
       }
-    }
+    });
 
     const nextDoors = doorsRef.current.filter(p => p.id !== item.id);
     doorsRef.current = nextDoors;
@@ -954,15 +967,22 @@ export function Wall({
         } else if (typeof afterRestore === 'object' && afterRestore.type === 'replace-terminal') {
           const panel = apiRef.current?.getPanel(item.id);
           if (!panel) return;
-          apiRef.current?.addPanel({
-            id: afterRestore.newId,
-            component: 'terminal',
-            tabComponent: 'terminal',
-            title: UNNAMED_PANEL_TITLE,
-            position: { referencePanel: panel, direction: 'within' },
+          // Add the replacement then drop the reattached pane. Both mutations
+          // activate a pane, and the explicit selectPane(newId) right after is the
+          // real selection intent, so tag the add+remove pair — the removePanel's
+          // activate-the-survivor echo is redundant when selectPane immediately
+          // follows. (disposeSession is synchronous and unrelated to activation.)
+          withProgrammaticActivation(programmaticActivationRef, () => {
+            apiRef.current?.addPanel({
+              id: afterRestore.newId,
+              component: 'terminal',
+              tabComponent: 'terminal',
+              title: UNNAMED_PANEL_TITLE,
+              position: { referencePanel: panel, direction: 'within' },
+            });
+            disposeSession(item.id);
+            apiRef.current?.removePanel(panel);
           });
-          disposeSession(item.id);
-          apiRef.current?.removePanel(panel);
           selectPane(afterRestore.newId);
           if (afterRestore.announce) {
             showShellSpawnNotice(afterRestore.newId, `Switched to ${afterRestore.shellName}`);
