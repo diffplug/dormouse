@@ -25,7 +25,7 @@ for (const { entry, out } of bundles) {
     bundle: true,
     platform: 'node', // node builtins (http/net/fs/child_process) stay external
     format: 'cjs',
-    target: 'node22',
+    target: 'node24',
     logLevel: 'warning',
   });
   console.log(`[sidecar] built ${path.relative(process.cwd(), outfile)}`);
