@@ -1,6 +1,7 @@
 import type { DockviewApi } from 'dockview-react';
 import { disposeSession } from './terminal-registry';
 import { prefersReducedMotion } from './ui-geometry';
+import { withProgrammaticActivation, type ProgrammaticActivationRef } from './programmatic-activation';
 
 /**
  * Run the kill animation: fade out the killed pane, then animate the
@@ -11,12 +12,21 @@ import { prefersReducedMotion } from './ui-geometry';
  * auto-spawn handler skips its own 440ms delay — otherwise a last-pane kill
  * stacks two 440ms waits.
  *
- * wasSelected says whether the killed pane was the selected one. Only then does
- * the selection move to a survivor; killing a background surface leaves selection
- * where the user left it. Mouse kills always arrive selected — clicking a pane
- * header activates it (dockview's pointerdown → doSetGroupActive) before the kill
- * button's click handler runs — so the wasSelected=false case comes only from CLI
- * kills (`dor kill surface:3`) and ensure's throwaway teardown.
+ * isSelected is a LIVE reader — `isSelected(killedId)` is evaluated twice, not
+ * snapshotted at call time: once at fade start (for the overlay ring) and again at
+ * removal time up to ~1s later (for the selection tail). Only when the killed pane
+ * is the selected one does selection move to a survivor; killing a background
+ * surface leaves selection where the user left it. Reading live at removal means a
+ * mid-fade selection move is honored: navigating AWAY from a dying selected pane
+ * means the tail no longer yanks selection to panels[0], and navigating ONTO a
+ * dying pane means the tail adopts a survivor instead of leaving selection dangling
+ * on the removed panel. The removal is tagged with withProgrammaticActivation (see
+ * programmatic-activation.ts): dockview's survivor-activation echo previously
+ * covered these two edges by accident; the live read now covers them by design, so
+ * the echo is muted. Mouse kills always arrive selected — clicking a pane header
+ * activates it (dockview's pointerdown → doSetGroupActive) before the kill button's
+ * click handler runs — so the not-selected case comes only from CLI kills
+ * (`dor kill surface:3`) and ensure's throwaway teardown.
  *
  * onRemoved runs once, on every path, immediately after removePanel: collapsing a
  * branch can re-parent the surviving selected pane's subtree and blur it, so the
@@ -25,25 +35,33 @@ import { prefersReducedMotion } from './ui-geometry';
 export function orchestrateKill(
   api: DockviewApi,
   killedId: string,
-  wasSelected: boolean,
+  isSelected: (id: string) => boolean,
   selectPane: (id: string) => void,
   setSelectedId: (id: string | null) => void,
   killInProgressRef: { current: boolean },
   overlayElRef: { current: HTMLElement | null },
+  programmaticActivationRef: ProgrammaticActivationRef,
   onRemoved?: () => void,
 ): void {
   const panel = api.getPanel(killedId);
   if (!panel) return;
 
   const bareRemove = () => {
+    // Sample selection live, BEFORE removePanel mutates dockview — the removal can
+    // change the active panel out from under us.
+    const wasSelected = isSelected(killedId);
     killInProgressRef.current = true;
     try {
       disposeSession(killedId);
       // A competing remover can beat this finalize to the panel — a double-fired
       // confirm kill's second orchestrateKill, a dor-CLI kill, or a render swap.
       // Removing a stale panel throws deep in dockview ('invalid operation'), so
-      // re-resolve by id and only remove the exact object we captured.
-      if (api.getPanel(killedId) === panel) api.removePanel(panel);
+      // re-resolve by id and only remove the exact object we captured. Tag the
+      // removal so dockview's activate-the-survivor echo doesn't read as user
+      // intent — the selection tail below applies our policy explicitly.
+      withProgrammaticActivation(programmaticActivationRef, () => {
+        if (api.getPanel(killedId) === panel) api.removePanel(panel);
+      });
     } finally {
       // A throw must not strand this flag: it gates the auto-spawn delay skip in
       // onDidRemovePanel, and a stuck true skips that delay forever after.
@@ -73,8 +91,11 @@ export function orchestrateKill(
   killedGroupEl.classList.add(fadeClass);
   // The overlay renders the *current* selection's ring. On an unselected kill
   // that selection (e.g. a surviving door) is not the killed pane, so its ring
-  // must not shrink away — only claim the overlay when the killed pane was it.
-  const overlayEl = isLastPane && wasSelected ? overlayElRef.current : null;
+  // must not shrink away — only claim the overlay when the killed pane is it.
+  // The ring shows the dying selection shrinking, so this at-fade-start read is
+  // the right one even though the selection tail re-reads live later.
+  const ringSelected = isSelected(killedId);
+  const overlayEl = isLastPane && ringSelected ? overlayElRef.current : null;
   if (overlayEl) overlayEl.classList.add('ring-shrinking-to-br');
 
   let finalized = false;

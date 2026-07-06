@@ -76,7 +76,7 @@ import { hostPathDisplay } from './wall/browser-url';
 import { SurfacePaneHeader } from './wall/SurfacePaneHeader';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { useDockviewReady } from './wall/use-dockview-ready';
-import { withProgrammaticActivation } from './wall/programmatic-activation';
+import { withProgrammaticActivation } from '../lib/programmatic-activation';
 import { pickSplitDirection } from './wall/dockview-helpers';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
@@ -712,16 +712,20 @@ export function Wall({
     // screen registration). A safe no-op for iframe/terminal surfaces.
     disposeAgentBrowserSurfaceController(id);
     // Only a kill of the selected pane should move selection; `dor kill` of a
-    // background surface (and ensure's throwaway teardown) leaves it. Mouse kills
-    // always arrive selected — clicking a pane header activates it (dockview's
-    // pointerdown) before the kill button's click handler runs.
-    const wasSelected = selectedIdRef.current === id;
+    // background surface (and ensure's throwaway teardown) leaves it. The check is
+    // LIVE — orchestrateKill re-reads it at removal time (up to ~1s after the fade
+    // starts), so a mid-fade selection move is honored. The `=== 'pane'` term keeps
+    // a doored id from ever reading as selected for the kill tail. Mouse kills always
+    // arrive selected — clicking a pane header activates it (dockview's pointerdown)
+    // before the kill button's click handler runs.
+    const isSelectedPane = (kid: string) =>
+      selectedTypeRef.current === 'pane' && selectedIdRef.current === kid;
     // removePanel can collapse a branch, re-parenting + blurring the survivor. If
     // selection is unchanged (background kill), TerminalPane's effect won't heal it,
     // so re-assert here; for a selected-pane kill the tail's selectPane changes
     // selection, so the rAF gate no-ops (harmless).
     const focusId = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
-    orchestrateKill(api, id, wasSelected, selectPane, setSelectedId, killInProgressRef, overlayElRef, focusId ? () => reassertPaneFocus(focusId) : undefined);
+    orchestrateKill(api, id, isSelectedPane, selectPane, setSelectedId, killInProgressRef, overlayElRef, programmaticActivationRef, focusId ? () => reassertPaneFocus(focusId) : undefined);
     clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
   }, [fireEvent, selectPane, reassertPaneFocus]);
@@ -1567,7 +1571,7 @@ export function Wall({
         );
         if (!integrated) {
           // Tear down the throwaway split. The focus-neutral create never selected
-          // it, so killPaneImmediately's wasSelected gate leaves the caller's
+          // it, so orchestrateKill's live selection check leaves the caller's
           // selection where ensure found it. A `--minimize` create is already a
           // door; killPaneImmediately tears the door down too — disposing the
           // session and removing it from the baseboard.

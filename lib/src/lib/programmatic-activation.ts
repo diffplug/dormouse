@@ -21,13 +21,16 @@
  * deferred activation events (microtask/timeout) would fire them after `finally`
  * has already decremented, escaping the tag; that upgrade must revisit this.
  *
- * Removal-side echoes are deliberately NOT tagged, anywhere: when a removal
- * invalidates state, dockview's activate-the-survivor echo is exactly what
- * self-heals selection — e.g. the kill path when the user had navigated onto a
- * fading pane, and the auto-spawn's `addPanel` echo that establishes selection on
- * the replacement pane in passthrough. Muting those would strand selection on a
- * gone pane. Only the add-side mutations that hand activation straight back to the
- * caller belong inside this wrapper.
+ * Removal-side echoes are tagged only where the removal applies its own explicit
+ * selection policy. The kill removal is tagged (`kill-animation.ts`): it decides
+ * where selection lands with a live read at removal time, so dockview's
+ * activate-the-survivor echo is redundant and muting it just stops a spurious
+ * user-intent read. The other two removal-side echoes stay untagged and remain
+ * load-bearing: the auto-spawn's `addPanel` echo establishes selection on the
+ * replacement pane in passthrough, and `minimizePane`'s removal echo self-heals
+ * selection when the user had navigated onto the minimized pane — muting either
+ * would strand selection on a gone pane. Add-side mutations that hand activation
+ * straight back to the caller always belong inside this wrapper.
  */
 export type ProgrammaticActivationRef = { current: number };
 
