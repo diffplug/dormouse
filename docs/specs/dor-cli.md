@@ -52,7 +52,11 @@ terminals must rely on injected env rather than a globally installed Node.
 
 Public PTY env:
 
-- `DORMOUSE_NODE` — Node runtime used by the launcher.
+- `DORMOUSE_NODE` — Node runtime used by the launcher. On Windows the standalone
+  host must point this at a **console-subsystem** node: its bundled node is patched
+  to the GUI subsystem (to avoid a stray terminal window when spawning the
+  sidecar), but a GUI-subsystem node drops all stdout/stderr when `dor` runs inside
+  a shell's ConPTY. See `docs/specs/standalone.md` (Windows node subsystem).
 - `DORMOUSE_CLI_JS` — absolute path to staged `dist/dor.js`.
 - `DORMOUSE_SURFACE_ID` — stable invoking Session/surface id.
 - `DORMOUSE_CONTROL_SOCKET` and `DORMOUSE_CONTROL_TOKEN` — private control

@@ -82,6 +82,22 @@ the webview, where `TauriAdapter` converts dor control requests into the
 `resource_dir()` once at the boundary so every derived path is plain — the
 reasons live in `docs/specs/dor-cli.md` (Bundling And PATH).
 
+**Windows node subsystem.** `build.rs` patches the bundled `node.exe` from the
+console to the GUI subsystem (`force_windows_gui_subsystem`): a console-subsystem
+process spawned from our GUI app triggers Win11's DefTerm handoff and flashes a
+stray Windows Terminal window, and neither `CREATE_NO_WINDOW` nor
+`DETACHED_PROCESS` suppresses it. The sidecar runs under that GUI node and talks
+to Rust over explicit piped stdio, which a GUI-subsystem node handles fine. But a
+GUI-subsystem node does **not** attach to an *inherited* console, so it must not
+run the `dor` CLI: dor runs inside a shell's ConPTY where stdout/stderr are
+console handles, and a GUI node silently drops everything it prints (every command
+appears to produce no output). `start_sidecar` therefore derives a
+console-subsystem copy once (`resolve_dor_node_path` → `ensure_console_subsystem_node`,
+flipping the PE subsystem byte back to console, cached in app-local data) and
+points `DORMOUSE_NODE` at it while spawning the sidecar itself under the GUI node.
+dor always runs inside an existing pseudo-console, so the console copy can't cause
+a stray window.
+
 ## Sidecar lifecycle
 
 Source of truth: `standalone/sidecar/main.js`.

@@ -724,6 +724,102 @@ fn find_node_binary(dir: &Path, target_triple: &str) -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
+// The node the `dor` CLI runs under. On Windows the bundled node.exe is patched
+// to the GUI subsystem at build time (build.rs `force_windows_gui_subsystem`) so
+// spawning the sidecar from our GUI process doesn't trigger Win11's DefTerm
+// handoff and flash a stray terminal window. A GUI-subsystem node, however, does
+// not attach to an *inherited* console: when `dor` runs inside a shell's ConPTY
+// its stdout/stderr are console handles (not STARTUPINFO pipes), so every byte it
+// prints is silently dropped and commands appear to produce no output. `dor`
+// already runs inside a pseudo-console and can never cause a stray window, so it
+// needs a console-subsystem node. Derive one by copying the bundled node and
+// flipping the PE subsystem byte back to console; cache it in app data. The
+// sidecar itself keeps running under the GUI node.
+#[cfg(windows)]
+fn resolve_dor_node_path(gui_node: &Path, app: &AppHandle) -> PathBuf {
+    match ensure_console_subsystem_node(gui_node, app) {
+        Ok(path) => path,
+        Err(err) => {
+            append_log(format!(
+                "[dor] console-subsystem node derivation failed ({err}); dor output may be lost"
+            ));
+            gui_node.to_path_buf()
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn resolve_dor_node_path(gui_node: &Path, _app: &AppHandle) -> PathBuf {
+    gui_node.to_path_buf()
+}
+
+#[cfg(windows)]
+const IMAGE_SUBSYSTEM_WINDOWS_CUI: u16 = 3;
+
+#[cfg(windows)]
+fn ensure_console_subsystem_node(gui_node: &Path, app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| format!("app_local_data_dir: {e}"))?;
+    create_dir_all(&dir).map_err(|e| format!("create cache dir: {e}"))?;
+    let dest = dir.join("dor-node.exe");
+    let src_len = std::fs::metadata(gui_node)
+        .map_err(|e| format!("stat bundled node: {e}"))?
+        .len();
+    // Reuse the cached copy only if it matches the current bundled node's size
+    // and is already console-subsystem; re-derive when missing or stale (e.g. an
+    // app update swapped the bundled node).
+    if let Ok(meta) = std::fs::metadata(&dest) {
+        if meta.len() == src_len
+            && read_pe_subsystem(&dest).ok() == Some(IMAGE_SUBSYSTEM_WINDOWS_CUI)
+        {
+            return Ok(dest);
+        }
+    }
+    std::fs::copy(gui_node, &dest).map_err(|e| format!("copy node: {e}"))?;
+    // fs::copy preserves a read-only attribute; clear it so the patch write works.
+    let mut perms = std::fs::metadata(&dest)
+        .map_err(|e| format!("stat dest: {e}"))?
+        .permissions();
+    if perms.readonly() {
+        perms.set_readonly(false);
+        std::fs::set_permissions(&dest, perms).map_err(|e| format!("clear readonly: {e}"))?;
+    }
+    write_pe_subsystem(&dest, IMAGE_SUBSYSTEM_WINDOWS_CUI)?;
+    Ok(dest)
+}
+
+#[cfg(windows)]
+fn pe_subsystem_offset(bytes: &[u8]) -> Result<usize, String> {
+    if bytes.len() < 0x40 || &bytes[0..2] != b"MZ" {
+        return Err("not a PE/COFF binary".into());
+    }
+    let pe_offset = u32::from_le_bytes(bytes[0x3C..0x40].try_into().unwrap()) as usize;
+    // PE signature (4) + COFF header (20) + Optional header up to Subsystem (0x44).
+    let subsystem_offset = pe_offset + 0x5C;
+    if bytes.len() < subsystem_offset + 2 || &bytes[pe_offset..pe_offset + 4] != b"PE\0\0" {
+        return Err("no PE signature at expected offset".into());
+    }
+    Ok(subsystem_offset)
+}
+
+#[cfg(windows)]
+fn read_pe_subsystem(path: &Path) -> Result<u16, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("read: {e}"))?;
+    let off = pe_subsystem_offset(&bytes)?;
+    Ok(u16::from_le_bytes(bytes[off..off + 2].try_into().unwrap()))
+}
+
+#[cfg(windows)]
+fn write_pe_subsystem(path: &Path, subsystem: u16) -> Result<(), String> {
+    let mut bytes = std::fs::read(path).map_err(|e| format!("read: {e}"))?;
+    let off = pe_subsystem_offset(&bytes)?;
+    bytes[off..off + 2].copy_from_slice(&subsystem.to_le_bytes());
+    std::fs::write(path, &bytes).map_err(|e| format!("write: {e}"))?;
+    Ok(())
+}
+
 fn dor_control_socket_path() -> String {
     let pid = std::process::id();
     #[cfg(windows)]
@@ -775,6 +871,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     let sidecar_path = resolve_sidecar_path(app.path().resource_dir().ok(), manifest_dir);
     let node_path = resolve_node_binary_path()?;
     let dor_cli_paths = resolve_dor_cli_paths(&sidecar_path, manifest_dir);
+    let dor_node_path = resolve_dor_node_path(&node_path, app);
     let dor_control_socket = dor_control_socket_path();
     let dor_control_token = dor_control_token();
     append_log(format!(
@@ -782,6 +879,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
         sidecar_path.display()
     ));
     append_log(format!("[sidecar] node binary: {}", node_path.display()));
+    append_log(format!("[dor] node binary: {}", dor_node_path.display()));
     append_log(format!(
         "[dor] CLI bin dir: {}",
         dor_cli_paths.bin_dir.display()
@@ -794,7 +892,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
 
     let mut wrap = CommandWrap::with_new(&node_path, |c| {
         c.arg(&sidecar_path)
-            .env("DORMOUSE_NODE", &node_path)
+            .env("DORMOUSE_NODE", &dor_node_path)
             .env("DORMOUSE_CLI_BIN", &dor_cli_paths.bin_dir)
             .env("DORMOUSE_CLI_JS", &dor_cli_paths.entrypoint)
             .env("DORMOUSE_CONTROL_SOCKET", &dor_control_socket)
@@ -1089,6 +1187,32 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn pe_subsystem_round_trips() {
+        use super::{read_pe_subsystem, write_pe_subsystem, IMAGE_SUBSYSTEM_WINDOWS_CUI};
+        let dir = TempDir::new("pe-subsystem");
+        let path = dir.path().join("fake.exe");
+        // Minimal PE: MZ magic, e_lfanew -> 0x80, "PE\0\0" signature, and a
+        // Subsystem field 0x5C past the PE signature starting as console (3).
+        let mut bytes = vec![0u8; 256];
+        bytes[0] = b'M';
+        bytes[1] = b'Z';
+        let pe_offset: u32 = 0x80;
+        bytes[0x3C..0x40].copy_from_slice(&pe_offset.to_le_bytes());
+        let po = pe_offset as usize;
+        bytes[po..po + 4].copy_from_slice(b"PE\0\0");
+        bytes[po + 0x5C..po + 0x5C + 2].copy_from_slice(&3u16.to_le_bytes());
+        fs::write(&path, &bytes).expect("write fake pe");
+
+        assert_eq!(read_pe_subsystem(&path).unwrap(), 3);
+        write_pe_subsystem(&path, 2).unwrap();
+        assert_eq!(read_pe_subsystem(&path).unwrap(), 2);
+        // The runtime derivation flips GUI (2) back to console (3) for dor.
+        write_pe_subsystem(&path, IMAGE_SUBSYSTEM_WINDOWS_CUI).unwrap();
+        assert_eq!(read_pe_subsystem(&path).unwrap(), 3);
     }
 
     #[test]

@@ -60,13 +60,19 @@ fn bundle_node_runtime() -> Result<(), Box<dyn Error>> {
 }
 
 // Rewrite the PE subsystem byte of the bundled node.exe from 3 (Windows
-// console) to 2 (Windows GUI). Node.js does not care which subsystem its
-// host binary advertises — it reads stdio handles from STARTUPINFO either
-// way — but a console-subsystem process triggers Windows' default-terminal
-// COM handoff, which on Win11 with Windows Terminal as DefTerm activates WT
-// to host the sidecar (visible as a stray WT window titled with the node.exe
-// path behind Dormouse). Neither CREATE_NO_WINDOW nor DETACHED_PROCESS opts
-// out of that handoff; only a non-console subsystem does.
+// console) to 2 (Windows GUI). A console-subsystem process triggers Windows'
+// default-terminal COM handoff, which on Win11 with Windows Terminal as DefTerm
+// activates WT to host the sidecar (visible as a stray WT window titled with the
+// node.exe path behind Dormouse). Neither CREATE_NO_WINDOW nor DETACHED_PROCESS
+// opts out of that handoff; only a non-console subsystem does.
+//
+// A GUI-subsystem node reads explicitly-passed stdio (STARTUPINFO) fine — which
+// is how the sidecar itself talks to us over piped stdio — but it does NOT
+// attach to an *inherited* console. So it must not be used to run the `dor` CLI:
+// dor runs inside a shell's ConPTY where stdout/stderr are console handles, and a
+// GUI-subsystem node silently drops everything it prints. lib.rs derives a
+// console-subsystem copy for `DORMOUSE_NODE` (see `resolve_dor_node_path`); dor
+// already runs inside a pseudo-console, so that copy can't cause a stray window.
 fn force_windows_gui_subsystem(path: &Path) -> Result<(), Box<dyn Error>> {
     const IMAGE_SUBSYSTEM_WINDOWS_GUI: u16 = 2;
     const IMAGE_SUBSYSTEM_WINDOWS_CUI: u16 = 3;
