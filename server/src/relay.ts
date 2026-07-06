@@ -6,8 +6,8 @@
  * after authorization it forwards `msg` frames verbatim.
  *
  * State is deliberately tiny and in-memory (a server restart just means everyone
- * reconnects) and the machine is kept small so slice 3 can layer connection
- * *verification* on top without reshaping it:
+ * reconnects) and the machine is kept small so connection *verification* layers
+ * on top without reshaping it:
  *
  *   - one live socket per `hostId` (a reconnect replaces the old socket);
  *   - each client is bound to at most one host (`clientId → hostId`) and carries
@@ -18,7 +18,7 @@
  * `clientId` is a server-assigned secret: it is stamped onto every host-bound
  * frame so the Host can address replies, but is never sent to the client.
  *
- * Slice 3 layers *verification* on top without reshaping any of this: the hub
+ * Verification layers on top without reshaping any of this: the hub
  * consults an injected {@link HandshakeGate} before relaying the two
  * security-critical Client frames (`pair`, `connect2`) and remembers each Host
  * challenge it relays, but the routing and session model are untouched.
@@ -88,9 +88,9 @@ export class RelayHub {
    *
    * A replacement also invalidates every session established with the OLD Host
    * process: the new process has a fresh ACL and no memory of them, so their
-   * in-flight `msg` frames must never be treated as authorized. Slice 2 did this
-   * only on disconnect; because the displaced socket's `close` is a no-op here,
-   * the invalidation has to happen at replacement time too.
+   * in-flight `msg` frames must never be treated as authorized. Handling this
+   * on disconnect alone is not enough; because the displaced socket's `close` is
+   * a no-op here, the invalidation has to happen at replacement time too.
    */
   registerHost(hostId: string, socket: RelaySocket): HostConn {
     const conn: HostConn = { hostId, socket };
