@@ -36,7 +36,7 @@ jobs:
         working-directory: lib
 
       - name: Run Chromatic
-        uses: chromaui/action@98132da0fca2211fb41b3af7b49ce85176007851 # latest
+        uses: chromaui/action@94713c544284a14195de3b50ef24301579f1877e # latest
         with:
           projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
           workingDir: lib
