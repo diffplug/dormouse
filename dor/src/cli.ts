@@ -8,6 +8,7 @@ import {
 } from '@stricli/core';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
 import { ensureCommand } from './commands/ensure.js';
+import { identifyCommand } from './commands/identify.js';
 import { iframeCommand } from './commands/iframe.js';
 import { killCommand } from './commands/kill.js';
 import { listPaneSurfacesCommand } from './commands/list-pane-surfaces.js';
@@ -70,6 +71,7 @@ const COMMANDS = [
   killCommand,
   iframeCommand,
   agentBrowserCommand,
+  identifyCommand,
   listPanesCommand,
   listPaneSurfacesCommand,
 ] as const satisfies readonly Command[];
@@ -83,6 +85,7 @@ const ROUTES = {
   kill: killCommand.command,
   iframe: iframeCommand.command,
   'agent-browser': agentBrowserCommand.command,
+  identify: identifyCommand.command,
   'list-panes': listPanesCommand.command,
   'list-pane-surfaces': listPaneSurfacesCommand.command,
 };

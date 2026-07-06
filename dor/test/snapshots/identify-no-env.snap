@@ -1,0 +1,19 @@
+exitCode: 0
+stdout:
+{
+  "caller": null,
+  "cli_js_path": null,
+  "focused": {
+    "is_browser_surface": false,
+    "pane_ref": "pane:1",
+    "surface_ref": "surface:1",
+    "surface_type": "terminal",
+    "window_ref": "window:1",
+    "workspace_ref": "workspace:1"
+  },
+  "host": null,
+  "host_workspace": null,
+  "node_path": null
+}
+
+stderr:

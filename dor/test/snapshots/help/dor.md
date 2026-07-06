@@ -12,6 +12,7 @@ USAGE
   dor kill --surface id|ref|index [--confirm-if-read text|--confirm-dangerously]
   dor iframe [--json] [--minimize] [--surface id|ref|index] <url>
   dor agent-browser [--key name|--session name] [args...]
+  dor identify [--id-format refs|uuids|both]
   dor list-panes [--id-format refs|uuids|both] [--json]
   dor list-pane-surfaces [--id-format refs|uuids|both] [--json] [--pane id|ref|index]
   dor --help
@@ -31,6 +32,7 @@ COMMANDS
   kill                Kill a terminal surface.
   iframe              Open a URL in an iframe surface.
   agent-browser       Drive a browser surface via your agent-browser install (alias: dor ab).
+  identify            Print JSON identifying this terminal within Dormouse.
   list-panes          List visible panes.
   list-pane-surfaces  List surfaces in a pane.
 
