@@ -76,8 +76,11 @@ otherwise split next to the reference surface. `dor iframe` also accepts
 `--surface`, `--minimize`, and `--json`.
 
 Both open the surface **focus-neutrally** (like `dor ensure`): it renders in the
-background and the caller keeps focus — except when replacing the caller's own
-untouched pane, where focus follows to the replacement. `createContentSurface`'s
+background and the caller keeps focus — except when replacing the pane the user
+is currently selected on, where selection follows to the replacement (it would
+otherwise dangle on the removed panel); replacing an active-but-unselected pane
+leaves the user's selection, including a door selection, untouched.
+`createContentSurface`'s
 `focusNeutral` routes through the shared `runSurfaceAdd` helper (see
 `docs/specs/layout.md` corner case #12).
 

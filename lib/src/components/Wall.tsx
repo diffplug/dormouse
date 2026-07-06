@@ -400,20 +400,30 @@ function spawnDirectionForDockview(direction: DockviewSplitDirection): SpawnDire
   return direction === 'above' || direction === 'below' ? 'top' : 'left';
 }
 
-// After a surface-adding op, settle dockview's active group. `caller` is set
-// (by runSurfaceAdd) only on the focus-neutral path: hand the active group back
-// to it so the new pane renders without stealing focus — unless the caller was
-// the pane just replaced in place (it's gone), in which case focus follows to the
-// new surface. Non-focus-neutral adds pass `caller` undefined and select the new
-// pane outright.
+// After a surface-adding op, settle focus and selection; returns whether it
+// selected the new surface. A non-focus-neutral add selects the new pane
+// outright. A focus-neutral add hands the active group back to `caller` (the
+// active pane at entry) so the new pane renders without the active group
+// wandering — this is purely a dockview-activation concern. Dormouse selection
+// then moves onto the new surface only when the op replaced the pane the user
+// was actually selected on (`selectionReplaced`); otherwise the user's
+// selection would dangle on a removed panel. Selection policy is deliberately
+// keyed on the user's selection, not on whether the captured `caller`
+// (activePanel) survived: activePanel can diverge from selection (e.g. a `dor`
+// op replacing an active-but-unselected pane while the user has a door
+// selected).
 function settleFocusAfterAdd(
   api: DockviewApi,
+  focusNeutral: boolean,
   caller: IDockviewPanel | undefined,
+  selectionReplaced: boolean,
   newId: string,
   selectPane: (id: string) => void,
-): void {
+): boolean {
+  if (!focusNeutral) { selectPane(newId); return true; }
   if (caller && api.getPanel(caller.id)) caller.api.setActive();
-  else selectPane(newId);
+  if (selectionReplaced) { selectPane(newId); return true; }
+  return false;
 }
 
 /**
@@ -983,8 +993,10 @@ export function Wall({
   // is: dockview renders a pane only once it becomes its group's active panel, so
   // `add` must activate the new pane and the onDidActivePanelChange listener would
   // follow it — we suppress that listener for the duration and pass `add` the caller
-  // panel (the active pane at entry) so it can hand activation straight back (via
-  // settleFocusAfterAdd). Adding the pane re-parents the caller's grid subtree,
+  // panel (the active pane at entry) purely as the activation hand-back target (via
+  // settleFocusAfterAdd, which reactivates it); selection policy is decided
+  // separately there from the user's selection (selectionReplaced), not the caller.
+  // Adding the pane re-parents the caller's grid subtree,
   // blurring its focus; since selection never moved, TerminalPane's effect won't
   // reclaim it, so we re-assert focus here — deferred past dockview's own post-split
   // focus handling, and only while the caller is still the selected pane in
@@ -1085,7 +1097,7 @@ export function Wall({
         title: UNNAMED_PANEL_TITLE,
         position: { referencePanel: referencePanel.id, direction: dockDirection },
       });
-      settleFocusAfterAdd(api, caller, newId, selectPane);
+      const selectedNew = settleFocusAfterAdd(api, !!focusNeutral, caller, false, newId, selectPane);
       onEventRef.current?.({
         type: 'split',
         direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
@@ -1093,7 +1105,7 @@ export function Wall({
       });
       if (minimized) {
         getOrCreateTerminal(newId);
-        minimizePane(newId, { select: !focusNeutral });
+        minimizePane(newId, { select: selectedNew });
       }
     });
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId) } };
@@ -1135,6 +1147,8 @@ export function Wall({
     const replaceUntouchedTerminal = reference.type === 'terminal' && isUntouched(reference.id);
 
     if (replaceUntouchedTerminal) {
+      // Whether the user's current selection sits on the pane being replaced.
+      const selectionReplaced = selectedTypeRef.current === 'pane' && selectedIdRef.current === reference.id;
       runSurfaceAdd(focusNeutral, (caller) => {
         api.addPanel({
           id: newId,
@@ -1150,15 +1164,14 @@ export function Wall({
         });
         disposeSession(reference.id);
         api.removePanel(referencePanel);
-        // Replacing the caller's own pane removes it, so settleFocusAfterAdd
-        // falls through to select the new surface (selectedType='pane').
-        settleFocusAfterAdd(api, caller, newId, selectPane);
-        // In that case a minimize must move selection onto the resulting door
-        // rather than leave selectedType='pane' pointing at a door id (the
-        // overlay would keep a stale rect). Otherwise the caller kept focus, so
-        // the door stays unselected as elsewhere.
-        const callerReplaced = !caller || !api.getPanel(caller.id);
-        if (minimized) minimizePane(newId, { select: !focusNeutral || callerReplaced });
+        // Replacing the pane the user is selected on forces selection onto the
+        // replacement (settleFocusAfterAdd selects it); replacing any other pane
+        // leaves the user's selection — including a door selection — untouched.
+        const selectedNew = settleFocusAfterAdd(api, !!focusNeutral, caller, selectionReplaced, newId, selectPane);
+        // When we did move selection onto the new pane, a minimize must carry it
+        // onto the resulting door rather than leave selectedType='pane' pointing
+        // at a door id (the overlay would keep a stale rect).
+        if (minimized) minimizePane(newId, { select: selectedNew });
       });
       return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'replaced' } };
     }
@@ -1175,13 +1188,13 @@ export function Wall({
         renderer,
         position: { referencePanel: referencePanel.id, direction: dockDirection },
       });
-      settleFocusAfterAdd(api, caller, newId, selectPane);
+      const selectedNew = settleFocusAfterAdd(api, !!focusNeutral, caller, false, newId, selectPane);
       onEventRef.current?.({
         type: 'split',
         direction: dockDirection === 'right' ? 'horizontal' : 'vertical',
         source: 'dor',
       });
-      if (minimized) minimizePane(newId, { select: !focusNeutral });
+      if (minimized) minimizePane(newId, { select: selectedNew });
     });
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'created' } };
   }, [runSurfaceAdd, generatePaneId, minimizePane, selectPane, surfaceRefForId]);
