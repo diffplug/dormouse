@@ -323,6 +323,17 @@ test('version output', async () => {
   );
 });
 
+test('--version and -v alias the version command', async () => {
+  const versionMetadata = { version: '0.12.0', commit: '6e86b3ba', commitsSinceVersion: 89 };
+  const expected = await runCli(['version'], { versionMetadata });
+  for (const flag of ['--version', '-v']) {
+    const actual = await runCli([flag], { versionMetadata });
+    assert.equal(actual.stdout, expected.stdout, `${flag} should print the version`);
+    assert.equal(actual.exitCode, 0, `${flag} should exit 0`);
+    assert.equal(actual.stderr, '', `${flag} should not error`);
+  }
+});
+
 test('send text output', async () => {
   await snapshot(
     'send-text',

@@ -130,7 +130,7 @@ interface CaptureProcess extends StricliProcess {
 }
 
 export async function runCli(rawArgv: string[], options: CliOptions = {}): Promise<CliResult> {
-  const argv = normalizeAgentBrowserAlias(rawArgv);
+  const argv = normalizeAgentBrowserAlias(normalizeVersionAlias(rawArgv));
 
   // `dor ab <args...>` forwards args verbatim to agent-browser, so they must
   // never reach stricli's flag parser. Only a bare `--help`/`-h` (or
@@ -161,6 +161,16 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
     stdout: applyHelpPatches(capture.stdout(), helpTarget),
     stderr: capture.stderr(),
   };
+}
+
+/** Map a bare top-level `--version`/`-v` to the `version` command, as most CLIs
+ * accept it (dor has no conflicting `-v`). Only the sole-argument form is
+ * rewritten; a trailing `--version` on a subcommand stays that command's concern. */
+function normalizeVersionAlias(argv: string[]): string[] {
+  if (argv.length === 1 && (argv[0] === '--version' || argv[0] === '-v')) {
+    return ['version'];
+  }
+  return argv;
 }
 
 /** `ab` is the documented short alias for `agent-browser`, in any help form. */
