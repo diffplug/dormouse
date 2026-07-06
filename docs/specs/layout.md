@@ -368,7 +368,7 @@ Shell-selection replacement uses the same pane add/remove primitives but also sh
 
 Case handling is purely rect-based (measure before and after removal), so 2-pane splits, linear 3+ rows/columns, and nested splits all fall through the same code path with no per-case branching.
 
-Selection tail: after removal, `orchestrateKill` moves selection to a survivor (`panels[0]`, or `null` → auto-spawn when the last pane goes) **only when `wasSelected`** — the killed pane was the selected one. `killPaneImmediately` computes `wasSelected = selectedId === killedId`, so killing a background surface (`dor kill surface:3`, or the header kill button on an unselected pane) leaves the user's selection untouched.
+Selection tail: after removal, `orchestrateKill` moves selection to a survivor (`panels[0]`, or `null` → auto-spawn when the last pane goes) **only when `wasSelected`** — the killed pane was the selected one. `killPaneImmediately` computes `wasSelected = selectedId === killedId`, so killing a background surface leaves the user's selection untouched. The header kill button cannot produce an unselected kill: dockview activates the pane on pointerdown (`doSetGroupActive`) before the button's click handler runs, so mouse kills are always selected-pane kills. The `wasSelected=false` cases are `dor kill` of a background surface (`dor kill surface:3`) and ensure's throwaway teardown.
 
 ### Auto-spawn delay
 

@@ -706,7 +706,9 @@ export function Wall({
     // screen registration). A safe no-op for iframe/terminal surfaces.
     disposeAgentBrowserSurfaceController(id);
     // Only a kill of the selected pane should move selection; `dor kill` of a
-    // background surface (or the header button on an unselected pane) leaves it.
+    // background surface (and ensure's throwaway teardown) leaves it. Mouse kills
+    // always arrive selected — clicking a pane header activates it (dockview's
+    // pointerdown) before the kill button's click handler runs.
     const wasSelected = selectedIdRef.current === id;
     // removePanel can collapse a branch, re-parenting + blurring the survivor. If
     // selection is unchanged (background kill), TerminalPane's effect won't heal it,
@@ -1196,22 +1198,24 @@ export function Wall({
     const newId = generatePaneId();
     const replaceUntouchedTerminal = reference.type === 'terminal' && isUntouched(reference.id);
 
+    // Shared panel spec for both paths; they differ only in position.direction.
+    const panelSpec = {
+      id: newId,
+      component,
+      tabComponent: 'surface',
+      title,
+      params,
+      // Keep iframes mounted across (de)activation — dockview's default
+      // onlyWhenVisible renderer detaches/reattaches panel DOM, and moving an
+      // <iframe> in the DOM reloads it (docs/specs/dor-browser.md).
+      renderer,
+    } as const;
+
     if (replaceUntouchedTerminal) {
       // Whether the user's current selection sits on the pane being replaced.
       const selectionReplaced = selectedTypeRef.current === 'pane' && selectedIdRef.current === reference.id;
       runSurfaceAdd(focusNeutral, (caller) => {
-        api.addPanel({
-          id: newId,
-          component,
-          tabComponent: 'surface',
-          title,
-          params,
-          // Keep iframes mounted across (de)activation — dockview's default
-          // onlyWhenVisible renderer detaches/reattaches panel DOM, and moving an
-          // <iframe> in the DOM reloads it (docs/specs/dor-browser.md).
-          renderer,
-          position: { referencePanel: referencePanel.id, direction: 'within' },
-        });
+        api.addPanel({ ...panelSpec, position: { referencePanel: referencePanel.id, direction: 'within' } });
         disposeSession(reference.id);
         api.removePanel(referencePanel);
         // Replacing the pane the user is selected on forces selection onto the
@@ -1229,15 +1233,7 @@ export function Wall({
     const dockDirection = pickSplitDirection(referencePanel);
     freshlySpawnedRef.current.set(newId, dockDirection === 'below' ? 'top' : 'left');
     runSurfaceAdd(focusNeutral, (caller) => {
-      api.addPanel({
-        id: newId,
-        component,
-        tabComponent: 'surface',
-        title,
-        params,
-        renderer,
-        position: { referencePanel: referencePanel.id, direction: dockDirection },
-      });
+      api.addPanel({ ...panelSpec, position: { referencePanel: referencePanel.id, direction: dockDirection } });
       const selectedNew = settleFocusAfterAdd(api, !!focusNeutral, caller, false, newId, selectPane);
       onEventRef.current?.({
         type: 'split',

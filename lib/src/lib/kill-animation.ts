@@ -12,9 +12,11 @@ import { prefersReducedMotion } from './ui-geometry';
  * stacks two 440ms waits.
  *
  * wasSelected says whether the killed pane was the selected one. Only then does
- * the selection move to a survivor; killing a background surface (e.g. `dor kill
- * surface:3`, or the header kill button on an unselected pane) leaves selection
- * where the user left it.
+ * the selection move to a survivor; killing a background surface leaves selection
+ * where the user left it. Mouse kills always arrive selected — clicking a pane
+ * header activates it (dockview's pointerdown → doSetGroupActive) before the kill
+ * button's click handler runs — so the wasSelected=false case comes only from CLI
+ * kills (`dor kill surface:3`) and ensure's throwaway teardown.
  *
  * onRemoved runs once, on every path, immediately after removePanel: collapsing a
  * branch can re-parent the surviving selected pane's subtree and blur it, so the
@@ -69,7 +71,10 @@ export function orchestrateKill(
   const fadeAnimationName = isLastPane ? 'pane-fade-and-shrink-to-br' : 'pane-fade-out';
   killedGroupEl.style.pointerEvents = 'none';
   killedGroupEl.classList.add(fadeClass);
-  const overlayEl = isLastPane ? overlayElRef.current : null;
+  // The overlay renders the *current* selection's ring. On an unselected kill
+  // that selection (e.g. a surviving door) is not the killed pane, so its ring
+  // must not shrink away — only claim the overlay when the killed pane was it.
+  const overlayEl = isLastPane && wasSelected ? overlayElRef.current : null;
   if (overlayEl) overlayEl.classList.add('ring-shrinking-to-br');
 
   let finalized = false;

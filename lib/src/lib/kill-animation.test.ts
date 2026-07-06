@@ -76,6 +76,8 @@ function dispatchAnimationEnd(el: HTMLElement, animationName: string): void {
 
 // Non-last-pane fade animation name; matched by the animationend handler.
 const FADE = 'pane-fade-out';
+// Last-pane fade animation name; the only remaining pane shrinks toward BR.
+const FADE_LAST = 'pane-fade-and-shrink-to-br';
 
 describe('orchestrateKill', () => {
   beforeEach(() => {
@@ -193,6 +195,43 @@ describe('orchestrateKill', () => {
     expect(setSelectedId).not.toHaveBeenCalled();
     // onRemoved runs before the selection gate, so a background kill still heals focus.
     expect(onRemoved).toHaveBeenCalledTimes(1);
+  });
+
+  it('last-pane kill with wasSelected=false never shrinks the overlay ring', () => {
+    // Only 'a' remains, so isLastPane is true. The overlay renders the current
+    // selection's ring; here the user's selection sits on a surviving door, so an
+    // unselected last-pane kill must leave that ring alone.
+    const { api, elementOf } = makeApi(['a']);
+    const killedEl = elementOf('a');
+    const overlayEl = document.createElement('div');
+    const selectPane = vi.fn();
+    const setSelectedId = vi.fn();
+    const killInProgressRef = { current: false };
+
+    orchestrateKill(api, 'a', false, selectPane, setSelectedId, killInProgressRef, { current: overlayEl });
+    // Not added during the fade...
+    expect(overlayEl.classList.contains('ring-shrinking-to-br')).toBe(false);
+
+    dispatchAnimationEnd(killedEl, FADE_LAST);
+    // ...nor left behind after finalize.
+    expect(overlayEl.classList.contains('ring-shrinking-to-br')).toBe(false);
+  });
+
+  it('last-pane kill with wasSelected=true shrinks the overlay ring, then peels it', () => {
+    const { api, elementOf } = makeApi(['a']);
+    const killedEl = elementOf('a');
+    const overlayEl = document.createElement('div');
+    const selectPane = vi.fn();
+    const setSelectedId = vi.fn();
+    const killInProgressRef = { current: false };
+
+    // The killed pane owned the selection, so its ring shrinks during the fade.
+    orchestrateKill(api, 'a', true, selectPane, setSelectedId, killInProgressRef, { current: overlayEl });
+    expect(overlayEl.classList.contains('ring-shrinking-to-br')).toBe(true);
+
+    // finalize peels the class so a reused overlay doesn't render at scale 0.
+    dispatchAnimationEnd(killedEl, FADE_LAST);
+    expect(overlayEl.classList.contains('ring-shrinking-to-br')).toBe(false);
   });
 
   it('reduced-motion sync path removes the panel synchronously', () => {
