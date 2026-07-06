@@ -793,7 +793,12 @@ export function Wall({
       .map(p => p.id)
       .sort();
 
-    api.removePanel(panel);
+    // The removal's survivor-activation echo is not user intent — selection is
+    // settled explicitly right after (selectDoor on the user path; the
+    // focus-neutral `--minimize` path leaves selection per its `select: false`).
+    withProgrammaticActivation(programmaticActivationRef, () => {
+      api.removePanel(panel);
+    });
     clearSessionAttention(id);
     const layoutAtMinimizeSignature = getLayoutStructureSignature(api.toJSON());
     const nextDoors = [...doorsRef.current, {
@@ -901,9 +906,9 @@ export function Wall({
 
     // Reattach mutations (the exact-layout fromJSON restore or the addPanel
     // fallbacks) activate a pane as a side effect; selection is established
-    // explicitly right after (selectPane / enterTerminalMode below), and
-    // previously only the door guard absorbed these activation echoes. Tag them
-    // so the neutralization is explicit rather than incidental.
+    // explicitly right after (selectPane / enterTerminalMode below). Tag them so
+    // the listener treats the echo as programmatic — with the door guard gone,
+    // this tag is the only thing keeping the echo from reading as user intent.
     withProgrammaticActivation(programmaticActivationRef, () => {
       if (canReattachExactLayout) {
         const currentTitles = new Map(

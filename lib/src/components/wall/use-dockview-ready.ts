@@ -150,19 +150,21 @@ export function useDockviewReady({
     });
 
     e.api.onDidActivePanelChange((panel) => {
-      if (panel) {
-        // A programmatic add-side mutation is mid-flight (focus-neutral create,
-        // etc.): it briefly activates the new pane so dockview renders it, then
-        // hands activation back to the caller. That activation churn is not user
-        // intent, so selection/mode stay put — see programmatic-activation.ts.
-        if (programmaticActivationRef.current > 0) return;
-        if (selectedTypeRef.current === 'door') return;
-        if (modeRef.current === 'passthrough' && selectedIdRef.current !== panel.id) {
-          enterTerminalModeRef.current(panel.id);
-          return;
-        }
-        setSelectedId(panel.id);
+      if (!panel) return;
+      // A tagged mutation is mid-flight; its caller applies selection policy
+      // explicitly at the mutation site (see programmatic-activation.ts).
+      if (programmaticActivationRef.current > 0) return;
+      // Every untagged activation is a dockview-native user interaction that the
+      // React click handlers don't cover — a panel drag, or DOM focus landing in
+      // a surface (an embed focusing itself adopts like a click). Adopt it through
+      // the real dispatchers so the (kind, id) selection pair stays consistent;
+      // never a bare setSelectedId, which can shear the pair (a door-type id
+      // pointing at a pane was corner case #11's desync).
+      if (modeRef.current === 'passthrough') {
+        if (selectedIdRef.current !== panel.id) enterTerminalModeRef.current(panel.id);
+        return;
       }
+      selectPane(panel.id);
     });
 
     e.api.onDidRemovePanel(() => {
