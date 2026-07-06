@@ -360,7 +360,7 @@ function getBundledRuntimeDependencies() {
   const nodeVersion = String(pkg?.devEngines?.runtime?.version ?? "").trim().replace(/^v/, "");
   if (!/^\d+\.\d+\.\d+$/.test(nodeVersion)) {
     console.error(
-      `ERROR: package.json devEngines.runtime.version must pin an exact Node.js version (e.g. 22.17.1), found "${nodeVersion}"`,
+      `ERROR: package.json devEngines.runtime.version must pin an exact Node.js version (e.g. 24.18.0), found "${nodeVersion}"`,
     );
     process.exit(1);
   }
