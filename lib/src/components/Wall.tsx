@@ -673,8 +673,34 @@ export function Wall({
 
   const killPaneImmediately = useCallback((id: string) => {
     const api = apiRef.current;
-    const panel = api?.getPanel(id);
-    if (!api || !panel) return;
+    if (!api) return;
+    const panel = api.getPanel(id);
+    if (!panel) {
+      // A doored surface has no dockview panel but still owns a live session
+      // (its PTY keeps running). `dor ensure --minimize`'s integration-timeout
+      // teardown lands here: the throwaway was created straight into a door.
+      const door = doorsRef.current.find(d => d.id === id);
+      if (!door) return;
+      closeAgentBrowserSession(door.params);
+      disposeAgentBrowserSurfaceController(id);
+      // Dispose the session/registry entry — this stops the PTY and makes a
+      // still-armed typeCommandWhenPromptReady exit via its `!registry.has(id)`
+      // check, so a late OSC signal can't type the command into a dead surface.
+      disposeSession(id);
+      const nextDoors = doorsRef.current.filter(d => d.id !== id);
+      doorsRef.current = nextDoors;
+      setDoors(nextDoors);
+      // Guard: no current caller kills a selected door (ensure's throwaway is
+      // never selected), but if one did, fall back to the active pane.
+      if (selectedIdRef.current === id && selectedTypeRef.current === 'door') {
+        const active = api.activePanel;
+        if (active) selectPane(active.id);
+        else setSelectedId(null);
+      }
+      clearLocalSurfaceActivity(id);
+      fireEvent({ type: 'kill', id });
+      return;
+    }
     closeAgentBrowserSession(panel.params);
     // Release the surface's client-side controller (connection, loops, timers,
     // screen registration). A safe no-op for iframe/terminal surfaces.
@@ -1527,8 +1553,9 @@ export function Wall({
         if (!integrated) {
           // Tear down the throwaway split. The focus-neutral create never selected
           // it, so killPaneImmediately's wasSelected gate leaves the caller's
-          // selection where ensure found it. (A `--minimize` create already made it
-          // a door with no panel; killPaneImmediately no-ops there, leaving it.)
+          // selection where ensure found it. A `--minimize` create is already a
+          // door; killPaneImmediately tears the door down too — disposing the
+          // session and removing it from the baseboard.
           killPaneImmediately(result.value.id);
           detail.respond({ ok: false, error: missingIntegrationError(ensureShell) });
           return;
