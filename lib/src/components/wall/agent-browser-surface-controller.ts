@@ -10,7 +10,7 @@
  *
  * Lifetime (deliberately surface-scoped, not panel-scoped):
  *   - created on first panel mount (`acquire…`),
- *   - SURVIVES unmount (minimize, dockview layout churn, React StrictMode) —
+ *   - SURVIVES unmount (minimize, layout churn, React StrictMode) —
  *     minimize no longer synchronously disposes the connection; the
  *     detach-as-hidden park (1s debounce) tears it down, reaching the same
  *     zero-resource end state with less thrash,
@@ -52,8 +52,8 @@ import {
 } from './agent-browser-connection';
 
 // A hidden-but-mounted (or detached) pane parks after this delay rather than
-// immediately, so flipping quickly between dockview tabs — or a StrictMode
-// unmount→remount — doesn't tear down and rebuild the stream connection.
+// immediately, so quick visibility flips — or a StrictMode unmount→remount —
+// don't tear down and rebuild the stream connection.
 export const HIDDEN_PARK_DELAY_MS = 1000;
 
 // The high-rate `[ab-panel]` stream/screenshot diagnostics fire per frame
@@ -147,7 +147,7 @@ export interface AgentBrowserViewSink {
   /** The content area — observed for resize and read for pane rect / pop-out
    *  positioning. */
   viewport: HTMLElement;
-  /** Persist a param write into the dockview layout blob. */
+  /** Persist a param write into the surface's engine metadata. */
   updateParameters(params: Record<string, unknown>): void;
   /** Set the persisted panel title (door labels / session save). */
   setTitle(title: string): void;
@@ -252,7 +252,7 @@ export class AgentBrowserSurfaceController {
 
   // --- canonical URL tracking ---
   // The newest non-blank active-tab URL observed from the live stream. Kept
-  // separate from paramsUrl: Dockview param writes can lag a tab message, but
+  // separate from paramsUrl: engine param writes can lag a tab message, but
   // pop-in/auto-revert must carry the page the user just navigated to.
   private latestRestorableUrl: string | undefined;
 
@@ -962,7 +962,7 @@ export class AgentBrowserSurfaceController {
   private setSyncEngaged(syncEngaged: boolean): void {
     if (this.syncEngaged === syncEngaged) return;
     this.syncEngaged = syncEngaged;
-    // Persist so it round-trips through the dockview layout blob; skip no-ops.
+    // Persist so it round-trips through the persisted layout; skip no-ops.
     if (this.paramsSyncEngaged !== syncEngaged) {
       this.paramsSyncEngaged = syncEngaged;
       this.writeParams({ syncEngaged });
@@ -1093,8 +1093,8 @@ export class AgentBrowserSurfaceController {
   // Push the current pane size to the browser as a native `set viewport`.
   private issueSyncToPane(): void {
     // A parked (hidden) pane must not drive the browser viewport: its rect can be
-    // degenerate depending on how dockview hides it. The unpark path reconciles
-    // any resize that happened while parked.
+    // degenerate while hidden. The unpark path reconciles any resize that happened
+    // while parked.
     if (this.parked) return;
     // A popped-out surface is a real headed OS window the user drives directly;
     // never force its viewport to the (now-stub) pane size. Sync resumes when it

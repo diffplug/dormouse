@@ -26,6 +26,9 @@ const fakePlatform = initPlatform('fake');
 if (window?.navigator?.userAgent?.includes('Chromatic')) {
   cfg.marchingAnts.paused = true;
   cfg.alert.ringingPaused = true;
+  // A blinking cursor is captured on-or-off depending on the frame; freeze it to a
+  // stable solid block so the terminal contributes no non-determinism.
+  cfg.terminal.cursorBlink = false;
 }
 
 // Collect all CSS variable names across all themes for cleanup

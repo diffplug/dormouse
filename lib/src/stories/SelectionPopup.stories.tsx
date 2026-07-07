@@ -11,9 +11,10 @@ import {
   unmountElement,
 } from '../lib/terminal-registry';
 import { flattenScenario, SCENARIO_LS_OUTPUT } from '../lib/platform';
-import { setSelection, type Selection } from '../lib/mouse-selection';
+import { getMouseSelectionState, setSelection, type Selection } from '../lib/mouse-selection';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../components/design';
 import { TouchUiContext } from '../components/touch-ui-context';
+import { settleTerminals, waitForCondition } from './settle-terminals';
 
 function SelectionPopupStory({
   id,
@@ -87,6 +88,12 @@ const meta: Meta<typeof SelectionPopupStory> = {
   component: SelectionPopupStory,
   parameters: {
     fakePty: { scenario: flattenScenario(SCENARIO_LS_OUTPUT) },
+  },
+  // Hold the snapshot until the terminal has painted AND the story's own timer has
+  // applied the selection (which is what reveals the copy popup).
+  play: async ({ args }) => {
+    await settleTerminals();
+    await waitForCondition(() => getMouseSelectionState(args.id).selection !== null);
   },
 };
 

@@ -18,9 +18,13 @@ export interface BaseboardProps {
   items: DooredItem[];
   onReattach: (item: DooredItem) => void;
   notice?: ReactNode;
+  /** A visible Door received a primary-button press (drag-out): the item + the press
+   *  point, so the Wall can start LathHost's threshold-gated external drag. Absent
+   *  (constrained embedders without a Wall) leaves Doors click-only. */
+  onDoorDragStart?: (item: DooredItem, press: { clientX: number; clientY: number }) => void;
 }
 
-export function Baseboard({ items, onReattach, notice }: BaseboardProps) {
+export function Baseboard({ items, onReattach, notice, onDoorDragStart }: BaseboardProps) {
   const { elements: doorElements, bumpVersion } = useContext(DoorElementsContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
@@ -197,6 +201,7 @@ export function Baseboard({ items, onReattach, notice }: BaseboardProps) {
             status={activity.status}
             todo={activity.todo}
             onClick={() => onReattach(item)}
+            onDragPress={onDoorDragStart ? (press) => onDoorDragStart(item, press) : undefined}
           />
         );
       })}

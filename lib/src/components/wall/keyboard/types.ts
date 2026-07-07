@@ -1,13 +1,28 @@
 import type { Dispatch, RefObject, SetStateAction } from 'react';
-import type { DockviewApi } from 'dockview-react';
 import type { ConfirmKill } from '../../KillConfirm';
 import type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind } from '../wall-types';
 import type { WallActions } from '../wall-context';
 
+/** The navigation/query seam the keyboard handlers read, backed by the Lath engine
+ *  (docs/specs/tiling-engine.md). */
+export interface WallNav {
+  /** Nearest pane id in the arrow's direction, or null. */
+  findInDirection(id: string, dir: 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown'): string | null;
+  /** A visible pane's params (surface-type classification), or undefined. */
+  paneParams(id: string): Record<string, unknown> | undefined;
+  /** Whether `id` is a live visible pane. */
+  hasPane(id: string): boolean;
+  /** Visible pane ids in order (Lath: pre-order leaves). */
+  panes(): string[];
+}
+
 /** Refs + callbacks shared by every keyboard branch. Bundled to avoid 25-arg
  *  signatures on each handler. */
 export interface WallKeyboardCtx {
-  apiRef: RefObject<DockviewApi | null>;
+  nav: WallNav;
+  /** Swap two panes' surfaces (Cmd-Arrow): swap leaf identities (meta follows ids,
+   *  so no companion title swap). */
+  swapWithNeighbor: (fromId: string, toId: string) => void;
   modeRef: RefObject<WallMode>;
   selectedIdRef: RefObject<string | null>;
   selectedTypeRef: RefObject<WallSelectionKind>;
@@ -15,9 +30,6 @@ export interface WallKeyboardCtx {
   confirmKillRef: RefObject<ConfirmKill | null>;
   renamingRef: RefObject<string | null>;
   dialogKeyboardActiveRef: RefObject<boolean>;
-  paneElements: Map<string, HTMLElement>;
-  killInProgressRef: RefObject<boolean>;
-  overlayElRef: RefObject<HTMLDivElement | null>;
   wallActionsRef: RefObject<WallActions>;
   handleReattachRef: RefObject<(item: DooredItem, options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction }) => void>;
   selectPane: (id: string) => void;
@@ -30,7 +42,6 @@ export interface WallKeyboardCtx {
   rejectKill: () => void;
   setConfirmKill: Dispatch<SetStateAction<ConfirmKill | null>>;
   setRenamingPaneId: Dispatch<SetStateAction<string | null>>;
-  setSelectedId: Dispatch<SetStateAction<string | null>>;
   fireEvent: (event: WallEvent) => void;
 }
 

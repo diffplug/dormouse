@@ -9,7 +9,6 @@ const terminalRegistryMocks = vi.hoisted(() => ({
   dismissOrToggleAlert: vi.fn(),
   getActivity: vi.fn(() => ({ status: 'WATCHING_DISABLED' })),
   isUntouched: vi.fn(),
-  swapTerminals: vi.fn(),
   toggleSessionTodo: vi.fn(),
 }));
 
@@ -17,7 +16,6 @@ vi.mock('../../../lib/terminal-registry', () => ({
   dismissOrToggleAlert: terminalRegistryMocks.dismissOrToggleAlert,
   getActivity: terminalRegistryMocks.getActivity,
   isUntouched: terminalRegistryMocks.isUntouched,
-  swapTerminals: terminalRegistryMocks.swapTerminals,
   toggleSessionTodo: terminalRegistryMocks.toggleSessionTodo,
 }));
 
@@ -25,15 +23,25 @@ vi.mock('../../KillConfirm', () => ({
   randomKillChar: () => 'Q',
 }));
 
+function makeNav(overrides: Partial<WallKeyboardCtx['nav']> = {}): WallKeyboardCtx['nav'] {
+  return {
+    findInDirection: () => null,
+    paneParams: () => undefined,
+    hasPane: () => false,
+    panes: () => [],
+    ...overrides,
+  };
+}
+
 function makeCtx(overrides: Partial<WallKeyboardCtx> = {}): WallKeyboardCtx {
   return {
-    apiRef: { current: {} },
+    nav: makeNav(),
+    swapWithNeighbor: vi.fn(),
     modeRef: { current: 'command' },
     selectedIdRef: { current: 'pane-a' },
     selectedTypeRef: { current: 'pane' },
     doorsRef: { current: [{ id: 'pane-a', title: 'Pane A' }] },
     dialogKeyboardActiveRef: { current: false },
-    paneElements: new Map(),
     wallActionsRef: {
       current: {
         onSplitH: vi.fn(),
@@ -42,6 +50,7 @@ function makeCtx(overrides: Partial<WallKeyboardCtx> = {}): WallKeyboardCtx {
       },
     },
     handleReattachRef: { current: vi.fn() },
+    selectPane: vi.fn(),
     enterTerminalMode: vi.fn(),
     killPaneImmediately: vi.fn(),
     setConfirmKill: vi.fn(),
@@ -53,6 +62,10 @@ function makeCtx(overrides: Partial<WallKeyboardCtx> = {}): WallKeyboardCtx {
 
 function keydown(key: string): KeyboardEvent {
   return new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+}
+
+function keydownMeta(key: string): KeyboardEvent {
+  return new KeyboardEvent('keydown', { key, metaKey: true, bubbles: true, cancelable: true });
 }
 
 describe('handlePaneShortcuts kill behavior', () => {
@@ -111,5 +124,52 @@ describe('handlePaneShortcuts kill behavior', () => {
       { id: 'pane-a', title: 'Pane A' },
       { enterPassthrough: false, afterRestore: 'confirm-kill' },
     );
+  });
+});
+
+describe('handlePaneShortcuts Cmd-Arrow swap (nav seam)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('swaps with the nav-resolved neighbor, fires move, and keeps selection on the moved pane', () => {
+    const ctx = makeCtx({
+      nav: makeNav({ findInDirection: (_id, dir) => (dir === 'ArrowRight' ? 'pane-b' : null) }),
+    });
+    const navHistory = { current: null };
+
+    expect(handlePaneShortcuts(keydownMeta('ArrowRight'), ctx, navHistory)).toBe(true);
+
+    expect(ctx.swapWithNeighbor).toHaveBeenCalledWith('pane-a', 'pane-b');
+    expect(ctx.fireEvent).toHaveBeenCalledWith({ type: 'move', fromId: 'pane-a', toId: 'pane-b' });
+    expect(ctx.selectPane).toHaveBeenCalledWith('pane-a');
+    // Selection stayed on pane-a, so the breadcrumb must record the swap
+    // partner — recording pane-a would make the backtrack a self-swap no-op.
+    expect(navHistory.current).toEqual({ direction: 'ArrowRight', fromId: 'pane-b' });
+  });
+
+  it('backtracks: the opposite Cmd-Arrow swaps back with the pane now in the old slot', () => {
+    const ctx = makeCtx({
+      nav: makeNav({
+        // Spatial nav only resolves the first swap; the backtrack must come
+        // from the breadcrumb, not findInDirection.
+        findInDirection: (_id, dir) => (dir === 'ArrowRight' ? 'pane-b' : null),
+        hasPane: (id) => id === 'pane-b',
+      }),
+    });
+    const navHistory = { current: null };
+
+    expect(handlePaneShortcuts(keydownMeta('ArrowRight'), ctx, navHistory)).toBe(true);
+    expect(handlePaneShortcuts(keydownMeta('ArrowLeft'), ctx, navHistory)).toBe(true);
+
+    expect(ctx.swapWithNeighbor).toHaveBeenNthCalledWith(2, 'pane-a', 'pane-b');
+    expect(ctx.fireEvent).toHaveBeenNthCalledWith(2, { type: 'move', fromId: 'pane-a', toId: 'pane-b' });
+  });
+
+  it('does nothing when nav finds no neighbor in that direction', () => {
+    const ctx = makeCtx({ nav: makeNav({ findInDirection: () => null }) });
+
+    expect(handlePaneShortcuts(keydownMeta('ArrowLeft'), ctx, { current: null })).toBe(true);
+
+    expect(ctx.swapWithNeighbor).not.toHaveBeenCalled();
+    expect(ctx.selectPane).not.toHaveBeenCalled();
   });
 });

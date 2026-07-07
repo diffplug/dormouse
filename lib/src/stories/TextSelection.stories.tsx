@@ -2,8 +2,9 @@ import { useEffect } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { TerminalPane } from '../components/TerminalPane';
 import { flattenScenario, SCENARIO_LS_OUTPUT } from '../lib/platform';
-import { setSelection, type Selection } from '../lib/mouse-selection';
+import { getMouseSelectionState, setSelection, type Selection } from '../lib/mouse-selection';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
+import { settleTerminals, waitForCondition } from './settle-terminals';
 
 /**
  * Wires a programmatic selection state onto a live TerminalPane so we can
@@ -54,6 +55,12 @@ const meta: Meta<typeof TextSelectionStory> = {
   component: TextSelectionStory,
   parameters: {
     fakePty: { scenario: flattenScenario(SCENARIO_LS_OUTPUT) },
+  },
+  // Hold the snapshot until the terminal has painted AND the story's own timer has
+  // applied the selection overlay.
+  play: async ({ args }) => {
+    await settleTerminals();
+    await waitForCondition(() => getMouseSelectionState(args.id).selection !== null);
   },
 };
 

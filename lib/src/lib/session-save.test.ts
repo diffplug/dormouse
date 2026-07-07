@@ -93,11 +93,10 @@ describe('saveSession', () => {
 
     terminalRegistryMocks.getLivePersistedAlertState.mockReturnValue({ status: 'NOTHING_TO_SHOW', todo: true });
 
-    await saveSession(platform, { root: true }, [{ id: 'pane-a', title: 'Pane A' }]);
+    await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
 
     expect(platform.saveState).toHaveBeenCalledWith({
       version: 3,
-      layout: { root: true },
       doors: [],
       panes: [
         expect.objectContaining({
@@ -112,13 +111,12 @@ describe('saveSession', () => {
     const platform = createPlatform(null);
     terminalRegistryMocks.resolveTerminalSessionId.mockReturnValue('pane-b');
 
-    await saveSession(platform, { root: true }, [{ id: 'pane-a', title: 'Pane A' }]);
+    await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
 
     expect(platform.getScrollback).toHaveBeenCalledWith('pane-b');
     expect(platform.getCwd).toHaveBeenCalledWith('pane-b');
     expect(platform.saveState).toHaveBeenCalledWith({
       version: 3,
-      layout: { root: true },
       doors: [],
       panes: [
         expect.objectContaining({
@@ -133,7 +131,7 @@ describe('saveSession', () => {
   it('does not persist a derived minimized door label as a user title', async () => {
     const platform = createPlatform(null);
 
-    await saveSession(platform, { root: true }, [], [{
+    await saveSession(platform, [], [{
       id: 'pane-a',
       title: 'npm test',
       neighborId: null,
@@ -145,7 +143,6 @@ describe('saveSession', () => {
 
     expect(platform.saveState).toHaveBeenCalledWith({
       version: 3,
-      layout: { root: true },
       doors: [
         expect.objectContaining({
           id: 'pane-a',
@@ -169,7 +166,7 @@ describe('saveSession', () => {
       },
     });
 
-    await saveSession(platform, { root: true }, [], [{
+    await saveSession(platform, [], [{
       id: 'pane-a',
       title: 'npm test',
       neighborId: null,
@@ -181,7 +178,6 @@ describe('saveSession', () => {
 
     expect(platform.saveState).toHaveBeenCalledWith({
       version: 3,
-      layout: { root: true },
       doors: [
         expect.objectContaining({
           id: 'pane-a',
@@ -201,11 +197,10 @@ describe('saveSession', () => {
     const platform = createPlatform(null);
     terminalRegistryMocks.isUntouched.mockReturnValue(true);
 
-    await saveSession(platform, { root: true }, [{ id: 'pane-a', title: 'Pane A' }]);
+    await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
 
     expect(platform.saveState).toHaveBeenCalledWith({
       version: 3,
-      layout: { root: true },
       doors: [],
       panes: [
         expect.objectContaining({
@@ -219,7 +214,7 @@ describe('saveSession', () => {
   it('records surfaceType only for browser surfaces, leaving terminal panes unmarked', async () => {
     const platform = createPlatform(null);
 
-    await saveSession(platform, { root: true }, [
+    await saveSession(platform, [
       { id: 'pane-term', title: 'Terminal', surfaceType: 'terminal' },
       { id: 'pane-web', title: 'localhost', surfaceType: 'browser' },
     ]);
@@ -238,7 +233,7 @@ describe('saveSession', () => {
   it('records surfaceType browser for a minimized browser door', async () => {
     const platform = createPlatform(null);
 
-    await saveSession(platform, { root: true }, [], [{
+    await saveSession(platform, [], [{
       id: 'door-web',
       title: 'localhost',
       component: 'browser',
@@ -263,7 +258,7 @@ describe('saveSession', () => {
     expect(bigScrollback.length).toBeGreaterThan(PERSISTED_SCROLLBACK_MAX_CHARS);
     vi.mocked(platform.getScrollback).mockResolvedValue(bigScrollback);
 
-    await saveSession(platform, { root: true }, [{ id: 'pane-a', title: 'Pane A' }]);
+    await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
 
     const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
     const pane = saved.panes.find((p) => p.id === 'pane-a')!;
@@ -275,6 +270,46 @@ describe('saveSession', () => {
     expect(pane.resumeCommand).toBe('claude --resume sess_abc');
   });
 
+  it('writes the Lath layout and never a legacy dockview `layout` key', async () => {
+    const platform = createPlatform(null);
+    const lathLayout = { version: 1, tree: { root: { kind: 'leaf', id: 'pane-a' } }, leafMeta: {} };
+
+    await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }], [], lathLayout);
+
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    expect('layout' in saved).toBe(false);
+    expect(saved.lathLayout).toEqual(lathLayout);
+  });
+
+  it('omits lathLayout entirely when not supplied', async () => {
+    const platform = createPlatform(null);
+
+    await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
+
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    expect('lathLayout' in saved).toBe(false);
+    expect('layout' in saved).toBe(false);
+  });
+
+  it('persists a door restore token through to the saved blob', async () => {
+    const platform = createPlatform(null);
+    const token = { leafId: 'door-a', weight: 0.5, siblingId: 'pane-b', edge: 'right', index: 0, fingerprint: null };
+
+    await saveSession(platform, [], [{
+      id: 'door-a',
+      title: 'npm test',
+      neighborId: 'pane-b',
+      direction: 'right',
+      remainingPaneIds: ['pane-b'],
+      layoutAtMinimize: null,
+      layoutAtMinimizeSignature: '',
+      token,
+    }]);
+
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    expect(saved.doors?.[0]?.token).toEqual(token);
+  });
+
   it('persists local browser surface TODO state in the browser pane alert field', async () => {
     const platform = createPlatform(null);
     terminalRegistryMocks.getActivity.mockReturnValue({
@@ -284,7 +319,7 @@ describe('saveSession', () => {
       notification: null,
     });
 
-    await saveSession(platform, { root: true }, [
+    await saveSession(platform, [
       { id: 'pane-web', title: 'localhost', surfaceType: 'browser' },
     ]);
 

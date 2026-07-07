@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
-import type { DockviewApi } from 'dockview-react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
 import { saveSession } from '../../lib/session-save';
@@ -10,21 +9,24 @@ import {
   UNNAMED_PANEL_TITLE,
 } from '../../lib/terminal-registry';
 import { isBrowserParams } from './browser-surface';
+import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, WallSelectionKind } from './wall-types';
 
 export function useSessionPersistence({
-  dockviewApi,
-  apiRef,
+  lath,
   doors,
   doorsRef,
   selectedIdRef,
   selectedTypeRef,
 }: {
-  dockviewApi: DockviewApi | null;
-  apiRef: RefObject<DockviewApi | null>;
-  // The `doors` STATE value, not just `doorsRef`: doors can mutate with no
-  // dockview event (e.g. `dor ensure` refreshing a minimized door's params via
-  // setDoors), so the ref alone can't signal that the persisted blob changed.
+  /** The Lath engine — the layout authority written on every commit, and the source
+   *  of the visible-pane projection (`lath.listPanes()`). Stable identity, so the
+   *  effect never re-subscribes. */
+  lath: LathWallEngine;
+  // The `doors` STATE value, not just `doorsRef`: doors can mutate with no Lath
+  // store commit (e.g. `dor ensure` refreshing a minimized door's params via
+  // setDoors), so the store subscription alone can't signal that the persisted
+  // blob changed.
   doors: DooredItem[];
   doorsRef: RefObject<DooredItem[]>;
   selectedIdRef: RefObject<string | null>;
@@ -37,16 +39,15 @@ export function useSessionPersistence({
   const trackerRef = useRef(createSessionDirtyTracker());
 
   const doSave = useCallback((): Promise<void> => {
-    const api = apiRef.current;
-    if (!api) return Promise.resolve();
-
-    const panes = api.panels.map((p) => ({
+    const panes = lath.listPanes().map((p) => ({
       id: p.id,
       title: p.title ?? UNNAMED_PANEL_TITLE,
       surfaceType: isBrowserParams(p.params) ? ('browser' as const) : ('terminal' as const),
     }));
-    return saveSession(getPlatform(), api.toJSON(), panes, doorsRef.current ?? []);
-  }, [apiRef, doorsRef]);
+    const doors = doorsRef.current ?? [];
+    // The Lath tree is the sole persisted layout; doors ride through with their tokens.
+    return saveSession(getPlatform(), panes, doors, lath.serializeLayout());
+  }, [lath, doorsRef]);
 
   const persistSessionNow = useCallback(async (): Promise<void> => {
     const runSave = (): Promise<void> => {
@@ -82,7 +83,7 @@ export function useSessionPersistence({
     }
   }, [doSave]);
 
-  // Doors mutate without any dockview event (setDoors from minimize/reattach or
+  // Doors mutate without any Lath store commit (setDoors from minimize/reattach or
   // `dor ensure` param refresh), so mark dirty whenever the state array changes.
   useEffect(() => {
     trackerRef.current.markDirty();
@@ -108,15 +109,11 @@ export function useSessionPersistence({
   }, [persistSessionNow]);
 
   useEffect(() => {
-    if (!dockviewApi) return;
-
     const platform = getPlatform();
     const { markDirty, isDirty } = trackerRef.current;
 
     const handlePtyExit = (detail: { id: string }) => {
-      const api = apiRef.current;
-      if (!api) return;
-      const ownsPane = api.panels.some((p) => p.id === detail.id);
+      const ownsPane = lath.listPanes().some((p) => p.id === detail.id);
       if (!ownsPane) return;
       void flushSessionSave().catch(() => undefined);
     };
@@ -131,21 +128,19 @@ export function useSessionPersistence({
       void flushSessionSave().catch(() => undefined);
     };
 
-    const layoutDisposable = dockviewApi.onDidLayoutChange(scheduleSessionSave);
-    const addDisposable = dockviewApi.onDidAddPanel(scheduleSessionSave);
-    const removeDisposable = dockviewApi.onDidRemovePanel(scheduleSessionSave);
+    // One subscription: every store commit (add/remove/resize/swap/meta, including
+    // the active-pane the serialized layout records) schedules a save.
+    const unsubscribeStore = lath.store.subscribe(scheduleSessionSave);
 
     // Content inputs mark dirty but never schedule — the heartbeat persists them
-    // (full rationale: docs/specs/standalone.md §Persistence). Untouched flips
-    // ride the pty echo of the keystroke, not the pane-state store (the registry
-    // mutates silently). onDidActivePanelChange is here because focus flips may
-    // not fire onDidLayoutChange, yet the serialized layout records the active view.
+    // (full rationale: docs/specs/standalone.md §Persistence). Untouched flips ride
+    // the pty echo of the keystroke, not the pane-state store (the registry mutates
+    // silently).
     platform.onPtyData(markDirty);
     const unsubActivity = subscribeToActivity(markDirty);
     const unsubPaneState = subscribeToTerminalPaneState(markDirty);
-    const activePanelDisposable = dockviewApi.onDidActivePanelChange(markDirty);
 
-    // Heartbeat: idle sessions no longer write.
+    // Heartbeat: idle sessions no longer write (only when something marked dirty).
     const interval = setInterval(() => {
       if (isDirty()) scheduleSessionSave();
     }, 30_000);
@@ -158,8 +153,7 @@ export function useSessionPersistence({
       if (paths.length === 0) return;
       const sid = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
       if (!sid) return;
-      const api = apiRef.current;
-      if (!api || !api.panels.some((p) => p.id === sid)) return;
+      if (!lath.listPanes().some((p) => p.id === sid)) return;
       pasteFilePaths(sid, paths);
     });
 
@@ -175,16 +169,12 @@ export function useSessionPersistence({
       platform.offPtyData(markDirty);
       unsubActivity();
       unsubPaneState();
-      activePanelDisposable.dispose();
-      layoutDisposable.dispose();
-      addDisposable.dispose();
-      removeDisposable.dispose();
+      unsubscribeStore();
       clearInterval(interval);
       void persistSessionNow().catch(() => undefined);
     };
   }, [
-    apiRef,
-    dockviewApi,
+    lath,
     flushSessionSave,
     persistSessionNow,
     scheduleSessionSave,

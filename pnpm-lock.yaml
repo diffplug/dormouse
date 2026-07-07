@@ -12,6 +12,49 @@ importers:
         specifier: runtime:24.18.0
         version: runtime:24.18.0
 
+  canopy:
+    dependencies:
+      '@diffplug/xterm-addon-webgl-sdf':
+        specifier: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf288.5/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf288.5.tgz
+        version: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf288.5/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf288.5.tgz
+      '@xterm/addon-webgl':
+        specifier: 0.20.0-beta.287
+        version: 0.20.0-beta.287(@xterm/xterm@6.1.0-beta.288)
+      '@xterm/xterm':
+        specifier: 6.1.0-beta.288
+        version: 6.1.0-beta.288
+      react:
+        specifier: ^19.2.6
+        version: 19.2.7
+      react-dom:
+        specifier: ^19.2.6
+        version: 19.2.7(react@19.2.7)
+    devDependencies:
+      '@storybook/react':
+        specifier: ^10.4.0
+        version: 10.4.6(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(storybook@10.4.6(@testing-library/dom@10.4.1)(@types/react@19.2.17)(prettier@3.9.1)(react@19.2.7))(typescript@6.0.3)
+      '@storybook/react-vite':
+        specifier: ^10.4.0
+        version: 10.4.6(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(esbuild@0.28.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rollup@4.62.2)(storybook@10.4.6(@testing-library/dom@10.4.1)(@types/react@19.2.17)(prettier@3.9.1)(react@19.2.7))(typescript@6.0.3)(vite@8.1.3(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0))
+      '@types/react':
+        specifier: ^19.2.14
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19.2.3
+        version: 19.2.3(@types/react@19.2.17)
+      '@vitejs/plugin-react':
+        specifier: ^6.0.2
+        version: 6.0.3(vite@8.1.3(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0))
+      storybook:
+        specifier: ^10.4.0
+        version: 10.4.6(@testing-library/dom@10.4.1)(@types/react@19.2.17)(prettier@3.9.1)(react@19.2.7)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.3(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)
+
   dor:
     dependencies:
       '@stricli/core':
@@ -58,9 +101,6 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
-      dockview-react:
-        specifier: ^5.1.0
-        version: 5.2.0(react@19.2.7)
       dor-lib-common:
         specifier: workspace:*
         version: link:../dor-lib-common
@@ -174,9 +214,6 @@ importers:
       '@xterm/xterm':
         specifier: 6.1.0-beta.288
         version: 6.1.0-beta.288
-      dockview-react:
-        specifier: ^5.1.0
-        version: 5.2.0(react@19.2.7)
       dormouse-lib:
         specifier: workspace:*
         version: link:../lib
@@ -561,6 +598,10 @@ packages:
   '@csstools/css-tokenizer@4.0.0':
     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
     engines: {node: '>=20.19.0'}
+
+  '@diffplug/xterm-addon-webgl-sdf@https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf288.5/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf288.5.tgz':
+    resolution: {integrity: sha512-oujJxNlDOSHiavXFwpeqA+fhKx/yTjH+MKBwCKoQrJH8KucQ9+MU79RzGz0QhxRsYyHU5IifFHgTHfV6MAbb2g==, tarball: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf288.5/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf288.5.tgz}
+    version: 0.20.0-sdf288.5
 
   '@emnapi/core@1.11.0':
     resolution: {integrity: sha512-l9Oo58x0HOP5znGzVhYW9U3e5wVuA4LAZU2AGezTmkhO1CgQRFDhDg4nneHsu/t3WniXg9QrG2nIXL/ZS8ln8Q==}
@@ -2093,6 +2134,11 @@ packages:
     peerDependencies:
       '@xterm/xterm': ^6.1.0-beta.288
 
+  '@xterm/addon-webgl@0.20.0-beta.287':
+    resolution: {integrity: sha512-ADDuXRHLfhMk3y+BFvaI1ibGCGxPMNRonzH5M/qTUnigsVxdnEMsYODG6pWAYkfDMPoCRBF8Zf/hj0efyEBjzQ==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.288
+
   '@xterm/xterm@6.1.0-beta.288':
     resolution: {integrity: sha512-XLtX5kO0bgvjOEypUtO5xYUykE+vbJuQPuRK2cIx7oBFwlSYXGCVKPC7pvkLOYsfJWqJ9yusIaeJQqJvrYT1kQ==}
 
@@ -2435,17 +2481,6 @@ packages:
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
-
-  dockview-core@5.2.0:
-    resolution: {integrity: sha512-Gib8yhK2Ng7w47ASvbUZ7GdhBYbeXEflbIDxf/vobdQBMrN/QXmPaouSsSSkEx5YH0N8ap8GYljfvqjug7h5Fg==}
-
-  dockview-react@5.2.0:
-    resolution: {integrity: sha512-xJU5EiViiYYoP0ez5KxN8I+5CWSiPC27KVgVJBpRYRYJN6wKjMUpUqqSHwTlN1PGw5OzCu7UGQlUl1RQew74ag==}
-
-  dockview@5.2.0:
-    resolution: {integrity: sha512-Eh+SWt+AydcyeVmYkwP+Yxax0XpYSQfXsc4Rad9k+6QEddkSCn4hcjsdxp9lLsw/CaMy39jHawbDVxPMC4kvTg==}
-    peerDependencies:
-      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
   doctrine@3.0.0:
     resolution: {integrity: sha512-yS+Q5i3hBf7GBkd4KG8a7eBNNWNGLTaEwwYWUijIYM7zrlYDM0BFXHjjPWlWZ1Rg7UaddZeIDmi9jF3HmqiQ2w==}
@@ -4413,6 +4448,8 @@ snapshots:
 
   '@csstools/css-tokenizer@4.0.0': {}
 
+  '@diffplug/xterm-addon-webgl-sdf@https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf288.5/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf288.5.tgz': {}
+
   '@emnapi/core@1.11.0':
     dependencies:
       '@emnapi/wasi-threads': 1.2.2
@@ -5644,6 +5681,10 @@ snapshots:
     dependencies:
       '@xterm/xterm': 6.1.0-beta.288
 
+  '@xterm/addon-webgl@0.20.0-beta.287(@xterm/xterm@6.1.0-beta.288)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.288
+
   '@xterm/xterm@6.1.0-beta.288': {}
 
   acorn@8.17.0: {}
@@ -5967,19 +6008,6 @@ snapshots:
   dequal@2.0.3: {}
 
   detect-libc@2.1.2: {}
-
-  dockview-core@5.2.0: {}
-
-  dockview-react@5.2.0(react@19.2.7):
-    dependencies:
-      dockview: 5.2.0(react@19.2.7)
-    transitivePeerDependencies:
-      - react
-
-  dockview@5.2.0(react@19.2.7):
-    dependencies:
-      dockview-core: 5.2.0
-      react: 19.2.7
 
   doctrine@3.0.0:
     dependencies:

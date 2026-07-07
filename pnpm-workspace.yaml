@@ -1,4 +1,5 @@
 packages:
+  - canopy
   - dor
   - dor-lib-common
   - lib

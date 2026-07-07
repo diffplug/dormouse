@@ -169,10 +169,7 @@ export function PocketTerminalExperience({
       const tutorialState = new TutorialState(POCKET_TUTORIAL_PROFILE.sections);
       tutorialStateRef.current = tutorialState;
       const detector = new TutDetector(tutorialState, registry, mouseSelection);
-      detector.attach({
-        activePanel: { id: POCKET_TUTORIAL_PANE },
-        onDidActivePanelChange: () => ({ dispose: () => {} }),
-      });
+      detector.start();
       detectorRef.current = detector;
       const shellRegistry = new PlaygroundShellRegistry(
         adapter,

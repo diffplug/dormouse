@@ -1,6 +1,5 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { tv } from 'tailwind-variants';
 import {
   ArrowLineDownIcon,
@@ -18,6 +17,7 @@ import { TodoAlertDialog } from '../TodoAlertDialog';
 import { TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
 import { bellIconClass } from '../bell-icon-class';
 import { useTodoPillContent } from '../TodoPillBody';
+import type { PaneProps } from './pane-props';
 import { IllegalRenameWarning, type RenameRejection } from './IllegalRenameWarning';
 import {
   DEFAULT_MOUSE_SELECTION_STATE,
@@ -82,7 +82,7 @@ const TODO_PREVIEW_MARGIN = 8;
 const TITLE_CANDIDATES_GAP = 6;
 const TITLE_CANDIDATES_MARGIN = 8;
 
-export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
+export function TerminalPaneHeader({ id, title }: PaneProps) {
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const renamingId = useContext(RenamingIdContext);
@@ -93,8 +93,8 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
   const mouseStates = useSyncExternalStore(subscribeToMouseSelection, getMouseSelectionSnapshot);
   const actions = useContext(WallActionsContext);
-  const activity = activityStates.get(api.id) ?? DEFAULT_ACTIVITY_STATE;
-  const paneState = terminalStates.get(api.id) ?? createTerminalPaneState();
+  const activity = activityStates.get(id) ?? DEFAULT_ACTIVITY_STATE;
+  const paneState = terminalStates.get(id) ?? createTerminalPaneState();
   const allPaneStates = useMemo(() => [...terminalStates.values()], [terminalStates]);
   const visiblePaneStates = allPaneStates.length > 0 ? allPaneStates : [paneState];
   const appTitleForPane = useMemo(
@@ -102,7 +102,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
     [terminalStates, activityStates],
   );
   const derivedHeader = deriveHeader(paneState, visiblePaneStates, { appTitleForPane });
-  const displayTitle = resolveDisplayPrimary(derivedHeader.primary, api.title);
+  const displayTitle = resolveDisplayPrimary(derivedHeader.primary, title);
   // The failure glyph rides at the end of the title string (so tabs/OS titles
   // carry it too). `lastCommandFailed` tells us authoritatively that it's there,
   // so we can color it red and strip it from the editing/rename base without
@@ -111,7 +111,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
   const displayTitleBase = showsFailGlyph
     ? displayTitle.slice(0, -` ${COMMAND_FAIL_GLYPH}`.length)
     : displayTitle;
-  const mouseState = mouseStates.get(api.id) ?? DEFAULT_MOUSE_SELECTION_STATE;
+  const mouseState = mouseStates.get(id) ?? DEFAULT_MOUSE_SELECTION_STATE;
   const showMouseIcon = mouseState.mouseReporting !== 'none';
   const inOverride = mouseState.override !== 'off';
   const mouseIconTooltip: string | null = mouseState.override === 'permanent'
@@ -120,9 +120,9 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
       ? null
       : 'TUI is intercepting mouse commands. Click to override.';
   const mouseIconAriaLabel = inOverride ? 'Restore mouse capture' : 'Override mouse capture';
-  const isSelected = selectedId === api.id;
+  const isSelected = selectedId === id;
   const isActiveHeader = mode === 'passthrough' && isSelected && windowFocused;
-  const isRenaming = renamingId === api.id;
+  const isRenaming = renamingId === id;
   const tabRef = useRef<HTMLDivElement>(null);
   const suppressAlertClickRef = useRef(false);
   const [tier, setTier] = useState<HeaderTier>('full');
@@ -140,7 +140,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
     ? 'Click to dismiss and show options'
     : 'Right-click for options';
   const todoNotificationPreview = formatNotificationPreview(activity.notification);
-  const todoPreviewId = `todo-notification-preview-${api.id}`;
+  const todoPreviewId = `todo-notification-preview-${id}`;
 
   const closeDialog = useCallback(() => setDialogTriggerRect(null), []);
   const closeTodoPreview = useCallback(() => setTodoPreviewRect(null), []);
@@ -148,24 +148,24 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
   const closeRenameWarning = useCallback(() => setRenameWarning(null), []);
   const submitRename = useCallback((value: string, anchor: HTMLElement) => {
     const rect = anchor.getBoundingClientRect();
-    const result = actions.onFinishRename(api.id, value);
+    const result = actions.onFinishRename(id, value);
     if (!result.accepted) {
       setRenameWarning({ rect, reason: result.reason, value });
     } else {
       setRenameWarning(null);
     }
-  }, [actions, api.id]);
+  }, [actions, id]);
   const openTodoPreview = useCallback((button: HTMLButtonElement) => {
     if (!activity.notification) return;
     setTodoPreviewRect(button.getBoundingClientRect());
   }, [activity.notification]);
 
   const triggerAlertButtonAction = useCallback((displayedStatus: SessionStatus, button: HTMLButtonElement) => {
-    const result = actions.onAlertButton(api.id, displayedStatus);
+    const result = actions.onAlertButton(id, displayedStatus);
     if (result === 'dismissed' || result === 'menu') {
       setDialogTriggerRect(button.getBoundingClientRect());
     }
-  }, [actions, api.id]);
+  }, [actions, id]);
 
   useEffect(() => {
     const el = tabRef.current;
@@ -207,12 +207,12 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
     <div
       ref={tabRef}
       className={tabVariant({ state: isActiveHeader ? 'active' : 'inactive' })}
-      onMouseDown={() => actions.onClickPanel(api.id)}
+      onMouseDown={() => actions.onClickPanel(id)}
     >
       <div className="flex flex-1 min-w-0 items-center gap-1.5 overflow-hidden">
         {isRenaming ? (
           <input
-            data-renaming-input-for={api.id}
+            data-renaming-input-for={id}
             className="bg-transparent outline-none border-none text-inherit font-medium font-mono w-full min-w-0 p-0 m-0"
             defaultValue={displayTitleBase}
             autoFocus
@@ -230,10 +230,10 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
           />
         ) : (
           <span
-            data-title-candidates-for={api.id}
+            data-title-candidates-for={id}
             className="inline-flex max-w-full min-w-0 shrink cursor-text items-baseline overflow-hidden font-medium text-inherit decoration-current/50 underline-offset-2 hover:underline"
             onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); actions.onStartRename(api.id); }}
+            onClick={(e) => { e.stopPropagation(); actions.onStartRename(id); }}
             onContextMenu={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -279,7 +279,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
           tooltip={alertButtonTooltip}
           tooltipDetail={alertButtonTooltipDetail}
           tooltipAlign="left"
-          dataAlertButtonFor={api.id}
+          dataAlertButtonFor={id}
         >
           <span className="flex items-center justify-center">
             {activity.status === 'WATCHING_DISABLED' ? (
@@ -292,7 +292,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
         {showTodoPill && (
           <button
             type="button"
-            data-session-todo-for={api.id}
+            data-session-todo-for={id}
             data-flourishing={todoPill.flourishing ? 'true' : 'false'}
             className={`todo-pill-shell shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10 focus:outline-none`}
             aria-label={todoNotificationPreview ? `Dismiss TODO: ${todoNotificationPreview}` : 'Dismiss TODO'}
@@ -306,7 +306,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
             onClick={(e) => {
               e.stopPropagation();
               closeTodoPreview();
-              clearSessionTodo(api.id);
+              clearSessionTodo(id);
             }}
           >
             {todoPill.body}
@@ -322,7 +322,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setMouseOverride(api.id, inOverride ? 'off' : 'temporary');
+                  setMouseOverride(id, inOverride ? 'off' : 'temporary');
                 }}
                 ariaLabel={mouseIconAriaLabel}
                 tooltip={mouseIconTooltip}
@@ -341,19 +341,19 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
             <div className="ml-1 flex shrink-0 items-center gap-0.5">
               <HeaderActionButton
                 className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-                onClick={(e) => { e.stopPropagation(); actions.onSplitH(api.id); }}
+                onClick={(e) => { e.stopPropagation(); actions.onSplitH(id); }}
                 ariaLabel="Split left/right"
                 tooltip="Split left/right [|] or [%]"
               ><SplitHorizontalIcon size={14} /></HeaderActionButton>
               <HeaderActionButton
                 className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-                onClick={(e) => { e.stopPropagation(); actions.onSplitV(api.id); }}
+                onClick={(e) => { e.stopPropagation(); actions.onSplitV(id); }}
                 ariaLabel="Split top/bottom"
                 tooltip={'Split top/bottom [-] or ["]'}
               ><SplitVerticalIcon size={14} /></HeaderActionButton>
               <HeaderActionButton
                 className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-                onClick={(e) => { e.stopPropagation(); actions.onZoom(api.id); }}
+                onClick={(e) => { e.stopPropagation(); actions.onZoom(id); }}
                 ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
                 tooltip={zoomed ? 'Unzoom [z]' : 'Zoom [z]'}
               >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
@@ -370,13 +370,13 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
           <div className="ml-1 flex shrink-0 items-center gap-0.5">
             <HeaderActionButton
               className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-              onClick={(e) => { e.stopPropagation(); actions.onMinimize(api.id); }}
+              onClick={(e) => { e.stopPropagation(); actions.onMinimize(id); }}
               ariaLabel="Minimize"
               tooltip="Minimize [m] or [d]"
             ><ArrowLineDownIcon size={14} /></HeaderActionButton>
             <HeaderActionButton
               className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-error/10 hover:text-error"
-              onClick={(e) => { e.stopPropagation(); actions.onKill(api.id); }}
+              onClick={(e) => { e.stopPropagation(); actions.onKill(id); }}
               ariaLabel="Kill"
               tooltip="Kill [k] or [x]"
             ><XIcon size={14} /></HeaderActionButton>
@@ -386,7 +386,7 @@ export function TerminalPaneHeader({ api }: IDockviewPanelHeaderProps) {
       {dialogTriggerRect && (
         <TodoAlertDialog
           triggerRect={dialogTriggerRect}
-          sessionId={api.id}
+          sessionId={id}
           onClose={closeDialog}
           onKeyboardActiveChange={setDialogKeyboardActive}
         />

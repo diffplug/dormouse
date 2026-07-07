@@ -183,14 +183,13 @@ function ShellCwdMatrix({
 }
 
 function HeaderPreview({ id, title }: { id: string; title: string }) {
-  const mockApi = { id, title } as any;
   return (
     <ModeContext.Provider value="command">
       <SelectedIdContext.Provider value={id}>
         <WallActionsContext.Provider value={noopActions}>
           <RenamingIdContext.Provider value={null}>
             <div className="h-[26px] bg-app-bg">
-              <TerminalPaneHeader api={mockApi} containerApi={{} as any} params={{}} tabLocation={'header' as any} />
+              <TerminalPaneHeader id={id} title={title} params={undefined} />
             </div>
           </RenamingIdContext.Provider>
         </WallActionsContext.Provider>

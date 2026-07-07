@@ -99,7 +99,6 @@ import {
   mountElement,
   clearLocalSurfaceActivity,
   clearSessionAttention,
-  clearSessionTodo,
   restoreBrowserSurfaceTodo,
   disposeAllSessions,
   disposeSession,
@@ -112,13 +111,11 @@ import {
   getActivity,
   initAlertStateReceiver,
   isUntouched,
-  markSessionTouched,
   markSessionAttention,
   markSessionTodo,
   resumeTerminal,
   restoreTerminal,
   setPendingShellOpts,
-  swapTerminals,
   toggleSessionAlert,
   toggleSessionTodo,
 } from './terminal-registry';
@@ -319,19 +316,6 @@ describe('terminal-registry alert behavior', () => {
     pasteFilePaths(id, ['/tmp/example file.txt']);
 
     expect(isUntouched(id)).toBe(false);
-  });
-
-  it('keeps untouched state with session content when swapping panes', () => {
-    const alpha = 'swap-alpha';
-    const beta = 'swap-beta';
-    createSession(alpha);
-    createSession(beta);
-
-    markSessionTouched(alpha);
-    swapTerminals(alpha, beta);
-
-    expect(isUntouched(alpha)).toBe(true);
-    expect(isUntouched(beta)).toBe(false);
   });
 
   it('seeds untouched state on resume and restore while defaulting missing state to touched', () => {
@@ -981,60 +965,6 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('routes alert state updates to the swapped-in pane entry', () => {
-    const alpha = 'swap-alpha';
-    const beta = 'swap-beta';
-    createSession(alpha);
-    createSession(beta);
-
-    toggleSessionAlert(alpha);
-    markSessionAttention(alpha);
-    swapTerminals(alpha, beta);
-
-    emitOutput(alpha, 'prompt> ');
-    advance(1_600);
-    emitOutput(alpha, 'working...');
-    emitOutput(alpha, 'more work');
-
-    expect(getActivity(alpha)).toMatchObject({
-      status: 'WATCHING_DISABLED',
-      todo: false,
-    });
-    expect(getActivity(beta)).toMatchObject({
-      status: 'BUSY',
-      todo: false,
-    });
-  });
-
-  it('routes alert actions to the swapped-in pane entry', () => {
-    const alpha = 'swap-action-alpha';
-    const beta = 'swap-action-beta';
-    createSession(alpha);
-    createSession(beta);
-
-    markSessionTodo(alpha);
-    swapTerminals(alpha, beta);
-
-    expect(getActivity(alpha)).toMatchObject({
-      status: 'WATCHING_DISABLED',
-      todo: false,
-    });
-    expect(getActivity(beta)).toMatchObject({
-      status: 'WATCHING_DISABLED',
-      todo: true,
-    });
-
-    clearSessionTodo(beta);
-
-    expect(getActivity(alpha)).toMatchObject({
-      status: 'WATCHING_DISABLED',
-      todo: false,
-    });
-    expect(getActivity(beta)).toMatchObject({
-      status: 'WATCHING_DISABLED',
-      todo: false,
-    });
-  });
 });
 
 describe('pending shell opts → spawnPty', () => {

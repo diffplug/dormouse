@@ -17,9 +17,12 @@ function getPreviousPaneMap(platform: PlatformAdapter): Map<string, PersistedPan
 // the unconditional flushes + store-level compare only bound the staleness.
 export async function saveSession(
   platform: PlatformAdapter,
-  layout: unknown,
   panes: Array<{ id: string; title: string; surfaceType?: PersistedSurfaceType }>,
   doors: PersistedDoor[] = [],
+  // The native Lath persisted layout (docs/specs/tiling-engine.md → "Persistence
+  // and migration"). The only layout Dormouse writes; the legacy dockview `layout`
+  // key is no longer emitted (pre-Lath blobs are still read on restore).
+  lathLayout?: unknown,
 ): Promise<void> {
   const previousPanes = getPreviousPaneMap(platform);
   const allPanes = new Map<string, { id: string; title: string; surfaceType: PersistedSurfaceType }>();
@@ -64,7 +67,12 @@ export async function saveSession(
       };
     }),
   );
-  const session: PersistedSession = { version: 3, panes: persisted, doors: persistedDoors, layout };
+  const session: PersistedSession = {
+    version: 3,
+    panes: persisted,
+    doors: persistedDoors,
+    ...(lathLayout !== undefined ? { lathLayout } : {}),
+  };
   platform.saveState(session);
 }
 

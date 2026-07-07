@@ -32,6 +32,7 @@ import {
   type MobileGesturePoint,
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
+import { settleTerminals } from './settle-terminals';
 
 const meta: Meta<typeof MobileTerminalUi> = {
   title: 'App/MobileTerminalUi',
@@ -324,6 +325,9 @@ export const PocketWall: Story = {
     fakePty: { scenario: flattenScenario(POCKET_WALL_SCENARIO) },
   },
   render: (args) => <PocketWallFrame {...args} />,
+  // The only story here with a live terminal (the rest use a mock or gesture
+  // snapshots); gate just this one so the ascii splash has painted.
+  play: () => settleTerminals(),
 };
 
 export const GestureMenuOpened: Story = {

@@ -1,6 +1,10 @@
-import type { DoorDirection } from './spatial-nav';
 import type { SessionStatus } from './activity-monitor';
 import { ACTIVITY_NOTIFICATION_SOURCES, migrateTodoState, type ActivityNotification, type TodoState } from './alert-manager';
+
+/** The direction a minimized pane sat relative to its neighbor, as captured by
+ *  pre-Lath saves (`PersistedDoor.direction`). Read-only legacy field; new doors
+ *  restore from a Lath `token` instead. */
+export type DoorDirection = 'left' | 'right' | 'above' | 'below';
 
 export interface PersistedAlertState {
   status: SessionStatus;
@@ -12,8 +16,8 @@ export interface PersistedAlertState {
 /**
  * Surface kind recorded per pane (`docs/specs/glossary.md`). Absent reads as
  * `'terminal'`. A `'browser'` pane has no PTY, scrollback, or registry entry; it
- * is reconstructed from the dockview `layout` blob, so restore/resume must route
- * it differently from a terminal (see `session-restore.ts`, `reconnect.ts`).
+ * is reconstructed from the persisted layout, so restore/resume must route it
+ * differently from a terminal (see `session-restore.ts`, `reconnect.ts`).
  */
 export type PersistedSurfaceType = 'terminal' | 'browser';
 
@@ -31,8 +35,8 @@ export interface PersistedPane {
 /**
  * Build the persisted record for a browser surface. Browser panes have no PTY,
  * so the terminal-only fields (cwd/scrollback/resumeCommand/untouched) are always
- * blank; the dockview `layout` blob reconstructs the surface and `alert` carries
- * the optional TODO. Single source of truth shared by the renderer save path
+ * blank; the persisted layout reconstructs the surface and `alert` carries the
+ * optional TODO. Single source of truth shared by the renderer save path
  * (`session-save.ts`) and the VS Code host refresh (`vscode-ext/session-state.ts`).
  */
 export function browserPersistedPane(
@@ -57,18 +61,31 @@ export interface PersistedDoor {
   component?: string;
   tabComponent?: string;
   params?: Record<string, unknown>;
-  neighborId: string | null;
-  direction: DoorDirection;
-  remainingPaneIds: string[];
-  layoutAtMinimize: unknown;
-  layoutAtMinimizeSignature: string;
+  /** Lath restore token (`RestoreToken`), written by every new door so it restores
+   *  at its captured tier (docs/specs/tiling-engine.md → "Restore tokens"). Typed
+   *  `unknown` to keep this module free of the lath core dep. Absent only on
+   *  pre-Lath doors, which fall back to the legacy fields below. */
+  token?: unknown;
+  /** Legacy fields — written only by pre-Lath saves, read-only for migration. A
+   *  door lacking a `token` synthesizes a neighbor-tier restore from `neighborId` +
+   *  `direction`. */
+  neighborId?: string | null;
+  direction?: DoorDirection;
+  remainingPaneIds?: string[];
+  layoutAtMinimize?: unknown;
+  layoutAtMinimizeSignature?: string;
 }
 
 export interface PersistedSession {
   version: 3;
   panes: PersistedPane[];
   doors?: PersistedDoor[];
-  layout: unknown; // SerializedDockview — kept as `unknown` to avoid dockview dep in types
+  /** Native Lath persisted layout (`LathPersistedLayout`) — the layout Dormouse
+   *  writes today (docs/specs/tiling-engine.md → "Persistence and migration"). */
+  lathLayout?: unknown;
+  /** Legacy dockview layout blob, written only by pre-Lath saves and read-only for
+   *  one-way migration on restore. Absent on saves made by the Lath engine. */
+  layout?: unknown;
 }
 
 export type WorkspaceId = string;
@@ -105,7 +122,8 @@ interface PersistedSessionV3Input {
   version: 3;
   panes: PersistedPaneInput[];
   doors?: PersistedDoor[];
-  layout: unknown;
+  layout?: unknown;
+  lathLayout?: unknown;
 }
 
 // --- Legacy v2 shapes (read-only, for migration) ---
@@ -207,14 +225,18 @@ function isPersistedDoor(value: unknown): value is PersistedDoor {
   return (
     typeof value.id === 'string' &&
     typeof value.title === 'string' &&
-    (typeof value.neighborId === 'string' || value.neighborId === null) &&
     (value.component === undefined || typeof value.component === 'string') &&
     (value.tabComponent === undefined || typeof value.tabComponent === 'string') &&
     (value.params === undefined || isRecord(value.params)) &&
-    typeof value.direction === 'string' &&
-    Array.isArray(value.remainingPaneIds) &&
-    value.remainingPaneIds.every((id) => typeof id === 'string') &&
-    typeof value.layoutAtMinimizeSignature === 'string'
+    // Legacy fields (pre-Lath doors) — present-or-absent, but well-typed if present.
+    (value.neighborId === undefined || typeof value.neighborId === 'string' || value.neighborId === null) &&
+    (value.direction === undefined || typeof value.direction === 'string') &&
+    (value.remainingPaneIds === undefined ||
+      (Array.isArray(value.remainingPaneIds) && value.remainingPaneIds.every((id) => typeof id === 'string'))) &&
+    (value.layoutAtMinimizeSignature === undefined || typeof value.layoutAtMinimizeSignature === 'string') &&
+    // A Lath restore token, when present, is structurally an object with a string
+    // `leafId` (kept permissive — the core owns full validation on restore).
+    (value.token === undefined || (isRecord(value.token) && typeof value.token.leafId === 'string'))
   );
 }
 
@@ -244,7 +266,9 @@ function isPersistedSessionV3(value: unknown): value is PersistedSessionV3Input 
     Array.isArray(value.panes) &&
     value.panes.every(isPersistedPaneShape) &&
     (value.doors === undefined || (Array.isArray(value.doors) && value.doors.every(isPersistedDoor))) &&
-    'layout' in value
+    // A v3 blob carries a layout in one form or the other: native `lathLayout` (Lath
+    // saves) or a legacy dockview `layout` (pre-Lath saves, migrated on restore).
+    ('layout' in value || 'lathLayout' in value)
   );
 }
 

@@ -15,6 +15,21 @@ vi.mock('./terminal-registry', () => ({
 }));
 
 import { resumeOrRestore } from './reconnect';
+import { dockviewFixture } from './lath/test-fixtures';
+import type { LathNode } from './lath/model';
+
+/** A native Lath persisted layout over `ids` (row split; empty tree for none) —
+ *  the shape every post-Lath save carries. */
+function lathLayoutFor(...ids: string[]) {
+  const nodes = ids.map((id): LathNode => ({ kind: 'leaf', id }));
+  const root: LathNode | null =
+    nodes.length === 0 ? null : nodes.length === 1 ? nodes[0] : { kind: 'split', dir: 'row', children: nodes.map((node) => ({ node, weight: 1 / nodes.length })) };
+  return {
+    version: 1 as const,
+    tree: { root },
+    leafMeta: Object.fromEntries(ids.map((id) => [id, { component: 'terminal', tabComponent: 'terminal', title: id }])),
+  };
+}
 
 function createPlatform(ptys: PtyInfo[], savedState: PersistedSession | null): PlatformAdapter {
   const listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
@@ -73,24 +88,19 @@ describe('resumeOrRestore', () => {
   });
 
   it('restores saved visible layout and minimized doors for matching live PTYs', async () => {
-    const layout = {
-      panels: {
-        'pane-a': {},
-        'pane-b': {},
-      },
-    };
+    const lathLayout = lathLayoutFor('pane-a', 'pane-b');
     const doors = [{
       id: 'pane-c',
       title: 'Pane C',
       neighborId: 'pane-b',
       direction: 'right' as const,
       remainingPaneIds: ['pane-a', 'pane-b'],
-      layoutAtMinimize: layout,
+      layoutAtMinimize: { panels: {} },
       layoutAtMinimizeSignature: 'sig',
     }];
     const saved: PersistedSession = {
       version: 3,
-      layout,
+      lathLayout,
       doors,
       panes: [
         { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null },
@@ -108,7 +118,7 @@ describe('resumeOrRestore', () => {
     expect(result).toEqual({
       paneIds: ['pane-a', 'pane-b'],
       doors,
-      layout,
+      lathLayout,
     });
     expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('pane-c', 'pane-c-replay', {
       alive: true,
@@ -120,7 +130,7 @@ describe('resumeOrRestore', () => {
   it('seeds saved visible pane titles when resuming live PTYs', async () => {
     const saved: PersistedSession = {
       version: 3,
-      layout: { panels: { 'pane-a': {} } },
+      lathLayout: lathLayoutFor('pane-a'),
       panes: [
         { id: 'pane-a', title: 'Production API', cwd: null, scrollback: null, resumeCommand: null },
       ],
@@ -140,7 +150,7 @@ describe('resumeOrRestore', () => {
   it('seeds saved untouched state when resuming live PTYs', async () => {
     const saved: PersistedSession = {
       version: 3,
-      layout: { panels: { 'pane-a': {} } },
+      lathLayout: lathLayoutFor('pane-a'),
       panes: [
         { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null, untouched: true },
       ],
@@ -161,7 +171,7 @@ describe('resumeOrRestore', () => {
   it('defaults missing saved untouched state to touched when resuming live PTYs', async () => {
     const saved = {
       version: 3 as const,
-      layout: { panels: { 'pane-a': {} } },
+      lathLayout: lathLayoutFor('pane-a'),
       panes: [
         { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null },
       ],
@@ -181,7 +191,7 @@ describe('resumeOrRestore', () => {
   it('seeds saved minimized door titles when resuming live PTYs', async () => {
     const saved: PersistedSession = {
       version: 3,
-      layout: { panels: {} },
+      lathLayout: lathLayoutFor(),
       doors: [{
         id: 'pane-a',
         title: 'Renamed Door',
@@ -210,7 +220,7 @@ describe('resumeOrRestore', () => {
   it('does not reuse a saved layout when live PTYs do not match saved panes', async () => {
     const saved: PersistedSession = {
       version: 3,
-      layout: { panels: { 'pane-a': {}, 'pane-b': {} } },
+      lathLayout: lathLayoutFor('pane-a', 'pane-b'),
       panes: [
         { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null },
         { id: 'pane-b', title: 'Pane B', cwd: null, scrollback: null, resumeCommand: null },
@@ -249,7 +259,7 @@ describe('resumeOrRestore', () => {
     }];
     const saved: PersistedSession = {
       version: 3,
-      layout: { panels: {} },
+      lathLayout: lathLayoutFor(),
       doors,
       panes: [
         { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null },
@@ -266,16 +276,16 @@ describe('resumeOrRestore', () => {
     expect(result).toEqual({
       paneIds: [],
       doors,
-      layout: { panels: {} },
+      lathLayout: lathLayoutFor(),
     });
     expect(terminalRegistryMocks.restoreTerminal).not.toHaveBeenCalled();
   });
 
   it('ignores stale saved panes when the saved layout still matches live visible panes', async () => {
-    const layout = { panels: { 'pane-a': {}, 'pane-b': {} } };
+    const lathLayout = lathLayoutFor('pane-a', 'pane-b');
     const saved: PersistedSession = {
       version: 3,
-      layout,
+      lathLayout,
       panes: [
         { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null },
         { id: 'pane-b', title: 'Pane B', cwd: null, scrollback: null, resumeCommand: null },
@@ -291,15 +301,15 @@ describe('resumeOrRestore', () => {
     expect(result).toEqual({
       paneIds: ['pane-a', 'pane-b'],
       doors: [],
-      layout,
+      lathLayout,
     });
   });
 
   it('keeps the saved layout and a visible browser pane when only terminals have live PTYs', async () => {
-    const layout = { panels: { 'pane-term': {}, 'pane-web': {} } };
+    const lathLayout = lathLayoutFor('pane-term', 'pane-web');
     const saved: PersistedSession = {
       version: 3,
-      layout,
+      lathLayout,
       panes: [
         { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null },
         { id: 'pane-web', title: 'localhost', cwd: null, scrollback: null, resumeCommand: null, surfaceType: 'browser' },
@@ -313,7 +323,7 @@ describe('resumeOrRestore', () => {
     expect(result).toEqual({
       paneIds: ['pane-term', 'pane-web'],
       doors: [],
-      layout,
+      lathLayout,
     });
     // The browser pane has no PTY and is never resumed as a terminal.
     expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledTimes(1);
@@ -321,10 +331,9 @@ describe('resumeOrRestore', () => {
   });
 
   it('restores browser surface TODO from the persisted alert during live resume', async () => {
-    const layout = { panels: { 'pane-term': {}, 'pane-web': {} } };
     const saved: PersistedSession = {
       version: 3,
-      layout,
+      lathLayout: lathLayoutFor('pane-term', 'pane-web'),
       panes: [
         { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null },
         {
@@ -358,7 +367,7 @@ describe('resumeOrRestore', () => {
   it('drops visible browser panes from terminal fallback when the saved layout is rejected', async () => {
     const saved: PersistedSession = {
       version: 3,
-      layout: { panels: { 'pane-term': {}, 'stale-term': {}, 'pane-web': {} } },
+      lathLayout: lathLayoutFor('pane-term', 'stale-term', 'pane-web'),
       panes: [
         { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null },
         { id: 'stale-term', title: 'Stale terminal', cwd: null, scrollback: null, resumeCommand: null },
@@ -373,12 +382,12 @@ describe('resumeOrRestore', () => {
     expect(result).toEqual({
       paneIds: ['pane-term'],
       doors: [],
-      layout: undefined,
+      lathLayout: undefined,
     });
   });
 
   it('keeps a minimized browser door alive across resume despite having no PTY', async () => {
-    const layout = { panels: { 'pane-term': {} } };
+    const lathLayout = lathLayoutFor('pane-term');
     const doors = [{
       id: 'door-web',
       title: 'localhost',
@@ -387,12 +396,12 @@ describe('resumeOrRestore', () => {
       neighborId: 'pane-term',
       direction: 'right' as const,
       remainingPaneIds: ['pane-term'],
-      layoutAtMinimize: layout,
+      layoutAtMinimize: { panels: {} },
       layoutAtMinimizeSignature: 'sig',
     }];
     const saved: PersistedSession = {
       version: 3,
-      layout,
+      lathLayout,
       doors,
       panes: [
         { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null },
@@ -407,7 +416,30 @@ describe('resumeOrRestore', () => {
     expect(result).toEqual({
       paneIds: ['pane-term'],
       doors,
-      layout,
+      lathLayout,
     });
+  });
+
+  it('migrates a pre-Lath dockview layout at the read boundary during live resume', async () => {
+    // A pre-Lath save carries only the legacy dockview `layout` blob; the resume plan
+    // must hand back the single migrated Lath channel, gated on the same leaf set.
+    const saved: PersistedSession = {
+      version: 3,
+      layout: dockviewFixture(), // panes a (terminal), b (browser), c (terminal)
+      panes: [
+        { id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'pane-b', title: 'B', cwd: null, scrollback: null, resumeCommand: null, surfaceType: 'browser' },
+        { id: 'pane-c', title: 'C', cwd: null, scrollback: null, resumeCommand: null },
+      ],
+    };
+
+    const result = await resumeOrRestore(createPlatform([
+      { id: 'pane-a', alive: true },
+      { id: 'pane-c', alive: true },
+    ], saved));
+
+    expect(result.paneIds).toEqual(['pane-a', 'pane-b', 'pane-c']);
+    expect(result.lathLayout?.version).toBe(1);
+    expect(Object.keys(result.lathLayout!.leafMeta).sort()).toEqual(['pane-a', 'pane-b', 'pane-c']);
   });
 });

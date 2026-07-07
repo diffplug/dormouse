@@ -273,7 +273,7 @@ Content-aware transformations, paste history, credential warnings, and middle-cl
 
 ### 8.7 Drag-to-Paste
 
-Dragging files onto a terminal pane mirrors the paste chain above: escaped paths are typed at the current prompt, space-joined with a trailing space. Tauri receives the drop natively via `WindowEvent::DragDrop` and routes paths to the focused pane — but this wiring is **inert today**: `tauri.conf.json` sets `dragDropEnabled: false` (required so HTML5 drag-and-drop inside the webview — dockview pane dragging — keeps working; tauri-apps/tauri#14373, dormouse#38), so the native handler never fires and drag-to-paste is currently unavailable in the standalone build.
+Dragging files onto a terminal pane mirrors the paste chain above: escaped paths are typed at the current prompt, space-joined with a trailing space. Tauri receives the drop natively via `WindowEvent::DragDrop` and routes paths to the focused pane — but this wiring is **inert today**: `tauri.conf.json` sets `dragDropEnabled: false` so HTML5 drag-and-drop inside the webview keeps working (tauri-apps/tauri#14373, dormouse#38), so the native handler never fires and drag-to-paste is currently unavailable in the standalone build. (Lath's pane dragging is pointer-based, not HTML5 DnD, so it no longer depends on this flag; flipping it to re-enable native drag-to-paste is a separate change.)
 
 Drag-to-paste is **not supported in the VSCode build**: VSCode's `WebviewView` (sidebar/panel) is excluded from external-file drop routing by the workbench, so the webview iframe never receives `dragover`/`drop` events for files dragged from the OS. See §9.2. VSCode users paste instead (§8.1/§8.5).
 

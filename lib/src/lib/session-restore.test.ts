@@ -15,6 +15,7 @@ vi.mock('./terminal-registry', () => ({
 }));
 
 import { restoreSession } from './session-restore';
+import { dockviewFixture } from './lath/test-fixtures';
 
 function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
   return {
@@ -121,6 +122,43 @@ describe('restoreSession', () => {
     expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith('pane-term', expect.objectContaining({ title: 'Terminal' }));
     // The browser pane stays in paneIds so the layout blob recreates and selects it.
     expect(result?.paneIds).toEqual(['pane-term', 'pane-web']);
+  });
+
+  it('migrates a pre-Lath dockview layout into the single lath channel on read', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      layout: dockviewFixture(),
+      panes: [
+        { id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
+        { id: 'pane-b', title: 'B', cwd: null, scrollback: null, resumeCommand: null, untouched: false, surfaceType: 'browser' },
+        { id: 'pane-c', title: 'C', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
+      ],
+    };
+
+    const result = restoreSession(createPlatform(saved));
+
+    expect(result?.lathLayout?.version).toBe(1);
+    expect(Object.keys(result!.lathLayout!.leafMeta).sort()).toEqual(['pane-a', 'pane-b', 'pane-c']);
+  });
+
+  it('prefers the native lathLayout and passes it through untouched', () => {
+    const lathLayout = {
+      version: 1 as const,
+      tree: { root: { kind: 'leaf' as const, id: 'pane-a' } },
+      leafMeta: { 'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'A' } },
+    };
+    const saved: PersistedSession = {
+      version: 3,
+      lathLayout,
+      layout: dockviewFixture(), // stale legacy blob must lose to the native layout
+      panes: [
+        { id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
+      ],
+    };
+
+    const result = restoreSession(createPlatform(saved));
+
+    expect(result?.lathLayout).toEqual(lathLayout);
   });
 
   it('restores browser surface TODO from the persisted alert during cold restore', () => {

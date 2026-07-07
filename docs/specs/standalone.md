@@ -399,7 +399,7 @@ Tauri branch, so the flow never initializes there.
 The `WindowEvent::DragDrop` handler in `lib.rs` routes dropped paths to the
 focused pane as escaped, space-joined paste input — but it is **inert
 today**: `tauri.conf.json` sets `dragDropEnabled: false` so HTML5
-drag-and-drop inside the webview (dockview pane dragging) keeps working
+drag-and-drop inside the webview keeps working
 (tauri-apps/tauri#14373, dormouse#38). Behavior and status are specified in
 `docs/specs/mouse-and-clipboard.md` (§8.7 Drag-to-Paste).
 
@@ -443,6 +443,7 @@ root `package.json` for the `dev:standalone*` orchestration.
 |------|------|
 | `standalone/src-tauri/src/lib.rs` | Rust backend: sidecar spawn/supervision, invoke commands, event forwarding, per-window session file store (`save_session` / `load_session`), quit interception (`QuitState`, `request_quit`, `quit_ack` / `quit_progress` / `quit_cancel` / `quit_proceed`, §Quit flow), file drop, logging, dock icon, exit teardown |
 | `standalone/src-tauri/src/clipboard_win.rs` | Native Win32 clipboard reads on Windows (owned by `docs/specs/mouse-and-clipboard.md`) |
+| `standalone/src-tauri/src/pe_subsystem.rs` | Shared PE-subsystem byte-flip (offset lookup + read/set) used by `build.rs` (GUI-patch the bundled sidecar node) and `lib.rs` (derive the console-subsystem `dor` node) — §Windows node subsystem |
 | `standalone/scripts/tauri.mjs`, `csp.mjs` | Tauri CLI wrapper assembling the webview CSP (`DORMOUSE_REMOTE_CONNECT_SRC`) |
 | `standalone/src-tauri/tauri.conf.json` | Window config, dev/build commands, sidecar resources glob, updater config |
 | `standalone/src/main.tsx` | Webview bootstrap (boot sequence above); initializes the quit orchestrator and installs the confirmation gate on the Tauri branch, mounts `<QuitConfirmModalHost>` via Wall's `dialogHost` prop |

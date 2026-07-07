@@ -23,7 +23,6 @@
     "@xterm/addon-unicode-graphemes": "0.5.0-beta.288",
     "@xterm/xterm": "6.1.0-beta.288",
     "clsx": "^2.1.1",
-    "dockview-react": "^5.1.0",
     "dor-lib-common": "workspace:*",
     "fflate": "0.8.3",
     "jsonc-parser": "3.3.1",

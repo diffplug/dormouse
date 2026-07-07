@@ -1,3 +1,4 @@
+import { type PointerEvent as ReactPointerEvent } from 'react';
 import { BellIcon } from '@phosphor-icons/react';
 import type { SessionStatus, TodoState } from '../lib/terminal-registry';
 import { useTodoPillContent } from './TodoPillBody';
@@ -10,6 +11,11 @@ export interface DoorProps {
   status?: SessionStatus;
   todo?: TodoState;
   onClick?: () => void;
+  /** When provided, a primary-button press reports its start point and the Wall begins
+   *  an (inactive) LathHost drag — LathHost owns the threshold, click suppression, and
+   *  hit-testing from there. A sub-threshold press-release still fires `onClick`
+   *  (reattach). Absent → Door stays click-only. */
+  onDragPress?: (press: { clientX: number; clientY: number }) => void;
 }
 
 export function Door({
@@ -18,10 +24,18 @@ export function Door({
   status = 'WATCHING_DISABLED',
   todo = false,
   onClick,
+  onDragPress,
 }: DoorProps) {
   const showBell = status !== 'WATCHING_DISABLED';
   const alertRinging = status === 'ALERT_RINGING';
   const todoPill = useTodoPillContent(todo);
+
+  const onPointerDown = onDragPress
+    ? (e: ReactPointerEvent<HTMLButtonElement>): void => {
+        if (e.button !== 0) return;
+        onDragPress({ clientX: e.clientX, clientY: e.clientY });
+      }
+    : undefined;
 
   return (
     <button
@@ -33,6 +47,7 @@ export function Door({
         'text-sm font-medium font-mono',
       ].join(' ')}
       onClick={onClick}
+      onPointerDown={onPointerDown}
       title={title}
     >
       <span className="min-w-0 flex-1 truncate">

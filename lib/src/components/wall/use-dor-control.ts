@@ -1,0 +1,729 @@
+import { useCallback, useEffect, type MutableRefObject } from 'react';
+import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
+import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
+import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
+import type {
+  Surface as DorSurface,
+  SplitDirection as DorSplitDirection,
+  ResolvedSplitDirection as DorResolvedSplitDirection,
+  ParseResult,
+} from 'dor/commands/types';
+import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
+import {
+  getDefaultShellOpts,
+  getTerminalInstance,
+  getTerminalPaneState,
+  isPaneOscDriven,
+} from '../../lib/terminal-registry';
+import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
+import { hostPathDisplay } from './browser-url';
+import { isAgentBrowserParams } from './browser-surface';
+import { dorDirectionForEdge, type LathWallEngine } from './lath-wall-engine';
+import type { WallNav } from './keyboard/types';
+import type { DooredItem } from './wall-types';
+
+type DorControlParams = {
+  command?: unknown;
+  confirmation?: unknown;
+  cwd?: unknown;
+  direction?: unknown;
+  input?: unknown;
+  inputCount?: unknown;
+  key?: unknown;
+  lines?: unknown;
+  minimized?: unknown;
+  restart?: unknown;
+  binaryPath?: unknown;
+  pane?: string;
+  session?: unknown;
+  surface?: unknown;
+  url?: unknown;
+  workspace?: string;
+  window?: string;
+  scrollback?: unknown;
+  wsPort?: unknown;
+};
+
+// The webview view of a control request: the shared wire payload, but with
+// semantically-typed params and a `respond` callback the transport layer wires
+// back to the request's `requestId`.
+type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
+  params?: DorControlParams;
+  respond: (response: DorControlResult) => void;
+};
+
+function isSingletonWorkspaceTarget(target: string | undefined): boolean {
+  return !target || target === 'workspace:1' || target === '1';
+}
+
+function isSingletonWindowTarget(target: string | undefined): boolean {
+  return !target || target === 'window:1' || target === '1';
+}
+
+function matchesDorPaneTarget(target: string | undefined, surface: DorSurface): boolean {
+  if (!target) return true;
+  if (target === 'focused' || target === 'current') return surface.focused;
+  if (target === surface.id || target === surface.ref || target === surface.paneRef) return true;
+
+  const numeric = Number(target);
+  return Number.isInteger(numeric) && numeric >= 1 && surface.index === numeric - 1;
+}
+
+function surfaceTitleTarget(target: string): string | null {
+  return target.startsWith('title:') ? target.slice('title:'.length) : null;
+}
+
+function renderSurfaceForError(surface: DorSurface): string {
+  return `${surface.ref} ${JSON.stringify(surface.title)}`;
+}
+
+function stringParam(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function booleanParam(value: unknown): boolean {
+  return value === true;
+}
+
+function stringArrayParam(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) return undefined;
+  return value;
+}
+
+function numberParam(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function limitLines(text: string, lines: number | undefined): string {
+  if (lines === undefined) return text;
+  const parts = text.split('\n');
+  return parts.slice(-lines).join('\n');
+}
+
+function readSurfaceText(surfaceId: string, lines: number | undefined, scrollback: boolean): string {
+  const terminal = getTerminalInstance(surfaceId);
+  if (!terminal) return '';
+
+  // Read rendered text straight off the xterm buffer so both modes return clean,
+  // ANSI-free lines and `--lines` trims by rendered line consistently. With
+  // scrollback we walk the whole buffer (history + screen); otherwise just the
+  // visible screen, which sits at `baseY..length`.
+  const buffer = terminal.buffer.active;
+  const start = scrollback ? 0 : Math.max(0, buffer.baseY);
+  const end = buffer.length;
+  const collected: string[] = [];
+  for (let row = start; row < end; row += 1) {
+    collected.push(buffer.getLine(row)?.translateToString(true) ?? '');
+  }
+
+  return limitLines(collected.join('\n').replace(/\n+$/, ''), lines);
+}
+
+// `dor ensure --restart` blocks the CLI while we interrupt a live command and
+// re-run it. Rather than guess at timings, poll the integration-derived
+// terminal state: a command is gone once `currentCommand` clears (commandFinish
+// → prompt) and back once the surface reports the same command live again.
+const RESTART_POLL_INTERVAL_MS = 100;
+const RESTART_INTERRUPT_TIMEOUT_MS = 15_000;
+const RESTART_START_TIMEOUT_MS = 15_000;
+
+/** Resolve true once `predicate` holds for the surface's live state, false on timeout. */
+function waitForTerminalState(
+  id: string,
+  predicate: (state: TerminalPaneState) => boolean,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (predicate(getTerminalPaneState(id))) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let elapsed = 0;
+    const timer = setInterval(() => {
+      if (predicate(getTerminalPaneState(id))) {
+        clearInterval(timer);
+        resolve(true);
+      } else if ((elapsed += RESTART_POLL_INTERVAL_MS) >= timeoutMs) {
+        clearInterval(timer);
+        resolve(false);
+      }
+    }, RESTART_POLL_INTERVAL_MS);
+  });
+}
+
+/**
+ * Restart a surface already running `command` in `cwd`: interrupt it (Ctrl+C),
+ * wait for the shell to return to its prompt, type the command again, and wait
+ * for it to go live. Drives the live PTY directly, so it works for minimized
+ * doors too (their PTY keeps running). Returns a message on failure.
+ */
+async function restartSurfaceInPlace(id: string, command: string, cwd: string): Promise<ParseResult<undefined>> {
+  // A match is by construction OSC-driven (surfaceRunsCommand only matches a
+  // shell that reports its command), so this never fires on the real path — but
+  // it guarantees we never fire Ctrl+C into a non-integration shell (e.g. cmd.exe
+  // popping `Terminate batch job (Y/N)?`).
+  if (!isPaneOscDriven(id)) return { ok: false, message: 'has no Dormouse shell integration to restart' };
+  const platform = getPlatform();
+  platform.writePty(id, '\x03');
+  const interrupted = await waitForTerminalState(
+    id,
+    (state) => state.currentCommand === null,
+    RESTART_INTERRUPT_TIMEOUT_MS,
+  );
+  if (!interrupted) return { ok: false, message: 'did not return to a prompt after interrupt' };
+  platform.writePty(id, `${command}\r`);
+  const restarted = await waitForTerminalState(
+    id,
+    (state) => surfaceRunsCommand(state, command, cwd),
+    RESTART_START_TIMEOUT_MS,
+  );
+  if (!restarted) return { ok: false, message: 'command did not restart' };
+  return { ok: true, value: undefined };
+}
+
+// A `dor ensure -- <command>` command is typed into the shell programmatically,
+// which bypasses the keystroke heuristic — so only a shell whose integration
+// emits OSC 633 boundaries ever reports the command back, which is what makes the
+// surface matchable/restartable. `dor ensure` requires it. We give the shell this
+// long to draw its first integrated prompt (headroom for a cold-start shell
+// loading a profile / under AV) before concluding it has no integration.
+const INTEGRATION_DETECT_TIMEOUT_MS = 8_000;
+
+// Shown to the user (via the CLI's stderr) when `dor ensure` can't run because the
+// target shell has no OSC 633 integration. `shell` is a display name when known.
+function missingIntegrationError(shell?: string): string {
+  const name = (shell ?? '').replace(/\\/g, '/').split('/').pop() || 'this shell';
+  return `dor ensure requires OSC 633 shell integration, which ${name} does not provide. Run it from a shell with Dormouse integration, such as Git Bash or PowerShell.`;
+}
+
+function killConfirmationParam(value: unknown): { mode: 'if-read'; text: string } | { mode: 'dangerously' } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const confirmation = value as { mode?: unknown; text?: unknown };
+  if (confirmation.mode === 'dangerously') return { mode: 'dangerously' };
+  if (confirmation.mode === 'if-read' && typeof confirmation.text === 'string') {
+    return { mode: 'if-read', text: confirmation.text };
+  }
+  return null;
+}
+
+function parseDorSplitDirection(value: unknown): DorSplitDirection | null {
+  if (value === undefined || value === null) return 'auto';
+  if (value === 'left' || value === 'right' || value === 'up' || value === 'down' || value === 'auto') return value;
+  return null;
+}
+
+/**
+ * Quote a raw argv into a single command string for the target pane's shell.
+ * This is the one place the command is quoted; the CLI sends argv unquoted
+ * precisely because only the webview knows which shell will run it.
+ */
+function dorCommandString(args: string[] | undefined): string | undefined {
+  if (!args || args.join('').trim() === '') return undefined;
+  const shell = getDefaultShellOpts()?.shell;
+  return buildShellCommandForKind(shellCommandKind(shell, PLATFORM_STRING), args);
+}
+
+/**
+ * The `dor` control plane: the webview handler for `dormouse:control-request`
+ * events (the `surface.*` methods that back the `dor` CLI) plus its private
+ * surface-resolution/query helpers. This is CLI policy — surface targeting,
+ * param coercion, command quoting, restart/integration timing — not wall layout;
+ * the layout primitives it drives (`createSplitSurface`, `createContentSurface`,
+ * `killPaneImmediately`, `buildDorSurfaces`, `surfaceRefForId`) are owned by the
+ * Wall and injected here (docs/specs/dor-cli.md).
+ */
+export function useDorControl({
+  lath,
+  nav,
+  doorsRef,
+  setDoors,
+  buildDorSurfaces,
+  surfaceRefForId,
+  createSplitSurface,
+  createContentSurface,
+  killPaneImmediately,
+  lastAgentBrowserBinaryPathRef,
+}: {
+  /** The Lath engine — visible-pane projection (`lath.listPanes()`), aspect-ratio
+   *  split resolution (`autoEdgeFor`), and per-leaf param writes. */
+  lath: LathWallEngine;
+  /** The navigation/query seam; the handler only needs `hasPane`. */
+  nav: WallNav;
+  doorsRef: MutableRefObject<DooredItem[]>;
+  setDoors: (doors: DooredItem[]) => void;
+  /** The visible panes + active surface projection, shared with wallActions. */
+  buildDorSurfaces: () => DorSurface[];
+  /** Stable `surface:N` ref for a pane/door id, shared with the render. */
+  surfaceRefForId: (id: string) => string;
+  createSplitSurface: (args: {
+    command?: string;
+    direction: DorResolvedSplitDirection;
+    minimized: boolean;
+    referenceId: string;
+    cwd?: string;
+    requireIntegration?: boolean;
+    focusNeutral?: boolean;
+  }) => ParseResult<{ id: string; ref: string }>;
+  createContentSurface: (args: {
+    minimized: boolean;
+    params: Record<string, unknown>;
+    reference: DorSurface;
+    title: string;
+    focusNeutral?: boolean;
+  }) => ParseResult<{ id: string; ref: string; status: 'created' | 'replaced' }>;
+  killPaneImmediately: (id: string) => void;
+  /** The last binary path a `dor ab` surface resolved on a terminal's PATH. */
+  lastAgentBrowserBinaryPathRef: MutableRefObject<string | undefined>;
+}): void {
+  const resolveVisibleSurface = useCallback((
+    target: string | undefined,
+    callerSurfaceId: string | undefined,
+  ): ParseResult<DorSurface> => {
+    const surfaces = buildDorSurfaces();
+    const resolvedTarget = target ?? callerSurfaceId ?? 'focused';
+    const titleTarget = surfaceTitleTarget(resolvedTarget);
+    if (titleTarget !== null) {
+      const matches = surfaces.filter((surface) => surface.title === titleTarget);
+      if (matches.length === 1) return { ok: true, value: matches[0] };
+      if (matches.length > 1) {
+        return {
+          ok: false,
+          message: `surface target '${resolvedTarget}' matched multiple surfaces: ${matches.map(renderSurfaceForError).join(', ')}`,
+        };
+      }
+      return { ok: false, message: `surface target '${resolvedTarget}' was not found` };
+    }
+
+    const matched = surfaces.find((surface) => matchesDorPaneTarget(resolvedTarget, surface))
+      ?? (!target && !callerSurfaceId ? (surfaces[0] ?? null) : null);
+    if (matched) return { ok: true, value: matched };
+    return { ok: false, message: `surface '${resolvedTarget}' was not found` };
+  }, [buildDorSurfaces]);
+
+  const findSurfaceIdRunningCommand = useCallback((command: string, cwdPath: string): string | null => {
+    const ids = [
+      ...lath.listPanes().map((panel) => panel.id),
+      ...doorsRef.current.map((door) => door.id),
+    ];
+    return ids.find((id) => surfaceRunsCommand(getTerminalPaneState(id), command, cwdPath)) ?? null;
+  }, [lath]);
+
+  /**
+   * The agent-browser session ↔ surface registry, derived from panel/door
+   * params rather than kept as separate state so it survives webview reloads.
+   * Returns the surface bound to `session`, or null if none exists.
+   */
+  const findAgentBrowserSurface = useCallback((session: string): { id: string; minimized: boolean } | null => {
+    const isMatch = (params: unknown) =>
+      isAgentBrowserParams(params) && (params as { session?: unknown }).session === session;
+
+    const panel = lath.listPanes().find((candidate) => isMatch(candidate.params));
+    if (panel) return { id: panel.id, minimized: false };
+    const door = doorsRef.current.find((candidate) => isMatch(candidate.params));
+    if (door) return { id: door.id, minimized: true };
+    return null;
+  }, [lath]);
+
+  useEffect(() => {
+    const handler = async (event: Event) => {
+      const detail = (event as CustomEvent<DorControlRequest>).detail;
+      if (!detail) return;
+
+      const params = detail.params ?? {};
+      if (!isSingletonWorkspaceTarget(params.workspace)) {
+        detail.respond({ ok: false, error: `unsupported workspace target '${params.workspace}'` });
+        return;
+      }
+      if (!isSingletonWindowTarget(params.window)) {
+        detail.respond({ ok: false, error: `unsupported window target '${params.window}'` });
+        return;
+      }
+
+      // Resolve the split reference surface and confirm it is a live visible pane,
+      // responding with the appropriate error and returning null otherwise.
+      const resolveSplitTarget = () => {
+        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return null;
+        }
+        const visible = nav.hasPane(target.value.id);
+        if (!visible) {
+          detail.respond({ ok: false, error: `surface '${target.value.ref}' is not visible` });
+          return null;
+        }
+        return { target: target.value };
+      };
+
+      // The `direction: 'auto'` aspect-ratio split resolution.
+      const autoDorDirection = (id: string): DorResolvedSplitDirection =>
+        dorDirectionForEdge(lath.store.autoEdgeFor(id));
+
+      if (detail.method === SURFACE_CONTROL_METHODS.list) {
+        const surfaces = buildDorSurfaces();
+        detail.respond({
+          ok: true,
+          result: {
+            surfaces: surfaces.filter((surface) => matchesDorPaneTarget(params.pane, surface)),
+            workspaceRef: 'workspace:1',
+            windowRef: 'window:1',
+          },
+        });
+        return;
+      }
+
+      if (detail.method === SURFACE_CONTROL_METHODS.split) {
+        const directionParam = parseDorSplitDirection(params.direction);
+        if (!directionParam) {
+          detail.respond({ ok: false, error: `invalid split direction '${String(params.direction)}'` });
+          return;
+        }
+        const resolved = resolveSplitTarget();
+        if (!resolved) return;
+        const direction = directionParam === 'auto'
+          ? autoDorDirection(resolved.target.id)
+          : directionParam;
+        const command = dorCommandString(stringArrayParam(params.command));
+        if (params.command !== undefined && !command) {
+          detail.respond({ ok: false, error: 'command cannot be empty' });
+          return;
+        }
+        const result = createSplitSurface({
+          command,
+          direction,
+          minimized: booleanParam(params.minimized),
+          referenceId: resolved.target.id,
+        });
+        if (!result.ok) {
+          detail.respond({ ok: false, error: result.message });
+          return;
+        }
+        detail.respond({
+          ok: true,
+          result: {
+            status: 'created',
+            surfaceId: result.value.id,
+            surfaceRef: result.value.ref,
+            direction,
+            minimized: booleanParam(params.minimized),
+            ...(command ? { command } : {}),
+          },
+        });
+        return;
+      }
+
+      if (detail.method === SURFACE_CONTROL_METHODS.ensure) {
+        const command = dorCommandString(stringArrayParam(params.command));
+        if (!command) {
+          detail.respond({ ok: false, error: 'command cannot be empty' });
+          return;
+        }
+        const cwd = stringParam(params.cwd)?.trim();
+        if (!cwd) {
+          detail.respond({ ok: false, error: 'cwd is required' });
+          return;
+        }
+        const existingId = findSurfaceIdRunningCommand(command, cwd);
+        if (existingId) {
+          const minimized = doorsRef.current.some((door) => door.id === existingId);
+          if (booleanParam(params.restart)) {
+            const restarted = await restartSurfaceInPlace(existingId, command, cwd);
+            if (!restarted.ok) {
+              detail.respond({ ok: false, error: `surface '${surfaceRefForId(existingId)}' ${restarted.message}` });
+              return;
+            }
+            detail.respond({
+              ok: true,
+              result: {
+                status: 'restarted',
+                surfaceId: existingId,
+                surfaceRef: surfaceRefForId(existingId),
+                command,
+                cwd,
+                minimized,
+              },
+            });
+            return;
+          }
+          detail.respond({
+            ok: true,
+            result: {
+              status: 'existing',
+              surfaceId: existingId,
+              surfaceRef: surfaceRefForId(existingId),
+              command,
+              cwd,
+              minimized,
+            },
+          });
+          return;
+        }
+        // ensure needs OSC 633 to track the command. cmd.exe provably has none,
+        // so when the configured shell is explicitly cmd, fail immediately without
+        // even spawning a split. Only short-circuit on an explicit shell — an
+        // unset shell classifies as 'cmd' on Windows but the sidecar may actually
+        // spawn PowerShell, so let those fall through to the generic OSC wait.
+        const ensureShell = getDefaultShellOpts()?.shell;
+        if (ensureShell && shellCommandKind(ensureShell, PLATFORM_STRING) === 'cmd') {
+          detail.respond({ ok: false, error: missingIntegrationError(ensureShell) });
+          return;
+        }
+        const resolved = resolveSplitTarget();
+        if (!resolved) return;
+        const direction = autoDorDirection(resolved.target.id);
+        const result = createSplitSurface({
+          command,
+          direction,
+          minimized: booleanParam(params.minimized),
+          referenceId: resolved.target.id,
+          cwd,
+          requireIntegration: true,
+          // ensure never steals focus from the caller, matched or freshly created.
+          focusNeutral: true,
+        });
+        if (!result.ok) {
+          detail.respond({ ok: false, error: result.message });
+          return;
+        }
+        // ensure is only useful if the new shell reports OSC 633 — otherwise it
+        // can never be matched or restarted. A non-cmd shell can still lack
+        // integration (misconfigured, exotic); wait for the signal, and if it
+        // never arrives kill the throwaway split and fail cleanly rather than
+        // half-run an untrackable command. typeCommandWhenPromptReady drops the
+        // command in the same case, so nothing executes.
+        const integrated = await waitForTerminalState(
+          result.value.id,
+          () => isPaneOscDriven(result.value.id),
+          INTEGRATION_DETECT_TIMEOUT_MS,
+        );
+        if (!integrated) {
+          // Tear down the throwaway split. The focus-neutral create never selected
+          // it, so the kill's live selection check leaves the caller's selection
+          // where ensure found it. A `--minimize` create is already a door;
+          // killPaneImmediately tears the door down too — disposing the session and
+          // removing it from the baseboard.
+          killPaneImmediately(result.value.id);
+          detail.respond({ ok: false, error: missingIntegrationError(ensureShell) });
+          return;
+        }
+        detail.respond({
+          ok: true,
+          result: {
+            status: 'created',
+            surfaceId: result.value.id,
+            surfaceRef: result.value.ref,
+            command,
+            cwd,
+            minimized: booleanParam(params.minimized),
+          },
+        });
+        return;
+      }
+
+      if (detail.method === SURFACE_CONTROL_METHODS.send) {
+        const input = stringParam(params.input);
+        if (input === undefined) {
+          detail.respond({ ok: false, error: 'input is required' });
+          return;
+        }
+        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        if (target.value.type !== 'terminal') {
+          detail.respond({ ok: false, error: `surface '${target.value.ref}' is not a terminal` });
+          return;
+        }
+        getPlatform().writePty(target.value.id, input);
+        detail.respond({
+          ok: true,
+          result: {
+            status: 'sent',
+            surfaceId: target.value.id,
+            surfaceRef: target.value.ref,
+            inputCount: typeof params.inputCount === 'number' ? params.inputCount : 1,
+          },
+        });
+        return;
+      }
+
+      if (detail.method === SURFACE_CONTROL_METHODS.read) {
+        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        if (target.value.type !== 'terminal') {
+          detail.respond({ ok: false, error: `surface '${target.value.ref}' is not a terminal` });
+          return;
+        }
+        const lines = numberParam(params.lines);
+        const scrollback = booleanParam(params.scrollback);
+        const text = readSurfaceText(target.value.id, lines, scrollback);
+        detail.respond({
+          ok: true,
+          result: {
+            workspaceRef: 'workspace:1',
+            surfaceId: target.value.id,
+            surfaceRef: target.value.ref,
+            text,
+          },
+        });
+        return;
+      }
+
+      if (detail.method === SURFACE_CONTROL_METHODS.kill) {
+        const confirmation = killConfirmationParam(params.confirmation);
+        if (!confirmation) {
+          detail.respond({ ok: false, error: 'invalid kill confirmation' });
+          return;
+        }
+        const surface = stringParam(params.surface);
+        if (!surface) {
+          detail.respond({ ok: false, error: 'surface is required' });
+          return;
+        }
+        const target = resolveVisibleSurface(surface, detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        if (confirmation.mode === 'if-read') {
+          const text = readSurfaceText(target.value.id, undefined, false);
+          if (!text.includes(confirmation.text)) {
+            detail.respond({ ok: false, error: `surface '${target.value.ref}' read text did not contain confirmation text` });
+            return;
+          }
+        }
+        killPaneImmediately(target.value.id);
+        detail.respond({
+          ok: true,
+          result: {
+            status: 'killed',
+            surfaceId: target.value.id,
+            surfaceRef: target.value.ref,
+          },
+        });
+        return;
+      }
+
+      if (detail.method === SURFACE_CONTROL_METHODS.iframe) {
+        const url = stringParam(params.url);
+        if (!url) {
+          detail.respond({ ok: false, error: 'url is required' });
+          return;
+        }
+        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        const result = createContentSurface({
+          minimized: booleanParam(params.minimized),
+          params: { surfaceType: 'browser', renderMode: 'iframe', url },
+          reference: target.value,
+          title: hostPathDisplay(url, true),
+          // `dor iframe` opens the embed in the background; caller keeps focus.
+          focusNeutral: true,
+        });
+        if (!result.ok) {
+          detail.respond({ ok: false, error: result.message });
+          return;
+        }
+        detail.respond({
+          ok: true,
+          result: {
+            status: result.value.status,
+            surfaceId: result.value.id,
+            surfaceRef: result.value.ref,
+            url,
+            minimized: booleanParam(params.minimized),
+          },
+        });
+        return;
+      }
+
+      if (detail.method === SURFACE_CONTROL_METHODS.agentBrowser) {
+        const session = stringParam(params.session);
+        if (!session) {
+          detail.respond({ ok: false, error: 'session is required' });
+          return;
+        }
+        const key = stringParam(params.key);
+        const wsPort = numberParam(params.wsPort);
+        const binaryPath = stringParam(params.binaryPath);
+        // Remember the resolved binary so an embed→screencast swap can spawn one.
+        if (binaryPath) lastAgentBrowserBinaryPathRef.current = binaryPath;
+        const refreshedParams = {
+          ...(wsPort !== undefined ? { wsPort } : {}),
+          ...(binaryPath !== undefined ? { binaryPath } : {}),
+        };
+
+        const existing = findAgentBrowserSurface(session);
+        if (existing) {
+          // Reuse: refresh the stream port (OS-assigned, churns across session
+          // restarts) so the panel reconnects to the live stream, and the
+          // resolved binary path alongside it.
+          if (!existing.minimized && Object.keys(refreshedParams).length > 0) {
+            lath.store.updateParams(existing.id, refreshedParams);
+          } else if (existing.minimized && Object.keys(refreshedParams).length > 0) {
+            const nextDoors = doorsRef.current.map((door) => door.id === existing.id
+              ? { ...door, params: { ...door.params, ...refreshedParams } }
+              : door);
+            doorsRef.current = nextDoors;
+            setDoors(nextDoors);
+          }
+          detail.respond({
+            ok: true,
+            result: {
+              status: 'existing',
+              surfaceId: existing.id,
+              surfaceRef: surfaceRefForId(existing.id),
+              session,
+              minimized: existing.minimized,
+            },
+          });
+          return;
+        }
+
+        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
+        if (!target.ok) {
+          detail.respond({ ok: false, error: target.message });
+          return;
+        }
+        const result = createContentSurface({
+          minimized: booleanParam(params.minimized),
+          params: {
+            surfaceType: 'browser',
+            renderMode: 'ab-screencast',
+            session,
+            ...(key !== undefined ? { key } : {}),
+            ...refreshedParams,
+          },
+          reference: target.value,
+          title: key ?? session,
+          // `dor ab` opens the screencast in the background; caller keeps focus.
+          focusNeutral: true,
+        });
+        if (!result.ok) {
+          detail.respond({ ok: false, error: result.message });
+          return;
+        }
+        detail.respond({
+          ok: true,
+          result: {
+            status: result.value.status,
+            surfaceId: result.value.id,
+            surfaceRef: result.value.ref,
+            session,
+            minimized: booleanParam(params.minimized),
+          },
+        });
+        return;
+      }
+
+      detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
+    };
+
+    window.addEventListener('dormouse:control-request', handler);
+    return () => window.removeEventListener('dormouse:control-request', handler);
+  }, [buildDorSurfaces, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, resolveVisibleSurface, surfaceRefForId, lath, nav]);
+}

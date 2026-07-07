@@ -16,110 +16,61 @@ body {
   height: 100vh;
 }
 
-/* --- Dockview overrides: flatten tab bar into a pane header --- */
+/* --- Lath host (the tiling engine binding) ---
+ *
+ * The HTML adapter for Lath (docs/specs/tiling-engine.md → "Adapters"), mounted by
+ * the Wall. app-bg gutters, a terminal-bg body, and a 30px header band. The header
+ * and body React components carry their own palette (bg-header-…, bg-terminal-bg)
+ * and rounded corners, so this is layout + backgrounds only. */
 
-/* Each group has exactly one panel (tab stacking is disabled),
-   so singleTabMode="fullwidth" makes the tab fill the header.
-   We strip all remaining tab-bar chrome so it looks like a plain
-   PaneHeader / PaneContent layout. */
-
-.dockview-theme-abyss {
-  --dv-tabs-and-actions-container-height: 30px !important;
-  --dv-tabs-and-actions-container-font-size: var(--mt-font-size) !important;
-  --dv-group-view-background-color: var(--color-terminal-bg) !important;
-  --dv-tabs-and-actions-container-background-color: var(--color-header-inactive-bg) !important;
-  --dv-activegroup-visiblepanel-tab-background-color: var(--color-header-active-bg) !important;
-  --dv-activegroup-hiddenpanel-tab-background-color: var(--color-header-inactive-bg) !important;
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-header-active-bg) !important;
-  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--color-header-inactive-bg) !important;
-  --dv-activegroup-visiblepanel-tab-color: var(--color-header-active-fg) !important;
-  --dv-activegroup-hiddenpanel-tab-color: var(--color-header-inactive-fg) !important;
-  --dv-inactivegroup-visiblepanel-tab-color: var(--color-header-active-fg) !important;
-  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-header-inactive-fg) !important;
-  --dv-tab-divider-color: var(--color-border) !important;
-  --dv-separator-border: transparent !important;
-  --dv-active-sash-color: transparent !important;
+.lath-host {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background-color: var(--color-app-bg);
 }
 
-/* Outermost dockview container shows through pane-to-pane gaps — paint it
- * with app-bg so the gutters read as host chrome, not pane content. */
-.dockview-theme-abyss.dv-dockview {
-  background-color: var(--color-app-bg) !important;
+/* One stable, absolutely-positioned div per leaf — moved and resized via inline
+ * styles, never re-parented (the no-reparent guarantee that keeps iframes from
+ * reloading and xterms from blurring). */
+.lath-host .lath-leaf {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-.dockview-theme-abyss .dv-groupview,
-.dockview-theme-abyss .dv-split-view-container,
-.dockview-theme-abyss .dv-split-view-container .dv-view-container {
-  background-color: var(--color-app-bg) !important;
-}
-
-/* Remove tab-bar background/border — the tab itself provides the bg */
-.dv-tabs-and-actions-container {
-  background: transparent !important;
-  border-bottom: none !important;
-  overflow: visible !important;
+.lath-host .lath-leaf-header {
+  flex: 0 0 30px;
+  height: 30px;
   position: relative;
+  overflow: visible;
   z-index: 20;
 }
 
-/* The scrollable wrapper around tabs — remove any padding/gaps */
-.dv-tabs-and-actions-container .dv-scrollable {
-  overflow: visible !important;
-}
-
-.dv-tabs-container {
-  overflow: visible !important;
-}
-
-/* Individual tab — stretch to fill, remove tab-like styling. Transparent
- * bg is critical: our React tab has rounded-t corners, so any color on the
- * wrapping dv-tab would peek through the corner triangles. */
-.dv-tabs-container .dv-tab {
-  background: transparent !important;
-  border: none !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  overflow: visible !important;
-}
-
-.dv-groupview {
-  overflow: visible !important;
-  border: none !important;
-}
-
-.dv-groupview > .dv-content-container {
+.lath-host .lath-leaf-body {
+  flex: 1 1 auto;
+  min-height: 0;
   position: relative;
-  z-index: 0;
-  overflow: hidden !important;
+  overflow: hidden;
+  background-color: var(--color-terminal-bg);
 }
 
-.dockview-theme-abyss .dv-pane-container .dv-pane .dv-pane-body,
-.dockview-theme-abyss .dv-split-view-container .dv-view-container .dv-view {
-  overflow: hidden !important;
+/* Sashes render from the core `sashes()` geometry as sibling divs over the gap
+ * band; the adapter widens the hit area and sets the cursor inline. */
+.lath-host .lath-sash {
+  position: absolute;
+  z-index: 30;
+  touch-action: none;
 }
 
-.dv-split-view-container .dv-sash-container .dv-sash {
-  background-color: transparent !important;
-}
-
-/* Sash handles removed — the gap itself is the visual separator */
-.dv-split-view-container .dv-sash-container .dv-sash::after {
-  content: none;
-}
-
-/* Remove hairline borders between split views */
-.dv-split-view-container .dv-view:not(:first-child)::before {
-  content: none !important;
-}
-
-/* Hide dockview's default close button */
-.dv-default-tab-action {
-  display: none !important;
-}
-
-/* Hide the right actions container (+ button etc) */
-.dv-right-actions-container {
-  display: none !important;
+/* Drag drop-preview: the speculative destination rect during a pane/Door drag. Fill,
+ * border color, and border-radius are all set inline (the resolved selection color +
+ * TERMINAL_SELECTION_BORDER_RADIUS); only positioning lives here. Inert to the pointer
+ * so it never intercepts the drag. */
+.lath-host .lath-drop-preview {
+  position: absolute;
+  pointer-events: none;
 }
 
 /* --- Command mode marching-ants animation --- */

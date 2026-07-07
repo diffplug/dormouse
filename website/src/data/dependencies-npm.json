@@ -70,27 +70,6 @@
     "homepage": "https://github.com/moxystudio/node-cross-spawn"
   },
   {
-    "name": "dockview",
-    "version": "5.2.0",
-    "license": "MIT",
-    "author": "https://github.com/mathuo",
-    "homepage": "https://github.com/mathuo/dockview"
-  },
-  {
-    "name": "dockview-core",
-    "version": "5.2.0",
-    "license": "MIT",
-    "author": "https://github.com/mathuo",
-    "homepage": "https://github.com/mathuo/dockview"
-  },
-  {
-    "name": "dockview-react",
-    "version": "5.2.0",
-    "license": "MIT",
-    "author": "https://github.com/mathuo",
-    "homepage": "https://github.com/mathuo/dockview"
-  },
-  {
     "name": "fflate",
     "version": "0.8.3",
     "license": "MIT",

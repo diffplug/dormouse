@@ -25,7 +25,6 @@
  * keeps a stuck pane from wedging the loop.
  */
 import { useEffect } from 'react';
-import type { DockviewApi } from 'dockview-react';
 import { getPlatform } from '../../lib/platform';
 import { getActivitySnapshot, getTerminalPaneStateSnapshot } from '../../lib/terminal-registry';
 import { buildAppTitleResolver, deriveSurfaceLabel, DEFAULT_IDLE_TITLE } from '../../lib/terminal-state';
@@ -36,6 +35,7 @@ import {
   subscribeWantedDevServerPorts,
 } from './agent-browser-ports';
 import type { DooredItem } from './wall-types';
+import type { LathWallEngine } from './lath-wall-engine';
 import { isBrowserParams } from './browser-surface';
 
 // Wait this long after interest changes before scanning, so a tab's open +
@@ -80,10 +80,11 @@ function cancelIdle(handle: number | undefined): void {
 }
 
 export function useDevServerPortCorrelation({
-  apiRef,
+  lath,
   doorsRef,
 }: {
-  apiRef: React.MutableRefObject<DockviewApi | null>;
+  /** The Lath engine — source of the visible-pane projection (`lath.listPanes()`). */
+  lath: LathWallEngine;
   doorsRef: React.MutableRefObject<DooredItem[]>;
 }): void {
   useEffect(() => {
@@ -134,12 +135,11 @@ export function useDevServerPortCorrelation({
 
       running = true;
       try {
-        const api = apiRef.current;
         const doors = doorsRef.current;
         // title lookups for labelling/fallback, keyed by surface id.
         const titles = new Map<string, string | null>();
         const candidates: string[] = [];
-        for (const panel of api?.panels ?? []) {
+        for (const panel of lath.listPanes()) {
           if (!isTerminalParams(panel.params)) continue;
           candidates.push(panel.id);
           titles.set(panel.id, panel.title ?? null);
@@ -240,5 +240,5 @@ export function useDevServerPortCorrelation({
       unsubscribeWanted();
       unsubscribeRescan();
     };
-  }, [apiRef, doorsRef]);
+  }, [lath, doorsRef]);
 }

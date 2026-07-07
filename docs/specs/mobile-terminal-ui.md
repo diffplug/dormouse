@@ -114,7 +114,7 @@ to touch input. This keeps the composition usable in desktop browsers, narrow
 desktop viewports, and Storybook without a touchscreen. A primary
 mouse/trackpad click in pane content must start radial gesture handling, call
 `preventDefault()`, stop propagation, and capture that pointer; it is not
-passed through to the embedded `Wall`, xterm, or dockview for focus,
+passed through to the embedded `Wall`, xterm, or the tiling engine for focus,
 selection, or pane interaction. Non-primary mouse buttons are ignored by
 gesture handling so their browser or host behavior can continue. Users who
 want terminal selection or TUI mouse input must choose Select or Mouse mode

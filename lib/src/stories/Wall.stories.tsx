@@ -7,10 +7,15 @@ import {
   SCENARIO_ANSI_COLORS,
 } from '../lib/platform';
 import type { ActivityState } from '../lib/terminal-registry';
+import { settleTerminals } from './settle-terminals';
 
 const meta: Meta<typeof Wall> = {
   title: 'App/Wall',
   component: Wall,
+  // Hold every snapshot until the terminals have written their scenario and painted.
+  // Stories that define their own `play` override this and call `settleTerminals()`
+  // themselves at the end.
+  play: () => settleTerminals(),
 };
 
 export default meta;
@@ -72,7 +77,10 @@ export const WithAnsiColors: Story = {
 
 export const MultiPane: Story = {
   parameters: { fakePty: { scenario: flattenScenario(SCENARIO_LS_OUTPUT) } },
-  play: splitPanes,
+  play: async () => {
+    await splitPanes();
+    await settleTerminals();
+  },
 };
 
 export const WithDoors: Story = {
@@ -81,6 +89,7 @@ export const WithDoors: Story = {
     await splitPanes();
     await minimizeFirstVisiblePane();
     await minimizeFirstVisiblePane();
+    await settleTerminals();
   },
 };
 
@@ -130,6 +139,7 @@ export const AlertRingingDoor: Story = {
   play: async () => {
     await minimizeSelectedPane();
     await wait(100);
+    await settleTerminals();
   },
 };
 
@@ -146,7 +156,10 @@ export const AlertModalOpen: Story = {
       },
     }),
   },
-  play: openAlertDialog,
+  play: async () => {
+    await openAlertDialog();
+    await settleTerminals();
+  },
 };
 
 export const TodoAfterDismiss: Story = {
@@ -180,6 +193,7 @@ export const MinimizedRingingSession: Story = {
   play: async () => {
     await minimizeSelectedPane();
     await wait(100);
+    await settleTerminals();
   },
 };
 

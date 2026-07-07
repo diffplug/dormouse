@@ -1,14 +1,11 @@
-import { findPaneInDirection } from '../../../lib/spatial-nav';
 import {
   dismissOrToggleAlert,
   getActivity,
   isUntouched,
-  swapTerminals,
   toggleSessionTodo,
 } from '../../../lib/terminal-registry';
 import { randomKillChar } from '../../KillConfirm';
 import { ARROW_OPPOSITES, isArrowKey, type NavHistoryRef, type WallKeyboardCtx } from './types';
-import { swapPanelTitles } from '../dockview-helpers';
 
 function findAlertButtonForSession(id: string): HTMLButtonElement | null {
   return document.querySelector<HTMLButtonElement>(`[data-alert-button-for="${CSS.escape(id)}"]`);
@@ -24,8 +21,6 @@ export function handlePaneShortcuts(
   ctx: WallKeyboardCtx,
   navHistory: NavHistoryRef,
 ): boolean {
-  const api = ctx.apiRef.current;
-  if (!api) return false;
   const sid = ctx.selectedIdRef.current;
 
   if (e.key === 'Enter' && sid) {
@@ -62,19 +57,23 @@ export function handlePaneShortcuts(
     const dir = e.key;
     const hist = navHistory.current;
     let targetId: string | null = null;
-    if (hist && ARROW_OPPOSITES[dir] === hist.direction && api.getPanel(hist.fromId)) {
+    if (hist && ARROW_OPPOSITES[dir] === hist.direction && ctx.nav.hasPane(hist.fromId)) {
       targetId = hist.fromId;
     } else {
-      targetId = findPaneInDirection(sid, dir, api, ctx.paneElements);
+      targetId = ctx.nav.findInDirection(sid, dir);
     }
     if (!targetId) return true;
 
-    swapTerminals(sid, targetId);
-    swapPanelTitles(api, sid, targetId);
+    // Swap leaf identities (meta follows ids), so the two panes trade places.
+    ctx.swapWithNeighbor(sid, targetId);
     ctx.fireEvent({ type: 'move', fromId: sid, toId: targetId });
 
-    navHistory.current = { direction: dir, fromId: sid };
-    ctx.selectPane(targetId);
+    // Selection stays on the moved pane, so the breadcrumb records the swap
+    // partner — the pane now holding the old slot. The opposite Cmd+Arrow then
+    // swaps back exactly, and a plain opposite arrow selects that partner;
+    // `fromId: sid` here would make both resolve to the selected pane itself.
+    navHistory.current = { direction: dir, fromId: targetId };
+    ctx.selectPane(sid);
     return true;
   }
 

@@ -52,7 +52,6 @@ export {
   restoreTerminal,
   resumeTerminal,
   setPendingShellOpts,
-  swapTerminals,
   unmountElement,
 } from './terminal-lifecycle';
 export type { SurfaceFocusHandle } from './terminal-lifecycle';

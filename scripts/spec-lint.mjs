@@ -25,8 +25,8 @@ const SPECS_DIR = 'docs/specs';
 
 const TOP_LEVEL_DIRS = [
   'lib/', 'standalone/', 'vscode-ext/', 'website/', 'server/',
-  'server-lib-common/', 'dor/', 'dor-lib-common/', 'docs/', 'scripts/',
-  '.github/', '.claude/', '.vscode/',
+  'server-lib-common/', 'dor/', 'dor-lib-common/', 'canopy/', 'docs/',
+  'scripts/', '.github/', '.claude/', '.vscode/',
 ];
 // Path prefixes that are legitimate references to build/staged/generated
 // output which does not exist in a clean checkout.

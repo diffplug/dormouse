@@ -1,12 +1,12 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { IDockviewPanelProps } from 'dockview-react';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
 import { registerProxyOrigin } from '../../lib/iframe-proxy-registry';
 import { registerSurfaceFocusHandle } from '../../lib/terminal-registry';
 import type { IframeProxyResult } from '../../lib/platform/types';
+import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
-import { WallActionsContext } from './wall-context';
+import { PaneWriteContext, WallActionsContext } from './wall-context';
 import {
   openAgentBrowserScreenModal,
   registerAgentBrowserScreen,
@@ -15,11 +15,6 @@ import {
   type ScreenRegistration,
 } from './agent-browser-screen';
 import { hostPathDisplay } from './browser-url';
-
-type IframePanelParams = {
-  surfaceType?: string;
-  url?: string;
-};
 
 // Sandbox the proxied frame so a tool's `if (top !== self) top.location = …`
 // framebust cannot navigate the Wall away — allow-top-navigation is omitted on
@@ -81,11 +76,12 @@ function upstreamUrlFromFrameLocation(frameUrl: unknown, targetUrl: string, prox
   }
 }
 
-export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelParams>) {
+export function IframePanel({ id, title, params }: PaneProps) {
   const actions = useContext(WallActionsContext);
+  const paneWrite = useContext(PaneWriteContext);
   const elRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  usePaneChrome(api, elRef);
+  usePaneChrome(id, elRef);
   const sourceUrl = typeof params?.url === 'string' ? params.url : '';
   const [liveUrl, setLiveUrl] = useState(sourceUrl);
   // A new-tab/window request from the proxy shim, pending the user's choice to
@@ -128,9 +124,9 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     if (!nextUrl) return;
     setLiveUrl(nextUrl);
     setHistory((prev) => appendHistory(prev, nextUrl));
-    if (persist) api.updateParameters({ url: nextUrl });
-    api.setTitle?.(hostPathDisplay(nextUrl, true));
-  }, [api]);
+    if (persist) paneWrite.updateParams(id, { url: nextUrl });
+    paneWrite.setTitle(id, hostPathDisplay(nextUrl, true));
+  }, [paneWrite, id]);
 
   const commitUrl = useCallback((nextUrl: string) => applyFrameUrl(nextUrl, true), [applyFrameUrl]);
   const observeFrameUrl = useCallback((nextUrl: string) => applyFrameUrl(nextUrl, false), [applyFrameUrl]);
@@ -141,15 +137,15 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     const nextUrl = prev.entries[nextIndex];
     setLiveUrl(nextUrl);
     setHistory({ ...prev, index: nextIndex });
-    api.updateParameters({ url: nextUrl });
-    api.setTitle?.(hostPathDisplay(nextUrl, true));
+    paneWrite.updateParams(id, { url: nextUrl });
+    paneWrite.setTitle(id, hostPathDisplay(nextUrl, true));
     // Force a proxy re-resolution so the frame actually reloads. After an
     // observed in-frame navigation, params.url stays at the source URL, so a
     // Back to that same URL is a no-op write — without bumping the nonce the
     // proxy effect (deps: sourceUrl, reloadNonce) wouldn't re-fire and the frame
     // would keep showing the navigated page while the chrome shows the target.
     setReloadNonce((n) => n + 1);
-  }, [api]);
+  }, [paneWrite, id]);
 
   // Ask the host to front the target with its transparent proxy. The returned
   // URL is a loopback origin that serves the page's bytes (instrumented for
@@ -192,14 +188,14 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     engageSync() {},
     applyDevice() {},
     applyViewport() {},
-    openModal() { openAgentBrowserScreenModal(api.id); },
+    openModal() { openAgentBrowserScreenModal(id); },
     // iframe is the current backend; ab-screencast / ab-popout swap to
     // agent-browser. Wired only when the host can spawn one — without it the
     // modal hides its Render section, but the chrome (URL/nav) still shows.
     setRenderMode: swapCapable
-      ? (mode) => { if (mode !== 'iframe') actionsRef.current.onSwapRenderMode(api.id, mode); }
+      ? (mode) => { if (mode !== 'iframe') actionsRef.current.onSwapRenderMode(id, mode); }
       : undefined,
-  }), [api.id, swapCapable]);
+  }), [id, swapCapable]);
   const chromeActions = useMemo<ChromeActions>(() => ({
     navigate(next) { commitUrl(next); },
     back() { goToHistoryIndex(historyIndexRef.current - 1); },
@@ -212,7 +208,7 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
   // is a full browser-chrome tab, not a lesser one (docs/specs/dor-browser.md).
   // The render-swap action is gated separately (screenActions.setRenderMode).
   useEffect(() => {
-    const registration = registerAgentBrowserScreen(api.id, {
+    const registration = registerAgentBrowserScreen(id, {
       snapshot: {
         state: 'SYNCED',
         renderMode: 'iframe',
@@ -222,7 +218,7 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
         syncEngaged: false,
       },
       actions: screenActions,
-      chrome: { url: liveUrl, displayUrl: hostPathDisplay(liveUrl), title: api.title ?? null, key: null },
+      chrome: { url: liveUrl, displayUrl: hostPathDisplay(liveUrl), title: title ?? null, key: null },
       chromeActions,
       hostCapable: false,
       // embed→popout spawns the new agent-browser headed and mounts it
@@ -231,12 +227,12 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     });
     registrationRef.current = registration;
     return () => { registration.dispose(); registrationRef.current = null; };
-  }, [api.id, swapCapable, screenActions, chromeActions]);
+  }, [id, swapCapable, screenActions, chromeActions]);
   // Keep the header's URL current as navigation and in-frame location changes
   // land. The iframe src is still driven only by sourceUrl.
   useEffect(() => {
-    registrationRef.current?.updateChrome({ url: liveUrl, displayUrl: hostPathDisplay(liveUrl), title: api.title ?? null, key: null });
-  }, [liveUrl, api.title]);
+    registrationRef.current?.updateChrome({ url: liveUrl, displayUrl: hostPathDisplay(liveUrl), title: title ?? null, key: null });
+  }, [liveUrl, title]);
 
   // Trust postMessage from this frame's origin (validated by the Wall's
   // keyboard/focus/location channel) only while the proxied surface is live.
@@ -252,15 +248,14 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
   // adopt it as entering the pane (select + passthrough), exactly like clicking
   // any other pane. Only genuine clicks emit `pointerdown`, so command-mode
   // arrow navigation never triggers it, and onClickPanel is idempotent for
-  // repeat clicks. (We can't gate on dockview's `api.isActive`: in a split each
-  // sole panel is always "active" within its own group.)
+  // repeat clicks.
   useEffect(() => {
     if (!proxyOrigin) return;
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== proxyOrigin) return;
       const data = e.data as { __dormouse?: unknown; url?: unknown } | null;
       if (data?.__dormouse === 'pointerdown') {
-        actions.onClickPanel(api.id);
+        actions.onClickPanel(id);
         return;
       }
       if (data?.__dormouse === 'open-window' && typeof data.url === 'string') {
@@ -277,7 +272,7 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [api, proxyOrigin, actions, liveUrl, sourceUrl, observeFrameUrl]);
+  }, [id, proxyOrigin, actions, liveUrl, sourceUrl, observeFrameUrl]);
 
   // Raw fallback frames have no injected shim, but focusing a cross-origin
   // iframe still blurs the parent window while the document itself remains
@@ -287,19 +282,19 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
     if (resolution.kind !== 'raw') return;
     const onWindowBlur = () => {
       if (document.hasFocus() && document.activeElement === iframeRef.current) {
-        actions.onClickPanel(api.id);
+        actions.onClickPanel(id);
       }
     };
     window.addEventListener('blur', onWindowBlur);
     return () => window.removeEventListener('blur', onWindowBlur);
-  }, [api.id, resolution.kind, actions]);
+  }, [id, resolution.kind, actions]);
 
   // Register a focus handle so onClickPanel → enterTerminalMode can focus the
   // frame like any other surface (spec → "#3"), and exitTerminalMode can hand
   // focus back. Focusing the element moves keyboard focus into the frame.
   useEffect(() => {
     if (resolution.kind !== 'proxied' && resolution.kind !== 'raw') return;
-    return registerSurfaceFocusHandle(api.id, {
+    return registerSurfaceFocusHandle(id, {
       // Skip if the frame already holds focus: re-focusing a cross-origin frame
       // on WebKit can blank it (the frame is already focused after a click).
       focus: () => {
@@ -313,7 +308,7 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
         elRef.current?.focus();
       },
     });
-  }, [api.id, resolution.kind]);
+  }, [id, resolution.kind]);
 
   const src = resolution.kind === 'proxied' || resolution.kind === 'raw' ? resolution.src : '';
 
@@ -325,21 +320,20 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
       tabIndex={-1}
       className={`relative h-full w-full overflow-hidden bg-terminal-bg outline-none ${TERMINAL_BOTTOM_RADIUS_CLASS}`}
       // A cross-origin iframe is an out-of-process frame; Chromium maps pointer
-      // events to it relative to its nearest compositing/containing ancestor.
-      // Dockview's root (.dv-dockview) sets `contain: layout`, so without this
-      // the frame's reference is that far-away root and clicks land offset by the
-      // pane's distance from it. translateZ(0) gives this container its own layer
-      // co-located with the frame, collapsing the offset to ~0. It's identity, so
+      // events to it relative to its nearest compositing/containing ancestor. If that
+      // ancestor is a far-away layout-contained root, clicks land offset by the pane's
+      // distance from it. translateZ(0) gives this container its own layer co-located
+      // with the frame, collapsing the offset to ~0. It's identity, so
       // getBoundingClientRect (overlay measurement) is unaffected.
       style={{ transform: 'translateZ(0)' }}
-      onMouseDown={() => actions.onClickPanel(api.id)}
+      onMouseDown={() => actions.onClickPanel(id)}
     >
       {src ? (
         <iframe
           ref={iframeRef}
           className="block h-full w-full border-0 bg-white"
           src={src}
-          title={api.title ?? liveUrl}
+          title={title ?? liveUrl}
           allow={IFRAME_ALLOW}
           {...(resolution.kind === 'proxied' ? { sandbox: PROXY_SANDBOX, 'data-dormouse-proxy': 'true' } : {})}
           referrerPolicy="strict-origin-when-cross-origin"
@@ -361,7 +355,7 @@ export function IframePanel({ api, params }: IDockviewPanelProps<IframePanelPara
                 e.stopPropagation();
                 const u = pendingOpenUrl;
                 setPendingOpenUrl(null);
-                if (u) actions.onOpenBrowserPane?.(api.id, u);
+                if (u) actions.onOpenBrowserPane?.(id, u);
               }}
               className="rounded border border-border px-2.5 py-1 text-sm text-foreground transition-colors hover:border-foreground"
             >
