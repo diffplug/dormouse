@@ -426,15 +426,22 @@ test('gracefulKillAll resolves early once every PTY has exited', async () => {
   assert.ok(Date.now() - started < 5_000);
 });
 
-test('gracefulKillAll with no live PTYs completes immediately', () => {
+test('gracefulKillAll with no live PTYs waits one grace tick', async () => {
   const events = [];
-  const mgr = create((event, data) => { events.push({ event, data }); }, {
+  let resolveDone;
+  const done = new Promise((resolve) => { resolveDone = resolve; });
+  const mgr = create((event, data) => {
+    events.push({ event, data });
+    if (event === 'gracefulKillDone') resolveDone();
+  }, {
     spawn() { throw new Error('nothing should spawn'); },
   });
 
   mgr.gracefulKillAll(60_000, 'req-1');
+  assert.deepEqual(events, []);
 
-  // Synchronous done — no SIGTERMs were sent, so no poll/grace ticks run.
+  await done;
+
   assert.deepEqual(events, [{ event: 'gracefulKillDone', data: { requestId: 'req-1' } }]);
 });
 

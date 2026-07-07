@@ -1168,9 +1168,10 @@ module.exports.create = function create(send, ptyModule) {
 
   function gracefulKillAll(timeout = 2000, requestId) {
     const done = () => send('gracefulKillDone', { requestId });
-    // Nothing live ⇒ nothing to SIGTERM and no final flush to wait for; skip
-    // the poll/grace ticks so an all-idle quit doesn't pay their ~100ms floor.
-    if (ptys.size === 0) { done(); return; }
+    // Nothing live to SIGTERM, but a just-exited PTY can still deliver final
+    // output shortly after onExit (notably under ConPTY). Keep the same single
+    // grace tick used after the live map empties before the quit flush runs.
+    if (ptys.size === 0) { setTimeout(done, 50); return; }
     for (const [, p] of ptys) {
       try { p.kill('SIGTERM'); } catch { /* already dead */ }
     }
