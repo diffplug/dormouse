@@ -37,13 +37,9 @@ export class TauriSessionStore implements SessionKeyValueStore {
   constructor(private readonly save: SessionSaveFn = invokeSave) {}
 
   /**
-   * Resolve when the write pipeline is idle — no save in flight and nothing
-   * queued. Idle at call time resolves immediately; otherwise resolves after the
-   * LAST chained flush settles (a `setItem` issued while draining chains as the
-   * pending value and pushes the idle point out, so it is covered). Rejected
-   * writes still drain — the store logs-and-continues in `flush`. Semantics:
-   * pipeline-idle at call time forward. A `setItem` that starts a fresh pipeline
-   * after this drain has already resolved is not covered by that resolved call.
+   * Resolves when the write pipeline goes idle — no save in flight, nothing
+   * queued. A `setItem` chained while draining pushes the idle point out (so it
+   * is covered); rejected writes still drain (`flush` logs-and-continues).
    */
   drain(): Promise<void> {
     if (!this.saveInFlight) return Promise.resolve();
@@ -88,9 +84,7 @@ export class TauriSessionStore implements SessionKeyValueStore {
           this.flush(next);
         } else {
           this.saveInFlight = false;
-          // Pipeline idle: release everyone awaiting drain(). Snapshot first so a
-          // waiter that re-enters (e.g. schedules another save) can't mutate the
-          // array mid-iteration.
+          // Pipeline idle: release drain waiters.
           const waiters = this.drainWaiters;
           this.drainWaiters = [];
           for (const resolve of waiters) resolve();

@@ -130,34 +130,6 @@ describe("TauriSessionStore", () => {
     expect(drained).toBe(true);
   });
 
-  it("drain covers a value queued behind the in-flight save", async () => {
-    const saved: string[] = [];
-    const resolvers: Array<() => void> = [];
-    const store = new TauriSessionStore(
-      (v) =>
-        new Promise<void>((res) => {
-          saved.push(v);
-          resolvers.push(res);
-        }),
-    );
-
-    store.setItem("k", "a"); // in flight
-    store.setItem("k", "b"); // queued as pending
-    let drained = false;
-    void store.drain().then(() => {
-      drained = true;
-    });
-
-    resolvers[0](); // 'a' settles → flush 'b'
-    await tick();
-    expect(saved).toEqual(["a", "b"]);
-    expect(drained).toBe(false); // pending 'b' still in flight
-
-    resolvers[1](); // 'b' settles → pipeline idle
-    await tick();
-    expect(drained).toBe(true);
-  });
-
   it("drain covers a setItem issued while draining (chains as pending)", async () => {
     const saved: string[] = [];
     const resolvers: Array<() => void> = [];

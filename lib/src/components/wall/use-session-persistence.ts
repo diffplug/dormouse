@@ -48,12 +48,7 @@ export function useSessionPersistence({
     return saveSession(getPlatform(), api.toJSON(), panes, doorsRef.current ?? []);
   }, [apiRef, doorsRef]);
 
-  const persistSessionNow = useCallback((): Promise<void> => {
-    if (sessionSavePromiseRef.current) {
-      pendingSaveNeededRef.current = true;
-      return sessionSavePromiseRef.current;
-    }
-
+  const persistSessionNow = useCallback(async (): Promise<void> => {
     const runSave = (): Promise<void> => {
       pendingSaveNeededRef.current = false;
       // Clear dirty only on a fulfilled write (.then, not .finally).
@@ -71,7 +66,17 @@ export function useSessionPersistence({
       return savePromise;
     };
 
-    return runSave();
+    if (sessionSavePromiseRef.current) {
+      pendingSaveNeededRef.current = true;
+    } else {
+      runSave();
+    }
+    // Await until the pipeline idles so the resolution covers the LATEST queued
+    // save, not just the one in flight. Terminates: a rerun chains only while a
+    // new save was requested mid-save, so the chain is finite.
+    while (sessionSavePromiseRef.current) {
+      await sessionSavePromiseRef.current;
+    }
   }, [doSave]);
 
   // Doors mutate without any dockview event (setDoors from minimize/reattach or
@@ -82,22 +87,12 @@ export function useSessionPersistence({
 
   // Never gated on the dirty tracker — the correctness net for dirty-trigger
   // gaps (e.g. a program calling chdir() silently produces no event).
-  const flushSessionSave = useCallback(async (): Promise<void> => {
+  const flushSessionSave = useCallback((): Promise<void> => {
     if (sessionSaveTimerRef.current) {
       clearTimeout(sessionSaveTimerRef.current);
       sessionSaveTimerRef.current = null;
     }
-    await persistSessionNow();
-    // persistSessionNow returns the in-flight save's promise (not the rerun)
-    // when a save is already running, queuing the newest data via
-    // pendingSaveNeededRef; that rerun only chains onto sessionSavePromiseRef
-    // after the current save settles. Keep awaiting the chained reruns until the
-    // pipeline goes idle, so this flush covers the LATEST queued save rather than
-    // resolving before it lands. Terminates: a rerun chains only while a new save
-    // was requested mid-save, so the chain is finite.
-    while (sessionSavePromiseRef.current) {
-      await sessionSavePromiseRef.current;
-    }
+    return persistSessionNow();
   }, [persistSessionNow]);
 
   const scheduleSessionSave = useCallback(() => {

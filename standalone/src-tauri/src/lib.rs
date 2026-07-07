@@ -645,13 +645,16 @@ fn write_session_to(dir: &Path, label: &str, state: &str) -> Result<(), String> 
     Ok(())
 }
 
+// Async so the file IO (and save's two fsyncs — temp file + dir, both
+// F_FULLFSYNC on macOS) runs off the main/event-loop thread. Ordering is safe:
+// the webview store issues at most one save_session at a time (its coalescer).
 #[tauri::command]
-fn load_session(window: tauri::Window) -> Result<Option<String>, String> {
+async fn load_session(window: tauri::Window) -> Result<Option<String>, String> {
     read_session_from(&sessions_dir(window.app_handle())?, window.label())
 }
 
 #[tauri::command]
-fn save_session(window: tauri::Window, state: String) -> Result<(), String> {
+async fn save_session(window: tauri::Window, state: String) -> Result<(), String> {
     write_session_to(&sessions_dir(window.app_handle())?, window.label(), &state)
 }
 

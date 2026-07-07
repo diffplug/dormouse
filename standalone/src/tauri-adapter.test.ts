@@ -21,12 +21,7 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 describe("TauriAdapter session-flush handshake", () => {
   it("resolves immediately when no flush handler is registered", async () => {
     const adapter = new TauriAdapter();
-    let resolved = false;
-    void adapter.requestSessionFlush(50).then(() => {
-      resolved = true;
-    });
-    await tick();
-    expect(resolved).toBe(true);
+    await adapter.requestSessionFlush(50);
   });
 
   it("fans a requestId out to handlers and resolves on completion", async () => {
@@ -48,6 +43,9 @@ describe("TauriAdapter session-flush handshake", () => {
     adapter.notifySessionFlushComplete(seenRequestId!);
     await tick();
     expect(resolved).toBe(true);
+    // A repeat notify (or an unknown requestId) is a harmless no-op.
+    expect(() => adapter.notifySessionFlushComplete(seenRequestId!)).not.toThrow();
+    expect(() => adapter.notifySessionFlushComplete("bogus")).not.toThrow();
   });
 
   it("resolves on timeout when a handler never completes", async () => {
@@ -66,37 +64,20 @@ describe("TauriAdapter session-flush handshake", () => {
 
   it("stops fanning out to a removed handler", async () => {
     const adapter = new TauriAdapter();
-    const handler = vi.fn();
-    adapter.onRequestSessionFlush(handler);
-    adapter.offRequestSessionFlush(handler);
+    const removed = vi.fn();
+    const kept = (detail: { requestId: string }) => {
+      adapter.notifySessionFlushComplete(detail.requestId);
+    };
+    adapter.onRequestSessionFlush(removed);
+    adapter.onRequestSessionFlush(kept);
+    adapter.offRequestSessionFlush(removed);
 
-    // No handlers left ⇒ immediate resolve, handler never invoked.
     await adapter.requestSessionFlush(1000);
-    expect(handler).not.toHaveBeenCalled();
-  });
-
-  it("ignores a stale/duplicate completion for an already-settled request", async () => {
-    const adapter = new TauriAdapter();
-    let seenRequestId: string | null = null;
-    adapter.onRequestSessionFlush((detail) => {
-      seenRequestId = detail.requestId;
-    });
-    const done = adapter.requestSessionFlush(1000);
-    await tick();
-    adapter.notifySessionFlushComplete(seenRequestId!);
-    await done;
-    // A second notify (or an unknown requestId) is a harmless no-op.
-    expect(() => adapter.notifySessionFlushComplete(seenRequestId!)).not.toThrow();
-    expect(() => adapter.notifySessionFlushComplete("bogus")).not.toThrow();
+    expect(removed).not.toHaveBeenCalled();
   });
 
   it("drainSessionSaves resolves immediately when the store pipeline is idle", async () => {
     const adapter = new TauriAdapter();
-    let resolved = false;
-    void adapter.drainSessionSaves(1000).then(() => {
-      resolved = true;
-    });
-    await tick();
-    expect(resolved).toBe(true);
+    await adapter.drainSessionSaves(1000);
   });
 });

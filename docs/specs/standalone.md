@@ -250,19 +250,19 @@ cleared, so the Rust store is the blob's only remaining home.
 
 **Durability on quit (current limitation).** `saveState` returns after updating
 the cache and *firing* `save_session`; nothing on the quit path awaits the Rust
-write. The awaitable primitives now exist — `TauriSessionStore.drain()` resolves
-when the write pipeline goes idle, the adapter's `onRequestSessionFlush`
-handshake is a real in-process fan-out (no longer a VS Code-only no-op) driven by
-`requestSessionFlush` / `notifySessionFlushComplete`, `drainSessionSaves` awaits
-the store drain under a bounded timeout, and each `save_session` is durable
-including the rename (dir fsync above) — **but nothing on the quit path calls
-them yet**. The normal quit path still does not intercept the window close
-(`updater.ts` `onCloseRequested` only prevents default for a pending update), so
-a clean quit can still drop the save fired at `pagehide`, losing state changed in
-the final debounce/heartbeat window — a regression from the old `localStorage`
-path, which WebKit flushed on teardown. Accepted for now because restore is
-best-effort and saves are frequent (≤500 ms for layout changes); the quit
-orchestrator that wires these primitives is planned (`## Future`).
+write. The awaitable primitives exist — `TauriSessionStore.drain()` resolves
+when the write pipeline goes idle; the adapter's `onRequestSessionFlush`
+handshake is a real in-process fan-out driven by `requestSessionFlush` /
+`notifySessionFlushComplete`; `drainSessionSaves` awaits the store drain under a
+bounded timeout; each `save_session` is durable through the rename (dir fsync)
+— **but nothing on the quit path calls them yet**. The normal quit path still
+does not intercept the window close (`updater.ts` `onCloseRequested` only
+prevents default for a pending update), so a clean quit can still drop the save
+fired at `pagehide`, losing state changed in the final debounce/heartbeat window
+— a regression from the old `localStorage` path, which WebKit flushed on
+teardown. Accepted for now because restore is best-effort and saves are frequent
+(≤500 ms for layout changes); the quit orchestrator that wires these primitives
+is planned (`## Future`).
 
 ## File drop
 
@@ -339,15 +339,12 @@ flight.)
 so a clean quit can drop the final save — a durability regression from the old
 `localStorage` path (§Persistence, "Durability on quit"). A webview `pagehide`
 handler cannot await async work. The awaitable primitives already exist
-(§Persistence): the adapter's `requestSessionFlush` (real in-process flush
-handshake) pushes the latest state through `saveState`, `drainSessionSaves`
-awaits the store's `drain()` under a bounded timeout, and `write_session_to`
-fsyncs the parent directory so the write is durable through the rename. What
-remains: a quit orchestrator that intercepts *every* quit trigger, calls
-`requestSessionFlush` then `drainSessionSaves`, and only then lets the process
-exit. Requirement: on a clean quit the latest state is durably written before the
-process exits, with a bounded wait so a stalled write cannot wedge quit. Unclean
-exits (crash, force-kill) stay best-effort.
+(§Persistence, "Durability on quit"); what remains is a quit orchestrator that
+intercepts *every* quit trigger, calls `requestSessionFlush` then
+`drainSessionSaves`, and only then lets the process exit. Requirement: on a
+clean quit the latest state is durably written before the process exits, with a
+bounded wait so a stalled write cannot wedge quit. Unclean exits (crash,
+force-kill) stay best-effort.
 
 **Quit confirmation + graceful terminal teardown.** Quitting ends all terminals;
 today it does so abruptly, unconfirmed, and without capturing final output.

@@ -68,10 +68,7 @@ export class TauriAdapter implements PlatformAdapter {
   // in the same webview). Handlers are the frontend flush listeners; a request
   // fans out one requestId and resolves when a handler reports completion.
   private flushHandlers = new Set<(detail: { requestId: string }) => void>();
-  private pendingFlushRequests = new Map<
-    string,
-    { resolve: () => void; timeout: ReturnType<typeof setTimeout> }
-  >();
+  private pendingFlushRequests = new Map<string, () => void>();
   private nextFlushRequestId = 0;
 
   constructor() {
@@ -423,11 +420,10 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   notifySessionFlushComplete(requestId: string): void {
-    const pending = this.pendingFlushRequests.get(requestId);
-    if (!pending) return;
+    const resolve = this.pendingFlushRequests.get(requestId);
+    if (!resolve) return;
     this.pendingFlushRequests.delete(requestId);
-    clearTimeout(pending.timeout);
-    pending.resolve();
+    resolve();
   }
 
   // Ask the frontend to flush its debounced/heartbeat session save now and report
@@ -440,13 +436,11 @@ export class TauriAdapter implements PlatformAdapter {
     if (this.flushHandlers.size === 0) return Promise.resolve();
     const requestId = `flush-${++this.nextFlushRequestId}`;
     return new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
-        this.pendingFlushRequests.delete(requestId);
-        resolve();
-      }, timeoutMs);
-      this.pendingFlushRequests.set(requestId, { resolve, timeout });
-      // First handler to notify completion wins (the app ships one Wall). Fan out
-      // after registering so a synchronous completion still finds the entry.
+      this.pendingFlushRequests.set(requestId, resolve);
+      // Timeout is a synthetic completion; a stale timer after a real completion
+      // hits notify's map-miss guard. Fan out after registering so a synchronous
+      // completion still finds the entry (first notify wins — one Wall ships).
+      setTimeout(() => this.notifySessionFlushComplete(requestId), timeoutMs);
       for (const handler of this.flushHandlers) handler({ requestId });
     });
   }
