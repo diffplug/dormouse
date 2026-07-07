@@ -130,7 +130,7 @@ describe('handlePaneShortcuts kill behavior', () => {
 describe('handlePaneShortcuts Cmd-Arrow swap (nav seam)', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('swaps with the nav-resolved neighbor, fires move, and follows selection', () => {
+  it('swaps with the nav-resolved neighbor, fires move, and keeps selection on the moved pane', () => {
     const ctx = makeCtx({
       nav: makeNav({ findInDirection: (_id, dir) => (dir === 'ArrowRight' ? 'pane-b' : null) }),
     });
@@ -139,7 +139,7 @@ describe('handlePaneShortcuts Cmd-Arrow swap (nav seam)', () => {
 
     expect(ctx.swapWithNeighbor).toHaveBeenCalledWith('pane-a', 'pane-b');
     expect(ctx.fireEvent).toHaveBeenCalledWith({ type: 'move', fromId: 'pane-a', toId: 'pane-b' });
-    expect(ctx.selectPane).toHaveBeenCalledWith('pane-b');
+    expect(ctx.selectPane).toHaveBeenCalledWith('pane-a');
   });
 
   it('does nothing when nav finds no neighbor in that direction', () => {
