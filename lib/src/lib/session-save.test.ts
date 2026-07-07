@@ -255,6 +255,45 @@ describe('saveSession', () => {
     expect(platform.getCwd).not.toHaveBeenCalledWith('door-web');
   });
 
+  it('dual-writes lathLayout alongside the legacy layout when supplied', async () => {
+    const platform = createPlatform(null);
+    const lathLayout = { version: 1, tree: { root: { kind: 'leaf', id: 'pane-a' } }, leafMeta: {} };
+
+    await saveSession(platform, { root: true }, [{ id: 'pane-a', title: 'Pane A' }], [], lathLayout);
+
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    expect(saved.layout).toEqual({ root: true });
+    expect(saved.lathLayout).toEqual(lathLayout);
+  });
+
+  it('omits lathLayout entirely when not supplied (pre-Lath save shape unchanged)', async () => {
+    const platform = createPlatform(null);
+
+    await saveSession(platform, { root: true }, [{ id: 'pane-a', title: 'Pane A' }]);
+
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    expect('lathLayout' in saved).toBe(false);
+  });
+
+  it('persists a door restore token through to the saved blob', async () => {
+    const platform = createPlatform(null);
+    const token = { leafId: 'door-a', weight: 0.5, siblingId: 'pane-b', edge: 'right', index: 0, fingerprint: null };
+
+    await saveSession(platform, { root: true }, [], [{
+      id: 'door-a',
+      title: 'npm test',
+      neighborId: 'pane-b',
+      direction: 'right',
+      remainingPaneIds: ['pane-b'],
+      layoutAtMinimize: null,
+      layoutAtMinimizeSignature: '',
+      token,
+    }]);
+
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    expect(saved.doors?.[0]?.token).toEqual(token);
+  });
+
   it('persists local browser surface TODO state in the browser pane alert field', async () => {
     const platform = createPlatform(null);
     terminalRegistryMocks.getActivity.mockReturnValue({

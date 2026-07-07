@@ -226,6 +226,54 @@ describe('readPersistedSession', () => {
     expect(readPersistedSession(JSON.stringify(v3))).toEqual(v3);
   });
 
+  it('round-trips a v3 blob carrying the additive lathLayout field', () => {
+    const v3 = {
+      version: 3 as const,
+      layout: { root: 'dockview' },
+      lathLayout: { version: 1, tree: { root: { kind: 'leaf', id: 'pane-a' } }, leafMeta: {} },
+      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null, untouched: true }],
+      doors: [],
+    };
+    // Fast path (all untouched present) returns the object unchanged, lathLayout intact.
+    expect(readPersistedSession(v3)).toBe(v3);
+    // And it survives a JSON round-trip.
+    expect(readPersistedSession(JSON.stringify(v3))).toEqual(v3);
+  });
+
+  it('accepts (and carries) a v3 door with a Lath restore token', () => {
+    const token = { leafId: 'door-a', weight: 0.5, siblingId: 'pane-b', edge: 'right', index: 0, fingerprint: null };
+    const v3 = {
+      version: 3 as const,
+      layout: null,
+      panes: [{ id: 'pane-b', title: 'Pane B', cwd: null, scrollback: null, resumeCommand: null, untouched: false }],
+      doors: [{
+        id: 'door-a',
+        title: 'Door',
+        neighborId: 'pane-b',
+        direction: 'right' as const,
+        remainingPaneIds: ['pane-b'],
+        layoutAtMinimize: null,
+        layoutAtMinimizeSignature: '',
+        token,
+      }],
+    };
+    expect(readPersistedSession(v3)?.doors?.[0]?.token).toEqual(token);
+  });
+
+  it('rejects a v3 door whose token is not an object with a string leafId', () => {
+    const base = {
+      version: 3 as const,
+      layout: null,
+      panes: [{ id: 'pane-b', title: 'Pane B', cwd: null, scrollback: null, resumeCommand: null, untouched: false }],
+    };
+    const door = {
+      id: 'door-a', title: 'Door', neighborId: null, direction: 'right' as const,
+      remainingPaneIds: [], layoutAtMinimize: null, layoutAtMinimizeSignature: '',
+    };
+    expect(readPersistedSession({ ...base, doors: [{ ...door, token: { weight: 1 } }] })).toBeNull();
+    expect(readPersistedSession({ ...base, doors: [{ ...door, token: 'nope' }] })).toBeNull();
+  });
+
   it('decodes escaped control bytes in JSON-stringified scrollback', () => {
     const v3 = {
       version: 3 as const,

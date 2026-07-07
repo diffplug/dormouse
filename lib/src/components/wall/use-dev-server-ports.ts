@@ -25,7 +25,6 @@
  * keeps a stuck pane from wedging the loop.
  */
 import { useEffect } from 'react';
-import type { DockviewApi } from 'dockview-react';
 import { getPlatform } from '../../lib/platform';
 import { getActivitySnapshot, getTerminalPaneStateSnapshot } from '../../lib/terminal-registry';
 import { buildAppTitleResolver, deriveSurfaceLabel, DEFAULT_IDLE_TITLE } from '../../lib/terminal-state';
@@ -79,11 +78,15 @@ function cancelIdle(handle: number | undefined): void {
   else clearTimeout(handle);
 }
 
+/** Visible-pane projection the correlation scans over — engine-neutral so the
+ *  same hook works under dockview (`api.panels`) and Lath (`lath.listPanes()`). */
+export type VisiblePane = { id: string; title: string | undefined; params: Record<string, unknown> | undefined };
+
 export function useDevServerPortCorrelation({
-  apiRef,
+  listVisiblePanes,
   doorsRef,
 }: {
-  apiRef: React.MutableRefObject<DockviewApi | null>;
+  listVisiblePanes: () => VisiblePane[];
   doorsRef: React.MutableRefObject<DooredItem[]>;
 }): void {
   useEffect(() => {
@@ -134,12 +137,11 @@ export function useDevServerPortCorrelation({
 
       running = true;
       try {
-        const api = apiRef.current;
         const doors = doorsRef.current;
         // title lookups for labelling/fallback, keyed by surface id.
         const titles = new Map<string, string | null>();
         const candidates: string[] = [];
-        for (const panel of api?.panels ?? []) {
+        for (const panel of listVisiblePanes()) {
           if (!isTerminalParams(panel.params)) continue;
           candidates.push(panel.id);
           titles.set(panel.id, panel.title ?? null);
@@ -240,5 +242,5 @@ export function useDevServerPortCorrelation({
       unsubscribeWanted();
       unsubscribeRescan();
     };
-  }, [apiRef, doorsRef]);
+  }, [listVisiblePanes, doorsRef]);
 }

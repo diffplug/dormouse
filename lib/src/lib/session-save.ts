@@ -17,6 +17,11 @@ export async function saveSession(
   layout: unknown,
   panes: Array<{ id: string; title: string; surfaceType?: PersistedSurfaceType }>,
   doors: PersistedDoor[] = [],
+  // The Lath persisted layout — the other half of the stage-2 dual-write
+  // (docs/specs/tiling-engine.md). Written alongside the legacy dockview `layout`
+  // so flipping `dormouse.flags.lath` either direction never loses a layout.
+  // Omitted from the persisted blob when undefined (pre-Lath / conversion failure).
+  lathLayout?: unknown,
 ): Promise<void> {
   const previousPanes = getPreviousPaneMap(platform);
   const allPanes = new Map<string, { id: string; title: string; surfaceType: PersistedSurfaceType }>();
@@ -59,7 +64,13 @@ export async function saveSession(
       };
     }),
   );
-  const session: PersistedSession = { version: 3, panes: persisted, doors: persistedDoors, layout };
+  const session: PersistedSession = {
+    version: 3,
+    panes: persisted,
+    doors: persistedDoors,
+    layout,
+    ...(lathLayout !== undefined ? { lathLayout } : {}),
+  };
   platform.saveState(session);
 }
 

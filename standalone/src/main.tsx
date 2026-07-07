@@ -102,6 +102,7 @@ async function bootstrap() {
       <App
         initialPaneIds={result.paneIds}
         restoredLayout={result.layout}
+        restoredLathLayout={result.lathLayout}
         initialDoors={result.doors}
         baseboardNotice={<ConnectedUpdateBanner />}
         enableRemoteHost

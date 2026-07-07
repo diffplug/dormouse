@@ -5,6 +5,9 @@ import { getDefaultShellOpts, restoreBrowserSurfaceTodo, restoreTerminal } from 
 export interface RestoredSession {
   paneIds: string[];
   layout: unknown;
+  /** The Lath persisted layout (dual-write half); threaded parallel to `layout`
+   *  so the Lath binding can restore from it when the flag is on. */
+  lathLayout?: unknown;
   doors: PersistedDoor[];
 }
 
@@ -36,6 +39,7 @@ export function restoreSession(platform: PlatformAdapter): RestoredSession | nul
   return {
     paneIds: saved.panes.filter((pane) => !doorIds.has(pane.id)).map((p) => p.id),
     layout: saved.layout,
+    lathLayout: saved.lathLayout,
     doors,
   };
 }

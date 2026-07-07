@@ -6,7 +6,11 @@ interface SpatialCandidate { id: string; dist: number; overlaps: boolean }
 
 export function resolvePaneElement(element: HTMLElement | null | undefined): HTMLElement | null {
   if (!element || !element.isConnected) return null;
-  return (element.closest('[class*="groupview"]') as HTMLElement | null) ?? element;
+  // dockview: climb to the `dv-groupview` (header + body). Lath: climb to the
+  // stable `[data-lath-leaf]` div (also header + body) so the selection ring /
+  // kill overlay cover the full leaf. The api-first branch of
+  // `resolvePaneGroupElement` no-ops under Lath (apiRef null) and falls here.
+  return (element.closest('[data-lath-leaf], [class*="groupview"]') as HTMLElement | null) ?? element;
 }
 
 /**

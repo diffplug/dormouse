@@ -176,16 +176,23 @@ export function LathHost({
     componentsOverride?.tabs?.[tabComponent] ?? TAB_COMPONENTS[tabComponent];
 
   return (
-    <div ref={containerRef} className="lath-host">
+    <div
+      ref={containerRef}
+      className="lath-host"
+      style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, overflow: 'hidden' }}
+    >
       {sortedIds.map((id) => {
         const meta = snapshot.leafMeta.get(id);
         const f = frames.get(id);
         const isZoomed = zoomedId === id;
+        // Absolute + flex column so the header sits atop a filling body; geometry
+        // (left/top/width/height) comes straight from the pure `layout`.
+        const base: CSSProperties = { position: 'absolute', display: 'flex', flexDirection: 'column', overflow: 'hidden' };
         const style: CSSProperties = isZoomed
-          ? { left: 0, top: 0, width: rect.width, height: rect.height, zIndex: Z_ZOOMED }
+          ? { ...base, left: 0, top: 0, width: rect.width, height: rect.height, zIndex: Z_ZOOMED }
           : f
-            ? { left: f.x, top: f.y, width: f.width, height: f.height, zIndex: Z_TILED }
-            : { display: 'none' };
+            ? { ...base, left: f.x, top: f.y, width: f.width, height: f.height, zIndex: Z_TILED }
+            : { ...base, display: 'none' };
 
         const Body = meta ? resolveBody(meta.component) : undefined;
         const Tab = meta ? resolveTab(meta.tabComponent) : undefined;
@@ -210,8 +217,8 @@ export function LathHost({
             }}
             onFocusCapture={() => onLeafFocused?.(id)}
           >
-            <div className="lath-leaf-header">{Tab ? <Tab {...paneProps} /> : null}</div>
-            <div className="lath-leaf-body">{Body ? <Body {...paneProps} /> : null}</div>
+            <div className="lath-leaf-header" style={{ flex: 'none' }}>{Tab ? <Tab {...paneProps} /> : null}</div>
+            <div className="lath-leaf-body" style={{ flex: 1, minHeight: 0, position: 'relative' }}>{Body ? <Body {...paneProps} /> : null}</div>
           </div>
         );
       })}
@@ -220,8 +227,11 @@ export function LathHost({
         const node = nodeAtPath(activeTree, sash.splitPath);
         const dir: 'row' | 'col' = node && node.kind === 'split' ? (node as Extract<LathNode, { kind: 'split' }>).dir : 'row';
         const vertical = dir === 'row'; // vertical divider between left/right children
+        // No zIndex: sashes render after the tiled leaves in DOM order (so they sit
+        // over the gap band) but below the zoomed leaf (z=40), which hides them.
         const style: CSSProperties = vertical
           ? {
+              position: 'absolute',
               left: sash.rect.x - (SASH_HIT - sash.rect.width) / 2,
               top: sash.rect.y,
               width: SASH_HIT,
@@ -229,6 +239,7 @@ export function LathHost({
               cursor: 'col-resize',
             }
           : {
+              position: 'absolute',
               left: sash.rect.x,
               top: sash.rect.y - (SASH_HIT - sash.rect.height) / 2,
               width: sash.rect.width,

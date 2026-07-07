@@ -125,6 +125,10 @@ export type LathWallStore = {
   /** Nearest neighbor of `id` in `direction` under the last reported geometry, or
    *  null (no neighbor, or no geometry yet). */
   neighborOf(id: LeafId, direction: Direction): LeafId | null;
+  /** Aspect-ratio split edge for `id` under the last reported geometry (`autoEdge`);
+   *  `'right'` when there is no geometry yet or the leaf is absent. Replaces
+   *  `pickSplitDirection` on the Lath path. */
+  autoEdgeFor(id: LeafId): Edge;
 };
 
 const EMPTY_TREE: LathTree = { root: null };
@@ -288,6 +292,10 @@ export function createLathWallStore(): LathWallStore {
     neighborOf(id, direction) {
       if (!geometry) return null;
       return neighbors(snapshot.tree, geometry.rect, id, direction, geometry.opts);
+    },
+    autoEdgeFor(id) {
+      if (!geometry) return 'right';
+      return autoEdge(snapshot.tree, geometry.rect, id, geometry.opts);
     },
   };
 }

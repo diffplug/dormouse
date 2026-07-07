@@ -6,6 +6,9 @@ import { restoreSession } from './session-restore';
 export interface ReconnectResult {
   paneIds: string[];
   layout?: unknown; // dockview SerializedDockview, only present on cold-start restore
+  /** Lath persisted layout (dual-write half); present alongside `layout`, gated by
+   *  the same pane-set match. */
+  lathLayout?: unknown;
   doors?: PersistedDoor[];
 }
 
@@ -135,10 +138,20 @@ function getSavedResumePlan(savedState: unknown, liveIds: string[]): ReconnectRe
     layoutPanelIds.length === paneIds.length &&
     layoutPanelIds.every((id) => paneIds.includes(id));
 
+  // The Lath layout is gated in parallel (its leaf-meta keys are its pane set). The
+  // two blobs are dual-written from one tree, so they agree; gating each on its own
+  // extractor keeps a lone stale blob from being kept.
+  const lathLeafIds = getLathLayoutLeafIds(saved.lathLayout);
+  const lathMatchesVisiblePanes =
+    !!lathLeafIds &&
+    lathLeafIds.length === paneIds.length &&
+    lathLeafIds.every((id) => paneIds.includes(id));
+
   return {
     paneIds: layoutMatchesVisiblePanes ? paneIds : paneIds.filter((id) => liveSet.has(id)),
     doors,
     layout: layoutMatchesVisiblePanes ? saved.layout : undefined,
+    lathLayout: lathMatchesVisiblePanes ? saved.lathLayout : undefined,
   };
 }
 
@@ -147,4 +160,13 @@ function getLayoutPanelIds(layout: unknown): string[] | null {
   const panels = (layout as { panels?: unknown }).panels;
   if (!panels || typeof panels !== 'object' || Array.isArray(panels)) return null;
   return Object.keys(panels);
+}
+
+/** Leaf ids of a Lath persisted layout (its `leafMeta` keys) — the pane-set the
+ *  gate above compares against, parallel to `getLayoutPanelIds`. */
+function getLathLayoutLeafIds(lathLayout: unknown): string[] | null {
+  if (!lathLayout || typeof lathLayout !== 'object') return null;
+  const leafMeta = (lathLayout as { leafMeta?: unknown }).leafMeta;
+  if (!leafMeta || typeof leafMeta !== 'object' || Array.isArray(leafMeta)) return null;
+  return Object.keys(leafMeta);
 }

@@ -36,6 +36,18 @@ export function setWorkspacesEnabled(enabled: boolean): void {
   }
 }
 
+export const LATH_FLAG_KEY = 'dormouse.flags.lath';
+
+/** Whether the Wall renders and mutates through the in-house Lath tiling engine
+ *  instead of dockview-react (docs/specs/tiling-engine.md → lath-rollout stage 2).
+ *  Off by default. Read ONCE per Wall mount (via a lazy `useRef` initializer), so
+ *  toggling requires a reload — the same contract as `abDebugLogs`. While the flag
+ *  lives (stages 2–4) saves dual-write both layout formats, so flipping it either
+ *  direction never loses a layout. */
+export function isLathEnabled(): boolean {
+  return readBoolFlag(LATH_FLAG_KEY);
+}
+
 export const AB_DEBUG_LOGS_FLAG_KEY = 'dormouse.flags.abDebugLogs';
 
 /** Whether the agent-browser high-rate `[ab-panel]`/`[agent-browser]` stream and

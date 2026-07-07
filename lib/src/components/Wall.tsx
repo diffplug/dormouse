@@ -33,6 +33,7 @@ import {
   markSessionAttention,
   toggleSessionTodo,
   setPendingShellOpts,
+  swapTerminals,
   getDefaultShellOpts,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
@@ -64,9 +65,10 @@ import type {
   SurfaceType as DorSurfaceType,
 } from 'dor/commands/types';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
-import { findReattachNeighbor } from '../lib/spatial-nav';
+import { findPaneInDirection, findReattachNeighbor } from '../lib/spatial-nav';
 import { cloneLayout, getLayoutStructureSignature } from '../lib/layout-snapshot';
 import type { PersistedDoor } from '../lib/session-types';
+import type { RestoreToken } from '../lib/lath/ops';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import {
   TerminalPanelAdapter,
@@ -79,7 +81,21 @@ import { hostPathDisplay } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { useDockviewReady } from './wall/use-dockview-ready';
 import { withProgrammaticActivation } from '../lib/programmatic-activation';
-import { pickSplitDirection } from './wall/dockview-helpers';
+import { pickSplitDirection, swapPanelTitles } from './wall/dockview-helpers';
+import { isLathEnabled } from '../lib/feature-flags';
+import { LathHost } from './wall/LathHost';
+import {
+  createLathWallEngine,
+  terminalLeafMeta,
+  browserLeafMeta,
+  legacyTokenFromDoor,
+  doorDirectionForEdge,
+  dorDirectionForEdge,
+  directionForArrow,
+  type LathWallEngine,
+  type LathPaneEntry,
+} from './wall/lath-wall-engine';
+import type { WallNav } from './wall/keyboard/types';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
 import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
@@ -483,6 +499,7 @@ export function Wall({
   initialPaneIds,
   initialMode = 'command',
   restoredLayout,
+  restoredLathLayout,
   initialDoors,
   onApiReady,
   onEvent,
@@ -493,6 +510,10 @@ export function Wall({
   initialPaneIds?: string[];
   initialMode?: WallMode;
   restoredLayout?: unknown;
+  /** The Lath persisted layout (dual-write half); preferred over `restoredLayout`
+   *  when the `dormouse.flags.lath` flag is on. `restoredLayout` keeps carrying the
+   *  bare dockview blob so flag-off paths are untouched. */
+  restoredLathLayout?: unknown;
   initialDoors?: PersistedDoor[];
   onApiReady?: (api: DockviewApi) => void;
   onEvent?: (event: WallEvent) => void;
@@ -509,6 +530,14 @@ export function Wall({
   const apiRef = useRef<DockviewApi | null>(null);
   const [dockviewApi, setDockviewApi] = useState<DockviewApi | null>(null);
   const dockviewContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // The Lath engine handle. Null when `dormouse.flags.lath` is off, so every
+  // `if (lath)` branch below falls through to the untouched dockview path. Read
+  // ONCE per mount (a reload is required to toggle — same contract as
+  // abDebugLogs). When on, DockviewReact is never rendered and `apiRef.current`
+  // stays null (docs/specs/tiling-engine.md → lath-rollout stage 2).
+  const lath = useRef<LathWallEngine | null>(isLathEnabled() ? createLathWallEngine() : null).current;
+  const restoredLathLayoutRef = useRef(restoredLathLayout);
 
   // Pane ID generation (instance-scoped, not module-level)
   const paneCounterRef = useRef(0);
@@ -590,6 +619,34 @@ export function Wall({
   doorsRef.current = doors;
   const confirmKillRef = useRef(confirmKill);
   confirmKillRef.current = confirmKill;
+
+  // Engine-neutral visible-pane projection (docs/specs/tiling-engine.md → "Pane
+  // props contract"): the shared shape `buildDorSurfaces`, persistence, and the
+  // dev-server correlation read instead of touching `api.panels` directly. Under
+  // Lath it is the tree's pre-order leaves + meta; under dockview the live panels.
+  const listVisiblePanes = useCallback((): LathPaneEntry[] => {
+    if (lath) return lath.listPanes();
+    return apiRef.current?.panels.map((p) => ({
+      id: p.id,
+      title: p.title ?? undefined,
+      params: p.params as Record<string, unknown> | undefined,
+    })) ?? [];
+  }, [lath]);
+
+  // Engine-neutral navigation/query seam for the keyboard handlers (they can no
+  // longer read `apiRef.current`, which is null under Lath).
+  const nav = useMemo<WallNav>(() => ({
+    ready: () => (lath ? true : !!apiRef.current),
+    findInDirection: (id, dir) => {
+      if (lath) return lath.neighborOf(id, directionForArrow(dir));
+      const api = apiRef.current;
+      return api ? findPaneInDirection(id, dir, api, paneElements) : null;
+    },
+    paneParams: (id) =>
+      lath ? lath.getMeta(id)?.params : (apiRef.current?.getPanel(id)?.params as Record<string, unknown> | undefined),
+    hasPane: (id) => (lath ? lath.has(id) : !!apiRef.current?.getPanel(id)),
+    panes: () => (lath ? lath.listPanes().map((p) => p.id) : apiRef.current?.panels.map((p) => p.id) ?? []),
+  }), [lath, paneElements]);
   const renamingRef = useRef(renamingPaneId);
   renamingRef.current = renamingPaneId;
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -634,12 +691,33 @@ export function Wall({
     selectedTypeRef.current = 'pane';
     setSelectedId(id);
     setSelectedType('pane');
+    // Under Lath `apiRef.current` is null (DockviewReact never mounts), so this
+    // block is naturally skipped — Wall state is the sole selection authority.
     const panel = apiRef.current?.getPanel(id);
     // The echo of our own setActive is not user intent; the refs written above
     // already neutralized it (selectedIdRef.current === panel.id, so the listener
     // no-ops), and the tag makes that ordering non-load-bearing.
     if (panel) withProgrammaticActivation(programmaticActivationRef, () => panel.api.setActive());
   }, []);
+
+  // Swap two panes' surfaces (Cmd-Arrow). dockview: swap registry entries + panel
+  // titles (dockview tracks titles on the panel). Lath: swap leaf identities — meta
+  // and registry entries follow ids, so there is no companion title swap.
+  const swapWithNeighbor = useCallback((fromId: string, toId: string) => {
+    if (lath) { lath.swapLeaves(fromId, toId); return; }
+    swapTerminals(fromId, toId);
+    const api = apiRef.current;
+    if (api) swapPanelTitles(api, fromId, toId);
+  }, [lath]);
+
+  // The selection tail of a surface-adding op on the Lath path (the dockview path
+  // uses settleFocusAfterAdd, which additionally hands the active group back). A
+  // non-focus-neutral add selects the new pane; a focus-neutral add moves selection
+  // onto it only when it replaced the pane the user was selected on.
+  const settleAddSelection = useCallback((focusNeutral: boolean, selectionReplaced: boolean, newId: string): boolean => {
+    if (!focusNeutral || selectionReplaced) { selectPane(newId); return true; }
+    return false;
+  }, [selectPane]);
 
   // Restore DOM focus to the selected pane after a dockview mutation (addPanel /
   // removePanel) re-parents its grid subtree and blurs it. Deferred a frame past
@@ -683,12 +761,13 @@ export function Wall({
 
   const killPaneImmediately = useCallback((id: string) => {
     const api = apiRef.current;
-    if (!api) return;
-    const panel = api.getPanel(id);
-    if (!panel) {
-      // A doored surface has no dockview panel but still owns a live session
+    if (!api && !lath) return;
+    const isVisiblePane = lath ? lath.has(id) : !!api!.getPanel(id);
+    if (!isVisiblePane) {
+      // A doored surface has no visible pane but still owns a live session
       // (its PTY keeps running). `dor ensure --minimize`'s integration-timeout
-      // teardown lands here: the throwaway was created straight into a door.
+      // teardown lands here: the throwaway was created straight into a door. This
+      // branch is engine-free except the survivor fallback.
       const door = doorsRef.current.find(d => d.id === id);
       if (!door) return;
       closeAgentBrowserSession(door.params);
@@ -701,38 +780,55 @@ export function Wall({
       doorsRef.current = nextDoors;
       setDoors(nextDoors);
       // Guard: no current caller kills a selected door (ensure's throwaway is
-      // never selected), but if one did, fall back to the active pane.
+      // never selected), but if one did, fall back to a visible pane.
       if (selectedIdRef.current === id && selectedTypeRef.current === 'door') {
-        const active = api.activePanel;
-        if (active) selectPane(active.id);
+        const survivorId = lath ? (lath.listPanes()[0]?.id ?? null) : (api!.activePanel?.id ?? null);
+        if (survivorId) selectPane(survivorId);
         else setSelectedId(null);
       }
       clearLocalSurfaceActivity(id);
       fireEvent({ type: 'kill', id });
       return;
     }
-    closeAgentBrowserSession(panel.params);
+    const params = lath ? lath.getMeta(id)?.params : api!.getPanel(id)!.params;
+    closeAgentBrowserSession(params);
     // Release the surface's client-side controller (connection, loops, timers,
     // screen registration). A safe no-op for iframe/terminal surfaces.
     disposeAgentBrowserSurfaceController(id);
-    // Only a kill of the selected pane should move selection; `dor kill` of a
-    // background surface (and ensure's throwaway teardown) leaves it. The check is
-    // LIVE — orchestrateKill re-reads it at removal time (up to ~1s after the fade
-    // starts), so a mid-fade selection move is honored. The `=== 'pane'` term keeps
-    // a doored id from ever reading as selected for the kill tail. Mouse kills always
-    // arrive selected — clicking a pane header activates it (dockview's pointerdown)
-    // before the kill button's click handler runs.
-    const isSelectedPane = (kid: string) =>
-      selectedTypeRef.current === 'pane' && selectedIdRef.current === kid;
-    // removePanel can collapse a branch, re-parenting + blurring the survivor. If
-    // selection is unchanged (background kill), TerminalPane's effect won't heal it,
-    // so re-assert here; for a selected-pane kill the tail's selectPane changes
-    // selection, so the rAF gate no-ops (harmless).
-    const focusId = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
-    orchestrateKill(api, id, isSelectedPane, selectPane, setSelectedId, killInProgressRef, overlayElRef, programmaticActivationRef, focusId ? () => reassertPaneFocus(focusId) : undefined);
+    if (lath) {
+      // Instant kill (animation is stage 3). Preserve the policy tail exactly: the
+      // restore token is discarded (kills don't restore); removing the last leaf
+      // empties the tree and the auto-spawn effect fills it. Only a kill of the
+      // selected pane moves selection — `dor kill` of a background surface leaves
+      // it (and under Lath focus is never lost, so nothing to heal).
+      const wasSelectedPane = selectedTypeRef.current === 'pane' && selectedIdRef.current === id;
+      lath.removeLeaf(id);
+      disposeSession(id);
+      if (wasSelectedPane) {
+        const survivorId = lath.listPanes()[0]?.id ?? null; // matches orchestrateKill's api.panels[0] tail
+        if (survivorId) selectPane(survivorId);
+        else setSelectedId(null);
+      }
+    } else {
+      // Only a kill of the selected pane should move selection; `dor kill` of a
+      // background surface (and ensure's throwaway teardown) leaves it. The check is
+      // LIVE — orchestrateKill re-reads it at removal time (up to ~1s after the fade
+      // starts), so a mid-fade selection move is honored. The `=== 'pane'` term keeps
+      // a doored id from ever reading as selected for the kill tail. Mouse kills always
+      // arrive selected — clicking a pane header activates it (dockview's pointerdown)
+      // before the kill button's click handler runs.
+      const isSelectedPane = (kid: string) =>
+        selectedTypeRef.current === 'pane' && selectedIdRef.current === kid;
+      // removePanel can collapse a branch, re-parenting + blurring the survivor. If
+      // selection is unchanged (background kill), TerminalPane's effect won't heal it,
+      // so re-assert here; for a selected-pane kill the tail's selectPane changes
+      // selection, so the rAF gate no-ops (harmless).
+      const focusId = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
+      orchestrateKill(api!, id, isSelectedPane, selectPane, setSelectedId, killInProgressRef, overlayElRef, programmaticActivationRef, focusId ? () => reassertPaneFocus(focusId) : undefined);
+    }
     clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
-  }, [fireEvent, selectPane, reassertPaneFocus]);
+  }, [fireEvent, selectPane, reassertPaneFocus, lath]);
 
   const acceptKill = useCallback(() => {
     const ck = confirmKillRef.current;
@@ -778,45 +874,76 @@ export function Wall({
   const enterTerminalModeRef = useRef(enterTerminalMode);
   enterTerminalModeRef.current = enterTerminalMode;
 
-  /** Minimize a pane: capture neighbor context, remove from dockview, add to doors state */
+  /** Minimize a pane: capture the restore context, remove the pane, add a Door. */
   const minimizePane = useCallback((id: string, opts?: { select?: boolean }) => {
-    const api = apiRef.current;
-    if (!api) return;
-    const panel = api.getPanel(id);
-    if (!panel) return;
-    const title = persistedPanelTitle(panel.title);
-    const surfaceType = surfaceTypeFromParams(panel.params);
-    const layoutAtMinimize = cloneLayout(api.toJSON());
+    let door: DooredItem | null = null;
 
-    // Capture the nearest adjacent pane and our actual relative position
-    // so immediate restore can reconstruct the original split precisely.
-    const { neighborId, direction } = findReattachNeighbor(id, api, paneElements);
+    if (lath) {
+      const meta = lath.getMeta(id);
+      if (!meta) return;
+      const surfaceType = surfaceTypeFromParams(meta.params);
+      // Capture the legacy `remainingPaneIds` (compat field) before the removal;
+      // the real payload is the core token below.
+      const remainingPaneIds = lath.listPanes().filter(p => p.id !== id).map(p => p.id).sort();
+      const { token } = lath.removeLeaf(id); // may auto-spawn if this was the last leaf
+      if (!token) return;
+      clearSessionAttention(id);
+      door = {
+        id,
+        title: persistedPanelTitle(meta.title),
+        component: componentForSurfaceType(surfaceType),
+        tabComponent: tabComponentForSurfaceType(surfaceType),
+        params: meta.params,
+        // The core token is the real restore payload; the legacy fields are filled
+        // for compatibility (docs/specs/tiling-engine.md → "Restore tokens").
+        token,
+        neighborId: token.siblingId,
+        direction: doorDirectionForEdge(token.edge),
+        remainingPaneIds,
+        layoutAtMinimize: null,
+        layoutAtMinimizeSignature: '',
+      };
+    } else {
+      const api = apiRef.current;
+      if (!api) return;
+      const panel = api.getPanel(id);
+      if (!panel) return;
+      const title = persistedPanelTitle(panel.title);
+      const surfaceType = surfaceTypeFromParams(panel.params);
+      const layoutAtMinimize = cloneLayout(api.toJSON());
 
-    const remainingPaneIds = api.panels
-      .filter(p => p.id !== id)
-      .map(p => p.id)
-      .sort();
+      // Capture the nearest adjacent pane and our actual relative position
+      // so immediate restore can reconstruct the original split precisely.
+      const { neighborId, direction } = findReattachNeighbor(id, api, paneElements);
 
-    // The removal's survivor-activation echo is not user intent — selection is
-    // settled explicitly right after (selectDoor on the user path; the
-    // focus-neutral `--minimize` path leaves selection per its `select: false`).
-    withProgrammaticActivation(programmaticActivationRef, () => {
-      api.removePanel(panel);
-    });
-    clearSessionAttention(id);
-    const layoutAtMinimizeSignature = getLayoutStructureSignature(api.toJSON());
-    const nextDoors = [...doorsRef.current, {
-      id,
-      title,
-      component: componentForSurfaceType(surfaceType),
-      tabComponent: tabComponentForSurfaceType(surfaceType),
-      params: panel.params,
-      neighborId,
-      direction,
-      remainingPaneIds,
-      layoutAtMinimize,
-      layoutAtMinimizeSignature,
-    }];
+      const remainingPaneIds = api.panels
+        .filter(p => p.id !== id)
+        .map(p => p.id)
+        .sort();
+
+      // The removal's survivor-activation echo is not user intent — selection is
+      // settled explicitly right after (selectDoor on the user path; the
+      // focus-neutral `--minimize` path leaves selection per its `select: false`).
+      withProgrammaticActivation(programmaticActivationRef, () => {
+        api.removePanel(panel);
+      });
+      clearSessionAttention(id);
+      const layoutAtMinimizeSignature = getLayoutStructureSignature(api.toJSON());
+      door = {
+        id,
+        title,
+        component: componentForSurfaceType(surfaceType),
+        tabComponent: tabComponentForSurfaceType(surfaceType),
+        params: panel.params,
+        neighborId,
+        direction,
+        remainingPaneIds,
+        layoutAtMinimize,
+        layoutAtMinimizeSignature,
+      };
+    }
+
+    const nextDoors = [...doorsRef.current, door];
     doorsRef.current = nextDoors;
     setDoors(nextDoors);
 
@@ -828,7 +955,7 @@ export function Wall({
       setMode('command');
       selectDoor(id);
     }
-  }, [selectDoor]);
+  }, [selectDoor, lath]);
 
   /** Exit terminal mode */
   const exitTerminalMode = useCallback(() => {
@@ -850,6 +977,9 @@ export function Wall({
     return () => window.removeEventListener('blur', handleBlur);
   }, []);
 
+  // The dockview onReady callback. Under Lath this is never wired to a
+  // DockviewReact (which is not rendered), so it never fires; the hook is still
+  // called unconditionally to satisfy the rules of hooks.
   const handleReady = useDockviewReady({
     apiRef,
     initialPaneIdsRef,
@@ -871,17 +1001,70 @@ export function Wall({
     onApiReady,
   });
 
+  // --- Lath seed + auto-spawn (replaces useDockviewReady's ready/auto-spawn) ---
+  const lathSeededRef = useRef(false);
+  useEffect(() => {
+    if (!lath || lathSeededRef.current) return;
+    lathSeededRef.current = true;
+
+    // Restore doors exactly as handleReady does.
+    const restoredDoors = initialDoorsRef.current;
+    doorsRef.current = restoredDoors;
+    setDoors(restoredDoors);
+
+    // Hydrate: prefer the Lath blob, migrate the dockview blob, else fresh panes.
+    const { paneIds, fresh } = lath.seed(
+      restoredLathLayoutRef.current,
+      restoredLayoutRef.current,
+      initialPaneIdsRef.current,
+      generatePaneId,
+    );
+    // Prime default-shell opts for the fresh path's generated ids (mirrors
+    // addTerminalPanel's primeDefaultShell; a no-op for already-restored ids).
+    if (fresh) {
+      const defaults = getDefaultShellOpts();
+      if (defaults?.shell) {
+        for (const id of paneIds) setPendingShellOpts(id, { shell: defaults.shell, args: defaults.args });
+      }
+    }
+    setSelectedId(paneIds[0] ?? null);
+    // onApiReady is dockview-only and never fires under Lath (the website tutorial
+    // / tut-detector require flag-off — acceptable for a dev flag through stage 4).
+  }, [lath, generatePaneId]);
+
+  // Auto-spawn: whenever a commit empties the tree (last pane killed/minimized),
+  // spawn one to keep a pane visible — the Wall's "always one pane" rule, moved off
+  // dockview's onDidRemovePanel. Instant (no kill animation until stage 3).
+  useEffect(() => {
+    if (!lath) return;
+    return lath.store.subscribe(() => {
+      if (lath.store.getSnapshot().tree.root !== null) return;
+      const id = generatePaneId();
+      const defaults = getDefaultShellOpts();
+      if (defaults?.shell) setPendingShellOpts(id, { shell: defaults.shell, args: defaults.args });
+      freshlySpawnedRef.current.set(id, 'top-left');
+      lath.addLeaf(id, terminalLeafMeta(), null); // becomes the root
+      // Adopt selection only when it points at nothing real: null, or dangling (a
+      // just-killed pane). A live door (last pane minimized) keeps selection.
+      const sel = selectedIdRef.current;
+      const selDangling = sel !== null && selectedTypeRef.current === 'pane' && !lath.has(sel);
+      if (sel === null || selDangling) selectPane(id);
+    });
+  }, [lath, generatePaneId, selectPane]);
+
   // --- Session persistence ---
   useSessionPersistence({
     dockviewApi,
     apiRef,
+    lath,
+    listVisiblePanes,
     doorsRef,
     selectedIdRef,
     selectedTypeRef,
   });
 
   // --- Dev-server port → pane correlation (browser header connection chip) ---
-  useDevServerPortCorrelation({ apiRef, doorsRef });
+  useDevServerPortCorrelation({ listVisiblePanes, doorsRef });
 
   // --- Reattach ---
 
@@ -890,75 +1073,97 @@ export function Wall({
     options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction },
   ) => {
     const api = apiRef.current;
-    if (!api) return;
+    if (!api && !lath) return;
     const enterPassthrough = options?.enterPassthrough ?? true;
     const afterRestore = options?.afterRestore;
 
-    const currentLayoutSignature = getLayoutStructureSignature(api.toJSON());
-    // Exact reattach is only safe when the layout structure matches AND the
-    // current panes are the same ones that existed when we minimized. If new
-    // panes were auto-spawned (e.g. last pane minimized → auto-create), the
-    // layoutAtMinimize would destroy them.
-    const currentPaneIds = api.panels.map(p => p.id).sort();
-    const reattachPaneIds = item.layoutAtMinimize
-      ? Object.keys(item.layoutAtMinimize.panels).filter(id => id !== item.id).sort()
-      : [];
-    const canReattachExactLayout =
-      !!item.layoutAtMinimize &&
-      currentLayoutSignature === item.layoutAtMinimizeSignature &&
-      idsMatch(currentPaneIds, reattachPaneIds);
+    if (lath) {
+      // Restore through the core token (the real payload): exact tier when the
+      // captured context survives, else neighbor, else fallback beside a live ref.
+      // A pre-Lath door has no token — synthesize a neighbor-tier one from its
+      // {neighborId, direction} so it restores beside its old neighbor.
+      const meta = {
+        component: item.component ?? 'terminal',
+        tabComponent: item.tabComponent ?? 'terminal',
+        title: item.title,
+        params: item.params,
+      };
+      const token = (item.token as RestoreToken | undefined) ?? legacyTokenFromDoor(item);
+      const sel = selectedIdRef.current;
+      const fallbackRef = sel && selectedTypeRef.current === 'pane' && lath.has(sel)
+        ? sel
+        : lath.listPanes()[0]?.id;
+      const r = lath.restoreLeaf(meta, token, { fallbackRef });
+      // `!ok` means no fallback was possible (empty tree) — make the leaf the root.
+      if (!r.ok) lath.addLeaf(item.id, meta, null);
+    } else {
+      const dvApi = api!;
+      const currentLayoutSignature = getLayoutStructureSignature(dvApi.toJSON());
+      // Exact reattach is only safe when the layout structure matches AND the
+      // current panes are the same ones that existed when we minimized. If new
+      // panes were auto-spawned (e.g. last pane minimized → auto-create), the
+      // layoutAtMinimize would destroy them.
+      const currentPaneIds = dvApi.panels.map(p => p.id).sort();
+      const reattachPaneIds = item.layoutAtMinimize
+        ? Object.keys(item.layoutAtMinimize.panels).filter(id => id !== item.id).sort()
+        : [];
+      const canReattachExactLayout =
+        !!item.layoutAtMinimize &&
+        currentLayoutSignature === item.layoutAtMinimizeSignature &&
+        idsMatch(currentPaneIds, reattachPaneIds);
 
-    // Reattach mutations (the exact-layout fromJSON restore or the addPanel
-    // fallbacks) activate a pane as a side effect; selection is established
-    // explicitly right after (selectPane / enterTerminalMode below). Tag them so
-    // the listener treats the echo as programmatic — with the door guard gone,
-    // this tag is the only thing keeping the echo from reading as user intent.
-    withProgrammaticActivation(programmaticActivationRef, () => {
-      if (canReattachExactLayout) {
-        const currentTitles = new Map(
-          api.panels.map(panel => [panel.id, panel.title ?? panel.id] as const),
-        );
+      // Reattach mutations (the exact-layout fromJSON restore or the addPanel
+      // fallbacks) activate a pane as a side effect; selection is established
+      // explicitly right after (selectPane / enterTerminalMode below). Tag them so
+      // the listener treats the echo as programmatic — with the door guard gone,
+      // this tag is the only thing keeping the echo from reading as user intent.
+      withProgrammaticActivation(programmaticActivationRef, () => {
+        if (canReattachExactLayout) {
+          const currentTitles = new Map(
+            dvApi.panels.map(panel => [panel.id, panel.title ?? panel.id] as const),
+          );
 
-        // reuseExistingPanels: keep existing panel component instances mounted
-        // rather than destroying and recreating them during deserialization.
-        api.fromJSON(cloneLayout(item.layoutAtMinimize!), { reuseExistingPanels: true });
+          // reuseExistingPanels: keep existing panel component instances mounted
+          // rather than destroying and recreating them during deserialization.
+          dvApi.fromJSON(cloneLayout(item.layoutAtMinimize!), { reuseExistingPanels: true });
 
-        for (const [panelId, title] of currentTitles) {
-          if (panelId === item.id) continue;
-          api.getPanel(panelId)?.api.setTitle(title);
-        }
-      } else {
-        const currentIds = api.panels.map(p => p.id).sort();
-        const layoutUnchanged =
-          item.neighborId &&
-          api.getPanel(item.neighborId) &&
-          idsMatch(currentIds, item.remainingPaneIds);
-
-        if (layoutUnchanged) {
-          // Restore to original position next to the same neighbor
-          api.addPanel({
-            id: item.id,
-            component: item.component ?? 'terminal',
-            tabComponent: item.tabComponent ?? 'terminal',
-            title: item.title,
-            params: item.params,
-            position: { referencePanel: item.neighborId!, direction: item.direction },
-          });
+          for (const [panelId, title] of currentTitles) {
+            if (panelId === item.id) continue;
+            dvApi.getPanel(panelId)?.api.setTitle(title);
+          }
         } else {
-          // Layout changed — split an existing panel based on its aspect ratio
-          const sid = selectedIdRef.current;
-          const refPanel = (sid && api.getPanel(sid)) ?? api.panels[0] ?? null;
-          api.addPanel({
-            id: item.id,
-            component: item.component ?? 'terminal',
-            tabComponent: item.tabComponent ?? 'terminal',
-            title: item.title,
-            params: item.params,
-            position: refPanel ? { referencePanel: refPanel.id, direction: pickSplitDirection(refPanel) } : undefined,
-          });
+          const currentIds = dvApi.panels.map(p => p.id).sort();
+          const layoutUnchanged =
+            item.neighborId &&
+            dvApi.getPanel(item.neighborId) &&
+            idsMatch(currentIds, item.remainingPaneIds);
+
+          if (layoutUnchanged) {
+            // Restore to original position next to the same neighbor
+            dvApi.addPanel({
+              id: item.id,
+              component: item.component ?? 'terminal',
+              tabComponent: item.tabComponent ?? 'terminal',
+              title: item.title,
+              params: item.params,
+              position: { referencePanel: item.neighborId!, direction: item.direction },
+            });
+          } else {
+            // Layout changed — split an existing panel based on its aspect ratio
+            const sid = selectedIdRef.current;
+            const refPanel = (sid && dvApi.getPanel(sid)) ?? dvApi.panels[0] ?? null;
+            dvApi.addPanel({
+              id: item.id,
+              component: item.component ?? 'terminal',
+              tabComponent: item.tabComponent ?? 'terminal',
+              title: item.title,
+              params: item.params,
+              position: refPanel ? { referencePanel: refPanel.id, direction: pickSplitDirection(refPanel) } : undefined,
+            });
+          }
         }
-      }
-    });
+      });
+    }
 
     const nextDoors = doorsRef.current.filter(p => p.id !== item.id);
     doorsRef.current = nextDoors;
@@ -970,14 +1175,24 @@ export function Wall({
       modeRef.current = 'command';
       setMode('command');
       requestAnimationFrame(() => {
-        // Guard against panel removal between scheduling and execution
-        if (!apiRef.current?.getPanel(item.id)) return;
+        // Guard against removal between scheduling and execution.
+        if (lath ? !lath.has(item.id) : !apiRef.current?.getPanel(item.id)) return;
         focusSession(item.id, false);
         if (afterRestore === 'kill-immediately') {
           killPaneImmediately(item.id);
         } else if (afterRestore === 'confirm-kill') {
           setConfirmKill({ id: item.id, char: randomKillChar() });
         } else if (typeof afterRestore === 'object' && afterRestore.type === 'replace-terminal') {
+          if (lath) {
+            // Atomic identity swap in place — no transient add/remove.
+            lath.replaceLeaf(item.id, afterRestore.newId, terminalLeafMeta());
+            disposeSession(item.id);
+            selectPane(afterRestore.newId);
+            if (afterRestore.announce) {
+              showShellSpawnNotice(afterRestore.newId, `Switched to ${afterRestore.shellName}`);
+            }
+            return;
+          }
           const panel = apiRef.current?.getPanel(item.id);
           if (!panel) return;
           // Add the replacement then drop the reattached pane. Both mutations
@@ -1003,13 +1218,18 @@ export function Wall({
         }
       });
     }
-  }, [selectPane, enterTerminalMode, killPaneImmediately, showShellSpawnNotice]);
+  }, [selectPane, enterTerminalMode, killPaneImmediately, showShellSpawnNotice, lath]);
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
-  const buildDorSurfaces = useCallback((api: DockviewApi): DorSurface[] => {
-    const panels = api.panels;
-    const activeId = api.activePanel?.id ?? (selectedTypeRef.current === 'pane' ? selectedIdRef.current : null);
+  // Engine-neutral: the visible panes + the active/selected surface, with no
+  // dockview api. Under Lath the "active" surface is simply the selected pane
+  // (there is no dockview activePanel).
+  const buildDorSurfaces = useCallback((): DorSurface[] => {
+    const panels = listVisiblePanes();
+    const activeId = lath
+      ? (selectedTypeRef.current === 'pane' ? selectedIdRef.current : null)
+      : (apiRef.current?.activePanel?.id ?? (selectedTypeRef.current === 'pane' ? selectedIdRef.current : null));
     const terminalStates = getTerminalPaneStateSnapshot();
     const activityStates = getActivitySnapshot();
     const appTitleForPane = buildAppTitleResolver(terminalStates, activityStates);
@@ -1035,24 +1255,22 @@ export function Wall({
         selectedInPane: true,
       };
     });
-  }, []);
+  }, [listVisiblePanes, lath]);
 
   const surfaceRefForId = useCallback((id: string): string => {
-    const api = apiRef.current;
-    const panelIndex = api?.panels.findIndex((panel) => panel.id === id) ?? -1;
+    const panes = listVisiblePanes();
+    const panelIndex = panes.findIndex((panel) => panel.id === id);
     if (panelIndex >= 0) return `surface:${panelIndex + 1}`;
     const doorIndex = doorsRef.current.findIndex((door) => door.id === id);
-    const visibleCount = api?.panels.length ?? 0;
-    if (doorIndex >= 0) return `surface:${visibleCount + doorIndex + 1}`;
+    if (doorIndex >= 0) return `surface:${panes.length + doorIndex + 1}`;
     return id;
-  }, []);
+  }, [listVisiblePanes]);
 
   const resolveVisibleSurface = useCallback((
-    api: DockviewApi,
     target: string | undefined,
     callerSurfaceId: string | undefined,
   ): ParseResult<DorSurface> => {
-    const surfaces = buildDorSurfaces(api);
+    const surfaces = buildDorSurfaces();
     const resolvedTarget = target ?? callerSurfaceId ?? 'focused';
     const titleTarget = surfaceTitleTarget(resolvedTarget);
     if (titleTarget !== null) {
@@ -1075,11 +1293,11 @@ export function Wall({
 
   const findSurfaceIdRunningCommand = useCallback((command: string, cwdPath: string): string | null => {
     const ids = [
-      ...(apiRef.current?.panels.map((panel) => panel.id) ?? []),
+      ...listVisiblePanes().map((panel) => panel.id),
       ...doorsRef.current.map((door) => door.id),
     ];
     return ids.find((id) => surfaceRunsCommand(getTerminalPaneState(id), command, cwdPath)) ?? null;
-  }, []);
+  }, [listVisiblePanes]);
 
   // Run a surface-adding `add`, focus-neutrally when asked — the shared machinery
   // behind focus-neutral `dor ensure` / `dor iframe` / `dor ab` (vs. plain `dor
@@ -1101,12 +1319,16 @@ export function Wall({
     focusNeutral: boolean | undefined,
     add: (caller: IDockviewPanel | undefined) => void,
   ) => {
+    // Under Lath an add never re-parents or steals activation, so every add is
+    // inherently focus-neutral: no caller hand-back, no activation tag, no focus
+    // re-assert. The `add` closure applies selection policy itself (settleAddSelection).
+    if (lath) { add(undefined); return; }
     if (!focusNeutral) { add(undefined); return; }
     const caller = apiRef.current?.activePanel ?? undefined;
     const focusId = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
     withProgrammaticActivation(programmaticActivationRef, () => add(caller));
     if (focusId) reassertPaneFocus(focusId);
-  }, [reassertPaneFocus]);
+  }, [reassertPaneFocus, lath]);
 
   const createSplitSurface = useCallback(({
     command,
@@ -1132,15 +1354,15 @@ export function Wall({
     ref: string;
   }> => {
     const api = apiRef.current;
-    if (!api) return { ok: false, message: 'Dormouse layout is not ready yet' };
-    const referencePanel = api.getPanel(referenceId);
-    if (!referencePanel) return { ok: false, message: `surface '${referenceId}' is not visible` };
+    if (!api && !lath) return { ok: false, message: 'Dormouse layout is not ready yet' };
+    const referenceVisible = lath ? lath.has(referenceId) : !!api!.getPanel(referenceId);
+    if (!referenceVisible) return { ok: false, message: `surface '${referenceId}' is not visible` };
 
     const newId = generatePaneId();
     const defaults = getDefaultShellOpts();
     // An explicit cwd (dor ensure --cwd, defaulting to the caller's directory)
     // wins; otherwise inherit the reference pane's local cwd as dor split does.
-    const sourceCwd = getTerminalPaneState(referencePanel.id).cwd;
+    const sourceCwd = getTerminalPaneState(referenceId).cwd;
     const inheritedCwd = cwd ?? (sourceCwd && !sourceCwd.isRemote ? sourceCwd.path : undefined);
 
     if (command) {
@@ -1173,15 +1395,22 @@ export function Wall({
     // `inactive`; runSurfaceAdd adds it active and, when focus-neutral, hands the
     // active group back to the caller (settleFocusAfterAdd) so it renders without
     // stealing focus. `dor split` (not focus-neutral) just selects the new pane.
+    // Under Lath adds never steal focus, so the split is inherently background.
     runSurfaceAdd(focusNeutral, (caller) => {
-      api.addPanel({
-        id: newId,
-        component: 'terminal',
-        tabComponent: 'terminal',
-        title: UNNAMED_PANEL_TITLE,
-        position: { referencePanel: referencePanel.id, direction: dockDirection },
-      });
-      const selectedNew = settleFocusAfterAdd(api, !!focusNeutral, caller, false, newId, selectPane);
+      let selectedNew: boolean;
+      if (lath) {
+        lath.addLeaf(newId, terminalLeafMeta(), { refId: referenceId, edge: lath.edgeForDorDirection(direction) });
+        selectedNew = settleAddSelection(!!focusNeutral, false, newId);
+      } else {
+        api!.addPanel({
+          id: newId,
+          component: 'terminal',
+          tabComponent: 'terminal',
+          title: UNNAMED_PANEL_TITLE,
+          position: { referencePanel: referenceId, direction: dockDirection },
+        });
+        selectedNew = settleFocusAfterAdd(api!, !!focusNeutral, caller, false, newId, selectPane);
+      }
       onEventRef.current?.({
         type: 'split',
         direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
@@ -1193,7 +1422,7 @@ export function Wall({
       }
     });
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId) } };
-  }, [runSurfaceAdd, generatePaneId, minimizePane, selectPane, surfaceRefForId]);
+  }, [runSurfaceAdd, generatePaneId, minimizePane, selectPane, surfaceRefForId, lath, settleAddSelection]);
 
   /**
    * Create a non-terminal content surface (iframe, agent-browser) next to a
@@ -1220,17 +1449,18 @@ export function Wall({
     status: 'created' | 'replaced';
   }> => {
     const api = apiRef.current;
-    if (!api) return { ok: false, message: 'Dormouse layout is not ready yet' };
-    const referencePanel = api.getPanel(reference.id);
-    if (!referencePanel) return { ok: false, message: `surface '${reference.ref}' is not visible` };
+    if (!api && !lath) return { ok: false, message: 'Dormouse layout is not ready yet' };
+    const referenceVisible = lath ? lath.has(reference.id) : !!api!.getPanel(reference.id);
+    if (!referenceVisible) return { ok: false, message: `surface '${reference.ref}' is not visible` };
 
     // One component for every browser surface; the renderer is derived per mode.
     const component = 'browser';
     const renderer = rendererForParams(params);
     const newId = generatePaneId();
+    const browserMeta = browserLeafMeta(title, params);
     const replaceUntouchedTerminal = reference.type === 'terminal' && isUntouched(reference.id);
 
-    // Shared panel spec for both paths; they differ only in position.direction.
+    // Shared dockview panel spec for both paths; they differ only in position.direction.
     const panelSpec = {
       id: newId,
       component,
@@ -1247,13 +1477,22 @@ export function Wall({
       // Whether the user's current selection sits on the pane being replaced.
       const selectionReplaced = selectedTypeRef.current === 'pane' && selectedIdRef.current === reference.id;
       runSurfaceAdd(focusNeutral, (caller) => {
-        api.addPanel({ ...panelSpec, position: { referencePanel: referencePanel.id, direction: 'within' } });
-        disposeSession(reference.id);
-        api.removePanel(referencePanel);
-        // Replacing the pane the user is selected on forces selection onto the
-        // replacement (settleFocusAfterAdd selects it); replacing any other pane
-        // leaves the user's selection — including a door selection — untouched.
-        const selectedNew = settleFocusAfterAdd(api, !!focusNeutral, caller, selectionReplaced, newId, selectPane);
+        let selectedNew: boolean;
+        if (lath) {
+          // Atomic identity swap in place; then dispose the old terminal session.
+          lath.replaceLeaf(reference.id, newId, browserMeta);
+          disposeSession(reference.id);
+          selectedNew = settleAddSelection(!!focusNeutral, selectionReplaced, newId);
+        } else {
+          const referencePanel = api!.getPanel(reference.id)!;
+          api!.addPanel({ ...panelSpec, position: { referencePanel: reference.id, direction: 'within' } });
+          disposeSession(reference.id);
+          api!.removePanel(referencePanel);
+          // Replacing the pane the user is selected on forces selection onto the
+          // replacement (settleFocusAfterAdd selects it); replacing any other pane
+          // leaves the user's selection — including a door selection — untouched.
+          selectedNew = settleFocusAfterAdd(api!, !!focusNeutral, caller, selectionReplaced, newId, selectPane);
+        }
         // When we did move selection onto the new pane, a minimize must carry it
         // onto the resulting door rather than leave selectedType='pane' pointing
         // at a door id (the overlay would keep a stale rect).
@@ -1262,20 +1501,30 @@ export function Wall({
       return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'replaced' } };
     }
 
-    const dockDirection = pickSplitDirection(referencePanel);
-    freshlySpawnedRef.current.set(newId, dockDirection === 'below' ? 'top' : 'left');
+    // Split beside the reference by its aspect ratio (dockview: pickSplitDirection;
+    // Lath: autoEdge). The spawn/animation + split-event direction derive from it.
+    const lathEdge = lath ? lath.autoEdgeFor(reference.id) : null;
+    const dvDirection = lath ? null : pickSplitDirection(api!.getPanel(reference.id)!);
+    freshlySpawnedRef.current.set(newId, (lath ? lathEdge === 'bottom' : dvDirection === 'below') ? 'top' : 'left');
+    const horizontal = lath ? lathEdge === 'right' : dvDirection === 'right';
     runSurfaceAdd(focusNeutral, (caller) => {
-      api.addPanel({ ...panelSpec, position: { referencePanel: referencePanel.id, direction: dockDirection } });
-      const selectedNew = settleFocusAfterAdd(api, !!focusNeutral, caller, false, newId, selectPane);
+      let selectedNew: boolean;
+      if (lath) {
+        lath.addLeaf(newId, browserMeta, { refId: reference.id, edge: lathEdge! });
+        selectedNew = settleAddSelection(!!focusNeutral, false, newId);
+      } else {
+        api!.addPanel({ ...panelSpec, position: { referencePanel: reference.id, direction: dvDirection! } });
+        selectedNew = settleFocusAfterAdd(api!, !!focusNeutral, caller, false, newId, selectPane);
+      }
       onEventRef.current?.({
         type: 'split',
-        direction: dockDirection === 'right' ? 'horizontal' : 'vertical',
+        direction: horizontal ? 'horizontal' : 'vertical',
         source: 'dor',
       });
       if (minimized) minimizePane(newId, { select: selectedNew });
     });
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'created' } };
-  }, [runSurfaceAdd, generatePaneId, minimizePane, selectPane, surfaceRefForId]);
+  }, [runSurfaceAdd, generatePaneId, minimizePane, selectPane, surfaceRefForId, lath, settleAddSelection]);
 
   // The last binary path a `dor ab` surface resolved on a terminal's PATH.
   // Re-used to spawn an agent-browser when swapping an iframe embed up to a
@@ -1294,27 +1543,33 @@ export function Wall({
     title: string;
   }): string | null => {
     const api = apiRef.current;
-    const panel = api?.getPanel(oldId);
-    if (!api || !panel) return null;
-    closeAgentBrowserSession(panel.params);
+    const oldParams = lath ? lath.getMeta(oldId)?.params : api?.getPanel(oldId)?.params;
+    const oldVisible = lath ? lath.has(oldId) : !!api?.getPanel(oldId);
+    if (!oldVisible) return null;
+    closeAgentBrowserSession(oldParams);
     // The old renderer's controller is going away with this swap; release its
     // client-side resources (no-op for a non-agent-browser surface).
     disposeAgentBrowserSurfaceController(oldId);
     const newId = generatePaneId();
-    api.addPanel({
-      id: newId,
-      component: 'browser',
-      tabComponent: 'surface',
-      title: next.title,
-      params: next.params,
-      renderer: rendererForParams(next.params),
-      position: { referencePanel: panel, direction: 'within' },
-    });
-    api.removePanel(panel);
+    if (lath) {
+      lath.replaceLeaf(oldId, newId, browserLeafMeta(next.title, next.params));
+    } else {
+      const panel = api!.getPanel(oldId)!;
+      api!.addPanel({
+        id: newId,
+        component: 'browser',
+        tabComponent: 'surface',
+        title: next.title,
+        params: next.params,
+        renderer: rendererForParams(next.params),
+        position: { referencePanel: panel, direction: 'within' },
+      });
+      api!.removePanel(panel);
+    }
     clearLocalSurfaceActivity(oldId);
     selectPane(newId);
     return newId;
-  }, [generatePaneId, selectPane]);
+  }, [generatePaneId, selectPane, lath]);
 
   /**
    * The agent-browser session ↔ surface registry, derived from panel/door
@@ -1325,18 +1580,18 @@ export function Wall({
     const isMatch = (params: unknown) =>
       isAgentBrowserParams(params) && (params as { session?: unknown }).session === session;
 
-    const panel = apiRef.current?.panels.find((candidate) => isMatch(candidate.params));
+    const panel = listVisiblePanes().find((candidate) => isMatch(candidate.params));
     if (panel) return { id: panel.id, minimized: false };
     const door = doorsRef.current.find((candidate) => isMatch(candidate.params));
     if (door) return { id: door.id, minimized: true };
     return null;
-  }, []);
+  }, [listVisiblePanes]);
 
   // Listen for external "new terminal" requests (e.g. from the standalone AppBar)
   useEffect(() => {
     const handler = (e: Event) => {
       const api = apiRef.current;
-      if (!api) return;
+      if (!api && !lath) return;
       const detail = ((e as CustomEvent<ShellSpawnRequest>).detail ?? {}) as ShellSpawnRequest;
       const newId = generatePaneId();
 
@@ -1346,27 +1601,32 @@ export function Wall({
       }
 
       const selectedPaneId = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
-      const selectedPanel = selectedPaneId ? api.getPanel(selectedPaneId) : undefined;
+      const selectedPaneVisible = !!selectedPaneId && (lath ? lath.has(selectedPaneId) : !!api!.getPanel(selectedPaneId));
       const selectedDoor = selectedTypeRef.current === 'door'
         ? doorsRef.current.find((door) => door.id === selectedIdRef.current)
         : undefined;
       const shouldReplaceUntouched =
         detail.replaceUntouched === true &&
-        !!selectedPaneId &&
-        !!selectedPanel &&
-        isUntouched(selectedPaneId);
+        selectedPaneVisible &&
+        isUntouched(selectedPaneId!);
       const shellName = detail.name?.trim() || 'terminal';
 
       if (shouldReplaceUntouched) {
-        api.addPanel({
-          id: newId,
-          component: 'terminal',
-          tabComponent: 'terminal',
-          title: UNNAMED_PANEL_TITLE,
-          position: { referencePanel: selectedPanel, direction: 'within' },
-        });
-        disposeSession(selectedPaneId);
-        api.removePanel(selectedPanel);
+        if (lath) {
+          lath.replaceLeaf(selectedPaneId!, newId, terminalLeafMeta());
+          disposeSession(selectedPaneId!);
+        } else {
+          const selectedPanel = api!.getPanel(selectedPaneId!)!;
+          api!.addPanel({
+            id: newId,
+            component: 'terminal',
+            tabComponent: 'terminal',
+            title: UNNAMED_PANEL_TITLE,
+            position: { referencePanel: selectedPanel, direction: 'within' },
+          });
+          disposeSession(selectedPaneId!);
+          api!.removePanel(selectedPanel);
+        }
         selectPane(newId);
         if (detail.announce) {
           showShellSpawnNotice(newId, `Switched to ${shellName}`);
@@ -1387,14 +1647,22 @@ export function Wall({
         return;
       }
 
-      const active = api.activePanel;
-      api.addPanel({
-        id: newId,
-        component: 'terminal',
-        tabComponent: 'terminal',
-        title: UNNAMED_PANEL_TITLE,
-        position: active ? { referencePanel: active.id, direction: pickSplitDirection(active) } : undefined,
-      });
+      if (lath) {
+        // dockview splits from the active panel; Lath splits from the selected pane
+        // when it's a live pane, else the last leaf.
+        const panes = lath.listPanes();
+        const refId = selectedPaneVisible ? selectedPaneId! : (panes.length > 0 ? panes[panes.length - 1].id : null);
+        lath.addLeaf(newId, terminalLeafMeta(), refId ? { refId, edge: lath.autoEdgeFor(refId) } : null);
+      } else {
+        const active = api!.activePanel;
+        api!.addPanel({
+          id: newId,
+          component: 'terminal',
+          tabComponent: 'terminal',
+          title: UNNAMED_PANEL_TITLE,
+          position: active ? { referencePanel: active.id, direction: pickSplitDirection(active) } : undefined,
+        });
+      }
       selectPane(newId);
       if (detail.announce) {
         showShellSpawnNotice(newId, `Opened ${shellName}`);
@@ -1402,7 +1670,7 @@ export function Wall({
     };
     window.addEventListener('dormouse:new-terminal', handler);
     return () => window.removeEventListener('dormouse:new-terminal', handler);
-  }, [generatePaneId, selectPane, showShellSpawnNotice]);
+  }, [generatePaneId, selectPane, showShellSpawnNotice, lath]);
 
   useEffect(() => {
     const handler = async (event: Event) => {
@@ -1420,29 +1688,33 @@ export function Wall({
       }
 
       const api = apiRef.current;
-      if (!api) {
+      if (!api && !lath) {
         detail.respond({ ok: false, error: 'Dormouse layout is not ready yet' });
         return;
       }
 
-      // Resolve the split reference surface and its live panel, responding with
-      // the appropriate error and returning null when either is unavailable.
+      // Resolve the split reference surface and confirm it is a live visible pane,
+      // responding with the appropriate error and returning null otherwise.
       const resolveSplitTarget = () => {
-        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
         if (!target.ok) {
           detail.respond({ ok: false, error: target.message });
           return null;
         }
-        const panel = api.getPanel(target.value.id);
-        if (!panel) {
+        const visible = lath ? lath.has(target.value.id) : !!api!.getPanel(target.value.id);
+        if (!visible) {
           detail.respond({ ok: false, error: `surface '${target.value.ref}' is not visible` });
           return null;
         }
-        return { target: target.value, panel };
+        return { target: target.value };
       };
 
+      // The `direction: 'auto'` aspect-ratio split resolution, per engine.
+      const autoDorDirection = (id: string): DorResolvedSplitDirection =>
+        lath ? dorDirectionForEdge(lath.autoEdgeFor(id)) : dorDirectionForDockview(pickSplitDirection(api!.getPanel(id)!));
+
       if (detail.method === SURFACE_CONTROL_METHODS.list) {
-        const surfaces = buildDorSurfaces(api);
+        const surfaces = buildDorSurfaces();
         detail.respond({
           ok: true,
           result: {
@@ -1463,7 +1735,7 @@ export function Wall({
         const resolved = resolveSplitTarget();
         if (!resolved) return;
         const direction = directionParam === 'auto'
-          ? dorDirectionForDockview(pickSplitDirection(resolved.panel))
+          ? autoDorDirection(resolved.target.id)
           : directionParam;
         const command = dorCommandString(stringArrayParam(params.command));
         if (params.command !== undefined && !command) {
@@ -1552,7 +1824,7 @@ export function Wall({
         }
         const resolved = resolveSplitTarget();
         if (!resolved) return;
-        const direction = dorDirectionForDockview(pickSplitDirection(resolved.panel));
+        const direction = autoDorDirection(resolved.target.id);
         const result = createSplitSurface({
           command,
           direction,
@@ -1608,7 +1880,7 @@ export function Wall({
           detail.respond({ ok: false, error: 'input is required' });
           return;
         }
-        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
         if (!target.ok) {
           detail.respond({ ok: false, error: target.message });
           return;
@@ -1631,7 +1903,7 @@ export function Wall({
       }
 
       if (detail.method === SURFACE_CONTROL_METHODS.read) {
-        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
         if (!target.ok) {
           detail.respond({ ok: false, error: target.message });
           return;
@@ -1666,7 +1938,7 @@ export function Wall({
           detail.respond({ ok: false, error: 'surface is required' });
           return;
         }
-        const target = resolveVisibleSurface(api, surface, detail.surfaceId);
+        const target = resolveVisibleSurface(surface, detail.surfaceId);
         if (!target.ok) {
           detail.respond({ ok: false, error: target.message });
           return;
@@ -1696,7 +1968,7 @@ export function Wall({
           detail.respond({ ok: false, error: 'url is required' });
           return;
         }
-        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
         if (!target.ok) {
           detail.respond({ ok: false, error: target.message });
           return;
@@ -1748,7 +2020,8 @@ export function Wall({
           // restarts) so the panel reconnects to the live stream, and the
           // resolved binary path alongside it.
           if (!existing.minimized && Object.keys(refreshedParams).length > 0) {
-            api.getPanel(existing.id)?.api.updateParameters(refreshedParams);
+            if (lath) lath.updateParams(existing.id, refreshedParams);
+            else api!.getPanel(existing.id)?.api.updateParameters(refreshedParams);
           } else if (existing.minimized && Object.keys(refreshedParams).length > 0) {
             const nextDoors = doorsRef.current.map((door) => door.id === existing.id
               ? { ...door, params: { ...door.params, ...refreshedParams } }
@@ -1769,7 +2042,7 @@ export function Wall({
           return;
         }
 
-        const target = resolveVisibleSurface(api, stringParam(params.surface), detail.surfaceId);
+        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
         if (!target.ok) {
           detail.respond({ ok: false, error: target.message });
           return;
@@ -1810,7 +2083,7 @@ export function Wall({
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, resolveVisibleSurface, surfaceRefForId]);
+  }, [buildDorSurfaces, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, resolveVisibleSurface, surfaceRefForId, lath]);
 
   const addSplitPanel = useCallback((
     id: string | null,
@@ -1819,9 +2092,9 @@ export function Wall({
     source: 'keyboard' | 'mouse' = 'mouse',
   ) => {
     const api = apiRef.current;
-    if (!api) return;
+    if (!api && !lath) return;
     const newId = generatePaneId();
-    const ref = id && api.getPanel(id) ? id : null;
+    const ref = id && (lath ? lath.has(id) : !!api!.getPanel(id)) ? id : null;
     // Carry the currently-selected shell into the split, same as [+].
     const defaults = getDefaultShellOpts();
     // Remote cwds (OSC 7 over ssh) name a path on the remote host, not one the local shell can chdir to.
@@ -1833,16 +2106,22 @@ export function Wall({
     // Horizontal split places the new pane to the right → reveal from its left edge.
     // Vertical split places it below → reveal from its top edge.
     freshlySpawnedRef.current.set(newId, direction === 'right' ? 'left' : 'top');
-    api.addPanel({
-      id: newId,
-      component: 'terminal',
-      tabComponent: 'terminal',
-      title: UNNAMED_PANEL_TITLE,
-      position: ref ? { referencePanel: ref, direction } : undefined,
-    });
+    if (lath) {
+      const panes = lath.listPanes();
+      const refId = ref ?? (panes.length > 0 ? panes[panes.length - 1].id : null);
+      lath.addLeaf(newId, terminalLeafMeta(), refId ? { refId, edge: direction === 'right' ? 'right' : 'bottom' } : null);
+    } else {
+      api!.addPanel({
+        id: newId,
+        component: 'terminal',
+        tabComponent: 'terminal',
+        title: UNNAMED_PANEL_TITLE,
+        position: ref ? { referencePanel: ref, direction } : undefined,
+      });
+    }
     selectPane(newId);
     onEventRef.current?.({ type: 'split', direction: splitDirection, source });
-  }, [selectPane, generatePaneId]);
+  }, [selectPane, generatePaneId, lath]);
 
   // --- Wall actions (for tab buttons) ---
 
@@ -1872,6 +2151,14 @@ export function Wall({
       addSplitPanel(id, 'below', 'vertical', source);
     },
     onZoom: (id: string) => {
+      if (lath) {
+        // Zoom is presentation state in the store (the tree is untouched). Toggle:
+        // any leaf zoomed → unzoom; else zoom this leaf.
+        const zoomedNow = lath.store.getSnapshot().zoomedId !== null;
+        lath.setZoomed(zoomedNow ? null : id);
+        setZoomed(!zoomedNow);
+        return;
+      }
       const api = apiRef.current;
       if (!api) return;
       if (api.hasMaximizedGroup()) {
@@ -1889,7 +2176,8 @@ export function Wall({
     onFocusPane: (id: string) => {
       setConfirmKill(null);
       // Visible pane → jump straight in; minimized (a door) → reattach first.
-      if (apiRef.current?.getPanel(id)) {
+      const visible = lath ? lath.has(id) : !!apiRef.current?.getPanel(id);
+      if (visible) {
         enterTerminalMode(id);
         return;
       }
@@ -1907,7 +2195,8 @@ export function Wall({
       }
       const result = setTerminalUserTitle(id, trimmed);
       if (result.accepted) {
-        apiRef.current?.getPanel(id)?.api.setTitle(trimmed);
+        if (lath) lath.setTitle(id, trimmed);
+        else apiRef.current?.getPanel(id)?.api.setTitle(trimmed);
       }
       setRenamingPaneId(null);
       return result;
@@ -1917,9 +2206,9 @@ export function Wall({
     },
     onSwapRenderMode: (id, mode) => {
       const api = apiRef.current;
-      const panel = api?.getPanel(id);
-      if (!api || !panel) return;
-      const params = panel.params as Record<string, unknown> | undefined;
+      const visible = lath ? lath.has(id) : !!api?.getPanel(id);
+      if (!visible) return;
+      const params = (lath ? lath.getMeta(id)?.params : api?.getPanel(id)?.params) as Record<string, unknown> | undefined;
       const currentType = surfaceTypeFromParams(params);
 
       // agent-browser → iframe: frame the active tab's URL, then the replace
@@ -1973,12 +2262,11 @@ export function Wall({
       }
     },
     onOpenBrowserPane: (id, url) => {
-      const api = apiRef.current;
-      if (!api) return;
+      if (!apiRef.current && !lath) return;
       // A new-tab request from the iframe shim → open the URL as a new iframe
       // browser pane, split next to the source (docs/specs/dor-browser.md →
       // "Iframe Shim").
-      const reference = buildDorSurfaces(api).find((s) => s.id === id);
+      const reference = buildDorSurfaces().find((s) => s.id === id);
       if (!reference) return;
       createContentSurface({
         minimized: false,
@@ -1987,22 +2275,27 @@ export function Wall({
         title: hostPathDisplay(url, true),
       });
     },
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface]);
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, lath]);
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
 
   // Engine-directed writes for the pane props contract (docs/specs/tiling-engine.md
   // → "Pane props contract"): route a pane/header's title / params writes to the
-  // backing dockview panel. Memoized (apiRef is stable) so the sink handed to
-  // panels via context keeps a stable identity. The render-swap and wsPort-refresh
-  // param writes in Wall.tsx above still call the dockview api directly.
-  const paneWrite = useMemo<PaneWriteActions>(() => ({
+  // engine's per-leaf metadata (Lath) or the backing dockview panel. Memoized so
+  // the sink handed to panels via context keeps a stable identity. The render-swap
+  // and wsPort-refresh param writes in Wall.tsx above route through the same engines.
+  const paneWrite = useMemo<PaneWriteActions>(() => (lath ? {
+    setTitle: (id, title) => lath.setTitle(id, title),
+    updateParams: (id, patch) => lath.updateParams(id, patch),
+  } : {
     setTitle: (id, title) => apiRef.current?.getPanel(id)?.api.setTitle(title),
     updateParams: (id, patch) => apiRef.current?.getPanel(id)?.api.updateParameters(patch),
-  }), []);
+  }), [lath]);
 
   useWallKeyboard({
     apiRef,
+    nav,
+    swapWithNeighbor,
     modeRef,
     selectedIdRef,
     selectedTypeRef,
@@ -2029,6 +2322,19 @@ export function Wall({
     fireEvent,
   });
 
+  // LathHost surfaces `focusin` inside a leaf as an op proposal (there are no
+  // activation events). Adopt it exactly like the dockview onDidActivePanelChange
+  // listener: passthrough → enter the leaf if selection differs; command → move
+  // selection onto it. Never during a kill.
+  const onLeafFocused = useCallback((id: string) => {
+    if (killInProgressRef.current) return;
+    if (modeRef.current === 'passthrough') {
+      if (selectedIdRef.current !== id) enterTerminalMode(id);
+      return;
+    }
+    if (selectedTypeRef.current !== 'pane' || selectedIdRef.current !== id) selectPane(id);
+  }, [enterTerminalMode, selectPane]);
+
   // --- Render ---
 
   return (
@@ -2047,14 +2353,22 @@ export function Wall({
             {/* Dockview — 2px bottom inset keeps rounded panes distinct from the baseboard when present. */}
             <div className={clsx('flex-1 min-h-0 relative px-1.5 pt-1.5', showBaseboard ? 'pb-0.5' : 'pb-1.5')}>
               <div ref={dockviewContainerRef} className={clsx('absolute inset-x-1.5 top-1.5', showBaseboard ? 'bottom-0.5' : 'bottom-1.5')}>
-                <DockviewReact
-                  components={components}
-                  tabComponents={tabComponents}
-                  onReady={handleReady}
-                  theme={dormouseTheme}
-                  singleTabMode="fullwidth"
-                />
-                <WorkspaceSelectionOverlay apiRef={apiRef} selectedId={selectedId} selectedType={selectedType} mode={mode} overlayElRef={overlayElRef} />
+                {lath ? (
+                  <LathHost
+                    store={lath.store}
+                    onCommitResize={(splitPath, boundary, deltaPx) => lath.store.resizeBoundary(splitPath, boundary, deltaPx)}
+                    onLeafFocused={onLeafFocused}
+                  />
+                ) : (
+                  <DockviewReact
+                    components={components}
+                    tabComponents={tabComponents}
+                    onReady={handleReady}
+                    theme={dormouseTheme}
+                    singleTabMode="fullwidth"
+                  />
+                )}
+                <WorkspaceSelectionOverlay apiRef={apiRef} lathStore={lath ? lath.store : null} selectedId={selectedId} selectedType={selectedType} mode={mode} overlayElRef={overlayElRef} />
               </div>
             </div>
 

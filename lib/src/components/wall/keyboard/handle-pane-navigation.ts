@@ -1,9 +1,8 @@
-import { findPaneInDirection } from '../../../lib/spatial-nav';
 import { ARROW_OPPOSITES, isArrowKey, type NavHistoryRef, type WallKeyboardCtx } from './types';
 
 /**
- * Plain arrow navigation: across panes (in dockview), or across doors (in
- * the baseboard), with backtracking via the NavHistoryRef.
+ * Plain arrow navigation: across panes (tiled), or across doors (in the
+ * baseboard), with backtracking via the NavHistoryRef.
  */
 export function handlePaneNavigation(
   e: KeyboardEvent,
@@ -16,9 +15,8 @@ export function handlePaneNavigation(
   e.preventDefault();
   e.stopPropagation();
 
-  const api = ctx.apiRef.current;
   const sid = ctx.selectedIdRef.current;
-  if (!api || !sid) return true;
+  if (!ctx.nav.ready() || !sid) return true;
 
   const dir = e.key;
   const currentType = ctx.selectedTypeRef.current;
@@ -26,7 +24,8 @@ export function handlePaneNavigation(
 
   if (currentType === 'door') {
     if (dir === 'ArrowUp') {
-      if (api.panels.length > 0) ctx.selectPane(api.panels[api.panels.length - 1].id);
+      const panes = ctx.nav.panes();
+      if (panes.length > 0) ctx.selectPane(panes[panes.length - 1]);
       return true;
     }
     const doorIdx = currentDoors.findIndex((d) => d.id === sid);
@@ -36,13 +35,13 @@ export function handlePaneNavigation(
   }
 
   const hist = navHistory.current;
-  if (hist && ARROW_OPPOSITES[dir] === hist.direction && api.getPanel(hist.fromId)) {
+  if (hist && ARROW_OPPOSITES[dir] === hist.direction && ctx.nav.hasPane(hist.fromId)) {
     navHistory.current = { direction: dir, fromId: sid };
     ctx.selectPane(hist.fromId);
     return true;
   }
 
-  const targetId = findPaneInDirection(sid, dir, api, ctx.paneElements);
+  const targetId = ctx.nav.findInDirection(sid, dir);
   if (targetId) {
     navHistory.current = { direction: dir, fromId: sid };
     ctx.selectPane(targetId);

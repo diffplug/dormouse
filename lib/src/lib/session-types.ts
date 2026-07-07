@@ -62,6 +62,11 @@ export interface PersistedDoor {
   remainingPaneIds: string[];
   layoutAtMinimize: unknown;
   layoutAtMinimizeSignature: string;
+  /** Lath restore token (`RestoreToken`), written by the Lath minimize path so a
+   *  Door restores at its captured tier (docs/specs/tiling-engine.md → "Restore
+   *  tokens"). Optional + `unknown` to keep this types module free of the lath
+   *  core dep; absent for pre-Lath doors, which restore at the neighbor tier. */
+  token?: unknown;
 }
 
 export interface PersistedSession {
@@ -69,6 +74,11 @@ export interface PersistedSession {
   panes: PersistedPane[];
   doors?: PersistedDoor[];
   layout: unknown; // SerializedDockview — kept as `unknown` to avoid dockview dep in types
+  /** Lath persisted layout (`LathPersistedLayout`), the other half of the
+   *  stage-2 dual-write (docs/specs/tiling-engine.md → "Persistence and
+   *  migration"). Additive — no version bump; absent on pre-Lath / conversion
+   *  failure. */
+  lathLayout?: unknown;
 }
 
 export type WorkspaceId = string;
@@ -106,6 +116,7 @@ interface PersistedSessionV3Input {
   panes: PersistedPaneInput[];
   doors?: PersistedDoor[];
   layout: unknown;
+  lathLayout?: unknown;
 }
 
 // --- Legacy v2 shapes (read-only, for migration) ---
@@ -214,7 +225,10 @@ function isPersistedDoor(value: unknown): value is PersistedDoor {
     typeof value.direction === 'string' &&
     Array.isArray(value.remainingPaneIds) &&
     value.remainingPaneIds.every((id) => typeof id === 'string') &&
-    typeof value.layoutAtMinimizeSignature === 'string'
+    typeof value.layoutAtMinimizeSignature === 'string' &&
+    // A Lath restore token, when present, is structurally an object with a string
+    // `leafId` (kept permissive — the core owns full validation on restore).
+    (value.token === undefined || (isRecord(value.token) && typeof value.token.leafId === 'string'))
   );
 }
 

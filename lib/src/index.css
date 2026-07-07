@@ -124,12 +124,13 @@ body {
 
 /* --- Lath host (in-house tiling engine binding) ---
  *
- * The HTML adapter for Lath (docs/specs/tiling-engine.md → "Adapters"). Inert:
- * nothing mounts LathHost yet. Reproduces the shipped pane look from the
- * `.dockview-theme-abyss` rules above — app-bg gutters, a terminal-bg body, and a
- * 30px header band (matching `--dv-tabs-and-actions-container-height`). The header
- * and body React components carry their own palette (bg-header-*/bg-terminal-bg)
- * and rounded corners, so this is layout + backgrounds only, parity minus polish. */
+ * The HTML adapter for Lath (docs/specs/tiling-engine.md → "Adapters"), mounted
+ * by the Wall when the dormouse.flags.lath flag is on. Reproduces the shipped
+ * pane look from the `.dockview-theme-abyss` rules above — app-bg gutters, a
+ * terminal-bg body, and a 30px header band (matching
+ * `--dv-tabs-and-actions-container-height`). The header and body React
+ * components carry their own palette (bg-header-…, bg-terminal-bg) and rounded
+ * corners, so this is layout + backgrounds only, parity minus polish. */
 
 .lath-host {
   position: relative;

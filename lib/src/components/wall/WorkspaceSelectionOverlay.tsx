@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState, type CSSProperties, type RefObject } from 'react';
+import { useContext, useEffect, useState, useSyncExternalStore, type CSSProperties, type RefObject } from 'react';
 import type { DockviewApi } from 'dockview-react';
 import {
   DOOR_SELECTION_BORDER_RADIUS,
@@ -10,8 +10,22 @@ import type { WallMode, WallSelectionKind } from './wall-types';
 import { DoorElementsContext, PaneElementsContext, WindowFocusedContext } from './wall-context';
 import { MarchingAntsRect } from './MarchingAntsRect';
 
-export function WorkspaceSelectionOverlay({ apiRef, selectedId, selectedType, mode, overlayElRef }: {
+/** The subset of the Lath store the overlay needs — a revision that bumps on every
+ *  commit, so the ring re-measures as leaves move / resize / restore. Kept
+ *  structural so this module doesn't hard-depend on the store. */
+export interface LathOverlayStore {
+  subscribe(listener: () => void): () => void;
+  getSnapshot(): { revision: number };
+}
+
+const NOOP_SUBSCRIBE = (): (() => void) => () => {};
+const NOOP_REVISION = (): number => 0;
+
+export function WorkspaceSelectionOverlay({ apiRef, lathStore, selectedId, selectedType, mode, overlayElRef }: {
   apiRef: RefObject<DockviewApi | null>;
+  /** When set (flag on), the overlay re-measures on every Lath commit instead of
+   *  `api.onDidLayoutChange`. `apiRef` stays null on this path. */
+  lathStore?: LathOverlayStore | null;
   selectedId: string | null;
   selectedType: WallSelectionKind;
   mode: WallMode;
@@ -24,9 +38,16 @@ export function WorkspaceSelectionOverlay({ apiRef, selectedId, selectedType, mo
   const [rect, setRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const isDoor = selectedType === 'door';
 
+  // Re-run the measuring effect after each Lath commit (0 when flag off). Runs
+  // post-render, so `getBoundingClientRect` sees the repositioned leaf divs.
+  const lathRevision = useSyncExternalStore(
+    lathStore?.subscribe ?? NOOP_SUBSCRIBE,
+    lathStore ? () => lathStore.getSnapshot().revision : NOOP_REVISION,
+  );
+
   useEffect(() => {
     const api = apiRef.current;
-    if (!api || !selectedId) {
+    if ((!api && !lathStore) || !selectedId) {
       setRect(null);
       return;
     }
@@ -57,10 +78,12 @@ export function WorkspaceSelectionOverlay({ apiRef, selectedId, selectedType, mo
     const doorEl = doorElements.get(selectedId);
     if (doorEl) ro.observe(doorEl);
 
-    const d = api.onDidLayoutChange(update);
+    // dockview drives re-measures via layout events; Lath drives them via the
+    // `lathRevision` effect dependency (the store has no DOM-layout event).
+    const d = api?.onDidLayoutChange(update);
 
-    return () => { ro.disconnect(); d.dispose(); };
-  }, [apiRef, selectedId, selectedType, paneVersion, doorVersion, paneElements, doorElements]);
+    return () => { ro.disconnect(); d?.dispose(); };
+  }, [apiRef, lathStore, lathRevision, selectedId, selectedType, paneVersion, doorVersion, paneElements, doorElements]);
 
   if (!rect || !selectedId) return null;
 
