@@ -59,12 +59,15 @@ function handleQuitRequested(): void {
 }
 
 // Ordering and rationale: docs/specs/standalone.md §Quit flow (Teardown
-// ordering). The 8s ceiling is belt-and-suspenders over the per-step bounds;
-// Rust's 20s watchdog backstops this module wedging entirely.
+// ordering). The 8s ceiling is belt-and-suspenders over the per-step bounds.
+// `quit_progress` tells Rust teardown has begun (ending the confirmation-wait
+// suspension) and marks each phase boundary so its watchdog gives teardown and
+// install separate budgets rather than one shared clock.
 async function runQuitTeardown(): Promise<void> {
   quitPhase = "tearing-down";
   const adapter = quitAdapter;
   try {
+    void invoke("quit_progress").catch(() => {}); // teardown phase begins
     if (adapter) {
       await withTimeout(
         (async () => {
@@ -77,8 +80,12 @@ async function runQuitTeardown(): Promise<void> {
         "[quit] teardown exceeded 8000ms; proceeding to exit",
       );
     }
-    // Install strictly after the completed final save.
-    if (hasPendingUpdate()) await installPendingUpdate();
+    // Install strictly after the completed final save. A fresh `quit_progress`
+    // gives install its own watchdog budget instead of the teardown remainder.
+    if (hasPendingUpdate()) {
+      void invoke("quit_progress").catch(() => {}); // install phase begins
+      await installPendingUpdate();
+    }
   } catch (err) {
     // A rejecting step or a failed installer must not prevent exit.
     console.warn("[quit] teardown step failed; proceeding to exit", err);

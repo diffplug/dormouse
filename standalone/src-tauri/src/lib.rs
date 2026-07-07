@@ -56,6 +56,17 @@ struct SidecarState {
 struct QuitState {
     // The webview acknowledged quit-requested — its listener is alive.
     acked: AtomicBool,
+    // Teardown has actually begun (user confirmed, or there was nothing to
+    // confirm). Until this is set the webview may be parked on the confirmation
+    // dialog waiting for a human, so the teardown deadline below must stay
+    // suspended — a slow user must not be force-quit out from under the dialog.
+    tearing_down: AtomicBool,
+    // Bumped by `quit_progress` at each teardown phase boundary (teardown start,
+    // install start). The phase-3 watchdog treats a bump as "still making
+    // progress" and refreshes its deadline, so a long-but-live install isn't cut
+    // off by a long teardown — each phase gets its own budget rather than sharing
+    // one total.
+    progress: AtomicU64,
     // Teardown finished (or a watchdog gave up): cleared to exit. Gates the
     // CloseRequested/ExitRequested arms so the final app.exit(0) isn't re-caught.
     approved: AtomicBool,
@@ -67,8 +78,11 @@ struct QuitState {
 
 // Phase 1: no ack within this window ⇒ webview listener is dead — exit.
 const QUIT_ACK_TIMEOUT_MS: u64 = 2_000;
-// Phase 2: total budget from request to a forced exit.
-const QUIT_TOTAL_TIMEOUT_MS: u64 = 20_000;
+// Phase 3: per-phase budget once teardown is running. Each reported phase
+// (teardown, install) refreshes it, so it bounds a single stalled phase, not the
+// sum of all teardown work. Comfortably exceeds the webview's own 8 s teardown
+// ceiling (docs/specs/standalone.md §Quit flow).
+const QUIT_PHASE_TIMEOUT_MS: u64 = 12_000;
 const QUIT_POLL_STEP_MS: u64 = 500;
 
 fn quit_approved(app: &AppHandle) -> bool {
@@ -81,6 +95,12 @@ fn request_quit(app: &AppHandle) {
         return;
     };
     quit.acked.store(false, Ordering::SeqCst);
+    // Deliberately do NOT reset `tearing_down` here. A cancel happens before
+    // teardown, so it's already false for a genuinely fresh quit; and once
+    // teardown begins it only ever ends in `quit_proceed` (app exit), so a repeat
+    // trigger fired mid-teardown must keep the flag set — otherwise the fresh
+    // watchdog would drop into the unbounded phase-2 wait and stop bounding the
+    // in-flight teardown.
     // fetch_add returns the prior value; our watchdog's seq is that + 1.
     let my_seq = quit.seq.fetch_add(1, Ordering::SeqCst) + 1;
     let _ = app.emit("dormouse://quit-requested", ());
@@ -108,18 +128,39 @@ fn request_quit(app: &AppHandle) {
             app.exit(0);
             return;
         }
-        // Phase 2: acked — wait for teardown to report proceed/cancel.
-        let mut elapsed = QUIT_ACK_TIMEOUT_MS;
-        while elapsed < QUIT_TOTAL_TIMEOUT_MS {
+        // Phase 2: acked but teardown hasn't begun. The webview may be parked on
+        // the confirmation dialog waiting for a human, so hold with no deadline —
+        // only proceed (approved) or cancel (seq bump) ends the wait.
+        while !quit.tearing_down.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(QUIT_POLL_STEP_MS));
-            elapsed += QUIT_POLL_STEP_MS;
             if stale(&quit) {
                 return;
             }
         }
-        append_log("[quit] teardown never completed; exiting");
-        quit.approved.store(true, Ordering::SeqCst);
-        app.exit(0);
+        // Phase 3: teardown running. Bound it, but a `quit_progress` bump (a phase
+        // boundary: teardown start, install start) refreshes the deadline so one
+        // long phase can't starve the next — each phase gets its own budget.
+        let mut last_progress = quit.progress.load(Ordering::SeqCst);
+        let mut elapsed = 0u64;
+        loop {
+            std::thread::sleep(Duration::from_millis(QUIT_POLL_STEP_MS));
+            if stale(&quit) {
+                return;
+            }
+            let progress = quit.progress.load(Ordering::SeqCst);
+            if progress != last_progress {
+                last_progress = progress;
+                elapsed = 0;
+                continue;
+            }
+            elapsed += QUIT_POLL_STEP_MS;
+            if elapsed >= QUIT_PHASE_TIMEOUT_MS {
+                append_log("[quit] teardown phase stalled; exiting");
+                quit.approved.store(true, Ordering::SeqCst);
+                app.exit(0);
+                return;
+            }
+        }
     });
 }
 
@@ -766,6 +807,16 @@ fn quit_ack(state: tauri::State<'_, QuitState>) {
     state.acked.store(true, Ordering::SeqCst);
 }
 
+// The orchestrator has started (or advanced) teardown: the confirmation wait is
+// over, and this phase boundary refreshes the watchdog's per-phase deadline. The
+// webview calls this at teardown start and again before installing an update, so
+// a long install gets its own budget instead of sharing the teardown clock.
+#[tauri::command]
+fn quit_progress(state: tauri::State<'_, QuitState>) {
+    state.tearing_down.store(true, Ordering::SeqCst);
+    state.progress.fetch_add(1, Ordering::SeqCst);
+}
+
 // The user declined the quit (confirmation cancel). Bumping seq invalidates any
 // live watchdog for this quit so nothing exits; the next request_quit starts
 // fresh (it re-clears `acked` itself).
@@ -1319,6 +1370,7 @@ pub fn run() {
             dor_control_response,
             kill_sidecar_now,
             quit_ack,
+            quit_progress,
             quit_cancel,
             quit_proceed,
             get_available_shells,

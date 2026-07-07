@@ -273,7 +273,7 @@ force-kill) stay best-effort.
 ## Quit flow
 
 Source of truth: `standalone/src-tauri/src/lib.rs` (`QuitState`, `request_quit`,
-the `quit_ack` / `quit_cancel` / `quit_proceed` commands, the `CloseRequested` /
+the `quit_ack` / `quit_progress` / `quit_cancel` / `quit_proceed` commands, the `CloseRequested` /
 `ExitRequested` arms) and `standalone/src/quit.ts` (the webview orchestrator).
 
 Quitting ends every terminal. Rust intercepts **every** quit trigger so the
@@ -292,25 +292,43 @@ and durably write the freshest session before the process exits.
   the flow; the `approved` gate lets that final exit through without re-catching
   it.
 
-**The ack / proceed / cancel protocol.** `request_quit` clears `acked`, bumps
-`seq`, and emits `dormouse://quit-requested` to the webview. The
-webview's orchestrator (registered by `initQuitFlow`, Tauri-only) responds:
+**The ack / progress / proceed / cancel protocol.** `request_quit` clears
+`acked` and `tearing_down`, bumps `seq`, and emits `dormouse://quit-requested`
+to the webview. The webview's orchestrator (registered by `initQuitFlow`,
+Tauri-only) responds:
 
 1. **Always `quit_ack`** first (fire-and-catch), so Rust's phase-1 watchdog
    stands down even if the orchestrator then dedupes the event out.
-2. Runs the teardown (below), then **`quit_proceed`** — which sets `approved` and
+2. When teardown actually begins (immediately on an all-idle quit, or after the
+   user confirms), **`quit_progress`** — sets `tearing_down` and bumps a
+   `progress` counter. It is sent again at the install phase boundary so each
+   phase gets its own watchdog budget.
+3. Runs the teardown (below), then **`quit_proceed`** — which sets `approved` and
    calls `app.exit(0)`. That re-enters `ExitRequested` with `approved` true and
    the app exits.
-3. A confirmation-dialog cancel (below) calls **`quit_cancel`** — bumps `seq`
+4. A confirmation-dialog cancel (below) calls **`quit_cancel`** — bumps `seq`
    (invalidating the live watchdog) and leaves the app running.
 
 A cloned-`AppHandle` **watchdog** thread keeps quit bounded against a dead or
-wedged webview, in two phases: **~2 s** for the ack (no ack ⇒ the listener is
-dead; log and `app.exit(0)`), then poll to **~20 s** total for proceed/cancel
-(never arrived ⇒ log and exit). Each watchdog captures the `seq` it was spawned
-for; a **repeated quit trigger** bumps `seq` (spawning a fresh watchdog and
-re-emitting), so the stale watchdog exits without acting — this is the user's
-escape hatch if the webview acked then wedged.
+wedged webview, in three phases:
+
+- **Phase 1 — ack (~2 s).** No `quit_ack` within the window ⇒ the listener is
+  dead; log and `app.exit(0)`.
+- **Phase 2 — awaiting teardown (unbounded).** Acked but `tearing_down` not yet
+  set: the webview may be parked on the confirmation dialog **waiting on a
+  human**, so the watchdog holds with *no deadline* — only `quit_proceed`
+  (`approved`) or `quit_cancel`/repeat-trigger (`seq` bump) ends the wait. A slow
+  user is never force-quit out from under the dialog.
+- **Phase 3 — teardown running (per-phase ~12 s).** Once `tearing_down` is set,
+  poll under a **per-phase** budget that each `quit_progress` bump refreshes, so
+  a long teardown and a long update install get separate budgets instead of
+  sharing one total; a phase that makes no progress for the budget ⇒ log and
+  exit. The ~12 s comfortably exceeds the webview's own 8 s teardown ceiling.
+
+Each watchdog captures the `seq` it was spawned for; a **repeated quit trigger**
+bumps `seq` (spawning a fresh watchdog and re-emitting), so the stale watchdog
+exits without acting — this is the user's escape hatch if the webview acked then
+wedged.
 
 **Confirmation dialog.** Source of truth: `standalone/src/quit-confirm-store.ts`
 (the module store + gate) and `standalone/src/QuitConfirmModal.tsx` (the modal);
@@ -361,9 +379,10 @@ every step is individually bounded so a stall can't wedge quit:
 4. `drainSessionSaves` — await the last `save_session` reaching disk. This is
    where the clean-quit **durability guarantee** is met (§Persistence, "Durability
    on quit"): the process does not exit until this write lands.
-5. If an update is pending, `installPendingUpdate()` — strictly *after* the
-   completed save (`docs/specs/auto-update.md`); Rust's 20 s watchdog backstops a
-   hung installer.
+5. If an update is pending, a fresh `quit_progress` (giving install its own
+   watchdog budget, not the teardown remainder) then `installPendingUpdate()` —
+   strictly *after* the completed save (`docs/specs/auto-update.md`); Rust's
+   phase-3 watchdog backstops a hung installer.
 6. **Always** `quit_proceed` (in `finally`, even on throw/timeout).
 
 **Windows note.** node-pty's `kill('SIGTERM')` is an immediate kill under ConPTY
@@ -422,12 +441,12 @@ root `package.json` for the `dev:standalone*` orchestration.
 
 | File | Role |
 |------|------|
-| `standalone/src-tauri/src/lib.rs` | Rust backend: sidecar spawn/supervision, invoke commands, event forwarding, per-window session file store (`save_session` / `load_session`), quit interception (`QuitState`, `request_quit`, `quit_ack` / `quit_cancel` / `quit_proceed`, §Quit flow), file drop, logging, dock icon, exit teardown |
+| `standalone/src-tauri/src/lib.rs` | Rust backend: sidecar spawn/supervision, invoke commands, event forwarding, per-window session file store (`save_session` / `load_session`), quit interception (`QuitState`, `request_quit`, `quit_ack` / `quit_progress` / `quit_cancel` / `quit_proceed`, §Quit flow), file drop, logging, dock icon, exit teardown |
 | `standalone/src-tauri/src/clipboard_win.rs` | Native Win32 clipboard reads on Windows (owned by `docs/specs/mouse-and-clipboard.md`) |
 | `standalone/scripts/tauri.mjs`, `csp.mjs` | Tauri CLI wrapper assembling the webview CSP (`DORMOUSE_REMOTE_CONNECT_SRC`) |
 | `standalone/src-tauri/tauri.conf.json` | Window config, dev/build commands, sidecar resources glob, updater config |
 | `standalone/src/main.tsx` | Webview bootstrap (boot sequence above); initializes the quit orchestrator and installs the confirmation gate on the Tauri branch, mounts `<QuitConfirmModalHost>` via Wall's `dialogHost` prop |
-| `standalone/src/quit.ts` | Quit orchestrator: listens for `dormouse://quit-requested`, runs the graceful teardown, calls `quit_ack` / `quit_proceed` / `quit_cancel` (§Quit flow) |
+| `standalone/src/quit.ts` | Quit orchestrator: listens for `dormouse://quit-requested`, runs the graceful teardown, calls `quit_ack` / `quit_progress` / `quit_proceed` / `quit_cancel` (§Quit flow) |
 | `standalone/src/quit-confirm-store.ts`, `QuitConfirmModal.tsx` | Quit-confirmation dialog: the running-work gate + module store, and the modal mounted via Wall's `dialogHost` prop (§Quit flow, "Confirmation dialog") |
 | `standalone/src/AppBar.tsx` | Titlebar: shell dropdown, theme picker, window controls |
 | `standalone/src/tauri-adapter.ts` | `TauriAdapter`: PlatformAdapter over Tauri invoke/events, session persistence via the Rust store, control-request dispatch |

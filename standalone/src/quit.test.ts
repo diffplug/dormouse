@@ -101,23 +101,43 @@ describe("quit orchestrator", () => {
 
     await triggerQuit(fakeAdapter(order));
 
+    // `quit_progress` marks each phase boundary (teardown start, install start)
+    // so Rust's watchdog budgets teardown and install separately.
     expect(order).toEqual([
       "quit_ack",
+      "quit_progress",
       "flush",
       "gracefulKill",
       "flush",
       "drain",
+      "quit_progress",
       "install",
       "quit_proceed",
     ]);
   });
 
-  it("skips install when no update is pending", async () => {
+  it("skips install and its phase signal when no update is pending", async () => {
     mocks.hasPendingUpdate.mockReturnValue(false);
     await triggerQuit(fakeAdapter());
 
     expect(mocks.installPendingUpdate).not.toHaveBeenCalled();
+    // Exactly one phase signal: teardown began, but there is no install phase.
+    const progress = mocks.invoke.mock.calls.filter((c) => c[0] === "quit_progress").length;
+    expect(progress).toBe(1);
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
+  });
+
+  it("emits no teardown phase signal while a confirmation is pending", async () => {
+    // The confirmation wait must not look like teardown progress to Rust, or its
+    // watchdog would start the teardown clock against a human decision.
+    mocks.countRunningSessions.mockReturnValue(1);
+    const adapter = fakeAdapter();
+    setQuitConfirmGate(vi.fn()); // gate never decides — dialog stays up
+
+    await triggerQuit(adapter);
+
+    expect(mocks.invoke).not.toHaveBeenCalledWith("quit_progress");
+    expect(mocks.invoke).toHaveBeenCalledWith("quit_ack");
   });
 
   it("still proceeds when a teardown step rejects", async () => {
