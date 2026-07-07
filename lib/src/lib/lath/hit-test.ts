@@ -6,7 +6,7 @@
 // raycast intersections). No DOM, React, or timing. See docs/specs/tiling-engine.md
 // ("Hierarchical drag and drop").
 
-import { type Edge, type LathTree, type LeafId, type Rect, findLeafPath } from './model';
+import { type Edge, type LathTree, type LeafId, type Rect, findLeafPath, rectsClose } from './model';
 import { type LayoutOpts, layout, nodeRectAtPath } from './layout';
 import { type DropTarget, insert, move } from './ops';
 
@@ -46,7 +46,7 @@ function sameLayout(a: Map<LeafId, Rect>, b: Map<LeafId, Rect>): boolean {
   if (a.size !== b.size) return false;
   for (const [id, ra] of a) {
     const rb = b.get(id);
-    if (!rb || rb.x !== ra.x || rb.y !== ra.y || rb.width !== ra.width || rb.height !== ra.height) return false;
+    if (!rb || !rectsClose(ra, rb)) return false;
   }
   return true;
 }

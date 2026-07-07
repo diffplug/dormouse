@@ -312,7 +312,7 @@ export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: La
   }
 
   const r = insert(t2, id, { kind: 'edge', path: insertPath, edge: target.edge }, w);
-  return r.ok ? { tree: r.tree, ok: true } : { tree, ok: false };
+  return r.ok ? r : { tree, ok: false };
 }
 
 /** Adjust the two weights adjacent to `boundary` (children `boundary` and

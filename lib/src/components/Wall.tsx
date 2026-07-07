@@ -90,6 +90,7 @@ import {
   terminalLeafMeta,
   browserLeafMeta,
   legacyTokenFromDoor,
+  leafMetaFromDoor,
   doorDirectionForEdge,
   dorDirectionForEdge,
   edgeForDorDirection,
@@ -605,9 +606,10 @@ export function Wall({
   const [confirmKill, setConfirmKill] = useState<ConfirmKill | null>(null);
   const [renamingPaneId, setRenamingPaneId] = useState<string | null>(null);
   const [doors, setDoors] = useState<DooredItem[]>(() => (initialDoors ?? []) as DooredItem[]);
-  // The Door being dragged out of the baseboard (Lath only). Non-null feeds LathHost's
+  // The Door being dragged out of the baseboard (Lath only): the item + the press point
+  // LathHost starts its threshold-gated external drag from. Non-null feeds LathHost's
   // external-drag hit-testing; the chip stays in `doors` until it lands on a target.
-  const [doorDrag, setDoorDrag] = useState<DooredItem | null>(null);
+  const [doorDrag, setDoorDrag] = useState<{ item: DooredItem; startX: number; startY: number } | null>(null);
   const [zoomed, setZoomed] = useState(false);
   const [shellSpawnNotice, setShellSpawnNotice] = useState<ShellSpawnNoticeState | null>(null);
   const shellSpawnNoticeCounterRef = useRef(0);
@@ -704,6 +706,15 @@ export function Wall({
     // no-ops), and the tag makes that ordering non-load-bearing.
     if (panel) withProgrammaticActivation(programmaticActivationRef, () => panel.api.setActive());
   }, []);
+
+  // The shared tail of both reattach paths (click-reattach + drag-out): drop the Door
+  // chip from the baseboard and select the now-restored pane.
+  const removeDoorAndSelect = useCallback((id: string) => {
+    const nextDoors = doorsRef.current.filter(d => d.id !== id);
+    doorsRef.current = nextDoors;
+    setDoors(nextDoors);
+    selectPane(id);
+  }, [selectPane]);
 
   // Swap two panes' surfaces (Cmd-Arrow). dockview: swap registry entries + panel
   // titles (dockview tracks titles on the panel). Lath: swap leaf identities — meta
@@ -1104,12 +1115,7 @@ export function Wall({
       // captured context survives, else neighbor, else fallback beside a live ref.
       // A pre-Lath door has no token — synthesize a neighbor-tier one from its
       // {neighborId, direction} so it restores beside its old neighbor.
-      const meta = {
-        component: item.component ?? 'terminal',
-        tabComponent: item.tabComponent ?? 'terminal',
-        title: item.title,
-        params: item.params,
-      };
+      const meta = leafMetaFromDoor(item);
       const token = (item.token as RestoreToken | undefined) ?? legacyTokenFromDoor(item);
       // The enter hint (from the token's edge) is derived inside `restoreLeaf`.
       const sel = selectedIdRef.current;
@@ -1188,10 +1194,7 @@ export function Wall({
       });
     }
 
-    const nextDoors = doorsRef.current.filter(p => p.id !== item.id);
-    doorsRef.current = nextDoors;
-    setDoors(nextDoors);
-    selectPane(item.id);
+    removeDoorAndSelect(item.id);
     if (enterPassthrough) {
       enterTerminalMode(item.id);
     } else {
@@ -1241,7 +1244,7 @@ export function Wall({
         }
       });
     }
-  }, [selectPane, enterTerminalMode, killPaneImmediately, showShellSpawnNotice, lath, nav]);
+  }, [selectPane, removeDoorAndSelect, enterTerminalMode, killPaneImmediately, showShellSpawnNotice, lath, nav]);
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
@@ -2372,11 +2375,9 @@ export function Wall({
   // owns the op commit + selection policy. ---
 
   // A pane drag crossed its threshold: move selection onto the dragged pane (covers
-  // "dragging while a door is selected moves selection onto the dragged pane"). A plain
-  // header press already selected it, so this is usually a no-op.
-  const onPaneDragStart = useCallback((id: string) => {
-    if (selectedTypeRef.current !== 'pane' || selectedIdRef.current !== id) selectPane(id);
-  }, [selectPane]);
+  // "dragging while a door is selected moves selection onto the dragged pane").
+  // `selectPane` is idempotent, so no pre-check is needed — a plain header press already
+  // selected it, and re-selecting is a no-op. Passed to LathHost's `onDragStart` directly.
 
   // Drop of a pane onto a hit-tested target: commit the move (command mode unchanged),
   // then select it. A center-drop swap mirrors the Cmd-Arrow swap's `move` event so
@@ -2390,38 +2391,33 @@ export function Wall({
   }, [lath, fireEvent, selectPane]);
 
   // Drop of a pane onto the baseboard zone: minimize it (captures the token + selects
-  // the door, exactly like the header minimize button).
+  // the door, exactly like the header minimize button). No-op when the Baseboard is
+  // hidden — there is nowhere for a below-wall release to minimize into.
   const onProposeMinimize = useCallback((id: string) => {
+    if (!showBaseboard) return;
     minimizePane(id);
-  }, [minimizePane]);
+  }, [minimizePane, showBaseboard]);
 
-  // A Door began dragging out of the baseboard — start LathHost's external drag.
-  const onDoorDragStart = useCallback((item: DooredItem) => {
-    if (!lath) return;
-    setDoorDrag(item);
-  }, [lath]);
+  // A Door received a press in the baseboard — hand its item + press point to LathHost,
+  // which starts an inactive external drag and applies the threshold. Only supplied to
+  // the Baseboard under Lath, so `lath` is guaranteed here.
+  const onDoorDragStart = useCallback((item: DooredItem, press: { clientX: number; clientY: number }) => {
+    setDoorDrag({ item, startX: press.clientX, startY: press.clientY });
+  }, []);
 
-  // Drop of a dragged-out Door: `null` (cancel / no candidate) leaves the Door where it
-  // is; a target reattaches the surface at the hit-tested position. The token is NOT
-  // consulted — the user chose the spot. The enter hint (from the target edge) is derived
-  // inside `insertLeaf`.
+  // Drop of a dragged-out Door: `null` (sub-threshold press, cancel, or no candidate)
+  // clears the transient drag and leaves the Door where it is; a target reattaches the
+  // surface at the hit-tested position. The token is NOT consulted — the user chose the
+  // spot. The enter hint (from the target edge) is derived inside `insertLeaf`.
   const onExternalDrop = useCallback((target: DropTarget | null) => {
-    const item = doorDrag;
+    const dd = doorDrag;
     setDoorDrag(null);
-    if (!item || !lath || !target) return;
-    const meta = {
-      component: item.component ?? 'terminal',
-      tabComponent: item.tabComponent ?? 'terminal',
-      title: item.title,
-      params: item.params,
-    };
-    const r = lath.insertLeaf(item.id, meta, target);
+    if (!dd || !lath || !target) return;
+    const item = dd.item;
+    const r = lath.insertLeaf(item.id, leafMetaFromDoor(item), target);
     if (!r.ok) return; // insert failed (unexpected) → the Door stays put
-    const nextDoors = doorsRef.current.filter((d) => d.id !== item.id);
-    doorsRef.current = nextDoors;
-    setDoors(nextDoors);
-    selectPane(item.id);
-  }, [doorDrag, lath, selectPane]);
+    removeDoorAndSelect(item.id);
+  }, [doorDrag, lath, removeDoorAndSelect]);
 
   // --- Render ---
 
@@ -2446,10 +2442,10 @@ export function Wall({
                     lath={lath}
                     onCommitResize={onCommitResize}
                     onLeafFocused={onLeafFocused}
-                    onDragStart={onPaneDragStart}
+                    onDragStart={selectPane}
                     onProposeMove={onProposeMove}
                     onProposeMinimize={onProposeMinimize}
-                    externalDrag={doorDrag ? { id: doorDrag.id } : null}
+                    externalDrag={doorDrag ? { id: doorDrag.item.id, startX: doorDrag.startX, startY: doorDrag.startY } : null}
                     onExternalDrop={onExternalDrop}
                   />
                 ) : (

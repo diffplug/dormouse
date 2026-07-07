@@ -11,6 +11,7 @@ import { layout } from '../../lib/lath/layout';
 import { LATH_EASING } from '../../lib/lath/animator';
 import { type DropTarget, move } from '../../lib/lath/ops';
 import { leafTree, type LathNode, type LathTree, type Rect } from '../../lib/lath/model';
+import { leaf, split, movePreview as movePreviewAt } from '../../lib/lath/test-util';
 import type { PaneProps } from './pane-props';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -18,6 +19,18 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const W = 800;
 const H = 600;
 const RECT = { x: 0, y: 0, width: W, height: H };
+
+/** Expected preview rect of an internal drag under this suite's rect + opts. */
+const movePreview = (t: LathTree, dragged: string, target: DropTarget): Rect =>
+  movePreviewAt(t, dragged, target, RECT, LATH_LAYOUT_OPTS);
+
+// The hit-test / sash-preview recompute is coalesced into one requestAnimationFrame;
+// wait a real frame so the pending commit lands before asserting on it.
+async function flushFrame() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  });
+}
 
 function meta(title: string, component = 'terminal', params?: Record<string, unknown>): LeafMeta {
   return { component, tabComponent: component === 'terminal' ? 'terminal' : 'surface', title, ...(params ? { params } : {}) };
@@ -174,14 +187,6 @@ describe('LathHost — frames applied to style', () => {
 describe('LathHost — sash drag', () => {
   function firstSash(): HTMLElement {
     return container.querySelector<HTMLElement>('[data-lath-sash]')!;
-  }
-
-  // Preview recompute is coalesced into one requestAnimationFrame per drag; flush a
-  // frame so the pending preview commit lands before we assert on it.
-  async function flushFrame() {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 30));
-    });
   }
 
   it('previews the resize during the drag and commits once on pointerup', async () => {
@@ -419,7 +424,7 @@ describe('LathHost — pane / Door drag', () => {
 
   function mountDrag(
     store: LathWallStore,
-    props: { externalDrag?: { id: string } | null } = {},
+    props: { externalDrag?: { id: string; startX: number; startY: number } | null } = {},
   ): { engine: ReturnType<typeof createLathWallEngine> } & DragHandlers {
     const engine = createLathWallEngine(store, { durationMs: 0 });
     const handlers: DragHandlers = {
@@ -442,13 +447,6 @@ describe('LathHost — pane / Door drag', () => {
     return { engine, ...handlers };
   }
 
-  // The hit-test is coalesced into one rAF; wait a real frame so the preview lands.
-  async function flushFrame() {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 30));
-    });
-  }
-
   function header(id: string): HTMLElement {
     return leafDiv(id)!.querySelector<HTMLElement>('.lath-leaf-header')!;
   }
@@ -469,33 +467,10 @@ describe('LathHost — pane / Door drag', () => {
   const moveTo = (x: number, y: number) => window.dispatchEvent(new MouseEvent('pointermove', { clientX: x, clientY: y }));
   const up = () => window.dispatchEvent(new MouseEvent('pointerup', {}));
 
-  function movePreview(t: LathTree, dragged: string, target: DropTarget): Rect {
-    return layout(move(t, dragged, target).tree, RECT, LATH_LAYOUT_OPTS).get(dragged)!;
-  }
-
   // col[ row[a, b], c ]: dragging c onto a's top edge yields two distinct candidates —
   // above 'a' (leaf level) and above the whole a|b row (its ancestor).
   function colRowTree(): LathTree {
-    return {
-      root: {
-        kind: 'split',
-        dir: 'col',
-        children: [
-          {
-            node: {
-              kind: 'split',
-              dir: 'row',
-              children: [
-                { node: { kind: 'leaf', id: 'a' }, weight: 0.5 },
-                { node: { kind: 'leaf', id: 'b' }, weight: 0.5 },
-              ],
-            },
-            weight: 0.5,
-          },
-          { node: { kind: 'leaf', id: 'c' }, weight: 0.5 },
-        ],
-      },
-    };
+    return { root: split('col', [split('row', [leaf('a'), 0.5], [leaf('b'), 0.5]), 0.5], [leaf('c'), 0.5]) };
   }
 
   it('enters a drag past the threshold and calls onDragStart, dimming the leaf', () => {
@@ -601,13 +576,53 @@ describe('LathHost — pane / Door drag', () => {
     const t = rowOf('a', 'b');
     const store = seeded(t, [['a', meta('A')], ['b', meta('B')]]);
     // 'door' is not a leaf — the chip stays in the baseboard; LathHost only hit-tests.
-    const { onExternalDrop } = mountDrag(store, { externalDrag: { id: 'door' } });
+    // The external drag starts INACTIVE at the press point; the move past the threshold
+    // activates it (like an internal drag).
+    const { onExternalDrop } = mountDrag(store, { externalDrag: { id: 'door', startX: 100, startY: 300 } });
 
-    act(() => moveTo(410, 300)); // b's left edge
+    act(() => moveTo(410, 300)); // past the threshold → b's left edge
     await flushFrame();
     expect(overlayEl()).not.toBeNull(); // previewed via insert (dragged null → no swap)
 
     act(() => up());
     expect(onExternalDrop).toHaveBeenCalledWith({ kind: 'edge', path: [1], edge: 'left' });
+  });
+
+  it('a sub-threshold Door press-release reports null (drag cleared; the click stands)', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    // A press that never crosses the threshold: the external drag stays inactive.
+    const { onExternalDrop } = mountDrag(store, { externalDrag: { id: 'door', startX: 100, startY: 300 } });
+
+    act(() => moveTo(102, 301)); // < 5px — not a drag
+    act(() => up());
+    // Reported so the Wall drops its transient door-drag state; a `null` target means
+    // "no drop" so the Door's own click-reattach is what actually restores it.
+    expect(onExternalDrop).toHaveBeenCalledWith(null);
+    expect(overlayEl()).toBeNull();
+  });
+
+  it('hit-tests the LIVE tree when a background commit lands mid-drag', async () => {
+    const store = seeded(rowOf('a', 'b', 'c'), [['a', meta('A')], ['b', meta('B')], ['c', meta('C')]]);
+    const { onProposeMove } = mountDrag(store);
+
+    // Start dragging 'a', hovering over the far-right third (c's slot in the 3-leaf tree).
+    act(() => down(header('a'), 100, 15));
+    act(() => moveTo(700, 300));
+    await flushFrame();
+    expect(overlayEl()).not.toBeNull();
+
+    // A background `dor kill` removes 'b' mid-drag → the store commits a NEW 2-leaf tree.
+    act(() => store.removeLeaf('b'));
+    const liveTree = store.getSnapshot().tree;
+
+    // The next frame hit-tests the live tree: 700,300 now sits in c's (widened) center.
+    act(() => moveTo(700, 300));
+    await flushFrame();
+    const target: DropTarget = { kind: 'swap', leaf: 'c' };
+    expect(move(liveTree, 'a', target).ok).toBe(true); // the target is valid on the live tree
+    expect(overlayRect()).toEqual(movePreview(liveTree, 'a', target));
+
+    act(() => up());
+    expect(onProposeMove).toHaveBeenCalledWith('a', target);
   });
 });

@@ -11,6 +11,18 @@ export type Edge = 'left' | 'right' | 'top' | 'bottom';
 export type Rect = { x: number; y: number; width: number; height: number };
 export type Size = { width: number; height: number };
 
+/** Whether two rects match within `eps` on every field (default `0` → exact). Shared
+ *  by hit-test's layout comparison (exact) and the animator's frame settle check
+ *  (loose, `eps` 0.01). */
+export function rectsClose(a: Rect, b: Rect, eps = 0): boolean {
+  return (
+    Math.abs(a.x - b.x) <= eps &&
+    Math.abs(a.y - b.y) <= eps &&
+    Math.abs(a.width - b.width) <= eps &&
+    Math.abs(a.height - b.height) <= eps
+  );
+}
+
 /** A `'row'` split lays its children left→right; a `'col'` split lays them top→bottom. */
 export type LathNode =
   | { kind: 'leaf'; id: LeafId }

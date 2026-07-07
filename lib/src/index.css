@@ -173,13 +173,13 @@ body {
   touch-action: none;
 }
 
-/* Drag drop-preview: the speculative destination rect during a pane/Door drag. Fill
- * + border color are set inline (the resolved selection color); the box geometry and
- * radius live here. Inert to the pointer so it never intercepts the drag. */
+/* Drag drop-preview: the speculative destination rect during a pane/Door drag. Fill,
+ * border color, and border-radius are all set inline (the resolved selection color +
+ * TERMINAL_SELECTION_BORDER_RADIUS); only positioning lives here. Inert to the pointer
+ * so it never intercepts the drag. */
 .lath-host .lath-drop-preview {
   position: absolute;
   pointer-events: none;
-  border-radius: 0.5rem; /* matches TERMINAL_SELECTION_BORDER_RADIUS */
 }
 
 /* --- Command mode marching-ants animation --- */

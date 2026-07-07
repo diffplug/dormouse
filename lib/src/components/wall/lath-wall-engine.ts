@@ -132,6 +132,18 @@ export function browserLeafMeta(title: string, params: Record<string, unknown>):
   return { component: 'browser', tabComponent: 'surface', title, params };
 }
 
+/** The engine-tracked meta for a Door's surface (component/tabComponent default to
+ *  terminal for pre-Lath doors). Shared by the two reattach paths — click-reattach
+ *  (`restoreLeaf`) and drag-out (`insertLeaf`) — so they build the same shape. */
+export function leafMetaFromDoor(item: DooredItem): LeafMeta {
+  return {
+    component: item.component ?? 'terminal',
+    tabComponent: item.tabComponent ?? 'terminal',
+    title: item.title,
+    params: item.params,
+  };
+}
+
 /** Synthesize a neighbor-tier restore token for a Door persisted before Lath (or a
  *  dockview-created door that never captured a core token): no fingerprint (skips
  *  the exact tier), the sibling + edge reproduce the original split beside the

@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { type LayoutOpts, layout } from './layout';
-import { type DropTarget, insert, move } from './ops';
+import { type LayoutOpts } from './layout';
 import { hitTest } from './hit-test';
-import { leaf, split as mk, tree, R } from './test-util';
+import { leaf, split as mk, tree, R, movePreview as movePreviewAt, insertPreview as insertPreviewAt } from './test-util';
 
 const opts: LayoutOpts = { gap: 0, minLeaf: { width: 0, height: 0 } };
 const RECT = R(0, 0, 1000, 600);
@@ -10,14 +9,11 @@ const RECT = R(0, 0, 1000, 600);
 // preview rect matches regardless of the label.
 const X = 'X';
 
-/** Expected preview rect of an internal drag: the dragged leaf's rect after `move`. */
-function movePreview(t: ReturnType<typeof tree>, dragged: string, target: DropTarget) {
-  return layout(move(t, dragged, target).tree, RECT, opts).get(dragged)!;
-}
-/** Expected preview rect of an external drag: the inserted leaf's rect after `insert`. */
-function insertPreview(t: ReturnType<typeof tree>, target: DropTarget) {
-  return layout(insert(t, X, target).tree, RECT, opts).get(X)!;
-}
+// Bind the shared preview helpers to this suite's rect + opts.
+const movePreview = (t: ReturnType<typeof tree>, dragged: string, target: Parameters<typeof movePreviewAt>[2]) =>
+  movePreviewAt(t, dragged, target, RECT, opts);
+const insertPreview = (t: ReturnType<typeof tree>, target: Parameters<typeof insertPreviewAt>[2]) =>
+  insertPreviewAt(t, X, target, RECT, opts);
 
 describe('hitTest — center region', () => {
   it('yields a swap for an internal drag over a leaf center, previewed at the target rect', () => {

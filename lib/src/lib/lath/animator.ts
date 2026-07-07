@@ -5,7 +5,7 @@
 // real interpolated values against a fake clock. The HTML adapter (LathHost) drives
 // it from a rAF loop; a Three.js adapter would drive it from its render loop.
 
-import type { Edge, Rect } from './model';
+import { rectsClose, type Edge, type Rect } from './model';
 
 /** A presentation frame for one leaf at a given instant. `layer` is a discrete band
  *  the adapter maps to z-index (0 = tiled, 1 = dying/on-top); it is never interpolated. */
@@ -138,14 +138,7 @@ function lerpFrame(from: Frame, to: Frame, t: number): Frame {
 /** Whether two frames are close enough to treat as "no visual change" (so the
  *  segment can start already-settled, keeping `settledAt` honest). */
 function framesClose(a: Frame, b: Frame): boolean {
-  const e = 0.01;
-  return (
-    Math.abs(a.rect.x - b.rect.x) < e &&
-    Math.abs(a.rect.y - b.rect.y) < e &&
-    Math.abs(a.rect.width - b.rect.width) < e &&
-    Math.abs(a.rect.height - b.rect.height) < e &&
-    Math.abs(a.opacity - b.opacity) < e
-  );
+  return rectsClose(a.rect, b.rect, 0.01) && Math.abs(a.opacity - b.opacity) < 0.01;
 }
 
 export function createAnimator(opts: { durationMs: number; easing?: (t: number) => number }): LathAnimator {
