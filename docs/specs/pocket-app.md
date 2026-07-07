@@ -87,8 +87,10 @@ the wall together.
 Pocket has no VS Code host and boots into auth long before a Wall exists, so
 the app restores the theme itself before first paint: `usePocketTheme()`
 (`lib/src/remote/pocket-app/pocket-theme.ts`) runs `restoreActiveTheme()`
-with the same Kimbie Dark default as the website playground, called at the
-top of the app component (and again by `PocketWall`, idempotently).
+with the Kimbie Dark default, called at the top of the app component (and
+again by `PocketWall`, idempotently). The default is one shared
+`POCKET_THEME_ID` constant that the website playground imports, so the
+playground cannot drift from the real Pocket default.
 Restoring also syncs document-level browser chrome that in-app hosts don't
 need: `color-scheme` on the root element (native form controls, scrollbars)
 and the `<meta name="theme-color">` address-bar tint, taken from the applied

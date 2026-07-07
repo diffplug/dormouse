@@ -13,6 +13,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { tv } from 'tailwind-variants';
 import {
   PocketClient,
   type ConnectDecision,
@@ -51,9 +52,22 @@ const HEADER_BUTTON_CLASS =
   'flex h-7 shrink-0 items-center gap-1 rounded px-2 text-sm text-inherit transition-colors hover:bg-current/10 active:bg-current/10 disabled:pointer-events-none disabled:opacity-45';
 const BODY_CLASS =
   'flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]';
-// The block passkey buttons: the modalActionButton primary tone at a 44px touch height.
-const PRIMARY_BLOCK_BUTTON_CLASS =
-  'flex min-h-11 w-full items-center justify-center rounded bg-header-active-bg px-3 text-sm font-medium text-header-active-fg transition-colors active:opacity-90 focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-45';
+// Action buttons: the modalActionButton tones at phone touch heights —
+// min-h-11 block primaries, min-h-9 host-row actions (docs/specs/pocket-app.md).
+const pocketButton = tv({
+  base: 'flex items-center justify-center rounded text-sm transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-45',
+  variants: {
+    tone: {
+      primary: 'bg-header-active-bg text-header-active-fg',
+      secondary: 'border border-border text-muted hover:bg-header-inactive-bg hover:text-foreground',
+    },
+    size: {
+      block: 'min-h-11 w-full px-3 font-medium active:opacity-90',
+      row: 'min-h-9 px-3',
+    },
+  },
+  defaultVariants: { tone: 'primary', size: 'row' },
+});
 const FIELD_CLASS = 'flex flex-col gap-1.5';
 // text-base (16px) is deliberate: it blocks iOS zoom-on-focus (phone-legibility exception).
 const INPUT_CLASS =
@@ -261,7 +275,7 @@ export function SetupOrSignin({
         {error ? <p className="text-sm text-error">{error}</p> : null}
         <button
           type="button"
-          className={PRIMARY_BLOCK_BUTTON_CLASS}
+          className={pocketButton({ size: 'block' })}
           disabled={busy !== null}
           onClick={onSignin}
         >
@@ -305,7 +319,7 @@ export function SetupOrSignin({
             </div>
             <button
               type="button"
-              className={PRIMARY_BLOCK_BUTTON_CLASS}
+              className={pocketButton({ size: 'block' })}
               disabled={busy !== null || password.length === 0}
               onClick={() => onSetup(password, label)}
             >
@@ -376,7 +390,7 @@ export function HostsView({
                   {!paired ? (
                     <button
                       type="button"
-                      className="flex min-h-9 items-center justify-center rounded border border-border px-3 text-sm text-muted transition-colors hover:bg-header-inactive-bg hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
+                      className={pocketButton({ tone: 'secondary' })}
                       disabled={busy !== null || !host.online}
                       onClick={() => onPair(host)}
                     >
@@ -385,7 +399,7 @@ export function HostsView({
                   ) : null}
                   <button
                     type="button"
-                    className="flex min-h-9 items-center justify-center rounded bg-header-active-bg px-3 text-sm text-header-active-fg transition-colors disabled:cursor-not-allowed disabled:opacity-45"
+                    className={pocketButton()}
                     disabled={busy !== null || !host.online}
                     onClick={() => onConnect(host)}
                   >
