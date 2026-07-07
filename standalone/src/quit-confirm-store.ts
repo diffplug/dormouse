@@ -1,25 +1,17 @@
-import { setQuitConfirmGate, type QuitConfirmContext } from "./quit";
+import type { QuitConfirmContext } from "./quit";
 
 /**
- * Module store backing the quit-confirmation dialog (docs/specs/standalone.md
- * §Quit flow, "Confirmation dialog"). `installQuitConfirmGate` registers the
- * running-work gate on the quit orchestrator; when quit fires with ≥1 running
- * session the gate opens this store, and `<QuitConfirmModalHost>` renders off
- * its `useSyncExternalStore` snapshot. `confirm` / `cancel` delegate to the
- * orchestrator context (`ctx.confirm` runs the teardown, `ctx.cancel` invokes
- * `quit_cancel`); the store never duplicates that phase/Rust logic.
+ * Module store backing the quit-confirmation dialog. The quit orchestrator's
+ * gate (`openQuitConfirm`, wired via `setQuitConfirmGate` in bootstrap) opens
+ * it; `<QuitConfirmModalHost>` renders off the phase. Behavior:
+ * docs/specs/standalone.md §Quit flow, "Confirmation dialog".
  */
 
-export interface QuitConfirmSnapshot {
-  /** Running-session count at the moment the dialog opened. The dialog's live
-   *  count is read separately from the terminal registry (a command may finish
-   *  while the dialog is up); this is only the trigger-time value. */
-  runningCountAtRequest: number;
-}
+export type QuitConfirmPhase = "open" | "quitting";
 
-let snapshot: QuitConfirmSnapshot | null = null;
-// The orchestrator context for the open request. Nulled the instant the
-// decision is made, so a double-click confirm / a late cancel is a no-op.
+let phase: QuitConfirmPhase | null = null;
+// The orchestrator context for the open request. Nulled the instant a decision
+// is made, so a repeated confirm / a late cancel is a no-op.
 let activeCtx: QuitConfirmContext | null = null;
 const listeners = new Set<() => void>();
 
@@ -30,54 +22,48 @@ export function subscribeQuitConfirm(listener: () => void): () => void {
   };
 }
 
-export function getQuitConfirmSnapshot(): QuitConfirmSnapshot | null {
-  return snapshot;
+export function getQuitConfirmPhase(): QuitConfirmPhase | null {
+  return phase;
 }
 
 function emit(): void {
   for (const listener of listeners) listener();
 }
 
-// The gate: open the dialog for a running-work quit. The orchestrator already
-// dedupes (`quitPhase !== "idle"`), so it never re-invokes the gate while a
-// dialog is up — the `snapshot` guard is belt-and-suspenders against stacking.
-function openQuitConfirm(ctx: QuitConfirmContext): void {
-  if (snapshot) return;
+// The orchestrator's confirmation gate. Wire with `setQuitConfirmGate` during
+// bootstrap (order relative to `initQuitFlow` is irrelevant — the gate is read
+// only at quit time). The orchestrator never re-invokes it while a dialog is
+// up; the phase guard is belt-and-suspenders against stacking.
+export function openQuitConfirm(ctx: QuitConfirmContext): void {
+  if (phase !== null) return;
   activeCtx = ctx;
-  snapshot = { runningCountAtRequest: ctx.runningCount };
+  phase = "open";
   emit();
 }
 
-/** User confirmed: run the teardown. The dialog stays mounted (snapshot is not
- *  cleared) so it can show a non-interactive "Quitting…" state; the app exits
- *  within ~1–3s. Resolving `activeCtx` blocks a second confirm/cancel. */
+// The phase survives confirm (as "quitting") so the modal shows a disabled
+// quitting state until the app exits.
 export function confirmQuit(): void {
   const ctx = activeCtx;
   if (!ctx) return;
   activeCtx = null;
+  phase = "quitting";
+  emit();
   ctx.confirm();
 }
 
-/** User cancelled (button or Escape): close the dialog and abort the quit. The
- *  app and every terminal are left untouched; a later quit starts fresh. */
 export function cancelQuit(): void {
   const ctx = activeCtx;
   if (!ctx) return;
   activeCtx = null;
-  snapshot = null;
+  phase = null;
   emit();
   ctx.cancel();
 }
 
-/** Install the running-work confirmation gate on the quit orchestrator. Call
- *  once at startup, after `initQuitFlow`. */
-export function installQuitConfirmGate(): void {
-  setQuitConfirmGate(openQuitConfirm);
-}
-
 /** @internal Reset module state for testing. */
 export function _resetQuitConfirmForTesting(): void {
-  snapshot = null;
+  phase = null;
   activeCtx = null;
   listeners.clear();
 }

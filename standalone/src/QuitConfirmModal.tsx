@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useContext, useEffect, useRef, useSyncExternalStore } from 'react';
 // Standalone reaches into the lib source directly (same relative form as the
 // sibling UpdateDebugModal.tsx). The terminal registry comes in via the
 // `dormouse-lib` alias, matching quit.ts.
@@ -11,7 +11,7 @@ import {
 import {
   cancelQuit,
   confirmQuit,
-  getQuitConfirmSnapshot,
+  getQuitConfirmPhase,
   subscribeQuitConfirm,
 } from './quit-confirm-store';
 
@@ -23,9 +23,9 @@ import {
  * of the ExternalLinkModalHost / ExternalLinkModal pair.
  */
 export function QuitConfirmModalHost() {
-  const snapshot = useSyncExternalStore(subscribeQuitConfirm, getQuitConfirmSnapshot);
+  const phase = useSyncExternalStore(subscribeQuitConfirm, getQuitConfirmPhase);
   const setDialogKeyboardActive = useContext(DialogKeyboardContext);
-  const open = snapshot !== null;
+  const open = phase !== null;
 
   // Suppress the Wall's command-mode key dispatch while the dialog is up.
   useEffect(() => {
@@ -33,27 +33,14 @@ export function QuitConfirmModalHost() {
     return () => setDialogKeyboardActive(false);
   }, [open, setDialogKeyboardActive]);
 
-  if (!snapshot) return null;
-  return <QuitConfirmModal />;
+  if (!phase) return null;
+  return <QuitConfirmModal confirming={phase === 'quitting'} />;
 }
 
-function QuitConfirmModal() {
+function QuitConfirmModal({ confirming }: { confirming: boolean }) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
-  // After confirm the teardown is running and the app exits within ~1–3s; the
-  // dialog stays up in a non-interactive "Quitting…" state (buttons disabled)
-  // so a second confirm / an Escape can't fire.
-  const [confirming, setConfirming] = useState(false);
-  // Live count: a command may finish while the dialog is open. If it drops to 0
-  // the dialog stays open (auto-quitting under the user would surprise) — the
-  // copy just reflects the current number.
+  // Live count — the dialog stays open even if it drops to 0 (see spec).
   const runningCount = useSyncExternalStore(subscribeToTerminalPaneState, countRunningSessions);
-
-  const handleConfirm = () => {
-    if (confirming) return;
-    setConfirming(true);
-    confirmQuit();
-  };
-
   const hasRunning = runningCount > 0;
 
   return (
@@ -67,7 +54,7 @@ function QuitConfirmModal() {
       initialFocusRef={cancelButtonRef}
       onEscape={confirming ? undefined : cancelQuit}
     >
-      <h2 id="quit-confirm-modal-title" className="text-sm font-medium text-foreground">
+      <h2 id="quit-confirm-modal-title" className="text-sm leading-5 text-foreground">
         Quit Dormouse?
       </h2>
       <p className="mt-2 text-sm text-muted">
@@ -90,7 +77,7 @@ function QuitConfirmModal() {
         </button>
         <button
           type="button"
-          onClick={handleConfirm}
+          onClick={confirmQuit}
           disabled={confirming}
           className={`${modalActionButton({ tone: 'primary' })} min-w-[5rem]`}
         >

@@ -163,18 +163,29 @@ describe("quit orchestrator", () => {
   it("routes a running-session quit through an installed confirm gate", async () => {
     mocks.countRunningSessions.mockReturnValue(3);
     const adapter = fakeAdapter();
-    let seenCount = 0;
-    setQuitConfirmGate((ctx) => {
-      seenCount = ctx.runningCount;
-      // Simulate the user confirming.
-      ctx.confirm();
-    });
+    // Simulate the user confirming.
+    const gate = vi.fn((ctx) => ctx.confirm());
+    setQuitConfirmGate(gate);
 
     await triggerQuit(adapter);
 
-    expect(seenCount).toBe(3);
+    expect(gate).toHaveBeenCalledTimes(1);
     expect(adapter.requestSessionFlush).toHaveBeenCalled();
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
+  });
+
+  it("does not re-invoke the gate while a confirmation is pending", async () => {
+    mocks.countRunningSessions.mockReturnValue(1);
+    const adapter = fakeAdapter();
+    const gate = vi.fn(); // never decides — the dialog stays up
+    setQuitConfirmGate(gate);
+
+    await triggerQuit(adapter);
+    quitRequested!(); // repeat trigger while confirming
+    await settle();
+
+    expect(gate).toHaveBeenCalledTimes(1);
+    expect(adapter.requestSessionFlush).not.toHaveBeenCalled();
   });
 
   it("cancels via the gate without tearing down", async () => {

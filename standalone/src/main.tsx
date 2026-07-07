@@ -89,13 +89,13 @@ async function bootstrap() {
   // Tauri APIs. !BROWSER_DEV_HOST is exactly the createPlatform branch that
   // returned a TauriAdapter.
   if (!BROWSER_DEV_HOST) {
-    const { initQuitFlow } = await import("./quit");
+    const [{ initQuitFlow, setQuitConfirmGate }, { openQuitConfirm }] = await Promise.all([
+      import("./quit"),
+      import("./quit-confirm-store"),
+    ]);
     initQuitFlow(platform as import("./tauri-adapter").TauriAdapter);
-    // Install the running-work confirmation gate: a quit with ≥1 running
-    // command opens <QuitConfirmModalHost> instead of tearing down unconfirmed
-    // (docs/specs/standalone.md §Quit flow, "Confirmation dialog").
-    const { installQuitConfirmGate } = await import("./quit-confirm-store");
-    installQuitConfirmGate();
+    // A quit with ≥1 running command opens <QuitConfirmModalHost>.
+    setQuitConfirmGate(openQuitConfirm);
   }
   const { initAlertStateReceiver } = await import("dormouse-lib/lib/terminal-registry");
   initAlertStateReceiver();

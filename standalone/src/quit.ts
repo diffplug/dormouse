@@ -24,7 +24,6 @@ let quitAdapter: TauriAdapter | null = null;
 // `ctx.confirm()` (run the teardown) or `ctx.cancel()` (abort). With no gate
 // installed the handler falls through to an immediate unconfirmed teardown.
 export interface QuitConfirmContext {
-  runningCount: number;
   confirm: () => void;
   cancel: () => void;
 }
@@ -48,11 +47,9 @@ function handleQuitRequested(): void {
 
   if (quitPhase !== "idle") return;
 
-  const running = countRunningSessions();
-  if (running > 0 && quitConfirmGate) {
+  if (countRunningSessions() > 0 && quitConfirmGate) {
     quitPhase = "confirming";
     quitConfirmGate({
-      runningCount: running,
       confirm: () => void runQuitTeardown(),
       cancel: cancelQuit,
     });

@@ -312,21 +312,21 @@ escape hatch if the webview acked then wedged.
 
 **Confirmation dialog.** Source of truth: `standalone/src/quit-confirm-store.ts`
 (the module store + gate) and `standalone/src/QuitConfirmModal.tsx` (the modal);
-installed by `main.tsx` on the Tauri branch right after `initQuitFlow`. When
-`handleQuitRequested` finds **≥1 running session** it hands the decision to the
-installed gate instead of tearing down; with no running work (or no gate) it
-falls straight through to the teardown, so an all-idle quit never prompts. A
-session counts as running iff its latest activity is a live command
+`main.tsx` wires the gate on the Tauri branch (`setQuitConfirmGate(openQuitConfirm)`;
+order relative to `initQuitFlow` is irrelevant — the gate is read only at quit
+time). When `handleQuitRequested` finds **≥1 running session** it hands the
+decision to the installed gate instead of tearing down; with no running work (or
+no gate) it falls straight through to the teardown, so an all-idle quit never
+prompts. A session counts as running iff its latest activity is a live command
 (`activity.kind === 'running'`); `countRunningSessions`
 (`lib/src/lib/terminal-state-store.ts`) is the count, the same predicate the
 gate check reads.
 
 - **Live count.** The body reads `countRunningSessions` through
   `useSyncExternalStore(subscribeToTerminalPaneState, …)`, so it tracks commands
-  finishing while the dialog is up; the gate's trigger-time count is kept only as
-  the store snapshot. **If the count drops to 0 the dialog stays open** —
-  auto-quitting out from under the user would surprise — and the copy just shows
-  "No commands are still running." with the same buttons.
+  finishing while the dialog is up. **If the count drops to 0 the dialog stays
+  open** — auto-quitting out from under the user would surprise — and the copy
+  just shows "No commands are still running." with the same buttons.
 - **Cancel / Escape** (Escape and the Cancel button, which takes initial focus as
   the safe default) close the dialog and call `ctx.cancel()` → `quit_cancel`: the
   app and every terminal are left untouched and a later quit starts fresh.
