@@ -12,40 +12,30 @@ import type { Terminal } from '@xterm/xterm';
  * awaiting this in `play` holds the snapshot until every visible terminal has written
  * its content and painted a settled frame.
  *
- * Robustness rules (a hanging gate is worse than none — it stalls Chromatic to its
- * own timeout):
- *  - The poll clock is `setTimeout`, never `requestAnimationFrame` alone: rAF is
- *    fully paused in a hidden/backgrounded tab, so an rAF-only wait can hang forever.
- *  - Content is detected through the xterm BUFFER model (parsed synchronously on
- *    write), independent of which renderer (DOM / canvas / WebGL) is painting.
- *  - Every wait is bounded: the poll by `timeoutMs`, each paint wait by its own
- *    fallback timer, so the returned promise always resolves.
+ * Content is detected through the xterm BUFFER model (parsed synchronously on write),
+ * independent of which renderer (DOM / canvas / WebGL) is painting.
  */
-export async function settleTerminals({ timeoutMs = 4000 }: { timeoutMs?: number } = {}): Promise<void> {
-  const deadline = performance.now() + timeoutMs;
-
-  // 1. Wait until at least one terminal exists and every live terminal has drawn
-  //    content into its buffer (cursor advanced, or a non-blank cell) — the signal
-  //    that the scenario data has actually been written, independent of adapter timers.
-  while (performance.now() < deadline) {
+export async function settleTerminals(opts?: { timeoutMs?: number }): Promise<void> {
+  await waitForCondition(() => {
     const terms = liveTerminals();
-    if (terms.length > 0 && terms.every(hasContent)) break;
-    await delay(16);
-  }
-
-  // 2. Give xterm's renderer a couple of frames to paint the settled buffer before
-  //    the snapshot. Falls back to a timer so it never hangs if rAF is throttled.
-  await paintFrame();
-  await paintFrame();
+    return terms.length > 0 && terms.every(hasContent);
+  }, opts);
 }
 
 /**
  * Wait until `predicate()` is true (bounded by `timeoutMs`), then a couple of paint
- * frames so whatever it gates has rendered. Companion to `settleTerminals` for stories
- * that reveal content asynchronously *after* the terminal paints — e.g. a programmatic
- * selection overlay applied on the story's own timer. Chaining it after
- * `settleTerminals` in `play` keeps Chromatic from capturing a painted terminal that
- * is still missing its overlay. Same robustness rules: `setTimeout` clock, bounded.
+ * frames so whatever it gates has rendered. The primitive behind `settleTerminals`,
+ * and the direct tool for stories that reveal content asynchronously *after* the
+ * terminal paints — e.g. a programmatic selection overlay applied on the story's own
+ * timer, chained after `settleTerminals` so Chromatic never captures a painted
+ * terminal that is still missing its overlay.
+ *
+ * Robustness rules (a hanging gate is worse than none — it stalls Chromatic to its
+ * own timeout):
+ *  - The poll clock is `setTimeout`, never `requestAnimationFrame` alone: rAF is
+ *    fully paused in a hidden/backgrounded tab, so an rAF-only wait can hang forever.
+ *  - Every wait is bounded: the poll by `timeoutMs`, each paint wait by its own
+ *    fallback timer, so the returned promise always resolves.
  */
 export async function waitForCondition(
   predicate: () => boolean,

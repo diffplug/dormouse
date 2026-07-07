@@ -344,6 +344,13 @@ export function createLathWallStore(): LathWallStore {
     },
 
     setLayoutGeometry(rect, opts) {
+      // Reject a degenerate (zero-area) measurement so it can never poison the
+      // geometry-derived queries (`autoEdge`, `neighbors`). `autoEdge` on a 0×0 rect
+      // returns `'bottom'` for every split, so a seed reading it would stack every
+      // pane vertically — strictly worse than the `!geometry` fallback (`'right'`).
+      // Keeping the last good geometry (or none yet) lets those readers hit their
+      // benign fallback until the container actually has a size.
+      if (rect.width <= 0 || rect.height <= 0) return;
       geometry = { rect, opts };
     },
 
