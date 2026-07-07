@@ -997,6 +997,7 @@ export function Wall({
       addSplitPanel(id, 'below', 'vertical', source);
     },
     onZoom: (id: string) => {
+      if (!nav.hasPane(id)) return;
       // Zoom is presentation state in the store (the tree is untouched). Toggle:
       // any leaf zoomed → unzoom; else zoom this leaf. The Wall's `zoomed` boolean
       // follows via the store subscription (below), which also un-zooms when a

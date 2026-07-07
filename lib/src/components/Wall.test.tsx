@@ -123,4 +123,26 @@ describe('Wall on the Lath engine', () => {
     // The surviving pane is present in the Lath layout's leaf meta.
     expect(Object.keys(saved!.lathLayout!.leafMeta ?? {})).toContain('pane-a');
   });
+
+  it('ignores zoom keyboard requests while a door is selected', async () => {
+    const onEvent = vi.fn();
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard onEvent={onEvent} />);
+    });
+    await flush();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true }));
+    });
+    await flush();
+    expect(container.querySelector('[data-door-id="pane-a"]')).not.toBeNull();
+
+    onEvent.mockClear();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', bubbles: true }));
+    });
+    await flush();
+
+    expect(onEvent).not.toHaveBeenCalledWith({ type: 'zoomChange', zoomed: true });
+  });
 });
