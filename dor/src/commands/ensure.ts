@@ -62,6 +62,8 @@ export const ensureCommand: Command = {
       brief: 'Ensure one surface is running a command.',
       fullDescription: `Ensures one surface in the current workspace is running the given command at the given path. If it's already running, no-op. If it isn't, then it creates a split and runs the command.
 
+ensure never changes focus. Whether it reuses a match, restarts one, or creates a new split, the surface you ran it from keeps focus — a newly created surface (visible or minimized) starts in the background.
+
 Matching uses the command each shell reports it is running via Dormouse shell integration (OSC 633), not process inspection. This captures the typed command (\`npm run dev\`), not the forked child process (\`node .../vite\`), and works for shells the user started by hand as well as shells Dormouse started. The match is exact: \`npm run dev\` and \`npm run dev --host\` are different commands and get separate surfaces.
 
 ensure requires that integration: a surface can only be matched, reused, or restarted if its shell reports its command. So if the shell has no OSC 633 integration (e.g. cmd.exe), ensure fails with an error rather than starting an untrackable surface — run it from a shell with integration, such as Git Bash or PowerShell.

@@ -860,6 +860,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
 
     let mut wrap = CommandWrap::with_new(&node_path, |c| {
         c.arg(&sidecar_path)
+            .env("DORMOUSE_HOST", "standalone")
             .env("DORMOUSE_NODE", &dor_node_path)
             .env("DORMOUSE_CLI_BIN", &dor_cli_paths.bin_dir)
             .env("DORMOUSE_CLI_JS", &dor_cli_paths.entrypoint)

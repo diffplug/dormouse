@@ -8,6 +8,7 @@ import type {
 } from 'dockview-react';
 import { getDefaultShellOpts, setPendingShellOpts, swapTerminals, UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
 import { prefersReducedMotion } from '../../lib/ui-geometry';
+import { withProgrammaticActivation } from '../../lib/programmatic-activation';
 import type { DooredItem, WallMode, WallSelectionKind, SpawnDirection } from './wall-types';
 import { pickSplitDirection, swapPanelTitles } from './dockview-helpers';
 
@@ -19,6 +20,7 @@ export function useDockviewReady({
   doorsRef,
   freshlySpawnedRef,
   killInProgressRef,
+  programmaticActivationRef,
   selectedIdRef,
   selectedTypeRef,
   modeRef,
@@ -37,6 +39,7 @@ export function useDockviewReady({
   doorsRef: RefObject<DooredItem[]>;
   freshlySpawnedRef: RefObject<Map<string, SpawnDirection>>;
   killInProgressRef: RefObject<boolean>;
+  programmaticActivationRef: RefObject<number>;
   selectedIdRef: RefObject<string | null>;
   selectedTypeRef: RefObject<WallSelectionKind>;
   modeRef: RefObject<WallMode>;
@@ -147,14 +150,21 @@ export function useDockviewReady({
     });
 
     e.api.onDidActivePanelChange((panel) => {
-      if (panel) {
-        if (selectedTypeRef.current === 'door') return;
-        if (modeRef.current === 'passthrough' && selectedIdRef.current !== panel.id) {
-          enterTerminalModeRef.current(panel.id);
-          return;
-        }
-        setSelectedId(panel.id);
+      if (!panel) return;
+      // A tagged mutation is mid-flight; its caller applies selection policy
+      // explicitly at the mutation site (see programmatic-activation.ts).
+      if (programmaticActivationRef.current > 0) return;
+      // Every untagged activation is a dockview-native user interaction that the
+      // React click handlers don't cover — a panel drag, or DOM focus landing in
+      // a surface (an embed focusing itself adopts like a click). Adopt it through
+      // the real dispatchers so the (kind, id) selection pair stays consistent;
+      // never a bare setSelectedId, which can shear the pair (a door-type id
+      // pointing at a pane was corner case #11's desync).
+      if (modeRef.current === 'passthrough') {
+        if (selectedIdRef.current !== panel.id) enterTerminalModeRef.current(panel.id);
+        return;
       }
+      selectPane(panel.id);
     });
 
     e.api.onDidRemovePanel(() => {
@@ -165,10 +175,18 @@ export function useDockviewReady({
         const id = generatePaneId();
         primeDefaultShell(id);
         freshlySpawnedRef.current.set(id, 'top-left');
-        e.api.addPanel({ id, component: 'terminal', tabComponent: 'terminal', title: UNNAMED_PANEL_TITLE });
-        if (selectedIdRef.current === null) {
-          selectPane(id);
-        }
+        withProgrammaticActivation(programmaticActivationRef, () => {
+          e.api.addPanel({ id, component: 'terminal', tabComponent: 'terminal', title: UNNAMED_PANEL_TITLE });
+        });
+        // Adopt the replacement only when the current selection no longer points at
+        // anything real: null (the kill tail cleared it) or dangling (selection still
+        // names the removed pane — the 0ms kill timer can beat React's flush of
+        // setSelectedId(null) into selectedIdRef). A valid selection keeps it: a door
+        // (just-minimized last pane, corner case #11) or a live pane stays selected —
+        // the auto-spawn exists to keep a pane visible, not to steal selection.
+        const sel = selectedIdRef.current;
+        const selDangling = sel !== null && selectedTypeRef.current === 'pane' && !e.api.getPanel(sel);
+        if (sel === null || selDangling) selectPane(id);
       };
       setTimeout(spawn, delay);
     });
@@ -188,6 +206,7 @@ export function useDockviewReady({
     resolvedRef,
     restoredLayoutRef,
     selectPane,
+    programmaticActivationRef,
     selectedIdRef,
     selectedTypeRef,
     setDockviewApi,

@@ -5,6 +5,7 @@ import {
   themeAbyss,
   type DockviewTheme,
   type DockviewApi,
+  type IDockviewPanel,
 } from 'dockview-react';
 import 'dockview-react/dist/styles/dockview.css';
 import { Baseboard } from './Baseboard';
@@ -75,6 +76,7 @@ import { hostPathDisplay } from './wall/browser-url';
 import { SurfacePaneHeader } from './wall/SurfacePaneHeader';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { useDockviewReady } from './wall/use-dockview-ready';
+import { withProgrammaticActivation } from '../lib/programmatic-activation';
 import { pickSplitDirection } from './wall/dockview-helpers';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
@@ -399,6 +401,32 @@ function spawnDirectionForDockview(direction: DockviewSplitDirection): SpawnDire
   return direction === 'above' || direction === 'below' ? 'top' : 'left';
 }
 
+// After a surface-adding op, settle focus and selection; returns whether it
+// selected the new surface. A non-focus-neutral add selects the new pane
+// outright. A focus-neutral add hands the active group back to `caller` (the
+// active pane at entry) so the new pane renders without the active group
+// wandering — this is purely a dockview-activation concern. Dormouse selection
+// then moves onto the new surface only when the op replaced the pane the user
+// was actually selected on (`selectionReplaced`); otherwise the user's
+// selection would dangle on a removed panel. Selection policy is deliberately
+// keyed on the user's selection, not on whether the captured `caller`
+// (activePanel) survived: activePanel can diverge from selection (e.g. a `dor`
+// op replacing an active-but-unselected pane while the user has a door
+// selected).
+function settleFocusAfterAdd(
+  api: DockviewApi,
+  focusNeutral: boolean,
+  caller: IDockviewPanel | undefined,
+  selectionReplaced: boolean,
+  newId: string,
+  selectPane: (id: string) => void,
+): boolean {
+  if (!focusNeutral) { selectPane(newId); return true; }
+  if (caller && api.getPanel(caller.id)) caller.api.setActive();
+  if (selectionReplaced) { selectPane(newId); return true; }
+  return false;
+}
+
 /**
  * Quote a raw argv into a single command string for the target pane's shell.
  * This is the one place the command is quoted; the CLI sends argv unquoted
@@ -490,6 +518,16 @@ export function Wall({
   const freshlySpawnedRef = useRef(new Map<string, SpawnDirection>());
 
   const killInProgressRef = useRef(false);
+
+  // "Programmatic activation" tag: depth > 0 while an add-side programmatic
+  // dockview mutation is in flight, so the onDidActivePanelChange listener can
+  // tell that activation churn apart from a genuine user click and leave
+  // selection/mode alone. dockview fires the same event for both. The tag is set
+  // via withProgrammaticActivation around runSurfaceAdd's add (focus-neutral
+  // surface creation, layout.md corner case #12); see programmatic-activation.ts
+  // for the full design rationale (why a depth counter, the synchronicity
+  // assumption, and why removal-side echoes are deliberately not tagged).
+  const programmaticActivationRef = useRef(0);
 
   // Ref to the WorkspaceSelectionOverlay's root element. orchestrateKill uses it to
   // animate the focus ring in sync with the killed pane's shrink (last-pane case).
@@ -593,7 +631,35 @@ export function Wall({
     setSelectedId(id);
     setSelectedType('pane');
     const panel = apiRef.current?.getPanel(id);
-    if (panel) panel.api.setActive();
+    // The echo of our own setActive is not user intent; the refs written above
+    // already neutralized it (selectedIdRef.current === panel.id, so the listener
+    // no-ops), and the tag makes that ordering non-load-bearing.
+    if (panel) withProgrammaticActivation(programmaticActivationRef, () => panel.api.setActive());
+  }, []);
+
+  // Restore DOM focus to the selected pane after a dockview mutation (addPanel /
+  // removePanel) re-parents its grid subtree and blurs it. Deferred a frame past
+  // dockview's own post-mutation focus handling. The first gate (selected pane in
+  // passthrough) is TerminalPane's `isFocused` condition, so this only ever heals
+  // the pane the effect itself would keep focused. `document.hasFocus()` keeps a
+  // background `dor` command from yanking cross-frame focus out of the host editor
+  // (VS Code: a webview blur leaves mode/selectedId untouched). The editable-control
+  // check keeps it from yanking in-page focus the user placed deliberately (e.g. the
+  // inline-rename input) — re-parent blur drops focus to `<body>`, so a focused
+  // control means the user chose it; the `xterm-helper-textarea` exemption is the
+  // terminal's own textarea, where re-focusing is idempotent. See docs/specs/layout.md
+  // corner case #12.
+  const reassertPaneFocus = useCallback((id: string) => {
+    requestAnimationFrame(() => {
+      if (modeRef.current !== 'passthrough' || selectedTypeRef.current !== 'pane' || selectedIdRef.current !== id) return;
+      if (!document.hasFocus()) return;
+      const ae = document.activeElement;
+      const inEditableControl = ae instanceof HTMLElement
+        && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)
+        && !ae.classList.contains('xterm-helper-textarea');
+      if (inEditableControl) return;
+      focusSession(id, true);
+    });
   }, []);
 
   const showShellSpawnNotice = useCallback((id: string, text: string) => {
@@ -613,16 +679,56 @@ export function Wall({
 
   const killPaneImmediately = useCallback((id: string) => {
     const api = apiRef.current;
-    const panel = api?.getPanel(id);
-    if (!api || !panel) return;
+    if (!api) return;
+    const panel = api.getPanel(id);
+    if (!panel) {
+      // A doored surface has no dockview panel but still owns a live session
+      // (its PTY keeps running). `dor ensure --minimize`'s integration-timeout
+      // teardown lands here: the throwaway was created straight into a door.
+      const door = doorsRef.current.find(d => d.id === id);
+      if (!door) return;
+      closeAgentBrowserSession(door.params);
+      disposeAgentBrowserSurfaceController(id);
+      // Dispose the session/registry entry — this stops the PTY and makes a
+      // still-armed typeCommandWhenPromptReady exit via its `!registry.has(id)`
+      // check, so a late OSC signal can't type the command into a dead surface.
+      disposeSession(id);
+      const nextDoors = doorsRef.current.filter(d => d.id !== id);
+      doorsRef.current = nextDoors;
+      setDoors(nextDoors);
+      // Guard: no current caller kills a selected door (ensure's throwaway is
+      // never selected), but if one did, fall back to the active pane.
+      if (selectedIdRef.current === id && selectedTypeRef.current === 'door') {
+        const active = api.activePanel;
+        if (active) selectPane(active.id);
+        else setSelectedId(null);
+      }
+      clearLocalSurfaceActivity(id);
+      fireEvent({ type: 'kill', id });
+      return;
+    }
     closeAgentBrowserSession(panel.params);
     // Release the surface's client-side controller (connection, loops, timers,
     // screen registration). A safe no-op for iframe/terminal surfaces.
     disposeAgentBrowserSurfaceController(id);
-    orchestrateKill(api, id, selectPane, setSelectedId, killInProgressRef, overlayElRef);
+    // Only a kill of the selected pane should move selection; `dor kill` of a
+    // background surface (and ensure's throwaway teardown) leaves it. The check is
+    // LIVE — orchestrateKill re-reads it at removal time (up to ~1s after the fade
+    // starts), so a mid-fade selection move is honored. The `=== 'pane'` term keeps
+    // a doored id from ever reading as selected for the kill tail. Mouse kills always
+    // arrive selected — clicking a pane header activates it (dockview's pointerdown)
+    // before the kill button's click handler runs.
+    const isSelectedPane = (kid: string) =>
+      selectedTypeRef.current === 'pane' && selectedIdRef.current === kid;
+    // removePanel can collapse a branch, re-parenting + blurring the survivor. If
+    // selection is unchanged (background kill), TerminalPane's effect won't heal it,
+    // so re-assert here; for a selected-pane kill the tail's selectPane changes
+    // selection, so the rAF gate no-ops (harmless).
+    const focusId = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
+    orchestrateKill(api, id, isSelectedPane, selectPane, setSelectedId, killInProgressRef, overlayElRef, programmaticActivationRef, focusId ? () => reassertPaneFocus(focusId) : undefined);
     clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
-  }, [fireEvent, selectPane]);
+  }, [fireEvent, selectPane, reassertPaneFocus]);
 
   const acceptKill = useCallback(() => {
     const ck = confirmKillRef.current;
@@ -660,13 +766,16 @@ export function Wall({
     // preventing dockview from stealing focus back from xterm
     requestAnimationFrame(() => focusSession(id, true));
     const panel = apiRef.current?.getPanel(id);
-    if (panel) panel.api.setActive();
+    // Same as selectPane: the echo of our own setActive is not user intent; the
+    // refs+mode written above already neutralized it, and the tag makes that
+    // ordering non-load-bearing.
+    if (panel) withProgrammaticActivation(programmaticActivationRef, () => panel.api.setActive());
   }, []);
   const enterTerminalModeRef = useRef(enterTerminalMode);
   enterTerminalModeRef.current = enterTerminalMode;
 
   /** Minimize a pane: capture neighbor context, remove from dockview, add to doors state */
-  const minimizePane = useCallback((id: string) => {
+  const minimizePane = useCallback((id: string, opts?: { select?: boolean }) => {
     const api = apiRef.current;
     if (!api) return;
     const panel = api.getPanel(id);
@@ -684,7 +793,12 @@ export function Wall({
       .map(p => p.id)
       .sort();
 
-    api.removePanel(panel);
+    // The removal's survivor-activation echo is not user intent — selection is
+    // settled explicitly right after (selectDoor on the user path; the
+    // focus-neutral `--minimize` path leaves selection per its `select: false`).
+    withProgrammaticActivation(programmaticActivationRef, () => {
+      api.removePanel(panel);
+    });
     clearSessionAttention(id);
     const layoutAtMinimizeSignature = getLayoutStructureSignature(api.toJSON());
     const nextDoors = [...doorsRef.current, {
@@ -703,9 +817,13 @@ export function Wall({
     setDoors(nextDoors);
 
     // Keep the minimized session selected as a door so the user can track where it went.
-    modeRef.current = 'command';
-    setMode('command');
-    selectDoor(id);
+    // A focus-neutral creation (`dor ensure --minimize`) opts out: it must leave the
+    // caller's mode and selection untouched (see createSplitSurface's focusNeutral).
+    if (opts?.select !== false) {
+      modeRef.current = 'command';
+      setMode('command');
+      selectDoor(id);
+    }
   }, [selectDoor]);
 
   /** Exit terminal mode */
@@ -736,6 +854,7 @@ export function Wall({
     doorsRef,
     freshlySpawnedRef,
     killInProgressRef,
+    programmaticActivationRef,
     selectedIdRef,
     selectedTypeRef,
     modeRef,
@@ -785,50 +904,57 @@ export function Wall({
       currentLayoutSignature === item.layoutAtMinimizeSignature &&
       idsMatch(currentPaneIds, reattachPaneIds);
 
-    if (canReattachExactLayout) {
-      const currentTitles = new Map(
-        api.panels.map(panel => [panel.id, panel.title ?? panel.id] as const),
-      );
+    // Reattach mutations (the exact-layout fromJSON restore or the addPanel
+    // fallbacks) activate a pane as a side effect; selection is established
+    // explicitly right after (selectPane / enterTerminalMode below). Tag them so
+    // the listener treats the echo as programmatic — with the door guard gone,
+    // this tag is the only thing keeping the echo from reading as user intent.
+    withProgrammaticActivation(programmaticActivationRef, () => {
+      if (canReattachExactLayout) {
+        const currentTitles = new Map(
+          api.panels.map(panel => [panel.id, panel.title ?? panel.id] as const),
+        );
 
-      // reuseExistingPanels: keep existing panel component instances mounted
-      // rather than destroying and recreating them during deserialization.
-      api.fromJSON(cloneLayout(item.layoutAtMinimize!), { reuseExistingPanels: true });
+        // reuseExistingPanels: keep existing panel component instances mounted
+        // rather than destroying and recreating them during deserialization.
+        api.fromJSON(cloneLayout(item.layoutAtMinimize!), { reuseExistingPanels: true });
 
-      for (const [panelId, title] of currentTitles) {
-        if (panelId === item.id) continue;
-        api.getPanel(panelId)?.api.setTitle(title);
-      }
-    } else {
-      const currentIds = api.panels.map(p => p.id).sort();
-      const layoutUnchanged =
-        item.neighborId &&
-        api.getPanel(item.neighborId) &&
-        idsMatch(currentIds, item.remainingPaneIds);
-
-      if (layoutUnchanged) {
-        // Restore to original position next to the same neighbor
-        api.addPanel({
-          id: item.id,
-          component: item.component ?? 'terminal',
-          tabComponent: item.tabComponent ?? 'terminal',
-          title: item.title,
-          params: item.params,
-          position: { referencePanel: item.neighborId!, direction: item.direction },
-        });
+        for (const [panelId, title] of currentTitles) {
+          if (panelId === item.id) continue;
+          api.getPanel(panelId)?.api.setTitle(title);
+        }
       } else {
-        // Layout changed — split an existing panel based on its aspect ratio
-        const sid = selectedIdRef.current;
-        const refPanel = (sid && api.getPanel(sid)) ?? api.panels[0] ?? null;
-        api.addPanel({
-          id: item.id,
-          component: item.component ?? 'terminal',
-          tabComponent: item.tabComponent ?? 'terminal',
-          title: item.title,
-          params: item.params,
-          position: refPanel ? { referencePanel: refPanel.id, direction: pickSplitDirection(refPanel) } : undefined,
-        });
+        const currentIds = api.panels.map(p => p.id).sort();
+        const layoutUnchanged =
+          item.neighborId &&
+          api.getPanel(item.neighborId) &&
+          idsMatch(currentIds, item.remainingPaneIds);
+
+        if (layoutUnchanged) {
+          // Restore to original position next to the same neighbor
+          api.addPanel({
+            id: item.id,
+            component: item.component ?? 'terminal',
+            tabComponent: item.tabComponent ?? 'terminal',
+            title: item.title,
+            params: item.params,
+            position: { referencePanel: item.neighborId!, direction: item.direction },
+          });
+        } else {
+          // Layout changed — split an existing panel based on its aspect ratio
+          const sid = selectedIdRef.current;
+          const refPanel = (sid && api.getPanel(sid)) ?? api.panels[0] ?? null;
+          api.addPanel({
+            id: item.id,
+            component: item.component ?? 'terminal',
+            tabComponent: item.tabComponent ?? 'terminal',
+            title: item.title,
+            params: item.params,
+            position: refPanel ? { referencePanel: refPanel.id, direction: pickSplitDirection(refPanel) } : undefined,
+          });
+        }
       }
-    }
+    });
 
     const nextDoors = doorsRef.current.filter(p => p.id !== item.id);
     doorsRef.current = nextDoors;
@@ -850,15 +976,22 @@ export function Wall({
         } else if (typeof afterRestore === 'object' && afterRestore.type === 'replace-terminal') {
           const panel = apiRef.current?.getPanel(item.id);
           if (!panel) return;
-          apiRef.current?.addPanel({
-            id: afterRestore.newId,
-            component: 'terminal',
-            tabComponent: 'terminal',
-            title: UNNAMED_PANEL_TITLE,
-            position: { referencePanel: panel, direction: 'within' },
+          // Add the replacement then drop the reattached pane. Both mutations
+          // activate a pane, and the explicit selectPane(newId) right after is the
+          // real selection intent, so tag the add+remove pair — the removePanel's
+          // activate-the-survivor echo is redundant when selectPane immediately
+          // follows. (disposeSession is synchronous and unrelated to activation.)
+          withProgrammaticActivation(programmaticActivationRef, () => {
+            apiRef.current?.addPanel({
+              id: afterRestore.newId,
+              component: 'terminal',
+              tabComponent: 'terminal',
+              title: UNNAMED_PANEL_TITLE,
+              position: { referencePanel: panel, direction: 'within' },
+            });
+            disposeSession(item.id);
+            apiRef.current?.removePanel(panel);
           });
-          disposeSession(item.id);
-          apiRef.current?.removePanel(panel);
           selectPane(afterRestore.newId);
           if (afterRestore.announce) {
             showShellSpawnNotice(afterRestore.newId, `Switched to ${afterRestore.shellName}`);
@@ -944,6 +1077,33 @@ export function Wall({
     return ids.find((id) => surfaceRunsCommand(getTerminalPaneState(id), command, cwdPath)) ?? null;
   }, []);
 
+  // Run a surface-adding `add`, focus-neutrally when asked — the shared machinery
+  // behind focus-neutral `dor ensure` / `dor iframe` / `dor ab` (vs. plain `dor
+  // split`). When not focus-neutral, `add` runs directly with no caller. When it
+  // is: dockview renders a pane only once it becomes its group's active panel, so
+  // `add` must activate the new pane and the onDidActivePanelChange listener would
+  // follow it — we run `add` inside withProgrammaticActivation so the listener
+  // ignores that activation churn for the duration, and pass `add` the caller
+  // panel (the active pane at entry) purely as the activation hand-back target (via
+  // settleFocusAfterAdd, which reactivates it); selection policy is decided
+  // separately there from the user's selection (selectionReplaced), not the caller.
+  // Adding the pane re-parents the selected pane's grid subtree, blurring its focus;
+  // since selection never moved, TerminalPane's effect won't reclaim it, so we
+  // re-assert focus through the shared reassertPaneFocus helper (keyed on the user's
+  // selection, not the caller — matching the selection-based policy; its rAF gate
+  // re-checks selection, so a legitimate selection move like selectionReplaced makes
+  // it a no-op). See docs/specs/layout.md corner case #12.
+  const runSurfaceAdd = useCallback((
+    focusNeutral: boolean | undefined,
+    add: (caller: IDockviewPanel | undefined) => void,
+  ) => {
+    if (!focusNeutral) { add(undefined); return; }
+    const caller = apiRef.current?.activePanel ?? undefined;
+    const focusId = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
+    withProgrammaticActivation(programmaticActivationRef, () => add(caller));
+    if (focusId) reassertPaneFocus(focusId);
+  }, [reassertPaneFocus]);
+
   const createSplitSurface = useCallback(({
     command,
     direction,
@@ -951,6 +1111,7 @@ export function Wall({
     referenceId,
     cwd,
     requireIntegration,
+    focusNeutral,
   }: {
     command?: string;
     direction: DorResolvedSplitDirection;
@@ -958,6 +1119,10 @@ export function Wall({
     referenceId: string;
     cwd?: string;
     requireIntegration?: boolean;
+    // `dor ensure` must never move focus: activate the new pane only transiently
+    // to force a render, then hand activation back to the caller, leaving the
+    // caller's selection, mode, and DOM focus intact.
+    focusNeutral?: boolean;
   }): ParseResult<{
     id: string;
     ref: string;
@@ -999,25 +1164,32 @@ export function Wall({
 
     const dockDirection = dockviewDirectionForDor(direction);
     freshlySpawnedRef.current.set(newId, spawnDirectionForDockview(dockDirection));
-    api.addPanel({
-      id: newId,
-      component: 'terminal',
-      tabComponent: 'terminal',
-      title: UNNAMED_PANEL_TITLE,
-      position: { referencePanel: referencePanel.id, direction: dockDirection },
+
+    // dockview renders a pane only once active in its group, so we can't add it
+    // `inactive`; runSurfaceAdd adds it active and, when focus-neutral, hands the
+    // active group back to the caller (settleFocusAfterAdd) so it renders without
+    // stealing focus. `dor split` (not focus-neutral) just selects the new pane.
+    runSurfaceAdd(focusNeutral, (caller) => {
+      api.addPanel({
+        id: newId,
+        component: 'terminal',
+        tabComponent: 'terminal',
+        title: UNNAMED_PANEL_TITLE,
+        position: { referencePanel: referencePanel.id, direction: dockDirection },
+      });
+      const selectedNew = settleFocusAfterAdd(api, !!focusNeutral, caller, false, newId, selectPane);
+      onEventRef.current?.({
+        type: 'split',
+        direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
+        source: 'dor',
+      });
+      if (minimized) {
+        getOrCreateTerminal(newId);
+        minimizePane(newId, { select: selectedNew });
+      }
     });
-    selectPane(newId);
-    onEventRef.current?.({
-      type: 'split',
-      direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
-      source: 'dor',
-    });
-    if (minimized) {
-      getOrCreateTerminal(newId);
-      minimizePane(newId);
-    }
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId) } };
-  }, [generatePaneId, minimizePane, selectPane, surfaceRefForId]);
+  }, [runSurfaceAdd, generatePaneId, minimizePane, selectPane, surfaceRefForId]);
 
   /**
    * Create a non-terminal content surface (iframe, agent-browser) next to a
@@ -1029,11 +1201,15 @@ export function Wall({
     params,
     reference,
     title,
+    focusNeutral,
   }: {
     minimized: boolean;
     params: Record<string, unknown>;
     reference: DorSurface;
     title: string;
+    // `dor iframe` / `dor ab` pass this to open the surface in the background
+    // without moving focus off the caller, matching `dor ensure`.
+    focusNeutral?: boolean;
   }): ParseResult<{
     id: string;
     ref: string;
@@ -1050,46 +1226,52 @@ export function Wall({
     const newId = generatePaneId();
     const replaceUntouchedTerminal = reference.type === 'terminal' && isUntouched(reference.id);
 
-    if (replaceUntouchedTerminal) {
-      api.addPanel({
-        id: newId,
-        component,
-        tabComponent: 'surface',
-        title,
-        params,
-        // Keep iframes mounted across (de)activation — dockview's default
-        // onlyWhenVisible renderer detaches/reattaches panel DOM, and moving an
-        // <iframe> in the DOM reloads it (docs/specs/dor-browser.md).
-        renderer,
-        position: { referencePanel: referencePanel.id, direction: 'within' },
-      });
-      disposeSession(reference.id);
-      api.removePanel(referencePanel);
-      selectPane(newId);
-      if (minimized) minimizePane(newId);
-      return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'replaced' } };
-    }
-
-    const dockDirection = pickSplitDirection(referencePanel);
-    freshlySpawnedRef.current.set(newId, dockDirection === 'below' ? 'top' : 'left');
-    api.addPanel({
+    // Shared panel spec for both paths; they differ only in position.direction.
+    const panelSpec = {
       id: newId,
       component,
       tabComponent: 'surface',
       title,
       params,
+      // Keep iframes mounted across (de)activation — dockview's default
+      // onlyWhenVisible renderer detaches/reattaches panel DOM, and moving an
+      // <iframe> in the DOM reloads it (docs/specs/dor-browser.md).
       renderer,
-      position: { referencePanel: referencePanel.id, direction: dockDirection },
+    } as const;
+
+    if (replaceUntouchedTerminal) {
+      // Whether the user's current selection sits on the pane being replaced.
+      const selectionReplaced = selectedTypeRef.current === 'pane' && selectedIdRef.current === reference.id;
+      runSurfaceAdd(focusNeutral, (caller) => {
+        api.addPanel({ ...panelSpec, position: { referencePanel: referencePanel.id, direction: 'within' } });
+        disposeSession(reference.id);
+        api.removePanel(referencePanel);
+        // Replacing the pane the user is selected on forces selection onto the
+        // replacement (settleFocusAfterAdd selects it); replacing any other pane
+        // leaves the user's selection — including a door selection — untouched.
+        const selectedNew = settleFocusAfterAdd(api, !!focusNeutral, caller, selectionReplaced, newId, selectPane);
+        // When we did move selection onto the new pane, a minimize must carry it
+        // onto the resulting door rather than leave selectedType='pane' pointing
+        // at a door id (the overlay would keep a stale rect).
+        if (minimized) minimizePane(newId, { select: selectedNew });
+      });
+      return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'replaced' } };
+    }
+
+    const dockDirection = pickSplitDirection(referencePanel);
+    freshlySpawnedRef.current.set(newId, dockDirection === 'below' ? 'top' : 'left');
+    runSurfaceAdd(focusNeutral, (caller) => {
+      api.addPanel({ ...panelSpec, position: { referencePanel: referencePanel.id, direction: dockDirection } });
+      const selectedNew = settleFocusAfterAdd(api, !!focusNeutral, caller, false, newId, selectPane);
+      onEventRef.current?.({
+        type: 'split',
+        direction: dockDirection === 'right' ? 'horizontal' : 'vertical',
+        source: 'dor',
+      });
+      if (minimized) minimizePane(newId, { select: selectedNew });
     });
-    selectPane(newId);
-    onEventRef.current?.({
-      type: 'split',
-      direction: dockDirection === 'right' ? 'horizontal' : 'vertical',
-      source: 'dor',
-    });
-    if (minimized) minimizePane(newId);
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'created' } };
-  }, [generatePaneId, minimizePane, selectPane, surfaceRefForId]);
+  }, [runSurfaceAdd, generatePaneId, minimizePane, selectPane, surfaceRefForId]);
 
   // The last binary path a `dor ab` surface resolved on a terminal's PATH.
   // Re-used to spawn an agent-browser when swapping an iframe embed up to a
@@ -1374,6 +1556,8 @@ export function Wall({
           referenceId: resolved.target.id,
           cwd,
           requireIntegration: true,
+          // ensure never steals focus from the caller, matched or freshly created.
+          focusNeutral: true,
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });
@@ -1391,6 +1575,11 @@ export function Wall({
           INTEGRATION_DETECT_TIMEOUT_MS,
         );
         if (!integrated) {
+          // Tear down the throwaway split. The focus-neutral create never selected
+          // it, so orchestrateKill's live selection check leaves the caller's
+          // selection where ensure found it. A `--minimize` create is already a
+          // door; killPaneImmediately tears the door down too — disposing the
+          // session and removing it from the baseboard.
           killPaneImmediately(result.value.id);
           detail.respond({ ok: false, error: missingIntegrationError(ensureShell) });
           return;
@@ -1513,6 +1702,8 @@ export function Wall({
           params: { surfaceType: 'browser', renderMode: 'iframe', url },
           reference: target.value,
           title: hostPathDisplay(url, true),
+          // `dor iframe` opens the embed in the background; caller keeps focus.
+          focusNeutral: true,
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });
@@ -1590,6 +1781,8 @@ export function Wall({
           },
           reference: target.value,
           title: key ?? session,
+          // `dor ab` opens the screencast in the background; caller keeps focus.
+          focusNeutral: true,
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });

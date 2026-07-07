@@ -610,6 +610,44 @@ test('agent-browser resolves the binary on PATH to an absolute binaryPath', asyn
   }
 });
 
+const identifyEnv = {
+  DORMOUSE_SURFACE_ID: '22222222-2222-4222-8222-222222222222',
+  DORMOUSE_CLI_JS: '/opt/dormouse/dor-cli/dist/dor.js',
+  DORMOUSE_NODE: '/opt/dormouse/node',
+  DORMOUSE_HOST: 'vscode',
+  DORMOUSE_HOST_WORKSPACE: '/Users/me/projects/site',
+  // The control socket is private host plumbing (the CLI is the public API),
+  // so identify must not echo it — the snapshot proves the field is absent.
+  DORMOUSE_CONTROL_SOCKET: '/tmp/dormouse-control.sock',
+};
+
+test('identify json output', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['identify'], { client, env: identifyEnv });
+  assert.deepEqual(client.requests, [{}]);
+  await snapshot('identify', result);
+});
+
+test('identify id-format both output', async () => {
+  await snapshot(
+    'identify-id-format-both',
+    await runCli(['identify', '--id-format', 'both'], { client: fixtureClient(), env: identifyEnv }),
+  );
+});
+
+test('identify without env reports null caller and paths', async () => {
+  await snapshot('identify-no-env', await runCli(['identify'], { client: fixtureClient() }));
+});
+
+test('identify reports a null caller when the calling surface is not visible', async () => {
+  const result = await runCli(['identify'], {
+    client: fixtureClient(),
+    env: { ...identifyEnv, DORMOUSE_SURFACE_ID: '99999999-9999-4999-8999-999999999999' },
+  });
+  assert.equal(result.exitCode, 0);
+  assert.equal(JSON.parse(result.stdout).caller, null);
+});
+
 test('list-panes text output', async () => {
   await snapshot('list-panes-text', await runCli(['list-panes'], { client: fixtureClient() }));
 });

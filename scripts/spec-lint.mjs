@@ -18,8 +18,9 @@
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, normalize } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SPECS_DIR = 'docs/specs';
 
 const TOP_LEVEL_DIRS = [
@@ -37,7 +38,9 @@ const SKIP_PATH_PREFIXES = [
 
 const specFiles = readdirSync(join(ROOT, SPECS_DIR))
   .filter((f) => f.endsWith('.md'))
-  .map((f) => join(SPECS_DIR, f));
+  // Keep repo-relative paths in POSIX form on every platform — they are
+  // compared against forward-slash paths written in the markdown.
+  .map((f) => `${SPECS_DIR}/${f}`);
 const allFiles = ['AGENTS.md', ...specFiles];
 const problems = [];
 

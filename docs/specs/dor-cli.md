@@ -59,6 +59,11 @@ Public PTY env:
   a shell's ConPTY. See `docs/specs/standalone.md` (Windows node subsystem).
 - `DORMOUSE_CLI_JS` — absolute path to staged `dist/dor.js`.
 - `DORMOUSE_SURFACE_ID` — stable invoking Session/surface id.
+- `DORMOUSE_HOST` — hosting app kind: `vscode` or `standalone`.
+- `DORMOUSE_HOST_WORKSPACE` — VS Code only: what the owning window has open —
+  the `.code-workspace` file when one is loaded, else the first workspace
+  folder. Unset under the standalone app (no workspace concept) and for an
+  empty VS Code window.
 - `DORMOUSE_CONTROL_SOCKET` and `DORMOUSE_CONTROL_TOKEN` — private control
   endpoint credentials.
 
@@ -148,7 +153,7 @@ it. `dor`'s `prebuild` builds `dor-lib-common` first so its `.d.ts` exists.
 
 `standalone/package.json` runs `pnpm stage:dor-cli` before Tauri dev/build.
 Rust resolves the staged/bundled CLI paths, starts the Node sidecar with
-`DORMOUSE_NODE`, `DORMOUSE_CLI_BIN`, `DORMOUSE_CLI_JS`,
+`DORMOUSE_HOST`, `DORMOUSE_NODE`, `DORMOUSE_CLI_BIN`, `DORMOUSE_CLI_JS`,
 `DORMOUSE_CONTROL_SOCKET`, and `DORMOUSE_CONTROL_TOKEN`, then the shared PTY
 core prepends `DORMOUSE_CLI_BIN` and sets `DORMOUSE_SURFACE_ID` per PTY.
 
@@ -261,6 +266,13 @@ from `command-detail`.
 - `dor agent-browser` / `dor ab` — delegates to the user's `agent-browser`,
   rendered in a Dormouse-native surface; the `ab-screencast` renderer of the
   unified `browser` surface, see [dor-browser.md](dor-browser.md)
+- `dor identify` — JSON identity dump: caller surface (matched locally against
+  `DORMOUSE_SURFACE_ID`, `null` when not visible), focused surface, and the
+  hosting app (`DORMOUSE_HOST` / `DORMOUSE_HOST_WORKSPACE` / runtime paths).
+  Composes over `surface.list` — no dedicated control method. Deliberately does
+  not expose the control socket: the CLI is the public API and the socket is
+  private plumbing.
+  [impl](../../dor/src/commands/identify.ts) [docs](../../dor/test/snapshots/help/identify.md)
 - `dor list-panes` [impl](../../dor/src/commands/list-panes.ts) [docs](../../dor/test/snapshots/help/list-panes.md)
 - `dor list-pane-surfaces` [impl](../../dor/src/commands/list-pane-surfaces.ts) [docs](../../dor/test/snapshots/help/list-pane-surfaces.md)
 

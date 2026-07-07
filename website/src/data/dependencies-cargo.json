@@ -58,7 +58,7 @@
     },
     {
       "name": "tauri",
-      "version": "2.11.3",
+      "version": "2.11.5",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
@@ -2389,7 +2389,7 @@
     },
     {
       "name": "tauri-runtime-wry",
-      "version": "2.11.3",
+      "version": "2.11.4",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/"

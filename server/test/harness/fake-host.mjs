@@ -3,7 +3,7 @@
  *
  * It speaks the Host side of the wire contract (server-lib-common `wire.ts`)
  * over a real `/ws/host` socket, wiring the exact security primitives the real
- * standalone Host will use in slice 4 — `HostAcl`, `HostChallengeIssuer`,
+ * standalone Host uses — `HostAcl`, `HostChallengeIssuer`,
  * `PairingCeremony`, and `authorizeConnection`. Everything is in memory, so a
  * fresh instance (reconnecting with the same token) models a Host restart: its
  * ACL starts empty again.
@@ -15,7 +15,8 @@
  * and assertions: `open`, `close`, `pair`, `paired`, `denied`, `connect`,
  * `decision`, `msg`, `client-gone`.
  *
- * Slice 5's smoke test and manual `scripts/fake-host.mjs` reuse this class.
+ * The handshake smoke test and the manual `scripts/fake-host.mjs` dev
+ * stand-in both reuse this class.
  */
 
 import { EventEmitter } from 'node:events';

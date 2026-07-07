@@ -1,6 +1,7 @@
 import { fork, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
+import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import { log } from './log';
 import type { DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
@@ -133,10 +134,23 @@ function resolveNodeBinary(): string {
 // it once and reuse it across every PTY spawn rather than rebuilding the paths.
 let dorRuntimeEnvCache: { path: string; env: Record<string, string> } | null = null;
 
+// What this VS Code window has open: the `.code-workspace` file when one is
+// loaded (an untitled workspace has no on-disk file, so fall through), else the
+// first workspace folder. Effectively constant per window — switching folder or
+// workspace file reloads the extension host.
+function resolveHostWorkspace(): string | undefined {
+  const workspaceFile = vscode.workspace.workspaceFile;
+  if (workspaceFile?.scheme === 'file') return workspaceFile.fsPath;
+  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
 function getDorRuntimeEnv(extensionPath: string): Record<string, string> {
   if (dorRuntimeEnvCache?.path === extensionPath) return dorRuntimeEnvCache.env;
   const dorCliRoot = path.join(extensionPath, 'dor-cli');
+  const hostWorkspace = resolveHostWorkspace();
   const env = {
+    DORMOUSE_HOST: 'vscode',
+    ...(hostWorkspace ? { DORMOUSE_HOST_WORKSPACE: hostWorkspace } : {}),
     DORMOUSE_NODE: resolveNodeBinary(),
     DORMOUSE_CLI_BIN: path.join(dorCliRoot, 'bin'),
     DORMOUSE_CLI_JS: path.join(dorCliRoot, 'dist', 'dor.js'),
