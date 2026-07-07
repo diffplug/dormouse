@@ -58,6 +58,20 @@ describe('remove', () => {
     expect(out.token).toMatchObject({ siblingId: 'b', edge: 'top', index: 0 });
   });
 
+  it('records the adjacent sibling subtree when that sibling is split', () => {
+    const t = tree(mk('row', [leaf('a'), 0.4], [mk('col', [leaf('b'), 0.5], [leaf('c'), 0.5]), 0.6]));
+    const out = remove(t, 'a');
+
+    expect(out.token).toMatchObject({
+      leafId: 'a',
+      siblingId: 'b',
+      siblingLeafIds: ['b', 'c'],
+      edge: 'left',
+      index: 0,
+    });
+    expect(out.token?.siblingFingerprint).toBeTruthy();
+  });
+
   it('absorbs weight proportionally among survivors', () => {
     const t = tree(mk('row', [leaf('a'), 0.5], [leaf('b'), 0.25], [leaf('c'), 0.25]));
     const out = remove(t, 'b');
@@ -268,6 +282,30 @@ describe('restore', () => {
     const out = restore(removed.tree, removed.token!);
     expect(out.tier).toBe('neighbor');
     expect(out.tree).toEqual(tree(mk('row', [leaf('a'), 0.5], [leaf('b'), 0.5])));
+  });
+
+  it('restores exact beside a split sibling after the removed parent collapsed', () => {
+    const original = tree(mk('row', [leaf('a'), 0.4], [mk('col', [leaf('b'), 0.5], [leaf('c'), 0.5]), 0.6]));
+    const removed = remove(original, 'a');
+
+    const out = restore(removed.tree, removed.token!);
+
+    expect(out.tier).toBe('exact');
+    expect(validate(out.tree)).toEqual([]);
+    expect(out.tree).toEqual(original);
+    expect(rects(out.tree, big)).toEqual(rects(original, big));
+  });
+
+  it('restores exact through a fingerprinted ancestor when the sibling leaf is nested', () => {
+    const original = tree(mk('row', [leaf('a'), 0.25], [mk('col', [leaf('b'), 0.5], [leaf('c'), 0.5]), 0.5], [leaf('d'), 0.25]));
+    const removed = remove(original, 'a');
+
+    const out = restore(removed.tree, removed.token!);
+
+    expect(out.tier).toBe('exact');
+    expect(validate(out.tree)).toEqual([]);
+    expect(out.tree).toEqual(original);
+    expect(rects(out.tree, big)).toEqual(rects(original, big));
   });
 
   it('degrades to fallback via a reference leaf when the sibling is gone', () => {

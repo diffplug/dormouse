@@ -34,6 +34,13 @@ export type RestoreToken = {
   /** Nearest same-parent leaf sibling (adjacent index preferred: the one before, else
    *  after; a split sibling contributes its first leaf). Null when it was the root leaf. */
   siblingId: LeafId | null;
+  /** Leaf set of the same-parent sibling node that supplied `siblingId`.
+   *  Present on tokens written after the split-subtree restore fix; absent legacy
+   *  tokens degrade to the older leaf-neighbor behavior. */
+  siblingLeafIds?: LeafId[];
+  /** Structure-only fingerprint of that same-parent sibling node, used when the
+   *  removed parent collapsed and the sibling subtree itself becomes the exact target. */
+  siblingFingerprint?: string;
   /** Edge of `siblingId` the leaf sat on, so neighbor-tier restore is
    *  `split(siblingId, edge, leafId)`. `'right'` for a root-leaf removal. */
   edge: Edge;
@@ -51,6 +58,40 @@ export type DropTarget =
 
 function mkLeaf(id: LeafId): LathNode {
   return { kind: 'leaf', id };
+}
+
+function findSplitPathByFingerprint(tree: LathTree, fingerprint: string): number[] | null {
+  let result: number[] | null = null;
+  const walk = (node: LathNode, path: number[]): void => {
+    if (result !== null || node.kind !== 'split') return;
+    if (structureFingerprint(node) === fingerprint) {
+      result = path;
+      return;
+    }
+    node.children.forEach((child, i) => walk(child.node, [...path, i]));
+  };
+  if (tree.root) walk(tree.root, []);
+  return result;
+}
+
+function findPathByLeafSet(tree: LathTree, target: Set<LeafId>): number[] | null {
+  if (target.size === 0) return null;
+  let result: number[] | null = null;
+  const eq = (s: Set<LeafId>): boolean => s.size === target.size && [...s].every((x) => target.has(x));
+  const walk = (node: LathNode, path: number[]): Set<LeafId> => {
+    let set: Set<LeafId>;
+    if (node.kind === 'leaf') set = new Set([node.id]);
+    else {
+      set = new Set();
+      node.children.forEach((c, i) => {
+        for (const id of walk(c.node, [...path, i])) set.add(id);
+      });
+    }
+    if (eq(set) && (result === null || path.length < result.length)) result = path;
+    return set;
+  };
+  if (tree.root) walk(tree.root, []);
+  return result;
 }
 
 /** Insert `newId` beside `at`. Always builds a nested split of the edge's axis at
@@ -98,6 +139,8 @@ export function remove(tree: LathTree, id: LeafId): { tree: LathTree; ok: boolea
   const before = idx > 0;
   const sibChild = parent.children[before ? idx - 1 : idx + 1].node;
   const siblingId = sibChild.kind === 'leaf' ? sibChild.id : leaves({ root: sibChild })[0];
+  const siblingLeafIds = leaves({ root: sibChild });
+  const siblingFingerprint = structureFingerprint(sibChild);
   const edge: Edge = before
     ? parent.dir === 'row'
       ? 'right'
@@ -108,7 +151,16 @@ export function remove(tree: LathTree, id: LeafId): { tree: LathTree; ok: boolea
 
   const postChildren = parent.children.filter((_, i) => i !== idx);
   const fingerprint = structureFingerprint({ kind: 'split', dir: parent.dir, children: postChildren });
-  const token: RestoreToken = { leafId: id, weight, siblingId, edge, index: idx, fingerprint };
+  const token: RestoreToken = {
+    leafId: id,
+    weight,
+    siblingId,
+    siblingLeafIds,
+    siblingFingerprint,
+    edge,
+    index: idx,
+    fingerprint,
+  };
 
   const newParent: LathNode = { kind: 'split', dir: parent.dir, children: postChildren };
   return { tree: { root: normalize(replaceAtPath(tree.root as LathNode, parentPath, newParent)) }, ok: true, token };
@@ -131,24 +183,32 @@ export function restore(
 
   // exact
   if (token.siblingId !== null && token.fingerprint !== null) {
-    const sibPath = findLeafPath(tree, token.siblingId);
-    if (sibPath !== null && sibPath.length > 0) {
-      const parentPath = sibPath.slice(0, -1);
-      const parent = nodeAtPath(tree, parentPath);
-      if (parent && parent.kind === 'split' && structureFingerprint(parent) === token.fingerprint) {
-        const scaled = parent.children.map((c) => ({ node: c.node, weight: c.weight * (1 - token.weight) }));
-        const insertAt = Math.min(Math.max(token.index, 0), scaled.length);
-        const children: LathChild[] = [
-          ...scaled.slice(0, insertAt),
-          { node: mkLeaf(token.leafId), weight: token.weight },
-          ...scaled.slice(insertAt),
-        ];
-        const newParent: LathNode = { kind: 'split', dir: parent.dir, children: normalizeWeights(children) };
-        return {
-          tree: { root: normalize(replaceAtPath(tree.root, parentPath, newParent)) },
-          ok: true,
-          tier: 'exact',
-        };
+    const parentPath = findSplitPathByFingerprint(tree, token.fingerprint);
+    if (parentPath !== null) {
+      const parent = nodeAtPath(tree, parentPath) as SplitNode;
+      const scaled = parent.children.map((c) => ({ node: c.node, weight: c.weight * (1 - token.weight) }));
+      const insertAt = Math.min(Math.max(token.index, 0), scaled.length);
+      const children: LathChild[] = [
+        ...scaled.slice(0, insertAt),
+        { node: mkLeaf(token.leafId), weight: token.weight },
+        ...scaled.slice(insertAt),
+      ];
+      const newParent: LathNode = { kind: 'split', dir: parent.dir, children: normalizeWeights(children) };
+      return {
+        tree: { root: normalize(replaceAtPath(tree.root, parentPath, newParent)) },
+        ok: true,
+        tier: 'exact',
+      };
+    }
+
+    if (token.siblingLeafIds && token.siblingLeafIds.length > 1 && token.siblingFingerprint) {
+      const siblingPath = findPathByLeafSet(tree, new Set(token.siblingLeafIds));
+      if (siblingPath !== null) {
+        const sibling = nodeAtPath(tree, siblingPath);
+        if (sibling && structureFingerprint(sibling) === token.siblingFingerprint) {
+          const r = insert(tree, token.leafId, { kind: 'edge', path: siblingPath, edge: token.edge }, token.weight);
+          if (r.ok) return { tree: r.tree, ok: true, tier: 'exact' };
+        }
       }
     }
   }
@@ -189,27 +249,6 @@ export function swap(tree: LathTree, a: LeafId, b: LeafId): { tree: LathTree; ok
   let root = replaceAtPath(tree.root as LathNode, pa, mkLeaf(b));
   root = replaceAtPath(root, pb, mkLeaf(a));
   return { tree: { root }, ok: true };
-}
-
-/** Shallowest node whose leaf set is exactly `target`, or null. Because leaf ids are
- *  unique, at most one node matches. */
-function findPathByLeafSet(tree: LathTree, target: Set<LeafId>): number[] | null {
-  let result: number[] | null = null;
-  const eq = (s: Set<LeafId>): boolean => s.size === target.size && [...s].every((x) => target.has(x));
-  const walk = (node: LathNode, path: number[]): Set<LeafId> => {
-    let set: Set<LeafId>;
-    if (node.kind === 'leaf') set = new Set([node.id]);
-    else {
-      set = new Set();
-      node.children.forEach((c, i) => {
-        for (const id of walk(c.node, [...path, i])) set.add(id);
-      });
-    }
-    if (eq(set) && (result === null || path.length < result.length)) result = path;
-    return set;
-  };
-  if (tree.root) walk(tree.root, []);
-  return result;
 }
 
 /** Insert leaf `newId` (raw weight `w`, the moved leaf's carried weight) beside the

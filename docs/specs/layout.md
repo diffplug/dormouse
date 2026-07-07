@@ -251,7 +251,7 @@ Swaps session **content** between two panes — the layout shape is unchanged. A
 ## Minimize and reattach
 
 ### Minimize (`m` key or minimize header button)
-1. `lath.removeLeaf(id)` removes the leaf and returns a JSON-serializable **restore token** capturing the leaf's ancestry (sibling id, edge, weight, child index, and a structure-only fingerprint of the parent split post-removal — `docs/specs/tiling-engine.md` → "Restore tokens").
+1. `lath.removeLeaf(id)` removes the leaf and returns a JSON-serializable **restore token** capturing the leaf's ancestry (sibling id, split-sibling leaf set/fingerprint when needed, edge, weight, child index, and a structure-only fingerprint of the parent split post-removal — `docs/specs/tiling-engine.md` → "Restore tokens").
 2. Add to `doors` state → door appears in baseboard, carrying the `token`. The door stores only the stable component/title for persistence; its visible label is derived from live terminal semantic state at render time. (A pane dragged onto the baseboard minimizes the same way — the drag proposes `onProposeMinimize`, which calls the same `minimizePane`.)
 3. Session stays in registry (not disposed).
 4. Selection moves to the new door (stays in command mode). If this was the *last* pane, the auto-spawn effect fills the emptied Wall while the door keeps selection.

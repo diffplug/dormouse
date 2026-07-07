@@ -126,13 +126,13 @@ Door drag-out: a `Door` press reports its start point (`onDoorDragStart(item, pr
 
 Source of truth: `RestoreToken` and `restore` in `lib/src/lib/lath/ops.ts`.
 
-`remove` returns a JSON-serializable token capturing the leaf's ancestry: the nearest same-parent sibling leaf it sat beside (`siblingId`), the edge relationship (`edge`, such that neighbor-tier restore is `split(siblingId, edge, leafId)`), its normalized `weight`, its child `index`, and a structure-only `fingerprint` (kinds, dirs, leaf ids — no weights) of the parent split *post-removal*. `restore` applies a three-tier policy (the Wall drives it from `handleReattach`):
+`remove` returns a JSON-serializable token capturing the leaf's ancestry: the nearest same-parent sibling leaf it sat beside (`siblingId`), the full leaf set and structure fingerprint of that sibling node when the sibling is itself a split subtree (`siblingLeafIds` / `siblingFingerprint`), the edge relationship (`edge`, such that neighbor-tier restore is `split(siblingId, edge, leafId)`), its normalized `weight`, its child `index`, and a structure-only `fingerprint` (kinds, dirs, leaf ids — no weights) of the parent split *post-removal*. `restore` applies a three-tier policy (the Wall drives it from `handleReattach`):
 
 1. exact — the fingerprinted context still exists around `siblingId`: reinsert at the original index with the original weight (existing siblings shrink proportionally);
 2. neighbor — the sibling still exists: split beside it on the original edge;
 3. fallback — split beside a caller-supplied reference leaf (`opts.fallbackRef`) via `autoEdge` (or `'right'` when no rect is supplied). Restoring into an empty tree makes the leaf the root.
 
-A leaf removed from a two-child split always degrades to the neighbor tier: the collapse erases the fingerprinted parent, and the neighbor tier reproduces the same position (at 50/50 rather than the original weights). A token whose sibling is gone and whose caller supplies no `fallbackRef` fails with `ok: false` — callers own picking a live reference.
+A leaf removed from a two-child split whose survivor is a single leaf always degrades to the neighbor tier: the collapse erases the fingerprinted parent, and the neighbor tier reproduces the same position (at 50/50 rather than the original weights). If the survivor is a split subtree, exact restore targets that unchanged subtree by `siblingLeafIds` / `siblingFingerprint` so `A | (B over C)` restores beside the whole `B/C` column rather than inside it. A token whose sibling is gone and whose caller supplies no `fallbackRef` fails with `ok: false` — callers own picking a live reference.
 
 Tokens serialize with Doors (`PersistedDoor.token`) as the sole restore payload; a Door persisted before Lath (no token) restores at the neighbor tier via a token synthesized from its legacy `{neighborId, direction}` fields (`legacyTokenFromDoor` in `lib/src/components/wall/lath-wall-engine.ts`; an absent `neighborId` degrades to the fallback tier, an absent `direction` defaults to `'right'`).
 
