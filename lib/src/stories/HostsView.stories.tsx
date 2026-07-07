@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
-// Importing from App.tsx runs its `index.css` side-effect import, loading the
-// shared --color-* theme tokens. The auth chrome is built from the three VSCode
-// list pairs (docs/specs/theme.md); switch themes with the Storybook toolbar.
+// Importing from App.tsx runs its `index.css` / `pocket.css` side-effect imports,
+// so Tailwind's utilities and the shell's structural rules load for these stories.
+// Storybook manages the theme tokens (`--vscode-*`) itself.
 import { HostsView, type HostView } from '../remote/pocket-app/App';
 import { PhoneFrame } from './PhoneFrame';
 
@@ -64,7 +64,7 @@ export const Refreshing: Story = {
   args: { busy: 'refresh' },
 };
 
-// Host dropped → the red error banner above the list.
+// Host dropped → the red error text above the list.
 export const Error: Story = {
   args: { error: 'The host disconnected.' },
 };

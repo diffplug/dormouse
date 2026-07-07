@@ -32,6 +32,7 @@ import {
 import { getTerminalInstance, refitSession } from '../../lib/terminal-registry';
 import { doPaste } from '../../lib/clipboard';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
+import { usePocketTheme } from './pocket-theme';
 import {
   activatePane,
   attachableDirectoryEntries,

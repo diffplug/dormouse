@@ -74,6 +74,46 @@ default, matching the homepage brand.
 The server (`server/`) stays the only dynamic code: accounts, relay, and
 static serving of the built Pocket bundle.
 
+## Design system and theming
+
+Pocket is a product surface, not a marketing page: all of it — the auth
+screens included — renders on the shared themeable design system
+(`--color-*` tokens over `--vscode-*`; [theme.md](./theme.md), `DESIGN.md`).
+The website's separate "homepage" design system (`website/src/index.css`) is
+never used by Pocket or anything else the server serves. There is no
+Pocket-specific palette; changing the theme re-skins the auth screens and
+the wall together.
+
+Pocket has no VS Code host and boots into auth long before a Wall exists, so
+the app restores the theme itself before first paint: `usePocketTheme()`
+(`lib/src/remote/pocket-app/pocket-theme.ts`) runs `restoreActiveTheme()`
+with the same Kimbie Dark default as the website playground, called at the
+top of the app component (and again by `PocketWall`, idempotently).
+Restoring also syncs document-level browser chrome that in-app hosts don't
+need: `color-scheme` on the root element (native form controls, scrollbars)
+and the `<meta name="theme-color">` address-bar tint, taken from the applied
+theme's type and resolved `sideBar.background`. The static meta values in
+`lib/pocket/index.html` are pre-boot placeholders only.
+
+Phone-specific exceptions to the desktop chrome scale (`DESIGN.md`'s
+Two-Step Rule), kept deliberately narrow:
+
+* Form inputs use `text-base` (16px): smaller input text triggers iOS
+  zoom-on-focus, and 10–12px inputs are illegible at thumb distance.
+* Touch targets are taller than desktop chrome: block action buttons
+  `min-h-11` (44px), row actions `min-h-9`, host rows `min-h-12` — the same
+  bump `MobileTerminalUi` already makes for its selector and session rows.
+
+Everything else stays on the shared vocabulary: screens sit on `app-bg`, the
+app header is a `header-inactive-bg` bg-shift (no border), host rows echo
+`MobileTerminalUi`'s session rows (`surface-raised`, `rounded`), the primary
+action uses the active-header pair, and online/offline status is
+`success`/`muted` text — no bespoke accent, no hex. Source of truth:
+`lib/src/remote/pocket-app/App.tsx` (views),
+`lib/src/remote/pocket-app/pocket-theme.ts` (theme boot + browser-chrome
+sync), `lib/src/remote/pocket-app/pocket.css` (structural document rules
+only — no colors beyond `--color-*` references).
+
 ## Deployment: same-origin, always
 
 WebAuthn binds passkeys to the serving origin, and Chrome's Private Network
@@ -100,3 +140,6 @@ code.
    `MobileTerminalUi` + `MobileWall` independently.
 2. **CloudFlare routing** — the SaaS deployment above; deferred until SaaS.
    Nothing in the shipped architecture needs rework for it.
+3. **Theme picker in Pocket** — the app restores the persisted theme but
+   exposes no picker; add the shared `ThemePicker` (and its theme-debugger
+   entry) once its dropdown is phone-friendly.

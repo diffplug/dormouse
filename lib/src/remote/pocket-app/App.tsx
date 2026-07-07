@@ -7,19 +7,12 @@
  * `MobileTerminalUi`/`MobileWall` (the same composition the website playground
  * proves out with `FakePtyAdapter`). No bespoke terminal UI.
  *
- * Chrome is built from the same three VSCode list pairs as the rest of the app
- * (docs/specs/theme.md): the page is `app-bg/fg`, the header band is the
- * *active* pair `header-active-bg/fg`, and host rows are the *inactive* pair
- * `header-inactive-bg/fg`. Hierarchy is background swaps between those pairs —
- * never `surface-raised` or `panel-border`, which are near-black / transparent
- * in themes like Kimbie. Secondary emphasis is foreground *intensity* (alpha on
- * the pair's own fg), so no fourth color is introduced. The theme is applied to
- * <body> by `restorePocketTheme()` in `main.tsx` before first paint.
+ * The whole shell — auth screens included — is styled on the shared `--vscode-*`
+ * design tokens (DESIGN.md; docs/specs/theme.md), restored before first paint by
+ * {@link usePocketTheme}. `pocket.css` carries only document-level structure.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { clsx } from 'clsx';
-import { tv } from 'tailwind-variants';
 import {
   PocketClient,
   type ConnectDecision,
@@ -30,8 +23,11 @@ import { getOrCreateDeviceKey } from '../client/device-key';
 import { RemotePtyAdapter } from '../client/remote-adapter';
 import { setPlatform } from '../../lib/platform';
 import { disposeAllSessions, initAlertStateReceiver } from '../../lib/terminal-registry';
+import { TODO_PILL_TRACKING_CLASS } from '../../components/design';
 import { PocketWall } from './PocketWall';
+import { usePocketTheme } from './pocket-theme';
 import '../../index.css';
+import './pocket.css';
 
 type Phase = 'auth' | 'hosts' | 'wall';
 
@@ -44,68 +40,27 @@ export interface HostView {
 /** A phone-friendly default pairing label. */
 const DEVICE_LABEL = 'Dormouse Pocket';
 
-// --- Pocket chrome vocabulary ------------------------------------------------
-//
-// Everything below is one of the three list pairs (app / header-active /
-// header-inactive) plus alpha-on-fg for secondary text. See theme.md.
-
-/**
- * Buttons.
- *  - primary  = the active header pair (caramel): the one strong action.
- *  - secondary = recessed to the page bg; reads as a button when it sits on an
- *    inactive-header row via the guaranteed app↔inactive delta.
- *  - ghost = transparent, inherits the surrounding band fg (header actions).
- */
-const pkButton = tv({
-  base: 'inline-flex items-center justify-center rounded-lg font-medium transition-colors active:brightness-110 disabled:pointer-events-none disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring',
-  variants: {
-    tone: {
-      primary: 'bg-header-active-bg text-header-active-fg',
-      secondary: 'bg-app-bg text-app-fg',
-      ghost: 'text-inherit hover:bg-current/10',
-    },
-    size: {
-      lg: 'min-h-[44px] px-4 text-[13px]',
-      sm: 'min-h-9 px-3 text-[12px]',
-    },
-    block: { true: 'w-full' },
-  },
-  defaultVariants: { tone: 'primary', size: 'lg' },
-});
-
-const PK = {
-  app: 'flex h-full min-h-0 flex-col bg-app-bg text-app-fg',
-  // Header band = the ACTIVE header pair (the "titlebar").
-  header:
-    'flex shrink-0 items-center gap-2 bg-header-active-bg px-4 pb-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] text-header-active-fg',
-  headerTitle: 'm-0 min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[0.01em]',
-  body:
-    'flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]',
-  bodyCenter: 'justify-center',
-  wallHost: 'flex min-h-0 flex-1 flex-col',
-  // Host row = the INACTIVE header pair (a list item lifted off the page).
-  row: 'flex w-full items-center gap-3 rounded-lg bg-header-inactive-bg px-3.5 py-3 text-left text-header-inactive-fg',
-  rowOffline: 'opacity-55', // presence = intensity, no extra color
-  rowMain: 'min-w-0 flex-1',
-  rowTitle: 'truncate text-[13px] font-semibold',
-  rowSecondary: 'mt-0.5 truncate text-[11px] text-header-inactive-fg/70',
-  rowActions: 'flex shrink-0 items-center gap-2',
-  field: 'flex flex-col gap-1.5',
-  fieldLabel: 'text-[11px] text-app-fg/60',
-  input:
-    'w-full rounded-lg bg-input-bg px-3.5 py-3 text-[16px] text-app-fg outline-none focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-focus-ring',
-  title: 'm-0 text-[20px] font-semibold',
-  lead: 'm-0 text-[13px] leading-relaxed text-app-fg/70',
-  // Error sits on the darker page bg (best red contrast) and is delineated by a
-  // reliable red inset hairline — panel-border is transparent in many themes.
-  error: 'rounded-lg px-3.5 py-2.5 text-[13px] text-error shadow-[inset_0_0_0_1px_var(--color-error)]',
-  empty: 'px-4 py-10 text-center text-[13px] text-app-fg/70',
-  disclosure:
-    'w-fit cursor-pointer text-[12px] text-app-fg/70 underline underline-offset-2 transition-colors hover:text-app-fg',
-  setup: 'flex flex-col gap-3 border-t border-app-fg/15 pt-4',
-} as const;
+// Shared shell vocabulary — the auth phases and the wall phase all sit in the
+// same app-bg column under a bg-shifted header (Bg-Only Chrome Rule: no border-b).
+const APP_SHELL_CLASS = 'flex h-full min-h-0 flex-col bg-app-bg font-mono text-app-fg';
+const HEADER_CLASS =
+  'flex shrink-0 items-center gap-2 bg-header-inactive-bg px-3 pb-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] text-header-inactive-fg';
+const HEADER_TITLE_CLASS = 'min-w-0 flex-1 truncate text-sm font-semibold';
+// Labeled chrome-button treatment at a touch-friendly height.
+const HEADER_BUTTON_CLASS =
+  'flex h-7 shrink-0 items-center gap-1 rounded px-2 text-sm text-inherit transition-colors hover:bg-current/10 active:bg-current/10 disabled:pointer-events-none disabled:opacity-45';
+const BODY_CLASS =
+  'flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]';
+// The block passkey buttons: the modalActionButton primary tone at a 44px touch height.
+const PRIMARY_BLOCK_BUTTON_CLASS =
+  'flex min-h-11 w-full items-center justify-center rounded bg-header-active-bg px-3 text-sm font-medium text-header-active-fg transition-colors active:opacity-90 focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-45';
+const FIELD_CLASS = 'flex flex-col gap-1.5';
+// text-base (16px) is deliberate: it blocks iOS zoom-on-focus (phone-legibility exception).
+const INPUT_CLASS =
+  'w-full rounded border border-input-border bg-input-bg px-3 py-2.5 font-mono text-base text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring';
 
 export default function App(): React.ReactElement {
+  usePocketTheme();
   const client = useMemo(
     () =>
       new PocketClient({
@@ -255,14 +210,14 @@ export default function App(): React.ReactElement {
 
   if (phase === 'wall' && activeHost && adapterRef.current) {
     return (
-      <div className={PK.app}>
-        <header className={PK.header}>
-          <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={leaveWall}>
+      <div className={APP_SHELL_CLASS}>
+        <header className={HEADER_CLASS}>
+          <button type="button" className={HEADER_BUTTON_CLASS} onClick={leaveWall}>
             ‹ Hosts
           </button>
-          <h1 className={PK.headerTitle}>{activeHost.label || activeHost.hostId}</h1>
+          <h1 className={HEADER_TITLE_CLASS}>{activeHost.label || activeHost.hostId}</h1>
         </header>
-        <div className={PK.wallHost}>
+        <div className="flex min-h-0 flex-1 flex-col">
           <PocketWall adapter={adapterRef.current} />
         </div>
       </div>
@@ -270,9 +225,7 @@ export default function App(): React.ReactElement {
   }
 
   return (
-    <div className={PK.app}>
-      <div className={clsx(PK.body, PK.bodyCenter)}>…</div>
-    </div>
+    <div className="flex h-full items-center justify-center bg-app-bg font-mono text-sm text-muted">…</div>
   );
 }
 
@@ -294,21 +247,21 @@ export function SetupOrSignin({
   const [label, setLabel] = useState('My Phone');
 
   return (
-    <div className={PK.app}>
-      <header className={PK.header}>
-        <h1 className={PK.headerTitle}>Dormouse Pocket</h1>
+    <div className={APP_SHELL_CLASS}>
+      <header className={HEADER_CLASS}>
+        <h1 className={HEADER_TITLE_CLASS}>Dormouse Pocket</h1>
       </header>
-      <div className={clsx(PK.body, PK.bodyCenter)}>
+      <div className={`${BODY_CLASS} justify-center`}>
         <div>
-          <p className={PK.title}>Welcome back</p>
-          <p className={clsx(PK.lead, 'mt-1')}>
+          <p className="mb-1 text-base font-bold text-foreground">Welcome back</p>
+          <p className="text-sm leading-relaxed text-muted">
             Sign in with your passkey to reach your enrolled hosts and pick up a terminal session.
           </p>
         </div>
-        {error ? <div className={PK.error}>{error}</div> : null}
+        {error ? <p className="text-sm text-error">{error}</p> : null}
         <button
           type="button"
-          className={pkButton({ tone: 'primary', block: true })}
+          className={PRIMARY_BLOCK_BUTTON_CLASS}
           disabled={busy !== null}
           onClick={onSignin}
         >
@@ -317,34 +270,34 @@ export function SetupOrSignin({
 
         <button
           type="button"
-          className={PK.disclosure}
+          className="self-start rounded px-1 py-2 text-sm text-muted transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring"
           onClick={() => setShowSetup((v) => !v)}
         >
           {showSetup ? '− First-time setup' : '+ First-time setup'}
         </button>
 
         {showSetup ? (
-          <div className={PK.setup}>
-            <p className={PK.lead}>
+          <div className="flex flex-col gap-3">
+            <p className="text-sm leading-relaxed text-muted">
               Create the account and register this device's passkey. Requires the server's setup
               password.
             </p>
-            <div className={PK.field}>
-              <label className={PK.fieldLabel} htmlFor="pk-pw">Setup password</label>
+            <div className={FIELD_CLASS}>
+              <label htmlFor="pocket-setup-password" className="text-sm text-muted">Setup password</label>
               <input
-                id="pk-pw"
-                className={PK.input}
+                id="pocket-setup-password"
+                className={INPUT_CLASS}
                 type="password"
                 autoComplete="off"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
-            <div className={PK.field}>
-              <label className={PK.fieldLabel} htmlFor="pk-label">Passkey label</label>
+            <div className={FIELD_CLASS}>
+              <label htmlFor="pocket-passkey-label" className="text-sm text-muted">Passkey label</label>
               <input
-                id="pk-label"
-                className={PK.input}
+                id="pocket-passkey-label"
+                className={INPUT_CLASS}
                 type="text"
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
@@ -352,7 +305,7 @@ export function SetupOrSignin({
             </div>
             <button
               type="button"
-              className={pkButton({ tone: 'primary', block: true })}
+              className={PRIMARY_BLOCK_BUTTON_CLASS}
               disabled={busy !== null || password.length === 0}
               onClick={() => onSetup(password, label)}
             >
@@ -385,38 +338,46 @@ export function HostsView({
   onConnect: (host: HostView) => void;
 }): React.ReactElement {
   return (
-    <div className={PK.app}>
-      <header className={PK.header}>
-        <h1 className={PK.headerTitle}>Hosts</h1>
-        <button
-          type="button"
-          className={pkButton({ tone: 'ghost', size: 'sm' })}
-          disabled={busy !== null}
-          onClick={onRefresh}
-        >
+    <div className={APP_SHELL_CLASS}>
+      <header className={HEADER_CLASS}>
+        <h1 className={HEADER_TITLE_CLASS}>Hosts</h1>
+        <button type="button" className={HEADER_BUTTON_CLASS} disabled={busy !== null} onClick={onRefresh}>
           {busy === 'refresh' ? '…' : 'Refresh'}
         </button>
       </header>
-      <div className={PK.body}>
-        {error ? <div className={PK.error}>{error}</div> : null}
+      <div className={BODY_CLASS}>
+        {error ? <p className="text-sm text-error">{error}</p> : null}
         {hosts.length === 0 ? (
-          <div className={PK.empty}>No hosts enrolled yet. Enroll one from your laptop.</div>
+          <div className="px-3 py-8 text-center text-sm text-muted">
+            No hosts enrolled yet. Enroll one from your laptop.
+          </div>
         ) : (
           hosts.map((host) => {
             const paired = isPaired(host.hostId);
-            const status = !host.online ? 'Offline' : paired ? 'Paired' : 'Not paired';
             return (
-              <div className={clsx(PK.row, !host.online && PK.rowOffline)} key={host.hostId}>
-                <div className={PK.rowMain}>
-                  <div className={PK.rowTitle}>{host.label || host.hostId}</div>
-                  <div className={PK.rowSecondary}>{status}</div>
+              <div
+                className="flex min-h-12 items-center gap-2 rounded bg-surface-raised px-3 py-2 text-left"
+                key={host.hostId}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium text-foreground">
+                    {host.label || host.hostId}
+                  </div>
+                  <div className="mt-0.5 truncate text-xs text-muted">
+                    {paired ? 'Paired' : 'Not paired'}
+                  </div>
                 </div>
-                <div className={PK.rowActions}>
-                  {host.online && !paired ? (
+                <span
+                  className={`shrink-0 text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} ${host.online ? 'text-success' : 'text-muted'}`}
+                >
+                  {host.online ? 'online' : 'offline'}
+                </span>
+                <div className="flex shrink-0 gap-2">
+                  {!paired ? (
                     <button
                       type="button"
-                      className={pkButton({ tone: 'secondary', size: 'sm' })}
-                      disabled={busy !== null}
+                      className="flex min-h-9 items-center justify-center rounded border border-border px-3 text-sm text-muted transition-colors hover:bg-header-inactive-bg hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
+                      disabled={busy !== null || !host.online}
                       onClick={() => onPair(host)}
                     >
                       {busy === 'pair' ? '…' : 'Pair'}
@@ -424,7 +385,7 @@ export function HostsView({
                   ) : null}
                   <button
                     type="button"
-                    className={pkButton({ tone: 'primary', size: 'sm' })}
+                    className="flex min-h-9 items-center justify-center rounded bg-header-active-bg px-3 text-sm text-header-active-fg transition-colors disabled:cursor-not-allowed disabled:opacity-45"
                     disabled={busy !== null || !host.online}
                     onClick={() => onConnect(host)}
                   >

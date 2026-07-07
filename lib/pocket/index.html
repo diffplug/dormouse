@@ -6,7 +6,10 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no"
     />
-    <meta name="color-scheme" content="light dark" />
+    <!-- Pre-boot defaults for Kimbie Dark (the default theme); pocket-theme.ts
+         re-syncs both to the applied theme at runtime, before first paint. -->
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#362712" />
     <title>Dormouse Pocket</title>
     <style>
       /* Theme-agnostic viewport plumbing. Colors and fonts come from the shared
@@ -18,8 +21,8 @@
         height: 100%;
         -webkit-text-size-adjust: 100%;
         overscroll-behavior: none;
-        background: var(--color-app-bg, #1e1e1e);
-        color: var(--color-app-fg, #e6e8ec);
+        background: var(--color-app-bg, #362712);
+        color: var(--color-app-fg, #d3af86);
       }
       #pocket-root {
         height: 100dvh;
