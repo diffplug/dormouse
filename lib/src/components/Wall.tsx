@@ -871,6 +871,7 @@ export function Wall({
   useSessionPersistence({
     dockviewApi,
     apiRef,
+    doors,
     doorsRef,
     selectedIdRef,
     selectedTypeRef,

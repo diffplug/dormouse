@@ -51,6 +51,53 @@ describe("TauriSessionStore", () => {
     expect(saved).toEqual(["a", "c", "d"]);
   });
 
+  it("skips the save_session round-trip when the value is unchanged", async () => {
+    const saved: string[] = [];
+    const store = new TauriSessionStore(async (v) => {
+      saved.push(v);
+    });
+    store.setItem("k", "a");
+    await tick();
+    expect(saved).toEqual(["a"]);
+    // Identical value: the dirty gate should already suppress this, but the
+    // store-level short-circuit backstops any miss — no second write.
+    store.setItem("k", "a");
+    await tick();
+    expect(saved).toEqual(["a"]);
+  });
+
+  it("writes a value that differs, then skips a repeat of it", async () => {
+    const saved: string[] = [];
+    const store = new TauriSessionStore(async (v) => {
+      saved.push(v);
+    });
+    store.setItem("k", "a");
+    store.setItem("k", "b"); // b differs from the a cache → writes
+    await tick();
+    expect(saved).toEqual(["a", "b"]);
+    store.setItem("k", "b"); // identical to cache → skipped
+    await tick();
+    expect(saved).toEqual(["a", "b"]);
+  });
+
+  it("does not short-circuit a value equal to the hydrated seed (migration path)", async () => {
+    // The localStorage→Rust migration hydrates with the pre-migration seed
+    // (null) then setItem()s the adopted blob so it reaches save_session even
+    // though it equals what will become the cache. Mirrors tauri-adapter's
+    // hydrateSessionStore: hydrate(null) leaves the migrated blob a genuine
+    // change, so the identical-value short-circuit does not swallow it.
+    const saved: string[] = [];
+    const store = new TauriSessionStore(async (v) => {
+      saved.push(v);
+    });
+    store.hydrate(null);
+    store.setItem("k", '{"migrated":1}');
+    // The cache updates synchronously for the cold-restore read that follows.
+    expect(store.getItem("k")).toBe('{"migrated":1}');
+    await tick();
+    expect(saved).toEqual(['{"migrated":1}']);
+  });
+
   it("recovers after a rejected write instead of wedging", async () => {
     const saved: string[] = [];
     let first = true;

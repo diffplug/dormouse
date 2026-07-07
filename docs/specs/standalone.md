@@ -208,11 +208,42 @@ the cache and forwards to `save_session` asynchronously, coalescing bursts to at
 most one in-flight write (latest value wins). This mirrors how the VS Code
 adapter reads a host-injected seed (`docs/specs/vscode.md`).
 
+**Dirty-gated writes.** An idle app must not rewrite the multi-MB blob. The save
+cadence is shared frontend code (`lib/src/components/wall/use-session-persistence.ts`),
+so every adapter benefits: a generation-counter dirty tracker
+(`lib/src/lib/session-dirty.ts`) gates the periodic heartbeat. Two distinct
+trigger classes feed it. **Structural** dockview events (layout change, panel
+add/remove) keep their existing 500 ms-debounced *schedule* — the cadence is
+byte-identical to before. **Content** inputs that change the persisted blob with
+no dockview event — terminal output (`onPtyData`: scrollback, OSC CWD, title
+candidates), Activity/TODO transitions (`subscribeToActivity`), pane
+title/rename/command state (`subscribeToTerminalPaneState`), active-pane focus
+(`onDidActivePanelChange`), and door-state changes — only *mark dirty*, never
+schedule. (If PTY output scheduled saves, a busy terminal would rewrite every
+500 ms — a regression versus today's heartbeat-only capture.) The 30 s heartbeat
+then persists only when the tracker is dirty, so an idle session issues zero
+writes. The tracker is conservative under races: a save captures its target
+generation before serializing and clears dirty only on a fulfilled write, so a
+change arriving mid-save costs at most one redundant save and is never lost.
+Flush paths — PTY exit, `onRequestSessionFlush`, `pagehide`, and unmount — stay
+**unconditional**: they are the correctness net for any dirty-trigger hole (e.g.
+a program calling `chdir()` emits no event, so its persisted CWD may go stale
+until the next output — accepted). As a store-level backstop under all of the
+above, `TauriSessionStore.setItem` short-circuits when the new blob byte-equals
+the cached one, suppressing any redundant `save_session` round-trip an upstream
+trigger missed; the cache is boot-seeded from disk in `hydrate`, so the compare
+is valid from the first write. Source of truth: `session-dirty.ts`,
+`use-session-persistence.ts`, `standalone/src/tauri-session-store.ts`.
+
 **Migration.** On the first boot after this change `load_session` returns null;
 if a legacy blob is still in `localStorage` under `TauriAdapter.STATE_KEY`, the
 adapter adopts it, persists it to the Rust store (through the store's normal
 write path, so it shares the coalescing), and removes the key — so WebKit stops
-rewriting it and its bloated WAL collapses on the next quit.
+rewriting it and its bloated WAL collapses on the next quit. Because the
+identical-value short-circuit above would swallow a `setItem` whose value equals
+the freshly hydrated cache, the migration hydrates with the pre-migration seed
+(null) and lets the `setItem` be a genuine change — localStorage is already
+cleared, so the Rust store is the blob's only remaining home.
 
 **Durability on quit (current limitation).** `saveState` returns after updating
 the cache and *firing* `save_session`; nothing awaits the Rust write on
@@ -294,18 +325,6 @@ root `package.json` for the `dev:standalone*` orchestration.
 Requirements for the next round of session-persistence work — what must be true,
 not how. (Detailed working notes live outside the specs while the work is in
 flight.)
-
-**Reduce session write throughput.** The session blob is rewritten on a 500 ms
-debounce **plus** an unconditional ~30 s heartbeat regardless of whether
-anything changed, and each Rust write is a full file write + fsync + rename.
-Requirements: do not write when the persisted state is unchanged since the last
-successful write; do not let the periodic timer force unchanged writes; no
-regression to restore fidelity. (Persisted scrollback is already bounded —
-100k chars/pane, `docs/specs/transport.md` §Persisted scrollback cap.) The
-cadence is shared code
-(`lib/src/components/wall/use-session-persistence.ts`,
-`lib/src/lib/session-save.ts`), so this affects every adapter, not only
-standalone.
 
 **Guaranteed session save on a clean quit.** `saveState` forwards to
 `save_session` asynchronously and nothing awaits it on shutdown, so a clean quit

@@ -3,19 +3,29 @@ import type { DockviewApi } from 'dockview-react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
 import { saveSession } from '../../lib/session-save';
-import { UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
+import { createSessionDirtyTracker } from '../../lib/session-dirty';
+import {
+  subscribeToActivity,
+  subscribeToTerminalPaneState,
+  UNNAMED_PANEL_TITLE,
+} from '../../lib/terminal-registry';
 import { isBrowserParams } from './browser-surface';
 import type { DooredItem, WallSelectionKind } from './wall-types';
 
 export function useSessionPersistence({
   dockviewApi,
   apiRef,
+  doors,
   doorsRef,
   selectedIdRef,
   selectedTypeRef,
 }: {
   dockviewApi: DockviewApi | null;
   apiRef: RefObject<DockviewApi | null>;
+  // The `doors` STATE value, not just `doorsRef`: doors can mutate with no
+  // dockview event (e.g. `dor ensure` refreshing a minimized door's params via
+  // setDoors), so the ref alone can't signal that the persisted blob changed.
+  doors: DooredItem[];
   doorsRef: RefObject<DooredItem[]>;
   selectedIdRef: RefObject<string | null>;
   selectedTypeRef: RefObject<WallSelectionKind>;
@@ -23,6 +33,10 @@ export function useSessionPersistence({
   const sessionSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionSavePromiseRef = useRef<Promise<void> | null>(null);
   const pendingSaveNeededRef = useRef(false);
+  // Dirty tracker: idle sessions must not rewrite the multi-MB blob. Content
+  // events mark dirty; the 30s heartbeat persists only when dirty. See
+  // session-dirty.ts for the conservative-under-races generation model.
+  const trackerRef = useRef(createSessionDirtyTracker());
 
   const doSave = useCallback((): Promise<void> => {
     const api = apiRef.current;
@@ -44,7 +58,14 @@ export function useSessionPersistence({
 
     const runSave = (): Promise<void> => {
       pendingSaveNeededRef.current = false;
+      // Capture the generation this save covers *before* serializing; clear the
+      // dirty flag only on a fulfilled write, never on reject. A markDirty that
+      // races in mid-save leaves the tracker dirty for the next heartbeat.
+      const token = trackerRef.current.beginSave();
       const savePromise = doSave()
+        .then(() => {
+          trackerRef.current.completeSave(token);
+        })
         .finally(() => {
           if (sessionSavePromiseRef.current === savePromise) {
             sessionSavePromiseRef.current = pendingSaveNeededRef.current ? runSave() : null;
@@ -56,6 +77,12 @@ export function useSessionPersistence({
 
     return runSave();
   }, [doSave]);
+
+  // Doors mutate without any dockview event (setDoors from minimize/reattach or
+  // `dor ensure` param refresh), so mark dirty whenever the state array changes.
+  useEffect(() => {
+    trackerRef.current.markDirty();
+  }, [doors]);
 
   const flushSessionSave = useCallback(() => {
     if (sessionSaveTimerRef.current) {
@@ -77,11 +104,15 @@ export function useSessionPersistence({
     if (!dockviewApi) return;
 
     const platform = getPlatform();
+    const tracker = trackerRef.current;
+    const markDirty = () => tracker.markDirty();
+
     const handlePtyExit = (detail: { id: string }) => {
       const api = apiRef.current;
       if (!api) return;
       const ownsPane = api.panels.some((p) => p.id === detail.id);
       if (!ownsPane) return;
+      // Flush paths are unconditional — the correctness net for any dirty hole.
       void flushSessionSave().catch(() => undefined);
     };
     const handleSessionFlushRequest = (detail: { requestId: string }) => {
@@ -95,10 +126,36 @@ export function useSessionPersistence({
       void flushSessionSave().catch(() => undefined);
     };
 
-    const layoutDisposable = dockviewApi.onDidLayoutChange(scheduleSessionSave);
-    const addDisposable = dockviewApi.onDidAddPanel(scheduleSessionSave);
-    const removeDisposable = dockviewApi.onDidRemovePanel(scheduleSessionSave);
-    const interval = setInterval(scheduleSessionSave, 30_000);
+    // Structural dockview events keep their existing 500ms-debounced cadence,
+    // but also mark dirty so a later heartbeat knows a write is warranted.
+    const scheduleWithDirty = () => {
+      tracker.markDirty();
+      scheduleSessionSave();
+    };
+    const layoutDisposable = dockviewApi.onDidLayoutChange(scheduleWithDirty);
+    const addDisposable = dockviewApi.onDidAddPanel(scheduleWithDirty);
+    const removeDisposable = dockviewApi.onDidRemovePanel(scheduleWithDirty);
+
+    // Mark-dirty-ONLY inputs: persisted-blob state that changes with no dockview
+    // event. These never *schedule* a save — if pty:data scheduled saves a busy
+    // terminal would rewrite the blob every 500ms (a regression vs. today's
+    // heartbeat-only capture). The 30s heartbeat below persists whatever they
+    // dirtied, keeping today's cadence exactly, minus all idle writes.
+    //   - onPtyData: terminal output drives scrollback, CWD (OSC), title candidates.
+    //   - subscribeToActivity: WATCHING timer transitions + TODO toggles (no PTY output).
+    //   - subscribeToTerminalPaneState: titles/renames/command-state + untouched flips.
+    //   - onDidActivePanelChange: the serialized layout records the active view;
+    //     focus flips may not fire onDidLayoutChange.
+    platform.onPtyData(markDirty);
+    const unsubActivity = subscribeToActivity(markDirty);
+    const unsubPaneState = subscribeToTerminalPaneState(markDirty);
+    const activePanelDisposable = dockviewApi.onDidActivePanelChange(markDirty);
+
+    // Heartbeat: persist only when something dirtied the state since the last
+    // completed save. Idle sessions no longer write.
+    const interval = setInterval(() => {
+      if (tracker.isDirty()) scheduleSessionSave();
+    }, 30_000);
     platform.onPtyExit(handlePtyExit);
     platform.onRequestSessionFlush(handleSessionFlushRequest);
     window.addEventListener('pagehide', handlePageHide);
@@ -122,10 +179,15 @@ export function useSessionPersistence({
       unsubFilesDropped?.();
       platform.offRequestSessionFlush(handleSessionFlushRequest);
       platform.offPtyExit(handlePtyExit);
+      platform.offPtyData(markDirty);
+      unsubActivity();
+      unsubPaneState();
+      activePanelDisposable.dispose();
       layoutDisposable.dispose();
       addDisposable.dispose();
       removeDisposable.dispose();
       clearInterval(interval);
+      // Unmount flush is unconditional — the final correctness net.
       void persistSessionNow().catch(() => undefined);
     };
   }, [
