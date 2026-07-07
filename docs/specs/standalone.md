@@ -64,7 +64,9 @@ stderr, which Rust appends to the log file). Webview → Rust is the Tauri
 `pty_get_scrollback` / `get_available_shells`, `dor_control_response`,
 `iframe_create_proxy_url`, the `agent_browser_*` family, the `clipboard`
 readers, `read_update_log`, and `kill_sidecar_now` — each a thin forwarder to
-the corresponding sidecar message, with two carve-outs: on Windows the
+the corresponding sidecar message. `load_session` / `save_session` are the
+exception that is *not* forwarded: they read/write the per-window session file
+directly in Rust (§Persistence). Two further carve-outs: on Windows the
 clipboard readers skip the sidecar and read the Win32 clipboard natively
 (`clipboard_win.rs`; behavior in `docs/specs/mouse-and-clipboard.md` §8.6),
 and `agent_browser_screenshot` receives a temp-file *path* from the sidecar
@@ -131,13 +133,47 @@ The workspace strip lands here when the workspaces rollout reaches stage 3 —
 
 ## Persistence
 
-`TauriAdapter.saveState` / `getState` store the session blob in webview
-`localStorage` under `TauriAdapter.STATE_KEY`, routed through
+`TauriAdapter.saveState` / `getState` route the session blob through
 `lib/src/lib/window-persistence.ts` (`loadSessionState` / `saveSessionState`)
 — the standalone adapter boundary where the `PersistedWindow` wrapping lives,
 identity-passthrough while the workspaces flag is off
-(`docs/specs/transport.md`, Workspace/Window containers). Theme selection
-persists separately through the theme store (`docs/specs/theme.md`).
+(`docs/specs/transport.md`, Workspace/Window containers). The backing store is
+**not** WebKit `localStorage`: `window-persistence.ts` reads/writes through the
+`SessionKeyValueStore` seam, and the standalone adapter supplies a Rust-backed
+implementation (`standalone/src/tauri-session-store.ts`). Theme selection still
+persists through the theme store on `localStorage` (`docs/specs/theme.md`); it
+is tiny and rarely written, so it does not stress the WebKit store.
+
+**Why not `localStorage`.** WKWebView stores `localStorage` as SQLite in WAL
+mode. Dormouse rewrites the multi-MB scrollback-bearing session blob on every
+save, and WebKit pins its own WAL with a long-lived reader that never advances
+during a running session — so the WAL is never checkpointed and grows unbounded
+(observed ~1 GB after a few hours; an external checkpoint is blocked by the same
+reader). A days-long session made this pathological.
+
+**Rust file store.** `save_session(window, state)` / `load_session(window)`
+(`lib.rs`) persist the blob as one atomic file per Tauri window —
+`<app_data_dir>/sessions/<label>.json`, written temp-then-rename so a crash
+cannot truncate the previous snapshot. There is no WAL to grow, and overwriting
+in place bounds the on-disk size to one blob. **Window identity is implicit**:
+each command keys by the invoking `tauri::Window`'s `label()`, so the frontend
+stays window-agnostic and a second window (`win-2`, …) persists to its own file
+without ever rewriting the first window's blob — the store is multi-window even
+though the app ships a single window today.
+
+**Boot + the synchronous-read constraint.** `getState()` is synchronous because
+cold-start restore reads it before React mounts, but a Tauri `invoke` is async.
+`TauriSessionStore` resolves this with an in-memory write-through cache: `init()`
+(awaited by `bootstrap()` before `resumeOrRestore`) hydrates the cache from
+`load_session`, `getItem` returns the cache synchronously, and `setItem` updates
+the cache and forwards to `save_session` asynchronously, coalescing bursts to at
+most one in-flight write (latest value wins). This mirrors how the VS Code
+adapter reads a host-injected seed (`docs/specs/vscode.md`).
+
+**Migration.** On the first boot after this change `load_session` returns null;
+if a legacy blob is still in `localStorage` under `TauriAdapter.STATE_KEY`, the
+adapter adopts it, persists it to the Rust store, and removes the key — so
+WebKit stops rewriting it and its bloated WAL collapses on the next quit.
 
 ## File drop
 
@@ -186,13 +222,14 @@ root `package.json` for the `dev:standalone*` orchestration.
 
 | File | Role |
 |------|------|
-| `standalone/src-tauri/src/lib.rs` | Rust backend: sidecar spawn/supervision, invoke commands, event forwarding, file drop, logging, dock icon, exit teardown |
+| `standalone/src-tauri/src/lib.rs` | Rust backend: sidecar spawn/supervision, invoke commands, event forwarding, per-window session file store (`save_session` / `load_session`), file drop, logging, dock icon, exit teardown |
 | `standalone/src-tauri/src/clipboard_win.rs` | Native Win32 clipboard reads on Windows (owned by `docs/specs/mouse-and-clipboard.md`) |
 | `standalone/scripts/tauri.mjs`, `csp.mjs` | Tauri CLI wrapper assembling the webview CSP (`DORMOUSE_REMOTE_CONNECT_SRC`) |
 | `standalone/src-tauri/tauri.conf.json` | Window config, dev/build commands, sidecar resources glob, updater config |
 | `standalone/src/main.tsx` | Webview bootstrap (boot sequence above) |
 | `standalone/src/AppBar.tsx` | Titlebar: shell dropdown, theme picker, window controls |
-| `standalone/src/tauri-adapter.ts` | `TauriAdapter`: PlatformAdapter over Tauri invoke/events, localStorage persistence, control-request dispatch |
+| `standalone/src/tauri-adapter.ts` | `TauriAdapter`: PlatformAdapter over Tauri invoke/events, session persistence via the Rust store, control-request dispatch |
+| `standalone/src/tauri-session-store.ts` | `TauriSessionStore`: Rust-backed `SessionKeyValueStore` — boot-seeded write-through cache over `load_session` / `save_session` (§Persistence) |
 | `standalone/src/updater.ts`, `UpdateBanner.tsx`, `UpdateDebugModal.tsx` | Auto-update (owned by `docs/specs/auto-update.md`) |
 | `standalone/src/browser-sidecar-host.ts`, `browser-sidecar-adapter.ts` | Browser-dev harness (owned by `docs/specs/transport.md`) |
 | `standalone/sidecar/main.js` | Sidecar entry: stdio JSON-lines dispatch, shutdown ordering, parent-PID watchdog |
