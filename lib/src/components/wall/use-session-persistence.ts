@@ -33,9 +33,7 @@ export function useSessionPersistence({
   const sessionSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionSavePromiseRef = useRef<Promise<void> | null>(null);
   const pendingSaveNeededRef = useRef(false);
-  // Dirty tracker: idle sessions must not rewrite the multi-MB blob. Content
-  // events mark dirty; the 30s heartbeat persists only when dirty. See
-  // session-dirty.ts for the conservative-under-races generation model.
+  // See session-dirty.ts for the conservative-under-races generation model.
   const trackerRef = useRef(createSessionDirtyTracker());
 
   const doSave = useCallback((): Promise<void> => {
@@ -58,9 +56,7 @@ export function useSessionPersistence({
 
     const runSave = (): Promise<void> => {
       pendingSaveNeededRef.current = false;
-      // Capture the generation this save covers *before* serializing; clear the
-      // dirty flag only on a fulfilled write, never on reject. A markDirty that
-      // races in mid-save leaves the tracker dirty for the next heartbeat.
+      // Clear dirty only on a fulfilled write (.then, not .finally).
       const token = trackerRef.current.beginSave();
       const savePromise = doSave()
         .then(() => {
@@ -84,6 +80,8 @@ export function useSessionPersistence({
     trackerRef.current.markDirty();
   }, [doors]);
 
+  // Never gated on the dirty tracker — the correctness net for dirty-trigger
+  // gaps (e.g. a program calling chdir() silently produces no event).
   const flushSessionSave = useCallback(() => {
     if (sessionSaveTimerRef.current) {
       clearTimeout(sessionSaveTimerRef.current);
@@ -93,6 +91,7 @@ export function useSessionPersistence({
   }, [persistSessionNow]);
 
   const scheduleSessionSave = useCallback(() => {
+    trackerRef.current.markDirty();
     if (sessionSaveTimerRef.current) return;
     sessionSaveTimerRef.current = setTimeout(() => {
       sessionSaveTimerRef.current = null;
@@ -104,15 +103,13 @@ export function useSessionPersistence({
     if (!dockviewApi) return;
 
     const platform = getPlatform();
-    const tracker = trackerRef.current;
-    const markDirty = () => tracker.markDirty();
+    const { markDirty, isDirty } = trackerRef.current;
 
     const handlePtyExit = (detail: { id: string }) => {
       const api = apiRef.current;
       if (!api) return;
       const ownsPane = api.panels.some((p) => p.id === detail.id);
       if (!ownsPane) return;
-      // Flush paths are unconditional — the correctness net for any dirty hole.
       void flushSessionSave().catch(() => undefined);
     };
     const handleSessionFlushRequest = (detail: { requestId: string }) => {
@@ -126,35 +123,23 @@ export function useSessionPersistence({
       void flushSessionSave().catch(() => undefined);
     };
 
-    // Structural dockview events keep their existing 500ms-debounced cadence,
-    // but also mark dirty so a later heartbeat knows a write is warranted.
-    const scheduleWithDirty = () => {
-      tracker.markDirty();
-      scheduleSessionSave();
-    };
-    const layoutDisposable = dockviewApi.onDidLayoutChange(scheduleWithDirty);
-    const addDisposable = dockviewApi.onDidAddPanel(scheduleWithDirty);
-    const removeDisposable = dockviewApi.onDidRemovePanel(scheduleWithDirty);
+    const layoutDisposable = dockviewApi.onDidLayoutChange(scheduleSessionSave);
+    const addDisposable = dockviewApi.onDidAddPanel(scheduleSessionSave);
+    const removeDisposable = dockviewApi.onDidRemovePanel(scheduleSessionSave);
 
-    // Mark-dirty-ONLY inputs: persisted-blob state that changes with no dockview
-    // event. These never *schedule* a save — if pty:data scheduled saves a busy
-    // terminal would rewrite the blob every 500ms (a regression vs. today's
-    // heartbeat-only capture). The 30s heartbeat below persists whatever they
-    // dirtied, keeping today's cadence exactly, minus all idle writes.
-    //   - onPtyData: terminal output drives scrollback, CWD (OSC), title candidates.
-    //   - subscribeToActivity: WATCHING timer transitions + TODO toggles (no PTY output).
-    //   - subscribeToTerminalPaneState: titles/renames/command-state + untouched flips.
-    //   - onDidActivePanelChange: the serialized layout records the active view;
-    //     focus flips may not fire onDidLayoutChange.
+    // Content inputs mark dirty but never schedule — the heartbeat persists them
+    // (full rationale: docs/specs/standalone.md §Persistence). Untouched flips
+    // ride the pty echo of the keystroke, not the pane-state store (the registry
+    // mutates silently). onDidActivePanelChange is here because focus flips may
+    // not fire onDidLayoutChange, yet the serialized layout records the active view.
     platform.onPtyData(markDirty);
     const unsubActivity = subscribeToActivity(markDirty);
     const unsubPaneState = subscribeToTerminalPaneState(markDirty);
     const activePanelDisposable = dockviewApi.onDidActivePanelChange(markDirty);
 
-    // Heartbeat: persist only when something dirtied the state since the last
-    // completed save. Idle sessions no longer write.
+    // Heartbeat: idle sessions no longer write.
     const interval = setInterval(() => {
-      if (tracker.isDirty()) scheduleSessionSave();
+      if (isDirty()) scheduleSessionSave();
     }, 30_000);
     platform.onPtyExit(handlePtyExit);
     platform.onRequestSessionFlush(handleSessionFlushRequest);
@@ -187,7 +172,6 @@ export function useSessionPersistence({
       addDisposable.dispose();
       removeDisposable.dispose();
       clearInterval(interval);
-      // Unmount flush is unconditional — the final correctness net.
       void persistSessionNow().catch(() => undefined);
     };
   }, [

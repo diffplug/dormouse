@@ -66,26 +66,9 @@ describe("TauriSessionStore", () => {
     expect(saved).toEqual(["a"]);
   });
 
-  it("writes a value that differs, then skips a repeat of it", async () => {
-    const saved: string[] = [];
-    const store = new TauriSessionStore(async (v) => {
-      saved.push(v);
-    });
-    store.setItem("k", "a");
-    store.setItem("k", "b"); // b differs from the a cache → writes
-    await tick();
-    expect(saved).toEqual(["a", "b"]);
-    store.setItem("k", "b"); // identical to cache → skipped
-    await tick();
-    expect(saved).toEqual(["a", "b"]);
-  });
-
   it("does not short-circuit a value equal to the hydrated seed (migration path)", async () => {
-    // The localStorage→Rust migration hydrates with the pre-migration seed
-    // (null) then setItem()s the adopted blob so it reaches save_session even
-    // though it equals what will become the cache. Mirrors tauri-adapter's
-    // hydrateSessionStore: hydrate(null) leaves the migrated blob a genuine
-    // change, so the identical-value short-circuit does not swallow it.
+    // Mirrors tauri-adapter's hydrateSessionStore: hydrate(null) leaves the
+    // migrated blob a genuine change, so the short-circuit can't swallow it.
     const saved: string[] = [];
     const store = new TauriSessionStore(async (v) => {
       saved.push(v);

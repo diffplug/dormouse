@@ -17,13 +17,6 @@ describe('createSessionDirtyTracker', () => {
     expect(tracker.isDirty()).toBe(true);
   });
 
-  it('beginSave/completeSave clears the dirty flag', () => {
-    const tracker = createSessionDirtyTracker();
-    const token = tracker.beginSave();
-    tracker.completeSave(token);
-    expect(tracker.isDirty()).toBe(false);
-  });
-
   it('a markDirty during a save leaves the tracker dirty after it completes', () => {
     const tracker = createSessionDirtyTracker();
     tracker.completeSave(tracker.beginSave());

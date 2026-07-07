@@ -190,13 +190,10 @@ export class TauriAdapter implements PlatformAdapter {
         localStorage.removeItem(TauriAdapter.STATE_KEY);
       }
     }
-    // Hydrate with the pre-migration seed (still null when migrating). We do NOT
-    // seed the cache with the migrated blob: the identical-value short-circuit
-    // in setItem would then skip the write, but localStorage was already
-    // cleared, so the Rust store is now this blob's only home. Leaving the cache
-    // null makes the setItem below a genuine change that actually persists — and
-    // setItem also updates the cache synchronously, so the cold-restore read
-    // that follows still sees the migrated value.
+    // Do NOT seed the cache with the migrated blob: setItem's identical-value
+    // short-circuit would skip the write, and localStorage is already cleared —
+    // the setItem below must be a genuine change so the blob reaches the Rust
+    // store (setItem updates the cache synchronously for the cold-restore read).
     this.sessionStore.hydrate(seed);
     // Persist the adopted blob through the store's normal write path (not a raw
     // invoke) so it shares the same coalescing — and the planned drain-on-quit.

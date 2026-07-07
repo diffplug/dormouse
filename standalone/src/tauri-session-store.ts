@@ -48,11 +48,8 @@ export class TauriSessionStore implements SessionKeyValueStore {
   }
 
   setItem(_key: string, value: string): void {
-    // Identical-value short-circuit: a string-compare backstop under the
-    // frontend dirty gate (use-session-persistence.ts). Whatever an upstream
-    // dirty-trigger misses, a save that produces a byte-identical blob issues no
-    // `save_session` round-trip. The cache is boot-seeded from disk in
-    // `hydrate`, so the comparison is valid from the very first write.
+    // Backstop under the frontend dirty gate: a byte-identical blob issues no
+    // round-trip. Valid from the first write — `hydrate` boot-seeds the cache.
     if (value === this.cache) return;
     this.cache = value;
     if (this.saveInFlight) {

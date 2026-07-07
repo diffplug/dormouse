@@ -23,16 +23,9 @@ export interface SessionDirtyTracker {
   markDirty(): void;
   /** True when there are changes not yet captured by a completed save. */
   isDirty(): boolean;
-  /**
-   * Capture the current generation as this save's token, before serializing.
-   * Pass the returned token to {@link completeSave} when the save settles.
-   */
+  /** Capture this save's token before serializing; pass it to completeSave. */
   beginSave(): number;
-  /**
-   * Record a successful save of `token`'s generation. Monotonic: a stale token
-   * (from a save that a newer one already superseded) never regresses
-   * `savedGen`, so it cannot re-dirty already-saved state.
-   */
+  /** Record a successful save of `token`'s generation (stale tokens ignored). */
   completeSave(token: number): void;
 }
 

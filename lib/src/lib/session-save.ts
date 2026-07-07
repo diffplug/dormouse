@@ -13,6 +13,8 @@ function getPreviousPaneMap(platform: PlatformAdapter): Map<string, PersistedPan
   return new Map(saved.panes.map((pane) => [pane.id, pane]));
 }
 
+// Every input read here needs a dirty trigger in use-session-persistence.ts;
+// the unconditional flushes + store-level compare only bound the staleness.
 export async function saveSession(
   platform: PlatformAdapter,
   layout: unknown,
