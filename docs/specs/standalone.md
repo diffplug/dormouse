@@ -82,21 +82,43 @@ the webview, where `TauriAdapter` converts dor control requests into the
 `resource_dir()` once at the boundary so every derived path is plain — the
 reasons live in `docs/specs/dor-cli.md` (Bundling And PATH).
 
-**Windows node subsystem.** `build.rs` patches the bundled `node.exe` from the
-console to the GUI subsystem (`force_windows_gui_subsystem`): a console-subsystem
-process spawned from our GUI app triggers Win11's DefTerm handoff and flashes a
-stray Windows Terminal window, and neither `CREATE_NO_WINDOW` nor
-`DETACHED_PROCESS` suppresses it. The sidecar runs under that GUI node and talks
-to Rust over explicit piped stdio, which a GUI-subsystem node handles fine. But a
-GUI-subsystem node does **not** attach to an *inherited* console, so it must not
-run the `dor` CLI: dor runs inside a shell's ConPTY where stdout/stderr are
-console handles, and a GUI node silently drops everything it prints (every command
-appears to produce no output). `start_sidecar` therefore derives a
-console-subsystem copy once (`resolve_dor_node_path` → `ensure_console_subsystem_node`,
-flipping the PE subsystem byte back to console, cached in app-local data) and
-points `DORMOUSE_NODE` at it while spawning the sidecar itself under the GUI node.
-dor always runs inside an existing pseudo-console, so the console copy can't cause
-a stray window.
+### Windows node subsystem
+
+On Windows the app carries **two** subsystem variants of the same `node.exe`,
+because the sidecar and the `dor` CLI have opposite console requirements. Each
+layer below is a workaround for the one above it:
+
+1. **The app is a GUI process that spawns a Node sidecar.** Spawning a
+   *console-subsystem* process from a GUI app triggers Win11's DefTerm handoff:
+   Windows launches Windows Terminal to host it, flashing a stray WT window
+   behind Dormouse. `CREATE_NO_WINDOW` / `DETACHED_PROCESS` do not opt out of
+   that handoff (tested) — only a non-console subsystem does.
+2. **So `build.rs` patches the bundled `node.exe` to the GUI subsystem**
+   (`force_windows_gui_subsystem`). The sidecar runs under that GUI node and
+   talks to Rust over explicit piped stdio, which a GUI-subsystem node serves
+   fine.
+3. **But a GUI-subsystem node does not attach to an *inherited* console**, and
+   `dor` runs inside a shell's ConPTY where stdout/stderr are console handles
+   (not pipes) — so a GUI node silently drops everything `dor` prints (every
+   command appears to produce no output). So `start_sidecar` derives a
+   **console-subsystem** copy once (`resolve_dor_node_path` →
+   `ensure_console_subsystem_node`, flipping the PE subsystem byte back to
+   console, cached in app-local data) and points `DORMOUSE_NODE` at it, while
+   the sidecar itself keeps the GUI node. `dor` always runs inside an existing
+   pseudo-console, so the console copy can never cause a stray window.
+
+The PE subsystem byte-flip is shared with `build.rs` via
+`standalone/src-tauri/src/pe_subsystem.rs` so the load-bearing PE offsets live
+in one place.
+
+**Reconsider if the stray window can be suppressed another way.** This entire
+two-variant mechanism (layers 2–3: the GUI patch *and* the console-node
+derivation) exists solely to work around the layer-1 stray window. Its one
+load-bearing assumption is that no spawn-time option suppresses the DefTerm
+handoff. If a `CREATE_NO_WINDOW` / `STARTUPINFO` + `SW_HIDE` / job-object
+approach is ever shown to suppress it on current Win11, delete layers 2–3 and
+ship the stock console node under `DORMOUSE_NODE` — `dor` output then works with
+no patching. Re-verify that assumption before extending any of this.
 
 ## Sidecar lifecycle
 
