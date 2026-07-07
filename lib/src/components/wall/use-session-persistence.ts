@@ -72,10 +72,13 @@ export function useSessionPersistence({
       runSave();
     }
     // Await until the pipeline idles so the resolution covers the LATEST queued
-    // save, not just the one in flight. Terminates: a rerun chains only while a
-    // new save was requested mid-save, so the chain is finite.
+    // save, not just the one in flight. Swallow a per-save rejection here: a
+    // failed save still chains its queued follow-up (via `.finally`), so
+    // throwing out of the loop would abandon that follow-up and resolve before
+    // the pipeline is actually idle. Terminates: a rerun chains only while a new
+    // save was requested mid-save, so the chain is finite.
     while (sessionSavePromiseRef.current) {
-      await sessionSavePromiseRef.current;
+      await sessionSavePromiseRef.current.catch(() => undefined);
     }
   }, [doSave]);
 
