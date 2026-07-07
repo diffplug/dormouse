@@ -32,6 +32,7 @@ export class TutDetector {
   private watchingEnabledPaneIds = new Set<string>();
   private preferredWatchingPaneId: string | null = null;
   private pendingMoveTargetId: string | null = null;
+  private pendingMoveClearTimer: ReturnType<typeof setTimeout> | null = null;
   private prevActivity = new Map<string, ActivityState>();
   private prevMouse = new Map<string, MouseSelectionState>();
   private disposables: (() => void)[] = [];
@@ -110,7 +111,7 @@ export class TutDetector {
         break;
       case "move":
         this.state.markComplete("kb-move");
-        this.pendingMoveTargetId = event.toId;
+        this.armPendingMoveTarget(event.toId);
         break;
       case "selectionChange":
         if (event.kind === "pane") {
@@ -120,12 +121,14 @@ export class TutDetector {
           // in passthrough must NOT grow the set. selectionChange is the
           // engine-neutral selection signal (selectPane fires it).
           if (this.currentMode === "command" && event.id) {
-            // Cmd/Ctrl+Arrow fires `move` then re-selects the swap target, which
-            // would otherwise grow commandModePanels to 2 and credit `kb-arrows`
-            // even though the user never pressed a bare arrow key. Consume that
-            // expected selection change so only true arrow navigation counts.
-            if (this.pendingMoveTargetId === event.id) {
-              this.pendingMoveTargetId = null;
+            // Cmd/Ctrl+Arrow can produce an immediate synthetic selection change
+            // to the swap target, which would otherwise credit `kb-arrows` even
+            // though the user never pressed a bare arrow key. The guard expires
+            // after the current turn so a later real arrow to that neighbor counts.
+            const pendingMoveTargetId = this.pendingMoveTargetId;
+            if (pendingMoveTargetId) this.clearPendingMoveTarget();
+            if (pendingMoveTargetId === event.id) {
+              // Consume the synthetic post-move selection.
             } else {
               this.commandModePanels.add(event.id);
               if (this.commandModePanels.size >= 2) {
@@ -135,6 +138,25 @@ export class TutDetector {
           }
         }
         break;
+    }
+  }
+
+  private armPendingMoveTarget(id: string): void {
+    this.clearPendingMoveTarget();
+    this.pendingMoveTargetId = id;
+    this.pendingMoveClearTimer = setTimeout(() => {
+      if (this.pendingMoveTargetId === id) {
+        this.pendingMoveTargetId = null;
+      }
+      this.pendingMoveClearTimer = null;
+    }, 0);
+  }
+
+  private clearPendingMoveTarget(): void {
+    this.pendingMoveTargetId = null;
+    if (this.pendingMoveClearTimer !== null) {
+      clearTimeout(this.pendingMoveClearTimer);
+      this.pendingMoveClearTimer = null;
     }
   }
 
@@ -233,6 +255,7 @@ export class TutDetector {
   dispose(): void {
     for (const fn of this.disposables) fn();
     this.disposables = [];
+    this.clearPendingMoveTarget();
   }
 
   private emitWatchingDemoPaneChange(): void {

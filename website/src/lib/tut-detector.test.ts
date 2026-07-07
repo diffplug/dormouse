@@ -114,6 +114,20 @@ describe("TutDetector", () => {
     expect(state.isComplete("kb-arrows")).toBe(true);
   });
 
+  it("credits a later plain arrow to the swap target after a Lath swap kept selection on the origin", async () => {
+    const { state, detector, selectPane } = makeDetectorHarness();
+
+    selectPane("pane-a");
+    detector.handleWallEvent({ type: "modeChange", mode: "passthrough" });
+    detector.handleWallEvent({ type: "modeChange", mode: "command" });
+    detector.handleWallEvent({ type: "move", fromId: "pane-a", toId: "pane-b" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    selectPane("pane-b");
+
+    expect(state.isComplete("kb-move")).toBe(true);
+    expect(state.isComplete("kb-arrows")).toBe(true);
+  });
+
   it("does not credit al-busy or al-ring when a pane is already in that status at first observation", () => {
     const { state, setActivitySnapshot } = makeDetectorHarness();
 
