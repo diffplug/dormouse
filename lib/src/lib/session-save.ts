@@ -1,6 +1,7 @@
 import type { PlatformAdapter } from './platform/types';
 import { browserPersistedPane, readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceType } from './session-types';
 import { detectResumeCommand } from './resume-patterns';
+import { trimPersistedScrollback } from './scrollback-trim';
 import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched, resolveTerminalSessionId } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 
@@ -47,13 +48,18 @@ export async function saveSession(
         platform.getScrollback(sessionId),
         platform.getCwd(sessionId),
       ]);
+      // Cap persisted scrollback per pane (tail-kept); the live sidecar buffer
+      // stays at its larger cap. Resume-command patterns live at the tail, so
+      // trimming before detection is safe; re-trimming a trimmed fallback is a
+      // no-op. Null stays null.
       const resolvedScrollback = scrollback ?? previousPane?.scrollback ?? null;
+      const trimmedScrollback = resolvedScrollback === null ? null : trimPersistedScrollback(resolvedScrollback);
       return {
         id: pane.id,
         title: pane.title,
         cwd: cwd ?? previousPane?.cwd ?? null,
-        scrollback: resolvedScrollback,
-        resumeCommand: resolvedScrollback ? detectResumeCommand(resolvedScrollback) : null,
+        scrollback: trimmedScrollback,
+        resumeCommand: trimmedScrollback ? detectResumeCommand(trimmedScrollback) : null,
         untouched: isUntouched(pane.id),
         alert: liveAlert ?? previousPane?.alert ?? null,
       };

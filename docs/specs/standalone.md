@@ -299,9 +299,10 @@ flight.)
 debounce **plus** an unconditional ~30 s heartbeat regardless of whether
 anything changed, and each Rust write is a full file write + fsync + rename.
 Requirements: do not write when the persisted state is unchanged since the last
-successful write; do not let the periodic timer force unchanged writes; bound
-persisted scrollback so one busy terminal cannot make each write arbitrarily
-large; no regression to restore fidelity. The cadence is shared code
+successful write; do not let the periodic timer force unchanged writes; no
+regression to restore fidelity. (Persisted scrollback is already bounded —
+100k chars/pane, `docs/specs/transport.md` §Persisted scrollback cap.) The
+cadence is shared code
 (`lib/src/components/wall/use-session-persistence.ts`,
 `lib/src/lib/session-save.ts`), so this affects every adapter, not only
 standalone.

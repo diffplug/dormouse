@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
 import type { AlertState } from '../../lib/src/lib/alert-manager';
 import { browserPersistedPane, readPersistedSession, type PersistedAlertState, type PersistedPane, type PersistedSession } from '../../lib/src/lib/session-types';
+import { trimPersistedScrollback } from '../../lib/src/lib/scrollback-trim';
 import { log } from './log';
 
 const SESSION_STATE_KEY = 'dormouse.session';
@@ -78,10 +79,13 @@ export async function refreshSavedSessionStateFromPtys(
 
       log.info(`[session] ${pane.id}: live PTY cwd=${cwd} scrollback=${scrollback ? scrollback.length + ' chars' : 'null'}`);
 
+      // Cap persisted scrollback per pane, mirroring the frontend save path
+      // (session-save.ts); the live PTY buffer stays at its larger cap.
+      const resolvedScrollback = scrollback ?? pane.scrollback ?? null;
       return {
         ...pane,
         cwd: cwd ?? pane.cwd ?? null,
-        scrollback: scrollback ?? pane.scrollback ?? null,
+        scrollback: resolvedScrollback === null ? null : trimPersistedScrollback(resolvedScrollback),
         alert,
       };
     }),

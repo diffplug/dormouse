@@ -255,6 +255,25 @@ describe('saveSession', () => {
     expect(platform.getCwd).not.toHaveBeenCalledWith('door-web');
   });
 
+  it('trims persisted scrollback that exceeds the 100k cap, keeping the tail and detecting resume commands', async () => {
+    const platform = createPlatform(null);
+    // ~165k chars of noise, then a resume command printed at the very end.
+    const bigScrollback = 'noise line\n'.repeat(15_000) + 'claude --resume sess_abc\n';
+    expect(bigScrollback.length).toBeGreaterThan(100_000);
+    vi.mocked(platform.getScrollback).mockResolvedValue(bigScrollback);
+
+    await saveSession(platform, { root: true }, [{ id: 'pane-a', title: 'Pane A' }]);
+
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    const pane = saved.panes.find((p) => p.id === 'pane-a')!;
+    expect(pane.scrollback!.length).toBeLessThanOrEqual(100_000);
+    // The persisted content is the tail of the live buffer.
+    expect(bigScrollback.endsWith(pane.scrollback!)).toBe(true);
+    expect(pane.scrollback!.endsWith('claude --resume sess_abc\n')).toBe(true);
+    // Resume detection still works because the pattern lives at the tail.
+    expect(pane.resumeCommand).toBe('claude --resume sess_abc');
+  });
+
   it('persists local browser surface TODO state in the browser pane alert field', async () => {
     const platform = createPlatform(null);
     terminalRegistryMocks.getActivity.mockReturnValue({
