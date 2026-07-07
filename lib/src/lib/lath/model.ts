@@ -33,6 +33,23 @@ export function edgeIsBefore(edge: Edge): boolean {
   return edge === 'left' || edge === 'top';
 }
 
+/** The opposite edge (`'left'` ↔ `'right'`, `'top'` ↔ `'bottom'`). Encodes the
+ *  animation contract's "enter from the shared boundary" rule: a newly-placed leaf
+ *  grows FROM the edge it shares with its reference, i.e. the one opposite where it
+ *  landed (a pane split to the `'right'` enters from its `'left'` edge). */
+export function oppositeEdge(edge: Edge): Edge {
+  switch (edge) {
+    case 'left':
+      return 'right';
+    case 'right':
+      return 'left';
+    case 'top':
+      return 'bottom';
+    case 'bottom':
+      return 'top';
+  }
+}
+
 /** The single-pane Wall — how the Wall seeds the tree; there is no op for
  *  inserting into an empty tree. */
 export function leafTree(id: LeafId): LathTree {

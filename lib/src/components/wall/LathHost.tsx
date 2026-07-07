@@ -35,7 +35,7 @@ import { type DropCandidate, hitTest } from '../../lib/lath/hit-test';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
 import type { PaneProps } from './pane-props';
 import type { LeafMeta } from './lath-wall-store';
-import type { LathWallEngine } from './lath-wall-engine';
+import { nowMs, type LathWallEngine } from './lath-wall-engine';
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
@@ -67,9 +67,6 @@ const Z_PREVIEW = 45;
  *  divs are registered for the animator via `registerEl`, but `getAnimEl` is a no-op
  *  so `usePaneChrome`'s class-based effect stays inert under Lath. */
 const NOOP_GET_ANIM_EL = (): HTMLElement | null => null;
-
-/** Wall-clock reader for the animator. Isolated so tests can mock `performance.now`. */
-const nowMs = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 /** Test seam: swap the resolved body/tab components (keyed by component name) so
  *  jsdom tests never mount the real TerminalPane/xterm. */
@@ -587,6 +584,9 @@ export function LathHost({
   // TARGET geometry; these writes override it while a tween/fade is in flight. ---
 
   const rafRef = useRef<number | null>(null);
+  // Holds the latest `step` for the rAF schedule inside `pump`, so `pump` needn't take
+  // `step` as a dependency (they reference each other).
+  const stepRef = useRef<() => void>(() => {});
   // The zoomed leaf is React-driven (full-rect) and never animated, so `applyFrames`
   // skips it. Kept in a ref so the rAF callback always sees the latest.
   const zoomedIdRef = useRef<string | null>(null);
@@ -618,26 +618,25 @@ export function LathHost({
     [animator],
   );
 
-  // The rAF tick: paint the current frame, tell chrome, reschedule while unsettled.
-  const step = useCallback(() => {
-    rafRef.current = null;
-    const t = nowMs();
-    applyFrames(t);
-    const settled = animator.settledAt(t);
-    lath.notifyFrames(settled);
-    if (!settled) rafRef.current = requestAnimationFrame(step);
-  }, [applyFrames, animator, lath]);
-
-  // Entry point (from the retarget effects and the markDying wake): paint now — this
-  // runs pre-paint when called from a layout effect, so the first frame is correct —
-  // and ensure the loop is scheduled while anything is still moving.
+  // The single tick body and the loop's entry point (from the retarget effects and the
+  // markDying wake): paint now — this runs pre-paint when called from a layout effect,
+  // so the first frame is correct — tell chrome, and schedule the loop while anything is
+  // still moving. Reschedules only when no frame is already pending.
   const pump = useCallback(() => {
     const t = nowMs();
     applyFrames(t);
     const settled = animator.settledAt(t);
     lath.notifyFrames(settled);
-    if (!settled && rafRef.current === null) rafRef.current = requestAnimationFrame(step);
-  }, [applyFrames, animator, lath, step]);
+    if (!settled && rafRef.current === null) rafRef.current = requestAnimationFrame(stepRef.current);
+  }, [applyFrames, animator, lath]);
+
+  // The scheduled rAF callback: clear the handle it just consumed, then re-enter `pump`
+  // (whose reschedule guard now passes, continuing the loop while still unsettled).
+  const step = useCallback(() => {
+    rafRef.current = null;
+    pump();
+  }, [pump]);
+  stepRef.current = step;
 
   // A committed layout change (store commit that alters the tree). Retarget every
   // leaf FROM its current interpolated frame (interruptible); a sash-drag commit

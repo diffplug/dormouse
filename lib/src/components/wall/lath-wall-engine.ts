@@ -42,6 +42,11 @@ import {
 } from './lath-dockview-convert';
 import type { DooredItem, VisiblePane } from './wall-types';
 
+/** Wall-clock reader for the animator (the single definition — LathHost imports it
+ *  rather than duplicating one). Kept out of the pure core, which always takes `now`
+ *  as an argument; isolated here so tests can mock `performance.now`. */
+export const nowMs = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
 /** dor split direction → Lath edge. `'up'`/`'down'` map to the vertical axis. */
 export function edgeForDorDirection(direction: DorResolvedSplitDirection): Edge {
   switch (direction) {
@@ -84,24 +89,6 @@ export function doorDirectionForEdge(edge: Edge): DoorDirection {
       return 'above';
     case 'bottom':
       return 'below';
-  }
-}
-
-/** The edge a newly-placed leaf grows FROM — the boundary it shares with its
- *  reference, i.e. the edge opposite where it landed. A pane split to the `'right'`
- *  enters from its `'left'` edge; one placed `'bottom'` enters from its `'top'`. Feeds
- *  the animator's enter hint (the correct-for-all-four-directions successor to the
- *  coarse dockview `spawnDirectionForDockview`). */
-export function enterFromForEdge(edge: Edge): EnterFrom {
-  switch (edge) {
-    case 'left':
-      return 'right';
-    case 'right':
-      return 'left';
-    case 'top':
-      return 'bottom';
-    case 'bottom':
-      return 'top';
   }
 }
 
@@ -182,10 +169,12 @@ export type LathWallEngine = {
    *  the animator duration (0 under reduced motion). */
   exitMs: number;
   /** Record the edge a soon-to-be-added leaf should enter from (drained by LathHost
-   *  at the next `retarget`). A plain map — not store state — so it never notifies. */
+   *  at the next `retarget`). Passthrough to the store, which owns the hint map and
+   *  derives a hint internally from the edge each mutator commits; an explicit call
+   *  here (the auto-spawn `'top-left'` override) still wins. */
   setEnterHint(id: string, enterFrom: EnterFrom): void;
   /** Drain and return every pending enter hint (LathHost consumes these when it
-   *  ingests a committed layout). */
+   *  ingests a committed layout). Passthrough to the store. */
   consumeEnterHints(): Map<string, EnterFrom>;
   /** Begin a leaf's exit fade (phase 1 of a kill); `shrinkTowardBottomRight` also
    *  collapses it toward its bottom-right corner (the last-pane kill). Idempotent. */
@@ -203,6 +192,8 @@ export type LathWallEngine = {
   // --- reads ---
   /** Visible leaves in tree pre-order, each with its meta title + params. */
   listPanes(): VisiblePane[];
+  /** Leaf ids in tree pre-order (the id-only counterpart to `listPanes`). */
+  leafIds(): string[];
   /** Whether `id` is a live leaf. */
   has(id: string): boolean;
   /** The leaf's metadata, or undefined. */
@@ -256,34 +247,25 @@ export function createLathWallEngine(
   const durationMs = opts?.durationMs ?? (prefersReducedMotion() ? 0 : LATH_MOTION_MS);
   const animator = createAnimator({ durationMs, easing: LATH_EASING });
 
-  // Presentation-only side state (never in the store snapshot): enter hints drained
-  // per retarget, the set of ids mid-fade, and the frame/wake listener sets.
-  const enterHints = new Map<string, EnterFrom>();
-  const dyingIds = new Set<string>();
+  // Presentation-only side state (never in the store snapshot): the frame/wake
+  // listener sets. Enter hints live in the store; dying state lives in the animator.
   const frameListeners = new Set<(settled: boolean) => void>();
   const wakeListeners = new Set<() => void>();
-  const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
   return {
     store,
 
     animator,
     exitMs: durationMs,
-    setEnterHint(id, enterFrom) {
-      enterHints.set(id, enterFrom);
-    },
-    consumeEnterHints() {
-      const drained = new Map(enterHints);
-      enterHints.clear();
-      return drained;
-    },
+    setEnterHint: (id, enterFrom) => store.setEnterHint(id, enterFrom),
+    consumeEnterHints: () => store.consumeEnterHints(),
     markDying(id, markOpts) {
-      if (dyingIds.has(id)) return;
-      dyingIds.add(id);
-      animator.markDying(id, now(), markOpts);
+      // The animator owns dying state (idempotent per id); wake the tick loop, since
+      // a fade starts no store commit and so fires no retarget effect.
+      animator.markDying(id, nowMs(), markOpts);
       for (const l of wakeListeners) l();
     },
-    isDying: (id) => dyingIds.has(id),
+    isDying: (id) => animator.isDying(id),
     subscribeFrames(cb) {
       frameListeners.add(cb);
       return () => frameListeners.delete(cb);
@@ -303,16 +285,14 @@ export function createLathWallEngine(
         return { id, title: m?.title, params: m?.params };
       });
     },
+    leafIds: () => store.leafIds(),
     has: (id) => store.has(id),
     getMeta: (id) => snapshot().leafMeta.get(id),
     neighborOf: (id, direction) => store.neighborOf(id, direction),
     autoEdgeFor: (id) => store.autoEdgeFor(id),
 
     addLeaf: (id, meta, position) => store.addLeaf(id, meta, position),
-    removeLeaf: (id) => {
-      dyingIds.delete(id);
-      return store.removeLeaf(id);
-    },
+    removeLeaf: (id) => store.removeLeaf(id),
     replaceLeaf: (oldId, newId, meta) => store.replaceLeaf(oldId, newId, meta),
     restoreLeaf: (meta, token, opts) => store.restoreLeaf(meta, token, opts),
     swapLeaves: (a, b) => store.swapLeaves(a, b),

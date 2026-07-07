@@ -199,8 +199,9 @@ export function createAnimator(opts: { durationMs: number; easing?: (t: number) 
         next.set(id, { from, to, start });
       }
 
-      // Drop dying leaves the tree no longer contains (their fade already ran).
-      for (const id of [...dying.keys()]) {
+      // Drop dying leaves the tree no longer contains (their fade already ran). A Map
+      // tolerates deletion during its own key iteration, so no snapshot is needed.
+      for (const id of dying.keys()) {
         if (!targets.has(id)) dying.delete(id);
       }
       anims = next;
@@ -208,8 +209,11 @@ export function createAnimator(opts: { durationMs: number; easing?: (t: number) 
 
     markDying(id, now, dyingOpts) {
       if (dying.has(id)) return; // idempotent
-      const cur = framesAt(now).get(id) ?? anims.get(id)?.to;
-      if (!cur) return; // unknown leaf — nothing to fade
+      // Sample this leaf's own live segment directly (it is not dying, per the guard
+      // above) instead of building the whole frame map just to read one entry.
+      const seg = anims.get(id);
+      if (!seg) return; // unknown leaf — nothing to fade
+      const cur = sample(seg, now);
       const fromRect = cur.rect;
       const toRect = dyingOpts?.shrinkTowardBottomRight
         ? { x: fromRect.x + fromRect.width, y: fromRect.y + fromRect.height, width: 0, height: 0 }

@@ -17,7 +17,9 @@ import {
   findLeafPath,
   leafTree,
   leaves,
+  oppositeEdge,
 } from '../../lib/lath/model';
+import type { EnterFrom } from '../../lib/lath/animator';
 import { type Direction, type LayoutOpts, autoEdge, neighbors } from '../../lib/lath/layout';
 import {
   type DropTarget,
@@ -130,6 +132,15 @@ export type LathWallStore = {
    *  it never notifies. */
   setLayoutGeometry(rect: Rect, opts: LayoutOpts): void;
 
+  /** Record the edge a soon-to-be-added leaf should enter from (drained at the next
+   *  retarget). An explicit call always wins — the mutators derive a hint internally
+   *  from the edge they commit, but only when none was pre-set for that id (e.g. the
+   *  auto-spawn `'top-left'` policy override). Side state, never in the snapshot. */
+  setEnterHint(id: LeafId, enterFrom: EnterFrom): void;
+  /** Drain and return every pending enter hint (LathHost consumes these when it
+   *  ingests a committed layout). */
+  consumeEnterHints(): Map<string, EnterFrom>;
+
   /** Pre-order leaf ids of the current tree. */
   leafIds(): LeafId[];
   /** Whether `id` is a leaf in the current tree. */
@@ -154,7 +165,17 @@ export function createLathWallStore(): LathWallStore {
   });
   // Last geometry LathHost rendered with; drives queries, never part of a snapshot.
   let geometry: { rect: Rect; opts: LayoutOpts } | null = null;
+  // Enter hints drained per retarget by LathHost. Side state, never in the snapshot.
+  const enterHints = new Map<string, EnterFrom>();
   const listeners = new Set<() => void>();
+
+  /** Derive an enter hint from the edge a mutator actually committed, unless an
+   *  explicit `setEnterHint` already named this leaf (a policy override wins). The
+   *  leaf grows FROM the boundary it shares with its reference — the opposite edge. */
+  function deriveEnterHint(id: LeafId, placementEdge: Edge): void {
+    if (enterHints.has(id)) return;
+    enterHints.set(id, oppositeEdge(placementEdge));
+  }
 
   function notify(): void {
     for (const listener of listeners) listener();
@@ -220,6 +241,9 @@ export function createLathWallStore(): LathWallStore {
 
       const r = split(tree, refId, edge, id);
       if (!r.ok) return { ok: false };
+      // Enter from the boundary the split lands beside (opposite the placement edge) —
+      // including the null-position `autoEdge` fallback, so those adds animate too.
+      deriveEnterHint(id, edge);
       const m = cloneMeta();
       m.set(id, meta);
       commit({ tree: r.tree, leafMeta: m });
@@ -255,6 +279,9 @@ export function createLathWallStore(): LathWallStore {
         layoutOpts: geometry?.opts,
       });
       if (!r.ok) return { ok: false, tier: r.tier };
+      // Enter from the boundary the door lands beside (opposite the token's edge). An
+      // exact-tier restore may land on a different edge — acceptable; entry is cosmetic.
+      deriveEnterHint(token.leafId, token.edge);
       const m = cloneMeta();
       m.set(token.leafId, meta);
       commit({ tree: r.tree, leafMeta: m });
@@ -280,6 +307,8 @@ export function createLathWallStore(): LathWallStore {
     insertLeaf(id, meta, target) {
       const r = insert(snapshot.tree, id, target);
       if (!r.ok) return { ok: false };
+      // A successful insert is always an edge target — enter from its opposite edge.
+      if (target.kind === 'edge') deriveEnterHint(id, target.edge);
       const m = cloneMeta();
       m.set(id, meta);
       commit({ tree: r.tree, leafMeta: m });
@@ -317,6 +346,15 @@ export function createLathWallStore(): LathWallStore {
 
     setLayoutGeometry(rect, opts) {
       geometry = { rect, opts };
+    },
+
+    setEnterHint(id, enterFrom) {
+      enterHints.set(id, enterFrom);
+    },
+    consumeEnterHints() {
+      const drained = new Map(enterHints);
+      enterHints.clear();
+      return drained;
     },
 
     leafIds: () => leaves(snapshot.tree),

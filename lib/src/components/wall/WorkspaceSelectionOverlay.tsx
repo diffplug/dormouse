@@ -18,23 +18,18 @@ export interface LathOverlayStore {
   getSnapshot(): { revision: number };
 }
 
-/** The animator's per-frame signal (LathHost pumps it). While frames stream the
- *  overlay re-measures the moving leaf each frame and drops its own CSS transition
- *  (which would otherwise lag the streamed rects by ~150ms). */
-export interface LathFramesSignal {
-  subscribe(cb: (settled: boolean) => void): () => void;
-}
-
 const NOOP_SUBSCRIBE = (): (() => void) => () => {};
 const NOOP_REVISION = (): number => 0;
 
-export function WorkspaceSelectionOverlay({ apiRef, lathStore, lathFrames, selectedId, selectedType, mode, overlayElRef }: {
+export function WorkspaceSelectionOverlay({ apiRef, lathStore, subscribeLathFrames, selectedId, selectedType, mode, overlayElRef }: {
   apiRef: RefObject<DockviewApi | null>;
   /** When set (flag on), the overlay re-measures on every Lath commit instead of
    *  `api.onDidLayoutChange`. `apiRef` stays null on this path. */
   lathStore?: LathOverlayStore | null;
-  /** When set (flag on), the ring also tracks the animator's per-frame updates. */
-  lathFrames?: LathFramesSignal | null;
+  /** The animator's per-frame subscribe (LathHost pumps it). When set (flag on), the
+   *  ring re-measures the moving leaf each frame and drops its own CSS transition (which
+   *  would otherwise lag the streamed rects by ~150ms). */
+  subscribeLathFrames?: ((cb: (settled: boolean) => void) => () => void) | null;
   selectedId: string | null;
   selectedType: WallSelectionKind;
   mode: WallMode;
@@ -74,12 +69,19 @@ export function WorkspaceSelectionOverlay({ apiRef, lathStore, lathFrames, selec
 
       const targetRect = targetEl.getBoundingClientRect();
       const inflate = selectedType === 'door' ? 0 : INFLATE;
-      setRect({
+      const next = {
         top: targetRect.top - inflate,
         left: targetRect.left - inflate,
         width: targetRect.width + inflate * 2,
         height: targetRect.height + inflate * 2,
-      });
+      };
+      // Bail on an unchanged rect (returning the same identity) so a per-frame animator
+      // tick on a stationary selected ring doesn't re-render or force a re-layout.
+      setRect((prev) =>
+        prev && prev.top === next.top && prev.left === next.left && prev.width === next.width && prev.height === next.height
+          ? prev
+          : next,
+      );
     };
 
     update();
@@ -95,13 +97,13 @@ export function WorkspaceSelectionOverlay({ apiRef, lathStore, lathFrames, selec
     // an animation runs, via the animator's per-frame signal (the leaf divs carry the
     // interpolated inline styles, so DOM measurement tracks the tween frame-accurately).
     const d = api?.onDidLayoutChange(update);
-    const unsubFrames = lathFrames?.subscribe((settled) => {
+    const unsubFrames = subscribeLathFrames?.((settled) => {
       update();
       setAnimating(!settled);
     });
 
     return () => { ro.disconnect(); d?.dispose(); unsubFrames?.(); };
-  }, [apiRef, lathStore, lathFrames, lathRevision, selectedId, selectedType, paneVersion, doorVersion, paneElements, doorElements]);
+  }, [apiRef, lathStore, subscribeLathFrames, lathRevision, selectedId, selectedType, paneVersion, doorVersion, paneElements, doorElements]);
 
   if (!rect || !selectedId) return null;
 

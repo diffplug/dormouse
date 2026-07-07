@@ -93,7 +93,6 @@ import {
   doorDirectionForEdge,
   dorDirectionForEdge,
   edgeForDorDirection,
-  enterFromForEdge,
   directionForArrow,
   type LathWallEngine,
 } from './wall/lath-wall-engine';
@@ -810,7 +809,7 @@ export function Wall({
       // dockview path did), then commit `remove` once the fade completes — survivors
       // tween into the reclaimed space. Dispose the session now so the content freezes
       // under the fade. The restore token is discarded (kills don't restore).
-      const lastLeaf = lath.listPanes().length === 1;
+      const lastLeaf = lath.leafIds().length === 1;
       lath.markDying(id, { shrinkTowardBottomRight: lastLeaf });
       disposeSession(id);
       setTimeout(() => {
@@ -1112,10 +1111,7 @@ export function Wall({
         params: item.params,
       };
       const token = (item.token as RestoreToken | undefined) ?? legacyTokenFromDoor(item);
-      // Enter from the boundary the restore lands beside (opposite the token's edge).
-      // An exact-tier restore may land on a different edge — acceptable; the entry
-      // direction is purely cosmetic.
-      lath.setEnterHint(item.id, enterFromForEdge(token.edge));
+      // The enter hint (from the token's edge) is derived inside `restoreLeaf`.
       const sel = selectedIdRef.current;
       const fallbackRef = sel && selectedTypeRef.current === 'pane' && lath.has(sel)
         ? sel
@@ -1427,7 +1423,6 @@ export function Wall({
       let selectedNew: boolean;
       if (lath) {
         const edge = edgeForDorDirection(direction);
-        lath.setEnterHint(newId, enterFromForEdge(edge));
         lath.addLeaf(newId, terminalLeafMeta(), { refId: referenceId, edge });
         selectedNew = settleAddSelection(!!focusNeutral, false, newId);
       } else {
@@ -1539,7 +1534,6 @@ export function Wall({
     runSurfaceAdd(focusNeutral, (caller) => {
       let selectedNew: boolean;
       if (lath) {
-        lath.setEnterHint(newId, enterFromForEdge(lathEdge!));
         lath.addLeaf(newId, browserMeta, { refId: reference.id, edge: lathEdge! });
         selectedNew = settleAddSelection(!!focusNeutral, false, newId);
       } else {
@@ -1682,7 +1676,8 @@ export function Wall({
         // when it's a live pane, else `null` lets the store fall back to the last leaf
         // via autoEdge (its own null-position behavior).
         const edge = selectedPaneVisible ? lath.autoEdgeFor(selectedPaneId!) : null;
-        if (edge) lath.setEnterHint(newId, enterFromForEdge(edge));
+        // The enter hint is derived inside `addLeaf` from the edge it commits — including
+        // the null-position `autoEdge` fallback when no pane is selected.
         lath.addLeaf(newId, terminalLeafMeta(), edge ? { refId: selectedPaneId!, edge } : null);
       } else {
         const active = api!.activePanel;
@@ -2141,7 +2136,7 @@ export function Wall({
       const panes = lath.listPanes();
       const refId = ref ?? (panes.length > 0 ? panes[panes.length - 1].id : null);
       const edge: Edge = direction === 'right' ? 'right' : 'bottom';
-      if (refId) lath.setEnterHint(newId, enterFromForEdge(edge));
+      // The enter hint is derived inside `addLeaf` from the edge it commits.
       lath.addLeaf(newId, terminalLeafMeta(), refId ? { refId, edge } : null);
     } else {
       api!.addPanel({
@@ -2372,14 +2367,6 @@ export function Wall({
     lath?.store.resizeBoundary(splitPath, boundary, deltaPx);
   }, [lath]);
 
-  // The animator's per-frame signal, handed to the selection overlay so its ring
-  // re-measures the moving leaf every frame (and drops its own CSS transition while
-  // frames stream). Stable — `lath` is a ref value.
-  const lathFrames = useMemo(
-    () => (lath ? { subscribe: lath.subscribeFrames } : null),
-    [lath],
-  );
-
   // --- Pane / Door drag-and-drop (Lath only; docs/specs/tiling-engine.md →
   // "Hierarchical drag and drop"). LathHost owns the gesture and hit-testing; the Wall
   // owns the op commit + selection policy. ---
@@ -2416,8 +2403,8 @@ export function Wall({
 
   // Drop of a dragged-out Door: `null` (cancel / no candidate) leaves the Door where it
   // is; a target reattaches the surface at the hit-tested position. The token is NOT
-  // consulted — the user chose the spot. Enter hint is set BEFORE the insert commit so
-  // the entry animation plays (mirrors handleReattach's ordering).
+  // consulted — the user chose the spot. The enter hint (from the target edge) is derived
+  // inside `insertLeaf`.
   const onExternalDrop = useCallback((target: DropTarget | null) => {
     const item = doorDrag;
     setDoorDrag(null);
@@ -2428,7 +2415,6 @@ export function Wall({
       title: item.title,
       params: item.params,
     };
-    lath.setEnterHint(item.id, target.kind === 'edge' ? enterFromForEdge(target.edge) : 'top-left');
     const r = lath.insertLeaf(item.id, meta, target);
     if (!r.ok) return; // insert failed (unexpected) → the Door stays put
     const nextDoors = doorsRef.current.filter((d) => d.id !== item.id);
@@ -2475,7 +2461,7 @@ export function Wall({
                     singleTabMode="fullwidth"
                   />
                 )}
-                <WorkspaceSelectionOverlay apiRef={apiRef} lathStore={lath ? lath.store : null} lathFrames={lathFrames} selectedId={selectedId} selectedType={selectedType} mode={mode} overlayElRef={overlayElRef} />
+                <WorkspaceSelectionOverlay apiRef={apiRef} lathStore={lath ? lath.store : null} subscribeLathFrames={lath ? lath.subscribeFrames : null} selectedId={selectedId} selectedType={selectedType} mode={mode} overlayElRef={overlayElRef} />
               </div>
             </div>
 

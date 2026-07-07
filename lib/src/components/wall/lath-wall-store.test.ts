@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createLathWallStore, type LathWallStore, type LeafMeta } from './lath-wall-store';
-import { leaves, type LathTree } from '../../lib/lath/model';
+import { leaves, oppositeEdge, type LathTree } from '../../lib/lath/model';
 import type { LayoutOpts } from '../../lib/lath/layout';
 
 const OPTS: LayoutOpts = { gap: 6, minLeaf: { width: 100, height: 60 } };
@@ -251,6 +251,51 @@ describe('insertLeaf', () => {
     expect(store.insertLeaf('a', meta(), { kind: 'edge', path: [1], edge: 'right' }).ok).toBe(false);
     expect(store.insertLeaf('c', meta(), { kind: 'swap', leaf: 'a' }).ok).toBe(false);
     expect(store.getSnapshot().revision).toBe(rev);
+  });
+});
+
+describe('enter hints (derived inside the mutators)', () => {
+  it('addLeaf derives the opposite-edge hint from a positioned split', () => {
+    const store = seeded();
+    store.addLeaf('c', meta(), { refId: 'a', edge: 'right' });
+    // Placed on the right → grows from the shared (left) boundary.
+    expect(store.consumeEnterHints().get('c')).toBe('left');
+  });
+
+  it('addLeaf derives a hint from its null-position autoEdge fallback', () => {
+    const store = seeded();
+    store.setLayoutGeometry(RECT, OPTS);
+    const edge = store.autoEdgeFor('b'); // the last leaf it splits beside
+    store.addLeaf('c', meta(), null);
+    expect(store.consumeEnterHints().get('c')).toBe(oppositeEdge(edge));
+  });
+
+  it('restoreLeaf derives the hint from the token edge, and consume drains the map', () => {
+    const store = seeded();
+    store.setLayoutGeometry(RECT, OPTS);
+    const removed = store.removeLeaf('b');
+    store.restoreLeaf(meta(), removed.token!, { fallbackRef: 'a' });
+    expect(store.consumeEnterHints().get('b')).toBe(oppositeEdge(removed.token!.edge));
+    expect(store.consumeEnterHints().size).toBe(0); // consume clears the map
+  });
+
+  it('insertLeaf derives the hint from an edge target', () => {
+    const store = seeded();
+    store.insertLeaf('c', meta(), { kind: 'edge', path: [1], edge: 'right' });
+    expect(store.consumeEnterHints().get('c')).toBe('left');
+  });
+
+  it('an explicit pre-set setEnterHint wins over the mutator-derived hint', () => {
+    const store = seeded();
+    store.setEnterHint('c', 'top-left'); // policy override (e.g. auto-spawn refill)
+    store.addLeaf('c', meta(), { refId: 'a', edge: 'right' });
+    expect(store.consumeEnterHints().get('c')).toBe('top-left');
+  });
+
+  it('sets no hint for an empty-tree root add (no edge to derive from)', () => {
+    const store = createLathWallStore();
+    store.addLeaf('x', meta(), null); // becomes the root
+    expect(store.consumeEnterHints().size).toBe(0);
   });
 });
 

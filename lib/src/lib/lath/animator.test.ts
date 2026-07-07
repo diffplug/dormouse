@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { createAnimator, cubicBezier, LATH_EASING, LATH_MOTION_MS } from './animator';
 import type { Rect } from './model';
+import { R } from './test-util';
 
-const rect = (x: number, y: number, width: number, height: number): Rect => ({ x, y, width, height });
-const A = rect(0, 0, 100, 100);
-const B = rect(200, 50, 300, 400);
+const A = R(0, 0, 100, 100);
+const B = R(200, 50, 300, 400);
 
 // A fixed clock: the animator takes `now` as an argument, so tests pass plain numbers.
 const T0 = 1000;
@@ -78,7 +78,7 @@ describe('animator retarget + framesAt', () => {
     a.retarget(new Map([['x', A]]), T0);
     a.retarget(new Map([['x', B]]), T0); // A → B
     const midFrame = a.framesAt(T0 + DUR / 2).get('x')!;
-    const C = rect(-100, -100, 10, 10);
+    const C = R(-100, -100, 10, 10);
     a.retarget(new Map([['x', C]]), T0 + DUR / 2); // interrupt → new from = midFrame
     // Immediately after the interrupt, the frame equals where it was.
     const at = a.framesAt(T0 + DUR / 2).get('x')!;
@@ -93,7 +93,7 @@ describe('animator retarget + framesAt', () => {
   });
 
   it('enters from each edge collapsed against that edge of the target', () => {
-    const target = rect(100, 100, 200, 80);
+    const target = R(100, 100, 200, 80);
     const check = (edge: 'left' | 'right' | 'top' | 'bottom' | 'top-left', expected: Rect) => {
       const a = make();
       a.retarget(new Map([['n', target]]), T0, new Map([['n', edge]]));
@@ -105,11 +105,11 @@ describe('animator retarget + framesAt', () => {
       expect(a.framesAt(T0 + DUR).get('n')!.rect).toEqual(target);
       expect(a.framesAt(T0 + DUR).get('n')!.opacity).toBe(1);
     };
-    check('left', rect(100, 100, 0, 80));
-    check('right', rect(300, 100, 0, 80));
-    check('top', rect(100, 100, 200, 0));
-    check('bottom', rect(100, 180, 200, 0));
-    check('top-left', rect(100, 100, 0, 0));
+    check('left', R(100, 100, 0, 80));
+    check('right', R(300, 100, 0, 80));
+    check('top', R(100, 100, 200, 0));
+    check('bottom', R(100, 180, 200, 0));
+    check('top-left', R(100, 100, 0, 0));
   });
 
   it('drops leaves absent from the new targets', () => {
@@ -126,7 +126,7 @@ describe('animator retarget + framesAt', () => {
     a.retarget(new Map([['x', A]]), T0);
     a.retarget(new Map([['x', B]]), T0); // tween A→B
     // Snap to C mid-flight.
-    const C = rect(5, 5, 5, 5);
+    const C = R(5, 5, 5, 5);
     a.retarget(new Map([['x', C]]), T0 + DUR / 2, undefined, { snap: true });
     expect(a.framesAt(T0 + DUR / 2).get('x')!.rect).toEqual(C);
     expect(a.settledAt(T0 + DUR / 2)).toBe(true);
@@ -155,10 +155,10 @@ describe('animator markDying', () => {
 
   it('shrinks toward the bottom-right corner at zero size', () => {
     const a = make();
-    a.retarget(new Map([['x', rect(10, 20, 100, 60)]]), T0);
+    a.retarget(new Map([['x', R(10, 20, 100, 60)]]), T0);
     a.markDying('x', T0, { shrinkTowardBottomRight: true });
     const end = a.framesAt(T0 + DUR).get('x')!;
-    expect(end.rect).toEqual(rect(110, 80, 0, 0)); // x+w, y+h, 0, 0
+    expect(end.rect).toEqual(R(110, 80, 0, 0)); // x+w, y+h, 0, 0
     expect(end.opacity).toBe(0);
   });
 
