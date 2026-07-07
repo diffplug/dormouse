@@ -483,6 +483,7 @@ export function Wall({
   onApiReady,
   onEvent,
   baseboardNotice,
+  dialogHost,
   showBaseboard = true,
   enableRemoteHost = false,
 }: {
@@ -493,6 +494,14 @@ export function Wall({
   onApiReady?: (api: DockviewApi) => void;
   onEvent?: (event: WallEvent) => void;
   baseboardNotice?: ReactNode;
+  /**
+   * Host-provided modal host(s) (e.g. the standalone quit-confirmation dialog),
+   * mounted beside the built-in modal hosts inside the Wall's
+   * `DialogKeyboardContext` provider so they can suppress command-mode keyboard
+   * dispatch while visible. Unlike `baseboardNotice`, this renders regardless
+   * of `showBaseboard`.
+   */
+  dialogHost?: ReactNode;
   showBaseboard?: boolean;
   /**
    * Opt in to the remote-control Host (the "Pocket" pairing seam). Only the
@@ -2075,6 +2084,7 @@ export function Wall({
                 <RemotePairingModalHost onKeyboardActiveChange={setDialogKeyboardActive} />
               </Suspense>
             ) : null}
+            {dialogHost}
 
           </div>
           </DialogKeyboardContext.Provider>

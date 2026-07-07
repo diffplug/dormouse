@@ -1,3 +1,4 @@
+import { ESC, RESET } from './ansi';
 import type { TerminalEntry } from './terminal-store';
 
 export function inputContainsEnter(data: string): boolean {
@@ -47,14 +48,14 @@ export function stripMouseReportsFromInput(data: string): string {
 // §Replay-time mode-reset tail. The mouse-encoding DECRSTs (?1005/?1006/?1015)
 // aren't surfaced by `terminal.modes` but xterm's parser consumes them.
 export const REPLAY_MODE_RESET =
-  '\x1b[?1049l\x1b[?47l\x1b[?1047l' + // exit alt-screen (current + legacy variants)
-  '\x1b[?9l\x1b[?1000l\x1b[?1002l\x1b[?1003l' + // disable mouse tracking
-  '\x1b[?1005l\x1b[?1006l\x1b[?1015l' + // disable mouse encodings (utf8/SGR/urxvt)
-  '\x1b[?1004l' + // focus reporting off
-  '\x1b[?2004l' + // bracketed paste off (the new shell re-enables it at its prompt)
-  '\x1b[?25h' + // show cursor
-  '\x1b[?1l' + // application cursor keys off
-  '\x1b[0m'; // SGR reset
+  `${ESC}?1049l${ESC}?47l${ESC}?1047l` + // exit alt-screen (current + legacy variants)
+  `${ESC}?9l${ESC}?1000l${ESC}?1002l${ESC}?1003l` + // disable mouse tracking
+  `${ESC}?1005l${ESC}?1006l${ESC}?1015l` + // disable mouse encodings (utf8/SGR/urxvt)
+  `${ESC}?1004l` + // focus reporting off
+  `${ESC}?2004l` + // bracketed paste off (the new shell re-enables it at its prompt)
+  `${ESC}?25h` + // show cursor
+  `${ESC}?1l` + // application cursor keys off
+  RESET; // SGR reset
 
 export function writeReplay(entry: TerminalEntry, ...chunks: string[]): void {
   if (chunks.length === 0) return;

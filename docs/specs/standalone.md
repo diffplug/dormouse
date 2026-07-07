@@ -292,8 +292,8 @@ and durably write the freshest session before the process exits.
   the flow; the `approved` gate lets that final exit through without re-catching
   it.
 
-**The ack / proceed / cancel protocol.** `request_quit` sets `pending`, clears
-`acked`, bumps `seq`, and emits `dormouse://quit-requested` to the webview. The
+**The ack / proceed / cancel protocol.** `request_quit` clears `acked`, bumps
+`seq`, and emits `dormouse://quit-requested` to the webview. The
 webview's orchestrator (registered by `initQuitFlow`, Tauri-only) responds:
 
 1. **Always `quit_ack`** first (fire-and-catch), so Rust's phase-1 watchdog
@@ -301,9 +301,8 @@ webview's orchestrator (registered by `initQuitFlow`, Tauri-only) responds:
 2. Runs the teardown (below), then **`quit_proceed`** — which sets `approved` and
    calls `app.exit(0)`. That re-enters `ExitRequested` with `approved` true and
    the app exits.
-3. A confirmation-dialog cancel (below) calls **`quit_cancel`** — clears
-   `pending`, bumps `seq` (invalidating the live watchdog), and leaves the app
-   running.
+3. A confirmation-dialog cancel (below) calls **`quit_cancel`** — bumps `seq`
+   (invalidating the live watchdog) and leaves the app running.
 
 A cloned-`AppHandle` **watchdog** thread keeps quit bounded against a dead or
 wedged webview, in two phases: **~2 s** for the ack (no ack ⇒ the listener is
@@ -339,11 +338,12 @@ gate check reads.
   its context the instant a decision is made, so a redundant confirm/cancel is a
   no-op; combined with the orchestrator's `quitPhase` dedupe, a repeated quit
   trigger while the dialog is open neither re-opens nor stacks it.
-- **Mount.** `<QuitConfirmModalHost>` renders in the Wall's `baseboardNotice`
-  slot (`main.tsx`, beside the update banner), which sits inside Wall's
-  `DialogKeyboardContext` provider; the host toggles that context while visible
-  so command-mode keyboard dispatch is suppressed under the modal. The modal
-  itself is a `ModalFrame` (`layer="critical"`, `backdrop="strong"`,
+- **Mount.** `<QuitConfirmModalHost>` is passed as Wall's `dialogHost` prop
+  (`main.tsx` → `App` → `Wall`), which renders it beside the built-in modal
+  hosts inside Wall's `DialogKeyboardContext` provider — unconditionally, unlike
+  the Baseboard's `baseboardNotice` slot; the host toggles that context while
+  visible so command-mode keyboard dispatch is suppressed under the modal. The
+  modal itself is a `ModalFrame` (`layer="critical"`, `backdrop="strong"`,
   focus-trapped), matching the ExternalLinkModal pattern and the in-pane
   kill-confirmation aesthetic (`docs/specs/layout.md`).
 
@@ -426,9 +426,9 @@ root `package.json` for the `dev:standalone*` orchestration.
 | `standalone/src-tauri/src/clipboard_win.rs` | Native Win32 clipboard reads on Windows (owned by `docs/specs/mouse-and-clipboard.md`) |
 | `standalone/scripts/tauri.mjs`, `csp.mjs` | Tauri CLI wrapper assembling the webview CSP (`DORMOUSE_REMOTE_CONNECT_SRC`) |
 | `standalone/src-tauri/tauri.conf.json` | Window config, dev/build commands, sidecar resources glob, updater config |
-| `standalone/src/main.tsx` | Webview bootstrap (boot sequence above); initializes the quit orchestrator and installs the confirmation gate on the Tauri branch, mounts `<QuitConfirmModalHost>` in the `baseboardNotice` slot |
+| `standalone/src/main.tsx` | Webview bootstrap (boot sequence above); initializes the quit orchestrator and installs the confirmation gate on the Tauri branch, mounts `<QuitConfirmModalHost>` via Wall's `dialogHost` prop |
 | `standalone/src/quit.ts` | Quit orchestrator: listens for `dormouse://quit-requested`, runs the graceful teardown, calls `quit_ack` / `quit_proceed` / `quit_cancel` (§Quit flow) |
-| `standalone/src/quit-confirm-store.ts`, `QuitConfirmModal.tsx` | Quit-confirmation dialog: the running-work gate + module store, and the modal mounted in the `baseboardNotice` slot (§Quit flow, "Confirmation dialog") |
+| `standalone/src/quit-confirm-store.ts`, `QuitConfirmModal.tsx` | Quit-confirmation dialog: the running-work gate + module store, and the modal mounted via Wall's `dialogHost` prop (§Quit flow, "Confirmation dialog") |
 | `standalone/src/AppBar.tsx` | Titlebar: shell dropdown, theme picker, window controls |
 | `standalone/src/tauri-adapter.ts` | `TauriAdapter`: PlatformAdapter over Tauri invoke/events, session persistence via the Rust store, control-request dispatch |
 | `standalone/src/tauri-session-store.ts` | `TauriSessionStore`: Rust-backed `SessionKeyValueStore` — boot-seeded write-through cache over `load_session` / `save_session` (§Persistence) |

@@ -255,7 +255,8 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   // Warn-and-proceed: a stalled graceful kill must not wedge a quit teardown.
-  async gracefulKillAllPtys(timeoutMs = 2000): Promise<void> {
+  // Callers own the timeout — the teardown bounds live in one place, quit.ts.
+  async gracefulKillAllPtys(timeoutMs: number): Promise<void> {
     try {
       await rawInvoke("pty_graceful_kill_all", { timeout: timeoutMs });
     } catch (err) {
@@ -442,7 +443,7 @@ export class TauriAdapter implements PlatformAdapter {
   // handler is registered (quit during boot, before the Wall mounts), resolve
   // immediately: there is nothing queued to flush. Called by the (future) quit
   // orchestrator; pairs with drainSessionSaves to await the resulting Rust write.
-  requestSessionFlush(timeoutMs = 1500): Promise<void> {
+  requestSessionFlush(timeoutMs: number): Promise<void> {
     if (this.flushHandlers.size === 0) return Promise.resolve();
     const requestId = `flush-${++this.nextFlushRequestId}`;
     return new Promise<void>((resolve) => {
@@ -458,7 +459,7 @@ export class TauriAdapter implements PlatformAdapter {
   // Await the session store's in-flight/pending save_session pipeline (the Rust
   // temp+fsync+rename that actually reaches disk). Bounded: on timeout resolve
   // anyway rather than wedge quit.
-  drainSessionSaves(timeoutMs = 2000): Promise<void> {
+  drainSessionSaves(timeoutMs: number): Promise<void> {
     return withTimeout(
       this.sessionStore.drain(),
       timeoutMs,

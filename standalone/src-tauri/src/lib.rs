@@ -54,8 +54,6 @@ struct SidecarState {
 // `quit_proceed`. Protocol + watchdog phases: docs/specs/standalone.md §Quit flow.
 #[derive(Default)]
 struct QuitState {
-    // A quit is in flight: request_quit fired, no proceed/cancel yet.
-    pending: AtomicBool,
     // The webview acknowledged quit-requested — its listener is alive.
     acked: AtomicBool,
     // Teardown finished (or a watchdog gave up): cleared to exit. Gates the
@@ -82,7 +80,6 @@ fn request_quit(app: &AppHandle) {
     let Some(quit) = app.try_state::<QuitState>() else {
         return;
     };
-    quit.pending.store(true, Ordering::SeqCst);
     quit.acked.store(false, Ordering::SeqCst);
     // fetch_add returns the prior value; our watchdog's seq is that + 1.
     let my_seq = quit.seq.fetch_add(1, Ordering::SeqCst) + 1;
@@ -97,12 +94,10 @@ fn request_quit(app: &AppHandle) {
         let Some(quit) = app.try_state::<QuitState>() else {
             return;
         };
-        // Superseded (seq bumped), already exiting (approved), or cancelled
-        // (!pending) ⇒ this watchdog has nothing to do.
+        // Superseded (seq bumped by a repeated trigger or a cancel) or already
+        // exiting (approved) ⇒ this watchdog has nothing to do.
         let stale = |quit: &QuitState| {
-            quit.seq.load(Ordering::SeqCst) != my_seq
-                || quit.approved.load(Ordering::SeqCst)
-                || !quit.pending.load(Ordering::SeqCst)
+            quit.seq.load(Ordering::SeqCst) != my_seq || quit.approved.load(Ordering::SeqCst)
         };
         if stale(&quit) {
             return;
@@ -431,14 +426,13 @@ fn pty_get_scrollback(
 #[tauri::command]
 async fn pty_graceful_kill_all(
     state: tauri::State<'_, SidecarState>,
-    timeout: Option<u64>,
+    timeout: u64,
 ) -> Result<(), String> {
-    let t = timeout.unwrap_or(2000);
     request_from_sidecar_timeout(
         &state,
         "pty:gracefulKillAll",
-        serde_json::json!({ "timeout": t }),
-        Duration::from_millis(t + 1500),
+        serde_json::json!({ "timeout": timeout }),
+        Duration::from_millis(timeout + 1500),
     )?;
     Ok(())
 }
@@ -772,12 +766,11 @@ fn quit_ack(state: tauri::State<'_, QuitState>) {
     state.acked.store(true, Ordering::SeqCst);
 }
 
-// The user declined the quit (confirmation cancel). Clearing pending and
-// bumping seq invalidates any live watchdog for this quit so nothing exits.
+// The user declined the quit (confirmation cancel). Bumping seq invalidates any
+// live watchdog for this quit so nothing exits; the next request_quit starts
+// fresh (it re-clears `acked` itself).
 #[tauri::command]
 fn quit_cancel(state: tauri::State<'_, QuitState>) {
-    state.pending.store(false, Ordering::SeqCst);
-    state.acked.store(false, Ordering::SeqCst);
     state.seq.fetch_add(1, Ordering::SeqCst);
 }
 

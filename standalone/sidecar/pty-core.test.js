@@ -426,6 +426,18 @@ test('gracefulKillAll resolves early once every PTY has exited', async () => {
   assert.ok(Date.now() - started < 5_000);
 });
 
+test('gracefulKillAll with no live PTYs completes immediately', () => {
+  const events = [];
+  const mgr = create((event, data) => { events.push({ event, data }); }, {
+    spawn() { throw new Error('nothing should spawn'); },
+  });
+
+  mgr.gracefulKillAll(60_000, 'req-1');
+
+  // Synchronous done — no SIGTERMs were sent, so no poll/grace ticks run.
+  assert.deepEqual(events, [{ event: 'gracefulKillDone', data: { requestId: 'req-1' } }]);
+});
+
 test('parseCwdFromLsof returns the cwd for the requested pid', () => {
   const output = [
     'p100',

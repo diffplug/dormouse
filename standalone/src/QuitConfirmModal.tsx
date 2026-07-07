@@ -17,10 +17,11 @@ import {
 
 /**
  * Quit-confirmation dialog (docs/specs/standalone.md §Quit flow, "Confirmation
- * dialog"). Mounted in the `baseboardNotice` slot so it lives inside Wall's
- * `DialogKeyboardContext` provider; it suppresses command-mode keyboard
- * handling while visible. Store-connected shell + presentational modal, mirror
- * of the ExternalLinkModalHost / ExternalLinkModal pair.
+ * dialog"). Mounted through Wall's `dialogHost` slot, which renders it beside
+ * the built-in modal hosts inside Wall's `DialogKeyboardContext` provider; it
+ * suppresses command-mode keyboard handling while visible. Store-connected
+ * shell + presentational modal, mirror of the ExternalLinkModalHost /
+ * ExternalLinkModal pair.
  */
 export function QuitConfirmModalHost() {
   const phase = useSyncExternalStore(subscribeQuitConfirm, getQuitConfirmPhase);
@@ -37,7 +38,9 @@ export function QuitConfirmModalHost() {
   return <QuitConfirmModal confirming={phase === 'quitting'} />;
 }
 
-function QuitConfirmModal({ confirming }: { confirming: boolean }) {
+// Exported for Storybook (QuitConfirmModal.stories.tsx), which renders the
+// presentational modal directly — same split as ExternalLinkModal's stories.
+export function QuitConfirmModal({ confirming }: { confirming: boolean }) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
   // Live count — the dialog stays open even if it drops to 0 (see spec).
   const runningCount = useSyncExternalStore(subscribeToTerminalPaneState, countRunningSessions);

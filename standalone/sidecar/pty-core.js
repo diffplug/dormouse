@@ -1167,6 +1167,10 @@ module.exports.create = function create(send, ptyModule) {
   }
 
   function gracefulKillAll(timeout = 2000, requestId) {
+    const done = () => send('gracefulKillDone', { requestId });
+    // Nothing live ⇒ nothing to SIGTERM and no final flush to wait for; skip
+    // the poll/grace ticks so an all-idle quit doesn't pay their ~100ms floor.
+    if (ptys.size === 0) { done(); return; }
     for (const [, p] of ptys) {
       try { p.kill('SIGTERM'); } catch { /* already dead */ }
     }
@@ -1177,7 +1181,6 @@ module.exports.create = function create(send, ptyModule) {
     // empties, since ConPTY can fire onExit before the final data flush and that
     // last output must land in scrollback first.
     const deadline = Date.now() + timeout;
-    const done = () => send('gracefulKillDone', { requestId });
     const tick = () => {
       if (ptys.size === 0) setTimeout(done, 50);
       else if (Date.now() >= deadline) done();
