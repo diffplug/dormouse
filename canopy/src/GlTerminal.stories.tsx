@@ -207,8 +207,11 @@ function PageStory(props: GlTerminalProps) {
  */
 function ScaleComparison() {
   const SCALE = 3;
-  const BASE = 15;
+  const BASE = 32;
   const content = compactContent();
+  // Rough footprint of a 36x6 terminal at fontSize BASE, for the scaled wrapper
+  const termW = Math.round(BASE * 22);
+  const termH = Math.round(BASE * 7.7);
   return (
     <Page>
       <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -216,7 +219,7 @@ function ScaleComparison() {
           <div style={{ marginBottom: 8, fontSize: 13, color: '#f0a0a0' }}>
             raster atlas @ {BASE}px, bitmap-upscaled ×{SCALE}
           </div>
-          <div style={{ width: 340 * SCALE, height: 125 * SCALE, overflow: 'hidden' }}>
+          <div style={{ width: termW * SCALE, height: termH * SCALE, overflow: 'hidden' }}>
             <div style={{ transform: `scale(${SCALE})`, transformOrigin: 'top left' }}>
               <GlTerminal content={content} fontSize={BASE} cols={36} rows={6} />
             </div>
