@@ -6,6 +6,11 @@ use std::{
     process::Command,
 };
 
+// Shared with the crate (which includes it via `mod pe_subsystem;`) so the
+// load-bearing PE offsets and subsystem constants live in exactly one place.
+#[path = "src/pe_subsystem.rs"]
+mod pe_subsystem;
+
 fn main() {
     println!("cargo:rerun-if-env-changed=DORMOUSE_NODE_BINARY");
     println!("cargo:rerun-if-env-changed=NODE_BINARY");
@@ -74,32 +79,21 @@ fn bundle_node_runtime() -> Result<(), Box<dyn Error>> {
 // console-subsystem copy for `DORMOUSE_NODE` (see `resolve_dor_node_path`); dor
 // already runs inside a pseudo-console, so that copy can't cause a stray window.
 fn force_windows_gui_subsystem(path: &Path) -> Result<(), Box<dyn Error>> {
-    const IMAGE_SUBSYSTEM_WINDOWS_GUI: u16 = 2;
-    const IMAGE_SUBSYSTEM_WINDOWS_CUI: u16 = 3;
-
     let mut bytes = fs::read(path)?;
-    if bytes.len() < 0x40 || &bytes[0..2] != b"MZ" {
-        return Err(format!("{} is not a PE/COFF binary", path.display()).into());
-    }
-    let pe_offset = u32::from_le_bytes(bytes[0x3C..0x40].try_into()?) as usize;
-    // PE signature (4) + COFF header (20) + Optional header up to Subsystem (0x44).
-    let subsystem_offset = pe_offset + 0x5C;
-    if bytes.len() < subsystem_offset + 2 || &bytes[pe_offset..pe_offset + 4] != b"PE\0\0" {
-        return Err(format!("{} has no PE signature at expected offset", path.display()).into());
-    }
-    let current = u16::from_le_bytes(bytes[subsystem_offset..subsystem_offset + 2].try_into()?);
-    if current == IMAGE_SUBSYSTEM_WINDOWS_GUI {
+    let offset = pe_subsystem::subsystem_offset(&bytes)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let current = u16::from_le_bytes(bytes[offset..offset + 2].try_into()?);
+    if current == pe_subsystem::GUI {
         return Ok(());
     }
-    if current != IMAGE_SUBSYSTEM_WINDOWS_CUI {
+    if current != pe_subsystem::CONSOLE {
         return Err(format!(
             "{} has unexpected PE subsystem {current}; refusing to patch",
             path.display()
         )
         .into());
     }
-    bytes[subsystem_offset..subsystem_offset + 2]
-        .copy_from_slice(&IMAGE_SUBSYSTEM_WINDOWS_GUI.to_le_bytes());
+    bytes[offset..offset + 2].copy_from_slice(&pe_subsystem::GUI.to_le_bytes());
 
     // fs::copy preserves the source's read-only attribute. When the runtime
     // comes from pnpm's content-addressable store (devEngines `onFail:

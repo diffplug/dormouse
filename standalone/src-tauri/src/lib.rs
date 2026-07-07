@@ -32,6 +32,10 @@ use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 #[cfg(windows)]
 mod clipboard_win;
 
+// Shared with build.rs (via `#[path]`); the PE subsystem offsets live in one place.
+#[cfg(windows)]
+mod pe_subsystem;
+
 type SidecarSender = mpsc::Sender<String>;
 type PendingRequests = Arc<Mutex<HashMap<String, mpsc::Sender<JsonValue>>>>;
 type SharedChild = Arc<Mutex<Box<dyn ChildWrapper + Send + Sync>>>;
@@ -754,9 +758,6 @@ fn resolve_dor_node_path(gui_node: &Path, _app: &AppHandle) -> PathBuf {
 }
 
 #[cfg(windows)]
-const IMAGE_SUBSYSTEM_WINDOWS_CUI: u16 = 3;
-
-#[cfg(windows)]
 fn ensure_console_subsystem_node(gui_node: &Path, app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -767,57 +768,24 @@ fn ensure_console_subsystem_node(gui_node: &Path, app: &AppHandle) -> Result<Pat
     let src_len = std::fs::metadata(gui_node)
         .map_err(|e| format!("stat bundled node: {e}"))?
         .len();
-    // Reuse the cached copy only if it matches the current bundled node's size
+    // Reuse the cached copy only when it matches the current bundled node's size
     // and is already console-subsystem; re-derive when missing or stale (e.g. an
-    // app update swapped the bundled node).
+    // app update swapped the bundled node). read_subsystem seeks to the field
+    // rather than reading the whole ~80MB binary on every launch.
     if let Ok(meta) = std::fs::metadata(&dest) {
         if meta.len() == src_len
-            && read_pe_subsystem(&dest).ok() == Some(IMAGE_SUBSYSTEM_WINDOWS_CUI)
+            && pe_subsystem::read_subsystem(&dest).ok() == Some(pe_subsystem::CONSOLE)
         {
             return Ok(dest);
         }
     }
-    std::fs::copy(gui_node, &dest).map_err(|e| format!("copy node: {e}"))?;
-    // fs::copy preserves a read-only attribute; clear it so the patch write works.
-    let mut perms = std::fs::metadata(&dest)
-        .map_err(|e| format!("stat dest: {e}"))?
-        .permissions();
-    if perms.readonly() {
-        perms.set_readonly(false);
-        std::fs::set_permissions(&dest, perms).map_err(|e| format!("clear readonly: {e}"))?;
-    }
-    write_pe_subsystem(&dest, IMAGE_SUBSYSTEM_WINDOWS_CUI)?;
+    // Copy the bundled node with its subsystem flipped back to console. Writing a
+    // fresh file (rather than fs::copy + re-patch) reads the source only once and
+    // sidesteps fs::copy propagating the source's read-only attribute.
+    let mut bytes = std::fs::read(gui_node).map_err(|e| format!("read bundled node: {e}"))?;
+    pe_subsystem::set_subsystem(&mut bytes, pe_subsystem::CONSOLE)?;
+    std::fs::write(&dest, &bytes).map_err(|e| format!("write dor node: {e}"))?;
     Ok(dest)
-}
-
-#[cfg(windows)]
-fn pe_subsystem_offset(bytes: &[u8]) -> Result<usize, String> {
-    if bytes.len() < 0x40 || &bytes[0..2] != b"MZ" {
-        return Err("not a PE/COFF binary".into());
-    }
-    let pe_offset = u32::from_le_bytes(bytes[0x3C..0x40].try_into().unwrap()) as usize;
-    // PE signature (4) + COFF header (20) + Optional header up to Subsystem (0x44).
-    let subsystem_offset = pe_offset + 0x5C;
-    if bytes.len() < subsystem_offset + 2 || &bytes[pe_offset..pe_offset + 4] != b"PE\0\0" {
-        return Err("no PE signature at expected offset".into());
-    }
-    Ok(subsystem_offset)
-}
-
-#[cfg(windows)]
-fn read_pe_subsystem(path: &Path) -> Result<u16, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("read: {e}"))?;
-    let off = pe_subsystem_offset(&bytes)?;
-    Ok(u16::from_le_bytes(bytes[off..off + 2].try_into().unwrap()))
-}
-
-#[cfg(windows)]
-fn write_pe_subsystem(path: &Path, subsystem: u16) -> Result<(), String> {
-    let mut bytes = std::fs::read(path).map_err(|e| format!("read: {e}"))?;
-    let off = pe_subsystem_offset(&bytes)?;
-    bytes[off..off + 2].copy_from_slice(&subsystem.to_le_bytes());
-    std::fs::write(path, &bytes).map_err(|e| format!("write: {e}"))?;
-    Ok(())
 }
 
 fn dor_control_socket_path() -> String {
@@ -1192,11 +1160,11 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn pe_subsystem_round_trips() {
-        use super::{read_pe_subsystem, write_pe_subsystem, IMAGE_SUBSYSTEM_WINDOWS_CUI};
+        use super::pe_subsystem::{read_subsystem, set_subsystem, CONSOLE, GUI};
         let dir = TempDir::new("pe-subsystem");
         let path = dir.path().join("fake.exe");
         // Minimal PE: MZ magic, e_lfanew -> 0x80, "PE\0\0" signature, and a
-        // Subsystem field 0x5C past the PE signature starting as console (3).
+        // Subsystem field 0x5C past the PE signature starting as console.
         let mut bytes = vec![0u8; 256];
         bytes[0] = b'M';
         bytes[1] = b'Z';
@@ -1204,15 +1172,17 @@ mod tests {
         bytes[0x3C..0x40].copy_from_slice(&pe_offset.to_le_bytes());
         let po = pe_offset as usize;
         bytes[po..po + 4].copy_from_slice(b"PE\0\0");
-        bytes[po + 0x5C..po + 0x5C + 2].copy_from_slice(&3u16.to_le_bytes());
+        bytes[po + 0x5C..po + 0x5C + 2].copy_from_slice(&CONSOLE.to_le_bytes());
         fs::write(&path, &bytes).expect("write fake pe");
 
-        assert_eq!(read_pe_subsystem(&path).unwrap(), 3);
-        write_pe_subsystem(&path, 2).unwrap();
-        assert_eq!(read_pe_subsystem(&path).unwrap(), 2);
-        // The runtime derivation flips GUI (2) back to console (3) for dor.
-        write_pe_subsystem(&path, IMAGE_SUBSYSTEM_WINDOWS_CUI).unwrap();
-        assert_eq!(read_pe_subsystem(&path).unwrap(), 3);
+        // read_subsystem seeks in the file; set_subsystem patches the image.
+        assert_eq!(read_subsystem(&path).unwrap(), CONSOLE);
+        set_subsystem(&mut bytes, GUI).unwrap(); // build.rs flips console -> GUI
+        fs::write(&path, &bytes).unwrap();
+        assert_eq!(read_subsystem(&path).unwrap(), GUI);
+        set_subsystem(&mut bytes, CONSOLE).unwrap(); // dor derive flips it back
+        fs::write(&path, &bytes).unwrap();
+        assert_eq!(read_subsystem(&path).unwrap(), CONSOLE);
     }
 
     #[test]
