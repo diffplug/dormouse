@@ -172,8 +172,20 @@ adapter reads a host-injected seed (`docs/specs/vscode.md`).
 
 **Migration.** On the first boot after this change `load_session` returns null;
 if a legacy blob is still in `localStorage` under `TauriAdapter.STATE_KEY`, the
-adapter adopts it, persists it to the Rust store, and removes the key — so
-WebKit stops rewriting it and its bloated WAL collapses on the next quit.
+adapter adopts it, persists it to the Rust store (through the store's normal
+write path, so it shares the coalescing), and removes the key — so WebKit stops
+rewriting it and its bloated WAL collapses on the next quit.
+
+**Durability on quit (current limitation).** `saveState` returns after updating
+the cache and *firing* `save_session`; nothing awaits the Rust write on
+shutdown — the `onRequestSessionFlush` handshake is a no-op here (VS Code-only),
+and the normal quit path does not intercept the window close (`updater.ts`
+`onCloseRequested` only prevents default for a pending update). So a clean quit
+can drop the save fired at `pagehide`, losing state changed in the final
+debounce/heartbeat window — a regression from the old `localStorage` path, which
+WebKit flushed on teardown. Accepted for now because restore is best-effort and
+saves are frequent (≤500 ms for layout changes); a drain-on-quit is planned
+(`## Future`).
 
 ## File drop
 
@@ -238,3 +250,14 @@ root `package.json` for the `dev:standalone*` orchestration.
 | `standalone/sidecar/clipboard-ops.js` | OS clipboard tiers (owned by `docs/specs/mouse-and-clipboard.md`) |
 | `standalone/scripts/build-sidecar-proxy.mjs` | Bundles `lib/src/host/` into the sidecar `.cjs` copies |
 | `standalone/scripts/dev-agent-browser.mjs` | `dev:standalone:ab` entry (owned by `docs/specs/transport.md`) |
+
+## Future
+
+**Drain-on-quit for the session store.** Restore the last-save durability the
+`localStorage` path had before the Rust store (§Persistence, "Durability on
+quit"). Add `TauriSessionStore.drain()` — resolves when no `save_session` is
+in-flight or pending — and have the close path (`updater.ts` `onCloseRequested`)
+`preventDefault`, run a final `flushSessionSave()`, `await` the drain (with a
+timeout so a hung write can't wedge quit), then close. Lands with the part-2
+save-path rework (write-on-change + heartbeat removal), which reshapes the same
+path.
