@@ -291,11 +291,55 @@ root `package.json` for the `dev:standalone*` orchestration.
 
 ## Future
 
-**Drain-on-quit for the session store.** Restore the last-save durability the
-`localStorage` path had before the Rust store (§Persistence, "Durability on
-quit"). Add `TauriSessionStore.drain()` — resolves when no `save_session` is
-in-flight or pending — and have the close path (`updater.ts` `onCloseRequested`)
-`preventDefault`, run a final `flushSessionSave()`, `await` the drain (with a
-timeout so a hung write can't wedge quit), then close. Lands with the part-2
-save-path rework (write-on-change + heartbeat removal), which reshapes the same
-path.
+Requirements for the next round of session-persistence work — what must be true,
+not how. (Detailed working notes live outside the specs while the work is in
+flight.)
+
+**Reduce session write throughput.** The session blob is rewritten on a 500 ms
+debounce **plus** an unconditional ~30 s heartbeat regardless of whether
+anything changed, and each Rust write is a full file write + fsync + rename.
+Requirements: do not write when the persisted state is unchanged since the last
+successful write; do not let the periodic timer force unchanged writes; bound
+persisted scrollback so one busy terminal cannot make each write arbitrarily
+large; no regression to restore fidelity. The cadence is shared code
+(`lib/src/components/wall/use-session-persistence.ts`,
+`lib/src/lib/session-save.ts`), so this affects every adapter, not only
+standalone.
+
+**Guaranteed session save on a clean quit.** `saveState` forwards to
+`save_session` asynchronously and nothing awaits it on shutdown, so a clean quit
+can drop the final save — a durability regression from the old `localStorage`
+path (§Persistence, "Durability on quit"). A webview `pagehide` handler cannot
+await async work. Requirement: on a clean quit the latest state is durably
+written before the process exits, with a bounded wait so a stalled write cannot
+wedge quit. Unclean exits (crash, force-kill) stay best-effort.
+
+**Quit confirmation + graceful terminal teardown.** Quitting ends all terminals;
+today it does so abruptly, unconfirmed, and without capturing final output.
+Requirements:
+- Confirm on quit only when ≥1 terminal has a running command (idle shells quit
+  silently); state the running-terminal count (`docs/specs/terminal-state.md`).
+- Apply to *every* quit trigger — window close button, Cmd+Q / app-menu Quit,
+  dock quit, interceptable OS logout — not just the window-close path (today
+  intercepted only for a pending update).
+- Terminate terminals so they can flush, and capture that final output into
+  persisted scrollback **before** the buffer is discarded. Constraint: the hard
+  kill path (`standalone/sidecar/pty-core.js`, `kill` / `killAll`) drops a PTY's
+  scrollback buffer synchronously; a natural or signal-driven exit does not.
+- Write the freshest session (with captured scrollback) and complete that write
+  before exit — this is where the clean-quit durability guarantee above is met.
+- Bounded: a terminal that ignores graceful termination, or a stalled save, must
+  not wedge quit.
+- Cancel leaves the app and all terminals untouched.
+- Compose with update-on-quit: teardown + save must complete before the updater
+  installs (on Windows the installer force-kills the process),
+  `docs/specs/auto-update.md`.
+- Dialog matches the in-pane kill-confirmation aesthetic (`docs/specs/layout.md`).
+
+**Retire the `localStorage` → Rust migration.** The one-time migration branch in
+`standalone/src/tauri-adapter.ts` (marked `SUNSET`) should be removed once
+shipped builds have all migrated; define the version gate. Until then it must
+run at most once and be safe under multiple windows — it currently reads a
+per-origin (window-shared) legacy blob and assumes a single window (overlaps the
+workspaces-rollout scope in `docs/specs/layout.md` `## Future`; cross-reference,
+do not duplicate).
