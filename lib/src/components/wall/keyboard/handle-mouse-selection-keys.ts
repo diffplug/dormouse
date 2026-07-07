@@ -81,7 +81,7 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
 }
 
 function surfaceTypeForId(ctx: WallKeyboardCtx, id: string): string {
-  const panelParams = ctx.apiRef?.current?.getPanel(id)?.params as { surfaceType?: unknown } | undefined;
+  const panelParams = ctx.nav.paneParams(id) as { surfaceType?: unknown } | undefined;
   if (typeof panelParams?.surfaceType === 'string') return panelParams.surfaceType;
   const door = ctx.doorsRef?.current?.find((candidate) => candidate.id === id);
   const doorType = (door?.params as { surfaceType?: unknown } | undefined)?.surfaceType;

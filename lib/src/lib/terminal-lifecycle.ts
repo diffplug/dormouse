@@ -2,6 +2,7 @@ import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { getPlatform, IS_MAC, IS_WINDOWS } from './platform';
+import { cfg } from '../cfg';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
 import { attachMouseModeObserver } from './mouse-mode-observer';
 import { attachKeyboardProtocolArbiter } from './keyboard-protocol-arbiter';
@@ -43,7 +44,6 @@ import {
   seedPromptShapeFromScrollback,
   seedTerminalManualCwd,
   setTerminalUserTitle,
-  swapTerminalPaneStates,
   type PromptLineReader,
 } from './terminal-state-store';
 import { readLogicalLineFromBuffer, type BufferLike } from './terminal-buffer-read';
@@ -108,7 +108,7 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
     allowProposedApi: true,
     fontSize: editorFontSize,
     fontFamily: editorFontFamily,
-    cursorBlink: true,
+    cursorBlink: cfg.terminal.cursorBlink,
     theme,
     // kittyKeyboard disambiguates Shift+Enter from Enter for TUIs that read
     // raw VT (Claude Code everywhere; Codex on macOS/Linux). win32InputMode
@@ -481,33 +481,6 @@ export function disposeSession(id: string): void {
   registry.delete(id);
   removeTerminalPaneState(id);
   removeMouseSelectionState(id);
-  notifyActivityListeners();
-}
-
-export function swapTerminals(idA: string, idB: string): void {
-  const entryA = registry.get(idA);
-  const entryB = registry.get(idB);
-  if (!entryA || !entryB) return;
-
-  const containerA = entryA.element.parentElement;
-  const containerB = entryB.element.parentElement;
-
-  entryA.element.remove();
-  entryB.element.remove();
-
-  registry.set(idA, entryB);
-  registry.set(idB, entryA);
-  swapTerminalPaneStates(idA, idB);
-
-  if (containerA) {
-    containerA.appendChild(entryB.element);
-    requestAnimationFrame(() => entryB.fit.fit());
-  }
-  if (containerB) {
-    containerB.appendChild(entryA.element);
-    requestAnimationFrame(() => entryA.fit.fit());
-  }
-
   notifyActivityListeners();
 }
 

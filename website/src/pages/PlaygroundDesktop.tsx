@@ -15,18 +15,18 @@ const PANE_MAIN = "tut-main";
 const PANE_BOXED = "tut-boxed";
 const PANE_SPLASH = "tut-splash";
 const DESKTOP_PANES: PaneSpec[] = [
-  { id: PANE_MAIN, command: "tut" },
-  { id: PANE_BOXED, command: "changelog" },
-  { id: PANE_SPLASH, command: "ascii-splash" },
+  { id: PANE_MAIN, command: "tut", title: "tutorial" },
+  { id: PANE_BOXED, command: "changelog", title: "changelog" },
+  { id: PANE_SPLASH, command: "ascii-splash", title: "ascii-splash" },
 ];
 
 type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
 type WallEvent = import("dormouse-lib/components/Wall").WallEvent;
-type DockviewDisposable = { dispose: () => void };
 
 interface PaneSpec {
   id: string;
   command: string;
+  title: string;
 }
 
 function DesktopPlaygroundUnavailable() {
@@ -65,7 +65,6 @@ function PlaygroundDesktopExperience() {
   const shellRegistryRef = useRef<PlaygroundShellRegistry | null>(null);
   const detectorRef = useRef<TutDetector | null>(null);
   const stateRef = useRef<TutorialState | null>(null);
-  const dockviewDisposablesRef = useRef<DockviewDisposable[]>([]);
   const autoStartedRef = useRef<Set<string>>(new Set());
   const spawnUnsubRef = useRef<(() => void) | null>(null);
   const busyDemoDisposeRef = useRef<(() => void) | null>(null);
@@ -123,6 +122,10 @@ function PlaygroundDesktopExperience() {
         },
       });
       detectorRef.current = detector;
+      // The detector now reads app state entirely through the WallEvent stream and
+      // the activity/mouse stores — no tiling api. `start()` seeds its prev-state
+      // maps and subscribes to those stores.
+      detector.start();
 
       const shellRegistry = new PlaygroundShellRegistry(
         adapter,
@@ -164,9 +167,13 @@ function PlaygroundDesktopExperience() {
       );
       shellRegistryRef.current = shellRegistry;
 
-      for (const pane of DESKTOP_PANES) shellRegistry.ensureShell(pane.id);
-
+      // Seed each pane's header title as a pending shell opt — the lib applies it
+      // (as a user-pin, which deriveHeader ranks above the engine fallback) when
+      // the terminal first spawns, after its state reset, so nothing clobbers it.
       const paneById = new Map(DESKTOP_PANES.map((p) => [p.id, p]));
+      for (const pane of DESKTOP_PANES) {
+        registry.setPendingShellOpts(pane.id, { title: pane.title });
+      }
       // Subscribe before Wall mounts so the spawn fired by TerminalPane's
       // mount effect doesn't race past us. If the pty already exists by
       // the time we get here, fire immediately.
@@ -184,10 +191,6 @@ function PlaygroundDesktopExperience() {
 
     return () => {
       cancelled = true;
-      for (const disposable of dockviewDisposablesRef.current) {
-        disposable.dispose();
-      }
-      dockviewDisposablesRef.current = [];
       detectorRef.current?.dispose();
       detectorRef.current = null;
       shellRegistryRef.current?.disposeAll();
@@ -202,40 +205,13 @@ function PlaygroundDesktopExperience() {
     };
   }, [handleOpenGithub, handleOpenPocket, tryAutoStart]);
 
-  const handleApiReady = useCallback((api: any) => {
-    const shellRegistry = shellRegistryRef.current;
-    shellRegistry?.ensureShell(PANE_MAIN);
-
-    const addDisposable = api.onDidAddPanel((panel: { id?: string } | undefined) => {
-      if (panel?.id) shellRegistryRef.current?.ensureShell(panel.id);
-    });
-    dockviewDisposablesRef.current.push(addDisposable);
-
-    api.addPanel({
-      id: PANE_BOXED,
-      component: "terminal",
-      tabComponent: "terminal",
-      title: "changelog",
-      position: { referencePanel: PANE_MAIN, direction: "right" },
-    });
-    api.addPanel({
-      id: PANE_SPLASH,
-      component: "terminal",
-      tabComponent: "terminal",
-      title: "ascii-splash",
-      position: { referencePanel: PANE_BOXED, direction: "below" },
-    });
-
-    const mainPanel = api.getPanel(PANE_MAIN);
-    if (mainPanel) {
-      mainPanel.api.setTitle("tutorial");
-      mainPanel.api.setActive();
-    }
-
-    detectorRef.current?.attach(api);
-  }, []);
-
   const handleWallEvent = useCallback((event: WallEvent) => {
+    // Every visible pane (the three seed panes + any the user splits off) gets a
+    // fake shell. `paneAdded` fires once per pane that becomes visible, before the
+    // pane's terminal spawns.
+    if (event.type === "paneAdded") {
+      shellRegistryRef.current?.ensureShell(event.id);
+    }
     detectorRef.current?.handleWallEvent(event);
   }, []);
 
@@ -255,9 +231,8 @@ function PlaygroundDesktopExperience() {
       <main className="fixed top-16 right-0 bottom-0 left-0 flex min-h-0 md:top-20">
         {WallModule ? (
           <WallModule.Wall
-            initialPaneIds={[PANE_MAIN]}
+            initialPaneIds={[PANE_MAIN, PANE_BOXED, PANE_SPLASH]}
             initialMode="passthrough"
-            onApiReady={handleApiReady}
             onEvent={handleWallEvent}
           />
         ) : null}

@@ -19,7 +19,7 @@ The unit of *layout* is a **Pane**; the unit of *content* is a **Surface**.
 
 | Term | Is | Owner |
 |---|---|---|
-| **Pane** | A slot in the tiling layout (one dockview panel). Holds one or more Surfaces, exactly one selected. | `lib/src/components/Wall.tsx` (dockview) |
+| **Pane** | A slot in the tiling layout (one Lath leaf). Holds one Surface. | `lib/src/components/Wall.tsx`; the engine per `docs/specs/tiling-engine.md` |
 | **Surface** | The content in a Pane: a **terminal** (a Session) or a **browser** Surface. | `Wall.tsx`; browser surfaces per `docs/specs/dor-browser.md` |
 
 Today every Pane holds exactly one Surface, but the model reserves multiple Surfaces per Pane (a future in-pane surface strip) — which is why a Surface ref (`surface:N`) is distinct from a Pane ref (`pane:N`).
@@ -50,7 +50,7 @@ A **Session** runs the full six-axis model below. A **browser Surface** particip
 | **Activity** | full machine (ring + TODO) | **TODO only** — a user may flag it; it never auto-rings (no BEL/OSC source) |
 | **Snapshot** | scrollback, cwd, alert | its `surfaceType` + render params (`docs/specs/transport.md`) |
 | **Process** | PTY (`Live`/`Exited`/`Tombstoned`/`Absent`) | none — host lifetime is the agent-browser session or proxy grant, keyed outside the Pane id |
-| **Registry** | xterm Terminal + persistent DOM element | none — DOM owned by dockview (`renderer:'always'`); focus via a lightweight handle |
+| **Registry** | xterm Terminal + persistent DOM element | none — DOM hosted by LathHost's leaf div (never re-parented); focus via a lightweight handle |
 | **Link** | resume / replay over the live PTY | none — rebuilt from persisted params, not replayed |
 
 The containment hierarchy the `dor` CLI handle model commits to (`docs/specs/dor-cli.md`):
@@ -59,7 +59,7 @@ The containment hierarchy the `dor` CLI handle model commits to (`docs/specs/dor
 Window ⊃ Workspace ⊃ Pane ⊃ Surface  (terminal = Session | browser)
 ```
 
-**Surface identity:** a Surface's id is its dockview panel id. For a terminal Surface that id *is* the `SessionId` and is stable (I1). A browser Surface's id is **not** preserved across a render-mode swap: switching `iframe` ⇄ `ab-screencast` ⇄ `ab-popout` replaces the Surface in the same Pane slot (new id), preserving only the slot and target URL (`docs/specs/dor-browser.md`).
+**Surface identity:** a Surface's id is its Lath leaf id. For a terminal Surface that id *is* the `SessionId` and is stable (I1). A browser Surface's id is **not** preserved across a render-mode swap: switching `iframe` ⇄ `ab-screencast` ⇄ `ab-popout` replaces the Surface in the same Pane slot (new id), preserving only the slot and target URL (`docs/specs/dor-browser.md`).
 
 ## Containers
 
@@ -68,7 +68,7 @@ A Surface never floats free: it sits in a **Pane**, every Pane belongs to exactl
 | Container | Holds | Owner |
 |---|---|---|
 | **Window** | One or more Workspaces. The OS frame (the standalone Tauri window) or the host frame (a VS Code window). | host (Tauri / VS Code) |
-| **Workspace** | A named set of Panes and their Surfaces, plus the layout that arranges them (dockview snapshot + doors). Exactly one **Wall** renders one Workspace. | `lib/src/components/Wall.tsx` at render time; persisted per `docs/specs/transport.md` |
+| **Workspace** | A named set of Panes and their Surfaces, plus the layout that arranges them (Lath layout snapshot + doors). Exactly one **Wall** renders one Workspace. | `lib/src/components/Wall.tsx` at render time; persisted per `docs/specs/transport.md` |
 
 A **Workspace** is the durable grouping a user thinks of as "a window's worth of panes." It has a `WorkspaceId`, a user-facing `name`, the Surfaces it contains, and the layout that arranges them. The pre-workspace model had exactly one implicit Workspace per Window; the model now allows several.
 
@@ -139,7 +139,7 @@ A **Session** is the tuple of its `SessionId` plus one state per layer. `Session
 
 | State | Meaning |
 |---|---|
-| `Paned` | Rendered as a pane in the content area (dockview group) |
+| `Paned` | Rendered as a pane in the content area (a Lath leaf) |
 | `Zoomed` | Subset of `Paned` — the selected pane is maximized |
 | `Doored` | Rendered as a door on the baseboard |
 | `Hidden` | In neither pane nor door — the webview is closed, the Surface belongs to an inactive Workspace (standalone), or the Surface is mid-transition. Process and Activity are unaffected. |
@@ -241,7 +241,7 @@ Use glossary names instead of these. The left column retains a meaning only wher
 | **session** | The durable identity of a **terminal Surface**. Do not use it for the Activity projection (that is `ActivityState`, not `SessionUiState`), nor for the agent-browser daemon's lowercase `session` string (`dormouse.1.<key>`), which is not a Dormouse durable unit. |
 | **terminal** | Keeps its meaning for the `xterm.Terminal` instance. Prose meaning "the whole thing" is **Session** (a terminal Surface). |
 | **surface** | A glossary term, not retired: the durable occupant of a Pane (a terminal Session or a browser Surface). Use **Session** only for the terminal kind; use **Surface** when a statement holds for both. |
-| **panel / pane** | Prefer **pane** for the layout slot. Use "panel" only when quoting dockview's own API (`api.panels`, `addPanel`). |
+| **panel / pane / leaf** | Prefer **pane** for the layout slot; **leaf** is Lath's tree node for the same thing (they map 1:1). "panel" survives only in legacy persisted-blob field names. |
 | **tether** | Remote-control term only: a display showing "tethering to \<device\>" has ceded terminal size authority to a remote viewer (`docs/specs/remote-api.md`). Not a layout term — do not use it for Pane/Door relationships. |
 
 Remote-only vocabulary (**Viewer**, the wire-level `DirectoryEntry` projection) is defined in `docs/specs/remote-api.md` § Terminology.

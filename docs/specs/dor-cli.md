@@ -22,7 +22,7 @@ Source of truth:
 | Standalone staging/runtime env | `standalone/package.json`, `standalone/src-tauri/src/lib.rs`, `standalone/sidecar/pty-core.js`, `standalone/sidecar/main.js` |
 | VS Code staging/runtime env | `vscode-ext/package.json`, `vscode-ext/src/pty-manager.ts`, `vscode-ext/src/pty-host.js` |
 | Control request routing into the webview | `standalone/src/tauri-adapter.ts`, `vscode-ext/src/message-router.ts`, `lib/src/lib/platform/vscode-adapter.ts` |
-| Implemented webview control handler | `lib/src/components/Wall.tsx` |
+| Implemented webview control handler | `lib/src/components/wall/use-dor-control.ts` (the `useDorControl` hook, mounted by `lib/src/components/Wall.tsx`) |
 
 ## Bundling And PATH
 
@@ -229,7 +229,7 @@ Invariants:
 ## Current Implemented Commands
 
 Implemented commands call private `surface.*` control methods. `surface.list`
-derives its response from current Dockview panels plus terminal state/activity
+derives its response from the current visible panes plus terminal state/activity
 snapshots where available, then returns `workspace:1` and `window:1` — it
 reports the single active Workspace (Workspace-aware tagging is staged; see
 [Future](#future)).
@@ -237,7 +237,7 @@ reports the single active Workspace (Workspace-aware tagging is staged; see
 Command tails captured after `--` are sent as raw argv arrays (`command:
 string[]`); the host — not `dor` — quotes them for the target shell. `dor`
 cannot know which shell the target surface runs, so it forwards argv unquoted
-and the host (`lib/src/components/Wall.tsx`, `dorCommandString`) detects the
+and the host (`lib/src/components/wall/use-dor-control.ts`, `dorCommandString`) detects the
 target shell, picks a quoting style with
 [`shellCommandKind` / `buildShellCommandForKind`](../../dor/src/commands/shell-quote.ts)
 (`cmd` / `posix` / `powershell`), and renders a single command string used for

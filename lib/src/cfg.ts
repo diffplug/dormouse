@@ -29,4 +29,9 @@ export const cfg = {
     /** When true, the ALERT_RINGING bell-ring animation is frozen at T=0 (for deterministic Chromatic snapshots). */
     ringingPaused: false,
   },
+  terminal: {
+    /** xterm cursor blink. Disabled under Chromatic so the cursor renders as a
+     *  stable solid block rather than being captured mid-blink (non-deterministic). */
+    cursorBlink: true,
+  },
 };

@@ -11,11 +11,20 @@ import { SelectionOverlay } from './SelectionOverlay';
 import { SelectionPopup } from './SelectionPopup';
 import { MouseOverrideBanner } from './wall/MouseOverrideBanner';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from './design';
+import { throttleTrailing } from '../lib/throttle';
 
 interface TerminalPaneProps {
   id: string;
   isFocused?: boolean;
 }
+
+// Lath tweens real pane geometry across many animation frames per motion (kills,
+// splits, restores, drag-drops) and sash drags stream live resizes, and every
+// refitSession() reflows the xterm buffer + fires a PTY resize (ioctl +
+// SIGWINCH; running TUIs redraw). Throttle the ResizeObserver so motion causes a
+// handful of reflows instead of one per frame — the leading edge keeps a single
+// resize (zoom) instant, and the trailing call fits the resting geometry exactly.
+const REFIT_THROTTLE_MS = 150;
 
 /**
  * Thin mount point for a terminal. The actual xterm.js instance lives in the
@@ -36,12 +45,17 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
     // Attach the terminal's persistent element to this container
     mountElement(id, container);
 
-    // Resize observer — refit terminal when container changes size
-    const observer = new ResizeObserver(() => refitSession(id));
+    // Resize observer — refit terminal when container changes size, throttled
+    // (see REFIT_THROTTLE_MS) so animated/dragged geometry doesn't reflow the
+    // buffer on every frame.
+    const throttledRefit = throttleTrailing(() => refitSession(id), REFIT_THROTTLE_MS);
+    const observer = new ResizeObserver(throttledRefit);
     observer.observe(container);
 
     return () => {
       observer.disconnect();
+      // Cancel any pending trailing refit — no fit after unmount.
+      throttledRefit.cancel();
       // Unmount DOM element — registry entry and Session survive
       unmountElement(id);
     };

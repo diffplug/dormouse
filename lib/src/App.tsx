@@ -24,20 +24,20 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 
 export default function App({
   initialPaneIds,
-  restoredLayout,
+  restoredLathLayout,
   initialDoors,
   baseboardNotice,
   enableRemoteHost,
 }: {
   initialPaneIds?: string[];
-  restoredLayout?: unknown;
+  restoredLathLayout?: unknown;
   initialDoors?: PersistedDoor[];
   baseboardNotice?: ReactNode;
   enableRemoteHost?: boolean;
 }) {
   return (
     <ErrorBoundary>
-      <Wall initialPaneIds={initialPaneIds} restoredLayout={restoredLayout} initialDoors={initialDoors} baseboardNotice={baseboardNotice} enableRemoteHost={enableRemoteHost} />
+      <Wall initialPaneIds={initialPaneIds} restoredLathLayout={restoredLathLayout} initialDoors={initialDoors} baseboardNotice={baseboardNotice} enableRemoteHost={enableRemoteHost} />
       <ThemeDebuggerGlobal />
     </ErrorBoundary>
   );

@@ -1,7 +1,7 @@
 import { useContext, useRef } from 'react';
-import type { IDockviewPanelProps } from 'dockview-react';
 import { TerminalPane } from '../TerminalPane';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
+import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
 import {
   ModeContext,
@@ -9,17 +9,17 @@ import {
   SelectedIdContext,
 } from './wall-context';
 
-export function TerminalPanel({ api }: IDockviewPanelProps) {
+export function TerminalPanel(props: PaneProps) {
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const actions = useContext(WallActionsContext);
-  const isFocused = mode === 'passthrough' && selectedId === api.id;
+  const isFocused = mode === 'passthrough' && selectedId === props.id;
   const elRef = useRef<HTMLDivElement>(null);
-  usePaneChrome(api, elRef);
+  usePaneChrome(props.id, elRef);
 
   return (
-    <div ref={elRef} className={`h-full w-full overflow-hidden bg-terminal-bg ${TERMINAL_BOTTOM_RADIUS_CLASS}`} onMouseDown={() => actions.onClickPanel(api.id)}>
-      <TerminalPane id={api.id} isFocused={isFocused} />
+    <div ref={elRef} className={`h-full w-full overflow-hidden bg-terminal-bg ${TERMINAL_BOTTOM_RADIUS_CLASS}`} onMouseDown={() => actions.onClickPanel(props.id)}>
+      <TerminalPane id={props.id} isFocused={isFocused} />
     </div>
   );
 }

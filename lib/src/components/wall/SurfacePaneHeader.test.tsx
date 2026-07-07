@@ -4,7 +4,7 @@
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { IDockviewPanelHeaderProps } from 'dockview-react';
+import type { PaneProps } from './pane-props';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
 import {
   registerAgentBrowserScreen,
@@ -60,8 +60,8 @@ function register(id: string, chrome: ChromeSnapshot = CHROME) {
   });
 }
 
-function headerApi(id: string, title: string): IDockviewPanelHeaderProps {
-  return { api: { id, title } } as unknown as IDockviewPanelHeaderProps;
+function headerProps(id: string, title: string): PaneProps {
+  return { id, title, params: undefined };
 }
 
 let container: HTMLDivElement;
@@ -78,7 +78,7 @@ afterEach(() => {
   container.remove();
 });
 
-function renderHeader(props: IDockviewPanelHeaderProps, actions: WallActions) {
+function renderHeader(props: PaneProps, actions: WallActions) {
   act(() => {
     root.render(
       <StrictMode>
@@ -93,7 +93,7 @@ function renderHeader(props: IDockviewPanelHeaderProps, actions: WallActions) {
 describe('SurfacePaneHeader — browser chrome', () => {
   it('shows the URL as primary text with the HTML title as a tooltip', () => {
     const registration = register('pane-url');
-    renderHeader(headerApi('pane-url', 'Vite + React'), stubActions());
+    renderHeader(headerProps('pane-url', 'Vite + React'), stubActions());
 
     const url = container.querySelector('span[title="Vite + React"]');
     expect(url?.textContent).toBe('localhost:5173/app');
@@ -103,7 +103,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
 
   it('shows a key indicator for a non-default --key but not the default key', () => {
     const reg = register('pane-key', { ...CHROME, key: 'storybook' });
-    renderHeader(headerApi('pane-key', 'x'), stubActions());
+    renderHeader(headerProps('pane-key', 'x'), stubActions());
     // Rendered inline as the key name, with `--key <name>` in the hover tooltip.
     expect(container.querySelector('[title="--key storybook"]')?.textContent).toBe('storybook');
     reg.dispose();
@@ -112,7 +112,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
     root = createRoot(container);
 
     const reg2 = register('pane-key2', { ...CHROME, key: 'default' });
-    renderHeader(headerApi('pane-key2', 'x'), stubActions());
+    renderHeader(headerProps('pane-key2', 'x'), stubActions());
     expect(container.querySelector('[title="--key default"]')).toBeNull();
     reg2.dispose();
   });
@@ -121,7 +121,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
     const reg = register('pane-dev');
     setDevServerResolution(5173, { paneId: 'term-9', label: 'pnpm dev' });
     const onFocusPane = vi.fn();
-    renderHeader(headerApi('pane-dev', 'x'), stubActions({ onFocusPane }));
+    renderHeader(headerProps('pane-dev', 'x'), stubActions({ onFocusPane }));
 
     const chip = container.querySelector('button[aria-label="Focus pnpm dev — serves this localhost port"]');
     expect(chip).not.toBeNull();
@@ -142,7 +142,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
 
   it('exposes back/forward/reload nav controls', () => {
     const reg = register('pane-nav');
-    renderHeader(headerApi('pane-nav', 'x'), stubActions());
+    renderHeader(headerProps('pane-nav', 'x'), stubActions());
     expect(container.querySelector('[aria-label="Back"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Forward"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Reload"]')).not.toBeNull();
@@ -158,7 +158,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
       chromeActions: { navigate, back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
       hostCapable: true,
     });
-    renderHeader(headerApi('pane-url-edit', 'x'), stubActions());
+    renderHeader(headerProps('pane-url-edit', 'x'), stubActions());
 
     const urlSpan = container.querySelector('span[title="Vite + React"]') as HTMLElement;
     expect(urlSpan).not.toBeNull();
@@ -189,7 +189,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
       chromeActions: { navigate, back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
       hostCapable: true,
     });
-    renderHeader(headerApi('pane-url-esc', 'x'), stubActions());
+    renderHeader(headerProps('pane-url-esc', 'x'), stubActions());
 
     act(() => {
       (container.querySelector('span[title="Vite + React"]') as HTMLElement)
@@ -209,7 +209,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
   });
 
   it('falls back to a plain title (no nav) for non-browser surfaces', () => {
-    renderHeader(headerApi('pane-iframe', 'example.com'), stubActions());
+    renderHeader(headerProps('pane-iframe', 'example.com'), stubActions());
     expect(container.textContent).toContain('example.com');
     expect(container.querySelector('[aria-label="Back"]')).toBeNull();
     expect(container.querySelector('[aria-label="Reload"]')).toBeNull();

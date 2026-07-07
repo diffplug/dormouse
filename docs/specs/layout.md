@@ -26,33 +26,34 @@ A **Workspace** is the named group of Surfaces rendered by a single **Wall**, to
 
 There are two areas:
 
-- **Content** — tiling layout containing Panes, powered by dockview
+- **Content** — tiling layout containing Panes, rendered by the **Lath** tiling engine (`docs/specs/tiling-engine.md` owns the engine)
 - **Baseboard** — bottom strip containing Doors and shortcut hints. It is visible in the main shell; tightly constrained embedders may suppress it with `Wall showBaseboard={false}` when they do not expose door/minimize workflows.
 
 The user can navigate between all elements using the mouse, or by entering `command` mode and using the keyboard.
 
 ```
 Wall
-├── Context providers (Mode, SelectedId, WallActions, PanelElements, DoorElements, RenamingId, Zoomed, WindowFocused)
+├── Context providers (Mode, SelectedId, WallActions, PaneElements, DoorElements, RenamingId, Zoomed, WindowFocused)
 │   └── div (h-screen, flex col)
-│       ├── Dockview wrapper (flex-1, 6px top/sides inset, 2px bottom inset)
-│       │   ├── DockviewReact (tiling layout engine, singleTabMode="fullwidth")
-│       │   │   └── Groups (one session per group, no tab stacking)
-│       │   │       ├── TerminalPanel → TerminalPane → xterm.js
-│       │   │       └── TerminalPaneHeader (tab component, drag handle)
+│       ├── Content wrapper (flex-1, 6px top/sides inset, 2px bottom inset)
+│       │   ├── LathHost (the tiling engine's HTML adapter)
+│       │   │   └── Leaf divs (one Surface per leaf, absolutely positioned, never re-parented)
+│       │   │       ├── TerminalPanel → TerminalPane → xterm.js  (or BrowserPanel)
+│       │   │       └── TerminalPaneHeader (drag handle)          (or SurfacePaneHeader)
 │       │   └── WorkspaceSelectionOverlay (fixed positioned, pointer-events: none)
 │       ├── Baseboard (bottom strip, shortcut hints when empty; optional for constrained embedders)
 │       │   └── Door components (one per minimized session)
 │       └── KillConfirmOverlay (conditional)
 ```
 
-### What dockview controls
-- Spatial arrangement of groups in a grid
-- Resize sashes between groups
-- Drag-and-drop rearrangement via pane headers
-- Group sizing and positioning
+### What Lath controls
+- The split tree, per-leaf rects, sash geometry, and layout (`layout()`)
+- Resize sashes between leaves, drag-and-drop rearrangement (hierarchical, pointer-based), zoom
+- Native FLIP animation of splits/kills/restores
 
-### What we control
+`docs/specs/tiling-engine.md` is the source of truth for all of the above. This spec owns the interaction model layered on top.
+
+### What the Wall controls
 - Focus and selection state (`selectedId`, `selectedType`)
 - Passthrough/command mode system
 - Keyboard shortcuts and selection overlay rendering
@@ -64,22 +65,17 @@ Wall
 
 ## Content
 
-The content area is a tiling layout of panes, powered by dockview. Each pane occupies its own group (no tab stacking). Panes are separated by a 6px gap. DockviewReact uses `singleTabMode="fullwidth"` so tabs stretch to fill the header.
+The content area is a tiling layout of panes rendered by Lath (`docs/specs/tiling-engine.md`). Each pane is one **leaf** in Lath's split tree — a stable, absolutely-positioned div that is never re-parented (so a moved `<iframe>` never reloads and a focused xterm never blurs). Panes are separated by a 6px gap. There is no tab stacking: one Surface per leaf, always.
 
 ### Tiling constraints
 
-**One session per group.** Dockview supports multiple panels per group (tabs), but we enforce one-panel-per-group to behave like a tiling window manager.
+**One Surface per leaf.** The split tree holds only leaves and binary-ish splits; a leaf shows exactly one Surface. Splitting a pane inserts a sibling leaf; removing a pane collapses single-child splits back. Lath enforces the invariants (a split has ≥2 children, never nests a same-direction split); see `docs/specs/tiling-engine.md` → "Core model".
 
-**No tab stacking.** Prevented via:
-- `onWillShowOverlay`: `event.kind === 'tab'` → blocked
-- `group.model.onWillDrop`: `event.position === 'center'` → intercepted and converted to a **swap**
-- All other positions and kinds are allowed — these create splits
-
-**Center drop = swap.** Dropping a pane onto the center of another swaps their session content (same as `Cmd/Ctrl+Arrow`). The overlay is allowed so the user sees a valid drop target, but `group.model.onWillDrop` intercepts it, calls `swapTerminals()` + swaps titles, then `preventDefault()` to block the merge.
+**Center drop = swap.** Dragging a pane onto the *center* of another swaps their Surfaces (same as `Cmd/Ctrl+Arrow`) — a Lath `swap` op that trades leaf identities, so meta and registry entries follow the ids with no companion title swap. Dragging onto an *edge* band splits beside that leaf (or beside an ancestor column/row, chosen by scroll-wheel depth). The full DnD model — depth cycling, the preview-equals-commit rect, baseboard-drop minimize, door drag-out — lives in `docs/specs/tiling-engine.md` → "Hierarchical drag and drop"; the Wall owns only the op commit + selection policy (`onProposeMove` / `onProposeMinimize` / `onExternalDrop` in `Wall.tsx`).
 
 ### Pane header
 
-Each pane has a 30px header that doubles as a drag handle. The header uses `cursor-grab` / `active:cursor-grabbing`, `select-none`, and the shared terminal top radius from `lib/src/components/design.tsx`. Background and foreground use the `--color-header-active-*` / `--color-header-inactive-*` token pairs, which map to VSCode file-tree list colors. Dockview's default close button and right-actions container are hidden via CSS.
+Each pane has a 30px header that doubles as a drag handle (a `pointerdown` on the header, past a 5px threshold, begins a Lath pane drag; below the threshold the header's own click behavior stands). The header uses `cursor-grab` / `active:cursor-grabbing`, `select-none`, and the shared terminal top radius from `lib/src/components/design.tsx`. Background and foreground use the `--color-header-active-*` / `--color-header-inactive-*` token pairs, which map to VSCode file-tree list colors.
 
 The header label is the `DerivedHeader` returned by `deriveHeader(paneState, visiblePanes)` in `docs/specs/terminal-state.md` — that spec is the single source of truth for the priority chain (user-pinned title, app-sent overrides, current command title, `<idle> ${LAST_TITLE}` for finished panes, plain `<idle>` for fresh panes), the disambiguator rule, and which OSC sources contribute. Layout's job is to render the result: the primary label truncates with ellipsis, the secondary label (when present) is shown muted next to it, click renames/pins, right-click opens the diagnostic popup.
 
@@ -116,7 +112,7 @@ The mouse-override icon only appears when the inside program has requested mouse
 
 ## Baseboard
 
-Below the content area is the baseboard (`h-7`, 28px). It is visible by default and has no top divider. The dockview area ends 2px above it, leaving a narrow theme-colored gap that keeps rounded pane corners distinct from the baseboard. Its horizontal padding matches the Dockview wrapper's 6px inset, so doors align with the panes above. When empty, it shows keyboard shortcut hints when there are no doors and the container is wider than 350px — platform-aware: `LCmd → RCmd to enter command mode` on macOS, `LShift → RShift to enter command mode` elsewhere (`Baseboard.tsx`).
+Below the content area is the baseboard (`h-7`, 28px). It is visible by default and has no top divider. The content area ends 2px above it, leaving a narrow theme-colored gap that keeps rounded pane corners distinct from the baseboard. Its horizontal padding matches the content wrapper's 6px inset, so doors align with the panes above. When empty, it shows keyboard shortcut hints when there are no doors and the container is wider than 350px — platform-aware: `LCmd → RCmd to enter command mode` on macOS, `LShift → RShift to enter command mode` elsewhere (`Baseboard.tsx`).
 
 `Wall` accepts `showBaseboard={false}` for constrained embedders such as the website's mobile Pocket playground, where a separate bottom navigation owns the area below the terminal and door workflows are outside the prototype scope. The main app shell keeps the default `showBaseboard=true`.
 
@@ -149,7 +145,7 @@ Extreme case: a single door with a very long title, with more doors on both side
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers and `docs/specs/alert.md` for the union status. VS Code's per-webview mapping is in `docs/specs/vscode.md`.
 
-A **Workspace** is one Wall's worth of Surfaces (terminal Sessions and browser surfaces) plus its layout, with a user-facing name. The standalone Window hosts several Workspaces but mounts only one — the **active** Workspace — at a time. Each Workspace owns its own Content (dockview layout) and Baseboard (doors).
+A **Workspace** is one Wall's worth of Surfaces (terminal Sessions and browser surfaces) plus its layout, with a user-facing name. The standalone Window hosts several Workspaces but mounts only one — the **active** Workspace — at a time. Each Workspace owns its own Content (Lath layout) and Baseboard (doors).
 
 What exists today lives behind the `dormouse.flags.workspaces` flag (`WORKSPACES_FLAG_KEY` in `lib/src/lib/feature-flags.ts`, **off by default**): the in-memory workspace model and its container verbs (`createWorkspace` / `closeWorkspace` / `renameWorkspace` / `setActiveWorkspace` in `lib/src/lib/workspace-store.ts`), the union projection (`computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`), and Window persistence (`PersistedWindow`, `docs/specs/transport.md`). `setActiveWorkspace` changes the active id in the model but does not yet re-render the Wall, and the single-Workspace cap is still in place. With the flag off, the app persists a bare `PersistedSession` and runs exactly one implicit Workspace — byte-identical to pre-workspace behavior.
 
@@ -177,7 +173,7 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 - Click any pane body or header
 - Press `Enter` on a selected pane in command mode
 - Click or press `Enter` on a door (restores session first)
-- Focus is deferred via `requestAnimationFrame` to prevent dockview from stealing it
+- Focus is deferred via `requestAnimationFrame` so it lands after the click/mousedown event finishes
 
 **Enter command mode:**
 - Left Cmd keydown, then Right Cmd keydown within 500ms — or the same left-then-right gesture with Shift (Left Shift, then Right Shift within 500ms)
@@ -215,7 +211,7 @@ Untouched sessions skip this confirmation. A newly spawned shell starts `untouch
 
 ## Selection overlay
 
-A fixed-positioned element rendered on top of dockview. Covers the active element's area inflated by 3px (half the 6px gap) for panes; doors are not inflated.
+A fixed-positioned element rendered on top of the Lath host. Covers the active element's area inflated by 3px (half the 6px gap) for panes; doors are not inflated.
 
 - A pane or door can be **active** or **inactive**. Only one element is active at a time.
 - **Passthrough:** `border: 1px solid ${color}` — no glow
@@ -225,19 +221,19 @@ A fixed-positioned element rendered on top of dockview. Covers the active elemen
 - `z-index: 50`, `pointer-events: none`, `transition: 150ms`
 
 ### Position tracking
-- `components/wall/TerminalPanel.tsx` registers its DOM element in a `paneElements` Map on mount, removes on unmount
+- Each pane body registers its DOM element in a `paneElements` Map on mount and removes it on unmount (`usePaneChrome`); the overlay resolves the enclosing Lath leaf (`[data-lath-leaf]`) via `resolvePaneElement` so the ring covers the full leaf (header + body)
 - Door elements are registered by the `Baseboard` via `DoorElementsContext` from `components/wall/wall-context.tsx` (queries `[data-door-id]` attributes)
-- Updates on: selection change, resize (`ResizeObserver`), layout change (`api.onDidLayoutChange`)
+- Updates on: selection change, resize (`ResizeObserver`), every Lath store commit (`revision` via `useSyncExternalStore`), and — while an animation runs — every animator frame (so the ring tracks kills, restores, and tweens frame-accurately, with its 150ms CSS transition dropped)
 
 ## Spatial navigation
 
 ### Direction detection
 
-Uses DOM positions of pane elements (registered in `paneElements` Map). For each candidate:
+Lath's pure `neighbors(tree, rect, id, direction, opts)` query resolves the nearest pane in an arrow's direction — no DOM rect scanning; it computes against the same laid-out rects the screen shows (`docs/specs/tiling-engine.md` → "Layout"). The keyboard handlers reach it through the engine-neutral `WallNav` seam (`lib/src/components/wall/keyboard/types.ts`), whose `findInDirection` calls `lath.neighborOf`. The semantics:
 
-1. **Edge-based direction check**: candidate must be entirely in the correct direction on the primary axis
-2. **Overlap requirement**: candidate must overlap on the secondary axis
-3. **Distance**: edge-to-edge on the primary axis
+1. **Edge-based direction check**: candidate must be strictly beyond the leaf's edge on the primary axis
+2. **Overlap requirement**: candidate overlapping on the secondary axis is preferred
+3. **Distance**: nearest edge-to-edge on the primary axis, with deterministic tie-breaks
 4. **Fallback**: if no overlapping candidate, nearest non-overlapping candidate
 
 ### Back-navigation
@@ -250,35 +246,25 @@ Down from the bottom-most pane navigates to the first door in the baseboard. Up 
 
 ### Cmd/Ctrl+Arrow swap
 
-Swaps session **content** between two panes — the layout shape is unchanged. Uses `swapTerminals()` from terminal-registry which swaps registry entries and reattaches DOM elements to each other's containers. Also swaps dockview panel titles. Selection follows the moved session. Uses the same back-navigation breadcrumb as arrow keys.
+Swaps session **content** between two panes — the layout shape is unchanged. A single Lath `swap` op trades the two leaf identities: because per-leaf metadata and terminal-registry entries are keyed by id, the title/params/session follow the ids automatically, with **no** companion title swap. Selection follows the moved session. Uses the same back-navigation breadcrumb as arrow keys.
 
 ## Minimize and reattach
 
 ### Minimize (`m` key or minimize header button)
-1. Capture reattach context before removing:
-   - `neighborId` and `direction`: spatial position relative to nearest neighbor
-   - `remainingPaneIds`: sorted IDs of panes that stay
-   - `layoutAtMinimize`: full layout snapshot
-   - `layoutAtMinimizeSignature`: structural fingerprint (ignores sizes)
-2. Remove pane from dockview (`api.removePanel`)
-3. Add to `doors` state → door appears in baseboard. The door stores only the stable dockview/user title for persistence; its visible label is derived from live terminal semantic state at render time.
-4. Session stays in registry (not disposed)
-5. Selection moves to the new door (stays in command mode)
+1. `lath.removeLeaf(id)` removes the leaf and returns a JSON-serializable **restore token** capturing the leaf's ancestry (sibling id, split-sibling leaf set/fingerprint when needed, edge, weight, child index, and a structure-only fingerprint of the parent split post-removal — `docs/specs/tiling-engine.md` → "Restore tokens").
+2. Add to `doors` state → door appears in baseboard, carrying the `token`. The door stores only the stable component/title for persistence; its visible label is derived from live terminal semantic state at render time. (A pane dragged onto the baseboard minimizes the same way — the drag proposes `onProposeMinimize`, which calls the same `minimizePane`.)
+3. Session stays in registry (not disposed).
+4. Selection moves to the new door (stays in command mode). If this was the *last* pane, the auto-spawn effect fills the emptied Wall while the door keeps selection.
 
 ### Reattach (click door, Enter/d on door)
-Three strategies based on layout state:
 
-**Exact reattach** (layout structure signature matches AND same panes exist):
-- Deserialize the saved layout snapshot with `reuseExistingPanels: true`
-- Preserves exact split ratios from before minimize
+`lath.restoreLeaf(meta, token, { fallbackRef })` applies a three-tier policy from the token (`docs/specs/tiling-engine.md` → "Restore tokens"):
 
-**Neighbor reattach** (neighbor still exists AND pane set matches `remainingPaneIds`):
-- `addPanel` with `position: { referencePanel: neighborId, direction }`
-- Restores original position relative to neighbor
+- **Exact** — the fingerprinted context still exists around the sibling: reinsert at the original index with the original weight (existing siblings shrink proportionally).
+- **Neighbor** — the sibling still exists: split beside it on the original edge (at 50/50).
+- **Fallback** — split beside a caller-supplied live reference (the selected pane, else the first pane) via `autoEdge`; into an empty tree the leaf becomes the root.
 
-**Aspect-ratio split** (layout changed):
-- Split the currently selected pane
-- Direction: wider than tall → split right, otherwise split below
+A Door persisted before Lath has no token; the Wall synthesizes a neighbor-tier one from its legacy `{neighborId, direction}` fields (`legacyTokenFromDoor`). A door dragged out of the baseboard skips the token entirely and inserts at the hit-tested drop position the user chose (`onExternalDrop` → `lath.insertLeaf`).
 
 ## Inline rename
 
@@ -295,30 +281,30 @@ Submitted values are rejected when empty or when they fail the `setTerminalUserT
 
 ## Session lifecycle and terminal registry
 
-For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getOrCreateTerminal(id)` on React mount and `unmountElement(id)` on React unmount. The session (xterm.js instance, PTY, DOM element) persists in the registry across mount/unmount cycles — the DOM element is detached from its container but the Registry entry stays `Mounted`. A browser surface's pane ID is a Surface id with no registry entry or PTY (`docs/specs/glossary.md`); its DOM is owned by dockview and it is reconstructed from persisted params, not from the registry.
+For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getOrCreateTerminal(id)` on React mount and `unmountElement(id)` on React unmount. The session (xterm.js instance, PTY, DOM element) persists in the registry across mount/unmount cycles — the DOM element is detached from its container but the Registry entry stays `Mounted`. A browser surface's pane ID is a Surface id with no registry entry or PTY (`docs/specs/glossary.md`); its DOM is hosted by LathHost's leaf div and it is reconstructed from persisted params, not from the registry.
 
 - **Create**: `getOrCreateTerminal` spawns xterm.js + UnicodeGraphemesAddon + FitAddon + PTY, returns existing if already created. The xterm instance sets `allowProposedApi: true` because UnicodeGraphemesAddon activates through xterm's proposed Unicode API.
 - **Resume**: `resumeTerminal` creates xterm entry and writes replay data without spawning a new PTY. Used when the webview is recreated while the host retains Live PTYs (Link: Severed → Resuming → Live).
 - **Restore**: `restoreTerminal` creates xterm entry and spawns a new PTY with saved cwd and scrollback. Used on cold start from a saved Snapshot (Link: Cold → Live).
 - **Untouched**: new `getOrCreateTerminal` sessions start untouched. `isUntouched(id)` exposes the flag, and user-originated PTY input clears it via the registry input paths. Resume/restore seed the persisted flag; missing legacy snapshot data defaults to touched (`false`) so close confirmation remains conservative.
-- **Shell selection replacement**: the standalone shell dropdown and VS Code shell picker send `dormouse:new-terminal` with `replaceUntouched` when the selected shell type changes. `Wall` always creates a new session id for that request. If the currently selected pane or door is untouched, the new terminal is inserted in the same dockview position (`direction: 'within'`; doors first reattach through the normal restore path), the old untouched session is disposed, and the old panel is removed without kill confirmation. If the selected terminal is touched or no terminal is selected, the request spawns a new pane near the active panel. Announced shell-selection spawns show a transient pane-anchored notice such as `Switched to zsh` or `Opened bash`.
+- **Shell selection replacement**: the standalone shell dropdown and VS Code shell picker send `dormouse:new-terminal` with `replaceUntouched` when the selected shell type changes. `Wall` always creates a new session id for that request. If the currently selected pane or door is untouched, the new terminal takes over the same leaf via a Lath `replace` op (an atomic identity swap; doors first reattach through the normal restore path), and the old untouched session is disposed. If the selected terminal is touched or no terminal is selected, the request spawns a new pane beside the selected one. Announced shell-selection spawns show a transient pane-anchored notice such as `Switched to zsh` or `Opened bash`.
 - During resume/restore replay, xterm.js may emit terminal-generated replies for OSC/CSI/DCS queries that were embedded in saved output. The registry drops those replay-time replies before they reach the new shell. This filter is limited to query/focus reports, and must not swallow user keyboard escape sequences such as arrows, function keys, or bracketed paste.
 - **mount / unmount (DOM)**: `mountElement` reparents the persistent DOM element into a container; `unmountElement` removes it. The Registry entry survives.
 - **Dispose**: `disposeSession` kills the PTY, disposes xterm, removes the registry entry. Only called on explicit kill (`x`).
-- **Swap**: `swapTerminals` swaps two registry entries and reattaches DOM elements to each other's containers.
+- **Swap**: the Cmd/Ctrl+Arrow swap trades two leaf identities via a Lath `swap` op — per-leaf metadata and registry entries are keyed by id, so they follow the swap with no DOM reattach or title swap (see "Cmd/Ctrl+Arrow swap" above).
 
 ### Session persistence
 
-Layout, scrollback, cwd, minimized items, user-pinned titles, untouched state, and alert state are saved to persistent storage via a debounced save (500ms). Derived command/app labels shown on minimized doors are display-only and are not persisted as user-pinned titles. Saves are triggered by layout changes, panel add/remove, and a 30s periodic interval. Saves are flushed immediately on PTY exit, `pagehide`, and extension shutdown requests.
+Layout, scrollback, cwd, minimized items, user-pinned titles, untouched state, and alert state are saved to persistent storage via a debounced save (500ms). The layout persists as the native Lath format (`lathLayout`; `docs/specs/tiling-engine.md` → "Persistence and migration"); the legacy dockview `layout` key is no longer written. Derived command/app labels shown on minimized doors are display-only and are not persisted as user-pinned titles. Saves are triggered by every Lath store commit (add/remove/resize/swap/meta) and a 30s periodic interval. Saves are flushed immediately on PTY exit, `pagehide`, and extension shutdown requests.
 
 In standalone, each Workspace's snapshot is wrapped in a Window snapshot that records every Workspace (name + layout) and which one is active, so all Workspaces — not just the mounted one — survive a restart. VS Code persists one Workspace per webview exactly as today (one snapshot per `WebviewView` / `WebviewPanel`). The persisted container types (`PersistedWorkspace`, `PersistedWindow`) and their migration live in `docs/specs/transport.md`.
 
 Saved snapshots are read through `readPersistedSession()`, which accepts the canonical object shape and defensively parses a JSON-stringified blob before validation and migration. This keeps malformed storage inert while covering hosts that hand back serialized JSON instead of the parsed object.
 
 On startup, recovery is priority-based:
-1. **Resume** (webview hidden/shown, live PTYs): request PTY list + replay data from platform, `resumeTerminal()` for each (500ms timeout). Saved pane and door titles are seeded back via `setTerminalUserTitle()` (see `docs/specs/transport.md`) so persisted placeholder labels never replay as user pins. If the saved session covers every live PTY, restore the saved dockview layout when its visible panel set matches and reattach saved minimized items as doors. This still counts as a live resume when every live session is minimized, so recovery must not fall through to cold restore just because the visible `paneIds` list is empty.
-2. **Restore** (app restart, cold start): restore layout from serialized dockview state, `restoreTerminal()` for each pane with saved cwd + scrollback, and spawn each PTY with the current default shell selection
-3. **Fallback/manual pane creation**: when no saved layout can be safely applied, add multiple panes as splits from the previous pane rather than tabs, and spawn each PTY with the current default shell selection
+1. **Resume** (webview hidden/shown, live PTYs): request PTY list + replay data from platform, `resumeTerminal()` for each (500ms timeout). Saved pane and door titles are seeded back via `setTerminalUserTitle()` (see `docs/specs/transport.md`) so persisted placeholder labels never replay as user pins. If the saved session covers every live PTY, restore the saved Lath layout when its leaf set matches (a pre-Lath save's legacy dockview `layout` blob is migrated into that single channel at the session read boundary) and reattach saved minimized items as doors. This still counts as a live resume when every live session is minimized, so recovery must not fall through to cold restore just because the visible `paneIds` list is empty.
+2. **Restore** (app restart, cold start): the Wall's `seed` hydrates from the restored Lath layout (the read boundary already migrated any legacy dockview `layout` blob one-way into it), else falls to (3); `restoreTerminal()` for each pane with saved cwd + scrollback, spawning each PTY with the current default shell selection
+3. **Fallback/manual pane creation**: when no saved layout can be safely applied, add multiple panes as splits from the previous pane, and spawn each PTY with the current default shell selection
 4. **Empty state**: create a single new pane with the current default shell selection
 
 ### Activity state
@@ -329,67 +315,45 @@ Each session also carries `TerminalPaneState` from `docs/specs/terminal-state.md
 
 ## Theme
 
-Custom `dormouseTheme` extends dockview's `themeAbyss`. Source of truth:
-`dormouseTheme` in `lib/src/components/Wall.tsx` defines gap and dnd overlay
-settings; `lib/src/index.css` defines dockview CSS-var overrides such as pane
-header height. The dockview area uses a 6px top/sides inset and 2px bottom
-inset (`px-1.5 pt-1.5 pb-0.5` on wrapper, `inset-x-1.5 top-1.5 bottom-0.5` on
-container).
+The Lath host styling lives in the `.lath-host` / `.lath-leaf` rules in `lib/src/index.css`: an app-bg host, a 30px header band per leaf, and a terminal-bg body. The content area uses a 6px top/sides inset and 2px bottom inset (`px-1.5 pt-1.5 pb-0.5` on wrapper, `inset-x-1.5 top-1.5 bottom-0.5` on container); the `LATH_LAYOUT_OPTS` gap of 6px is the only visual separator between panes.
 
 Colors use a two-layer CSS variable strategy: `@theme --color-*` tokens → `var(--vscode-*)`. VSCode provides host theme variables in extension mode; standalone and website mode apply bundled or installed theme variables before rendering. Tailwind v4 `@theme` block registers `--color-*` tokens as Tailwind colors (e.g., `bg-app-bg`, `text-app-fg`, `border-border`). See `theme.css` for the full token map.
 
-Dockview's separator borders, sash handles, and groupview borders are all set to transparent/none — the 6px gap is the only visual separator between panes. Dockview infrastructure paints `var(--color-app-bg)` so gutters and rounded pane/header corner cutouts match host chrome. Terminal content backgrounds are painted by the React terminal wrappers and xterm host elements, not by dockview containers.
+The Lath host paints `var(--color-app-bg)` so gutters and rounded pane/header corner cutouts match host chrome. Terminal content backgrounds are painted by the React terminal wrappers and xterm host elements, not by the leaf containers.
 
 ## Animations
 
-All pane-related motion is 440ms with `cubic-bezier(0.22, 1, 0.36, 1)` and uses `clip-path` (not `transform`) so `getBoundingClientRect` remains accurate during animation — the selection overlay measures the real post-animation bounds without lag. Reduced-motion users skip every animation described below.
+All pane motion is owned by the Lath **animator** — a pure function of time that turns committed layout changes into interpolated frames, applied imperatively to the leaf divs by LathHost (`docs/specs/tiling-engine.md` → "Animation"). Default motion is 440ms `cubic-bezier(0.22, 1, 0.36, 1)`; under reduced motion the animator runs the same code with a 0 duration (instant). The selection overlay measures the leaf divs, which carry the interpolated inline geometry, so `getBoundingClientRect` tracks the tween frame-accurately. There are no CSS entrance/exit classes. Terminal panes, by contrast, do not refit every frame: `TerminalPane`'s resize observer throttles `refitSession` (leading edge, then at most one per ~150ms while resizes keep arriving, plus a trailing call at rest), so a motion or sash drag reflows the xterm buffer and fires a PTY resize a handful of times instead of once per animated cell-boundary crossing, while the resting geometry still gets an exact fit.
 
 ### Spawn (new pane reveal)
 
-When a pane is added, its dockview group element gets a directional `.pane-spawning-from-{left,top,top-left}` class. The clip-path starts fully closed from the opposite edge(s) and reveals to `inset(0)`. Direction is chosen by how the pane was born:
+A newly added leaf enters by growing from the boundary it was placed against, at opacity 0 → 1 (a split to the right grows from its left boundary, and so on). The store's mutators derive this **enter hint** from the edge they commit; the auto-spawn refill overrides it to `'top-left'` (the killed last pane shrank toward the bottom-right, so the refill grows from the opposite corner). See `docs/specs/tiling-engine.md` → "Animation" → Enter.
 
-- **Horizontal split** (new pane on the right) → reveal from the left edge.
-- **Vertical split** (new pane below) → reveal from the top edge.
-- **Auto-spawn after last-pane kill/minimize** → reveal from the top-left corner.
+Shell-selection replacement shows a short fixed-position notice over the resulting pane. The notice fades in/out over 1500ms via `.shell-spawn-notice` and is suppressed to a static render for reduced-motion users.
 
-The direction is carried via `FreshlySpawnedContext` — a `Map<paneId, SpawnDirection>` written by the spawn call site and consumed once by `TerminalPanel`'s `useLayoutEffect` on first mount.
+### Kill (two-phase fade + tween reclaim)
 
-Shell-selection replacement uses the same pane add/remove primitives but also shows a short fixed-position notice over the resulting pane. The notice fades in/out over 1500ms via `.shell-spawn-notice` and is suppressed to a static render for reduced-motion users.
+Kill is the animator's two-phase exit (`docs/specs/tiling-engine.md` → "Animation" → Exit). `killPaneImmediately` in `Wall.tsx` runs it after the user confirms:
 
-### Kill (in-place fade + FLIP reclaim)
+1. `lath.markDying(id, { shrinkTowardBottomRight })` freezes the pane geometry and fades it in place (a last-pane kill also shrinks it toward its bottom-right corner). The mounted terminal DOM remains in the dying leaf for the fade; dying leaves get `pointer-events: none`.
+2. After `lath.exitMs`, `disposeSession(id)` runs and `lath.removeLeaf(id)` commits — survivors tween into the reclaimed space on the resulting retarget. A second kill of the same pane mid-fade is a no-op (`lath.isDying`). A mid-tween re-kill of a *different* pane retargets cleanly from the current interpolated frame (the animator is interruptible by construction).
 
-`orchestrateKill(api, killedId, isSelected, …, onRemoved?)` in `lib/src/lib/kill-animation.ts` runs on kill confirmation. `Wall.tsx` owns the command dispatch and calls it after the user confirms. `isSelected` is a live reader, not a snapshot: the selection tail evaluates `isSelected(killedId)` at removal time (up to ~1s after the fade starts), and the overlay ring reads it once at fade start. The optional `onRemoved` callback fires once, on every path, immediately after `removePanel`: collapsing a branch can re-parent and blur the surviving selected pane, so `killPaneImmediately` uses it to re-assert that pane's DOM focus (through the shared `reassertPaneFocus` guard, see corner case #12). It fades the real pane element in place (its content dissolves against the same-colored background), then removes the panel and FLIP-reveals the survivors:
+Selection tail: at removal time, selection moves to a survivor (`lath.listPanes()[0]`, or `null` → auto-spawn when the last pane goes) **only when the killed pane is still the selected pane** — the check is live (`selectedType === 'pane' && selectedId === killedId` re-read inside the removal timeout), so killing a background surface leaves the user's selection untouched, and a selection move *during* the fade is honored: navigating away from a dying selected pane means the tail no longer yanks selection, and navigating onto a dying pane means the tail adopts a survivor instead of leaving selection dangling. The header kill button is always a selected-pane kill (clicking the header selects the pane before the button's click handler runs); the not-selected cases are `dor kill` of a background surface (`dor kill surface:3`) and ensure's throwaway teardown.
 
-1. Add `.pane-fading-out` (or `.pane-fading-and-shrinking-to-br` for a last-pane kill) to the killed pane's group element. Block pointer events during the fade.
-2. On `animationend`, snapshot `getBoundingClientRect` for every surviving panel's group element.
-3. `disposeSession` + `api.removePanel`; dockview snaps the layout.
-4. Measure post-rects. Any panel whose rect grew is a "grower."
-5. For each grower, apply an inline `clip-path: inset(...)` with the newly-claimed territory clipped off, force a reflow, then transition to `inset(0)`. This reveals the grower into the vacated space without affecting `getBoundingClientRect`. Clears on `transitionend`.
+### Auto-spawn refill
 
-Case handling is purely rect-based (measure before and after removal), so 2-pane splits, linear 3+ rows/columns, and nested splits all fall through the same code path with no per-case branching.
+A store commit that empties the tree (last pane killed or minimized) triggers the "always keep one pane visible" auto-spawn: a Wall effect subscribed to the store spawns one leaf into the emptied tree (`lib/src/components/Wall.tsx`). It fires re-entrantly on the same commit chain, so the refill appears without a separate delay; the killed pane's fade already sequenced the removal. The refill spawns with the current default shell selection, matching manual splits and the standalone `[+]` action.
 
-Selection tail: after removal, `orchestrateKill` moves selection to a survivor (`panels[0]`, or `null` → auto-spawn when the last pane goes) **only when `isSelected(killedId)` reads true at removal time** — the killed pane is the selected one. `killPaneImmediately` passes a live reader (`selectedType === 'pane' && selectedId === killedId`) rather than a snapshot, so killing a background surface leaves the user's selection untouched, and a selection move *during* the ~1s fade is honored by design: navigating away from a dying selected pane means the tail no longer yanks selection to `panels[0]`, and navigating onto a dying pane means the tail adopts a survivor instead of leaving selection dangling on the removed panel. (The removal is tagged with `withProgrammaticActivation`, so dockview's activate-the-survivor echo — which previously covered those two edges by accident — no longer reads as user intent; the live check covers them explicitly.) The header kill button cannot produce an unselected kill: dockview activates the pane on pointerdown (`doSetGroupActive`) before the button's click handler runs, so mouse kills are always selected-pane kills. The not-selected cases are `dor kill` of a background surface (`dor kill surface:3`) and ensure's throwaway teardown.
-
-### Auto-spawn delay
-
-When `onDidRemovePanel` triggers the "always keep one pane visible" auto-spawn (see corner case #10), the `api.addPanel` call is deferred by 440ms **for the minimize path** — letting the selection-overlay slide to the door finish before the replacement's reveal starts. The kill path uses no extra delay (0ms): kill sequencing is already handled inside `orchestrateKill`, which removes the panel only after the fade's `animationend`. Reduced-motion users also get 0ms. The deferred spawn re-checks `totalPanels` at fire time and becomes a no-op if anything repopulated the pane area during the delay (e.g. a door reattach). If it does create a replacement pane, that pane spawns with the current default shell selection, matching manual splits and the standalone `[+]` action.
-
-The deferred spawn adopts the replacement (`selectPane`) only when the current selection no longer points at anything real: null (`orchestrateKill`'s selection tail cleared it after a selected last-pane kill) or dangling (selection still names the removed pane, which the 0ms kill timer can observe if it beats React's flush of `setSelectedId(null)` into `selectedIdRef`). A *valid* selection is left alone — the just-created door on the minimize path (preserving that door focus across the delay is the point) or a live pane after an unselected kill — because the auto-spawn exists to keep a pane visible, not to steal selection.
+The refill adopts the replacement (`selectPane`) only when the current selection no longer points at anything real: null (the kill tail cleared it after a selected last-pane kill) or dangling (selection still names the just-removed pane). A *valid* selection is left alone — the just-created door on the minimize path (so the door keeps selection across the refill) or a live pane after an unselected kill — because the auto-spawn exists to keep a pane visible, not to steal selection.
 
 ## Corner cases
 
-1. **Dual React instance**: dockview bundles its own React. Fixed with `resolve.dedupe: ['react', 'react-dom']` in Vite config.
-2. **White screen on boot**: `DockviewReact` needs pixel dimensions. Fixed with relative wrapper + absolute inner container.
-3. **Theme as prop**: dockview v5 uses `theme={themeObject}` prop, not a CSS class.
-4. **xterm steals Meta keys**: mode-exit gesture uses `capture: true` on the window keydown listener.
-5. **Click doesn't focus terminal**: focus deferred to `requestAnimationFrame` to prevent dockview from stealing it.
-6. **Stale hitboxes after DnD**: each `TerminalPanel` registers its own DOM element in a Map for overlay/navigation.
-7. **Asymmetric back-navigation**: breadcrumb tracks last direction + origin for opposite-direction return.
-8. **Center drop merges panels**: intercepted at group-level `model.onWillDrop` and converted to a swap.
-9. **Group drag has null panelId**: falls back to `api.getGroup(groupId).activePanel.id`.
-10. **Auto-spawn on empty**: `onDidRemovePanel` creates a new session whenever the last visible pane is removed, whether or not doors exist — there is always a pane visible. The `addPanel` call is delayed 440ms on the minimize path (see "Auto-spawn delay" under Animations); the kill path is sequenced by `orchestrateKill` instead.
-11. **Door focus survives auto-spawn**: `api.addPanel` auto-activates the new panel, firing `onDidActivePanelChange`. When the current selection is a door (e.g., just-minimized last pane), selection must not flip to the new pane — otherwise `selectedType === 'door'` + `selectedId === newPaneId` desyncs and the door loses its highlight while the `WorkspaceSelectionOverlay` is stuck on the stale door rect. The auto-spawn's `addPanel` is tagged with `withProgrammaticActivation` and applies its adopt-or-leave selection policy explicitly at the spawn site (adopt only when selection is null or dangling; a valid door or live-pane selection is left alone), so door survival lives in the spawn-site policy — the listener no longer has a door special case. A dockview-native user interaction, though, DOES move selection off a door now — dragging a panel, or DOM focus landing in a surface (an embed focusing itself) — matching how those already move selection off a pane; explicit user selection of a pane always wins over door stickiness.
-12. **Focus-neutral surface creation (`dor ensure` / `dor iframe` / `dor ab`)**: unlike `dor split`, these must never move focus off the caller (`docs/specs/dor-cli.md`, `docs/specs/dor-browser.md`). Adding the pane `inactive` does **not** work: dockview renders and lays out a pane only once it becomes its group's active panel (a new group's `setActive` runs `doSetActivePanel`), so an `inactive` add — which skips both — leaves the pane behind a blank tile until the first click activates it. Instead the shared `runSurfaceAdd(focusNeutral, add)` helper adds the pane **active** (so it renders), then `add` hands the active group straight back to the caller via `settleFocusAfterAdd` (`caller.api.setActive()`); the new pane stays active *within its own group* and keeps rendering. The helper runs the add inside `withProgrammaticActivation` (`lib/src/lib/programmatic-activation.ts`), a depth-counted tag the `onDidActivePanelChange` listener (#11) checks so this programmatic activation churn never reads as user intent, and `selectedId`/mode never leave the caller. But adding the pane re-parents the caller's grid subtree in the DOM, which **blurs its xterm textarea** — and since `selectedId` never changed, `TerminalPanel`'s focus effect does not re-run to reclaim it, so the caller would silently stop receiving keystrokes until clicked. So the helper re-asserts the selected pane's focus with a deferred `focusSession` through the shared `reassertPaneFocus` rAF helper (deferred to beat dockview's post-split focus handling, like the click-focus rAF in `enterTerminalMode`), gated on three conditions: the pane is still the selected pane in passthrough (the condition `TerminalPanel` uses for `isFocused`, so a legitimate selection move makes it a no-op); the window still has focus (`document.hasFocus()` — a background `dor` command must never yank cross-frame focus out of the host editor, e.g. VS Code); and DOM focus is not in an in-page editable control (the inline-rename input, a non-terminal `<input>`/`<textarea>`/contenteditable — re-parent blur drops focus to `<body>`, so a focused control means the user put it there; the terminal's own `xterm-helper-textarea` is exempt since re-focusing it is idempotent). Callers skip `selectPane`; the `--minimize` case passes `select: false` to `minimizePane` so it creates the door without stealing selection or switching to command mode. (`dor iframe` / `dor ab` replacing the pane the user is *currently selected on* are the exception: selection follows to the replacement, since it would otherwise dangle on the removed panel. Replacing an active-but-unselected pane leaves the user's selection — including a door selection — untouched.) If a freshly created shell never reports OSC 633 integration, ensure tears the throwaway pane down with `killPaneImmediately`; because the focus-neutral create never selected it, `orchestrateKill`'s live selection check (`isSelected(killedId)` read at removal time, see the kill "Selection tail" above) leaves the caller's selection intact. For a `--minimize` create the throwaway is already a door with no dockview panel, and `killPaneImmediately` handles that too — disposing the session and removing the door directly (no panel to animate). Coverage rule: every programmatic dockview mutation runs tagged inside `withProgrammaticActivation` — the focus-neutral adds here, `selectPane`/`enterTerminalMode`'s own trailing `setActive`, reattach's restore mutations (`handleReattach`), the kill removal, `minimizePane`'s removal, and the empty-pane auto-spawn's `addPanel` — so an untagged activation is a dockview-native user interaction (a panel drag, or DOM focus landing in a surface), which the listener adopts through the real dispatchers: `enterTerminalMode` in passthrough, `selectPane` in command. Selection policy lives at the mutation sites, not the listener; `lib/src/lib/programmatic-activation.ts` holds the rationale.
+1. **xterm steals Meta keys**: the mode-exit gesture uses `capture: true` on the window keydown listener, so it fires even while xterm has DOM focus.
+2. **Click focus timing**: entering passthrough defers `focusSession` to `requestAnimationFrame` so it lands after the click/mousedown event finishes (`enterTerminalMode`).
+3. **Stable hitboxes across moves**: each pane body registers its DOM element in `paneElements` (`usePaneChrome`), and the selection/kill overlays resolve the enclosing `[data-lath-leaf]` from it, so a leaf measured after a move reports its new rect. Because Lath never re-parents a leaf div, its node identity — and any embedded `<iframe>` — survives every op; there is no re-parent blur to heal and no iframe reload.
+4. **Asymmetric back-navigation**: a breadcrumb tracks last direction + origin for opposite-direction return.
+5. **Door keeps selection through the auto-spawn refill**: minimizing the last pane selects the new door, then the auto-spawn refill fills the emptied Wall. The refill only adopts selection when it points at nothing real (null or dangling), so a live door selection is left alone — the door keeps its highlight. Explicit user selection of a pane (a click, a drag, or an embed focusing itself) still moves selection off a door. See "Auto-spawn refill" under Animations.
+6. **Focus-neutral surface creation (`dor ensure` / `dor iframe` / `dor ab`)**: unlike `dor split`, these open in the background without moving focus off the caller (`docs/specs/dor-cli.md`, `docs/specs/dor-browser.md`). Under Lath this is inherent — an add never re-parents the caller's subtree or steals activation, so the caller keeps DOM focus and selection with no healing; the create simply does not call `selectPane` (`settleAddSelection` returns false for a focus-neutral, non-selection-replacing add). The one exception: `dor iframe` / `dor ab` replacing the pane the user is *currently selected on* moves selection to the replacement (else it would dangle on the removed leaf); replacing any other pane, or a door selection, is left untouched. A throwaway that never reports OSC 633 integration is torn down with `killPaneImmediately`, whose live selection check leaves the caller's selection intact (a `--minimize` throwaway is already a door, and `killPaneImmediately` disposes it directly).
 
 ## Files
 
@@ -397,16 +361,16 @@ The deferred spawn adopts the replacement (`selectPane`) only when the current s
 |------|------|
 | `lib/src/components/Wall.tsx` | Main layout orchestrator: selected mode/state, session actions, minimize/reattach, provider composition |
 | `lib/src/components/wall/wall-types.ts` / `wall-context.tsx` | Shared Wall types and React contexts used by Wall, pane headers, panels, overlays, and the baseboard |
-| `lib/src/components/wall/TerminalPanel.tsx` | Dockview panel body wrapper; registers pane DOM elements and plays spawn animation |
-| `lib/src/components/wall/TerminalPaneHeader.tsx` | Custom dockview tab/header with rename, alert/TODO, mouse override, split/zoom/minimize/kill controls |
-| `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` | Pane/door focus ring and marching-ants overlay |
+| `lib/src/components/wall/LathHost.tsx` | The tiling engine's HTML adapter: leaf divs, sashes, the pane/door drag gesture, and imperative animator frame application. Engine internals are mapped in `docs/specs/tiling-engine.md`. |
+| `lib/src/components/wall/TerminalPanel.tsx` | Pane body wrapper; registers the pane's DOM element (`usePaneChrome`) |
+| `lib/src/components/wall/TerminalPaneHeader.tsx` | Pane header with rename, alert/TODO, mouse override, split/zoom/minimize/kill controls |
+| `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` | Pane/door focus ring and marching-ants overlay; re-measures on Lath store commits + animator frames |
 | `lib/src/components/wall/MarchingAntsRect.tsx` | SVG marching-ants border path and dash sizing |
 | `lib/src/components/wall/MouseOverrideBanner.tsx` | Temporary mouse override banner shown from the header icon |
-| `lib/src/components/wall/use-dockview-ready.ts` | Dockview ready/setup handler: restore/create panels, DnD swap wiring, active panel sync, auto-spawn |
-| `lib/src/lib/programmatic-activation.ts` | `withProgrammaticActivation` depth-tag distinguishing programmatic add-side dockview activation from user activation |
 | `lib/src/components/wall/use-wall-keyboard.ts` | Capture-phase keyboard dispatch for mode switching, pane/door commands, copy/paste, selection drag keys |
 | `lib/src/lib/vscode-keybindings.ts` | VS Code-hosted workbench chord mirror allowlist |
 | `lib/src/components/wall/use-session-persistence.ts` | Debounced layout/session save, flush requests, pagehide, PTY exit, file-drop paste routing |
+| `lib/src/components/wall/use-dor-control.ts` | The `dor` CLI's webview control-plane hook (`useDorControl`): the `dormouse:control-request` handler for `surface.*` methods plus its surface-resolution/param-coercion/command-quoting helpers (`docs/specs/dor-cli.md`) |
 | `lib/src/components/wall/use-window-focused.ts` | Window focus tracking hook for header and selection overlay dimming |
 | `lib/src/components/Baseboard.tsx` | Always-visible bottom strip with door components, overflow arrows, and shortcut hints |
 | `lib/src/components/Door.tsx` | Individual door element — mouse-hole styled button with alert/TODO indicators |
@@ -420,8 +384,7 @@ The deferred spawn adopts the replacement (`selectPane`) only when the current s
 | `lib/src/lib/terminal-theme.ts` | xterm theme extraction, terminal host painting, theme MutationObserver |
 | `lib/src/lib/terminal-report-filter.ts` | Synthetic/replay terminal report detection and replay writer |
 | `lib/src/lib/terminal-mouse-router.ts` | Mouse selection routing, smart-token hinting, Alt shape toggle |
-| `lib/src/lib/spatial-nav.ts` | Spatial navigation (`findPaneInDirection`) and reattach-neighbor detection (`findReattachNeighbor`) |
-| `lib/src/lib/layout-snapshot.ts` | Layout cloning (`cloneLayout`) and structural signature (`getLayoutStructureSignature`) for restore comparison |
+| `lib/src/components/wall/resolve-pane-element.ts` | `resolvePaneElement` — climbs a registered pane element to its enclosing `[data-lath-leaf]` for overlay/kill measurement |
 | `lib/src/lib/activity-monitor.ts` | Per-session activity state machine: output timing → alert escalation |
 | `lib/src/lib/alert-manager.ts` | Manages ActivityMonitors + attention tracking + TODO state per session |
 | `lib/src/lib/session-types.ts` | Type definitions for persisted sessions (`PersistedPane`, `PersistedDoor`, `PersistedSession`) |
@@ -429,7 +392,7 @@ The deferred spawn adopts the replacement (`selectPane`) only when the current s
 | `lib/src/lib/session-restore.ts` | Deserialization: loads saved session, calls `restoreTerminal()` for each pane |
 | `lib/src/lib/reconnect.ts` | Priority-based recovery: live PTYs first, then saved session, then empty |
 | `lib/src/lib/resume-patterns.ts` | Detects resumable commands (`claude --resume`, etc.) in scrollback |
-| `lib/src/index.css` | Dockview theme overrides — separator/sash/border removal, background flattening |
+| `lib/src/index.css` | Lath host styling — `.lath-host` / `.lath-leaf` / `.lath-sash` / drop-preview layout and background flattening |
 | `lib/src/theme.css` | Two-layer VSCode theme token system (`@theme --color-*` → `--vscode-*`) and Tailwind v4 `@theme` integration |
 
 ## Maintainer checklist
@@ -440,7 +403,7 @@ When changing layout behavior:
 - Pane-header changes: this spec owns placement and sizing only. Bell/TODO behavior and visual states belong to `docs/specs/alert.md`; the mouse-override icon and banner to `docs/specs/mouse-and-clipboard.md`; the derived label to `docs/specs/terminal-state.md`.
 - Persisted-shape changes (`PersistedPane` / `PersistedDoor` / layout blobs) belong to `docs/specs/transport.md` — add the migration note there.
 - New pane chrome uses tokens from `lib/src/components/design.tsx` (see AGENTS.md Design); never raw color classes.
-- Pane animations stay on `clip-path`, not `transform`, so `getBoundingClientRect` remains accurate for the selection overlay; respect reduced-motion.
+- Pane spawn/kill/tween motion is owned by the Lath animator (`docs/specs/tiling-engine.md` → "Animation"); layout.md owns only the interaction behavior around it.
 - Anything workspace-strip or switching related stays under `## Future` (workspaces-rollout) until built.
 
 ## Future
@@ -455,7 +418,7 @@ Concrete switch/create/close/rename keyboard shortcuts are chosen alongside the 
 
 ### Stage 4 — real switching and multi-Workspace activation
 
-Activating another Workspace (`switchWorkspace`) mounts the target Workspace's Surfaces into the Wall — rebuilding its dockview layout and reattaching its doors — and unmounts the previously active Workspace's Surfaces. For a terminal Surface this reuses the `mount` / `unmount` registry ops: the Registry entry and PTY survive `unmount`, so Process stays `Live`. A browser surface's backing agent-browser session or proxy grant likewise survives while its viewer resources are released. Because a terminal's Activity keeps flowing while unmounted, an inactive Workspace's tab can begin ringing or showing TODO while the user is elsewhere. Mounting must not fire a fresh ring (glossary I8, mirroring the minimize/reattach rule I3).
+Activating another Workspace (`switchWorkspace`) mounts the target Workspace's Surfaces into the Wall — rebuilding its Lath layout and reattaching its doors — and unmounts the previously active Workspace's Surfaces. For a terminal Surface this reuses the `mount` / `unmount` registry ops: the Registry entry and PTY survive `unmount`, so Process stays `Live`. A browser surface's backing agent-browser session or proxy grant likewise survives while its viewer resources are released. Because a terminal's Activity keeps flowing while unmounted, an inactive Workspace's tab can begin ringing or showing TODO while the user is elsewhere. Mounting must not fire a fresh ring (glossary I8, mirroring the minimize/reattach rule I3).
 
 Stage 4 also lifts the single-Workspace cap and wires the lifecycle UX:
 

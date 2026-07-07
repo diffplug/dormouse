@@ -11,7 +11,6 @@
  * subscribes to one snapshot via `useSyncExternalStore`.
  */
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { IDockviewPanelProps } from 'dockview-react';
 import { clsx } from 'clsx';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
@@ -27,26 +26,32 @@ import {
 // Re-exported so existing importers (notably the panel test) keep resolving the
 // park delay from here even though it now lives on the controller.
 export { HIDDEN_PARK_DELAY_MS } from './agent-browser-surface-controller';
+import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
 import { useSurfaceVisibility } from './use-surface-visibility';
 import {
   ModeContext,
+  PaneWriteContext,
   SelectedIdContext,
   WallActionsContext,
 } from './wall-context';
 
 type AgentBrowserPanelParams = AgentBrowserSurfaceParams;
 
-export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: IDockviewPanelProps<AgentBrowserPanelParams> & { renderMode?: RenderMode }) {
+export function AgentBrowserPanel({ id, params: rawParams, renderMode: renderModeProp }: PaneProps & { renderMode?: RenderMode }) {
+  // The engine-tracked `title` prop is unused here: the live title is derived
+  // from the stream (controller → paneWrite.setTitle), never read back.
+  const params = rawParams as AgentBrowserPanelParams | undefined;
   const actions = useContext(WallActionsContext);
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
+  const paneWrite = useContext(PaneWriteContext);
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const elRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  usePaneChrome(api, elRef);
+  usePaneChrome(id, elRef);
 
   const session = params?.session;
   const wsPort = params?.wsPort;
@@ -61,18 +66,18 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
   // The surface-scoped controller: get-or-create, keyed by surface id. Survives
   // this component's unmount (minimize, layout churn, StrictMode).
   const controller = useMemo(
-    () => acquireAgentBrowserSurfaceController(api.id, { ...params, renderMode: seededMode }),
+    () => acquireAgentBrowserSurfaceController(id, { ...params, renderMode: seededMode }),
     // Only the id identifies the controller; later param changes flow through
     // updateParams below (acquire is get-or-create and ignores params when the
     // controller already exists).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [api.id],
+    [id],
   );
 
   const snapshot = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const { tabs, status, connectionLost, hasFrame, poppedOut, streamPort } = snapshot;
 
-  const interactive = mode === 'passthrough' && selectedId === api.id;
+  const interactive = mode === 'passthrough' && selectedId === id;
   const interactiveRef = useRef(interactive);
   interactiveRef.current = interactive;
   // A direct mouse click on the canvas should reach the page even when this pane
@@ -103,22 +108,25 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
     const handle = controller.attachView({
       canvas,
       viewport,
-      updateParameters: (next) => api.updateParameters(next),
-      setTitle: (title) => api.setTitle(title),
+      updateParameters: (next) => paneWrite.updateParams(id, next),
+      setTitle: (nextTitle) => paneWrite.setTitle(id, nextTitle),
       requestIframeSwap: () => {
         // The iframe renderer is single-frame: only the active tab survives.
         // Warn + require a typed confirm when other tabs would be closed.
         if (controller.snapshot().tabs.length >= 2) setPendingIframeSwap(true);
-        else actionsRef.current.onSwapRenderMode(api.id, 'iframe');
+        else actionsRef.current.onSwapRenderMode(id, 'iframe');
       },
     });
     return () => handle.detach();
+    // The sink closes over `paneWrite` + `id`, both stable for a mounted pane
+    // (Wall memoizes paneWrite; id never changes), so this still binds once per
+    // controller — preserving the sink's identity stability.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [controller, api]);
+  }, [controller, paneWrite, id]);
 
-  // Feed effective on-screen visibility (dockview active tab AND foreground
-  // window) so the controller can park a hidden pane after the debounce.
-  const visible = useSurfaceVisibility(api);
+  // Feed effective on-screen visibility (foreground window; a mounted leaf is always
+  // engine-visible) so the controller can park a hidden pane after the debounce.
+  const visible = useSurfaceVisibility();
   useEffect(() => {
     controller.setVisible(visible);
   }, [controller, visible]);
@@ -270,9 +278,9 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
     if (interactive) elRef.current?.focus({ preventScroll: true });
   }, [interactive]);
 
-  // Fallback: if focus fell through to <body> (dockview focus churn, clicks
-  // racing the passthrough transition), forward keys from the window so the pane
-  // never goes keyboard-dead while interactive. Events targeted inside the pane
+  // Fallback: if focus fell through to <body> (focus churn, clicks racing the
+  // passthrough transition), forward keys from the window so the pane never goes
+  // keyboard-dead while interactive. Events targeted inside the pane
   // are skipped — the React handlers above already cover those. The Wall's own
   // capture listener registered earlier, so its dual-tap leader still runs first.
   useEffect(() => {
@@ -327,8 +335,8 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
       tabIndex={-1}
       className={`flex h-full w-full flex-col overflow-hidden bg-terminal-bg outline-none ${TERMINAL_BOTTOM_RADIUS_CLASS}`}
       onMouseDown={() => {
-        actions.onClickPanel(api.id);
-        // Deferred so it lands after dockview's own focus handling for this
+        actions.onClickPanel(id);
+        // Deferred so it lands after the browser's own focus handling for this
         // mousedown (same trick as enterTerminalMode's focusSession).
         requestAnimationFrame(() => elRef.current?.focus({ preventScroll: true }));
       }}
@@ -420,7 +428,7 @@ export function AgentBrowserPanel({ api, params, renderMode: renderModeProp }: I
               e.stopPropagation();
               if (e.key === 'c' || e.key === 'C') {
                 setPendingIframeSwap(false);
-                actions.onSwapRenderMode(api.id, 'iframe');
+                actions.onSwapRenderMode(id, 'iframe');
               } else if (e.key === 'Escape') {
                 setPendingIframeSwap(false);
               }

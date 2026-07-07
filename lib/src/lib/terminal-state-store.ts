@@ -292,35 +292,6 @@ export function fillTerminalProcessCwdByPtyId(ptyId: string, path: string | null
   fillTerminalProcessCwd(resolvePaneStateIdByPtyId(ptyId), path);
 }
 
-export function swapTerminalPaneStates(idA: string, idB: string): void {
-  const stateA = paneStates.get(idA);
-  const stateB = paneStates.get(idB);
-  const inputA = promptSubmitStates.get(idA);
-  const inputB = promptSubmitStates.get(idB);
-  const shapeA = promptShapes.get(idA);
-  const shapeB = promptShapes.get(idB);
-  const outputA = promptOutputBuffers.get(idA);
-  const outputB = promptOutputBuffers.get(idB);
-  if (!stateA && !stateB && !inputA && !inputB && !shapeA && !shapeB && !outputA && !outputB) return;
-  if (stateB) paneStates.set(idA, stateB);
-  else paneStates.delete(idA);
-  if (stateA) paneStates.set(idB, stateA);
-  else paneStates.delete(idB);
-  if (inputB) promptSubmitStates.set(idA, inputB);
-  else promptSubmitStates.delete(idA);
-  if (inputA) promptSubmitStates.set(idB, inputA);
-  else promptSubmitStates.delete(idB);
-  if (shapeB) promptShapes.set(idA, shapeB);
-  else promptShapes.delete(idA);
-  if (shapeA) promptShapes.set(idB, shapeA);
-  else promptShapes.delete(idB);
-  if (outputB) promptOutputBuffers.set(idA, outputB);
-  else promptOutputBuffers.delete(idA);
-  if (outputA) promptOutputBuffers.set(idB, outputA);
-  else promptOutputBuffers.delete(idB);
-  notifyTerminalPaneStateListeners();
-}
-
 function updateCwdIfAllowed(id: string, cwd: CwdState): void {
   const current = paneStates.get(id);
   if (!current) return;

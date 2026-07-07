@@ -230,7 +230,7 @@ saves are frequent (≤500 ms for layout changes); a drain-on-quit is planned
 The `WindowEvent::DragDrop` handler in `lib.rs` routes dropped paths to the
 focused pane as escaped, space-joined paste input — but it is **inert
 today**: `tauri.conf.json` sets `dragDropEnabled: false` so HTML5
-drag-and-drop inside the webview (dockview pane dragging) keeps working
+drag-and-drop inside the webview keeps working
 (tauri-apps/tauri#14373, dormouse#38). Behavior and status are specified in
 `docs/specs/mouse-and-clipboard.md` (§8.7 Drag-to-Paste).
 

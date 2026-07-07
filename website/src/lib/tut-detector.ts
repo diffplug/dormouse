@@ -1,12 +1,6 @@
 import { DEFAULT_MOUSE_SELECTION_STATE } from "dormouse-lib/lib/mouse-selection";
 import type { TutorialState } from "./tutorial-state";
 
-interface DockviewApi {
-  activePanel?: { id?: string } | null;
-  onDidActivePanelChange: (
-    listener: (panel: { id?: string } | undefined) => void,
-  ) => { dispose: () => void };
-}
 type WallEvent = import("dormouse-lib/components/Wall").WallEvent;
 type WallMode = import("dormouse-lib/components/Wall").WallMode;
 type ActivityState = import("dormouse-lib/lib/terminal-registry").ActivityState;
@@ -31,13 +25,14 @@ export class TutDetector {
   private activityStore: ActivityStoreModule;
   private mouseStore: MouseSelectionModule;
   private onWatchingDemoPaneChange?: (id: string | null) => void;
-  private api: DockviewApi | null = null;
+  private started = false;
   private currentMode: WallMode = "command";
   private currentPaneId: string | null = null;
   private commandModePanels = new Set<string>();
   private watchingEnabledPaneIds = new Set<string>();
   private preferredWatchingPaneId: string | null = null;
   private pendingMoveTargetId: string | null = null;
+  private pendingMoveClearTimer: ReturnType<typeof setTimeout> | null = null;
   private prevActivity = new Map<string, ActivityState>();
   private prevMouse = new Map<string, MouseSelectionState>();
   private disposables: (() => void)[] = [];
@@ -54,11 +49,14 @@ export class TutDetector {
     this.onWatchingDemoPaneChange = options.onWatchingDemoPaneChange;
   }
 
-  attach(api: DockviewApi): void {
-    if (this.api) {
-      throw new Error("TutDetector.attach called twice");
+  /** Seed the prev-state maps and subscribe to the activity/mouse stores. The
+   *  detector is otherwise driven by the `WallEvent` stream (`handleWallEvent`), so
+   *  it is engine-neutral — it never touches the tiling api. */
+  start(): void {
+    if (this.started) {
+      throw new Error("TutDetector.start called twice");
     }
-    this.api = api;
+    this.started = true;
     // Seed previous-state maps so the very first listener fire isn't
     // mis-read as a transition from "nothing".
     for (const [id, s] of this.activityStore.getActivitySnapshot()) {
@@ -72,24 +70,6 @@ export class TutDetector {
     for (const [id, s] of this.mouseStore.getMouseSelectionSnapshot()) {
       this.prevMouse.set(id, { ...s });
     }
-
-    const activeUnsub = api.onDidActivePanelChange((panel: { id?: string } | undefined) => {
-      if (!panel?.id) return;
-      if (this.currentMode !== "command") return;
-      // Cmd/Ctrl+Arrow fires `move` then re-selects the swap target, which
-      // would otherwise grow commandModePanels to 2 and credit `kb-arrows`
-      // even though the user never pressed a bare arrow key. Consume the
-      // expected focus-change so only true arrow navigation counts.
-      if (this.pendingMoveTargetId === panel.id) {
-        this.pendingMoveTargetId = null;
-        return;
-      }
-      this.commandModePanels.add(panel.id);
-      if (this.commandModePanels.size >= 2) {
-        this.state.markComplete("kb-arrows");
-      }
-    });
-    this.disposables.push(() => activeUnsub.dispose());
 
     this.disposables.push(
       this.activityStore.subscribeToActivity(() => this.processActivity()),
@@ -108,12 +88,10 @@ export class TutDetector {
         if (event.mode === "command" && this.currentMode === "passthrough") {
           this.state.markComplete("kb-mode");
           this.commandModePanels.clear();
-          // Prefer dockview's active panel — that is the source pane the
-          // arrow-nav handler navigates *from*, and what onDidActivePanelChange
-          // fires against. Falling back to the wall's selection covers the
-          // edge case where the api is missing (e.g. unit tests).
-          const activePaneId = this.api?.activePanel?.id ?? this.currentPaneId;
-          if (activePaneId) this.commandModePanels.add(activePaneId);
+          // Seed with the currently-selected pane (tracked from selectionChange).
+          // It is the pane arrow-nav navigates *from*, so it must already be in
+          // the set for the first arrow to a neighbor to reach size 2.
+          if (this.currentPaneId) this.commandModePanels.add(this.currentPaneId);
         }
         this.currentMode = event.mode;
         break;
@@ -133,13 +111,52 @@ export class TutDetector {
         break;
       case "move":
         this.state.markComplete("kb-move");
-        this.pendingMoveTargetId = event.toId;
+        this.armPendingMoveTarget(event.toId);
         break;
       case "selectionChange":
         if (event.kind === "pane") {
           this.currentPaneId = event.id;
+          // kb-arrows: in command mode, selecting a different pane (a bare arrow
+          // key, or a click) grows the set; two distinct panes credits it. Events
+          // in passthrough must NOT grow the set. selectionChange is the
+          // engine-neutral selection signal (selectPane fires it).
+          if (this.currentMode === "command" && event.id) {
+            // Cmd/Ctrl+Arrow can produce an immediate synthetic selection change
+            // to the swap target, which would otherwise credit `kb-arrows` even
+            // though the user never pressed a bare arrow key. The guard expires
+            // after the current turn so a later real arrow to that neighbor counts.
+            const pendingMoveTargetId = this.pendingMoveTargetId;
+            if (pendingMoveTargetId) this.clearPendingMoveTarget();
+            if (pendingMoveTargetId === event.id) {
+              // Consume the synthetic post-move selection.
+            } else {
+              this.commandModePanels.add(event.id);
+              if (this.commandModePanels.size >= 2) {
+                this.state.markComplete("kb-arrows");
+              }
+            }
+          }
         }
         break;
+    }
+  }
+
+  private armPendingMoveTarget(id: string): void {
+    this.clearPendingMoveTarget();
+    this.pendingMoveTargetId = id;
+    this.pendingMoveClearTimer = setTimeout(() => {
+      if (this.pendingMoveTargetId === id) {
+        this.pendingMoveTargetId = null;
+      }
+      this.pendingMoveClearTimer = null;
+    }, 0);
+  }
+
+  private clearPendingMoveTarget(): void {
+    this.pendingMoveTargetId = null;
+    if (this.pendingMoveClearTimer !== null) {
+      clearTimeout(this.pendingMoveClearTimer);
+      this.pendingMoveClearTimer = null;
     }
   }
 
@@ -147,7 +164,7 @@ export class TutDetector {
     const snapshot = this.activityStore.getActivitySnapshot();
     for (const [id, current] of snapshot) {
       const prev = this.prevActivity.get(id);
-      // First time we see an id (e.g. a pane added after attach()), record
+      // First time we see an id (e.g. a pane added after start()), record
       // its state without firing any transitions — we have no "before" to
       // compare against, so treating undefined as a transition from
       // WATCHING_DISABLED / todo=false would falsely credit work the user
@@ -173,7 +190,7 @@ export class TutDetector {
       // Gate al-busy / al-ring on a true status transition. Without the
       // prev.status check, a pane already in BUSY or ALERT_RINGING at the
       // moment its first activity event fires (e.g. restored state, or a
-      // pane spawned after attach() that arrives mid-task) would credit
+      // pane spawned after start() that arrives mid-task) would credit
       // the user for work they did not do this session.
       if (
         prev.status !== current.status &&
@@ -238,6 +255,7 @@ export class TutDetector {
   dispose(): void {
     for (const fn of this.disposables) fn();
     this.disposables = [];
+    this.clearPendingMoveTarget();
   }
 
   private emitWatchingDemoPaneChange(): void {

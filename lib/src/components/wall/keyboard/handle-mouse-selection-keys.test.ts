@@ -15,6 +15,9 @@ vi.mock('../../../lib/platform', () => ({ IS_MAC: true }));
 function makeCtx(): WallKeyboardCtx {
   return {
     selectedIdRef: { current: 'pane-a' },
+    // Surface-type lookup now flows through the engine-neutral `nav` seam; an
+    // absent params reads as a terminal.
+    nav: { paneParams: () => undefined, findInDirection: () => null, hasPane: () => false, panes: () => [] },
   } as unknown as WallKeyboardCtx;
 }
 

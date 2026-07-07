@@ -21,7 +21,7 @@ initAlertStateReceiver();
 resumeOrRestore(platform).then((result) => {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <App initialPaneIds={result.paneIds} restoredLayout={result.layout} initialDoors={result.doors} />
+      <App initialPaneIds={result.paneIds} restoredLathLayout={result.lathLayout} initialDoors={result.doors} />
     </StrictMode>,
   );
 });

@@ -3,13 +3,13 @@
  */
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { IDockviewPanelProps } from 'dockview-react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
+import type { PaneProps } from './pane-props';
 import { IframePanel } from './IframePanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
-import { WallActionsContext, type WallActions } from './wall-context';
+import { PaneWriteContext, WallActionsContext, type PaneWriteActions, type WallActions } from './wall-context';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -32,11 +32,8 @@ function stubActions(overrides: Partial<WallActions> = {}): WallActions {
   };
 }
 
-function panelProps(id: string, updateParameters = vi.fn()): IDockviewPanelProps<{ url: string }> {
-  return {
-    api: { id, title: 'Raw iframe', updateParameters, setTitle: vi.fn() },
-    params: { url: 'http://example.test/app' },
-  } as unknown as IDockviewPanelProps<{ url: string }>;
+function paneProps(id: string): PaneProps {
+  return { id, title: 'Raw iframe', params: { url: 'http://example.test/app' } };
 }
 
 let container: HTMLDivElement;
@@ -55,13 +52,22 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function renderPanel(actions: WallActions, props = panelProps('iframe-raw')): Promise<HTMLIFrameElement> {
+async function renderPanel(
+  actions: WallActions,
+  props: PaneProps = paneProps('iframe-raw'),
+  updateParameters: (patch: Record<string, unknown>) => void = () => {},
+): Promise<HTMLIFrameElement> {
+  // The panel's title/param writes go through PaneWriteContext now; forward
+  // updateParams' patch to the test's mock so its assertions stay unchanged.
+  const paneWrite: PaneWriteActions = { updateParams: (_id, patch) => updateParameters(patch), setTitle: () => {} };
   await act(async () => {
     root.render(
       <StrictMode>
-        <WallActionsContext.Provider value={actions}>
-          <IframePanel {...props} />
-        </WallActionsContext.Provider>
+        <PaneWriteContext.Provider value={paneWrite}>
+          <WallActionsContext.Provider value={actions}>
+            <IframePanel {...props} />
+          </WallActionsContext.Provider>
+        </PaneWriteContext.Provider>
       </StrictMode>,
     );
   });
@@ -107,7 +113,7 @@ describe('IframePanel', () => {
     const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserOpen'>;
     platform.agentBrowserOpen = vi.fn();
     setPlatform(platform);
-    await renderPanel(stubActions(), panelProps('iframe-history', updateParameters));
+    await renderPanel(stubActions(), paneProps('iframe-history'), updateParameters);
 
     await act(async () => {
       getAgentBrowserScreenController('iframe-history')?.chromeActions.navigate('http://example.test/one');
@@ -136,7 +142,7 @@ describe('IframePanel', () => {
       upstream: 'http://example.test/app',
     }));
     setPlatform(platform);
-    await renderPanel(stubActions(), panelProps('iframe-proxied', updateParameters));
+    await renderPanel(stubActions(), paneProps('iframe-proxied'), updateParameters);
 
     await act(async () => {
       window.dispatchEvent(new MessageEvent('message', {
@@ -158,7 +164,7 @@ describe('IframePanel', () => {
     const createProxy = vi.fn(async () => ({ ok: true, url: 'http://127.0.0.1:61234/app' }));
     platform.createIframeProxyUrl = createProxy;
     setPlatform(platform);
-    await renderPanel(stubActions(), panelProps('iframe-back', updateParameters));
+    await renderPanel(stubActions(), paneProps('iframe-back'), updateParameters);
 
     // Observe an in-frame navigation: it adds a history entry but, by design,
     // does not write params.url back, so params.url stays the source URL.

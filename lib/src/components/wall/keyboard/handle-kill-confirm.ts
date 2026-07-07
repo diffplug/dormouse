@@ -12,8 +12,7 @@ export function handleKillConfirm(e: KeyboardEvent, ctx: WallKeyboardCtx): boole
   e.stopPropagation();
   if (ck.exit) return true;
 
-  const api = ctx.apiRef.current;
-  if (e.key.toLowerCase() === ck.char.toLowerCase() && api) {
+  if (e.key.toLowerCase() === ck.char.toLowerCase()) {
     ctx.acceptKill();
     return true;
   }
