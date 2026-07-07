@@ -122,6 +122,57 @@ body {
   display: none !important;
 }
 
+/* --- Lath host (in-house tiling engine binding) ---
+ *
+ * The HTML adapter for Lath (docs/specs/tiling-engine.md → "Adapters"). Inert:
+ * nothing mounts LathHost yet. Reproduces the shipped pane look from the
+ * `.dockview-theme-abyss` rules above — app-bg gutters, a terminal-bg body, and a
+ * 30px header band (matching `--dv-tabs-and-actions-container-height`). The header
+ * and body React components carry their own palette (bg-header-*/bg-terminal-bg)
+ * and rounded corners, so this is layout + backgrounds only, parity minus polish. */
+
+.lath-host {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--color-app-bg);
+}
+
+/* One stable, absolutely-positioned div per leaf — moved and resized via inline
+ * styles, never re-parented (the no-reparent guarantee that keeps iframes from
+ * reloading and xterms from blurring). */
+.lath-host .lath-leaf {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.lath-host .lath-leaf-header {
+  flex: 0 0 30px;
+  height: 30px;
+  position: relative;
+  overflow: visible;
+  z-index: 20;
+}
+
+.lath-host .lath-leaf-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background-color: var(--color-terminal-bg);
+}
+
+/* Sashes render from the core `sashes()` geometry as sibling divs over the gap
+ * band; the adapter widens the hit area and sets the cursor inline. */
+.lath-host .lath-sash {
+  position: absolute;
+  z-index: 30;
+  touch-action: none;
+}
+
 /* --- Command mode marching-ants animation --- */
 
 @keyframes marching-ants {
