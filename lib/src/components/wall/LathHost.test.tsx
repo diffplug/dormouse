@@ -9,7 +9,8 @@ import { createLathWallStore, type LathWallStore, type LeafMeta } from './lath-w
 import { createLathWallEngine } from './lath-wall-engine';
 import { layout } from '../../lib/lath/layout';
 import { LATH_EASING } from '../../lib/lath/animator';
-import { leafTree, type LathNode, type LathTree } from '../../lib/lath/model';
+import { type DropTarget, move } from '../../lib/lath/ops';
+import { leafTree, type LathNode, type LathTree, type Rect } from '../../lib/lath/model';
 import type { PaneProps } from './pane-props';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -44,7 +45,14 @@ function StubBody(props: PaneProps) {
 }
 function StubTab(props: PaneProps) {
   tabProps[props.id] = props;
-  return <div data-tab={props.id} />;
+  // Include a button so the drag tests can assert a header button never starts a drag.
+  return (
+    <div data-tab={props.id}>
+      <button data-stub-btn={props.id} type="button">
+        x
+      </button>
+    </div>
+  );
 }
 const OVERRIDE = { bodies: { terminal: StubBody }, tabs: { terminal: StubTab } };
 
@@ -398,5 +406,208 @@ describe('LathHost — imperative animation frames', () => {
     // Advancing the clock changes nothing — there is no tween in flight.
     clock += DUR;
     expect(widthOf('a')).toBeCloseTo(after, 1);
+  });
+});
+
+describe('LathHost — pane / Door drag', () => {
+  type DragHandlers = {
+    onDragStart: ReturnType<typeof vi.fn>;
+    onProposeMove: ReturnType<typeof vi.fn>;
+    onProposeMinimize: ReturnType<typeof vi.fn>;
+    onExternalDrop: ReturnType<typeof vi.fn>;
+  };
+
+  function mountDrag(
+    store: LathWallStore,
+    props: { externalDrag?: { id: string } | null } = {},
+  ): { engine: ReturnType<typeof createLathWallEngine> } & DragHandlers {
+    const engine = createLathWallEngine(store, { durationMs: 0 });
+    const handlers: DragHandlers = {
+      onDragStart: vi.fn(),
+      onProposeMove: vi.fn(),
+      onProposeMinimize: vi.fn(),
+      onExternalDrop: vi.fn(),
+    };
+    act(() => {
+      root.render(
+        <LathHost
+          lath={engine}
+          onCommitResize={vi.fn()}
+          componentsOverride={OVERRIDE}
+          externalDrag={props.externalDrag ?? null}
+          {...handlers}
+        />,
+      );
+    });
+    return { engine, ...handlers };
+  }
+
+  // The hit-test is coalesced into one rAF; wait a real frame so the preview lands.
+  async function flushFrame() {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+  }
+
+  function header(id: string): HTMLElement {
+    return leafDiv(id)!.querySelector<HTMLElement>('.lath-leaf-header')!;
+  }
+  function overlayEl(): HTMLElement | null {
+    return container.querySelector<HTMLElement>('[data-lath-drop-preview]');
+  }
+  function overlayRect(): Rect {
+    const el = overlayEl()!;
+    return {
+      x: parseFloat(el.style.left),
+      y: parseFloat(el.style.top),
+      width: parseFloat(el.style.width),
+      height: parseFloat(el.style.height),
+    };
+  }
+  const down = (el: HTMLElement, x: number, y: number) =>
+    el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, button: 0 }));
+  const moveTo = (x: number, y: number) => window.dispatchEvent(new MouseEvent('pointermove', { clientX: x, clientY: y }));
+  const up = () => window.dispatchEvent(new MouseEvent('pointerup', {}));
+
+  function movePreview(t: LathTree, dragged: string, target: DropTarget): Rect {
+    return layout(move(t, dragged, target).tree, RECT, LATH_LAYOUT_OPTS).get(dragged)!;
+  }
+
+  // col[ row[a, b], c ]: dragging c onto a's top edge yields two distinct candidates —
+  // above 'a' (leaf level) and above the whole a|b row (its ancestor).
+  function colRowTree(): LathTree {
+    return {
+      root: {
+        kind: 'split',
+        dir: 'col',
+        children: [
+          {
+            node: {
+              kind: 'split',
+              dir: 'row',
+              children: [
+                { node: { kind: 'leaf', id: 'a' }, weight: 0.5 },
+                { node: { kind: 'leaf', id: 'b' }, weight: 0.5 },
+              ],
+            },
+            weight: 0.5,
+          },
+          { node: { kind: 'leaf', id: 'c' }, weight: 0.5 },
+        ],
+      },
+    };
+  }
+
+  it('enters a drag past the threshold and calls onDragStart, dimming the leaf', () => {
+    const store = seeded(rowOf('a', 'b', 'c'), [['a', meta('A')], ['b', meta('B')], ['c', meta('C')]]);
+    const { onDragStart } = mountDrag(store);
+
+    act(() => down(header('a'), 100, 15));
+    act(() => moveTo(102, 15)); // < 5px — not yet a drag
+    expect(onDragStart).not.toHaveBeenCalled();
+
+    act(() => moveTo(120, 15)); // past the threshold
+    expect(onDragStart).toHaveBeenCalledWith('a');
+    expect(leafDiv('a')!.style.opacity).toBe('0.6');
+
+    act(() => up());
+    expect(leafDiv('a')!.style.opacity).toBe('');
+  });
+
+  it('shows the innermost candidate preview and commits it on pointerup', async () => {
+    const t = rowOf('a', 'b');
+    const store = seeded(t, [['a', meta('A')], ['b', meta('B')]]);
+    const { onProposeMove } = mountDrag(store);
+
+    act(() => down(header('a'), 100, 15));
+    act(() => moveTo(601, 300)); // b's center → swap
+    await flushFrame();
+    expect(overlayEl()).not.toBeNull();
+    expect(overlayRect()).toEqual(movePreview(t, 'a', { kind: 'swap', leaf: 'b' }));
+
+    act(() => up());
+    expect(onProposeMove).toHaveBeenCalledWith('a', { kind: 'swap', leaf: 'b' });
+    expect(overlayEl()).toBeNull(); // preview cleared on drop
+  });
+
+  it('cycles the drop depth outward with the wheel', async () => {
+    const t = colRowTree();
+    const store = seeded(t, [['a', meta('A')], ['b', meta('B')], ['c', meta('C')]]);
+    const { onProposeMove } = mountDrag(store);
+
+    // Drag c onto a's top edge (a spans y 0..~297, x 0..~397).
+    act(() => down(header('c'), 100, 320)); // press on c's header (c is the bottom leaf)
+    act(() => moveTo(100, 5)); // a's top band
+    await flushFrame();
+    expect(overlayRect()).toEqual(movePreview(t, 'c', { kind: 'edge', path: [0, 0], edge: 'top' }));
+
+    act(() => window.dispatchEvent(new WheelEvent('wheel', { deltaY: 10, cancelable: true })));
+    expect(overlayRect()).toEqual(movePreview(t, 'c', { kind: 'edge', path: [0], edge: 'top' }));
+
+    act(() => up());
+    expect(onProposeMove).toHaveBeenCalledWith('c', { kind: 'edge', path: [0], edge: 'top' });
+  });
+
+  it('proposes a minimize when dropped below the wall (baseboard zone)', async () => {
+    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    const { onProposeMinimize, onProposeMove } = mountDrag(store);
+
+    act(() => down(header('a'), 100, 15));
+    act(() => moveTo(100, 650)); // below the 600px container → baseboard zone
+    await flushFrame();
+    expect(overlayEl()).toBeNull(); // no drop preview in the baseboard zone
+
+    act(() => up());
+    expect(onProposeMinimize).toHaveBeenCalledWith('a');
+    expect(onProposeMove).not.toHaveBeenCalled();
+  });
+
+  it('cancels on Escape with no proposal', async () => {
+    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    const { onProposeMove, onProposeMinimize } = mountDrag(store);
+
+    act(() => down(header('a'), 100, 15));
+    act(() => moveTo(601, 300));
+    await flushFrame();
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+
+    expect(onProposeMove).not.toHaveBeenCalled();
+    expect(onProposeMinimize).not.toHaveBeenCalled();
+    expect(overlayEl()).toBeNull();
+  });
+
+  it('does not drag on a sub-threshold press (click preserved)', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    const { onDragStart, onProposeMove } = mountDrag(store);
+
+    act(() => down(header('a'), 100, 15));
+    act(() => moveTo(102, 16));
+    act(() => up());
+    expect(onDragStart).not.toHaveBeenCalled();
+    expect(onProposeMove).not.toHaveBeenCalled();
+  });
+
+  it('does not start a drag from a header button', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    const { onDragStart } = mountDrag(store);
+
+    const btn = leafDiv('a')!.querySelector<HTMLElement>('[data-stub-btn="a"]')!;
+    act(() => down(btn, 100, 15));
+    act(() => moveTo(140, 15));
+    expect(onDragStart).not.toHaveBeenCalled();
+  });
+
+  it('runs external (Door) drags with dragged null and fires onExternalDrop', async () => {
+    const t = rowOf('a', 'b');
+    const store = seeded(t, [['a', meta('A')], ['b', meta('B')]]);
+    // 'door' is not a leaf — the chip stays in the baseboard; LathHost only hit-tests.
+    const { onExternalDrop } = mountDrag(store, { externalDrag: { id: 'door' } });
+
+    act(() => moveTo(410, 300)); // b's left edge
+    await flushFrame();
+    expect(overlayEl()).not.toBeNull(); // previewed via insert (dragged null → no swap)
+
+    act(() => up());
+    expect(onExternalDrop).toHaveBeenCalledWith({ kind: 'edge', path: [1], edge: 'left' });
   });
 });

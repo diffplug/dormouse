@@ -20,7 +20,10 @@ import {
 } from '../../lib/lath/model';
 import { type Direction, type LayoutOpts, autoEdge, neighbors } from '../../lib/lath/layout';
 import {
+  type DropTarget,
   type RestoreToken,
+  insert,
+  move,
   remove,
   replace,
   resize,
@@ -98,6 +101,15 @@ export type LathWallStore = {
    *  the panel and needs a companion `swapPanelTitles`; there is nothing to swap
    *  here. */
   swapLeaves(a: LeafId, b: LeafId): { ok: boolean };
+
+  /** Move an existing leaf onto a hit-tested drop `target` (core `move`, one commit).
+   *  Meta follows the id, so nothing else moves. Rejected op → no commit. */
+  moveLeaf(id: LeafId, target: DropTarget): { ok: boolean };
+
+  /** Insert a NEW leaf onto a hit-tested drop `target` (core `insert` at the default
+   *  0.5 split), setting its meta — the Door drag-out reattach. Rejected op → no
+   *  commit. */
+  insertLeaf(id: LeafId, meta: LeafMeta, target: DropTarget): { ok: boolean };
 
   /** Commit a sash resize (one core `resize`) using the store's last reported
    *  geometry. Called once on pointerup; the live drag preview is LathHost-local.
@@ -254,6 +266,23 @@ export function createLathWallStore(): LathWallStore {
       if (!r.ok) return { ok: false };
       // Meta is keyed by id and untouched by a swap, so reuse the same map.
       commit({ tree: r.tree });
+      return { ok: true };
+    },
+
+    moveLeaf(id, target) {
+      const r = move(snapshot.tree, id, target);
+      if (!r.ok) return { ok: false };
+      // Meta is keyed by id and untouched by a move, so reuse the same map.
+      commit({ tree: r.tree });
+      return { ok: true };
+    },
+
+    insertLeaf(id, meta, target) {
+      const r = insert(snapshot.tree, id, target);
+      if (!r.ok) return { ok: false };
+      const m = cloneMeta();
+      m.set(id, meta);
+      commit({ tree: r.tree, leafMeta: m });
       return { ok: true };
     },
 

@@ -1,4 +1,4 @@
-// Lath operations: the seven pure tree transforms plus their restore tokens and drop
+// Lath operations: the pure tree transforms plus their restore tokens and drop
 // targets. Every op is `(tree, …) → { tree, ok, … }`, synchronous, and returns a tree
 // that passes `validate`. On any invalid input the *input tree object* is returned
 // unchanged with `ok: false`, so callers can identity-compare to detect no-ops.
@@ -255,8 +255,31 @@ function insertBesideNode(tree: LathTree, targetPath: number[], edge: Edge, newI
   return { root: normalize(replaceAtPath(root, targetPath, nested)) };
 }
 
+/** Insert a NEW leaf `id` beside the node named by an `edge` `target`, carrying
+ *  `weight` into its new context (raw — renormalized alongside real siblings for a
+ *  sibling insert, or `weight`/`1 - weight` when nesting). `move` passes the dragged
+ *  leaf's old normalized weight; door drops omit it → the default `0.5` split. The
+ *  public half of `move`: `move` = weight + `remove` + re-find path + `insert`. A
+ *  `swap` target, an already-present `id`, an empty tree, or a path off the tree all
+ *  reject with `ok: false`. The weight is clamped into `(0, 1)` so any caller value
+ *  yields a valid tree. */
+export function insert(
+  tree: LathTree,
+  id: LeafId,
+  target: DropTarget,
+  weight = 0.5,
+): { tree: LathTree; ok: boolean } {
+  if (target.kind === 'swap') return { tree, ok: false };
+  if (tree.root === null) return { tree, ok: false };
+  if (findLeafPath(tree, id) !== null) return { tree, ok: false };
+  if (nodeAtPath(tree, target.path) === null) return { tree, ok: false };
+  const eps = 1e-6;
+  const w = Math.min(Math.max(weight, eps), 1 - eps);
+  return { tree: insertBesideNode(tree, target.path, target.edge, id, w), ok: true };
+}
+
 /** Move a leaf to a drop target as one op (no token). A `swap` target defers to
- *  `swap`; an `edge` target is remove-then-insert-beside-the-node-at-path, with the
+ *  `swap`; an `edge` target is `remove` + `insert` beside the node at path, with the
  *  moved leaf carrying its old normalized weight. The path is read against the *input*
  *  tree, then re-found in the post-removal tree by the target's surviving leaf set. */
 export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: LathTree; ok: boolean } {
@@ -276,8 +299,7 @@ export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: La
 
   const w = idPath.length === 0 ? 1 : (nodeAtPath(tree, idPath.slice(0, -1)) as SplitNode).children[idPath[idPath.length - 1]].weight;
 
-  const removed = remove(tree, id);
-  const t2 = removed.tree;
+  const t2 = remove(tree, id).tree;
 
   const targetSet = new Set(targetLeaves.filter((l) => l !== id));
   let insertPath = findPathByLeafSet(t2, targetSet);
@@ -289,7 +311,8 @@ export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: La
     if (insertPath === null) return { tree, ok: false };
   }
 
-  return { tree: insertBesideNode(t2, insertPath, target.edge, id, w), ok: true };
+  const r = insert(t2, id, { kind: 'edge', path: insertPath, edge: target.edge }, w);
+  return r.ok ? { tree: r.tree, ok: true } : { tree, ok: false };
 }
 
 /** Adjust the two weights adjacent to `boundary` (children `boundary` and

@@ -68,7 +68,7 @@ import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-q
 import { findPaneInDirection, findReattachNeighbor } from '../lib/spatial-nav';
 import { cloneLayout, getLayoutStructureSignature } from '../lib/layout-snapshot';
 import type { PersistedDoor } from '../lib/session-types';
-import type { RestoreToken } from '../lib/lath/ops';
+import type { DropTarget, RestoreToken } from '../lib/lath/ops';
 import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import {
@@ -606,6 +606,9 @@ export function Wall({
   const [confirmKill, setConfirmKill] = useState<ConfirmKill | null>(null);
   const [renamingPaneId, setRenamingPaneId] = useState<string | null>(null);
   const [doors, setDoors] = useState<DooredItem[]>(() => (initialDoors ?? []) as DooredItem[]);
+  // The Door being dragged out of the baseboard (Lath only). Non-null feeds LathHost's
+  // external-drag hit-testing; the chip stays in `doors` until it lands on a target.
+  const [doorDrag, setDoorDrag] = useState<DooredItem | null>(null);
   const [zoomed, setZoomed] = useState(false);
   const [shellSpawnNotice, setShellSpawnNotice] = useState<ShellSpawnNoticeState | null>(null);
   const shellSpawnNoticeCounterRef = useRef(0);
@@ -2377,6 +2380,63 @@ export function Wall({
     [lath],
   );
 
+  // --- Pane / Door drag-and-drop (Lath only; docs/specs/tiling-engine.md →
+  // "Hierarchical drag and drop"). LathHost owns the gesture and hit-testing; the Wall
+  // owns the op commit + selection policy. ---
+
+  // A pane drag crossed its threshold: move selection onto the dragged pane (covers
+  // "dragging while a door is selected moves selection onto the dragged pane"). A plain
+  // header press already selected it, so this is usually a no-op.
+  const onPaneDragStart = useCallback((id: string) => {
+    if (selectedTypeRef.current !== 'pane' || selectedIdRef.current !== id) selectPane(id);
+  }, [selectPane]);
+
+  // Drop of a pane onto a hit-tested target: commit the move (command mode unchanged),
+  // then select it. A center-drop swap mirrors the Cmd-Arrow swap's `move` event so
+  // tutorial/event consumers behave identically.
+  const onProposeMove = useCallback((id: string, target: DropTarget) => {
+    if (!lath) return;
+    const r = lath.moveLeaf(id, target);
+    if (!r.ok) return;
+    if (target.kind === 'swap') fireEvent({ type: 'move', fromId: id, toId: target.leaf });
+    selectPane(id);
+  }, [lath, fireEvent, selectPane]);
+
+  // Drop of a pane onto the baseboard zone: minimize it (captures the token + selects
+  // the door, exactly like the header minimize button).
+  const onProposeMinimize = useCallback((id: string) => {
+    minimizePane(id);
+  }, [minimizePane]);
+
+  // A Door began dragging out of the baseboard — start LathHost's external drag.
+  const onDoorDragStart = useCallback((item: DooredItem) => {
+    if (!lath) return;
+    setDoorDrag(item);
+  }, [lath]);
+
+  // Drop of a dragged-out Door: `null` (cancel / no candidate) leaves the Door where it
+  // is; a target reattaches the surface at the hit-tested position. The token is NOT
+  // consulted — the user chose the spot. Enter hint is set BEFORE the insert commit so
+  // the entry animation plays (mirrors handleReattach's ordering).
+  const onExternalDrop = useCallback((target: DropTarget | null) => {
+    const item = doorDrag;
+    setDoorDrag(null);
+    if (!item || !lath || !target) return;
+    const meta = {
+      component: item.component ?? 'terminal',
+      tabComponent: item.tabComponent ?? 'terminal',
+      title: item.title,
+      params: item.params,
+    };
+    lath.setEnterHint(item.id, target.kind === 'edge' ? enterFromForEdge(target.edge) : 'top-left');
+    const r = lath.insertLeaf(item.id, meta, target);
+    if (!r.ok) return; // insert failed (unexpected) → the Door stays put
+    const nextDoors = doorsRef.current.filter((d) => d.id !== item.id);
+    doorsRef.current = nextDoors;
+    setDoors(nextDoors);
+    selectPane(item.id);
+  }, [doorDrag, lath, selectPane]);
+
   // --- Render ---
 
   return (
@@ -2400,6 +2460,11 @@ export function Wall({
                     lath={lath}
                     onCommitResize={onCommitResize}
                     onLeafFocused={onLeafFocused}
+                    onDragStart={onPaneDragStart}
+                    onProposeMove={onProposeMove}
+                    onProposeMinimize={onProposeMinimize}
+                    externalDrag={doorDrag ? { id: doorDrag.id } : null}
+                    onExternalDrop={onExternalDrop}
                   />
                 ) : (
                   <DockviewReact
@@ -2416,7 +2481,12 @@ export function Wall({
 
             {/* Baseboard — always visible in the main shell; embedders may suppress it for constrained mobile prototypes. */}
             {showBaseboard ? (
-              <Baseboard items={doors} onReattach={handleReattach} notice={baseboardNotice} />
+              <Baseboard
+                items={doors}
+                onReattach={handleReattach}
+                notice={baseboardNotice}
+                onDoorDragStart={lath ? onDoorDragStart : undefined}
+              />
             ) : null}
 
             {/* Kill confirmation overlay — centered over the pane being killed */}

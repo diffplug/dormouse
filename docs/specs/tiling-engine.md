@@ -2,7 +2,7 @@
 
 > See [glossary.md](glossary.md) for the Surface model, the `Window ⊃ Workspace ⊃ Pane ⊃ Surface` hierarchy, and the Pane / Door / baseboard / passthrough vocabulary used here.
 
-> Status: stages 1–3 of the lath-rollout scope are implemented — the pure core under `lib/src/lib/lath/` (including the headless animator) and the full Wall binding with native motion behind the `dormouse.flags.lath` dev flag (acceptance rows 1–11 verified live). **Flag off — the default — Dormouse still ships dockview-react**, and [layout.md](layout.md) remains the source of truth for that path's behavior. Everything under `## Future` here — DnD and the dockview deletion sweep — is the remaining dream design for **Lath**, an in-house headless tiling engine named for the strips hidden behind a plaster wall, written ahead of the code per the spec lifecycle in AGENTS.md.
+> Status: stages 1–4 of the lath-rollout scope are implemented — the pure core under `lib/src/lib/lath/` (model, layout, ops, animator, hit-testing) and the full Wall binding with native motion and hierarchical DnD behind the `dormouse.flags.lath` dev flag (the whole acceptance matrix, rows 1–13, verified live). **Flag off — the default — Dormouse still ships dockview-react**, and [layout.md](layout.md) remains the source of truth for that path's behavior. The one thing left under `## Future` is stage 5, the dockview deletion sweep. Lath is an in-house headless tiling engine named for the strips hidden behind a plaster wall; this spec was written ahead of the code per the spec lifecycle in AGENTS.md.
 
 ## Why
 
@@ -86,6 +86,7 @@ All ops return `{ tree: LathTree; ok: boolean }` plus op-specific fields. All ar
 | `move` | `(tree, id, target: DropTarget)` | Remove + insert as one op; weight follows the leaf (it carries its old normalized weight into the new context). `target.path` is read against the input tree, then re-found post-removal by surviving leaf set. |
 | `swap` | `(tree, a, b)` | Leaf identity swap (drag-onto-center; the Cmd-Arrow swap). `a === b` is rejected. |
 | `resize` | `(tree, splitPath, boundary, deltaPx, rect, opts)` | Adjusts the two weights adjacent to `boundary` (children `boundary`/`boundary + 1`), clamped so neither side drops below its recursive `minLeaf` span — with an epsilon floor keeping both weights strictly positive (a `minLeaf` of 0 may render 0px but never stores weight 0). Streamed during a sash drag: pass the *original* tree each frame with a cumulative delta; the final tree commits on pointerup. |
+| `insert` | `(tree, id, target: DropTarget, weight = 0.5)` | The insert half of `move`, public for external (Door) drops: places a NEW leaf at a drop target carrying `weight` (clamped into (0,1)). Swap targets, existing ids, and empty trees are rejected. `move` is remove + re-find + `insert`. |
 | `restore` | `(tree, token, opts?)` | Reinserts a removed leaf, best effort (below). |
 
 ```ts
@@ -94,9 +95,34 @@ type DropTarget =
   | { kind: 'swap'; leaf: LeafId };
 ```
 
-`DropTarget` is defined with the ops (its `edge`-at-ancestor-path form is what gives DnD its depth levels); the `hitTest` that produces candidates is unbuilt — see Hierarchical drag and drop under `## Future`.
+`DropTarget` is defined with the ops; its `edge`-at-ancestor-path form is what gives DnD its depth levels (Hierarchical drag and drop, below).
 
-Because ops are cheap pure functions, speculative evaluation is free — sash live-resize (and, in stage 4, DnD previews) runs `layout(op(tree, …).tree, …)` per frame without committing.
+Because ops are cheap pure functions, speculative evaluation is free — sash live-resize and DnD previews run `layout(op(tree, …).tree, …)` per frame without committing.
+
+## Hierarchical drag and drop
+
+Source of truth: `lib/src/lib/lath/hit-test.ts` (core); the drag machinery in `LathHost.tsx`; the `useDoorDrag` hook in `Door.tsx` / `Baseboard.tsx`; the drag callbacks in `Wall.tsx`.
+
+Pointer events only (`pointerdown` → 5px threshold → drag; no HTML5 DnD), so drags are testable from CDP and never race React's synthetic events.
+
+```ts
+hitTest(tree, rect, point, dragged: LeafId | null, opts): DropCandidate[]
+// DropCandidate = { target: DropTarget; previewRect: Rect; depth: number }, ordered innermost → outermost
+```
+
+`hitTest` is core and renderer-agnostic: it consumes a point already in Wall coordinates (`dragged: null` is an external drag — a Door coming in — which yields no `swap` and previews via `insert`). The HTML adapter feeds it pointer positions; a Three.js adapter would feed raycast intersections. Gesture mechanics and the preview overlay are adapter concerns.
+
+The depth model:
+
+- The center region of a leaf yields `swap` (internal drags only, never with yourself).
+- The inner edge bands of a leaf — `min(0.3 × extent, 96)` px per side; the nearest in-band edge wins a corner — yield `edge` targets **at the leaf's level**. A point in a gap attributes to the nearest leaf, so split boundaries have no dead zones.
+- When the hovered leaf's edge coincides (≤ 0.5px) with an ancestor boundary, `hitTest` also yields `edge` targets **at each ancestor level** — "beside this entire column," up to the root ("new full-height/width band at the Wall's edge").
+- Every candidate's `previewRect` is the exact rect the drop would commit — computed by speculatively running `move` (or `insert`) + `layout`, never a heuristic hint zone. Rejected ops, beside-itself no-ops (committed layout identical to current), and duplicates (ancestor levels the flatten invariant collapses into their child's result — common when removing the dragged leaf collapses its column) are filtered out, so every surviving depth is a genuinely different drop.
+- Default resolution is the innermost candidate; the **scroll wheel** during a drag cycles outward through `depth` (wrapping; scroll up cycles backward). The candidate list resets to innermost whenever it changes identity.
+
+Adapter gesture (LathHost): drags start on a leaf's header slot (bailing on buttons/inputs/contenteditable so header chrome keeps working, and while zoomed or during a sash drag — the two drags are mutually exclusive); the dragged leaf dims to 0.6; one `data-lath-drop-preview` overlay renders the chosen candidate's rect in the selection color; hit-testing is rAF-coalesced; Escape cancels. Grabbing a header also fires the header's press-time click path first, so a drag begins from passthrough on that pane — selection lands correctly, accepted quirk. Drops surface as proposals the Wall commits: `onDragStart(id)` (Wall moves selection onto the dragged pane — covering the drag-while-door-selected case), `onProposeMove(id, target)` (→ `moveLeaf`, then select), `onProposeMinimize(id)` when released below the container (→ the standard `minimizePane`, token and all). Committed moves tween via the animator.
+
+Door drag-out: `Door` gains an internal threshold-gated drag hook (active only when the Wall supplies `onDoorDragStart` — flag-off Doors stay click-only), which puts LathHost into external-drag mode (`externalDrag={ id }`): same hit-test/preview/wheel machinery with `dragged: null`, the chip staying put in the baseboard. A drop on a candidate removes the Door and `insertLeaf`s the surface at the hit-tested target (the token is not consulted — the user chose the position) with an enter hint from the target edge; a drop on nothing (or Escape, or dropping back onto the baseboard) leaves the Door in place. One gesture system spans panes and Doors.
 
 ## Restore tokens (Doors)
 
@@ -178,13 +204,13 @@ Restore prefers `lathLayout`, falls back to migrating the dockview blob (grid br
 
 ## Testing
 
-Source of truth: `lib/src/lib/lath/{model,layout,ops,animator,property}.test.ts` (+ shared builders in `test-util.ts`); `lath-wall-store.test.ts`, `lath-dockview-convert.test.ts`, `LathHost.test.tsx`, `lath-wall-engine.test.ts`, `Wall.lath.test.tsx` under `lib/src/components/`.
+Source of truth: `lib/src/lib/lath/{model,layout,ops,animator,hit-test,property}.test.ts` (+ shared builders in `test-util.ts`); `lath-wall-store.test.ts`, `lath-dockview-convert.test.ts`, `LathHost.test.tsx`, `lath-wall-engine.test.ts`, `Wall.lath.test.tsx` under `lib/src/components/`.
 
-- Core: DOM-free property tests over seeded random op sequences (tiling exactness, invariant preservation via `validate` after every op, the `ok: false` identity contract, `move` ≡ `remove`+insert, restore-tier degradation) plus golden trees, `neighbors`/`autoEdge`/`sashes` geometry, and per-op rejection cases. Animator: fake-clock tests asserting real interpolated rects/opacities against the exported easing — retarget mid-flight from the interpolated frame, enter-from-edge starting rects, dying freeze-and-fade + shrink geometry, snap semantics, settled detection, reduced-motion zero-duration.
-- Binding (jsdom): **node identity is preserved** across every op (the no-re-parent guarantee) and DOM order stays fixed while layout order changes; imperative frame application between commits (fake rAF + fixed-duration engine), mid-tween React re-renders not snapping styles, dying pointer-events; sash drag preview/commit/cancel and the snap-on-commit; zoom; the pane props contract via `componentsOverride`; store mutator/rejection/notify semantics; converter round-trips against dockview-core's real serialized shapes; engine hydration from each of the three seed sources; a flag-on `<Wall>` smoke (split, kill, dual-write save capture).
-- Acceptance: rows 1–11 of the matrix below were driven live through the standalone agent-browser harness (`pnpm dev:standalone:ab`; mechanics in `.claude/skills/debug-standalone-agent-browser/SKILL.md`) with the flag on — including the exact-tier door restore from a 3-child row, sash live-resize, embed self-focus adoption, restart restores from both the native and a legacy dockview-only blob, and frame-sampled motion (kill freeze-and-fade then survivor tween, last-pane shrink-to-corner with top-left auto-spawn entry, continuous retarget under two kills 200ms apart). Re-run the applicable rows at each remaining rollout stage; all rows before stage 5's deletion sweep.
+- Core: DOM-free property tests over seeded random op sequences (tiling exactness, invariant preservation via `validate` after every op, the `ok: false` identity contract, `move` ≡ `remove`+insert, restore-tier degradation) plus golden trees, `neighbors`/`autoEdge`/`sashes` geometry, and per-op rejection cases. Animator: fake-clock tests asserting real interpolated rects/opacities against the exported easing — retarget mid-flight from the interpolated frame, enter-from-edge starting rects, dying freeze-and-fade + shrink geometry, snap semantics, settled detection, reduced-motion zero-duration. Hit-testing: center/edge-band/ancestor-coincidence candidates in depth order, band caps, self/no-op/duplicate filtering, external (null-dragged) drags, and previewRect equality against an explicit `move`+`layout`.
+- Binding (jsdom): **node identity is preserved** across every op (the no-re-parent guarantee) and DOM order stays fixed while layout order changes; imperative frame application between commits (fake rAF + fixed-duration engine), mid-tween React re-renders not snapping styles, dying pointer-events; sash drag preview/commit/cancel and the snap-on-commit; the pane-drag gesture (threshold entry, button bail, preview overlay, wheel depth cycling, baseboard-zone minimize, Escape cancel, external door-drag mode); zoom; the pane props contract via `componentsOverride`; store mutator/rejection/notify semantics; converter round-trips against dockview-core's real serialized shapes; engine hydration from each of the three seed sources; a flag-on `<Wall>` smoke (split, kill, dual-write save capture).
+- Acceptance: all rows (1–13) of the matrix below were driven live through the standalone agent-browser harness (`pnpm dev:standalone:ab`; mechanics in `.claude/skills/debug-standalone-agent-browser/SKILL.md`) with the flag on — including the exact-tier door restore from a 3-child row, sash live-resize, embed self-focus adoption, restart restores from both the native and a legacy dockview-only blob, frame-sampled motion (kill freeze-and-fade then survivor tween, last-pane shrink-to-corner with top-left auto-spawn entry, continuous retarget under two kills 200ms apart), and the full DnD surface (pixel-exact preview-equals-commit at leaf/column/root depths with wheel cycling, center swap, drag-to-baseboard minimize, door drag-out restore at the previewed slot, selection adoption on drag start). Re-run all rows before stage 5's deletion sweep.
 
-Acceptance matrix — each row is an end-to-end observable, independent of engine internals (rows 12–13 gate the stages under `## Future`):
+Acceptance matrix — each row is an end-to-end observable, independent of engine internals:
 
 | # | Flow | Expected observable |
 | --- | --- | --- |
@@ -199,41 +225,20 @@ Acceptance matrix — each row is an end-to-end observable, independent of engin
 | 9 | Zoom toggle on a pane | Full-rect render and back; layout identical after |
 | 10 | Restart the app (harness re-open) | Layout, doors, titles, and params restored — including from a pre-Lath legacy blob |
 | 11 | Kill with animation | Fade in place, survivors tween into the space; a second kill mid-tween retargets cleanly; reduced-motion instant |
-| 12 | (stage 4+) Drag a pane to a leaf edge, an ancestor edge, and center | Split-beside-pane, split-beside-column/row, and swap respectively; preview rect matches the committed result; dragging while a door is selected moves selection onto the dragged pane |
-| 13 | (stage 4+) Drag a pane onto the baseboard; drag a door out | Minimize with token; restore at the hit-tested position |
+| 12 | Drag a pane to a leaf edge, an ancestor edge, and center | Split-beside-pane, split-beside-column/row, and swap respectively; preview rect matches the committed result; dragging while a door is selected moves selection onto the dragged pane |
+| 13 | Drag a pane onto the baseboard; drag a door out | Minimize with token; restore at the hit-tested position |
 
 Row 8's counterpart guard (a background `dor` command must never yank cross-frame focus out of the host editor) is a Wall-level policy that predates Lath — keep its check in the VS Code host after the focus-heal machinery is deleted.
 
 ## Future
 
-**Scope: lath-rollout** — staged order; each stage lands green before the next starts (stages 1–3 are done — see above the fold):
+**Scope: lath-rollout** — staged order; stages 1–4 are done (see above the fold), leaving:
 
-4. **Drag and drop** — pointer-based hierarchical DnD with the depth model below; drag-to-baseboard minimize. (The dockview drag wiring is deleted at stage 5 with the rest of the flag-off path, not here.)
 5. **Deletion sweep** — remove the dockview dependency, the programmatic-activation tag, the focus-heal machinery, `lib/src/lib/kill-animation.ts` + the CSS spawn-animation path, the dockview drag wiring, and the shadow models (inventory below); delete the flag and the dual-write together; promote this spec's built portions above the fold and rewrite the affected sections of [layout.md](layout.md).
 
 Ordering constraint: lath-rollout completes before the workspace-switching stages of the **workspaces-rollout** scope (defined in [layout.md](layout.md)) — a workspace switch under Lath is "swap which tree renders," with none of dockview's active-group juggling.
 
-Known parity gaps accepted while the flag lives: `onApiReady` never fires under Lath (the website tutorial's tut-detector needs flag-off), and there is no pane DnD until stage 4.
-
-### Hierarchical drag and drop
-
-Pointer events only (`pointerdown` → threshold → drag; no HTML5 DnD), so drags are testable from CDP and never race React's synthetic events.
-
-```ts
-hitTest(tree, rect, point, dragged: LeafId): DropCandidate[]
-// DropCandidate = { target: DropTarget; previewRect: Rect; depth: number }, ordered innermost → outermost
-```
-
-`hitTest` is core and renderer-agnostic: it consumes a point already in Wall coordinates. The HTML adapter feeds it pointer positions; a Three.js adapter feeds it raycast intersections with the wall plane. Gesture mechanics (drag thresholds, wheel/modifier depth cycling) and the preview overlay are adapter concerns.
-
-The depth model — the reason Lath exists beyond animation:
-
-- The center region of a leaf yields `swap`.
-- The inner edge bands of a leaf yield `edge` targets **at the leaf's level** (split beside this pane).
-- When the pointer sits within a band that coincides with an ancestor boundary, `hitTest` also yields `edge` targets **at each ancestor level** — "beside this entire column," up to the root ("new full-height band at the Wall's edge"). The flatten invariant guarantees each level is a genuinely different result.
-- Default resolution is the innermost candidate; scroll wheel (or a modifier, decided at implementation) cycles outward through `depth`. The binding renders the committed-if-dropped-here preview by speculatively running `move` — the overlay shows the exact resulting rect, not a heuristic hint zone.
-
-Drag beyond the Wall onto the baseboard minimizes (remove + Door with token); dragging a Door out of the baseboard restores at the hit-tested target. One gesture system spans panes and Doors.
+Known parity gap accepted while the flag lives: `onApiReady` never fires under Lath (the website tutorial's tut-detector needs flag-off).
 
 ### What this deletes
 

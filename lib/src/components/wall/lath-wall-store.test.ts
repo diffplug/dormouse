@@ -206,6 +206,54 @@ describe('swapLeaves', () => {
   });
 });
 
+describe('moveLeaf', () => {
+  it('moves a leaf onto an edge target in one commit, meta following the id', () => {
+    const store = seeded();
+    const metaA = store.getSnapshot().leafMeta.get('a');
+    const rev = store.getSnapshot().revision;
+    // Move 'a' to b's right edge → order becomes b, a.
+    const r = store.moveLeaf('a', { kind: 'edge', path: [1], edge: 'right' });
+    expect(r.ok).toBe(true);
+    const s = store.getSnapshot();
+    expect(leaves(s.tree)).toEqual(['b', 'a']);
+    expect(s.revision).toBe(rev + 1); // exactly one commit
+    expect(s.leafMeta.get('a')).toBe(metaA); // meta keyed by id, untouched
+  });
+
+  it('commits a center-drop swap target', () => {
+    const store = seeded();
+    const r = store.moveLeaf('a', { kind: 'swap', leaf: 'b' });
+    expect(r.ok).toBe(true);
+    expect(leaves(store.getSnapshot().tree)).toEqual(['b', 'a']);
+  });
+
+  it('rejects an invalid move without committing', () => {
+    const store = seeded();
+    const rev = store.getSnapshot().revision;
+    expect(store.moveLeaf('nope', { kind: 'edge', path: [1], edge: 'right' }).ok).toBe(false);
+    expect(store.getSnapshot().revision).toBe(rev);
+  });
+});
+
+describe('insertLeaf', () => {
+  it('inserts a NEW leaf onto an edge target and sets its meta', () => {
+    const store = seeded();
+    const r = store.insertLeaf('c', meta('terminal', 'C'), { kind: 'edge', path: [1], edge: 'right' });
+    expect(r.ok).toBe(true);
+    const s = store.getSnapshot();
+    expect(leaves(s.tree).sort()).toEqual(['a', 'b', 'c']);
+    expect(s.leafMeta.get('c')).toMatchObject({ title: 'C', component: 'terminal' });
+  });
+
+  it('rejects a duplicate id or a swap target without committing', () => {
+    const store = seeded();
+    const rev = store.getSnapshot().revision;
+    expect(store.insertLeaf('a', meta(), { kind: 'edge', path: [1], edge: 'right' }).ok).toBe(false);
+    expect(store.insertLeaf('c', meta(), { kind: 'swap', leaf: 'a' }).ok).toBe(false);
+    expect(store.getSnapshot().revision).toBe(rev);
+  });
+});
+
 describe('resizeBoundary', () => {
   it('adjusts weights using the reported geometry', () => {
     const store = seeded();

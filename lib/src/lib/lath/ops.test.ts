@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { type LathTree, findLeafPath, leafTree, leaves, validate } from './model';
 import { type LayoutOpts, layout } from './layout';
-import { move, remove, replace, resize, restore, split, swap } from './ops';
+import { insert, move, remove, replace, resize, restore, split, swap } from './ops';
 // `split` here is the op; the test-util split node-builder is aliased to `mk`.
 import { leaf, split as mk, tree, R } from './test-util';
 
@@ -150,6 +150,45 @@ describe('move', () => {
     // single-leaf tree relative to itself.
     expect(move(leafTree('a'), 'a', { kind: 'edge', path: [], edge: 'left' }).ok).toBe(false);
     expect(move(t, 'z', { kind: 'edge', path: [1], edge: 'left' }).tree).toBe(t);
+  });
+});
+
+describe('insert', () => {
+  it('inserts a new leaf beside a leaf at the default 0.5 split', () => {
+    const out = insert(leafTree('a'), 'b', { kind: 'edge', path: [], edge: 'right' });
+    expect(out.ok).toBe(true);
+    expect(out.tree).toEqual(tree(mk('row', [leaf('a'), 0.5], [leaf('b'), 0.5])));
+    expect(validate(out.tree)).toEqual([]);
+  });
+
+  it('inserts beside an ancestor split ("beside the whole column")', () => {
+    const t = tree(mk('col', [leaf('b'), 0.5], [leaf('c'), 0.5]));
+    const out = insert(t, 'a', { kind: 'edge', path: [], edge: 'right' });
+    expect(out.tree).toEqual(tree(mk('row', [mk('col', [leaf('b'), 0.5], [leaf('c'), 0.5]), 0.5], [leaf('a'), 0.5])));
+  });
+
+  it('carries a raw weight into a nested insert (the moved-leaf weight rule)', () => {
+    // weight 0.75 → the new leaf takes 0.75, the displaced subtree the 0.25 complement.
+    const out = insert(leafTree('a'), 'b', { kind: 'edge', path: [], edge: 'right' }, 0.75);
+    expect(out.tree).toEqual(tree(mk('row', [leaf('a'), 0.25], [leaf('b'), 0.75])));
+    expect(validate(out.tree)).toEqual([]);
+  });
+
+  it('clamps an out-of-range weight into a valid tree', () => {
+    const out = insert(leafTree('a'), 'b', { kind: 'edge', path: [], edge: 'right' }, 5);
+    expect(out.ok).toBe(true);
+    expect(validate(out.tree)).toEqual([]);
+    // a keeps a hairline positive weight; b takes essentially all of it.
+    const w = rects(out.tree, R(0, 0, 100, 100), { gap: 0, minLeaf: { width: 0, height: 0 } });
+    expect(w.b.width).toBeGreaterThan(w.a.width);
+  });
+
+  it('rejects: swap target, existing id, empty tree, path off the tree', () => {
+    const t = tree(mk('row', [leaf('a'), 0.5], [leaf('b'), 0.5]));
+    expect(insert(t, 'c', { kind: 'swap', leaf: 'a' })).toEqual({ tree: t, ok: false });
+    expect(insert(t, 'a', { kind: 'edge', path: [0], edge: 'right' })).toEqual({ tree: t, ok: false });
+    expect(insert(tree(null), 'a', { kind: 'edge', path: [], edge: 'right' })).toEqual({ tree: tree(null), ok: false });
+    expect(insert(t, 'c', { kind: 'edge', path: [9], edge: 'right' })).toEqual({ tree: t, ok: false });
   });
 });
 

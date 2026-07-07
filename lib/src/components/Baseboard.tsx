@@ -18,9 +18,12 @@ export interface BaseboardProps {
   items: DooredItem[];
   onReattach: (item: DooredItem) => void;
   notice?: ReactNode;
+  /** A visible Door crossed its drag threshold (Lath drag-out). Absent (dockview /
+   *  constrained embedders) leaves Doors click-only — zero behavior change. */
+  onDoorDragStart?: (item: DooredItem) => void;
 }
 
-export function Baseboard({ items, onReattach, notice }: BaseboardProps) {
+export function Baseboard({ items, onReattach, notice, onDoorDragStart }: BaseboardProps) {
   const { elements: doorElements, bumpVersion } = useContext(DoorElementsContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
@@ -197,6 +200,7 @@ export function Baseboard({ items, onReattach, notice }: BaseboardProps) {
             status={activity.status}
             todo={activity.todo}
             onClick={() => onReattach(item)}
+            onDragStart={onDoorDragStart ? () => onDoorDragStart(item) : undefined}
           />
         );
       })}

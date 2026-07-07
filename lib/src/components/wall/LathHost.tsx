@@ -26,10 +26,13 @@ import {
   useSyncExternalStore,
   type ComponentType,
   type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { type LathTree, leaves } from '../../lib/lath/model';
+import { type LathTree, type Rect, leaves } from '../../lib/lath/model';
 import { type LayoutOpts, layout, sashes } from '../../lib/lath/layout';
-import { resize } from '../../lib/lath/ops';
+import { type DropTarget, resize } from '../../lib/lath/ops';
+import { type DropCandidate, hitTest } from '../../lib/lath/hit-test';
+import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
 import type { PaneProps } from './pane-props';
 import type { LeafMeta } from './lath-wall-store';
 import type { LathWallEngine } from './lath-wall-engine';
@@ -45,12 +48,20 @@ export const LATH_LAYOUT_OPTS: LayoutOpts = { gap: 6, minLeaf: { width: 100, hei
 
 /** Widened pointer target over each (thin) sash band, in px. */
 const SASH_HIT = 8;
+/** Pointer travel (px) before a header press becomes a pane drag; below it the
+ *  header's own click behavior (select / enter passthrough / rename) is untouched. */
+const DRAG_THRESHOLD = 5;
+/** Opacity applied to the dragged leaf while its drop preview floats elsewhere. */
+const DRAG_DIM = '0.6';
 /** Leaf stacking bands (mapped from the animator's discrete `Frame.layer`). Tiled
  *  survivors sit at 0; a dying leaf fades above them (and above the z-30 sashes);
  *  the zoomed leaf is highest. */
 const Z_TILED = 0;
 const Z_DYING = 35;
 const Z_ZOOMED = 40;
+/** The drop-preview overlay floats above every tiled/dying leaf (a drag can't start
+ *  while a leaf is zoomed, so it never competes with `Z_ZOOMED`). */
+const Z_PREVIEW = 45;
 
 /** Lath never runs the CSS spawn-animation path (the animator owns entry): the leaf
  *  divs are registered for the animator via `registerEl`, but `getAnimEl` is a no-op
@@ -92,10 +103,35 @@ type DragState = {
   delta: number;
 };
 
-/** Stable per-id callback handed to each `LathLeaf`, cached so the memoized leaf
+/** A live pane / Door drag session. The tree is captured at drag start (no commits
+ *  happen mid-drag) and hit-tested every frame; `depth` indexes the hit-test
+ *  candidates, cycled by the wheel and reset when the candidate list changes. */
+type PaneDragState = {
+  /** The dragged leaf (internal) or the Door being dragged in (external). */
+  id: string;
+  external: boolean;
+  /** Crossed the drag threshold. External drags start already active (the Door owns
+   *  its own threshold before it hands off to LathHost). */
+  active: boolean;
+  startX: number;
+  startY: number;
+  tree: LathTree;
+  candidates: DropCandidate[];
+  depth: number;
+  /** Serialized candidate targets — a change resets `depth` to the innermost. */
+  candKey: string;
+  /** Pointer sits below the wall in the baseboard zone (internal drags → minimize). */
+  pendingBaseboard: boolean;
+  lastX: number;
+  lastY: number;
+  rafId: number | null;
+};
+
+/** Stable per-id callbacks handed to each `LathLeaf`, cached so the memoized leaf
  *  never re-renders just because a parent commit minted a fresh closure. */
 type LeafCallbacks = {
   registerEl: (el: HTMLDivElement | null) => void;
+  onHeaderPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
 };
 
 /** One leaf div: header band atop a filling body, positioned purely by the inline
@@ -114,6 +150,7 @@ const LathLeaf = memo(function LathLeaf({
   zIndex,
   hidden,
   registerEl,
+  onHeaderPointerDown,
   onLeafFocused,
 }: {
   id: string;
@@ -128,6 +165,8 @@ const LathLeaf = memo(function LathLeaf({
   /** A leaf with no frame (not laid out and not zoomed) hides rather than tiling. */
   hidden: boolean;
   registerEl: (el: HTMLDivElement | null) => void;
+  /** Header-press → maybe a pane drag (threshold-gated inside LathHost). Stable. */
+  onHeaderPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
   onLeafFocused?: (id: string) => void;
 }) {
   // React writes the *target* geometry; while an animation is in flight LathHost
@@ -152,7 +191,9 @@ const LathLeaf = memo(function LathLeaf({
       ref={registerEl}
       onFocusCapture={() => onLeafFocused?.(id)}
     >
-      <div className="lath-leaf-header">{Tab ? <Tab {...paneProps} /> : null}</div>
+      <div className="lath-leaf-header" onPointerDown={onHeaderPointerDown}>
+        {Tab ? <Tab {...paneProps} /> : null}
+      </div>
       <div className="lath-leaf-body">{Body ? <Body {...paneProps} /> : null}</div>
     </div>
   );
@@ -162,6 +203,11 @@ export function LathHost({
   lath,
   onCommitResize,
   onLeafFocused,
+  onDragStart,
+  onProposeMove,
+  onProposeMinimize,
+  externalDrag,
+  onExternalDrop,
   componentsOverride,
 }: {
   /** The Wall's engine handle: LathHost reads `lath.store`, drives `lath.animator`,
@@ -171,6 +217,18 @@ export function LathHost({
   onCommitResize: (splitPath: number[], boundary: number, deltaPx: number) => void;
   /** focusin inside a leaf's subtree (embed self-focus adoption, acceptance row 8). */
   onLeafFocused?: (id: string) => void;
+  /** A pane drag crossed its threshold — the Wall applies its selection policy. */
+  onDragStart?: (id: string) => void;
+  /** Drop of an internal pane drag onto a hit-tested target (the Wall commits `move`). */
+  onProposeMove?: (id: string, target: DropTarget) => void;
+  /** Drop of an internal pane drag onto the baseboard zone (the Wall minimizes it). */
+  onProposeMinimize?: (id: string) => void;
+  /** When set, a Door is being dragged out of the baseboard: LathHost hit-tests with
+   *  `dragged: null` (no ghost — the chip stays in the baseboard) and reports the drop. */
+  externalDrag?: { id: string } | null;
+  /** Drop of an external (Door) drag: a hit-tested target, or `null` on cancel / a
+   *  release over no candidate — the Wall leaves the Door where it is. */
+  onExternalDrop?: (target: DropTarget | null) => void;
   componentsOverride?: LathComponentsOverride;
 }) {
   const store = lath.store;
@@ -200,11 +258,46 @@ export function LathHost({
   const rectRef = useRef(rect);
   rectRef.current = rect;
 
+  // The drop-preview overlay is painted in the selection ring's color (translucent
+  // fill + solid border), so it reads as "this pane, dropped here".
+  const selectionColor = useFocusRingColor();
+
   // Report the geometry we render with so the store's queries (restore/resize/
   // neighbors/autoEdge) match the screen.
   useEffect(() => {
     store.setLayoutGeometry({ x: 0, y: 0, width: size.width, height: size.height }, LATH_LAYOUT_OPTS);
   }, [store, size.width, size.height]);
+
+  // --- Pane / Door drag (docs/specs/tiling-engine.md → "Hierarchical drag and
+  // drop"). All pointer-event based (no HTML5 DnD), so it is CDP-testable and never
+  // races React's synthetic events. The drag controller lives in a mount-once effect
+  // and is entered two ways: an internal pane drag (a threshold-gated header press)
+  // or an external Door drag (the Wall sets `externalDrag`). Both feed the same core
+  // `hitTest` and render one preview overlay. --- */
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
+  const onDragStartRef = useRef(onDragStart);
+  onDragStartRef.current = onDragStart;
+  const onProposeMoveRef = useRef(onProposeMove);
+  onProposeMoveRef.current = onProposeMove;
+  const onProposeMinimizeRef = useRef(onProposeMinimize);
+  onProposeMinimizeRef.current = onProposeMinimize;
+  const onExternalDropRef = useRef(onExternalDrop);
+  onExternalDropRef.current = onExternalDrop;
+
+  // The live drag session (mutable — the window handlers read/write it in place).
+  const paneDragRef = useRef<PaneDragState | null>(null);
+  // The current preview overlay rect (null → no overlay). The dragged leaf itself is
+  // dimmed imperatively; only this rect is React state.
+  const [dragPreview, setDragPreview] = useState<Rect | null>(null);
+  // Set when a real drag ends so the click the browser synthesizes on pointerup does
+  // not re-fire header/door click behavior; cleared by the click suppressor (or a tick).
+  const suppressNextClickRef = useRef(false);
+  // Populated by the controller effect below; called from the header press / the
+  // external-drag effect (both defined before the effect runs, so the refs suffice).
+  const beginInternalDragRef = useRef<(id: string, clientX: number, clientY: number) => void>(() => {});
+  const beginExternalDragRef = useRef<(id: string) => void>(() => {});
+  const endExternalDragRef = useRef<() => void>(() => {});
 
   // Sash drag: a local preview tree takes over layout until pointerup.
   const dragRef = useRef<DragState | null>(null);
@@ -285,11 +378,209 @@ export function LathHost({
           if (el) leafElsRef.current.set(id, el);
           else leafElsRef.current.delete(id);
         },
+        onHeaderPointerDown: (e) => {
+          // Primary button only; leave header buttons / the rename input alone so a
+          // press on them keeps its click behavior (they never start a drag). The
+          // header's own onMouseDown (select / passthrough) still runs — a plain
+          // click below the threshold is untouched.
+          if (e.button !== 0) return;
+          const t = e.target as HTMLElement;
+          if (t.closest('button, input, textarea, [contenteditable]')) return;
+          beginInternalDragRef.current(id, e.clientX, e.clientY);
+        },
       };
       leafCallbacksRef.current.set(id, cb);
     }
     return cb;
   };
+
+  // --- Drag controller: one mount-once effect owns the window listeners, so the
+  // handler identities stay stable for the whole gesture and nothing re-subscribes on
+  // a Wall re-render. Everything is read through refs. Entered internally (a
+  // threshold-gated header press) or externally (the Wall's `externalDrag`). ---
+  useEffect(() => {
+    function detach(): void {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('wheel', onWheel);
+      const d = paneDragRef.current;
+      if (d && d.rafId !== null) {
+        cancelAnimationFrame(d.rafId);
+        d.rafId = null;
+      }
+    }
+
+    function attach(): void {
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('keydown', onKey);
+      // Non-passive: the wheel cycles drop depth instead of scrolling.
+      window.addEventListener('wheel', onWheel, { passive: false });
+    }
+
+    function runHitTest(): void {
+      const d = paneDragRef.current;
+      if (!d || !d.active) return;
+      const containerEl = containerRef.current;
+      if (!containerEl) return;
+      const cr = containerEl.getBoundingClientRect();
+      // An internal drag below the wall is the baseboard minimize zone. A Door dropped
+      // there just cancels (dragged back down, it stays a Door), so external skips it.
+      if (!d.external && d.lastY > cr.bottom) {
+        d.pendingBaseboard = true;
+        d.candidates = [];
+        d.depth = 0;
+        d.candKey = '';
+        setDragPreview(null);
+        return;
+      }
+      d.pendingBaseboard = false;
+      const point = { x: d.lastX - cr.left, y: d.lastY - cr.top };
+      const cands = hitTest(d.tree, rectRef.current, point, d.external ? null : d.id, LATH_LAYOUT_OPTS);
+      const key = cands.map((c) => JSON.stringify(c.target)).join('|');
+      if (key !== d.candKey) {
+        d.candKey = key;
+        d.depth = 0; // a new candidate list starts at the innermost
+      }
+      d.candidates = cands;
+      if (cands.length === 0) {
+        setDragPreview(null);
+        return;
+      }
+      d.depth = Math.min(d.depth, cands.length - 1);
+      setDragPreview(cands[d.depth].previewRect);
+    }
+
+    function scheduleHitTest(): void {
+      const d = paneDragRef.current;
+      if (!d || d.rafId !== null) return;
+      d.rafId = requestAnimationFrame(() => {
+        const dd = paneDragRef.current;
+        if (!dd) return;
+        dd.rafId = null;
+        runHitTest();
+      });
+    }
+
+    function finish(commit: boolean): void {
+      const d = paneDragRef.current;
+      detach();
+      paneDragRef.current = null;
+      setDragPreview(null);
+      if (d && !d.external) {
+        const el = leafElsRef.current.get(d.id);
+        if (el) el.style.opacity = ''; // un-dim (the move commit tweens it into place)
+      }
+      if (!d || !d.active) return; // sub-threshold press: the click behavior stands
+      // A real drag happened → swallow the click the browser fires on pointerup.
+      suppressNextClickRef.current = true;
+      setTimeout(() => {
+        suppressNextClickRef.current = false;
+      }, 0);
+      const chosen = d.candidates.length > 0 ? d.candidates[Math.min(d.depth, d.candidates.length - 1)] : null;
+      if (!commit) {
+        if (d.external) onExternalDropRef.current?.(null); // Escape → put the Door back
+        return;
+      }
+      if (d.external) {
+        onExternalDropRef.current?.(chosen ? chosen.target : null);
+        return;
+      }
+      if (d.pendingBaseboard) {
+        onProposeMinimizeRef.current?.(d.id);
+        return;
+      }
+      if (chosen) onProposeMoveRef.current?.(d.id, chosen.target);
+    }
+
+    function onMove(e: PointerEvent): void {
+      const d = paneDragRef.current;
+      if (!d) return;
+      d.lastX = e.clientX;
+      d.lastY = e.clientY;
+      if (!d.active) {
+        if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD) return;
+        d.active = true;
+        onDragStartRef.current?.(d.id); // Wall applies its selection policy
+        const el = leafElsRef.current.get(d.id);
+        if (el) el.style.opacity = DRAG_DIM;
+      }
+      scheduleHitTest();
+    }
+
+    function onUp(): void {
+      finish(true);
+    }
+
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === 'Escape') finish(false);
+    }
+
+    function onWheel(e: WheelEvent): void {
+      const d = paneDragRef.current;
+      if (!d || !d.active || d.candidates.length === 0) return;
+      e.preventDefault();
+      const n = d.candidates.length;
+      const step = e.deltaY > 0 ? 1 : -1; // scroll away/down → one level outward, wrap
+      d.depth = ((d.depth + step) % n + n) % n;
+      setDragPreview(d.candidates[d.depth].previewRect);
+    }
+
+    beginInternalDragRef.current = (id, clientX, clientY) => {
+      // One drag at a time; never during a sash drag or while a leaf is zoomed.
+      if (paneDragRef.current || dragRef.current) return;
+      if (snapshotRef.current.zoomedId !== null) return;
+      paneDragRef.current = {
+        id, external: false, active: false, startX: clientX, startY: clientY,
+        tree: snapshotRef.current.tree, candidates: [], depth: 0, candKey: '',
+        pendingBaseboard: false, lastX: clientX, lastY: clientY, rafId: null,
+      };
+      attach();
+    };
+    beginExternalDragRef.current = (id) => {
+      if (paneDragRef.current) return;
+      // The Door already crossed its own threshold, so an external drag starts active.
+      paneDragRef.current = {
+        id, external: true, active: true, startX: 0, startY: 0,
+        tree: snapshotRef.current.tree, candidates: [], depth: 0, candKey: '',
+        pendingBaseboard: false, lastX: -1, lastY: -1, rafId: null,
+      };
+      attach();
+    };
+    endExternalDragRef.current = () => {
+      // The Wall cleared `externalDrag` (drop handled, or teardown) — stop cleanly.
+      if (paneDragRef.current?.external) {
+        detach();
+        paneDragRef.current = null;
+        setDragPreview(null);
+      }
+    };
+
+    return () => detach();
+  }, []);
+
+  // Mirror the Wall's `externalDrag` (a Door dragged out) into the controller. Keyed
+  // on the id — the Wall passes a fresh object each render.
+  const externalDragId = externalDrag?.id ?? null;
+  useEffect(() => {
+    if (externalDragId !== null) beginExternalDragRef.current(externalDragId);
+    else endExternalDragRef.current();
+  }, [externalDragId]);
+
+  // Swallow the one click the browser synthesizes after a real drag (so a drop over a
+  // header/button/door does not also fire its click). Capture phase, so React's own
+  // bubble-phase onClick never runs.
+  useEffect(() => {
+    const onClickCapture = (e: MouseEvent): void => {
+      if (!suppressNextClickRef.current) return;
+      suppressNextClickRef.current = false;
+      e.stopPropagation();
+      e.preventDefault();
+    };
+    window.addEventListener('click', onClickCapture, true);
+    return () => window.removeEventListener('click', onClickCapture, true);
+  }, []);
 
   // --- Animation: imperatively apply the animator's interpolated frames to the leaf
   // divs (docs/specs/tiling-engine.md → "Animation contract"). React renders the
@@ -417,6 +708,7 @@ export function LathHost({
             Tab={meta ? resolveTab(meta.tabComponent) : undefined}
             {...geom}
             registerEl={cb.registerEl}
+            onHeaderPointerDown={cb.onHeaderPointerDown}
             onLeafFocused={onLeafFocused}
           />
         );
@@ -449,6 +741,7 @@ export function LathHost({
             className="lath-sash"
             style={style}
             onPointerDown={(e) => {
+              if (paneDragRef.current) return; // a pane drag has the pointer
               e.preventDefault();
               (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
               dragRef.current = {
@@ -466,6 +759,24 @@ export function LathHost({
           />
         );
       })}
+
+      {/* Drop-preview overlay: the exact rect the current candidate would commit to,
+          painted in the selection color (translucent fill + solid border). */}
+      {dragPreview && (
+        <div
+          data-lath-drop-preview=""
+          className="lath-drop-preview"
+          style={{
+            left: dragPreview.x,
+            top: dragPreview.y,
+            width: dragPreview.width,
+            height: dragPreview.height,
+            zIndex: Z_PREVIEW,
+            border: `1px solid ${selectionColor}`,
+            backgroundColor: `color-mix(in srgb, ${selectionColor} 22%, transparent)`,
+          }}
+        />
+      )}
     </div>
   );
 }

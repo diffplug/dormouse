@@ -16,7 +16,7 @@ import {
   validate,
 } from '../../lib/lath/model';
 import type { Direction } from '../../lib/lath/layout';
-import type { RestoreToken } from '../../lib/lath/ops';
+import type { DropTarget, RestoreToken } from '../../lib/lath/ops';
 import {
   type EnterFrom,
   type LathAnimator,
@@ -222,6 +222,10 @@ export type LathWallEngine = {
     opts?: { fallbackRef?: string },
   ): { ok: boolean; tier: 'exact' | 'neighbor' | 'fallback' | null };
   swapLeaves(a: string, b: string): { ok: boolean };
+  /** Move an existing leaf onto a hit-tested drop `target` (drag-move). */
+  moveLeaf(id: string, target: DropTarget): { ok: boolean };
+  /** Insert a NEW leaf onto a hit-tested drop `target`, with meta (Door drag-out). */
+  insertLeaf(id: string, meta: LeafMeta, target: DropTarget): { ok: boolean };
   setTitle(id: string, title: string): void;
   updateParams(id: string, patch: Record<string, unknown>): void;
   setZoomed(id: string | null): void;
@@ -312,6 +316,8 @@ export function createLathWallEngine(
     replaceLeaf: (oldId, newId, meta) => store.replaceLeaf(oldId, newId, meta),
     restoreLeaf: (meta, token, opts) => store.restoreLeaf(meta, token, opts),
     swapLeaves: (a, b) => store.swapLeaves(a, b),
+    moveLeaf: (id, target) => store.moveLeaf(id, target),
+    insertLeaf: (id, meta, target) => store.insertLeaf(id, meta, target),
     setTitle: (id, title) => store.setTitle(id, title),
     updateParams: (id, patch) => store.updateParams(id, patch),
     setZoomed: (id) => store.setZoomed(id),
