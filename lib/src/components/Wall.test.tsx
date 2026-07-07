@@ -187,4 +187,38 @@ describe('Wall on the Lath engine', () => {
       disposeSpy.mockRestore();
     }
   });
+
+  it('seeds multiple initial panes with the aspect-aware layout (geometry is measured before the seed)', async () => {
+    // jsdom has no layout, so stub the container measurement wide. The seed reads the
+    // store's geometry via `autoEdge`; if that geometry lags behind the measurement
+    // (the old passive-effect report left it at the initial 0×0 on mount), the aspect
+    // heuristic sees a square and stacks every pane vertically. A wide container must
+    // instead produce `row[A, col[B,C]]`: A is the full-height left column.
+    const origRect = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      return { x: 0, y: 0, top: 0, left: 0, right: 1200, bottom: 740, width: 1200, height: 740, toJSON() {} } as DOMRect;
+    };
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a', 'pane-b', 'pane-c']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+
+      const leafOf = (id: string) => container.querySelector<HTMLElement>(`[data-lath-leaf="${id}"]`);
+      const heightOf = (id: string) => parseFloat(leafOf(id)!.style.height);
+      const leftOf = (id: string) => parseFloat(leafOf(id)!.style.left);
+
+      expect(leafCount()).toBe(3);
+      // A is the left column: full container height and flush to the left edge.
+      expect(heightOf('pane-a')).toBeGreaterThan(700);
+      expect(leftOf('pane-a')).toBe(0);
+      // B and C share the right column: offset right and each roughly half-height —
+      // i.e. NOT a pure vertical stack (which would leave all three at left:0).
+      expect(leftOf('pane-b')).toBeGreaterThan(0);
+      expect(leftOf('pane-c')).toBeGreaterThan(0);
+      expect(heightOf('pane-b')).toBeLessThan(500);
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = origRect;
+    }
+  });
 });

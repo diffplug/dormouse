@@ -220,11 +220,18 @@ export function LathHost({
 
   // Measure the container and track resizes. `getBoundingClientRect` (not
   // `entry.contentRect`) so the measurement is trivially stubbable in jsdom.
+  // Reporting geometry from the measurement itself — not a passive effect reading
+  // the rendered `size` — is load-bearing: this runs in the layout phase with the
+  // real laid-out rect, so it is set before the Wall's seed passive effect reads it
+  // (`autoEdge`). A lagging passive report left geometry at the initial 0×0 on
+  // mount, so the seed's aspect heuristic saw a square and stacked every pane
+  // vertically instead of laying them out by aspect.
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const measure = () => {
       const r = el.getBoundingClientRect();
+      store.setLayoutGeometry({ x: 0, y: 0, width: r.width, height: r.height }, LATH_LAYOUT_OPTS);
       setSize((prev) => (prev.width === r.width && prev.height === r.height ? prev : { width: r.width, height: r.height }));
     };
     measure();
@@ -232,7 +239,7 @@ export function LathHost({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [store]);
 
   const rect = { x: 0, y: 0, width: size.width, height: size.height };
   const rectRef = useRef(rect);
@@ -241,12 +248,6 @@ export function LathHost({
   // The drop-preview overlay is painted in the selection ring's color (translucent
   // fill + solid border), so it reads as "this pane, dropped here".
   const selectionColor = useFocusRingColor();
-
-  // Report the geometry we render with so the store's queries (restore/resize/
-  // neighbors/autoEdge) match the screen.
-  useEffect(() => {
-    store.setLayoutGeometry(rectRef.current, LATH_LAYOUT_OPTS);
-  }, [store, size.width, size.height]);
 
   // --- Pane / Door drag (docs/specs/tiling-engine.md → "Hierarchical drag and
   // drop"). All pointer-event based (no HTML5 DnD), so it is CDP-testable and never
