@@ -1,5 +1,6 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-shell";
 import type {
   AgentBrowserCommandResult,
@@ -187,12 +188,11 @@ export class TauriAdapter implements PlatformAdapter {
       console.error("[tauri-adapter] load_session failed:", err);
     }
     let migrated: string | null = null;
-    if (seed === null) {
-      // One-time migration off WebKit localStorage. SUNSET: drop this branch
-      // once shipped builds have all migrated. It assumes a single window — the
-      // legacy blob is per-origin (shared across windows) and window-agnostic,
-      // which is safe today because the app ships one window; a multi-window
-      // build must gate this so only one window adopts the shared blob.
+    // One-time migration off WebKit localStorage. SUNSET: removal criteria in
+    // docs/specs/standalone.md `## Future`. The legacy blob is per-origin
+    // (window-shared) and window-agnostic, so only the main window may adopt
+    // and clear it — a second window racing this would double-adopt.
+    if (seed === null && getCurrentWindow().label === "main") {
       migrated = localStorage.getItem(TauriAdapter.STATE_KEY);
       if (migrated !== null) {
         localStorage.removeItem(TauriAdapter.STATE_KEY);
