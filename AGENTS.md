@@ -23,6 +23,7 @@ pnpm build       # build lib, vscode extension, and website
 - **`dor/`** — The `dor` CLI (stricli) staged onto the `PATH` of every Dormouse-launched terminal; talks to its host over a private control socket
 - **`server-lib-common/`** — Security primitives + remote wire contract shared by `server`, the Host module in `lib`, and the Pocket app (bare ES2022 — no DOM or Node types)
 - **`dor-lib-common/`** — Cross-platform external-process spawning (`spawnAndCapture`) shared by `dor` and the `lib` host. Despite the parallel names, the two `*-lib-common` packages are unrelated: `server-lib-common` is remote security/wire, `dor-lib-common` is spawn plumbing.
+- **`canopy/`** — Experimental 3D/WebXR terminal-rendering lab (Storybook-only, not in the production build). Consumes `@diffplug/xterm-addon-webgl-sdf` — the webgl addon from our [xterm.js fork](https://github.com/diffplug/xterm.js) (`sdf` branch; see its `FORK.md`) — as a GitHub-release tarball dependency. The addon bundles xterm core internals, so its version and canopy's `@xterm/xterm` pin must move in lockstep; bumping either means cutting a fork release and updating both in `canopy/package.json`.
 
 ## Specs
 

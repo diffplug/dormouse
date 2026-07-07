@@ -12,6 +12,46 @@ importers:
         specifier: runtime:24.18.0
         version: runtime:24.18.0
 
+  canopy:
+    dependencies:
+      '@diffplug/xterm-addon-webgl-sdf':
+        specifier: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf288.1/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf288.1.tgz
+        version: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf288.1/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf288.1.tgz
+      '@xterm/xterm':
+        specifier: 6.1.0-beta.288
+        version: 6.1.0-beta.288
+      react:
+        specifier: ^19.2.6
+        version: 19.2.7
+      react-dom:
+        specifier: ^19.2.6
+        version: 19.2.7(react@19.2.7)
+    devDependencies:
+      '@storybook/react':
+        specifier: ^10.4.0
+        version: 10.4.6(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(storybook@10.4.6(@testing-library/dom@10.4.1)(@types/react@19.2.17)(prettier@3.9.1)(react@19.2.7))(typescript@6.0.3)
+      '@storybook/react-vite':
+        specifier: ^10.4.0
+        version: 10.4.6(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(esbuild@0.28.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rollup@4.62.2)(storybook@10.4.6(@testing-library/dom@10.4.1)(@types/react@19.2.17)(prettier@3.9.1)(react@19.2.7))(typescript@6.0.3)(vite@8.1.3(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0))
+      '@types/react':
+        specifier: ^19.2.14
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19.2.3
+        version: 19.2.3(@types/react@19.2.17)
+      '@vitejs/plugin-react':
+        specifier: ^6.0.2
+        version: 6.0.3(vite@8.1.3(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0))
+      storybook:
+        specifier: ^10.4.0
+        version: 10.4.6(@testing-library/dom@10.4.1)(@types/react@19.2.17)(prettier@3.9.1)(react@19.2.7)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vite:
+        specifier: ^8.0.14
+        version: 8.1.3(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)
+
   dor:
     dependencies:
       '@stricli/core':
@@ -561,6 +601,10 @@ packages:
   '@csstools/css-tokenizer@4.0.0':
     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
     engines: {node: '>=20.19.0'}
+
+  '@diffplug/xterm-addon-webgl-sdf@https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf288.1/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf288.1.tgz':
+    resolution: {integrity: sha512-4V7JgvCH28YB2pF5SL0iQitGPp6FdOlOCc2DCTx9ilEzeaRETf3RgRf/FOUmoNDfVMHrI4zBzA1E8q5BN1hqiQ==, tarball: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf288.1/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf288.1.tgz}
+    version: 0.20.0-sdf288.1
 
   '@emnapi/core@1.11.0':
     resolution: {integrity: sha512-l9Oo58x0HOP5znGzVhYW9U3e5wVuA4LAZU2AGezTmkhO1CgQRFDhDg4nneHsu/t3WniXg9QrG2nIXL/ZS8ln8Q==}
@@ -4412,6 +4456,8 @@ snapshots:
       css-tree: 3.2.1
 
   '@csstools/css-tokenizer@4.0.0': {}
+
+  '@diffplug/xterm-addon-webgl-sdf@https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf288.1/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf288.1.tgz': {}
 
   '@emnapi/core@1.11.0':
     dependencies:
