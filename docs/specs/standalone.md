@@ -298,8 +298,9 @@ webview's orchestrator (registered by `initQuitFlow`, Tauri-only) responds:
 2. Runs the teardown (below), then **`quit_proceed`** — which sets `approved` and
    calls `app.exit(0)`. That re-enters `ExitRequested` with `approved` true and
    the app exits.
-3. A stage-D3 confirmation cancel calls **`quit_cancel`** — clears `pending`,
-   bumps `seq` (invalidating the live watchdog), and leaves the app running.
+3. A confirmation-dialog cancel (below) calls **`quit_cancel`** — clears
+   `pending`, bumps `seq` (invalidating the live watchdog), and leaves the app
+   running.
 
 A cloned-`AppHandle` **watchdog** thread keeps quit bounded against a dead or
 wedged webview, in two phases: **~2 s** for the ack (no ack ⇒ the listener is
@@ -308,6 +309,40 @@ dead; log and `app.exit(0)`), then poll to **~20 s** total for proceed/cancel
 for; a **repeated quit trigger** bumps `seq` (spawning a fresh watchdog and
 re-emitting), so the stale watchdog exits without acting — this is the user's
 escape hatch if the webview acked then wedged.
+
+**Confirmation dialog.** Source of truth: `standalone/src/quit-confirm-store.ts`
+(the module store + gate) and `standalone/src/QuitConfirmModal.tsx` (the modal);
+installed by `main.tsx` on the Tauri branch right after `initQuitFlow`. When
+`handleQuitRequested` finds **≥1 running session** it hands the decision to the
+installed gate instead of tearing down; with no running work (or no gate) it
+falls straight through to the teardown, so an all-idle quit never prompts. A
+session counts as running iff its latest activity is a live command
+(`activity.kind === 'running'`); `countRunningSessions`
+(`lib/src/lib/terminal-state-store.ts`) is the count, the same predicate the
+gate check reads.
+
+- **Live count.** The body reads `countRunningSessions` through
+  `useSyncExternalStore(subscribeToTerminalPaneState, …)`, so it tracks commands
+  finishing while the dialog is up; the gate's trigger-time count is kept only as
+  the store snapshot. **If the count drops to 0 the dialog stays open** —
+  auto-quitting out from under the user would surprise — and the copy just shows
+  "No commands are still running." with the same buttons.
+- **Cancel / Escape** (Escape and the Cancel button, which takes initial focus as
+  the safe default) close the dialog and call `ctx.cancel()` → `quit_cancel`: the
+  app and every terminal are left untouched and a later quit starts fresh.
+- **Confirm** calls `ctx.confirm()`, which runs the normal teardown; the dialog
+  switches to a non-interactive "Quitting…" state (both buttons disabled, Escape
+  inert) until the process exits, so it can't be double-confirmed. The store nulls
+  its context the instant a decision is made, so a redundant confirm/cancel is a
+  no-op; combined with the orchestrator's `quitPhase` dedupe, a repeated quit
+  trigger while the dialog is open neither re-opens nor stacks it.
+- **Mount.** `<QuitConfirmModalHost>` renders in the Wall's `baseboardNotice`
+  slot (`main.tsx`, beside the update banner), which sits inside Wall's
+  `DialogKeyboardContext` provider; the host toggles that context while visible
+  so command-mode keyboard dispatch is suppressed under the modal. The modal
+  itself is a `ModalFrame` (`layer="critical"`, `backdrop="strong"`,
+  focus-trapped), matching the ExternalLinkModal pattern and the in-pane
+  kill-confirmation aesthetic (`docs/specs/layout.md`).
 
 **Teardown ordering (`runQuitTeardown`), and why.** Wrapped in an 8 s ceiling;
 every step is individually bounded so a stall can't wedge quit:
@@ -388,8 +423,9 @@ root `package.json` for the `dev:standalone*` orchestration.
 | `standalone/src-tauri/src/clipboard_win.rs` | Native Win32 clipboard reads on Windows (owned by `docs/specs/mouse-and-clipboard.md`) |
 | `standalone/scripts/tauri.mjs`, `csp.mjs` | Tauri CLI wrapper assembling the webview CSP (`DORMOUSE_REMOTE_CONNECT_SRC`) |
 | `standalone/src-tauri/tauri.conf.json` | Window config, dev/build commands, sidecar resources glob, updater config |
-| `standalone/src/main.tsx` | Webview bootstrap (boot sequence above); initializes the quit orchestrator on the Tauri branch |
+| `standalone/src/main.tsx` | Webview bootstrap (boot sequence above); initializes the quit orchestrator and installs the confirmation gate on the Tauri branch, mounts `<QuitConfirmModalHost>` in the `baseboardNotice` slot |
 | `standalone/src/quit.ts` | Quit orchestrator: listens for `dormouse://quit-requested`, runs the graceful teardown, calls `quit_ack` / `quit_proceed` / `quit_cancel` (§Quit flow) |
+| `standalone/src/quit-confirm-store.ts`, `QuitConfirmModal.tsx` | Quit-confirmation dialog: the running-work gate + module store, and the modal mounted in the `baseboardNotice` slot (§Quit flow, "Confirmation dialog") |
 | `standalone/src/AppBar.tsx` | Titlebar: shell dropdown, theme picker, window controls |
 | `standalone/src/tauri-adapter.ts` | `TauriAdapter`: PlatformAdapter over Tauri invoke/events, session persistence via the Rust store, control-request dispatch |
 | `standalone/src/tauri-session-store.ts` | `TauriSessionStore`: Rust-backed `SessionKeyValueStore` — boot-seeded write-through cache over `load_session` / `save_session` (§Persistence) |
@@ -407,23 +443,6 @@ root `package.json` for the `dev:standalone*` orchestration.
 Requirements for the next round of session-persistence work — what must be true,
 not how. (Detailed working notes live outside the specs while the work is in
 flight.)
-
-**Quit confirmation dialog.** The quit interception, graceful teardown, and
-durable final save are built (§Quit flow); what remains is the *confirmation UI*
-in front of them. Today a quit with running work tears down immediately and
-unconfirmed. The orchestrator already exposes a seam — `setQuitConfirmGate` in
-`standalone/src/quit.ts`, consulted when `countRunningSessions() > 0`, with the
-fall-through running an unconfirmed teardown until a gate is installed.
-Requirements:
-- Show the dialog only when ≥1 terminal has a running command (idle shells quit
-  silently); state the running-terminal count (`docs/specs/terminal-state.md`,
-  and `countRunningSessions` is the count).
-- On confirm, run the existing teardown (`ctx.confirm()`); on decline, abort via
-  `ctx.cancel()` (invokes `quit_cancel`) and leave the app and every terminal
-  untouched.
-- Cover every quit trigger — the interception already does, so the gate is
-  consulted uniformly regardless of how quit was initiated.
-- Dialog matches the in-pane kill-confirmation aesthetic (`docs/specs/layout.md`).
 
 **Retire the `localStorage` → Rust migration.** The one-time migration branch in
 `standalone/src/tauri-adapter.ts` (marked `SUNSET`) should be removed once

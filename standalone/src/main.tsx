@@ -9,6 +9,7 @@ import App from "dormouse-lib/App";
 import "dormouse-lib/index.css";
 import { UpdateBanner } from "./UpdateBanner";
 import { UpdateDebugModal } from "./UpdateDebugModal";
+import { QuitConfirmModalHost } from "./QuitConfirmModal";
 import { AppBar, type ShellEntry } from "./AppBar";
 import {
   startUpdateCheck,
@@ -90,6 +91,11 @@ async function bootstrap() {
   if (!BROWSER_DEV_HOST) {
     const { initQuitFlow } = await import("./quit");
     initQuitFlow(platform as import("./tauri-adapter").TauriAdapter);
+    // Install the running-work confirmation gate: a quit with ≥1 running
+    // command opens <QuitConfirmModalHost> instead of tearing down unconfirmed
+    // (docs/specs/standalone.md §Quit flow, "Confirmation dialog").
+    const { installQuitConfirmGate } = await import("./quit-confirm-store");
+    installQuitConfirmGate();
   }
   const { initAlertStateReceiver } = await import("dormouse-lib/lib/terminal-registry");
   initAlertStateReceiver();
@@ -112,7 +118,12 @@ async function bootstrap() {
         initialPaneIds={result.paneIds}
         restoredLayout={result.layout}
         initialDoors={result.doors}
-        baseboardNotice={<ConnectedUpdateBanner />}
+        baseboardNotice={
+          <>
+            <ConnectedUpdateBanner />
+            <QuitConfirmModalHost />
+          </>
+        }
         enableRemoteHost
       />
     </StrictMode>,
