@@ -16,6 +16,10 @@ export default defineConfig(({ mode }) => ({
       // `server-lib-common`, whose package `exports` resolve to a `dist` this
       // build never compiles. Alias it to source, exactly like `dormouse-lib`.
       "server-lib-common": path.resolve(__dirname, "../server-lib-common/src"),
+      // Wall also imports `dor/*` (protocol + command types); `dor` has no
+      // package `exports`, and vite does not read tsconfig paths, so resolve it
+      // to source — the same alias lib and standalone use.
+      dor: path.resolve(__dirname, "../dor/src"),
       "ascii-splash-internal": path.resolve(
         __dirname,
         "node_modules/ascii-splash/dist",

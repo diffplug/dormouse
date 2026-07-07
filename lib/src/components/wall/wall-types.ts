@@ -30,6 +30,12 @@ export type WallEvent =
   | { type: 'minimizeChange'; count: number }
   | { type: 'split'; direction: 'horizontal' | 'vertical'; source: 'keyboard' | 'mouse' | 'dor' }
   | { type: 'selectionChange'; id: string | null; kind: WallSelectionKind }
+  // Fires once per pane that becomes visible on the Wall — the initial seed ids,
+  // splits, dor surfaces, restores, and auto-spawn — on both engines (dockview:
+  // `onDidAddPanel`; Lath: the store-subscription leaf-id diff). Engine-neutral so
+  // embedders (the website tutorial) can react to new panes without touching the
+  // tiling api.
+  | { type: 'paneAdded'; id: string }
   | { type: 'kill'; id: string }
   | { type: 'move'; fromId: string; toId: string };
 

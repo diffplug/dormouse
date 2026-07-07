@@ -13,7 +13,6 @@ function activity(
 }
 
 function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityState>()) {
-  let activePanelListener: ((panel: { id?: string } | undefined) => void) | null = null;
   let activityListener: (() => void) | null = null;
   let mouseListener: (() => void) | null = null;
   let activitySnapshot = initialActivitySnapshot;
@@ -44,12 +43,7 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
     { onWatchingDemoPaneChange },
   );
 
-  detector.attach({
-    onDidActivePanelChange: (listener: (panel: { id?: string } | undefined) => void) => {
-      activePanelListener = listener;
-      return { dispose: vi.fn() };
-    },
-  });
+  detector.start();
 
   return {
     state,
@@ -62,7 +56,10 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
       mouseSnapshot = snapshot;
       mouseListener?.();
     },
-    activePanelChange: (id: string) => activePanelListener?.({ id }),
+    // Arrow navigation / clicks surface as a pane `selectionChange` WallEvent (what
+    // Wall.selectPane fires on both engines); the detector reads kb-arrows from it.
+    selectPane: (id: string) =>
+      detector.handleWallEvent({ type: "selectionChange", id, kind: "pane" }),
     onWatchingDemoPaneChange,
   };
 }
@@ -90,30 +87,30 @@ describe("TutDetector", () => {
   });
 
   it("credits arrow navigation after the first move away from the command-mode origin pane", () => {
-    const { state, detector, activePanelChange } = makeDetectorHarness();
+    const { state, detector, selectPane } = makeDetectorHarness();
 
-    detector.handleWallEvent({ type: "selectionChange", id: "pane-a", kind: "pane" });
+    selectPane("pane-a");
     detector.handleWallEvent({ type: "modeChange", mode: "passthrough" });
     detector.handleWallEvent({ type: "modeChange", mode: "command" });
-    activePanelChange("pane-b");
+    selectPane("pane-b");
 
     expect(state.isComplete("kb-arrows")).toBe(true);
   });
 
   it("does not credit kb-arrows for the focus change that follows a Cmd/Ctrl+Arrow swap", () => {
-    const { state, detector, activePanelChange } = makeDetectorHarness();
+    const { state, detector, selectPane } = makeDetectorHarness();
 
-    detector.handleWallEvent({ type: "selectionChange", id: "pane-a", kind: "pane" });
+    selectPane("pane-a");
     detector.handleWallEvent({ type: "modeChange", mode: "passthrough" });
     detector.handleWallEvent({ type: "modeChange", mode: "command" });
     detector.handleWallEvent({ type: "move", fromId: "pane-a", toId: "pane-b" });
-    activePanelChange("pane-b");
+    selectPane("pane-b");
 
     expect(state.isComplete("kb-move")).toBe(true);
     expect(state.isComplete("kb-arrows")).toBe(false);
 
     // A subsequent plain arrow nav to a third pane should still credit kb-arrows.
-    activePanelChange("pane-c");
+    selectPane("pane-c");
     expect(state.isComplete("kb-arrows")).toBe(true);
   });
 

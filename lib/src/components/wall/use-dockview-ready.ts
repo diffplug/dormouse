@@ -9,7 +9,7 @@ import type {
 import { getDefaultShellOpts, setPendingShellOpts, swapTerminals, UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
 import { prefersReducedMotion } from '../../lib/ui-geometry';
 import { withProgrammaticActivation } from '../../lib/programmatic-activation';
-import type { DooredItem, WallMode, WallSelectionKind, SpawnDirection } from './wall-types';
+import type { DooredItem, WallEvent, WallMode, WallSelectionKind, SpawnDirection } from './wall-types';
 import { pickSplitDirection, swapPanelTitles } from './dockview-helpers';
 
 export function useDockviewReady({
@@ -27,6 +27,7 @@ export function useDockviewReady({
   enterTerminalModeRef,
   generatePaneId,
   selectPane,
+  fireEvent,
   setDockviewApi,
   setDoors,
   setSelectedId,
@@ -46,6 +47,7 @@ export function useDockviewReady({
   enterTerminalModeRef: RefObject<(id: string) => void>;
   generatePaneId: () => string;
   selectPane: (id: string) => void;
+  fireEvent: (event: WallEvent) => void;
   setDockviewApi: Dispatch<SetStateAction<DockviewApi | null>>;
   setDoors: Dispatch<SetStateAction<DooredItem[]>>;
   setSelectedId: Dispatch<SetStateAction<string | null>>;
@@ -79,6 +81,14 @@ export function useDockviewReady({
         : { mode: 'panes', paneIds: hasRestored ? restored! : [generatePaneId()] };
       resolvedRef.current = resolution;
     }
+
+    // Fire `paneAdded` for every panel dockview adds. Registered BEFORE the initial
+    // resolution below so it also covers the seed adds (dockview fires onDidAddPanel
+    // synchronously during addPanel/fromJSON), matching the Lath path's seed diff.
+    // Temporary glue: dies with this file when dockview is removed.
+    e.api.onDidAddPanel((panel) => {
+      if (panel?.id) fireEvent({ type: 'paneAdded', id: panel.id });
+    });
 
     const primeDefaultShell = (id: string) => {
       const defaults = getDefaultShellOpts();
@@ -196,6 +206,7 @@ export function useDockviewReady({
     apiRef,
     doorsRef,
     enterTerminalModeRef,
+    fireEvent,
     freshlySpawnedRef,
     generatePaneId,
     initialDoorsRef,

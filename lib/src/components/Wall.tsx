@@ -1022,6 +1022,7 @@ export function Wall({
     enterTerminalModeRef,
     generatePaneId,
     selectPane,
+    fireEvent,
     setDockviewApi,
     setDoors,
     setSelectedId,
@@ -1030,6 +1031,11 @@ export function Wall({
 
   // --- Lath seed + auto-spawn (replaces useDockviewReady's ready/auto-spawn) ---
   const lathSeededRef = useRef(false);
+  // The leaf-id set as of the last commit, so the store subscription can fire
+  // `paneAdded` for ids that just appeared (splits, dor surfaces, restores,
+  // auto-spawn). Seeded here so the seed ids are NOT re-fired by the diff — they
+  // are announced explicitly below, matching dockview's onDidAddPanel initial adds.
+  const prevLeafIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!lath || lathSeededRef.current) return;
     lathSeededRef.current = true;
@@ -1055,9 +1061,13 @@ export function Wall({
       }
     }
     setSelectedId(paneIds[0] ?? null);
-    // onApiReady is dockview-only and never fires under Lath (the website tutorial
-    // / tut-detector require flag-off — acceptable for a dev flag through stage 4).
-  }, [lath, generatePaneId]);
+    // Announce the seeded panes and prime the diff set so the store subscription
+    // only fires for ids added later (the seed's own commits predate its subscribe).
+    prevLeafIdsRef.current = new Set(paneIds);
+    for (const id of paneIds) fireEvent({ type: 'paneAdded', id });
+    // onApiReady is dockview-only and never fires under Lath, but `paneAdded` /
+    // `selectionChange` now carry the website tutorial on both engines.
+  }, [lath, generatePaneId, fireEvent]);
 
   // Auto-spawn: whenever a commit empties the tree (last pane killed/minimized),
   // spawn one to keep a pane visible — the Wall's "always one pane" rule, moved off
@@ -1070,6 +1080,22 @@ export function Wall({
       // removes the zoomed leaf), so mirror the Wall's `zoomed` boolean off it.
       // setZoomed no-ops when unchanged, so this is cheap on every commit.
       setZoomed(snap.zoomedId !== null);
+      // `paneAdded` for any leaf new since the last commit — the engine-neutral
+      // counterpart to dockview's onDidAddPanel. Runs post-commit, so the pane
+      // exists. Meta/zoom/resize commits leave the id set unchanged (no fire). The
+      // auto-spawn below commits re-entrantly, so its new leaf is caught here too.
+      const currentIds = lath.leafIds();
+      const prevIds = prevLeafIdsRef.current;
+      let leavesChanged = currentIds.length !== prevIds.size;
+      for (const id of currentIds) {
+        if (!prevIds.has(id)) {
+          leavesChanged = true;
+          fireEvent({ type: 'paneAdded', id });
+        }
+      }
+      // The size check also catches pure removals, purging dead ids so a later
+      // re-add of the same id fires again.
+      if (leavesChanged) prevLeafIdsRef.current = new Set(currentIds);
       if (snap.tree.root !== null) return;
       const id = generatePaneId();
       const defaults = getDefaultShellOpts();
@@ -1083,7 +1109,7 @@ export function Wall({
       const selDangling = sel !== null && selectedTypeRef.current === 'pane' && !lath.has(sel);
       if (sel === null || selDangling) selectPane(id);
     });
-  }, [lath, generatePaneId, selectPane]);
+  }, [lath, generatePaneId, selectPane, fireEvent]);
 
   // --- Session persistence ---
   useSessionPersistence({

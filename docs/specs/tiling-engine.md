@@ -238,7 +238,7 @@ Row 8's counterpart guard (a background `dor` command must never yank cross-fram
 
 Ordering constraint: lath-rollout completes before the workspace-switching stages of the **workspaces-rollout** scope (defined in [layout.md](layout.md)) — a workspace switch under Lath is "swap which tree renders," with none of dockview's active-group juggling.
 
-Known parity gap accepted while the flag lives: `onApiReady` never fires under Lath (the website tutorial's tut-detector needs flag-off).
+`onApiReady` never fires under Lath, but it no longer has a consumer: the website tutorial (its last one) was decoupled from the tiling api and now drives off the engine-neutral `WallEvent` stream (`paneAdded` for pane creation, `selectionChange` for kb-arrows), so `/playground/desktop` runs identically under both engines. The unused prop is deleted in the sweep.
 
 ### What this deletes
 
