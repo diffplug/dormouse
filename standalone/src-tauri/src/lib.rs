@@ -631,6 +631,17 @@ fn write_session_to(dir: &Path, label: &str, state: &str) -> Result<(), String> 
         f.sync_all().map_err(|e| format!("fsync temp: {e}"))?;
     }
     std::fs::rename(&tmp, &path).map_err(|e| format!("rename session {label}: {e}"))?;
+    // The temp file's own fsync doesn't make the rename durable — on unix the
+    // directory entry that now points at the new inode must be fsynced too, or a
+    // crash right after quit could leave the rename unrecorded. Best-effort: a
+    // failure here doesn't invalidate the (already-written) data. Windows has no
+    // equivalent dir-fsync concept, so this is unix-only.
+    #[cfg(unix)]
+    {
+        if let Ok(d) = std::fs::File::open(dir) {
+            let _ = d.sync_all();
+        }
+    }
     Ok(())
 }
 

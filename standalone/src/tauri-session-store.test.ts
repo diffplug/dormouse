@@ -100,4 +100,108 @@ describe("TauriSessionStore", () => {
     await tick();
     expect(saved).toEqual(["a", "b"]);
   });
+
+  it("drain resolves immediately when the pipeline is idle", async () => {
+    const store = new TauriSessionStore(async () => {});
+    let resolved = false;
+    void store.drain().then(() => {
+      resolved = true;
+    });
+    await tick();
+    expect(resolved).toBe(true);
+  });
+
+  it("drain resolves only after an in-flight save settles", async () => {
+    let release!: () => void;
+    const store = new TauriSessionStore(
+      () => new Promise<void>((res) => (release = res)),
+    );
+
+    store.setItem("k", "a"); // starts the in-flight write of 'a'
+    let drained = false;
+    void store.drain().then(() => {
+      drained = true;
+    });
+    await tick();
+    expect(drained).toBe(false); // still in flight
+
+    release();
+    await tick();
+    expect(drained).toBe(true);
+  });
+
+  it("drain covers a value queued behind the in-flight save", async () => {
+    const saved: string[] = [];
+    const resolvers: Array<() => void> = [];
+    const store = new TauriSessionStore(
+      (v) =>
+        new Promise<void>((res) => {
+          saved.push(v);
+          resolvers.push(res);
+        }),
+    );
+
+    store.setItem("k", "a"); // in flight
+    store.setItem("k", "b"); // queued as pending
+    let drained = false;
+    void store.drain().then(() => {
+      drained = true;
+    });
+
+    resolvers[0](); // 'a' settles → flush 'b'
+    await tick();
+    expect(saved).toEqual(["a", "b"]);
+    expect(drained).toBe(false); // pending 'b' still in flight
+
+    resolvers[1](); // 'b' settles → pipeline idle
+    await tick();
+    expect(drained).toBe(true);
+  });
+
+  it("drain covers a setItem issued while draining (chains as pending)", async () => {
+    const saved: string[] = [];
+    const resolvers: Array<() => void> = [];
+    const store = new TauriSessionStore(
+      (v) =>
+        new Promise<void>((res) => {
+          saved.push(v);
+          resolvers.push(res);
+        }),
+    );
+
+    store.setItem("k", "a"); // in flight
+    let drained = false;
+    void store.drain().then(() => {
+      drained = true;
+    });
+    // Issued mid-drain while 'a' is still in flight: chains as pending, so the
+    // drain must not resolve until this later write also lands.
+    store.setItem("k", "b");
+
+    resolvers[0](); // 'a' settles → flush 'b'
+    await tick();
+    expect(drained).toBe(false);
+
+    resolvers[1](); // 'b' settles → idle
+    await tick();
+    expect(drained).toBe(true);
+    expect(saved).toEqual(["a", "b"]);
+  });
+
+  it("drain still resolves after a rejected write", async () => {
+    let reject!: (err: unknown) => void;
+    const store = new TauriSessionStore(
+      () => new Promise<void>((_res, rej) => (reject = rej)),
+    );
+
+    store.setItem("k", "a"); // in flight
+    let drained = false;
+    void store.drain().then(() => {
+      drained = true;
+    });
+
+    reject(new Error("boom")); // store logs-and-continues; pipeline goes idle
+    await tick();
+    expect(drained).toBe(true);
+  });
 });

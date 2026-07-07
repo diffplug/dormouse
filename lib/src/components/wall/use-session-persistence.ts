@@ -82,12 +82,22 @@ export function useSessionPersistence({
 
   // Never gated on the dirty tracker — the correctness net for dirty-trigger
   // gaps (e.g. a program calling chdir() silently produces no event).
-  const flushSessionSave = useCallback(() => {
+  const flushSessionSave = useCallback(async (): Promise<void> => {
     if (sessionSaveTimerRef.current) {
       clearTimeout(sessionSaveTimerRef.current);
       sessionSaveTimerRef.current = null;
     }
-    return persistSessionNow();
+    await persistSessionNow();
+    // persistSessionNow returns the in-flight save's promise (not the rerun)
+    // when a save is already running, queuing the newest data via
+    // pendingSaveNeededRef; that rerun only chains onto sessionSavePromiseRef
+    // after the current save settles. Keep awaiting the chained reruns until the
+    // pipeline goes idle, so this flush covers the LATEST queued save rather than
+    // resolving before it lands. Terminates: a rerun chains only while a new save
+    // was requested mid-save, so the chain is finite.
+    while (sessionSavePromiseRef.current) {
+      await sessionSavePromiseRef.current;
+    }
   }, [persistSessionNow]);
 
   const scheduleSessionSave = useCallback(() => {

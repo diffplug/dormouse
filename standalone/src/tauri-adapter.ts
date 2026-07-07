@@ -63,6 +63,16 @@ export class TauriAdapter implements PlatformAdapter {
   private protocolParsers = new Map<string, TerminalProtocolParser>();
   private alertManager = new AlertManager();
   private sessionStore = new TauriSessionStore();
+  // In-process session-flush handshake (mirrors the VS Code message-router flow
+  // in vscode-ext/src/message-router.ts, but without postMessage — the Wall runs
+  // in the same webview). Handlers are the frontend flush listeners; a request
+  // fans out one requestId and resolves when a handler reports completion.
+  private flushHandlers = new Set<(detail: { requestId: string }) => void>();
+  private pendingFlushRequests = new Map<
+    string,
+    { resolve: () => void; timeout: ReturnType<typeof setTimeout> }
+  >();
+  private nextFlushRequestId = 0;
 
   constructor() {
     // Wire alert manager state changes to handlers
@@ -404,11 +414,58 @@ export class TauriAdapter implements PlatformAdapter {
     this.replayHandlers.delete(handler);
   }
 
-  onRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}
+  onRequestSessionFlush(handler: (detail: { requestId: string }) => void): void {
+    this.flushHandlers.add(handler);
+  }
 
-  offRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}
+  offRequestSessionFlush(handler: (detail: { requestId: string }) => void): void {
+    this.flushHandlers.delete(handler);
+  }
 
-  notifySessionFlushComplete(_requestId: string): void {}
+  notifySessionFlushComplete(requestId: string): void {
+    const pending = this.pendingFlushRequests.get(requestId);
+    if (!pending) return;
+    this.pendingFlushRequests.delete(requestId);
+    clearTimeout(pending.timeout);
+    pending.resolve();
+  }
+
+  // Ask the frontend to flush its debounced/heartbeat session save now and report
+  // back. Resolves when a handler notifies completion for this requestId, or when
+  // the bounded wait elapses — quit must never wedge on a stalled flush. If no
+  // handler is registered (quit during boot, before the Wall mounts), resolve
+  // immediately: there is nothing queued to flush. Called by the (future) quit
+  // orchestrator; pairs with drainSessionSaves to await the resulting Rust write.
+  requestSessionFlush(timeoutMs = 1500): Promise<void> {
+    if (this.flushHandlers.size === 0) return Promise.resolve();
+    const requestId = `flush-${++this.nextFlushRequestId}`;
+    return new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        this.pendingFlushRequests.delete(requestId);
+        resolve();
+      }, timeoutMs);
+      this.pendingFlushRequests.set(requestId, { resolve, timeout });
+      // First handler to notify completion wins (the app ships one Wall). Fan out
+      // after registering so a synchronous completion still finds the entry.
+      for (const handler of this.flushHandlers) handler({ requestId });
+    });
+  }
+
+  // Await the session store's in-flight/pending save_session pipeline (the Rust
+  // temp+fsync+rename that actually reaches disk). Bounded: on timeout resolve
+  // anyway rather than wedge quit. Called by the (future) quit orchestrator after
+  // requestSessionFlush has pushed the latest state through saveState.
+  async drainSessionSaves(timeoutMs = 2000): Promise<void> {
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        console.warn("[tauri-adapter] drainSessionSaves timed out; proceeding with quit");
+        resolve();
+      }, timeoutMs);
+    });
+    await Promise.race([this.sessionStore.drain(), timeout]);
+    clearTimeout(timer!);
+  }
 
   // --- Alert management (local AlertManager) ---
 

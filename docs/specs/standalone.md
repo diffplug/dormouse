@@ -192,8 +192,11 @@ reader). A days-long session made this pathological.
 **Rust file store.** `save_session(window, state)` / `load_session(window)`
 (`lib.rs`) persist the blob as one atomic file per Tauri window —
 `<app_data_dir>/sessions/<label>.json`, written temp-then-rename so a crash
-cannot truncate the previous snapshot. There is no WAL to grow, and overwriting
-in place bounds the on-disk size to one blob. **Window identity is implicit**:
+cannot truncate the previous snapshot. The temp file is fsynced before the
+rename, and on unix the sessions directory is fsynced *after* the rename (a
+directory-entry fsync is what makes the rename itself durable; Windows has no
+equivalent concept, so that step is unix-only). There is no WAL to grow, and
+overwriting in place bounds the on-disk size to one blob. **Window identity is implicit**:
 each command keys by the invoking `tauri::Window`'s `label()`, so the frontend
 stays window-agnostic and a second window (`win-2`, …) persists to its own file
 without ever rewriting the first window's blob — the store is multi-window even
@@ -246,15 +249,20 @@ the freshly hydrated cache, the migration hydrates with the pre-migration seed
 cleared, so the Rust store is the blob's only remaining home.
 
 **Durability on quit (current limitation).** `saveState` returns after updating
-the cache and *firing* `save_session`; nothing awaits the Rust write on
-shutdown — the `onRequestSessionFlush` handshake is a no-op here (VS Code-only),
-and the normal quit path does not intercept the window close (`updater.ts`
-`onCloseRequested` only prevents default for a pending update). So a clean quit
-can drop the save fired at `pagehide`, losing state changed in the final
-debounce/heartbeat window — a regression from the old `localStorage` path, which
-WebKit flushed on teardown. Accepted for now because restore is best-effort and
-saves are frequent (≤500 ms for layout changes); a drain-on-quit is planned
-(`## Future`).
+the cache and *firing* `save_session`; nothing on the quit path awaits the Rust
+write. The awaitable primitives now exist — `TauriSessionStore.drain()` resolves
+when the write pipeline goes idle, the adapter's `onRequestSessionFlush`
+handshake is a real in-process fan-out (no longer a VS Code-only no-op) driven by
+`requestSessionFlush` / `notifySessionFlushComplete`, `drainSessionSaves` awaits
+the store drain under a bounded timeout, and each `save_session` is durable
+including the rename (dir fsync above) — **but nothing on the quit path calls
+them yet**. The normal quit path still does not intercept the window close
+(`updater.ts` `onCloseRequested` only prevents default for a pending update), so
+a clean quit can still drop the save fired at `pagehide`, losing state changed in
+the final debounce/heartbeat window — a regression from the old `localStorage`
+path, which WebKit flushed on teardown. Accepted for now because restore is
+best-effort and saves are frequent (≤500 ms for layout changes); the quit
+orchestrator that wires these primitives is planned (`## Future`).
 
 ## File drop
 
@@ -327,12 +335,19 @@ not how. (Detailed working notes live outside the specs while the work is in
 flight.)
 
 **Guaranteed session save on a clean quit.** `saveState` forwards to
-`save_session` asynchronously and nothing awaits it on shutdown, so a clean quit
-can drop the final save — a durability regression from the old `localStorage`
-path (§Persistence, "Durability on quit"). A webview `pagehide` handler cannot
-await async work. Requirement: on a clean quit the latest state is durably
-written before the process exits, with a bounded wait so a stalled write cannot
-wedge quit. Unclean exits (crash, force-kill) stay best-effort.
+`save_session` asynchronously and nothing on the quit path awaits it on shutdown,
+so a clean quit can drop the final save — a durability regression from the old
+`localStorage` path (§Persistence, "Durability on quit"). A webview `pagehide`
+handler cannot await async work. The awaitable primitives already exist
+(§Persistence): the adapter's `requestSessionFlush` (real in-process flush
+handshake) pushes the latest state through `saveState`, `drainSessionSaves`
+awaits the store's `drain()` under a bounded timeout, and `write_session_to`
+fsyncs the parent directory so the write is durable through the rename. What
+remains: a quit orchestrator that intercepts *every* quit trigger, calls
+`requestSessionFlush` then `drainSessionSaves`, and only then lets the process
+exit. Requirement: on a clean quit the latest state is durably written before the
+process exits, with a bounded wait so a stalled write cannot wedge quit. Unclean
+exits (crash, force-kill) stay best-effort.
 
 **Quit confirmation + graceful terminal teardown.** Quitting ends all terminals;
 today it does so abruptly, unconfirmed, and without capturing final output.
