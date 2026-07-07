@@ -69,6 +69,7 @@ import { findPaneInDirection, findReattachNeighbor } from '../lib/spatial-nav';
 import { cloneLayout, getLayoutStructureSignature } from '../lib/layout-snapshot';
 import type { PersistedDoor } from '../lib/session-types';
 import type { RestoreToken } from '../lib/lath/ops';
+import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import {
   TerminalPanelAdapter,
@@ -92,6 +93,7 @@ import {
   doorDirectionForEdge,
   dorDirectionForEdge,
   edgeForDorDirection,
+  enterFromForEdge,
   directionForArrow,
   type LathWallEngine,
 } from './wall/lath-wall-engine';
@@ -763,6 +765,9 @@ export function Wall({
   const killPaneImmediately = useCallback((id: string) => {
     const api = apiRef.current;
     if (!api && !lath) return;
+    // Lath: a second kill for a pane already mid-fade is a no-op (idempotent) — it
+    // must not re-fire the event, re-dispose, or schedule a second removal.
+    if (lath && lath.isDying(id)) return;
     const isVisiblePane = nav.hasPane(id);
     if (!isVisiblePane) {
       // A doored surface has no visible pane but still owns a live session
@@ -797,19 +802,27 @@ export function Wall({
     // screen registration). A safe no-op for iframe/terminal surfaces.
     disposeAgentBrowserSurfaceController(id);
     if (lath) {
-      // Instant kill (animation is stage 3). Preserve the policy tail exactly: the
-      // restore token is discarded (kills don't restore); removing the last leaf
-      // empties the tree and the auto-spawn effect fills it. Only a kill of the
-      // selected pane moves selection — `dor kill` of a background surface leaves
-      // it (and under Lath focus is never lost, so nothing to heal).
-      const wasSelectedPane = selectedTypeRef.current === 'pane' && selectedIdRef.current === id;
-      lath.removeLeaf(id);
+      // Two-phase kill (docs/specs/tiling-engine.md → "Animation contract"): fade the
+      // pane in place (a last-pane kill also shrinks it toward the bottom-right, as the
+      // dockview path did), then commit `remove` once the fade completes — survivors
+      // tween into the reclaimed space. Dispose the session now so the content freezes
+      // under the fade. The restore token is discarded (kills don't restore).
+      const lastLeaf = lath.listPanes().length === 1;
+      lath.markDying(id, { shrinkTowardBottomRight: lastLeaf });
       disposeSession(id);
-      if (wasSelectedPane) {
-        const survivorId = lath.listPanes()[0]?.id ?? null; // matches orchestrateKill's api.panels[0] tail
-        if (survivorId) selectPane(survivorId);
-        else setSelectedId(null);
-      }
+      setTimeout(() => {
+        if (!lath.has(id)) return; // superseded meanwhile (e.g. replaced)
+        // Live re-read at removal time (matches orchestrateKill): only a kill of the
+        // still-selected pane moves selection; navigating away mid-fade is honored.
+        // Removing the last leaf empties the tree and the auto-spawn effect fills it.
+        const wasSelectedPane = selectedTypeRef.current === 'pane' && selectedIdRef.current === id;
+        lath.removeLeaf(id);
+        if (wasSelectedPane) {
+          const survivorId = lath.listPanes()[0]?.id ?? null; // matches orchestrateKill's api.panels[0] tail
+          if (survivorId) selectPane(survivorId);
+          else setSelectedId(null);
+        }
+      }, lath.exitMs);
     } else {
       // Only a kill of the selected pane should move selection; `dor kill` of a
       // background surface (and ensure's throwaway teardown) leaves it. The check is
@@ -1049,6 +1062,7 @@ export function Wall({
       const defaults = getDefaultShellOpts();
       if (defaults?.shell) setPendingShellOpts(id, { shell: defaults.shell, args: defaults.args });
       freshlySpawnedRef.current.set(id, 'top-left');
+      lath.setEnterHint(id, 'top-left'); // grows from the top-left as the killed pane shrank to the bottom-right
       lath.addLeaf(id, terminalLeafMeta(), null); // becomes the root
       // Adopt selection only when it points at nothing real: null, or dangling (a
       // just-killed pane). A live door (last pane minimized) keeps selection.
@@ -1095,6 +1109,10 @@ export function Wall({
         params: item.params,
       };
       const token = (item.token as RestoreToken | undefined) ?? legacyTokenFromDoor(item);
+      // Enter from the boundary the restore lands beside (opposite the token's edge).
+      // An exact-tier restore may land on a different edge — acceptable; the entry
+      // direction is purely cosmetic.
+      lath.setEnterHint(item.id, enterFromForEdge(token.edge));
       const sel = selectedIdRef.current;
       const fallbackRef = sel && selectedTypeRef.current === 'pane' && lath.has(sel)
         ? sel
@@ -1405,7 +1423,9 @@ export function Wall({
     runSurfaceAdd(focusNeutral, (caller) => {
       let selectedNew: boolean;
       if (lath) {
-        lath.addLeaf(newId, terminalLeafMeta(), { refId: referenceId, edge: edgeForDorDirection(direction) });
+        const edge = edgeForDorDirection(direction);
+        lath.setEnterHint(newId, enterFromForEdge(edge));
+        lath.addLeaf(newId, terminalLeafMeta(), { refId: referenceId, edge });
         selectedNew = settleAddSelection(!!focusNeutral, false, newId);
       } else {
         api!.addPanel({
@@ -1516,6 +1536,7 @@ export function Wall({
     runSurfaceAdd(focusNeutral, (caller) => {
       let selectedNew: boolean;
       if (lath) {
+        lath.setEnterHint(newId, enterFromForEdge(lathEdge!));
         lath.addLeaf(newId, browserMeta, { refId: reference.id, edge: lathEdge! });
         selectedNew = settleAddSelection(!!focusNeutral, false, newId);
       } else {
@@ -1657,11 +1678,9 @@ export function Wall({
         // dockview splits from the active panel; Lath splits beside the selected pane
         // when it's a live pane, else `null` lets the store fall back to the last leaf
         // via autoEdge (its own null-position behavior).
-        lath.addLeaf(
-          newId,
-          terminalLeafMeta(),
-          selectedPaneVisible ? { refId: selectedPaneId!, edge: lath.autoEdgeFor(selectedPaneId!) } : null,
-        );
+        const edge = selectedPaneVisible ? lath.autoEdgeFor(selectedPaneId!) : null;
+        if (edge) lath.setEnterHint(newId, enterFromForEdge(edge));
+        lath.addLeaf(newId, terminalLeafMeta(), edge ? { refId: selectedPaneId!, edge } : null);
       } else {
         const active = api!.activePanel;
         api!.addPanel({
@@ -2118,7 +2137,9 @@ export function Wall({
     if (lath) {
       const panes = lath.listPanes();
       const refId = ref ?? (panes.length > 0 ? panes[panes.length - 1].id : null);
-      lath.addLeaf(newId, terminalLeafMeta(), refId ? { refId, edge: direction === 'right' ? 'right' : 'bottom' } : null);
+      const edge: Edge = direction === 'right' ? 'right' : 'bottom';
+      if (refId) lath.setEnterHint(newId, enterFromForEdge(edge));
+      lath.addLeaf(newId, terminalLeafMeta(), refId ? { refId, edge } : null);
     } else {
       api!.addPanel({
         id: newId,
@@ -2348,6 +2369,14 @@ export function Wall({
     lath?.store.resizeBoundary(splitPath, boundary, deltaPx);
   }, [lath]);
 
+  // The animator's per-frame signal, handed to the selection overlay so its ring
+  // re-measures the moving leaf every frame (and drops its own CSS transition while
+  // frames stream). Stable — `lath` is a ref value.
+  const lathFrames = useMemo(
+    () => (lath ? { subscribe: lath.subscribeFrames } : null),
+    [lath],
+  );
+
   // --- Render ---
 
   return (
@@ -2368,7 +2397,7 @@ export function Wall({
               <div ref={dockviewContainerRef} className={clsx('absolute inset-x-1.5 top-1.5', showBaseboard ? 'bottom-0.5' : 'bottom-1.5')}>
                 {lath ? (
                   <LathHost
-                    store={lath.store}
+                    lath={lath}
                     onCommitResize={onCommitResize}
                     onLeafFocused={onLeafFocused}
                   />
@@ -2381,7 +2410,7 @@ export function Wall({
                     singleTabMode="fullwidth"
                   />
                 )}
-                <WorkspaceSelectionOverlay apiRef={apiRef} lathStore={lath ? lath.store : null} selectedId={selectedId} selectedType={selectedType} mode={mode} overlayElRef={overlayElRef} />
+                <WorkspaceSelectionOverlay apiRef={apiRef} lathStore={lath ? lath.store : null} lathFrames={lathFrames} selectedId={selectedId} selectedType={selectedType} mode={mode} overlayElRef={overlayElRef} />
               </div>
             </div>
 

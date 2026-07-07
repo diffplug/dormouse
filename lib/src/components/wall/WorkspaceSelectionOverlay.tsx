@@ -18,14 +18,23 @@ export interface LathOverlayStore {
   getSnapshot(): { revision: number };
 }
 
+/** The animator's per-frame signal (LathHost pumps it). While frames stream the
+ *  overlay re-measures the moving leaf each frame and drops its own CSS transition
+ *  (which would otherwise lag the streamed rects by ~150ms). */
+export interface LathFramesSignal {
+  subscribe(cb: (settled: boolean) => void): () => void;
+}
+
 const NOOP_SUBSCRIBE = (): (() => void) => () => {};
 const NOOP_REVISION = (): number => 0;
 
-export function WorkspaceSelectionOverlay({ apiRef, lathStore, selectedId, selectedType, mode, overlayElRef }: {
+export function WorkspaceSelectionOverlay({ apiRef, lathStore, lathFrames, selectedId, selectedType, mode, overlayElRef }: {
   apiRef: RefObject<DockviewApi | null>;
   /** When set (flag on), the overlay re-measures on every Lath commit instead of
    *  `api.onDidLayoutChange`. `apiRef` stays null on this path. */
   lathStore?: LathOverlayStore | null;
+  /** When set (flag on), the ring also tracks the animator's per-frame updates. */
+  lathFrames?: LathFramesSignal | null;
   selectedId: string | null;
   selectedType: WallSelectionKind;
   mode: WallMode;
@@ -36,6 +45,9 @@ export function WorkspaceSelectionOverlay({ apiRef, lathStore, selectedId, selec
   const selectionColor = useFocusRingColor();
   const windowFocused = useContext(WindowFocusedContext);
   const [rect, setRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+  // True while the animator streams frames — the ring's own transition is dropped so
+  // it tracks the streamed rects exactly instead of chasing them ~150ms behind.
+  const [animating, setAnimating] = useState(false);
   const isDoor = selectedType === 'door';
 
   // Re-run the measuring effect after each Lath commit (0 when flag off). Runs
@@ -79,11 +91,17 @@ export function WorkspaceSelectionOverlay({ apiRef, lathStore, selectedId, selec
     if (doorEl) ro.observe(doorEl);
 
     // dockview drives re-measures via layout events; Lath drives them via the
-    // `lathRevision` effect dependency (the store has no DOM-layout event).
+    // `lathRevision` effect dependency (the store has no DOM-layout event) and, while
+    // an animation runs, via the animator's per-frame signal (the leaf divs carry the
+    // interpolated inline styles, so DOM measurement tracks the tween frame-accurately).
     const d = api?.onDidLayoutChange(update);
+    const unsubFrames = lathFrames?.subscribe((settled) => {
+      update();
+      setAnimating(!settled);
+    });
 
-    return () => { ro.disconnect(); d?.dispose(); };
-  }, [apiRef, lathStore, lathRevision, selectedId, selectedType, paneVersion, doorVersion, paneElements, doorElements]);
+    return () => { ro.disconnect(); d?.dispose(); unsubFrames?.(); };
+  }, [apiRef, lathStore, lathFrames, lathRevision, selectedId, selectedType, paneVersion, doorVersion, paneElements, doorElements]);
 
   if (!rect || !selectedId) return null;
 
@@ -95,7 +113,7 @@ export function WorkspaceSelectionOverlay({ apiRef, lathStore, selectedId, selec
     width: rect.width,
     height: rect.height,
     zIndex: 50,
-    transition: 'top 150ms, left 150ms, width 150ms, height 150ms, filter 200ms',
+    transition: animating ? 'none' : 'top 150ms, left 150ms, width 150ms, height 150ms, filter 200ms',
     filter: windowFocused ? undefined : 'saturate(0.3)',
   };
 

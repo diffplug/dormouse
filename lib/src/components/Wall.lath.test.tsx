@@ -42,8 +42,11 @@ beforeEach(() => {
     unobserve() {}
     disconnect() {}
   } as unknown as typeof ResizeObserver;
-  globalThis.matchMedia ??= ((query: string) => ({
-    matches: false,
+  // Reduced motion so the Lath engine runs a 0 duration: the two-phase kill's
+  // deferred removal fires on a setTimeout(0) and completes within `flush()` — the
+  // instant path is also stage 3's "reduced motion" acceptance requirement.
+  globalThis.matchMedia = ((query: string) => ({
+    matches: query.includes('prefers-reduced-motion'),
     media: query,
     onchange: null,
     addEventListener() {},

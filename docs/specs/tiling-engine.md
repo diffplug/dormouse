@@ -2,7 +2,7 @@
 
 > See [glossary.md](glossary.md) for the Surface model, the `Window ⊃ Workspace ⊃ Pane ⊃ Surface` hierarchy, and the Pane / Door / baseboard / passthrough vocabulary used here.
 
-> Status: stages 1–2 of the lath-rollout scope are implemented — the pure core under `lib/src/lib/lath/` and the full Wall binding behind the `dormouse.flags.lath` dev flag (acceptance rows 1–10 verified live). **Flag off — the default — Dormouse still ships dockview-react**, and [layout.md](layout.md) remains the source of truth for that path's behavior. Everything under `## Future` here — animation, DnD, and the dockview deletion sweep — is the remaining dream design for **Lath**, an in-house headless tiling engine named for the strips hidden behind a plaster wall, written ahead of the code per the spec lifecycle in AGENTS.md.
+> Status: stages 1–3 of the lath-rollout scope are implemented — the pure core under `lib/src/lib/lath/` (including the headless animator) and the full Wall binding with native motion behind the `dormouse.flags.lath` dev flag (acceptance rows 1–11 verified live). **Flag off — the default — Dormouse still ships dockview-react**, and [layout.md](layout.md) remains the source of truth for that path's behavior. Everything under `## Future` here — DnD and the dockview deletion sweep — is the remaining dream design for **Lath**, an in-house headless tiling engine named for the strips hidden behind a plaster wall, written ahead of the code per the spec lifecycle in AGENTS.md.
 
 ## Why
 
@@ -127,7 +127,7 @@ The dev flag is `dormouse.flags.lath` in localStorage, read once per Wall mount 
 
 Source of truth: `lib/src/components/wall/LathHost.tsx` (+ the `.lath-host` rules in `lib/src/index.css`).
 
-An adapter owns exactly three things: mapping input into Wall coordinates (pointer position in HTML; a controller/gaze raycast against the wall plane in a Three.js adapter), applying frames to its scene, and hosting pane content. Layout, ops, sash geometry — and, from stage 3, animation timelines — are core and shared.
+An adapter owns exactly three things: mapping input into Wall coordinates (pointer position in HTML; a controller/gaze raycast against the wall plane in a Three.js adapter), applying animator frames to its scene each tick, and hosting pane content. Layout, ops, sash geometry, and animation timelines are core and shared.
 
 LathHost, the HTML adapter (a thin React component, the only non-headless part of lath-rollout):
 
@@ -136,7 +136,21 @@ LathHost, the HTML adapter (a thin React component, the only non-headless part o
 - Sashes render from core `sashes()` geometry as sibling divs (hit area widened to 8px, cursor per axis); a drag streams a core `resize` preview from the drag-start tree with the cumulative delta and proposes a single commit on pointerup (`onCommitResize`); Escape cancels. Geometry is reported back via `store.setLayoutGeometry` so store queries match the screen (`LATH_LAYOUT_OPTS`: gap 6 = the dockview theme's gap; minLeaf 100×60).
 - The zoomed leaf renders full-rect above the others via z-index; sashes sit between (they disappear under the zoomed leaf).
 - The binding never calls `.focus()` and emits no activation events. Gestures surface as proposals (`onCommitResize`, `onLeafFocused`) that the Wall commits — selection/focus policy stays at the same Wall call sites where it lives today.
-- The selection ring and kill overlay measure leaf elements through `resolvePaneElement`, which climbs to `[data-lath-leaf]` exactly as it climbs to dockview groupviews; `WorkspaceSelectionOverlay` re-measures on every store commit (`revision` via `useSyncExternalStore`) instead of `api.onDidLayoutChange`.
+- The selection ring and kill overlay measure leaf elements through `resolvePaneElement`, which climbs to `[data-lath-leaf]` exactly as it climbs to dockview groupviews; `WorkspaceSelectionOverlay` re-measures on every store commit (`revision` via `useSyncExternalStore`) instead of `api.onDidLayoutChange`, and additionally on every animator tick (the engine's frame signal), dropping its 150ms CSS transition while frames stream so the ring tracks kills, restores, and tweens frame-accurately.
+
+## Animation
+
+Source of truth: `lib/src/lib/lath/animator.ts` (core); the engine's animator ownership in `lath-wall-engine.ts`; the frame-application effects in `LathHost.tsx`.
+
+Animation is core, not adapter: the headless **animator** turns committed layout changes into presentation frames as a pure function of time (`now` is always passed in — no DOM, timers, or Date), so every renderer animates identically and tests assert real interpolated values against a fake clock.
+
+- `createAnimator({ durationMs, easing? })` exposes `retarget(targets, now, enters?, { snap? })`, `markDying(id, now, { shrinkTowardBottomRight? })`, `isDying(id)`, `framesAt(now): Map<LeafId, Frame>` (`Frame = { rect, opacity, layer }`; layer 0 tiled, 1 dying), and `settledAt(now)` (adapters stop ticking when settled).
+- Default motion is the house easing (`LATH_MOTION_MS` 440ms, `cubic-bezier(0.22, 1, 0.36, 1)` solved in JS by the exported `cubicBezier`). A `retarget` mid-flight starts every leaf from its current interpolated frame — interruptible by construction; no `killInProgressRef`-style guards. `snap: true` starts leaves already settled (sash-drag commits and container resizes — hand-placed geometry must not tween).
+- **Enter**: mutation sites pass `enterFrom` (an `Edge` or `'top-left'`) via the engine's enter-hint map (`setEnterHint` / drained by `consumeEnterHints` at retarget); the leaf's frames begin collapsed against that boundary at opacity 0. The hint edge is the *opposite* of the placement edge (a pane placed to the right grows from its left boundary); reattach hints from the door token's edge; auto-spawn uses `'top-left'`.
+- **Exit**: removal is two-phase. The Wall calls `lath.markDying(id, { shrinkTowardBottomRight })` (freeze-and-fade in place; the last-pane kill shrinks toward its bottom-right corner) with the session disposed up front so the content freezes under the fade, then commits `removeLeaf` in a `setTimeout(lath.exitMs)` — survivors tween into the reclaimed space on the resulting retarget. `isDying` makes a second kill of the same pane a no-op; selection adoption stays a live re-read at removal time. Dying leaves get `pointer-events: none`.
+- **Ownership split**: the core animator is pure; the *engine* owns the instance (`durationMs` 0 under `prefersReducedMotion()` — reduced motion runs the same code), the enter-hint map, the dying-id set, `exitMs`, and the frame/wake signals; *LathHost* merely drives a rAF tick while unsettled and applies `framesAt` **imperatively** to the registered leaf divs (left/top/width/height/opacity/z-index/pointer-events). React keeps rendering target geometry — the memoized `LathLeaf`s do not re-render during a tween, and a no-deps layout effect re-asserts the current frames after any unrelated React commit so a mid-tween re-render can't snap styles to target.
+- The stage-2 CSS spawn-animation path (`getAnimEl` → `pane-spawn-from-*` classes) is dockview-only now: under Lath, LathHost passes a null `getAnimEl` and entry is animator-driven. `lib/src/lib/kill-animation.ts` is likewise lath-unused — it remains solely the dockview path's `orchestrateKill` and is deleted with that path at stage 5 (the original stage-3 ledger scheduled the deletion here, but the flag-off path still needs it).
+- Known minor gap: killing a *zoomed* pane skips the fade (frames are not applied to the zoomed leaf) — instant removal, accepted for now.
 
 ## Pane props contract
 
@@ -164,13 +178,13 @@ Restore prefers `lathLayout`, falls back to migrating the dockview blob (grid br
 
 ## Testing
 
-Source of truth: `lib/src/lib/lath/{model,layout,ops,property}.test.ts`; `lath-wall-store.test.ts`, `lath-dockview-convert.test.ts`, `LathHost.test.tsx`, `lath-wall-engine.test.ts`, `Wall.lath.test.tsx` under `lib/src/components/`.
+Source of truth: `lib/src/lib/lath/{model,layout,ops,animator,property}.test.ts` (+ shared builders in `test-util.ts`); `lath-wall-store.test.ts`, `lath-dockview-convert.test.ts`, `LathHost.test.tsx`, `lath-wall-engine.test.ts`, `Wall.lath.test.tsx` under `lib/src/components/`.
 
-- Core: DOM-free property tests over seeded random op sequences (tiling exactness, invariant preservation via `validate` after every op, the `ok: false` identity contract, `move` ≡ `remove`+insert, restore-tier degradation) plus golden trees, `neighbors`/`autoEdge`/`sashes` geometry, and per-op rejection cases.
-- Binding (jsdom): **node identity is preserved** across every op (the no-re-parent guarantee) and DOM order stays fixed while layout order changes; frames-applied-to-style; sash drag preview/commit/cancel; zoom; the pane props contract via `componentsOverride`; store mutator/rejection/notify semantics; converter round-trips against dockview-core's real serialized shapes; engine hydration from each of the three seed sources; a flag-on `<Wall>` smoke (split, kill, dual-write save capture).
-- Acceptance: rows 1–10 of the matrix below were driven live through the standalone agent-browser harness (`pnpm dev:standalone:ab`; mechanics in `.claude/skills/debug-standalone-agent-browser/SKILL.md`) with the flag on — including the exact-tier door restore from a 3-child row, sash live-resize, embed self-focus adoption, and restart restores from both the native and a legacy dockview-only blob. Re-run the applicable rows at each remaining rollout stage; all rows before stage 5's deletion sweep.
+- Core: DOM-free property tests over seeded random op sequences (tiling exactness, invariant preservation via `validate` after every op, the `ok: false` identity contract, `move` ≡ `remove`+insert, restore-tier degradation) plus golden trees, `neighbors`/`autoEdge`/`sashes` geometry, and per-op rejection cases. Animator: fake-clock tests asserting real interpolated rects/opacities against the exported easing — retarget mid-flight from the interpolated frame, enter-from-edge starting rects, dying freeze-and-fade + shrink geometry, snap semantics, settled detection, reduced-motion zero-duration.
+- Binding (jsdom): **node identity is preserved** across every op (the no-re-parent guarantee) and DOM order stays fixed while layout order changes; imperative frame application between commits (fake rAF + fixed-duration engine), mid-tween React re-renders not snapping styles, dying pointer-events; sash drag preview/commit/cancel and the snap-on-commit; zoom; the pane props contract via `componentsOverride`; store mutator/rejection/notify semantics; converter round-trips against dockview-core's real serialized shapes; engine hydration from each of the three seed sources; a flag-on `<Wall>` smoke (split, kill, dual-write save capture).
+- Acceptance: rows 1–11 of the matrix below were driven live through the standalone agent-browser harness (`pnpm dev:standalone:ab`; mechanics in `.claude/skills/debug-standalone-agent-browser/SKILL.md`) with the flag on — including the exact-tier door restore from a 3-child row, sash live-resize, embed self-focus adoption, restart restores from both the native and a legacy dockview-only blob, and frame-sampled motion (kill freeze-and-fade then survivor tween, last-pane shrink-to-corner with top-left auto-spawn entry, continuous retarget under two kills 200ms apart). Re-run the applicable rows at each remaining rollout stage; all rows before stage 5's deletion sweep.
 
-Acceptance matrix — each row is an end-to-end observable, independent of engine internals (rows 11–13 gate the stages under `## Future`):
+Acceptance matrix — each row is an end-to-end observable, independent of engine internals (rows 12–13 gate the stages under `## Future`):
 
 | # | Flow | Expected observable |
 | --- | --- | --- |
@@ -184,7 +198,7 @@ Acceptance matrix — each row is an end-to-end observable, independent of engin
 | 8 | Embedded page focuses itself (iframe surface) | Selection moves onto that pane — visible jump, same as a click; never a silent desync |
 | 9 | Zoom toggle on a pane | Full-rect render and back; layout identical after |
 | 10 | Restart the app (harness re-open) | Layout, doors, titles, and params restored — including from a pre-Lath legacy blob |
-| 11 | (stage 3+) Kill with animation | Fade in place, survivors tween into the space; a second kill mid-tween retargets cleanly; reduced-motion instant |
+| 11 | Kill with animation | Fade in place, survivors tween into the space; a second kill mid-tween retargets cleanly; reduced-motion instant |
 | 12 | (stage 4+) Drag a pane to a leaf edge, an ancestor edge, and center | Split-beside-pane, split-beside-column/row, and swap respectively; preview rect matches the committed result; dragging while a door is selected moves selection onto the dragged pane |
 | 13 | (stage 4+) Drag a pane onto the baseboard; drag a door out | Minimize with token; restore at the hit-tested position |
 
@@ -192,15 +206,14 @@ Row 8's counterpart guard (a background `dor` command must never yank cross-fram
 
 ## Future
 
-**Scope: lath-rollout** — staged order; each stage lands green before the next starts (stages 1–2 are done — see above the fold):
+**Scope: lath-rollout** — staged order; each stage lands green before the next starts (stages 1–3 are done — see above the fold):
 
-3. **Animation** — the headless animator in the core plus the HTML adapter applying its frames: tween/retarget, enter/exit, kill fade, overlay-ring sync. Delete `lib/src/lib/kill-animation.ts`.
-4. **Drag and drop** — pointer-based hierarchical DnD with the depth model below; drag-to-baseboard minimize; delete the dockview drag wiring.
-5. **Deletion sweep** — remove the dockview dependency, the programmatic-activation tag, the focus-heal machinery, and the shadow models (inventory below); delete the flag and the dual-write together; promote this spec's built portions above the fold and rewrite the affected sections of [layout.md](layout.md).
+4. **Drag and drop** — pointer-based hierarchical DnD with the depth model below; drag-to-baseboard minimize. (The dockview drag wiring is deleted at stage 5 with the rest of the flag-off path, not here.)
+5. **Deletion sweep** — remove the dockview dependency, the programmatic-activation tag, the focus-heal machinery, `lib/src/lib/kill-animation.ts` + the CSS spawn-animation path, the dockview drag wiring, and the shadow models (inventory below); delete the flag and the dual-write together; promote this spec's built portions above the fold and rewrite the affected sections of [layout.md](layout.md).
 
 Ordering constraint: lath-rollout completes before the workspace-switching stages of the **workspaces-rollout** scope (defined in [layout.md](layout.md)) — a workspace switch under Lath is "swap which tree renders," with none of dockview's active-group juggling.
 
-Known parity gaps accepted while the flag lives: `onApiReady` never fires under Lath (the website tutorial's tut-detector needs flag-off), there is no pane DnD until stage 4, and kills/minimizes are instant until stage 3.
+Known parity gaps accepted while the flag lives: `onApiReady` never fires under Lath (the website tutorial's tut-detector needs flag-off), and there is no pane DnD until stage 4.
 
 ### Hierarchical drag and drop
 
@@ -222,24 +235,13 @@ The depth model — the reason Lath exists beyond animation:
 
 Drag beyond the Wall onto the baseboard minimizes (remove + Door with token); dragging a Door out of the baseboard restores at the hit-tested target. One gesture system spans panes and Doors.
 
-### Animation contract
-
-Animation is core, not adapter: a headless **animator** turns committed layout changes into presentation frames as a pure function of time, so every renderer animates identically and tests assert real interpolated values against a fake clock (CSS transitions are untestable in jsdom and unavailable in Three.js anyway).
-
-- `createAnimator(opts)` ingests each committed layout (`retarget(rects, meta)`) and exposes `framesAt(now): Map<LeafId, Frame>`, `Frame = { rect; opacity; layer }`. Adapters drive it from their own tick — rAF in HTML, the render loop in Three.js — and merely apply frames to their scene.
-- Default motion is the house easing (440ms, `cubic-bezier(0.22, 1, 0.36, 1)`, solved in JS to match today's constants). A commit mid-flight retargets every leaf from its current interpolated frame — interruptible by construction; no `killInProgressRef`, no `animationend` + safety-timeout + double-finalize guards.
-- **Enter**: `split`/`restore` callers pass `enterFrom: Edge`; the leaf's frames begin from that edge (replaces `freshlySpawnedRef`).
-- **Exit**: removal is two-phase — mark the leaf dying (opacity fade in place; last-pane kills also shrink toward the bottom-right, as today), then commit `remove` and the survivors tween into the reclaimed space. The kill-confirmation flow drives the phases; the geometry never needs measuring because it was never lost.
-- The `WorkspaceSelectionOverlay` (and any future chrome) reads the selected leaf's frame from the animator instead of `getBoundingClientRect` measurement, so the ring tracks moves, kills, and restores identically in every renderer.
-- Reduced motion runs the same code with zero durations.
-
 ### What this deletes
 
 | Today | Under Lath |
 | --- | --- |
 | `lib/src/lib/programmatic-activation.ts` + every tag site | Deleted — there are no activation events to mute |
 | `onDidActivePanelChange` listener + adopt policy | Deleted — user gestures arrive as op proposals |
-| `lib/src/lib/kill-animation.ts`, `killInProgressRef`, `freshlySpawnedRef` | The animation contract |
+| `lib/src/lib/kill-animation.ts`, `killInProgressRef`, `freshlySpawnedRef` | The animator (already the live path under the flag; the dockview-only file + refs delete here) |
 | `reassertPaneFocus`, `orchestrateKill`'s `onRemoved` heal | Deleted — nothing re-parents, nothing blurs |
 | `renderer: 'always'` iframe constraint | Deleted — iframes never move in the DOM |
 | `layoutAtMinimize` + signatures + `findReattachNeighbor` | Restore tokens (already the live path under the flag) |

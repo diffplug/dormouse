@@ -6,8 +6,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LathHost, LATH_LAYOUT_OPTS } from './LathHost';
 import { createLathWallStore, type LathWallStore, type LeafMeta } from './lath-wall-store';
+import { createLathWallEngine } from './lath-wall-engine';
 import { layout } from '../../lib/lath/layout';
-import type { LathNode, LathTree } from '../../lib/lath/model';
+import { LATH_EASING } from '../../lib/lath/animator';
+import { leafTree, type LathNode, type LathTree } from '../../lib/lath/model';
 import type { PaneProps } from './pane-props';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -68,13 +70,17 @@ afterEach(() => {
   rectSpy.mockRestore();
 });
 
-function mount(store: LathWallStore, onCommitResize = vi.fn(), onLeafFocused = vi.fn()) {
+// Wrap the store in an engine (LathHost drives the whole engine now). Default to a
+// 0 duration so the geometry/structure tests see frames applied instantly; animation
+// tests pass a fixed duration and a fake clock.
+function mount(store: LathWallStore, onCommitResize = vi.fn(), onLeafFocused = vi.fn(), durationMs = 0) {
+  const engine = createLathWallEngine(store, { durationMs });
   act(() => {
     root.render(
-      <LathHost store={store} onCommitResize={onCommitResize} onLeafFocused={onLeafFocused} componentsOverride={OVERRIDE} />,
+      <LathHost lath={engine} onCommitResize={onCommitResize} onLeafFocused={onLeafFocused} componentsOverride={OVERRIDE} />,
     );
   });
-  return { onCommitResize, onLeafFocused };
+  return { engine, onCommitResize, onLeafFocused };
 }
 
 function leafDiv(id: string): HTMLElement | null {
@@ -239,9 +245,10 @@ describe('LathHost — pane props contract', () => {
     expect(bodyProps['b']).toMatchObject({ id: 'b', title: 'B', panelVisible: true, params: { url: 'x' } });
     expect(tabProps['a']).toMatchObject({ id: 'a', title: 'A', panelVisible: true });
 
-    // getAnimEl resolves to the leaf's own stable div.
-    expect(bodyProps['a'].getAnimEl()).toBe(leafDiv('a'));
-    expect(tabProps['b'].getAnimEl()).toBe(leafDiv('b'));
+    // Under Lath the CSS spawn path is disabled (the animator owns entry), so
+    // getAnimEl is a no-op — usePaneChrome's class-based effect stays inert.
+    expect(bodyProps['a'].getAnimEl()).toBeNull();
+    expect(tabProps['b'].getAnimEl()).toBeNull();
   });
 
   it('reports focusin inside a leaf via onLeafFocused', () => {
@@ -258,5 +265,138 @@ describe('LathHost — empty tree', () => {
     expect(() => mount(store)).not.toThrow();
     expect(leafOrder()).toEqual([]);
     expect(container.querySelector('[data-lath-sash]')).toBeNull();
+  });
+});
+
+describe('LathHost — imperative animation frames', () => {
+  const DUR = 400;
+  let clock: number;
+  let rafCbs: FrameRequestCallback[];
+  let spies: Array<{ mockRestore: () => void }>;
+
+  beforeEach(() => {
+    clock = 1000;
+    rafCbs = [];
+    spies = [
+      vi.spyOn(performance, 'now').mockImplementation(() => clock),
+      vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb: FrameRequestCallback) => {
+        rafCbs.push(cb);
+        return rafCbs.length;
+      }),
+      vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => {}),
+    ];
+  });
+  afterEach(() => {
+    for (const s of spies) s.mockRestore();
+  });
+
+  // Run every queued animation frame at the current clock (the loop reschedules
+  // itself, so callers advance the clock and flush again per step).
+  function flushRaf(): void {
+    const cbs = rafCbs.splice(0);
+    act(() => {
+      for (const cb of cbs) cb(clock);
+    });
+  }
+  const widthOf = (id: string): number => parseFloat(leafDiv(id)!.style.width);
+
+  it('tweens a survivor from its old rect to its new rect, then stops ticking', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    mount(store, vi.fn(), vi.fn(), DUR);
+
+    const twoWide = widthOf('a'); // 'a' at 50% of the row
+    // Split 'c' beside 'a' → 'a' must shrink to ~1/3. No enter hint for 'c', so it
+    // appears instantly; 'a' and 'b' tween.
+    act(() => store.addLeaf('c', meta('C'), { refId: 'a', edge: 'right' }));
+    const threeWide = layout(store.getSnapshot().tree, RECT, LATH_LAYOUT_OPTS).get('a')!.width;
+
+    // t = 0: still at the old width (retarget starts from the current frame).
+    expect(widthOf('a')).toBeCloseTo(twoWide, 1);
+    expect(rafCbs.length).toBeGreaterThan(0); // loop scheduled
+
+    // t = 0.5: interpolated through the house easing.
+    clock += DUR / 2;
+    flushRaf();
+    const expectedMid = twoWide + (threeWide - twoWide) * LATH_EASING(0.5);
+    expect(widthOf('a')).toBeCloseTo(expectedMid, 0);
+
+    // t = 1: settled at the target, and the loop stops (no reschedule).
+    clock += DUR / 2;
+    flushRaf();
+    expect(widthOf('a')).toBeCloseTo(threeWide, 1);
+    expect(rafCbs.length).toBe(0);
+  });
+
+  it('a meta re-render mid-tween does not snap the leaf to its target', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    mount(store, vi.fn(), vi.fn(), DUR);
+
+    act(() => store.addLeaf('c', meta('C'), { refId: 'a', edge: 'right' }));
+    clock += DUR / 2;
+    flushRaf();
+    const midWidth = widthOf('a');
+    const target = layout(store.getSnapshot().tree, RECT, LATH_LAYOUT_OPTS).get('a')!.width;
+    expect(midWidth).not.toBeCloseTo(target, 0); // genuinely mid-flight
+
+    // A pure meta write re-renders the leaf but must not snap its inline geometry.
+    act(() => store.setTitle('a', 'Renamed'));
+    expect(widthOf('a')).toBeCloseTo(midWidth, 1);
+  });
+
+  it('fades a dying leaf in place with pointer-events off, above the survivors', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    const { engine } = mount(store, vi.fn(), vi.fn(), DUR);
+
+    act(() => engine.markDying('b'));
+    const b = leafDiv('b')!;
+    expect(b.style.pointerEvents).toBe('none');
+    expect(b.style.zIndex).toBe('35'); // Z_DYING — above tiled survivors
+    expect(engine.isDying('b')).toBe(true);
+
+    clock += DUR / 2;
+    flushRaf();
+    const mid = parseFloat(b.style.opacity);
+    expect(mid).toBeGreaterThan(0);
+    expect(mid).toBeLessThan(1);
+
+    clock += DUR / 2;
+    flushRaf();
+    expect(b.style.opacity).toBe('0');
+    expect(rafCbs.length).toBe(0); // settled → loop stops
+  });
+
+  it('shrinks the last pane toward its bottom-right corner as it dies', () => {
+    const store = seeded(leafTree('solo'), [['solo', meta('Solo')]]);
+    const { engine } = mount(store, vi.fn(), vi.fn(), DUR);
+    expect(widthOf('solo')).toBeCloseTo(W, 0); // full-rect single pane
+
+    act(() => engine.markDying('solo', { shrinkTowardBottomRight: true }));
+    clock += DUR;
+    flushRaf();
+    const el = leafDiv('solo')!;
+    expect(parseFloat(el.style.width)).toBeCloseTo(0, 1);
+    expect(parseFloat(el.style.height)).toBeCloseTo(0, 1);
+    expect(parseFloat(el.style.left)).toBeCloseTo(W, 0); // collapsed to the bottom-right
+    expect(parseFloat(el.style.top)).toBeCloseTo(H, 0);
+    expect(el.style.opacity).toBe('0');
+  });
+
+  it('snaps (no tween) on a sash-drag commit — the user placed the boundary by hand', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    // onCommitResize commits the resize (as the Wall does), so the tree changes.
+    mount(store, (sp, b, d) => { store.resizeBoundary(sp, b, d); }, vi.fn(), DUR);
+
+    const before = widthOf('a');
+    const sash = container.querySelector<HTMLElement>('[data-lath-sash]')!;
+    act(() => sash.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100, clientY: 10 })));
+    act(() => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 160, clientY: 10 })));
+    act(() => window.dispatchEvent(new MouseEvent('pointerup', {})));
+
+    // Commit landed immediately at the resized width (snap), not tweening from `before`.
+    const after = widthOf('a');
+    expect(after).toBeGreaterThan(before);
+    // Advancing the clock changes nothing — there is no tween in flight.
+    clock += DUR;
+    expect(widthOf('a')).toBeCloseTo(after, 1);
   });
 });

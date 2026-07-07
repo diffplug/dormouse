@@ -17,6 +17,14 @@ import {
 } from '../../lib/lath/model';
 import type { Direction } from '../../lib/lath/layout';
 import type { RestoreToken } from '../../lib/lath/ops';
+import {
+  type EnterFrom,
+  type LathAnimator,
+  LATH_EASING,
+  LATH_MOTION_MS,
+  createAnimator,
+} from '../../lib/lath/animator';
+import { prefersReducedMotion } from '../../lib/ui-geometry';
 import { UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
 import type { ResolvedSplitDirection as DorResolvedSplitDirection } from 'dor/commands/types';
 import type { DoorDirection } from '../../lib/spatial-nav';
@@ -76,6 +84,24 @@ export function doorDirectionForEdge(edge: Edge): DoorDirection {
       return 'above';
     case 'bottom':
       return 'below';
+  }
+}
+
+/** The edge a newly-placed leaf grows FROM — the boundary it shares with its
+ *  reference, i.e. the edge opposite where it landed. A pane split to the `'right'`
+ *  enters from its `'left'` edge; one placed `'bottom'` enters from its `'top'`. Feeds
+ *  the animator's enter hint (the correct-for-all-four-directions successor to the
+ *  coarse dockview `spawnDirectionForDockview`). */
+export function enterFromForEdge(edge: Edge): EnterFrom {
+  switch (edge) {
+    case 'left':
+      return 'right';
+    case 'right':
+      return 'left';
+    case 'top':
+      return 'bottom';
+    case 'bottom':
+      return 'top';
   }
 }
 
@@ -148,6 +174,32 @@ export type LathWallEngine = {
    *  subscription. */
   store: LathWallStore;
 
+  // --- animation (stage 3; docs/specs/tiling-engine.md → "Animation contract") ---
+  /** The headless motion core the HTML adapter drives from its rAF loop. Created
+   *  with a 0 duration under reduced motion, so the same code path snaps instantly. */
+  animator: LathAnimator;
+  /** The kill-fade duration (ms) the Wall waits before committing `remove`. Equals
+   *  the animator duration (0 under reduced motion). */
+  exitMs: number;
+  /** Record the edge a soon-to-be-added leaf should enter from (drained by LathHost
+   *  at the next `retarget`). A plain map — not store state — so it never notifies. */
+  setEnterHint(id: string, enterFrom: EnterFrom): void;
+  /** Drain and return every pending enter hint (LathHost consumes these when it
+   *  ingests a committed layout). */
+  consumeEnterHints(): Map<string, EnterFrom>;
+  /** Begin a leaf's exit fade (phase 1 of a kill); `shrinkTowardBottomRight` also
+   *  collapses it toward its bottom-right corner (the last-pane kill). Idempotent. */
+  markDying(id: string, opts?: { shrinkTowardBottomRight?: boolean }): void;
+  /** Whether `id` is mid-fade — the Wall's re-entrant-kill guard. */
+  isDying(id: string): boolean;
+  /** Presentation-frame signal for chrome (the selection ring). LathHost's tick
+   *  calls `notifyFrames(settled)`; subscribers re-measure. Returns an unsubscribe. */
+  subscribeFrames(cb: (settled: boolean) => void): () => void;
+  notifyFrames(settled: boolean): void;
+  /** Wake signal for the adapter's tick loop — fired when the animator becomes busy
+   *  without a store commit (i.e. `markDying`). Returns an unsubscribe. */
+  subscribeWake(cb: () => void): () => void;
+
   // --- reads ---
   /** Visible leaves in tree pre-order, each with its meta title + params. */
   listPanes(): VisiblePane[];
@@ -189,11 +241,56 @@ export type LathWallEngine = {
   ): { paneIds: string[]; fresh: boolean };
 };
 
-export function createLathWallEngine(store: LathWallStore = createLathWallStore()): LathWallEngine {
+export function createLathWallEngine(
+  store: LathWallStore = createLathWallStore(),
+  opts?: { durationMs?: number },
+): LathWallEngine {
   const snapshot = (): LathWallSnapshot => store.getSnapshot();
+
+  // 0 under reduced motion, so entry/exit/tween all collapse to instant through the
+  // very same code path. Tests inject a fixed duration (or 0) via `opts`.
+  const durationMs = opts?.durationMs ?? (prefersReducedMotion() ? 0 : LATH_MOTION_MS);
+  const animator = createAnimator({ durationMs, easing: LATH_EASING });
+
+  // Presentation-only side state (never in the store snapshot): enter hints drained
+  // per retarget, the set of ids mid-fade, and the frame/wake listener sets.
+  const enterHints = new Map<string, EnterFrom>();
+  const dyingIds = new Set<string>();
+  const frameListeners = new Set<(settled: boolean) => void>();
+  const wakeListeners = new Set<() => void>();
+  const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
   return {
     store,
+
+    animator,
+    exitMs: durationMs,
+    setEnterHint(id, enterFrom) {
+      enterHints.set(id, enterFrom);
+    },
+    consumeEnterHints() {
+      const drained = new Map(enterHints);
+      enterHints.clear();
+      return drained;
+    },
+    markDying(id, markOpts) {
+      if (dyingIds.has(id)) return;
+      dyingIds.add(id);
+      animator.markDying(id, now(), markOpts);
+      for (const l of wakeListeners) l();
+    },
+    isDying: (id) => dyingIds.has(id),
+    subscribeFrames(cb) {
+      frameListeners.add(cb);
+      return () => frameListeners.delete(cb);
+    },
+    notifyFrames(settled) {
+      for (const l of frameListeners) l(settled);
+    },
+    subscribeWake(cb) {
+      wakeListeners.add(cb);
+      return () => wakeListeners.delete(cb);
+    },
 
     listPanes() {
       const meta = snapshot().leafMeta;
@@ -208,7 +305,10 @@ export function createLathWallEngine(store: LathWallStore = createLathWallStore(
     autoEdgeFor: (id) => store.autoEdgeFor(id),
 
     addLeaf: (id, meta, position) => store.addLeaf(id, meta, position),
-    removeLeaf: (id) => store.removeLeaf(id),
+    removeLeaf: (id) => {
+      dyingIds.delete(id);
+      return store.removeLeaf(id);
+    },
     replaceLeaf: (oldId, newId, meta) => store.replaceLeaf(oldId, newId, meta),
     restoreLeaf: (meta, token, opts) => store.restoreLeaf(meta, token, opts),
     swapLeaves: (a, b) => store.swapLeaves(a, b),
