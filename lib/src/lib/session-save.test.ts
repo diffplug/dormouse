@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlatformAdapter } from './platform/types';
+import { PERSISTED_SCROLLBACK_MAX_CHARS } from './scrollback-trim';
 import type { PersistedSession } from './session-types';
 
 const terminalRegistryMocks = vi.hoisted(() => ({
@@ -259,14 +260,14 @@ describe('saveSession', () => {
     const platform = createPlatform(null);
     // ~165k chars of noise, then a resume command printed at the very end.
     const bigScrollback = 'noise line\n'.repeat(15_000) + 'claude --resume sess_abc\n';
-    expect(bigScrollback.length).toBeGreaterThan(100_000);
+    expect(bigScrollback.length).toBeGreaterThan(PERSISTED_SCROLLBACK_MAX_CHARS);
     vi.mocked(platform.getScrollback).mockResolvedValue(bigScrollback);
 
     await saveSession(platform, { root: true }, [{ id: 'pane-a', title: 'Pane A' }]);
 
     const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
     const pane = saved.panes.find((p) => p.id === 'pane-a')!;
-    expect(pane.scrollback!.length).toBeLessThanOrEqual(100_000);
+    expect(pane.scrollback!.length).toBeLessThanOrEqual(PERSISTED_SCROLLBACK_MAX_CHARS);
     // The persisted content is the tail of the live buffer.
     expect(bigScrollback.endsWith(pane.scrollback!)).toBe(true);
     expect(pane.scrollback!.endsWith('claude --resume sess_abc\n')).toBe(true);

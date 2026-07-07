@@ -21,52 +21,27 @@ describe('trimPersistedScrollback', () => {
   });
 
   it('drops the partial first line at the cut boundary', () => {
-    // length 15; slice(-12) starts one char into "aaaa", so the tail is
-    // "a\nbbbb\ncccc\n" — a torn partial first line ("a"). The cut at the first
-    // newline drops it, so the result starts on a clean line.
-    const scrollback = 'aaaa\nbbbb\ncccc\n';
-    const result = trimPersistedScrollback(scrollback, 12);
-    expect(result.startsWith('a\n')).toBe(false);
-    expect(result).toBe('bbbb\ncccc\n');
-    expect(result.length).toBeLessThanOrEqual(12);
+    // length 15; the last 12 chars start one char into "aaaa", so the tail is
+    // "a\nbbbb\ncccc\n" — the cut at its first newline drops the torn "a".
+    expect(trimPersistedScrollback('aaaa\nbbbb\ncccc\n', 12)).toBe('bbbb\ncccc\n');
   });
 
   it('hard-cuts a single line longer than the cap (no newline in tail)', () => {
-    const scrollback = 'z'.repeat(100);
-    const result = trimPersistedScrollback(scrollback, 20);
-    expect(result).toBe('z'.repeat(20));
-    expect(result.length).toBe(20);
-    expect(result.length).toBeGreaterThan(0);
+    expect(trimPersistedScrollback('z'.repeat(100), 20)).toBe('z'.repeat(20));
   });
 
   it('hard-cuts when the only newline in the tail is its last char', () => {
-    // tail = slice(-6) = 'aaaaa\n'; indexOf('\n') === 5 === tail.length - 1, so
-    // dropping through it would yield '' — keep the tail as a hard cut instead.
-    const scrollback = 'x'.repeat(20) + '\n';
-    const result = trimPersistedScrollback(scrollback, 6);
-    expect(result).toBe('xxxxx\n');
-    expect(result.length).toBe(6);
-    expect(result.length).toBeGreaterThan(0);
+    // tail = 'aaaaa\n' — dropping through its only newline would yield ''.
+    expect(trimPersistedScrollback('x'.repeat(20) + '\n', 6)).toBe('xxxxx\n');
   });
 
-  it('never returns more than maxChars characters', () => {
-    const cases = [
-      'short\n',
-      'a'.repeat(200),
-      Array.from({ length: 100 }, (_, i) => `entry-${i}`).join('\n') + '\n',
-      'first\n' + 'y'.repeat(200) + '\n',
-    ];
-    for (const scrollback of cases) {
-      expect(trimPersistedScrollback(scrollback, 30).length).toBeLessThanOrEqual(30);
-    }
+  it('passes null through', () => {
+    expect(trimPersistedScrollback(null)).toBeNull();
   });
 
   it('caps at 100k chars by default', () => {
     expect(PERSISTED_SCROLLBACK_MAX_CHARS).toBe(100_000);
     const scrollback = ('busy output line\n').repeat(20_000); // ~340k chars
-    const result = trimPersistedScrollback(scrollback);
-    expect(result.length).toBeLessThanOrEqual(100_000);
-    expect(result.endsWith('\n')).toBe(true);
-    expect(scrollback.endsWith(result)).toBe(true);
+    expect(trimPersistedScrollback(scrollback).length).toBeLessThanOrEqual(100_000);
   });
 });

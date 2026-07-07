@@ -48,12 +48,9 @@ export async function saveSession(
         platform.getScrollback(sessionId),
         platform.getCwd(sessionId),
       ]);
-      // Cap persisted scrollback per pane (tail-kept); the live sidecar buffer
-      // stays at its larger cap. Resume-command patterns live at the tail, so
-      // trimming before detection is safe; re-trimming a trimmed fallback is a
-      // no-op. Null stays null.
-      const resolvedScrollback = scrollback ?? previousPane?.scrollback ?? null;
-      const trimmedScrollback = resolvedScrollback === null ? null : trimPersistedScrollback(resolvedScrollback);
+      // Resume-command patterns live at the tail, so trimming before detection
+      // is safe.
+      const trimmedScrollback = trimPersistedScrollback(scrollback ?? previousPane?.scrollback ?? null);
       return {
         id: pane.id,
         title: pane.title,

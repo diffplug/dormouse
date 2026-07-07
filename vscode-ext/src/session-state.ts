@@ -79,13 +79,11 @@ export async function refreshSavedSessionStateFromPtys(
 
       log.info(`[session] ${pane.id}: live PTY cwd=${cwd} scrollback=${scrollback ? scrollback.length + ' chars' : 'null'}`);
 
-      // Cap persisted scrollback per pane, mirroring the frontend save path
-      // (session-save.ts); the live PTY buffer stays at its larger cap.
-      const resolvedScrollback = scrollback ?? pane.scrollback ?? null;
       return {
         ...pane,
         cwd: cwd ?? pane.cwd ?? null,
-        scrollback: resolvedScrollback === null ? null : trimPersistedScrollback(resolvedScrollback),
+        // Mirrors the frontend save path (session-save.ts).
+        scrollback: trimPersistedScrollback(scrollback ?? pane.scrollback ?? null),
         alert,
       };
     }),
