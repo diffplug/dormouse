@@ -323,7 +323,7 @@ The Lath host paints `var(--color-app-bg)` so gutters and rounded pane/header co
 
 ## Animations
 
-All pane motion is owned by the Lath **animator** — a pure function of time that turns committed layout changes into interpolated frames, applied imperatively to the leaf divs by LathHost (`docs/specs/tiling-engine.md` → "Animation"). Default motion is 440ms `cubic-bezier(0.22, 1, 0.36, 1)`; under reduced motion the animator runs the same code with a 0 duration (instant). The selection overlay measures the leaf divs, which carry the interpolated inline geometry, so `getBoundingClientRect` tracks the tween frame-accurately. There are no CSS entrance/exit classes.
+All pane motion is owned by the Lath **animator** — a pure function of time that turns committed layout changes into interpolated frames, applied imperatively to the leaf divs by LathHost (`docs/specs/tiling-engine.md` → "Animation"). Default motion is 440ms `cubic-bezier(0.22, 1, 0.36, 1)`; under reduced motion the animator runs the same code with a 0 duration (instant). The selection overlay measures the leaf divs, which carry the interpolated inline geometry, so `getBoundingClientRect` tracks the tween frame-accurately. There are no CSS entrance/exit classes. Terminal panes, by contrast, do not refit every frame: `TerminalPane`'s resize observer throttles `refitSession` (leading edge, then at most one per ~150ms while resizes keep arriving, plus a trailing call at rest), so a motion or sash drag reflows the xterm buffer and fires a PTY resize a handful of times instead of once per animated cell-boundary crossing, while the resting geometry still gets an exact fit.
 
 ### Spawn (new pane reveal)
 
