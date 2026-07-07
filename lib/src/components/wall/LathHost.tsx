@@ -422,8 +422,9 @@ export function LathHost({
   // Holds the latest `step` for the rAF schedule inside `pump`, so `pump` needn't take
   // `step` as a dependency (they reference each other).
   const stepRef = useRef<() => void>(() => {});
-  // The zoomed leaf is React-driven (full-rect) and never animated, so `applyFrames`
-  // skips it. Kept in a ref so the rAF callback always sees the latest.
+  // The zoomed leaf's geometry is React-driven (full-rect), but dying opacity /
+  // pointer-events still come from the animator. Kept in a ref so the rAF callback
+  // always sees the latest.
   const zoomedIdRef = useRef<string | null>(null);
   zoomedIdRef.current = zoomedId;
 
@@ -432,20 +433,22 @@ export function LathHost({
       const paint = animator.framesAt(t);
       const zoomed = zoomedIdRef.current;
       for (const [id, el] of leafElsRef.current) {
-        if (id === zoomed) continue; // zoom owns its full-rect geometry
         const f = paint.get(id);
         if (!f) continue; // not tracked (e.g. just-removed) — leave React's styles
-        el.style.left = `${f.rect.x}px`;
-        el.style.top = `${f.rect.y}px`;
-        el.style.width = `${f.rect.width}px`;
-        el.style.height = `${f.rect.height}px`;
+        const isZoomed = id === zoomed;
+        if (!isZoomed) {
+          el.style.left = `${f.rect.x}px`;
+          el.style.top = `${f.rect.y}px`;
+          el.style.width = `${f.rect.width}px`;
+          el.style.height = `${f.rect.height}px`;
+        }
         el.style.opacity = f.opacity >= 1 ? '' : `${f.opacity}`;
         if (f.layer >= 1) {
           // Dying: fade above the survivors and swallow no pointer events.
           el.style.zIndex = `${Z_DYING}`;
           el.style.pointerEvents = 'none';
         } else {
-          el.style.zIndex = `${Z_TILED}`;
+          el.style.zIndex = isZoomed ? `${Z_ZOOMED}` : `${Z_TILED}`;
           el.style.pointerEvents = '';
         }
       }

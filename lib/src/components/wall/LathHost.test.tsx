@@ -399,6 +399,32 @@ describe('LathHost — imperative animation frames', () => {
     expect(rafCbs.length).toBe(0); // settled → loop stops
   });
 
+  it('fades a zoomed dying leaf while keeping its full-rect geometry', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    const { engine } = mount(store, vi.fn(), vi.fn(), DUR);
+
+    act(() => store.setZoomed('a'));
+    const a = leafDiv('a')!;
+    expect(a.style.left).toBe('0px');
+    expect(a.style.top).toBe('0px');
+    expect(a.style.width).toBe(`${W}px`);
+    expect(a.style.height).toBe(`${H}px`);
+
+    act(() => engine.markDying('a'));
+    expect(a.style.pointerEvents).toBe('none');
+    expect(a.style.zIndex).toBe('35'); // Z_DYING — above tiled survivors and sashes
+
+    clock += DUR / 2;
+    flushRaf();
+    const mid = parseFloat(a.style.opacity);
+    expect(mid).toBeGreaterThan(0);
+    expect(mid).toBeLessThan(1);
+    expect(a.style.left).toBe('0px');
+    expect(a.style.top).toBe('0px');
+    expect(a.style.width).toBe(`${W}px`);
+    expect(a.style.height).toBe(`${H}px`);
+  });
+
   it('shrinks the last pane toward its bottom-right corner as it dies', () => {
     const store = seeded(leafTree('solo'), [['solo', leafMeta({ title: 'Solo' })]]);
     const { engine } = mount(store, vi.fn(), vi.fn(), DUR);
