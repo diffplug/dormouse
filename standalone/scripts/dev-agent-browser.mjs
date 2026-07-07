@@ -22,7 +22,11 @@ const dorEntrypoint = path.join(sidecarDir, 'dor-cli', 'dist', 'dor.js');
 const hostPort = Number(process.env.DORMOUSE_BROWSER_DEV_HOST_PORT || 1422);
 const vitePort = Number(process.env.DORMOUSE_BROWSER_DEV_VITE_PORT || 1420);
 const browserSession = process.env.DORMOUSE_BROWSER_DEV_AB_SESSION || 'dormouse-dev-standalone';
-const controlSocket = path.join(os.tmpdir(), `dormouse-${process.pid}-browser-dor.sock`);
+// Windows can't bind an AF_UNIX socket at an arbitrary temp path here (listen
+// fails EACCES); the real standalone host uses a named pipe, so mirror that.
+const controlSocket = process.platform === 'win32'
+  ? `\\\\.\\pipe\\dormouse-${process.pid}-browser-dor`
+  : path.join(os.tmpdir(), `dormouse-${process.pid}-browser-dor.sock`);
 const controlToken = Math.random().toString(36).slice(2);
 
 const pending = new Map();

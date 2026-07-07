@@ -32,6 +32,10 @@ use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 #[cfg(windows)]
 mod clipboard_win;
 
+// Shared with build.rs (via `#[path]`); the PE subsystem offsets live in one place.
+#[cfg(windows)]
+mod pe_subsystem;
+
 type SidecarSender = mpsc::Sender<String>;
 type PendingRequests = Arc<Mutex<HashMap<String, mpsc::Sender<JsonValue>>>>;
 type SharedChild = Arc<Mutex<Box<dyn ChildWrapper + Send + Sync>>>;
@@ -724,6 +728,66 @@ fn find_node_binary(dir: &Path, target_triple: &str) -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
+// The node the `dor` CLI runs under. On Windows the bundled node.exe is patched
+// to the GUI subsystem at build time (build.rs `force_windows_gui_subsystem`) so
+// spawning the sidecar from our GUI process doesn't trigger Win11's DefTerm
+// handoff and flash a stray terminal window. A GUI-subsystem node, however, does
+// not attach to an *inherited* console: when `dor` runs inside a shell's ConPTY
+// its stdout/stderr are console handles (not STARTUPINFO pipes), so every byte it
+// prints is silently dropped and commands appear to produce no output. `dor`
+// already runs inside a pseudo-console and can never cause a stray window, so it
+// needs a console-subsystem node. Derive one by copying the bundled node and
+// flipping the PE subsystem byte back to console; cache it in app data. The
+// sidecar itself keeps running under the GUI node.
+#[cfg(windows)]
+fn resolve_dor_node_path(gui_node: &Path, app: &AppHandle) -> PathBuf {
+    match ensure_console_subsystem_node(gui_node, app) {
+        Ok(path) => path,
+        Err(err) => {
+            append_log(format!(
+                "[dor] console-subsystem node derivation failed ({err}); dor output may be lost"
+            ));
+            gui_node.to_path_buf()
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn resolve_dor_node_path(gui_node: &Path, _app: &AppHandle) -> PathBuf {
+    gui_node.to_path_buf()
+}
+
+#[cfg(windows)]
+fn ensure_console_subsystem_node(gui_node: &Path, app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| format!("app_local_data_dir: {e}"))?;
+    create_dir_all(&dir).map_err(|e| format!("create cache dir: {e}"))?;
+    let dest = dir.join("dor-node.exe");
+    let src_len = std::fs::metadata(gui_node)
+        .map_err(|e| format!("stat bundled node: {e}"))?
+        .len();
+    // Reuse the cached copy only when it matches the current bundled node's size
+    // and is already console-subsystem; re-derive when missing or stale (e.g. an
+    // app update swapped the bundled node). read_subsystem seeks to the field
+    // rather than reading the whole ~80MB binary on every launch.
+    if let Ok(meta) = std::fs::metadata(&dest) {
+        if meta.len() == src_len
+            && pe_subsystem::read_subsystem(&dest).ok() == Some(pe_subsystem::CONSOLE)
+        {
+            return Ok(dest);
+        }
+    }
+    // Copy the bundled node with its subsystem flipped back to console. Writing a
+    // fresh file (rather than fs::copy + re-patch) reads the source only once and
+    // sidesteps fs::copy propagating the source's read-only attribute.
+    let mut bytes = std::fs::read(gui_node).map_err(|e| format!("read bundled node: {e}"))?;
+    pe_subsystem::set_subsystem(&mut bytes, pe_subsystem::CONSOLE)?;
+    std::fs::write(&dest, &bytes).map_err(|e| format!("write dor node: {e}"))?;
+    Ok(dest)
+}
+
 fn dor_control_socket_path() -> String {
     let pid = std::process::id();
     #[cfg(windows)]
@@ -775,6 +839,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     let sidecar_path = resolve_sidecar_path(app.path().resource_dir().ok(), manifest_dir);
     let node_path = resolve_node_binary_path()?;
     let dor_cli_paths = resolve_dor_cli_paths(&sidecar_path, manifest_dir);
+    let dor_node_path = resolve_dor_node_path(&node_path, app);
     let dor_control_socket = dor_control_socket_path();
     let dor_control_token = dor_control_token();
     append_log(format!(
@@ -782,6 +847,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
         sidecar_path.display()
     ));
     append_log(format!("[sidecar] node binary: {}", node_path.display()));
+    append_log(format!("[dor] node binary: {}", dor_node_path.display()));
     append_log(format!(
         "[dor] CLI bin dir: {}",
         dor_cli_paths.bin_dir.display()
@@ -795,7 +861,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     let mut wrap = CommandWrap::with_new(&node_path, |c| {
         c.arg(&sidecar_path)
             .env("DORMOUSE_HOST", "standalone")
-            .env("DORMOUSE_NODE", &node_path)
+            .env("DORMOUSE_NODE", &dor_node_path)
             .env("DORMOUSE_CLI_BIN", &dor_cli_paths.bin_dir)
             .env("DORMOUSE_CLI_JS", &dor_cli_paths.entrypoint)
             .env("DORMOUSE_CONTROL_SOCKET", &dor_control_socket)
@@ -1090,6 +1156,34 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn pe_subsystem_round_trips() {
+        use super::pe_subsystem::{read_subsystem, set_subsystem, CONSOLE, GUI};
+        let dir = TempDir::new("pe-subsystem");
+        let path = dir.path().join("fake.exe");
+        // Minimal PE: MZ magic, e_lfanew -> 0x80, "PE\0\0" signature, and a
+        // Subsystem field 0x5C past the PE signature starting as console.
+        let mut bytes = vec![0u8; 256];
+        bytes[0] = b'M';
+        bytes[1] = b'Z';
+        let pe_offset: u32 = 0x80;
+        bytes[0x3C..0x40].copy_from_slice(&pe_offset.to_le_bytes());
+        let po = pe_offset as usize;
+        bytes[po..po + 4].copy_from_slice(b"PE\0\0");
+        bytes[po + 0x5C..po + 0x5C + 2].copy_from_slice(&CONSOLE.to_le_bytes());
+        fs::write(&path, &bytes).expect("write fake pe");
+
+        // read_subsystem seeks in the file; set_subsystem patches the image.
+        assert_eq!(read_subsystem(&path).unwrap(), CONSOLE);
+        set_subsystem(&mut bytes, GUI).unwrap(); // build.rs flips console -> GUI
+        fs::write(&path, &bytes).unwrap();
+        assert_eq!(read_subsystem(&path).unwrap(), GUI);
+        set_subsystem(&mut bytes, CONSOLE).unwrap(); // dor derive flips it back
+        fs::write(&path, &bytes).unwrap();
+        assert_eq!(read_subsystem(&path).unwrap(), CONSOLE);
     }
 
     #[test]
