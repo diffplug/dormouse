@@ -162,7 +162,15 @@ describe('LathHost — sash drag', () => {
     return container.querySelector<HTMLElement>('[data-lath-sash]')!;
   }
 
-  it('previews the resize during the drag and commits once on pointerup', () => {
+  // Preview recompute is coalesced into one requestAnimationFrame per drag; flush a
+  // frame so the pending preview commit lands before we assert on it.
+  async function flushFrame() {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+  }
+
+  it('previews the resize during the drag and commits once on pointerup', async () => {
     const store = seeded(rowOf('a', 'b', 'c'), [['a', meta('A')], ['b', meta('B')], ['c', meta('C')]]);
     const { onCommitResize } = mount(store);
 
@@ -171,6 +179,7 @@ describe('LathHost — sash drag', () => {
 
     act(() => sash.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100, clientY: 10 })));
     act(() => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 140, clientY: 10 })));
+    await flushFrame();
     // Preview: 'a' (left of boundary 0) grew.
     expect(parseFloat(leafDiv('a')!.style.width)).toBeGreaterThan(parseFloat(widthBefore));
     expect(onCommitResize).not.toHaveBeenCalled();

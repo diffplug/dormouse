@@ -10,29 +10,7 @@ import {
 } from './lath-wall-engine';
 import type { DooredItem } from './wall-types';
 import { leaves } from '../../lib/lath/model';
-
-// A minimal but valid dockview blob (mirrors lath-dockview-convert's fixture shape).
-function dockviewBlob(): unknown {
-  return {
-    grid: {
-      root: {
-        type: 'branch',
-        data: [
-          { type: 'leaf', data: { id: 'g1', views: ['pane-a'], activeView: 'pane-a' }, size: 600 },
-          { type: 'leaf', data: { id: 'g2', views: ['pane-b'], activeView: 'pane-b' }, size: 400 },
-        ],
-        size: 800,
-      },
-      width: 1000,
-      height: 800,
-      orientation: 'HORIZONTAL',
-    },
-    panels: {
-      'pane-a': { id: 'pane-a', contentComponent: 'terminal', tabComponent: 'terminal', title: 'A' },
-      'pane-b': { id: 'pane-b', contentComponent: 'terminal', tabComponent: 'terminal', title: 'B' },
-    },
-  };
-}
+import { dockviewFixture } from './lath-test-fixtures';
 
 describe('lath-wall-engine seed', () => {
   it('(a) hydrates from a LathPersistedLayout, preferring it over the dockview blob', () => {
@@ -42,7 +20,7 @@ describe('lath-wall-engine seed', () => {
       tree: { root: { kind: 'leaf' as const, id: 'leaf-1' } },
       leafMeta: { 'leaf-1': { component: 'terminal', tabComponent: 'terminal', title: 'Restored' } },
     };
-    const { paneIds, fresh } = engine.seed(lathLayout, dockviewBlob(), ['ignored'], () => 'gen');
+    const { paneIds, fresh } = engine.seed(lathLayout, dockviewFixture(), ['ignored'], () => 'gen');
     expect(fresh).toBe(false);
     expect(paneIds).toEqual(['leaf-1']);
     expect(engine.getMeta('leaf-1')?.title).toBe('Restored');
@@ -51,9 +29,9 @@ describe('lath-wall-engine seed', () => {
 
   it('(b) migrates a legacy dockview blob when there is no lath layout', () => {
     const engine = createLathWallEngine();
-    const { paneIds, fresh } = engine.seed(null, dockviewBlob(), ['pane-a', 'pane-b'], () => 'gen');
+    const { paneIds, fresh } = engine.seed(null, dockviewFixture(), ['pane-a', 'pane-b'], () => 'gen');
     expect(fresh).toBe(false);
-    expect([...paneIds].sort()).toEqual(['pane-a', 'pane-b']);
+    expect([...paneIds].sort()).toEqual(['pane-a', 'pane-b', 'pane-c']);
     expect(engine.getMeta('pane-a')?.title).toBe('A');
   });
 

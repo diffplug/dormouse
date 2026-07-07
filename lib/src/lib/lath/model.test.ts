@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   type LathNode,
-  type LathTree,
   edgeAxis,
   edgeIsBefore,
   findLeafPath,
@@ -14,14 +13,7 @@ import {
   structureFingerprint,
   validate,
 } from './model';
-
-const leaf = (id: string): LathNode => ({ kind: 'leaf', id });
-const split = (dir: 'row' | 'col', ...children: Array<[LathNode, number]>): LathNode => ({
-  kind: 'split',
-  dir,
-  children: children.map(([node, weight]) => ({ node, weight })),
-});
-const tree = (root: LathNode | null): LathTree => ({ root });
+import { leaf, split, tree } from './test-util';
 
 describe('leafTree', () => {
   it('seeds a single-leaf tree', () => {

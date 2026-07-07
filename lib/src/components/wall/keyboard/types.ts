@@ -1,5 +1,4 @@
 import type { Dispatch, RefObject, SetStateAction } from 'react';
-import type { DockviewApi } from 'dockview-react';
 import type { ConfirmKill } from '../../KillConfirm';
 import type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind } from '../wall-types';
 import type { WallActions } from '../wall-context';
@@ -24,9 +23,6 @@ export interface WallNav {
 /** Refs + callbacks shared by every keyboard branch. Bundled to avoid 25-arg
  *  signatures on each handler. */
 export interface WallKeyboardCtx {
-  /** The dockview api on the dockview path; null under Lath. Query it through
-   *  `nav` — direct reads break under Lath. */
-  apiRef: RefObject<DockviewApi | null>;
   nav: WallNav;
   /** Swap two panes' surfaces (Cmd-Arrow). Wall wires the engine-specific move:
    *  dockview swaps registry entries + panel titles; Lath swaps leaf identities

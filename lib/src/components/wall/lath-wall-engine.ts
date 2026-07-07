@@ -32,12 +32,7 @@ import {
   dockviewLayoutToLath,
   lathLayoutFromStore,
 } from './lath-dockview-convert';
-import type { DooredItem } from './wall-types';
-
-/** A visible-pane projection used by the engine-neutral Wall helpers
- *  (`buildDorSurfaces`, dev-server correlation, …). Mirrors what dockview's
- *  `api.panels` map gives on the other path. */
-export type LathPaneEntry = { id: string; title: string | undefined; params: Record<string, unknown> | undefined };
+import type { DooredItem, VisiblePane } from './wall-types';
 
 /** dor split direction → Lath edge. `'up'`/`'down'` map to the vertical axis. */
 export function edgeForDorDirection(direction: DorResolvedSplitDirection): Edge {
@@ -155,7 +150,7 @@ export type LathWallEngine = {
 
   // --- reads ---
   /** Visible leaves in tree pre-order, each with its meta title + params. */
-  listPanes(): LathPaneEntry[];
+  listPanes(): VisiblePane[];
   /** Whether `id` is a live leaf. */
   has(id: string): boolean;
   /** The leaf's metadata, or undefined. */
@@ -178,9 +173,6 @@ export type LathWallEngine = {
   setTitle(id: string, title: string): void;
   updateParams(id: string, patch: Record<string, unknown>): void;
   setZoomed(id: string | null): void;
-
-  // --- edge/direction maps (re-exported as methods for call-site brevity) ---
-  edgeForDorDirection(direction: DorResolvedSplitDirection): Edge;
 
   // --- persistence ---
   serializeLayout(): LathPersistedLayout;
@@ -223,8 +215,6 @@ export function createLathWallEngine(store: LathWallStore = createLathWallStore(
     setTitle: (id, title) => store.setTitle(id, title),
     updateParams: (id, patch) => store.updateParams(id, patch),
     setZoomed: (id) => store.setZoomed(id),
-
-    edgeForDorDirection,
 
     serializeLayout: () => lathLayoutFromStore(snapshot()),
 

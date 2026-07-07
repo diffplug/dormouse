@@ -1,15 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { type LathNode, type LathTree, leafTree } from './model';
+import { leafTree } from './model';
 import { type LayoutOpts, autoEdge, layout, neighbors, nodeRectAtPath, sashes } from './layout';
+import { leaf, split, tree, R } from './test-util';
 
-const leaf = (id: string): LathNode => ({ kind: 'leaf', id });
-const split = (dir: 'row' | 'col', ...children: Array<[LathNode, number]>): LathNode => ({
-  kind: 'split',
-  dir,
-  children: children.map(([node, weight]) => ({ node, weight })),
-});
-const tree = (root: LathNode | null): LathTree => ({ root });
-const R = (x: number, y: number, width: number, height: number) => ({ x, y, width, height });
 const noMin: LayoutOpts = { gap: 0, minLeaf: { width: 0, height: 0 } };
 const obj = (m: Map<string, unknown>) => Object.fromEntries(m);
 
@@ -139,15 +132,15 @@ describe('sashes', () => {
   it('reports the gap band of a single split', () => {
     const t = tree(split('row', [leaf('a'), 0.5], [leaf('b'), 0.5]));
     expect(sashes(t, R(0, 0, 100, 100), { gap: 4, minLeaf: { width: 0, height: 0 } })).toEqual([
-      { splitPath: [], boundary: 0, rect: R(48, 0, 4, 100) },
+      { splitPath: [], boundary: 0, dir: 'row', rect: R(48, 0, 4, 100) },
     ]);
   });
 
   it('reports a zero-thickness band at the shared edge with gap 0, one per split', () => {
     const t = tree(split('row', [leaf('a'), 0.5], [split('col', [leaf('b'), 0.5], [leaf('c'), 0.5]), 0.5]));
     expect(sashes(t, R(0, 0, 100, 100), noMin)).toEqual([
-      { splitPath: [], boundary: 0, rect: R(50, 0, 0, 100) },
-      { splitPath: [1], boundary: 0, rect: R(50, 50, 50, 0) },
+      { splitPath: [], boundary: 0, dir: 'row', rect: R(50, 0, 0, 100) },
+      { splitPath: [1], boundary: 0, dir: 'col', rect: R(50, 50, 50, 0) },
     ]);
   });
 });

@@ -7,8 +7,7 @@ import { UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
 import { isBrowserParams } from './browser-surface';
 import { dockviewLayoutToLath, lathToDockviewLayout } from './lath-dockview-convert';
 import type { LathWallEngine } from './lath-wall-engine';
-import type { VisiblePane } from './use-dev-server-ports';
-import type { DooredItem, WallSelectionKind } from './wall-types';
+import type { DooredItem, VisiblePane, WallSelectionKind } from './wall-types';
 
 export function useSessionPersistence({
   dockviewApi,

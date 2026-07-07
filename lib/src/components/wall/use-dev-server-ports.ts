@@ -34,7 +34,7 @@ import {
   subscribeDevServerRescan,
   subscribeWantedDevServerPorts,
 } from './agent-browser-ports';
-import type { DooredItem } from './wall-types';
+import type { DooredItem, VisiblePane } from './wall-types';
 import { isBrowserParams } from './browser-surface';
 
 // Wait this long after interest changes before scanning, so a tab's open +
@@ -77,10 +77,6 @@ function cancelIdle(handle: number | undefined): void {
   if (typeof cancelIdleCallback === 'function') cancelIdleCallback(handle);
   else clearTimeout(handle);
 }
-
-/** Visible-pane projection the correlation scans over — engine-neutral so the
- *  same hook works under dockview (`api.panels`) and Lath (`lath.listPanes()`). */
-export type VisiblePane = { id: string; title: string | undefined; params: Record<string, unknown> | undefined };
 
 export function useDevServerPortCorrelation({
   listVisiblePanes,

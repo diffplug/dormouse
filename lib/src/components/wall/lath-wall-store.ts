@@ -7,7 +7,7 @@
 //
 // What lives here is *geometry + metadata only*: there is no selection, focus,
 // mode, or activation anywhere in this file — those stay in the Wall, which wires
-// itself to this store in a later stage. Nothing imports this module yet (inert).
+// itself to this store.
 
 import {
   type Edge,
@@ -219,7 +219,9 @@ export function createLathWallStore(): LathWallStore {
       if (!r.ok) return { ok: false, token: null };
       const m = cloneMeta();
       m.delete(id);
-      commit({ tree: r.tree, leafMeta: m });
+      // `zoomedId` always names a live leaf (a store invariant, like meta): clear it
+      // when the leaf it named departs.
+      commit({ tree: r.tree, leafMeta: m, ...(snapshot.zoomedId === id ? { zoomedId: null } : {}) });
       return { ok: true, token: r.token };
     },
 
@@ -229,7 +231,8 @@ export function createLathWallStore(): LathWallStore {
       const m = cloneMeta();
       m.delete(oldId);
       m.set(newId, meta);
-      commit({ tree: r.tree, leafMeta: m });
+      // A replace preserves the slot, so retarget a zoom that named the old leaf.
+      commit({ tree: r.tree, leafMeta: m, ...(snapshot.zoomedId === oldId ? { zoomedId: newId } : {}) });
       return { ok: true };
     },
 

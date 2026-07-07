@@ -116,6 +116,17 @@ describe('removeLeaf', () => {
     expect(r).toEqual({ ok: false, token: null });
     expect(store.getSnapshot()).toBe(before);
   });
+
+  it('clears zoomedId when the removed leaf was zoomed, but leaves it otherwise', () => {
+    const store = seeded();
+    store.setZoomed('a');
+    // Removing a different leaf leaves the zoom intact.
+    store.removeLeaf('b');
+    expect(store.getSnapshot().zoomedId).toBe('a');
+    // Removing the zoomed leaf clears it (invariant: zoomedId names a live leaf).
+    store.removeLeaf('a');
+    expect(store.getSnapshot().zoomedId).toBeNull();
+  });
 });
 
 describe('replaceLeaf', () => {
@@ -135,6 +146,17 @@ describe('replaceLeaf', () => {
     const store = seeded();
     expect(store.replaceLeaf('nope', 'x', meta()).ok).toBe(false);
     expect(store.replaceLeaf('a', 'b', meta()).ok).toBe(false);
+  });
+
+  it('retargets zoomedId to the new id when the replaced leaf was zoomed', () => {
+    const store = seeded();
+    store.setZoomed('a');
+    // Replacing a different leaf leaves the zoom on 'a'.
+    store.replaceLeaf('b', 'b2', meta());
+    expect(store.getSnapshot().zoomedId).toBe('a');
+    // Replacing the zoomed leaf follows it to the new slot id.
+    store.replaceLeaf('a', 'a2', meta());
+    expect(store.getSnapshot().zoomedId).toBe('a2');
   });
 });
 

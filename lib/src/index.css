@@ -133,9 +133,8 @@ body {
  * corners, so this is layout + backgrounds only, parity minus polish. */
 
 .lath-host {
-  position: relative;
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: 0;
   overflow: hidden;
   background-color: var(--color-app-bg);
 }

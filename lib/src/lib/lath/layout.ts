@@ -2,7 +2,7 @@
 // rects (exact integer tiling), plus the derived queries that replace today's DOM
 // rect scanning. No DOM, React, or timing. See docs/specs/tiling-engine.md ("Layout").
 
-import type { LathNode, LathTree, LeafId, Rect, Size, Edge } from './model';
+import type { LathChild, LathNode, LathTree, LeafId, Rect, Size, Edge } from './model';
 
 export type LayoutOpts = { gap: number; minLeaf: Size };
 export type Direction = 'left' | 'right' | 'up' | 'down';
@@ -74,31 +74,37 @@ export function allocateChildSpans(
       }
     }
   }
-  return roundSpans(frac, available);
+  return cumulativeRound(frac, available);
 }
 
-/** Cumulative rounding: child i gets `round(cum_{i+1}) - round(cum_i)`, so the
- *  integer spans sum exactly to `round(available)` with drift never accumulating. */
-function roundSpans(frac: number[], available: number): number[] {
-  const out = new Array<number>(frac.length);
+/** Cumulative rounding: entry i gets `round(cum_{i+1}) - round(cum_i)`, so the
+ *  integer parts sum exactly to `round(total)` with drift never accumulating. The
+ *  final boundary snaps to `round(total)` so the parts tile exactly. Shared by the
+ *  layout allocator and the dockview size serializer. */
+export function cumulativeRound(fracs: number[], total: number): number[] {
+  const out = new Array<number>(fracs.length);
   let cum = 0;
   let prevRounded = 0;
-  const target = Math.round(available);
-  for (let i = 0; i < frac.length; i++) {
-    cum += frac[i];
-    // Snap the final boundary to the target so integer spans tile exactly.
-    const rounded = i === frac.length - 1 ? target : Math.round(cum);
+  const target = Math.round(total);
+  for (let i = 0; i < fracs.length; i++) {
+    cum += fracs[i];
+    const rounded = i === fracs.length - 1 ? target : Math.round(cum);
     out[i] = rounded - prevRounded;
     prevRounded = rounded;
   }
   return out;
 }
 
-function layoutNode(node: LathNode, rect: Rect, opts: LayoutOpts, out: Map<LeafId, Rect>): void {
-  if (node.kind === 'leaf') {
-    out.set(node.id, rect);
-    return;
-  }
+/** Walk a split's children in split order (row: left→right; col: top→bottom),
+ *  invoking `cb` with each child, its laid-out rect, and its index. The single
+ *  "allocate spans, advance by span + gap, build the per-axis child rect" spine
+ *  behind `layoutNode`, `nodeRectAtPath`, and `sashes`. */
+function forEachChildRect(
+  node: Extract<LathNode, { kind: 'split' }>,
+  rect: Rect,
+  opts: LayoutOpts,
+  cb: (child: LathChild, childRect: Rect, index: number) => void,
+): void {
   const isRow = node.dir === 'row';
   const span = isRow ? rect.width : rect.height;
   const spans = allocateChildSpans(node.children, span, opts, node.dir);
@@ -107,9 +113,17 @@ function layoutNode(node: LathNode, rect: Rect, opts: LayoutOpts, out: Map<LeafI
     const childRect: Rect = isRow
       ? { x: pos, y: rect.y, width: spans[i], height: rect.height }
       : { x: rect.x, y: pos, width: rect.width, height: spans[i] };
-    layoutNode(node.children[i].node, childRect, opts, out);
+    cb(node.children[i], childRect, i);
     pos += spans[i] + opts.gap;
   }
+}
+
+function layoutNode(node: LathNode, rect: Rect, opts: LayoutOpts, out: Map<LeafId, Rect>): void {
+  if (node.kind === 'leaf') {
+    out.set(node.id, rect);
+    return;
+  }
+  forEachChildRect(node, rect, opts, (child, childRect) => layoutNode(child.node, childRect, opts, out));
 }
 
 /** Per-leaf rects that exactly tile `rect` minus gaps: integer pixels, no overlap,
@@ -130,15 +144,16 @@ export function nodeRectAtPath(tree: LathTree, rect: Rect, opts: LayoutOpts, pat
   for (const idx of path) {
     if (node.kind !== 'split') return null;
     if (idx < 0 || idx >= node.children.length) return null;
-    const isRow = node.dir === 'row';
-    const span = isRow ? cur.width : cur.height;
-    const spans = allocateChildSpans(node.children, span, opts, node.dir);
-    let pos = isRow ? cur.x : cur.y;
-    for (let i = 0; i < idx; i++) pos += spans[i] + opts.gap;
-    cur = isRow
-      ? { x: pos, y: cur.y, width: spans[idx], height: cur.height }
-      : { x: cur.x, y: pos, width: cur.width, height: spans[idx] };
-    node = node.children[idx].node;
+    // Collect the child at `idx` via the shared walk (TS can't narrow a
+    // closure-assigned local, so gather into an array and read the first).
+    const match: Array<{ node: LathNode; rect: Rect }> = [];
+    forEachChildRect(node, cur, opts, (child, childRect, i) => {
+      if (i === idx) match.push({ node: child.node, rect: childRect });
+    });
+    const found = match[0];
+    if (!found) return null;
+    cur = found.rect;
+    node = found.node;
   }
   return cur;
 }
@@ -200,38 +215,34 @@ export function autoEdge(tree: LathTree, rect: Rect, id: LeafId, opts: LayoutOpt
 }
 
 /** One entry per adjacent child pair of every split: `boundary` is the boundary
- *  between children `boundary` and `boundary + 1`; `rect` is the gap band between
- *  them (thickness = `gap`, spanning the split's cross-axis). With `gap: 0` the band
- *  is the zero-thickness shared edge — the adapter widens the hit area. */
+ *  between children `boundary` and `boundary + 1`; `dir` is the split's own
+ *  direction (so a consumer knows a `'row'` split's boundary is a vertical divider
+ *  without re-walking the tree); `rect` is the gap band between them (thickness =
+ *  `gap`, spanning the split's cross-axis). With `gap: 0` the band is the
+ *  zero-thickness shared edge — the adapter widens the hit area. */
 export function sashes(
   tree: LathTree,
   rect: Rect,
   opts: LayoutOpts,
-): Array<{ splitPath: number[]; boundary: number; rect: Rect }> {
-  const out: Array<{ splitPath: number[]; boundary: number; rect: Rect }> = [];
+): Array<{ splitPath: number[]; boundary: number; dir: 'row' | 'col'; rect: Rect }> {
+  const out: Array<{ splitPath: number[]; boundary: number; dir: 'row' | 'col'; rect: Rect }> = [];
   const walk = (node: LathNode, r: Rect, path: number[]): void => {
     if (node.kind !== 'split') return;
     const isRow = node.dir === 'row';
-    const span = isRow ? r.width : r.height;
-    const spans = allocateChildSpans(node.children, span, opts, node.dir);
-    let pos = isRow ? r.x : r.y;
-    for (let i = 0; i < node.children.length; i++) {
-      const childRect: Rect = isRow
-        ? { x: pos, y: r.y, width: spans[i], height: r.height }
-        : { x: r.x, y: pos, width: r.width, height: spans[i] };
+    forEachChildRect(node, r, opts, (child, childRect, i) => {
       if (i < node.children.length - 1) {
-        const bandStart = pos + spans[i];
+        const bandStart = isRow ? childRect.x + childRect.width : childRect.y + childRect.height;
         out.push({
           splitPath: path,
           boundary: i,
+          dir: node.dir,
           rect: isRow
             ? { x: bandStart, y: r.y, width: opts.gap, height: r.height }
             : { x: r.x, y: bandStart, width: r.width, height: opts.gap },
         });
       }
-      walk(node.children[i].node, childRect, [...path, i]);
-      pos += spans[i] + opts.gap;
-    }
+      walk(child.node, childRect, [...path, i]);
+    });
   };
   if (tree.root) walk(tree.root, rect, []);
   return out;

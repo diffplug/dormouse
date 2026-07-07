@@ -15,10 +15,9 @@
 //   - The binding never calls `.focus()` and emits no activation events. Gestures
 //     surface as proposals (`onCommitResize`, `onLeafFocused`); the Wall owns
 //     selection/focus policy.
-//
-// Inert: nothing imports this yet.
 
 import {
+  memo,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -27,11 +26,11 @@ import {
   type ComponentType,
   type CSSProperties,
 } from 'react';
-import { type LathNode, type LathTree, leaves, nodeAtPath } from '../../lib/lath/model';
+import { type LathTree, leaves } from '../../lib/lath/model';
 import { type LayoutOpts, layout, sashes } from '../../lib/lath/layout';
 import { resize } from '../../lib/lath/ops';
 import type { PaneProps } from './pane-props';
-import type { LathWallStore } from './lath-wall-store';
+import type { LathWallStore, LeafMeta } from './lath-wall-store';
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
@@ -79,6 +78,71 @@ type DragState = {
   tree: LathTree;
   delta: number;
 };
+
+/** Stable per-id callbacks handed to each `LathLeaf`, cached so the memoized leaf
+ *  never re-renders just because a parent commit minted a fresh closure. */
+type LeafCallbacks = {
+  getAnimEl: () => HTMLElement | null;
+  registerEl: (el: HTMLDivElement | null) => void;
+};
+
+/** One leaf div: header band atop a filling body, positioned purely by the inline
+ *  geometry props. Memoized so a store commit or a drag frame only re-renders the
+ *  leaves whose props actually changed (geometry / meta / resolved component).
+ *  Static presentation (position/flex/overflow) lives in the `.lath-leaf*` CSS. */
+const LathLeaf = memo(function LathLeaf({
+  id,
+  meta,
+  Body,
+  Tab,
+  left,
+  top,
+  width,
+  height,
+  zIndex,
+  hidden,
+  getAnimEl,
+  registerEl,
+  onLeafFocused,
+}: {
+  id: string;
+  meta: LeafMeta | undefined;
+  Body: ComponentType<PaneProps> | undefined;
+  Tab: ComponentType<PaneProps> | undefined;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  zIndex: number;
+  /** A leaf with no frame (not laid out and not zoomed) hides rather than tiling. */
+  hidden: boolean;
+  getAnimEl: () => HTMLElement | null;
+  registerEl: (el: HTMLDivElement | null) => void;
+  onLeafFocused?: (id: string) => void;
+}) {
+  // Inline styles carry ONLY dynamic values; the rest is `.lath-leaf` CSS.
+  const style: CSSProperties = hidden ? { display: 'none' } : { left, top, width, height, zIndex };
+  const paneProps: PaneProps = {
+    id,
+    title: meta?.title,
+    params: meta?.params,
+    // Under Lath a mounted leaf is always engine-visible (no active-tab gating).
+    panelVisible: true,
+    getAnimEl,
+  };
+  return (
+    <div
+      data-lath-leaf={id}
+      className="lath-leaf"
+      style={style}
+      ref={registerEl}
+      onFocusCapture={() => onLeafFocused?.(id)}
+    >
+      <div className="lath-leaf-header">{Tab ? <Tab {...paneProps} /> : null}</div>
+      <div className="lath-leaf-body">{Body ? <Body {...paneProps} /> : null}</div>
+    </div>
+  );
+});
 
 export function LathHost({
   store,
@@ -131,14 +195,27 @@ export function LathHost({
 
   useEffect(() => {
     if (!dragging) return;
+    // Coalesce pointermove: stash the latest cumulative delta and recompute the
+    // preview at most once per animation frame (the resize itself is cheap, but a
+    // React commit per pointer event is not).
+    let rafId: number | null = null;
+    const flush = () => {
+      rafId = null;
+      const d = dragRef.current;
+      if (!d) return;
+      setPreview(resize(d.tree, d.splitPath, d.boundary, d.delta, rectRef.current, LATH_LAYOUT_OPTS).tree);
+    };
     const onMove = (e: PointerEvent) => {
       const d = dragRef.current;
       if (!d) return;
-      const delta = d.dir === 'row' ? e.clientX - d.startX : e.clientY - d.startY;
-      d.delta = delta;
-      setPreview(resize(d.tree, d.splitPath, d.boundary, delta, rectRef.current, LATH_LAYOUT_OPTS).tree);
+      d.delta = d.dir === 'row' ? e.clientX - d.startX : e.clientY - d.startY;
+      if (rafId === null) rafId = requestAnimationFrame(flush);
     };
     const end = (commit: boolean) => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       const d = dragRef.current;
       dragRef.current = null;
       setDragging(false);
@@ -153,6 +230,7 @@ export function LathHost({
     window.addEventListener('pointerup', onUp);
     window.addEventListener('keydown', onKey);
     return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('keydown', onKey);
@@ -164,11 +242,29 @@ export function LathHost({
   const sashList = sashes(activeTree, rect, LATH_LAYOUT_OPTS);
 
   // DOM order is sorted-by-id and STABLE across layout changes; z-index (not DOM
-  // order) lifts the zoomed leaf, so keyed siblings never reorder.
-  const sortedIds = [...leaves(snapshot.tree)].sort();
+  // order) lifts the zoomed leaf, so keyed siblings never reorder. `leaves()`
+  // already returns a fresh array, so sort it in place.
+  const sortedIds = leaves(snapshot.tree).sort();
   const zoomedId = snapshot.zoomedId;
 
   const leafElsRef = useRef(new Map<string, HTMLDivElement>());
+  // Create-once-per-id callback bundle so the memoized LathLeaf sees stable
+  // `getAnimEl` / `registerEl` identities across commits.
+  const leafCallbacksRef = useRef(new Map<string, LeafCallbacks>());
+  const leafCallbacks = (id: string): LeafCallbacks => {
+    let cb = leafCallbacksRef.current.get(id);
+    if (!cb) {
+      cb = {
+        getAnimEl: () => leafElsRef.current.get(id) ?? null,
+        registerEl: (el) => {
+          if (el) leafElsRef.current.set(id, el);
+          else leafElsRef.current.delete(id);
+        },
+      };
+      leafCallbacksRef.current.set(id, cb);
+    }
+    return cb;
+  };
 
   const resolveBody = (component: string): ComponentType<PaneProps> | undefined =>
     componentsOverride?.bodies?.[component] ?? BODY_COMPONENTS[component];
@@ -176,62 +272,41 @@ export function LathHost({
     componentsOverride?.tabs?.[tabComponent] ?? TAB_COMPONENTS[tabComponent];
 
   return (
-    <div
-      ref={containerRef}
-      className="lath-host"
-      style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, overflow: 'hidden' }}
-    >
+    <div ref={containerRef} className="lath-host">
       {sortedIds.map((id) => {
         const meta = snapshot.leafMeta.get(id);
         const f = frames.get(id);
         const isZoomed = zoomedId === id;
-        // Absolute + flex column so the header sits atop a filling body; geometry
-        // (left/top/width/height) comes straight from the pure `layout`.
-        const base: CSSProperties = { position: 'absolute', display: 'flex', flexDirection: 'column', overflow: 'hidden' };
-        const style: CSSProperties = isZoomed
-          ? { ...base, left: 0, top: 0, width: rect.width, height: rect.height, zIndex: Z_ZOOMED }
+        // Geometry passed as primitives so the memoized leaf can shallow-compare.
+        // Zoomed → full rect on top; laid-out → its frame at z 0; neither → hidden.
+        const cb = leafCallbacks(id);
+        const geom = isZoomed
+          ? { left: 0, top: 0, width: rect.width, height: rect.height, zIndex: Z_ZOOMED, hidden: false }
           : f
-            ? { ...base, left: f.x, top: f.y, width: f.width, height: f.height, zIndex: Z_TILED }
-            : { ...base, display: 'none' };
-
-        const Body = meta ? resolveBody(meta.component) : undefined;
-        const Tab = meta ? resolveTab(meta.tabComponent) : undefined;
-        const paneProps: PaneProps = {
-          id,
-          title: meta?.title,
-          params: meta?.params,
-          // Under Lath a mounted leaf is always engine-visible (no active-tab gating).
-          panelVisible: true,
-          getAnimEl: () => leafElsRef.current.get(id) ?? null,
-        };
-
+            ? { left: f.x, top: f.y, width: f.width, height: f.height, zIndex: Z_TILED, hidden: false }
+            : { left: 0, top: 0, width: 0, height: 0, zIndex: Z_TILED, hidden: true };
         return (
-          <div
+          <LathLeaf
             key={id}
-            data-lath-leaf={id}
-            className="lath-leaf"
-            style={style}
-            ref={(el) => {
-              if (el) leafElsRef.current.set(id, el);
-              else leafElsRef.current.delete(id);
-            }}
-            onFocusCapture={() => onLeafFocused?.(id)}
-          >
-            <div className="lath-leaf-header" style={{ flex: 'none' }}>{Tab ? <Tab {...paneProps} /> : null}</div>
-            <div className="lath-leaf-body" style={{ flex: 1, minHeight: 0, position: 'relative' }}>{Body ? <Body {...paneProps} /> : null}</div>
-          </div>
+            id={id}
+            meta={meta}
+            Body={meta ? resolveBody(meta.component) : undefined}
+            Tab={meta ? resolveTab(meta.tabComponent) : undefined}
+            {...geom}
+            getAnimEl={cb.getAnimEl}
+            registerEl={cb.registerEl}
+            onLeafFocused={onLeafFocused}
+          />
         );
       })}
 
       {sashList.map((sash) => {
-        const node = nodeAtPath(activeTree, sash.splitPath);
-        const dir: 'row' | 'col' = node && node.kind === 'split' ? (node as Extract<LathNode, { kind: 'split' }>).dir : 'row';
-        const vertical = dir === 'row'; // vertical divider between left/right children
-        // No zIndex: sashes render after the tiled leaves in DOM order (so they sit
-        // over the gap band) but below the zoomed leaf (z=40), which hides them.
+        const vertical = sash.dir === 'row'; // a 'row' split's boundary is a vertical divider
+        // Inline carries ONLY geometry + cursor; position/z-index/touch-action are
+        // the `.lath-sash` CSS (z-index 30 sits above tiled leaves at z 0 and below
+        // the zoomed leaf at z 40, which hides them).
         const style: CSSProperties = vertical
           ? {
-              position: 'absolute',
               left: sash.rect.x - (SASH_HIT - sash.rect.width) / 2,
               top: sash.rect.y,
               width: SASH_HIT,
@@ -239,7 +314,6 @@ export function LathHost({
               cursor: 'col-resize',
             }
           : {
-              position: 'absolute',
               left: sash.rect.x,
               top: sash.rect.y - (SASH_HIT - sash.rect.height) / 2,
               width: sash.rect.width,
@@ -258,7 +332,7 @@ export function LathHost({
               dragRef.current = {
                 splitPath: sash.splitPath,
                 boundary: sash.boundary,
-                dir,
+                dir: sash.dir,
                 startX: e.clientX,
                 startY: e.clientY,
                 tree: snapshot.tree,

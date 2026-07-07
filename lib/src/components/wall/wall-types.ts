@@ -5,6 +5,11 @@ export type DooredItem = Omit<PersistedDoor, 'layoutAtMinimize'> & {
   layoutAtMinimize: SerializedDockview | null;
 };
 
+/** Engine-neutral visible-pane projection (dockview: `api.panels`; Lath:
+ *  `lath.listPanes()`). Shared by the Wall helpers, dev-server correlation, and
+ *  session persistence so they never touch the tiling engine directly. */
+export type VisiblePane = { id: string; title: string | undefined; params: Record<string, unknown> | undefined };
+
 export type WallMode = 'command' | 'passthrough';
 
 export type WallSelectionKind = 'pane' | 'door';

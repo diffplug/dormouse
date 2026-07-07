@@ -26,7 +26,8 @@ import type {
   SerializedGridObject,
   GroupviewPanelState,
 } from 'dockview-react';
-import { type LathChild, type LathNode, type LathTree, normalize, validate } from '../../lib/lath/model';
+import { type LathChild, type LathNode, type LathTree, leaves, normalize, validate } from '../../lib/lath/model';
+import { cumulativeRound } from '../../lib/lath/layout';
 import type { LeafMeta } from './lath-wall-store';
 
 /** The Lath persisted layout — the tree is its own wire format; `leafMeta` carries
@@ -167,20 +168,13 @@ export function dockviewLayoutToLath(blob: unknown): LathPersistedLayout | null 
     if (errors.length > 0) return null;
 
     // Drop meta for any view that did not survive into the tree (defensive).
-    const live = new Set(collectLeafIds(tree.root));
+    const live = new Set(leaves(tree));
     for (const id of Object.keys(leafMeta)) if (!live.has(id)) delete leafMeta[id];
 
     return { version: 1, tree, leafMeta };
   } catch {
     return null;
   }
-}
-
-function collectLeafIds(node: LathNode | null, out: string[] = []): string[] {
-  if (!node) return out;
-  if (node.kind === 'leaf') out.push(node.id);
-  else for (const c of node.children) collectLeafIds(c.node, out);
-  return out;
 }
 
 // --- Lath → persisted / Lath → dockview ---
@@ -194,35 +188,16 @@ export function lathLayoutFromStore(snapshot: {
   return { version: 1, tree: snapshot.tree, leafMeta: Object.fromEntries(snapshot.leafMeta) };
 }
 
-/** Integer sizes summing exactly to `total`, apportioned by `weights` via cumulative
- *  rounding so drift never accumulates. */
-function scaleWeights(weights: number[], total: number): number[] {
-  const out = new Array<number>(weights.length);
-  const sum = weights.reduce((a, b) => a + b, 0) || 1;
-  let cum = 0;
-  let prevRounded = 0;
-  for (let i = 0; i < weights.length; i++) {
-    cum += weights[i] / sum;
-    const rounded = i === weights.length - 1 ? total : Math.round(cum * total);
-    out[i] = rounded - prevRounded;
-    prevRounded = rounded;
-  }
-  return out;
-}
-
-let groupCounter = 0;
-function nextGroupId(): string {
-  return `lath-group-${(groupCounter++).toString(36)}`;
-}
-
 /** Build a serialized grid object for a Lath node. `size` is the node's extent along
  *  its PARENT split's axis (proportional to its weight); dockview re-normalizes on
  *  layout, so absolute magnitudes only need to preserve sibling ratios. A split's own
- *  children are scaled into the sizeHint dimension for that split's axis. */
+ *  children are scaled into the sizeHint dimension for that split's axis via
+ *  cumulative rounding. `nextGroupId` mints per-call group ids. */
 function buildObj(
   node: LathNode,
   size: number | undefined,
   sizeHint: { width: number; height: number },
+  nextGroupId: () => string,
 ): SerializedGridObject<GroupState> {
   if (node.kind === 'leaf') {
     // A single-view group; `activeView` is that lone view.
@@ -233,8 +208,10 @@ function buildObj(
     };
   }
   const axisDim = node.dir === 'row' ? sizeHint.width : sizeHint.height;
-  const childSizes = scaleWeights(node.children.map((c) => c.weight), axisDim);
-  const data = node.children.map((c, i) => buildObj(c.node, childSizes[i], sizeHint));
+  // Sum is always 1 on a valid tree; the `|| 1` only guards a degenerate all-zero split.
+  const sum = node.children.reduce((s, c) => s + c.weight, 0) || 1;
+  const childSizes = cumulativeRound(node.children.map((c) => (c.weight / sum) * axisDim), axisDim);
+  const data = node.children.map((c, i) => buildObj(c.node, childSizes[i], sizeHint, nextGroupId));
   return { type: 'branch', data, ...(size !== undefined ? { size } : {}) };
 }
 
@@ -260,6 +237,10 @@ export function lathToDockviewLayout(
     };
   }
 
+  // Group-id counter is local so a call produces deterministic ids from 0.
+  let groupCounter = 0;
+  const nextGroupId = (): string => `lath-group-${(groupCounter++).toString(36)}`;
+
   const root = layout.tree.root;
   const orientation: Orientation = root && root.kind === 'split' ? orientationOf(root.dir) : 'HORIZONTAL';
 
@@ -267,7 +248,7 @@ export function lathToDockviewLayout(
   if (root === null) {
     gridRoot = { type: 'branch', data: [], size: sizeHint.width };
   } else if (root.kind === 'split') {
-    gridRoot = buildObj(root, undefined, sizeHint);
+    gridRoot = buildObj(root, undefined, sizeHint, nextGroupId);
     // Root carries its cross-axis extent as `size` (mirrors dockview's serialize).
     gridRoot.size = orientation === 'HORIZONTAL' ? sizeHint.height : sizeHint.width;
   } else {
@@ -275,7 +256,7 @@ export function lathToDockviewLayout(
     const mainDim = orientation === 'HORIZONTAL' ? sizeHint.width : sizeHint.height;
     gridRoot = {
       type: 'branch',
-      data: [buildObj(root, mainDim, sizeHint)],
+      data: [buildObj(root, mainDim, sizeHint, nextGroupId)],
       size: orientation === 'HORIZONTAL' ? sizeHint.height : sizeHint.width,
     };
   }

@@ -1,16 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { type LathNode, type LathTree, findLeafPath, leafTree, leaves, validate } from './model';
+import { type LathTree, findLeafPath, leafTree, leaves, validate } from './model';
 import { type LayoutOpts, layout } from './layout';
 import { move, remove, replace, resize, restore, split, swap } from './ops';
+// `split` here is the op; the test-util split node-builder is aliased to `mk`.
+import { leaf, split as mk, tree, R } from './test-util';
 
-const leaf = (id: string): LathNode => ({ kind: 'leaf', id });
-const mk = (dir: 'row' | 'col', ...children: Array<[LathNode, number]>): LathNode => ({
-  kind: 'split',
-  dir,
-  children: children.map(([node, weight]) => ({ node, weight })),
-});
-const tree = (root: LathNode | null): LathTree => ({ root });
-const R = (x: number, y: number, width: number, height: number) => ({ x, y, width, height });
 const opts: LayoutOpts = { gap: 0, minLeaf: { width: 0, height: 0 } };
 const rects = (t: LathTree, r = R(0, 0, 100, 100), o = opts) => Object.fromEntries(layout(t, r, o));
 

@@ -11,6 +11,7 @@ import {
 } from './model';
 import { type LayoutOpts, allocateChildSpans, layout, minSpan } from './layout';
 import { type RestoreToken, move, remove, replace, resize, restore, split, swap } from './ops';
+import { R } from './test-util';
 
 // Deterministic PRNG so failures are reproducible from the seed.
 function mulberry32(seed: number): () => number {
@@ -24,7 +25,6 @@ function mulberry32(seed: number): () => number {
 }
 const randInt = (rng: () => number, n: number): number => Math.floor(rng() * n);
 const pick = <T>(rng: () => number, arr: readonly T[]): T => arr[randInt(rng, arr.length)];
-const R = (x: number, y: number, width: number, height: number) => ({ x, y, width, height });
 const EDGES: Edge[] = ['left', 'right', 'top', 'bottom'];
 
 /** Build a random valid tree by splitting beside random leaves. */

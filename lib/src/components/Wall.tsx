@@ -91,9 +91,9 @@ import {
   legacyTokenFromDoor,
   doorDirectionForEdge,
   dorDirectionForEdge,
+  edgeForDorDirection,
   directionForArrow,
   type LathWallEngine,
-  type LathPaneEntry,
 } from './wall/lath-wall-engine';
 import type { WallNav } from './wall/keyboard/types';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
@@ -115,7 +115,7 @@ import {
   type PaneWriteActions,
   type WallActions,
 } from './wall/wall-context';
-import type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind, SpawnDirection } from './wall/wall-types';
+import type { DoorAfterRestoreAction, DooredItem, VisiblePane, WallEvent, WallMode, WallSelectionKind, SpawnDirection } from './wall/wall-types';
 
 type ShellSpawnRequest = {
   shell?: string;
@@ -439,12 +439,13 @@ function settleFocusAfterAdd(
   caller: IDockviewPanel | undefined,
   selectionReplaced: boolean,
   newId: string,
-  selectPane: (id: string) => void,
+  settleAddSelection: (focusNeutral: boolean, selectionReplaced: boolean, newId: string) => boolean,
 ): boolean {
-  if (!focusNeutral) { selectPane(newId); return true; }
-  if (caller && api.getPanel(caller.id)) caller.api.setActive();
-  if (selectionReplaced) { selectPane(newId); return true; }
-  return false;
+  // dockview-only activation hand-back: a focus-neutral add reactivates the caller
+  // group so the new pane renders without the active group wandering. Selection
+  // policy is shared with the Lath path via settleAddSelection.
+  if (focusNeutral && caller && api.getPanel(caller.id)) caller.api.setActive();
+  return settleAddSelection(focusNeutral, selectionReplaced, newId);
 }
 
 /**
@@ -624,7 +625,7 @@ export function Wall({
   // props contract"): the shared shape `buildDorSurfaces`, persistence, and the
   // dev-server correlation read instead of touching `api.panels` directly. Under
   // Lath it is the tree's pre-order leaves + meta; under dockview the live panels.
-  const listVisiblePanes = useCallback((): LathPaneEntry[] => {
+  const listVisiblePanes = useCallback((): VisiblePane[] => {
     if (lath) return lath.listPanes();
     return apiRef.current?.panels.map((p) => ({
       id: p.id,
@@ -645,8 +646,8 @@ export function Wall({
     paneParams: (id) =>
       lath ? lath.getMeta(id)?.params : (apiRef.current?.getPanel(id)?.params as Record<string, unknown> | undefined),
     hasPane: (id) => (lath ? lath.has(id) : !!apiRef.current?.getPanel(id)),
-    panes: () => (lath ? lath.listPanes().map((p) => p.id) : apiRef.current?.panels.map((p) => p.id) ?? []),
-  }), [lath, paneElements]);
+    panes: () => listVisiblePanes().map((p) => p.id),
+  }), [lath, paneElements, listVisiblePanes]);
   const renamingRef = useRef(renamingPaneId);
   renamingRef.current = renamingPaneId;
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -762,7 +763,7 @@ export function Wall({
   const killPaneImmediately = useCallback((id: string) => {
     const api = apiRef.current;
     if (!api && !lath) return;
-    const isVisiblePane = lath ? lath.has(id) : !!api!.getPanel(id);
+    const isVisiblePane = nav.hasPane(id);
     if (!isVisiblePane) {
       // A doored surface has no visible pane but still owns a live session
       // (its PTY keeps running). `dor ensure --minimize`'s integration-timeout
@@ -790,7 +791,7 @@ export function Wall({
       fireEvent({ type: 'kill', id });
       return;
     }
-    const params = lath ? lath.getMeta(id)?.params : api!.getPanel(id)!.params;
+    const params = nav.paneParams(id);
     closeAgentBrowserSession(params);
     // Release the surface's client-side controller (connection, loops, timers,
     // screen registration). A safe no-op for iframe/terminal surfaces.
@@ -828,7 +829,7 @@ export function Wall({
     }
     clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
-  }, [fireEvent, selectPane, reassertPaneFocus, lath]);
+  }, [fireEvent, selectPane, reassertPaneFocus, lath, nav]);
 
   const acceptKill = useCallback(() => {
     const ck = confirmKillRef.current;
@@ -1038,7 +1039,12 @@ export function Wall({
   useEffect(() => {
     if (!lath) return;
     return lath.store.subscribe(() => {
-      if (lath.store.getSnapshot().tree.root !== null) return;
+      const snap = lath.store.getSnapshot();
+      // Zoom truth: the store owns `zoomedId` (and clears it when a kill/replace
+      // removes the zoomed leaf), so mirror the Wall's `zoomed` boolean off it.
+      // setZoomed no-ops when unchanged, so this is cheap on every commit.
+      setZoomed(snap.zoomedId !== null);
+      if (snap.tree.root !== null) return;
       const id = generatePaneId();
       const defaults = getDefaultShellOpts();
       if (defaults?.shell) setPendingShellOpts(id, { shell: defaults.shell, args: defaults.args });
@@ -1176,7 +1182,7 @@ export function Wall({
       setMode('command');
       requestAnimationFrame(() => {
         // Guard against removal between scheduling and execution.
-        if (lath ? !lath.has(item.id) : !apiRef.current?.getPanel(item.id)) return;
+        if (!nav.hasPane(item.id)) return;
         focusSession(item.id, false);
         if (afterRestore === 'kill-immediately') {
           killPaneImmediately(item.id);
@@ -1218,7 +1224,7 @@ export function Wall({
         }
       });
     }
-  }, [selectPane, enterTerminalMode, killPaneImmediately, showShellSpawnNotice, lath]);
+  }, [selectPane, enterTerminalMode, killPaneImmediately, showShellSpawnNotice, lath, nav]);
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
@@ -1355,7 +1361,7 @@ export function Wall({
   }> => {
     const api = apiRef.current;
     if (!api && !lath) return { ok: false, message: 'Dormouse layout is not ready yet' };
-    const referenceVisible = lath ? lath.has(referenceId) : !!api!.getPanel(referenceId);
+    const referenceVisible = nav.hasPane(referenceId);
     if (!referenceVisible) return { ok: false, message: `surface '${referenceId}' is not visible` };
 
     const newId = generatePaneId();
@@ -1399,7 +1405,7 @@ export function Wall({
     runSurfaceAdd(focusNeutral, (caller) => {
       let selectedNew: boolean;
       if (lath) {
-        lath.addLeaf(newId, terminalLeafMeta(), { refId: referenceId, edge: lath.edgeForDorDirection(direction) });
+        lath.addLeaf(newId, terminalLeafMeta(), { refId: referenceId, edge: edgeForDorDirection(direction) });
         selectedNew = settleAddSelection(!!focusNeutral, false, newId);
       } else {
         api!.addPanel({
@@ -1409,7 +1415,7 @@ export function Wall({
           title: UNNAMED_PANEL_TITLE,
           position: { referencePanel: referenceId, direction: dockDirection },
         });
-        selectedNew = settleFocusAfterAdd(api!, !!focusNeutral, caller, false, newId, selectPane);
+        selectedNew = settleFocusAfterAdd(api!, !!focusNeutral, caller, false, newId, settleAddSelection);
       }
       onEventRef.current?.({
         type: 'split',
@@ -1422,7 +1428,7 @@ export function Wall({
       }
     });
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId) } };
-  }, [runSurfaceAdd, generatePaneId, minimizePane, selectPane, surfaceRefForId, lath, settleAddSelection]);
+  }, [runSurfaceAdd, generatePaneId, minimizePane, selectPane, surfaceRefForId, lath, settleAddSelection, nav]);
 
   /**
    * Create a non-terminal content surface (iframe, agent-browser) next to a
@@ -1450,7 +1456,7 @@ export function Wall({
   }> => {
     const api = apiRef.current;
     if (!api && !lath) return { ok: false, message: 'Dormouse layout is not ready yet' };
-    const referenceVisible = lath ? lath.has(reference.id) : !!api!.getPanel(reference.id);
+    const referenceVisible = nav.hasPane(reference.id);
     if (!referenceVisible) return { ok: false, message: `surface '${reference.ref}' is not visible` };
 
     // One component for every browser surface; the renderer is derived per mode.
@@ -1491,7 +1497,7 @@ export function Wall({
           // Replacing the pane the user is selected on forces selection onto the
           // replacement (settleFocusAfterAdd selects it); replacing any other pane
           // leaves the user's selection — including a door selection — untouched.
-          selectedNew = settleFocusAfterAdd(api!, !!focusNeutral, caller, selectionReplaced, newId, selectPane);
+          selectedNew = settleFocusAfterAdd(api!, !!focusNeutral, caller, selectionReplaced, newId, settleAddSelection);
         }
         // When we did move selection onto the new pane, a minimize must carry it
         // onto the resulting door rather than leave selectedType='pane' pointing
@@ -1514,7 +1520,7 @@ export function Wall({
         selectedNew = settleAddSelection(!!focusNeutral, false, newId);
       } else {
         api!.addPanel({ ...panelSpec, position: { referencePanel: reference.id, direction: dvDirection! } });
-        selectedNew = settleFocusAfterAdd(api!, !!focusNeutral, caller, false, newId, selectPane);
+        selectedNew = settleFocusAfterAdd(api!, !!focusNeutral, caller, false, newId, settleAddSelection);
       }
       onEventRef.current?.({
         type: 'split',
@@ -1524,7 +1530,7 @@ export function Wall({
       if (minimized) minimizePane(newId, { select: selectedNew });
     });
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'created' } };
-  }, [runSurfaceAdd, generatePaneId, minimizePane, selectPane, surfaceRefForId, lath, settleAddSelection]);
+  }, [runSurfaceAdd, generatePaneId, minimizePane, selectPane, surfaceRefForId, lath, settleAddSelection, nav]);
 
   // The last binary path a `dor ab` surface resolved on a terminal's PATH.
   // Re-used to spawn an agent-browser when swapping an iframe embed up to a
@@ -1543,8 +1549,8 @@ export function Wall({
     title: string;
   }): string | null => {
     const api = apiRef.current;
-    const oldParams = lath ? lath.getMeta(oldId)?.params : api?.getPanel(oldId)?.params;
-    const oldVisible = lath ? lath.has(oldId) : !!api?.getPanel(oldId);
+    const oldParams = nav.paneParams(oldId);
+    const oldVisible = nav.hasPane(oldId);
     if (!oldVisible) return null;
     closeAgentBrowserSession(oldParams);
     // The old renderer's controller is going away with this swap; release its
@@ -1569,7 +1575,7 @@ export function Wall({
     clearLocalSurfaceActivity(oldId);
     selectPane(newId);
     return newId;
-  }, [generatePaneId, selectPane, lath]);
+  }, [generatePaneId, selectPane, lath, nav]);
 
   /**
    * The agent-browser session ↔ surface registry, derived from panel/door
@@ -1601,7 +1607,7 @@ export function Wall({
       }
 
       const selectedPaneId = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
-      const selectedPaneVisible = !!selectedPaneId && (lath ? lath.has(selectedPaneId) : !!api!.getPanel(selectedPaneId));
+      const selectedPaneVisible = !!selectedPaneId && nav.hasPane(selectedPaneId);
       const selectedDoor = selectedTypeRef.current === 'door'
         ? doorsRef.current.find((door) => door.id === selectedIdRef.current)
         : undefined;
@@ -1648,11 +1654,14 @@ export function Wall({
       }
 
       if (lath) {
-        // dockview splits from the active panel; Lath splits from the selected pane
-        // when it's a live pane, else the last leaf.
-        const panes = lath.listPanes();
-        const refId = selectedPaneVisible ? selectedPaneId! : (panes.length > 0 ? panes[panes.length - 1].id : null);
-        lath.addLeaf(newId, terminalLeafMeta(), refId ? { refId, edge: lath.autoEdgeFor(refId) } : null);
+        // dockview splits from the active panel; Lath splits beside the selected pane
+        // when it's a live pane, else `null` lets the store fall back to the last leaf
+        // via autoEdge (its own null-position behavior).
+        lath.addLeaf(
+          newId,
+          terminalLeafMeta(),
+          selectedPaneVisible ? { refId: selectedPaneId!, edge: lath.autoEdgeFor(selectedPaneId!) } : null,
+        );
       } else {
         const active = api!.activePanel;
         api!.addPanel({
@@ -1670,7 +1679,7 @@ export function Wall({
     };
     window.addEventListener('dormouse:new-terminal', handler);
     return () => window.removeEventListener('dormouse:new-terminal', handler);
-  }, [generatePaneId, selectPane, showShellSpawnNotice, lath]);
+  }, [generatePaneId, selectPane, showShellSpawnNotice, lath, nav]);
 
   useEffect(() => {
     const handler = async (event: Event) => {
@@ -1701,7 +1710,7 @@ export function Wall({
           detail.respond({ ok: false, error: target.message });
           return null;
         }
-        const visible = lath ? lath.has(target.value.id) : !!api!.getPanel(target.value.id);
+        const visible = nav.hasPane(target.value.id);
         if (!visible) {
           detail.respond({ ok: false, error: `surface '${target.value.ref}' is not visible` });
           return null;
@@ -2083,7 +2092,7 @@ export function Wall({
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, resolveVisibleSurface, surfaceRefForId, lath]);
+  }, [buildDorSurfaces, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, resolveVisibleSurface, surfaceRefForId, lath, nav]);
 
   const addSplitPanel = useCallback((
     id: string | null,
@@ -2094,7 +2103,7 @@ export function Wall({
     const api = apiRef.current;
     if (!api && !lath) return;
     const newId = generatePaneId();
-    const ref = id && (lath ? lath.has(id) : !!api!.getPanel(id)) ? id : null;
+    const ref = id && nav.hasPane(id) ? id : null;
     // Carry the currently-selected shell into the split, same as [+].
     const defaults = getDefaultShellOpts();
     // Remote cwds (OSC 7 over ssh) name a path on the remote host, not one the local shell can chdir to.
@@ -2121,7 +2130,7 @@ export function Wall({
     }
     selectPane(newId);
     onEventRef.current?.({ type: 'split', direction: splitDirection, source });
-  }, [selectPane, generatePaneId, lath]);
+  }, [selectPane, generatePaneId, lath, nav]);
 
   // --- Wall actions (for tab buttons) ---
 
@@ -2153,10 +2162,11 @@ export function Wall({
     onZoom: (id: string) => {
       if (lath) {
         // Zoom is presentation state in the store (the tree is untouched). Toggle:
-        // any leaf zoomed → unzoom; else zoom this leaf.
+        // any leaf zoomed → unzoom; else zoom this leaf. The Wall's `zoomed` boolean
+        // follows via the store subscription (below), which also un-zooms when a
+        // kill/replace clears the zoomed leaf.
         const zoomedNow = lath.store.getSnapshot().zoomedId !== null;
         lath.setZoomed(zoomedNow ? null : id);
-        setZoomed(!zoomedNow);
         return;
       }
       const api = apiRef.current;
@@ -2176,7 +2186,7 @@ export function Wall({
     onFocusPane: (id: string) => {
       setConfirmKill(null);
       // Visible pane → jump straight in; minimized (a door) → reattach first.
-      const visible = lath ? lath.has(id) : !!apiRef.current?.getPanel(id);
+      const visible = nav.hasPane(id);
       if (visible) {
         enterTerminalMode(id);
         return;
@@ -2205,10 +2215,9 @@ export function Wall({
       setRenamingPaneId(null);
     },
     onSwapRenderMode: (id, mode) => {
-      const api = apiRef.current;
-      const visible = lath ? lath.has(id) : !!api?.getPanel(id);
+      const visible = nav.hasPane(id);
       if (!visible) return;
-      const params = (lath ? lath.getMeta(id)?.params : api?.getPanel(id)?.params) as Record<string, unknown> | undefined;
+      const params = nav.paneParams(id);
       const currentType = surfaceTypeFromParams(params);
 
       // agent-browser → iframe: frame the active tab's URL, then the replace
@@ -2275,7 +2284,7 @@ export function Wall({
         title: hostPathDisplay(url, true),
       });
     },
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, lath]);
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, lath, nav]);
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
 
@@ -2293,7 +2302,6 @@ export function Wall({
   }), [lath]);
 
   useWallKeyboard({
-    apiRef,
     nav,
     swapWithNeighbor,
     modeRef,
@@ -2335,6 +2343,11 @@ export function Wall({
     if (selectedTypeRef.current !== 'pane' || selectedIdRef.current !== id) selectPane(id);
   }, [enterTerminalMode, selectPane]);
 
+  // Stable so LathHost's sash-drag effect never re-subscribes on a Wall re-render.
+  const onCommitResize = useCallback((splitPath: number[], boundary: number, deltaPx: number) => {
+    lath?.store.resizeBoundary(splitPath, boundary, deltaPx);
+  }, [lath]);
+
   // --- Render ---
 
   return (
@@ -2356,7 +2369,7 @@ export function Wall({
                 {lath ? (
                   <LathHost
                     store={lath.store}
-                    onCommitResize={(splitPath, boundary, deltaPx) => lath.store.resizeBoundary(splitPath, boundary, deltaPx)}
+                    onCommitResize={onCommitResize}
                     onLeafFocused={onLeafFocused}
                   />
                 ) : (
