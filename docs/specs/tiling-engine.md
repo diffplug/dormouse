@@ -10,7 +10,7 @@
 
 1. **Core** — pure model + `layout()` + op set + restore tokens as a dependency-free module under lib/src/lib/lath/ (no UI, no DOM). Property tests and golden trees. Lands inert.
 2. **Binding** — the LathHost React binding behind the dev flag, rendering the existing Wall panes at feature parity minus polish: splits, instant kills, sash resize, zoom, persistence migration, and the pane props contract below (migrating the nine pane/header components off `IDockviewPanelProps` is the largest single chunk of this stage — do it first). The acceptance matrix below is the gate.
-3. **Animation** — the animation contract below: tween/retarget, enter/exit, kill fade, overlay-ring sync. Delete `lib/src/lib/kill-animation.ts`.
+3. **Animation** — the headless animator in the core plus the HTML adapter applying its frames: tween/retarget, enter/exit, kill fade, overlay-ring sync. Delete `lib/src/lib/kill-animation.ts`.
 4. **Drag and drop** — pointer-based hierarchical DnD with the depth model below; drag-to-baseboard minimize; delete the dockview drag wiring.
 5. **Deletion sweep** — remove the dockview dependency, the programmatic-activation tag, the focus-heal machinery, and the shadow models (inventory below); promote this spec's built portions above the fold and rewrite the affected sections of [layout.md](layout.md).
 
@@ -36,9 +36,10 @@ The programmatic-activation refactor was the down payment: selection policy alre
 Lath is a **headless geometry engine**. It owns the split tree, rects, animation targets, and drag hit-testing — nothing else.
 
 - Pure core: every operation is `(tree, args) → result`. No listeners, no event emitters, no timing assumptions. Invalid operations return the input tree unchanged with `ok: false`.
+- Renderer-agnostic core: the core never imports DOM (or React, or Three.js) types — tree, `layout()`, ops, hit-testing, sash geometry, and the animator are all plain-data-in, plain-data-out. The HTML adapter below is the first consumer; a Three.js adapter (serving the VR Window item in [remote-api.md](remote-api.md)'s staged remainder) is a planned second and must be able to reuse all of it unchanged.
 - Lath has **no concept of selection, focus, mode, or activation**. Those stay in the Wall, where the (kind, id) selection pair and its policies already live.
 - The DOM binding **never re-parents** a pane's element. Layout is geometric (absolute position + size on stable nodes), not structural.
-- Non-goals: tab stacking, floating groups, popout windows (agent-browser pop-out is a separate mechanism), and the mobile compositions (MobileWall does not tile).
+- Non-goals: tab stacking, floating groups, popout windows (agent-browser pop-out is a separate mechanism), and the mobile compositions (MobileWall does not tile). The Three.js adapter itself is also a non-goal of lath-rollout — the scope only guarantees the core stays consumable by one.
 
 ### Core model
 
@@ -117,6 +118,8 @@ hitTest(tree, rect, point, dragged: LeafId): DropCandidate[]
 // DropCandidate = { target: DropTarget; previewRect: Rect; depth: number }, ordered innermost → outermost
 ```
 
+`hitTest` is core and renderer-agnostic: it consumes a point already in Wall coordinates. The HTML adapter feeds it pointer positions; a Three.js adapter feeds it raycast intersections with the wall plane. Gesture mechanics (drag thresholds, wheel/modifier depth cycling) and the preview overlay are adapter concerns.
+
 The depth model — the reason Lath exists beyond animation:
 
 - The center region of a leaf yields `swap`.
@@ -128,20 +131,23 @@ Drag beyond the Wall onto the baseboard minimizes (remove + Door with token); dr
 
 ### Animation contract
 
-Rects are data, so every layout change is natively FLIP — the binding owns one animation system:
+Animation is core, not adapter: a headless **animator** turns committed layout changes into presentation frames as a pure function of time, so every renderer animates identically and tests assert real interpolated values against a fake clock (CSS transitions are untestable in jsdom and unavailable in Three.js anyway).
 
-- On commit, each surviving leaf tweens from its current **visual** rect to its new rect (transform + size), using the house easing (440ms, `cubic-bezier(0.22, 1, 0.36, 1)`, matching today's constants). Tweens are interruptible and retargetable: a second commit mid-flight retargets from the current visual position — no `killInProgressRef`, no `animationend` + safety-timeout + double-finalize guards.
-- **Enter**: `split`/`restore` callers pass `enterFrom: Edge`; the leaf animates in from that edge (replaces `freshlySpawnedRef`).
-- **Exit**: removal is two-phase — the binding marks the leaf dying (fade in place against the same-colored background; last-pane kills shrink toward the bottom-right, as today), then commits `remove` and the survivors tween into the reclaimed space. The kill-confirmation flow drives the phases; the geometry never needs measuring because it was never lost.
-- The `WorkspaceSelectionOverlay` reads the selected leaf's **animated** rect from the binding instead of `getBoundingClientRect` polling, so the ring tracks moves, kills, and restores for free.
+- `createAnimator(opts)` ingests each committed layout (`retarget(rects, meta)`) and exposes `framesAt(now): Map<LeafId, Frame>`, `Frame = { rect; opacity; layer }`. Adapters drive it from their own tick — rAF in HTML, the render loop in Three.js — and merely apply frames to their scene.
+- Default motion is the house easing (440ms, `cubic-bezier(0.22, 1, 0.36, 1)`, solved in JS to match today's constants). A commit mid-flight retargets every leaf from its current interpolated frame — interruptible by construction; no `killInProgressRef`, no `animationend` + safety-timeout + double-finalize guards.
+- **Enter**: `split`/`restore` callers pass `enterFrom: Edge`; the leaf's frames begin from that edge (replaces `freshlySpawnedRef`).
+- **Exit**: removal is two-phase — mark the leaf dying (opacity fade in place; last-pane kills also shrink toward the bottom-right, as today), then commit `remove` and the survivors tween into the reclaimed space. The kill-confirmation flow drives the phases; the geometry never needs measuring because it was never lost.
+- The `WorkspaceSelectionOverlay` (and any future chrome) reads the selected leaf's frame from the animator instead of `getBoundingClientRect` polling, so the ring tracks moves, kills, and restores identically in every renderer.
 - Reduced motion runs the same code with zero durations.
 
-### DOM binding
+### Adapters; the HTML adapter (LathHost)
 
-LathHost (a thin React component, the only non-headless part):
+An adapter owns exactly three things: mapping input into Wall coordinates (pointer position in HTML; a controller/gaze raycast against the wall plane in a Three.js adapter), applying animator frames to its scene each tick, and hosting pane content. Layout, ops, hit-testing, sash geometry, and animation timelines are core and shared.
+
+LathHost, the HTML adapter (a thin React component, the only non-headless part of lath-rollout):
 
 - One flat container; one stable `position: absolute` div per leaf, keyed by id. Pane content renders as ordinary React children into that div. The div moves and resizes; it is **never re-parented and never unmounted** except on remove-commit. This deletes the re-parent blur class of bugs and the iframe-reload constraint at the root rather than healing them.
-- Sashes are sibling divs owned by the binding, driving `resize` with live preview.
+- Sashes render from core geometry — `sashes(tree, rect, opts) → { splitPath, boundary, rect }[]` — as sibling divs; the adapter draws them, sets cursors, and captures their drags, streaming `resize` with live preview.
 - Dying leaves and the zoomed leaf render above the others; pointer events are disabled on dying leaves only.
 - The binding never calls `.focus()` and emits no activation events. User gestures surface as **op proposals** (`onProposeOp(op)`) that the Wall commits — the Wall applies selection/focus policy at the same call sites where it lives today.
 
@@ -177,8 +183,8 @@ New serialized form: `{ version: 1, tree, leafMeta, doors: [{ …door, token }] 
 
 ### Testing
 
-- Core: property tests (tiling exactness, invariant preservation across random op sequences, `move` ≡ `remove`+`insert`, restore-tier degradation) plus golden trees for layout rounding.
-- Binding: jsdom tests asserting **node identity is preserved** across every op (the no-re-parent guarantee), enter/exit phase sequencing with fake timers, sash clamping, and the pane props contract (components render with plain props).
+- Core: property tests (tiling exactness, invariant preservation across random op sequences, `move` ≡ `remove`+`insert`, restore-tier degradation) plus golden trees for layout rounding, and animator tests against a fake clock — real interpolated rects/opacities, retarget mid-flight, enter/exit phase ordering, reduced-motion zero-duration. No DOM anywhere in these.
+- Binding: jsdom tests asserting **node identity is preserved** across every op (the no-re-parent guarantee), frames-applied-to-style wiring, sash clamping, and the pane props contract (components render with plain props).
 - Acceptance: the live matrix below, driven through the standalone agent-browser harness (`pnpm dev:standalone:ab`; mechanics — typing into xterm, synthetic Enter, ring probing, group mapping — are documented in the in-repo skill at `.claude/skills/debug-standalone-agent-browser/SKILL.md`). Run the applicable rows at each rollout stage; all rows before stage 5's deletion sweep.
 
 Acceptance matrix — each row is an end-to-end observable, independent of engine internals:
