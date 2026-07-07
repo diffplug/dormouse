@@ -61,10 +61,10 @@ stdout (stdout is reserved for the protocol — sidecar diagnostics go to
 stderr, which Rust appends to the log file). Webview → Rust is the Tauri
 `invoke` command set — `pty_spawn` / `pty_write` / `pty_resize` / `pty_kill` /
 `pty_request_init` / `pty_get_cwd` / `pty_get_open_ports` /
-`pty_get_scrollback` / `get_available_shells`, `dor_control_response`,
-`iframe_create_proxy_url`, the `agent_browser_*` family, the `clipboard`
-readers, `read_update_log`, and `kill_sidecar_now` — each a thin forwarder to
-the corresponding sidecar message. `load_session` / `save_session` are the
+`pty_get_scrollback` / `pty_graceful_kill_all` / `get_available_shells`,
+`dor_control_response`, `iframe_create_proxy_url`, the `agent_browser_*` family,
+the `clipboard` readers, `read_update_log`, and `kill_sidecar_now` — each a thin
+forwarder to the corresponding sidecar message. `load_session` / `save_session` are the
 exception that is *not* forwarded: they read/write the per-window session file
 directly in Rust (§Persistence). Two further carve-outs: on Windows the
 clipboard readers skip the sidecar and read the Win32 clipboard natively
@@ -74,6 +74,14 @@ and reads the bytes in Rust so images never ride the JSON-lines pipe shared
 with PTY traffic (`docs/specs/dor-browser.md`). Request/response commands block on the
 sidecar's reply with a timeout; `OPEN_PORT_TIMEOUT_MS` in `lib.rs` mirrors the
 constant in `lib/src/lib/platform/types.ts` and the two must stay in sync.
+`pty_graceful_kill_all` (`TauriAdapter.gracefulKillAllPtys`) SIGTERMs every live
+PTY and blocks on the sidecar's `gracefulKillDone` reply (up to `timeout + 1.5s`);
+unlike the hard `pty_kill` path it preserves scrollback, so final output stays
+readable via `pty_get_scrollback` afterward. The `pty:gracefulKillAll` message now
+carries an optional `requestId` that the sidecar echoes back on `gracefulKillDone`
+(routed like any request/response reply), letting the host await completion — the
+same handler stays event-type-only for the VS Code host, which passes no
+`requestId`. Reachable but not yet called by any quit path.
 Sidecar events (`pty:*`, dor control requests, async results) are emitted to
 the webview, where `TauriAdapter` converts dor control requests into the
 `dormouse:control-request` CustomEvent that `Wall` handles

@@ -1166,12 +1166,17 @@ module.exports.create = function create(send, ptyModule) {
     });
   }
 
-  function gracefulKillAll(timeout = 2000) {
+  function gracefulKillAll(timeout = 2000, requestId) {
     for (const [, p] of ptys) {
       try { p.kill('SIGTERM'); } catch { /* already dead */ }
     }
+    // Deliberately does NOT clear scrollback (unlike kill/killAll): a SIGTERM'd
+    // process's final output stays readable via getScrollback afterward.
+    // Echo requestId when a caller supplied one so a host can await completion
+    // (standalone); omit it entirely when undefined so the VS Code path, which
+    // matches on message type alone, is unaffected.
     setTimeout(() => {
-      send('gracefulKillDone', {});
+      send('gracefulKillDone', requestId === undefined ? {} : { requestId });
     }, timeout);
   }
 

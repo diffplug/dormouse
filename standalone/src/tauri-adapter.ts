@@ -253,6 +253,19 @@ export class TauriAdapter implements PlatformAdapter {
     } catch { return null; }
   }
 
+  // SIGTERM every live PTY and await the sidecar's graceful-kill completion
+  // (bounded in Rust at timeout + 1.5s). Preserves scrollback, so a quit
+  // orchestrator can capture final output afterward. Warn-and-proceed on
+  // failure: a stalled graceful kill must not wedge a quit teardown — the
+  // caller proceeds regardless.
+  async gracefulKillAllPtys(timeoutMs = 2000): Promise<void> {
+    try {
+      await rawInvoke("pty_graceful_kill_all", { timeout: timeoutMs });
+    } catch (err) {
+      console.warn("[tauri-adapter] gracefulKillAllPtys failed; proceeding", err);
+    }
+  }
+
   async getOpenPorts(id: string): Promise<OpenPort[]> {
     try {
       return await rawInvoke<OpenPort[]>("pty_get_open_ports", { id });

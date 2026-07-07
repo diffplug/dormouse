@@ -343,6 +343,28 @@ fn pty_get_scrollback(
         .and_then(|data| data.as_str().map(String::from)))
 }
 
+// SIGTERM every live PTY, then block on the sidecar's `gracefulKillDone` reply
+// (routed back by the injected requestId, like every request_from_sidecar call —
+// the sidecar echoes requestId onto that event). Unlike pty_kill / kill_sidecar_now
+// this preserves scrollback so a caller can capture final output afterward via
+// pty_get_scrollback. Waits `timeout + 1500ms` — the extra margin covers the round
+// trip beyond the sidecar's own kill timer. Reachable but not yet wired to a quit
+// path (Stage D1). See docs/specs/standalone.md.
+#[tauri::command]
+fn pty_graceful_kill_all(
+    state: tauri::State<'_, SidecarState>,
+    timeout: Option<u64>,
+) -> Result<(), String> {
+    let t = timeout.unwrap_or(2000);
+    request_from_sidecar_timeout(
+        &state,
+        "pty:gracefulKillAll",
+        serde_json::json!({ "timeout": t }),
+        Duration::from_millis(t + 1500),
+    )?;
+    Ok(())
+}
+
 // Stands up the loopback iframe proxy in the sidecar and returns the
 // IframeProxyResult JSON the webview's IframePanel expects. The proxy server is
 // the shared lib/src/host/iframe-proxy.ts; this only bridges the request.
@@ -1180,6 +1202,7 @@ pub fn run() {
             pty_get_cwd,
             pty_get_open_ports,
             pty_get_scrollback,
+            pty_graceful_kill_all,
             iframe_create_proxy_url,
             pty_request_init,
             dor_control_response,
