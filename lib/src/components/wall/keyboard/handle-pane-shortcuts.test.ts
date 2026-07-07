@@ -134,12 +134,34 @@ describe('handlePaneShortcuts Cmd-Arrow swap (nav seam)', () => {
     const ctx = makeCtx({
       nav: makeNav({ findInDirection: (_id, dir) => (dir === 'ArrowRight' ? 'pane-b' : null) }),
     });
+    const navHistory = { current: null };
 
-    expect(handlePaneShortcuts(keydownMeta('ArrowRight'), ctx, { current: null })).toBe(true);
+    expect(handlePaneShortcuts(keydownMeta('ArrowRight'), ctx, navHistory)).toBe(true);
 
     expect(ctx.swapWithNeighbor).toHaveBeenCalledWith('pane-a', 'pane-b');
     expect(ctx.fireEvent).toHaveBeenCalledWith({ type: 'move', fromId: 'pane-a', toId: 'pane-b' });
     expect(ctx.selectPane).toHaveBeenCalledWith('pane-a');
+    // Selection stayed on pane-a, so the breadcrumb must record the swap
+    // partner — recording pane-a would make the backtrack a self-swap no-op.
+    expect(navHistory.current).toEqual({ direction: 'ArrowRight', fromId: 'pane-b' });
+  });
+
+  it('backtracks: the opposite Cmd-Arrow swaps back with the pane now in the old slot', () => {
+    const ctx = makeCtx({
+      nav: makeNav({
+        // Spatial nav only resolves the first swap; the backtrack must come
+        // from the breadcrumb, not findInDirection.
+        findInDirection: (_id, dir) => (dir === 'ArrowRight' ? 'pane-b' : null),
+        hasPane: (id) => id === 'pane-b',
+      }),
+    });
+    const navHistory = { current: null };
+
+    expect(handlePaneShortcuts(keydownMeta('ArrowRight'), ctx, navHistory)).toBe(true);
+    expect(handlePaneShortcuts(keydownMeta('ArrowLeft'), ctx, navHistory)).toBe(true);
+
+    expect(ctx.swapWithNeighbor).toHaveBeenNthCalledWith(2, 'pane-a', 'pane-b');
+    expect(ctx.fireEvent).toHaveBeenNthCalledWith(2, { type: 'move', fromId: 'pane-a', toId: 'pane-b' });
   });
 
   it('does nothing when nav finds no neighbor in that direction', () => {

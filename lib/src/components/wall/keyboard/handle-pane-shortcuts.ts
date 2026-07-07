@@ -68,7 +68,11 @@ export function handlePaneShortcuts(
     ctx.swapWithNeighbor(sid, targetId);
     ctx.fireEvent({ type: 'move', fromId: sid, toId: targetId });
 
-    navHistory.current = { direction: dir, fromId: sid };
+    // Selection stays on the moved pane, so the breadcrumb records the swap
+    // partner — the pane now holding the old slot. The opposite Cmd+Arrow then
+    // swaps back exactly, and a plain opposite arrow selects that partner;
+    // `fromId: sid` here would make both resolve to the selected pane itself.
+    navHistory.current = { direction: dir, fromId: targetId };
     ctx.selectPane(sid);
     return true;
   }
