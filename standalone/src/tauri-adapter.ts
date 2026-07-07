@@ -253,11 +253,7 @@ export class TauriAdapter implements PlatformAdapter {
     } catch { return null; }
   }
 
-  // SIGTERM every live PTY and await the sidecar's graceful-kill completion
-  // (bounded in Rust at timeout + 1.5s). Preserves scrollback, so a quit
-  // orchestrator can capture final output afterward. Warn-and-proceed on
-  // failure: a stalled graceful kill must not wedge a quit teardown — the
-  // caller proceeds regardless.
+  // Warn-and-proceed: a stalled graceful kill must not wedge a quit teardown.
   async gracefulKillAllPtys(timeoutMs = 2000): Promise<void> {
     try {
       await rawInvoke("pty_graceful_kill_all", { timeout: timeoutMs });

@@ -75,13 +75,13 @@ with PTY traffic (`docs/specs/dor-browser.md`). Request/response commands block 
 sidecar's reply with a timeout; `OPEN_PORT_TIMEOUT_MS` in `lib.rs` mirrors the
 constant in `lib/src/lib/platform/types.ts` and the two must stay in sync.
 `pty_graceful_kill_all` (`TauriAdapter.gracefulKillAllPtys`) SIGTERMs every live
-PTY and blocks on the sidecar's `gracefulKillDone` reply (up to `timeout + 1.5s`);
-unlike the hard `pty_kill` path it preserves scrollback, so final output stays
-readable via `pty_get_scrollback` afterward. The `pty:gracefulKillAll` message now
-carries an optional `requestId` that the sidecar echoes back on `gracefulKillDone`
-(routed like any request/response reply), letting the host await completion — the
-same handler stays event-type-only for the VS Code host, which passes no
-`requestId`. Reachable but not yet called by any quit path.
+PTY and awaits the sidecar's `gracefulKillDone` (echoing the request's
+`requestId`; bounded at `timeout + 1.5s`). `gracefulKillDone` fires early once
+every PTY has exited — one 50 ms grace tick after the last exit, so ConPTY's
+late final flush still lands — or at the timeout for SIGTERM-ignoring programs.
+Unlike the hard `pty_kill` path it preserves scrollback, so final output stays
+readable via `pty_get_scrollback`; it is the hook the quit-teardown item in
+`## Future` calls for.
 Sidecar events (`pty:*`, dor control requests, async results) are emitted to
 the webview, where `TauriAdapter` converts dor control requests into the
 `dormouse:control-request` CustomEvent that `Wall` handles

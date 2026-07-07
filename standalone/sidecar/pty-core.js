@@ -1172,12 +1172,18 @@ module.exports.create = function create(send, ptyModule) {
     }
     // Deliberately does NOT clear scrollback (unlike kill/killAll): a SIGTERM'd
     // process's final output stays readable via getScrollback afterward.
-    // Echo requestId when a caller supplied one so a host can await completion
-    // (standalone); omit it entirely when undefined so the VS Code path, which
-    // matches on message type alone, is unaffected.
-    setTimeout(() => {
-      send('gracefulKillDone', requestId === undefined ? {} : { requestId });
-    }, timeout);
+    // Resolve early once every PTY has exited (onExit empties the map) instead
+    // of always sitting out the full timeout — but one grace tick after the map
+    // empties, since ConPTY can fire onExit before the final data flush and that
+    // last output must land in scrollback first.
+    const deadline = Date.now() + timeout;
+    const done = () => send('gracefulKillDone', { requestId });
+    const tick = () => {
+      if (ptys.size === 0) setTimeout(done, 50);
+      else if (Date.now() >= deadline) done();
+      else setTimeout(tick, 50);
+    };
+    setTimeout(tick, 50);
   }
 
   function getShells(requestId) {

@@ -343,15 +343,12 @@ fn pty_get_scrollback(
         .and_then(|data| data.as_str().map(String::from)))
 }
 
-// SIGTERM every live PTY, then block on the sidecar's `gracefulKillDone` reply
-// (routed back by the injected requestId, like every request_from_sidecar call —
-// the sidecar echoes requestId onto that event). Unlike pty_kill / kill_sidecar_now
-// this preserves scrollback so a caller can capture final output afterward via
-// pty_get_scrollback. Waits `timeout + 1500ms` — the extra margin covers the round
-// trip beyond the sidecar's own kill timer. Reachable but not yet wired to a quit
-// path (Stage D1). See docs/specs/standalone.md.
+// Unlike pty_kill / kill_sidecar_now this preserves scrollback so the caller can
+// capture final output afterward. Async: waits up to `timeout + 1500ms` (margin
+// for the round trip beyond the sidecar's own kill timer) and must not block the
+// main thread for that long.
 #[tauri::command]
-fn pty_graceful_kill_all(
+async fn pty_graceful_kill_all(
     state: tauri::State<'_, SidecarState>,
     timeout: Option<u64>,
 ) -> Result<(), String> {

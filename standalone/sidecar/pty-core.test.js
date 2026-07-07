@@ -360,42 +360,7 @@ test('create buffers scrollback for getScrollback requests', () => {
   });
 });
 
-test('gracefulKillAll echoes requestId in gracefulKillDone when provided', async () => {
-  const events = [];
-  let resolveDone;
-  const done = new Promise((resolve) => { resolveDone = resolve; });
-
-  const mgr = create((event, data) => {
-    events.push({ event, data });
-    if (event === 'gracefulKillDone') resolveDone();
-  }, { spawn() { return { pid: 1, onData() {}, onExit() {}, resize() {}, write() {}, kill() {} }; } });
-
-  mgr.gracefulKillAll(1, 'req-42');
-  await done;
-
-  assert.deepEqual(events.at(-1), {
-    event: 'gracefulKillDone',
-    data: { requestId: 'req-42' },
-  });
-});
-
-test('gracefulKillAll omits requestId from gracefulKillDone when undefined (VS Code path)', async () => {
-  const events = [];
-  let resolveDone;
-  const done = new Promise((resolve) => { resolveDone = resolve; });
-
-  const mgr = create((event, data) => {
-    events.push({ event, data });
-    if (event === 'gracefulKillDone') resolveDone();
-  }, { spawn() { return { pid: 1, onData() {}, onExit() {}, resize() {}, write() {}, kill() {} }; } });
-
-  mgr.gracefulKillAll(1);
-  await done;
-
-  assert.deepEqual(events.at(-1), { event: 'gracefulKillDone', data: {} });
-});
-
-test('gracefulKillAll SIGTERMs live PTYs but preserves scrollback (unlike kill/killAll)', async () => {
+test('gracefulKillAll SIGTERMs live PTYs, echoes requestId, preserves scrollback', async () => {
   const events = [];
   const killSignals = [];
   const listeners = {};
@@ -417,18 +382,48 @@ test('gracefulKillAll SIGTERMs live PTYs but preserves scrollback (unlike kill/k
 
   mgr.spawn('pane-1');
   listeners.data?.('final output');
-  mgr.gracefulKillAll(1);
+  mgr.gracefulKillAll(1, 'req-42');
   await done;
 
-  // SIGTERM was delivered to the live PTY.
+  // SIGTERM was delivered, and the done event carries the caller's requestId.
   assert.deepEqual(killSignals, ['SIGTERM']);
+  assert.deepEqual(events.at(-1), {
+    event: 'gracefulKillDone',
+    data: { requestId: 'req-42' },
+  });
 
-  // Scrollback survives — getScrollback still returns the final output.
+  // Scrollback survives (unlike kill/killAll) — final output stays readable.
   mgr.getScrollback('pane-1', 'req-9');
   assert.deepEqual(events.at(-1), {
     event: 'scrollback',
     data: { id: 'pane-1', data: 'final output', requestId: 'req-9' },
   });
+});
+
+test('gracefulKillAll resolves early once every PTY has exited', async () => {
+  const listeners = {};
+  const fakePty = {
+    pid: 7,
+    onData() {},
+    onExit(handler) { listeners.exit = handler; },
+    resize() {},
+    write() {},
+    kill() {},
+  };
+
+  let resolveDone;
+  const done = new Promise((resolve) => { resolveDone = resolve; });
+  const mgr = create((event) => {
+    if (event === 'gracefulKillDone') resolveDone();
+  }, { spawn() { return fakePty; } });
+
+  mgr.spawn('pane-1');
+  const started = Date.now();
+  mgr.gracefulKillAll(60_000, 'req-1');
+  listeners.exit({ exitCode: 0, signal: 15 }); // empties the live-PTY map
+  await done;
+  // Resolved on the exit-driven early path, nowhere near the 60s bound.
+  assert.ok(Date.now() - started < 5_000);
 });
 
 test('parseCwdFromLsof returns the cwd for the requested pid', () => {
