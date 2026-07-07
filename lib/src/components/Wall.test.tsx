@@ -13,6 +13,7 @@ import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { Wall } from './Wall';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
+import * as terminalRegistry from '../lib/terminal-registry';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -144,5 +145,46 @@ describe('Wall on the Lath engine', () => {
     await flush();
 
     expect(onEvent).not.toHaveBeenCalledWith({ type: 'zoomChange', zoomed: true });
+  });
+
+  it('keeps visible terminal sessions mounted until the kill fade completes', async () => {
+    globalThis.matchMedia = ((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent() { return false; },
+    })) as unknown as typeof matchMedia;
+    const disposeSpy = vi.spyOn(terminalRegistry, 'disposeSession');
+
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.kill,
+            params: { surface: '1', confirmation: { mode: 'dangerously' } },
+            respond: () => {},
+          },
+        }));
+      });
+
+      expect(disposeSpy).not.toHaveBeenCalledWith('pane-a');
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 500));
+      });
+
+      expect(disposeSpy).toHaveBeenCalledWith('pane-a');
+    } finally {
+      disposeSpy.mockRestore();
+    }
   });
 });
