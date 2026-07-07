@@ -34,8 +34,11 @@ committed; a later `pnpm install` restores the release tarball.
 
 1. ~~Consume the stock webgl addon through the fork pipeline~~ (done — the
    stories render via WebGL2 with the pixel-accurate texture atlas)
-2. Swap the glyph atlas to signed distance fields (probably
-   [mapbox/tiny-sdf](https://github.com/mapbox/tiny-sdf)); color emoji and the
-   custom-rasterized box/powerline glyphs stay non-SDF (hybrid atlas). The
-   `TextureAtlas` story shows the live atlas the conversion replaces.
+2. ~~Swap the glyph atlas to signed distance fields~~ (done — vendored
+   mapbox/tiny-sdf behind the addon's `sdf` / `sdfGlyphSize` options; hybrid
+   atlas keeps emoji, box/powerline custom glyphs and decorated cells on the
+   raster path. `SdfVsRasterAt3x` shows a 15px atlas rendered crisp at 45px;
+   `SdfTextureAtlas` shows the live distance fields. Known v1 limits:
+   decorated cells fall back to raster, and single-channel SDF rounds very
+   sharp corners at extreme magnification — MSDF is the upgrade path.)
 3. Render terminals as textures in a WebXR scene.
