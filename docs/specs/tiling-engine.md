@@ -99,9 +99,9 @@ Because ops are cheap pure functions, speculative evaluation is free — sash li
 
 ## Hierarchical drag and drop
 
-Source of truth: `lib/src/lib/lath/hit-test.ts` (core); the `DragController` in `LathHost.tsx` (one gesture owner — threshold, hit-test, click-suppression — for both pane and Door drags, built once per mount); `Door.tsx` / `Baseboard.tsx` (press reporting only); the drag callbacks in `Wall.tsx`.
+Source of truth: `lib/src/lib/lath/hit-test.ts` (core); the `DragController` in `lib/src/components/wall/lath-drag-controller.ts` (one gesture owner — threshold, hit-test, click-suppression — for both pane and Door drags; LathHost builds one per mount and feeds it header presses / the `externalDrag` mirror); `Door.tsx` / `Baseboard.tsx` (press reporting only); the drag callbacks in `Wall.tsx`.
 
-Pointer events only (`pointerdown` → 5px threshold → drag; no HTML5 DnD), so drags are testable from CDP and never race React's synthetic events. LathHost owns the single `DRAG_THRESHOLD`; a live drag hit-tests the store's tree read fresh each frame, so a background `dor split`/`dor kill` commit mid-drag is reflected in the next preview.
+Pointer events only (`pointerdown` → 5px threshold → drag; no HTML5 DnD), so drags are testable from CDP and never race React's synthetic events. The controller owns the single `DRAG_THRESHOLD`; a live drag hit-tests the store's tree read fresh each frame, so a background `dor split`/`dor kill` commit mid-drag is reflected in the next preview.
 
 ```ts
 hitTest(tree, rect, point, dragged: LeafId | null, opts): DropCandidate[]
@@ -147,7 +147,7 @@ Source of truth: `lib/src/components/wall/lath-wall-store.ts`; `lib/src/componen
 
 ## Adapters; the HTML adapter (LathHost)
 
-Source of truth: `lib/src/components/wall/LathHost.tsx` (+ the `.lath-host` rules in `lib/src/index.css`).
+Source of truth: `lib/src/components/wall/LathHost.tsx` (+ the `.lath-host` rules in `lib/src/index.css`; the pane/Door drag gesture lives in `lath-drag-controller.ts` — see "Hierarchical drag and drop").
 
 An adapter owns exactly three things: mapping input into Wall coordinates (pointer position in HTML; a controller/gaze raycast against the wall plane in a Three.js adapter), applying animator frames to its scene each tick, and hosting pane content. Layout, ops, sash geometry, and animation timelines are core and shared.
 
