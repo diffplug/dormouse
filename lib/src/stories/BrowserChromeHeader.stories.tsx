@@ -140,8 +140,6 @@ function BrowserChromeStory(args: StoryArgs) {
     setDevServerResolution(port, label ? { paneId: 'term-dev', label } : null);
   }, [port, args.devServerLabel]);
 
-  const mockApi = { id: surfaceId, title: args.htmlTitle || hostPathDisplay(args.url) } as never;
-
   return (
     <ModeContext.Provider value="passthrough">
       <SelectedIdContext.Provider value={args.selected ? surfaceId : null}>
@@ -150,7 +148,13 @@ function BrowserChromeStory(args: StoryArgs) {
             <WallActionsContext.Provider value={loggingActions}>
               <div style={{ width: args.width }}>
                 <div className="bg-app-bg" style={{ height: 26 }}>
-                  <SurfacePaneHeader api={mockApi} containerApi={{} as never} params={{}} tabLocation={'header' as never} />
+                  <SurfacePaneHeader
+                    id={surfaceId}
+                    title={args.htmlTitle || hostPathDisplay(args.url)}
+                    params={undefined}
+                    panelVisible={true}
+                    getAnimEl={() => null}
+                  />
                 </div>
               </div>
             </WallActionsContext.Provider>

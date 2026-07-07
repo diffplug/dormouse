@@ -1,5 +1,4 @@
 import { useContext, useEffect, useState, type ReactNode } from 'react';
-import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import {
   ArrowClockwiseIcon,
   ArrowLeftIcon,
@@ -23,6 +22,7 @@ import {
   useAgentBrowserScreenSnapshot,
   type ScreenSnapshot,
 } from './agent-browser-screen';
+import type { PaneProps } from './pane-props';
 import { loopbackPort, normalizeNavUrl, pathDisplay } from './browser-url';
 import { triggerDevServerRescan, useDevServerMatch } from './agent-browser-ports';
 import {
@@ -48,18 +48,18 @@ function screenChip(s: ScreenSnapshot): { icon: ReactNode; label: string } {
     : { icon: <LockSimpleIcon size={14} />, label: 'agent-browser screencast, fixed resolution — change render or resolution' };
 }
 
-export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
+export function SurfacePaneHeader({ id, title }: PaneProps) {
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const windowFocused = useContext(WindowFocusedContext);
   const zoomed = useContext(ZoomedContext);
   const actions = useContext(WallActionsContext);
-  const isActiveHeader = mode === 'passthrough' && selectedId === api.id && windowFocused;
+  const isActiveHeader = mode === 'passthrough' && selectedId === id && windowFocused;
 
   // Presence of a screen controller for this pane is exactly what marks it an
   // agent-browser surface — terminals/iframes never register one, so the whole
   // browser chrome (nav + URL + connection) is strictly scoped to it.
-  const screen = useAgentBrowserScreenController(api.id);
+  const screen = useAgentBrowserScreenController(id);
   const screenSnapshot = useAgentBrowserScreenSnapshot(screen);
   const chrome = useAgentBrowserChromeSnapshot(screen);
   const chip = screenSnapshot ? screenChip(screenSnapshot) : null;
@@ -98,7 +98,7 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
   return (
     <div
       className={`flex h-full w-full cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${isActiveHeader ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg'}`}
-      onMouseDown={() => actions.onClickPanel(api.id)}
+      onMouseDown={() => actions.onClickPanel(id)}
     >
       {screen && screenSnapshot && chrome ? (
         <>
@@ -154,7 +154,7 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
                the full URL + all selected, Enter navigates, Escape/blur cancels
                (browser-omnibox style). Fills the URL+chip+spacer span. */
             <input
-              data-url-input-for={api.id}
+              data-url-input-for={id}
               className="min-w-0 flex-1 border-none bg-transparent p-0 font-medium text-inherit outline-none"
               defaultValue={chrome.url}
               autoFocus
@@ -197,7 +197,7 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
                 title={chrome.title ?? chrome.url ?? undefined}
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => { e.stopPropagation(); setEditingUrl(true); }}
-              >{urlText || api.title || api.id}</span>
+              >{urlText || title || id}</span>
 
               {/* Flexible spacer keeps the layout buttons right-aligned. */}
               <div className="min-w-0 flex-1" />
@@ -205,25 +205,25 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
           )}
         </>
       ) : (
-        <span className="min-w-0 flex-1 truncate font-medium">{api.title ?? api.id}</span>
+        <span className="min-w-0 flex-1 truncate font-medium">{title ?? id}</span>
       )}
 
       <div className="ml-1 hidden shrink-0 items-center gap-0.5 min-[420px]:flex">
         <HeaderActionButton
           className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-          onClick={(e) => { e.stopPropagation(); actions.onSplitH(api.id); }}
+          onClick={(e) => { e.stopPropagation(); actions.onSplitH(id); }}
           ariaLabel="Split left/right"
           tooltip="Split left/right [|] or [%]"
         ><SplitHorizontalIcon size={14} /></HeaderActionButton>
         <HeaderActionButton
           className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-          onClick={(e) => { e.stopPropagation(); actions.onSplitV(api.id); }}
+          onClick={(e) => { e.stopPropagation(); actions.onSplitV(id); }}
           ariaLabel="Split top/bottom"
           tooltip={'Split top/bottom [-] or ["]'}
         ><SplitVerticalIcon size={14} /></HeaderActionButton>
         <HeaderActionButton
           className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-          onClick={(e) => { e.stopPropagation(); actions.onZoom(api.id); }}
+          onClick={(e) => { e.stopPropagation(); actions.onZoom(id); }}
           ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
           tooltip={zoomed ? 'Unzoom [z]' : 'Zoom [z]'}
         >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
@@ -231,13 +231,13 @@ export function SurfacePaneHeader({ api }: IDockviewPanelHeaderProps) {
       <div className="ml-1 flex shrink-0 items-center gap-0.5">
         <HeaderActionButton
           className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-          onClick={(e) => { e.stopPropagation(); actions.onMinimize(api.id); }}
+          onClick={(e) => { e.stopPropagation(); actions.onMinimize(id); }}
           ariaLabel="Minimize"
           tooltip="Minimize [m] or [d]"
         ><ArrowLineDownIcon size={14} /></HeaderActionButton>
         <HeaderActionButton
           className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-error/10 hover:text-error"
-          onClick={(e) => { e.stopPropagation(); actions.onKill(api.id); }}
+          onClick={(e) => { e.stopPropagation(); actions.onKill(id); }}
           ariaLabel="Kill"
           tooltip="Kill [k] or [x]"
         ><XIcon size={14} /></HeaderActionButton>

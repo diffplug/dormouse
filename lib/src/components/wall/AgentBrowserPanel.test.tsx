@@ -1,16 +1,16 @@
 /**
  * @vitest-environment jsdom
  */
-import { act, StrictMode } from 'react';
+import { act, StrictMode, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { IDockviewPanelProps } from 'dockview-react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { AgentBrowserPopResult, AgentBrowserStreamStatusResult, PlatformAdapter } from '../../lib/platform/types';
+import type { PaneProps } from './pane-props';
 import { AgentBrowserPanel, HIDDEN_PARK_DELAY_MS } from './AgentBrowserPanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { disposeAllAgentBrowserSurfaceControllers } from './agent-browser-surface-controller';
-import { ModeContext, SelectedIdContext, WallActionsContext, type WallActions } from './wall-context';
+import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, type PaneWriteActions, type WallActions } from './wall-context';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -22,6 +22,8 @@ type TestPanelParams = {
   url?: string;
   poppedOut?: boolean;
 };
+
+const DEFAULT_PARAMS: TestPanelParams = { surfaceType: 'agent-browser', session: 'browser-session' };
 
 class ResizeObserverMock {
   observe() {}
@@ -48,14 +50,14 @@ function stubActions(overrides: Partial<WallActions> = {}): WallActions {
   };
 }
 
-function panelProps(
-  id: string,
-  updateParameters = vi.fn(),
-): IDockviewPanelProps<TestPanelParams> {
-  return {
-    api: { id, title: 'Browser', updateParameters, setTitle: vi.fn() },
-    params: { surfaceType: 'agent-browser', session: 'browser-session' },
-  } as unknown as IDockviewPanelProps<TestPanelParams>;
+function paneProps(id: string, params: TestPanelParams = DEFAULT_PARAMS): PaneProps {
+  return { id, title: 'Browser', params, panelVisible: true, getAnimEl: () => null };
+}
+
+// The panel's title/param writes route through PaneWriteContext now; forward
+// updateParams' patch to the test's mock so its assertions stay unchanged.
+function paneWriteFor(updateParameters: (patch: Record<string, unknown>) => void): PaneWriteActions {
+  return { updateParams: (_id, patch) => updateParameters(patch), setTitle: () => {} };
 }
 
 class WebSocketMock {
@@ -111,13 +113,18 @@ afterEach(() => {
   setPlatform(new FakePtyAdapter());
 });
 
-async function renderPanel(props = panelProps('ab-panel')): Promise<void> {
+async function renderPanel(
+  props: PaneProps = paneProps('ab-panel'),
+  updateParameters: (patch: Record<string, unknown>) => void = () => {},
+): Promise<void> {
   await act(async () => {
     root.render(
       <StrictMode>
-        <WallActionsContext.Provider value={stubActions()}>
-          <AgentBrowserPanel {...props} />
-        </WallActionsContext.Provider>
+        <PaneWriteContext.Provider value={paneWriteFor(updateParameters)}>
+          <WallActionsContext.Provider value={stubActions()}>
+            <AgentBrowserPanel {...props} />
+          </WallActionsContext.Provider>
+        </PaneWriteContext.Provider>
       </StrictMode>,
     );
   });
@@ -140,7 +147,7 @@ describe('AgentBrowserPanel render mode controller', () => {
     platform.agentBrowserStreamStatus = streamStatus;
     setPlatform(platform);
 
-    await renderPanel(panelProps('ab-panel', updateParameters));
+    await renderPanel(paneProps('ab-panel'), updateParameters);
 
     await act(async () => {
       getAgentBrowserScreenController('ab-panel')?.actions.setRenderMode?.('ab-popout');
@@ -165,10 +172,10 @@ describe('AgentBrowserPanel render mode controller', () => {
     platform.agentBrowserStreamStatus = vi.fn(async () => ({ ok: true, wsPort: 1234 }));
     setPlatform(platform);
 
-    await renderPanel({
-      ...panelProps('ab-panel', updateParameters),
-      params: { surfaceType: 'browser', renderMode: 'ab-popout', session: 'browser-session' },
-    } as unknown as IDockviewPanelProps<{ surfaceType: string; renderMode: string; session: string }>);
+    await renderPanel(
+      paneProps('ab-panel', { surfaceType: 'browser', renderMode: 'ab-popout', session: 'browser-session' }),
+      updateParameters,
+    );
 
     expect(getAgentBrowserScreenController('ab-panel')?.snapshot().renderMode).toBe('ab-popout');
 
@@ -193,16 +200,16 @@ describe('AgentBrowserPanel render mode controller', () => {
     platform.agentBrowserStreamStatus = vi.fn(async () => ({ ok: true, wsPort: 1234 }));
     setPlatform(platform);
 
-    await renderPanel({
-      ...panelProps('ab-panel', updateParameters),
-      params: {
+    await renderPanel(
+      paneProps('ab-panel', {
         surfaceType: 'browser',
         renderMode: 'ab-popout',
         session: 'browser-session',
         wsPort: 1111,
         url: 'https://google.com/',
-      },
-    });
+      }),
+      updateParameters,
+    );
 
     await act(async () => {
       WebSocketMock.instances[0]?.emitMessage(JSON.stringify({
@@ -227,16 +234,16 @@ describe('AgentBrowserPanel render mode controller', () => {
     platform.agentBrowserStreamStatus = vi.fn(async () => ({ ok: true, wsPort: 1234 }));
     setPlatform(platform);
 
-    await renderPanel({
-      ...panelProps('ab-panel', updateParameters),
-      params: {
+    await renderPanel(
+      paneProps('ab-panel', {
         surfaceType: 'browser',
         renderMode: 'ab-popout',
         session: 'browser-session',
         wsPort: 1111,
         url: 'https://google.com/',
-      },
-    });
+      }),
+      updateParameters,
+    );
 
     await act(async () => {
       WebSocketMock.instances[0]?.emitMessage(JSON.stringify({
@@ -258,16 +265,16 @@ describe('AgentBrowserPanel render mode controller', () => {
     platform.agentBrowserStreamStatus = vi.fn(async () => ({ ok: true, wsPort: 1234 }));
     setPlatform(platform);
 
-    await renderPanel({
-      ...panelProps('ab-panel', updateParameters),
-      params: {
+    await renderPanel(
+      paneProps('ab-panel', {
         surfaceType: 'browser',
         renderMode: 'ab-popout',
         session: 'browser-session',
         wsPort: 1111,
         url: 'https://google.com/',
-      },
-    });
+      }),
+      updateParameters,
+    );
 
     await act(async () => {
       await Promise.resolve();
@@ -293,10 +300,7 @@ describe('AgentBrowserPanel render mode controller', () => {
     platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
     setPlatform(platform);
 
-    await renderPanel({
-      ...panelProps('ab-panel'),
-      params: { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 },
-    });
+    await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 }));
 
     await act(async () => {
       WebSocketMock.instances.at(-1)?.emitMessage(JSON.stringify({
@@ -323,10 +327,7 @@ describe('AgentBrowserPanel render mode controller', () => {
     platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
     setPlatform(platform);
 
-    await renderPanel({
-      ...panelProps('ab-panel'),
-      params: { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 },
-    });
+    await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 }));
 
     await act(async () => {
       WebSocketMock.instances.at(-1)?.emitMessage(JSON.stringify({
@@ -353,10 +354,7 @@ describe('AgentBrowserPanel render mode controller', () => {
     platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
     setPlatform(platform);
 
-    await renderPanel({
-      ...panelProps('ab-panel'),
-      params: { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 },
-    });
+    await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 }));
 
     await act(async () => {
       WebSocketMock.instances.at(-1)?.emitMessage(JSON.stringify({
@@ -390,10 +388,10 @@ describe('AgentBrowserPanel render mode controller', () => {
 
   it('keeps the last known active tab when the stream emits a transient empty tab list', async () => {
     const updateParameters = vi.fn();
-    await renderPanel({
-      ...panelProps('ab-panel', updateParameters),
-      params: { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 },
-    });
+    await renderPanel(
+      paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 }),
+      updateParameters,
+    );
 
     await act(async () => {
       WebSocketMock.instances.at(-1)?.emitMessage(JSON.stringify({
@@ -420,10 +418,7 @@ describe('AgentBrowserPanel render mode controller', () => {
     platform.agentBrowserStreamStatus = streamStatus;
     setPlatform(platform);
 
-    await renderPanel({
-      ...panelProps('ab-panel'),
-      params: { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 },
-    });
+    await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', wsPort: 1111 }));
 
     await act(async () => {
       await Promise.resolve();
@@ -444,7 +439,7 @@ describe('AgentBrowserPanel render mode controller', () => {
       root.render(
         <StrictMode>
           <WallActionsContext.Provider value={stubActions({ onSwapRenderMode })}>
-            <AgentBrowserPanel {...panelProps('ab-panel')} />
+            <AgentBrowserPanel {...paneProps('ab-panel')} />
           </WallActionsContext.Provider>
         </StrictMode>,
       );
@@ -461,31 +456,31 @@ describe('AgentBrowserPanel render mode controller', () => {
 });
 
 describe('AgentBrowserPanel visibility parking', () => {
-  // Build an api mock carrying the dockview visibility surface (isVisible +
-  // onDidVisibilityChange) that the minimal mocks above deliberately omit, plus
-  // a `fireVisibility` hook the test can drive.
-  function panelPropsWithVisibility(
+  // Engine visibility arrives as the `panelVisible` prop now, not a subscription,
+  // so a hidden/shown transition is a re-render with a new prop value. This
+  // harness holds panelVisible in state and hands the test a setter, mirroring
+  // what the dockview adapter (or LathHost) does when engine visibility flips.
+  async function renderVisibilityPanel(
     params: TestPanelParams,
-    updateParameters = vi.fn(),
-  ): { props: IDockviewPanelProps<TestPanelParams>; fireVisibility: (isVisible: boolean) => void } {
-    const listeners = new Set<(e: { isVisible: boolean }) => void>();
-    let isVisible = true;
-    const api = {
-      id: 'ab-panel',
-      title: 'Browser',
-      updateParameters,
-      setTitle: vi.fn(),
-      get isVisible() { return isVisible; },
-      onDidVisibilityChange(listener: (e: { isVisible: boolean }) => void) {
-        listeners.add(listener);
-        return { dispose() { listeners.delete(listener); } };
-      },
-    };
-    const fireVisibility = (next: boolean) => {
-      isVisible = next;
-      for (const listener of [...listeners]) listener({ isVisible: next });
-    };
-    return { props: { api, params } as unknown as IDockviewPanelProps<TestPanelParams>, fireVisibility };
+  ): Promise<{ setVisible: (visible: boolean) => void }> {
+    let externalSet: ((visible: boolean) => void) | null = null;
+    function Harness() {
+      const [visible, setVisible] = useState(true);
+      externalSet = setVisible;
+      return <AgentBrowserPanel {...paneProps('ab-panel', params)} panelVisible={visible} />;
+    }
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
+            <WallActionsContext.Provider value={stubActions()}>
+              <Harness />
+            </WallActionsContext.Provider>
+          </PaneWriteContext.Provider>
+        </StrictMode>,
+      );
+    });
+    return { setVisible: (visible) => externalSet?.(visible) };
   }
 
   const streamSockets = (port: number) =>
@@ -496,16 +491,15 @@ describe('AgentBrowserPanel visibility parking', () => {
   afterEach(() => vi.useRealTimers());
 
   it('parks a hidden panel: closes the stream and opens no replacement', async () => {
-    const { props, fireVisibility } = panelPropsWithVisibility({
+    const { setVisible } = await renderVisibilityPanel({
       surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
     });
-    await renderPanel(props);
 
     const socket = liveStreamSocket(4321);
     expect(socket?.readyState).toBe(1);
     const before = streamSockets(4321).length;
 
-    await act(async () => { fireVisibility(false); });
+    await act(async () => { setVisible(false); });
     await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
 
     // The live socket is torn down and nothing reconnects while hidden.
@@ -521,14 +515,13 @@ describe('AgentBrowserPanel visibility parking', () => {
 
     // No wsPort ⇒ the stale-port recovery effect is the code path that would
     // query the daemon; the parked guard must suppress it.
-    const { props, fireVisibility } = panelPropsWithVisibility({
+    const { setVisible } = await renderVisibilityPanel({
       surfaceType: 'browser', session: 'browser-session',
     });
-    await renderPanel(props);
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     streamStatus.mockClear();
 
-    await act(async () => { fireVisibility(false); });
+    await act(async () => { setVisible(false); });
     await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
 
     expect(streamStatus).not.toHaveBeenCalled();
@@ -540,16 +533,15 @@ describe('AgentBrowserPanel visibility parking', () => {
     platform.agentBrowserScreenshot = screenshot;
     setPlatform(platform);
 
-    const { props, fireVisibility } = panelPropsWithVisibility({
+    const { setVisible } = await renderVisibilityPanel({
       surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
     });
-    await renderPanel(props);
 
-    await act(async () => { fireVisibility(false); });
+    await act(async () => { setVisible(false); });
     await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
     const parkedCount = streamSockets(4321).length;
 
-    await act(async () => { fireVisibility(true); });
+    await act(async () => { setVisible(true); });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 
     // A fresh socket to the same port replaces the parked one.
@@ -567,15 +559,14 @@ describe('AgentBrowserPanel visibility parking', () => {
   });
 
   it('does not park a popped-out panel while it is hidden', async () => {
-    const { props, fireVisibility } = panelPropsWithVisibility({
+    const { setVisible } = await renderVisibilityPanel({
       surfaceType: 'browser', renderMode: 'ab-popout', session: 'browser-session', wsPort: 1111,
     });
-    await renderPanel(props);
 
     const socket = liveStreamSocket(1111);
     expect(socket?.readyState).toBe(1);
 
-    await act(async () => { fireVisibility(false); });
+    await act(async () => { setVisible(false); });
     await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
 
     // Popped out is exempt: the stream observer that drives window-close
@@ -584,10 +575,9 @@ describe('AgentBrowserPanel visibility parking', () => {
   });
 
   it('parks when the document is hidden even if the panel tab is visible', async () => {
-    const { props } = panelPropsWithVisibility({
+    await renderVisibilityPanel({
       surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
     });
-    await renderPanel(props);
 
     const socket = liveStreamSocket(4321);
     expect(socket?.readyState).toBe(1);
@@ -603,17 +593,16 @@ describe('AgentBrowserPanel visibility parking', () => {
   });
 
   it('does not park when a hide is reversed within the delay', async () => {
-    const { props, fireVisibility } = panelPropsWithVisibility({
+    const { setVisible } = await renderVisibilityPanel({
       surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
     });
-    await renderPanel(props);
 
     const socket = liveStreamSocket(4321);
     expect(socket?.readyState).toBe(1);
 
-    await act(async () => { fireVisibility(false); });
+    await act(async () => { setVisible(false); });
     await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS / 2); });
-    await act(async () => { fireVisibility(true); });
+    await act(async () => { setVisible(true); });
     await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS); });
 
     expect(socket?.readyState).toBe(1);
@@ -626,20 +615,19 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
   // it is the click that selects the pane. Mouse-down/up therefore gate on
   // passthrough mode alone, not full `interactive` (mode && selected).
   async function renderWithMode(mode: 'passthrough' | 'command', selectedId: string | null): Promise<HTMLCanvasElement> {
-    const props = {
-      api: { id: 'ab-panel', title: 'Browser', updateParameters: vi.fn(), setTitle: vi.fn() },
-      params: { surfaceType: 'agent-browser', session: 'browser-session', wsPort: 4321 },
-    } as unknown as IDockviewPanelProps<TestPanelParams>;
+    const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', wsPort: 4321 });
     await act(async () => {
       root.render(
         <StrictMode>
-          <WallActionsContext.Provider value={stubActions()}>
-            <ModeContext.Provider value={mode}>
-              <SelectedIdContext.Provider value={selectedId}>
-                <AgentBrowserPanel {...props} />
-              </SelectedIdContext.Provider>
-            </ModeContext.Provider>
-          </WallActionsContext.Provider>
+          <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
+            <WallActionsContext.Provider value={stubActions()}>
+              <ModeContext.Provider value={mode}>
+                <SelectedIdContext.Provider value={selectedId}>
+                  <AgentBrowserPanel {...props} />
+                </SelectedIdContext.Provider>
+              </ModeContext.Provider>
+            </WallActionsContext.Provider>
+          </PaneWriteContext.Provider>
         </StrictMode>,
       );
     });
@@ -688,10 +676,7 @@ describe('AgentBrowserPanel tab strip actions', () => {
     const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand'>;
     platform.agentBrowserCommand = command;
     setPlatform(platform);
-    const props = {
-      api: { id: 'ab-panel', title: 'Browser', updateParameters: vi.fn(), setTitle: vi.fn() },
-      params: { surfaceType: 'agent-browser', session: 'browser-session', wsPort: 4321 },
-    } as unknown as IDockviewPanelProps<TestPanelParams>;
+    const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', wsPort: 4321 });
     await renderPanel(props);
     const ws = WebSocketMock.instances[WebSocketMock.instances.length - 1];
     await act(async () => {
@@ -733,10 +718,7 @@ describe('AgentBrowserPanel tab strip actions', () => {
     const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserScreenshot'>;
     platform.agentBrowserScreenshot = screenshot;
     setPlatform(platform);
-    const props = {
-      api: { id: 'ab-panel', title: 'Browser', updateParameters: vi.fn(), setTitle: vi.fn() },
-      params: { surfaceType: 'agent-browser', session: 'browser-session', wsPort: 4321 },
-    } as unknown as IDockviewPanelProps<TestPanelParams>;
+    const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', wsPort: 4321 });
     await renderPanel(props);
     const ws = WebSocketMock.instances[WebSocketMock.instances.length - 1];
     const tabs = (a: 't1' | 't2', extra = false) => JSON.stringify({ type: 'tabs', tabs: [

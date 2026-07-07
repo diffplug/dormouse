@@ -9,10 +9,11 @@
  * the renderer choice. The browser chrome each child registers is keyed by
  * `api.id`, so the shared header/modal are unaffected by which child is mounted.
  */
-import { useEffect } from 'react';
-import type { IDockviewPanelProps } from 'dockview-react';
+import { useContext, useEffect } from 'react';
 import type { RenderMode } from './agent-browser-screen';
 import { resolveRenderMode } from './browser-surface';
+import type { PaneProps } from './pane-props';
+import { PaneWriteContext } from './wall-context';
 import { AgentBrowserPanel } from './AgentBrowserPanel';
 import { IframePanel } from './IframePanel';
 
@@ -33,8 +34,9 @@ export type BrowserPanelParams = {
   poppedOut?: boolean;
 };
 
-export function BrowserPanel(props: IDockviewPanelProps<BrowserPanelParams>) {
-  const { api, params } = props;
+export function BrowserPanel(props: PaneProps) {
+  const { params } = props;
+  const paneWrite = useContext(PaneWriteContext);
   const renderMode = resolveRenderMode(params);
 
   // Canonicalize a legacy layout once: write renderMode + surfaceType:'browser'
@@ -42,8 +44,8 @@ export function BrowserPanel(props: IDockviewPanelProps<BrowserPanelParams>) {
   // renderMode from the prop below, so this is purely for the persisted blob).
   useEffect(() => {
     if (params?.renderMode === renderMode && params?.surfaceType === 'browser') return;
-    api.updateParameters({ renderMode, surfaceType: 'browser' });
-  }, [api, params?.renderMode, params?.surfaceType, renderMode]);
+    paneWrite.updateParams(props.id, { renderMode, surfaceType: 'browser' });
+  }, [paneWrite, props.id, params?.renderMode, params?.surfaceType, renderMode]);
 
   if (renderMode === 'iframe') return <IframePanel {...props} />;
   return <AgentBrowserPanel {...props} renderMode={renderMode} />;

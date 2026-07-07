@@ -56,8 +56,6 @@ function MouseIconStoryFrame({
     };
   }, [mouseReporting, override]);
 
-  const mockApi = { id: SESSION_ID, title } as unknown as Parameters<typeof TerminalPaneHeader>[0]['api'];
-
   return (
     <ModeContext.Provider value={mode}>
       <SelectedIdContext.Provider value={SESSION_ID}>
@@ -66,10 +64,11 @@ function MouseIconStoryFrame({
             <div style={{ width }}>
               <div className="bg-app-bg" style={{ height: 26 }}>
                 <TerminalPaneHeader
-                  api={mockApi}
-                  containerApi={{} as Parameters<typeof TerminalPaneHeader>[0]['containerApi']}
-                  params={{}}
-                  tabLocation={'header' as Parameters<typeof TerminalPaneHeader>[0]['tabLocation']}
+                  id={SESSION_ID}
+                  title={title}
+                  params={undefined}
+                  panelVisible={true}
+                  getAnimEl={() => null}
                 />
               </div>
               <div className="relative" style={{ height: 40 }}>

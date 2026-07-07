@@ -1,5 +1,4 @@
 import { useContext, useEffect, useLayoutEffect, type RefObject } from 'react';
-import type { IDockviewPanelProps } from 'dockview-react';
 import { FreshlySpawnedContext, PaneElementsContext } from './wall-context';
 
 /**
@@ -9,43 +8,45 @@ import { FreshlySpawnedContext, PaneElementsContext } from './wall-context';
  * - registers the pane's root element in `PaneElementsContext` so overlays can
  *   measure it, and unregisters on unmount;
  * - runs the `pane-spawn-from-<direction>` animation once when the pane was
- *   freshly spawned.
+ *   freshly spawned, on the element the engine designates via `getAnimEl`
+ *   (dockview: the group element; Lath: the leaf div).
  */
 export function usePaneChrome(
-  api: IDockviewPanelProps['api'],
+  id: string,
   elRef: RefObject<HTMLDivElement | null>,
+  getAnimEl: () => HTMLElement | null,
 ): void {
   const { elements: paneElements, bumpVersion } = useContext(PaneElementsContext);
   const freshlySpawned = useContext(FreshlySpawnedContext);
 
   useEffect(() => {
     if (!elRef.current) return;
-    paneElements.set(api.id, elRef.current);
+    paneElements.set(id, elRef.current);
     bumpVersion();
     return () => {
-      paneElements.delete(api.id);
+      paneElements.delete(id);
       bumpVersion();
     };
-  }, [api.id, paneElements, bumpVersion, elRef]);
+  }, [id, paneElements, bumpVersion, elRef]);
 
   useLayoutEffect(() => {
-    const direction = freshlySpawned.get(api.id);
+    const direction = freshlySpawned.get(id);
     if (!direction) return;
-    freshlySpawned.delete(api.id);
-    const groupEl = api.group?.element;
-    if (!groupEl) return;
+    freshlySpawned.delete(id);
+    const animEl = getAnimEl();
+    if (!animEl) return;
     const className = `pane-spawning-from-${direction}`;
     const animationName = `pane-spawn-from-${direction}`;
-    groupEl.classList.add(className);
+    animEl.classList.add(className);
     const onEnd = (ev: AnimationEvent) => {
       if (ev.animationName !== animationName) return;
-      groupEl.classList.remove(className);
-      groupEl.removeEventListener('animationend', onEnd);
+      animEl.classList.remove(className);
+      animEl.removeEventListener('animationend', onEnd);
     };
-    groupEl.addEventListener('animationend', onEnd);
+    animEl.addEventListener('animationend', onEnd);
     return () => {
-      groupEl.removeEventListener('animationend', onEnd);
-      groupEl.classList.remove(className);
+      animEl.removeEventListener('animationend', onEnd);
+      animEl.classList.remove(className);
     };
-  }, [api, freshlySpawned]);
+  }, [id, freshlySpawned, getAnimEl]);
 }

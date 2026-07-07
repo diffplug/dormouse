@@ -68,12 +68,14 @@ import { findReattachNeighbor } from '../lib/spatial-nav';
 import { cloneLayout, getLayoutStructureSignature } from '../lib/layout-snapshot';
 import type { PersistedDoor } from '../lib/session-types';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
-import { TerminalPanel } from './wall/TerminalPanel';
-import { TerminalPaneHeader } from './wall/TerminalPaneHeader';
-import { BrowserPanel } from './wall/BrowserPanel';
+import {
+  TerminalPanelAdapter,
+  BrowserPanelAdapter,
+  TerminalPaneHeaderAdapter,
+  SurfacePaneHeaderAdapter,
+} from './wall/dockview-panel-adapters';
 import { resolveRenderMode, isAgentBrowserParams, isBrowserParams } from './wall/browser-surface';
 import { hostPathDisplay } from './wall/browser-url';
-import { SurfacePaneHeader } from './wall/SurfacePaneHeader';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { useDockviewReady } from './wall/use-dockview-ready';
 import { withProgrammaticActivation } from '../lib/programmatic-activation';
@@ -88,11 +90,13 @@ import {
   FreshlySpawnedContext,
   ModeContext,
   PaneElementsContext,
+  PaneWriteContext,
   WallActionsContext,
   RenamingIdContext,
   SelectedIdContext,
   WindowFocusedContext,
   ZoomedContext,
+  type PaneWriteActions,
   type WallActions,
 } from './wall/wall-context';
 import type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind, SpawnDirection } from './wall/wall-types';
@@ -470,8 +474,8 @@ function ShellSpawnNotice({
 // One body component for every browser surface; the legacy 'iframe' /
 // 'agent-browser' names alias to it so dockview layouts persisted before the
 // unification still resolve on restore.
-const components = { terminal: TerminalPanel, browser: BrowserPanel, iframe: BrowserPanel, 'agent-browser': BrowserPanel };
-const tabComponents = { terminal: TerminalPaneHeader, surface: SurfacePaneHeader };
+const components = { terminal: TerminalPanelAdapter, browser: BrowserPanelAdapter, iframe: BrowserPanelAdapter, 'agent-browser': BrowserPanelAdapter };
+const tabComponents = { terminal: TerminalPaneHeaderAdapter, surface: SurfacePaneHeaderAdapter };
 
 // --- Main component ---
 
@@ -1987,6 +1991,16 @@ export function Wall({
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
 
+  // Engine-directed writes for the pane props contract (docs/specs/tiling-engine.md
+  // → "Pane props contract"): route a pane/header's title / params writes to the
+  // backing dockview panel. Memoized (apiRef is stable) so the sink handed to
+  // panels via context keeps a stable identity. The render-swap and wsPort-refresh
+  // param writes in Wall.tsx above still call the dockview api directly.
+  const paneWrite = useMemo<PaneWriteActions>(() => ({
+    setTitle: (id, title) => apiRef.current?.getPanel(id)?.api.setTitle(title),
+    updateParams: (id, patch) => apiRef.current?.getPanel(id)?.api.updateParameters(patch),
+  }), []);
+
   useWallKeyboard({
     apiRef,
     modeRef,
@@ -2021,6 +2035,7 @@ export function Wall({
     <ModeContext.Provider value={mode}>
       <SelectedIdContext.Provider value={selectedId}>
         <WallActionsContext.Provider value={wallActions}>
+          <PaneWriteContext.Provider value={paneWrite}>
           <PaneElementsContext.Provider value={{ elements: paneElements, version: paneElementsVersion, bumpVersion: bumpPaneElementsVersion }}>
           <DoorElementsContext.Provider value={{ elements: doorElements, version: doorElementsVersion, bumpVersion: bumpDoorElementsVersion }}>
           <RenamingIdContext.Provider value={renamingPaneId}>
@@ -2083,6 +2098,7 @@ export function Wall({
           </RenamingIdContext.Provider>
           </DoorElementsContext.Provider>
           </PaneElementsContext.Provider>
+          </PaneWriteContext.Provider>
         </WallActionsContext.Provider>
       </SelectedIdContext.Provider>
     </ModeContext.Provider>

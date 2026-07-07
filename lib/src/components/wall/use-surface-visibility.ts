@@ -1,27 +1,19 @@
 import { useEffect, useState } from 'react';
-import type { IDockviewPanelProps } from 'dockview-react';
 
 /**
- * Whether a Surface is actually on screen: its dockview panel is the active tab
- * AND the document isn't hidden (backgrounded window). Browser panels use
- * `renderer: 'always'` (see dor-browser.md → "Canonical Params"), so an inactive
- * tab stays mounted; callers gate streaming work on this so a hidden pane stops
- * consuming resources while its daemon/session stays alive.
+ * Whether a Surface is actually on screen: the engine reports the pane visible
+ * (dockview: its panel is the active tab in its group; Lath: a mounted leaf is
+ * always visible) AND the document isn't hidden (backgrounded window). Callers
+ * gate streaming work on this so a hidden pane stops consuming resources while
+ * its daemon/session stays alive.
  *
- * The panel-api visibility members are absent on the minimal api mocks used in
- * tests (and any host that doesn't wire them); absence reads as always-visible.
+ * The engine-visibility half arrives as the `panelVisible` prop (built by the
+ * dockview adapter from `api.isVisible` / `onDidVisibilityChange`, or supplied
+ * directly by LathHost); this hook owns only the document-visibility half and
+ * ANDs the two.
  */
-export function useSurfaceVisibility(api: IDockviewPanelProps['api']): boolean {
-  const [panelVisible, setPanelVisible] = useState<boolean>(api.isVisible ?? true);
+export function useSurfaceVisibility(panelVisible: boolean): boolean {
   const [docVisible, setDocVisible] = useState<boolean>(() => document.visibilityState !== 'hidden');
-
-  useEffect(() => {
-    // Re-sync from the api in case visibility flipped between render and this
-    // subscribe — the dockview event only reports future changes.
-    setPanelVisible(api.isVisible ?? true);
-    const disposable = api.onDidVisibilityChange?.((e) => setPanelVisible(e.isVisible));
-    return () => disposable?.dispose();
-  }, [api]);
 
   useEffect(() => {
     const onChange = () => setDocVisible(document.visibilityState !== 'hidden');
