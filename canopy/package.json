@@ -1,0 +1,29 @@
+{
+  "name": "canopy",
+  "version": "0.0.0",
+  "license": "FSL-1.1-MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "storybook": "storybook dev -p 6007 --no-open --ci",
+    "build-storybook": "storybook build",
+    "test": "tsc -p ."
+  },
+  "dependencies": {
+    "@diffplug/xterm-addon-webgl-sdf": "https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf288.5/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf288.5.tgz",
+    "@xterm/addon-webgl": "0.20.0-beta.287",
+    "@xterm/xterm": "6.1.0-beta.288",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@storybook/react": "^10.4.0",
+    "@storybook/react-vite": "^10.4.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "storybook": "^10.4.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.14"
+  }
+}
