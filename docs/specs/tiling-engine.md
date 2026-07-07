@@ -9,12 +9,14 @@
 **Scope: lath-rollout** — staged order; each stage lands green before the next starts:
 
 1. **Core** — pure model + `layout()` + op set + restore tokens as a dependency-free module under lib/src/lib/lath/ (no UI, no DOM). Property tests and golden trees. Lands inert.
-2. **Binding** — the LathHost React binding behind a dev flag, rendering the existing Wall panes at feature parity minus polish: splits, instant kills, sash resize, zoom, persistence migration. The live harness matrix from the focus-neutral branch (focus-neutral create, background/selected kills, minimize/reattach, door survival, auto-spawn) is the acceptance gate.
+2. **Binding** — the LathHost React binding behind the dev flag, rendering the existing Wall panes at feature parity minus polish: splits, instant kills, sash resize, zoom, persistence migration, and the pane props contract below (migrating the nine pane/header components off `IDockviewPanelProps` is the largest single chunk of this stage — do it first). The acceptance matrix below is the gate.
 3. **Animation** — the animation contract below: tween/retarget, enter/exit, kill fade, overlay-ring sync. Delete `lib/src/lib/kill-animation.ts`.
 4. **Drag and drop** — pointer-based hierarchical DnD with the depth model below; drag-to-baseboard minimize; delete the dockview drag wiring.
 5. **Deletion sweep** — remove the dockview dependency, the programmatic-activation tag, the focus-heal machinery, and the shadow models (inventory below); promote this spec's built portions above the fold and rewrite the affected sections of [layout.md](layout.md).
 
 Ordering constraint: lath-rollout completes before the workspace-switching stages of the **workspaces-rollout** scope (defined in [layout.md](layout.md)) — a workspace switch under Lath is "swap which tree renders," with none of dockview's active-group juggling.
+
+The dev flag is `dormouse.flags.lath` in localStorage, read once at module load — the same pattern as `dormouse.flags.abDebugLogs`. While the flag exists (stages 2–4), saves **dual-write** both formats — the Lath tree and the legacy serialized-dockview blob — so flipping the flag either direction never loses a layout; the dual-write and the flag are deleted together at stage 5.
 
 ### Why
 
@@ -143,6 +145,17 @@ LathHost (a thin React component, the only non-headless part):
 - Dying leaves and the zoomed leaf render above the others; pointer events are disabled on dying leaves only.
 - The binding never calls `.focus()` and emits no activation events. User gestures surface as **op proposals** (`onProposeOp(op)`) that the Wall commits — the Wall applies selection/focus policy at the same call sites where it lives today.
 
+### Pane props contract
+
+The largest hidden chunk of stage 2: nine pane/header components are currently coupled to dockview's panel objects (`IDockviewPanelProps` / `IDockviewPanelHeaderProps`) — `TerminalPanel`, `BrowserPanel`, `AgentBrowserPanel`, `IframePanel`, `TerminalPaneHeader`, `SurfacePaneHeader`, plus `use-pane-chrome` and `use-surface-visibility` — reading `api.id` / `params` / `title` and calling `api.updateParameters` / `api.setTitle` (~12 call sites). Under Lath there is no panel object, so stage 2 introduces a plain props contract supplied by LathHost:
+
+- **Read side**: `{ id, params, title }` as ordinary React props. Title-change and params-change subscriptions (`onDidTitleChange`, `updateParameters` echoes) become ordinary re-renders — the data lives in a Wall-owned per-leaf metadata map (`id → { params, title }`), which is also what persists (today this state rides inside dockview's serialized panel blobs).
+- **Write side**: `{ setTitle(id, t), updateParams(id, patch) }` actions writing that same map. The render-swap and `wsPort`-refresh flows (`api.updateParameters` sites in `Wall.tsx`) route through `updateParams`; door param refreshes already write door state directly and are unaffected.
+- **Headers** render into a header slot of the leaf's stable div as plain components — no dockview tab wrapper, which also retires the native-pointerdown-races-React-synthetic-events class of bugs (the header-kill activation ordering).
+- **Visibility**: with no `onlyWhenVisible` renderer, a mounted leaf is always visible; `use-surface-visibility` reduces to "leaf present in the tree" (Doors remain unmounted, as today).
+
+Do this migration first within stage 2 — it is mechanical, independently verifiable (components render under a test harness with plain props), and everything else in the stage depends on it.
+
 ### What this deletes
 
 | Today | Under Lath |
@@ -160,10 +173,30 @@ LathHost (a thin React component, the only non-headless part):
 
 ### Persistence and migration
 
-New serialized form: `{ version: 1, tree, doors: [{ …door, token }] }` — the tree is its own wire format. A one-way loader migrates `SerializedDockview` blobs (grid branches → splits with `dir` from `data.direction`, view sizes → normalized weights, panels → leaves) per the persisted-session migration conventions in [transport.md](transport.md); Door `layoutAtMinimize` blobs degrade to neighbor-tier tokens. The old reader is retained for a deprecation window before deletion.
+New serialized form: `{ version: 1, tree, leafMeta, doors: [{ …door, token }] }` — the tree is its own wire format, and `leafMeta` carries the per-leaf `{ params, title }` map from the pane props contract (state that today rides inside dockview's serialized panel blobs). A one-way loader migrates `SerializedDockview` blobs (grid branches → splits with `dir` from `data.direction`, view sizes → normalized weights, panels → leaves + leafMeta) per the persisted-session migration conventions in [transport.md](transport.md); Door `layoutAtMinimize` blobs degrade to neighbor-tier tokens. During stages 2–4 saves dual-write both formats (see the flag note under the scope above); the legacy reader and dual-write are deleted together at stage 5 after a deprecation window.
 
 ### Testing
 
 - Core: property tests (tiling exactness, invariant preservation across random op sequences, `move` ≡ `remove`+`insert`, restore-tier degradation) plus golden trees for layout rounding.
-- Binding: jsdom tests asserting **node identity is preserved** across every op (the no-re-parent guarantee), enter/exit phase sequencing with fake timers, sash clamping.
-- Acceptance: the agent-browser harness matrix from the focus-neutral branch, re-run per rollout stage, plus a real hierarchical drag (now drivable, since DnD is pointer-based).
+- Binding: jsdom tests asserting **node identity is preserved** across every op (the no-re-parent guarantee), enter/exit phase sequencing with fake timers, sash clamping, and the pane props contract (components render with plain props).
+- Acceptance: the live matrix below, driven through the standalone agent-browser harness (`pnpm dev:standalone:ab`; mechanics — typing into xterm, synthetic Enter, ring probing, group mapping — are documented in the in-repo skill at `.claude/skills/debug-standalone-agent-browser/SKILL.md`). Run the applicable rows at each rollout stage; all rows before stage 5's deletion sweep.
+
+Acceptance matrix — each row is an end-to-end observable, independent of engine internals:
+
+| # | Flow | Expected observable |
+| --- | --- | --- |
+| 1 | Type into the selected terminal | Keystrokes echo; `dor list-panes` marks it `[focused]` |
+| 2 | `dor iframe <url>` / `dor ensure` from a touched terminal | Surface created in the background; caller keeps DOM focus (`document.activeElement` stays its xterm textarea) and selection; follow-up typing lands |
+| 3 | Click between panes (body and header), both directions | Selection and focus follow the click; passthrough entered |
+| 4 | `dor kill` of a background surface | Surface removed; caller's selection, focus, and typing all survive (under Lath: focus is never lost, not healed) |
+| 5 | Kill the selected pane (`dor kill` self or confirm flow) | Selection adopts a survivor; typing works there |
+| 6 | Minimize the last pane | Door created and selected; auto-spawn fills the Wall; **door keeps selection** through the spawn |
+| 7 | Click a door | Reattach at original position when structure allows (exact tier); pane selected |
+| 8 | Embedded page focuses itself (iframe surface) | Selection moves onto that pane — visible jump, same as a click; never a silent desync |
+| 9 | Zoom toggle on a pane | Full-rect render and back; layout identical after |
+| 10 | Restart the app (harness re-open) | Layout, doors, titles, and params restored — including from a pre-Lath legacy blob |
+| 11 | (stage 3+) Kill with animation | Fade in place, survivors tween into the space; a second kill mid-tween retargets cleanly; reduced-motion instant |
+| 12 | (stage 4+) Drag a pane to a leaf edge, an ancestor edge, and center | Split-beside-pane, split-beside-column/row, and swap respectively; preview rect matches the committed result; dragging while a door is selected moves selection onto the dragged pane |
+| 13 | (stage 4+) Drag a pane onto the baseboard; drag a door out | Minimize with token; restore at the hit-tested position |
+
+Row 8's counterpart guard (a background `dor` command must never yank cross-frame focus out of the host editor) is a Wall-level policy that predates Lath — keep its check in the VS Code host after the focus-heal machinery is deleted.
