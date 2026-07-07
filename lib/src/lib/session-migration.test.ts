@@ -260,6 +260,34 @@ describe('readPersistedSession', () => {
     expect(readPersistedSession(v3)?.doors?.[0]?.token).toEqual(token);
   });
 
+  it('reads a new-format door (token only, no legacy fields)', () => {
+    const token = { leafId: 'door-a', weight: 0.5, siblingId: 'pane-b', edge: 'right', index: 0, fingerprint: null };
+    const v3 = {
+      version: 3 as const,
+      lathLayout: { version: 1, tree: { root: { kind: 'leaf', id: 'pane-b' } }, leafMeta: {} },
+      panes: [{ id: 'pane-b', title: 'Pane B', cwd: null, scrollback: null, resumeCommand: null, untouched: false }],
+      doors: [{ id: 'door-a', title: 'Door', component: 'terminal', tabComponent: 'terminal', token }],
+    };
+    const door = readPersistedSession(v3)?.doors?.[0];
+    expect(door?.token).toEqual(token);
+    // The legacy fields are simply absent — restore synthesizes them if ever needed.
+    expect(door?.neighborId).toBeUndefined();
+    expect(door?.direction).toBeUndefined();
+  });
+
+  it('reads a v3 blob carrying only a lathLayout (no legacy dockview `layout`)', () => {
+    const v3 = {
+      version: 3 as const,
+      lathLayout: { version: 1, tree: { root: { kind: 'leaf', id: 'pane-a' } }, leafMeta: {} },
+      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null, untouched: true }],
+      doors: [],
+    };
+    const read = readPersistedSession(v3);
+    expect(read).not.toBeNull();
+    expect(read?.lathLayout).toEqual(v3.lathLayout);
+    expect('layout' in (read as object)).toBe(false);
+  });
+
   it('rejects a v3 door whose token is not an object with a string leafId', () => {
     const base = {
       version: 3 as const,

@@ -79,8 +79,7 @@ export function allocateChildSpans(
 
 /** Cumulative rounding: entry i gets `round(cum_{i+1}) - round(cum_i)`, so the
  *  integer parts sum exactly to `round(total)` with drift never accumulating. The
- *  final boundary snaps to `round(total)` so the parts tile exactly. Shared by the
- *  layout allocator and the dockview size serializer. */
+ *  final boundary snaps to `round(total)` so the parts tile exactly. */
 export function cumulativeRound(fracs: number[], total: number): number[] {
   const out = new Array<number>(fracs.length);
   let cum = 0;
@@ -158,10 +157,10 @@ export function nodeRectAtPath(tree: LathTree, rect: Rect, opts: LayoutOpts, pat
   return cur;
 }
 
-/** Nearest leaf in `direction`, replacing spatial-nav's DOM rect scanning
- *  (`findPaneInDirection`). Candidates must lie strictly beyond the current leaf's
- *  edge in that direction; overlapping candidates on the secondary axis win, then
- *  nearest edge-to-edge distance. Deterministic ties: smaller (y, x), then id.
+/** Nearest leaf in `direction`, computed from the laid-out rects (no DOM). Candidates
+ *  must lie strictly beyond the current leaf's edge in that direction; overlapping
+ *  candidates on the secondary axis win, then nearest edge-to-edge distance.
+ *  Deterministic ties: smaller (y, x), then id.
  *  Callers pass the same `rect`/`opts` they render with. */
 export function neighbors(
   tree: LathTree,
@@ -206,8 +205,8 @@ export function neighbors(
   return pool[0]?.id ?? null;
 }
 
-/** The aspect-ratio split heuristic (`pickSplitDirection`): the leaf's laid-out rect
- *  wider than tall → `'right'`, else `'bottom'`. Missing leaf → `'right'`. */
+/** The aspect-ratio split heuristic: the leaf's laid-out rect wider than tall →
+ *  `'right'`, else `'bottom'`. Missing leaf → `'right'`. */
 export function autoEdge(tree: LathTree, rect: Rect, id: LeafId, opts: LayoutOpts): Edge {
   const r = layout(tree, rect, opts).get(id);
   if (!r) return 'right';

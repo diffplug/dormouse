@@ -16,121 +16,12 @@ body {
   height: 100vh;
 }
 
-/* --- Dockview overrides: flatten tab bar into a pane header --- */
-
-/* Each group has exactly one panel (tab stacking is disabled),
-   so singleTabMode="fullwidth" makes the tab fill the header.
-   We strip all remaining tab-bar chrome so it looks like a plain
-   PaneHeader / PaneContent layout. */
-
-.dockview-theme-abyss {
-  --dv-tabs-and-actions-container-height: 30px !important;
-  --dv-tabs-and-actions-container-font-size: var(--mt-font-size) !important;
-  --dv-group-view-background-color: var(--color-terminal-bg) !important;
-  --dv-tabs-and-actions-container-background-color: var(--color-header-inactive-bg) !important;
-  --dv-activegroup-visiblepanel-tab-background-color: var(--color-header-active-bg) !important;
-  --dv-activegroup-hiddenpanel-tab-background-color: var(--color-header-inactive-bg) !important;
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-header-active-bg) !important;
-  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--color-header-inactive-bg) !important;
-  --dv-activegroup-visiblepanel-tab-color: var(--color-header-active-fg) !important;
-  --dv-activegroup-hiddenpanel-tab-color: var(--color-header-inactive-fg) !important;
-  --dv-inactivegroup-visiblepanel-tab-color: var(--color-header-active-fg) !important;
-  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-header-inactive-fg) !important;
-  --dv-tab-divider-color: var(--color-border) !important;
-  --dv-separator-border: transparent !important;
-  --dv-active-sash-color: transparent !important;
-}
-
-/* Outermost dockview container shows through pane-to-pane gaps — paint it
- * with app-bg so the gutters read as host chrome, not pane content. */
-.dockview-theme-abyss.dv-dockview {
-  background-color: var(--color-app-bg) !important;
-}
-
-.dockview-theme-abyss .dv-groupview,
-.dockview-theme-abyss .dv-split-view-container,
-.dockview-theme-abyss .dv-split-view-container .dv-view-container {
-  background-color: var(--color-app-bg) !important;
-}
-
-/* Remove tab-bar background/border — the tab itself provides the bg */
-.dv-tabs-and-actions-container {
-  background: transparent !important;
-  border-bottom: none !important;
-  overflow: visible !important;
-  position: relative;
-  z-index: 20;
-}
-
-/* The scrollable wrapper around tabs — remove any padding/gaps */
-.dv-tabs-and-actions-container .dv-scrollable {
-  overflow: visible !important;
-}
-
-.dv-tabs-container {
-  overflow: visible !important;
-}
-
-/* Individual tab — stretch to fill, remove tab-like styling. Transparent
- * bg is critical: our React tab has rounded-t corners, so any color on the
- * wrapping dv-tab would peek through the corner triangles. */
-.dv-tabs-container .dv-tab {
-  background: transparent !important;
-  border: none !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  overflow: visible !important;
-}
-
-.dv-groupview {
-  overflow: visible !important;
-  border: none !important;
-}
-
-.dv-groupview > .dv-content-container {
-  position: relative;
-  z-index: 0;
-  overflow: hidden !important;
-}
-
-.dockview-theme-abyss .dv-pane-container .dv-pane .dv-pane-body,
-.dockview-theme-abyss .dv-split-view-container .dv-view-container .dv-view {
-  overflow: hidden !important;
-}
-
-.dv-split-view-container .dv-sash-container .dv-sash {
-  background-color: transparent !important;
-}
-
-/* Sash handles removed — the gap itself is the visual separator */
-.dv-split-view-container .dv-sash-container .dv-sash::after {
-  content: none;
-}
-
-/* Remove hairline borders between split views */
-.dv-split-view-container .dv-view:not(:first-child)::before {
-  content: none !important;
-}
-
-/* Hide dockview's default close button */
-.dv-default-tab-action {
-  display: none !important;
-}
-
-/* Hide the right actions container (+ button etc) */
-.dv-right-actions-container {
-  display: none !important;
-}
-
-/* --- Lath host (in-house tiling engine binding) ---
+/* --- Lath host (the tiling engine binding) ---
  *
- * The HTML adapter for Lath (docs/specs/tiling-engine.md → "Adapters"), mounted
- * by the Wall when the dormouse.flags.lath flag is on. Reproduces the shipped
- * pane look from the `.dockview-theme-abyss` rules above — app-bg gutters, a
- * terminal-bg body, and a 30px header band (matching
- * `--dv-tabs-and-actions-container-height`). The header and body React
- * components carry their own palette (bg-header-…, bg-terminal-bg) and rounded
- * corners, so this is layout + backgrounds only, parity minus polish. */
+ * The HTML adapter for Lath (docs/specs/tiling-engine.md → "Adapters"), mounted by
+ * the Wall. app-bg gutters, a terminal-bg body, and a 30px header band. The header
+ * and body React components carry their own palette (bg-header-…, bg-terminal-bg)
+ * and rounded corners, so this is layout + backgrounds only. */
 
 .lath-host {
   position: absolute;

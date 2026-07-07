@@ -35,8 +35,8 @@ import {
 } from '../../lib/lath/ops';
 
 /** Per-leaf presentation metadata, keyed by leaf id in the snapshot's `leafMeta`
- *  map. This is the state that today rides inside dockview's serialized panel
- *  blobs (the Pane props contract's "read side"). */
+ *  map — the Pane props contract's "read side", serialized inside the persisted
+ *  Lath layout. */
 export type LeafMeta = {
   /** Body component key — `'terminal'` | `'browser'` (legacy `'iframe'` /
    *  `'agent-browser'` aliases are resolved to `'browser'` at conversion time and
@@ -99,9 +99,7 @@ export type LathWallStore = {
   ): { ok: boolean; tier: 'exact' | 'neighbor' | 'fallback' | null };
 
   /** Exchange two leaf identities. Meta stays keyed by id, so each leaf's title /
-   *  params follow its id automatically — unlike dockview, which tracks titles on
-   *  the panel and needs a companion `swapPanelTitles`; there is nothing to swap
-   *  here. */
+   *  params follow its id automatically — there is no companion title swap. */
   swapLeaves(a: LeafId, b: LeafId): { ok: boolean };
 
   /** Move an existing leaf onto a hit-tested drop `target` (core `move`, one commit).
@@ -149,8 +147,7 @@ export type LathWallStore = {
    *  null (no neighbor, or no geometry yet). */
   neighborOf(id: LeafId, direction: Direction): LeafId | null;
   /** Aspect-ratio split edge for `id` under the last reported geometry (`autoEdge`);
-   *  `'right'` when there is no geometry yet or the leaf is absent. Replaces
-   *  `pickSplitDirection` on the Lath path. */
+   *  `'right'` when there is no geometry yet or the leaf is absent. */
   autoEdgeFor(id: LeafId): Edge;
 };
 

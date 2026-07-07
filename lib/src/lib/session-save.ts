@@ -14,13 +14,11 @@ function getPreviousPaneMap(platform: PlatformAdapter): Map<string, PersistedPan
 
 export async function saveSession(
   platform: PlatformAdapter,
-  layout: unknown,
   panes: Array<{ id: string; title: string; surfaceType?: PersistedSurfaceType }>,
   doors: PersistedDoor[] = [],
-  // The Lath persisted layout — the other half of the stage-2 dual-write
-  // (docs/specs/tiling-engine.md). Written alongside the legacy dockview `layout`
-  // so flipping `dormouse.flags.lath` either direction never loses a layout.
-  // Omitted from the persisted blob when undefined (pre-Lath / conversion failure).
+  // The native Lath persisted layout (docs/specs/tiling-engine.md → "Persistence
+  // and migration"). The only layout Dormouse writes; the legacy dockview `layout`
+  // key is no longer emitted (pre-Lath blobs are still read on restore).
   lathLayout?: unknown,
 ): Promise<void> {
   const previousPanes = getPreviousPaneMap(platform);
@@ -68,7 +66,6 @@ export async function saveSession(
     version: 3,
     panes: persisted,
     doors: persistedDoors,
-    layout,
     ...(lathLayout !== undefined ? { lathLayout } : {}),
   };
   platform.saveState(session);

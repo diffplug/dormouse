@@ -4,9 +4,9 @@ import { getDefaultShellOpts, restoreBrowserSurfaceTodo, restoreTerminal } from 
 
 export interface RestoredSession {
   paneIds: string[];
+  /** Legacy dockview layout blob from pre-Lath saves; migrated one-way on seed. */
   layout: unknown;
-  /** The Lath persisted layout (dual-write half); threaded parallel to `layout`
-   *  so the Lath binding can restore from it when the flag is on. */
+  /** Native Lath persisted layout; preferred over `layout` when present. */
   lathLayout?: unknown;
   doors: PersistedDoor[];
 }
@@ -19,9 +19,9 @@ export function restoreSession(platform: PlatformAdapter): RestoredSession | nul
   const shellOpts = getDefaultShellOpts();
 
   for (const pane of saved.panes) {
-    // Browser surfaces have no PTY or xterm; the dockview layout blob recreates
-    // them via fromJSON (docs/specs/transport.md). Calling restoreTerminal here
-    // would mint a stray PTY + xterm for the pane id that never gets mounted.
+    // Browser surfaces have no PTY or xterm; the persisted layout recreates them
+    // (docs/specs/transport.md). Calling restoreTerminal here would mint a stray
+    // PTY + xterm for the pane id that never gets mounted.
     if (pane.surfaceType === 'browser') {
       restoreBrowserSurfaceTodo(pane);
       continue;

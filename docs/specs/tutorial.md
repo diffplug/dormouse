@@ -25,7 +25,7 @@ Each item starts pending; the first incomplete item is marked active, and comple
 Three browser-side pieces in `website/src/lib/`, mirroring `ascii-splash-runner.ts` (xterm alt-screen + `FakePtyAdapter` boundary, no Node `terminal-kit`):
 
 - **`tut-runner.ts`** (`TutRunner`) — profile-aware alt-screen TUI. Subscribes to `TutorialState`, re-renders on progress changes, routes input via `FakePtyAdapter.writePty`.
-- **`tut-detector.ts`** (`TutDetector`) — wires app events to `TutorialState.markComplete(id)`. It is engine-neutral: `start()` seeds its prev-state maps and subscribes to `subscribeToActivity` (`dormouse-lib/lib/terminal-registry`) and `subscribeToMouseSelection` (`dormouse-lib/lib/mouse-selection`); everything else arrives on the `WallEvent` stream (`handleWallEvent`). It never touches the tiling api — kb-arrows is credited from `selectionChange` (a pane selection change to a distinct pane while in command mode), which `Wall.selectPane` fires on both dockview and Lath. The per-item detection contract — which transition credits which id, the Cmd/Ctrl+Arrow `move` consume-first guard, and the guards against falsely crediting restored/spawned state — lives in this file's code and comments.
+- **`tut-detector.ts`** (`TutDetector`) — wires app events to `TutorialState.markComplete(id)`. It is engine-neutral: `start()` seeds its prev-state maps and subscribes to `subscribeToActivity` (`dormouse-lib/lib/terminal-registry`) and `subscribeToMouseSelection` (`dormouse-lib/lib/mouse-selection`); everything else arrives on the `WallEvent` stream (`handleWallEvent`). It never touches the tiling engine — kb-arrows is credited from `selectionChange` (a pane selection change to a distinct pane while in command mode), which `Wall.selectPane` fires. The per-item detection contract — which transition credits which id, the Cmd/Ctrl+Arrow `move` consume-first guard, and the guards against falsely crediting restored/spawned state — lives in this file's code and comments.
 - **`tutorial-state.ts`** (`TutorialState`) — in-memory progress store; see [Storage](#storage) for keys. Profile totals are computed from the active profile's section list.
 - **`tut-items.ts`** — section + item definitions and the two profiles, shared by runner and detector.
 
@@ -33,7 +33,7 @@ Three browser-side pieces in `website/src/lib/`, mirroring `ascii-splash-runner.
 
 - `SiteHeader` at top with the `Theme:` dropdown on `/playground/desktop`. Header is `themeAware` so `--vscode-*` variables drive its chrome.
 - `<main>` is a flex container so Wall's `flex-1 min-h-0` root gets a real height.
-- `/playground/desktop` runs `Wall` (`FakePtyAdapter`, `initialMode="passthrough"`) in a three-pane layout. The page passes `initialPaneIds={[tut-main, tut-boxed, tut-splash]}` and no tiling api: the Wall's panes-mode seed splits each new pane off the previous by the aspect heuristic (dockview `pickSplitDirection` / Lath `autoEdge`), reproducing the L-shape below on a wide desktop. Header titles are seeded as pending shell opts (`setPendingShellOpts(id, { title })`) before the Wall mounts; the lib applies each as a user-pin at first spawn, which `deriveHeader` ranks above the engine fallback:
+- `/playground/desktop` runs `Wall` (`FakePtyAdapter`, `initialMode="passthrough"`) in a three-pane layout. The page passes `initialPaneIds={[tut-main, tut-boxed, tut-splash]}`: the Wall's fresh-panes seed splits each new pane off the previous by the aspect heuristic (Lath `autoEdge`), reproducing the L-shape below on a wide desktop. Header titles are seeded as pending shell opts (`setPendingShellOpts(id, { title })`) before the Wall mounts; the lib applies each as a user-pin at first spawn, which `deriveHeader` ranks above the engine fallback:
   - **`tut-main`** (left, ~50%) — auto-launches `TutRunner` (`mainShell.runCommand("tut")`), title "tutorial".
   - **`tut-boxed`** (right-top, ~25%, "changelog") — auto-launches `ChangelogRunner`. Doubles as the Copy Rewrapped target; its wrapped lines exercise the rewrap path.
   - **`tut-splash`** (right-bottom, ~25%, "ascii-splash") — auto-launches `AsciiSplashRunner`.
@@ -91,7 +91,7 @@ All three are removed on `TutorialState.reset()`. Legacy `dormouse-tutorial-step
 
 These exist in `dormouse-lib` (or `MobileTerminalUi`) specifically so the browser-side tutorial can observe and drive real behavior:
 
-- **`WallEvent.kill` / `WallEvent.move` / `WallEvent.paneAdded`** — discriminants on the `WallEvent` union (`lib/src/components/wall/wall-types.ts`); `kill` fires from `acceptKill`, `move` from `handle-pane-shortcuts.ts` after the Cmd/Ctrl-Arrow swap. `paneAdded` fires once per pane that becomes visible (seed ids, splits, dor surfaces, restores, auto-spawn) on both engines — dockview via `onDidAddPanel`, Lath via the store-subscription leaf-id diff (seed ids announced explicitly so both engines emit them) — so the page can create a fake shell for each pane without a tiling api.
+- **`WallEvent.kill` / `WallEvent.move` / `WallEvent.paneAdded`** — discriminants on the `WallEvent` union (`lib/src/components/wall/wall-types.ts`); `kill` fires from `acceptKill`, `move` from `handle-pane-shortcuts.ts` after the Cmd/Ctrl-Arrow swap. `paneAdded` fires once per pane that becomes visible (seed ids, splits, dor surfaces, restores, auto-spawn) via the Lath store-subscription leaf-id diff (seed ids announced explicitly so they are emitted too) — so the page can create a fake shell for each pane without touching the tiling engine.
 - **`FakePtyAdapter.pumpActivity(id, durationMs, intervalMs)`** — drives the alert manager for a fixed duration with no data output (used by the `s` busy demo).
 - **`FakePtyAdapter.sendOutput(id, data)`** — pushes data through the data handlers as if the PTY produced it, also driving `alertManager.onData()`.
 - **`MobileTerminalUi.onGestureInput(input, data)`** — optional callback fired only for radial-menu actions, so Pocket credits gesture items without mistaking native keyboard input for gestures.
@@ -104,7 +104,7 @@ Implemented in `dormouse-lib/lib/themes` and `dormouse-lib/components/ThemePicke
 
 The picker is labeled `Theme:` and appears on `/playground/desktop` (inside the theme-aware `SiteHeader`), `/playground/pocket` mobile (floating over the terminal), and the desktop Pocket page (standalone appbar variant). `/pocket` redirects before rendering one.
 
-Each theme is a map of `--vscode-*` overrides. `applyTheme()` cascades them into `--color-*` (via `theme.css` fallbacks), triggers the `MutationObserver` in `lib/src/lib/terminal-theme.ts` to re-read `getTerminalTheme()` for xterm.js terminals, and updates Dockview/Tailwind tokens. The active theme is restored on mount.
+Each theme is a map of `--vscode-*` overrides. `applyTheme()` cascades them into `--color-*` (via `theme.css` fallbacks), triggers the `MutationObserver` in `lib/src/lib/terminal-theme.ts` to re-read `getTerminalTheme()` for xterm.js terminals, and updates Tailwind tokens. The active theme is restored on mount.
 
 ## Mouse and Clipboard Feature Coverage
 

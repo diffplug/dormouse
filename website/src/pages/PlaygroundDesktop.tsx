@@ -207,8 +207,8 @@ function PlaygroundDesktopExperience() {
 
   const handleWallEvent = useCallback((event: WallEvent) => {
     // Every visible pane (the three seed panes + any the user splits off) gets a
-    // fake shell. `paneAdded` is the engine-neutral replacement for dockview's
-    // onDidAddPanel and fires before the pane's terminal spawns on both engines.
+    // fake shell. `paneAdded` fires once per pane that becomes visible, before the
+    // pane's terminal spawns.
     if (event.type === "paneAdded") {
       shellRegistryRef.current?.ensureShell(event.id);
     }

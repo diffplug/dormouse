@@ -61,7 +61,7 @@ function register(id: string, chrome: ChromeSnapshot = CHROME) {
 }
 
 function headerProps(id: string, title: string): PaneProps {
-  return { id, title, params: undefined, panelVisible: true, getAnimEl: () => null };
+  return { id, title, params: undefined, panelVisible: true };
 }
 
 let container: HTMLDivElement;

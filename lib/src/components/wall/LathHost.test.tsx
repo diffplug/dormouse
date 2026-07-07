@@ -247,7 +247,7 @@ describe('LathHost — zoom', () => {
 });
 
 describe('LathHost — pane props contract', () => {
-  it('supplies each body and tab { id, title, params, panelVisible: true } and getAnimEl → the leaf div', () => {
+  it('supplies each body and tab { id, title, params, panelVisible: true }', () => {
     const store = seeded(rowOf('a', 'b'), [
       ['a', meta('A')],
       ['b', meta('B', 'terminal', { url: 'x' })],
@@ -257,11 +257,6 @@ describe('LathHost — pane props contract', () => {
     expect(bodyProps['a']).toMatchObject({ id: 'a', title: 'A', panelVisible: true, params: undefined });
     expect(bodyProps['b']).toMatchObject({ id: 'b', title: 'B', panelVisible: true, params: { url: 'x' } });
     expect(tabProps['a']).toMatchObject({ id: 'a', title: 'A', panelVisible: true });
-
-    // Under Lath the CSS spawn path is disabled (the animator owns entry), so
-    // getAnimEl is a no-op — usePaneChrome's class-based effect stays inert.
-    expect(bodyProps['a'].getAnimEl()).toBeNull();
-    expect(tabProps['b'].getAnimEl()).toBeNull();
   });
 
   it('reports focusin inside a leaf via onLeafFocused', () => {

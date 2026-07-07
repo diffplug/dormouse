@@ -51,7 +51,7 @@ function stubActions(overrides: Partial<WallActions> = {}): WallActions {
 }
 
 function paneProps(id: string, params: TestPanelParams = DEFAULT_PARAMS): PaneProps {
-  return { id, title: 'Browser', params, panelVisible: true, getAnimEl: () => null };
+  return { id, title: 'Browser', params, panelVisible: true };
 }
 
 // The panel's title/param writes route through PaneWriteContext now; forward
@@ -459,7 +459,7 @@ describe('AgentBrowserPanel visibility parking', () => {
   // Engine visibility arrives as the `panelVisible` prop now, not a subscription,
   // so a hidden/shown transition is a re-render with a new prop value. This
   // harness holds panelVisible in state and hands the test a setter, mirroring
-  // what the dockview adapter (or LathHost) does when engine visibility flips.
+  // what LathHost does when engine visibility flips.
   async function renderVisibilityPanel(
     params: TestPanelParams,
   ): Promise<{ setVisible: (visible: boolean) => void }> {
@@ -667,9 +667,8 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
 describe('AgentBrowserPanel tab strip actions', () => {
   // The chip/× use plain onClick. In the real app a click on an unselected
   // browser pane used to be lost because selecting the pane moved its DOM
-  // mid-press; that is fixed at the source by giving browser panels dockview's
-  // `renderer:'always'` (Wall.tsx → rendererForParams), so the node stays put and
-  // the click survives. jsdom doesn't move the DOM, so a dispatched click here
+  // mid-press; under Lath the leaf div is never re-parented, so the node stays put
+  // and the click survives. jsdom doesn't move the DOM, so a dispatched click here
   // just exercises the onClick → selectTab/closeTab wiring.
   async function renderWithTwoTabs(): Promise<ReturnType<typeof vi.fn>> {
     const command = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));

@@ -203,7 +203,7 @@ Invariants:
 ## Current Implemented Commands
 
 Implemented commands call private `surface.*` control methods. `surface.list`
-derives its response from current Dockview panels plus terminal state/activity
+derives its response from the current visible panes plus terminal state/activity
 snapshots where available, then returns `workspace:1` and `window:1` — it
 reports the single active Workspace (Workspace-aware tagging is staged; see
 [Future](#future)).

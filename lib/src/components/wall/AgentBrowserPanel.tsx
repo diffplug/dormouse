@@ -38,7 +38,7 @@ import {
 
 type AgentBrowserPanelParams = AgentBrowserSurfaceParams;
 
-export function AgentBrowserPanel({ id, params: rawParams, panelVisible, getAnimEl, renderMode: renderModeProp }: PaneProps & { renderMode?: RenderMode }) {
+export function AgentBrowserPanel({ id, params: rawParams, panelVisible, renderMode: renderModeProp }: PaneProps & { renderMode?: RenderMode }) {
   // The engine-tracked `title` prop is unused here: the live title is derived
   // from the stream (controller → paneWrite.setTitle), never read back.
   const params = rawParams as AgentBrowserPanelParams | undefined;
@@ -51,7 +51,7 @@ export function AgentBrowserPanel({ id, params: rawParams, panelVisible, getAnim
   const elRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  usePaneChrome(id, elRef, getAnimEl);
+  usePaneChrome(id, elRef);
 
   const session = params?.session;
   const wsPort = params?.wsPort;
@@ -124,8 +124,8 @@ export function AgentBrowserPanel({ id, params: rawParams, panelVisible, getAnim
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controller, paneWrite, id]);
 
-  // Feed effective on-screen visibility (dockview active tab AND foreground
-  // window) so the controller can park a hidden pane after the debounce.
+  // Feed effective on-screen visibility (engine-visible leaf AND foreground window)
+  // so the controller can park a hidden pane after the debounce.
   const visible = useSurfaceVisibility(panelVisible);
   useEffect(() => {
     controller.setVisible(visible);
@@ -278,9 +278,9 @@ export function AgentBrowserPanel({ id, params: rawParams, panelVisible, getAnim
     if (interactive) elRef.current?.focus({ preventScroll: true });
   }, [interactive]);
 
-  // Fallback: if focus fell through to <body> (dockview focus churn, clicks
-  // racing the passthrough transition), forward keys from the window so the pane
-  // never goes keyboard-dead while interactive. Events targeted inside the pane
+  // Fallback: if focus fell through to <body> (focus churn, clicks racing the
+  // passthrough transition), forward keys from the window so the pane never goes
+  // keyboard-dead while interactive. Events targeted inside the pane
   // are skipped — the React handlers above already cover those. The Wall's own
   // capture listener registered earlier, so its dual-tap leader still runs first.
   useEffect(() => {
@@ -336,7 +336,7 @@ export function AgentBrowserPanel({ id, params: rawParams, panelVisible, getAnim
       className={`flex h-full w-full flex-col overflow-hidden bg-terminal-bg outline-none ${TERMINAL_BOTTOM_RADIUS_CLASS}`}
       onMouseDown={() => {
         actions.onClickPanel(id);
-        // Deferred so it lands after dockview's own focus handling for this
+        // Deferred so it lands after the browser's own focus handling for this
         // mousedown (same trick as enterTerminalMode's focusSession).
         requestAnimationFrame(() => elRef.current?.focus({ preventScroll: true }));
       }}

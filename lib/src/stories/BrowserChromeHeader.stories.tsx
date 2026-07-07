@@ -153,7 +153,6 @@ function BrowserChromeStory(args: StoryArgs) {
                     title={args.htmlTitle || hostPathDisplay(args.url)}
                     params={undefined}
                     panelVisible={true}
-                    getAnimEl={() => null}
                   />
                 </div>
               </div>

@@ -3,12 +3,10 @@ import type { ConfirmKill } from '../../KillConfirm';
 import type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind } from '../wall-types';
 import type { WallActions } from '../wall-context';
 
-/** Engine-neutral navigation/query seam the keyboard handlers read instead of
- *  reaching into the dockview api directly (so they work under both dockview and
- *  Lath, where `apiRef.current` is null). Wall builds the concrete impl per engine
- *  (docs/specs/tiling-engine.md → lath-rollout stage 2). */
+/** The navigation/query seam the keyboard handlers read, backed by the Lath engine
+ *  (docs/specs/tiling-engine.md). */
 export interface WallNav {
-  /** Whether the tiling engine is mounted/ready (dockview: `!!api`; Lath: true). */
+  /** Whether the tiling engine is ready (always true under Lath). */
   ready(): boolean;
   /** Nearest pane id in the arrow's direction, or null. */
   findInDirection(id: string, dir: 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown'): string | null;
@@ -16,7 +14,7 @@ export interface WallNav {
   paneParams(id: string): Record<string, unknown> | undefined;
   /** Whether `id` is a live visible pane. */
   hasPane(id: string): boolean;
-  /** Visible pane ids in order (dockview: `api.panels`; Lath: pre-order leaves). */
+  /** Visible pane ids in order (Lath: pre-order leaves). */
   panes(): string[];
 }
 
@@ -24,9 +22,8 @@ export interface WallNav {
  *  signatures on each handler. */
 export interface WallKeyboardCtx {
   nav: WallNav;
-  /** Swap two panes' surfaces (Cmd-Arrow). Wall wires the engine-specific move:
-   *  dockview swaps registry entries + panel titles; Lath swaps leaf identities
-   *  (meta follows ids, so no companion title swap). */
+  /** Swap two panes' surfaces (Cmd-Arrow): swap leaf identities (meta follows ids,
+   *  so no companion title swap). */
   swapWithNeighbor: (fromId: string, toId: string) => void;
   modeRef: RefObject<WallMode>;
   selectedIdRef: RefObject<string | null>;
@@ -36,8 +33,6 @@ export interface WallKeyboardCtx {
   renamingRef: RefObject<string | null>;
   dialogKeyboardActiveRef: RefObject<boolean>;
   paneElements: Map<string, HTMLElement>;
-  killInProgressRef: RefObject<boolean>;
-  overlayElRef: RefObject<HTMLDivElement | null>;
   wallActionsRef: RefObject<WallActions>;
   handleReattachRef: RefObject<(item: DooredItem, options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction }) => void>;
   selectPane: (id: string) => void;

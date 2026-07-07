@@ -167,63 +167,9 @@ body {
   .mobile-gesture-chip-spawn { animation: none; }
 }
 
-/* Pane spawn — directional clip-path reveal applied to the dockview group element.
- * clip-path (not transform) keeps getBoundingClientRect accurate so the selection
- * overlay measures the real post-animation bounds during the animation. */
-
-@keyframes pane-spawn-from-left {
-  from { opacity: 0; clip-path: inset(0 100% 0 0); }
-  to   { opacity: 1; clip-path: inset(0 0 0 0); }
-}
-@keyframes pane-spawn-from-top {
-  from { opacity: 0; clip-path: inset(0 0 100% 0); }
-  to   { opacity: 1; clip-path: inset(0 0 0 0); }
-}
-@keyframes pane-spawn-from-top-left {
-  from { opacity: 0; clip-path: inset(0 100% 100% 0); }
-  to   { opacity: 1; clip-path: inset(0 0 0 0); }
-}
-
-.pane-spawning-from-left     { animation: pane-spawn-from-left     440ms cubic-bezier(0.22, 1, 0.36, 1); }
-.pane-spawning-from-top      { animation: pane-spawn-from-top      440ms cubic-bezier(0.22, 1, 0.36, 1); }
-.pane-spawning-from-top-left { animation: pane-spawn-from-top-left 440ms cubic-bezier(0.22, 1, 0.36, 1); }
-
-/* Pane kill — fade the real pane element out. Opacity only is enough for edge
- * and middle kills: the grower reveal beside the fading pane already carries
- * the directional cue. For a last-pane kill there is no grower, so we also
- * shrink the pane toward its bottom-right corner — a visible disappearance
- * that also pairs diagonally with the auto-spawn's top-left reveal. */
-
-@keyframes pane-fade-out {
-  from { opacity: 1; }
-  to   { opacity: 0; }
-}
-
-@keyframes pane-fade-and-shrink-to-br {
-  from { opacity: 1; transform: scale(1); }
-  to   { opacity: 0; transform: scale(0); }
-}
-
-/* Matches the pane shrink so the focus ring stays visually glued to its pane. */
-@keyframes ring-shrink-to-br {
-  from { transform: scale(1); }
-  to   { transform: scale(0); }
-}
-
-.pane-fading-out                 { animation: pane-fade-out               440ms cubic-bezier(0.22, 1, 0.36, 1) forwards; }
-.pane-fading-and-shrinking-to-br { animation: pane-fade-and-shrink-to-br  440ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
-                                   transform-origin: 100% 100%; }
-.ring-shrinking-to-br            { animation: ring-shrink-to-br           440ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
-                                   transform-origin: 100% 100%; }
-
-@media (prefers-reduced-motion: reduce) {
-  .pane-spawning-from-left,
-  .pane-spawning-from-top,
-  .pane-spawning-from-top-left,
-  .pane-fading-out,
-  .pane-fading-and-shrinking-to-br,
-  .ring-shrinking-to-br { animation: none; }
-}
+/* Pane spawn / kill motion is owned by the Lath animator (docs/specs/tiling-engine.md
+ * → "Animation"): LathHost applies interpolated frames imperatively to the leaf divs,
+ * so there are no CSS entrance/exit classes. */
 
 /* TODO dismiss flourish. Sequence across 500ms:
  *   0–30%  letters fade out while the check springs in (with a small overshoot)

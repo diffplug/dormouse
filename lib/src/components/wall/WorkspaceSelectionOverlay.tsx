@@ -1,11 +1,10 @@
-import { useContext, useEffect, useState, useSyncExternalStore, type CSSProperties, type RefObject } from 'react';
-import type { DockviewApi } from 'dockview-react';
+import { useContext, useEffect, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import {
   DOOR_SELECTION_BORDER_RADIUS,
   TERMINAL_SELECTION_BORDER_RADIUS,
 } from '../design';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
-import { resolvePaneGroupElement } from '../../lib/spatial-nav';
+import { resolvePaneElement } from '../../lib/spatial-nav';
 import type { WallMode, WallSelectionKind } from './wall-types';
 import { DoorElementsContext, PaneElementsContext, WindowFocusedContext } from './wall-context';
 import { MarchingAntsRect } from './MarchingAntsRect';
@@ -18,22 +17,17 @@ export interface LathOverlayStore {
   getSnapshot(): { revision: number };
 }
 
-const NOOP_SUBSCRIBE = (): (() => void) => () => {};
-const NOOP_REVISION = (): number => 0;
-
-export function WorkspaceSelectionOverlay({ apiRef, lathStore, subscribeLathFrames, selectedId, selectedType, mode, overlayElRef }: {
-  apiRef: RefObject<DockviewApi | null>;
-  /** When set (flag on), the overlay re-measures on every Lath commit instead of
-   *  `api.onDidLayoutChange`. `apiRef` stays null on this path. */
-  lathStore?: LathOverlayStore | null;
-  /** The animator's per-frame subscribe (LathHost pumps it). When set (flag on), the
-   *  ring re-measures the moving leaf each frame and drops its own CSS transition (which
-   *  would otherwise lag the streamed rects by ~150ms). */
+export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, selectedId, selectedType, mode }: {
+  /** The Lath store — the overlay re-measures on every commit (`revision` via
+   *  `useSyncExternalStore`), so the ring tracks leaves as they move / resize / restore. */
+  lathStore: LathOverlayStore;
+  /** The animator's per-frame subscribe (LathHost pumps it). The ring re-measures the
+   *  moving leaf each frame and drops its own CSS transition (which would otherwise lag
+   *  the streamed rects by ~150ms). Optional-null for tests. */
   subscribeLathFrames?: ((cb: (settled: boolean) => void) => () => void) | null;
   selectedId: string | null;
   selectedType: WallSelectionKind;
   mode: WallMode;
-  overlayElRef?: RefObject<HTMLDivElement | null>;
 }) {
   const { elements: paneElements, version: paneVersion } = useContext(PaneElementsContext);
   const { elements: doorElements, version: doorVersion } = useContext(DoorElementsContext);
@@ -45,16 +39,12 @@ export function WorkspaceSelectionOverlay({ apiRef, lathStore, subscribeLathFram
   const [animating, setAnimating] = useState(false);
   const isDoor = selectedType === 'door';
 
-  // Re-run the measuring effect after each Lath commit (0 when flag off). Runs
-  // post-render, so `getBoundingClientRect` sees the repositioned leaf divs.
-  const lathRevision = useSyncExternalStore(
-    lathStore?.subscribe ?? NOOP_SUBSCRIBE,
-    lathStore ? () => lathStore.getSnapshot().revision : NOOP_REVISION,
-  );
+  // Re-run the measuring effect after each Lath commit. Runs post-render, so
+  // `getBoundingClientRect` sees the repositioned leaf divs.
+  const lathRevision = useSyncExternalStore(lathStore.subscribe, () => lathStore.getSnapshot().revision);
 
   useEffect(() => {
-    const api = apiRef.current;
-    if ((!api && !lathStore) || !selectedId) {
+    if (!selectedId) {
       setRect(null);
       return;
     }
@@ -64,7 +54,7 @@ export function WorkspaceSelectionOverlay({ apiRef, lathStore, subscribeLathFram
     const update = () => {
       const targetEl = selectedType === 'door'
         ? doorElements.get(selectedId)
-        : resolvePaneGroupElement(api, selectedId, paneElements);
+        : resolvePaneElement(paneElements.get(selectedId));
       if (!targetEl) return;
 
       const targetRect = targetEl.getBoundingClientRect();
@@ -87,23 +77,22 @@ export function WorkspaceSelectionOverlay({ apiRef, lathStore, subscribeLathFram
     update();
 
     const ro = new ResizeObserver(update);
-    const panelEl = resolvePaneGroupElement(api, selectedId, paneElements);
+    const panelEl = resolvePaneElement(paneElements.get(selectedId));
     if (panelEl) ro.observe(panelEl);
     const doorEl = doorElements.get(selectedId);
     if (doorEl) ro.observe(doorEl);
 
-    // dockview drives re-measures via layout events; Lath drives them via the
-    // `lathRevision` effect dependency (the store has no DOM-layout event) and, while
-    // an animation runs, via the animator's per-frame signal (the leaf divs carry the
-    // interpolated inline styles, so DOM measurement tracks the tween frame-accurately).
-    const d = api?.onDidLayoutChange(update);
+    // Re-measures ride the `lathRevision` effect dependency (the store has no
+    // DOM-layout event) and, while an animation runs, the animator's per-frame signal
+    // (the leaf divs carry the interpolated inline styles, so DOM measurement tracks
+    // the tween frame-accurately).
     const unsubFrames = subscribeLathFrames?.((settled) => {
       update();
       setAnimating(!settled);
     });
 
-    return () => { ro.disconnect(); d?.dispose(); unsubFrames?.(); };
-  }, [apiRef, lathStore, subscribeLathFrames, lathRevision, selectedId, selectedType, paneVersion, doorVersion, paneElements, doorElements]);
+    return () => { ro.disconnect(); unsubFrames?.(); };
+  }, [subscribeLathFrames, lathRevision, selectedId, selectedType, paneVersion, doorVersion, paneElements, doorElements]);
 
   if (!rect || !selectedId) return null;
 
@@ -122,11 +111,11 @@ export function WorkspaceSelectionOverlay({ apiRef, lathStore, subscribeLathFram
   if (mode === 'passthrough') {
     style.borderRadius = isDoor ? DOOR_SELECTION_BORDER_RADIUS : TERMINAL_SELECTION_BORDER_RADIUS;
     style.border = `1px solid ${selectionColor}`;
-    return <div ref={overlayElRef} style={style} />;
+    return <div style={style} />;
   }
 
   return (
-    <div ref={overlayElRef} style={style}>
+    <div style={style}>
       <MarchingAntsRect
         width={rect.width}
         height={rect.height}

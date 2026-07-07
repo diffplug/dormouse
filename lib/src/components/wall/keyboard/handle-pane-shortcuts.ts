@@ -65,8 +65,7 @@ export function handlePaneShortcuts(
     }
     if (!targetId) return true;
 
-    // dockview: swap registry entries + panel titles; Lath: swap leaf identities
-    // (meta follows ids). Wall wires the engine-specific move.
+    // Swap leaf identities (meta follows ids), so the two panes trade places.
     ctx.swapWithNeighbor(sid, targetId);
     ctx.fireEvent({ type: 'move', fromId: sid, toId: targetId });
 

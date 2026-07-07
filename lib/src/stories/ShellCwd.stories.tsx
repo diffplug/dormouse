@@ -189,7 +189,7 @@ function HeaderPreview({ id, title }: { id: string; title: string }) {
         <WallActionsContext.Provider value={noopActions}>
           <RenamingIdContext.Provider value={null}>
             <div className="h-[26px] bg-app-bg">
-              <TerminalPaneHeader id={id} title={title} params={undefined} panelVisible={true} getAnimEl={() => null} />
+              <TerminalPaneHeader id={id} title={title} params={undefined} panelVisible={true} />
             </div>
           </RenamingIdContext.Provider>
         </WallActionsContext.Provider>

@@ -5,9 +5,10 @@ import { restoreSession } from './session-restore';
 
 export interface ReconnectResult {
   paneIds: string[];
-  layout?: unknown; // dockview SerializedDockview, only present on cold-start restore
-  /** Lath persisted layout (dual-write half); present alongside `layout`, gated by
-   *  the same pane-set match. */
+  /** Legacy dockview layout blob from pre-Lath saves; migrated one-way on seed. Only
+   *  present on cold-start restore, gated by the same pane-set match as `lathLayout`. */
+  layout?: unknown;
+  /** Native Lath persisted layout; preferred over `layout` when present. */
   lathLayout?: unknown;
   doors?: PersistedDoor[];
 }

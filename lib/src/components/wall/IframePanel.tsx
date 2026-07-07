@@ -76,12 +76,12 @@ function upstreamUrlFromFrameLocation(frameUrl: unknown, targetUrl: string, prox
   }
 }
 
-export function IframePanel({ id, title, params, getAnimEl }: PaneProps) {
+export function IframePanel({ id, title, params }: PaneProps) {
   const actions = useContext(WallActionsContext);
   const paneWrite = useContext(PaneWriteContext);
   const elRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  usePaneChrome(id, elRef, getAnimEl);
+  usePaneChrome(id, elRef);
   const sourceUrl = typeof params?.url === 'string' ? params.url : '';
   const [liveUrl, setLiveUrl] = useState(sourceUrl);
   // A new-tab/window request from the proxy shim, pending the user's choice to
@@ -248,8 +248,7 @@ export function IframePanel({ id, title, params, getAnimEl }: PaneProps) {
   // adopt it as entering the pane (select + passthrough), exactly like clicking
   // any other pane. Only genuine clicks emit `pointerdown`, so command-mode
   // arrow navigation never triggers it, and onClickPanel is idempotent for
-  // repeat clicks. (We can't gate on dockview's `api.isActive`: in a split each
-  // sole panel is always "active" within its own group.)
+  // repeat clicks.
   useEffect(() => {
     if (!proxyOrigin) return;
     const onMessage = (e: MessageEvent) => {
@@ -321,11 +320,10 @@ export function IframePanel({ id, title, params, getAnimEl }: PaneProps) {
       tabIndex={-1}
       className={`relative h-full w-full overflow-hidden bg-terminal-bg outline-none ${TERMINAL_BOTTOM_RADIUS_CLASS}`}
       // A cross-origin iframe is an out-of-process frame; Chromium maps pointer
-      // events to it relative to its nearest compositing/containing ancestor.
-      // Dockview's root (.dv-dockview) sets `contain: layout`, so without this
-      // the frame's reference is that far-away root and clicks land offset by the
-      // pane's distance from it. translateZ(0) gives this container its own layer
-      // co-located with the frame, collapsing the offset to ~0. It's identity, so
+      // events to it relative to its nearest compositing/containing ancestor. If that
+      // ancestor is a far-away layout-contained root, clicks land offset by the pane's
+      // distance from it. translateZ(0) gives this container its own layer co-located
+      // with the frame, collapsing the offset to ~0. It's identity, so
       // getBoundingClientRect (overlay measurement) is unaffected.
       style={{ transform: 'translateZ(0)' }}
       onMouseDown={() => actions.onClickPanel(id)}

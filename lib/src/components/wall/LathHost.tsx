@@ -44,9 +44,9 @@ import { BrowserPanel } from './BrowserPanel';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
 
-/** The geometry LathHost renders with. `gap: 6` matches today's `dormouseTheme.gap`;
- *  `minLeaf` ≈ dockview's default panel minimums. Exported so callers report the
- *  same opts to the store (`setLayoutGeometry`) that the host lays out with. */
+/** The geometry LathHost renders with. `gap: 6` is the pane-to-pane gutter; `minLeaf`
+ *  is a comfortable minimum pane size. Exported so callers report the same opts to
+ *  the store (`setLayoutGeometry`) that the host lays out with. */
 export const LATH_LAYOUT_OPTS: LayoutOpts = { gap: 6, minLeaf: { width: 100, height: 60 } };
 
 /** Widened pointer target over each (thin) sash band, in px. */
@@ -65,11 +65,6 @@ const Z_ZOOMED = 40;
 /** The drop-preview overlay floats above every tiled/dying leaf (a drag can't start
  *  while a leaf is zoomed, so it never competes with `Z_ZOOMED`). */
 const Z_PREVIEW = 45;
-
-/** Lath never runs the CSS spawn-animation path (the animator owns entry): the leaf
- *  divs are registered for the animator via `registerEl`, but `getAnimEl` is a no-op
- *  so `usePaneChrome`'s class-based effect stays inert under Lath. */
-const NOOP_GET_ANIM_EL = (): HTMLElement | null => null;
 
 /** Test seam: swap the resolved body/tab components (keyed by component name) so
  *  jsdom tests never mount the real TerminalPane/xterm. */
@@ -176,10 +171,8 @@ const LathLeaf = memo(function LathLeaf({
     id,
     title: meta?.title,
     params: meta?.params,
-    // Under Lath a mounted leaf is always engine-visible (no active-tab gating).
+    // A mounted leaf is always engine-visible (no active-tab gating).
     panelVisible: true,
-    // The animator owns entry; the CSS spawn path is disabled (no-op getAnimEl).
-    getAnimEl: NOOP_GET_ANIM_EL,
   };
   return (
     <div

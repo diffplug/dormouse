@@ -5,7 +5,7 @@
 > shared `dor` CLI, surface handle model, and host control plumbing this surface
 > builds on.
 
-Dormouse has one dockview component for web content: `BrowserPanel`, persisted as
+Dormouse has one body component for web content: `BrowserPanel`, persisted as
 `surfaceType: 'browser'` with a swappable `renderMode`.
 
 Entry points:
@@ -60,9 +60,10 @@ Invariants:
   navigations initiated by Dormouse chrome.
 - Agent-browser session state is flat (`session`, `wsPort`, `binaryPath`,
   `syncEngaged`, `key`), not nested.
-- Every browser panel uses dockview `renderer: 'always'`, because moving iframe
-  DOM reloads it and moving the screencast canvas mid-click breaks click
-  synthesis.
+- The browser DOM is never moved: Lath's leaf div is never re-parented, so an
+  embedded `<iframe>` never reloads and the screencast canvas never moves
+  mid-click (which would break click synthesis). This replaces the old dockview
+  `renderer: 'always'` workaround — the constraint is gone at the root, not healed.
 
 Source of truth: `BrowserPanel.tsx`, `browser-surface.ts`, `Wall.tsx`
 (`rendererForParams`, `replaceSurface`), `AgentBrowserPanel.tsx`
@@ -241,7 +242,7 @@ canvas, feeds params/visibility, forwards DOM input, and subscribes to one
 snapshot via `useSyncExternalStore`. The controller owns one
 `AgentBrowserConnection` for `{ session, streamPort, binaryPath }` paired with
 its screenshot loop, and it is SURFACE-scoped rather than panel-scoped: it
-survives panel unmount (minimize, dockview layout churn, React StrictMode). So
+survives panel unmount (minimize, layout churn, React StrictMode). So
 minimize no longer synchronously disposes the connection — the view detaches,
 which counts as hidden and parks the connection after the ~1s debounce, reaching
 the same zero-resource end state with less thrash. The agent-browser
@@ -249,11 +250,11 @@ daemon/session stays alive throughout and reattaches from persisted params. The
 controller's client resources are released only at pane kill or a render swap
 away from the renderer (`disposeAgentBrowserSurfaceController` in `Wall.tsx`).
 
-Hidden-but-mounted panes park too. Browser panels use `renderer: 'always'`, so
-an inactive dockview tab or a backgrounded window stays mounted and would keep
-its ~20Hz stream plus per-pulse screenshot loop running for nothing. A pane that
-goes off-screen — or whose view unmounts (minimize) — parks after a ~1s debounce
-(so quick tab-flipping or a StrictMode remount doesn't thrash the connection):
+Hidden-but-mounted panes park too. A Lath leaf is always mounted (no active-tab
+gating), so a backgrounded window would keep its ~20Hz stream plus per-pulse
+screenshot loop running for nothing. A pane that goes off-screen — or whose view
+unmounts (minimize) — parks after a ~1s debounce (so a quick visibility flip or a
+StrictMode remount doesn't thrash the connection):
 the connection and screenshot loop are disposed while the daemon/session stays
 alive, and daemon-side frame streaming stops on its own because clients trigger
 it. Parking also clears the controller's "this stream port opened live" marker,
@@ -438,8 +439,8 @@ Source of truth: `IFRAME_SHIM` in
 - `registerSurfaceFocusHandle` focuses/blurs the iframe element like other
   surfaces.
 - `IframePanel` applies `transform: translateZ(0)` to its immediate container to
-  avoid Chromium out-of-process iframe pointer offsets caused by dockview
-  containment.
+  avoid Chromium out-of-process iframe pointer offsets from a far-away
+  compositing/containing ancestor.
 - The iframe sandbox omits `allow-top-navigation` to block framebusting while
   allowing scripts, same-origin within the proxy origin, forms, popups, modals,
   downloads, and common device/clipboard permissions.
@@ -513,7 +514,7 @@ Source of truth: `lib/src/lib/platform/types.ts`,
 When changing browser-surface behavior:
 
 - `renderMode` is canonical. Never reintroduce `surfaceType: 'iframe' | 'agent-browser'` or `poppedOut` as stored state — extend the `resolveRenderMode` migration instead, and update the kind-mapping table in `docs/specs/glossary.md` if adding a render mode.
-- Every browser panel keeps dockview `renderer: 'always'` — moving iframe DOM reloads it, and moving the screencast canvas mid-click breaks click synthesis.
+- Never move a browser surface's DOM. Lath's leaf div is never re-parented, so an `<iframe>` never reloads and the screencast canvas never moves mid-click (which would break click synthesis) — do not add any re-parenting/reordering that would defeat this.
 - A new agent-browser subcommand must be added to `AGENT_BROWSER_ALLOWED_SUBCOMMANDS` (`lib/src/lib/platform/types.ts`); the host-side allowlist is the security boundary, not the CLI.
 - External-binary spawns go through `spawnAndCapture` (`dor-lib-common`), never raw `child_process` — see `docs/specs/dor-cli.md` → Spawning External Binaries.
 - New kill/swap/teardown paths must run `closeAgentBrowserSession` **and** dispose the surface controller (`disposeAgentBrowserSurfaceController`), and respect the closed-session mark so pop-out auto-revert cannot resurrect a killed session.

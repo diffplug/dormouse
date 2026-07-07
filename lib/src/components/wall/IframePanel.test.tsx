@@ -33,7 +33,7 @@ function stubActions(overrides: Partial<WallActions> = {}): WallActions {
 }
 
 function paneProps(id: string): PaneProps {
-  return { id, title: 'Raw iframe', params: { url: 'http://example.test/app' }, panelVisible: true, getAnimEl: () => null };
+  return { id, title: 'Raw iframe', params: { url: 'http://example.test/app' }, panelVisible: true };
 }
 
 let container: HTMLDivElement;

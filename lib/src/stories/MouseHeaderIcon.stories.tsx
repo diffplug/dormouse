@@ -68,7 +68,6 @@ function MouseIconStoryFrame({
                   title={title}
                   params={undefined}
                   panelVisible={true}
-                  getAnimEl={() => null}
                 />
               </div>
               <div className="relative" style={{ height: 40 }}>

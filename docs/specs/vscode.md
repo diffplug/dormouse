@@ -28,7 +28,7 @@ Frontend Library (lib/src/)
 ├── main.tsx                      — entry point
 ├── cfg.ts                        — timing config (marching ants, alert thresholds)
 ├── theme.css                     — --vscode-* -> semantic --color-* tokens
-├── index.css                     — dockview overrides, marching-ants keyframe
+├── index.css                     — Lath host styling, marching-ants keyframe
 ├── components/
 │   ├── Wall.tsx                  — pane manager shell, mode state, session actions
 │   ├── wall/                     — Wall header/panel/overlay/context helpers
@@ -52,8 +52,7 @@ Frontend Library (lib/src/)
     ├── session-restore.ts        — cold-start pane restoration
     ├── session-types.ts          — PersistedSession/PersistedPane/PersistedAlertState types
     ├── resume-patterns.ts        — detect resumable commands from scrollback
-    ├── spatial-nav.ts            — arrow-key panel navigation + restore neighbor lookup
-    ├── layout-snapshot.ts        — dockview layout cloning + structure signature
+    ├── spatial-nav.ts            — resolve a pane element to its Lath leaf (overlay measurement)
     └── platform/
         ├── types.ts              — PlatformAdapter interface
         ├── index.ts              — adapter factory (auto-detects VS Code vs fake)

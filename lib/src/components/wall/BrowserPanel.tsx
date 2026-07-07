@@ -1,5 +1,5 @@
 /**
- * The single dockview component for every browser surface (docs/specs/dor-browser.md
+ * The single body component for every browser surface (docs/specs/dor-browser.md
  * → "Display Modal And Render Swaps").
  *
  * One surface, swappable renderer: it reads the canonical `renderMode` and mounts

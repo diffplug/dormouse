@@ -1,6 +1,6 @@
 import { createContext } from 'react';
 import type { AlertButtonActionResult, SessionStatus, SetTerminalUserTitleResult } from '../../lib/terminal-registry';
-import type { WallMode, SpawnDirection } from './wall-types';
+import type { WallMode } from './wall-types';
 import type { RenderMode } from './agent-browser-screen';
 
 export interface PaneElementsState {
@@ -71,9 +71,8 @@ export const WallActionsContext = createContext<WallActions>({
 /** Engine-directed writes from a pane/header (title + params). The read side is
  *  the plain `PaneProps`; writes go here because they target the tiling engine,
  *  which owns the per-leaf metadata (docs/specs/tiling-engine.md → "Pane props
- *  contract"). Wall.tsx provides the dockview-backed implementation; the default
- *  is a no-op so a component renders standalone (tests, Storybook) without a
- *  provider. */
+ *  contract"). Wall.tsx provides the engine-backed implementation; the default is a
+ *  no-op so a component renders standalone (tests, Storybook) without a provider. */
 export interface PaneWriteActions {
   setTitle(id: string, title: string): void;
   updateParams(id: string, patch: Record<string, unknown>): void;
@@ -89,4 +88,3 @@ export const ZoomedContext = createContext(false);
 export const WindowFocusedContext = createContext(true);
 
 export const DialogKeyboardContext = createContext<(active: boolean) => void>(() => {});
-export const FreshlySpawnedContext = createContext<Map<string, SpawnDirection>>(new Map());

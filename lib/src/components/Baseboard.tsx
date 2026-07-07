@@ -18,9 +18,9 @@ export interface BaseboardProps {
   items: DooredItem[];
   onReattach: (item: DooredItem) => void;
   notice?: ReactNode;
-  /** A visible Door received a primary-button press (Lath drag-out): the item + the
-   *  press point, so the Wall can start LathHost's threshold-gated external drag. Absent
-   *  (dockview / constrained embedders) leaves Doors click-only — zero behavior change. */
+  /** A visible Door received a primary-button press (drag-out): the item + the press
+   *  point, so the Wall can start LathHost's threshold-gated external drag. Absent
+   *  (constrained embedders without a Wall) leaves Doors click-only. */
   onDoorDragStart?: (item: DooredItem, press: { clientX: number; clientY: number }) => void;
 }
 

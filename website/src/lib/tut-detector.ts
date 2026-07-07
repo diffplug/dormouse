@@ -118,8 +118,7 @@ export class TutDetector {
           // kb-arrows: in command mode, selecting a different pane (a bare arrow
           // key, or a click) grows the set; two distinct panes credits it. Events
           // in passthrough must NOT grow the set. selectionChange is the
-          // engine-neutral replacement for the old DockviewApi.onDidActivePanelChange
-          // listener (selectPane fires it on both engines).
+          // engine-neutral selection signal (selectPane fires it).
           if (this.currentMode === "command" && event.id) {
             // Cmd/Ctrl+Arrow fires `move` then re-selects the swap target, which
             // would otherwise grow commandModePanels to 2 and credit `kb-arrows`

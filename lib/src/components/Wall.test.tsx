@@ -1,11 +1,10 @@
 /**
  * @vitest-environment jsdom
  *
- * Integration smoke for the Lath binding behind `dormouse.flags.lath` (stage 2c):
- * a Wall mounted with the flag on renders panes through LathHost, splits/kills
- * through the engine, and dual-writes both layout formats on save. jsdom has no
- * real layout, so this asserts structure (leaf count, save shape), not geometry —
- * the acceptance matrix in tiling-engine.md is the live gate.
+ * Integration smoke for the Wall on the Lath engine: it renders panes through
+ * LathHost, splits/kills through the engine, and persists the Lath layout on save.
+ * jsdom has no real layout, so this asserts structure (leaf count, save shape), not
+ * geometry — the acceptance matrix in tiling-engine.md is the live gate.
  */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -33,7 +32,6 @@ function leafCount(): number {
 }
 
 beforeEach(() => {
-  localStorage.setItem('dormouse.flags.lath', 'true');
   fake = new FakePtyAdapter();
   setPlatform(fake);
   // jsdom lacks these; Baseboard / dynamic-palette / reduced-motion need them.
@@ -69,7 +67,6 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
-  localStorage.removeItem('dormouse.flags.lath');
   vi.clearAllMocks();
 });
 
@@ -77,14 +74,14 @@ async function flush(): Promise<void> {
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 }
 
-describe('Wall under the Lath flag', () => {
-  it('renders a pane through LathHost, splits via wallActions, kills, and dual-writes on save', async () => {
+describe('Wall on the Lath engine', () => {
+  it('renders a pane through LathHost, splits via wallActions, kills, and persists the Lath layout on save', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
     });
     await flush();
 
-    // 1. A pane renders through LathHost (the leaf div is Lath's, not dockview's).
+    // 1. A pane renders through LathHost (the stable Lath leaf div).
     expect(container.querySelector('.lath-host')).not.toBeNull();
     expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
     expect(leafCount()).toBe(1);
@@ -109,8 +106,8 @@ describe('Wall under the Lath flag', () => {
     await flush();
     expect(leafCount()).toBe(1);
 
-    // 4. A save (flushed via pagehide) dual-writes both the legacy dockview blob and
-    //    the Lath layout.
+    // 4. A save (flushed via pagehide) writes the Lath layout only (no legacy
+    //    dockview `layout` key).
     await act(async () => {
       window.dispatchEvent(new Event('pagehide'));
     });
@@ -120,7 +117,7 @@ describe('Wall under the Lath flag', () => {
     const saved = fake.getState() as { version?: number; layout?: unknown; lathLayout?: { version?: number; leafMeta?: Record<string, unknown> } } | null;
     expect(saved).not.toBeNull();
     expect(saved!.version).toBe(3);
-    expect(saved!.layout).toBeDefined();
+    expect(saved!.layout).toBeUndefined();
     expect(saved!.lathLayout).toBeDefined();
     expect(saved!.lathLayout!.version).toBe(1);
     // The surviving pane is present in the Lath layout's leaf meta.

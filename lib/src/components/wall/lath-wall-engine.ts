@@ -1,12 +1,10 @@
-// The Wall-facing Lath engine handle (docs/specs/tiling-engine.md → lath-rollout
-// stage 2). Wraps the stage-2b headless store (`lath-wall-store.ts`) with the
-// conveniences Wall.tsx needs so each lath branch in Wall stays a one-liner:
-// tree pre-order + meta reads, the dor-direction ↔ Edge ↔ DoorDirection maps, the
-// three-way hydration `seed`, and a legacy-Door → neighbor-tier token bridge.
+// The Wall-facing Lath engine handle (docs/specs/tiling-engine.md). Wraps the
+// headless store (`lath-wall-store.ts`) with the conveniences Wall.tsx needs so each
+// call site stays a one-liner: tree pre-order + meta reads, the dor-direction ↔ Edge
+// ↔ DoorDirection maps, the three-way hydration `seed`, and a legacy-Door →
+// neighbor-tier token bridge.
 //
-// The engine holds NO selection/focus/mode/activation state — those stay in the
-// Wall. This file is only wired up when `dormouse.flags.lath` is on; with the flag
-// off `lath` is null and every Wall branch takes the untouched dockview path.
+// The engine holds NO selection/focus/mode/activation state — those stay in the Wall.
 
 import {
   type Edge,
@@ -27,7 +25,7 @@ import {
 import { prefersReducedMotion } from '../../lib/ui-geometry';
 import { UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
 import type { ResolvedSplitDirection as DorResolvedSplitDirection } from 'dor/commands/types';
-import type { DoorDirection } from '../../lib/spatial-nav';
+import type { DoorDirection } from '../../lib/session-types';
 import {
   type AddLeafPosition,
   type LathWallSnapshot,
@@ -144,17 +142,17 @@ export function leafMetaFromDoor(item: DooredItem): LeafMeta {
   };
 }
 
-/** Synthesize a neighbor-tier restore token for a Door persisted before Lath (or a
- *  dockview-created door that never captured a core token): no fingerprint (skips
- *  the exact tier), the sibling + edge reproduce the original split beside the
- *  neighbor, weight 0.5, index 0. Matches the spec's migration note that pre-Lath
- *  doors restore at the neighbor tier. */
+/** Synthesize a neighbor-tier restore token for a Door persisted before Lath (no
+ *  core `token`): no fingerprint (skips the exact tier), the sibling + edge reproduce
+ *  the original split beside the neighbor, weight 0.5, index 0. Missing legacy fields
+ *  degrade gracefully — an absent `neighborId` (null sibling) falls to the fallback
+ *  tier at restore, and an absent `direction` defaults to `'right'`. */
 export function legacyTokenFromDoor(item: DooredItem): RestoreToken {
   return {
     leafId: item.id,
     weight: 0.5,
-    siblingId: item.neighborId,
-    edge: edgeForDoorDirection(item.direction),
+    siblingId: item.neighborId ?? null,
+    edge: edgeForDoorDirection(item.direction ?? 'right'),
     index: 0,
     fingerprint: null,
   };
@@ -327,7 +325,7 @@ export function createLathWallEngine(
         }
       }
 
-      // 2. Migrate a legacy dockview blob (the other half of the dual-write).
+      // 2. Migrate a legacy dockview blob (one-way upgrade for pre-Lath saves).
       const migrated = dockviewLayoutToLath(dockviewBlob);
       if (migrated && leaves(migrated.tree).length > 0) {
         store.seed(migrated.tree, Object.entries(migrated.leafMeta));

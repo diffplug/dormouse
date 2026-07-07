@@ -1,29 +1,23 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
-import type { DockviewApi } from 'dockview-react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
 import { saveSession } from '../../lib/session-save';
 import { UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
 import { isBrowserParams } from './browser-surface';
-import { dockviewLayoutToLath, lathToDockviewLayout } from './lath-dockview-convert';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, VisiblePane, WallSelectionKind } from './wall-types';
 
 export function useSessionPersistence({
-  dockviewApi,
-  apiRef,
   lath,
   listVisiblePanes,
   doorsRef,
   selectedIdRef,
   selectedTypeRef,
 }: {
-  dockviewApi: DockviewApi | null;
-  apiRef: RefObject<DockviewApi | null>;
-  /** The Lath engine when the flag is on; null on the dockview path. */
-  lath: LathWallEngine | null;
-  /** Engine-neutral visible-pane projection (dockview: `api.panels`; Lath:
-   *  `lath.listPanes()`). Stable identity so the effect never re-subscribes. */
+  /** The Lath engine — the layout authority written on every commit. */
+  lath: LathWallEngine;
+  /** The visible-pane projection (`lath.listPanes()`). Stable identity so the effect
+   *  never re-subscribes. */
   listVisiblePanes: () => VisiblePane[];
   doorsRef: RefObject<DooredItem[]>;
   selectedIdRef: RefObject<string | null>;
@@ -40,21 +34,9 @@ export function useSessionPersistence({
       surfaceType: isBrowserParams(p.params) ? ('browser' as const) : ('terminal' as const),
     }));
     const doors = doorsRef.current ?? [];
-
-    if (lath) {
-      // Dual-write: the Lath tree is authoritative; the dockview blob is derived
-      // so a flag flip to OFF still restores. Doors ride through with their tokens.
-      const lathLayout = lath.serializeLayout();
-      return saveSession(getPlatform(), lathToDockviewLayout(lathLayout), panes, doors, lathLayout);
-    }
-
-    const api = apiRef.current;
-    if (!api) return Promise.resolve();
-    const json = api.toJSON();
-    // Dual-write the other direction: derive the Lath layout from the live
-    // dockview layout (undefined on conversion failure → omitted).
-    return saveSession(getPlatform(), json, panes, doors, dockviewLayoutToLath(json) ?? undefined);
-  }, [apiRef, lath, listVisiblePanes, doorsRef]);
+    // The Lath tree is the sole persisted layout; doors ride through with their tokens.
+    return saveSession(getPlatform(), panes, doors, lath.serializeLayout());
+  }, [lath, listVisiblePanes, doorsRef]);
 
   const persistSessionNow = useCallback((): Promise<void> => {
     if (sessionSavePromiseRef.current) {
@@ -94,10 +76,6 @@ export function useSessionPersistence({
   }, [persistSessionNow]);
 
   useEffect(() => {
-    // Flag off: wait for the dockview api. Flag on: the engine is ready at mount
-    // (dockview never mounts, so `dockviewApi` stays null).
-    if (!dockviewApi && !lath) return;
-
     const platform = getPlatform();
     const handlePtyExit = (detail: { id: string }) => {
       const ownsPane = listVisiblePanes().some((p) => p.id === detail.id);
@@ -115,15 +93,8 @@ export function useSessionPersistence({
       void flushSessionSave().catch(() => undefined);
     };
 
-    // Lath: one subscription — every store commit (add/remove/resize/swap/meta)
-    // schedules a save. dockview: the three layout events, as before.
-    const engineDisposables = lath
-      ? [{ dispose: lath.store.subscribe(scheduleSessionSave) }]
-      : [
-          dockviewApi!.onDidLayoutChange(scheduleSessionSave),
-          dockviewApi!.onDidAddPanel(scheduleSessionSave),
-          dockviewApi!.onDidRemovePanel(scheduleSessionSave),
-        ];
+    // One subscription: every store commit (add/remove/resize/swap/meta) schedules a save.
+    const unsubscribeStore = lath.store.subscribe(scheduleSessionSave);
     const interval = setInterval(scheduleSessionSave, 30_000);
     platform.onPtyExit(handlePtyExit);
     platform.onRequestSessionFlush(handleSessionFlushRequest);
@@ -147,13 +118,11 @@ export function useSessionPersistence({
       unsubFilesDropped?.();
       platform.offRequestSessionFlush(handleSessionFlushRequest);
       platform.offPtyExit(handlePtyExit);
-      for (const d of engineDisposables) d.dispose();
+      unsubscribeStore();
       clearInterval(interval);
       void persistSessionNow().catch(() => undefined);
     };
   }, [
-    apiRef,
-    dockviewApi,
     lath,
     listVisiblePanes,
     flushSessionSave,

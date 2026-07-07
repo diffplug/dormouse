@@ -1,5 +1,5 @@
 // Lath core model: the split tree and the invariant-preserving constructors every
-// op builds through. Pure data — no DOM, React, dockview, or timing. See
+// op builds through. Pure data — no DOM, React, or timing. See
 // docs/specs/tiling-engine.md ("Core model") for the contract this implements.
 
 export type LeafId = string;

@@ -15,7 +15,7 @@ export function TerminalPanel(props: PaneProps) {
   const actions = useContext(WallActionsContext);
   const isFocused = mode === 'passthrough' && selectedId === props.id;
   const elRef = useRef<HTMLDivElement>(null);
-  usePaneChrome(props.id, elRef, props.getAnimEl);
+  usePaneChrome(props.id, elRef);
 
   return (
     <div ref={elRef} className={`h-full w-full overflow-hidden bg-terminal-bg ${TERMINAL_BOTTOM_RADIUS_CLASS}`} onMouseDown={() => actions.onClickPanel(props.id)}>

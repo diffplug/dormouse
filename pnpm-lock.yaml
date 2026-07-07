@@ -58,9 +58,6 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
-      dockview-react:
-        specifier: ^5.1.0
-        version: 5.2.0(react@19.2.7)
       dor-lib-common:
         specifier: workspace:*
         version: link:../dor-lib-common
@@ -174,9 +171,6 @@ importers:
       '@xterm/xterm':
         specifier: 6.1.0-beta.288
         version: 6.1.0-beta.288
-      dockview-react:
-        specifier: ^5.1.0
-        version: 5.2.0(react@19.2.7)
       dormouse-lib:
         specifier: workspace:*
         version: link:../lib
@@ -2435,17 +2429,6 @@ packages:
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
-
-  dockview-core@5.2.0:
-    resolution: {integrity: sha512-Gib8yhK2Ng7w47ASvbUZ7GdhBYbeXEflbIDxf/vobdQBMrN/QXmPaouSsSSkEx5YH0N8ap8GYljfvqjug7h5Fg==}
-
-  dockview-react@5.2.0:
-    resolution: {integrity: sha512-xJU5EiViiYYoP0ez5KxN8I+5CWSiPC27KVgVJBpRYRYJN6wKjMUpUqqSHwTlN1PGw5OzCu7UGQlUl1RQew74ag==}
-
-  dockview@5.2.0:
-    resolution: {integrity: sha512-Eh+SWt+AydcyeVmYkwP+Yxax0XpYSQfXsc4Rad9k+6QEddkSCn4hcjsdxp9lLsw/CaMy39jHawbDVxPMC4kvTg==}
-    peerDependencies:
-      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
   doctrine@3.0.0:
     resolution: {integrity: sha512-yS+Q5i3hBf7GBkd4KG8a7eBNNWNGLTaEwwYWUijIYM7zrlYDM0BFXHjjPWlWZ1Rg7UaddZeIDmi9jF3HmqiQ2w==}
@@ -5967,19 +5950,6 @@ snapshots:
   dequal@2.0.3: {}
 
   detect-libc@2.1.2: {}
-
-  dockview-core@5.2.0: {}
-
-  dockview-react@5.2.0(react@19.2.7):
-    dependencies:
-      dockview: 5.2.0(react@19.2.7)
-    transitivePeerDependencies:
-      - react
-
-  dockview@5.2.0(react@19.2.7):
-    dependencies:
-      dockview-core: 5.2.0
-      react: 19.2.7
 
   doctrine@3.0.0:
     dependencies:
