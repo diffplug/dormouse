@@ -12,6 +12,7 @@ import {
 } from '../lib/terminal-registry';
 import { flattenScenario, SCENARIO_LS_OUTPUT } from '../lib/platform';
 import {
+  getMouseSelectionState,
   setHintToken,
   setSelection,
   type Selection,
@@ -19,6 +20,7 @@ import {
 } from '../lib/mouse-selection';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../components/design';
 import { TouchUiContext } from '../components/touch-ui-context';
+import { settleTerminals, waitForCondition } from './settle-terminals';
 
 function SelectionOverlayStory({
   id,
@@ -96,6 +98,13 @@ const meta: Meta<typeof SelectionOverlayStory> = {
   component: SelectionOverlayStory,
   parameters: {
     fakePty: { scenario: flattenScenario(SCENARIO_LS_OUTPUT) },
+  },
+  // Hold the snapshot until the terminal has painted AND the story's own timer has
+  // applied the selection — otherwise Chromatic can capture a painted terminal with
+  // no overlay yet.
+  play: async ({ args }) => {
+    await settleTerminals();
+    await waitForCondition(() => getMouseSelectionState(args.id).selection !== null);
   },
 };
 

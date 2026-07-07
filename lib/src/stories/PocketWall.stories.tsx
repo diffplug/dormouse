@@ -6,6 +6,7 @@ import { RemotePtyAdapter, type RemoteAdapterClient } from '../remote/client/rem
 import type { TerminalHandlers } from '../remote/client/pocket-client';
 import { setPlatform } from '../lib/platform';
 import { disposeAllSessions, initAlertStateReceiver } from '../lib/terminal-registry';
+import { settleTerminals } from './settle-terminals';
 
 // The adapter decodes `terminal.data` as base64url UTF-8, so encode splash text
 // the same way the real wire does.
@@ -104,6 +105,8 @@ const meta: Meta<typeof PocketWallStory> = {
   title: 'Pocket/PocketWall',
   component: PocketWallStory,
   parameters: { layout: 'centered' },
+  // Hold the snapshot until the attached session has streamed and painted its splash.
+  play: () => settleTerminals(),
 };
 
 export default meta;

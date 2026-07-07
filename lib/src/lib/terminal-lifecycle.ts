@@ -2,6 +2,7 @@ import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { getPlatform, IS_MAC, IS_WINDOWS } from './platform';
+import { cfg } from '../cfg';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
 import { attachMouseModeObserver } from './mouse-mode-observer';
 import { attachKeyboardProtocolArbiter } from './keyboard-protocol-arbiter';
@@ -107,7 +108,7 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
     allowProposedApi: true,
     fontSize: editorFontSize,
     fontFamily: editorFontFamily,
-    cursorBlink: true,
+    cursorBlink: cfg.terminal.cursorBlink,
     theme,
     // kittyKeyboard disambiguates Shift+Enter from Enter for TUIs that read
     // raw VT (Claude Code everywhere; Codex on macOS/Linux). win32InputMode

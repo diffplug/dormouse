@@ -8,6 +8,7 @@ import {
   SCENARIO_LONG_RUNNING,
   SCENARIO_FAST_OUTPUT,
 } from '../lib/platform';
+import { settleTerminals } from './settle-terminals';
 
 function TerminalContainer({ id = 'story-terminal' }: { id?: string }) {
   return (
@@ -20,6 +21,9 @@ function TerminalContainer({ id = 'story-terminal' }: { id?: string }) {
 const meta: Meta<typeof TerminalContainer> = {
   title: 'Terminal/TerminalPane',
   component: TerminalContainer,
+  // Hold every snapshot until the terminal has written its scenario and painted,
+  // so Chromatic never captures a half-rendered prompt.
+  play: () => settleTerminals(),
 };
 
 export default meta;
