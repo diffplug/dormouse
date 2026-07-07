@@ -3,7 +3,7 @@ import type { SessionKeyValueStore } from "dormouse-lib/lib/window-persistence";
 
 /** Persist the blob to the host; the default routes to the Rust `save_session`
  *  command (keyed implicitly by the invoking Tauri window). Injectable for tests. */
-export type SessionSaveFn = (value: string) => Promise<void>;
+type SessionSaveFn = (value: string) => Promise<void>;
 
 const invokeSave: SessionSaveFn = (value) => rawInvoke("save_session", { state: value });
 
@@ -27,8 +27,10 @@ const invokeSave: SessionSaveFn = (value) => rawInvoke("save_session", { state: 
 export class TauriSessionStore implements SessionKeyValueStore {
   private cache: string | null = null;
   private saveInFlight = false;
+  // Latest value queued behind an in-flight save, or null when nothing is
+  // queued. A queued `value` is always a JSON string (never JS null), so null is
+  // a safe "nothing pending" sentinel — even an empty-string blob is distinct.
   private pending: string | null = null;
-  private hasPending = false;
 
   constructor(private readonly save: SessionSaveFn = invokeSave) {}
 
@@ -37,7 +39,10 @@ export class TauriSessionStore implements SessionKeyValueStore {
     this.cache = seed;
   }
 
-  // One blob per window ⇒ one slot; the key is always the adapter's STATE_KEY.
+  // One blob per window ⇒ one slot, so the key is ignored: the axis that
+  // separates windows is the Tauri window label, applied in Rust (save_session /
+  // load_session), not this key. localStorage-backed callers still pass the
+  // adapter's STATE_KEY, which this store simply doesn't need.
   getItem(_key: string): string | null {
     return this.cache;
   }
@@ -46,7 +51,6 @@ export class TauriSessionStore implements SessionKeyValueStore {
     this.cache = value;
     if (this.saveInFlight) {
       this.pending = value;
-      this.hasPending = true;
       return;
     }
     this.saveInFlight = true;
@@ -57,9 +61,8 @@ export class TauriSessionStore implements SessionKeyValueStore {
     this.save(value)
       .catch((err) => console.error("[tauri-session-store] save_session failed:", err))
       .finally(() => {
-        if (this.hasPending) {
-          this.hasPending = false;
-          const next = this.pending ?? "";
+        if (this.pending !== null) {
+          const next = this.pending;
           this.pending = null;
           this.flush(next);
         } else {

@@ -179,6 +179,11 @@ export class TauriAdapter implements PlatformAdapter {
       console.error("[tauri-adapter] load_session failed:", err);
     }
     if (seed === null) {
+      // One-time migration off WebKit localStorage. SUNSET: drop this branch
+      // once shipped builds have all migrated. It assumes a single window — the
+      // legacy blob is per-origin (shared across windows) and window-agnostic,
+      // which is safe today because the app ships one window; a multi-window
+      // build must gate this so only one window adopts the shared blob.
       const legacy = localStorage.getItem(TauriAdapter.STATE_KEY);
       if (legacy !== null) {
         seed = legacy;

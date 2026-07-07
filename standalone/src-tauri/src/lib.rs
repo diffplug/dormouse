@@ -615,12 +615,11 @@ fn read_session_from(dir: &Path, label: &str) -> Result<Option<String>, String> 
 
 fn write_session_to(dir: &Path, label: &str, state: &str) -> Result<(), String> {
     create_dir_all(dir).map_err(|e| format!("create sessions dir: {e}"))?;
-    let path = dir.join(session_file_name(label));
+    let file_name = session_file_name(label);
+    let path = dir.join(&file_name);
+    let tmp = dir.join(format!("{file_name}.tmp"));
     // Atomic replace: write a sibling temp file, fsync it, then rename over the
     // target so a crash mid-write can never truncate the previous good snapshot.
-    let mut tmp = path.clone().into_os_string();
-    tmp.push(".tmp");
-    let tmp = PathBuf::from(tmp);
     {
         let mut f = File::create(&tmp).map_err(|e| format!("open temp: {e}"))?;
         f.write_all(state.as_bytes())
