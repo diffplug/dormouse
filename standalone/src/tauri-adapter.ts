@@ -18,6 +18,7 @@ import type {
 import { AlertManager, type SessionStatus } from "dormouse-lib/lib/alert-manager";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
+import { TauriSessionStore } from "./tauri-session-store";
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
@@ -61,6 +62,7 @@ export class TauriAdapter implements PlatformAdapter {
   private unlistenFns: Array<() => void> = [];
   private protocolParsers = new Map<string, TerminalProtocolParser>();
   private alertManager = new AlertManager();
+  private sessionStore = new TauriSessionStore();
 
   constructor() {
     // Wire alert manager state changes to handlers
@@ -160,6 +162,33 @@ export class TauriAdapter implements PlatformAdapter {
         }));
       }),
     );
+
+    await this.hydrateSessionStore();
+  }
+
+  // Seed the session cache from the Rust file store before restore reads it
+  // (bootstrap() awaits init() before resumeOrRestore). On the first boot after
+  // moving off WebKit localStorage, adopt any legacy blob still parked there,
+  // persist it to Rust, and clear it — so WebKit stops rewriting that key and
+  // its bloated WAL collapses on the next quit (docs/specs/standalone.md).
+  private async hydrateSessionStore(): Promise<void> {
+    let seed: string | null = null;
+    try {
+      seed = (await rawInvoke<string | null>("load_session")) ?? null;
+    } catch (err) {
+      console.error("[tauri-adapter] load_session failed:", err);
+    }
+    if (seed === null) {
+      const legacy = localStorage.getItem(TauriAdapter.STATE_KEY);
+      if (legacy !== null) {
+        seed = legacy;
+        rawInvoke("save_session", { state: legacy }).catch((err) =>
+          console.error("[tauri-adapter] session migration failed:", err),
+        );
+        localStorage.removeItem(TauriAdapter.STATE_KEY);
+      }
+    }
+    this.sessionStore.hydrate(seed);
   }
 
   shutdown(): void {
@@ -432,10 +461,11 @@ export class TauriAdapter implements PlatformAdapter {
 
   // Persisted blob is a PersistedWindow when the workspaces flag is on, a bare
   // PersistedSession when off (docs/specs/transport.md). The window-persistence
-  // helpers own the translation + JSON/storage plumbing.
+  // helpers own the translation + JSON plumbing; the backing store is the
+  // Rust-backed cache (hydrated in init()), not WebKit localStorage.
   saveState(state: unknown): void {
     try {
-      saveSessionState(localStorage, TauriAdapter.STATE_KEY, state);
+      saveSessionState(this.sessionStore, TauriAdapter.STATE_KEY, state);
     } catch {
       console.error('[tauri-adapter] Failed to save session state');
     }
@@ -443,7 +473,7 @@ export class TauriAdapter implements PlatformAdapter {
 
   getState(): unknown {
     try {
-      return loadSessionState(localStorage, TauriAdapter.STATE_KEY);
+      return loadSessionState(this.sessionStore, TauriAdapter.STATE_KEY);
     } catch {
       return null;
     }

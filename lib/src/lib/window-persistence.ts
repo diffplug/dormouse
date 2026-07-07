@@ -42,20 +42,34 @@ export function storedValueForSession(existingStored: unknown, session: unknown)
   return existingWindow ? replaceActiveSession(existingWindow, next) : wrapSessionInWindow(next);
 }
 
+/**
+ * The seam below the shared save/restore code: a single synchronous key/value
+ * slot the host persists natively. `localStorage` (browser-dev sidecar) and the
+ * standalone `TauriSessionStore` (a Rust-backed, boot-seeded cache) both satisfy
+ * it — the same interface, two host-native backings (`docs/specs/standalone.md`
+ * §Persistence). `Storage` is a structural superset, so passing `localStorage`
+ * still type-checks. VS Code does not go through here; it persists one bare
+ * `PersistedSession` per webview through the extension host's own state APIs.
+ */
+export interface SessionKeyValueStore {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
 // Storage-level round trip shared by the standalone adapters (Tauri + the
-// browser-dev sidecar). Owns the JSON parse/stringify and the `Storage` access
+// browser-dev sidecar). Owns the JSON parse/stringify and the store access
 // so each adapter's get/save collapses to one call instead of re-implementing
 // the read-merge-write dance.
 
 /** Read the stored blob and return the `PersistedSession` to restore (or null). */
-export function loadSessionState(storage: Storage, key: string): unknown {
+export function loadSessionState(storage: SessionKeyValueStore, key: string): unknown {
   const raw = storage.getItem(key);
   if (raw === null) return null;
   return activeSessionFromStored(JSON.parse(raw));
 }
 
 /** Persist `session` under `key`, merging into the active Workspace when the flag is on. */
-export function saveSessionState(storage: Storage, key: string, session: unknown): void {
+export function saveSessionState(storage: SessionKeyValueStore, key: string, session: unknown): void {
   // Flag off (the default): store the bare session without reading the existing
   // blob — its previous value is irrelevant, so skip parsing the (potentially
   // large, scrollback-bearing) stored snapshot.
