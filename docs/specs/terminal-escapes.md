@@ -108,6 +108,12 @@ During `pty:replay`, Dormouse reconstructs scrollback by replaying saved bytes t
 
 This filter is limited to *terminal-generated reports*. User keyboard escape sequences — arrows, function keys, bracketed paste, modified key reports from the kitty keyboard protocol, and win32-input-mode key records (`CSI …_`) — must not be swallowed. See `docs/specs/transport.md` and `docs/specs/layout.md` for the contexts that invoke the filter.
 
+### Replay-time mode-reset tail (Dormouse-emitted)
+
+Saved scrollback can end mid-TUI with private modes still latched. Replaying it verbatim re-applies those DECSETs with no process alive to ever DECRST them, so a restored pane can be stuck in mouse-tracking mode, the alt-screen, or with the cursor hidden. After a **dead** session's scrollback replays, Dormouse writes a fixed reset tail (`REPLAY_MODE_RESET`) to return the terminal to a sane baseline for the freshly spawned shell: exit alt-screen (`CSI ? 1049/47/1047 l`), disable mouse tracking (`CSI ? 9/1000/1002/1003 l`), disable mouse encodings (`CSI ? 1005/1006/1015 l`), focus reporting off (`CSI ? 1004 l`), bracketed paste off (`CSI ? 2004 l` — the new shell re-enables it at its prompt), show cursor (`CSI ? 25 h`), application cursor keys off (`CSI ? 1 l`), and `SGR 0`. The only DECSET in the tail is show-cursor; everything else is a DECRST or SGR reset.
+
+The tail is emitted only for dead sessions: `restoreTerminal` (always — the saved process is gone and a fresh shell spawns) and `resumeTerminal` when `exitInfo.alive` is false. It is **never** emitted on a live resume (a VS Code webview reattaching to a still-running PTY), where the running process legitimately owns its modes. It is written inside `writeReplay`, so `isReplaying` covers it and the reply filter above drops any report it provokes; the mouse-mode observer's parser hooks fire on the DECRSTs and re-sync the mouse-selection store to `none`. Source of truth: `lib/src/lib/terminal-report-filter.ts` (`REPLAY_MODE_RESET`), applied in `lib/src/lib/terminal-lifecycle.ts`.
+
 ### Pass-through and fail-inertly
 
 Unknown CSI sequences pass through to xterm.js so it can handle standard terminal behavior Dormouse does not model. The same fail-inertly rule that applies to OSCs (see [iTerm2 identity](#iterm2-identity)) applies to CSIs: any sequence that xterm.js does not recognize must be consumed silently — no visible terminal garbage, no clipboard or file access, no focus changes, no other side effects.

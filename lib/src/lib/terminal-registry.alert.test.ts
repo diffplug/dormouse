@@ -124,6 +124,7 @@ import {
 } from './terminal-registry';
 import { pasteFilePaths } from './clipboard';
 import { registry } from './terminal-store';
+import { REPLAY_MODE_RESET } from './terminal-report-filter';
 
 interface MockTerminalInstance {
   writes: string[];
@@ -1120,5 +1121,55 @@ describe('typeCommandWhenPromptReady — dor ensure requires OSC 633', () => {
     vi.advanceTimersByTime(15_100); // split's best-effort timeout
 
     expect(typed).toContain('pnpm dev\r');
+  });
+});
+
+describe('restore/resume replay mode-reset tail', () => {
+  beforeEach(installRegistryTestGlobals);
+  afterEach(uninstallRegistryTestGlobals);
+
+  it('restore appends the reset tail while still under replay (before spawning the shell)', () => {
+    const entry = restoreTerminal('restore-reset', {
+      scrollback: 'ncmatrix\x1b[?1000h\x1b[?1006h\x1b[?1049h\x1b[?25l',
+    }) as TestTerminalEntry;
+
+    // The tail rides inside writeReplay: scrollback, then REPLAY_MODE_RESET,
+    // then the '\r\n' separator, all before the freshly spawned shell prompt.
+    expect(entry.terminal.writes).toContain(REPLAY_MODE_RESET);
+    const resetAt = entry.terminal.writes.indexOf(REPLAY_MODE_RESET);
+    const sepAt = entry.terminal.writes.indexOf('\r\n');
+    expect(resetAt).toBeGreaterThan(0);
+    expect(sepAt).toBeGreaterThan(resetAt);
+  });
+
+  it('resume of a DEAD session emits the reset tail before the exit line', () => {
+    const entry = resumeTerminal(
+      'resume-dead-reset',
+      'top\x1b[?1002h\x1b[?1003h\x1b[?1049h',
+      { alive: false, exitCode: 7 },
+    ) as TestTerminalEntry;
+
+    expect(entry.terminal.writes).toContain(REPLAY_MODE_RESET);
+    const resetAt = entry.terminal.writes.indexOf(REPLAY_MODE_RESET);
+    const exitAt = entry.terminal.writes.indexOf('\r\n[Process exited with code 7]\r\n');
+    expect(resetAt).toBeGreaterThanOrEqual(0);
+    expect(exitAt).toBeGreaterThan(resetAt);
+  });
+
+  it('resume of a LIVE session leaves modes alone (no reset tail)', () => {
+    // VS Code webview reattaching to a still-running PTY: the process owns its
+    // modes, so replaying its buffer must not reset them.
+    const entry = resumeTerminal(
+      'resume-live-noreset',
+      'vim\x1b[?1000h\x1b[?1049h',
+      { alive: true },
+    ) as TestTerminalEntry;
+
+    expect(entry.terminal.writes).not.toContain(REPLAY_MODE_RESET);
+  });
+
+  it('restore with no scrollback writes no reset tail', () => {
+    const entry = restoreTerminal('restore-empty', {}) as TestTerminalEntry;
+    expect(entry.terminal.writes).not.toContain(REPLAY_MODE_RESET);
   });
 });

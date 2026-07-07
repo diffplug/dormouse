@@ -25,6 +25,7 @@ import {
   inputContainsEnter,
   inputIsReplayTerminalReport,
   inputIsSyntheticTerminalReport,
+  REPLAY_MODE_RESET,
   stripMouseReportsFromInput,
   writeReplay,
 } from './terminal-report-filter';
@@ -398,12 +399,21 @@ export function resumeTerminal(
   if (existing) return existing;
 
   const entry = setupTerminalEntry(id, { untouched: exitInfo?.untouched ?? false });
+  const isDead = exitInfo != null && !exitInfo.alive;
 
   if (replayData) {
-    writeReplay(entry, replayData);
+    // A dead session's replay may end mid-TUI with private modes latched (mouse
+    // tracking, alt-screen, hidden cursor); append the reset tail so the pane
+    // returns to a sane baseline. A live resume (VS Code webview reattaching to
+    // a running PTY) leaves the modes alone — the process still owns them.
+    if (isDead) {
+      writeReplay(entry, replayData, REPLAY_MODE_RESET);
+    } else {
+      writeReplay(entry, replayData);
+    }
     seedPromptShapeFromScrollback(id, replayData);
   }
-  if (exitInfo && !exitInfo.alive) {
+  if (isDead) {
     entry.terminal.write(`\r\n[Process exited with code ${exitInfo.exitCode ?? -1}]\r\n`);
     entry.exited = true;
   }
@@ -431,7 +441,13 @@ export function restoreTerminal(
   }
 
   if (opts.scrollback) {
-    writeReplay(entry, opts.scrollback, '\r\n');
+    // The saved process is gone and a fresh shell is about to spawn. Persisted
+    // scrollback can end mid-TUI with private modes latched (mouse tracking,
+    // alt-screen, hidden cursor); the reset tail returns the terminal to a sane
+    // baseline before the new shell prints its prompt. Kept inside writeReplay
+    // so `entry.isReplaying` still covers it (the input filter drops any reports
+    // it provokes). Source of truth: REPLAY_MODE_RESET in terminal-report-filter.
+    writeReplay(entry, opts.scrollback, REPLAY_MODE_RESET, '\r\n');
     seedPromptShapeFromScrollback(id, opts.scrollback);
   }
   if (opts.cwdWarning) {
