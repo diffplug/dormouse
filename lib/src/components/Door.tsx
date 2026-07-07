@@ -14,7 +14,7 @@ export interface DoorProps {
   /** When provided, a primary-button press reports its start point and the Wall begins
    *  an (inactive) LathHost drag — LathHost owns the threshold, click suppression, and
    *  hit-testing from there. A sub-threshold press-release still fires `onClick`
-   *  (reattach). Absent → Door stays click-only (flag off / non-Lath). */
+   *  (reattach). Absent → Door stays click-only. */
   onDragPress?: (press: { clientX: number; clientY: number }) => void;
 }
 

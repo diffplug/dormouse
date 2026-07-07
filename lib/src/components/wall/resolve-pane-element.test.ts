@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { resolvePaneElement } from './spatial-nav';
+import { resolvePaneElement } from './resolve-pane-element';
 
 describe('resolvePaneElement', () => {
   beforeEach(() => {

@@ -67,7 +67,6 @@ function MouseIconStoryFrame({
                   id={SESSION_ID}
                   title={title}
                   params={undefined}
-                  panelVisible={true}
                 />
               </div>
               <div className="relative" style={{ height: 40 }}>

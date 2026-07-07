@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { act, StrictMode, useState } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
@@ -51,7 +51,7 @@ function stubActions(overrides: Partial<WallActions> = {}): WallActions {
 }
 
 function paneProps(id: string, params: TestPanelParams = DEFAULT_PARAMS): PaneProps {
-  return { id, title: 'Browser', params, panelVisible: true };
+  return { id, title: 'Browser', params };
 }
 
 // The panel's title/param writes route through PaneWriteContext now; forward
@@ -456,31 +456,38 @@ describe('AgentBrowserPanel render mode controller', () => {
 });
 
 describe('AgentBrowserPanel visibility parking', () => {
-  // Engine visibility arrives as the `panelVisible` prop now, not a subscription,
-  // so a hidden/shown transition is a re-render with a new prop value. This
-  // harness holds panelVisible in state and hands the test a setter, mirroring
-  // what LathHost does when engine visibility flips.
+  // Under Lath a mounted leaf is always engine-visible, so on-screen visibility
+  // reduces to document visibility (`useSurfaceVisibility`). A hidden/shown
+  // transition is a `visibilitychange` event; the harness drives it by overriding
+  // `document.visibilityState` and dispatching.
+  function setDocumentHidden(hidden: boolean): void {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => (hidden ? 'hidden' : 'visible'),
+    });
+  }
+
   async function renderVisibilityPanel(
     params: TestPanelParams,
   ): Promise<{ setVisible: (visible: boolean) => void }> {
-    let externalSet: ((visible: boolean) => void) | null = null;
-    function Harness() {
-      const [visible, setVisible] = useState(true);
-      externalSet = setVisible;
-      return <AgentBrowserPanel {...paneProps('ab-panel', params)} panelVisible={visible} />;
-    }
+    setDocumentHidden(false); // mount on-screen
     await act(async () => {
       root.render(
         <StrictMode>
           <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
             <WallActionsContext.Provider value={stubActions()}>
-              <Harness />
+              <AgentBrowserPanel {...paneProps('ab-panel', params)} />
             </WallActionsContext.Provider>
           </PaneWriteContext.Provider>
         </StrictMode>,
       );
     });
-    return { setVisible: (visible) => externalSet?.(visible) };
+    return {
+      setVisible: (visible) => {
+        setDocumentHidden(!visible);
+        document.dispatchEvent(new Event('visibilitychange'));
+      },
+    };
   }
 
   const streamSockets = (port: number) =>
@@ -488,7 +495,10 @@ describe('AgentBrowserPanel visibility parking', () => {
   const liveStreamSocket = (port: number) => streamSockets(port).at(-1);
 
   beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (document as unknown as { visibilityState?: unknown }).visibilityState;
+  });
 
   it('parks a hidden panel: closes the stream and opens no replacement', async () => {
     const { setVisible } = await renderVisibilityPanel({
@@ -574,7 +584,7 @@ describe('AgentBrowserPanel visibility parking', () => {
     expect(socket?.readyState).toBe(1);
   });
 
-  it('parks when the document is hidden even if the panel tab is visible', async () => {
+  it('parks when the document is hidden (raw visibilitychange event)', async () => {
     await renderVisibilityPanel({
       surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
     });
@@ -583,13 +593,9 @@ describe('AgentBrowserPanel visibility parking', () => {
     expect(socket?.readyState).toBe(1);
 
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
-    try {
-      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
-      await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
-      expect(socket?.readyState).toBe(3);
-    } finally {
-      delete (document as unknown as { visibilityState?: unknown }).visibilityState;
-    }
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
+    expect(socket?.readyState).toBe(3);
   });
 
   it('does not park when a hide is reversed within the delay', async () => {

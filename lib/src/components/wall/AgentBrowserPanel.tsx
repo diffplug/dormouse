@@ -38,7 +38,7 @@ import {
 
 type AgentBrowserPanelParams = AgentBrowserSurfaceParams;
 
-export function AgentBrowserPanel({ id, params: rawParams, panelVisible, renderMode: renderModeProp }: PaneProps & { renderMode?: RenderMode }) {
+export function AgentBrowserPanel({ id, params: rawParams, renderMode: renderModeProp }: PaneProps & { renderMode?: RenderMode }) {
   // The engine-tracked `title` prop is unused here: the live title is derived
   // from the stream (controller → paneWrite.setTitle), never read back.
   const params = rawParams as AgentBrowserPanelParams | undefined;
@@ -124,9 +124,9 @@ export function AgentBrowserPanel({ id, params: rawParams, panelVisible, renderM
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controller, paneWrite, id]);
 
-  // Feed effective on-screen visibility (engine-visible leaf AND foreground window)
-  // so the controller can park a hidden pane after the debounce.
-  const visible = useSurfaceVisibility(panelVisible);
+  // Feed effective on-screen visibility (foreground window; a mounted leaf is always
+  // engine-visible) so the controller can park a hidden pane after the debounce.
+  const visible = useSurfaceVisibility();
   useEffect(() => {
     controller.setVisible(visible);
   }, [controller, visible]);

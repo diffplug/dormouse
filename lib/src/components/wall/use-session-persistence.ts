@@ -5,20 +5,18 @@ import { saveSession } from '../../lib/session-save';
 import { UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
 import { isBrowserParams } from './browser-surface';
 import type { LathWallEngine } from './lath-wall-engine';
-import type { DooredItem, VisiblePane, WallSelectionKind } from './wall-types';
+import type { DooredItem, WallSelectionKind } from './wall-types';
 
 export function useSessionPersistence({
   lath,
-  listVisiblePanes,
   doorsRef,
   selectedIdRef,
   selectedTypeRef,
 }: {
-  /** The Lath engine — the layout authority written on every commit. */
+  /** The Lath engine — the layout authority written on every commit, and the source
+   *  of the visible-pane projection (`lath.listPanes()`). Stable identity, so the
+   *  effect never re-subscribes. */
   lath: LathWallEngine;
-  /** The visible-pane projection (`lath.listPanes()`). Stable identity so the effect
-   *  never re-subscribes. */
-  listVisiblePanes: () => VisiblePane[];
   doorsRef: RefObject<DooredItem[]>;
   selectedIdRef: RefObject<string | null>;
   selectedTypeRef: RefObject<WallSelectionKind>;
@@ -28,7 +26,7 @@ export function useSessionPersistence({
   const pendingSaveNeededRef = useRef(false);
 
   const doSave = useCallback((): Promise<void> => {
-    const panes = listVisiblePanes().map((p) => ({
+    const panes = lath.listPanes().map((p) => ({
       id: p.id,
       title: p.title ?? UNNAMED_PANEL_TITLE,
       surfaceType: isBrowserParams(p.params) ? ('browser' as const) : ('terminal' as const),
@@ -36,7 +34,7 @@ export function useSessionPersistence({
     const doors = doorsRef.current ?? [];
     // The Lath tree is the sole persisted layout; doors ride through with their tokens.
     return saveSession(getPlatform(), panes, doors, lath.serializeLayout());
-  }, [lath, listVisiblePanes, doorsRef]);
+  }, [lath, doorsRef]);
 
   const persistSessionNow = useCallback((): Promise<void> => {
     if (sessionSavePromiseRef.current) {
@@ -78,7 +76,7 @@ export function useSessionPersistence({
   useEffect(() => {
     const platform = getPlatform();
     const handlePtyExit = (detail: { id: string }) => {
-      const ownsPane = listVisiblePanes().some((p) => p.id === detail.id);
+      const ownsPane = lath.listPanes().some((p) => p.id === detail.id);
       if (!ownsPane) return;
       void flushSessionSave().catch(() => undefined);
     };
@@ -105,7 +103,7 @@ export function useSessionPersistence({
       if (paths.length === 0) return;
       const sid = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
       if (!sid) return;
-      if (!listVisiblePanes().some((p) => p.id === sid)) return;
+      if (!lath.listPanes().some((p) => p.id === sid)) return;
       pasteFilePaths(sid, paths);
     });
 
@@ -124,7 +122,6 @@ export function useSessionPersistence({
     };
   }, [
     lath,
-    listVisiblePanes,
     flushSessionSave,
     persistSessionNow,
     scheduleSessionSave,

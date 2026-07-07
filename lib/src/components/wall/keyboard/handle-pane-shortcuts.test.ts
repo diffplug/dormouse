@@ -25,7 +25,6 @@ vi.mock('../../KillConfirm', () => ({
 
 function makeNav(overrides: Partial<WallKeyboardCtx['nav']> = {}): WallKeyboardCtx['nav'] {
   return {
-    ready: () => true,
     findInDirection: () => null,
     paneParams: () => undefined,
     hasPane: () => false,
@@ -43,7 +42,6 @@ function makeCtx(overrides: Partial<WallKeyboardCtx> = {}): WallKeyboardCtx {
     selectedTypeRef: { current: 'pane' },
     doorsRef: { current: [{ id: 'pane-a', title: 'Pane A' }] },
     dialogKeyboardActiveRef: { current: false },
-    paneElements: new Map(),
     wallActionsRef: {
       current: {
         onSplitH: vi.fn(),
@@ -151,12 +149,5 @@ describe('handlePaneShortcuts Cmd-Arrow swap (nav seam)', () => {
 
     expect(ctx.swapWithNeighbor).not.toHaveBeenCalled();
     expect(ctx.selectPane).not.toHaveBeenCalled();
-  });
-
-  it('bails entirely when the engine is not ready', () => {
-    const ctx = makeCtx({ nav: makeNav({ ready: () => false }) });
-
-    expect(handlePaneShortcuts(keydown('x'), ctx, { current: null })).toBe(false);
-    expect(ctx.killPaneImmediately).not.toHaveBeenCalled();
   });
 });

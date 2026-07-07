@@ -1,9 +1,15 @@
-// The Lath-side Wall store: headless state over the stage-1 core (docs/specs/
-// tiling-engine.md → "Adapters; the HTML adapter (LathHost)", "Pane props contract").
-// It owns the split tree plus a per-leaf metadata map and exposes a
-// `useSyncExternalStore`-compatible snapshot. Every mutator applies exactly one
-// pure core op; a rejected op (`ok: false`) commits nothing and returns the
-// failure verbatim, so callers can distinguish "did nothing" from "changed".
+// The Lath-side Wall store: the headless state machine + geometry + enter hints over
+// the stage-1 core (docs/specs/tiling-engine.md → "The wall store and engine"). It
+// owns the split tree, a per-leaf metadata map, zoom, the reported layout geometry,
+// and the pending enter-hint map, and exposes a `useSyncExternalStore`-compatible
+// snapshot. Every mutator applies exactly one pure core op; a rejected op
+// (`ok: false`) commits nothing and returns the failure verbatim, so callers can
+// distinguish "did nothing" from "changed".
+//
+// This is the sole state authority: every state op and geometry query reaches it
+// directly as `lath.store.*`. The engine (`lath-wall-engine.ts`) only layers
+// presentation / vocabulary / persistence conveniences over it — it re-exports none
+// of these mutators or queries.
 //
 // What lives here is *geometry + metadata only*: there is no selection, focus,
 // mode, or activation anywhere in this file — those stay in the Wall, which wires
@@ -33,6 +39,13 @@ import {
   split,
   swap,
 } from '../../lib/lath/ops';
+
+/** The geometry the wall lays out with: `gap` is the pane-to-pane gutter, `minLeaf`
+ *  a comfortable minimum pane size. Pure data beside the store's geometry contract —
+ *  the HTML adapter (LathHost) lays out with it and reports it back via
+ *  `setLayoutGeometry`, so the store's queries (restore / resize / neighbors /
+ *  autoEdge) match the screen. */
+export const LATH_LAYOUT_OPTS: LayoutOpts = { gap: 6, minLeaf: { width: 100, height: 60 } };
 
 /** Per-leaf presentation metadata, keyed by leaf id in the snapshot's `leafMeta`
  *  map — the Pane props contract's "read side", serialized inside the persisted

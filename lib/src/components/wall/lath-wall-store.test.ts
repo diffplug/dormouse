@@ -1,34 +1,20 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createLathWallStore, type LathWallStore, type LeafMeta } from './lath-wall-store';
-import { leaves, oppositeEdge, type LathTree } from '../../lib/lath/model';
-import type { LayoutOpts } from '../../lib/lath/layout';
+import { createLathWallStore, type LathWallStore, LATH_LAYOUT_OPTS } from './lath-wall-store';
+import { leaves, oppositeEdge, type LathNode, type LathTree } from '../../lib/lath/model';
+import { leaf, split, tree } from '../../lib/lath/test-util';
+import { leafMeta } from './lath-test-fixtures';
 
-const OPTS: LayoutOpts = { gap: 6, minLeaf: { width: 100, height: 60 } };
 const RECT = { x: 0, y: 0, width: 800, height: 600 };
 
-function meta(component = 'terminal', title = 't'): LeafMeta {
-  return { component, tabComponent: component === 'terminal' ? 'terminal' : 'surface', title };
-}
-
-/** a | b, a row split at 50/50. */
-function twoLeafRow(): LathTree {
-  return {
-    root: {
-      kind: 'split',
-      dir: 'row',
-      children: [
-        { node: { kind: 'leaf', id: 'a' }, weight: 0.5 },
-        { node: { kind: 'leaf', id: 'b' }, weight: 0.5 },
-      ],
-    },
-  };
-}
+/** a | b, a row split at 50/50 (built from the shared core test builders). */
+const twoLeafRow = (): LathTree =>
+  tree(split('row', [leaf('a'), 0.5] as [LathNode, number], [leaf('b'), 0.5] as [LathNode, number]));
 
 function seeded(): LathWallStore {
   const store = createLathWallStore();
   store.seed(twoLeafRow(), [
-    ['a', meta('terminal', 'A')],
-    ['b', meta('browser', 'B')],
+    ['a', leafMeta({ title: 'A' })],
+    ['b', leafMeta({ component: 'browser', title: 'B' })],
   ]);
   return store;
 }
@@ -43,7 +29,7 @@ describe('createLathWallStore — snapshot basics', () => {
     expect(s0.revision).toBe(0);
     expect(store.getSnapshot()).toBe(s0); // same identity, no commit
 
-    store.seed(twoLeafRow(), [['a', meta()], ['b', meta()]]);
+    store.seed(twoLeafRow(), [['a', leafMeta()], ['b', leafMeta()]]);
     expect(store.getSnapshot()).not.toBe(s0);
     expect(store.getSnapshot().revision).toBe(1);
   });
@@ -51,7 +37,7 @@ describe('createLathWallStore — snapshot basics', () => {
   it('seed replaces everything and clears zoom', () => {
     const store = seeded();
     store.setZoomed('a');
-    store.seed({ root: { kind: 'leaf', id: 'z' } }, [['z', meta()]]);
+    store.seed({ root: { kind: 'leaf', id: 'z' } }, [['z', leafMeta()]]);
     const s = store.getSnapshot();
     expect(leaves(s.tree)).toEqual(['z']);
     expect(s.zoomedId).toBeNull();
@@ -62,7 +48,7 @@ describe('createLathWallStore — snapshot basics', () => {
 describe('addLeaf', () => {
   it('seeds the root of an empty tree', () => {
     const store = createLathWallStore();
-    const r = store.addLeaf('x', meta(), null);
+    const r = store.addLeaf('x', leafMeta(), null);
     expect(r.ok).toBe(true);
     expect(leaves(store.getSnapshot().tree)).toEqual(['x']);
     expect(store.getSnapshot().leafMeta.get('x')?.title).toBe('t');
@@ -70,7 +56,7 @@ describe('addLeaf', () => {
 
   it('splits beside a ref leaf on the given edge', () => {
     const store = seeded();
-    const r = store.addLeaf('c', meta(), { refId: 'a', edge: 'right' });
+    const r = store.addLeaf('c', leafMeta(), { refId: 'a', edge: 'right' });
     expect(r.ok).toBe(true);
     expect(new Set(leaves(store.getSnapshot().tree))).toEqual(new Set(['a', 'b', 'c']));
     expect(store.has('c')).toBe(true);
@@ -78,8 +64,8 @@ describe('addLeaf', () => {
 
   it('falls back to splitting beside the last leaf via autoEdge when position is null', () => {
     const store = seeded();
-    store.setLayoutGeometry(RECT, OPTS);
-    const r = store.addLeaf('c', meta(), null);
+    store.setLayoutGeometry(RECT, LATH_LAYOUT_OPTS);
+    const r = store.addLeaf('c', leafMeta(), null);
     expect(r.ok).toBe(true);
     // last leaf is 'b'; wide row rect → autoEdge picks a right split beside it.
     expect(store.has('c')).toBe(true);
@@ -90,7 +76,7 @@ describe('addLeaf', () => {
     const listener = vi.fn();
     store.subscribe(listener);
     const before = store.getSnapshot();
-    const r = store.addLeaf('a', meta(), { refId: 'b', edge: 'right' });
+    const r = store.addLeaf('a', leafMeta(), { refId: 'b', edge: 'right' });
     expect(r.ok).toBe(false);
     expect(store.getSnapshot()).toBe(before);
     expect(listener).not.toHaveBeenCalled();
@@ -133,7 +119,7 @@ describe('replaceLeaf', () => {
   it('atomically swaps id and moves meta in one commit', () => {
     const store = seeded();
     const rev = store.getSnapshot().revision;
-    const r = store.replaceLeaf('a', 'a2', meta('terminal', 'A2'));
+    const r = store.replaceLeaf('a', 'a2', leafMeta({ title: 'A2' }));
     expect(r.ok).toBe(true);
     const s = store.getSnapshot();
     expect(s.revision).toBe(rev + 1); // single commit — atomic
@@ -144,18 +130,18 @@ describe('replaceLeaf', () => {
 
   it('rejects when old is missing or new already exists', () => {
     const store = seeded();
-    expect(store.replaceLeaf('nope', 'x', meta()).ok).toBe(false);
-    expect(store.replaceLeaf('a', 'b', meta()).ok).toBe(false);
+    expect(store.replaceLeaf('nope', 'x', leafMeta()).ok).toBe(false);
+    expect(store.replaceLeaf('a', 'b', leafMeta()).ok).toBe(false);
   });
 
   it('retargets zoomedId to the new id when the replaced leaf was zoomed', () => {
     const store = seeded();
     store.setZoomed('a');
     // Replacing a different leaf leaves the zoom on 'a'.
-    store.replaceLeaf('b', 'b2', meta());
+    store.replaceLeaf('b', 'b2', leafMeta());
     expect(store.getSnapshot().zoomedId).toBe('a');
     // Replacing the zoomed leaf follows it to the new slot id.
-    store.replaceLeaf('a', 'a2', meta());
+    store.replaceLeaf('a', 'a2', leafMeta());
     expect(store.getSnapshot().zoomedId).toBe('a2');
   });
 });
@@ -163,10 +149,10 @@ describe('replaceLeaf', () => {
 describe('restoreLeaf', () => {
   it('restores a removed leaf (neighbor tier) and sets its meta', () => {
     const store = seeded();
-    store.setLayoutGeometry(RECT, OPTS);
+    store.setLayoutGeometry(RECT, LATH_LAYOUT_OPTS);
     const removed = store.removeLeaf('b');
     expect(removed.ok).toBe(true);
-    const r = store.restoreLeaf(meta('browser', 'B-back'), removed.token!, { fallbackRef: 'a' });
+    const r = store.restoreLeaf(leafMeta({ component: 'browser', title: 'B-back' }), removed.token!, { fallbackRef: 'a' });
     expect(r.ok).toBe(true);
     expect(r.tier).toBe('neighbor');
     expect(store.has('b')).toBe(true);
@@ -177,8 +163,8 @@ describe('restoreLeaf', () => {
     const store = seeded();
     const removed = store.removeLeaf('b');
     // restore once (ok), then a second restore of the same token must reject.
-    store.restoreLeaf(meta(), removed.token!, { fallbackRef: 'a' });
-    const again = store.restoreLeaf(meta(), removed.token!, { fallbackRef: 'a' });
+    store.restoreLeaf(leafMeta(), removed.token!, { fallbackRef: 'a' });
+    const again = store.restoreLeaf(leafMeta(), removed.token!, { fallbackRef: 'a' });
     expect(again.ok).toBe(false);
     expect(again.tier).toBeNull();
   });
@@ -238,7 +224,7 @@ describe('moveLeaf', () => {
 describe('insertLeaf', () => {
   it('inserts a NEW leaf onto an edge target and sets its meta', () => {
     const store = seeded();
-    const r = store.insertLeaf('c', meta('terminal', 'C'), { kind: 'edge', path: [1], edge: 'right' });
+    const r = store.insertLeaf('c', leafMeta({ title: 'C' }), { kind: 'edge', path: [1], edge: 'right' });
     expect(r.ok).toBe(true);
     const s = store.getSnapshot();
     expect(leaves(s.tree).sort()).toEqual(['a', 'b', 'c']);
@@ -248,8 +234,8 @@ describe('insertLeaf', () => {
   it('rejects a duplicate id or a swap target without committing', () => {
     const store = seeded();
     const rev = store.getSnapshot().revision;
-    expect(store.insertLeaf('a', meta(), { kind: 'edge', path: [1], edge: 'right' }).ok).toBe(false);
-    expect(store.insertLeaf('c', meta(), { kind: 'swap', leaf: 'a' }).ok).toBe(false);
+    expect(store.insertLeaf('a', leafMeta(), { kind: 'edge', path: [1], edge: 'right' }).ok).toBe(false);
+    expect(store.insertLeaf('c', leafMeta(), { kind: 'swap', leaf: 'a' }).ok).toBe(false);
     expect(store.getSnapshot().revision).toBe(rev);
   });
 });
@@ -257,44 +243,44 @@ describe('insertLeaf', () => {
 describe('enter hints (derived inside the mutators)', () => {
   it('addLeaf derives the opposite-edge hint from a positioned split', () => {
     const store = seeded();
-    store.addLeaf('c', meta(), { refId: 'a', edge: 'right' });
+    store.addLeaf('c', leafMeta(), { refId: 'a', edge: 'right' });
     // Placed on the right → grows from the shared (left) boundary.
     expect(store.consumeEnterHints().get('c')).toBe('left');
   });
 
   it('addLeaf derives a hint from its null-position autoEdge fallback', () => {
     const store = seeded();
-    store.setLayoutGeometry(RECT, OPTS);
+    store.setLayoutGeometry(RECT, LATH_LAYOUT_OPTS);
     const edge = store.autoEdgeFor('b'); // the last leaf it splits beside
-    store.addLeaf('c', meta(), null);
+    store.addLeaf('c', leafMeta(), null);
     expect(store.consumeEnterHints().get('c')).toBe(oppositeEdge(edge));
   });
 
   it('restoreLeaf derives the hint from the token edge, and consume drains the map', () => {
     const store = seeded();
-    store.setLayoutGeometry(RECT, OPTS);
+    store.setLayoutGeometry(RECT, LATH_LAYOUT_OPTS);
     const removed = store.removeLeaf('b');
-    store.restoreLeaf(meta(), removed.token!, { fallbackRef: 'a' });
+    store.restoreLeaf(leafMeta(), removed.token!, { fallbackRef: 'a' });
     expect(store.consumeEnterHints().get('b')).toBe(oppositeEdge(removed.token!.edge));
     expect(store.consumeEnterHints().size).toBe(0); // consume clears the map
   });
 
   it('insertLeaf derives the hint from an edge target', () => {
     const store = seeded();
-    store.insertLeaf('c', meta(), { kind: 'edge', path: [1], edge: 'right' });
+    store.insertLeaf('c', leafMeta(), { kind: 'edge', path: [1], edge: 'right' });
     expect(store.consumeEnterHints().get('c')).toBe('left');
   });
 
   it('an explicit pre-set setEnterHint wins over the mutator-derived hint', () => {
     const store = seeded();
     store.setEnterHint('c', 'top-left'); // policy override (e.g. auto-spawn refill)
-    store.addLeaf('c', meta(), { refId: 'a', edge: 'right' });
+    store.addLeaf('c', leafMeta(), { refId: 'a', edge: 'right' });
     expect(store.consumeEnterHints().get('c')).toBe('top-left');
   });
 
   it('sets no hint for an empty-tree root add (no edge to derive from)', () => {
     const store = createLathWallStore();
-    store.addLeaf('x', meta(), null); // becomes the root
+    store.addLeaf('x', leafMeta(), null); // becomes the root
     expect(store.consumeEnterHints().size).toBe(0);
   });
 });
@@ -302,7 +288,7 @@ describe('enter hints (derived inside the mutators)', () => {
 describe('resizeBoundary', () => {
   it('adjusts weights using the reported geometry', () => {
     const store = seeded();
-    store.setLayoutGeometry(RECT, OPTS);
+    store.setLayoutGeometry(RECT, LATH_LAYOUT_OPTS);
     const r = store.resizeBoundary([], 0, 100);
     expect(r.ok).toBe(true);
     const root = store.getSnapshot().tree.root;
@@ -395,7 +381,7 @@ describe('queries', () => {
   it('neighborOf uses the seeded geometry (null without it)', () => {
     const store = seeded();
     expect(store.neighborOf('a', 'right')).toBeNull(); // no geometry yet
-    store.setLayoutGeometry(RECT, OPTS);
+    store.setLayoutGeometry(RECT, LATH_LAYOUT_OPTS);
     expect(store.neighborOf('a', 'right')).toBe('b');
     expect(store.neighborOf('b', 'left')).toBe('a');
     expect(store.neighborOf('a', 'left')).toBeNull();

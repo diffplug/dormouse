@@ -152,7 +152,6 @@ function BrowserChromeStory(args: StoryArgs) {
                     id={surfaceId}
                     title={args.htmlTitle || hostPathDisplay(args.url)}
                     params={undefined}
-                    panelVisible={true}
                   />
                 </div>
               </div>

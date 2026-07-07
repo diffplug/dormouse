@@ -16,7 +16,7 @@ export function handlePaneNavigation(
   e.stopPropagation();
 
   const sid = ctx.selectedIdRef.current;
-  if (!ctx.nav.ready() || !sid) return true;
+  if (!sid) return true;
 
   const dir = e.key;
   const currentType = ctx.selectedTypeRef.current;

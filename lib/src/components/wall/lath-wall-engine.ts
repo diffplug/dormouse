@@ -1,8 +1,11 @@
-// The Wall-facing Lath engine handle (docs/specs/tiling-engine.md). Wraps the
-// headless store (`lath-wall-store.ts`) with the conveniences Wall.tsx needs so each
-// call site stays a one-liner: tree pre-order + meta reads, the dor-direction ↔ Edge
-// ↔ DoorDirection maps, the three-way hydration `seed`, and a legacy-Door →
-// neighbor-tier token bridge.
+// The Wall-facing Lath engine handle (docs/specs/tiling-engine.md → "The wall store
+// and engine"). The store (`lath-wall-store.ts`) is the state machine + geometry +
+// enter hints; the engine layers presentation, vocabulary, and persistence
+// conveniences over it — the animator (entry/exit/tween + dying state), the
+// pane-list / meta projections, the dor-direction ↔ Edge ↔ Door-direction maps, the
+// leaf-meta builders, the legacy-Door → neighbor-tier token bridge, and the
+// three-way hydration `seed` + `serializeLayout`. Every state op and geometry query
+// goes straight to `lath.store.*`; the engine no longer re-exports them.
 //
 // The engine holds NO selection/focus/mode/activation state — those stay in the Wall.
 
@@ -14,9 +17,8 @@ import {
   validate,
 } from '../../lib/lath/model';
 import type { Direction } from '../../lib/lath/layout';
-import type { DropTarget, RestoreToken } from '../../lib/lath/ops';
+import type { RestoreToken } from '../../lib/lath/ops';
 import {
-  type EnterFrom,
   type LathAnimator,
   LATH_EASING,
   LATH_MOTION_MS,
@@ -27,17 +29,17 @@ import { UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
 import type { ResolvedSplitDirection as DorResolvedSplitDirection } from 'dor/commands/types';
 import type { DoorDirection } from '../../lib/session-types';
 import {
-  type AddLeafPosition,
   type LathWallSnapshot,
   type LathWallStore,
   type LeafMeta,
   createLathWallStore,
 } from './lath-wall-store';
+import { dockviewLayoutToLath } from './lath-dockview-convert';
 import {
   type LathPersistedLayout,
-  dockviewLayoutToLath,
+  isLathPersistedLayout,
   lathLayoutFromStore,
-} from './lath-dockview-convert';
+} from './lath-persistence';
 import type { DooredItem, VisiblePane } from './wall-types';
 
 /** Wall-clock reader for the animator (the single definition — LathHost imports it
@@ -75,23 +77,8 @@ export function dorDirectionForEdge(edge: Edge): DorResolvedSplitDirection {
   }
 }
 
-/** Lath edge → Door direction (Baseboard placement token; matches spatial-nav's
- *  `DoorDirection`). Mirrors the Edge→DoorDirection map in `remove`'s token edge. */
-export function doorDirectionForEdge(edge: Edge): DoorDirection {
-  switch (edge) {
-    case 'left':
-      return 'left';
-    case 'right':
-      return 'right';
-    case 'top':
-      return 'above';
-    case 'bottom':
-      return 'below';
-  }
-}
-
-/** Door direction → Lath edge (inverse of `doorDirectionForEdge`); used to
- *  synthesize a neighbor-tier token from a pre-Lath Door. */
+/** Door direction → Lath edge (Baseboard placement token, matching session-types'
+ *  `DoorDirection`); used to synthesize a neighbor-tier token from a pre-Lath Door. */
 export function edgeForDoorDirection(direction: DoorDirection): Edge {
   switch (direction) {
     case 'left':
@@ -130,12 +117,19 @@ export function browserLeafMeta(title: string, params: Record<string, unknown>):
   return { component: 'browser', tabComponent: 'surface', title, params };
 }
 
-/** The engine-tracked meta for a Door's surface (component/tabComponent default to
- *  terminal for pre-Lath doors). Shared by the two reattach paths — click-reattach
- *  (`restoreLeaf`) and drag-out (`insertLeaf`) — so they build the same shape. */
+/** The engine-tracked meta for a Door's surface. Shared by the two reattach paths —
+ *  click-reattach (`restore`) and drag-out (`insert`) — so they build the same shape.
+ *  Legacy `'iframe'` / `'agent-browser'` component aliases are canonicalized to
+ *  `'browser'` here, so a leaf always carries the canonical body key: a re-minimize
+ *  reads `meta.component` straight through, and `reconnect.ts`'s `component ===
+ *  'browser'` filter keys off it. Component/tabComponent default to terminal for
+ *  pre-Lath doors that carry neither. */
 export function leafMetaFromDoor(item: DooredItem): LeafMeta {
+  const component = item.component === 'iframe' || item.component === 'agent-browser'
+    ? 'browser'
+    : item.component ?? 'terminal';
   return {
-    component: item.component ?? 'terminal',
+    component,
     tabComponent: item.tabComponent ?? 'terminal',
     title: item.title,
     params: item.params,
@@ -158,17 +152,10 @@ export function legacyTokenFromDoor(item: DooredItem): RestoreToken {
   };
 }
 
-function isLathPersistedLayout(blob: unknown): blob is LathPersistedLayout {
-  if (!blob || typeof blob !== 'object') return false;
-  const b = blob as { version?: unknown; tree?: unknown; leafMeta?: unknown };
-  if (b.version !== 1) return false;
-  if (!b.tree || typeof b.tree !== 'object' || !('root' in (b.tree as object))) return false;
-  return !!b.leafMeta && typeof b.leafMeta === 'object';
-}
-
 export type LathWallEngine = {
-  /** The underlying headless store — handed to LathHost + the persistence
-   *  subscription. */
+  /** The underlying headless store — the state machine + geometry every state op and
+   *  query goes through directly (`lath.store.*`), and the reader LathHost + the
+   *  persistence subscription subscribe to. */
   store: LathWallStore;
 
   // --- animation (stage 3; docs/specs/tiling-engine.md → "Animation contract") ---
@@ -178,14 +165,6 @@ export type LathWallEngine = {
   /** The kill-fade duration (ms) the Wall waits before committing `remove`. Equals
    *  the animator duration (0 under reduced motion). */
   exitMs: number;
-  /** Record the edge a soon-to-be-added leaf should enter from (drained by LathHost
-   *  at the next `retarget`). Passthrough to the store, which owns the hint map and
-   *  derives a hint internally from the edge each mutator commits; an explicit call
-   *  here (the auto-spawn `'top-left'` override) still wins. */
-  setEnterHint(id: string, enterFrom: EnterFrom): void;
-  /** Drain and return every pending enter hint (LathHost consumes these when it
-   *  ingests a committed layout). Passthrough to the store. */
-  consumeEnterHints(): Map<string, EnterFrom>;
   /** Begin a leaf's exit fade (phase 1 of a kill); `shrinkTowardBottomRight` also
    *  collapses it toward its bottom-right corner (the last-pane kill). Idempotent. */
   markDying(id: string, opts?: { shrinkTowardBottomRight?: boolean }): void;
@@ -199,37 +178,11 @@ export type LathWallEngine = {
    *  without a store commit (i.e. `markDying`). Returns an unsubscribe. */
   subscribeWake(cb: () => void): () => void;
 
-  // --- reads ---
+  // --- reads / projections over the store ---
   /** Visible leaves in tree pre-order, each with its meta title + params. */
   listPanes(): VisiblePane[];
-  /** Leaf ids in tree pre-order (the id-only counterpart to `listPanes`). */
-  leafIds(): string[];
-  /** Whether `id` is a live leaf. */
-  has(id: string): boolean;
   /** The leaf's metadata, or undefined. */
   getMeta(id: string): LeafMeta | undefined;
-  /** Nearest neighbor of `id` in `direction`, or null. */
-  neighborOf(id: string, direction: Direction): string | null;
-  /** Aspect-ratio split edge for `id` (`autoEdge`). */
-  autoEdgeFor(id: string): Edge;
-
-  // --- store mutators (passthrough; rejected ops commit nothing) ---
-  addLeaf(id: string, meta: LeafMeta, position: AddLeafPosition): { ok: boolean };
-  removeLeaf(id: string): { ok: boolean; token: RestoreToken | null };
-  replaceLeaf(oldId: string, newId: string, meta: LeafMeta): { ok: boolean };
-  restoreLeaf(
-    meta: LeafMeta,
-    token: RestoreToken,
-    opts?: { fallbackRef?: string },
-  ): { ok: boolean; tier: 'exact' | 'neighbor' | 'fallback' | null };
-  swapLeaves(a: string, b: string): { ok: boolean };
-  /** Move an existing leaf onto a hit-tested drop `target` (drag-move). */
-  moveLeaf(id: string, target: DropTarget): { ok: boolean };
-  /** Insert a NEW leaf onto a hit-tested drop `target`, with meta (Door drag-out). */
-  insertLeaf(id: string, meta: LeafMeta, target: DropTarget): { ok: boolean };
-  setTitle(id: string, title: string): void;
-  updateParams(id: string, patch: Record<string, unknown>): void;
-  setZoomed(id: string | null): void;
 
   // --- persistence ---
   serializeLayout(): LathPersistedLayout;
@@ -267,8 +220,6 @@ export function createLathWallEngine(
 
     animator,
     exitMs: durationMs,
-    setEnterHint: (id, enterFrom) => store.setEnterHint(id, enterFrom),
-    consumeEnterHints: () => store.consumeEnterHints(),
     markDying(id, markOpts) {
       // The animator owns dying state (idempotent per id); wake the tick loop, since
       // a fade starts no store commit and so fires no retarget effect.
@@ -295,22 +246,7 @@ export function createLathWallEngine(
         return { id, title: m?.title, params: m?.params };
       });
     },
-    leafIds: () => store.leafIds(),
-    has: (id) => store.has(id),
     getMeta: (id) => snapshot().leafMeta.get(id),
-    neighborOf: (id, direction) => store.neighborOf(id, direction),
-    autoEdgeFor: (id) => store.autoEdgeFor(id),
-
-    addLeaf: (id, meta, position) => store.addLeaf(id, meta, position),
-    removeLeaf: (id) => store.removeLeaf(id),
-    replaceLeaf: (oldId, newId, meta) => store.replaceLeaf(oldId, newId, meta),
-    restoreLeaf: (meta, token, opts) => store.restoreLeaf(meta, token, opts),
-    swapLeaves: (a, b) => store.swapLeaves(a, b),
-    moveLeaf: (id, target) => store.moveLeaf(id, target),
-    insertLeaf: (id, meta, target) => store.insertLeaf(id, meta, target),
-    setTitle: (id, title) => store.setTitle(id, title),
-    updateParams: (id, patch) => store.updateParams(id, patch),
-    setZoomed: (id) => store.setZoomed(id),
 
     serializeLayout: () => lathLayoutFromStore(snapshot()),
 

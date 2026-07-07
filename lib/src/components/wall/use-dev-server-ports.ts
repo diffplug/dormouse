@@ -34,7 +34,8 @@ import {
   subscribeDevServerRescan,
   subscribeWantedDevServerPorts,
 } from './agent-browser-ports';
-import type { DooredItem, VisiblePane } from './wall-types';
+import type { DooredItem } from './wall-types';
+import type { LathWallEngine } from './lath-wall-engine';
 import { isBrowserParams } from './browser-surface';
 
 // Wait this long after interest changes before scanning, so a tab's open +
@@ -79,10 +80,11 @@ function cancelIdle(handle: number | undefined): void {
 }
 
 export function useDevServerPortCorrelation({
-  listVisiblePanes,
+  lath,
   doorsRef,
 }: {
-  listVisiblePanes: () => VisiblePane[];
+  /** The Lath engine — source of the visible-pane projection (`lath.listPanes()`). */
+  lath: LathWallEngine;
   doorsRef: React.MutableRefObject<DooredItem[]>;
 }): void {
   useEffect(() => {
@@ -137,7 +139,7 @@ export function useDevServerPortCorrelation({
         // title lookups for labelling/fallback, keyed by surface id.
         const titles = new Map<string, string | null>();
         const candidates: string[] = [];
-        for (const panel of listVisiblePanes()) {
+        for (const panel of lath.listPanes()) {
           if (!isTerminalParams(panel.params)) continue;
           candidates.push(panel.id);
           titles.set(panel.id, panel.title ?? null);
@@ -238,5 +240,5 @@ export function useDevServerPortCorrelation({
       unsubscribeWanted();
       unsubscribeRescan();
     };
-  }, [listVisiblePanes, doorsRef]);
+  }, [lath, doorsRef]);
 }

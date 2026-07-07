@@ -17,7 +17,7 @@ function makeCtx(): WallKeyboardCtx {
     selectedIdRef: { current: 'pane-a' },
     // Surface-type lookup now flows through the engine-neutral `nav` seam; an
     // absent params reads as a terminal.
-    nav: { paneParams: () => undefined, ready: () => true, findInDirection: () => null, hasPane: () => false, panes: () => [] },
+    nav: { paneParams: () => undefined, findInDirection: () => null, hasPane: () => false, panes: () => [] },
   } as unknown as WallKeyboardCtx;
 }
 

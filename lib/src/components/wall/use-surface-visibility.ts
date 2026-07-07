@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react';
 
 /**
- * Whether a Surface is actually on screen: the engine reports the pane visible
- * (Lath: a mounted leaf is always visible) AND the document isn't hidden
- * (backgrounded window). Callers gate streaming work on this so a hidden pane stops
- * consuming resources while its daemon/session stays alive.
- *
- * The engine-visibility half arrives as the `panelVisible` prop (supplied by
- * LathHost); this hook owns only the document-visibility half and ANDs the two.
+ * Whether a Surface is actually on screen: under Lath a mounted leaf is always
+ * engine-visible, so this reduces to whether the document isn't hidden (backgrounded
+ * window). Callers gate streaming work on it so a hidden pane stops consuming
+ * resources while its daemon/session stays alive.
  */
-export function useSurfaceVisibility(panelVisible: boolean): boolean {
+export function useSurfaceVisibility(): boolean {
   const [docVisible, setDocVisible] = useState<boolean>(() => document.visibilityState !== 'hidden');
 
   useEffect(() => {
@@ -18,5 +15,5 @@ export function useSurfaceVisibility(panelVisible: boolean): boolean {
     return () => document.removeEventListener('visibilitychange', onChange);
   }, []);
 
-  return panelVisible && docVisible;
+  return docVisible;
 }

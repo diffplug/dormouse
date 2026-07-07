@@ -91,7 +91,7 @@ function TabStory({
               style={{ width }}
             >
               <div className="bg-app-bg" style={{ height: 26 }}>
-                <TerminalPaneHeader id={SESSION_ID} title={title} params={undefined} panelVisible={true} />
+                <TerminalPaneHeader id={SESSION_ID} title={title} params={undefined} />
               </div>
             </div>
           </RenamingIdContext.Provider>

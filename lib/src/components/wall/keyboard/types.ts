@@ -6,8 +6,6 @@ import type { WallActions } from '../wall-context';
 /** The navigation/query seam the keyboard handlers read, backed by the Lath engine
  *  (docs/specs/tiling-engine.md). */
 export interface WallNav {
-  /** Whether the tiling engine is ready (always true under Lath). */
-  ready(): boolean;
   /** Nearest pane id in the arrow's direction, or null. */
   findInDirection(id: string, dir: 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown'): string | null;
   /** A visible pane's params (surface-type classification), or undefined. */
@@ -32,7 +30,6 @@ export interface WallKeyboardCtx {
   confirmKillRef: RefObject<ConfirmKill | null>;
   renamingRef: RefObject<string | null>;
   dialogKeyboardActiveRef: RefObject<boolean>;
-  paneElements: Map<string, HTMLElement>;
   wallActionsRef: RefObject<WallActions>;
   handleReattachRef: RefObject<(item: DooredItem, options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction }) => void>;
   selectPane: (id: string) => void;
@@ -45,7 +42,6 @@ export interface WallKeyboardCtx {
   rejectKill: () => void;
   setConfirmKill: Dispatch<SetStateAction<ConfirmKill | null>>;
   setRenamingPaneId: Dispatch<SetStateAction<string | null>>;
-  setSelectedId: Dispatch<SetStateAction<string | null>>;
   fireEvent: (event: WallEvent) => void;
 }
 

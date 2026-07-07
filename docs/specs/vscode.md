@@ -52,7 +52,7 @@ Frontend Library (lib/src/)
     ├── session-restore.ts        — cold-start pane restoration
     ├── session-types.ts          — PersistedSession/PersistedPane/PersistedAlertState types
     ├── resume-patterns.ts        — detect resumable commands from scrollback
-    ├── spatial-nav.ts            — resolve a pane element to its Lath leaf (overlay measurement)
+    ├── resolve-pane-element.ts   — resolve a pane element to its Lath leaf (overlay measurement)
     └── platform/
         ├── types.ts              — PlatformAdapter interface
         ├── index.ts              — adapter factory (auto-detects VS Code vs fake)

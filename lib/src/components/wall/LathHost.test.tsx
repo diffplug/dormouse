@@ -4,14 +4,15 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LathHost, LATH_LAYOUT_OPTS } from './LathHost';
-import { createLathWallStore, type LathWallStore, type LeafMeta } from './lath-wall-store';
+import { LathHost } from './LathHost';
+import { createLathWallStore, type LathWallStore, type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { createLathWallEngine } from './lath-wall-engine';
 import { layout } from '../../lib/lath/layout';
 import { LATH_EASING } from '../../lib/lath/animator';
 import { type DropTarget, move } from '../../lib/lath/ops';
 import { leafTree, type LathNode, type LathTree, type Rect } from '../../lib/lath/model';
-import { leaf, split, movePreview as movePreviewAt } from '../../lib/lath/test-util';
+import { leaf, split, tree as treeOf, movePreview as movePreviewAt } from '../../lib/lath/test-util';
+import { leafMeta } from './lath-test-fixtures';
 import type { PaneProps } from './pane-props';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -32,20 +33,10 @@ async function flushFrame() {
   });
 }
 
-function meta(title: string, component = 'terminal', params?: Record<string, unknown>): LeafMeta {
-  return { component, tabComponent: component === 'terminal' ? 'terminal' : 'surface', title, ...(params ? { params } : {}) };
-}
 
-/** a | b | c — a three-way row split at thirds. */
-function rowOf(...ids: string[]): LathTree {
-  return {
-    root: {
-      kind: 'split',
-      dir: 'row',
-      children: ids.map((id) => ({ node: { kind: 'leaf', id } as LathNode, weight: 1 / ids.length })),
-    },
-  };
-}
+/** a | b | c — an equal-weight row split, built from the shared core test builders. */
+const rowOf = (...ids: string[]): LathTree =>
+  treeOf(split('row', ...ids.map((id): [LathNode, number] => [leaf(id), 1 / ids.length])));
 
 // --- stub pane components (never mount the real TerminalPane/xterm) ---
 
@@ -119,7 +110,7 @@ function seeded(tree: LathTree, entries: Array<[string, LeafMeta]>): LathWallSto
 
 describe('LathHost — node identity (the no-re-parent guarantee)', () => {
   it('keeps surviving leaf divs as the SAME element across split/remove/resize/swap', () => {
-    const store = seeded(rowOf('a', 'b', 'c'), [['a', meta('A')], ['b', meta('B')], ['c', meta('C')]]);
+    const store = seeded(rowOf('a', 'b', 'c'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })], ['c', leafMeta({ title: 'C' })]]);
     mount(store);
 
     const a0 = leafDiv('a');
@@ -127,7 +118,7 @@ describe('LathHost — node identity (the no-re-parent guarantee)', () => {
     const c0 = leafDiv('c');
     expect(a0 && b0 && c0).toBeTruthy();
 
-    act(() => store.addLeaf('d', meta('D'), { refId: 'a', edge: 'right' }));
+    act(() => store.addLeaf('d', leafMeta({ title: 'D' }), { refId: 'a', edge: 'right' }));
     expect(leafDiv('a')).toBe(a0);
     expect(leafDiv('b')).toBe(b0);
     expect(leafDiv('c')).toBe(c0);
@@ -154,7 +145,7 @@ describe('LathHost — node identity (the no-re-parent guarantee)', () => {
 describe('LathHost — stable DOM order', () => {
   it('renders divs sorted by id even when tree order differs, and stays fixed across a swap', () => {
     // Tree pre-order is c, a, b; DOM order must be the sorted a, b, c.
-    const store = seeded(rowOf('c', 'a', 'b'), [['a', meta('A')], ['b', meta('B')], ['c', meta('C')]]);
+    const store = seeded(rowOf('c', 'a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })], ['c', leafMeta({ title: 'C' })]]);
     mount(store);
     expect(leafOrder()).toEqual(['a', 'b', 'c']);
 
@@ -166,7 +157,7 @@ describe('LathHost — stable DOM order', () => {
 describe('LathHost — frames applied to style', () => {
   it('lands each leaf rect from layout() in inline px that tiles the container', () => {
     const tree = rowOf('a', 'b', 'c');
-    const store = seeded(tree, [['a', meta('A')], ['b', meta('B')], ['c', meta('C')]]);
+    const store = seeded(tree, [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })], ['c', leafMeta({ title: 'C' })]]);
     mount(store);
 
     const frames = layout(tree, RECT, LATH_LAYOUT_OPTS);
@@ -190,7 +181,7 @@ describe('LathHost — sash drag', () => {
   }
 
   it('previews the resize during the drag and commits once on pointerup', async () => {
-    const store = seeded(rowOf('a', 'b', 'c'), [['a', meta('A')], ['b', meta('B')], ['c', meta('C')]]);
+    const store = seeded(rowOf('a', 'b', 'c'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })], ['c', leafMeta({ title: 'C' })]]);
     const { onCommitResize } = mount(store);
 
     const widthBefore = leafDiv('a')!.style.width;
@@ -211,7 +202,7 @@ describe('LathHost — sash drag', () => {
   });
 
   it('cancels the drag on Escape without committing', () => {
-    const store = seeded(rowOf('a', 'b', 'c'), [['a', meta('A')], ['b', meta('B')], ['c', meta('C')]]);
+    const store = seeded(rowOf('a', 'b', 'c'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })], ['c', leafMeta({ title: 'C' })]]);
     const { onCommitResize } = mount(store);
     const widthBefore = leafDiv('a')!.style.width;
     const sash = firstSash();
@@ -227,7 +218,7 @@ describe('LathHost — sash drag', () => {
 
 describe('LathHost — zoom', () => {
   it('renders the zoomed leaf full-rect on top, and restores after', () => {
-    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     mount(store);
 
     act(() => store.setZoomed('a'));
@@ -247,20 +238,55 @@ describe('LathHost — zoom', () => {
 });
 
 describe('LathHost — pane props contract', () => {
-  it('supplies each body and tab { id, title, params, panelVisible: true }', () => {
+  it('supplies each body and tab { id, title, params }', () => {
     const store = seeded(rowOf('a', 'b'), [
-      ['a', meta('A')],
-      ['b', meta('B', 'terminal', { url: 'x' })],
+      ['a', leafMeta({ title: 'A' })],
+      ['b', leafMeta({ title: 'B', params: { url: 'x' } })],
     ]);
     mount(store);
 
-    expect(bodyProps['a']).toMatchObject({ id: 'a', title: 'A', panelVisible: true, params: undefined });
-    expect(bodyProps['b']).toMatchObject({ id: 'b', title: 'B', panelVisible: true, params: { url: 'x' } });
-    expect(tabProps['a']).toMatchObject({ id: 'a', title: 'A', panelVisible: true });
+    expect(bodyProps['a']).toMatchObject({ id: 'a', title: 'A', params: undefined });
+    expect(bodyProps['b']).toMatchObject({ id: 'b', title: 'B', params: { url: 'x' } });
+    expect(tabProps['a']).toMatchObject({ id: 'a', title: 'A' });
+  });
+
+  it('does not re-render leaf content on a geometry-only frame', () => {
+    // A resize commit changes the tree geometry but no leaf's meta, so the memoized
+    // LathLeafContent (header + body) must not re-render — only the positioned wrapper.
+    const bodyRenders: Record<string, number> = {};
+    const tabRenders: Record<string, number> = {};
+    const CountingBody = (props: PaneProps) => {
+      bodyRenders[props.id] = (bodyRenders[props.id] ?? 0) + 1;
+      return <div data-body={props.id} />;
+    };
+    const CountingTab = (props: PaneProps) => {
+      tabRenders[props.id] = (tabRenders[props.id] ?? 0) + 1;
+      return <div data-tab={props.id} />;
+    };
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    const engine = createLathWallEngine(store, { durationMs: 0 });
+    act(() => {
+      root.render(
+        <LathHost
+          lath={engine}
+          onCommitResize={vi.fn()}
+          onLeafFocused={vi.fn()}
+          componentsOverride={{ bodies: { terminal: CountingBody }, tabs: { terminal: CountingTab } }}
+        />,
+      );
+    });
+    const before = { ba: bodyRenders['a'], bb: bodyRenders['b'], ta: tabRenders['a'], tb: tabRenders['b'] };
+
+    act(() => store.resizeBoundary([], 0, 40)); // geometry-only: weights change, meta does not
+
+    expect(bodyRenders['a']).toBe(before.ba);
+    expect(bodyRenders['b']).toBe(before.bb);
+    expect(tabRenders['a']).toBe(before.ta);
+    expect(tabRenders['b']).toBe(before.tb);
   });
 
   it('reports focusin inside a leaf via onLeafFocused', () => {
-    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     const { onLeafFocused } = mount(store);
     act(() => leafDiv('a')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true })));
     expect(onLeafFocused).toHaveBeenCalledWith('a');
@@ -309,13 +335,13 @@ describe('LathHost — imperative animation frames', () => {
   const widthOf = (id: string): number => parseFloat(leafDiv(id)!.style.width);
 
   it('tweens a survivor from its old rect to its new rect, then stops ticking', () => {
-    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     mount(store, vi.fn(), vi.fn(), DUR);
 
     const twoWide = widthOf('a'); // 'a' at 50% of the row
     // Split 'c' beside 'a' → 'a' must shrink to ~1/3. No enter hint for 'c', so it
     // appears instantly; 'a' and 'b' tween.
-    act(() => store.addLeaf('c', meta('C'), { refId: 'a', edge: 'right' }));
+    act(() => store.addLeaf('c', leafMeta({ title: 'C' }), { refId: 'a', edge: 'right' }));
     const threeWide = layout(store.getSnapshot().tree, RECT, LATH_LAYOUT_OPTS).get('a')!.width;
 
     // t = 0: still at the old width (retarget starts from the current frame).
@@ -336,10 +362,10 @@ describe('LathHost — imperative animation frames', () => {
   });
 
   it('a meta re-render mid-tween does not snap the leaf to its target', () => {
-    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     mount(store, vi.fn(), vi.fn(), DUR);
 
-    act(() => store.addLeaf('c', meta('C'), { refId: 'a', edge: 'right' }));
+    act(() => store.addLeaf('c', leafMeta({ title: 'C' }), { refId: 'a', edge: 'right' }));
     clock += DUR / 2;
     flushRaf();
     const midWidth = widthOf('a');
@@ -352,7 +378,7 @@ describe('LathHost — imperative animation frames', () => {
   });
 
   it('fades a dying leaf in place with pointer-events off, above the survivors', () => {
-    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     const { engine } = mount(store, vi.fn(), vi.fn(), DUR);
 
     act(() => engine.markDying('b'));
@@ -374,7 +400,7 @@ describe('LathHost — imperative animation frames', () => {
   });
 
   it('shrinks the last pane toward its bottom-right corner as it dies', () => {
-    const store = seeded(leafTree('solo'), [['solo', meta('Solo')]]);
+    const store = seeded(leafTree('solo'), [['solo', leafMeta({ title: 'Solo' })]]);
     const { engine } = mount(store, vi.fn(), vi.fn(), DUR);
     expect(widthOf('solo')).toBeCloseTo(W, 0); // full-rect single pane
 
@@ -390,7 +416,7 @@ describe('LathHost — imperative animation frames', () => {
   });
 
   it('snaps (no tween) on a sash-drag commit — the user placed the boundary by hand', () => {
-    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     // onCommitResize commits the resize (as the Wall does), so the tree changes.
     mount(store, (sp, b, d) => { store.resizeBoundary(sp, b, d); }, vi.fn(), DUR);
 
@@ -469,7 +495,7 @@ describe('LathHost — pane / Door drag', () => {
   }
 
   it('enters a drag past the threshold and calls onDragStart, dimming the leaf', () => {
-    const store = seeded(rowOf('a', 'b', 'c'), [['a', meta('A')], ['b', meta('B')], ['c', meta('C')]]);
+    const store = seeded(rowOf('a', 'b', 'c'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })], ['c', leafMeta({ title: 'C' })]]);
     const { onDragStart } = mountDrag(store);
 
     act(() => down(header('a'), 100, 15));
@@ -486,7 +512,7 @@ describe('LathHost — pane / Door drag', () => {
 
   it('shows the innermost candidate preview and commits it on pointerup', async () => {
     const t = rowOf('a', 'b');
-    const store = seeded(t, [['a', meta('A')], ['b', meta('B')]]);
+    const store = seeded(t, [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     const { onProposeMove } = mountDrag(store);
 
     act(() => down(header('a'), 100, 15));
@@ -502,7 +528,7 @@ describe('LathHost — pane / Door drag', () => {
 
   it('cycles the drop depth outward with the wheel', async () => {
     const t = colRowTree();
-    const store = seeded(t, [['a', meta('A')], ['b', meta('B')], ['c', meta('C')]]);
+    const store = seeded(t, [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })], ['c', leafMeta({ title: 'C' })]]);
     const { onProposeMove } = mountDrag(store);
 
     // Drag c onto a's top edge (a spans y 0..~297, x 0..~397).
@@ -519,7 +545,7 @@ describe('LathHost — pane / Door drag', () => {
   });
 
   it('proposes a minimize when dropped below the wall (baseboard zone)', async () => {
-    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     const { onProposeMinimize, onProposeMove } = mountDrag(store);
 
     act(() => down(header('a'), 100, 15));
@@ -533,7 +559,7 @@ describe('LathHost — pane / Door drag', () => {
   });
 
   it('cancels on Escape with no proposal', async () => {
-    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     const { onProposeMove, onProposeMinimize } = mountDrag(store);
 
     act(() => down(header('a'), 100, 15));
@@ -547,7 +573,7 @@ describe('LathHost — pane / Door drag', () => {
   });
 
   it('does not drag on a sub-threshold press (click preserved)', () => {
-    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     const { onDragStart, onProposeMove } = mountDrag(store);
 
     act(() => down(header('a'), 100, 15));
@@ -558,7 +584,7 @@ describe('LathHost — pane / Door drag', () => {
   });
 
   it('does not start a drag from a header button', () => {
-    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     const { onDragStart } = mountDrag(store);
 
     const btn = leafDiv('a')!.querySelector<HTMLElement>('[data-stub-btn="a"]')!;
@@ -569,7 +595,7 @@ describe('LathHost — pane / Door drag', () => {
 
   it('runs external (Door) drags with dragged null and fires onExternalDrop', async () => {
     const t = rowOf('a', 'b');
-    const store = seeded(t, [['a', meta('A')], ['b', meta('B')]]);
+    const store = seeded(t, [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     // 'door' is not a leaf — the chip stays in the baseboard; LathHost only hit-tests.
     // The external drag starts INACTIVE at the press point; the move past the threshold
     // activates it (like an internal drag).
@@ -584,7 +610,7 @@ describe('LathHost — pane / Door drag', () => {
   });
 
   it('a sub-threshold Door press-release reports null (drag cleared; the click stands)', () => {
-    const store = seeded(rowOf('a', 'b'), [['a', meta('A')], ['b', meta('B')]]);
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     // A press that never crosses the threshold: the external drag stays inactive.
     const { onExternalDrop } = mountDrag(store, { externalDrag: { id: 'door', startX: 100, startY: 300 } });
 
@@ -597,7 +623,7 @@ describe('LathHost — pane / Door drag', () => {
   });
 
   it('hit-tests the LIVE tree when a background commit lands mid-drag', async () => {
-    const store = seeded(rowOf('a', 'b', 'c'), [['a', meta('A')], ['b', meta('B')], ['c', meta('C')]]);
+    const store = seeded(rowOf('a', 'b', 'c'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })], ['c', leafMeta({ title: 'C' })]]);
     const { onProposeMove } = mountDrag(store);
 
     // Start dragging 'a', hovering over the far-right third (c's slot in the 3-leaf tree).

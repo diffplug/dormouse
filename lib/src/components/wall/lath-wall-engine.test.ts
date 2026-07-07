@@ -3,9 +3,9 @@ import {
   createLathWallEngine,
   edgeForDorDirection,
   dorDirectionForEdge,
-  doorDirectionForEdge,
   edgeForDoorDirection,
   directionForArrow,
+  leafMetaFromDoor,
   legacyTokenFromDoor,
 } from './lath-wall-engine';
 import type { DooredItem } from './wall-types';
@@ -24,7 +24,7 @@ describe('lath-wall-engine seed', () => {
     expect(fresh).toBe(false);
     expect(paneIds).toEqual(['leaf-1']);
     expect(engine.getMeta('leaf-1')?.title).toBe('Restored');
-    expect(engine.has('pane-a')).toBe(false); // the dockview blob was NOT used
+    expect(engine.store.has('pane-a')).toBe(false); // the dockview blob was NOT used
   });
 
   it('(b) migrates a legacy dockview blob when there is no lath layout', () => {
@@ -73,14 +73,11 @@ describe('lath-wall-engine edge/direction maps', () => {
     expect(dorDirectionForEdge('left')).toBe('left');
   });
 
-  it('maps edges to door directions and back (inverse pair)', () => {
-    expect(doorDirectionForEdge('top')).toBe('above');
-    expect(doorDirectionForEdge('bottom')).toBe('below');
-    expect(doorDirectionForEdge('right')).toBe('right');
-    expect(doorDirectionForEdge('left')).toBe('left');
-    for (const edge of ['left', 'right', 'top', 'bottom'] as const) {
-      expect(edgeForDoorDirection(doorDirectionForEdge(edge))).toBe(edge);
-    }
+  it('maps door directions to lath edges', () => {
+    expect(edgeForDoorDirection('above')).toBe('top');
+    expect(edgeForDoorDirection('below')).toBe('bottom');
+    expect(edgeForDoorDirection('right')).toBe('right');
+    expect(edgeForDoorDirection('left')).toBe('left');
   });
 
   it('maps keyboard arrows to lath directions', () => {
@@ -88,6 +85,32 @@ describe('lath-wall-engine edge/direction maps', () => {
     expect(directionForArrow('ArrowRight')).toBe('right');
     expect(directionForArrow('ArrowUp')).toBe('up');
     expect(directionForArrow('ArrowDown')).toBe('down');
+  });
+});
+
+describe('leafMetaFromDoor', () => {
+  const base: DooredItem = { id: 'door-1', title: 'Door' } as DooredItem;
+
+  it('canonicalizes legacy iframe/agent-browser component aliases to browser', () => {
+    expect(leafMetaFromDoor({ ...base, component: 'iframe' }).component).toBe('browser');
+    expect(leafMetaFromDoor({ ...base, component: 'agent-browser' }).component).toBe('browser');
+  });
+
+  it('passes browser/terminal through and defaults an absent component to terminal', () => {
+    expect(leafMetaFromDoor({ ...base, component: 'browser' }).component).toBe('browser');
+    expect(leafMetaFromDoor({ ...base, component: 'terminal' }).component).toBe('terminal');
+    expect(leafMetaFromDoor(base).component).toBe('terminal');
+  });
+
+  it('minimizing a reattached legacy-alias door persists component "browser"', () => {
+    // A pre-Lath door carrying the legacy `iframe` alias reattaches (leaf meta is
+    // canonicalized here), so a subsequent minimize — which reads `meta.component`
+    // straight through — persists the canonical `browser` value `reconnect.ts` filters on.
+    const engine = createLathWallEngine();
+    engine.seed(null, null, ['p1'], () => 'gen');
+    const meta = leafMetaFromDoor({ ...base, id: 'legacy', component: 'iframe', params: { renderMode: 'iframe', url: 'x' } });
+    engine.store.addLeaf('legacy', meta, { refId: 'p1', edge: 'right' });
+    expect(engine.getMeta('legacy')?.component).toBe('browser');
   });
 });
 
@@ -125,21 +148,22 @@ describe('legacyTokenFromDoor', () => {
   });
 });
 
-describe('lath-wall-engine passthroughs', () => {
-  it('lists panes in tree pre-order with meta, and restores from a token', () => {
+describe('lath-wall-engine listPanes projection', () => {
+  it('lists panes in tree pre-order with meta as store state changes', () => {
     const engine = createLathWallEngine();
     engine.seed(null, null, ['p1'], () => 'gen');
-    // Split p1 → p2 on the right (explicit edge, so no geometry is needed).
-    engine.addLeaf('p2', { component: 'terminal', tabComponent: 'terminal', title: 'P2' }, { refId: 'p1', edge: 'right' });
+    // Split p1 → p2 on the right (explicit edge, so no geometry is needed). State ops
+    // go through the store; the engine's `listPanes` projection reflects them.
+    engine.store.addLeaf('p2', { component: 'terminal', tabComponent: 'terminal', title: 'P2' }, { refId: 'p1', edge: 'right' });
     expect(engine.listPanes().map((p) => p.id).sort()).toEqual(['p1', 'p2']);
 
     // Minimize p2 → token; restore should reinstate it.
-    const { token } = engine.removeLeaf('p2');
-    expect(engine.has('p2')).toBe(false);
+    const { token } = engine.store.removeLeaf('p2');
+    expect(engine.store.has('p2')).toBe(false);
     expect(token).not.toBeNull();
     const meta = { component: 'terminal', tabComponent: 'terminal', title: 'P2' };
-    const { ok } = engine.restoreLeaf(meta, token!, { fallbackRef: 'p1' });
+    const { ok } = engine.store.restoreLeaf(meta, token!, { fallbackRef: 'p1' });
     expect(ok).toBe(true);
-    expect(engine.has('p2')).toBe(true);
+    expect(engine.store.has('p2')).toBe(true);
   });
 });

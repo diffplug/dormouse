@@ -4,7 +4,7 @@ import {
   TERMINAL_SELECTION_BORDER_RADIUS,
 } from '../design';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
-import { resolvePaneElement } from '../../lib/spatial-nav';
+import { resolvePaneElement } from './resolve-pane-element';
 import type { WallMode, WallSelectionKind } from './wall-types';
 import { DoorElementsContext, PaneElementsContext, WindowFocusedContext } from './wall-context';
 import { MarchingAntsRect } from './MarchingAntsRect';

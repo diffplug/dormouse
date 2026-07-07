@@ -14,14 +14,7 @@
 
 import { type LathChild, type LathNode, type LathTree, leaves, normalize, validate } from '../../lib/lath/model';
 import type { LeafMeta } from './lath-wall-store';
-
-/** The Lath persisted layout — the tree is its own wire format; `leafMeta` carries
- *  the per-leaf `{ component, tabComponent, title, params }`. */
-export type LathPersistedLayout = {
-  version: 1;
-  tree: LathTree;
-  leafMeta: Record<string, LeafMeta>;
-};
+import type { LathPersistedLayout } from './lath-persistence';
 
 type Orientation = 'HORIZONTAL' | 'VERTICAL';
 
@@ -173,13 +166,4 @@ export function dockviewLayoutToLath(blob: unknown): LathPersistedLayout | null 
   } catch {
     return null;
   }
-}
-
-/** Serialize a store snapshot to the Lath persisted layout (trivial — the tree is
- *  already the wire format). */
-export function lathLayoutFromStore(snapshot: {
-  tree: LathTree;
-  leafMeta: ReadonlyMap<string, LeafMeta>;
-}): LathPersistedLayout {
-  return { version: 1, tree: snapshot.tree, leafMeta: Object.fromEntries(snapshot.leafMeta) };
 }

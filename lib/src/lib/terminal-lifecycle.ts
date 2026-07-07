@@ -43,7 +43,6 @@ import {
   seedPromptShapeFromScrollback,
   seedTerminalManualCwd,
   setTerminalUserTitle,
-  swapTerminalPaneStates,
   type PromptLineReader,
 } from './terminal-state-store';
 import { readLogicalLineFromBuffer, type BufferLike } from './terminal-buffer-read';
@@ -481,33 +480,6 @@ export function disposeSession(id: string): void {
   registry.delete(id);
   removeTerminalPaneState(id);
   removeMouseSelectionState(id);
-  notifyActivityListeners();
-}
-
-export function swapTerminals(idA: string, idB: string): void {
-  const entryA = registry.get(idA);
-  const entryB = registry.get(idB);
-  if (!entryA || !entryB) return;
-
-  const containerA = entryA.element.parentElement;
-  const containerB = entryB.element.parentElement;
-
-  entryA.element.remove();
-  entryB.element.remove();
-
-  registry.set(idA, entryB);
-  registry.set(idB, entryA);
-  swapTerminalPaneStates(idA, idB);
-
-  if (containerA) {
-    containerA.appendChild(entryB.element);
-    requestAnimationFrame(() => entryB.fit.fit());
-  }
-  if (containerB) {
-    containerB.appendChild(entryA.element);
-    requestAnimationFrame(() => entryA.fit.fit());
-  }
-
   notifyActivityListeners();
 }
 

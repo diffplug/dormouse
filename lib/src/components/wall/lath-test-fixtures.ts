@@ -1,11 +1,32 @@
-// Shared hand-written SerializedDockview fixture for the Lath persistence tests
-// (lath-dockview-convert.test.ts + lath-wall-engine.test.ts). Matches
-// dockview-core's serialized shape: grid.orientation is the ROOT orientation; a
-// HORIZONTAL branch lays children left→right; each child's `size` is its extent
-// along the parent axis; a leaf `data` is a group ({ id, views, activeView }); the
-// per-panel state lives in the flat `panels` map. Returned as `unknown` so callers
-// cast/pass it as their assertion needs.
+// Shared fixtures for the Lath wall tests: the `leafMeta` builder every suite uses to
+// stamp per-leaf metadata, and a hand-written SerializedDockview blob for the
+// persistence/migration tests.
 
+import type { LeafMeta } from './lath-wall-store';
+
+/** Build a `LeafMeta` for tests. `tabComponent` defaults from `component` the same way
+ *  the real builders do (`terminal` → `terminal`, anything else → `surface`); `title`
+ *  defaults to `'t'`. The single builder shared by every Lath wall test suite. */
+export function leafMeta(overrides: {
+  title?: string;
+  component?: string;
+  tabComponent?: string;
+  params?: Record<string, unknown>;
+} = {}): LeafMeta {
+  const component = overrides.component ?? 'terminal';
+  return {
+    component,
+    tabComponent: overrides.tabComponent ?? (component === 'terminal' ? 'terminal' : 'surface'),
+    title: overrides.title ?? 't',
+    ...(overrides.params ? { params: overrides.params } : {}),
+  };
+}
+
+// The dockview fixture matches dockview-core's serialized shape: grid.orientation is
+// the ROOT orientation; a HORIZONTAL branch lays children left→right; each child's
+// `size` is its extent along the parent axis; a leaf `data` is a group ({ id, views,
+// activeView }); the per-panel state lives in the flat `panels` map. Returned as
+// `unknown` so callers cast/pass it as their assertion needs.
 export function dockviewFixture(): unknown {
   return {
     grid: {

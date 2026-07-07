@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback, useMemo, lazy, Suspense, type ReactNode } from 'react';
+import { useRef, useState, useEffect, useCallback, useMemo, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { Baseboard } from './Baseboard';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
@@ -64,6 +64,7 @@ import { hostPathDisplay } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { LathHost } from './wall/LathHost';
 import {
+  type LathWallEngine,
   createLathWallEngine,
   terminalLeafMeta,
   browserLeafMeta,
@@ -92,7 +93,7 @@ import {
   type PaneWriteActions,
   type WallActions,
 } from './wall/wall-context';
-import type { DoorAfterRestoreAction, DooredItem, VisiblePane, WallEvent, WallMode, WallSelectionKind } from './wall/wall-types';
+import type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind } from './wall/wall-types';
 
 type ShellSpawnRequest = {
   shell?: string;
@@ -177,15 +178,6 @@ function closeAgentBrowserSession(params: unknown): void {
   // the impending teardown and doesn't relaunch the session we're killing.
   markAgentBrowserSessionClosed(p.session);
   getPlatform().agentBrowserCommand?.(p.session, ['close'], binaryPath).catch(() => {});
-}
-
-function componentForSurfaceType(type: DorSurfaceType): string {
-  // iframe + agent-browser both render through the unified BrowserPanel.
-  return type === 'terminal' ? 'terminal' : 'browser';
-}
-
-function tabComponentForSurfaceType(type: DorSurfaceType): string {
-  return type === 'terminal' ? 'terminal' : 'surface';
 }
 
 function isSingletonWorkspaceTarget(target: string | undefined): boolean {
@@ -418,9 +410,12 @@ export function Wall({
    */
   enableRemoteHost?: boolean;
 } = {}) {
-  // The Lath engine handle — Dormouse's tiling engine. Constructed once per Wall
-  // mount (docs/specs/tiling-engine.md).
-  const lath = useRef(createLathWallEngine()).current;
+  // The Lath engine handle — Dormouse's tiling engine. Constructed lazily exactly
+  // once per Wall mount, so `createLathWallEngine` is not re-invoked each render
+  // (docs/specs/tiling-engine.md).
+  const lathRef = useRef<LathWallEngine | null>(null);
+  if (lathRef.current === null) lathRef.current = createLathWallEngine();
+  const lath = lathRef.current;
   const restoredLathLayoutRef = useRef(restoredLathLayout);
 
   // Pane ID generation (instance-scoped, not module-level)
@@ -437,7 +432,6 @@ export function Wall({
   // Consumed once by the Lath seed effect to restore existing sessions
   const initialPaneIdsRef = useRef(initialPaneIds);
   const restoredLayoutRef = useRef(restoredLayout);
-  const initialDoorsRef = useRef((initialDoors ?? []) as DooredItem[]);
 
   // Mutable maps shared via context — consumers must call bumpVersion() after
   // any mutation so that dependent effects/components re-run.
@@ -453,6 +447,16 @@ export function Wall({
   const bumpDoorElementsVersion = useCallback(() => {
     setDoorElementsVersion((v) => v + 1);
   }, []);
+  // Memoize the context payloads so a Wall re-render only hands consumers a new object
+  // when the version actually bumps (the map + bumper identities are already stable).
+  const paneElementsContextValue = useMemo(
+    () => ({ elements: paneElements, version: paneElementsVersion, bumpVersion: bumpPaneElementsVersion }),
+    [paneElements, paneElementsVersion, bumpPaneElementsVersion],
+  );
+  const doorElementsContextValue = useMemo(
+    () => ({ elements: doorElements, version: doorElementsVersion, bumpVersion: bumpDoorElementsVersion }),
+    [doorElements, doorElementsVersion, bumpDoorElementsVersion],
+  );
 
   // Selection/focus/mode policy lives here in the Wall; Lath owns only geometry.
   const [mode, setMode] = useState<WallMode>(initialMode);
@@ -470,7 +474,10 @@ export function Wall({
   // starts its threshold-gated external drag from. Non-null feeds LathHost's
   // external-drag hit-testing; the chip stays in `doors` until it lands on a target.
   const [doorDrag, setDoorDrag] = useState<{ item: DooredItem; startX: number; startY: number } | null>(null);
-  const [zoomed, setZoomed] = useState(false);
+  // Zoom is presentation state the store owns (`zoomedId`, cleared when a kill/replace
+  // removes the zoomed leaf); derive the Wall's boolean straight from it rather than
+  // mirroring into local state (docs/specs/tiling-engine.md).
+  const zoomed = useSyncExternalStore(lath.store.subscribe, () => lath.store.getSnapshot().zoomedId !== null);
   const [shellSpawnNotice, setShellSpawnNotice] = useState<ShellSpawnNoticeState | null>(null);
   const shellSpawnNoticeCounterRef = useRef(0);
   const shellSpawnNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -487,20 +494,15 @@ export function Wall({
   const confirmKillRef = useRef(confirmKill);
   confirmKillRef.current = confirmKill;
 
-  // The visible-pane projection (docs/specs/tiling-engine.md → "Pane props
-  // contract"): the shared shape `buildDorSurfaces`, persistence, and the dev-server
-  // correlation read — the tree's pre-order leaves + meta. A stable callback so the
-  // hooks that depend on it never re-subscribe.
-  const listVisiblePanes = useCallback((): VisiblePane[] => lath.listPanes(), [lath]);
-
-  // The navigation/query seam for the keyboard handlers, backed by the engine.
+  // The navigation/query seam for the keyboard handlers, backed by the engine + its
+  // store. State queries (`neighborOf` / `has` / pre-order `leafIds`) go straight to
+  // the store; `paneParams` reads the engine's meta projection.
   const nav = useMemo<WallNav>(() => ({
-    ready: () => true,
-    findInDirection: (id, dir) => lath.neighborOf(id, directionForArrow(dir)),
+    findInDirection: (id, dir) => lath.store.neighborOf(id, directionForArrow(dir)),
     paneParams: (id) => lath.getMeta(id)?.params,
-    hasPane: (id) => lath.has(id),
-    panes: () => listVisiblePanes().map((p) => p.id),
-  }), [lath, listVisiblePanes]);
+    hasPane: (id) => lath.store.has(id),
+    panes: () => lath.store.leafIds(),
+  }), [lath]);
   const renamingRef = useRef(renamingPaneId);
   renamingRef.current = renamingPaneId;
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -560,7 +562,7 @@ export function Wall({
   // Swap two panes' surfaces (Cmd-Arrow): swap leaf identities — meta and registry
   // entries follow ids, so there is no companion title swap.
   const swapWithNeighbor = useCallback((fromId: string, toId: string) => {
-    lath.swapLeaves(fromId, toId);
+    lath.store.swapLeaves(fromId, toId);
   }, [lath]);
 
   // The selection tail of a surface-adding op. A non-focus-neutral add selects the
@@ -627,16 +629,16 @@ export function Wall({
     // `remove` once the fade completes — survivors tween into the reclaimed space.
     // Dispose the session now so the content freezes under the fade. The restore
     // token is discarded (kills don't restore).
-    const lastLeaf = lath.leafIds().length === 1;
+    const lastLeaf = lath.store.leafIds().length === 1;
     lath.markDying(id, { shrinkTowardBottomRight: lastLeaf });
     disposeSession(id);
     setTimeout(() => {
-      if (!lath.has(id)) return; // superseded meanwhile (e.g. replaced)
+      if (!lath.store.has(id)) return; // superseded meanwhile (e.g. replaced)
       // Live re-read at removal time: only a kill of the still-selected pane moves
       // selection; navigating away mid-fade is honored. Removing the last leaf
       // empties the tree and the auto-spawn effect fills it.
       const wasSelectedPane = selectedTypeRef.current === 'pane' && selectedIdRef.current === id;
-      lath.removeLeaf(id);
+      lath.store.removeLeaf(id);
       if (wasSelectedPane) {
         const survivorId = lath.listPanes()[0]?.id ?? null;
         if (survivorId) selectPane(survivorId);
@@ -688,18 +690,20 @@ export function Wall({
   const minimizePane = useCallback((id: string, opts?: { select?: boolean }) => {
     const meta = lath.getMeta(id);
     if (!meta) return;
-    const surfaceType = surfaceTypeFromParams(meta.params);
-    const { token } = lath.removeLeaf(id); // may auto-spawn if this was the last leaf
+    const { token } = lath.store.removeLeaf(id); // may auto-spawn if this was the last leaf
     if (!token) return;
     clearSessionAttention(id);
-    // The core token is the restore payload (docs/specs/tiling-engine.md → "Restore
-    // tokens"); the legacy `{neighborId, direction, remainingPaneIds, layoutAtMinimize}`
-    // fields are omitted — only pre-Lath doors carry them, read-only for migration.
+    // The Door's component/tabComponent are the leaf's own canonical meta (browser
+    // aliases are canonicalized at `leafMetaFromDoor`, so `reconnect.ts`'s `component
+    // === 'browser'` filter keys off them). The core token is the restore payload
+    // (docs/specs/tiling-engine.md → "Restore tokens"); the legacy `{neighborId,
+    // direction, remainingPaneIds, layoutAtMinimize}` fields are omitted — only pre-Lath
+    // doors carry them, read-only for migration.
     const door: DooredItem = {
       id,
       title: persistedPanelTitle(meta.title),
-      component: componentForSurfaceType(surfaceType),
-      tabComponent: tabComponentForSurfaceType(surfaceType),
+      component: meta.component,
+      tabComponent: meta.tabComponent,
       params: meta.params,
       token,
     };
@@ -749,10 +753,8 @@ export function Wall({
     if (lathSeededRef.current) return;
     lathSeededRef.current = true;
 
-    // Restore doors.
-    const restoredDoors = initialDoorsRef.current;
-    doorsRef.current = restoredDoors;
-    setDoors(restoredDoors);
+    // Doors are already seeded from `initialDoors` by the `doors` useState initializer
+    // (and `doorsRef` mirrors it every render), so there is nothing to restore here.
 
     // Hydrate: prefer the native Lath layout, migrate a legacy dockview blob, else
     // fresh panes.
@@ -782,14 +784,10 @@ export function Wall({
   useEffect(() => {
     return lath.store.subscribe(() => {
       const snap = lath.store.getSnapshot();
-      // Zoom truth: the store owns `zoomedId` (and clears it when a kill/replace
-      // removes the zoomed leaf), so mirror the Wall's `zoomed` boolean off it.
-      // setZoomed no-ops when unchanged, so this is cheap on every commit.
-      setZoomed(snap.zoomedId !== null);
       // `paneAdded` for any leaf new since the last commit. Runs post-commit, so the
       // pane exists. Meta/zoom/resize commits leave the id set unchanged (no fire).
       // The auto-spawn below commits re-entrantly, so its new leaf is caught here too.
-      const currentIds = lath.leafIds();
+      const currentIds = lath.store.leafIds();
       const prevIds = prevLeafIdsRef.current;
       let leavesChanged = currentIds.length !== prevIds.size;
       for (const id of currentIds) {
@@ -805,12 +803,12 @@ export function Wall({
       const id = generatePaneId();
       const defaults = getDefaultShellOpts();
       if (defaults?.shell) setPendingShellOpts(id, { shell: defaults.shell, args: defaults.args });
-      lath.setEnterHint(id, 'top-left'); // grows from the top-left as the killed pane shrank to the bottom-right
-      lath.addLeaf(id, terminalLeafMeta(), null); // becomes the root
+      lath.store.setEnterHint(id, 'top-left'); // grows from the top-left as the killed pane shrank to the bottom-right
+      lath.store.addLeaf(id, terminalLeafMeta(), null); // becomes the root
       // Adopt selection only when it points at nothing real: null, or dangling (a
       // just-killed pane). A live door (last pane minimized) keeps selection.
       const sel = selectedIdRef.current;
-      const selDangling = sel !== null && selectedTypeRef.current === 'pane' && !lath.has(sel);
+      const selDangling = sel !== null && selectedTypeRef.current === 'pane' && !lath.store.has(sel);
       if (sel === null || selDangling) selectPane(id);
     });
   }, [lath, generatePaneId, selectPane, fireEvent]);
@@ -818,14 +816,13 @@ export function Wall({
   // --- Session persistence ---
   useSessionPersistence({
     lath,
-    listVisiblePanes,
     doorsRef,
     selectedIdRef,
     selectedTypeRef,
   });
 
   // --- Dev-server port → pane correlation (browser header connection chip) ---
-  useDevServerPortCorrelation({ listVisiblePanes, doorsRef });
+  useDevServerPortCorrelation({ lath, doorsRef });
 
   // --- Reattach ---
 
@@ -844,12 +841,12 @@ export function Wall({
     const token = (item.token as RestoreToken | undefined) ?? legacyTokenFromDoor(item);
     // The enter hint (from the token's edge) is derived inside `restoreLeaf`.
     const sel = selectedIdRef.current;
-    const fallbackRef = sel && selectedTypeRef.current === 'pane' && lath.has(sel)
+    const fallbackRef = sel && selectedTypeRef.current === 'pane' && lath.store.has(sel)
       ? sel
       : lath.listPanes()[0]?.id;
-    const r = lath.restoreLeaf(meta, token, { fallbackRef });
+    const r = lath.store.restoreLeaf(meta, token, { fallbackRef });
     // `!ok` means no fallback was possible (empty tree) — make the leaf the root.
-    if (!r.ok) lath.addLeaf(item.id, meta, null);
+    if (!r.ok) lath.store.addLeaf(item.id, meta, null);
 
     removeDoorAndSelect(item.id);
     if (enterPassthrough) {
@@ -867,7 +864,7 @@ export function Wall({
           setConfirmKill({ id: item.id, char: randomKillChar() });
         } else if (typeof afterRestore === 'object' && afterRestore.type === 'replace-terminal') {
           // Atomic identity swap in place — no transient add/remove.
-          lath.replaceLeaf(item.id, afterRestore.newId, terminalLeafMeta());
+          lath.store.replaceLeaf(item.id, afterRestore.newId, terminalLeafMeta());
           disposeSession(item.id);
           selectPane(afterRestore.newId);
           if (afterRestore.announce) {
@@ -883,7 +880,7 @@ export function Wall({
   // The visible panes + the active/selected surface. The "active" surface is
   // simply the selected pane.
   const buildDorSurfaces = useCallback((): DorSurface[] => {
-    const panels = listVisiblePanes();
+    const panels = lath.listPanes();
     const activeId = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
     const terminalStates = getTerminalPaneStateSnapshot();
     const activityStates = getActivitySnapshot();
@@ -910,16 +907,16 @@ export function Wall({
         selectedInPane: true,
       };
     });
-  }, [listVisiblePanes]);
+  }, [lath]);
 
   const surfaceRefForId = useCallback((id: string): string => {
-    const panes = listVisiblePanes();
+    const panes = lath.listPanes();
     const panelIndex = panes.findIndex((panel) => panel.id === id);
     if (panelIndex >= 0) return `surface:${panelIndex + 1}`;
     const doorIndex = doorsRef.current.findIndex((door) => door.id === id);
     if (doorIndex >= 0) return `surface:${panes.length + doorIndex + 1}`;
     return id;
-  }, [listVisiblePanes]);
+  }, [lath]);
 
   const resolveVisibleSurface = useCallback((
     target: string | undefined,
@@ -948,11 +945,11 @@ export function Wall({
 
   const findSurfaceIdRunningCommand = useCallback((command: string, cwdPath: string): string | null => {
     const ids = [
-      ...listVisiblePanes().map((panel) => panel.id),
+      ...lath.listPanes().map((panel) => panel.id),
       ...doorsRef.current.map((door) => door.id),
     ];
     return ids.find((id) => surfaceRunsCommand(getTerminalPaneState(id), command, cwdPath)) ?? null;
-  }, [listVisiblePanes]);
+  }, [lath]);
 
   const createSplitSurface = useCallback(({
     command,
@@ -1013,7 +1010,7 @@ export function Wall({
     // The split is inherently background: `dor split` (not focus-neutral) selects
     // the new pane; `dor ensure` (focus-neutral) leaves selection put.
     const edge = edgeForDorDirection(direction);
-    lath.addLeaf(newId, terminalLeafMeta(), { refId: referenceId, edge });
+    lath.store.addLeaf(newId, terminalLeafMeta(), { refId: referenceId, edge });
     const selectedNew = settleAddSelection(!!focusNeutral, false, newId);
     onEventRef.current?.({
       type: 'split',
@@ -1062,7 +1059,7 @@ export function Wall({
       // Whether the user's current selection sits on the pane being replaced.
       const selectionReplaced = selectedTypeRef.current === 'pane' && selectedIdRef.current === reference.id;
       // Atomic identity swap in place; then dispose the old terminal session.
-      lath.replaceLeaf(reference.id, newId, browserMeta);
+      lath.store.replaceLeaf(reference.id, newId, browserMeta);
       disposeSession(reference.id);
       // Replacing the pane the user is selected on forces selection onto the
       // replacement; replacing any other pane leaves the user's selection —
@@ -1077,9 +1074,9 @@ export function Wall({
 
     // Split beside the reference by its aspect ratio (autoEdge). The split-event
     // direction derives from it.
-    const lathEdge = lath.autoEdgeFor(reference.id);
+    const lathEdge = lath.store.autoEdgeFor(reference.id);
     const horizontal = lathEdge === 'right';
-    lath.addLeaf(newId, browserMeta, { refId: reference.id, edge: lathEdge });
+    lath.store.addLeaf(newId, browserMeta, { refId: reference.id, edge: lathEdge });
     const selectedNew = settleAddSelection(!!focusNeutral, false, newId);
     onEventRef.current?.({
       type: 'split',
@@ -1113,7 +1110,7 @@ export function Wall({
     // client-side resources (no-op for a non-agent-browser surface).
     disposeAgentBrowserSurfaceController(oldId);
     const newId = generatePaneId();
-    lath.replaceLeaf(oldId, newId, browserLeafMeta(next.title, next.params));
+    lath.store.replaceLeaf(oldId, newId, browserLeafMeta(next.title, next.params));
     clearLocalSurfaceActivity(oldId);
     selectPane(newId);
     return newId;
@@ -1128,12 +1125,12 @@ export function Wall({
     const isMatch = (params: unknown) =>
       isAgentBrowserParams(params) && (params as { session?: unknown }).session === session;
 
-    const panel = listVisiblePanes().find((candidate) => isMatch(candidate.params));
+    const panel = lath.listPanes().find((candidate) => isMatch(candidate.params));
     if (panel) return { id: panel.id, minimized: false };
     const door = doorsRef.current.find((candidate) => isMatch(candidate.params));
     if (door) return { id: door.id, minimized: true };
     return null;
-  }, [listVisiblePanes]);
+  }, [lath]);
 
   // Listen for external "new terminal" requests (e.g. from the standalone AppBar)
   useEffect(() => {
@@ -1158,7 +1155,7 @@ export function Wall({
       const shellName = detail.name?.trim() || 'terminal';
 
       if (shouldReplaceUntouched) {
-        lath.replaceLeaf(selectedPaneId!, newId, terminalLeafMeta());
+        lath.store.replaceLeaf(selectedPaneId!, newId, terminalLeafMeta());
         disposeSession(selectedPaneId!);
         selectPane(newId);
         if (detail.announce) {
@@ -1182,9 +1179,9 @@ export function Wall({
 
       // Split beside the selected pane when it's a live pane, else `null` lets the
       // store fall back to the last leaf via autoEdge (its null-position behavior).
-      const edge = selectedPaneVisible ? lath.autoEdgeFor(selectedPaneId!) : null;
+      const edge = selectedPaneVisible ? lath.store.autoEdgeFor(selectedPaneId!) : null;
       // The enter hint is derived inside `addLeaf` from the edge it commits.
-      lath.addLeaf(newId, terminalLeafMeta(), edge ? { refId: selectedPaneId!, edge } : null);
+      lath.store.addLeaf(newId, terminalLeafMeta(), edge ? { refId: selectedPaneId!, edge } : null);
       selectPane(newId);
       if (detail.announce) {
         showShellSpawnNotice(newId, `Opened ${shellName}`);
@@ -1227,7 +1224,7 @@ export function Wall({
 
       // The `direction: 'auto'` aspect-ratio split resolution.
       const autoDorDirection = (id: string): DorResolvedSplitDirection =>
-        dorDirectionForEdge(lath.autoEdgeFor(id));
+        dorDirectionForEdge(lath.store.autoEdgeFor(id));
 
       if (detail.method === SURFACE_CONTROL_METHODS.list) {
         const surfaces = buildDorSurfaces();
@@ -1536,7 +1533,7 @@ export function Wall({
           // restarts) so the panel reconnects to the live stream, and the
           // resolved binary path alongside it.
           if (!existing.minimized && Object.keys(refreshedParams).length > 0) {
-            lath.updateParams(existing.id, refreshedParams);
+            lath.store.updateParams(existing.id, refreshedParams);
           } else if (existing.minimized && Object.keys(refreshedParams).length > 0) {
             const nextDoors = doorsRef.current.map((door) => door.id === existing.id
               ? { ...door, params: { ...door.params, ...refreshedParams } }
@@ -1620,7 +1617,7 @@ export function Wall({
     const refId = ref ?? (panes.length > 0 ? panes[panes.length - 1].id : null);
     const edge: Edge = direction === 'right' ? 'right' : 'bottom';
     // The enter hint is derived inside `addLeaf` from the edge it commits.
-    lath.addLeaf(newId, terminalLeafMeta(), refId ? { refId, edge } : null);
+    lath.store.addLeaf(newId, terminalLeafMeta(), refId ? { refId, edge } : null);
     selectPane(newId);
     onEventRef.current?.({ type: 'split', direction: splitDirection, source });
   }, [selectPane, generatePaneId, lath, nav]);
@@ -1658,7 +1655,7 @@ export function Wall({
       // follows via the store subscription (below), which also un-zooms when a
       // kill/replace clears the zoomed leaf.
       const zoomedNow = lath.store.getSnapshot().zoomedId !== null;
-      lath.setZoomed(zoomedNow ? null : id);
+      lath.store.setZoomed(zoomedNow ? null : id);
     },
     onClickPanel: (id: string) => {
       setConfirmKill(null);
@@ -1686,7 +1683,7 @@ export function Wall({
       }
       const result = setTerminalUserTitle(id, trimmed);
       if (result.accepted) {
-        lath.setTitle(id, trimmed);
+        lath.store.setTitle(id, trimmed);
       }
       setRenamingPaneId(null);
       return result;
@@ -1773,8 +1770,8 @@ export function Wall({
   // keeps a stable identity. The render-swap and wsPort-refresh param writes in
   // Wall.tsx above route through the same engine.
   const paneWrite = useMemo<PaneWriteActions>(() => ({
-    setTitle: (id, title) => lath.setTitle(id, title),
-    updateParams: (id, patch) => lath.updateParams(id, patch),
+    setTitle: (id, title) => lath.store.setTitle(id, title),
+    updateParams: (id, patch) => lath.store.updateParams(id, patch),
   }), [lath]);
 
   useWallKeyboard({
@@ -1787,7 +1784,6 @@ export function Wall({
     confirmKillRef,
     renamingRef,
     dialogKeyboardActiveRef,
-    paneElements,
     wallActionsRef,
     handleReattachRef,
     selectPane,
@@ -1800,7 +1796,6 @@ export function Wall({
     rejectKill,
     setConfirmKill,
     setRenamingPaneId,
-    setSelectedId,
     fireEvent,
   });
 
@@ -1833,7 +1828,7 @@ export function Wall({
   // then select it. A center-drop swap mirrors the Cmd-Arrow swap's `move` event so
   // tutorial/event consumers behave identically.
   const onProposeMove = useCallback((id: string, target: DropTarget) => {
-    const r = lath.moveLeaf(id, target);
+    const r = lath.store.moveLeaf(id, target);
     if (!r.ok) return;
     if (target.kind === 'swap') fireEvent({ type: 'move', fromId: id, toId: target.leaf });
     selectPane(id);
@@ -1862,7 +1857,7 @@ export function Wall({
     setDoorDrag(null);
     if (!dd || !target) return;
     const item = dd.item;
-    const r = lath.insertLeaf(item.id, leafMetaFromDoor(item), target);
+    const r = lath.store.insertLeaf(item.id, leafMetaFromDoor(item), target);
     if (!r.ok) return; // insert failed (unexpected) → the Door stays put
     removeDoorAndSelect(item.id);
   }, [doorDrag, lath, removeDoorAndSelect]);
@@ -1874,8 +1869,8 @@ export function Wall({
       <SelectedIdContext.Provider value={selectedId}>
         <WallActionsContext.Provider value={wallActions}>
           <PaneWriteContext.Provider value={paneWrite}>
-          <PaneElementsContext.Provider value={{ elements: paneElements, version: paneElementsVersion, bumpVersion: bumpPaneElementsVersion }}>
-          <DoorElementsContext.Provider value={{ elements: doorElements, version: doorElementsVersion, bumpVersion: bumpDoorElementsVersion }}>
+          <PaneElementsContext.Provider value={paneElementsContextValue}>
+          <DoorElementsContext.Provider value={doorElementsContextValue}>
           <RenamingIdContext.Provider value={renamingPaneId}>
           <ZoomedContext.Provider value={zoomed}>
           <WindowFocusedContext.Provider value={windowFocused}>

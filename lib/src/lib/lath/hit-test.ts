@@ -6,7 +6,7 @@
 // raycast intersections). No DOM, React, or timing. See docs/specs/tiling-engine.md
 // ("Hierarchical drag and drop").
 
-import { type Edge, type LathTree, type LeafId, type Rect, findLeafPath, rectsClose } from './model';
+import { type Edge, type LathTree, type LeafId, type Rect, findLeafPath, rectKey, rectsClose } from './model';
 import { type LayoutOpts, layout, nodeRectAtPath } from './layout';
 import { type DropTarget, insert, move } from './ops';
 
@@ -144,7 +144,7 @@ export function hitTest(
     if (!pr) continue;
     // Beside-itself: a committed layout identical to the current one is not a real move.
     if (dragged !== null && target.kind === 'edge' && sameLayout(rects, resultRects)) continue;
-    const key = `${pr.x},${pr.y},${pr.width},${pr.height}`;
+    const key = rectKey(pr);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ target, previewRect: pr, depth: out.length });

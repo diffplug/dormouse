@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { resolvePaneElement } from '../lib/spatial-nav';
+import { resolvePaneElement } from './wall/resolve-pane-element';
 import { ModalFrame, Shortcut } from './design';
 
 export type KillExit = 'shake' | 'confirm';

@@ -1,15 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import {
-  dockviewLayoutToLath,
-  lathLayoutFromStore,
-} from './lath-dockview-convert';
-import { validate, type LathNode, type LathTree } from '../../lib/lath/model';
-import type { LeafMeta } from './lath-wall-store';
-import { dockviewFixture } from './lath-test-fixtures';
-
-function m(component: string, tabComponent: string, title: string, params?: Record<string, unknown>): LeafMeta {
-  return { component, tabComponent, title, ...(params ? { params } : {}) };
-}
+import { dockviewLayoutToLath } from './lath-dockview-convert';
+import { validate, type LathNode } from '../../lib/lath/model';
+import { dockviewFixture, leafMeta as makeLeafMeta } from './lath-test-fixtures';
 
 describe('dockviewLayoutToLath — real-shaped blob', () => {
   it('maps orientation-by-depth to split dirs, sizes to normalized weights, panels to meta', () => {
@@ -32,9 +24,9 @@ describe('dockviewLayoutToLath — real-shaped blob', () => {
     expect(nested.children[0].weight).toBeCloseTo(0.375, 5);
     expect(nested.children[1].weight).toBeCloseTo(0.625, 5);
 
-    expect(leafMeta['pane-a']).toEqual(m('terminal', 'terminal', 'A'));
-    expect(leafMeta['pane-b']).toEqual(m('browser', 'surface', 'B', { renderMode: 'iframe', url: 'https://example.com' }));
-    expect(leafMeta['pane-c']).toEqual(m('terminal', 'terminal', 'C'));
+    expect(leafMeta['pane-a']).toEqual(makeLeafMeta({ component: 'terminal', title: 'A' }));
+    expect(leafMeta['pane-b']).toEqual(makeLeafMeta({ component: 'browser', title: 'B', params: { renderMode: 'iframe', url: 'https://example.com' } }));
+    expect(leafMeta['pane-c']).toEqual(makeLeafMeta({ component: 'terminal', title: 'C' }));
 
     expect(validate(tree)).toEqual([]);
   });
@@ -133,14 +125,5 @@ describe('dockviewLayoutToLath — malformed blobs', () => {
       panels: { dup: { id: 'dup', contentComponent: 'terminal' } },
     };
     expect(dockviewLayoutToLath(blob)).toBeNull();
-  });
-});
-
-describe('lathLayoutFromStore', () => {
-  it('serializes a store snapshot to the persisted layout', () => {
-    const tree: LathTree = { root: { kind: 'leaf', id: 'a' } };
-    const leafMeta = new Map<string, LeafMeta>([['a', m('terminal', 'terminal', 'A')]]);
-    const out = lathLayoutFromStore({ tree, leafMeta });
-    expect(out).toEqual({ version: 1, tree, leafMeta: { a: m('terminal', 'terminal', 'A') } });
   });
 });

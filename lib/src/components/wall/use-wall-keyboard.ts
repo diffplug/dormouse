@@ -29,7 +29,6 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       if (handleDualTap(e, c, dualTapState)) return;
       if (handleMouseSelectionKeys(e, c)) return;
       if (c.modeRef.current === 'passthrough') return;
-      if (!c.nav.ready()) return;
       if (c.renamingRef.current) return;
       if (handleKillConfirm(e, c)) return;
       if (c.dialogKeyboardActiveRef.current) return;

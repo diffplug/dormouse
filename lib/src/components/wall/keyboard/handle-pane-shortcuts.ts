@@ -21,7 +21,6 @@ export function handlePaneShortcuts(
   ctx: WallKeyboardCtx,
   navHistory: NavHistoryRef,
 ): boolean {
-  if (!ctx.nav.ready()) return false;
   const sid = ctx.selectedIdRef.current;
 
   if (e.key === 'Enter' && sid) {

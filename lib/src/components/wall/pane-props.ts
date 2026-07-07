@@ -8,7 +8,4 @@ export type PaneProps = {
    *  terminal-state stores. */
   title: string | undefined;
   params: Record<string, unknown> | undefined;
-  /** Engine visibility (Lath: a mounted leaf is always true). Document visibility
-   *  is NOT folded in here — `useSurfaceVisibility` combines the two. */
-  panelVisible: boolean;
 };

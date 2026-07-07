@@ -30,24 +30,19 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from 'react';
-import { type LathTree, type Rect, leaves } from '../../lib/lath/model';
-import { type LayoutOpts, layout, sashes } from '../../lib/lath/layout';
+import { type LathTree, type Rect, leaves, rectKey } from '../../lib/lath/model';
+import { layout, sashes } from '../../lib/lath/layout';
 import { type DropTarget, resize } from '../../lib/lath/ops';
 import { type DropCandidate, hitTest } from '../../lib/lath/hit-test';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
 import { TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import type { PaneProps } from './pane-props';
-import type { LathWallSnapshot, LeafMeta } from './lath-wall-store';
+import { type LathWallSnapshot, type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { nowMs, type LathWallEngine } from './lath-wall-engine';
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
-
-/** The geometry LathHost renders with. `gap: 6` is the pane-to-pane gutter; `minLeaf`
- *  is a comfortable minimum pane size. Exported so callers report the same opts to
- *  the store (`setLayoutGeometry`) that the host lays out with. */
-export const LATH_LAYOUT_OPTS: LayoutOpts = { gap: 6, minLeaf: { width: 100, height: 60 } };
 
 /** Widened pointer target over each (thin) sash band, in px. */
 const SASH_HIT = 8;
@@ -127,10 +122,44 @@ type LeafCallbacks = {
   onHeaderPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
 };
 
-/** One leaf div: header band atop a filling body, positioned purely by the inline
- *  geometry props. Memoized so a store commit or a drag frame only re-renders the
- *  leaves whose props actually changed (geometry / meta / resolved component).
- *  Static presentation (position/flex/overflow) lives in the `.lath-leaf*` CSS. */
+/** A leaf's content: the header band atop a filling body. Memoized on its content
+ *  identity (id / meta / resolved components / the stable header-press handler), so a
+ *  geometry-only frame — a sash-drag preview or a resize commit re-renders the
+ *  positioned wrapper — never re-renders the header or body. Returned as a fragment so
+ *  the header/body stay direct flex children of `.lath-leaf`. A mounted leaf is always
+ *  engine-visible, so the pane props carry no visibility flag (docs/specs/
+ *  tiling-engine.md → "Pane props contract"). */
+const LathLeafContent = memo(function LathLeafContent({
+  id,
+  meta,
+  Body,
+  Tab,
+  onHeaderPointerDown,
+}: {
+  id: string;
+  meta: LeafMeta | undefined;
+  Body: ComponentType<PaneProps> | undefined;
+  Tab: ComponentType<PaneProps> | undefined;
+  /** Header-press → maybe a pane drag (threshold-gated inside LathHost). Stable. */
+  onHeaderPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
+}) {
+  const paneProps: PaneProps = { id, title: meta?.title, params: meta?.params };
+  return (
+    <>
+      <div className="lath-leaf-header" onPointerDown={onHeaderPointerDown}>
+        {Tab ? <Tab {...paneProps} /> : null}
+      </div>
+      <div className="lath-leaf-body">{Body ? <Body {...paneProps} /> : null}</div>
+    </>
+  );
+});
+
+/** One leaf div: the positioned wrapper (geometry only), wrapping the memoized
+ *  `LathLeafContent`. Memoized so a store commit or a drag frame only re-renders the
+ *  wrappers whose props actually changed. React writes the *target* geometry; while an
+ *  animation is in flight LathHost imperatively overrides left/top/width/height/opacity
+ *  on the registered div, so a re-render here can't snap a mid-tween leaf back to its
+ *  resting rect. Inline styles carry ONLY dynamic values; the rest is `.lath-leaf` CSS. */
 const LathLeaf = memo(function LathLeaf({
   id,
   meta,
@@ -162,18 +191,7 @@ const LathLeaf = memo(function LathLeaf({
   onHeaderPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
   onLeafFocused?: (id: string) => void;
 }) {
-  // React writes the *target* geometry; while an animation is in flight LathHost
-  // imperatively overrides left/top/width/height/opacity on the registered div, so a
-  // meta re-render here can't snap a mid-tween leaf back to its resting rect. Inline
-  // styles carry ONLY dynamic values; the rest is `.lath-leaf` CSS.
   const style: CSSProperties = hidden ? { display: 'none' } : { left, top, width, height, zIndex };
-  const paneProps: PaneProps = {
-    id,
-    title: meta?.title,
-    params: meta?.params,
-    // A mounted leaf is always engine-visible (no active-tab gating).
-    panelVisible: true,
-  };
   return (
     <div
       data-lath-leaf={id}
@@ -182,10 +200,7 @@ const LathLeaf = memo(function LathLeaf({
       ref={registerEl}
       onFocusCapture={() => onLeafFocused?.(id)}
     >
-      <div className="lath-leaf-header" onPointerDown={onHeaderPointerDown}>
-        {Tab ? <Tab {...paneProps} /> : null}
-      </div>
-      <div className="lath-leaf-body">{Body ? <Body {...paneProps} /> : null}</div>
+      <LathLeafContent id={id} meta={meta} Body={Body} Tab={Tab} onHeaderPointerDown={onHeaderPointerDown} />
     </div>
   );
 });
@@ -243,7 +258,7 @@ function createDragController(deps: DragControllerDeps): DragController {
       }
       return;
     }
-    const key = `${rect.x},${rect.y},${rect.width},${rect.height}`;
+    const key = rectKey(rect);
     if (key === lastPreviewKey) return;
     lastPreviewKey = key;
     deps.setDragPreview(rect);
@@ -436,7 +451,7 @@ export function LathHost({
   componentsOverride,
 }: {
   /** The Wall's engine handle: LathHost reads `lath.store`, drives `lath.animator`,
-   *  drains `lath.consumeEnterHints`, and pumps `lath.notifyFrames`. */
+   *  drains `lath.store.consumeEnterHints`, and pumps `lath.notifyFrames`. */
   lath: LathWallEngine;
   /** Wall commits the resize (as an op proposal) once the drag ends. */
   onCommitResize: (splitPath: number[], boundary: number, deltaPx: number) => void;
@@ -493,7 +508,7 @@ export function LathHost({
   // Report the geometry we render with so the store's queries (restore/resize/
   // neighbors/autoEdge) match the screen.
   useEffect(() => {
-    store.setLayoutGeometry({ x: 0, y: 0, width: size.width, height: size.height }, LATH_LAYOUT_OPTS);
+    store.setLayoutGeometry(rectRef.current, LATH_LAYOUT_OPTS);
   }, [store, size.width, size.height]);
 
   // --- Pane / Door drag (docs/specs/tiling-engine.md → "Hierarchical drag and
@@ -726,7 +741,7 @@ export function LathHost({
   // other referenced values are stable refs/callbacks).
   useLayoutEffect(() => {
     const targets = layout(snapshot.tree, rectRef.current, LATH_LAYOUT_OPTS);
-    animator.retarget(targets, nowMs(), lath.consumeEnterHints(), { snap: snapNextRef.current });
+    animator.retarget(targets, nowMs(), lath.store.consumeEnterHints(), { snap: snapNextRef.current });
     snapNextRef.current = false;
     pump();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -736,7 +751,7 @@ export function LathHost({
   // would lag. Skipped before the first measurement.
   useLayoutEffect(() => {
     if (size.width === 0 && size.height === 0) return;
-    const targets = layout(snapshot.tree, { x: 0, y: 0, width: size.width, height: size.height }, LATH_LAYOUT_OPTS);
+    const targets = layout(snapshot.tree, rectRef.current, LATH_LAYOUT_OPTS);
     animator.retarget(targets, nowMs(), undefined, { snap: true });
     pump();
     // eslint-disable-next-line react-hooks/exhaustive-deps

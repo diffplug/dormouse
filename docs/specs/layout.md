@@ -383,7 +383,7 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/lib/terminal-theme.ts` | xterm theme extraction, terminal host painting, theme MutationObserver |
 | `lib/src/lib/terminal-report-filter.ts` | Synthetic/replay terminal report detection and replay writer |
 | `lib/src/lib/terminal-mouse-router.ts` | Mouse selection routing, smart-token hinting, Alt shape toggle |
-| `lib/src/lib/spatial-nav.ts` | `resolvePaneElement` — climbs a registered pane element to its enclosing `[data-lath-leaf]` for overlay/kill measurement |
+| `lib/src/components/wall/resolve-pane-element.ts` | `resolvePaneElement` — climbs a registered pane element to its enclosing `[data-lath-leaf]` for overlay/kill measurement |
 | `lib/src/lib/activity-monitor.ts` | Per-session activity state machine: output timing → alert escalation |
 | `lib/src/lib/alert-manager.ts` | Manages ActivityMonitors + attention tracking + TODO state per session |
 | `lib/src/lib/session-types.ts` | Type definitions for persisted sessions (`PersistedPane`, `PersistedDoor`, `PersistedSession`) |

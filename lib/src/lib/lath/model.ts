@@ -23,6 +23,12 @@ export function rectsClose(a: Rect, b: Rect, eps = 0): boolean {
   );
 }
 
+/** Stable `"x,y,w,h"` string identity of a rect — the dedup/change key shared by
+ *  hit-test's candidate de-duplication and the drag-preview change guard. */
+export function rectKey(r: Rect): string {
+  return `${r.x},${r.y},${r.width},${r.height}`;
+}
+
 /** A `'row'` split lays its children left→right; a `'col'` split lays them top→bottom. */
 export type LathNode =
   | { kind: 'leaf'; id: LeafId }
