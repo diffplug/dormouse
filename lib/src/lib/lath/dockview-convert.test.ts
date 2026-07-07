@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { dockviewLayoutToLath } from './lath-dockview-convert';
-import { validate, type LathNode } from '../../lib/lath/model';
-import { dockviewFixture, leafMeta as makeLeafMeta } from './lath-test-fixtures';
+import { dockviewLayoutToLath } from './dockview-convert';
+import { validate, type LathNode } from './model';
+import { dockviewFixture, leafMeta as makeLeafMeta } from './test-fixtures';
 
 describe('dockviewLayoutToLath — real-shaped blob', () => {
   it('maps orientation-by-depth to split dirs, sizes to normalized weights, panels to meta', () => {

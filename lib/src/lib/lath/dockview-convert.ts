@@ -1,8 +1,9 @@
 // The legacy dockview → Lath layout upgrade reader (docs/specs/tiling-engine.md →
 // "Persistence and migration"). Lath is the sole layout format Dormouse writes; this
 // module exists only to migrate a `SerializedDockview` blob persisted by a pre-Lath
-// build one-way into a Lath tree on restore. It models the serialized dockview shape
-// with LOCAL structural types (no dockview dependency).
+// build one-way into a Lath tree, once, at the session read boundary
+// (`session-restore.ts`'s `persistedLathLayout`). It models the serialized dockview
+// shape with LOCAL structural types (no dockview dependency).
 //
 // dockview's serialized grid stores orientation only at the root (`grid.orientation`)
 // and *alternates it per depth*: a branch node lays its children along its own
@@ -12,9 +13,8 @@
 // normalized Lath tree's dirs already strictly alternate by depth, so the two models
 // line up level-for-level.
 
-import { type LathChild, type LathNode, type LathTree, leaves, normalize, validate } from '../../lib/lath/model';
-import type { LeafMeta } from './lath-wall-store';
-import type { LathPersistedLayout } from './lath-persistence';
+import { type LathChild, type LathNode, type LathTree, leaves, normalize, validate } from './model';
+import type { LathPersistedLayout, LeafMeta } from './persistence';
 
 type Orientation = 'HORIZONTAL' | 'VERTICAL';
 

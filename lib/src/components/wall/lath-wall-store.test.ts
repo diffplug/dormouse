@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createLathWallStore, type LathWallStore, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { leaves, oppositeEdge, type LathNode, type LathTree } from '../../lib/lath/model';
 import { leaf, split, tree } from '../../lib/lath/test-util';
-import { leafMeta } from './lath-test-fixtures';
+import { leafMeta } from '../../lib/lath/test-fixtures';
 
 const RECT = { x: 0, y: 0, width: 800, height: 600 };
 

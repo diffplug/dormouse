@@ -39,6 +39,11 @@ import {
   split,
   swap,
 } from '../../lib/lath/ops';
+import type { LeafMeta } from '../../lib/lath/persistence';
+
+// Re-exported for the wall modules that read/write the store's meta map — the type
+// itself lives with the persisted-layout wire format it serializes into.
+export type { LeafMeta };
 
 /** The geometry the wall lays out with: `gap` is the pane-to-pane gutter, `minLeaf`
  *  a comfortable minimum pane size. Pure data beside the store's geometry contract —
@@ -46,22 +51,6 @@ import {
  *  `setLayoutGeometry`, so the store's queries (restore / resize / neighbors /
  *  autoEdge) match the screen. */
 export const LATH_LAYOUT_OPTS: LayoutOpts = { gap: 6, minLeaf: { width: 100, height: 60 } };
-
-/** Per-leaf presentation metadata, keyed by leaf id in the snapshot's `leafMeta`
- *  map — the Pane props contract's "read side", serialized inside the persisted
- *  Lath layout. */
-export type LeafMeta = {
-  /** Body component key — `'terminal'` | `'browser'` (legacy `'iframe'` /
-   *  `'agent-browser'` aliases are resolved to `'browser'` at conversion time and
-   *  again at render time). */
-  component: string;
-  /** Header component key — `'terminal'` | `'surface'`. */
-  tabComponent: string;
-  /** Engine-tracked fallback title (live titles come from the terminal-state
-   *  stores). Always a string in the snapshot. */
-  title: string;
-  params?: Record<string, unknown>;
-};
 
 /** An immutable view of the store. `getSnapshot` returns the same object identity
  *  until the next commit, as `useSyncExternalStore` requires. */

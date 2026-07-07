@@ -12,7 +12,7 @@ import { LATH_EASING } from '../../lib/lath/animator';
 import { type DropTarget, move } from '../../lib/lath/ops';
 import { leafTree, type LathNode, type LathTree, type Rect } from '../../lib/lath/model';
 import { leaf, split, tree as treeOf, movePreview as movePreviewAt } from '../../lib/lath/test-util';
-import { leafMeta } from './lath-test-fixtures';
+import { leafMeta } from '../../lib/lath/test-fixtures';
 import type { PaneProps } from './pane-props';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;

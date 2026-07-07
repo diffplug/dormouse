@@ -1,15 +1,15 @@
+import type { LathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter, PtyInfo } from './platform/types';
 import { restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
 import { readPersistedSession, type PersistedDoor } from './session-types';
-import { restoreSession } from './session-restore';
+import { persistedLathLayout, restoreSession } from './session-restore';
 
 export interface ReconnectResult {
   paneIds: string[];
-  /** Legacy dockview layout blob from pre-Lath saves; migrated one-way on seed. Only
-   *  present on cold-start restore, gated by the same pane-set match as `lathLayout`. */
-  layout?: unknown;
-  /** Native Lath persisted layout; preferred over `layout` when present. */
-  lathLayout?: unknown;
+  /** The saved session's single layout channel (native, or migrated from a pre-Lath
+   *  save at the read boundary — `persistedLathLayout`), gated on its leaf set
+   *  matching the visible pane set. */
+  lathLayout?: LathPersistedLayout;
   doors?: PersistedDoor[];
 }
 
@@ -133,41 +133,19 @@ function getSavedResumePlan(savedState: unknown, liveIds: string[]): ReconnectRe
   const paneIds = saved.panes
     .filter((pane) => !doorIds.has(pane.id) && (liveSet.has(pane.id) || pane.surfaceType === 'browser'))
     .map((pane) => pane.id);
-  const layoutPanelIds = getLayoutPanelIds(saved.layout);
+  // Gate the layout (already the single Lath channel — pre-Lath saves were migrated
+  // at the read boundary) on its leaf set matching the visible pane set, so a stale
+  // blob is dropped rather than restored over a mismatched pane set.
+  const lathLayout = persistedLathLayout(saved);
+  const leafIds = lathLayout ? Object.keys(lathLayout.leafMeta) : null;
   const layoutMatchesVisiblePanes =
-    !!layoutPanelIds &&
-    layoutPanelIds.length === paneIds.length &&
-    layoutPanelIds.every((id) => paneIds.includes(id));
-
-  // The Lath layout is gated in parallel (its leaf-meta keys are its pane set). The
-  // two blobs are dual-written from one tree, so they agree; gating each on its own
-  // extractor keeps a lone stale blob from being kept.
-  const lathLeafIds = getLathLayoutLeafIds(saved.lathLayout);
-  const lathMatchesVisiblePanes =
-    !!lathLeafIds &&
-    lathLeafIds.length === paneIds.length &&
-    lathLeafIds.every((id) => paneIds.includes(id));
+    !!leafIds &&
+    leafIds.length === paneIds.length &&
+    leafIds.every((id) => paneIds.includes(id));
 
   return {
     paneIds: layoutMatchesVisiblePanes ? paneIds : paneIds.filter((id) => liveSet.has(id)),
     doors,
-    layout: layoutMatchesVisiblePanes ? saved.layout : undefined,
-    lathLayout: lathMatchesVisiblePanes ? saved.lathLayout : undefined,
+    lathLayout: layoutMatchesVisiblePanes ? lathLayout : undefined,
   };
-}
-
-function getLayoutPanelIds(layout: unknown): string[] | null {
-  if (!layout || typeof layout !== 'object') return null;
-  const panels = (layout as { panels?: unknown }).panels;
-  if (!panels || typeof panels !== 'object' || Array.isArray(panels)) return null;
-  return Object.keys(panels);
-}
-
-/** Leaf ids of a Lath persisted layout (its `leafMeta` keys) — the pane-set the
- *  gate above compares against, parallel to `getLayoutPanelIds`. */
-function getLathLayoutLeafIds(lathLayout: unknown): string[] | null {
-  if (!lathLayout || typeof lathLayout !== 'object') return null;
-  const leafMeta = (lathLayout as { leafMeta?: unknown }).leafMeta;
-  if (!leafMeta || typeof leafMeta !== 'object' || Array.isArray(leafMeta)) return null;
-  return Object.keys(leafMeta);
 }

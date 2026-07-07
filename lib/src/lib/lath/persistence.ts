@@ -1,12 +1,28 @@
 // The Lath persisted-layout wire format and its reader/writer (docs/specs/
-// tiling-engine.md → "Persistence and migration"). Persistence is an engine
-// concern layered over the store: `lathLayoutFromStore` snapshots the store into
-// the on-disk blob, and `isLathPersistedLayout` recognizes one on restore. The
-// legacy dockview reader (`lath-dockview-convert.ts`) imports the type; the engine
-// (`lath-wall-engine.ts`) owns `serializeLayout`/`seed`, which call through here.
+// tiling-engine.md → "Persistence and migration"). Plain data over the core model:
+// `lathLayoutFromStore` snapshots the wall store into the on-disk blob, and
+// `isLathPersistedLayout` recognizes one at the session read boundary
+// (`session-restore.ts`). The legacy dockview reader (`dockview-convert.ts`) emits
+// this shape; the engine (`lath-wall-engine.ts`) owns `serializeLayout`/`seed`,
+// which call through here.
 
-import type { LathTree } from '../../lib/lath/model';
-import type { LeafMeta } from './lath-wall-store';
+import type { LathTree } from './model';
+
+/** Per-leaf presentation metadata, keyed by leaf id — the Pane props contract's
+ *  "read side", owned live by the wall store's `leafMeta` map and serialized
+ *  verbatim inside the persisted Lath layout. */
+export type LeafMeta = {
+  /** Body component key — `'terminal'` | `'browser'` (legacy `'iframe'` /
+   *  `'agent-browser'` aliases are resolved to `'browser'` at conversion time and
+   *  again at render time). */
+  component: string;
+  /** Header component key — `'terminal'` | `'surface'`. */
+  tabComponent: string;
+  /** Engine-tracked fallback title (live titles come from the terminal-state
+   *  stores). Always a string in the snapshot. */
+  title: string;
+  params?: Record<string, unknown>;
+};
 
 /** The Lath persisted layout — the tree is its own wire format; `leafMeta` carries
  *  the per-leaf `{ component, tabComponent, title, params }`. */

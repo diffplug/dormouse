@@ -176,7 +176,6 @@ function ShellSpawnNotice({
 export function Wall({
   initialPaneIds,
   initialMode = 'command',
-  restoredLayout,
   restoredLathLayout,
   initialDoors,
   onEvent,
@@ -186,11 +185,9 @@ export function Wall({
 }: {
   initialPaneIds?: string[];
   initialMode?: WallMode;
-  /** Legacy dockview layout blob from pre-Lath saves; migrated one-way to a Lath
-   *  tree on seed (the upgrade channel). `restoredLathLayout` is preferred when
-   *  present (docs/specs/tiling-engine.md → "Persistence and migration"). */
-  restoredLayout?: unknown;
-  /** The native Lath persisted layout, preferred over the legacy `restoredLayout`. */
+  /** The restored Lath persisted layout — the session read boundary already
+   *  migrated any pre-Lath dockview save into this single channel
+   *  (docs/specs/tiling-engine.md → "Persistence and migration"). */
   restoredLathLayout?: unknown;
   initialDoors?: PersistedDoor[];
   onEvent?: (event: WallEvent) => void;
@@ -225,7 +222,6 @@ export function Wall({
 
   // Consumed once by the Lath seed effect to restore existing sessions
   const initialPaneIdsRef = useRef(initialPaneIds);
-  const restoredLayoutRef = useRef(restoredLayout);
 
   // Mutable maps shared via context — consumers must call bumpVersion() after
   // any mutation so that dependent effects/components re-run.
@@ -550,11 +546,9 @@ export function Wall({
     // Doors are already seeded from `initialDoors` by the `doors` useState initializer
     // (and `doorsRef` mirrors it every render), so there is nothing to restore here.
 
-    // Hydrate: prefer the native Lath layout, migrate a legacy dockview blob, else
-    // fresh panes.
+    // Hydrate: the restored Lath layout when usable, else fresh panes.
     const { paneIds, fresh } = lath.seed(
       restoredLathLayoutRef.current,
-      restoredLayoutRef.current,
       initialPaneIdsRef.current,
       generatePaneId,
     );

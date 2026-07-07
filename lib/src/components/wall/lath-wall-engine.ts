@@ -4,7 +4,7 @@
 // conveniences over it — the animator (entry/exit/tween + dying state), the
 // pane-list / meta projections, the dor-direction ↔ Edge ↔ Door-direction maps, the
 // leaf-meta builders, the legacy-Door → neighbor-tier token bridge, and the
-// three-way hydration `seed` + `serializeLayout`. Every state op and geometry query
+// hydration `seed` + `serializeLayout`. Every state op and geometry query
 // goes straight to `lath.store.*`; the engine no longer re-exports them.
 //
 // The engine holds NO selection/focus/mode/activation state — those stay in the Wall.
@@ -34,12 +34,11 @@ import {
   type LeafMeta,
   createLathWallStore,
 } from './lath-wall-store';
-import { dockviewLayoutToLath } from './lath-dockview-convert';
 import {
   type LathPersistedLayout,
   isLathPersistedLayout,
   lathLayoutFromStore,
-} from './lath-persistence';
+} from '../../lib/lath/persistence';
 import type { DooredItem, VisiblePane } from './wall-types';
 
 /** Wall-clock reader for the animator (the single definition — LathHost imports it
@@ -187,13 +186,13 @@ export type LathWallEngine = {
   // --- persistence ---
   serializeLayout(): LathPersistedLayout;
 
-  /** Hydration: prefer a persisted Lath layout, else migrate the dockview blob,
-   *  else build a fresh tree from `initialPaneIds` (or one generated id). Returns
-   *  the resulting pane ids (pre-order) and whether the fresh path was taken (so
-   *  the Wall knows to prime default-shell opts, mirroring `addTerminalPanel`). */
+  /** Hydration: a persisted Lath layout when usable (pre-Lath saves were already
+   *  migrated into one at the session read boundary — `session-restore.ts`), else a
+   *  fresh tree from `initialPaneIds` (or one generated id). Returns the resulting
+   *  pane ids (pre-order) and whether the fresh path was taken (so the Wall knows
+   *  to prime default-shell opts, mirroring `addTerminalPanel`). */
   seed(
     lathBlob: unknown,
-    dockviewBlob: unknown,
     initialPaneIds: string[] | undefined,
     generatePaneId: () => string,
   ): { paneIds: string[]; fresh: boolean };
@@ -250,7 +249,7 @@ export function createLathWallEngine(
 
     serializeLayout: () => lathLayoutFromStore(snapshot()),
 
-    seed(lathBlob, dockviewBlob, initialPaneIds, generatePaneId) {
+    seed(lathBlob, initialPaneIds, generatePaneId) {
       // 1. A persisted Lath layout (must validate; empty trees fall through so the
       //    Wall always seeds ≥1 pane).
       if (isLathPersistedLayout(lathBlob)) {
@@ -261,14 +260,7 @@ export function createLathWallEngine(
         }
       }
 
-      // 2. Migrate a legacy dockview blob (one-way upgrade for pre-Lath saves).
-      const migrated = dockviewLayoutToLath(dockviewBlob);
-      if (migrated && leaves(migrated.tree).length > 0) {
-        store.seed(migrated.tree, Object.entries(migrated.leafMeta));
-        return { paneIds: store.leafIds(), fresh: false };
-      }
-
-      // 3. Fresh tree from the restored session ids (or one generated id), splitting
+      // 2. Fresh tree from the restored session ids (or one generated id), splitting
       //    successive panes via the store's autoEdge (as `addTerminalPanel` does).
       const ids = initialPaneIds && initialPaneIds.length > 0 ? initialPaneIds : [generatePaneId()];
       store.seed(leafTree(ids[0]), [[ids[0], terminalLeafMeta()]]);

@@ -2,7 +2,7 @@
 // stamp per-leaf metadata, and a hand-written SerializedDockview blob for the
 // persistence/migration tests.
 
-import type { LeafMeta } from './lath-wall-store';
+import type { LeafMeta } from './persistence';
 
 /** Build a `LeafMeta` for tests. `tabComponent` defaults from `component` the same way
  *  the real builders do (`terminal` → `terminal`, anything else → `surface`); `title`

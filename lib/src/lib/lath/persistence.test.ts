@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { isLathPersistedLayout, lathLayoutFromStore } from './lath-persistence';
-import type { LathTree } from '../../lib/lath/model';
-import type { LeafMeta } from './lath-wall-store';
-import { leafMeta as makeLeafMeta } from './lath-test-fixtures';
+import { isLathPersistedLayout, lathLayoutFromStore } from './persistence';
+import type { LathTree } from './model';
+import type { LeafMeta } from './persistence';
+import { leafMeta as makeLeafMeta } from './test-fixtures';
 
 describe('lathLayoutFromStore', () => {
   it('serializes a store snapshot to the persisted layout', () => {

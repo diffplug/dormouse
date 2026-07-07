@@ -10,34 +10,25 @@ import {
 } from './lath-wall-engine';
 import type { DooredItem } from './wall-types';
 import { leaves } from '../../lib/lath/model';
-import { dockviewFixture } from './lath-test-fixtures';
 
 describe('lath-wall-engine seed', () => {
-  it('(a) hydrates from a LathPersistedLayout, preferring it over the dockview blob', () => {
+  it('(a) hydrates from a LathPersistedLayout, ignoring initialPaneIds', () => {
     const engine = createLathWallEngine();
     const lathLayout = {
       version: 1 as const,
       tree: { root: { kind: 'leaf' as const, id: 'leaf-1' } },
       leafMeta: { 'leaf-1': { component: 'terminal', tabComponent: 'terminal', title: 'Restored' } },
     };
-    const { paneIds, fresh } = engine.seed(lathLayout, dockviewFixture(), ['ignored'], () => 'gen');
+    const { paneIds, fresh } = engine.seed(lathLayout, ['ignored'], () => 'gen');
     expect(fresh).toBe(false);
     expect(paneIds).toEqual(['leaf-1']);
     expect(engine.getMeta('leaf-1')?.title).toBe('Restored');
-    expect(engine.store.has('pane-a')).toBe(false); // the dockview blob was NOT used
+    expect(engine.store.has('ignored')).toBe(false);
   });
 
-  it('(b) migrates a legacy dockview blob when there is no lath layout', () => {
+  it('(b) builds a fresh tree from initialPaneIds when the layout is not usable', () => {
     const engine = createLathWallEngine();
-    const { paneIds, fresh } = engine.seed(null, dockviewFixture(), ['pane-a', 'pane-b'], () => 'gen');
-    expect(fresh).toBe(false);
-    expect([...paneIds].sort()).toEqual(['pane-a', 'pane-b', 'pane-c']);
-    expect(engine.getMeta('pane-a')?.title).toBe('A');
-  });
-
-  it('(c) builds a fresh tree from initialPaneIds when neither layout is usable', () => {
-    const engine = createLathWallEngine();
-    const { paneIds, fresh } = engine.seed(null, null, ['p1', 'p2'], () => 'gen');
+    const { paneIds, fresh } = engine.seed(null, ['p1', 'p2'], () => 'gen');
     expect(fresh).toBe(true);
     expect([...paneIds].sort()).toEqual(['p1', 'p2']);
     expect(leaves(engine.store.getSnapshot().tree).sort()).toEqual(['p1', 'p2']);
@@ -45,9 +36,9 @@ describe('lath-wall-engine seed', () => {
     expect(engine.getMeta('p1')).toMatchObject({ component: 'terminal', tabComponent: 'terminal' });
   });
 
-  it('(c) generates a single pane id when initialPaneIds is empty', () => {
+  it('(b) generates a single pane id when initialPaneIds is empty', () => {
     const engine = createLathWallEngine();
-    const { paneIds, fresh } = engine.seed(undefined, undefined, undefined, () => 'generated-1');
+    const { paneIds, fresh } = engine.seed(undefined, undefined, () => 'generated-1');
     expect(fresh).toBe(true);
     expect(paneIds).toEqual(['generated-1']);
   });
@@ -55,7 +46,7 @@ describe('lath-wall-engine seed', () => {
   it('falls through an empty-tree lath layout to fresh panes', () => {
     const engine = createLathWallEngine();
     const emptyLath = { version: 1 as const, tree: { root: null }, leafMeta: {} };
-    const { paneIds, fresh } = engine.seed(emptyLath, null, ['p1'], () => 'gen');
+    const { paneIds, fresh } = engine.seed(emptyLath, ['p1'], () => 'gen');
     expect(fresh).toBe(true);
     expect(paneIds).toEqual(['p1']);
   });
@@ -107,7 +98,7 @@ describe('leafMetaFromDoor', () => {
     // canonicalized here), so a subsequent minimize — which reads `meta.component`
     // straight through — persists the canonical `browser` value `reconnect.ts` filters on.
     const engine = createLathWallEngine();
-    engine.seed(null, null, ['p1'], () => 'gen');
+    engine.seed(null, ['p1'], () => 'gen');
     const meta = leafMetaFromDoor({ ...base, id: 'legacy', component: 'iframe', params: { renderMode: 'iframe', url: 'x' } });
     engine.store.addLeaf('legacy', meta, { refId: 'p1', edge: 'right' });
     expect(engine.getMeta('legacy')?.component).toBe('browser');
@@ -151,7 +142,7 @@ describe('legacyTokenFromDoor', () => {
 describe('lath-wall-engine listPanes projection', () => {
   it('lists panes in tree pre-order with meta as store state changes', () => {
     const engine = createLathWallEngine();
-    engine.seed(null, null, ['p1'], () => 'gen');
+    engine.seed(null, ['p1'], () => 'gen');
     // Split p1 → p2 on the right (explicit edge, so no geometry is needed). State ops
     // go through the store; the engine's `listPanes` projection reflects them.
     engine.store.addLeaf('p2', { component: 'terminal', tabComponent: 'terminal', title: 'P2' }, { refId: 'p1', edge: 'right' });
