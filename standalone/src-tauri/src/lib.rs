@@ -568,6 +568,79 @@ fn read_update_log() -> Result<String, String> {
     read_log_tail(10_000)
 }
 
+// --- Per-window session persistence (docs/specs/standalone.md §Persistence) ---
+//
+// The webview's persisted-session blob (a `PersistedWindow`) is stored as one
+// atomic file per Tauri window, keyed by the window label. This replaces webview
+// `localStorage`, whose WKWebView SQLite WAL grew unbounded because WebKit pins
+// its own WAL with a long-lived reader and never truncates during a days-long
+// session. A plain file we overwrite atomically has no WAL and cannot grow.
+//
+// Window identity is implicit: each command keys by the invoking window's label,
+// so the frontend stays window-agnostic and a second window (`win-2`, …) persists
+// to its own file without ever rewriting the first window's blob.
+
+fn sessions_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir unavailable: {e}"))?
+        .join("sessions"))
+}
+
+// Window labels are app-controlled (e.g. "main"), but sanitize defensively so a
+// label can never escape the sessions directory or embed a path separator.
+fn session_file_name(label: &str) -> String {
+    let safe: String = label
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("{safe}.json")
+}
+
+fn read_session_from(dir: &Path, label: &str) -> Result<Option<String>, String> {
+    let path = dir.join(session_file_name(label));
+    match std::fs::read_to_string(&path) {
+        Ok(contents) => Ok(Some(contents)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("read session {label}: {e}")),
+    }
+}
+
+fn write_session_to(dir: &Path, label: &str, state: &str) -> Result<(), String> {
+    create_dir_all(dir).map_err(|e| format!("create sessions dir: {e}"))?;
+    let path = dir.join(session_file_name(label));
+    // Atomic replace: write a sibling temp file, fsync it, then rename over the
+    // target so a crash mid-write can never truncate the previous good snapshot.
+    let mut tmp = path.clone().into_os_string();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    {
+        let mut f = File::create(&tmp).map_err(|e| format!("open temp: {e}"))?;
+        f.write_all(state.as_bytes())
+            .map_err(|e| format!("write temp: {e}"))?;
+        f.sync_all().map_err(|e| format!("fsync temp: {e}"))?;
+    }
+    std::fs::rename(&tmp, &path).map_err(|e| format!("rename session {label}: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn load_session(window: tauri::Window) -> Result<Option<String>, String> {
+    read_session_from(&sessions_dir(window.app_handle())?, window.label())
+}
+
+#[tauri::command]
+fn save_session(window: tauri::Window, state: String) -> Result<(), String> {
+    write_session_to(&sessions_dir(window.app_handle())?, window.label(), &state)
+}
+
 #[tauri::command]
 fn kill_sidecar_now(state: tauri::State<'_, SidecarState>) {
     kill_sidecar_and_wait(&state.child);
@@ -1037,6 +1110,8 @@ pub fn run() {
             read_clipboard_image_as_file_path,
             read_clipboard_text,
             read_update_log,
+            load_session,
+            save_session,
             agent_browser_command,
             agent_browser_edit,
             agent_browser_screenshot,
@@ -1063,8 +1138,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_node_binary, resolve_dor_cli_paths, resolve_sidecar_path,
-        strip_windows_verbatim_prefix,
+        find_node_binary, read_session_from, resolve_dor_cli_paths, resolve_sidecar_path,
+        session_file_name, strip_windows_verbatim_prefix, write_session_to,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -1248,5 +1323,48 @@ mod tests {
 
         assert_eq!(resolved, sidecar_path);
         assert!(!resolved.to_string_lossy().contains(r"\\?\"));
+    }
+
+    #[test]
+    fn session_missing_reads_none() {
+        let dir = TempDir::new("sessions-missing");
+        // No file yet — a fresh install / new window reads as None, not an error.
+        assert_eq!(read_session_from(dir.path(), "main").unwrap(), None);
+    }
+
+    #[test]
+    fn session_round_trips_and_isolates_windows() {
+        let dir = TempDir::new("sessions-roundtrip");
+        write_session_to(dir.path(), "main", r#"{"v":1,"who":"main"}"#).unwrap();
+        assert_eq!(
+            read_session_from(dir.path(), "main").unwrap().as_deref(),
+            Some(r#"{"v":1,"who":"main"}"#),
+        );
+
+        // A second window persists to its own file and never touches the first's.
+        write_session_to(dir.path(), "win-2", r#"{"v":1,"who":"win-2"}"#).unwrap();
+        assert_eq!(
+            read_session_from(dir.path(), "main").unwrap().as_deref(),
+            Some(r#"{"v":1,"who":"main"}"#),
+        );
+        assert_eq!(
+            read_session_from(dir.path(), "win-2").unwrap().as_deref(),
+            Some(r#"{"v":1,"who":"win-2"}"#),
+        );
+
+        // Overwrite is atomic-replace, not append: the latest blob fully wins.
+        write_session_to(dir.path(), "main", r#"{"v":2}"#).unwrap();
+        assert_eq!(
+            read_session_from(dir.path(), "main").unwrap().as_deref(),
+            Some(r#"{"v":2}"#),
+        );
+    }
+
+    #[test]
+    fn session_label_cannot_escape_directory() {
+        // A hostile label is flattened to a plain filename inside the dir.
+        assert_eq!(session_file_name("../../evil"), "______evil.json");
+        assert_eq!(session_file_name("main"), "main.json");
+        assert_eq!(session_file_name("a/b"), "a_b.json");
     }
 }
