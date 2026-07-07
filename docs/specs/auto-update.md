@@ -30,21 +30,25 @@ app launch
   │
   user quits
   │
-  ├─ no approved, downloaded update → exit normally
-  └─ approved, downloaded update → write success marker → install() → exit
-                         │
-                         └─ install fails → overwrite with failure marker → exit normally
+  └─ quit orchestrator runs graceful teardown + durable final save
+       │   (docs/specs/standalone.md §Quit flow)
+       ├─ no approved, downloaded update → quit_proceed → exit
+       └─ approved, downloaded update → write success marker → install() → exit
+                              │
+                              └─ install fails → overwrite with failure marker → quit_proceed → exit
 ```
 
-The `Update` object returned by `check()` is held in memory as an available update. Clicking the approval action calls `download()` and promotes it to a pending update only after the download succeeds. The close handler intercepts the window close event only when there is an approved, downloaded update, writes a success marker to `localStorage` *before* calling `install()` (because on Windows, NSIS force-kills the process), then — on Windows only — kills the sidecar and waits for it to fully exit (see *Sidecar teardown on Windows* below) before calling `install()`. In Vite dev mode (`pnpm dev:standalone`), the close handler skips `install()` without preventing the close. Dev mode is useful for testing check/download/banner behavior, but install must be tested from a packaged app because the updater resolves its replacement target from the current executable path.
+The `Update` object returned by `check()` is held in memory as an available update. Clicking the approval action calls `download()` and promotes it to a pending update only after the download succeeds.
+
+Install-on-quit is no longer owned by a window-close handler. Every quit trigger is intercepted in Rust and driven through the webview quit orchestrator (`docs/specs/standalone.md` §Quit flow), which runs the graceful terminal teardown and durable final session save, and *then* — as the last step, and only when there is an approved, downloaded update — calls the updater's `installPendingUpdate()`. The updater exposes two functions for that step: `hasPendingUpdate()` and `installPendingUpdate()`. `installPendingUpdate()` writes a success marker to `localStorage` *before* calling `install()` (because on Windows, NSIS force-kills the process), then — on Windows only — kills the sidecar and waits for it to fully exit (see *Sidecar teardown on Windows* below) before calling `install()`. It does **not** prevent-default or close the window: exiting the process is the orchestrator's `quit_proceed` job, which runs after this returns. In Vite dev mode (`pnpm dev:standalone`), `installPendingUpdate()` skips `install()` (the orchestrator still proceeds to exit). Dev mode is useful for testing check/download/banner behavior, but install must be tested from a packaged app because the updater resolves its replacement target from the current executable path.
 
 ## Sidecar teardown on Windows
 
-The NSIS installer overwrites files inside the bundled sidecar — including node-pty's native `conpty.node`. Windows refuses to overwrite a native module that a live process still has loaded, so if the Node sidecar is running when NSIS reaches `node_modules`, the install fails with *"Error opening file for writing: …\_up_\sidecar\node_modules\node-pty\prebuilds\win32-x64\conpty.node"*. The Rust `RunEvent::Exit` kill is too late and asynchronous — NSIS starts copying files immediately after `install()` force-kills the app, racing the sidecar's shutdown.
+The NSIS installer overwrites files inside the bundled sidecar — including node-pty's native `conpty.node`. Windows refuses to overwrite a native module that a live process still has loaded, so if the Node sidecar is running when NSIS reaches `node_modules`, the install fails with *"Error opening file for writing: …\_up_\sidecar\node_modules\node-pty\prebuilds\win32-x64\conpty.node"*. The Rust `RunEvent::Exit` sidecar kill is too late and asynchronous — NSIS starts copying files immediately after `install()` force-kills the app, racing the sidecar's shutdown. (By quit time the orchestrator's graceful teardown has already killed the sidecar's *PTYs*, but the sidecar process itself is still alive holding those native modules.)
 
 Because `pty-core` spawns with `useConptyDll: true` on Windows (see [terminal-escapes.md](terminal-escapes.md#osc-color-queries-on-windows-require-the-bundled-conpty)), the same hazard now covers two more bundled files: the sidecar additionally `LoadLibrary`s node-pty's `conpty/conpty.dll`, and each pseudoconsole runs an `OpenConsole.exe` child process. `conpty.dll` is released when the sidecar exits (same as `conpty.node`); the `OpenConsole.exe` children run inside the sidecar's job object (`process_wrap`'s `JobObject`), so terminating the sidecar tears them down too.
 
-So on Windows the close handler `invoke`s `kill_sidecar_now` and awaits it before `install()`. That command is synchronous on the Rust side: it sends the kill, then polls `try_wait` (capped at ~5s) until the process has actually exited and released its file handles. `try_wait` is used instead of the job-object `wait()` because `wait()` consumes a completion-port message the reaper thread relies on and could block forever if the sidecar had already exited. macOS and Linux can replace open files in place, so they skip this and rely on the existing `RunEvent::Exit` cleanup.
+So on Windows `installPendingUpdate()` `invoke`s `kill_sidecar_now` and awaits it before `install()`. That command is synchronous on the Rust side: it sends the kill, then polls `try_wait` (capped at ~5s) until the process has actually exited and released its file handles. `try_wait` is used instead of the job-object `wait()` because `wait()` consumes a completion-port message the reaper thread relies on and could block forever if the sidecar had already exited. macOS and Linux can replace open files in place, so they skip this and rely on the existing `RunEvent::Exit` cleanup.
 
 ## Update notice in the Baseboard
 
@@ -71,12 +75,18 @@ The Baseboard is in `lib/` but the updater is standalone-only. The notice is thr
 
 ## Platform behavior at quit
 
+On every platform the quit orchestrator calls `quit_proceed` after the teardown +
+install step returns; `quit_proceed` sets the approved flag and calls
+`app.exit(0)`, so the app exit is uniform. The per-platform difference is only in
+what `install()` itself does:
+
 | Platform | What `install()` does | App exit |
 |----------|----------------------|----------|
-| Windows | Kills the sidecar and waits for it to exit (so NSIS can overwrite its loaded native modules), then launches NSIS installer in passive mode (progress bar, no user interaction). Force-kills the app. | Automatic (NSIS) |
-| macOS | Replaces the `.app` bundle in place | `getCurrentWindow().close()` after `install()` returns |
-| Linux | Replaces the AppImage in place | `getCurrentWindow().close()` after `install()` returns |
-| Vite dev mode | Skips `install()` to avoid replacing the dev executable directory | Native close proceeds normally |
+| Windows | Kills the sidecar and waits for it to exit (so NSIS can overwrite its loaded native modules), then launches NSIS installer in passive mode (progress bar, no user interaction). Force-kills the app. | NSIS force-kills before `quit_proceed` is reached |
+| macOS | Replaces the `.app` bundle in place | `quit_proceed` → `app.exit(0)` |
+| Linux | Replaces the AppImage in place | `quit_proceed` → `app.exit(0)` |
+| No pending update | — (`installPendingUpdate` not called) | `quit_proceed` → `app.exit(0)` |
+| Vite dev mode | Skips `install()` to avoid replacing the dev executable directory | `quit_proceed` → `app.exit(0)` |
 
 Windows uses `"installMode": "passive"` (configured in `tauri.conf.json` under `plugins.updater.windows`).
 
@@ -95,7 +105,8 @@ The success marker is written *before* `install()` because Windows NSIS force-ki
 
 | File | Role |
 |------|------|
-| [`standalone/src/updater.ts`](../../standalone/src/updater.ts) | State machine, update check, user-approved download, close handler, post-install markers |
+| [`standalone/src/updater.ts`](../../standalone/src/updater.ts) | State machine, update check, user-approved download, quit-time install (`hasPendingUpdate` / `installPendingUpdate`, called by the quit orchestrator), post-install markers |
+| [`standalone/src/quit.ts`](../../standalone/src/quit.ts) | Quit orchestrator (owned by `docs/specs/standalone.md` §Quit flow); calls `installPendingUpdate()` as the last teardown step |
 | [`standalone/src/UpdateBanner.tsx`](../../standalone/src/UpdateBanner.tsx) | Pure presentational component — renders inline notice content for the Baseboard |
 | [`standalone/src/main.tsx`](../../standalone/src/main.tsx) | Passes `<ConnectedUpdateBanner />` as the `baseboardNotice` prop to `<App />`, calls `startUpdateCheck()` after platform init |
 
@@ -115,12 +126,12 @@ In `standalone/src-tauri/tauri.conf.json`:
 }
 ```
 
-The Rust side registers the plugin with `tauri_plugin_updater::Builder::new().build()` in `lib.rs`. No custom Rust commands or `on_before_exit` hooks — the JS close handler handles everything. Capabilities must include `core:window:allow-destroy` as well as `core:window:allow-close`: Tauri's `onCloseRequested` API calls `destroy()` after the handler returns when the close was not prevented.
+The Rust side registers the plugin with `tauri_plugin_updater::Builder::new().build()` in `lib.rs`. The updater adds no Rust commands of its own; the install step runs entirely in JS (`installPendingUpdate`) and the process exit is the quit orchestrator's `quit_proceed` (`docs/specs/standalone.md` §Quit flow). Capabilities include `core:window:allow-close` and `core:window:allow-destroy` (used by the AppBar window controls); the quit flow itself needs no added capability (`core:event:allow-listen` already exists, and the quit commands are custom, which require none).
 
 ## Dependencies
 
 - `@tauri-apps/plugin-updater` — update check, download, install
-- `@tauri-apps/api/window` — `getCurrentWindow()`, `onCloseRequested`
+- `@tauri-apps/api/core` — `invoke('kill_sidecar_now')` before install on Windows
 - `@tauri-apps/api/app` — `getVersion()` for the "from" version in markers
 - `@tauri-apps/plugin-shell` — `open()` for the changelog link
 - `tauri-plugin-updater` Rust crate — registered in `Cargo.toml` and `lib.rs`
@@ -135,6 +146,6 @@ The Rust side registers the plugin with `tauri_plugin_updater::Builder::new().bu
 
 **Why write the success marker before `install()`?** On Windows, the NSIS installer force-kills the process — code after `install()` may never run. Writing optimistically and overwriting on failure handles both platforms correctly.
 
-**Why no `on_before_exit` Rust hook?** The JS close handler (`onCloseRequested`) runs before `install()` and handles marker writes and (on Windows) the synchronous sidecar kill. On Windows, NSIS handles process termination after `install()`. On macOS/Linux the sidecar is orphaned and exits when its stdin closes — harmless there because open files can be replaced in place.
+**Why install as the last step of the quit orchestrator, not a standalone hook?** The install must run *after* the graceful terminal teardown and the durable final session save (`docs/specs/standalone.md` §Quit flow) — otherwise a Windows NSIS force-kill mid-teardown would lose the freshest scrollback. Folding install into the orchestrator (step 5) makes that ordering explicit and gives it the same bounded-exit backstops (the Rust 20s watchdog covers a hung installer). The updater therefore owns no quit interception of its own — it just exposes `hasPendingUpdate` / `installPendingUpdate` for the orchestrator to call.
 
 **Why `localStorage` instead of Tauri's store plugin?** `localStorage` persists across launches in Tauri's webview, requires no additional dependencies, and is automatically scoped to the app. If the user resets app data, markers are cleaned up naturally.

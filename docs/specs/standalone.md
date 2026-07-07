@@ -80,8 +80,8 @@ PTY and awaits the sidecar's `gracefulKillDone` (echoing the request's
 every PTY has exited — one 50 ms grace tick after the last exit, so ConPTY's
 late final flush still lands — or at the timeout for SIGTERM-ignoring programs.
 Unlike the hard `pty_kill` path it preserves scrollback, so final output stays
-readable via `pty_get_scrollback`; it is the hook the quit-teardown item in
-`## Future` calls for.
+readable via `pty_get_scrollback`; it is the hook the quit flow's graceful
+teardown calls (§Quit flow).
 Sidecar events (`pty:*`, dor control requests, async results) are emitted to
 the webview, where `TauriAdapter` converts dor control requests into the
 `dormouse:control-request` CustomEvent that `Wall` handles
@@ -149,11 +149,15 @@ force-killed (especially on Windows), and an orphaned sidecar would hold
 `conpty.node`/`conpty.dll` open and block the NSIS installer
 (`docs/specs/auto-update.md`, Sidecar teardown on Windows).
 
-Host-side ordering: the window-close path is owned by the updater's close
-handler (`docs/specs/auto-update.md` — post-install markers, and on Windows a
-synchronous `kill_sidecar_now` that waits for the process to actually exit
-before `install()`). Independently, Tauri's `RunEvent::Exit` runs
-`shutdown_sidecar_and_wait` so a plain quit also tears the sidecar down.
+Host-side ordering: every quit trigger is intercepted and driven through the
+webview quit orchestrator (§Quit flow), which runs the graceful teardown and
+then, if an update is pending, invokes the updater's install step
+(`docs/specs/auto-update.md` — post-install markers, and on Windows a synchronous
+`kill_sidecar_now` that waits for the process to actually exit before
+`install()`). Only after the orchestrator calls `quit_proceed` does the app
+exit; Tauri's `RunEvent::Exit` then runs `shutdown_sidecar_and_wait` as a final
+backstop (harmless post-teardown — the PTY map is already empty, so the sidecar
+`killAll` no-ops).
 
 ## AppBar
 
@@ -256,21 +260,86 @@ the freshly hydrated cache, the migration hydrates with the pre-migration seed
 (null) and lets the `setItem` be a genuine change — localStorage is already
 cleared, so the Rust store is the blob's only remaining home.
 
-**Durability on quit (current limitation).** `saveState` returns after updating
-the cache and *firing* `save_session`; nothing on the quit path awaits the Rust
-write. The awaitable primitives exist — `TauriSessionStore.drain()` resolves
-when the write pipeline goes idle; the adapter's `onRequestSessionFlush`
-handshake is a real in-process fan-out driven by `requestSessionFlush` /
-`notifySessionFlushComplete`; `drainSessionSaves` awaits the store drain under a
-bounded timeout; each `save_session` is durable through the rename (dir fsync)
-— **but nothing on the quit path calls them yet**. The normal quit path still
-does not intercept the window close (`updater.ts` `onCloseRequested` only
-prevents default for a pending update), so a clean quit can still drop the save
-fired at `pagehide`, losing state changed in the final debounce/heartbeat window
-— a regression from the old `localStorage` path, which WebKit flushed on
-teardown. Accepted for now because restore is best-effort and saves are frequent
-(≤500 ms for layout changes); the quit orchestrator that wires these primitives
-is planned (`## Future`).
+**Durability on quit.** A clean quit durably writes the latest state before the
+process exits. `saveState` still returns after updating the cache and *firing*
+`save_session`, but the quit orchestrator (§Quit flow) now awaits the pipeline to
+disk: `requestSessionFlush` drives the frontend's debounced/heartbeat save
+through `saveState`, then `drainSessionSaves` awaits `TauriSessionStore.drain()`
+(resolves when the write pipeline goes idle) under a bounded timeout, and each
+`save_session` is itself durable through the temp-then-rename (dir fsync). So the
+final debounce/heartbeat window is no longer lost — the regression from the old
+WebKit-flush-on-teardown `localStorage` path is closed. Unclean exits (crash,
+force-kill) stay best-effort.
+
+## Quit flow
+
+Source of truth: `standalone/src-tauri/src/lib.rs` (`QuitState`, `request_quit`,
+the `quit_ack` / `quit_cancel` / `quit_proceed` commands, the `CloseRequested` /
+`ExitRequested` arms) and `standalone/src/quit.ts` (the webview orchestrator).
+
+Quitting ends every terminal. Rust intercepts **every** quit trigger so the
+webview can tear terminals down gracefully — capturing their final scrollback —
+and durably write the freshest session before the process exits.
+
+**Trigger interception.** Two Rust arms funnel into `request_quit(app)`:
+
+- `WindowEvent::CloseRequested` (the window close button) — `api.prevent_close()`
+  unless the quit is already approved. *Multi-window seam*: one window ships
+  today, so a per-window close is the whole-app quit; a multi-window build would
+  give each `CloseRequested` a per-window teardown and only quit on the last.
+- `RunEvent::ExitRequested` (Cmd+Q / app-menu Quit / dock quit / interceptable OS
+  logout) — `api.prevent_exit()` unless approved. Its `code` is `None` for a
+  user-initiated exit and `Some` for the programmatic `app.exit(0)` that *ends*
+  the flow; the `approved` gate lets that final exit through without re-catching
+  it.
+
+**The ack / proceed / cancel protocol.** `request_quit` sets `pending`, clears
+`acked`, bumps `seq`, and emits `dormouse://quit-requested` to the webview. The
+webview's orchestrator (registered by `initQuitFlow`, Tauri-only) responds:
+
+1. **Always `quit_ack`** first (fire-and-catch), so Rust's phase-1 watchdog
+   stands down even if the orchestrator then dedupes the event out.
+2. Runs the teardown (below), then **`quit_proceed`** — which sets `approved` and
+   calls `app.exit(0)`. That re-enters `ExitRequested` with `approved` true and
+   the app exits.
+3. A stage-D3 confirmation cancel calls **`quit_cancel`** — clears `pending`,
+   bumps `seq` (invalidating the live watchdog), and leaves the app running.
+
+A cloned-`AppHandle` **watchdog** thread keeps quit bounded against a dead or
+wedged webview, in two phases: **~2 s** for the ack (no ack ⇒ the listener is
+dead; log and `app.exit(0)`), then poll to **~20 s** total for proceed/cancel
+(never arrived ⇒ log and exit). Each watchdog captures the `seq` it was spawned
+for; a **repeated quit trigger** bumps `seq` (spawning a fresh watchdog and
+re-emitting), so the stale watchdog exits without acting — this is the user's
+escape hatch if the webview acked then wedged.
+
+**Teardown ordering (`runQuitTeardown`), and why.** Wrapped in an 8 s ceiling;
+every step is individually bounded so a stall can't wedge quit:
+
+1. `requestSessionFlush` — save while PTYs are alive, so CWDs are fresh.
+2. `gracefulKillAllPtys` — SIGTERM every PTY (§Rust ↔ sidecar bridge); resolves
+   early once all exit. This **precedes** capture on purpose: a PTY's scrollback
+   buffer survives its exit and is only cleared by the *hard* `pty_kill` / sidecar
+   `killAll`, so graceful termination leaves the final output intact.
+3. `requestSessionFlush` — capture that now-final scrollback of the dead PTYs.
+   `getCwd` returns null for a dead PTY, and session-save falls back to the
+   previously persisted CWD.
+4. `drainSessionSaves` — await the last `save_session` reaching disk. This is
+   where the clean-quit **durability guarantee** is met (§Persistence, "Durability
+   on quit"): the process does not exit until this write lands.
+5. If an update is pending, `installPendingUpdate()` — strictly *after* the
+   completed save (`docs/specs/auto-update.md`); Rust's 20 s watchdog backstops a
+   hung installer.
+6. **Always** `quit_proceed` (in `finally`, even on throw/timeout).
+
+**Windows note.** node-pty's `kill('SIGTERM')` is an immediate kill under ConPTY
+(no graceful-signal delivery), so step 2 terminates promptly there — but the
+scrollback buffer still survives the exit, so step 3 captures the final output
+just as it does elsewhere.
+
+**Dev-mode note.** The browser-dev harness (`VITE_DORMOUSE_BROWSER_DEV_HOST`) has
+no Rust quit interception; `bootstrap()` only calls `initQuitFlow` on the real
+Tauri branch, so the flow never initializes there.
 
 ## File drop
 
@@ -319,11 +388,12 @@ root `package.json` for the `dev:standalone*` orchestration.
 
 | File | Role |
 |------|------|
-| `standalone/src-tauri/src/lib.rs` | Rust backend: sidecar spawn/supervision, invoke commands, event forwarding, per-window session file store (`save_session` / `load_session`), file drop, logging, dock icon, exit teardown |
+| `standalone/src-tauri/src/lib.rs` | Rust backend: sidecar spawn/supervision, invoke commands, event forwarding, per-window session file store (`save_session` / `load_session`), quit interception (`QuitState`, `request_quit`, `quit_ack` / `quit_cancel` / `quit_proceed`, §Quit flow), file drop, logging, dock icon, exit teardown |
 | `standalone/src-tauri/src/clipboard_win.rs` | Native Win32 clipboard reads on Windows (owned by `docs/specs/mouse-and-clipboard.md`) |
 | `standalone/scripts/tauri.mjs`, `csp.mjs` | Tauri CLI wrapper assembling the webview CSP (`DORMOUSE_REMOTE_CONNECT_SRC`) |
 | `standalone/src-tauri/tauri.conf.json` | Window config, dev/build commands, sidecar resources glob, updater config |
-| `standalone/src/main.tsx` | Webview bootstrap (boot sequence above) |
+| `standalone/src/main.tsx` | Webview bootstrap (boot sequence above); initializes the quit orchestrator on the Tauri branch |
+| `standalone/src/quit.ts` | Quit orchestrator: listens for `dormouse://quit-requested`, runs the graceful teardown, calls `quit_ack` / `quit_proceed` / `quit_cancel` (§Quit flow) |
 | `standalone/src/AppBar.tsx` | Titlebar: shell dropdown, theme picker, window controls |
 | `standalone/src/tauri-adapter.ts` | `TauriAdapter`: PlatformAdapter over Tauri invoke/events, session persistence via the Rust store, control-request dispatch |
 | `standalone/src/tauri-session-store.ts` | `TauriSessionStore`: Rust-backed `SessionKeyValueStore` — boot-seeded write-through cache over `load_session` / `save_session` (§Persistence) |
@@ -342,38 +412,21 @@ Requirements for the next round of session-persistence work — what must be tru
 not how. (Detailed working notes live outside the specs while the work is in
 flight.)
 
-**Guaranteed session save on a clean quit.** `saveState` forwards to
-`save_session` asynchronously and nothing on the quit path awaits it on shutdown,
-so a clean quit can drop the final save — a durability regression from the old
-`localStorage` path (§Persistence, "Durability on quit"). A webview `pagehide`
-handler cannot await async work. The awaitable primitives already exist
-(§Persistence, "Durability on quit"); what remains is a quit orchestrator that
-intercepts *every* quit trigger, calls `requestSessionFlush` then
-`drainSessionSaves`, and only then lets the process exit. Requirement: on a
-clean quit the latest state is durably written before the process exits, with a
-bounded wait so a stalled write cannot wedge quit. Unclean exits (crash,
-force-kill) stay best-effort.
-
-**Quit confirmation + graceful terminal teardown.** Quitting ends all terminals;
-today it does so abruptly, unconfirmed, and without capturing final output.
+**Quit confirmation dialog.** The quit interception, graceful teardown, and
+durable final save are built (§Quit flow); what remains is the *confirmation UI*
+in front of them. Today a quit with running work tears down immediately and
+unconfirmed. The orchestrator already exposes a seam — `setQuitConfirmGate` in
+`standalone/src/quit.ts`, consulted when `countRunningSessions() > 0`, with the
+fall-through running an unconfirmed teardown until a gate is installed.
 Requirements:
-- Confirm on quit only when ≥1 terminal has a running command (idle shells quit
-  silently); state the running-terminal count (`docs/specs/terminal-state.md`).
-- Apply to *every* quit trigger — window close button, Cmd+Q / app-menu Quit,
-  dock quit, interceptable OS logout — not just the window-close path (today
-  intercepted only for a pending update).
-- Terminate terminals so they can flush, and capture that final output into
-  persisted scrollback **before** the buffer is discarded. Constraint: the hard
-  kill path (`standalone/sidecar/pty-core.js`, `kill` / `killAll`) drops a PTY's
-  scrollback buffer synchronously; a natural or signal-driven exit does not.
-- Write the freshest session (with captured scrollback) and complete that write
-  before exit — this is where the clean-quit durability guarantee above is met.
-- Bounded: a terminal that ignores graceful termination, or a stalled save, must
-  not wedge quit.
-- Cancel leaves the app and all terminals untouched.
-- Compose with update-on-quit: teardown + save must complete before the updater
-  installs (on Windows the installer force-kills the process),
-  `docs/specs/auto-update.md`.
+- Show the dialog only when ≥1 terminal has a running command (idle shells quit
+  silently); state the running-terminal count (`docs/specs/terminal-state.md`,
+  and `countRunningSessions` is the count).
+- On confirm, run the existing teardown (`ctx.confirm()`); on decline, abort via
+  `ctx.cancel()` (invokes `quit_cancel`) and leave the app and every terminal
+  untouched.
+- Cover every quit trigger — the interception already does, so the gate is
+  consulted uniformly regardless of how quit was initiated.
 - Dialog matches the in-pane kill-confirmation aesthetic (`docs/specs/layout.md`).
 
 **Retire the `localStorage` → Rust migration.** The one-time migration branch in

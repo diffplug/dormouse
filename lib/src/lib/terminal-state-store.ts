@@ -63,6 +63,17 @@ export function getTerminalPaneState(id: string): TerminalPaneState {
   return paneStates.get(id) ?? createTerminalPaneState();
 }
 
+// Count sessions whose latest activity is a live/running command (not an idle
+// shell at a prompt). The standalone quit orchestrator uses this to decide
+// whether a quit needs a confirmation (docs/specs/standalone.md §Quit flow).
+export function countRunningSessions(): number {
+  let count = 0;
+  for (const state of paneStates.values()) {
+    if (state.activity.kind === 'running') count++;
+  }
+  return count;
+}
+
 // True once the pane's shell has emitted real OSC 633/133 boundaries — i.e. its
 // shell integration injection took. `dor ensure -- <command>` types the command
 // into the shell programmatically (bypassing the keystroke heuristic), so only an

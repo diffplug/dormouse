@@ -62,6 +62,7 @@ export { setDefaultShellOpts, getDefaultShellOpts } from './shell-defaults';
 export {
   applyTerminalSemanticEvents,
   applyTerminalSemanticEventsByPtyId,
+  countRunningSessions,
   ensureTerminalPaneState,
   fillTerminalProcessCwd,
   fillTerminalProcessCwdByPtyId,

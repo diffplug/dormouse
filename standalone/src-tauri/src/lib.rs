@@ -8,7 +8,7 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::Stdio,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     sync::mpsc,
     sync::{Arc, Mutex, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -45,6 +45,95 @@ struct SidecarState {
     pending_requests: PendingRequests,
     next_request_id: AtomicU64,
     child: SharedChild,
+}
+
+// ── Quit interception (docs/specs/standalone.md §Quit flow) ──────────────────
+//
+// Every quit trigger — window-close button, Cmd+Q / app-menu Quit, dock quit,
+// interceptable OS logout — is caught in Rust (CloseRequested + ExitRequested)
+// and funnelled through `request_quit` instead of exiting immediately. That
+// emits `dormouse://quit-requested` to the webview, whose quit orchestrator
+// (standalone/src/quit.ts) runs the graceful teardown — flush → SIGTERM +
+// capture → flush → drain → optional update install — then calls back
+// `quit_proceed`. Two watchdog phases (ack, then total) keep the process bounded
+// if the webview never answers.
+#[derive(Default)]
+struct QuitState {
+    // A quit is in flight: request_quit fired, no proceed/cancel yet.
+    pending: AtomicBool,
+    // The webview acknowledged quit-requested — its listener is alive.
+    acked: AtomicBool,
+    // Teardown finished (or a watchdog gave up): cleared to exit. Gates the
+    // CloseRequested/ExitRequested arms so the final app.exit(0) isn't re-caught.
+    approved: AtomicBool,
+    // Bumped on every request_quit and on quit_cancel. A watchdog captures the
+    // seq it was spawned for; if it no longer matches, a repeated trigger or a
+    // cancel has superseded it and the watchdog exits without acting.
+    seq: AtomicU64,
+}
+
+// Phase 1: wait this long for the webview to ack. No ack ⇒ its listener is dead
+// (e.g. a crashed webview) and quit would otherwise hang — so exit.
+const QUIT_ACK_TIMEOUT_MS: u64 = 2_000;
+// Phase 2: total budget from request to a forced exit. A teardown that never
+// reports proceed/cancel within this window is abandoned and the app exits — the
+// user's escape hatch is a repeated trigger, which supersedes the wedged flow.
+const QUIT_TOTAL_TIMEOUT_MS: u64 = 20_000;
+const QUIT_POLL_STEP_MS: u64 = 500;
+
+fn quit_approved(app: &AppHandle) -> bool {
+    app.try_state::<QuitState>()
+        .is_some_and(|q| q.approved.load(Ordering::SeqCst))
+}
+
+fn request_quit(app: &AppHandle) {
+    let Some(quit) = app.try_state::<QuitState>() else {
+        return;
+    };
+    quit.pending.store(true, Ordering::SeqCst);
+    quit.acked.store(false, Ordering::SeqCst);
+    // fetch_add returns the prior value; our watchdog's seq is that + 1.
+    let my_seq = quit.seq.fetch_add(1, Ordering::SeqCst) + 1;
+    let _ = app.emit("dormouse://quit-requested", ());
+
+    // Watchdog: a cloned handle polls QuitState so a dead or wedged webview can't
+    // make quit hang. A repeated trigger bumps seq, so this (now-stale) watchdog
+    // returns and the fresh request_quit spawns a replacement.
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(QUIT_ACK_TIMEOUT_MS));
+        let Some(quit) = app.try_state::<QuitState>() else {
+            return;
+        };
+        // Superseded (seq bumped), already exiting (approved), or cancelled
+        // (!pending) ⇒ this watchdog has nothing to do.
+        let stale = |quit: &QuitState| {
+            quit.seq.load(Ordering::SeqCst) != my_seq
+                || quit.approved.load(Ordering::SeqCst)
+                || !quit.pending.load(Ordering::SeqCst)
+        };
+        if stale(&quit) {
+            return;
+        }
+        if !quit.acked.load(Ordering::SeqCst) {
+            append_log("[quit] no ack from webview; exiting");
+            quit.approved.store(true, Ordering::SeqCst);
+            app.exit(0);
+            return;
+        }
+        // Phase 2: acked — wait for teardown to report proceed/cancel.
+        let mut elapsed = QUIT_ACK_TIMEOUT_MS;
+        while elapsed < QUIT_TOTAL_TIMEOUT_MS {
+            std::thread::sleep(Duration::from_millis(QUIT_POLL_STEP_MS));
+            elapsed += QUIT_POLL_STEP_MS;
+            if stale(&quit) {
+                return;
+            }
+        }
+        append_log("[quit] teardown never completed; exiting");
+        quit.approved.store(true, Ordering::SeqCst);
+        app.exit(0);
+    });
 }
 
 const LOG_FILE_ENV: &str = "DORMOUSE_LOG_FILE";
@@ -682,6 +771,32 @@ fn kill_sidecar_now(state: tauri::State<'_, SidecarState>) {
     kill_sidecar_and_wait(&state.child);
 }
 
+// ── Quit protocol commands (docs/specs/standalone.md §Quit flow) ─────────────
+
+// The webview's quit orchestrator received quit-requested and its listener is
+// alive; stand the phase-1 ack watchdog down.
+#[tauri::command]
+fn quit_ack(state: tauri::State<'_, QuitState>) {
+    state.acked.store(true, Ordering::SeqCst);
+}
+
+// The user declined the quit (a stage-D3 confirmation cancel). Clearing pending
+// and bumping seq invalidates any live watchdog for this quit so nothing exits.
+#[tauri::command]
+fn quit_cancel(state: tauri::State<'_, QuitState>) {
+    state.pending.store(false, Ordering::SeqCst);
+    state.acked.store(false, Ordering::SeqCst);
+    state.seq.fetch_add(1, Ordering::SeqCst);
+}
+
+// Teardown is done (or the orchestrator bailed under its own timeout); approve so
+// the app.exit(0) below re-enters ExitRequested with approved=true and proceeds.
+#[tauri::command]
+fn quit_proceed(app: AppHandle, state: tauri::State<'_, QuitState>) {
+    state.approved.store(true, Ordering::SeqCst);
+    app.exit(0);
+}
+
 // Normal app quit should let the Node sidecar run its shutdown handler first:
 // that handler closes headed agent-browser pop-out windows before killing PTYs.
 // If the sidecar is wedged, fall back to the same hard kill path so quit remains
@@ -1167,6 +1282,20 @@ pub fn run() {
                     .collect();
                 let _ = window.emit("dormouse://files-dropped", serde_json::json!({ "paths": payload }));
             }
+            // The window-close button funnels into the app-wide quit flow. Until
+            // the teardown approves the exit we hold the window open and run the
+            // graceful quit; the app.exit(0) that ends it tears the window down.
+            //
+            // Multi-window seam: one window ships today, so a per-window close is
+            // the whole-app quit. A multi-window build would instead give each
+            // CloseRequested a per-window teardown and only quit on the last one.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle();
+                if !quit_approved(app) {
+                    api.prevent_close();
+                    request_quit(app);
+                }
+            }
         })
         .setup(|app| {
             init_log();
@@ -1178,6 +1307,9 @@ pub fn run() {
             })?;
             app.manage(sidecar_state);
             append_log("[app] sidecar state registered");
+
+            // Quit-interception state (docs/specs/standalone.md §Quit flow).
+            app.manage(QuitState::default());
 
             // On non-macOS, remove native decorations for a fully custom title bar.
             // macOS uses titleBarStyle "Overlay" from config instead, which preserves
@@ -1204,6 +1336,9 @@ pub fn run() {
             pty_request_init,
             dor_control_response,
             kill_sidecar_now,
+            quit_ack,
+            quit_cancel,
+            quit_proceed,
             get_available_shells,
             read_clipboard_file_paths,
             read_clipboard_image_as_file_path,
@@ -1224,6 +1359,19 @@ pub fn run() {
         .run(|app, event| match event {
             #[cfg(target_os = "macos")]
             RunEvent::Ready => set_macos_dock_icon(),
+            // Covers Cmd+Q / app-menu Quit / dock quit / interceptable OS logout.
+            // `code` is None for a user-initiated exit and Some for the
+            // programmatic app.exit(0) that ends the quit flow; either way, once
+            // teardown has approved we let it through, otherwise we intercept and
+            // run the flow (which re-enters here with approved=true and proceeds).
+            RunEvent::ExitRequested { api, .. } => {
+                if !quit_approved(app) {
+                    api.prevent_exit();
+                    request_quit(app);
+                }
+            }
+            // Harmless after teardown: the PTY map is already empty, so the
+            // sidecar killAll no-ops. Still the backstop for any unclean exit.
             RunEvent::Exit => {
                 if let Some(state) = app.try_state::<SidecarState>() {
                     append_log("[app] exit — shutting down sidecar");

@@ -79,9 +79,20 @@ async function createPlatform(): Promise<PlatformAdapter> {
 
 // Await init() first to register event listeners before reconnecting
 async function bootstrap() {
+  const browserDevHost = import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST as string | undefined;
   const platform = await createPlatform();
   setPlatform(platform);
   await platform.init();
+  // Quit orchestrator (docs/specs/standalone.md §Quit flow). Tauri-only: the
+  // browser-dev harness has no Rust quit interception, and quit.ts pulls the
+  // Tauri APIs, so only initialize it on the real Tauri branch.
+  if (!browserDevHost) {
+    const [{ initQuitFlow }, { TauriAdapter }] = await Promise.all([
+      import("./quit"),
+      import("./tauri-adapter"),
+    ]);
+    if (platform instanceof TauriAdapter) initQuitFlow(platform);
+  }
   const { initAlertStateReceiver } = await import("dormouse-lib/lib/terminal-registry");
   initAlertStateReceiver();
   restoreActiveTheme();
