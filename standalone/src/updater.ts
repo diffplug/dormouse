@@ -225,25 +225,17 @@ export function _resetForTesting(): void {
 
 // --- Quit-time install ---
 //
-// The updater no longer owns a window-close handler — the quit orchestrator
-// (standalone/src/quit.ts) intercepts every quit trigger and calls these as
-// step (5) of its graceful teardown, strictly *after* the final session save has
-// landed (docs/specs/auto-update.md, "Quit-time install"). There is no
-// preventDefault or window.close() here: exiting the process is quit_proceed's
-// job in Rust, which runs after this returns.
+// Called by the quit orchestrator (standalone/src/quit.ts) as the final
+// teardown step, strictly *after* the final session save has landed. Exiting
+// the process is quit_proceed's job in Rust, which runs after this returns.
 
 /** Whether an approved, downloaded update is waiting to install at quit. */
 export function hasPendingUpdate(): boolean {
   return pendingUpdate !== null;
 }
 
-/**
- * Install the pending update. Called by the quit orchestrator after teardown +
- * the final save. Writes the success marker to localStorage *before* installing
- * (on Windows NSIS force-kills the process), kills the sidecar first on Windows
- * so NSIS can overwrite its still-loaded native modules, then installs; a throw
- * overwrites the marker with a failure entry. No-op in Vite dev mode.
- */
+/** Install the pending update; ordering and Windows constraints are owned by
+ *  docs/specs/auto-update.md ("Quit-time install"). No-op in Vite dev mode. */
 export async function installPendingUpdate(): Promise<void> {
   const update = pendingUpdate;
   if (!update) return;

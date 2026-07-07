@@ -19,6 +19,7 @@ import { AlertManager, type SessionStatus } from "dormouse-lib/lib/alert-manager
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
 import { TauriSessionStore } from "./tauri-session-store";
+import { withTimeout } from "./with-timeout";
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
@@ -456,18 +457,13 @@ export class TauriAdapter implements PlatformAdapter {
 
   // Await the session store's in-flight/pending save_session pipeline (the Rust
   // temp+fsync+rename that actually reaches disk). Bounded: on timeout resolve
-  // anyway rather than wedge quit. Called by the (future) quit orchestrator after
-  // requestSessionFlush has pushed the latest state through saveState.
-  async drainSessionSaves(timeoutMs = 2000): Promise<void> {
-    let timer: ReturnType<typeof setTimeout>;
-    const timeout = new Promise<void>((resolve) => {
-      timer = setTimeout(() => {
-        console.warn("[tauri-adapter] drainSessionSaves timed out; proceeding with quit");
-        resolve();
-      }, timeoutMs);
-    });
-    await Promise.race([this.sessionStore.drain(), timeout]);
-    clearTimeout(timer!);
+  // anyway rather than wedge quit.
+  drainSessionSaves(timeoutMs = 2000): Promise<void> {
+    return withTimeout(
+      this.sessionStore.drain(),
+      timeoutMs,
+      "[tauri-adapter] drainSessionSaves timed out; proceeding with quit",
+    );
   }
 
   // --- Alert management (local AlertManager) ---

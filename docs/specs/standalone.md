@@ -149,13 +149,9 @@ force-killed (especially on Windows), and an orphaned sidecar would hold
 `conpty.node`/`conpty.dll` open and block the NSIS installer
 (`docs/specs/auto-update.md`, Sidecar teardown on Windows).
 
-Host-side ordering: every quit trigger is intercepted and driven through the
-webview quit orchestrator (§Quit flow), which runs the graceful teardown and
-then, if an update is pending, invokes the updater's install step
-(`docs/specs/auto-update.md` — post-install markers, and on Windows a synchronous
-`kill_sidecar_now` that waits for the process to actually exit before
-`install()`). Only after the orchestrator calls `quit_proceed` does the app
-exit; Tauri's `RunEvent::Exit` then runs `shutdown_sidecar_and_wait` as a final
+Host-side ordering: every quit trigger is driven through the webview quit
+orchestrator (§Quit flow, which owns the teardown/install/exit sequence);
+Tauri's `RunEvent::Exit` then runs `shutdown_sidecar_and_wait` as a final
 backstop (harmless post-teardown — the PTY map is already empty, so the sidecar
 `killAll` no-ops).
 

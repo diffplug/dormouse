@@ -37,7 +37,7 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 
 // A fake adapter whose teardown steps append their name to `order` so the call
 // sequence is assertable. `overrides` swap in slow/failing steps per test.
-function fakeAdapter(order: string[], overrides: Partial<Record<string, () => Promise<void>>> = {}): TauriAdapter {
+function fakeAdapter(order: string[] = [], overrides: Partial<Record<string, () => Promise<void>>> = {}): TauriAdapter {
   const step = (name: string) =>
     vi.fn(async () => {
       if (overrides[name]) return overrides[name]!();
@@ -48,6 +48,13 @@ function fakeAdapter(order: string[], overrides: Partial<Record<string, () => Pr
     gracefulKillAllPtys: step("gracefulKill"),
     drainSessionSaves: step("drain"),
   } as unknown as TauriAdapter;
+}
+
+// Wire the orchestrator, fire Rust's quit-requested event, drain the chain.
+async function triggerQuit(adapter: TauriAdapter): Promise<void> {
+  initQuitFlow(adapter);
+  quitRequested!();
+  await settle();
 }
 
 describe("quit orchestrator", () => {
@@ -68,19 +75,14 @@ describe("quit orchestrator", () => {
   afterEach(() => setQuitConfirmGate(null));
 
   it("always acks the quit-requested event", async () => {
-    initQuitFlow(fakeAdapter([]));
-    quitRequested!();
-    await settle();
+    await triggerQuit(fakeAdapter());
 
     expect(mocks.invoke).toHaveBeenCalledWith("quit_ack");
   });
 
   it("with no running sessions, tears down immediately and proceeds", async () => {
-    const order: string[] = [];
-    const adapter = fakeAdapter(order);
-    initQuitFlow(adapter);
-    quitRequested!();
-    await settle();
+    const adapter = fakeAdapter();
+    await triggerQuit(adapter);
 
     expect(adapter.requestSessionFlush).toHaveBeenCalled();
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
@@ -97,9 +99,7 @@ describe("quit orchestrator", () => {
       order.push("install");
     });
 
-    initQuitFlow(fakeAdapter(order));
-    quitRequested!();
-    await settle();
+    await triggerQuit(fakeAdapter(order));
 
     expect(order).toEqual([
       "quit_ack",
@@ -114,9 +114,7 @@ describe("quit orchestrator", () => {
 
   it("skips install when no update is pending", async () => {
     mocks.hasPendingUpdate.mockReturnValue(false);
-    initQuitFlow(fakeAdapter([]));
-    quitRequested!();
-    await settle();
+    await triggerQuit(fakeAdapter());
 
     expect(mocks.installPendingUpdate).not.toHaveBeenCalled();
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
@@ -126,9 +124,7 @@ describe("quit orchestrator", () => {
     const adapter = fakeAdapter([], {
       gracefulKill: () => Promise.reject(new Error("SIGTERM refused")),
     });
-    initQuitFlow(adapter);
-    quitRequested!();
-    await settle();
+    await triggerQuit(adapter);
 
     // A rejecting step must not prevent exit.
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
@@ -139,8 +135,7 @@ describe("quit orchestrator", () => {
     // the 2nd trigger; step 3's flush resolves so the teardown can complete.
     let release!: () => void;
     let flushCount = 0;
-    const order: string[] = [];
-    const adapter = fakeAdapter(order, {
+    const adapter = fakeAdapter([], {
       flush: () => {
         flushCount += 1;
         if (flushCount === 1) return new Promise<void>((r) => { release = r; });
@@ -167,8 +162,7 @@ describe("quit orchestrator", () => {
 
   it("routes a running-session quit through an installed confirm gate", async () => {
     mocks.countRunningSessions.mockReturnValue(3);
-    const order: string[] = [];
-    const adapter = fakeAdapter(order);
+    const adapter = fakeAdapter();
     let seenCount = 0;
     setQuitConfirmGate((ctx) => {
       seenCount = ctx.runningCount;
@@ -176,9 +170,7 @@ describe("quit orchestrator", () => {
       ctx.confirm();
     });
 
-    initQuitFlow(adapter);
-    quitRequested!();
-    await settle();
+    await triggerQuit(adapter);
 
     expect(seenCount).toBe(3);
     expect(adapter.requestSessionFlush).toHaveBeenCalled();
@@ -187,12 +179,10 @@ describe("quit orchestrator", () => {
 
   it("cancels via the gate without tearing down", async () => {
     mocks.countRunningSessions.mockReturnValue(1);
-    const adapter = fakeAdapter([]);
+    const adapter = fakeAdapter();
     setQuitConfirmGate((ctx) => ctx.cancel());
 
-    initQuitFlow(adapter);
-    quitRequested!();
-    await settle();
+    await triggerQuit(adapter);
 
     expect(mocks.invoke).toHaveBeenCalledWith("quit_cancel");
     expect(adapter.requestSessionFlush).not.toHaveBeenCalled();
@@ -201,12 +191,10 @@ describe("quit orchestrator", () => {
 
   it("falls through to teardown when no gate is installed even with running sessions", async () => {
     mocks.countRunningSessions.mockReturnValue(2);
-    const adapter = fakeAdapter([]);
-    initQuitFlow(adapter);
-    quitRequested!();
-    await settle();
+    const adapter = fakeAdapter();
+    await triggerQuit(adapter);
 
-    // Stage D2 behavior: unconfirmed teardown until D3 installs a gate.
+    // No confirmation gate installed yet: unconfirmed teardown.
     expect(adapter.requestSessionFlush).toHaveBeenCalled();
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
   });

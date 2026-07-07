@@ -47,16 +47,11 @@ struct SidecarState {
     child: SharedChild,
 }
 
-// ── Quit interception (docs/specs/standalone.md §Quit flow) ──────────────────
+// ── Quit interception ─────────────────────────────────────────────────────────
 //
-// Every quit trigger — window-close button, Cmd+Q / app-menu Quit, dock quit,
-// interceptable OS logout — is caught in Rust (CloseRequested + ExitRequested)
-// and funnelled through `request_quit` instead of exiting immediately. That
-// emits `dormouse://quit-requested` to the webview, whose quit orchestrator
-// (standalone/src/quit.ts) runs the graceful teardown — flush → SIGTERM +
-// capture → flush → drain → optional update install — then calls back
-// `quit_proceed`. Two watchdog phases (ack, then total) keep the process bounded
-// if the webview never answers.
+// Every quit trigger funnels through `request_quit`, which asks the webview's
+// orchestrator (standalone/src/quit.ts) to tear down and call back
+// `quit_proceed`. Protocol + watchdog phases: docs/specs/standalone.md §Quit flow.
 #[derive(Default)]
 struct QuitState {
     // A quit is in flight: request_quit fired, no proceed/cancel yet.
@@ -72,12 +67,9 @@ struct QuitState {
     seq: AtomicU64,
 }
 
-// Phase 1: wait this long for the webview to ack. No ack ⇒ its listener is dead
-// (e.g. a crashed webview) and quit would otherwise hang — so exit.
+// Phase 1: no ack within this window ⇒ webview listener is dead — exit.
 const QUIT_ACK_TIMEOUT_MS: u64 = 2_000;
-// Phase 2: total budget from request to a forced exit. A teardown that never
-// reports proceed/cancel within this window is abandoned and the app exits — the
-// user's escape hatch is a repeated trigger, which supersedes the wedged flow.
+// Phase 2: total budget from request to a forced exit.
 const QUIT_TOTAL_TIMEOUT_MS: u64 = 20_000;
 const QUIT_POLL_STEP_MS: u64 = 500;
 
@@ -780,8 +772,8 @@ fn quit_ack(state: tauri::State<'_, QuitState>) {
     state.acked.store(true, Ordering::SeqCst);
 }
 
-// The user declined the quit (a stage-D3 confirmation cancel). Clearing pending
-// and bumping seq invalidates any live watchdog for this quit so nothing exits.
+// The user declined the quit (confirmation cancel). Clearing pending and
+// bumping seq invalidates any live watchdog for this quit so nothing exits.
 #[tauri::command]
 fn quit_cancel(state: tauri::State<'_, QuitState>) {
     state.pending.store(false, Ordering::SeqCst);
@@ -1282,13 +1274,10 @@ pub fn run() {
                     .collect();
                 let _ = window.emit("dormouse://files-dropped", serde_json::json!({ "paths": payload }));
             }
-            // The window-close button funnels into the app-wide quit flow. Until
-            // the teardown approves the exit we hold the window open and run the
-            // graceful quit; the app.exit(0) that ends it tears the window down.
-            //
+            // Window close funnels into the app-wide quit flow (§Quit flow).
             // Multi-window seam: one window ships today, so a per-window close is
-            // the whole-app quit. A multi-window build would instead give each
-            // CloseRequested a per-window teardown and only quit on the last one.
+            // the whole-app quit; a multi-window build would give each close a
+            // per-window teardown and only quit on the last one.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let app = window.app_handle();
                 if !quit_approved(app) {
@@ -1359,11 +1348,9 @@ pub fn run() {
         .run(|app, event| match event {
             #[cfg(target_os = "macos")]
             RunEvent::Ready => set_macos_dock_icon(),
-            // Covers Cmd+Q / app-menu Quit / dock quit / interceptable OS logout.
-            // `code` is None for a user-initiated exit and Some for the
-            // programmatic app.exit(0) that ends the quit flow; either way, once
-            // teardown has approved we let it through, otherwise we intercept and
-            // run the flow (which re-enters here with approved=true and proceeds).
+            // Cmd+Q / app-menu / dock quit / interceptable OS logout (§Quit flow).
+            // The flow's own app.exit(0) re-enters here with approved=true and
+            // passes; `code` (None = user-initiated) is deliberately ignored.
             RunEvent::ExitRequested { api, .. } => {
                 if !quit_approved(app) {
                     api.prevent_exit();
