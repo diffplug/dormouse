@@ -2,6 +2,10 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { WebglAddon } from '@diffplug/xterm-addon-webgl-sdf';
+// The pristine upstream addon, pinned to the exact commit the fork's sdf branch is based on
+// (addon 0.20.0-beta.287 and core 6.1.0-beta.288 share gitHead 8aab3103) — the regression
+// baseline for the RendererComparison story.
+import { WebglAddon as UpstreamWebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 
 const ESC = '\x1b[';
@@ -64,10 +68,19 @@ function demoContent(): string {
   lines.push(label('') + '└───────────────┘ ╚═══════════════╝ ╰───────────────╯');
   lines.push('');
 
+  // Written as \uE0BX escapes, not literal PUA chars: the literals are invisible in editors and
+  // were once silently dropped in a file rewrite, which read as a rendering regression
   lines.push(
     label('powerline')
-    + `${ESC}30;44m ~/dormouse ${ESC}34;42m${ESC}30m canopy ${ESC}32;49m${RESET}`
-    + `     ${ESC}30;46m sdf ${RESET}`,
+    + `${ESC}30;44m ~/dormouse ${ESC}34;42m\ue0b0${ESC}30m canopy ${ESC}32;49m\ue0b0${RESET}`
+    + `  \ue0b1 \ue0b3  ${ESC}36m\ue0b2${ESC}30;46m sdf ${RESET}`,
+  );
+  // Solid chevrons at every bg boundary in both directions plus the thin variants — the
+  // "background-colored glyph" cases for regression-hunting against upstream
+  lines.push(
+    label('chevrons')
+    + `${ESC}37;41m red ${ESC}31;44m\ue0b0${ESC}37m blue ${ESC}34;42m\ue0b0${ESC}30m green ${ESC}32;49m\ue0b0${RESET}`
+    + `  ${ESC}36m\ue0b2${ESC}30;46m cyan ${ESC}36;45m\ue0b2${ESC}37m magenta ${ESC}35m\ue0b1\ue0b1 \ue0b3\ue0b3${RESET}`,
   );
   lines.push(label('wide/CJK') + '你好, 世界 — こんにちは ｶﾀｶﾅ');
   lines.push(label('emoji') + '🦎 🌲 🍄 ✨ 🚀');
@@ -88,20 +101,22 @@ function compactContent(): string {
   return lines.join('\r\n');
 }
 
+type RendererKind = 'upstream' | 'fork-raster' | 'fork-sdf';
+
 interface GlTerminalProps {
   content: string;
   /** Also mount the addon's live glyph texture atlas below the terminal. */
   showAtlas?: boolean;
-  /** Render glyphs as signed distance fields (the fork's addition). */
-  sdf?: boolean;
-  /** Base font px for SDF rasterization; 0/undefined = native. */
+  /** Which webgl addon renders the terminal: pristine upstream, or the fork with sdf off/on. */
+  renderer?: RendererKind;
+  /** Base font px for SDF rasterization; undefined = the addon's default (32). */
   sdfGlyphSize?: number;
   fontSize?: number;
   cols?: number;
   rows?: number;
 }
 
-function GlTerminal({ content, showAtlas = false, sdf = false, sdfGlyphSize, fontSize = 14, cols = 100, rows = 24 }: GlTerminalProps) {
+function GlTerminal({ content, showAtlas = false, renderer = 'fork-raster', sdfGlyphSize, fontSize = 14, cols = 100, rows = 24 }: GlTerminalProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const atlasRef = useRef<HTMLDivElement>(null);
   const [glError, setGlError] = useState<string | null>(null);
@@ -123,7 +138,9 @@ function GlTerminal({ content, showAtlas = false, sdf = false, sdfGlyphSize, fon
     const disposables: { dispose(): void }[] = [];
     const atlasHost = atlasRef.current;
     try {
-      const addon = new WebglAddon({ sdf, sdfGlyphSize });
+      const addon = renderer === 'upstream'
+        ? new UpstreamWebglAddon()
+        : new WebglAddon({ sdf: renderer === 'fork-sdf', sdfGlyphSize });
       if (atlasHost) {
         const styleAtlasCanvas = (canvas: HTMLCanvasElement) => {
           canvas.style.maxWidth = '100%';
@@ -162,7 +179,7 @@ function GlTerminal({ content, showAtlas = false, sdf = false, sdfGlyphSize, fon
       atlasHost?.replaceChildren();
       setGlError(null);
     };
-  }, [content, showAtlas, sdf, sdfGlyphSize, fontSize, cols, rows]);
+  }, [content, showAtlas, renderer, sdfGlyphSize, fontSize, cols, rows]);
 
   return (
     <div>
@@ -175,7 +192,7 @@ function GlTerminal({ content, showAtlas = false, sdf = false, sdfGlyphSize, fon
       {showAtlas ? (
         <div style={{ marginTop: 16 }}>
           <div style={{ marginBottom: 8, fontSize: 12, color: '#888' }}>
-            glyph texture atlas (live){sdf ? ' — white shapes are distance fields, tinted in the shader' : ' — this is what the SDF conversion replaces'}
+            glyph texture atlas (live){renderer === 'fork-sdf' ? ' — white shapes are distance fields, tinted in the shader' : ' — this is what the SDF conversion replaces'}
           </div>
           <div ref={atlasRef} />
         </div>
@@ -229,7 +246,7 @@ function ScaleComparison() {
           <div style={{ marginBottom: 8, fontSize: 13, color: '#a0f0a0' }}>
             SDF atlas @ {BASE}px, shader-rendered @ {BASE * SCALE}px
           </div>
-          <GlTerminal content={content} sdf sdfGlyphSize={BASE} fontSize={BASE * SCALE} cols={36} rows={6} />
+          <GlTerminal content={content} renderer="fork-sdf" sdfGlyphSize={BASE} fontSize={BASE * SCALE} cols={36} rows={6} />
         </div>
       </div>
     </Page>
@@ -253,13 +270,38 @@ export const TextureAtlas: Story = {
 };
 
 export const Sdf: Story = {
-  args: { content: demoContent(), sdf: true },
+  args: { content: demoContent(), renderer: 'fork-sdf' },
 };
 
 export const SdfTextureAtlas: Story = {
-  args: { content: demoContent(), sdf: true, showAtlas: true },
+  args: { content: demoContent(), renderer: 'fork-sdf', showAtlas: true },
 };
 
 export const SdfVsRasterAt3x: StoryObj = {
   render: () => <ScaleComparison />,
+};
+
+const RENDERER_LABELS: Record<RendererKind, string> = {
+  'upstream': 'upstream @xterm/addon-webgl 0.20.0-beta.287 — same commit as the fork base (regression baseline)',
+  'fork-raster': 'fork, sdf: false — isolates the instance-layout/shader changes',
+  'fork-sdf': 'fork, sdf: true — isolates the SDF glyph path',
+};
+
+/** The same content through all three renderers, stacked for regression comparison. */
+function RendererComparison() {
+  const content = demoContent();
+  return (
+    <Page>
+      {(Object.keys(RENDERER_LABELS) as RendererKind[]).map((kind) => (
+        <div key={kind} style={{ marginBottom: 20 }}>
+          <div style={{ marginBottom: 6, fontSize: 12, color: '#8ab4f8' }}>{RENDERER_LABELS[kind]}</div>
+          <GlTerminal content={content} renderer={kind} rows={22} />
+        </div>
+      ))}
+    </Page>
+  );
+}
+
+export const UpstreamVsFork: StoryObj = {
+  render: () => <RendererComparison />,
 };

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@diffplug/xterm-addon-webgl-sdf": "https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf288.4/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf288.4.tgz",
+    "@xterm/addon-webgl": "0.20.0-beta.287",
     "@xterm/xterm": "6.1.0-beta.288",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"

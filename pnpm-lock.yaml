@@ -17,6 +17,9 @@ importers:
       '@diffplug/xterm-addon-webgl-sdf':
         specifier: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf288.4/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf288.4.tgz
         version: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf288.4/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf288.4.tgz
+      '@xterm/addon-webgl':
+        specifier: 0.20.0-beta.287
+        version: 0.20.0-beta.287(@xterm/xterm@6.1.0-beta.288)
       '@xterm/xterm':
         specifier: 6.1.0-beta.288
         version: 6.1.0-beta.288
@@ -2134,6 +2137,11 @@ packages:
 
   '@xterm/addon-unicode-graphemes@0.5.0-beta.288':
     resolution: {integrity: sha512-127ICNqM+/QZ7cE0knEDh+tJeD6LJRSty1V45a2iWa3t2goV8PWO9LYD83BXavyiZnofjxdNMDdDuj9SbaUY4w==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.288
+
+  '@xterm/addon-webgl@0.20.0-beta.287':
+    resolution: {integrity: sha512-ADDuXRHLfhMk3y+BFvaI1ibGCGxPMNRonzH5M/qTUnigsVxdnEMsYODG6pWAYkfDMPoCRBF8Zf/hj0efyEBjzQ==}
     peerDependencies:
       '@xterm/xterm': ^6.1.0-beta.288
 
@@ -5687,6 +5695,10 @@ snapshots:
       '@xterm/xterm': 6.1.0-beta.288
 
   '@xterm/addon-unicode-graphemes@0.5.0-beta.288(@xterm/xterm@6.1.0-beta.288)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.288
+
+  '@xterm/addon-webgl@0.20.0-beta.287(@xterm/xterm@6.1.0-beta.288)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.288
 

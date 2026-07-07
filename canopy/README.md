@@ -20,6 +20,20 @@ pnpm dev:canopy   # storybook on http://localhost:6007
   update the URL (and the `@xterm/xterm` pin if the base beta moved) in
   `package.json` here.
 
+## Regression harness
+
+The `UpstreamVsFork` story renders identical content through three renderers
+stacked: pristine upstream `@xterm/addon-webgl`, the fork with `sdf: false`
+(isolates the instance-layout/shader changes), and the fork with `sdf: true`
+(isolates the SDF glyph path). The upstream pin must be the same commit as the
+fork base — the addon's beta counter is offset from core's (addon
+`0.20.0-beta.287` == core `6.1.0-beta.288` == commit `8aab3103`); re-derive it
+with `npm view @xterm/addon-webgl@<ver> gitHead` when the fork rebases.
+
+Story content writes PUA glyphs (powerline chevrons etc.) as `\uE0BX` escapes,
+never literal characters — the literals are invisible in editors and were once
+silently dropped in a file rewrite, which presented as a rendering regression.
+
 ## Local dev loop against the fork
 
 ```sh
