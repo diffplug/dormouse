@@ -75,19 +75,24 @@ function demoContent(): string {
     + `${ESC}30;44m ~/dormouse ${ESC}34;42m\ue0b0${ESC}30m canopy ${ESC}32;49m\ue0b0${RESET}`
     + `  \ue0b1 \ue0b3  ${ESC}36m\ue0b2${ESC}30;46m sdf ${RESET}`,
   );
-  // Solid chevrons at every bg boundary in both directions plus the thin variants — the
-  // "background-colored glyph" cases for regression-hunting against upstream
-  lines.push(
-    label('chevrons')
-    + `${ESC}37;41m red ${ESC}31;44m\ue0b0${ESC}37m blue ${ESC}34;42m\ue0b0${ESC}30m green ${ESC}32;49m\ue0b0${RESET}`
-    + `  ${ESC}36m\ue0b2${ESC}30;46m cyan ${ESC}36;45m\ue0b2${ESC}37m magenta ${ESC}35m\ue0b1\ue0b1 \ue0b3\ue0b3${RESET}`,
-  );
   lines.push(label('wide/CJK') + '你好, 世界 — こんにちは ｶﾀｶﾅ');
   lines.push(label('emoji') + '🦎 🌲 🍄 ✨ 🚀');
   lines.push('');
   lines.push(`${ESC}90m$ ${RESET}echo "rendered by WebGL2"`);
 
   return lines.join('\r\n');
+}
+
+/**
+ * Regression-discriminating rows owned by the RendererComparison harness (not part of
+ * demoContent, so demo-content tidy-ups cannot silently weaken the harness): solid chevrons at
+ * every bg boundary in both directions plus the thin variants — the "background-colored glyph"
+ * cases.
+ */
+function chevronGauntlet(): string {
+  return label('chevrons')
+    + `${ESC}37;41m red ${ESC}31;44m\ue0b0${ESC}37m blue ${ESC}34;42m\ue0b0${ESC}30m green ${ESC}32;49m\ue0b0${RESET}`
+    + `  ${ESC}36m\ue0b2${ESC}30;46m cyan ${ESC}36;45m\ue0b2${ESC}37m magenta ${ESC}35m\ue0b1\ue0b1 \ue0b3\ue0b3${RESET}`;
 }
 
 /** Compact content for the side-by-side scale comparison. */
@@ -218,17 +223,19 @@ function PageStory(props: GlTerminalProps) {
 }
 
 /**
- * The apples-to-apples VR scenario: both sides start from a ~15px glyph source, displayed 3x
- * larger. The raster side can only bitmap-upscale (blurry); the SDF side reconstructs crisp
- * edges in the shader from a 15px distance-field atlas.
+ * The apples-to-apples VR scenario: both sides start from the same BASE-px glyph source,
+ * displayed SCALE times larger. The raster side can only bitmap-upscale (blurry); the SDF side
+ * reconstructs crisp edges in the shader from a distance-field atlas of the same base size.
  */
 function ScaleComparison() {
   const SCALE = 3;
   const BASE = 32;
+  const COLS = 36;
+  const ROWS = 6;
   const content = compactContent();
-  // Rough footprint of a 36x6 terminal at fontSize BASE, for the scaled wrapper
-  const termW = Math.round(BASE * 22);
-  const termH = Math.round(BASE * 7.7);
+  // Rough footprint of the raster terminal at fontSize BASE, for the scaled wrapper
+  const termW = Math.round(BASE * 0.62 * COLS);
+  const termH = Math.round(BASE * 1.29 * ROWS);
   return (
     <Page>
       <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -238,7 +245,7 @@ function ScaleComparison() {
           </div>
           <div style={{ width: termW * SCALE, height: termH * SCALE, overflow: 'hidden' }}>
             <div style={{ transform: `scale(${SCALE})`, transformOrigin: 'top left' }}>
-              <GlTerminal content={content} fontSize={BASE} cols={36} rows={6} />
+              <GlTerminal content={content} fontSize={BASE} cols={COLS} rows={ROWS} />
             </div>
           </div>
         </div>
@@ -246,7 +253,7 @@ function ScaleComparison() {
           <div style={{ marginBottom: 8, fontSize: 13, color: '#a0f0a0' }}>
             SDF atlas @ {BASE}px, shader-rendered @ {BASE * SCALE}px
           </div>
-          <GlTerminal content={content} renderer="fork-sdf" sdfGlyphSize={BASE} fontSize={BASE * SCALE} cols={36} rows={6} />
+          <GlTerminal content={content} renderer="fork-sdf" sdfGlyphSize={BASE} fontSize={BASE * SCALE} cols={COLS} rows={ROWS} />
         </div>
       </div>
     </Page>
@@ -287,9 +294,12 @@ const RENDERER_LABELS: Record<RendererKind, string> = {
   'fork-sdf': 'fork, sdf: true — isolates the SDF glyph path',
 };
 
-/** The same content through all three renderers, stacked for regression comparison. */
+/**
+ * The same content through all three renderers, stacked for regression comparison. The harness
+ * owns its discriminating rows (chevronGauntlet) so demo-content edits cannot weaken it.
+ */
 function RendererComparison() {
-  const content = demoContent();
+  const content = demoContent() + '\r\n' + chevronGauntlet();
   return (
     <Page>
       {(Object.keys(RENDERER_LABELS) as RendererKind[]).map((kind) => (

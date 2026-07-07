@@ -51,7 +51,7 @@ committed; a later `pnpm install` restores the release tarball.
 2. ~~Swap the glyph atlas to signed distance fields~~ (done — vendored
    mapbox/tiny-sdf behind the addon's `sdf` / `sdfGlyphSize` options; hybrid
    atlas keeps emoji, box/powerline custom glyphs and decorated cells on the
-   raster path. `SdfVsRasterAt3x` shows a 15px atlas rendered crisp at 45px;
+   raster path. `SdfVsRasterAt3x` renders a low-res SDF atlas crisp at 3x;
    `SdfTextureAtlas` shows the live distance fields. Known v1 limits:
    decorated cells fall back to raster, and single-channel SDF rounds very
    sharp corners at extreme magnification — MSDF is the upgrade path.)
