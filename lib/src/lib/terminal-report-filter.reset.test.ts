@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { Terminal } from '@xterm/xterm';
 import { REPLAY_MODE_RESET } from './terminal-report-filter';
 import { attachMouseModeObserver } from './mouse-mode-observer';
@@ -9,7 +9,6 @@ import { __resetMouseSelectionForTests, getMouseSelectionState } from './mouse-s
 
 afterEach(() => {
   __resetMouseSelectionForTests();
-  vi.restoreAllMocks();
 });
 
 // A real (headless) xterm instance parses the reset tail and updates
@@ -30,9 +29,6 @@ async function flushMicrotasks(): Promise<void> {
 
 describe('REPLAY_MODE_RESET', () => {
   it('sets no private mode (DECSET) except show-cursor (?25h)', () => {
-    // Sanity: a reset tail that turned a mode ON would be a bug. The only `h`
-    // sequence permitted is ?25h (show cursor); everything else is a DECRST or
-    // the SGR reset.
     const setSequences = REPLAY_MODE_RESET.match(/\x1b\[[?\d;]*h/g) ?? [];
     expect(setSequences).toEqual(['\x1b[?25h']);
   });
@@ -72,9 +68,6 @@ describe('REPLAY_MODE_RESET', () => {
   });
 
   it('re-syncs the mouse-selection store to none via the mode observer', async () => {
-    // The observer's DECSET/DECRST parser hooks fire on the reset writes, so the
-    // stale mouse mode that would otherwise break terminal text selection is
-    // cleared with no extra plumbing.
     const id = 'reset-observer';
     const terminal = makeTerminal();
     const observer = attachMouseModeObserver(id, terminal);

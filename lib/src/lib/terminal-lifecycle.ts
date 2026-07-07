@@ -402,15 +402,9 @@ export function resumeTerminal(
   const isDead = exitInfo != null && !exitInfo.alive;
 
   if (replayData) {
-    // A dead session's replay may end mid-TUI with private modes latched (mouse
-    // tracking, alt-screen, hidden cursor); append the reset tail so the pane
-    // returns to a sane baseline. A live resume (VS Code webview reattaching to
-    // a running PTY) leaves the modes alone — the process still owns them.
-    if (isDead) {
-      writeReplay(entry, replayData, REPLAY_MODE_RESET);
-    } else {
-      writeReplay(entry, replayData);
-    }
+    // Dead session: append the reset tail. A live resume leaves the modes to
+    // the still-running process that owns them (see REPLAY_MODE_RESET).
+    writeReplay(entry, replayData, ...(isDead ? [REPLAY_MODE_RESET] : []));
     seedPromptShapeFromScrollback(id, replayData);
   }
   if (isDead) {
@@ -441,12 +435,9 @@ export function restoreTerminal(
   }
 
   if (opts.scrollback) {
-    // The saved process is gone and a fresh shell is about to spawn. Persisted
-    // scrollback can end mid-TUI with private modes latched (mouse tracking,
-    // alt-screen, hidden cursor); the reset tail returns the terminal to a sane
-    // baseline before the new shell prints its prompt. Kept inside writeReplay
-    // so `entry.isReplaying` still covers it (the input filter drops any reports
-    // it provokes). Source of truth: REPLAY_MODE_RESET in terminal-report-filter.
+    // Saved process is gone: append the reset tail (see REPLAY_MODE_RESET),
+    // inside writeReplay so `isReplaying` covers it, and before the '\r\n'
+    // separator so the alt-screen exit lands before the separator line.
     writeReplay(entry, opts.scrollback, REPLAY_MODE_RESET, '\r\n');
     seedPromptShapeFromScrollback(id, opts.scrollback);
   }

@@ -1135,7 +1135,6 @@ describe('restore/resume replay mode-reset tail', () => {
 
     // The tail rides inside writeReplay: scrollback, then REPLAY_MODE_RESET,
     // then the '\r\n' separator, all before the freshly spawned shell prompt.
-    expect(entry.terminal.writes).toContain(REPLAY_MODE_RESET);
     const resetAt = entry.terminal.writes.indexOf(REPLAY_MODE_RESET);
     const sepAt = entry.terminal.writes.indexOf('\r\n');
     expect(resetAt).toBeGreaterThan(0);
@@ -1149,7 +1148,6 @@ describe('restore/resume replay mode-reset tail', () => {
       { alive: false, exitCode: 7 },
     ) as TestTerminalEntry;
 
-    expect(entry.terminal.writes).toContain(REPLAY_MODE_RESET);
     const resetAt = entry.terminal.writes.indexOf(REPLAY_MODE_RESET);
     const exitAt = entry.terminal.writes.indexOf('\r\n[Process exited with code 7]\r\n');
     expect(resetAt).toBeGreaterThanOrEqual(0);
