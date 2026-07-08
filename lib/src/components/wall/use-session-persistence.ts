@@ -2,13 +2,19 @@ import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
 import { saveSession } from '../../lib/session-save';
-import { UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
+import { createSessionDirtyTracker } from '../../lib/session-dirty';
+import {
+  subscribeToActivity,
+  subscribeToTerminalPaneState,
+  UNNAMED_PANEL_TITLE,
+} from '../../lib/terminal-registry';
 import { isBrowserParams } from './browser-surface';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, WallSelectionKind } from './wall-types';
 
 export function useSessionPersistence({
   lath,
+  doors,
   doorsRef,
   selectedIdRef,
   selectedTypeRef,
@@ -17,6 +23,11 @@ export function useSessionPersistence({
    *  of the visible-pane projection (`lath.listPanes()`). Stable identity, so the
    *  effect never re-subscribes. */
   lath: LathWallEngine;
+  // The `doors` STATE value, not just `doorsRef`: doors can mutate with no Lath
+  // store commit (e.g. `dor ensure` refreshing a minimized door's params via
+  // setDoors), so the store subscription alone can't signal that the persisted
+  // blob changed.
+  doors: DooredItem[];
   doorsRef: RefObject<DooredItem[]>;
   selectedIdRef: RefObject<string | null>;
   selectedTypeRef: RefObject<WallSelectionKind>;
@@ -24,6 +35,8 @@ export function useSessionPersistence({
   const sessionSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionSavePromiseRef = useRef<Promise<void> | null>(null);
   const pendingSaveNeededRef = useRef(false);
+  // See session-dirty.ts for the conservative-under-races generation model.
+  const trackerRef = useRef(createSessionDirtyTracker());
 
   const doSave = useCallback((): Promise<void> => {
     const panes = lath.listPanes().map((p) => ({
@@ -36,15 +49,15 @@ export function useSessionPersistence({
     return saveSession(getPlatform(), panes, doors, lath.serializeLayout());
   }, [lath, doorsRef]);
 
-  const persistSessionNow = useCallback((): Promise<void> => {
-    if (sessionSavePromiseRef.current) {
-      pendingSaveNeededRef.current = true;
-      return sessionSavePromiseRef.current;
-    }
-
+  const persistSessionNow = useCallback(async (): Promise<void> => {
     const runSave = (): Promise<void> => {
       pendingSaveNeededRef.current = false;
+      // Clear dirty only on a fulfilled write (.then, not .finally).
+      const token = trackerRef.current.beginSave();
       const savePromise = doSave()
+        .then(() => {
+          trackerRef.current.completeSave(token);
+        })
         .finally(() => {
           if (sessionSavePromiseRef.current === savePromise) {
             sessionSavePromiseRef.current = pendingSaveNeededRef.current ? runSave() : null;
@@ -54,10 +67,31 @@ export function useSessionPersistence({
       return savePromise;
     };
 
-    return runSave();
+    if (sessionSavePromiseRef.current) {
+      pendingSaveNeededRef.current = true;
+    } else {
+      runSave();
+    }
+    // Await until the pipeline idles so the resolution covers the LATEST queued
+    // save, not just the one in flight. Swallow a per-save rejection here: a
+    // failed save still chains its queued follow-up (via `.finally`), so
+    // throwing out of the loop would abandon that follow-up and resolve before
+    // the pipeline is actually idle. Terminates: a rerun chains only while a new
+    // save was requested mid-save, so the chain is finite.
+    while (sessionSavePromiseRef.current) {
+      await sessionSavePromiseRef.current.catch(() => undefined);
+    }
   }, [doSave]);
 
-  const flushSessionSave = useCallback(() => {
+  // Doors mutate without any Lath store commit (setDoors from minimize/reattach or
+  // `dor ensure` param refresh), so mark dirty whenever the state array changes.
+  useEffect(() => {
+    trackerRef.current.markDirty();
+  }, [doors]);
+
+  // Never gated on the dirty tracker — the correctness net for dirty-trigger
+  // gaps (e.g. a program calling chdir() silently produces no event).
+  const flushSessionSave = useCallback((): Promise<void> => {
     if (sessionSaveTimerRef.current) {
       clearTimeout(sessionSaveTimerRef.current);
       sessionSaveTimerRef.current = null;
@@ -66,6 +100,7 @@ export function useSessionPersistence({
   }, [persistSessionNow]);
 
   const scheduleSessionSave = useCallback(() => {
+    trackerRef.current.markDirty();
     if (sessionSaveTimerRef.current) return;
     sessionSaveTimerRef.current = setTimeout(() => {
       sessionSaveTimerRef.current = null;
@@ -75,6 +110,8 @@ export function useSessionPersistence({
 
   useEffect(() => {
     const platform = getPlatform();
+    const { markDirty, isDirty } = trackerRef.current;
+
     const handlePtyExit = (detail: { id: string }) => {
       const ownsPane = lath.listPanes().some((p) => p.id === detail.id);
       if (!ownsPane) return;
@@ -91,9 +128,22 @@ export function useSessionPersistence({
       void flushSessionSave().catch(() => undefined);
     };
 
-    // One subscription: every store commit (add/remove/resize/swap/meta) schedules a save.
+    // One subscription: every store commit (add/remove/resize/swap/meta, including
+    // the active-pane the serialized layout records) schedules a save.
     const unsubscribeStore = lath.store.subscribe(scheduleSessionSave);
-    const interval = setInterval(scheduleSessionSave, 30_000);
+
+    // Content inputs mark dirty but never schedule — the heartbeat persists them
+    // (full rationale: docs/specs/standalone.md §Persistence). Untouched flips ride
+    // the pty echo of the keystroke, not the pane-state store (the registry mutates
+    // silently).
+    platform.onPtyData(markDirty);
+    const unsubActivity = subscribeToActivity(markDirty);
+    const unsubPaneState = subscribeToTerminalPaneState(markDirty);
+
+    // Heartbeat: idle sessions no longer write (only when something marked dirty).
+    const interval = setInterval(() => {
+      if (isDirty()) scheduleSessionSave();
+    }, 30_000);
     platform.onPtyExit(handlePtyExit);
     platform.onRequestSessionFlush(handleSessionFlushRequest);
     window.addEventListener('pagehide', handlePageHide);
@@ -116,6 +166,9 @@ export function useSessionPersistence({
       unsubFilesDropped?.();
       platform.offRequestSessionFlush(handleSessionFlushRequest);
       platform.offPtyExit(handlePtyExit);
+      platform.offPtyData(markDirty);
+      unsubActivity();
+      unsubPaneState();
       unsubscribeStore();
       clearInterval(interval);
       void persistSessionNow().catch(() => undefined);

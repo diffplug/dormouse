@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   applyTerminalSemanticEvents,
+  countRunningSessions,
   fillTerminalProcessCwd,
   fillTerminalProcessCwdByPtyId,
   getTerminalPaneState,
@@ -275,6 +276,34 @@ describe('terminal command input via rendered buffer', () => {
     recordTerminalUserInput('pane', 'pnpm build\r', lineReader(`${PROMPT}pnpm build`));
 
     expect(getTerminalPaneState('pane').currentCommand).toBeNull();
+  });
+});
+
+describe('countRunningSessions (quit-confirmation gate)', () => {
+  afterEach(() => {
+    removeTerminalPaneState('run-a');
+    removeTerminalPaneState('run-b');
+    removeTerminalPaneState('idle');
+  });
+
+  it('counts only sessions whose activity is running', () => {
+    expect(countRunningSessions()).toBe(0);
+
+    // A running command via OSC boundary.
+    applyTerminalSemanticEvents('run-a', [{ type: 'commandStart', source: 'osc633_boundaries' }]);
+    expect(countRunningSessions()).toBe(1);
+
+    // A second running session.
+    applyTerminalSemanticEvents('run-b', [{ type: 'commandStart', source: 'osc633_boundaries' }]);
+    expect(countRunningSessions()).toBe(2);
+
+    // An idle shell at a prompt does not count.
+    applyTerminalSemanticEvents('idle', [{ type: 'promptStart' }]);
+    expect(countRunningSessions()).toBe(2);
+
+    // Finishing a command drops it back below the running threshold.
+    applyTerminalSemanticEvents('run-a', [{ type: 'commandFinish', exitCode: 0 }]);
+    expect(countRunningSessions()).toBe(1);
   });
 });
 

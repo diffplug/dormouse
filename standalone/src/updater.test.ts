@@ -5,8 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   check: vi.fn(),
   getVersion: vi.fn(),
-  onCloseRequested: vi.fn(),
-  windowClose: vi.fn(),
   shellOpen: vi.fn(),
   invoke: vi.fn(),
 }));
@@ -17,13 +15,6 @@ vi.mock('@tauri-apps/plugin-updater', () => ({
 
 vi.mock('@tauri-apps/api/app', () => ({
   getVersion: mocks.getVersion,
-}));
-
-vi.mock('@tauri-apps/api/window', () => ({
-  getCurrentWindow: () => ({
-    onCloseRequested: mocks.onCloseRequested,
-    close: mocks.windowClose,
-  }),
 }));
 
 vi.mock('@tauri-apps/plugin-shell', () => ({
@@ -59,6 +50,8 @@ import {
   approveUpdate,
   openChangelog,
   buildDebugReport,
+  hasPendingUpdate,
+  installPendingUpdate,
   _resetForTesting,
 } from './updater';
 
@@ -70,8 +63,6 @@ describe('updater', () => {
     _resetForTesting();
     mocks.getVersion.mockResolvedValue('0.4.0');
     mocks.check.mockResolvedValue(null);
-    mocks.onCloseRequested.mockResolvedValue(vi.fn());
-    mocks.windowClose.mockResolvedValue(undefined);
     mocks.shellOpen.mockResolvedValue(undefined);
     mocks.invoke.mockResolvedValue('');
   });
@@ -175,54 +166,59 @@ describe('updater', () => {
     });
   });
 
+  // The quit orchestrator (standalone/src/quit.ts) — not the updater — owns quit
+  // interception now. The updater just exposes hasPendingUpdate/installPendingUpdate
+  // for the orchestrator to call as the last step of its teardown.
   describe('quit-time install', () => {
-    it('registers a close handler', async () => {
+    // Drive check → approve → download so an approved, downloaded update is pending.
+    async function reachDownloadedUpdate(update: ReturnType<typeof makeUpdate>) {
+      mocks.check.mockResolvedValue(update);
       startUpdateCheck();
       await vi.advanceTimersByTimeAsync(5_000);
       await vi.advanceTimersByTimeAsync(0);
+      approveUpdate();
+      await vi.advanceTimersByTimeAsync(0);
+    }
 
-      expect(mocks.onCloseRequested).toHaveBeenCalledOnce();
-    });
-
-    it('writes success marker before calling install', async () => {
+    it('reports no pending update until one is approved and downloaded', async () => {
       const update = makeUpdate('0.5.0');
       mocks.check.mockResolvedValue(update);
 
       startUpdateCheck();
       await vi.advanceTimersByTimeAsync(5_000);
       await vi.advanceTimersByTimeAsync(0);
+
+      // Available but not approved → not pending.
+      expect(hasPendingUpdate()).toBe(false);
+
       approveUpdate();
       await vi.advanceTimersByTimeAsync(0);
 
-      // Get the close handler
-      const closeHandler = mocks.onCloseRequested.mock.calls[0][0];
-      const event = { preventDefault: vi.fn() };
+      expect(hasPendingUpdate()).toBe(true);
+    });
 
-      // Track the order of operations
+    it('writes the success marker before calling install', async () => {
+      const update = makeUpdate('0.5.0');
+      await reachDownloadedUpdate(update);
+
       const order: string[] = [];
       update.install.mockImplementation(async () => {
-        // At this point, localStorage should already be set
+        // The success marker must already be in localStorage when install runs.
         const marker = localStorage.getItem(STORAGE_KEY);
         order.push(marker ? 'marker-set' : 'marker-missing');
         order.push('install');
       });
 
-      await closeHandler(event);
+      await installPendingUpdate();
 
-      expect(event.preventDefault).toHaveBeenCalled();
       expect(order).toEqual(['marker-set', 'install']);
-      expect(mocks.windowClose).toHaveBeenCalled();
+      // The pending update is consumed after a successful install.
+      expect(hasPendingUpdate()).toBe(false);
     });
 
     it('kills the sidecar and waits for it before installing on Windows', async () => {
       const update = makeUpdate('0.5.0');
-      mocks.check.mockResolvedValue(update);
-
-      startUpdateCheck();
-      await vi.advanceTimersByTimeAsync(5_000);
-      await vi.advanceTimersByTimeAsync(0);
-      approveUpdate();
-      await vi.advanceTimersByTimeAsync(0);
+      await reachDownloadedUpdate(update);
 
       const order: string[] = [];
       mocks.invoke.mockImplementation(async (cmd: string) => {
@@ -233,8 +229,7 @@ describe('updater', () => {
         order.push('install');
       });
 
-      const closeHandler = mocks.onCloseRequested.mock.calls[0][0];
-      await closeHandler({ preventDefault: vi.fn() });
+      await installPendingUpdate();
 
       expect(mocks.invoke).toHaveBeenCalledWith('kill_sidecar_now');
       // The kill must complete before NSIS runs, or it can't overwrite the
@@ -242,30 +237,31 @@ describe('updater', () => {
       expect(order).toEqual(['kill', 'install']);
     });
 
-    it('writes failure marker when install throws', async () => {
+    it('writes a failure marker when install throws', async () => {
       const update = makeUpdate('0.5.0');
       update.install.mockRejectedValue(new Error('install failed'));
-      mocks.check.mockResolvedValue(update);
+      await reachDownloadedUpdate(update);
 
+      await installPendingUpdate();
+
+      const marker = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
+      expect(marker.failed).toBe(true);
+      expect(marker.version).toBe('0.5.0');
+    });
+
+    it('is a no-op when no update is pending', async () => {
       startUpdateCheck();
       await vi.advanceTimersByTimeAsync(5_000);
       await vi.advanceTimersByTimeAsync(0);
-      approveUpdate();
-      await vi.advanceTimersByTimeAsync(0);
 
-      const closeHandler = mocks.onCloseRequested.mock.calls[0][0];
-      const event = { preventDefault: vi.fn() };
+      expect(hasPendingUpdate()).toBe(false);
+      await installPendingUpdate();
 
-      await closeHandler(event);
-
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const marker = JSON.parse(raw!);
-      expect(marker.failed).toBe(true);
-      expect(marker.version).toBe('0.5.0');
-      expect(mocks.windowClose).toHaveBeenCalled();
+      // Nothing installed, no marker written.
+      expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
     });
 
-    it('does not install an available update before approval', async () => {
+    it('does not install an available update that was never approved', async () => {
       const update = makeUpdate('0.5.0');
       mocks.check.mockResolvedValue(update);
 
@@ -273,29 +269,10 @@ describe('updater', () => {
       await vi.advanceTimersByTimeAsync(5_000);
       await vi.advanceTimersByTimeAsync(0);
 
-      const closeHandler = mocks.onCloseRequested.mock.calls[0][0];
-      const event = { preventDefault: vi.fn() };
+      await installPendingUpdate();
 
-      await closeHandler(event);
-
-      expect(event.preventDefault).not.toHaveBeenCalled();
       expect(update.download).not.toHaveBeenCalled();
       expect(update.install).not.toHaveBeenCalled();
-    });
-
-    it('does not prevent close when no update is pending', async () => {
-      mocks.check.mockResolvedValue(null);
-
-      startUpdateCheck();
-      await vi.advanceTimersByTimeAsync(5_000);
-      await vi.advanceTimersByTimeAsync(0);
-
-      const closeHandler = mocks.onCloseRequested.mock.calls[0][0];
-      const event = { preventDefault: vi.fn() };
-
-      await closeHandler(event);
-
-      expect(event.preventDefault).not.toHaveBeenCalled();
     });
   });
 

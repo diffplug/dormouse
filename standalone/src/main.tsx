@@ -9,6 +9,7 @@ import App from "dormouse-lib/App";
 import "dormouse-lib/index.css";
 import { UpdateBanner } from "./UpdateBanner";
 import { UpdateDebugModal } from "./UpdateDebugModal";
+import { QuitConfirmModalHost } from "./QuitConfirmModal";
 import { AppBar, type ShellEntry } from "./AppBar";
 import {
   startUpdateCheck,
@@ -64,14 +65,15 @@ function ConnectedUpdateBanner() {
   );
 }
 
+const BROWSER_DEV_HOST = import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST as string | undefined;
+
 async function createPlatform(): Promise<PlatformAdapter> {
-  const browserDevHost = import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST as string | undefined;
-  if (browserDevHost) {
+  if (BROWSER_DEV_HOST) {
     const [{ BrowserSidecarHost }, { BrowserSidecarAdapter }] = await Promise.all([
       import("./browser-sidecar-host"),
       import("./browser-sidecar-adapter"),
     ]);
-    return new BrowserSidecarAdapter(new BrowserSidecarHost(browserDevHost));
+    return new BrowserSidecarAdapter(new BrowserSidecarHost(BROWSER_DEV_HOST));
   }
   const { TauriAdapter } = await import("./tauri-adapter");
   return new TauriAdapter();
@@ -82,6 +84,19 @@ async function bootstrap() {
   const platform = await createPlatform();
   setPlatform(platform);
   await platform.init();
+  // Quit orchestrator (docs/specs/standalone.md §Quit flow). Tauri-only: the
+  // browser-dev harness has no Rust quit interception, and quit.ts pulls the
+  // Tauri APIs. !BROWSER_DEV_HOST is exactly the createPlatform branch that
+  // returned a TauriAdapter.
+  if (!BROWSER_DEV_HOST) {
+    const [{ initQuitFlow, setQuitConfirmGate }, { openQuitConfirm }] = await Promise.all([
+      import("./quit"),
+      import("./quit-confirm-store"),
+    ]);
+    initQuitFlow(platform as import("./tauri-adapter").TauriAdapter);
+    // A quit with ≥1 running command opens <QuitConfirmModalHost>.
+    setQuitConfirmGate(openQuitConfirm);
+  }
   const { initAlertStateReceiver } = await import("dormouse-lib/lib/terminal-registry");
   initAlertStateReceiver();
   restoreActiveTheme();
@@ -104,6 +119,7 @@ async function bootstrap() {
         restoredLathLayout={result.lathLayout}
         initialDoors={result.doors}
         baseboardNotice={<ConnectedUpdateBanner />}
+        dialogHost={<QuitConfirmModalHost />}
         enableRemoteHost
       />
     </StrictMode>,

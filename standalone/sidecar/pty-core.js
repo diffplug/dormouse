@@ -1166,13 +1166,28 @@ module.exports.create = function create(send, ptyModule) {
     });
   }
 
-  function gracefulKillAll(timeout = 2000) {
+  function gracefulKillAll(timeout = 2000, requestId) {
+    const done = () => send('gracefulKillDone', { requestId });
+    // Nothing live to SIGTERM, but a just-exited PTY can still deliver final
+    // output shortly after onExit (notably under ConPTY). Keep the same single
+    // grace tick used after the live map empties before the quit flush runs.
+    if (ptys.size === 0) { setTimeout(done, 50); return; }
     for (const [, p] of ptys) {
       try { p.kill('SIGTERM'); } catch { /* already dead */ }
     }
-    setTimeout(() => {
-      send('gracefulKillDone', {});
-    }, timeout);
+    // Deliberately does NOT clear scrollback (unlike kill/killAll): a SIGTERM'd
+    // process's final output stays readable via getScrollback afterward.
+    // Resolve early once every PTY has exited (onExit empties the map) instead
+    // of always sitting out the full timeout — but one grace tick after the map
+    // empties, since ConPTY can fire onExit before the final data flush and that
+    // last output must land in scrollback first.
+    const deadline = Date.now() + timeout;
+    const tick = () => {
+      if (ptys.size === 0) setTimeout(done, 50);
+      else if (Date.now() >= deadline) done();
+      else setTimeout(tick, 50);
+    };
+    setTimeout(tick, 50);
   }
 
   function getShells(requestId) {

@@ -26,6 +26,7 @@ import {
   inputContainsEnter,
   inputIsReplayTerminalReport,
   inputIsSyntheticTerminalReport,
+  REPLAY_MODE_RESET,
   stripMouseReportsFromInput,
   writeReplay,
 } from './terminal-report-filter';
@@ -398,12 +399,15 @@ export function resumeTerminal(
   if (existing) return existing;
 
   const entry = setupTerminalEntry(id, { untouched: exitInfo?.untouched ?? false });
+  const isDead = exitInfo != null && !exitInfo.alive;
 
   if (replayData) {
-    writeReplay(entry, replayData);
+    // Dead session: append the reset tail. A live resume leaves the modes to
+    // the still-running process that owns them (see REPLAY_MODE_RESET).
+    writeReplay(entry, replayData, ...(isDead ? [REPLAY_MODE_RESET] : []));
     seedPromptShapeFromScrollback(id, replayData);
   }
-  if (exitInfo && !exitInfo.alive) {
+  if (isDead) {
     entry.terminal.write(`\r\n[Process exited with code ${exitInfo.exitCode ?? -1}]\r\n`);
     entry.exited = true;
   }
@@ -431,7 +435,10 @@ export function restoreTerminal(
   }
 
   if (opts.scrollback) {
-    writeReplay(entry, opts.scrollback, '\r\n');
+    // Saved process is gone: append the reset tail (see REPLAY_MODE_RESET),
+    // inside writeReplay so `isReplaying` covers it, and before the '\r\n'
+    // separator so the alt-screen exit lands before the separator line.
+    writeReplay(entry, opts.scrollback, REPLAY_MODE_RESET, '\r\n');
     seedPromptShapeFromScrollback(id, opts.scrollback);
   }
   if (opts.cwdWarning) {

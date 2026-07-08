@@ -452,6 +452,11 @@ export function MobileTerminalUi({
   const gestureCompletionTimerRef = useRef<number | null>(null);
   const cursorPointerIdRef = useRef<number | null>(null);
   const cursorPointerTargetRef = useRef<EventTarget | null>(null);
+  // Handles for the staggered blur retries scheduled by blurPaneTextInputs, so
+  // an unmount can cancel them — otherwise a still-pending retry fires after the
+  // component is gone (in jsdom, after the test env tears down `document`).
+  const blurRetryTimersRef = useRef<number[]>([]);
+  const blurRetryFrameRef = useRef<number | null>(null);
   const [gestureState, setGestureState] = useState<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
   const [pendingGestureConfirmation, setPendingGestureConfirmation] = useState<MobileGestureConfirmationAction | null>(null);
   const [inputValue, setInputValue] = useState('');
@@ -470,6 +475,15 @@ export function MobileTerminalUi({
     if (gestureCompletionTimerRef.current === null) return;
     window.clearTimeout(gestureCompletionTimerRef.current);
     gestureCompletionTimerRef.current = null;
+  }, []);
+
+  const cancelBlurRetries = useCallback(() => {
+    for (const timer of blurRetryTimersRef.current) window.clearTimeout(timer);
+    blurRetryTimersRef.current = [];
+    if (blurRetryFrameRef.current !== null) {
+      window.cancelAnimationFrame(blurRetryFrameRef.current);
+      blurRetryFrameRef.current = null;
+    }
   }, []);
 
   const scheduleGestureCompletionClear = useCallback(() => {
@@ -513,13 +527,16 @@ export function MobileTerminalUi({
     };
     // Wall defers xterm focus via rAF, so a single blur can be reverted after we
     // return; repeat across rAF and a few staggered ticks. See
-    // mobile-terminal-ui.md (Touch interactions).
+    // mobile-terminal-ui.md (Touch interactions). A fresh blur supersedes any
+    // still-pending retries; tracking the handles also lets unmount cancel them
+    // (otherwise a late retry fires against a torn-down DOM).
+    cancelBlurRetries();
     blurActivePaneInput();
-    window.setTimeout(blurActivePaneInput, 0);
-    window.setTimeout(blurActivePaneInput, 50);
-    window.setTimeout(blurActivePaneInput, 200);
-    window.requestAnimationFrame(blurActivePaneInput);
-  }, [configurePaneTextInputs]);
+    for (const delay of [0, 50, 200]) {
+      blurRetryTimersRef.current.push(window.setTimeout(blurActivePaneInput, delay));
+    }
+    blurRetryFrameRef.current = window.requestAnimationFrame(blurActivePaneInput);
+  }, [cancelBlurRetries, configurePaneTextInputs]);
 
   const setKeyboardMode = useCallback((nextMode: MobileTerminalKeyboardMode) => {
     if (activeKeyboardMode === undefined && activeSection === undefined) {
@@ -636,6 +653,10 @@ export function MobileTerminalUi({
   }, [clearGestureCompletionTimer, commitGestureState, interactive, touchMode]);
 
   useEffect(() => clearGestureCompletionTimer, [clearGestureCompletionTimer]);
+
+  // Cancel any pending blur retries on unmount so they can't run against a
+  // torn-down DOM.
+  useEffect(() => cancelBlurRetries, [cancelBlurRetries]);
 
   const handlePanePointerDownCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     if (isGestureDialogTarget(event.target)) return;

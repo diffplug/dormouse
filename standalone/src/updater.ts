@@ -33,11 +33,6 @@ async function invokeTauri<T>(cmd: string): Promise<T> {
   return invoke<T>(cmd);
 }
 
-async function getAppWindow() {
-  const { getCurrentWindow } = await import('@tauri-apps/api/window');
-  return getCurrentWindow();
-}
-
 // --- State ---
 
 const STORAGE_KEY = 'dormouse:update-result';
@@ -164,7 +159,6 @@ async function runUpdateCheck(): Promise<void> {
   // Skip the auto-update probe on a failure-marker launch: prompting for the
   // same version that just failed would unmount any open debug dialog.
   if (hadFailureMarker) {
-    registerCloseHandler();
     return;
   }
 
@@ -173,7 +167,6 @@ async function runUpdateCheck(): Promise<void> {
   try {
     const update = await checkForUpdate();
     if (!update) {
-      registerCloseHandler();
       return;
     }
 
@@ -182,8 +175,6 @@ async function runUpdateCheck(): Promise<void> {
   } catch (e) {
     console.error('[updater] Check failed:', e);
   }
-
-  registerCloseHandler();
 }
 
 async function downloadApprovedUpdate(): Promise<void> {
@@ -229,58 +220,57 @@ export function _resetForTesting(): void {
   pendingUpdate = null;
   downloadPromise = null;
   currentVersion = '';
-  closeHandlerRegistered = false;
   listeners.clear();
 }
 
 // --- Quit-time install ---
+//
+// Called by the quit orchestrator (standalone/src/quit.ts) as the final
+// teardown step, strictly *after* the final session save has landed. Exiting
+// the process is quit_proceed's job in Rust, which runs after this returns.
 
-let closeHandlerRegistered = false;
+/** Whether an approved, downloaded update is waiting to install at quit. */
+export function hasPendingUpdate(): boolean {
+  return pendingUpdate !== null;
+}
 
-function registerCloseHandler(): void {
-  if (BROWSER_DEV_HOST) return;
-  if (closeHandlerRegistered) return;
-  closeHandlerRegistered = true;
+/** Install the pending update; ordering and Windows constraints are owned by
+ *  docs/specs/auto-update.md ("Quit-time install"). No-op in Vite dev mode. */
+export async function installPendingUpdate(): Promise<void> {
+  const update = pendingUpdate;
+  if (!update) return;
 
-  getAppWindow().then((appWindow) => appWindow.onCloseRequested(async (event) => {
-    const update = pendingUpdate;
-    if (!update) return;
-
-    if (shouldSkipInstallInDev()) {
-      console.warn('[updater] Skipping update install in dev mode. Use a packaged app to test install.');
-      pendingUpdate = null;
-      return;
-    }
-
-    event.preventDefault();
-
-    try {
-      // Write success marker BEFORE install — on Windows, NSIS force-kills the process
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        from: currentVersion,
-        to: update.version,
-      }));
-      // On Windows the NSIS installer overwrites files inside the bundled
-      // sidecar (e.g. node-pty's conpty.node). Windows refuses to overwrite a
-      // native module the running sidecar still has loaded, which surfaces as
-      // "Error opening file for writing". Kill the sidecar and wait for it to
-      // fully exit before launching the installer. (On macOS/Linux open files
-      // can be replaced in place, so this is Windows-only.)
-      if (IS_WINDOWS) {
-        await invokeTauri('kill_sidecar_now');
-      }
-      await update.install();
-    } catch (e) {
-      // Overwrite with failure marker
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        failed: true,
-        version: update.version,
-        error: String(e),
-      }));
-      console.error('[updater] Install failed:', e);
-    }
-
+  if (shouldSkipInstallInDev()) {
+    console.warn('[updater] Skipping update install in dev mode. Use a packaged app to test install.');
     pendingUpdate = null;
-    await appWindow.close();
-  }));
+    return;
+  }
+
+  try {
+    // Write success marker BEFORE install — on Windows, NSIS force-kills the process
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      from: currentVersion,
+      to: update.version,
+    }));
+    // On Windows the NSIS installer overwrites files inside the bundled
+    // sidecar (e.g. node-pty's conpty.node). Windows refuses to overwrite a
+    // native module the running sidecar still has loaded, which surfaces as
+    // "Error opening file for writing". Kill the sidecar and wait for it to
+    // fully exit before launching the installer. (On macOS/Linux open files
+    // can be replaced in place, so this is Windows-only.)
+    if (IS_WINDOWS) {
+      await invokeTauri('kill_sidecar_now');
+    }
+    await update.install();
+  } catch (e) {
+    // Overwrite with failure marker
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      failed: true,
+      version: update.version,
+      error: String(e),
+    }));
+    console.error('[updater] Install failed:', e);
+  }
+
+  pendingUpdate = null;
 }

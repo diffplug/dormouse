@@ -8,7 +8,7 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::Stdio,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     sync::mpsc,
     sync::{Arc, Mutex, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -45,6 +45,123 @@ struct SidecarState {
     pending_requests: PendingRequests,
     next_request_id: AtomicU64,
     child: SharedChild,
+}
+
+// ── Quit interception ─────────────────────────────────────────────────────────
+//
+// Every quit trigger funnels through `request_quit`, which asks the webview's
+// orchestrator (standalone/src/quit.ts) to tear down and call back
+// `quit_proceed`. Protocol + watchdog phases: docs/specs/standalone.md §Quit flow.
+#[derive(Default)]
+struct QuitState {
+    // The webview acknowledged quit-requested — its listener is alive.
+    acked: AtomicBool,
+    // Teardown has actually begun (user confirmed, or there was nothing to
+    // confirm). Until this is set the webview may be parked on the confirmation
+    // dialog waiting for a human, so the teardown deadline below must stay
+    // suspended — a slow user must not be force-quit out from under the dialog.
+    tearing_down: AtomicBool,
+    // Bumped by `quit_progress` at each teardown phase boundary (teardown start,
+    // install start). The phase-3 watchdog treats a bump as "still making
+    // progress" and refreshes its deadline, so a long-but-live install isn't cut
+    // off by a long teardown — each phase gets its own budget rather than sharing
+    // one total.
+    progress: AtomicU64,
+    // Teardown finished (or a watchdog gave up): cleared to exit. Gates the
+    // CloseRequested/ExitRequested arms so the final app.exit(0) isn't re-caught.
+    approved: AtomicBool,
+    // Bumped on every request_quit and on quit_cancel. A watchdog captures the
+    // seq it was spawned for; if it no longer matches, a repeated trigger or a
+    // cancel has superseded it and the watchdog exits without acting.
+    seq: AtomicU64,
+}
+
+// Phase 1: no ack within this window ⇒ webview listener is dead — exit.
+const QUIT_ACK_TIMEOUT_MS: u64 = 2_000;
+// Phase 3: per-phase budget once teardown is running. Each reported phase
+// (teardown, install) refreshes it, so it bounds a single stalled phase, not the
+// sum of all teardown work. Comfortably exceeds the webview's own 8 s teardown
+// ceiling (docs/specs/standalone.md §Quit flow).
+const QUIT_PHASE_TIMEOUT_MS: u64 = 12_000;
+const QUIT_POLL_STEP_MS: u64 = 500;
+
+fn quit_approved(app: &AppHandle) -> bool {
+    app.try_state::<QuitState>()
+        .is_some_and(|q| q.approved.load(Ordering::SeqCst))
+}
+
+fn request_quit(app: &AppHandle) {
+    let Some(quit) = app.try_state::<QuitState>() else {
+        return;
+    };
+    quit.acked.store(false, Ordering::SeqCst);
+    // Deliberately do NOT reset `tearing_down` here. A cancel happens before
+    // teardown, so it's already false for a genuinely fresh quit; and once
+    // teardown begins it only ever ends in `quit_proceed` (app exit), so a repeat
+    // trigger fired mid-teardown must keep the flag set — otherwise the fresh
+    // watchdog would drop into the unbounded phase-2 wait and stop bounding the
+    // in-flight teardown.
+    // fetch_add returns the prior value; our watchdog's seq is that + 1.
+    let my_seq = quit.seq.fetch_add(1, Ordering::SeqCst) + 1;
+    let _ = app.emit("dormouse://quit-requested", ());
+
+    // Watchdog: a cloned handle polls QuitState so a dead or wedged webview can't
+    // make quit hang. A repeated trigger bumps seq, so this (now-stale) watchdog
+    // returns and the fresh request_quit spawns a replacement.
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(QUIT_ACK_TIMEOUT_MS));
+        let Some(quit) = app.try_state::<QuitState>() else {
+            return;
+        };
+        // Superseded (seq bumped by a repeated trigger or a cancel) or already
+        // exiting (approved) ⇒ this watchdog has nothing to do.
+        let stale = |quit: &QuitState| {
+            quit.seq.load(Ordering::SeqCst) != my_seq || quit.approved.load(Ordering::SeqCst)
+        };
+        if stale(&quit) {
+            return;
+        }
+        if !quit.acked.load(Ordering::SeqCst) {
+            append_log("[quit] no ack from webview; exiting");
+            quit.approved.store(true, Ordering::SeqCst);
+            app.exit(0);
+            return;
+        }
+        // Phase 2: acked but teardown hasn't begun. The webview may be parked on
+        // the confirmation dialog waiting for a human, so hold with no deadline —
+        // only proceed (approved) or cancel (seq bump) ends the wait.
+        while !quit.tearing_down.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(QUIT_POLL_STEP_MS));
+            if stale(&quit) {
+                return;
+            }
+        }
+        // Phase 3: teardown running. Bound it, but a `quit_progress` bump (a phase
+        // boundary: teardown start, install start) refreshes the deadline so one
+        // long phase can't starve the next — each phase gets its own budget.
+        let mut last_progress = quit.progress.load(Ordering::SeqCst);
+        let mut elapsed = 0u64;
+        loop {
+            std::thread::sleep(Duration::from_millis(QUIT_POLL_STEP_MS));
+            if stale(&quit) {
+                return;
+            }
+            let progress = quit.progress.load(Ordering::SeqCst);
+            if progress != last_progress {
+                last_progress = progress;
+                elapsed = 0;
+                continue;
+            }
+            elapsed += QUIT_POLL_STEP_MS;
+            if elapsed >= QUIT_PHASE_TIMEOUT_MS {
+                append_log("[quit] teardown phase stalled; exiting");
+                quit.approved.store(true, Ordering::SeqCst);
+                app.exit(0);
+                return;
+            }
+        }
+    });
 }
 
 const LOG_FILE_ENV: &str = "DORMOUSE_LOG_FILE";
@@ -343,6 +460,24 @@ fn pty_get_scrollback(
         .and_then(|data| data.as_str().map(String::from)))
 }
 
+// Unlike pty_kill / kill_sidecar_now this preserves scrollback so the caller can
+// capture final output afterward. Async: waits up to `timeout + 1500ms` (margin
+// for the round trip beyond the sidecar's own kill timer) and must not block the
+// main thread for that long.
+#[tauri::command]
+async fn pty_graceful_kill_all(
+    state: tauri::State<'_, SidecarState>,
+    timeout: u64,
+) -> Result<(), String> {
+    request_from_sidecar_timeout(
+        &state,
+        "pty:gracefulKillAll",
+        serde_json::json!({ "timeout": timeout }),
+        Duration::from_millis(timeout + 1500),
+    )?;
+    Ok(())
+}
+
 // Stands up the loopback iframe proxy in the sidecar and returns the
 // IframeProxyResult JSON the webview's IframePanel expects. The proxy server is
 // the shared lib/src/host/iframe-proxy.ts; this only bridges the request.
@@ -631,22 +766,71 @@ fn write_session_to(dir: &Path, label: &str, state: &str) -> Result<(), String> 
         f.sync_all().map_err(|e| format!("fsync temp: {e}"))?;
     }
     std::fs::rename(&tmp, &path).map_err(|e| format!("rename session {label}: {e}"))?;
+    // The temp file's own fsync doesn't make the rename durable — on unix the
+    // directory entry that now points at the new inode must be fsynced too, or a
+    // crash right after quit could leave the rename unrecorded. Best-effort: a
+    // failure here doesn't invalidate the (already-written) data. Windows has no
+    // equivalent dir-fsync concept, so this is unix-only.
+    #[cfg(unix)]
+    {
+        if let Ok(d) = std::fs::File::open(dir) {
+            let _ = d.sync_all();
+        }
+    }
     Ok(())
 }
 
+// Async so the file IO (and save's two fsyncs — temp file + dir, both
+// F_FULLFSYNC on macOS) runs off the main/event-loop thread. Ordering is safe:
+// the webview store issues at most one save_session at a time (its coalescer).
 #[tauri::command]
-fn load_session(window: tauri::Window) -> Result<Option<String>, String> {
+async fn load_session(window: tauri::Window) -> Result<Option<String>, String> {
     read_session_from(&sessions_dir(window.app_handle())?, window.label())
 }
 
 #[tauri::command]
-fn save_session(window: tauri::Window, state: String) -> Result<(), String> {
+async fn save_session(window: tauri::Window, state: String) -> Result<(), String> {
     write_session_to(&sessions_dir(window.app_handle())?, window.label(), &state)
 }
 
 #[tauri::command]
 fn kill_sidecar_now(state: tauri::State<'_, SidecarState>) {
     kill_sidecar_and_wait(&state.child);
+}
+
+// ── Quit protocol commands (docs/specs/standalone.md §Quit flow) ─────────────
+
+// The webview's quit orchestrator received quit-requested and its listener is
+// alive; stand the phase-1 ack watchdog down.
+#[tauri::command]
+fn quit_ack(state: tauri::State<'_, QuitState>) {
+    state.acked.store(true, Ordering::SeqCst);
+}
+
+// The orchestrator has started (or advanced) teardown: the confirmation wait is
+// over, and this phase boundary refreshes the watchdog's per-phase deadline. The
+// webview calls this at teardown start and again before installing an update, so
+// a long install gets its own budget instead of sharing the teardown clock.
+#[tauri::command]
+fn quit_progress(state: tauri::State<'_, QuitState>) {
+    state.tearing_down.store(true, Ordering::SeqCst);
+    state.progress.fetch_add(1, Ordering::SeqCst);
+}
+
+// The user declined the quit (confirmation cancel). Bumping seq invalidates any
+// live watchdog for this quit so nothing exits; the next request_quit starts
+// fresh (it re-clears `acked` itself).
+#[tauri::command]
+fn quit_cancel(state: tauri::State<'_, QuitState>) {
+    state.seq.fetch_add(1, Ordering::SeqCst);
+}
+
+// Teardown is done (or the orchestrator bailed under its own timeout); approve so
+// the app.exit(0) below re-enters ExitRequested with approved=true and proceeds.
+#[tauri::command]
+fn quit_proceed(app: AppHandle, state: tauri::State<'_, QuitState>) {
+    state.approved.store(true, Ordering::SeqCst);
+    app.exit(0);
 }
 
 // Normal app quit should let the Node sidecar run its shutdown handler first:
@@ -1134,6 +1318,17 @@ pub fn run() {
                     .collect();
                 let _ = window.emit("dormouse://files-dropped", serde_json::json!({ "paths": payload }));
             }
+            // Window close funnels into the app-wide quit flow (§Quit flow).
+            // Multi-window seam: one window ships today, so a per-window close is
+            // the whole-app quit; a multi-window build would give each close a
+            // per-window teardown and only quit on the last one.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle();
+                if !quit_approved(app) {
+                    api.prevent_close();
+                    request_quit(app);
+                }
+            }
         })
         .setup(|app| {
             init_log();
@@ -1145,6 +1340,9 @@ pub fn run() {
             })?;
             app.manage(sidecar_state);
             append_log("[app] sidecar state registered");
+
+            // Quit-interception state (docs/specs/standalone.md §Quit flow).
+            app.manage(QuitState::default());
 
             // On non-macOS, remove native decorations for a fully custom title bar.
             // macOS uses titleBarStyle "Overlay" from config instead, which preserves
@@ -1166,10 +1364,15 @@ pub fn run() {
             pty_get_cwd,
             pty_get_open_ports,
             pty_get_scrollback,
+            pty_graceful_kill_all,
             iframe_create_proxy_url,
             pty_request_init,
             dor_control_response,
             kill_sidecar_now,
+            quit_ack,
+            quit_progress,
+            quit_cancel,
+            quit_proceed,
             get_available_shells,
             read_clipboard_file_paths,
             read_clipboard_image_as_file_path,
@@ -1190,6 +1393,17 @@ pub fn run() {
         .run(|app, event| match event {
             #[cfg(target_os = "macos")]
             RunEvent::Ready => set_macos_dock_icon(),
+            // Cmd+Q / app-menu / dock quit / interceptable OS logout (§Quit flow).
+            // The flow's own app.exit(0) re-enters here with approved=true and
+            // passes; `code` (None = user-initiated) is deliberately ignored.
+            RunEvent::ExitRequested { api, .. } => {
+                if !quit_approved(app) {
+                    api.prevent_exit();
+                    request_quit(app);
+                }
+            }
+            // Harmless after teardown: the PTY map is already empty, so the
+            // sidecar killAll no-ops. Still the backstop for any unclean exit.
             RunEvent::Exit => {
                 if let Some(state) = app.try_state::<SidecarState>() {
                     append_log("[app] exit — shutting down sidecar");

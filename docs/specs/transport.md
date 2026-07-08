@@ -120,12 +120,15 @@ The wrapping lives at the **standalone adapter boundary**, not in the shared sav
 
 Versioning and migration: the standalone top-level snapshot is a `PersistedWindow` (its own `version: 1`) wrapping v3 sessions. A pre-workspace bare `PersistedSession` (any version) migrates on read to a single `PersistedWorkspace` named `Workspace 1`, marked active, inside a `PersistedWindow` (`readPersistedWindow`); unreadable inner sessions are dropped and a dangling `activeWorkspaceId` is repaired to the first Workspace. A host that hands back a bare `PersistedSession` (VS Code, or legacy/flag-off standalone storage) is read as one Workspace. Migrations stay additive — older shapes keep flowing v1→v2→v3→(window) without losing panes, doors, alert state, or surface kind.
 
+**Persisted scrollback cap.** Each terminal pane's persisted scrollback is capped at 100,000 chars, keeping the tail cut at a line boundary (with the trailing `\n` preserved, per "Scrollback trailing newline" below) so N busy panes can't rewrite N MB on every save. The trim happens where scrollback is resolved for persistence — the frontend save path (`session-save.ts`) and the VS Code host-side refresh (`vscode-ext/src/session-state.ts`) both apply it — before resume-command detection, which is unaffected because resume patterns live at the tail. The sidecar's larger in-memory live-buffer cap (`standalone/sidecar/pty-core.js`) is unchanged. Source of truth: `lib/src/lib/scrollback-trim.ts`.
+
 Every saved-session entry point must pass through `readPersistedSession()`. That reader accepts both the canonical parsed object and a JSON-stringified session blob before validating/migrating; this covers host state APIs that may hand back the inner serialized JSON string.
 
 ## Universal invariants
 
-These rules apply to every adapter. Adapter-specific layering (deactivate ordering, save APIs, panel retention) lives in the adapter spec, e.g. `docs/specs/vscode.md`.
+These rules apply to every adapter. Adapter-specific layering (deactivate ordering, save APIs, panel retention) lives in the adapter spec, e.g. `docs/specs/vscode.md` (deactivate ordering) and `docs/specs/standalone.md` §Quit flow (quit teardown ordering).
 
+- **Scrollback buffers survive PTY exit.** In the shared `pty-core.js`, only the hard `kill`/`killAll` (or host-process exit) clears a PTY's scrollback buffer; natural exit, signal-driven exit, and `gracefulKillAll` leave it readable via `getScrollback`. Both hosts' teardown orderings rest on this contract — capture-after-graceful-kill is only correct because the buffer outlives the process.
 - **Shell login args are shell-specific.** The shared `pty-core.js` launches POSIX shells with `-l` only for shells that accept it. `csh`/`tcsh` must be spawned without `-l` so users whose login shell is C-shell-derived can open a usable terminal in any adapter.
 - **Scrollback trailing newline.** Restored scrollback must end with `\n` to avoid zsh printing a `%` artifact at the top of the terminal.
 - **Replay drops terminal replies only.** While saved output is being replayed into xterm.js, terminal-generated OSC/CSI/DCS query and focus reports are dropped so they do not enter the resumed/restored shell's input buffer. The replay filter must preserve user keyboard escape sequences, including arrows, function keys, and bracketed paste.

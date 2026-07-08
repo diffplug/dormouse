@@ -1,5 +1,6 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-shell";
 import type {
   AgentBrowserCommandResult,
@@ -19,6 +20,7 @@ import { AlertManager, type SessionStatus } from "dormouse-lib/lib/alert-manager
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
 import { TauriSessionStore } from "./tauri-session-store";
+import { withTimeout } from "./with-timeout";
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
@@ -63,6 +65,13 @@ export class TauriAdapter implements PlatformAdapter {
   private protocolParsers = new Map<string, TerminalProtocolParser>();
   private alertManager = new AlertManager();
   private sessionStore = new TauriSessionStore();
+  // In-process session-flush handshake (mirrors the VS Code message-router flow
+  // in vscode-ext/src/message-router.ts, but without postMessage — the Wall runs
+  // in the same webview). Handlers are the frontend flush listeners; a request
+  // fans out one requestId and resolves when a handler reports completion.
+  private flushHandlers = new Set<(detail: { requestId: string }) => void>();
+  private pendingFlushRequests = new Map<string, () => void>();
+  private nextFlushRequestId = 0;
 
   constructor() {
     // Wire alert manager state changes to handlers
@@ -179,18 +188,20 @@ export class TauriAdapter implements PlatformAdapter {
       console.error("[tauri-adapter] load_session failed:", err);
     }
     let migrated: string | null = null;
-    if (seed === null) {
-      // One-time migration off WebKit localStorage. SUNSET: drop this branch
-      // once shipped builds have all migrated. It assumes a single window — the
-      // legacy blob is per-origin (shared across windows) and window-agnostic,
-      // which is safe today because the app ships one window; a multi-window
-      // build must gate this so only one window adopts the shared blob.
+    // One-time migration off WebKit localStorage. SUNSET: removal criteria in
+    // docs/specs/standalone.md `## Future`. The legacy blob is per-origin
+    // (window-shared) and window-agnostic, so only the main window may adopt
+    // and clear it — a second window racing this would double-adopt.
+    if (seed === null && getCurrentWindow().label === "main") {
       migrated = localStorage.getItem(TauriAdapter.STATE_KEY);
       if (migrated !== null) {
-        seed = migrated;
         localStorage.removeItem(TauriAdapter.STATE_KEY);
       }
     }
+    // Do NOT seed the cache with the migrated blob: setItem's identical-value
+    // short-circuit would skip the write, and localStorage is already cleared —
+    // the setItem below must be a genuine change so the blob reaches the Rust
+    // store (setItem updates the cache synchronously for the cold-restore read).
     this.sessionStore.hydrate(seed);
     // Persist the adopted blob through the store's normal write path (not a raw
     // invoke) so it shares the same coalescing — and the planned drain-on-quit.
@@ -241,6 +252,16 @@ export class TauriAdapter implements PlatformAdapter {
     try {
       return await rawInvoke<string | null>("pty_get_scrollback", { id });
     } catch { return null; }
+  }
+
+  // Warn-and-proceed: a stalled graceful kill must not wedge a quit teardown.
+  // Callers own the timeout — the teardown bounds live in one place, quit.ts.
+  async gracefulKillAllPtys(timeoutMs: number): Promise<void> {
+    try {
+      await rawInvoke("pty_graceful_kill_all", { timeout: timeoutMs });
+    } catch (err) {
+      console.warn("[tauri-adapter] gracefulKillAllPtys failed; proceeding", err);
+    }
   }
 
   async getOpenPorts(id: string): Promise<OpenPort[]> {
@@ -401,11 +422,50 @@ export class TauriAdapter implements PlatformAdapter {
     this.replayHandlers.delete(handler);
   }
 
-  onRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}
+  onRequestSessionFlush(handler: (detail: { requestId: string }) => void): void {
+    this.flushHandlers.add(handler);
+  }
 
-  offRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}
+  offRequestSessionFlush(handler: (detail: { requestId: string }) => void): void {
+    this.flushHandlers.delete(handler);
+  }
 
-  notifySessionFlushComplete(_requestId: string): void {}
+  notifySessionFlushComplete(requestId: string): void {
+    const resolve = this.pendingFlushRequests.get(requestId);
+    if (!resolve) return;
+    this.pendingFlushRequests.delete(requestId);
+    resolve();
+  }
+
+  // Ask the frontend to flush its debounced/heartbeat session save now and report
+  // back. Resolves when a handler notifies completion for this requestId, or when
+  // the bounded wait elapses — quit must never wedge on a stalled flush. If no
+  // handler is registered (quit during boot, before the Wall mounts), resolve
+  // immediately: there is nothing queued to flush. Called by the (future) quit
+  // orchestrator; pairs with drainSessionSaves to await the resulting Rust write.
+  requestSessionFlush(timeoutMs: number): Promise<void> {
+    if (this.flushHandlers.size === 0) return Promise.resolve();
+    const requestId = `flush-${++this.nextFlushRequestId}`;
+    return new Promise<void>((resolve) => {
+      this.pendingFlushRequests.set(requestId, resolve);
+      // Timeout is a synthetic completion; a stale timer after a real completion
+      // hits notify's map-miss guard. Fan out after registering so a synchronous
+      // completion still finds the entry (first notify wins — one Wall ships).
+      setTimeout(() => this.notifySessionFlushComplete(requestId), timeoutMs);
+      for (const handler of this.flushHandlers) handler({ requestId });
+    });
+  }
+
+  // Await the session store's in-flight/pending save_session pipeline (the Rust
+  // temp+fsync+rename that actually reaches disk). Bounded: on timeout resolve
+  // anyway rather than wedge quit.
+  drainSessionSaves(timeoutMs: number): Promise<void> {
+    return withTimeout(
+      this.sessionStore.drain(),
+      timeoutMs,
+      "[tauri-adapter] drainSessionSaves timed out; proceeding with quit",
+    );
+  }
 
   // --- Alert management (local AlertManager) ---
 

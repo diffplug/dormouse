@@ -31,8 +31,22 @@ export class TauriSessionStore implements SessionKeyValueStore {
   // queued. A queued `value` is always a JSON string (never JS null), so null is
   // a safe "nothing pending" sentinel — even an empty-string blob is distinct.
   private pending: string | null = null;
+  // Resolvers for pending drain() calls, fired when the pipeline next goes idle.
+  private drainWaiters: Array<() => void> = [];
 
   constructor(private readonly save: SessionSaveFn = invokeSave) {}
+
+  /**
+   * Resolves when the write pipeline goes idle — no save in flight, nothing
+   * queued. A `setItem` chained while draining pushes the idle point out (so it
+   * is covered); rejected writes still drain (`flush` logs-and-continues).
+   */
+  drain(): Promise<void> {
+    if (!this.saveInFlight) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      this.drainWaiters.push(resolve);
+    });
+  }
 
   /** Seed the cache from the host's persisted blob (or null) at boot. */
   hydrate(seed: string | null): void {
@@ -48,6 +62,9 @@ export class TauriSessionStore implements SessionKeyValueStore {
   }
 
   setItem(_key: string, value: string): void {
+    // Backstop under the frontend dirty gate: a byte-identical blob issues no
+    // round-trip. Valid from the first write — `hydrate` boot-seeds the cache.
+    if (value === this.cache) return;
     this.cache = value;
     if (this.saveInFlight) {
       this.pending = value;
@@ -67,6 +84,10 @@ export class TauriSessionStore implements SessionKeyValueStore {
           this.flush(next);
         } else {
           this.saveInFlight = false;
+          // Pipeline idle: release drain waiters.
+          const waiters = this.drainWaiters;
+          this.drainWaiters = [];
+          for (const resolve of waiters) resolve();
         }
       });
   }

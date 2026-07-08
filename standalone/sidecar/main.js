@@ -62,7 +62,7 @@ rl.on('line', (line) => {
       case 'pty:getOpenPorts': mgr.getOpenPorts(data.id, data.requestId); break;
       case 'pty:getScrollback': mgr.getScrollback(data.id, data.requestId); break;
       case 'pty:getShells':  mgr.getShells(data.requestId); break;
-      case 'pty:gracefulKillAll': mgr.gracefulKillAll(data.timeout); break;
+      case 'pty:gracefulKillAll': mgr.gracefulKillAll(data.timeout, data.requestId); break;
       case 'sidecar:shutdown': shutdown(); break;
       case 'dor:controlResponse': dorControl?.respond(data); break;
       case 'iframe:createProxyUrl':

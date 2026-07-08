@@ -1,6 +1,7 @@
 import type { PlatformAdapter } from './platform/types';
 import { browserPersistedPane, readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceType } from './session-types';
 import { detectResumeCommand } from './resume-patterns';
+import { trimPersistedScrollback } from './scrollback-trim';
 import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched, resolveTerminalSessionId } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 
@@ -12,6 +13,8 @@ function getPreviousPaneMap(platform: PlatformAdapter): Map<string, PersistedPan
   return new Map(saved.panes.map((pane) => [pane.id, pane]));
 }
 
+// Every input read here needs a dirty trigger in use-session-persistence.ts;
+// the unconditional flushes + store-level compare only bound the staleness.
 export async function saveSession(
   platform: PlatformAdapter,
   panes: Array<{ id: string; title: string; surfaceType?: PersistedSurfaceType }>,
@@ -50,13 +53,15 @@ export async function saveSession(
         platform.getScrollback(sessionId),
         platform.getCwd(sessionId),
       ]);
-      const resolvedScrollback = scrollback ?? previousPane?.scrollback ?? null;
+      // Resume-command patterns live at the tail, so trimming before detection
+      // is safe.
+      const trimmedScrollback = trimPersistedScrollback(scrollback ?? previousPane?.scrollback ?? null);
       return {
         id: pane.id,
         title: pane.title,
         cwd: cwd ?? previousPane?.cwd ?? null,
-        scrollback: resolvedScrollback,
-        resumeCommand: resolvedScrollback ? detectResumeCommand(resolvedScrollback) : null,
+        scrollback: trimmedScrollback,
+        resumeCommand: trimmedScrollback ? detectResumeCommand(trimmedScrollback) : null,
         untouched: isUntouched(pane.id),
         alert: liveAlert ?? previousPane?.alert ?? null,
       };
