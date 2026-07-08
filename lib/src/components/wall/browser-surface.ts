@@ -18,10 +18,7 @@ function asParams(params: unknown): BrowserParamsLike {
 /** Resolve the canonical render mode; defaults to `iframe` when unset. */
 export function resolveRenderMode(params: unknown): RenderMode {
   const p = asParams(params);
-  if (p.renderMode === 'ab-screencast' || p.renderMode === 'ab-popout' || p.renderMode === 'iframe') {
-    return p.renderMode;
-  }
-  return 'iframe';
+  return p.renderMode === 'ab-screencast' || p.renderMode === 'ab-popout' ? p.renderMode : 'iframe';
 }
 
 /** Whether params describe an agent-browser-rendered surface (ab-screencast /

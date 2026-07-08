@@ -178,7 +178,7 @@ function isPersistedSessionV3(value: unknown): value is PersistedSessionV3Input 
 export function readPersistedSession(raw: unknown): PersistedSession | null {
   if (isEmptyState(raw)) return null;
   const value = parseJsonString(raw);
-  if (isRecord(value) && isPersistedSessionV3(value)) return normalizeSessionV3(value);
+  if (isPersistedSessionV3(value)) return normalizeSessionV3(value);
   console.warn('[dormouse] Ignoring unreadable persisted session; starting fresh.');
   return null;
 }

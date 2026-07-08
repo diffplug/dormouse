@@ -134,11 +134,6 @@ describe('saveSession', () => {
     await saveSession(platform, [], [{
       id: 'pane-a',
       title: 'npm test',
-      neighborId: null,
-      direction: 'right',
-      remainingPaneIds: [],
-      layoutAtMinimize: null,
-      layoutAtMinimizeSignature: 'empty',
     }]);
 
     expect(platform.saveState).toHaveBeenCalledWith({
@@ -169,11 +164,6 @@ describe('saveSession', () => {
     await saveSession(platform, [], [{
       id: 'pane-a',
       title: 'npm test',
-      neighborId: null,
-      direction: 'right',
-      remainingPaneIds: [],
-      layoutAtMinimize: null,
-      layoutAtMinimizeSignature: 'empty',
     }]);
 
     expect(platform.saveState).toHaveBeenCalledWith({
@@ -238,11 +228,6 @@ describe('saveSession', () => {
       title: 'localhost',
       component: 'browser',
       params: { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173' },
-      neighborId: null,
-      direction: 'right',
-      remainingPaneIds: [],
-      layoutAtMinimize: null,
-      layoutAtMinimizeSignature: 'empty',
     }]);
 
     const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
@@ -298,11 +283,6 @@ describe('saveSession', () => {
     await saveSession(platform, [], [{
       id: 'door-a',
       title: 'npm test',
-      neighborId: 'pane-b',
-      direction: 'right',
-      remainingPaneIds: ['pane-b'],
-      layoutAtMinimize: null,
-      layoutAtMinimizeSignature: '',
       token,
     }]);
 
