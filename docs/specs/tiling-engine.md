@@ -203,7 +203,7 @@ Acceptance matrix — each row is an end-to-end observable, independent of engin
 
 | # | Flow | Expected observable |
 | --- | --- | --- |
-| 1 | Type into the selected terminal | Keystrokes echo; `dor list-panes` marks it `[focused]` |
+| 1 | Type into the selected terminal | Keystrokes echo; `dor list` marks it `*` (focused) |
 | 2 | `dor iframe <url>` / `dor ensure` from a touched terminal | Surface created in the background; caller keeps DOM focus (`document.activeElement` stays its xterm textarea) and selection; follow-up typing lands |
 | 3 | Click between panes (body and header), both directions | Selection and focus follow the click; passthrough entered |
 | 4 | `dor kill` of a background surface | Surface removed; caller's selection, focus, and typing all survive (under Lath: focus is never lost, not healed) |

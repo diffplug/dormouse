@@ -8,11 +8,9 @@ import {
 } from '@stricli/core';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
 import { ensureCommand } from './commands/ensure.js';
-import { identifyCommand } from './commands/identify.js';
 import { iframeCommand } from './commands/iframe.js';
 import { killCommand } from './commands/kill.js';
-import { listPaneSurfacesCommand } from './commands/list-pane-surfaces.js';
-import { listPanesCommand } from './commands/list-panes.js';
+import { listCommand } from './commands/list.js';
 import { readCommand } from './commands/read.js';
 import { sendCommand } from './commands/send.js';
 import { splitCommand } from './commands/split.js';
@@ -58,7 +56,10 @@ export type {
   SplitSurfaceRequest,
   SplitSurfaceResponse,
   Surface,
+  SurfaceActivity,
+  SurfacePort,
   SurfaceType,
+  SurfaceView,
   VersionMetadata,
 } from './commands/types.js';
 
@@ -71,9 +72,7 @@ const COMMANDS = [
   killCommand,
   iframeCommand,
   agentBrowserCommand,
-  identifyCommand,
-  listPanesCommand,
-  listPaneSurfacesCommand,
+  listCommand,
 ] as const satisfies readonly Command[];
 
 const ROUTES = {
@@ -85,9 +84,7 @@ const ROUTES = {
   kill: killCommand.command,
   iframe: iframeCommand.command,
   'agent-browser': agentBrowserCommand.command,
-  identify: identifyCommand.command,
-  'list-panes': listPanesCommand.command,
-  'list-pane-surfaces': listPaneSurfacesCommand.command,
+  list: listCommand.command,
 };
 
 const DOR_TEXT: ApplicationText = {

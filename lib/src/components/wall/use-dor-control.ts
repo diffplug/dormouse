@@ -7,7 +7,9 @@ import type {
   SplitDirection as DorSplitDirection,
   ResolvedSplitDirection as DorResolvedSplitDirection,
   ParseResult,
+  SurfacePort as DorSurfacePort,
 } from 'dor/commands/types';
+import type { OpenPort } from '../../lib/platform/types';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import {
   getDefaultShellOpts,
@@ -34,6 +36,7 @@ type DorControlParams = {
   minimized?: unknown;
   restart?: unknown;
   binaryPath?: unknown;
+  includePorts?: unknown;
   pane?: string;
   session?: unknown;
   surface?: unknown;
@@ -75,6 +78,32 @@ function surfaceTitleTarget(target: string): string | null {
 
 function renderSurfaceForError(surface: DorSurface): string {
   return `${surface.ref} ${JSON.stringify(surface.title)}`;
+}
+
+function toSurfacePort(port: OpenPort): DorSurfacePort {
+  return {
+    family: port.family,
+    address: port.address,
+    port: port.port,
+    pid: port.pid,
+    ...(port.processName ? { processName: port.processName } : {}),
+  };
+}
+
+/** Enumerate each terminal Surface's listening ports for `dor list --ports`.
+ *  The adapter shells out per pane (and returns `[]` on remote / on error), so
+ *  the fetches run in parallel and failures degrade to no ports, never a reject. */
+async function attachSurfacePorts(surfaces: DorSurface[]): Promise<DorSurface[]> {
+  const platform = getPlatform();
+  return Promise.all(surfaces.map(async (surface) => {
+    if (surface.type !== 'terminal') return surface;
+    try {
+      const ports = await platform.getOpenPorts(surface.id);
+      return { ...surface, ports: ports.map(toSurfacePort) };
+    } catch {
+      return { ...surface, ports: [] };
+    }
+  }));
 }
 
 function stringParam(value: unknown): string | undefined {
@@ -235,6 +264,7 @@ export function useDorControl({
   doorsRef,
   setDoors,
   buildDorSurfaces,
+  buildDorSurfaceList,
   surfaceRefForId,
   createSplitSurface,
   createContentSurface,
@@ -250,6 +280,9 @@ export function useDorControl({
   setDoors: (doors: DooredItem[]) => void;
   /** The visible panes + active surface projection, shared with wallActions. */
   buildDorSurfaces: () => DorSurface[];
+  /** Like `buildDorSurfaces` but also includes minimized (doored) Surfaces —
+   *  the full `dor list` view. */
+  buildDorSurfaceList: () => DorSurface[];
   /** Stable `surface:N` ref for a pane/door id, shared with the render. */
   surfaceRefForId: (id: string) => string;
   createSplitSurface: (args: {
@@ -357,11 +390,15 @@ export function useDorControl({
         dorDirectionForEdge(lath.store.autoEdgeFor(id));
 
       if (detail.method === SURFACE_CONTROL_METHODS.list) {
-        const surfaces = buildDorSurfaces();
+        const matched = buildDorSurfaceList()
+          .filter((surface) => matchesDorPaneTarget(params.pane, surface));
+        const surfaces = booleanParam(params.includePorts)
+          ? await attachSurfacePorts(matched)
+          : matched;
         detail.respond({
           ok: true,
           result: {
-            surfaces: surfaces.filter((surface) => matchesDorPaneTarget(params.pane, surface)),
+            surfaces,
             workspaceRef: 'workspace:1',
             windowRef: 'window:1',
           },
@@ -729,5 +766,5 @@ export function useDorControl({
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, resolveVisibleSurface, surfaceRefForId, lath, nav]);
+  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, resolveVisibleSurface, surfaceRefForId, lath, nav]);
 }

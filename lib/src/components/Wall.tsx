@@ -46,6 +46,7 @@ import type {
   ResolvedSplitDirection as DorResolvedSplitDirection,
   ParseResult,
   SurfaceType as DorSurfaceType,
+  SurfaceView as DorSurfaceView,
 } from 'dor/commands/types';
 import type { PersistedDoor } from '../lib/session-types';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
@@ -125,6 +126,14 @@ function surfaceTypeFromParams(params: unknown): DorSurfaceType {
   // The CLI surface type tracks the *renderer* (iframe vs agent-browser) so
   // `dor` output stays informative even though both are one 'browser' surface.
   return resolveRenderMode(params) === 'iframe' ? 'iframe' : 'agent-browser';
+}
+
+/** The target URL a browser Surface carries in its params (`dor list`); null for
+ *  terminals or params without one. */
+function browserUrlFromParams(params: unknown): string | null {
+  if (!params || typeof params !== 'object') return null;
+  const url = (params as { url?: unknown }).url;
+  return typeof url === 'string' ? url : null;
 }
 
 /** Killing or swapping away from an agent-browser surface closes its session —
@@ -669,37 +678,70 @@ export function Wall({
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
-  // The visible panes + the active/selected surface. The "active" surface is
-  // simply the selected pane.
-  const buildDorSurfaces = useCallback((): DorSurface[] => {
+  // The Surfaces of the current Workspace. `buildDorSurfaces` is the visible-pane
+  // projection used for `dor` targeting; `buildDorSurfaceList` additionally
+  // includes minimized (doored) Surfaces for `dor list`, numbered after the
+  // visible panes to match `surfaceRefForId`. The "active" Surface is the
+  // selected pane.
+  const buildDorSurfacesInternal = useCallback((includeMinimized: boolean): DorSurface[] => {
     const panels = lath.listPanes();
+    const doors = includeMinimized ? doorsRef.current : [];
     const activeId = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
+    const zoomedId = lath.store.getSnapshot().zoomedId;
     const terminalStates = getTerminalPaneStateSnapshot();
     const activityStates = getActivitySnapshot();
     const appTitleForPane = buildAppTitleResolver(terminalStates, activityStates);
-    const panelStates = panels.map((panel) => terminalStates.get(panel.id) ?? createTerminalPaneState());
 
-    return panels.map((panel, index) => {
-      const type = surfaceTypeFromParams(panel.params);
-      const state = panelStates[index] ?? createTerminalPaneState();
+    const sources = [
+      ...panels.map((panel) => ({ id: panel.id, params: panel.params, title: panel.title, minimized: false })),
+      ...doors.map((door) => ({ id: door.id, params: door.params, title: door.title, minimized: true })),
+    ];
+    const states = sources.map((source) => terminalStates.get(source.id) ?? createTerminalPaneState());
+
+    return sources.map((source, index) => {
+      const type = surfaceTypeFromParams(source.params);
+      const state = states[index] ?? createTerminalPaneState();
+      const activity = activityStates.get(source.id);
+      const shellActivity = type === 'terminal' ? state.activity : null;
       const title = type === 'terminal'
-        ? deriveSurfaceLabel(state, panelStates, appTitleForPane, panel.title ?? panel.id)
-        : (panel.title ?? panel.id);
+        ? deriveSurfaceLabel(state, states, appTitleForPane, source.title ?? source.id)
+        : (source.title ?? source.id);
+      const view: DorSurfaceView = source.minimized
+        ? 'minimized'
+        : (source.id === zoomedId ? 'zoomed' : 'paned');
 
       return {
-        id: panel.id,
+        id: source.id,
         ref: `surface:${index + 1}`,
         paneRef: `pane:${index + 1}`,
         type,
         title,
-        focused: panel.id === activeId,
+        focused: source.id === activeId,
         index,
         indexInPane: 0,
-        requestedWorkingDirectory: type === 'terminal' ? (state.cwd?.path ?? null) : null,
         selectedInPane: true,
+        view,
+        cwd: type === 'terminal' ? (state.cwd?.path ?? null) : null,
+        activity: shellActivity ? shellActivity.kind : null,
+        ...(shellActivity?.kind === 'finished' && shellActivity.exitCode !== undefined
+          ? { exitCode: shellActivity.exitCode }
+          : {}),
+        command: type === 'terminal' ? (state.currentCommand?.displayCommand ?? null) : null,
+        url: type === 'terminal' ? null : browserUrlFromParams(source.params),
+        ringing: activity?.status === 'ALERT_RINGING',
+        todo: activity?.todo === true,
       };
     });
   }, [lath]);
+
+  const buildDorSurfaces = useCallback(
+    (): DorSurface[] => buildDorSurfacesInternal(false),
+    [buildDorSurfacesInternal],
+  );
+  const buildDorSurfaceList = useCallback(
+    (): DorSurface[] => buildDorSurfacesInternal(true),
+    [buildDorSurfacesInternal],
+  );
 
   const surfaceRefForId = useCallback((id: string): string => {
     const panes = lath.listPanes();
@@ -944,6 +986,7 @@ export function Wall({
     doorsRef,
     setDoors,
     buildDorSurfaces,
+    buildDorSurfaceList,
     surfaceRefForId,
     createSplitSurface,
     createContentSurface,

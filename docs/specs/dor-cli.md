@@ -3,7 +3,7 @@
 > See `docs/specs/glossary.md` for canonical Surface / Session / Pane vocabulary.
 > A **Surface** (the durable occupant of a Pane — a terminal Session or a browser
 > surface) is `dor`'s user-facing CLI handle. Pane remains layout vocabulary in the
-> implementation and in existing compatibility commands.
+> implementation and in the `pane:N` refs / `pane_ref` fields `dor` still exposes.
 
 Dormouse bundles a `dor` CLI into every terminal it launches. The CLI is the
 public API; any socket used underneath it is private host plumbing.
@@ -207,8 +207,8 @@ to a Workspace. The handle model therefore reserves `workspace:<n|name>` and
 Surface`. Each visible Pane has one selected Surface; a Surface is a terminal (a
 Session) or a browser surface — the `iframe` / agent-browser renderers of `dor`'s
 unified `browser` surface (`docs/specs/dor-browser.md`). User-facing `dor` commands
-expose Surface handles; Pane remains layout vocabulary and compatibility-command
-terminology.
+expose Surface handles; Pane remains layout vocabulary, surfaced as `pane:N` refs
+and the `pane_ref` field on `dor list` rows.
 
 Invariants:
 
@@ -217,8 +217,7 @@ Invariants:
 - Surface targets also accept `title:<exact display title>`. If exactly one
   visible surface has that title, it is selected. If multiple visible surfaces
   match, the command fails and lists the matching surface refs.
-- Short refs currently use cmux-style names for implemented handles:
-  `surface:1`, `pane:2`.
+- Short refs use `surface:1`, `pane:2`.
 - List output defaults to refs; commands that list handles accept
   `--id-format refs|uuids|both`.
 - Reserved: `workspace:<n>` (and `workspace:<name>` when exactly one Workspace
@@ -229,10 +228,24 @@ Invariants:
 ## Current Implemented Commands
 
 Implemented commands call private `surface.*` control methods. `surface.list`
-derives its response from the current visible panes plus terminal state/activity
-snapshots where available, then returns `workspace:1` and `window:1` — it
-reports the single active Workspace (Workspace-aware tagging is staged; see
-[Future](#future)).
+derives its response from the current Workspace's Surfaces — the visible panes
+**plus minimized (doored) Surfaces**, each tagged with its `view`
+(`paned` / `zoomed` / `minimized`) — joined with terminal state and
+activity snapshots. It returns `workspace:1` and `window:1`: it reports the
+single active Workspace (Workspace-aware tagging is staged; see
+[Future](#future)). Two builders back this on the host
+(`lib/src/components/Wall.tsx`): `buildDorSurfaces` is the visible-pane
+projection used for `dor` **targeting** (split / kill / send / read), while
+`buildDorSurfaceList` adds the minimized Surfaces for `dor list` — so listing
+sees minimized Surfaces but targeting semantics are unchanged. Minimized
+Surfaces are numbered after the visible panes (matching `surfaceRefForId`).
+
+When the request sets `includePorts` (`dor list --ports`), the host calls
+`PlatformAdapter.getOpenPorts(id)` (`docs/specs/dor-browser.md` → Dev-Server
+Chip) for each terminal Surface, in parallel. Enumeration shells out per pane
+(`lsof` / `Get-NetTCPConnection`) under `OPEN_PORT_TIMEOUT_MS`, so it is opt-in;
+a remote paired session reports none, and any error degrades to an empty list
+rather than failing the call.
 
 Command tails captured after `--` are sent as raw argv arrays (`command:
 string[]`); the host — not `dor` — quotes them for the target shell. `dor`
@@ -271,20 +284,43 @@ from `command-detail`.
 - `dor agent-browser` / `dor ab` — delegates to the user's `agent-browser`,
   rendered in a Dormouse-native surface; the `ab-screencast` renderer of the
   unified `browser` surface, see [dor-browser.md](dor-browser.md)
-- `dor identify` — JSON identity dump: caller surface (matched locally against
-  `DORMOUSE_SURFACE_ID`, `null` when not visible), focused surface, and the
-  hosting app (`DORMOUSE_HOST` / `DORMOUSE_HOST_WORKSPACE` / runtime paths).
-  Composes over `surface.list` — no dedicated control method. Deliberately does
-  not expose the control socket: the CLI is the public API and the socket is
-  private plumbing.
-  [impl](../../dor/src/commands/identify.ts) [docs](../../dor/test/snapshots/help/identify.md)
-- `dor list-panes` [impl](../../dor/src/commands/list-panes.ts) [docs](../../dor/test/snapshots/help/list-panes.md)
-- `dor list-pane-surfaces` [impl](../../dor/src/commands/list-pane-surfaces.ts) [docs](../../dor/test/snapshots/help/list-pane-surfaces.md)
+- `dor list` — the unified Surface listing. Lists every Surface in the current
+  Workspace (terminals and browser Surfaces, including minimized ones), one row
+  per Surface in `surface:N` order. Text marks the focused Surface with `*` and
+  the calling terminal with `(you)`, and shows type, `view`, location (cwd for
+  terminals, URL for browser Surfaces), title, and `[ringing]` / `[todo]` tags.
+  `--ports` adds each terminal's listening ports. `--json` additionally emits the
+  identity dump `dor identify` used to print — top-level `caller_surface_ref`
+  (matched locally against `DORMOUSE_SURFACE_ID`, `null` when the caller is not
+  in the list), `focused_surface_ref`, and a `host` block (`DORMOUSE_HOST` /
+  `DORMOUSE_HOST_WORKSPACE` / runtime paths). It deliberately does not expose the
+  control socket: the CLI is the public API and the socket is private plumbing.
+  Replaces the retired cmux-shaped `list-panes` / `list-pane-surfaces` and the
+  `identify` command. Filtering by type/state and workspace scope are staged (see
+  [Future](#future)). [impl](../../dor/src/commands/list.ts)
+  [docs](../../dor/test/snapshots/help/list.md)
 
 ## Future
 
+- **`dor list` filters** — narrow the listing without post-processing: a
+  positional/`--pane` target (reusing the `matchesDorPaneTarget` resolver that
+  already backs the other commands), `--type terminal|browser`, and state filters
+  (`--running`, `--alert`/`--todo`). Each ships with its snapshot-tested help.
+- **`dor list` workspace scope** — today `dor list` shows only the active
+  Workspace and the noun stays "Surface" (no workspace rows). When workspaces
+  land, add `--all` (widen the surface scope to every Workspace, grouped by a
+  Workspace header), `--workspace <ref>` (narrow to one), and `--workspaces` (the
+  cheap overview: one row per Workspace with its `active` flag and union status —
+  ringing / todo / count from `docs/specs/glossary.md`). `dor list` owns all
+  read/enumeration; the `dor workspace` command below owns mutation only, so the
+  overview is never duplicated. Host asymmetry constrains `--all`: standalone can
+  reach unmounted Workspaces (their stores survive unmount, layouts are
+  persisted, and `getOpenPorts` is PTY-keyed so it still works), but VS Code puts
+  each Workspace in a separate webview, so cross-Workspace listing must aggregate
+  at the extension host, not the per-webview control handler. Staged with the
+  workspaces rollout (`docs/specs/layout.md` `## Future`, workspaces-rollout).
 - **Workspace handles and commands** — a `--workspace` target flag and `dor
-  workspace` management commands (list / new / rename / close / switch)
+  workspace` management commands (new / rename / close / switch — mutation only)
   consuming the reserved `workspace:<n|name>` / `window:<n>` ref grammar in the
   handle model above. Like every other command they ship with their
   snapshot-tested help and the control methods that back them, not ahead of

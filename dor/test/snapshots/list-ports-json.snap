@@ -1,0 +1,98 @@
+exitCode: 0
+stdout:
+{
+  "surfaces": [
+    {
+      "ref": "surface:1",
+      "pane_ref": "pane:1",
+      "type": "terminal",
+      "view": "paned",
+      "title": "pnpm dev",
+      "focused": true,
+      "index": 0,
+      "cwd": "/Users/me/projects/site",
+      "activity": "running",
+      "command": "pnpm dev",
+      "url": null,
+      "ringing": false,
+      "todo": false,
+      "ports": [
+        {
+          "family": "IPv4",
+          "address": "0.0.0.0",
+          "port": 5173,
+          "pid": 4242,
+          "process_name": "node"
+        }
+      ]
+    },
+    {
+      "ref": "surface:2",
+      "pane_ref": "pane:2",
+      "type": "terminal",
+      "view": "paned",
+      "title": "repo \"watch\"",
+      "focused": false,
+      "index": 1,
+      "cwd": "/Users/me/repo",
+      "activity": "finished",
+      "exit_code": 1,
+      "command": null,
+      "url": null,
+      "ringing": false,
+      "todo": true,
+      "ports": []
+    },
+    {
+      "ref": "surface:3",
+      "pane_ref": "pane:3",
+      "type": "agent-browser",
+      "view": "paned",
+      "title": "Dormouse",
+      "focused": false,
+      "index": 2,
+      "cwd": null,
+      "activity": null,
+      "command": null,
+      "url": "http://localhost:5173/",
+      "ringing": false,
+      "todo": false
+    },
+    {
+      "ref": "surface:4",
+      "pane_ref": "pane:4",
+      "type": "terminal",
+      "view": "minimized",
+      "title": "<idle> server.js",
+      "focused": false,
+      "index": 3,
+      "cwd": "/Users/me/api",
+      "activity": "finished",
+      "command": null,
+      "url": null,
+      "ringing": true,
+      "todo": false,
+      "ports": [
+        {
+          "family": "IPv6",
+          "address": "::1",
+          "port": 8080,
+          "pid": 5151,
+          "process_name": "python"
+        }
+      ]
+    }
+  ],
+  "caller_surface_ref": "surface:2",
+  "focused_surface_ref": "surface:1",
+  "window_ref": "window:1",
+  "workspace_ref": "workspace:1",
+  "host": {
+    "app": "vscode",
+    "workspace": "/Users/me/projects/site",
+    "cli_js_path": "/opt/dormouse/dor-cli/dist/dor.js",
+    "node_path": "/opt/dormouse/node"
+  }
+}
+
+stderr:
