@@ -21,7 +21,12 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 // stubbed so panes mount cheaply. TerminalPanel still runs usePaneChrome (registering
 // the leaf element) and renders this stub inside its animation div.
 vi.mock('./TerminalPane', () => ({
-  TerminalPane: ({ id }: { id: string }) => <div data-testid="terminal-pane" data-session-id={id} />,
+  // `isFocused` is the Wall's focus decision for a pane (mode === 'passthrough' &&
+  // selected) — the real component turns it into an xterm `.focus()`. Reflect it as
+  // a data attribute so focus-transfer tests can assert on it without a live xterm.
+  TerminalPane: ({ id, isFocused }: { id: string; isFocused?: boolean }) => (
+    <div data-testid="terminal-pane" data-session-id={id} data-focused={isFocused ? 'true' : 'false'} />
+  ),
 }));
 
 let container: HTMLDivElement;
@@ -185,6 +190,57 @@ describe('Wall on the Lath engine', () => {
     } finally {
       disposeSpy.mockRestore();
     }
+  });
+
+  // The focus decision the Wall makes for a pane: `data-focused` on the mocked
+  // TerminalPane mirrors `mode === 'passthrough' && selected`.
+  const focusOf = (id: string): string | null =>
+    container.querySelector(`[data-session-id="${id}"]`)?.getAttribute('data-focused') ?? null;
+
+  async function dispatchSplit(params: Record<string, unknown>): Promise<string> {
+    let response: { ok: boolean; result?: { surfaceId?: string } } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.split,
+          params,
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+    expect(response?.ok).toBe(true);
+    return response!.result!.surfaceId!;
+  }
+
+  it('dor split transfers focus to the new surface (passthrough)', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" showBaseboard />);
+    });
+    await flush();
+    // The seeded pane starts focused (passthrough + selected).
+    expect(focusOf('pane-a')).toBe('true');
+
+    const newId = await dispatchSplit({ direction: 'right' });
+
+    // Focus moves to the freshly split surface; the caller is no longer focused.
+    expect(focusOf(newId)).toBe('true');
+    expect(focusOf('pane-a')).toBe('false');
+  });
+
+  it('dor split -- <command> keeps focus on the calling surface (passthrough)', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" showBaseboard />);
+    });
+    await flush();
+    expect(focusOf('pane-a')).toBe('true');
+
+    const newId = await dispatchSplit({ direction: 'right', command: ['echo', 'hi'] });
+
+    // The initial command runs in the background: the caller keeps focus and the
+    // new surface is not focused.
+    expect(focusOf('pane-a')).toBe('true');
+    expect(focusOf(newId)).toBe('false');
   });
 
   it('seeds multiple initial panes with the aspect-aware layout (geometry is measured before the seed)', async () => {

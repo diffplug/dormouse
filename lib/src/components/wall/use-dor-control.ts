@@ -390,6 +390,10 @@ export function useDorControl({
           direction,
           minimized: booleanParam(params.minimized),
           referenceId: resolved.target.id,
+          // Bare `dor split` hands the user a terminal to work in, so focus moves
+          // to the new surface. `dor split -- <command>` launches the command in
+          // the background and leaves focus on the caller (like `dor ensure`).
+          focusNeutral: command !== undefined,
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });
