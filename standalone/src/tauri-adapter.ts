@@ -1,6 +1,5 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-shell";
 import type {
   AgentBrowserCommandResult,
@@ -176,10 +175,9 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   // Seed the session cache from the Rust file store before restore reads it
-  // (bootstrap() awaits init() before resumeOrRestore). On the first boot after
-  // moving off WebKit localStorage, adopt any legacy blob still parked there,
-  // persist it to Rust, and clear it — so WebKit stops rewriting that key and
-  // its bloated WAL collapses on the next quit (docs/specs/standalone.md).
+  // (bootstrap() awaits init() before resumeOrRestore). The Rust store is the sole
+  // backing — the session blob never lives in WebKit localStorage
+  // (docs/specs/standalone.md).
   private async hydrateSessionStore(): Promise<void> {
     let seed: string | null = null;
     try {
@@ -187,25 +185,7 @@ export class TauriAdapter implements PlatformAdapter {
     } catch (err) {
       console.error("[tauri-adapter] load_session failed:", err);
     }
-    let migrated: string | null = null;
-    // One-time migration off WebKit localStorage. SUNSET: removal criteria in
-    // docs/specs/standalone.md `## Future`. The legacy blob is per-origin
-    // (window-shared) and window-agnostic, so only the main window may adopt
-    // and clear it — a second window racing this would double-adopt.
-    if (seed === null && getCurrentWindow().label === "main") {
-      migrated = localStorage.getItem(TauriAdapter.STATE_KEY);
-      if (migrated !== null) {
-        localStorage.removeItem(TauriAdapter.STATE_KEY);
-      }
-    }
-    // Do NOT seed the cache with the migrated blob: setItem's identical-value
-    // short-circuit would skip the write, and localStorage is already cleared —
-    // the setItem below must be a genuine change so the blob reaches the Rust
-    // store (setItem updates the cache synchronously for the cold-restore read).
     this.sessionStore.hydrate(seed);
-    // Persist the adopted blob through the store's normal write path (not a raw
-    // invoke) so it shares the same coalescing — and the planned drain-on-quit.
-    if (migrated !== null) this.sessionStore.setItem(TauriAdapter.STATE_KEY, migrated);
   }
 
   shutdown(): void {

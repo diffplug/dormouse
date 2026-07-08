@@ -60,7 +60,6 @@ import {
   createLathWallEngine,
   terminalLeafMeta,
   browserLeafMeta,
-  legacyTokenFromDoor,
   leafMetaFromDoor,
   edgeForDorDirection,
   directionForArrow,
@@ -186,9 +185,8 @@ export function Wall({
 }: {
   initialPaneIds?: string[];
   initialMode?: WallMode;
-  /** The restored Lath persisted layout — the session read boundary already
-   *  migrated any pre-Lath dockview save into this single channel
-   *  (docs/specs/tiling-engine.md → "Persistence and migration"). */
+  /** The restored Lath persisted layout (docs/specs/tiling-engine.md →
+   *  "Persistence"). */
   restoredLathLayout?: unknown;
   initialDoors?: PersistedDoor[];
   onEvent?: (event: WallEvent) => void;
@@ -493,12 +491,9 @@ export function Wall({
     const { token } = lath.store.removeLeaf(id); // may auto-spawn if this was the last leaf
     if (!token) return;
     clearSessionAttention(id);
-    // The Door's component/tabComponent are the leaf's own canonical meta (browser
-    // aliases are canonicalized at `leafMetaFromDoor`, so `reconnect.ts`'s `component
-    // === 'browser'` filter keys off them). The core token is the restore payload
-    // (docs/specs/tiling-engine.md → "Restore tokens"); the legacy `{neighborId,
-    // direction, remainingPaneIds, layoutAtMinimize}` fields are omitted — only pre-Lath
-    // doors carry them, read-only for migration.
+    // The Door's component/tabComponent are the leaf's own canonical meta, so
+    // `reconnect.ts`'s `component === 'browser'` filter keys off them. The core token
+    // is the restore payload (docs/specs/tiling-engine.md → "Restore tokens").
     const door: DooredItem = {
       id,
       title: persistedPanelTitle(meta.title),
@@ -634,17 +629,15 @@ export function Wall({
 
     // Restore through the core token (the real payload): exact tier when the
     // captured context survives, else neighbor, else fallback beside a live ref.
-    // A pre-Lath door has no token — synthesize a neighbor-tier one from its
-    // {neighborId, direction} so it restores beside its old neighbor.
     const meta = leafMetaFromDoor(item);
-    const token = (item.token as RestoreToken | undefined) ?? legacyTokenFromDoor(item);
+    const token = item.token as RestoreToken | undefined;
     // The enter hint (from the token's edge) is derived inside `restoreLeaf`.
     const sel = selectedIdRef.current;
     const fallbackRef = sel && selectedTypeRef.current === 'pane' && lath.store.has(sel)
       ? sel
       : lath.listPanes()[0]?.id;
-    const r = lath.store.restoreLeaf(meta, token, { fallbackRef });
-    // `!ok` means no fallback was possible (empty tree) — make the leaf the root.
+    const r = token ? lath.store.restoreLeaf(meta, token, { fallbackRef }) : { ok: false };
+    // No token (or no fallback was possible — empty tree): make the leaf the root.
     if (!r.ok) lath.store.addLeaf(item.id, meta, null);
 
     removeDoorAndSelect(item.id);

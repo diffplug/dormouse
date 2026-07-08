@@ -3,10 +3,8 @@ import {
   createLathWallEngine,
   edgeForDorDirection,
   dorDirectionForEdge,
-  edgeForDoorDirection,
   directionForArrow,
   leafMetaFromDoor,
-  legacyTokenFromDoor,
 } from './lath-wall-engine';
 import type { DooredItem } from './wall-types';
 import { leaves } from '../../lib/lath/model';
@@ -64,13 +62,6 @@ describe('lath-wall-engine edge/direction maps', () => {
     expect(dorDirectionForEdge('left')).toBe('left');
   });
 
-  it('maps door directions to lath edges', () => {
-    expect(edgeForDoorDirection('above')).toBe('top');
-    expect(edgeForDoorDirection('below')).toBe('bottom');
-    expect(edgeForDoorDirection('right')).toBe('right');
-    expect(edgeForDoorDirection('left')).toBe('left');
-  });
-
   it('maps keyboard arrows to lath directions', () => {
     expect(directionForArrow('ArrowLeft')).toBe('left');
     expect(directionForArrow('ArrowRight')).toBe('right');
@@ -82,60 +73,10 @@ describe('lath-wall-engine edge/direction maps', () => {
 describe('leafMetaFromDoor', () => {
   const base: DooredItem = { id: 'door-1', title: 'Door' } as DooredItem;
 
-  it('canonicalizes legacy iframe/agent-browser component aliases to browser', () => {
-    expect(leafMetaFromDoor({ ...base, component: 'iframe' }).component).toBe('browser');
-    expect(leafMetaFromDoor({ ...base, component: 'agent-browser' }).component).toBe('browser');
-  });
-
   it('passes browser/terminal through and defaults an absent component to terminal', () => {
     expect(leafMetaFromDoor({ ...base, component: 'browser' }).component).toBe('browser');
     expect(leafMetaFromDoor({ ...base, component: 'terminal' }).component).toBe('terminal');
     expect(leafMetaFromDoor(base).component).toBe('terminal');
-  });
-
-  it('minimizing a reattached legacy-alias door persists component "browser"', () => {
-    // A pre-Lath door carrying the legacy `iframe` alias reattaches (leaf meta is
-    // canonicalized here), so a subsequent minimize — which reads `meta.component`
-    // straight through — persists the canonical `browser` value `reconnect.ts` filters on.
-    const engine = createLathWallEngine();
-    engine.seed(null, ['p1'], () => 'gen');
-    const meta = leafMetaFromDoor({ ...base, id: 'legacy', component: 'iframe', params: { renderMode: 'iframe', url: 'x' } });
-    engine.store.addLeaf('legacy', meta, { refId: 'p1', edge: 'right' });
-    expect(engine.getMeta('legacy')?.component).toBe('browser');
-  });
-});
-
-describe('legacyTokenFromDoor', () => {
-  function door(overrides: Partial<DooredItem>): DooredItem {
-    return {
-      id: 'door-1',
-      title: 'Door',
-      neighborId: 'pane-x',
-      direction: 'right',
-      remainingPaneIds: [],
-      layoutAtMinimize: null,
-      layoutAtMinimizeSignature: '',
-      ...overrides,
-    } as DooredItem;
-  }
-
-  it('synthesizes a neighbor-tier token (no fingerprint) from {neighborId, direction}', () => {
-    const token = legacyTokenFromDoor(door({ neighborId: 'pane-x', direction: 'below' }));
-    expect(token).toEqual({
-      leafId: 'door-1',
-      weight: 0.5,
-      siblingId: 'pane-x',
-      edge: 'bottom', // 'below' → 'bottom'
-      index: 0,
-      fingerprint: null,
-    });
-  });
-
-  it('carries a null neighbor (fallback tier at restore time)', () => {
-    const token = legacyTokenFromDoor(door({ neighborId: null, direction: 'right' }));
-    expect(token.siblingId).toBeNull();
-    expect(token.edge).toBe('right');
-    expect(token.fingerprint).toBeNull();
   });
 });
 

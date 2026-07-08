@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   activeWorkspaceSession,
-  DEFAULT_WORKSPACE_ID,
-  DEFAULT_WORKSPACE_NAME,
   readPersistedWindow,
   wrapSessionInWindow,
   type PersistedSession,
@@ -11,39 +9,15 @@ import {
 
 const sessionA: PersistedSession = {
   version: 3,
-  layout: { panels: { 'pane-a': {} } },
   panes: [{ id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null, untouched: false }],
 };
 
 const sessionB: PersistedSession = {
   version: 3,
-  layout: { panels: { 'pane-b': {} } },
   panes: [{ id: 'pane-b', title: 'B', cwd: null, scrollback: null, resumeCommand: null, untouched: false }],
 };
 
 describe('readPersistedWindow', () => {
-  it('migrates a pre-workspace bare PersistedSession to a single Workspace named "Workspace 1"', () => {
-    const win = readPersistedWindow(sessionA);
-    expect(win).toEqual({
-      version: 1,
-      activeWorkspaceId: DEFAULT_WORKSPACE_ID,
-      workspaces: [{ id: DEFAULT_WORKSPACE_ID, name: DEFAULT_WORKSPACE_NAME, session: sessionA }],
-    });
-  });
-
-  it('migrates a legacy v2 bare session through readPersistedSession (panes preserved)', () => {
-    const v2 = {
-      version: 2 as const,
-      layout: { panels: { 'pane-a': {} } },
-      panes: [{ id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null }],
-    };
-    const win = readPersistedWindow(v2);
-    expect(win?.workspaces).toHaveLength(1);
-    expect(win?.workspaces[0].session.version).toBe(3);
-    expect(win?.workspaces[0].session.panes[0].id).toBe('pane-a');
-    expect(win?.workspaces[0].session.panes[0].untouched).toBe(false);
-  });
-
   it('round-trips a canonical multi-Workspace window', () => {
     const win: PersistedWindow = {
       version: 1,

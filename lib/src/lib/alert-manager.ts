@@ -44,16 +44,6 @@ interface CommandExitWatch {
   seenWithAttentionAt: number | null;
 }
 
-/** Migrate legacy persisted TodoState values (numeric, string, boolean) to a boolean. */
-export function migrateTodoState(todo: unknown): TodoState {
-  if (typeof todo === 'boolean') return todo;
-  // v2 numeric encoding: -1 = off, [0,1] = soft, 2 = hard
-  if (typeof todo === 'number') return Number.isFinite(todo) && (todo === 2 || (todo >= 0 && todo <= 1));
-  // v1 string encoding: 'soft' | 'hard' | false
-  if (todo === 'hard' || todo === 'soft') return true;
-  return false;
-}
-
 export function normalizeActivityNotification(value: unknown): ActivityNotification | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
@@ -628,7 +618,7 @@ export class AlertManager {
    */
   seed(id: string, state: { status: string; todo: unknown; notification?: unknown; watchingEnabled?: unknown }): void {
     const entry = this.getOrCreateEntry(id);
-    entry.todo = migrateTodoState(state.todo);
+    entry.todo = state.todo === true;
     entry.notification = entry.todo ? normalizeActivityNotification(state.notification) : null;
     entry.protocolStatus = 'IDLE';
     entry.progress = null;
@@ -638,9 +628,7 @@ export class AlertManager {
 
     const watchingEnabled = typeof state.watchingEnabled === 'boolean'
       ? state.watchingEnabled
-      // Accept legacy persisted ALERT_DISABLED as the old name for WATCHING_DISABLED.
       : state.status !== 'WATCHING_DISABLED'
-        && state.status !== 'ALERT_DISABLED'
         && state.status !== 'OSC_NOTIF_BUSY'
         && state.status !== 'COMMAND_EXIT_ARMED';
     if (watchingEnabled) {

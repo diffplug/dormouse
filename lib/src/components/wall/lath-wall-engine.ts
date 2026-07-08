@@ -2,10 +2,10 @@
 // and engine"). The store (`lath-wall-store.ts`) is the state machine + geometry +
 // enter hints; the engine layers presentation, vocabulary, and persistence
 // conveniences over it — the animator (entry/exit/tween + dying state), the
-// pane-list / meta projections, the dor-direction ↔ Edge ↔ Door-direction maps, the
-// leaf-meta builders, the legacy-Door → neighbor-tier token bridge, and the
-// hydration `seed` + `serializeLayout`. Every state op and geometry query
-// goes straight to `lath.store.*`; the engine no longer re-exports them.
+// pane-list / meta projections, the dor-direction ↔ Edge maps, the leaf-meta
+// builders, and the hydration `seed` + `serializeLayout`. Every state op and
+// geometry query goes straight to `lath.store.*`; the engine no longer re-exports
+// them.
 //
 // The engine holds NO selection/focus/mode/activation state — those stay in the Wall.
 
@@ -17,7 +17,6 @@ import {
   validate,
 } from '../../lib/lath/model';
 import type { Direction } from '../../lib/lath/layout';
-import type { RestoreToken } from '../../lib/lath/ops';
 import {
   type LathAnimator,
   LATH_EASING,
@@ -27,7 +26,6 @@ import {
 import { prefersReducedMotion } from '../../lib/ui-geometry';
 import { UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
 import type { ResolvedSplitDirection as DorResolvedSplitDirection } from 'dor/commands/types';
-import type { DoorDirection } from '../../lib/session-types';
 import {
   type LathWallSnapshot,
   type LathWallStore,
@@ -76,21 +74,6 @@ export function dorDirectionForEdge(edge: Edge): DorResolvedSplitDirection {
   }
 }
 
-/** Door direction → Lath edge (Baseboard placement token, matching session-types'
- *  `DoorDirection`); used to synthesize a neighbor-tier token from a pre-Lath Door. */
-export function edgeForDoorDirection(direction: DoorDirection): Edge {
-  switch (direction) {
-    case 'left':
-      return 'left';
-    case 'right':
-      return 'right';
-    case 'above':
-      return 'top';
-    case 'below':
-      return 'bottom';
-  }
-}
-
 /** Keyboard arrow → Lath spatial direction. */
 export function directionForArrow(key: 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown'): Direction {
   switch (key) {
@@ -118,36 +101,13 @@ export function browserLeafMeta(title: string, params: Record<string, unknown>):
 
 /** The engine-tracked meta for a Door's surface. Shared by the two reattach paths —
  *  click-reattach (`restore`) and drag-out (`insert`) — so they build the same shape.
- *  Legacy `'iframe'` / `'agent-browser'` component aliases are canonicalized to
- *  `'browser'` here, so a leaf always carries the canonical body key: a re-minimize
- *  reads `meta.component` straight through, and `reconnect.ts`'s `component ===
- *  'browser'` filter keys off it. Component/tabComponent default to terminal for
- *  pre-Lath doors that carry neither. */
+ *  Component/tabComponent default to terminal for a door that carries neither. */
 export function leafMetaFromDoor(item: DooredItem): LeafMeta {
-  const component = item.component === 'iframe' || item.component === 'agent-browser'
-    ? 'browser'
-    : item.component ?? 'terminal';
   return {
-    component,
+    component: item.component ?? 'terminal',
     tabComponent: item.tabComponent ?? 'terminal',
     title: item.title,
     params: item.params,
-  };
-}
-
-/** Synthesize a neighbor-tier restore token for a Door persisted before Lath (no
- *  core `token`): no fingerprint (skips the exact tier), the sibling + edge reproduce
- *  the original split beside the neighbor, weight 0.5, index 0. Missing legacy fields
- *  degrade gracefully — an absent `neighborId` (null sibling) falls to the fallback
- *  tier at restore, and an absent `direction` defaults to `'right'`. */
-export function legacyTokenFromDoor(item: DooredItem): RestoreToken {
-  return {
-    leafId: item.id,
-    weight: 0.5,
-    siblingId: item.neighborId ?? null,
-    edge: edgeForDoorDirection(item.direction ?? 'right'),
-    index: 0,
-    fingerprint: null,
   };
 }
 
@@ -186,11 +146,10 @@ export type LathWallEngine = {
   // --- persistence ---
   serializeLayout(): LathPersistedLayout;
 
-  /** Hydration: a persisted Lath layout when usable (pre-Lath saves were already
-   *  migrated into one at the session read boundary — `session-restore.ts`), else a
-   *  fresh tree from `initialPaneIds` (or one generated id). Returns the resulting
-   *  pane ids (pre-order) and whether the fresh path was taken (so the Wall knows
-   *  to prime default-shell opts, mirroring `addTerminalPanel`). */
+  /** Hydration: a persisted Lath layout when usable, else a fresh tree from
+   *  `initialPaneIds` (or one generated id). Returns the resulting pane ids
+   *  (pre-order) and whether the fresh path was taken (so the Wall knows to prime
+   *  default-shell opts, mirroring `addTerminalPanel`). */
   seed(
     lathBlob: unknown,
     initialPaneIds: string[] | undefined,

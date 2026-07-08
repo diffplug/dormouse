@@ -1,4 +1,3 @@
-import { dockviewLayoutToLath } from './lath/dockview-convert';
 import { type LathPersistedLayout, isLathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter } from './platform/types';
 import { readPersistedSession, type PersistedDoor, type PersistedSession } from './session-types';
@@ -6,20 +5,15 @@ import { getDefaultShellOpts, restoreBrowserSurfaceTodo, restoreTerminal } from 
 
 export interface RestoredSession {
   paneIds: string[];
-  /** The session's single layout channel — native, or migrated from a pre-Lath
-   *  save by `persistedLathLayout`. */
+  /** The session's persisted Lath layout, when present. */
   lathLayout?: LathPersistedLayout;
   doors: PersistedDoor[];
 }
 
-/** The one layout a persisted session carries: the native Lath layout when present,
- *  else a pre-Lath dockview `layout` blob migrated one-way via `dockviewLayoutToLath`
- *  (docs/specs/tiling-engine.md → "Persistence and migration"). This is the single
- *  migration point — everything downstream of the session read sees only a Lath
- *  layout. */
+/** The persisted Lath layout a session carries, or undefined when absent/unusable
+ *  (docs/specs/tiling-engine.md → "Persistence"). */
 export function persistedLathLayout(saved: PersistedSession): LathPersistedLayout | undefined {
-  if (isLathPersistedLayout(saved.lathLayout)) return saved.lathLayout;
-  return dockviewLayoutToLath(saved.layout) ?? undefined;
+  return isLathPersistedLayout(saved.lathLayout) ? saved.lathLayout : undefined;
 }
 
 export function restoreSession(platform: PlatformAdapter): RestoredSession | null {

@@ -15,7 +15,6 @@ vi.mock('./terminal-registry', () => ({
 }));
 
 import { restoreSession } from './session-restore';
-import { dockviewFixture } from './lath/test-fixtures';
 
 function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
   return {
@@ -72,7 +71,6 @@ describe('restoreSession', () => {
     });
     const saved: PersistedSession = {
       version: 3,
-      layout: { panels: { 'pane-a': {} } },
       panes: [
         { id: 'pane-a', title: 'Pane A', cwd: 'C:\\repo', scrollback: 'hello', resumeCommand: null },
       ],
@@ -93,7 +91,6 @@ describe('restoreSession', () => {
   it('seeds restored untouched state', () => {
     const saved: PersistedSession = {
       version: 3,
-      layout: { panels: { 'pane-a': {} } },
       panes: [
         { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null, untouched: true },
       ],
@@ -109,7 +106,6 @@ describe('restoreSession', () => {
   it('does not spawn a terminal for a browser surface, but keeps it in paneIds', () => {
     const saved: PersistedSession = {
       version: 3,
-      layout: { panels: { 'pane-term': {}, 'pane-web': {} } },
       panes: [
         { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
         { id: 'pane-web', title: 'localhost', cwd: null, scrollback: null, resumeCommand: null, untouched: false, surfaceType: 'browser' },
@@ -124,24 +120,7 @@ describe('restoreSession', () => {
     expect(result?.paneIds).toEqual(['pane-term', 'pane-web']);
   });
 
-  it('migrates a pre-Lath dockview layout into the single lath channel on read', () => {
-    const saved: PersistedSession = {
-      version: 3,
-      layout: dockviewFixture(),
-      panes: [
-        { id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
-        { id: 'pane-b', title: 'B', cwd: null, scrollback: null, resumeCommand: null, untouched: false, surfaceType: 'browser' },
-        { id: 'pane-c', title: 'C', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
-      ],
-    };
-
-    const result = restoreSession(createPlatform(saved));
-
-    expect(result?.lathLayout?.version).toBe(1);
-    expect(Object.keys(result!.lathLayout!.leafMeta).sort()).toEqual(['pane-a', 'pane-b', 'pane-c']);
-  });
-
-  it('prefers the native lathLayout and passes it through untouched', () => {
+  it('passes the native lathLayout through untouched', () => {
     const lathLayout = {
       version: 1 as const,
       tree: { root: { kind: 'leaf' as const, id: 'pane-a' } },
@@ -150,7 +129,6 @@ describe('restoreSession', () => {
     const saved: PersistedSession = {
       version: 3,
       lathLayout,
-      layout: dockviewFixture(), // stale legacy blob must lose to the native layout
       panes: [
         { id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
       ],
@@ -164,7 +142,6 @@ describe('restoreSession', () => {
   it('restores browser surface TODO from the persisted alert during cold restore', () => {
     const saved: PersistedSession = {
       version: 3,
-      layout: { panels: { 'pane-web': {} } },
       panes: [
         {
           id: 'pane-web',

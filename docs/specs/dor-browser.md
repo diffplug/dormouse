@@ -25,8 +25,8 @@ Two independent axes define a browser pane:
 | Render | `ab-screencast`, `ab-popout`, `iframe` |
 
 The render axis is a pane parameter, not a separate surface type. The `dor` CLI
-still reports `iframe` or `agent-browser` as a legacy/informative surface type;
-that is derived from `renderMode`.
+still reports `iframe` or `agent-browser` as an informative surface type derived
+from `renderMode` (never stored).
 
 Source of truth: `lib/src/components/wall/BrowserPanel.tsx`,
 `lib/src/components/wall/browser-surface.ts`, `lib/src/components/Wall.tsx`
@@ -46,15 +46,12 @@ type BrowserPanelParams = {
   wsPort?: number;
   binaryPath?: string;
   syncEngaged?: boolean;
-  poppedOut?: boolean; // legacy migration only
 };
 ```
 
 Invariants:
 
-- `renderMode` is canonical. Legacy params (`surfaceType: 'iframe'`,
-  `surfaceType: 'agent-browser'`, `poppedOut`) are migrated by
-  `resolveRenderMode`.
+- `renderMode` is canonical.
 - `url` is the canonical target across render swaps and relaunches. Agent-browser
   mirrors the newest non-blank active tab URL into params; iframe persists only
   navigations initiated by Dormouse chrome.
@@ -513,7 +510,7 @@ Source of truth: `lib/src/lib/platform/types.ts`,
 
 When changing browser-surface behavior:
 
-- `renderMode` is canonical. Never reintroduce `surfaceType: 'iframe' | 'agent-browser'` or `poppedOut` as stored state — extend the `resolveRenderMode` migration instead, and update the kind-mapping table in `docs/specs/glossary.md` if adding a render mode.
+- `renderMode` is canonical. Never reintroduce `surfaceType: 'iframe' | 'agent-browser'` or `poppedOut` as stored state; update the kind-mapping table in `docs/specs/glossary.md` if adding a render mode.
 - Never move a browser surface's DOM. Lath's leaf div is never re-parented, so an `<iframe>` never reloads and the screencast canvas never moves mid-click (which would break click synthesis) — do not add any re-parenting/reordering that would defeat this.
 - A new agent-browser subcommand must be added to `AGENT_BROWSER_ALLOWED_SUBCOMMANDS` (`lib/src/lib/platform/types.ts`); the host-side allowlist is the security boundary, not the CLI.
 - External-binary spawns go through `spawnAndCapture` (`dor-lib-common`), never raw `child_process` — see `docs/specs/dor-cli.md` → Spawning External Binaries.

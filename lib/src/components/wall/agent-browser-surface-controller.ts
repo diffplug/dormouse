@@ -35,7 +35,6 @@ import {
   openAgentBrowserScreenModal,
 } from './agent-browser-screen';
 import { hostPathDisplay, tabDisplayTitle } from './browser-url';
-import { resolveRenderMode } from './browser-surface';
 import { clearAgentBrowserSessionClosed, isAgentBrowserSessionClosed } from './agent-browser-sessions';
 import {
   EDIT_OPS,
@@ -302,10 +301,9 @@ export class AgentBrowserSurfaceController {
     this.paramsKey = params.key ?? null;
     this.paramsSyncEngaged = params.syncEngaged;
     this.latestRestorableUrl = isRestorableUrl(params.url) ? params.url : undefined;
-    // poppedOut is derived from the canonical renderMode; fall back to resolving
-    // it from params for a direct mount (tests) or a legacy blob.
-    const seededMode = params.renderMode ?? resolveRenderMode(params);
-    this.poppedOut = seededMode === 'ab-popout';
+    // poppedOut is derived from the canonical renderMode; an unset mode (a direct
+    // mount in tests) is not popped out.
+    this.poppedOut = params.renderMode === 'ab-popout';
     // A fresh surface auto-engages sync (no persisted flag); a re-attached one
     // restores whatever was persisted into the layout blob.
     this.syncEngaged = params.syncEngaged ?? true;

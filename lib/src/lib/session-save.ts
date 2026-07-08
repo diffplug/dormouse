@@ -19,9 +19,8 @@ export async function saveSession(
   platform: PlatformAdapter,
   panes: Array<{ id: string; title: string; surfaceType?: PersistedSurfaceType }>,
   doors: PersistedDoor[] = [],
-  // The native Lath persisted layout (docs/specs/tiling-engine.md → "Persistence
-  // and migration"). The only layout Dormouse writes; the legacy dockview `layout`
-  // key is no longer emitted (pre-Lath blobs are still read on restore).
+  // The native Lath persisted layout (docs/specs/tiling-engine.md → "Persistence").
+  // The only layout Dormouse writes.
   lathLayout?: unknown,
 ): Promise<void> {
   const previousPanes = getPreviousPaneMap(platform);
