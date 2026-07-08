@@ -61,13 +61,11 @@ export type LathComponentsOverride = {
   tabs?: Record<string, ComponentType<PaneProps>>;
 };
 
-// The same alias tables Wall.tsx uses: legacy `iframe` / `agent-browser` bodies
-// resolve to the unified BrowserPanel; `surface` headers to SurfacePaneHeader.
+// Body components keyed by `leafMeta.component`; `surface` headers to
+// SurfacePaneHeader. Every browser surface resolves to the unified BrowserPanel.
 const BODY_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalPanel,
   browser: BrowserPanel,
-  iframe: BrowserPanel,
-  'agent-browser': BrowserPanel,
 };
 const TAB_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalPaneHeader,

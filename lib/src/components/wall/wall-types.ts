@@ -1,8 +1,7 @@
 import type { PersistedDoor } from '../../lib/session-types';
 
-/** A minimized surface's baseboard chip. Identical to its persisted form; new doors
- *  carry a Lath restore `token`, pre-Lath doors carry the legacy `{neighborId,
- *  direction, ...}` fields (read-only for migration). */
+/** A minimized surface's baseboard chip. Identical to its persisted form; each door
+ *  carries a Lath restore `token`. */
 export type DooredItem = PersistedDoor;
 
 /** The visible-pane projection (`lath.listPanes()`). Shared by the Wall helpers,

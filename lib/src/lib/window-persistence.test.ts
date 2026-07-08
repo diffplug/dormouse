@@ -19,12 +19,10 @@ function stubLocalStorage(): void {
 
 const sessionA: PersistedSession = {
   version: 3,
-  layout: { panels: { 'pane-a': {} } },
   panes: [{ id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null, untouched: false }],
 };
 const sessionB: PersistedSession = {
   version: 3,
-  layout: { panels: { 'pane-b': {} } },
   panes: [{ id: 'pane-b', title: 'B', cwd: null, scrollback: null, resumeCommand: null, untouched: false }],
 };
 
@@ -58,10 +56,6 @@ describe('window-persistence', () => {
     it('round-trips: save then load yields the same active session', () => {
       const stored = storedValueForSession(null, sessionA);
       expect(activeSessionFromStored(stored)).toEqual(sessionA);
-    });
-
-    it('load migrates a pre-workspace bare session transparently', () => {
-      expect(activeSessionFromStored(sessionA)).toEqual(sessionA);
     });
 
     it('save replaces only the active Workspace, preserving the others', () => {

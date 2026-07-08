@@ -33,8 +33,6 @@ Public `status` is a projection — first match wins:
 
 Persist `status`, `watchingEnabled`, `todo`, and sanitized `notification`. Restore `todo` and `notification`, then restart WATCHING only if `watchingEnabled` is true. Restore must not recreate protocol progress, command-exit arms, or a fresh ring; replay filtering in `docs/specs/terminal-escapes.md` prevents old terminal output from firing notification side effects again.
 
-Source of truth: `migrateTodoState` in `lib/src/lib/alert-manager.ts` defines the legacy-TODO-value migration to boolean.
-
 ## Attention
 
 `attentionSessionId` is set only by explicit user actions that plausibly mean "I am looking at this Session":

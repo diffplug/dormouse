@@ -1,10 +1,5 @@
 import type { SessionStatus } from './activity-monitor';
-import { ACTIVITY_NOTIFICATION_SOURCES, migrateTodoState, type ActivityNotification, type TodoState } from './alert-manager';
-
-/** The direction a minimized pane sat relative to its neighbor, as captured by
- *  pre-Lath saves (`PersistedDoor.direction`). Read-only legacy field; new doors
- *  restore from a Lath `token` instead. */
-export type DoorDirection = 'left' | 'right' | 'above' | 'below';
+import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
 
 export interface PersistedAlertState {
   status: SessionStatus;
@@ -61,19 +56,10 @@ export interface PersistedDoor {
   component?: string;
   tabComponent?: string;
   params?: Record<string, unknown>;
-  /** Lath restore token (`RestoreToken`), written by every new door so it restores
+  /** Lath restore token (`RestoreToken`), written by every door so it restores
    *  at its captured tier (docs/specs/tiling-engine.md → "Restore tokens"). Typed
-   *  `unknown` to keep this module free of the lath core dep. Absent only on
-   *  pre-Lath doors, which fall back to the legacy fields below. */
+   *  `unknown` to keep this module free of the lath core dep. */
   token?: unknown;
-  /** Legacy fields — written only by pre-Lath saves, read-only for migration. A
-   *  door lacking a `token` synthesizes a neighbor-tier restore from `neighborId` +
-   *  `direction`. */
-  neighborId?: string | null;
-  direction?: DoorDirection;
-  remainingPaneIds?: string[];
-  layoutAtMinimize?: unknown;
-  layoutAtMinimizeSignature?: string;
 }
 
 export interface PersistedSession {
@@ -81,11 +67,8 @@ export interface PersistedSession {
   panes: PersistedPane[];
   doors?: PersistedDoor[];
   /** Native Lath persisted layout (`LathPersistedLayout`) — the layout Dormouse
-   *  writes today (docs/specs/tiling-engine.md → "Persistence and migration"). */
+   *  writes (docs/specs/tiling-engine.md → "Persistence"). */
   lathLayout?: unknown;
-  /** Legacy dockview layout blob, written only by pre-Lath saves and read-only for
-   *  one-way migration on restore. Absent on saves made by the Lath engine. */
-  layout?: unknown;
 }
 
 export type WorkspaceId = string;
@@ -112,7 +95,7 @@ export interface PersistedWindow {
   activeWorkspaceId: WorkspaceId;
 }
 
-/** Default id/name for the single Workspace a pre-workspace snapshot migrates to. */
+/** Default id/name for the single Workspace a fresh Window is created with. */
 export const DEFAULT_WORKSPACE_ID: WorkspaceId = 'workspace-1';
 export const DEFAULT_WORKSPACE_NAME = 'Workspace 1';
 
@@ -122,50 +105,7 @@ interface PersistedSessionV3Input {
   version: 3;
   panes: PersistedPaneInput[];
   doors?: PersistedDoor[];
-  layout?: unknown;
   lathLayout?: unknown;
-}
-
-// --- Legacy v2 shapes (read-only, for migration) ---
-
-export interface PersistedAlertStateV2 {
-  status: SessionStatus;
-  todo: unknown; // numeric encoding: -1=off, [0,1]=soft, 2=hard
-}
-
-export interface PersistedPaneV2 {
-  id: string;
-  cwd: string | null;
-  title: string;
-  scrollback: string | null;
-  resumeCommand: string | null;
-  alert?: PersistedAlertStateV2 | null;
-}
-
-export interface PersistedSessionV2 {
-  version: 2;
-  panes: PersistedPaneV2[];
-  doors?: PersistedDoor[];
-  layout: unknown;
-}
-
-// --- Legacy v1 shapes (read-only, for migration) ---
-
-export interface PersistedDoorV1 {
-  id: string;
-  title: string;
-  neighborId: string | null;
-  direction: DoorDirection;
-  remainingPanelIds: string[];
-  restoreLayout: unknown;
-  detachedLayoutSignature: string;
-}
-
-export interface PersistedSessionV1 {
-  version: 1;
-  panes: PersistedPaneV2[];
-  detached?: PersistedDoorV1[];
-  layout: unknown;
 }
 
 // --- Validation guards (reject untrusted blobs) ---
@@ -179,8 +119,7 @@ function isPersistedAlertShape(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (typeof value.status !== 'string') return false;
   if (value.watchingEnabled !== undefined && typeof value.watchingEnabled !== 'boolean') return false;
-  const t = value.todo;
-  if (!(typeof t === 'boolean' || typeof t === 'number' || typeof t === 'string')) return false;
+  if (typeof value.todo !== 'boolean') return false;
   return value.notification === undefined || value.notification === null || isActivityNotificationShape(value.notification);
 }
 
@@ -207,19 +146,6 @@ function isPersistedPaneShape(value: unknown): boolean {
   );
 }
 
-function isPersistedDoorV1(value: unknown): value is PersistedDoorV1 {
-  if (!isRecord(value)) return false;
-  return (
-    typeof value.id === 'string' &&
-    typeof value.title === 'string' &&
-    (typeof value.neighborId === 'string' || value.neighborId === null) &&
-    typeof value.direction === 'string' &&
-    Array.isArray(value.remainingPanelIds) &&
-    value.remainingPanelIds.every((id) => typeof id === 'string') &&
-    typeof value.detachedLayoutSignature === 'string'
-  );
-}
-
 function isPersistedDoor(value: unknown): value is PersistedDoor {
   if (!isRecord(value)) return false;
   return (
@@ -228,35 +154,9 @@ function isPersistedDoor(value: unknown): value is PersistedDoor {
     (value.component === undefined || typeof value.component === 'string') &&
     (value.tabComponent === undefined || typeof value.tabComponent === 'string') &&
     (value.params === undefined || isRecord(value.params)) &&
-    // Legacy fields (pre-Lath doors) — present-or-absent, but well-typed if present.
-    (value.neighborId === undefined || typeof value.neighborId === 'string' || value.neighborId === null) &&
-    (value.direction === undefined || typeof value.direction === 'string') &&
-    (value.remainingPaneIds === undefined ||
-      (Array.isArray(value.remainingPaneIds) && value.remainingPaneIds.every((id) => typeof id === 'string'))) &&
-    (value.layoutAtMinimizeSignature === undefined || typeof value.layoutAtMinimizeSignature === 'string') &&
     // A Lath restore token, when present, is structurally an object with a string
     // `leafId` (kept permissive — the core owns full validation on restore).
     (value.token === undefined || (isRecord(value.token) && typeof value.token.leafId === 'string'))
-  );
-}
-
-function isPersistedSessionV1(value: unknown): value is PersistedSessionV1 {
-  if (!isRecord(value) || value.version !== 1) return false;
-  return (
-    Array.isArray(value.panes) &&
-    value.panes.every(isPersistedPaneShape) &&
-    (value.detached === undefined || (Array.isArray(value.detached) && value.detached.every(isPersistedDoorV1))) &&
-    'layout' in value
-  );
-}
-
-function isPersistedSessionV2(value: unknown): value is PersistedSessionV2 {
-  if (!isRecord(value) || value.version !== 2) return false;
-  return (
-    Array.isArray(value.panes) &&
-    value.panes.every(isPersistedPaneShape) &&
-    (value.doors === undefined || (Array.isArray(value.doors) && value.doors.every(isPersistedDoor))) &&
-    'layout' in value
   );
 }
 
@@ -265,53 +165,21 @@ function isPersistedSessionV3(value: unknown): value is PersistedSessionV3Input 
   return (
     Array.isArray(value.panes) &&
     value.panes.every(isPersistedPaneShape) &&
-    (value.doors === undefined || (Array.isArray(value.doors) && value.doors.every(isPersistedDoor))) &&
-    // A v3 blob carries a layout in one form or the other: native `lathLayout` (Lath
-    // saves) or a legacy dockview `layout` (pre-Lath saves, migrated on restore).
-    ('layout' in value || 'lathLayout' in value)
+    (value.doors === undefined || (Array.isArray(value.doors) && value.doors.every(isPersistedDoor)))
   );
 }
 
-// --- Migrations ---
-
-export function migrateSessionV1toV2(v1: PersistedSessionV1): PersistedSessionV2 {
-  return {
-    version: 2,
-    panes: v1.panes,
-    layout: v1.layout,
-    doors: (v1.detached ?? []).map((door) => ({
-      id: door.id,
-      title: door.title,
-      neighborId: door.neighborId,
-      direction: door.direction,
-      remainingPaneIds: door.remainingPanelIds,
-      layoutAtMinimize: door.restoreLayout,
-      layoutAtMinimizeSignature: door.detachedLayoutSignature,
-    })),
-  };
-}
-
-export function migrateSessionV2toV3(v2: PersistedSessionV2): PersistedSession {
-  return {
-    version: 3,
-    layout: v2.layout,
-    doors: v2.doors,
-    panes: v2.panes.map((pane) => ({
-      ...pane,
-      untouched: false,
-      alert: pane.alert
-        ? { status: pane.alert.status, todo: migrateTodoState(pane.alert.todo) }
-        : pane.alert,
-    })),
-  };
-}
-
+/**
+ * Parse a persisted session blob (`version: 3`), or null if nothing usable is
+ * present. A blob that is absent/empty returns null silently; one that is present
+ * but unreadable (bad JSON, wrong shape) is logged and discarded so a corrupt save
+ * can never block startup — the caller starts fresh (`docs/specs/transport.md`).
+ */
 export function readPersistedSession(raw: unknown): PersistedSession | null {
+  if (isEmptyState(raw)) return null;
   const value = parseJsonString(raw);
-  if (!isRecord(value)) return null;
-  if (isPersistedSessionV3(value)) return normalizeSessionV3(value);
-  if (isPersistedSessionV2(value)) return migrateSessionV2toV3(value);
-  if (isPersistedSessionV1(value)) return migrateSessionV2toV3(migrateSessionV1toV2(value));
+  if (isRecord(value) && isPersistedSessionV3(value)) return normalizeSessionV3(value);
+  console.warn('[dormouse] Ignoring unreadable persisted session; starting fresh.');
   return null;
 }
 
@@ -335,6 +203,12 @@ function parseJsonString(raw: unknown): unknown {
   } catch {
     return raw;
   }
+}
+
+/** No saved state at all (fresh install): null/undefined or an empty string. Not an
+ *  error — the caller starts fresh without a warning. */
+function isEmptyState(raw: unknown): boolean {
+  return raw == null || (typeof raw === 'string' && raw.trim() === '');
 }
 
 // --- Window container (stage 2b) ---
@@ -361,37 +235,35 @@ export function wrapSessionInWindow(
 }
 
 /**
- * Read a persisted Window snapshot. Accepts a canonical `PersistedWindow`, a
- * JSON-stringified one, or a bare `PersistedSession` (any version) — the
- * pre-workspace shape — which migrates to a single Workspace named `Workspace 1`
- * (`docs/specs/transport.md`). Returns null when nothing usable is present.
+ * Read a persisted Window snapshot (a canonical `PersistedWindow` or a
+ * JSON-stringified one). Returns null when nothing usable is present — an
+ * absent/empty blob silently, a present-but-unreadable one with a warning so a
+ * corrupt save can never block startup (`docs/specs/transport.md`).
  *
- * Each inner session is normalized/migrated through `readPersistedSession`. If
- * `activeWorkspaceId` does not match any Workspace, the first Workspace is made
- * active so the snapshot stays usable.
+ * Each inner session is validated through `readPersistedSession`; Workspaces whose
+ * session is unreadable are dropped. If `activeWorkspaceId` does not match any
+ * Workspace, the first Workspace is made active so the snapshot stays usable.
  */
 export function readPersistedWindow(raw: unknown): PersistedWindow | null {
+  if (isEmptyState(raw)) return null;
   const value = parseJsonString(raw);
-  if (!isRecord(value)) return null;
-
-  if (isPersistedWindowShape(value)) {
-    const workspaces = (value.workspaces as unknown[])
-      .map((ws): PersistedWorkspace | null => {
-        if (!isRecord(ws) || typeof ws.id !== 'string' || typeof ws.name !== 'string') return null;
-        const session = readPersistedSession(ws.session);
-        return session ? { id: ws.id, name: ws.name, session } : null;
-      })
-      .filter((ws): ws is PersistedWorkspace => ws !== null);
-    if (workspaces.length === 0) return null;
-    const activeWorkspaceId = workspaces.some((ws) => ws.id === value.activeWorkspaceId)
-      ? (value.activeWorkspaceId as WorkspaceId)
-      : workspaces[0].id;
-    return { version: 1, workspaces, activeWorkspaceId };
+  if (!isRecord(value) || !isPersistedWindowShape(value)) {
+    console.warn('[dormouse] Ignoring unreadable persisted window; starting fresh.');
+    return null;
   }
 
-  // Pre-workspace bare PersistedSession → single-Workspace window.
-  const session = readPersistedSession(value);
-  return session ? wrapSessionInWindow(session) : null;
+  const workspaces = (value.workspaces as unknown[])
+    .map((ws): PersistedWorkspace | null => {
+      if (!isRecord(ws) || typeof ws.id !== 'string' || typeof ws.name !== 'string') return null;
+      const session = readPersistedSession(ws.session);
+      return session ? { id: ws.id, name: ws.name, session } : null;
+    })
+    .filter((ws): ws is PersistedWorkspace => ws !== null);
+  if (workspaces.length === 0) return null;
+  const activeWorkspaceId = workspaces.some((ws) => ws.id === value.activeWorkspaceId)
+    ? (value.activeWorkspaceId as WorkspaceId)
+    : workspaces[0].id;
+  return { version: 1, workspaces, activeWorkspaceId };
 }
 
 /** The active Workspace's session, or the first Workspace's as a fallback. */

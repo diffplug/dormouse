@@ -6,9 +6,8 @@ import { persistedLathLayout, restoreSession } from './session-restore';
 
 export interface ReconnectResult {
   paneIds: string[];
-  /** The saved session's single layout channel (native, or migrated from a pre-Lath
-   *  save at the read boundary — `persistedLathLayout`), gated on its leaf set
-   *  matching the visible pane set. */
+  /** The saved session's persisted Lath layout (`persistedLathLayout`), gated on its
+   *  leaf set matching the visible pane set. */
   lathLayout?: LathPersistedLayout;
   doors?: PersistedDoor[];
 }
@@ -133,9 +132,8 @@ function getSavedResumePlan(savedState: unknown, liveIds: string[]): ReconnectRe
   const paneIds = saved.panes
     .filter((pane) => !doorIds.has(pane.id) && (liveSet.has(pane.id) || pane.surfaceType === 'browser'))
     .map((pane) => pane.id);
-  // Gate the layout (already the single Lath channel — pre-Lath saves were migrated
-  // at the read boundary) on its leaf set matching the visible pane set, so a stale
-  // blob is dropped rather than restored over a mismatched pane set.
+  // Gate the layout on its leaf set matching the visible pane set, so a stale blob
+  // is dropped rather than restored over a mismatched pane set.
   const lathLayout = persistedLathLayout(saved);
   const leafIds = lathLayout ? Object.keys(lathLayout.leafMeta) : null;
   const layoutMatchesVisiblePanes =

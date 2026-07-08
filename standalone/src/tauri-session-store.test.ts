@@ -66,19 +66,19 @@ describe("TauriSessionStore", () => {
     expect(saved).toEqual(["a"]);
   });
 
-  it("does not short-circuit a value equal to the hydrated seed (migration path)", async () => {
-    // Mirrors tauri-adapter's hydrateSessionStore: hydrate(null) leaves the
-    // migrated blob a genuine change, so the short-circuit can't swallow it.
+  it("writes the first setItem after hydrate(null) (cold start)", async () => {
+    // Mirrors tauri-adapter's hydrateSessionStore: hydrate(null) seeds no value, so
+    // the first save is a genuine change the short-circuit can't swallow.
     const saved: string[] = [];
     const store = new TauriSessionStore(async (v) => {
       saved.push(v);
     });
     store.hydrate(null);
-    store.setItem("k", '{"migrated":1}');
+    store.setItem("k", '{"v":1}');
     // The cache updates synchronously for the cold-restore read that follows.
-    expect(store.getItem("k")).toBe('{"migrated":1}');
+    expect(store.getItem("k")).toBe('{"v":1}');
     await tick();
-    expect(saved).toEqual(['{"migrated":1}']);
+    expect(saved).toEqual(['{"v":1}']);
   });
 
   it("recovers after a rejected write instead of wedging", async () => {

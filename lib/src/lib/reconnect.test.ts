@@ -15,7 +15,6 @@ vi.mock('./terminal-registry', () => ({
 }));
 
 import { resumeOrRestore } from './reconnect';
-import { dockviewFixture } from './lath/test-fixtures';
 import type { LathNode } from './lath/model';
 
 /** A native Lath persisted layout over `ids` (row split; empty tree for none) —
@@ -92,11 +91,6 @@ describe('resumeOrRestore', () => {
     const doors = [{
       id: 'pane-c',
       title: 'Pane C',
-      neighborId: 'pane-b',
-      direction: 'right' as const,
-      remainingPaneIds: ['pane-a', 'pane-b'],
-      layoutAtMinimize: { panels: {} },
-      layoutAtMinimizeSignature: 'sig',
     }];
     const saved: PersistedSession = {
       version: 3,
@@ -195,11 +189,6 @@ describe('resumeOrRestore', () => {
       doors: [{
         id: 'pane-a',
         title: 'Renamed Door',
-        neighborId: null,
-        direction: 'right',
-        remainingPaneIds: [],
-        layoutAtMinimize: { panels: {} },
-        layoutAtMinimizeSignature: 'sig',
       }],
       panes: [
         { id: 'pane-a', title: 'Renamed Door', cwd: null, scrollback: null, resumeCommand: null },
@@ -243,19 +232,9 @@ describe('resumeOrRestore', () => {
     const doors = [{
       id: 'pane-a',
       title: 'Pane A',
-      neighborId: 'pane-b',
-      direction: 'right' as const,
-      remainingPaneIds: ['pane-b'],
-      layoutAtMinimize: { panels: { 'pane-b': {} } },
-      layoutAtMinimizeSignature: 'sig-a',
     }, {
       id: 'pane-b',
       title: 'Pane B',
-      neighborId: 'pane-a',
-      direction: 'left' as const,
-      remainingPaneIds: ['pane-a'],
-      layoutAtMinimize: { panels: { 'pane-a': {} } },
-      layoutAtMinimizeSignature: 'sig-b',
     }];
     const saved: PersistedSession = {
       version: 3,
@@ -393,11 +372,6 @@ describe('resumeOrRestore', () => {
       title: 'localhost',
       component: 'browser',
       params: { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173' },
-      neighborId: 'pane-term',
-      direction: 'right' as const,
-      remainingPaneIds: ['pane-term'],
-      layoutAtMinimize: { panels: {} },
-      layoutAtMinimizeSignature: 'sig',
     }];
     const saved: PersistedSession = {
       version: 3,
@@ -418,28 +392,5 @@ describe('resumeOrRestore', () => {
       doors,
       lathLayout,
     });
-  });
-
-  it('migrates a pre-Lath dockview layout at the read boundary during live resume', async () => {
-    // A pre-Lath save carries only the legacy dockview `layout` blob; the resume plan
-    // must hand back the single migrated Lath channel, gated on the same leaf set.
-    const saved: PersistedSession = {
-      version: 3,
-      layout: dockviewFixture(), // panes a (terminal), b (browser), c (terminal)
-      panes: [
-        { id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null },
-        { id: 'pane-b', title: 'B', cwd: null, scrollback: null, resumeCommand: null, surfaceType: 'browser' },
-        { id: 'pane-c', title: 'C', cwd: null, scrollback: null, resumeCommand: null },
-      ],
-    };
-
-    const result = await resumeOrRestore(createPlatform([
-      { id: 'pane-a', alive: true },
-      { id: 'pane-c', alive: true },
-    ], saved));
-
-    expect(result.paneIds).toEqual(['pane-a', 'pane-b', 'pane-c']);
-    expect(result.lathLayout?.version).toBe(1);
-    expect(Object.keys(result.lathLayout!.leafMeta).sort()).toEqual(['pane-a', 'pane-b', 'pane-c']);
   });
 });

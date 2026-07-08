@@ -61,11 +61,12 @@ export interface SessionKeyValueStore {
 // so each adapter's get/save collapses to one call instead of re-implementing
 // the read-merge-write dance.
 
-/** Read the stored blob and return the `PersistedSession` to restore (or null). */
+/** Read the stored blob and return the `PersistedSession` to restore (or null). A
+ *  corrupt (unparseable) blob is discarded, so a bad save can never block startup. */
 export function loadSessionState(storage: SessionKeyValueStore, key: string): unknown {
   const raw = storage.getItem(key);
   if (raw === null) return null;
-  return activeSessionFromStored(JSON.parse(raw));
+  return activeSessionFromStored(parseStoredJson(raw));
 }
 
 /** Persist `session` under `key`, merging into the active Workspace when the flag is on. */
@@ -78,6 +79,17 @@ export function saveSessionState(storage: SessionKeyValueStore, key: string, ses
     return;
   }
   const raw = storage.getItem(key);
-  const existing = raw === null ? null : JSON.parse(raw);
+  const existing = raw === null ? null : parseStoredJson(raw);
   storage.setItem(key, JSON.stringify(storedValueForSession(existing, session)));
+}
+
+/** Parse a stored JSON blob, or null when it is corrupt — a bad blob degrades to a
+ *  fresh start rather than throwing at the boot boundary (`docs/specs/transport.md`). */
+function parseStoredJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    console.warn('[dormouse] Ignoring corrupt persisted state; starting fresh.');
+    return null;
+  }
 }

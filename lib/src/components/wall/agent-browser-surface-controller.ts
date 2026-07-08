@@ -302,8 +302,8 @@ export class AgentBrowserSurfaceController {
     this.paramsKey = params.key ?? null;
     this.paramsSyncEngaged = params.syncEngaged;
     this.latestRestorableUrl = isRestorableUrl(params.url) ? params.url : undefined;
-    // poppedOut is derived from the canonical renderMode; fall back to resolving
-    // it from params for a direct mount (tests) or a legacy blob.
+    // poppedOut is derived from the canonical renderMode (resolveRenderMode covers a
+    // direct mount in tests that passes params without a renderMode).
     const seededMode = params.renderMode ?? resolveRenderMode(params);
     this.poppedOut = seededMode === 'ab-popout';
     // A fresh surface auto-engages sync (no persisted flag); a re-attached one

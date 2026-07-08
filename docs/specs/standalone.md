@@ -246,19 +246,6 @@ trigger missed; the cache is boot-seeded from disk in `hydrate`, so the compare
 is valid from the first write. Source of truth: `session-dirty.ts`,
 `use-session-persistence.ts`, `standalone/src/tauri-session-store.ts`.
 
-**Migration.** On the first boot after this change `load_session` returns null;
-if a legacy blob is still in `localStorage` under `TauriAdapter.STATE_KEY`, the
-adapter adopts it, persists it to the Rust store (through the store's normal
-write path, so it shares the coalescing), and removes the key — so WebKit stops
-rewriting it and its bloated WAL collapses on the next quit. The legacy blob is
-per-origin (window-shared), so adoption is gated to the `main` window — a
-second window never races the adopt-and-clear (removal criteria: `## Future`).
-Because the
-identical-value short-circuit above would swallow a `setItem` whose value equals
-the freshly hydrated cache, the migration hydrates with the pre-migration seed
-(null) and lets the `setItem` be a genuine change — localStorage is already
-cleared, so the Rust store is the blob's only remaining home.
-
 **Durability on quit.** A clean quit durably writes the latest state before the
 process exits. `saveState` still returns after updating the cache and *firing*
 `save_session`, but the quit orchestrator (§Quit flow) now awaits the pipeline to
@@ -460,21 +447,3 @@ root `package.json` for the `dev:standalone*` orchestration.
 | `standalone/sidecar/clipboard-ops.js` | OS clipboard tiers (owned by `docs/specs/mouse-and-clipboard.md`) |
 | `standalone/scripts/build-sidecar-proxy.mjs` | Bundles `lib/src/host/` into the sidecar `.cjs` copies |
 | `standalone/scripts/dev-agent-browser.mjs` | `dev:standalone:ab` entry (owned by `docs/specs/transport.md`) |
-
-## Future
-
-Requirements for the next round of session-persistence work — what must be true,
-not how. (Detailed working notes live outside the specs while the work is in
-flight.)
-
-**Retire the `localStorage` → Rust migration.** The one-time migration branch in
-`standalone/src/tauri-adapter.ts` (marked `SUNSET`, gated to the `main` window)
-cannot be removed on a version fence: the Tauri updater jumps directly from any
-old version to the latest, so there is no release after which "all shipped
-builds have migrated" — a pre-migration straggler updating much later would
-adopt nothing and lose exactly one session restore. Removal is therefore an
-acceptance decision, recorded here (2026-07-07): remove once a one-time lost
-restore for pre-0.12 stragglers is acceptable — recommended at least six months
-or two minor releases after the migration ships. Multi-window (the
-workspaces-rollout scope, `docs/specs/layout.md` `## Future`) does not block
-removal: the branch already gates adoption to the `main` window.

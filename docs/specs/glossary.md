@@ -33,14 +33,14 @@ Today every Pane holds exactly one Surface, but the model reserves multiple Surf
 
 Three related enums name a Surface's kind at different layers. This table is the canonical mapping:
 
-| Surface | Persisted `surfaceType` (`docs/specs/transport.md`) | `renderMode` (`docs/specs/dor-browser.md`) | CLI `SurfaceType` (`dor`, legacy/derived) |
+| Surface | Persisted `surfaceType` (`docs/specs/transport.md`) | `renderMode` (`docs/specs/dor-browser.md`) | CLI `SurfaceType` (`dor`, derived) |
 |---|---|---|---|
 | terminal Session | `'terminal'` (the default, omitted from the row) | — | `terminal` |
 | browser, iframe renderer | `'browser'` | `iframe` | `iframe` |
 | browser, screencast renderer | `'browser'` | `ab-screencast` | `agent-browser` |
 | browser, popped-out renderer | `'browser'` | `ab-popout` | `agent-browser` |
 
-For browser Surfaces `renderMode` is canonical; the CLI column is derived from it for backwards-compatible `dor` output and is never stored.
+For browser Surfaces `renderMode` is canonical; the CLI column is derived from it for `dor` output and is never stored.
 
 A **Session** runs the full six-axis model below. A **browser Surface** participates only where a web view meaningfully can:
 
@@ -70,7 +70,7 @@ A Surface never floats free: it sits in a **Pane**, every Pane belongs to exactl
 | **Window** | One or more Workspaces. The OS frame (the standalone Tauri window) or the host frame (a VS Code window). | host (Tauri / VS Code) |
 | **Workspace** | A named set of Panes and their Surfaces, plus the layout that arranges them (Lath layout snapshot + doors). Exactly one **Wall** renders one Workspace. | `lib/src/components/Wall.tsx` at render time; persisted per `docs/specs/transport.md` |
 
-A **Workspace** is the durable grouping a user thinks of as "a window's worth of panes." It has a `WorkspaceId`, a user-facing `name`, the Surfaces it contains, and the layout that arranges them. The pre-workspace model had exactly one implicit Workspace per Window; the model now allows several.
+A **Workspace** is the durable grouping a user thinks of as "a window's worth of panes." It has a `WorkspaceId`, a user-facing `name`, the Surfaces it contains, and the layout that arranges them. The model allows several Workspaces per Window, though the app mounts one at a time today.
 
 How many are visible at once is host-specific:
 
@@ -241,7 +241,7 @@ Use glossary names instead of these. The left column retains a meaning only wher
 | **session** | The durable identity of a **terminal Surface**. Do not use it for the Activity projection (that is `ActivityState`, not `SessionUiState`), nor for the agent-browser daemon's lowercase `session` string (`dormouse.1.<key>`), which is not a Dormouse durable unit. |
 | **terminal** | Keeps its meaning for the `xterm.Terminal` instance. Prose meaning "the whole thing" is **Session** (a terminal Surface). |
 | **surface** | A glossary term, not retired: the durable occupant of a Pane (a terminal Session or a browser Surface). Use **Session** only for the terminal kind; use **Surface** when a statement holds for both. |
-| **panel / pane / leaf** | Prefer **pane** for the layout slot; **leaf** is Lath's tree node for the same thing (they map 1:1). "panel" survives only in legacy persisted-blob field names. |
+| **panel / pane / leaf** | Prefer **pane** for the layout slot; **leaf** is Lath's tree node for the same thing (they map 1:1). "panel" survives only in React component names (`TerminalPanel`, `BrowserPanel`, `IframePanel`). |
 | **tether** | Remote-control term only: a display showing "tethering to \<device\>" has ceded terminal size authority to a remote viewer (`docs/specs/remote-api.md`). Not a layout term — do not use it for Pane/Door relationships. |
 
 Remote-only vocabulary (**Viewer**, the wire-level `DirectoryEntry` projection) is defined in `docs/specs/remote-api.md` § Terminology.

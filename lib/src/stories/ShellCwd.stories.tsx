@@ -407,11 +407,6 @@ function makeDoorItem(id: string, title: string): DooredItem {
   return {
     id,
     title,
-    neighborId: null,
-    direction: 'right',
-    remainingPaneIds: [],
-    layoutAtMinimize: null,
-    layoutAtMinimizeSignature: '',
   };
 }
 

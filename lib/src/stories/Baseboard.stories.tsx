@@ -8,11 +8,6 @@ const BASE_TIME = 1_700_000_000_000;
 const makeItem = (id: string, title: string): DooredItem => ({
   id,
   title,
-  neighborId: null,
-  direction: 'right',
-  remainingPaneIds: [],
-  layoutAtMinimize: null,
-  layoutAtMinimizeSignature: '',
 });
 
 function withState(items: DooredItem[], byId: Record<string, Record<string, unknown>>) {

@@ -1,10 +1,9 @@
 // The Lath persisted-layout wire format and its reader/writer (docs/specs/
-// tiling-engine.md → "Persistence and migration"). Plain data over the core model:
+// tiling-engine.md → "Persistence"). Plain data over the core model:
 // `lathLayoutFromStore` snapshots the wall store into the on-disk blob, and
 // `isLathPersistedLayout` recognizes one at the session read boundary
-// (`session-restore.ts`). The legacy dockview reader (`dockview-convert.ts`) emits
-// this shape; the engine (`lath-wall-engine.ts`) owns `serializeLayout`/`seed`,
-// which call through here.
+// (`session-restore.ts`). The engine (`lath-wall-engine.ts`) owns
+// `serializeLayout`/`seed`, which call through here.
 
 import type { LathTree } from './model';
 
@@ -12,9 +11,7 @@ import type { LathTree } from './model';
  *  "read side", owned live by the wall store's `leafMeta` map and serialized
  *  verbatim inside the persisted Lath layout. */
 export type LeafMeta = {
-  /** Body component key — `'terminal'` | `'browser'` (legacy `'iframe'` /
-   *  `'agent-browser'` aliases are resolved to `'browser'` at conversion time and
-   *  again at render time). */
+  /** Body component key — `'terminal'` | `'browser'`. */
   component: string;
   /** Header component key — `'terminal'` | `'surface'`. */
   tabComponent: string;
