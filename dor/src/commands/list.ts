@@ -117,17 +117,18 @@ function renderListText(
 
   const callerId = env.DORMOUSE_SURFACE_ID;
   const handles = surfaces.map((surface) => renderHandle(surface, idFormat));
+  const locations = surfaces.map(surfaceLocation);
   const handleWidth = Math.max(...handles.map((handle) => handle.length));
   const typeWidth = Math.max(...surfaces.map((surface) => surface.type.length));
   const viewWidth = Math.max(...surfaces.map((surface) => surface.view.length));
-  const locationWidth = Math.max(...surfaces.map((surface) => surfaceLocation(surface).length));
+  const locationWidth = Math.max(...locations.map((location) => location.length));
 
   const lines = surfaces.map((surface, index) => {
     const marker = surface.focused ? '*' : ' ';
     const handle = handles[index].padEnd(handleWidth);
     const type = surface.type.padEnd(typeWidth);
     const view = surface.view.padEnd(viewWidth);
-    const location = surfaceLocation(surface).padEnd(locationWidth);
+    const location = locations[index].padEnd(locationWidth);
 
     const tags: string[] = [];
     if (callerId !== undefined && surface.id === callerId) tags.push('(you)');
@@ -178,8 +179,7 @@ function renderSurfaceJson(
 ): Record<string, unknown> {
   return {
     ...(wantsIds(idFormat) ? { id: surface.id } : {}),
-    ...(wantsRefs(idFormat) ? { ref: surface.ref } : {}),
-    ...(wantsRefs(idFormat) ? { pane_ref: surface.paneRef } : {}),
+    ...(wantsRefs(idFormat) ? { ref: surface.ref, pane_ref: surface.paneRef } : {}),
     type: surface.type,
     view: surface.view,
     title: surface.title,

@@ -52,7 +52,7 @@ import type { PersistedDoor } from '../lib/session-types';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
 import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
-import { resolveRenderMode, isAgentBrowserParams, isBrowserParams } from './wall/browser-surface';
+import { resolveRenderMode, isAgentBrowserParams, isBrowserParams, browserUrlFromParams } from './wall/browser-surface';
 import { hostPathDisplay } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { LathHost } from './wall/LathHost';
@@ -126,14 +126,6 @@ function surfaceTypeFromParams(params: unknown): DorSurfaceType {
   // The CLI surface type tracks the *renderer* (iframe vs agent-browser) so
   // `dor` output stays informative even though both are one 'browser' surface.
   return resolveRenderMode(params) === 'iframe' ? 'iframe' : 'agent-browser';
-}
-
-/** The target URL a browser Surface carries in its params (`dor list`); null for
- *  terminals or params without one. */
-function browserUrlFromParams(params: unknown): string | null {
-  if (!params || typeof params !== 'object') return null;
-  const url = (params as { url?: unknown }).url;
-  return typeof url === 'string' ? url : null;
 }
 
 /** Killing or swapping away from an agent-browser surface closes its session —
@@ -682,7 +674,9 @@ export function Wall({
   // projection used for `dor` targeting; `buildDorSurfaceList` additionally
   // includes minimized (doored) Surfaces for `dor list`, numbered after the
   // visible panes to match `surfaceRefForId`. The "active" Surface is the
-  // selected pane.
+  // selected pane. This is a parallel projection to the phone's `DirectoryEntry`
+  // (`lib/src/remote/host/directory-collect.ts`) over the same stores — keep the
+  // shared field derivations (activity / cwd / ringing / todo) in sync.
   const buildDorSurfacesInternal = useCallback((includeMinimized: boolean): DorSurface[] => {
     const panels = lath.listPanes();
     const doors = includeMinimized ? doorsRef.current : [];
@@ -700,7 +694,7 @@ export function Wall({
 
     return sources.map((source, index) => {
       const type = surfaceTypeFromParams(source.params);
-      const state = states[index] ?? createTerminalPaneState();
+      const state = states[index];
       const activity = activityStates.get(source.id);
       const shellActivity = type === 'terminal' ? state.activity : null;
       const title = type === 'terminal'

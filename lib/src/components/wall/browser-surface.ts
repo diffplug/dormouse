@@ -9,6 +9,7 @@ import type { RenderMode } from './agent-browser-screen';
 type BrowserParamsLike = {
   surfaceType?: unknown;
   renderMode?: unknown;
+  url?: unknown;
 };
 
 function asParams(params: unknown): BrowserParamsLike {
@@ -33,4 +34,11 @@ export function isAgentBrowserParams(params: unknown): boolean {
 export function isBrowserParams(params: unknown): boolean {
   const p = asParams(params);
   return p.surfaceType === 'browser' || typeof p.renderMode === 'string';
+}
+
+/** The target URL a browser surface carries in its params (`dor list`); null
+ *  when absent (e.g. a terminal, or a browser surface with no URL yet). */
+export function browserUrlFromParams(params: unknown): string | null {
+  const url = asParams(params).url;
+  return typeof url === 'string' ? url : null;
 }
