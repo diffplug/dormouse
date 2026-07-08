@@ -253,7 +253,12 @@ whitespace characters), and `<TO-EOL>` (rest of line including the newline or
 EOF). Command help patches can target the `command-usage` section separately
 from `command-detail`.
 
-- `dor split` [impl](../../dor/src/commands/split.ts) [docs](../../dor/test/snapshots/help/split.md)
+- `dor split` [impl](../../dor/src/commands/split.ts) [docs](../../dor/test/snapshots/help/split.md).
+  Bare `dor split` focuses the new surface (in passthrough mode focus follows the
+  selection, so the user types straight into it); `dor split -- <command>` runs
+  the command in the background and leaves focus on the caller, like `dor ensure`.
+  Both are wired through `createSplitSurface`'s `focusNeutral` flag
+  (`lib/src/components/wall/use-dor-control.ts`).
 - `dor ensure` [impl](../../dor/src/commands/ensure.ts) [docs](../../dor/test/snapshots/help/ensure.md)
 - `dor version` [impl](../../dor/src/commands/version.ts) [docs](../../dor/test/snapshots/help/version.md)
 - `dor send` [impl](../../dor/src/commands/send.ts) [docs](../../dor/test/snapshots/help/send.md)

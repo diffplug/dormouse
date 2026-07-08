@@ -725,9 +725,10 @@ export function Wall({
     referenceId: string;
     cwd?: string;
     requireIntegration?: boolean;
-    // `dor ensure` must never move focus: the split is created in the background,
-    // leaving the caller's selection, mode, and DOM focus intact. Under Lath every
-    // add is inherently background (nothing re-parents or activates).
+    // `dor ensure` and `dor split -- <command>` must never move focus: the split
+    // is created in the background, leaving the caller's selection, mode, and DOM
+    // focus intact. Under Lath every add is inherently background (nothing
+    // re-parents or activates).
     focusNeutral?: boolean;
   }): ParseResult<{
     id: string;
@@ -767,7 +768,9 @@ export function Wall({
     }
 
     // The split is inherently background: `dor split` (not focus-neutral) selects
-    // the new pane; `dor ensure` (focus-neutral) leaves selection put.
+    // the new pane — in passthrough mode selection carries DOM focus, so the user
+    // types straight into it; `dor split -- <command>` and `dor ensure`
+    // (focus-neutral) leave selection put.
     const edge = edgeForDorDirection(direction);
     lath.store.addLeaf(newId, terminalLeafMeta(), { refId: referenceId, edge });
     const selectedNew = settleAddSelection(!!focusNeutral, false, newId);

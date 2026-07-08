@@ -77,7 +77,7 @@ export const splitCommand: Command = {
       brief: 'Create a new terminal surface by splitting an existing surface.',
       fullDescription: `If no direction is provided, --auto is used. --auto chooses right when the target surface is wide and down when it is narrow.
 
-Use -- followed by a command to run an initial command in the new terminal surface.
+Use -- followed by a command to run an initial command in the new terminal surface. Bare split focuses the new surface so you can start typing in it; split with an initial command runs it in the background and leaves focus on the calling surface.
 
 --minimize creates the surface and immediately sends it to the minimized area.
 
