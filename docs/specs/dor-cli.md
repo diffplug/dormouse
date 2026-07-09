@@ -229,8 +229,8 @@ Invariants:
   swaps do not change the ref. Killing a Surface retires its ref; a later target
   that names it fails instead of silently retargeting.
 - Surface targets also accept `title:<exact display title>`, primarily for human
-  recovery; automation should prefer refs/ids from command responses or
-  `dor list --json`. Action commands (`read`, `send`, `kill`) resolve against
+  recovery; automation should prefer refs from command responses or
+  `dor list`. Action commands (`read`, `send`, `kill`) resolve against
   listed Surfaces, including minimized ones. For `split` and `ensure --surface`,
   the reference target also resolves against the listed Surfaces so minimized
   peers participate in ambiguity checks; when the resolved reference is
@@ -289,7 +289,9 @@ output, JSON responses, default `ensure` titles, and the launched command alike.
 
 Every first-party command except the `dor agent-browser` / `dor ab` passthrough
 accepts `--json` and emits a stable object with the same handles as its text
-output. Single-Surface responses always include both `surface_id` (the stable
+output. Text output is the primary interface for agents as well as humans — it
+carries the same refs; `--json` exists for scripts and pipelines that consume
+output mechanically. Single-Surface responses always include both `surface_id` (the stable
 id) and `surface_ref` (the Workspace-stable short ref). `dor ab` forwards
 arguments to the user's `agent-browser` CLI, so any JSON mode there belongs to
 that delegated command surface rather than to `dor`.
@@ -362,7 +364,7 @@ from `command-detail`.
 A handful of end-to-end agent scenarios are the CLI's product-level acceptance
 tests: each one checks that the commands *compose* into a real automation, not
 just that they work in isolation — orchestration, Surface targeting, browser
-handoff, cleanup, and JSON output holding together across a whole task. They all
+handoff, cleanup, and output holding together across a whole task. They all
 reduce to one shape — **discover the target Surface with `dor list` (filtered),
 then act on it with a handle-taking command** — which is why targeting lives in
 `dor list` while `read` / `send` / `kill` stay handle-taking instead of each
@@ -378,14 +380,14 @@ their session is held externally by `agent-browser`.
 
 | Workflow | How the shipped CLI does it |
 | --- | --- |
-| Share a dev server | `dor ensure -- npm dev` reuses the command already live in the same resolved cwd (`--restart` re-runs it in place, preserving layout and minimized/visible state). `dor list --command "npm dev" --cwd . --ports --json` returns the Surface with its ports, and the agent opens `dor ab open http://localhost:<port>`. Passing the terminal handle straight to the browser command (`dor ab open surface:N`) is the one unshipped ergonomic — see [Future](#future). |
+| Share a dev server | `dor ensure -- npm dev` reuses the command already live in the same resolved cwd (`--restart` re-runs it in place, preserving layout and minimized/visible state). `dor list --command "npm dev" --cwd . --ports` returns the Surface with its ports, and the agent opens `dor ab open http://localhost:<port>`. Passing the terminal handle straight to the browser command (`dor ab open surface:N`) is the one unshipped ergonomic — see [Future](#future). |
 | Launch a sub-agent | `dor split -- codex` returns `surface:N`; drive it with `dor send surface:N --text "/review" --key enter` (or `--sequence` for arbitrary ordering), then read it back with `dor read surface:N`. |
-| Wait on a sub-agent | `dor split -- otheragent` returns `surface:5`; the caller watches `dor list --json` for that Surface's `ringing` flag and calls `dor read surface:5` once the peer rings the Dormouse bell to signal it is done. Blocking on the bell directly with `dor await surface:5` (which prints the screen the moment it rings) is staged — see [Future](#future). |
+| Wait on a sub-agent | `dor split -- otheragent` returns `surface:5`; the caller watches `dor list` for that Surface's `[ringing]` tag and calls `dor read surface:5` once the peer rings the Dormouse bell to signal it is done. Blocking on the bell directly with `dor await surface:5` (which prints the screen the moment it rings) is staged — see [Future](#future). |
 | Client / server browser testing | `dor ab --key client open <client-url>` and `dor ab --key server open <server-url>` create or reuse two independent browser Surfaces. |
-| Multi-worktree, same command | Two worktrees each run `dor ensure -- npm dev`; the resolved cwd keeps them distinct, and `dor list --command "npm dev" --cwd <worktree> --json` selects the intended one. |
-| Long-running background job | `dor ensure --minimize -- npm test -- --watch` keeps a watcher out of the layout; `dor list --command "npm test -- --watch" --json` rediscovers the minimized Surface after churn, and `read` / `send` / `kill` target it by ref. |
-| Port-owner handoff | `dor list --port 5173 --json` returns the terminal that owns the socket (browser Surfaces never match `--port`), then `dor ab --key client open http://localhost:5173` binds the browser side. |
-| Safe cleanup | `dor list --command "npm dev" --cwd . --json`, then `dor kill <ref> --confirm-if-read <text>`. The ref comes from a recent listing or command response; `title:<exact>` also targets one but can drift. |
+| Multi-worktree, same command | Two worktrees each run `dor ensure -- npm dev`; the resolved cwd keeps them distinct, and `dor list --command "npm dev" --cwd <worktree>` selects the intended one. |
+| Long-running background job | `dor ensure --minimize -- npm test -- --watch` keeps a watcher out of the layout; `dor list --command "npm test -- --watch"` rediscovers the minimized Surface after churn, and `read` / `send` / `kill` target it by ref. |
+| Port-owner handoff | `dor list --port 5173` returns the terminal that owns the socket (browser Surfaces never match `--port`), then `dor ab --key client open http://localhost:5173` binds the browser side. |
+| Safe cleanup | `dor list --command "npm dev" --cwd .`, then `dor kill <ref> --confirm-if-read <text>`. The ref comes from a recent listing or command response; `title:<exact>` also targets one but can drift. |
 
 ## Future
 
@@ -394,7 +396,7 @@ their session is held externally by `agent-browser`.
   `dor iframe <target>` accept an explicit terminal Surface handle (`surface:N`,
   `surface:<stable-id>`, `surface:self`, or `surface:focused`) wherever they
   currently accept an absolute URL, collapsing the two-step
-  `dor list --ports --json` → `dor ab open http://localhost:<port>` dance into
+  `dor list --ports` → `dor ab open http://localhost:<port>` dance into
   one command. Resolution calls the same host port scan as `dor list --ports`.
   V1 groups listening records by port, so one dev server bound on `localhost`, a
   LAN address, and an overlay-network address is still one candidate; Dormouse
@@ -409,7 +411,7 @@ their session is held externally by `agent-browser`.
   launches a peer with `dor split -- otheragent`, then `dor await surface:5` parks
   until that peer signals completion by ringing (the `BEL` / `OSC 9` / `9;4` /
   `99` / `777` events that already drive the `ringing` flag in `dor list`), so the
-  caller stops polling `dor list --json` in a loop. A Surface already ringing when
+  caller stops polling `dor list` in a loop. A Surface already ringing when
   `await` is called returns immediately. Resolving is exactly a human attending the
   ringing Session (`docs/specs/alert.md` → Clearing And TODO): it clears the active
   ring and sets `todo = true`, so the bell goes quiet and the Surface now carries a
