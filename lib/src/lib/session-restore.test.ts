@@ -139,6 +139,34 @@ describe('restoreSession', () => {
     expect(result?.lathLayout).toEqual(lathLayout);
   });
 
+  it('restores workspace-scoped dor surface refs', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      surfaceRefs: { 'pane-a': 'surface:1', 'closed-pane': 'surface:2' },
+      panes: [
+        { id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
+      ],
+    };
+
+    const result = restoreSession(createPlatform(saved));
+
+    expect(result?.surfaceRefs).toEqual({ 'pane-a': 'surface:1', 'closed-pane': 'surface:2' });
+  });
+
+  it('discards malformed dor surface refs without rejecting the session', () => {
+    const saved = {
+      version: 3,
+      surfaceRefs: { 'pane-a': 'pane:1', 'pane-b': 'surface:2' },
+      panes: [
+        { id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
+      ],
+    } as unknown as PersistedSession;
+
+    const result = restoreSession(createPlatform(saved));
+
+    expect(result?.surfaceRefs).toEqual({ 'pane-b': 'surface:2' });
+  });
+
   it('restores browser surface TODO from the persisted alert during cold restore', () => {
     const saved: PersistedSession = {
       version: 3,

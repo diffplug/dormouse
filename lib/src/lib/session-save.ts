@@ -1,5 +1,5 @@
 import type { PlatformAdapter } from './platform/types';
-import { browserPersistedPane, readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceType } from './session-types';
+import { browserPersistedPane, readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedSurfaceType } from './session-types';
 import { detectResumeCommand } from './resume-patterns';
 import { trimPersistedScrollback } from './scrollback-trim';
 import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched, resolveTerminalSessionId } from './terminal-registry';
@@ -22,6 +22,7 @@ export async function saveSession(
   // The native Lath persisted layout (docs/specs/tiling-engine.md → "Persistence").
   // The only layout Dormouse writes.
   lathLayout?: unknown,
+  surfaceRefs?: PersistedSurfaceRefs,
 ): Promise<void> {
   const previousPanes = getPreviousPaneMap(platform);
   const allPanes = new Map<string, { id: string; title: string; surfaceType: PersistedSurfaceType }>();
@@ -71,6 +72,7 @@ export async function saveSession(
     panes: persisted,
     doors: persistedDoors,
     ...(lathLayout !== undefined ? { lathLayout } : {}),
+    ...(surfaceRefs && Object.keys(surfaceRefs).length > 0 ? { surfaceRefs } : {}),
   };
   platform.saveState(session);
 }

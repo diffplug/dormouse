@@ -41,15 +41,15 @@ export const ensureCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref|index] [--cwd path]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref|index] [--cwd path] -- <command>...\n',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path]<TO-EOL>',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] -- <command>...\n',
       ],
     },
     {
       scope: 'command-usage',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref|index] [--cwd path]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref|index] [--cwd path] -- <command>...\n',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path]<TO-EOL>',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] -- <command>...\n',
       ],
     },
     {
@@ -100,7 +100,7 @@ JSON output:
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         restart: { kind: 'boolean', brief: 'Restart a matching surface in place.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'id|ref|index' },
+        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'id|ref' },
         cwd: { kind: 'parsed', parse: stringParser, brief: 'Working directory for matching and for the new command.', optional: true, placeholder: 'path' },
       },
       positional: {

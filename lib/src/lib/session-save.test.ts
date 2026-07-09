@@ -266,6 +266,21 @@ describe('saveSession', () => {
     expect(saved.lathLayout).toEqual(lathLayout);
   });
 
+  it('persists workspace-scoped dor surface refs', async () => {
+    const platform = createPlatform(null);
+
+    await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }], [], undefined, {
+      'pane-a': 'surface:1',
+      'closed-pane': 'surface:2',
+    });
+
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    expect(saved.surfaceRefs).toEqual({
+      'pane-a': 'surface:1',
+      'closed-pane': 'surface:2',
+    });
+  });
+
   it('omits lathLayout entirely when not supplied', async () => {
     const platform = createPlatform(null);
 

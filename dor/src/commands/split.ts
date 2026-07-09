@@ -43,8 +43,8 @@ export const splitCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        `  dor split ${groupedSplitDirectionUsage} [--json] [--minimize] [--surface id|ref|index]<TO-EOL>`,
-        `  dor split ${groupedSplitDirectionUsage} [--json] [--minimize] [--surface id|ref|index] [-- <command>...]\n`,
+        `  dor split ${groupedSplitDirectionUsage} [--json] [--minimize] [--surface id|ref]<TO-EOL>`,
+        `  dor split ${groupedSplitDirectionUsage} [--json] [--minimize] [--surface id|ref] [-- <command>...]\n`,
       ],
     },
     {
@@ -52,8 +52,8 @@ export const splitCommand: Command = {
       findReplace: [
         '[--auto]',
         `${groupedSplitDirectionUsage}`,
-        '[--surface id|ref|index]<TO-EOL>',
-        '[--surface id|ref|index] [-- <command>...]\n',
+        '[--surface id|ref]<TO-EOL>',
+        '[--surface id|ref] [-- <command>...]\n',
       ],
       remove: ['<WS>[--down]', '<WS>[--left]', '<WS>[--right]', '<WS>[--up]'],
     },
@@ -110,7 +110,7 @@ JSON output:
         left: { kind: 'boolean', brief: 'Split left of the target surface.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         right: { kind: 'boolean', brief: 'Split right of the target surface.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split.', optional: true, placeholder: 'id|ref|index' },
+        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split.', optional: true, placeholder: 'id|ref' },
         up: { kind: 'boolean', brief: 'Split above the target surface.', optional: true, withNegated: false },
       },
       positional: {

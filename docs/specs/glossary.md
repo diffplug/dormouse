@@ -22,7 +22,7 @@ The unit of *layout* is a **Pane**; the unit of *content* is a **Surface**.
 | **Pane** | A slot in the tiling layout (one Lath leaf). Holds one Surface. | `lib/src/components/Wall.tsx`; the engine per `docs/specs/tiling-engine.md` |
 | **Surface** | The content in a Pane: a **terminal** (a Session) or a **browser** Surface. | `Wall.tsx`; browser surfaces per `docs/specs/dor-browser.md` |
 
-Today every Pane holds exactly one Surface, but the model reserves multiple Surfaces per Pane (a future in-pane surface strip) — which is why a Surface ref (`surface:N`) is distinct from a Pane ref (`pane:N`).
+Today every Pane holds exactly one Surface, but the model reserves multiple Surfaces per Pane (a future in-pane surface strip). The `dor` CLI therefore exposes Surface refs (`surface:N`) as content handles and keeps Pane refs reserved for future layout-only commands rather than using them for `read` / `send` / `kill` targeting.
 
 **Surface kinds** — the `type` a `dor` handle reports, derived from the Pane's params, never stored on the id:
 

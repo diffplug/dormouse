@@ -63,13 +63,18 @@ function isSingletonWindowTarget(target: string | undefined): boolean {
   return !target || target === 'window:1' || target === '1';
 }
 
-function matchesDorPaneTarget(target: string | undefined, surface: DorSurface): boolean {
+function matchesDorSurfaceTarget(
+  target: string | undefined,
+  surface: DorSurface,
+  callerSurfaceId: string | undefined,
+): boolean {
   if (!target) return true;
-  if (target === 'focused' || target === 'current') return surface.focused;
-  if (target === surface.id || target === surface.ref || target === surface.paneRef) return true;
-
-  const numeric = Number(target);
-  return Number.isInteger(numeric) && numeric >= 1 && surface.index === numeric - 1;
+  if (target === 'surface:focused') return surface.focused;
+  if (target === 'surface:self') return callerSurfaceId !== undefined && surface.id === callerSurfaceId;
+  if (target === surface.id || target === surface.ref) return true;
+  if (!target.startsWith('surface:')) return false;
+  const stableId = target.slice('surface:'.length);
+  return stableId.length > 0 && stableId === surface.id;
 }
 
 function surfaceTitleTarget(target: string): string | null {
@@ -85,7 +90,7 @@ function resolveSurfaceTarget(
   target: string | undefined,
   callerSurfaceId: string | undefined,
 ): ParseResult<DorSurface> {
-  const resolvedTarget = target ?? callerSurfaceId ?? 'focused';
+  const resolvedTarget = target ?? callerSurfaceId ?? 'surface:focused';
   const titleTarget = surfaceTitleTarget(resolvedTarget);
   if (titleTarget !== null) {
     const matches = surfaces.filter((surface) => surface.title === titleTarget);
@@ -99,9 +104,16 @@ function resolveSurfaceTarget(
     return { ok: false, message: `surface target '${resolvedTarget}' was not found` };
   }
 
-  const matched = surfaces.find((surface) => matchesDorPaneTarget(resolvedTarget, surface))
-    ?? (!target && !callerSurfaceId ? (surfaces[0] ?? null) : null);
-  if (matched) return { ok: true, value: matched };
+  const matches = surfaces.filter((surface) => matchesDorSurfaceTarget(resolvedTarget, surface, callerSurfaceId));
+  if (matches.length === 1) return { ok: true, value: matches[0] };
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      message: `surface target '${resolvedTarget}' matched multiple surfaces: ${matches.map(renderSurfaceForError).join(', ')}`,
+    };
+  }
+  const fallback = !target && !callerSurfaceId ? (surfaces[0] ?? null) : null;
+  if (fallback) return { ok: true, value: fallback };
   return { ok: false, message: `surface '${resolvedTarget}' was not found` };
 }
 
@@ -277,7 +289,7 @@ function dorCommandString(args: string[] | undefined): string | undefined {
 /**
  * The `dor` control plane: the webview handler for `dormouse:control-request`
  * events (the `surface.*` methods that back the `dor` CLI) plus its private
- * surface-resolution/query helpers. This is CLI policy — surface targeting,
+   * surface-resolution/query helpers. This is CLI policy — surface targeting,
  * param coercion, command quoting, restart/integration timing — not wall layout;
  * the layout primitives it drives (`createSplitSurface`, `createContentSurface`,
  * `killPaneImmediately`, `buildDorSurfaces`, `surfaceRefForId`) are owned by the
@@ -403,7 +415,7 @@ export function useDorControl({
 
       if (detail.method === SURFACE_CONTROL_METHODS.list) {
         const matched = buildDorSurfaceList()
-          .filter((surface) => matchesDorPaneTarget(params.pane, surface));
+          .filter((surface) => matchesDorSurfaceTarget(params.pane, surface, detail.surfaceId));
         const surfaces = booleanParam(params.includePorts)
           ? await attachSurfacePorts(matched)
           : matched;

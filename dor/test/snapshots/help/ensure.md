@@ -4,7 +4,7 @@ Invocation: `dor ensure --help`
 
 ```text
 USAGE
-  dor ensure [--json] [--minimize] [--restart] [--surface id|ref|index] [--cwd path] -- <command>...
+  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] -- <command>...
   dor ensure --help
 
 Ensures one surface in the current workspace is running the given command at the given path. If it's already running, no-op. If it isn't, then it creates a split and runs the command.

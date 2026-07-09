@@ -104,7 +104,7 @@ describe('Wall on the Lath engine', () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', {
         detail: {
           method: SURFACE_CONTROL_METHODS.kill,
-          params: { surface: '2', confirmation: { mode: 'dangerously' } },
+          params: { surface: 'surface:2', confirmation: { mode: 'dangerously' } },
           respond: () => {},
         },
       }));
@@ -168,7 +168,7 @@ describe('Wall on the Lath engine', () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', {
         detail: {
           method: SURFACE_CONTROL_METHODS.kill,
-          params: { surface: 'surface:2', confirmation: { mode: 'dangerously' } },
+          params: { surface: 'surface:1', confirmation: { mode: 'dangerously' } },
           respond: (r: typeof response) => { response = r; },
         },
       }));
@@ -178,6 +178,53 @@ describe('Wall on the Lath engine', () => {
     expect(response?.ok).toBe(true);
     expect(response?.error).toBeUndefined();
     expect(container.querySelector('[data-door-id="pane-a"]')).toBeNull();
+  });
+
+  it('dor action targets reject bare numeric refs', async () => {
+    let response: { ok: boolean; error?: string } | undefined;
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.kill,
+          params: { surface: '1', confirmation: { mode: 'dangerously' } },
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+
+    expect(response?.ok).toBe(false);
+    expect(response?.error).toContain("surface '1' was not found");
+    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
+  });
+
+  it('dor action targets can resolve surface:self from the caller id', async () => {
+    let response: { ok: boolean; error?: string } | undefined;
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.kill,
+          surfaceId: 'pane-a',
+          params: { surface: 'surface:self', confirmation: { mode: 'dangerously' } },
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+
+    expect(response?.ok).toBe(true);
+    expect(response?.error).toBeUndefined();
+    expect(container.querySelector('[data-lath-leaf="pane-a"]')).toBeNull();
   });
 
   it('keeps visible terminal sessions mounted until the kill fade completes', async () => {
@@ -203,7 +250,7 @@ describe('Wall on the Lath engine', () => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', {
           detail: {
             method: SURFACE_CONTROL_METHODS.kill,
-            params: { surface: '1', confirmation: { mode: 'dangerously' } },
+            params: { surface: 'surface:1', confirmation: { mode: 'dangerously' } },
             respond: () => {},
           },
         }));

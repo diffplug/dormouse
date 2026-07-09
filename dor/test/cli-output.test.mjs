@@ -15,14 +15,10 @@ const fixtureSurfaces = [
   {
     id: '11111111-1111-4111-8111-111111111111',
     ref: 'surface:1',
-    paneRef: 'pane:1',
     kind: 'terminal',
     renderMode: null,
     title: 'pnpm dev',
     focused: true,
-    index: 0,
-    indexInPane: 0,
-    selectedInPane: true,
     view: 'paned',
     cwd: '/Users/me/projects/site',
     activity: 'running',
@@ -34,14 +30,10 @@ const fixtureSurfaces = [
   {
     id: '22222222-2222-4222-8222-222222222222',
     ref: 'surface:2',
-    paneRef: 'pane:2',
     kind: 'terminal',
     renderMode: null,
     title: 'repo "watch"',
     focused: false,
-    index: 1,
-    indexInPane: 0,
-    selectedInPane: true,
     view: 'paned',
     cwd: '/Users/me/repo',
     activity: 'finished',
@@ -54,14 +46,10 @@ const fixtureSurfaces = [
   {
     id: '33333333-3333-4333-8333-333333333333',
     ref: 'surface:3',
-    paneRef: 'pane:3',
     kind: 'browser',
     renderMode: 'ab-screencast',
     title: 'Dormouse',
     focused: false,
-    index: 2,
-    indexInPane: 0,
-    selectedInPane: true,
     view: 'paned',
     cwd: null,
     activity: null,
@@ -73,14 +61,10 @@ const fixtureSurfaces = [
   {
     id: '44444444-4444-4444-8444-444444444444',
     ref: 'surface:4',
-    paneRef: 'pane:4',
     kind: 'terminal',
     renderMode: null,
     title: '<idle> server.js',
     focused: false,
-    index: 3,
-    indexInPane: 0,
-    selectedInPane: true,
     view: 'minimized',
     cwd: '/Users/me/api',
     activity: 'finished',
@@ -102,11 +86,9 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
     requests: [],
     async listSurfaces(request) {
       this.requests.push(request);
-      const focusedPaneRef = surfacesFixture.find((surface) => surface.focused)?.paneRef;
-      const paneTarget = request.pane === 'focused' ? focusedPaneRef : request.pane;
+      const paneTarget = request.pane;
       const matched = paneTarget
         ? surfacesFixture.filter((surface) => (
-          surface.paneRef === paneTarget ||
           surface.ref === paneTarget ||
           surface.id === paneTarget
         ))
@@ -793,7 +775,6 @@ test('list json schema includes ids and refs regardless of id-format', async () 
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.surfaces[0].id, fixtureSurfaces[0].id);
   assert.equal(payload.surfaces[0].ref, 'surface:1');
-  assert.equal(payload.surfaces[0].pane_ref, 'pane:1');
   assert.equal(payload.caller_surface_id, listEnv.DORMOUSE_SURFACE_ID);
   assert.equal(payload.caller_surface_ref, 'surface:2');
   assert.equal(payload.focused_surface_id, fixtureSurfaces[0].id);

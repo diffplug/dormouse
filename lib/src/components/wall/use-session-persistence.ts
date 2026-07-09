@@ -11,6 +11,7 @@ import {
 import { isBrowserParams } from './browser-surface';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, WallSelectionKind } from './wall-types';
+import type { PersistedSurfaceRefs } from '../../lib/session-types';
 
 export function useSessionPersistence({
   lath,
@@ -18,6 +19,7 @@ export function useSessionPersistence({
   doorsRef,
   selectedIdRef,
   selectedTypeRef,
+  surfaceRefsForSave,
 }: {
   /** The Lath engine — the layout authority written on every commit, and the source
    *  of the visible-pane projection (`lath.listPanes()`). Stable identity, so the
@@ -31,6 +33,7 @@ export function useSessionPersistence({
   doorsRef: RefObject<DooredItem[]>;
   selectedIdRef: RefObject<string | null>;
   selectedTypeRef: RefObject<WallSelectionKind>;
+  surfaceRefsForSave?: () => PersistedSurfaceRefs;
 }): void {
   const sessionSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionSavePromiseRef = useRef<Promise<void> | null>(null);
@@ -46,8 +49,8 @@ export function useSessionPersistence({
     }));
     const doors = doorsRef.current ?? [];
     // The Lath tree is the sole persisted layout; doors ride through with their tokens.
-    return saveSession(getPlatform(), panes, doors, lath.serializeLayout());
-  }, [lath, doorsRef]);
+    return saveSession(getPlatform(), panes, doors, lath.serializeLayout(), surfaceRefsForSave?.());
+  }, [lath, doorsRef, surfaceRefsForSave]);
 
   const persistSessionNow = useCallback(async (): Promise<void> => {
     const runSave = (): Promise<void> => {

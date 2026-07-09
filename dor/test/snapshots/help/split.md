@@ -4,7 +4,7 @@ Invocation: `dor split --help`
 
 ```text
 USAGE
-  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref|index] [-- <command>...]
+  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref] [-- <command>...]
   dor split --help
 
 If no direction is provided, --auto is used. --auto chooses right when the target surface is wide and down when it is narrow.

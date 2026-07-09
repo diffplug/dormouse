@@ -118,6 +118,7 @@ async function bootstrap() {
         initialPaneIds={result.paneIds}
         restoredLathLayout={result.lathLayout}
         initialDoors={result.doors}
+        initialSurfaceRefs={result.surfaceRefs}
         baseboardNotice={<ConnectedUpdateBanner />}
         dialogHost={<QuitConfirmModalHost />}
         enableRemoteHost

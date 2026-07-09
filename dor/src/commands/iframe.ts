@@ -50,7 +50,7 @@ JSON output:
       flags: {
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create or replace the surface minimized.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to replace or split from.', optional: true, placeholder: 'id|ref|index' },
+        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to replace or split from.', optional: true, placeholder: 'id|ref' },
       },
       positional: {
         kind: 'tuple',

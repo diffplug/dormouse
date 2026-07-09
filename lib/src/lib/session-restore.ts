@@ -1,6 +1,6 @@
 import { type LathPersistedLayout, isLathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter } from './platform/types';
-import { readPersistedSession, type PersistedDoor, type PersistedSession } from './session-types';
+import { readPersistedSession, type PersistedDoor, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
 import { getDefaultShellOpts, restoreBrowserSurfaceTodo, restoreTerminal } from './terminal-registry';
 
 export interface RestoredSession {
@@ -8,6 +8,8 @@ export interface RestoredSession {
   /** The session's persisted Lath layout, when present. */
   lathLayout?: LathPersistedLayout;
   doors: PersistedDoor[];
+  /** Workspace-scoped stable `dor` Surface refs restored with the session. */
+  surfaceRefs?: PersistedSurfaceRefs;
 }
 
 /** The persisted Lath layout a session carries, or undefined when absent/unusable
@@ -45,5 +47,6 @@ export function restoreSession(platform: PlatformAdapter): RestoredSession | nul
     paneIds: saved.panes.filter((pane) => !doorIds.has(pane.id)).map((p) => p.id),
     lathLayout: persistedLathLayout(saved),
     doors,
+    ...(saved.surfaceRefs ? { surfaceRefs: saved.surfaceRefs } : {}),
   };
 }

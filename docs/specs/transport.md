@@ -112,6 +112,15 @@ Source of truth: `lib/src/lib/session-types.ts` defines the persisted-session in
 
 **The layout field.** A `PersistedSession` records the layout as `lathLayout` — the native Lath tree (`docs/specs/tiling-engine.md` → "Persistence"). Each `PersistedDoor` carries a Lath restore `token` as its sole restore payload.
 
+**Workspace-scoped dor refs.** A `PersistedSession` may record `surfaceRefs`,
+a map from stable Surface id to the Workspace-local `dor` short ref
+(`surface:N`). The map belongs to the Workspace session, not to the layout:
+reordering, minimizing, reattaching, zooming, and browser render swaps preserve
+the ref, and closed Surface ids remain in the map so a stale short ref is never
+reused for a different Surface. Old snapshots without the field allocate refs
+from the restored Surfaces on first mount. Source of truth:
+`Wall.tsx` owns the runtime registry and `session-save.ts` writes it.
+
 **Surface kinds in the snapshot.** Each `PersistedPane` records a `surfaceType` (`docs/specs/glossary.md`): `'terminal'` (the default, omitted from the row to keep terminal snapshots byte-identical) or `'browser'`. This is the discriminator that routes restore/resume. `restoreSession` skips terminal restoration for a browser pane, so it no longer mints a stray PTY + xterm for each browser pane id (`session-restore.ts`); the resume plan keeps browser panes (and minimized browser doors) even though they have no live PTY, so the saved layout's pane set still matches and is not discarded (`reconnect.ts` gates the session's Lath layout on its leaf set). A browser pane rebuilds from the persisted layout (visible) or `PersistedDoor.params` (minimized); its render params (`renderMode`, `url`, agent-browser `session`) live there, not in `PersistedPane` — `surfaceType` alone is enough to route restore. A pane lacking `surfaceType` reads as `'terminal'`.
 
 **Workspace/Window containers (implemented, dormant behind the `dormouse.flags.workspaces` flag; rollout ledger in `docs/specs/layout.md` `## Future`).** A **Workspace** persists as a `PersistedWorkspace`: a `WorkspaceId`, a user-facing `name`, and the Workspace's `PersistedSession` (its panes, doors, and Lath layout). The standalone Window persists as a `PersistedWindow`: the ordered list of `PersistedWorkspace` plus the active `WorkspaceId`. Source of truth: `PersistedWorkspace` / `PersistedWindow` / `readPersistedWindow` / `replaceActiveSession` in `session-types.ts`. VS Code does **not** use `PersistedWindow`; each webview persists exactly one `PersistedSession` — its single Workspace — through the same per-surface state API as today (`workspaceState` for the view, `vscode.setState()` per editor panel; see `docs/specs/vscode.md`).

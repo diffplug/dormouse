@@ -4,13 +4,13 @@ Invocation: `dor --help`
 
 ```text
 USAGE
-  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref|index] [-- <command>...]
-  dor ensure [--json] [--minimize] [--restart] [--surface id|ref|index] [--cwd path] -- <command>...
+  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref] [-- <command>...]
+  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] -- <command>...
   dor version [--json]
   dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw]
   dor read <surface> [--json] [--lines count] [--scrollback]
   dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json]
-  dor iframe [--json] [--minimize] [--surface id|ref|index] <url>
+  dor iframe [--json] [--minimize] [--surface id|ref] <url>
   dor agent-browser [--key name|--session name] [args...]
   dor list [--command text] [--cwd path] [--id-format refs|ids|both] [--json] [--kind terminal|browser] [--port number] [--ports] [--view paned|zoomed|minimized]
   dor --help

@@ -30,14 +30,10 @@ export interface SurfacePort {
 export interface Surface {
   id: string;
   ref: string;
-  paneRef: string;
   kind: SurfaceKind;
   renderMode: SurfaceRenderMode | null;
   title: string;
   focused: boolean;
-  index: number;
-  indexInPane: number;
-  selectedInPane: boolean;
   /** Where the Surface renders; minimized Surfaces are listed with `minimized`. */
   view: SurfaceView;
   /** Reported working directory (terminal Surfaces); `null` for browser Surfaces. */

@@ -62,6 +62,9 @@ export interface PersistedDoor {
   token?: unknown;
 }
 
+/** Workspace-scoped stable `dor` short refs: Surface id -> `surface:N`. */
+export type PersistedSurfaceRefs = Record<string, string>;
+
 export interface PersistedSession {
   version: 3;
   panes: PersistedPane[];
@@ -69,6 +72,8 @@ export interface PersistedSession {
   /** Native Lath persisted layout (`LathPersistedLayout`) — the layout Dormouse
    *  writes (docs/specs/tiling-engine.md → "Persistence"). */
   lathLayout?: unknown;
+  /** Stable `dor` short refs scoped to this Workspace. Refs are never reused. */
+  surfaceRefs?: PersistedSurfaceRefs;
 }
 
 export type WorkspaceId = string;
@@ -106,6 +111,7 @@ interface PersistedSessionV3Input {
   panes: PersistedPaneInput[];
   doors?: PersistedDoor[];
   lathLayout?: unknown;
+  surfaceRefs?: unknown;
 }
 
 // --- Validation guards (reject untrusted blobs) ---
@@ -169,6 +175,19 @@ function isPersistedSessionV3(value: unknown): value is PersistedSessionV3Input 
   );
 }
 
+function validSurfaceRef(value: unknown): value is string {
+  return typeof value === 'string' && /^surface:[1-9]\d*$/.test(value);
+}
+
+function normalizeSurfaceRefs(value: unknown): PersistedSurfaceRefs | undefined {
+  if (!isRecord(value)) return undefined;
+  const refs: PersistedSurfaceRefs = {};
+  for (const [id, ref] of Object.entries(value)) {
+    if (id.length > 0 && validSurfaceRef(ref)) refs[id] = ref;
+  }
+  return Object.keys(refs).length > 0 ? refs : undefined;
+}
+
 /**
  * Parse a persisted session blob (`version: 3`), or null if nothing usable is
  * present. A blob that is absent/empty returns null silently; one that is present
@@ -184,15 +203,21 @@ export function readPersistedSession(raw: unknown): PersistedSession | null {
 }
 
 function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession {
+  const surfaceRefs = normalizeSurfaceRefs(session.surfaceRefs);
+  const { surfaceRefs: _rawSurfaceRefs, ...sessionWithoutSurfaceRefs } = session;
   if (session.panes.every((pane) => typeof pane.untouched === 'boolean')) {
-    return session as PersistedSession;
+    return {
+      ...(sessionWithoutSurfaceRefs as Omit<PersistedSession, 'surfaceRefs'>),
+      ...(surfaceRefs ? { surfaceRefs } : {}),
+    };
   }
   return {
-    ...session,
+    ...sessionWithoutSurfaceRefs,
     panes: session.panes.map((pane) => ({
       ...pane,
       untouched: pane.untouched ?? false,
     })),
+    ...(surfaceRefs ? { surfaceRefs } : {}),
   };
 }
 

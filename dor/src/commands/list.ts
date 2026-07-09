@@ -248,13 +248,11 @@ function renderSurfaceJson(
   return {
     id: surface.id,
     ref: surface.ref,
-    pane_ref: surface.paneRef,
     kind: surface.kind,
     render_mode: surface.renderMode,
     view: surface.view,
     title: surface.title,
     focused: surface.focused,
-    index: surface.index,
     cwd: surface.cwd,
     activity: surface.activity,
     ...(surface.exitCode !== undefined ? { exit_code: surface.exitCode } : {}),
