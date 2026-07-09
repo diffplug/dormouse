@@ -59,6 +59,12 @@ SaaS sources; localhost and the rest of the policy are untouched. The default
 is deliberately not internet-wide — widening it is an explicit, per-build
 opt-in.
 
+Reserved: the `https://*.dormouse.sh wss://*.dormouse.sh` entries are
+*wildcards* on purpose. The BYOT posture (`## Future`, Scope: saas-multitenant)
+has the stock client connect to per-tenant subdomains such as
+`tenant-xyz.dormouse.sh` without a custom build, so narrowing them to a fixed
+host would foreclose it.
+
 ## State files
 
 ```
@@ -299,3 +305,94 @@ reconnect by tapping Connect again.
 Everything past this loop (browser surfaces, in-flight replay, thumbnails,
 the tethering display, WebRTC) is staged in remote-api.md `## Future` as
 additive follow-ups.
+
+## Future
+
+**Scope: saas-multitenant** — the server-side hurdles between today's
+single-owner selfhost server and a multi-tenant SaaS on `*.dormouse.sh`,
+including the Bring-Your-Own-Tailnet (BYOT) posture that puts the relay inside a
+customer's own tailnet without a custom client build. The wire API and security
+model are unchanged from selfhost ([remote-api.md](./remote-api.md), Server
+deployment modes); everything here is deployment and relay plumbing beneath
+them. Complementary front-door work is staged elsewhere and this scope does not
+restate it: the SaaS account model (email + passkey self-serve signup) in
+remote-api.md, and CloudFlare routing + Pocket static serving in
+[pocket-app.md](./pocket-app.md) `## Future`.
+
+Framing invariant: Tailscale is network-layer defense-in-depth *under* the
+existing authorization model, never a substitute for it. The Host's
+`authorizeConnection` stays the final authority and the relay never decides
+access ([remote-security-model.md](./remote-security-model.md)). Keep two
+properties separate: BYOT controls **reachability** (the relay endpoint leaves
+the public internet and is addressable only from the customer's tailnet), while
+**confidentiality of relayed bytes from the SaaS operator** is a distinct layer
+— app-layer encryption, staged in remote-api.md `## Future` — that BYOT does
+*not* provide, since the tenant's tunnel still terminates at our node inside our
+process.
+
+### From single-owner to multi-tenant
+
+Selfhost (everything above the fold) stays as-is; SaaS is a parallel deployment
+that lifts each single-tenant simplification. Each guardrail was chosen to be
+liftable:
+
+* **Accounts.** One `accountId: "owner"` gated by a shared
+  `DORMOUSE_SETUP_PASSWORD` becomes many accounts, each created by email +
+  passkey. The two hand-edited JSON files (`account.json`, `hosts.json`) become
+  a real per-tenant store with per-tenant revocation, and Host enrollment moves
+  from the global setup password to the authenticated account.
+* **Relay tenant-scoping (an invariant, not a check).** The relay binds one Host
+  per Client socket with no notion of tenant. Multi-tenant makes tenancy
+  intrinsic to that binding: a Client may only ever be offered, and bound to,
+  Hosts of its own account, and a cross-tenant binding must be *impossible*, not
+  merely unauthorized. This is defense-in-depth — the Host still authorizes —
+  but the relay must not be the weak point.
+* **Statefulness → horizontal scale.** All transient state (challenges,
+  sessions, relay bindings) is in memory, so the relay is one process. At scale
+  a Client and its Host must land on the same instance (sticky routing) or share
+  a bus; the CloudFlare front door ([pocket-app.md](./pocket-app.md) `## Future`)
+  is where that routing lands.
+
+### The `*.dormouse.sh` pin — the constraint everything obeys
+
+The shipped signed client scopes its webview CSP `connect-src` to
+`https://*.dormouse.sh wss://*.dormouse.sh` (Host webview CSP, above), and
+passkeys bind to the served origin (`DORMOUSE_ORIGIN` → `rpId`/`origin`) with
+Pocket served same-origin ([pocket-app.md](./pocket-app.md)). This is why a
+selfhoster must produce a custom build (`DORMOUSE_REMOTE_CONNECT_SRC`) — the
+stock client refuses any other origin — and it is the hard constraint on BYOT:
+whatever a stock client connects to must present a `*.dormouse.sh` origin over
+TLS. A raw `100.x` tailnet IP or a `*.ts.net` MagicDNS name is a different
+origin and breaks both the CSP and the passkey binding, so BYOT cannot simply
+point the client at the tailnet node.
+
+### BYOT — a per-tenant tailnet node
+
+The SaaS process embeds one Tailscale node per tenant via `tsnet` (one
+`tsnet.Server` per tenant, each with its own state dir), joining the customer's
+own tailnet. Tenant A's Host and Pocket reach the relay as a node inside A's
+tailnet; A cannot address B's node because it is not in A's tailnet — network
+isolation layered on the relay tenant-scoping above.
+
+The load-bearing hurdle is reconciling that node with the `*.dormouse.sh` pin:
+
+* **Name + cert.** A per-tenant hostname under the wildcard — e.g.
+  `tenant-xyz.dormouse.sh` — must resolve, *for tailnet members only*
+  (split-horizon DNS coordinated with the customer's MagicDNS), to that tenant's
+  node, which serves a real TLS cert for the subdomain (we control `dormouse.sh`,
+  so ACME DNS-01 issues it). Origin stays `*.dormouse.sh`, so the existing CSP
+  wildcard, passkeys, and autoupdate all keep working while the bytes ride the
+  tailnet and the relay never touches the public internet. This is exactly what
+  a selfhoster cannot reproduce (no `*.dormouse.sh` cert, no stock client),
+  which is what makes BYOT a distinct product rather than dressed-up selfhost.
+* **Enrollment.** The customer supplies a Tailscale OAuth client or tagged
+  ephemeral auth key scoped to a tag (e.g. `tag:dormouse-relay`); the server
+  brings the tenant's node up as an ephemeral, tagged device, and the customer's
+  own ACLs pin which of their devices may reach it.
+* **Operational hurdles.** N userspace WireGuard nodes (each a gVisor netstack,
+  a DERP connection, and key material) live in one process: lazy activation
+  (node up only while a tenant has a live device, ephemeral teardown when idle),
+  sharding across processes at scale, per-tenant cert provisioning + split-DNS,
+  server-side custody of per-tenant Tailscale auth material, and per-node health
+  (a dropped node means that tenant is offline). The node also consumes a device
+  slot on the *customer's* tailnet — kept ephemeral to minimize it.
