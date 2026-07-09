@@ -34,4 +34,13 @@ export const cfg = {
      *  stable solid block rather than being captured mid-blink (non-deterministic). */
     cursorBlink: true,
   },
+  layout: {
+    /** When false, Lath pane geometry changes (split / restore / kill / drag) apply
+     *  instantly with no tween. Disabled under Chromatic: a mid-tween split resizes
+     *  panes through many transient widths (briefly near-zero), and xterm's DOM
+     *  renderer can latch onto one of those frames and leave a pane painted blank or
+     *  clipped (`user@dormouse:~$` → `user@do`) even after the geometry settles.
+     *  Snapping straight to the final geometry removes that whole race. */
+    animate: true,
+  },
 };
