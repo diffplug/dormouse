@@ -13,9 +13,7 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
-  useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
@@ -26,7 +24,6 @@ import {
   type MobileTerminalTouchMode,
 } from '../../components/MobileTerminalUi';
 import { MobileWall } from '../../components/MobileWall';
-import { restoreActiveTheme } from '../../lib/themes';
 import {
   getMouseSelectionSnapshot,
   setOverride as setMouseOverride,
@@ -42,26 +39,10 @@ import {
   directoryWallSessions,
 } from './wall-model';
 
-/** Same default theme the website playground restores, unless the user picked one. */
-const POCKET_THEME_ID = 'vscode.theme-kimbie-dark.kimbie-dark';
-
-const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
-
-function usePocketTheme() {
-  const restoredRef = useRef(false);
-  if (!restoredRef.current) {
-    restoreActiveTheme(POCKET_THEME_ID);
-    restoredRef.current = true;
-  }
-  // Repeat after hydration so MobileWall reads real theme variables even if
-  // React reconciled away render-time body styles.
-  useBrowserLayoutEffect(() => {
-    restoreActiveTheme(POCKET_THEME_ID);
-  }, []);
-}
-
 export function PocketWall({ adapter }: { adapter: RemotePtyAdapter }): React.ReactElement {
-  usePocketTheme();
+  // The theme is applied to <body> once at boot by restorePocketTheme() in
+  // main.tsx (applyTheme writes --vscode-* outside React, so a CSR mount never
+  // reconciles it away); the wall just reads those variables.
   const [entries, setEntries] = useState<DirectoryEntry[]>(() => adapter.getDirectoryEntries());
   const [activePaneId, setActivePaneId] = useState<string | null>(null);
   const [touchMode, setTouchMode] = useState<MobileTerminalTouchMode>('gestures');

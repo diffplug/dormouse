@@ -19,6 +19,31 @@ The chrome is anchored on VSCode's file-tree styling because those colors are
 designed to read clearly inside the sidebar host area. Use bg-only chrome for
 panes and doors; do not add borders to make the hierarchy work.
 
+**Build every surface from the three list pairs.** The chrome — and full
+standalone/Pocket screens like the auth flow — must draw hierarchy from three
+cohesive foreground/background pairs, and nothing else:
+
+- `app-bg` / `app-fg` — the page.
+- `header-active-bg` / `header-active-fg` — the accent: a focused header, a
+  titlebar band, the single primary action. (Kimbie Dark renders it caramel.)
+- `header-inactive-bg` / `header-inactive-fg` — a secondary surface: list rows,
+  unfocused headers.
+
+Hierarchy is the background swap between these pairs; secondary text is alpha on
+the same pair's own foreground (`text-app-fg/70`), never a separate token. Do
+**not** carry resting structure with `surface-raised`, `border` (panel.border),
+`input-border`, or `muted` (descriptionForeground): themes may leave those
+unset, and several do. Kimbie Dark is the cautionary case —
+`editorWidget.background` is near-black (`#131510`, a dark patch, not a gentle
+lift) and `panel.border` / `input.border` / `descriptionForeground` are unset,
+so borders resolve to transparent and a card-and-border layout collapses into
+invisible edges on muddy backgrounds. `surface-raised` + `border` are for
+*floating* surfaces only (popovers, dialogs, theme picker); resting chrome uses
+the three pairs. When a hairline is genuinely needed, derive it from a pair
+foreground at low alpha or an inset shadow (the Inset-Over-Border rule in
+`DESIGN.md`), not a border token. Reference implementation: the Pocket auth
+chrome in `lib/src/remote/pocket-app/App.tsx`.
+
 Source of truth: `lib/src/theme.css` defines token→VSCode-key bindings. The
 runtime-picked `--color-door-bg` / `--color-door-fg`, `--color-focus-ring`, and
 the per-surface alarm tints
@@ -60,7 +85,9 @@ Dormouse has two theme layers:
 
 `applyTheme()` sets imported `--vscode-*` variables on `document.body`, fills
 missing consumed variables through the VSCode resolver, and adds either
-`vscode-light` or `vscode-dark` for consumers that need the theme type. In real
+`vscode-light` or `vscode-dark` for consumers that need the theme type. It also
+sets `body`'s `color-scheme` to that polarity, so native controls (form inputs,
+scrollbars, autofill) follow the theme rather than the OS preference. In real
 VSCode webviews, `installVscodeThemeVarResolver()` runs before React renders;
 it reads host-provided variables, materializes only missing Dormouse-consumed
 variables on `body.style`, and removes stale materialized variables when the
@@ -203,3 +230,6 @@ When changing theme behavior:
 - Avoid reintroducing a pass-through `--mt-*` layer or one-off tokens for tabs,
   badges, accents, or button hovers unless there is a new rendered surface that
   cannot be expressed by the hierarchy above.
+- Build any new full app surface (standalone/Pocket) from the three list pairs
+  (see “Build every surface from the three list pairs”); do not lean on
+  `surface-raised`, `border`, or `input-border` for resting structure.

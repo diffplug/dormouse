@@ -9,7 +9,7 @@ import tailwindcss from "@tailwindcss/vite";
 // server to serve statically (docs/specs/pocket-app.md). It shares the full
 // terminal UI (`MobileTerminalUi`/`MobileWall`) with the main app, so it needs
 // the same Tailwind + `--vscode-*` theme plumbing (`src/index.css`); the auth
-// views layer their own self-contained `pocket.css` on top.
+// views are styled with the same shared `--color-*` tokens (docs/specs/theme.md).
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   root: fileURLToPath(new URL("./pocket", import.meta.url)),

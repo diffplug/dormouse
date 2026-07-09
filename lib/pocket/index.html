@@ -6,9 +6,27 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no"
     />
-    <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#16181d" />
+    <meta name="color-scheme" content="light dark" />
     <title>Dormouse Pocket</title>
+    <style>
+      /* Theme-agnostic viewport plumbing. Colors and fonts come from the shared
+         theme system applied to <body> (src/theme.css + main.tsx's
+         restorePocketTheme()); the dark fallback only shows in the sub-frame
+         window before the theme applies on first paint. */
+      html,
+      body {
+        height: 100%;
+        -webkit-text-size-adjust: 100%;
+        overscroll-behavior: none;
+        background: var(--color-app-bg, #1e1e1e);
+        color: var(--color-app-fg, #e6e8ec);
+      }
+      #pocket-root {
+        height: 100dvh;
+        display: flex;
+        flex-direction: column;
+      }
+    </style>
   </head>
   <body>
     <div id="pocket-root"></div>
