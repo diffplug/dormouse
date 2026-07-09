@@ -19,6 +19,7 @@ Source of truth:
 | POSIX / Windows launchers | `dor/bin/dor`, `dor/bin/dor.cmd` |
 | Snapshot tests for CLI output and help text | `dor/test/cli-output.test.mjs`, `dor/test/cli-help.test.mjs`, `dor/test/snapshots/` |
 | Shared staging script | `scripts/stage-dor-cli.mjs` |
+| Agent skill markdown and its inlining codegen | `dor/skill.md`, `scripts/generate-dor-skill.mjs` |
 | Standalone staging/runtime env | `standalone/package.json`, `standalone/src-tauri/src/lib.rs`, `standalone/sidecar/pty-core.js`, `standalone/sidecar/main.js` |
 | VS Code staging/runtime env | `vscode-ext/package.json`, `vscode-ext/src/pty-manager.ts`, `vscode-ext/src/pty-host.js` |
 | Control request routing into the webview | `standalone/src/tauri-adapter.ts`, `vscode-ext/src/message-router.ts`, `lib/src/lib/platform/vscode-adapter.ts` |
@@ -323,6 +324,9 @@ from `command-detail`.
   (`lib/src/components/wall/use-dor-control.ts`).
 - `dor ensure` [impl](../../dor/src/commands/ensure.ts) [docs](../../dor/test/snapshots/help/ensure.md)
 - `dor version` [impl](../../dor/src/commands/version.ts) [docs](../../dor/test/snapshots/help/version.md)
+- `dor skill` — prints the bundled agent skill, or installs its bootstrap stub
+  with `--install`; see [Agent Skill](#agent-skill).
+  [impl](../../dor/src/commands/skill.ts) [docs](../../dor/test/snapshots/help/skill.md)
 - `dor send` [impl](../../dor/src/commands/send.ts) [docs](../../dor/test/snapshots/help/send.md)
 - `dor read` [impl](../../dor/src/commands/read.ts) [docs](../../dor/test/snapshots/help/read.md)
 - `dor kill` [impl](../../dor/src/commands/kill.ts) [docs](../../dor/test/snapshots/help/kill.md)
@@ -389,47 +393,49 @@ their session is held externally by `agent-browser`.
 | Port-owner handoff | `dor list --port 5173` returns the terminal that owns the socket (browser Surfaces never match `--port`), then `dor ab --key client open http://localhost:5173` binds the browser side. |
 | Safe cleanup | `dor list --command "npm dev" --cwd .`, then `dor kill <ref> --confirm-if-read <text>`. The ref comes from a recent listing or command response; `title:<exact>` also targets one but can drift. |
 
+## Agent Skill
+
+`dor/skill.md` is the agent skill: instructions that teach a coding agent
+running inside a Dormouse terminal to drive it through `dor` — the Agent
+Workflows above, recast as a targeting model plus recipes. Distribution splits
+into content and bootstrap so each is exactly as stable as it needs to be:
+
+- **Content ships with the CLI.** `scripts/generate-dor-skill.mjs` (prebuild,
+  like the version metadata) inlines the markdown into the bundle as the
+  gitignored `generated-skill.ts`, so `dor skill` prints text version-locked
+  to the CLI that staged it and the staged package stays launchers + bundle.
+  The skill body contains no environment detection: if `dor skill` ran, `dor`
+  is by definition available — detection lives only in the stub.
+- **Bootstrap is a stub that cannot drift.** `dor skill --install` writes a
+  marker-delimited block (`<!-- dor-skill:begin` … `dor-skill:end -->`) into
+  the project's agent instructions file, resolved against the invoking
+  shell's PWD like `dor ensure --cwd`. The block's entire content is the
+  detection rule — *if `DORMOUSE_SURFACE_ID` is set, run `dor skill` and
+  follow it; otherwise ignore this section* — plus a one-line Dormouse
+  pointer, so a committed stub carries no CLI facts and never version-skews,
+  and the env guard keeps it inert for collaborators who don't run Dormouse.
+  Committing it is the point: the stub travels with the repo (`AGENTS.md` is
+  the convention read by Codex, Pi, OpenCode, and most other harnesses), so
+  one teammate installing it covers every agent and every clone.
+- **File selection.** An existing block in `AGENTS.md` or `CLAUDE.md`
+  (checked in that order) is rewritten in place; everything outside the
+  markers is untouched, so re-running is idempotent. Otherwise: append to
+  `AGENTS.md` when it exists; else to `CLAUDE.md` when it exists and does not
+  already import `@AGENTS.md`; else create `AGENTS.md`. A begin marker
+  without a well-ordered end marker fails (`malformed dor-skill block`)
+  rather than guessing. Output reports the bare file name only
+  (`created AGENTS.md` / `updated CLAUDE.md`), never an absolute path.
+
+Source of truth: `dor/src/commands/skill.ts`, `scripts/generate-dor-skill.mjs`,
+`dor/skill.md`; `dor skill` output is asserted byte-identical to `dor/skill.md`
+in `dor/test/cli-output.test.mjs`.
+
 ## Future
 
-- **`dor skill` — agent-skill distribution** — ship the agent
-  skill (`dor-skill.md`, authored at the repo root) to every coding agent
-  running inside a Dormouse terminal. Distribution splits into content and
-  bootstrap so each can be exactly as stable as it needs to be:
-  - **Content ships with the CLI.** `dor skill` prints the skill markdown.
-    The text is inlined into the compiled entrypoint at build time (esbuild
-    text import; the file moves into the `dor` package — e.g. a top-level
-    `skill.md` there — so the build can import it), keeping the staged package
-    launchers + bundle and version-locking the text to the CLI it documents.
-    The printed text is snapshot-tested alongside the command's help. The
-    skill body deliberately contains no environment detection: if `dor skill`
-    ran, `dor` is by definition available — detection belongs entirely to the
-    stub.
-  - **Bootstrap is a stub that cannot drift.** `dor skill --install` writes
-    the stub as a managed block in the *project's* agent instruction file —
-    `AGENTS.md`, the convention read by Codex, Pi, OpenCode, and most other
-    harnesses, or `CLAUDE.md` where that is what the project has — whose
-    entire content is the detection rule: *if `DORMOUSE_SURFACE_ID` is set in
-    the environment, run `dor skill` and follow it; otherwise this terminal is
-    not Dormouse-hosted and `dor` does not apply.* The stub carries no facts
-    about the CLI, so it can never version-skew; the instructions always come
-    from the running Dormouse. The env-var guard also makes the committed
-    block inert for collaborators who don't run Dormouse — committing it is
-    safe, and is the point: the stub travels with the repo, so one teammate
-    installing it covers every agent and every clone, instead of living in one
-    user's home config. The block is delimited by marker comments and
-    rewritten in place on every run — `dor skill --install` is idempotent,
-    creates the file when the project has none, never touches text outside its
-    markers, and prints what it wrote.
-  - Skill-ecosystem publication (plugin marketplaces, npm) distributes the
-    stub, never a copy of the content.
-  - To workshop before implementing: the file-selection rule (prefer an
-    existing `AGENTS.md`; fall back to `CLAUDE.md` when it exists and does not
-    already import `AGENTS.md`; create `AGENTS.md` when neither exists?);
-    whether the stub says anything to readers without Dormouse (a one-line
-    pointer is honest advertising, more is spam); whether a user-level
-    `--global` variant is also worth offering; whether the canonical skill
-    file keeps its YAML frontmatter now that the stub is an instructions block
-    (nothing would index the frontmatter); and the exact stub wording.
+- **`dor skill` follow-ons** — skill-ecosystem publication (plugin
+  marketplaces, npm) distributes the bootstrap stub, never a copy of the
+  content. A user-level `--global` install variant waits until a story needs
+  it.
 
 - **Browser open target resolution** — the one unshipped Agent-Workflow
   ergonomic (the Share-a-dev-server shortcut above): `dor ab open <target>` and
