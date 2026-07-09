@@ -112,7 +112,7 @@ export interface EnsureSurfaceResponse {
 }
 
 export interface SendSurfaceRequest {
-  surface?: string;
+  surface: string;
   input: string;
   inputCount: number;
 }
@@ -127,7 +127,7 @@ export interface SendSurfaceResponse {
 export interface ReadSurfaceRequest {
   lines?: number;
   scrollback: boolean;
-  surface?: string;
+  surface: string;
 }
 
 export interface ReadSurfaceResponse {

@@ -4,16 +4,14 @@ Invocation: `dor send --help`
 
 ```text
 USAGE
-  dor send [--json] [--key value] [--raw] [--sequence json] [--stdin] [--surface id|ref|index] [--text value] [<text>]
+  dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw]
   dor send --help
 
-By default, a positional argument is sent as text. Special keys must be sent with --key so values like "enter" are never confused with literal text.
+Sends text or key input to a target terminal surface. Special keys must be sent with --key so values like "enter" are never confused with literal text.
 
-If --surface is omitted, Dormouse uses the caller surface from DORMOUSE_SURFACE_ID, then the focused surface.
+Exactly one input mode is required: --text/--key, --stdin, or --sequence. --text and --key may be combined only in that order; text is sent first, then the key. Duplicate input flags are rejected. Use --sequence for arbitrary ordering or multiple text/key events.
 
-Exactly one input source is required: TEXT, --text, --key, --stdin, or --sequence.
-
-Text input interprets backslash escapes for \n, \r, \t, and \\ unless --raw is set. Prefer --key enter when submitting a prompt.
+Text input interprets backslash escapes for \n, \r, \t, and \\ unless --raw is set.
 
 Supported keys: enter, escape, esc, tab, backspace, delete, up, down, left, right, ctrl-a through ctrl-z.
 
@@ -28,11 +26,11 @@ JSON output:
   }
 
 Examples:
-  dor send "echo hello"
-  dor send --key enter
-  dor send --surface surface:3 --key ctrl-c
-  cat script.sh | dor send --surface surface:3 --stdin
-  dor send --surface surface:3 --sequence '[{"text":"npm test"},{"key":"enter"}]'
+  dor send surface:3 --text "echo hello"
+  dor send surface:3 --text "npm test" --key enter
+  dor send surface:3 --key ctrl-c
+  cat script.sh | dor send surface:3 --stdin
+  dor send surface:3 --sequence '[{"text":"npm test"},{"key":"enter"}]'
 
 FLAGS
      [--json]      Print JSON output.
@@ -40,12 +38,11 @@ FLAGS
      [--raw]       Do not interpret backslash escapes in text input.
      [--sequence]  Send an ordered JSON sequence of text and key events.
      [--stdin]     Read text from standard input and send it as text.
-     [--surface]   Target surface.
      [--text]      Send literal text.
   -h  --help       Print help information and exit
       --           All subsequent inputs should be interpreted as arguments
 
 ARGUMENTS
-  [text]  Text to send.
+  surface  Target surface.
 
 ```

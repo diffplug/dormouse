@@ -576,7 +576,12 @@ export function useDorControl({
           detail.respond({ ok: false, error: 'input is required' });
           return;
         }
-        const target = resolveListedSurface(stringParam(params.surface), detail.surfaceId);
+        const surface = stringParam(params.surface);
+        if (!surface) {
+          detail.respond({ ok: false, error: 'surface is required' });
+          return;
+        }
+        const target = resolveListedSurface(surface, detail.surfaceId);
         if (!target.ok) {
           detail.respond({ ok: false, error: target.message });
           return;
@@ -599,7 +604,12 @@ export function useDorControl({
       }
 
       if (detail.method === SURFACE_CONTROL_METHODS.read) {
-        const target = resolveListedSurface(stringParam(params.surface), detail.surfaceId);
+        const surface = stringParam(params.surface);
+        if (!surface) {
+          detail.respond({ ok: false, error: 'surface is required' });
+          return;
+        }
+        const target = resolveListedSurface(surface, detail.surfaceId);
         if (!target.ok) {
           detail.respond({ ok: false, error: target.message });
           return;

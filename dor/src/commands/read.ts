@@ -16,17 +16,24 @@ interface ReadFlags {
   readonly json?: boolean;
   readonly lines?: number;
   readonly scrollback?: boolean;
-  readonly surface?: string;
 }
 
 export const readCommand: Command = {
   name: 'read',
-  command: buildCommand<ReadFlags, [], DorCommandContext>({
+  helpPatches: [
+    {
+      scope: 'root',
+      findReplace: [
+        '  dor read [--json] [--lines count] [--scrollback]<TO-EOL>',
+        '  dor read <surface> [--json] [--lines count] [--scrollback]\n',
+      ],
+    },
+  ],
+  command: buildCommand<ReadFlags, [string], DorCommandContext>({
     docs: {
       brief: 'Read terminal text from a surface.',
-      fullDescription: `By default, reads the visible screen text from the target surface. Use --scrollback to include terminal history, and --lines to limit how much text is returned.
-
-If --surface is omitted, Dormouse uses the caller surface from DORMOUSE_SURFACE_ID, then the focused surface.
+      customUsage: ['<surface> [--json] [--lines count] [--scrollback]'],
+      fullDescription: `Reads the visible screen text from the target terminal surface. Use --scrollback to include terminal history, and --lines to limit how much text is returned.
 
 Text mode prints terminal text directly.
 
@@ -43,14 +50,19 @@ JSON output:
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         lines: { kind: 'parsed', parse: parseLineCount, brief: 'Maximum number of lines to return.', optional: true, placeholder: 'count' },
         scrollback: { kind: 'boolean', brief: 'Include terminal scrollback/history instead of only the visible screen.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to read.', optional: true, placeholder: 'id|ref|index' },
+      },
+      positional: {
+        kind: 'tuple',
+        parameters: [
+          { parse: stringParser, brief: 'Surface to read.', placeholder: 'surface' },
+        ],
       },
     },
     func: runReadCommand,
   }),
 };
 
-async function runReadCommand(this: DorCommandContext, flags: ReadFlags): Promise<void | Error> {
+async function runReadCommand(this: DorCommandContext, flags: ReadFlags, surface: string): Promise<void | Error> {
   const client = requireControlClient(this.options);
   if (client instanceof Error) return client;
 
@@ -58,7 +70,7 @@ async function runReadCommand(this: DorCommandContext, flags: ReadFlags): Promis
     const response = await client.readSurface({
       ...(flags.lines !== undefined ? { lines: flags.lines } : {}),
       scrollback: flags.scrollback === true,
-      surface: flags.surface,
+      surface,
     });
     writeStdout(this, renderReadResponse(response, flags.json === true));
     return undefined;

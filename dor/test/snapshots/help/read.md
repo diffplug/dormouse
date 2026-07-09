@@ -4,12 +4,10 @@ Invocation: `dor read --help`
 
 ```text
 USAGE
-  dor read [--json] [--lines count] [--scrollback] [--surface id|ref|index]
+  dor read <surface> [--json] [--lines count] [--scrollback]
   dor read --help
 
-By default, reads the visible screen text from the target surface. Use --scrollback to include terminal history, and --lines to limit how much text is returned.
-
-If --surface is omitted, Dormouse uses the caller surface from DORMOUSE_SURFACE_ID, then the focused surface.
+Reads the visible screen text from the target terminal surface. Use --scrollback to include terminal history, and --lines to limit how much text is returned.
 
 Text mode prints terminal text directly.
 
@@ -25,8 +23,10 @@ FLAGS
      [--json]        Print JSON output.
      [--lines]       Maximum number of lines to return.
      [--scrollback]  Include terminal scrollback/history instead of only the visible screen.
-     [--surface]     Surface to read.
   -h  --help         Print help information and exit
       --             All subsequent inputs should be interpreted as arguments
+
+ARGUMENTS
+  surface  Surface to read.
 
 ```

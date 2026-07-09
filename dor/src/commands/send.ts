@@ -20,7 +20,6 @@ interface SendFlags {
   readonly raw?: boolean;
   readonly sequence?: string;
   readonly stdin?: boolean;
-  readonly surface?: string;
   readonly text?: string;
 }
 
@@ -30,16 +29,24 @@ type SendInput =
 
 export const sendCommand: Command = {
   name: 'send',
-  command: buildCommand<SendFlags, [string?], DorCommandContext>({
+  helpPatches: [
+    {
+      scope: 'root',
+      findReplace: [
+        '  dor send [--json] [--key value] [--raw] [--sequence json] [--stdin] [--text value]<TO-EOL>',
+        '  dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw]\n',
+      ],
+    },
+  ],
+  command: buildCommand<SendFlags, [string], DorCommandContext>({
     docs: {
       brief: 'Send text or key input to a terminal surface.',
-      fullDescription: `By default, a positional argument is sent as text. Special keys must be sent with --key so values like "enter" are never confused with literal text.
+      customUsage: ['<surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw]'],
+      fullDescription: `Sends text or key input to a target terminal surface. Special keys must be sent with --key so values like "enter" are never confused with literal text.
 
-If --surface is omitted, Dormouse uses the caller surface from DORMOUSE_SURFACE_ID, then the focused surface.
+Exactly one input mode is required: --text/--key, --stdin, or --sequence. --text and --key may be combined only in that order; text is sent first, then the key. Duplicate input flags are rejected. Use --sequence for arbitrary ordering or multiple text/key events.
 
-Exactly one input source is required: TEXT, --text, --key, --stdin, or --sequence.
-
-Text input interprets backslash escapes for \\n, \\r, \\t, and \\\\ unless --raw is set. Prefer --key enter when submitting a prompt.
+Text input interprets backslash escapes for \\n, \\r, \\t, and \\\\ unless --raw is set.
 
 Supported keys: enter, escape, esc, tab, backspace, delete, up, down, left, right, ctrl-a through ctrl-z.
 
@@ -54,11 +61,11 @@ JSON output:
   }
 
 Examples:
-  dor send "echo hello"
-  dor send --key enter
-  dor send --surface surface:3 --key ctrl-c
-  cat script.sh | dor send --surface surface:3 --stdin
-  dor send --surface surface:3 --sequence '[{"text":"npm test"},{"key":"enter"}]'`,
+  dor send surface:3 --text "echo hello"
+  dor send surface:3 --text "npm test" --key enter
+  dor send surface:3 --key ctrl-c
+  cat script.sh | dor send surface:3 --stdin
+  dor send surface:3 --sequence '[{"text":"npm test"},{"key":"enter"}]'`,
     },
     parameters: {
       flags: {
@@ -67,13 +74,12 @@ Examples:
         raw: { kind: 'boolean', brief: 'Do not interpret backslash escapes in text input.', optional: true, withNegated: false },
         sequence: { kind: 'parsed', parse: stringParser, brief: 'Send an ordered JSON sequence of text and key events.', optional: true, placeholder: 'json' },
         stdin: { kind: 'boolean', brief: 'Read text from standard input and send it as text.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Target surface.', optional: true, placeholder: 'id|ref|index' },
         text: { kind: 'parsed', parse: stringParser, brief: 'Send literal text.', optional: true },
       },
       positional: {
         kind: 'tuple',
         parameters: [
-          { parse: stringParser, brief: 'Text to send.', optional: true, placeholder: 'text' },
+          { parse: stringParser, brief: 'Target surface.', placeholder: 'surface' },
         ],
       },
     },
@@ -81,8 +87,8 @@ Examples:
   }),
 };
 
-async function runSendCommand(this: DorCommandContext, flags: SendFlags, text?: string): Promise<void | Error> {
-  const inputs = await collectSendInputs(flags, text, this.options.readStdin);
+async function runSendCommand(this: DorCommandContext, flags: SendFlags, surface: string): Promise<void | Error> {
+  const inputs = await collectSendInputs(flags, this.options.readStdin);
   if (!inputs.ok) return new Error(inputs.message);
 
   const encoded = encodeSendInputs(inputs.value, flags.raw === true);
@@ -94,7 +100,7 @@ async function runSendCommand(this: DorCommandContext, flags: SendFlags, text?: 
 
   try {
     const response = await client.sendSurface({
-      surface: flags.surface,
+      surface,
       input: encoded.value.input,
       inputCount: encoded.value.inputCount,
     });
@@ -107,24 +113,25 @@ async function runSendCommand(this: DorCommandContext, flags: SendFlags, text?: 
 
 async function collectSendInputs(
   flags: SendFlags,
-  positionalText: string | undefined,
   readStdin: (() => Promise<string>) | undefined,
 ): Promise<ParseResult<SendInput[]>> {
+  const inline = flags.text !== undefined || flags.key !== undefined;
   const sources = [
-    positionalText !== undefined,
-    flags.text !== undefined,
-    flags.key !== undefined,
+    inline,
     flags.stdin === true,
     flags.sequence !== undefined,
   ].filter(Boolean).length;
 
   if (sources !== 1) {
-    return { ok: false, message: 'dor send requires exactly one input source' };
+    return { ok: false, message: 'dor send requires exactly one input mode' };
   }
 
-  if (positionalText !== undefined) return { ok: true, value: [{ kind: 'text', text: positionalText }] };
-  if (flags.text !== undefined) return { ok: true, value: [{ kind: 'text', text: flags.text }] };
-  if (flags.key !== undefined) return { ok: true, value: [{ kind: 'key', key: flags.key }] };
+  if (inline) {
+    const inputs: SendInput[] = [];
+    if (flags.text !== undefined) inputs.push({ kind: 'text', text: flags.text });
+    if (flags.key !== undefined) inputs.push({ kind: 'key', key: flags.key });
+    return { ok: true, value: inputs };
+  }
   if (flags.stdin === true) {
     if (!readStdin) return { ok: false, message: 'stdin is not available' };
     return { ok: true, value: [{ kind: 'text', text: await readStdin() }] };

@@ -417,24 +417,24 @@ test('--version and -v alias the version command', async () => {
 test('send text output', async () => {
   await snapshot(
     'send-text',
-    await runCli(['send', '--surface', 'surface:2', 'echo hello\\n'], { client: fixtureClient() }),
+    await runCli(['send', 'surface:2', '--text', 'echo hello\\n'], { client: fixtureClient() }),
   );
 });
 
 test('send json output', async () => {
   await snapshot(
     'send-json',
-    await runCli(['send', '--json', '--surface', 'surface:2', '--key', 'ctrl-c'], { client: fixtureClient() }),
+    await runCli(['send', 'surface:2', '--json', '--key', 'ctrl-c'], { client: fixtureClient() }),
   );
 });
 
 test('send sends escaped text to the host', async () => {
   const client = fixtureClient();
-  await runCli(['send', '--text', 'echo hello\\n'], { client });
+  await runCli(['send', 'surface:1', '--text', 'echo hello\\n'], { client });
   assert.deepEqual(client.requests, [{
     method: 'sendSurface',
     request: {
-      surface: undefined,
+      surface: 'surface:1',
       input: 'echo hello\n',
       inputCount: 1,
     },
@@ -443,7 +443,7 @@ test('send sends escaped text to the host', async () => {
 
 test('send sends key input to the host', async () => {
   const client = fixtureClient();
-  await runCli(['send', '--surface', 'surface:2', '--key', 'ctrl-c'], { client });
+  await runCli(['send', 'surface:2', '--key', 'ctrl-c'], { client });
   assert.deepEqual(client.requests, [{
     method: 'sendSurface',
     request: {
@@ -454,13 +454,47 @@ test('send sends key input to the host', async () => {
   }]);
 });
 
-test('send sequence sends ordered input to the host', async () => {
+test('send combines text then key input', async () => {
   const client = fixtureClient();
-  await runCli(['send', '--sequence', '[{"text":"npm test"},{"key":"enter"}]'], { client });
+  await runCli(['send', 'surface:2', '--text', 'npm test', '--key', 'enter'], { client });
   assert.deepEqual(client.requests, [{
     method: 'sendSurface',
     request: {
-      surface: undefined,
+      surface: 'surface:2',
+      input: 'npm test\r',
+      inputCount: 2,
+    },
+  }]);
+});
+
+test('send key before text output', async () => {
+  await snapshot(
+    'send-key-before-text',
+    await runCli(['send', 'surface:1', '--key', 'enter', '--text', 'npm test'], { client: fixtureClient() }),
+  );
+});
+
+test('send duplicate text output', async () => {
+  await snapshot(
+    'send-duplicate-text',
+    await runCli(['send', 'surface:1', '--text', 'one', '--text', 'two'], { client: fixtureClient() }),
+  );
+});
+
+test('send duplicate key output', async () => {
+  await snapshot(
+    'send-duplicate-key',
+    await runCli(['send', 'surface:1', '--key', 'enter', '--key', 'tab'], { client: fixtureClient() }),
+  );
+});
+
+test('send sequence sends ordered input to the host', async () => {
+  const client = fixtureClient();
+  await runCli(['send', 'surface:1', '--sequence', '[{"text":"npm test"},{"key":"enter"}]'], { client });
+  assert.deepEqual(client.requests, [{
+    method: 'sendSurface',
+    request: {
+      surface: 'surface:1',
       input: 'npm test\r',
       inputCount: 2,
     },
@@ -469,11 +503,11 @@ test('send sequence sends ordered input to the host', async () => {
 
 test('send stdin sends standard input to the host', async () => {
   const client = fixtureClient();
-  await runCli(['send', '--stdin'], { client, readStdin: async () => 'cat from stdin\n' });
+  await runCli(['send', 'surface:1', '--stdin'], { client, readStdin: async () => 'cat from stdin\n' });
   assert.deepEqual(client.requests, [{
     method: 'sendSurface',
     request: {
-      surface: undefined,
+      surface: 'surface:1',
       input: 'cat from stdin\n',
       inputCount: 1,
     },
@@ -481,20 +515,20 @@ test('send stdin sends standard input to the host', async () => {
 });
 
 test('send missing input output', async () => {
-  await snapshot('send-missing-input', await runCli(['send'], { client: fixtureClient() }));
+  await snapshot('send-missing-input', await runCli(['send', 'surface:1'], { client: fixtureClient() }));
 });
 
 test('send unsupported key output', async () => {
-  await snapshot('send-unsupported-key', await runCli(['send', '--key', 'cmd-k'], { client: fixtureClient() }));
+  await snapshot('send-unsupported-key', await runCli(['send', 'surface:1', '--key', 'cmd-k'], { client: fixtureClient() }));
 });
 
 test('read text output', async () => {
-  await snapshot('read-text', await runCli(['read'], { client: fixtureClient() }));
+  await snapshot('read-text', await runCli(['read', 'surface:1'], { client: fixtureClient() }));
 });
 
 test('read sends request to the host', async () => {
   const client = fixtureClient();
-  await runCli(['read', '--surface', 'title:repo "watch"', '--scrollback', '--lines', '2'], { client });
+  await runCli(['read', 'title:repo "watch"', '--scrollback', '--lines', '2'], { client });
   assert.deepEqual(client.requests, [{
     method: 'readSurface',
     request: {
@@ -508,31 +542,31 @@ test('read sends request to the host', async () => {
 test('read json output', async () => {
   await snapshot(
     'read-json',
-    await runCli(['read', '--json', '--surface', 'surface:2', '--scrollback', '--lines', '2'], { client: fixtureClient() }),
+    await runCli(['read', 'surface:2', '--json', '--scrollback', '--lines', '2'], { client: fixtureClient() }),
   );
 });
 
 test('read invalid lines output', async () => {
-  await snapshot('read-invalid-lines', await runCli(['read', '--lines', '0'], { client: fixtureClient() }));
+  await snapshot('read-invalid-lines', await runCli(['read', 'surface:1', '--lines', '0'], { client: fixtureClient() }));
 });
 
 test('kill text output', async () => {
   await snapshot(
     'kill-text',
-    await runCli(['kill', '--surface', 'surface:2', '--confirm-dangerously'], { client: fixtureClient() }),
+    await runCli(['kill', 'surface:2', '--confirm-dangerously'], { client: fixtureClient() }),
   );
 });
 
 test('kill json output', async () => {
   await snapshot(
     'kill-json',
-    await runCli(['kill', '--json', '--surface', 'surface:2', '--confirm-dangerously'], { client: fixtureClient() }),
+    await runCli(['kill', 'surface:2', '--json', '--confirm-dangerously'], { client: fixtureClient() }),
   );
 });
 
 test('kill sends confirmation to the host', async () => {
   const client = fixtureClient();
-  await runCli(['kill', '--surface', 'title:repo "watch"', '--confirm-if-read', 'done'], { client });
+  await runCli(['kill', 'title:repo "watch"', '--confirm-if-read', 'done'], { client });
   assert.deepEqual(client.requests, [{
     method: 'killSurface',
     request: {
@@ -543,13 +577,13 @@ test('kill sends confirmation to the host', async () => {
 });
 
 test('kill missing confirmation output', async () => {
-  await snapshot('kill-missing-confirmation', await runCli(['kill', '--surface', 'surface:2'], { client: fixtureClient() }));
+  await snapshot('kill-missing-confirmation', await runCli(['kill', 'surface:2'], { client: fixtureClient() }));
 });
 
 test('kill short confirm-if-read output', async () => {
   await snapshot(
     'kill-short-confirm-if-read',
-    await runCli(['kill', '--surface', 'surface:2', '--confirm-if-read', 'abc'], { client: fixtureClient() }),
+    await runCli(['kill', 'surface:2', '--confirm-if-read', 'abc'], { client: fixtureClient() }),
   );
 });
 

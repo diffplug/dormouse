@@ -147,6 +147,10 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
     const delimiterCheck = validateEnsureDelimiter(args);
     if (!delimiterCheck.ok) return fail(delimiterCheck.message);
   }
+  if (commandName === 'send' && !args.includes('-h') && !args.includes('--help')) {
+    const sendFlagsCheck = validateSendFlags(args);
+    if (!sendFlagsCheck.ok) return fail(sendFlagsCheck.message);
+  }
 
   const capture = createCaptureProcess(options.env);
   await runStricli(APPLICATION, commandName ? [commandName, ...args] : [], {
@@ -353,6 +357,50 @@ function validateEnsureDelimiter(args: string[]): ParseResult<void> {
   }
 
   return { ok: true, value: undefined };
+}
+
+function validateSendFlags(args: string[]): ParseResult<void> {
+  const tracked = new Map<string, number>();
+  const flagPositions = new Map<string, number>();
+  const positionalStart = args.indexOf('--');
+  const scanEnd = positionalStart === -1 ? args.length : positionalStart;
+
+  for (let index = 0; index < scanEnd; index += 1) {
+    const flag = sendFlagName(args[index]);
+    if (!flag) continue;
+
+    if (tracked.has(flag)) {
+      return { ok: false, message: `dor send does not allow duplicate ${flag}` };
+    }
+    tracked.set(flag, index);
+    flagPositions.set(flag, index);
+  }
+
+  const textIndex = flagPositions.get('--text');
+  const keyIndex = flagPositions.get('--key');
+  if (textIndex !== undefined && keyIndex !== undefined && keyIndex < textIndex) {
+    return {
+      ok: false,
+      message: 'when combining --text and --key, put --text before --key; use --sequence for arbitrary ordering',
+    };
+  }
+
+  return { ok: true, value: undefined };
+}
+
+function sendFlagName(arg: string): string | null {
+  const [name] = arg.split('=', 1);
+  switch (name) {
+    case '--json':
+    case '--key':
+    case '--raw':
+    case '--sequence':
+    case '--stdin':
+    case '--text':
+      return name;
+    default:
+      return null;
+  }
 }
 
 function createCaptureProcess(env: CliEnv | undefined): {
