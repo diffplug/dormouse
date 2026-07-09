@@ -62,6 +62,12 @@ export function applyTheme(theme: DormouseTheme): void {
     document.body.classList.add('vscode-dark');
     document.body.classList.remove('vscode-light');
   }
+
+  // Match the resolved polarity so native controls (form inputs, scrollbars,
+  // autofill) render in the theme's light/dark UA chrome rather than following
+  // the OS preference. Owned here so every non-VSCode host (standalone, website,
+  // Pocket) inherits it from one place instead of guessing in each HTML shell.
+  document.body.style.colorScheme = theme.type === 'light' ? 'light' : 'dark';
 }
 
 /** Apply the persisted active theme. When nothing is persisted yet, fall

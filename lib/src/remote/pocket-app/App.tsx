@@ -68,9 +68,9 @@ const pkButton = tv({
       lg: 'min-h-[44px] px-4 text-[13px]',
       sm: 'min-h-9 px-3 text-[12px]',
     },
-    block: { true: 'w-full', false: '' },
+    block: { true: 'w-full' },
   },
-  defaultVariants: { tone: 'primary', size: 'lg', block: false },
+  defaultVariants: { tone: 'primary', size: 'lg' },
 });
 
 const PK = {

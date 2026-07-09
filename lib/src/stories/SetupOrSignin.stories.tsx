@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import type { ReactNode } from 'react';
 // Importing from App.tsx runs its `index.css` side-effect import, loading the
 // shared --color-* theme tokens. The auth chrome is built from the three VSCode
 // list pairs (docs/specs/theme.md); switch themes with the Storybook toolbar.
 import { SetupOrSignin } from '../remote/pocket-app/App';
+import { PhoneFrame } from './PhoneFrame';
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -18,19 +18,6 @@ async function openSetup({ canvasElement }: { canvasElement: HTMLElement }) {
   );
   disclosure?.click();
   await wait(50);
-}
-
-// Phone-sized frame on the app-bg surface, matching the real app shell. Uses a
-// faint app-fg outline for definition since panel-border is often transparent.
-function PhoneFrame({ children }: { children: ReactNode }) {
-  return (
-    <div
-      className="overflow-hidden rounded-xl shadow-2xl outline outline-1 outline-app-fg/15"
-      style={{ width: 390, height: 760, background: 'var(--color-app-bg)' }}
-    >
-      {children}
-    </div>
-  );
 }
 
 const meta: Meta<typeof SetupOrSignin> = {

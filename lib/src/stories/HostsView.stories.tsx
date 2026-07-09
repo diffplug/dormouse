@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import type { ReactNode } from 'react';
 // Importing from App.tsx runs its `index.css` side-effect import, loading the
 // shared --color-* theme tokens. The auth chrome is built from the three VSCode
 // list pairs (docs/specs/theme.md); switch themes with the Storybook toolbar.
 import { HostsView, type HostView } from '../remote/pocket-app/App';
+import { PhoneFrame } from './PhoneFrame';
 
 // A paired online host, an unpaired online host (shows Pair + Connect), and an
 // offline host (both actions disabled) — the full row matrix in one frame.
@@ -15,19 +15,6 @@ const MIXED_HOSTS: HostView[] = [
 
 const PAIRED = new Set(['host-studio']);
 const isPaired = (hostId: string) => PAIRED.has(hostId);
-
-// Phone-sized frame on the app-bg surface, matching the real app shell. Uses a
-// faint app-fg outline for definition since panel-border is often transparent.
-function PhoneFrame({ children }: { children: ReactNode }) {
-  return (
-    <div
-      className="overflow-hidden rounded-xl shadow-2xl outline outline-1 outline-app-fg/15"
-      style={{ width: 390, height: 760, background: 'var(--color-app-bg)' }}
-    >
-      {children}
-    </div>
-  );
-}
 
 const meta: Meta<typeof HostsView> = {
   title: 'Pocket/HostsView',

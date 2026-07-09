@@ -11,7 +11,7 @@
  */
 import { restoreActiveTheme } from '../../lib/themes';
 
-export const POCKET_THEME_ID = 'vscode.theme-kimbie-dark.kimbie-dark';
+const POCKET_THEME_ID = 'vscode.theme-kimbie-dark.kimbie-dark';
 
 /**
  * Apply the persisted-or-default theme to <body>. Call before first paint so
