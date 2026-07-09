@@ -8,6 +8,24 @@ export type SplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
 export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
 export type SurfaceType = 'terminal' | 'iframe' | 'agent-browser';
 
+/** Where a Surface renders. Minimized Surfaces (baseboard doors) are listed too;
+ *  `hidden` is reserved for Surfaces in an inactive Workspace (a future). */
+export type SurfaceView = 'paned' | 'zoomed' | 'minimized' | 'hidden';
+
+/** Shell activity of a terminal Surface (`docs/specs/terminal-state.md`). */
+export type SurfaceActivity = 'unknown' | 'prompt' | 'editing' | 'running' | 'finished';
+
+/** A listening TCP port opened by a terminal Surface's shell or a descendant
+ *  process. `address` is the bind interface — `0.0.0.0` / `::` mean all
+ *  interfaces, `127.0.0.1` / `::1` mean loopback-only. */
+export interface SurfacePort {
+  family: 'IPv4' | 'IPv6';
+  address: string;
+  port: number;
+  pid: number;
+  processName?: string;
+}
+
 export interface Surface {
   id: string;
   ref: string;
@@ -18,12 +36,34 @@ export interface Surface {
   index: number;
   indexInPane: number;
   selectedInPane: boolean;
+  /** Where the Surface renders; minimized Surfaces are listed with `minimized`. */
+  view: SurfaceView;
+  /** Reported working directory (terminal Surfaces); `null` for browser Surfaces. */
+  cwd: string | null;
+  /** Shell activity (terminal Surfaces); `null` for browser Surfaces. */
+  activity: SurfaceActivity | null;
+  /** Exit code of the most recently finished command, when known. */
+  exitCode?: number;
+  /** Running command label; `null` when idle or not a terminal Surface. */
+  command: string | null;
+  /** Target URL of a browser Surface; `null` for terminal Surfaces. */
+  url: string | null;
+  /** An alert is ringing. Browser Surfaces never ring. */
+  ringing: boolean;
+  /** User-flagged TODO. */
+  todo: boolean;
+  /** Listening ports opened by this terminal Surface. Present only when the
+   *  request set `includePorts` (`dor list --ports`); never on browser Surfaces. */
+  ports?: SurfacePort[];
 }
 
 export interface ListSurfacesRequest {
   pane?: string;
   workspace?: string;
   window?: string;
+  /** Enumerate each terminal Surface's listening ports. The host shells out per
+   *  pane (lsof / PowerShell), so callers opt in; remote sessions report none. */
+  includePorts?: boolean;
 }
 
 export interface ListSurfacesResponse {

@@ -17,11 +17,18 @@ const fixtureSurfaces = [
     ref: 'surface:1',
     paneRef: 'pane:1',
     type: 'terminal',
-    title: 'dor list-pane-surfaces',
+    title: 'pnpm dev',
     focused: true,
     index: 0,
     indexInPane: 0,
     selectedInPane: true,
+    view: 'paned',
+    cwd: '/Users/me/projects/site',
+    activity: 'running',
+    command: 'pnpm dev',
+    url: null,
+    ringing: false,
+    todo: false,
   },
   {
     id: '22222222-2222-4222-8222-222222222222',
@@ -33,8 +40,58 @@ const fixtureSurfaces = [
     index: 1,
     indexInPane: 0,
     selectedInPane: true,
+    view: 'paned',
+    cwd: '/Users/me/repo',
+    activity: 'finished',
+    exitCode: 1,
+    command: null,
+    url: null,
+    ringing: false,
+    todo: true,
+  },
+  {
+    id: '33333333-3333-4333-8333-333333333333',
+    ref: 'surface:3',
+    paneRef: 'pane:3',
+    type: 'agent-browser',
+    title: 'Dormouse',
+    focused: false,
+    index: 2,
+    indexInPane: 0,
+    selectedInPane: true,
+    view: 'paned',
+    cwd: null,
+    activity: null,
+    command: null,
+    url: 'http://localhost:5173/',
+    ringing: false,
+    todo: false,
+  },
+  {
+    id: '44444444-4444-4444-8444-444444444444',
+    ref: 'surface:4',
+    paneRef: 'pane:4',
+    type: 'terminal',
+    title: '<idle> server.js',
+    focused: false,
+    index: 3,
+    indexInPane: 0,
+    selectedInPane: true,
+    view: 'minimized',
+    cwd: '/Users/me/api',
+    activity: 'finished',
+    command: null,
+    url: null,
+    ringing: true,
+    todo: false,
   },
 ];
+
+// Listening ports the host would attach to a terminal Surface for `--ports`.
+const fixturePortsByRef = {
+  'surface:1': [{ family: 'IPv4', address: '0.0.0.0', port: 5173, pid: 4242, processName: 'node' }],
+  'surface:4': [{ family: 'IPv6', address: '::1', port: 8080, pid: 5151, processName: 'python' }],
+};
 
 function fixtureClient(surfacesFixture = fixtureSurfaces) {
   return {
@@ -43,13 +100,19 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       this.requests.push(request);
       const focusedPaneRef = surfacesFixture.find((surface) => surface.focused)?.paneRef;
       const paneTarget = request.pane === 'focused' ? focusedPaneRef : request.pane;
-      const surfaces = paneTarget
+      const matched = paneTarget
         ? surfacesFixture.filter((surface) => (
           surface.paneRef === paneTarget ||
           surface.ref === paneTarget ||
           surface.id === paneTarget
         ))
         : surfacesFixture;
+      // Mirror the host: attach listening ports to terminal Surfaces on request.
+      const surfaces = request.includePorts
+        ? matched.map((surface) => (surface.type === 'terminal'
+          ? { ...surface, ports: fixturePortsByRef[surface.ref] ?? [] }
+          : surface))
+        : matched;
       return {
         surfaces,
         windowRef: 'window:1',
@@ -610,81 +673,64 @@ test('agent-browser resolves the binary on PATH to an absolute binaryPath', asyn
   }
 });
 
-const identifyEnv = {
+// The caller terminal (surface:2) plus the host identity `dor list --json` folds
+// in. The control socket is private host plumbing (the CLI is the public API), so
+// the host block must not echo it — the snapshot proves the field is absent.
+const listEnv = {
   DORMOUSE_SURFACE_ID: '22222222-2222-4222-8222-222222222222',
   DORMOUSE_CLI_JS: '/opt/dormouse/dor-cli/dist/dor.js',
   DORMOUSE_NODE: '/opt/dormouse/node',
   DORMOUSE_HOST: 'vscode',
   DORMOUSE_HOST_WORKSPACE: '/Users/me/projects/site',
-  // The control socket is private host plumbing (the CLI is the public API),
-  // so identify must not echo it — the snapshot proves the field is absent.
   DORMOUSE_CONTROL_SOCKET: '/tmp/dormouse-control.sock',
 };
 
-test('identify json output', async () => {
+test('list text output', async () => {
   const client = fixtureClient();
-  const result = await runCli(['identify'], { client, env: identifyEnv });
-  assert.deepEqual(client.requests, [{}]);
-  await snapshot('identify', result);
+  const result = await runCli(['list'], { client, env: listEnv });
+  assert.deepEqual(client.requests, [{ includePorts: false }]);
+  await snapshot('list-text', result);
 });
 
-test('identify id-format both output', async () => {
+test('list json output', async () => {
   await snapshot(
-    'identify-id-format-both',
-    await runCli(['identify', '--id-format', 'both'], { client: fixtureClient(), env: identifyEnv }),
+    'list-json',
+    await runCli(['list', '--json'], { client: fixtureClient(), env: listEnv }),
   );
 });
 
-test('identify without env reports null caller and paths', async () => {
-  await snapshot('identify-no-env', await runCli(['identify'], { client: fixtureClient() }));
+test('list id-format both output', async () => {
+  await snapshot(
+    'list-id-format-both',
+    await runCli(['list', '--id-format', 'both'], { client: fixtureClient(), env: listEnv }),
+  );
 });
 
-test('identify reports a null caller when the calling surface is not visible', async () => {
-  const result = await runCli(['identify'], {
+test('list ports text output', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['list', '--ports'], { client, env: listEnv });
+  assert.deepEqual(client.requests, [{ includePorts: true }]);
+  await snapshot('list-ports-text', result);
+});
+
+test('list ports json output', async () => {
+  await snapshot(
+    'list-ports-json',
+    await runCli(['list', '--ports', '--json'], { client: fixtureClient(), env: listEnv }),
+  );
+});
+
+test('list reports a null caller when the calling surface is not in the list', async () => {
+  const result = await runCli(['list', '--json'], {
     client: fixtureClient(),
-    env: { ...identifyEnv, DORMOUSE_SURFACE_ID: '99999999-9999-4999-8999-999999999999' },
+    env: { ...listEnv, DORMOUSE_SURFACE_ID: '99999999-9999-4999-8999-999999999999' },
   });
   assert.equal(result.exitCode, 0);
-  assert.equal(JSON.parse(result.stdout).caller, null);
+  assert.equal(JSON.parse(result.stdout).caller_surface_ref, null);
 });
 
-test('list-panes text output', async () => {
-  await snapshot('list-panes-text', await runCli(['list-panes'], { client: fixtureClient() }));
-});
-
-test('list-panes id-format both output', async () => {
-  await snapshot(
-    'list-panes-id-format-both',
-    await runCli(['list-panes', '--id-format', 'both'], { client: fixtureClient() }),
-  );
-});
-
-test('list-panes json output', async () => {
-  await snapshot(
-    'list-panes-json',
-    await runCli(['list-panes', '--json'], { client: fixtureClient() }),
-  );
-});
-
-test('list-pane-surfaces pane-scoped output', async () => {
-  const client = fixtureClient();
-  const result = await runCli(['list-pane-surfaces'], { client });
-  assert.deepEqual(client.requests, [{ pane: 'focused' }]);
-  await snapshot('list-pane-surfaces-text', result);
-});
-
-test('list-pane-surfaces id-format both output', async () => {
-  await snapshot(
-    'list-pane-surfaces-id-format-both',
-    await runCli(['list-pane-surfaces', '--id-format', 'both'], { client: fixtureClient() }),
-  );
-});
-
-test('list-pane-surfaces json output', async () => {
-  await snapshot(
-    'list-pane-surfaces-json',
-    await runCli(['list-pane-surfaces', '--json'], { client: fixtureClient() }),
-  );
+test('list without env reports null caller and host paths', async () => {
+  await snapshot('list-no-env', await runCli(['list', '--json'], { client: fixtureClient() }));
 });
 
 test('unknown command output', async () => {
@@ -692,7 +738,7 @@ test('unknown command output', async () => {
 });
 
 test('missing control endpoint output', async () => {
-  await snapshot('missing-control-endpoint', await runCli(['list-panes']));
+  await snapshot('missing-control-endpoint', await runCli(['list']));
 });
 
 test('ensure missing command output', async () => {
