@@ -85,7 +85,9 @@ Dormouse has two theme layers:
 
 `applyTheme()` sets imported `--vscode-*` variables on `document.body`, fills
 missing consumed variables through the VSCode resolver, and adds either
-`vscode-light` or `vscode-dark` for consumers that need the theme type. In real
+`vscode-light` or `vscode-dark` for consumers that need the theme type. It also
+sets `body`'s `color-scheme` to that polarity, so native controls (form inputs,
+scrollbars, autofill) follow the theme rather than the OS preference. In real
 VSCode webviews, `installVscodeThemeVarResolver()` runs before React renders;
 it reads host-provided variables, materializes only missing Dormouse-consumed
 variables on `body.style`, and removes stale materialized variables when the

@@ -64,6 +64,13 @@ lib/src/remote/
   pocket-app/      the app shell: auth views + the mobile wall composition
 ```
 
+Both the auth views and the wall are themed by the shared VSCode `--color-*`
+system ([theme.md](./theme.md)), not a bespoke palette: `restorePocketTheme()`
+(`lib/src/remote/pocket-app/pocket-theme.ts`) applies the persisted-or-default
+theme to `<body>` in `main.tsx` before first paint, so the auth chrome — built
+from the three list pairs — is themed on the first frame. Kimbie Dark is the
+default, matching the homepage brand.
+
 The server (`server/`) stays the only dynamic code: accounts, relay, and
 static serving of the built Pocket bundle.
 
