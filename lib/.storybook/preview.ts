@@ -29,6 +29,12 @@ if (window?.navigator?.userAgent?.includes('Chromatic')) {
   // A blinking cursor is captured on-or-off depending on the frame; freeze it to a
   // stable solid block so the terminal contributes no non-determinism.
   cfg.terminal.cursorBlink = false;
+  // Snap pane splits/restores to their final geometry instead of tweening. A
+  // mid-tween split resizes panes through many transient widths, and xterm's DOM
+  // renderer can latch a frame where a pane is still narrow — freezing its last
+  // line clipped (`user@dormouse:~$` → `user@do`) even after the layout settles.
+  // Instant geometry removes that race at the source.
+  cfg.layout.animate = false;
 }
 
 // Collect all CSS variable names across all themes for cleanup
