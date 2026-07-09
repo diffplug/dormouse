@@ -261,8 +261,10 @@ output, JSON responses, default `ensure` titles, and the launched command alike.
 
 Every first-party command except the `dor agent-browser` / `dor ab` passthrough
 accepts `--json` and emits a stable object with the same handles as its text
-output. `dor ab` forwards arguments to the user's `agent-browser` CLI, so any
-JSON mode there belongs to that delegated command surface rather than to `dor`.
+output. Single-Surface responses always include both `surface_id` (the stable
+id) and `surface_ref` (the current short ref). `dor ab` forwards arguments to the
+user's `agent-browser` CLI, so any JSON mode there belongs to that delegated
+command surface rather than to `dor`.
 
 User-facing command docs live in the generated help snapshots. Implementation
 details live in the command files. When `stricli` cannot express a desired

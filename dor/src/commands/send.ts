@@ -233,7 +233,7 @@ function renderSendResponse(response: SendSurfaceResponse, json: boolean): strin
   if (json) {
     return renderJson({
       status: response.status,
-      ...(response.surfaceId ? { surface_id: response.surfaceId } : {}),
+      surface_id: response.surfaceId,
       surface_ref: response.surfaceRef,
       input_count: response.inputCount,
     });

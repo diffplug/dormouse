@@ -161,7 +161,7 @@ function renderEnsureResponse(response: EnsureSurfaceResponse, json: boolean): s
   if (json) {
     return renderJson({
       status: response.status,
-      ...(response.surfaceId ? { surface_id: response.surfaceId } : {}),
+      surface_id: response.surfaceId,
       surface_ref: response.surfaceRef,
       command: response.command,
       cwd: response.cwd,

@@ -113,7 +113,7 @@ function renderKillResponse(response: KillSurfaceResponse, json: boolean): strin
   if (json) {
     return renderJson({
       status: response.status,
-      ...(response.surfaceId ? { surface_id: response.surfaceId } : {}),
+      surface_id: response.surfaceId,
       surface_ref: response.surfaceRef,
     });
   }

@@ -99,7 +99,7 @@ function renderIframeResponse(response: IframeSurfaceResponse, json: boolean): s
   if (json) {
     return `${JSON.stringify({
       status: response.status,
-      ...(response.surfaceId ? { surface_id: response.surfaceId } : {}),
+      surface_id: response.surfaceId,
       surface_ref: response.surfaceRef,
       url: response.url,
       minimized: response.minimized,

@@ -84,7 +84,7 @@ export interface SplitSurfaceRequest {
 
 export interface SplitSurfaceResponse {
   status: 'created';
-  surfaceId?: string;
+  surfaceId: string;
   surfaceRef: string;
   direction: ResolvedSplitDirection;
   minimized: boolean;
@@ -104,7 +104,7 @@ export interface EnsureSurfaceRequest {
 
 export interface EnsureSurfaceResponse {
   status: 'created' | 'existing' | 'restarted';
-  surfaceId?: string;
+  surfaceId: string;
   surfaceRef: string;
   command: string;
   cwd: string;
@@ -119,7 +119,7 @@ export interface SendSurfaceRequest {
 
 export interface SendSurfaceResponse {
   status: 'sent';
-  surfaceId?: string;
+  surfaceId: string;
   surfaceRef: string;
   inputCount: number;
 }
@@ -132,7 +132,7 @@ export interface ReadSurfaceRequest {
 
 export interface ReadSurfaceResponse {
   workspaceRef: string;
-  surfaceId?: string;
+  surfaceId: string;
   surfaceRef: string;
   text: string;
 }
@@ -148,7 +148,7 @@ export interface KillSurfaceRequest {
 
 export interface KillSurfaceResponse {
   status: 'killed';
-  surfaceId?: string;
+  surfaceId: string;
   surfaceRef: string;
 }
 
@@ -160,7 +160,7 @@ export interface IframeSurfaceRequest {
 
 export interface IframeSurfaceResponse {
   status: 'created' | 'replaced';
-  surfaceId?: string;
+  surfaceId: string;
   surfaceRef: string;
   url: string;
   minimized: boolean;
@@ -180,7 +180,7 @@ export interface AgentBrowserSurfaceRequest {
 
 export interface AgentBrowserSurfaceResponse {
   status: 'created' | 'existing' | 'replaced';
-  surfaceId?: string;
+  surfaceId: string;
   surfaceRef: string;
   session: string;
   minimized: boolean;

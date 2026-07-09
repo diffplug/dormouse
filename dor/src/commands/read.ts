@@ -79,7 +79,7 @@ function renderReadResponse(response: ReadSurfaceResponse, json: boolean): strin
   if (json) {
     return `${JSON.stringify({
       workspace_ref: response.workspaceRef,
-      ...(response.surfaceId ? { surface_id: response.surfaceId } : {}),
+      surface_id: response.surfaceId,
       surface_ref: response.surfaceRef,
       text: response.text,
     }, null, 2)}\n`;

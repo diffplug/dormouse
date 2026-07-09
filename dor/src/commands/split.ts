@@ -164,7 +164,7 @@ function renderSplitResponse(response: SplitSurfaceResponse, json: boolean): str
   if (json) {
     return renderJson({
       status: response.status,
-      ...(response.surfaceId ? { surface_id: response.surfaceId } : {}),
+      surface_id: response.surfaceId,
       surface_ref: response.surfaceRef,
       direction: response.direction,
       minimized: response.minimized,
