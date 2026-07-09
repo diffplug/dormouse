@@ -404,8 +404,15 @@ their session is held externally by `agent-browser`.
   until that peer signals completion by ringing (the `BEL` / `OSC 9` / `9;4` /
   `99` / `777` events that already drive the `ringing` flag in `dor list`), so the
   caller stops polling `dor list --json` in a loop. A Surface already ringing when
-  `await` is called returns immediately; `await` acknowledges the alert track it
-  resolved on, so a later `await` blocks on the next ring and the UI bell clears.
+  `await` is called returns immediately. Resolving is exactly a human attending the
+  ringing Session (`docs/specs/alert.md` → Clearing And TODO): it clears the active
+  ring and sets `todo = true`, so the bell goes quiet and the Surface now carries a
+  TODO the caller owns. Writing back with `dor send surface:5 --text "…" --key
+  enter` then clears that TODO just as a human's passthrough `Enter` does — `dor`
+  input is a first-class, human-equivalent interaction in the attention/TODO
+  lifecycle, so the send path must drive the same clear. A fresh ring re-arms the
+  cycle, so a later `await` blocks again. Only terminal Surfaces ring, so `await`
+  targets terminals like `read` / `send`.
   It reuses `dor read`'s `--lines` / `--scrollback` / `--json` output shape, needs
   an extended request timeout with a `--timeout <seconds>` ceiling that exits
   non-zero on expiry, and fails cleanly if the awaited Surface is killed rather
