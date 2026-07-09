@@ -22,7 +22,7 @@ The unit of *layout* is a **Pane**; the unit of *content* is a **Surface**.
 | **Pane** | A slot in the tiling layout (one Lath leaf). Holds one Surface. | `lib/src/components/Wall.tsx`; the engine per `docs/specs/tiling-engine.md` |
 | **Surface** | The content in a Pane: a **terminal** (a Session) or a **browser** Surface. | `Wall.tsx`; browser surfaces per `docs/specs/dor-browser.md` |
 
-Today every Pane holds exactly one Surface, but the model reserves multiple Surfaces per Pane (a future in-pane surface strip) — which is why a Surface ref (`surface:N`) is distinct from a Pane ref (`pane:N`).
+Today every Pane holds exactly one Surface, but the model reserves multiple Surfaces per Pane (a future in-pane surface strip). The `dor` CLI therefore exposes Surface refs (`surface:N`) as content handles and keeps Pane refs reserved for future layout-only commands rather than using them for `read` / `send` / `kill` targeting.
 
 **Surface kinds** — the `type` a `dor` handle reports, derived from the Pane's params, never stored on the id:
 
@@ -31,16 +31,18 @@ Today every Pane holds exactly one Surface, but the model reserves multiple Surf
 | `terminal` | — | a PTY + xterm.js instance — i.e. a **Session** |
 | `browser` | `iframe`, `ab-screencast`, `ab-popout` | an iframe proxy grant, or an agent-browser daemon session (`docs/specs/dor-browser.md`) |
 
-Three related enums name a Surface's kind at different layers. This table is the canonical mapping:
+The persisted surface kind, browser render mode, and `dor` row fields map as
+follows:
 
-| Surface | Persisted `surfaceType` (`docs/specs/transport.md`) | `renderMode` (`docs/specs/dor-browser.md`) | CLI `SurfaceType` (`dor`, derived) |
-|---|---|---|---|
-| terminal Session | `'terminal'` (the default, omitted from the row) | — | `terminal` |
-| browser, iframe renderer | `'browser'` | `iframe` | `iframe` |
-| browser, screencast renderer | `'browser'` | `ab-screencast` | `agent-browser` |
-| browser, popped-out renderer | `'browser'` | `ab-popout` | `agent-browser` |
+| Surface | Persisted `surfaceType` (`docs/specs/transport.md`) | `renderMode` (`docs/specs/dor-browser.md`) | CLI `kind` | CLI `render_mode` |
+|---|---|---|---|---|
+| terminal Session | `'terminal'` (the default, omitted from the row) | — | `terminal` | `null` |
+| browser, iframe renderer | `'browser'` | `iframe` | `browser` | `iframe` |
+| browser, screencast renderer | `'browser'` | `ab-screencast` | `browser` | `ab-screencast` |
+| browser, popped-out renderer | `'browser'` | `ab-popout` | `browser` | `ab-popout` |
 
-For browser Surfaces `renderMode` is canonical; the CLI column is derived from it for `dor` output and is never stored.
+For browser Surfaces `renderMode` is canonical; the CLI `render_mode` field is
+derived from it for `dor` output and is never stored.
 
 A **Session** runs the full six-axis model below. A **browser Surface** participates only where a web view meaningfully can:
 
@@ -253,7 +255,7 @@ Remote-only vocabulary (**Viewer**, the wire-level `DirectoryEntry` projection) 
 - Event kind strings match the verb: `'minimizeChange'`, not `'detachChange'`.
 - A persisted type is `Persisted<Shape>` where `<Shape>` is the glossary noun (`PersistedPane`, `PersistedDoor`, `PersistedWorkspace`, `PersistedWindow`).
 - A handle type is `<Layer>State` (`ActivityState`, not `SessionUiState`).
-- Surface kinds are lowercase strings; the kind-enum mapping table in [Panes and Surfaces](#panes-and-surfaces) is canonical for how the persisted `surfaceType`, `renderMode`, and CLI `SurfaceType` relate.
+- Surface kinds are lowercase strings; the kind-enum mapping table in [Panes and Surfaces](#panes-and-surfaces) is canonical for how the persisted `surfaceType`, `renderMode`, and CLI `kind` / `render_mode` relate.
 - Container names are `PascalCase` nouns (`Workspace`, `Window`); their ids are `WorkspaceId` and `WindowId`. Container verbs keep the container as a suffix (`createWorkspace`, `switchWorkspace`) to stay distinct from the layer-agnostic Session `rename`.
 
 ## Future

@@ -9,6 +9,7 @@ import type {
   ParseResult,
 } from './types.js';
 import {
+  renderJson,
   requireControlClient,
   stringParser,
   writeStdout,
@@ -17,7 +18,7 @@ import {
 interface KillFlags {
   readonly confirmDangerously?: boolean;
   readonly confirmIfRead?: string;
-  readonly surface: string;
+  readonly json?: boolean;
 }
 
 export const killCommand: Command = {
@@ -26,42 +27,49 @@ export const killCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        '  dor kill [--confirm-dangerously] [--confirm-if-read text] (--surface id|ref|index)',
-        '  dor kill --surface id|ref|index [--confirm-if-read text|--confirm-dangerously]',
-      ],
-    },
-    {
-      scope: 'command-usage',
-      findReplace: [
-        '  dor kill [--confirm-dangerously] [--confirm-if-read text] (--surface id|ref|index)',
-        '  dor kill --surface id|ref|index [--confirm-if-read text|--confirm-dangerously]',
+        '  dor kill [--confirm-dangerously] [--confirm-if-read text] [--json]<TO-EOL>',
+        '  dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json]\n',
       ],
     },
   ],
-  command: buildCommand<KillFlags, [], DorCommandContext>({
+  command: buildCommand<KillFlags, [string], DorCommandContext>({
     docs: {
-      brief: 'Kill a terminal surface.',
-      fullDescription: `Kills a terminal surface. One confirmation mode is required.
+      brief: 'Kill a surface.',
+      customUsage: ['<surface> [--confirm-if-read text|--confirm-dangerously] [--json]'],
+      fullDescription: `Kills a surface. One confirmation mode is required.
 
---confirm-if-read kills only if dor read --surface <surface> would return visible text containing the provided text. The text must contain at least 4 non-whitespace characters.
+--confirm-if-read kills only if dor read <surface> would return visible text containing the provided text. The text must contain at least 4 non-whitespace characters.
 
 --confirm-dangerously kills without further confirmation. Use only when automation has already validated the target.
 
 Text output:
-  killed surface:3`,
+  killed surface:3
+
+JSON output:
+  {
+    "status": "killed",
+    "surface_id": "...",
+    "surface_ref": "surface:3"
+  }`,
     },
     parameters: {
       flags: {
         confirmDangerously: { kind: 'boolean', brief: 'Kill without further confirmation.', optional: true, withNegated: false },
         confirmIfRead: { kind: 'parsed', parse: stringParser, brief: 'Kill only if dor read contains this text.', optional: true, placeholder: 'text' },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to kill.', placeholder: 'id|ref|index' },
+        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+      },
+      positional: {
+        kind: 'tuple',
+        parameters: [
+          { parse: stringParser, brief: 'Surface to kill.', placeholder: 'surface' },
+        ],
       },
     },
     func: runKillCommand,
   }),
 };
 
-async function runKillCommand(this: DorCommandContext, flags: KillFlags): Promise<void | Error> {
+async function runKillCommand(this: DorCommandContext, flags: KillFlags, surface: string): Promise<void | Error> {
   const confirmation = parseConfirmation(flags);
   if (!confirmation.ok) return new Error(confirmation.message);
 
@@ -71,9 +79,9 @@ async function runKillCommand(this: DorCommandContext, flags: KillFlags): Promis
   try {
     const response = await client.killSurface({
       confirmation: confirmation.value,
-      surface: flags.surface,
+      surface,
     });
-    writeStdout(this, renderKillResponse(response));
+    writeStdout(this, renderKillResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
     return new Error(error instanceof Error ? error.message : String(error));
@@ -99,6 +107,14 @@ function parseConfirmation(flags: KillFlags): ParseResult<KillSurfaceConfirmatio
   return { ok: true, value: { mode: 'if-read', text } };
 }
 
-function renderKillResponse(response: KillSurfaceResponse): string {
+function renderKillResponse(response: KillSurfaceResponse, json: boolean): string {
+  if (json) {
+    return renderJson({
+      status: response.status,
+      surface_id: response.surfaceId,
+      surface_ref: response.surfaceRef,
+    });
+  }
+
   return `${response.status} ${response.surfaceRef}\n`;
 }

@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: when combining --text and --key, put --text before --key; use --sequence for arbitrary ordering

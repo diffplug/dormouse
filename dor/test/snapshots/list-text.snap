@@ -1,8 +1,8 @@
 exitCode: 0
 stdout:
-* surface:1  terminal       paned      /Users/me/projects/site  pnpm dev
-  surface:2  terminal       paned      /Users/me/repo           repo "watch"  (you)  [todo]
-  surface:3  agent-browser  paned      http://localhost:5173/   Dormouse
-  surface:4  terminal       minimized  /Users/me/api            <idle> server.js  [ringing]
+* surface:1  terminal  -              paned      /Users/me/projects/site  pnpm dev
+  surface:2  terminal  -              paned      /Users/me/repo           repo "watch"  (you)  [todo]
+  surface:3  browser   ab-screencast  paned      http://localhost:5173/   Dormouse
+  surface:4  terminal  -              minimized  /Users/me/api            <idle> server.js  [ringing]
 
 stderr:

@@ -4,18 +4,18 @@ Invocation: `dor split --help`
 
 ```text
 USAGE
-  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref|index] [-- <command>...]
+  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref] [-- <command>...]
   dor split --help
 
-If no direction is provided, --auto is used. --auto chooses right when the target surface is wide and down when it is narrow.
+If no direction is provided, --auto is used. --auto chooses right when the target surface is wide, down when it is narrow, and right when the target is minimized.
 
 Use -- followed by a command to run an initial command in the new terminal surface. Bare split focuses the new surface so you can start typing in it; split with an initial command runs it in the background and leaves focus on the calling surface.
 
 --minimize creates the surface and immediately sends it to the minimized area.
 
---surface selects the surface to split. If omitted, Dormouse uses the caller surface when available, then the focused surface.
+--surface selects the surface to split. If the target is minimized, the new surface is created minimized too and inserted immediately to the right of the target door. If omitted, Dormouse uses the caller surface when available, then the focused surface.
 
-split does not know about non-terminal surface types. Compose future content commands through the initial command:
+split creates terminal Surfaces. Compose browser content commands through the initial command:
 
   dor split --right -- dor iframe https://example.com
   dor split --auto -- dor agent-browser open https://example.com

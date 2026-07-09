@@ -80,6 +80,10 @@ async function flush(): Promise<void> {
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 }
 
+async function flushFrame(): Promise<void> {
+  await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(undefined))); });
+}
+
 describe('Wall on the Lath engine', () => {
   it('renders a pane through LathHost, splits via wallActions, kills, and persists the Lath layout on save', async () => {
     await act(async () => {
@@ -104,7 +108,7 @@ describe('Wall on the Lath engine', () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', {
         detail: {
           method: SURFACE_CONTROL_METHODS.kill,
-          params: { surface: '2', confirmation: { mode: 'dangerously' } },
+          params: { surface: 'surface:2', confirmation: { mode: 'dangerously' } },
           respond: () => {},
         },
       }));
@@ -129,6 +133,229 @@ describe('Wall on the Lath engine', () => {
     expect(Object.keys(saved!.lathLayout!.leafMeta ?? {})).toContain('pane-a');
   });
 
+  it('retires a killed surface ref instead of reusing its number, and persists the counter', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    // Split → the new pane gets surface:2.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true }));
+    });
+    await flush();
+
+    // Kill surface:2 → its ref is retired, not recycled.
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.kill,
+          params: { surface: 'surface:2', confirmation: { mode: 'dangerously' } },
+          respond: () => {},
+        },
+      }));
+    });
+    await flush();
+
+    // Split again → the fresh pane must be surface:3, never a reused surface:2.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true }));
+    });
+    await flush();
+
+    let listed: { result?: { surfaces: Array<{ ref: string }> } } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.list,
+          params: {},
+          respond: (r: { result?: { surfaces: Array<{ ref: string }> } }) => { listed = r; },
+        },
+      }));
+    });
+    await flush();
+    expect(listed?.result?.surfaces.map((s) => s.ref)).toEqual(['surface:1', 'surface:3']);
+
+    // The save drops the killed surface:2 entry but keeps the counter past it, so a
+    // later restore still can't hand surface:2 to a different Surface.
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    await flush();
+    await flush();
+
+    const saved = fake.getState() as { surfaceRefs?: Record<string, string>; surfaceRefsNext?: number } | null;
+    expect(Object.values(saved!.surfaceRefs ?? {})).toEqual(['surface:1', 'surface:3']);
+    expect(saved!.surfaceRefsNext).toBe(4);
+  });
+
+  it('preserves the surface ref when an iframe replaces an untouched terminal', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'pane-a');
+
+    try {
+      let response: {
+        ok: boolean;
+        error?: string;
+        result?: { status: string; surfaceId: string; surfaceRef: string };
+      } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.iframe,
+            params: { url: 'http://localhost:5173/' },
+            respond: (r: typeof response) => { response = r; },
+          },
+        }));
+      });
+      await flush();
+
+      expect(response?.ok).toBe(true);
+      expect(response?.error).toBeUndefined();
+      expect(response?.result?.status).toBe('replaced');
+      expect(response?.result?.surfaceRef).toBe('surface:1');
+      const newId = response!.result!.surfaceId;
+      expect(newId).not.toBe('pane-a');
+
+      let listed: { result?: { surfaces: Array<{ id: string; ref: string }> } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.list,
+            params: {},
+            respond: (r: typeof listed) => { listed = r; },
+          },
+        }));
+      });
+      await flush();
+      expect(listed?.result?.surfaces.map((surface) => [surface.id, surface.ref])).toEqual([[newId, 'surface:1']]);
+
+      await act(async () => {
+        window.dispatchEvent(new Event('pagehide'));
+      });
+      await flush();
+      await flush();
+
+      const saved = fake.getState() as { surfaceRefs?: Record<string, string>; surfaceRefsNext?: number } | null;
+      expect(saved!.surfaceRefs).toEqual({ [newId]: 'surface:1' });
+      expect(saved!.surfaceRefsNext).toBe(2);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('retires the old ref when shell selection replaces an untouched pane', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'pane-a');
+
+    try {
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:new-terminal', {
+          detail: {
+            shell: '/bin/zsh',
+            name: 'zsh',
+            replaceUntouched: true,
+          },
+        }));
+      });
+      await flush();
+
+      let listed: { result?: { surfaces: Array<{ id: string; ref: string }> } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.list,
+            params: {},
+            respond: (r: typeof listed) => { listed = r; },
+          },
+        }));
+      });
+      await flush();
+
+      expect(listed?.result?.surfaces).toHaveLength(1);
+      const replacement = listed!.result!.surfaces[0];
+      expect(replacement.id).not.toBe('pane-a');
+      expect(replacement.ref).toBe('surface:2');
+
+      await act(async () => {
+        window.dispatchEvent(new Event('pagehide'));
+      });
+      await flush();
+      await flush();
+
+      const saved = fake.getState() as { surfaceRefs?: Record<string, string>; surfaceRefsNext?: number } | null;
+      expect(saved!.surfaceRefs).toEqual({ [replacement.id]: 'surface:2' });
+      expect(saved!.surfaceRefsNext).toBe(3);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('retires the old ref when shell selection replaces an untouched selected door', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'pane-a');
+
+    try {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true }));
+      });
+      await flush();
+      expect(container.querySelector('[data-door-id="pane-a"]')).not.toBeNull();
+
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:new-terminal', {
+          detail: {
+            shell: '/bin/zsh',
+            name: 'zsh',
+            replaceUntouched: true,
+          },
+        }));
+      });
+      await flush();
+      await flushFrame();
+      await flush();
+
+      let listed: { result?: { surfaces: Array<{ id: string; ref: string }> } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.list,
+            params: {},
+            respond: (r: typeof listed) => { listed = r; },
+          },
+        }));
+      });
+      await flush();
+
+      expect(listed?.result?.surfaces).toHaveLength(2);
+      expect(listed!.result!.surfaces.map((surface) => surface.ref)).toEqual(['surface:2', 'surface:3']);
+      expect(listed!.result!.surfaces.some((surface) => surface.id === 'pane-a')).toBe(false);
+      expect(container.querySelector('[data-door-id="pane-a"]')).toBeNull();
+
+      await act(async () => {
+        window.dispatchEvent(new Event('pagehide'));
+      });
+      await flush();
+      await flush();
+
+      const saved = fake.getState() as { surfaceRefs?: Record<string, string>; surfaceRefsNext?: number } | null;
+      expect(saved!.surfaceRefs).not.toHaveProperty('pane-a');
+      expect(Object.values(saved!.surfaceRefs ?? {})).toEqual(['surface:2', 'surface:3']);
+      expect(saved!.surfaceRefsNext).toBe(4);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
   it('ignores zoom keyboard requests while a door is selected', async () => {
     const onEvent = vi.fn();
     await act(async () => {
@@ -149,6 +376,134 @@ describe('Wall on the Lath engine', () => {
     await flush();
 
     expect(onEvent).not.toHaveBeenCalledWith({ type: 'zoomChange', zoomed: true });
+  });
+
+  it('dor kill can target a minimized surface ref', async () => {
+    let response: { ok: boolean; error?: string } | undefined;
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true }));
+    });
+    await flush();
+    expect(container.querySelector('[data-door-id="pane-a"]')).not.toBeNull();
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.kill,
+          params: { surface: 'surface:1', confirmation: { mode: 'dangerously' } },
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+
+    expect(response?.ok).toBe(true);
+    expect(response?.error).toBeUndefined();
+    expect(container.querySelector('[data-door-id="pane-a"]')).toBeNull();
+  });
+
+  it('dor split can target a minimized surface and creates a sibling door', async () => {
+    let response: {
+      ok: boolean;
+      error?: string;
+      result?: { surfaceId: string; surfaceRef: string; direction: string; minimized: boolean };
+    } | undefined;
+    const getTerminalSpy = vi
+      .spyOn(terminalRegistry, 'getOrCreateTerminal')
+      .mockImplementation(() => ({}) as ReturnType<typeof terminalRegistry.getOrCreateTerminal>);
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    try {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true }));
+      });
+      await flush();
+      expect(Array.from(container.querySelectorAll('[data-door-id]')).map((el) => el.getAttribute('data-door-id'))).toEqual(['pane-a']);
+      expect(leafCount()).toBe(1);
+
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.split,
+            params: { surface: 'surface:1' },
+            respond: (r: typeof response) => { response = r; },
+          },
+        }));
+      });
+      await flush();
+
+      expect(response?.ok).toBe(true);
+      expect(response?.error).toBeUndefined();
+      expect(response?.result?.surfaceRef).toBe('surface:3');
+      expect(response?.result?.direction).toBe('right');
+      expect(response?.result?.minimized).toBe(true);
+      expect(getTerminalSpy).toHaveBeenCalledWith(response!.result!.surfaceId);
+      expect(leafCount()).toBe(1);
+      await act(async () => {
+        window.dispatchEvent(new Event('pagehide'));
+      });
+      await flush();
+      await flush();
+      const saved = fake.getState() as { doors?: Array<{ id: string }> } | null;
+      expect(saved?.doors?.map((door) => door.id)).toEqual(['pane-a', response!.result!.surfaceId]);
+    } finally {
+      getTerminalSpy.mockRestore();
+    }
+  });
+
+  it('dor action targets reject bare numeric refs', async () => {
+    let response: { ok: boolean; error?: string } | undefined;
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.kill,
+          params: { surface: '1', confirmation: { mode: 'dangerously' } },
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+
+    expect(response?.ok).toBe(false);
+    expect(response?.error).toContain("surface '1' was not found");
+    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
+  });
+
+  it('dor action targets can resolve surface:self from the caller id', async () => {
+    let response: { ok: boolean; error?: string } | undefined;
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.kill,
+          surfaceId: 'pane-a',
+          params: { surface: 'surface:self', confirmation: { mode: 'dangerously' } },
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+
+    expect(response?.ok).toBe(true);
+    expect(response?.error).toBeUndefined();
+    expect(container.querySelector('[data-lath-leaf="pane-a"]')).toBeNull();
   });
 
   it('keeps visible terminal sessions mounted until the kill fade completes', async () => {
@@ -174,7 +529,7 @@ describe('Wall on the Lath engine', () => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', {
           detail: {
             method: SURFACE_CONTROL_METHODS.kill,
-            params: { surface: '1', confirmation: { mode: 'dangerously' } },
+            params: { surface: 'surface:1', confirmation: { mode: 'dangerously' } },
             respond: () => {},
           },
         }));

@@ -2,8 +2,8 @@
 
 > See `docs/specs/glossary.md` for canonical Surface / Session / Pane vocabulary.
 > A **Surface** (the durable occupant of a Pane — a terminal Session or a browser
-> surface) is `dor`'s user-facing CLI handle. Pane remains layout vocabulary in the
-> implementation and in the `pane:N` refs / `pane_ref` fields `dor` still exposes.
+> surface) is `dor`'s user-facing CLI handle. Pane remains layout vocabulary;
+> public `dor` targeting addresses Surfaces, not layout positions.
 
 Dormouse bundles a `dor` CLI into every terminal it launches. The CLI is the
 public API; any socket used underneath it is private host plumbing.
@@ -207,23 +207,49 @@ to a Workspace. The handle model therefore reserves `workspace:<n|name>` and
 Surface`. Each visible Pane has one selected Surface; a Surface is a terminal (a
 Session) or a browser surface — the `iframe` / agent-browser renderers of `dor`'s
 unified `browser` surface (`docs/specs/dor-browser.md`). User-facing `dor` commands
-expose Surface handles; Pane remains layout vocabulary, surfaced as `pane:N` refs
-and the `pane_ref` field on `dor list` rows.
+expose Surface handles; Pane remains layout vocabulary and is not part of the
+public target grammar.
 
 Invariants:
 
-- Stable ids and short refs are accepted where a surface/pane target is
-  accepted.
-- Surface targets also accept `title:<exact display title>`. If exactly one
-  visible surface has that title, it is selected. If multiple visible surfaces
-  match, the command fails and lists the matching surface refs.
-- Short refs use `surface:1`, `pane:2`.
-- List output defaults to refs; commands that list handles accept
-  `--id-format refs|uuids|both`.
+- Stable ids and stable short refs are accepted where a Surface target is
+  accepted. A target may be `surface:N`, a stable Surface id, or
+  `surface:<stable-id>`. `surface:focused` selects the focused Surface in the
+  current Workspace; `surface:self` selects the invoking Surface from
+  `DORMOUSE_SURFACE_ID`.
+- Short refs use `surface:1`, `surface:2`, ... and are Workspace-scoped stable
+  refs, not layout/list positions. Each Workspace starts at `surface:1` and
+  assigns the next number when a Surface is created/restored. The live id→ref map
+  and a separate monotonic counter both persist in the session snapshot
+  (`PersistedSession.surfaceRefs` / `surfaceRefsNext`); the counter — not the max
+  of the surviving map — is the source of truth for the next number, so a killed
+  Surface's entry is dropped from the map immediately without its number ever
+  being reused. Reordering panes, minimizing, reattaching, zooming, focusing,
+  replacing an untouched terminal with a browser Surface, and browser render-mode
+  swaps do not change the ref. Killing a Surface retires its ref; a later target
+  that names it fails instead of silently retargeting.
+- Surface targets also accept `title:<exact display title>`, primarily for human
+  recovery; automation should prefer refs/ids from command responses or
+  `dor list --json`. Action commands (`read`, `send`, `kill`) resolve against
+  listed Surfaces, including minimized ones. For `split` and `ensure --surface`,
+  the reference target also resolves against the listed Surfaces so minimized
+  peers participate in ambiguity checks; when the resolved reference is
+  minimized, the new terminal is created minimized too and its Door is inserted
+  immediately to the right of the reference Door. Browser placement commands
+  (`iframe`, browser creation) resolve against visible Surfaces. If multiple
+  Surfaces in the relevant scope match, the command fails and lists the matching
+  surface refs.
+- Bare numeric targets and `pane:N` are not Surface handles. Pane refs are
+  reserved for future layout-only commands if those commands ever need them.
+- Text list output defaults to refs; commands that list handles accept
+  `--id-format refs|ids|both` (`uuids` is accepted as a compatibility alias for
+  `ids`). JSON list output always includes both refs and stable ids.
 - Reserved: `workspace:<n>` (and `workspace:<name>` when exactly one Workspace
   matches) and `window:<n>` select a container. The ref grammar is reserved now
-  so surface/pane refs never collide with it; the flag and commands that consume
-  it are staged — see [Future](#future).
+  so Surface refs never collide with it; the flag and commands that consume it
+  are staged — see [Future](#future). Stable Surface ids are globally unique, but
+  cross-Workspace id routing is staged with Workspace-aware listing/targeting;
+  the current webview control handler resolves ids in the mounted Workspace.
 
 ## Current Implemented Commands
 
@@ -235,10 +261,15 @@ activity snapshots. It returns `workspace:1` and `window:1`: it reports the
 single active Workspace (Workspace-aware tagging is staged; see
 [Future](#future)). Two builders back this on the host
 (`lib/src/components/Wall.tsx`): `buildDorSurfaces` is the visible-pane
-projection used for `dor` **targeting** (split / kill / send / read), while
-`buildDorSurfaceList` adds the minimized Surfaces for `dor list` — so listing
-sees minimized Surfaces but targeting semantics are unchanged. Minimized
-Surfaces are numbered after the visible panes (matching `surfaceRefForId`).
+projection used for `dor` commands that need geometry (split / browser-surface
+placement), while `buildDorSurfaceList` adds the minimized Surfaces for
+`dor list`, direct terminal operations (`send`, `read`, `kill`), and
+`split`/`ensure --surface` target disambiguation. Visible split references add a
+new pane in Lath; minimized split references add a sibling Door in the
+baseboard. `dor list` rows are sorted by the Workspace-stable `surface:N` ref;
+the ref registry is owned by `Wall` and persisted with the session, independent
+of Lath layout order. Minimized refs remain valid targets for operations that do
+not need a visible reference pane.
 
 When the request sets `includePorts` (`dor list --ports`), the host calls
 `PlatformAdapter.getOpenPorts(id)` (`docs/specs/dor-browser.md` → Dev-Server
@@ -255,6 +286,22 @@ target shell, picks a quoting style with
 [`shellCommandKind` / `buildShellCommandForKind`](../../dor/src/commands/shell-quote.ts)
 (`cmd` / `posix` / `powershell`), and renders a single command string used for
 output, JSON responses, default `ensure` titles, and the launched command alike.
+
+Every first-party command except the `dor agent-browser` / `dor ab` passthrough
+accepts `--json` and emits a stable object with the same handles as its text
+output. Single-Surface responses always include both `surface_id` (the stable
+id) and `surface_ref` (the Workspace-stable short ref). `dor ab` forwards
+arguments to the user's `agent-browser` CLI, so any JSON mode there belongs to
+that delegated command surface rather than to `dor`.
+
+Commands that operate on one existing Surface take the target as a required
+positional handle: `dor read <surface>`, `dor send <surface> ...`, and
+`dor kill <surface> ...`. Commands that create/place a Surface keep `--surface`
+as an optional visible reference Surface (`split`, `ensure`, `iframe`, and
+browser creation). `dor send <surface>` accepts exactly one input mode:
+`--text`/`--key`, `--stdin`, or `--sequence`. `--text` and `--key` may be
+combined only in that order, duplicate input flags are rejected, and
+`--sequence` is the explicit form for arbitrary ordering or multiple events.
 
 User-facing command docs live in the generated help snapshots. Implementation
 details live in the command files. When `stricli` cannot express a desired
@@ -286,26 +333,104 @@ from `command-detail`.
   unified `browser` surface, see [dor-browser.md](dor-browser.md)
 - `dor list` — the unified Surface listing. Lists every Surface in the current
   Workspace (terminals and browser Surfaces, including minimized ones), one row
-  per Surface in `surface:N` order. Text marks the focused Surface with `*` and
-  the calling terminal with `(you)`, and shows type, `view`, location (cwd for
-  terminals, URL for browser Surfaces), title, and `[ringing]` / `[todo]` tags.
-  `--ports` adds each terminal's listening ports. `--json` additionally emits the
-  identity dump `dor identify` used to print — top-level `caller_surface_ref`
-  (matched locally against `DORMOUSE_SURFACE_ID`, `null` when the caller is not
-  in the list), `focused_surface_ref`, and a `host` block (`DORMOUSE_HOST` /
-  `DORMOUSE_HOST_WORKSPACE` / runtime paths). It deliberately does not expose the
-  control socket: the CLI is the public API and the socket is private plumbing.
+  per Surface in stable `surface:N` order. Text marks the focused Surface with
+  `*` and the calling terminal with `(you)`, and shows kind, render mode (`-` for
+  terminals), `view`, location (cwd for terminals, URL for browser Surfaces),
+  title, and `[ringing]` / `[todo]` tags.
+  Filters are ANDed: `--kind terminal|browser`, `--view
+  paned|zoomed|minimized`, exact `--command <text>`, `--cwd <path>` (resolved
+  like `dor ensure --cwd`, relative to the invoking shell's `PWD` when
+  available), and `--port <number>`. `--ports` adds every terminal's listening
+  ports. `--port` is distinct from `--ports`: it filters to terminal Surfaces
+  that own the port (browser Surfaces never match, even when showing that URL),
+  implies the same opt-in port scan, and includes port details in JSON / text
+  output. `--json` always includes both stable ids and stable refs, and
+  additionally emits the identity dump `dor identify` used to print — top-level
+  `caller_surface_ref` / `caller_surface_id` (matched locally against
+  `DORMOUSE_SURFACE_ID`, `null` when the caller is not in the list),
+  `focused_surface_ref` / `focused_surface_id`, and a `host` block
+  (`DORMOUSE_HOST` / `DORMOUSE_HOST_WORKSPACE` / runtime paths). It deliberately
+  does not expose the control socket: the CLI is the public API and the socket is
+  private plumbing.
   Replaces the retired cmux-shaped `list-panes` / `list-pane-surfaces` and the
-  `identify` command. Filtering by type/state and workspace scope are staged (see
-  [Future](#future)). [impl](../../dor/src/commands/list.ts)
+  `identify` command. Filtering by activity/state and workspace scope are staged
+  (see [Future](#future)). [impl](../../dor/src/commands/list.ts)
   [docs](../../dor/test/snapshots/help/list.md)
+
+## Agent Workflows
+
+A handful of end-to-end agent scenarios are the CLI's product-level acceptance
+tests: each one checks that the commands *compose* into a real automation, not
+just that they work in isolation — orchestration, Surface targeting, browser
+handoff, cleanup, and JSON output holding together across a whole task. They all
+reduce to one shape — **discover the target Surface with `dor list` (filtered),
+then act on it with a handle-taking command** — which is why targeting lives in
+`dor list` while `read` / `send` / `kill` stay handle-taking instead of each
+growing its own match syntax. A bare `dor kill "npm dev"` is intentionally
+unsupported: the two-step composition is the intended shape.
+
+Identity follows the Surface, not a user-supplied key. A terminal Surface is
+named by its Workspace-stable `surface:N` ref, or rediscovered after layout churn
+by `--command` / `--cwd` / `--port`; `dor ensure`'s command+cwd match is an
+implicit key that also lets an agent adopt a command the user started by hand.
+Only browser Surfaces carry an explicit join key (`dor ab --key <name>`), because
+their session is held externally by `agent-browser`.
+
+| Workflow | How the shipped CLI does it |
+| --- | --- |
+| Share a dev server | `dor ensure -- npm dev` reuses the command already live in the same resolved cwd (`--restart` re-runs it in place, preserving layout and minimized/visible state). `dor list --command "npm dev" --cwd . --ports --json` returns the Surface with its ports, and the agent opens `dor ab open http://localhost:<port>`. Passing the terminal handle straight to the browser command (`dor ab open surface:N`) is the one unshipped ergonomic — see [Future](#future). |
+| Launch a sub-agent | `dor split -- codex` returns `surface:N`; drive it with `dor send surface:N --text "/review" --key enter` (or `--sequence` for arbitrary ordering), then read it back with `dor read surface:N`. |
+| Wait on a sub-agent | `dor split -- otheragent` returns `surface:5`; the caller watches `dor list --json` for that Surface's `ringing` flag and calls `dor read surface:5` once the peer rings the Dormouse bell to signal it is done. Blocking on the bell directly with `dor await surface:5` (which prints the screen the moment it rings) is staged — see [Future](#future). |
+| Client / server browser testing | `dor ab --key client open <client-url>` and `dor ab --key server open <server-url>` create or reuse two independent browser Surfaces. |
+| Multi-worktree, same command | Two worktrees each run `dor ensure -- npm dev`; the resolved cwd keeps them distinct, and `dor list --command "npm dev" --cwd <worktree> --json` selects the intended one. |
+| Long-running background job | `dor ensure --minimize -- npm test -- --watch` keeps a watcher out of the layout; `dor list --command "npm test -- --watch" --json` rediscovers the minimized Surface after churn, and `read` / `send` / `kill` target it by ref. |
+| Port-owner handoff | `dor list --port 5173 --json` returns the terminal that owns the socket (browser Surfaces never match `--port`), then `dor ab --key client open http://localhost:5173` binds the browser side. |
+| Safe cleanup | `dor list --command "npm dev" --cwd . --json`, then `dor kill <ref> --confirm-if-read <text>`. The ref comes from a recent listing or command response; `title:<exact>` also targets one but can drift. |
 
 ## Future
 
-- **`dor list` filters** — narrow the listing without post-processing: a
-  positional/`--pane` target (reusing the `matchesDorPaneTarget` resolver that
-  already backs the other commands), `--type terminal|browser`, and state filters
-  (`--running`, `--alert`/`--todo`). Each ships with its snapshot-tested help.
+- **Browser open target resolution** — the one unshipped Agent-Workflow
+  ergonomic (the Share-a-dev-server shortcut above): `dor ab open <target>` and
+  `dor iframe <target>` accept an explicit terminal Surface handle (`surface:N`,
+  `surface:<stable-id>`, `surface:self`, or `surface:focused`) wherever they
+  currently accept an absolute URL, collapsing the two-step
+  `dor list --ports --json` → `dor ab open http://localhost:<port>` dance into
+  one command. Resolution calls the same host port scan as `dor list --ports`.
+  V1 groups listening records by port, so one dev server bound on `localhost`, a
+  LAN address, and an overlay-network address is still one candidate; Dormouse
+  opens `http://localhost:<port>/`. Zero candidate ports fail clearly. Multiple
+  distinct candidate ports fail and list choices until an explicit port selector
+  exists. Future tether address selection can choose a non-localhost address from
+  the same candidate set without changing the surface-target grammar.
+
+- **`dor await <surface>`** — block until a Surface rings the Dormouse bell, then
+  print its screen (like `dor read`) and exit — turning the alert system
+  (`docs/specs/alert.md`) into an agent synchronization primitive. An agent
+  launches a peer with `dor split -- otheragent`, then `dor await surface:5` parks
+  until that peer signals completion by ringing (the `BEL` / `OSC 9` / `9;4` /
+  `99` / `777` events that already drive the `ringing` flag in `dor list`), so the
+  caller stops polling `dor list --json` in a loop. A Surface already ringing when
+  `await` is called returns immediately. Resolving is exactly a human attending the
+  ringing Session (`docs/specs/alert.md` → Clearing And TODO): it clears the active
+  ring and sets `todo = true`, so the bell goes quiet and the Surface now carries a
+  TODO the caller owns. Writing back with `dor send surface:5 --text "…" --key
+  enter` then clears that TODO just as a human's passthrough `Enter` does — `dor`
+  input is a first-class, human-equivalent interaction in the attention/TODO
+  lifecycle, so the send path must drive the same clear. A fresh ring re-arms the
+  cycle, so a later `await` blocks again. Only terminal Surfaces ring, so `await`
+  targets terminals like `read` / `send`.
+  It reuses `dor read`'s `--lines` / `--scrollback` / `--json` output shape, needs
+  an extended request timeout with a `--timeout <seconds>` ceiling that exits
+  non-zero on expiry, and fails cleanly if the awaited Surface is killed rather
+  than blocking forever. Backed by a `surface.await` control method subscribing to
+  the host alert state (`docs/specs/alert.md`); like every command it ships with
+  its snapshot-tested help.
+
+- **Additional `dor list` filters** — activity/state filters are deliberately
+  deferred: `--running` as shorthand for `--activity running`, full `--activity
+  unknown|prompt|editing|running|finished`, and possible alert filters such as
+  `--alert` / `--todo`. Add only once a story needs them, and ship each with
+  snapshot-tested help.
 - **`dor list` workspace scope** — today `dor list` shows only the active
   Workspace and the noun stays "Surface" (no workspace rows). When workspaces
   land, add `--all` (widen the surface scope to every Workspace, grouped by a
@@ -319,6 +444,9 @@ from `command-detail`.
   each Workspace in a separate webview, so cross-Workspace listing must aggregate
   at the extension host, not the per-webview control handler. Staged with the
   workspaces rollout (`docs/specs/layout.md` `## Future`, workspaces-rollout).
+  The same scope owns cross-Workspace action targeting by stable Surface id:
+  today the per-webview control handler can only resolve ids in the mounted
+  Workspace, even though the ids themselves are globally unique.
 - **Workspace handles and commands** — a `--workspace` target flag and `dor
   workspace` management commands (new / rename / close / switch — mutation only)
   consuming the reserved `workspace:<n|name>` / `window:<n>` ref grammar in the

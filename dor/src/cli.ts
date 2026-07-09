@@ -23,7 +23,6 @@ import type {
   Command,
   DorCommandContext,
   HelpPatch,
-  ParseResult,
 } from './commands/types.js';
 
 export type {
@@ -57,8 +56,9 @@ export type {
   SplitSurfaceResponse,
   Surface,
   SurfaceActivity,
+  SurfaceKind,
   SurfacePort,
-  SurfaceType,
+  SurfaceRenderMode,
   SurfaceView,
   VersionMetadata,
 } from './commands/types.js';
@@ -142,9 +142,15 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
   const helpTarget = getHelpTarget(argv);
   const [commandName, ...args] = rewriteHelpArgv(argv);
 
-  if (commandName === 'ensure' && !args.includes('-h') && !args.includes('--help')) {
-    const delimiterCheck = validateEnsureDelimiter(args);
-    if (!delimiterCheck.ok) return fail(delimiterCheck.message);
+  // Some commands need argv validated *before* stricli parses it (the `--` command
+  // tail in `dor ensure`, `dor send`'s input-flag ordering). Each owns that check
+  // as `Command.preParse`, defined next to its flags in the command module; here we
+  // just dispatch it. `helpTarget` already captured whether this is a help
+  // invocation (in which case the command func never runs), so reuse it to skip.
+  const command = commandName ? COMMANDS.find((entry) => entry.name === commandName) : undefined;
+  if (command?.preParse && helpTarget === undefined) {
+    const check = command.preParse(args);
+    if (!check.ok) return fail(check.message);
   }
 
   const capture = createCaptureProcess(options.env);
@@ -319,39 +325,6 @@ function compileHelpPattern(pattern: string): RegExp {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
-}
-
-function validateEnsureDelimiter(args: string[]): ParseResult<void> {
-  const delimiterIndex = args.indexOf('--');
-  if (delimiterIndex === -1) {
-    return { ok: false, message: 'dor ensure requires -- <command...>' };
-  }
-
-  for (let index = 0; index < delimiterIndex; index += 1) {
-    const arg = args[index];
-    if (arg === '--json' || arg === '--minimize' || arg === '--restart') {
-      continue;
-    }
-    if (arg === '--cwd' || arg === '--surface') {
-      const value = args[index + 1];
-      if (!value || value.startsWith('-') || index + 1 >= delimiterIndex) {
-        return { ok: false, message: `${arg} requires a value` };
-      }
-      index += 1;
-      continue;
-    }
-    if (arg.startsWith('-')) {
-      return { ok: false, message: `unknown option '${arg}'` };
-    }
-    return { ok: false, message: `unexpected argument '${arg}' before --` };
-  }
-
-  const command = args.slice(delimiterIndex + 1).join(' ').trim();
-  if (!command) {
-    return { ok: false, message: 'dor ensure requires a command after --' };
-  }
-
-  return { ok: true, value: undefined };
 }
 
 function createCaptureProcess(env: CliEnv | undefined): {

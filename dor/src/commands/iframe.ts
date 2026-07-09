@@ -7,6 +7,7 @@ import type {
   IframeSurfaceResponse,
 } from './types.js';
 import {
+  renderJson,
   requireControlClient,
   stringParser,
   writeStdout,
@@ -50,7 +51,7 @@ JSON output:
       flags: {
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create or replace the surface minimized.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to replace or split from.', optional: true, placeholder: 'id|ref|index' },
+        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to replace or split from.', optional: true, placeholder: 'id|ref' },
       },
       positional: {
         kind: 'tuple',
@@ -97,13 +98,13 @@ function parseIframeUrl(input: string): string {
 
 function renderIframeResponse(response: IframeSurfaceResponse, json: boolean): string {
   if (json) {
-    return `${JSON.stringify({
+    return renderJson({
       status: response.status,
-      ...(response.surfaceId ? { surface_id: response.surfaceId } : {}),
+      surface_id: response.surfaceId,
       surface_ref: response.surfaceRef,
       url: response.url,
       minimized: response.minimized,
-    }, null, 2)}\n`;
+    });
   }
 
   const minimized = response.minimized ? '  [minimized]' : '';

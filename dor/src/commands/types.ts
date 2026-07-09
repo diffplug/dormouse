@@ -3,10 +3,11 @@ import type {
   CommandContext,
 } from '@stricli/core';
 
-export type IdFormat = 'refs' | 'uuids' | 'both';
+export type IdFormat = 'refs' | 'ids' | 'both';
 export type SplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
 export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
-export type SurfaceType = 'terminal' | 'iframe' | 'agent-browser';
+export type SurfaceKind = 'terminal' | 'browser';
+export type SurfaceRenderMode = 'iframe' | 'ab-screencast' | 'ab-popout';
 
 /** Where a Surface renders. Minimized Surfaces (baseboard doors) are listed too;
  *  `hidden` is reserved for Surfaces in an inactive Workspace (a future). */
@@ -29,13 +30,10 @@ export interface SurfacePort {
 export interface Surface {
   id: string;
   ref: string;
-  paneRef: string;
-  type: SurfaceType;
+  kind: SurfaceKind;
+  renderMode: SurfaceRenderMode | null;
   title: string;
   focused: boolean;
-  index: number;
-  indexInPane: number;
-  selectedInPane: boolean;
   /** Where the Surface renders; minimized Surfaces are listed with `minimized`. */
   view: SurfaceView;
   /** Reported working directory (terminal Surfaces); `null` for browser Surfaces. */
@@ -82,7 +80,7 @@ export interface SplitSurfaceRequest {
 
 export interface SplitSurfaceResponse {
   status: 'created';
-  surfaceId?: string;
+  surfaceId: string;
   surfaceRef: string;
   direction: ResolvedSplitDirection;
   minimized: boolean;
@@ -102,7 +100,7 @@ export interface EnsureSurfaceRequest {
 
 export interface EnsureSurfaceResponse {
   status: 'created' | 'existing' | 'restarted';
-  surfaceId?: string;
+  surfaceId: string;
   surfaceRef: string;
   command: string;
   cwd: string;
@@ -110,14 +108,14 @@ export interface EnsureSurfaceResponse {
 }
 
 export interface SendSurfaceRequest {
-  surface?: string;
+  surface: string;
   input: string;
   inputCount: number;
 }
 
 export interface SendSurfaceResponse {
   status: 'sent';
-  surfaceId?: string;
+  surfaceId: string;
   surfaceRef: string;
   inputCount: number;
 }
@@ -125,12 +123,12 @@ export interface SendSurfaceResponse {
 export interface ReadSurfaceRequest {
   lines?: number;
   scrollback: boolean;
-  surface?: string;
+  surface: string;
 }
 
 export interface ReadSurfaceResponse {
   workspaceRef: string;
-  surfaceId?: string;
+  surfaceId: string;
   surfaceRef: string;
   text: string;
 }
@@ -146,7 +144,7 @@ export interface KillSurfaceRequest {
 
 export interface KillSurfaceResponse {
   status: 'killed';
-  surfaceId?: string;
+  surfaceId: string;
   surfaceRef: string;
 }
 
@@ -158,7 +156,7 @@ export interface IframeSurfaceRequest {
 
 export interface IframeSurfaceResponse {
   status: 'created' | 'replaced';
-  surfaceId?: string;
+  surfaceId: string;
   surfaceRef: string;
   url: string;
   minimized: boolean;
@@ -178,7 +176,7 @@ export interface AgentBrowserSurfaceRequest {
 
 export interface AgentBrowserSurfaceResponse {
   status: 'created' | 'existing' | 'replaced';
-  surfaceId?: string;
+  surfaceId: string;
   surfaceRef: string;
   session: string;
   minimized: boolean;
@@ -230,6 +228,12 @@ export interface Command {
   name: string;
   command: StricliCommand<DorCommandContext>;
   helpPatches?: readonly HelpPatch[];
+  /** Argv validation that must run *before* stricli parses (e.g. the `--` command
+   *  tail in `dor ensure`, or `dor send`'s input-flag ordering). Defined next to
+   *  the command's flags so the check and the flag list can't drift apart; `cli.ts`
+   *  dispatches it generically. Receives argv with the command name already
+   *  stripped, and is skipped for help invocations. */
+  preParse?: (args: string[]) => ParseResult<void>;
 }
 
 export interface VersionMetadata {

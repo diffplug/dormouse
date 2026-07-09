@@ -1,14 +1,14 @@
 /** Private `surface.ensure` wiring for command+cwd idempotency. */
 
-import { resolve as resolvePath } from 'node:path';
 import { buildCommand } from '@stricli/core';
 import type {
-  CliEnv,
   Command,
   DorCommandContext,
   EnsureSurfaceResponse,
+  ParseResult,
 } from './types.js';
 import {
+  callerWorkingDirectory,
   errorMessage,
   renderJson,
   requireControlClient,
@@ -35,21 +35,60 @@ const RESTART_TIMEOUT_MS = 60_000;
 // surfaces still respond instantly; this only raises the ceiling for the slow case.
 const ENSURE_TIMEOUT_MS = 20_000;
 
+// stricli treats a bare `--` as "rest are positionals", but it can't express
+// "everything after `--` is one required command tail, and only these flags may
+// precede it". `cli.ts` runs this before stricli parses so the argv-tail contract
+// (and its friendly messages) is enforced next to the flag definitions above —
+// keep the allowed-flag list here in sync with `parameters.flags`.
+export function validateEnsureDelimiter(args: string[]): ParseResult<void> {
+  const delimiterIndex = args.indexOf('--');
+  if (delimiterIndex === -1) {
+    return { ok: false, message: 'dor ensure requires -- <command...>' };
+  }
+
+  for (let index = 0; index < delimiterIndex; index += 1) {
+    const arg = args[index];
+    if (arg === '--json' || arg === '--minimize' || arg === '--restart') {
+      continue;
+    }
+    if (arg === '--cwd' || arg === '--surface') {
+      const value = args[index + 1];
+      if (!value || value.startsWith('-') || index + 1 >= delimiterIndex) {
+        return { ok: false, message: `${arg} requires a value` };
+      }
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('-')) {
+      return { ok: false, message: `unknown option '${arg}'` };
+    }
+    return { ok: false, message: `unexpected argument '${arg}' before --` };
+  }
+
+  const command = args.slice(delimiterIndex + 1).join(' ').trim();
+  if (!command) {
+    return { ok: false, message: 'dor ensure requires a command after --' };
+  }
+
+  return { ok: true, value: undefined };
+}
+
 export const ensureCommand: Command = {
   name: 'ensure',
+  preParse: validateEnsureDelimiter,
   helpPatches: [
     {
       scope: 'root',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref|index] [--cwd path]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref|index] [--cwd path] -- <command>...\n',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path]<TO-EOL>',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] -- <command>...\n',
       ],
     },
     {
       scope: 'command-usage',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref|index] [--cwd path]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref|index] [--cwd path] -- <command>...\n',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path]<TO-EOL>',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] -- <command>...\n',
       ],
     },
     {
@@ -78,7 +117,7 @@ Two surfaces running the same command in different working directories are disti
 
 --restart applies only to an already-running match: it interrupts the live command (Ctrl+C), waits for the shell to return to its prompt, then re-runs the command in place and blocks until the command is live again. A restarted surface keeps its minimized/visible state. If no surface is running the command, --restart behaves like a plain ensure and creates one.
 
---surface selects the surface to split only when creating a new surface. If omitted, Dormouse uses the same caller/focused fallback as dor split.
+--surface selects the surface to split only when creating a new surface. If the target is minimized, the new surface is created minimized too and inserted immediately to the right of the target door. If omitted, Dormouse uses the same caller/focused fallback as dor split.
 
 Text output:
   created surface:3  "npm run dev"
@@ -100,7 +139,7 @@ JSON output:
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         restart: { kind: 'boolean', brief: 'Restart a matching surface in place.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'id|ref|index' },
+        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'id|ref' },
         cwd: { kind: 'parsed', parse: stringParser, brief: 'Working directory for matching and for the new command.', optional: true, placeholder: 'path' },
       },
       positional: {
@@ -136,32 +175,11 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
   }
 }
 
-// Git Bash exports PWD as a POSIX path (`/c/Users/...`). On Windows, resolvePath
-// reads the leading `/c` as a folder under the current drive's root and mangles it
-// to `C:\c\Users\...`, which then matches no surface. Fold the MSYS drive form to a
-// native Windows drive first. No-op off win32 and for paths that already carry a
-// drive letter (e.g. `C:/Users/...`, which some MSYS builds export instead).
-export function msysToWindowsCwd(pwd: string, platform: string): string {
-  if (platform !== 'win32') return pwd;
-  const match = pwd.match(/^\/([A-Za-z])\/(.*)$/);
-  return match ? `${match[1].toUpperCase()}:\\${match[2].replace(/\//g, '\\')}` : pwd;
-}
-
-// The host has no idea where `dor` was launched, so the caller's directory must
-// travel in the request. Prefer the shell's PWD (injectable, matches what the
-// user sees) and fall back to the process cwd. resolvePath canonicalizes both
-// the default and a relative/absolute --cwd into one absolute path the host can
-// key on.
-function callerWorkingDirectory(flag: string | undefined, env: CliEnv | undefined): string {
-  const base = msysToWindowsCwd(env?.PWD ?? process.cwd(), process.platform);
-  return resolvePath(base, flag ?? '.');
-}
-
 function renderEnsureResponse(response: EnsureSurfaceResponse, json: boolean): string {
   if (json) {
     return renderJson({
       status: response.status,
-      ...(response.surfaceId ? { surface_id: response.surfaceId } : {}),
+      surface_id: response.surfaceId,
       surface_ref: response.surfaceRef,
       command: response.command,
       cwd: response.cwd,

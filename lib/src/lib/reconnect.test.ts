@@ -121,6 +121,23 @@ describe('resumeOrRestore', () => {
     });
   });
 
+  it('restores workspace-scoped dor surface refs when resuming live PTYs', async () => {
+    const saved: PersistedSession = {
+      version: 3,
+      lathLayout: lathLayoutFor('pane-a'),
+      surfaceRefs: { 'pane-a': 'surface:1', 'closed-pane': 'surface:2' },
+      panes: [
+        { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null },
+      ],
+    };
+
+    const result = await resumeOrRestore(createPlatform([
+      { id: 'pane-a', alive: true },
+    ], saved));
+
+    expect(result.surfaceRefs).toEqual({ 'pane-a': 'surface:1', 'closed-pane': 'surface:2' });
+  });
+
   it('seeds saved visible pane titles when resuming live PTYs', async () => {
     const saved: PersistedSession = {
       version: 3,

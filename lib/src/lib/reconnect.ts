@@ -1,7 +1,7 @@
 import type { LathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter, PtyInfo } from './platform/types';
 import { restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
-import { readPersistedSession, type PersistedDoor } from './session-types';
+import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedSurfaceRefs } from './session-types';
 import { persistedLathLayout, restoreSession } from './session-restore';
 
 export interface ReconnectResult {
@@ -10,6 +10,11 @@ export interface ReconnectResult {
    *  leaf set matching the visible pane set. */
   lathLayout?: LathPersistedLayout;
   doors?: PersistedDoor[];
+  /** Workspace-scoped stable `dor` Surface refs restored with the session. */
+  surfaceRefs?: PersistedSurfaceRefs;
+  /** The Workspace's next `surface:N` counter, carried so a killed ref's number
+   *  is never reused across a resume/restore. */
+  surfaceRefsNext?: number;
 }
 
 /**
@@ -89,7 +94,12 @@ function resumeLiveSessions(platform: PlatformAdapter): Promise<ReconnectResult 
         return;
       }
 
-      resolve({ paneIds: ids, doors: [] });
+      const saved = readPersistedSession(savedState);
+      resolve({
+        paneIds: ids,
+        doors: [],
+        ...carrySurfaceRefs(saved),
+      });
     }
 
     platform.onPtyList(handleList);
@@ -145,5 +155,6 @@ function getSavedResumePlan(savedState: unknown, liveIds: string[]): ReconnectRe
     paneIds: layoutMatchesVisiblePanes ? paneIds : paneIds.filter((id) => liveSet.has(id)),
     doors,
     lathLayout: layoutMatchesVisiblePanes ? lathLayout : undefined,
+    ...carrySurfaceRefs(saved),
   };
 }

@@ -4,7 +4,7 @@ Invocation: `dor iframe --help`
 
 ```text
 USAGE
-  dor iframe [--json] [--minimize] [--surface id|ref|index] <url>
+  dor iframe [--json] [--minimize] [--surface id|ref] <url>
   dor iframe --help
 
 Opens a URL in a high-fidelity iframe surface for human inspection.

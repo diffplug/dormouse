@@ -63,13 +63,18 @@ function isSingletonWindowTarget(target: string | undefined): boolean {
   return !target || target === 'window:1' || target === '1';
 }
 
-function matchesDorPaneTarget(target: string | undefined, surface: DorSurface): boolean {
+function matchesDorSurfaceTarget(
+  target: string | undefined,
+  surface: DorSurface,
+  callerSurfaceId: string | undefined,
+): boolean {
   if (!target) return true;
-  if (target === 'focused' || target === 'current') return surface.focused;
-  if (target === surface.id || target === surface.ref || target === surface.paneRef) return true;
-
-  const numeric = Number(target);
-  return Number.isInteger(numeric) && numeric >= 1 && surface.index === numeric - 1;
+  if (target === 'surface:focused') return surface.focused;
+  if (target === 'surface:self') return callerSurfaceId !== undefined && surface.id === callerSurfaceId;
+  if (target === surface.id || target === surface.ref) return true;
+  if (!target.startsWith('surface:')) return false;
+  const stableId = target.slice('surface:'.length);
+  return stableId.length > 0 && stableId === surface.id;
 }
 
 function surfaceTitleTarget(target: string): string | null {
@@ -78,6 +83,40 @@ function surfaceTitleTarget(target: string): string | null {
 
 function renderSurfaceForError(surface: DorSurface): string {
   return `${surface.ref} ${JSON.stringify(surface.title)}`;
+}
+
+// Resolve exactly one match: ok for a single hit, an ambiguity error for many,
+// null for none (each caller supplies its own not-found / fallback tail).
+function pickSingleMatch(matches: DorSurface[], resolvedTarget: string): ParseResult<DorSurface> | null {
+  if (matches.length === 1) return { ok: true, value: matches[0] };
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      message: `surface target '${resolvedTarget}' matched multiple surfaces: ${matches.map(renderSurfaceForError).join(', ')}`,
+    };
+  }
+  return null;
+}
+
+function resolveSurfaceTarget(
+  surfaces: DorSurface[],
+  target: string | undefined,
+  callerSurfaceId: string | undefined,
+): ParseResult<DorSurface> {
+  const resolvedTarget = target ?? callerSurfaceId ?? 'surface:focused';
+  const titleTarget = surfaceTitleTarget(resolvedTarget);
+  if (titleTarget !== null) {
+    const matches = surfaces.filter((surface) => surface.title === titleTarget);
+    return pickSingleMatch(matches, resolvedTarget)
+      ?? { ok: false, message: `surface target '${resolvedTarget}' was not found` };
+  }
+
+  const matches = surfaces.filter((surface) => matchesDorSurfaceTarget(resolvedTarget, surface, callerSurfaceId));
+  const single = pickSingleMatch(matches, resolvedTarget);
+  if (single) return single;
+  const fallback = !target && !callerSurfaceId ? (surfaces[0] ?? null) : null;
+  if (fallback) return { ok: true, value: fallback };
+  return { ok: false, message: `surface '${resolvedTarget}' was not found` };
 }
 
 function toSurfacePort(port: OpenPort): DorSurfacePort {
@@ -96,7 +135,7 @@ function toSurfacePort(port: OpenPort): DorSurfacePort {
 async function attachSurfacePorts(surfaces: DorSurface[]): Promise<DorSurface[]> {
   const platform = getPlatform();
   return Promise.all(surfaces.map(async (surface) => {
-    if (surface.type !== 'terminal') return surface;
+    if (surface.kind !== 'terminal') return surface;
     try {
       const ports = await platform.getOpenPorts(surface.id);
       return { ...surface, ports: ports.map(toSurfacePort) };
@@ -252,7 +291,7 @@ function dorCommandString(args: string[] | undefined): string | undefined {
 /**
  * The `dor` control plane: the webview handler for `dormouse:control-request`
  * events (the `surface.*` methods that back the `dor` CLI) plus its private
- * surface-resolution/query helpers. This is CLI policy — surface targeting,
+   * surface-resolution/query helpers. This is CLI policy — surface targeting,
  * param coercion, command quoting, restart/integration timing — not wall layout;
  * the layout primitives it drives (`createSplitSurface`, `createContentSurface`,
  * `killPaneImmediately`, `buildDorSurfaces`, `surfaceRefForId`) are owned by the
@@ -289,11 +328,11 @@ export function useDorControl({
     command?: string;
     direction: DorResolvedSplitDirection;
     minimized: boolean;
-    referenceId: string;
+    reference: DorSurface;
     cwd?: string;
     requireIntegration?: boolean;
     focusNeutral?: boolean;
-  }) => ParseResult<{ id: string; ref: string }>;
+  }) => ParseResult<{ id: string; ref: string; minimized: boolean }>;
   createContentSurface: (args: {
     minimized: boolean;
     params: Record<string, unknown>;
@@ -308,27 +347,32 @@ export function useDorControl({
   const resolveVisibleSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
-  ): ParseResult<DorSurface> => {
-    const surfaces = buildDorSurfaces();
-    const resolvedTarget = target ?? callerSurfaceId ?? 'focused';
-    const titleTarget = surfaceTitleTarget(resolvedTarget);
-    if (titleTarget !== null) {
-      const matches = surfaces.filter((surface) => surface.title === titleTarget);
-      if (matches.length === 1) return { ok: true, value: matches[0] };
-      if (matches.length > 1) {
-        return {
-          ok: false,
-          message: `surface target '${resolvedTarget}' matched multiple surfaces: ${matches.map(renderSurfaceForError).join(', ')}`,
-        };
-      }
-      return { ok: false, message: `surface target '${resolvedTarget}' was not found` };
-    }
+  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaces(), target, callerSurfaceId), [buildDorSurfaces]);
 
-    const matched = surfaces.find((surface) => matchesDorPaneTarget(resolvedTarget, surface))
-      ?? (!target && !callerSurfaceId ? (surfaces[0] ?? null) : null);
-    if (matched) return { ok: true, value: matched };
-    return { ok: false, message: `surface '${resolvedTarget}' was not found` };
-  }, [buildDorSurfaces]);
+  const resolveListedSurface = useCallback((
+    target: string | undefined,
+    callerSurfaceId: string | undefined,
+  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId), [buildDorSurfaceList]);
+
+  // The shared prelude of the direct-operation handlers (send / read / kill): a
+  // target surface is required and must resolve against the listed surfaces.
+  // Responds with the failure and returns null so the caller just bails.
+  const requireListedSurface = useCallback((
+    surfaceParam: unknown,
+    detail: DorControlRequest,
+  ): DorSurface | null => {
+    const surface = stringParam(surfaceParam);
+    if (!surface) {
+      detail.respond({ ok: false, error: 'surface is required' });
+      return null;
+    }
+    const target = resolveListedSurface(surface, detail.surfaceId);
+    if (!target.ok) {
+      detail.respond({ ok: false, error: target.message });
+      return null;
+    }
+    return target.value;
+  }, [resolveListedSurface]);
 
   const findSurfaceIdRunningCommand = useCallback((command: string, cwdPath: string): string | null => {
     const ids = [
@@ -369,29 +413,24 @@ export function useDorControl({
         return;
       }
 
-      // Resolve the split reference surface and confirm it is a live visible pane,
-      // responding with the appropriate error and returning null otherwise.
+      // Resolve the split reference surface across listed Surfaces. A minimized
+      // reference is valid: the Wall creates the new split as a sibling Door.
       const resolveSplitTarget = () => {
-        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
+        const target = resolveListedSurface(stringParam(params.surface), detail.surfaceId);
         if (!target.ok) {
           detail.respond({ ok: false, error: target.message });
-          return null;
-        }
-        const visible = nav.hasPane(target.value.id);
-        if (!visible) {
-          detail.respond({ ok: false, error: `surface '${target.value.ref}' is not visible` });
           return null;
         }
         return { target: target.value };
       };
 
       // The `direction: 'auto'` aspect-ratio split resolution.
-      const autoDorDirection = (id: string): DorResolvedSplitDirection =>
-        dorDirectionForEdge(lath.store.autoEdgeFor(id));
+      const autoDorDirection = (surface: DorSurface): DorResolvedSplitDirection =>
+        nav.hasPane(surface.id) ? dorDirectionForEdge(lath.store.autoEdgeFor(surface.id)) : 'right';
 
       if (detail.method === SURFACE_CONTROL_METHODS.list) {
         const matched = buildDorSurfaceList()
-          .filter((surface) => matchesDorPaneTarget(params.pane, surface));
+          .filter((surface) => matchesDorSurfaceTarget(params.pane, surface, detail.surfaceId));
         const surfaces = booleanParam(params.includePorts)
           ? await attachSurfacePorts(matched)
           : matched;
@@ -415,7 +454,7 @@ export function useDorControl({
         const resolved = resolveSplitTarget();
         if (!resolved) return;
         const direction = directionParam === 'auto'
-          ? autoDorDirection(resolved.target.id)
+          ? autoDorDirection(resolved.target)
           : directionParam;
         const command = dorCommandString(stringArrayParam(params.command));
         if (params.command !== undefined && !command) {
@@ -426,7 +465,7 @@ export function useDorControl({
           command,
           direction,
           minimized: booleanParam(params.minimized),
-          referenceId: resolved.target.id,
+          reference: resolved.target,
           // Bare `dor split` hands the user a terminal to work in, so focus moves
           // to the new surface. `dor split -- <command>` launches the command in
           // the background and leaves focus on the caller (like `dor ensure`).
@@ -443,7 +482,7 @@ export function useDorControl({
             surfaceId: result.value.id,
             surfaceRef: result.value.ref,
             direction,
-            minimized: booleanParam(params.minimized),
+            minimized: result.value.minimized,
             ...(command ? { command } : {}),
           },
         });
@@ -508,12 +547,12 @@ export function useDorControl({
         }
         const resolved = resolveSplitTarget();
         if (!resolved) return;
-        const direction = autoDorDirection(resolved.target.id);
+        const direction = autoDorDirection(resolved.target);
         const result = createSplitSurface({
           command,
           direction,
           minimized: booleanParam(params.minimized),
-          referenceId: resolved.target.id,
+          reference: resolved.target,
           cwd,
           requireIntegration: true,
           // ensure never steals focus from the caller, matched or freshly created.
@@ -552,7 +591,7 @@ export function useDorControl({
             surfaceRef: result.value.ref,
             command,
             cwd,
-            minimized: booleanParam(params.minimized),
+            minimized: result.value.minimized,
           },
         });
         return;
@@ -564,22 +603,19 @@ export function useDorControl({
           detail.respond({ ok: false, error: 'input is required' });
           return;
         }
-        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
-        if (!target.ok) {
-          detail.respond({ ok: false, error: target.message });
+        const target = requireListedSurface(params.surface, detail);
+        if (!target) return;
+        if (target.kind !== 'terminal') {
+          detail.respond({ ok: false, error: `surface '${target.ref}' is not a terminal` });
           return;
         }
-        if (target.value.type !== 'terminal') {
-          detail.respond({ ok: false, error: `surface '${target.value.ref}' is not a terminal` });
-          return;
-        }
-        getPlatform().writePty(target.value.id, input);
+        getPlatform().writePty(target.id, input);
         detail.respond({
           ok: true,
           result: {
             status: 'sent',
-            surfaceId: target.value.id,
-            surfaceRef: target.value.ref,
+            surfaceId: target.id,
+            surfaceRef: target.ref,
             inputCount: typeof params.inputCount === 'number' ? params.inputCount : 1,
           },
         });
@@ -587,24 +623,21 @@ export function useDorControl({
       }
 
       if (detail.method === SURFACE_CONTROL_METHODS.read) {
-        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
-        if (!target.ok) {
-          detail.respond({ ok: false, error: target.message });
-          return;
-        }
-        if (target.value.type !== 'terminal') {
-          detail.respond({ ok: false, error: `surface '${target.value.ref}' is not a terminal` });
+        const target = requireListedSurface(params.surface, detail);
+        if (!target) return;
+        if (target.kind !== 'terminal') {
+          detail.respond({ ok: false, error: `surface '${target.ref}' is not a terminal` });
           return;
         }
         const lines = numberParam(params.lines);
         const scrollback = booleanParam(params.scrollback);
-        const text = readSurfaceText(target.value.id, lines, scrollback);
+        const text = readSurfaceText(target.id, lines, scrollback);
         detail.respond({
           ok: true,
           result: {
             workspaceRef: 'workspace:1',
-            surfaceId: target.value.id,
-            surfaceRef: target.value.ref,
+            surfaceId: target.id,
+            surfaceRef: target.ref,
             text,
           },
         });
@@ -617,30 +650,22 @@ export function useDorControl({
           detail.respond({ ok: false, error: 'invalid kill confirmation' });
           return;
         }
-        const surface = stringParam(params.surface);
-        if (!surface) {
-          detail.respond({ ok: false, error: 'surface is required' });
-          return;
-        }
-        const target = resolveVisibleSurface(surface, detail.surfaceId);
-        if (!target.ok) {
-          detail.respond({ ok: false, error: target.message });
-          return;
-        }
+        const target = requireListedSurface(params.surface, detail);
+        if (!target) return;
         if (confirmation.mode === 'if-read') {
-          const text = readSurfaceText(target.value.id, undefined, false);
+          const text = readSurfaceText(target.id, undefined, false);
           if (!text.includes(confirmation.text)) {
-            detail.respond({ ok: false, error: `surface '${target.value.ref}' read text did not contain confirmation text` });
+            detail.respond({ ok: false, error: `surface '${target.ref}' read text did not contain confirmation text` });
             return;
           }
         }
-        killPaneImmediately(target.value.id);
+        killPaneImmediately(target.id);
         detail.respond({
           ok: true,
           result: {
             status: 'killed',
-            surfaceId: target.value.id,
-            surfaceRef: target.value.ref,
+            surfaceId: target.id,
+            surfaceRef: target.ref,
           },
         });
         return;
@@ -766,5 +791,5 @@ export function useDorControl({
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, resolveVisibleSurface, surfaceRefForId, lath, nav]);
+  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireListedSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
 }

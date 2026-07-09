@@ -4,15 +4,15 @@ Invocation: `dor --help`
 
 ```text
 USAGE
-  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref|index] [-- <command>...]
-  dor ensure [--json] [--minimize] [--restart] [--surface id|ref|index] [--cwd path] -- <command>...
-  dor version
-  dor send [--key value] [--raw] [--sequence json] [--stdin] [--surface id|ref|index] [--text value] [<text>]
-  dor read [--json] [--lines count] [--scrollback] [--surface id|ref|index]
-  dor kill --surface id|ref|index [--confirm-if-read text|--confirm-dangerously]
-  dor iframe [--json] [--minimize] [--surface id|ref|index] <url>
+  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref] [-- <command>...]
+  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] -- <command>...
+  dor version [--json]
+  dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw]
+  dor read <surface> [--json] [--lines count] [--scrollback]
+  dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json]
+  dor iframe [--json] [--minimize] [--surface id|ref] <url>
   dor agent-browser [--key name|--session name] [args...]
-  dor list [--id-format refs|uuids|both] [--json] [--ports]
+  dor list [--command text] [--cwd path] [--id-format refs|ids|both] [--json] [--kind terminal|browser] [--port number] [--ports] [--view paned|zoomed|minimized]
   dor --help
 
 Dormouse bundles the dor CLI into every terminal it launches.
@@ -27,7 +27,7 @@ COMMANDS
   version        Print the dor CLI version.
   send           Send text or key input to a terminal surface.
   read           Read terminal text from a surface.
-  kill           Kill a terminal surface.
+  kill           Kill a surface.
   iframe         Open a URL in an iframe surface.
   agent-browser  Drive a browser surface via your agent-browser install (alias: dor ab).
   list           List Dormouse Surfaces.

@@ -4,45 +4,57 @@
  * `dor identify` used to print (caller / focused pointers + host block).
  *
  * Lists every Surface in the current Workspace, including minimized ones, and
- * optionally each terminal's listening ports (`--ports`).
+ * optionally each terminal's listening ports (`--ports` / `--port`).
  */
 
 import { buildCommand, type FlagParametersForType } from '@stricli/core';
 import type {
+  CliEnv,
   Command,
   DorCommandContext,
   IdFormat,
   ListSurfacesResponse,
   Surface,
+  SurfaceKind,
   SurfacePort,
+  SurfaceView,
 } from './types.js';
 import {
+  callerWorkingDirectory,
   errorMessage,
   parseIdFormat,
   renderHandle,
   renderJson,
   requireControlClient,
-  wantsIds,
-  wantsRefs,
+  stringParser,
   writeStdout,
 } from './shared.js';
 
 interface ListFlags {
+  readonly command?: string;
+  readonly cwd?: string;
   readonly idFormat?: IdFormat;
   readonly json?: boolean;
+  readonly kind?: SurfaceKind;
+  readonly port?: number;
   readonly ports?: boolean;
+  readonly view?: SurfaceView;
 }
 
 const FULL_DESCRIPTION = `Lists every Surface in the current Workspace — terminals and browser Surfaces, including minimized ones (view "minimized").
 
-Text output prints one row per Surface: a * marks the focused Surface, then the handle, type, view, location (cwd for terminals, URL for browser Surfaces), and title. Trailing tags: (you) for the calling terminal, [ringing], [todo], and listening ports with --ports.
+Text output prints one row per Surface: a * marks the focused Surface, then the handle, kind, render mode ("-" for terminals), view, location (cwd for terminals, URL for browser Surfaces), and title. Trailing tags: (you) for the calling terminal, [ringing], [todo], and listening ports with --ports.
 
 --ports adds each terminal's listening TCP ports. The host shells out per pane (lsof / PowerShell), so it is opt-in; remote sessions report none.
 
-JSON output (--json) adds top-level caller_surface_ref and focused_surface_ref — the calling and focused Surfaces, null when neither is in the list — plus workspace_ref, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
+--port <number> filters to terminal Surfaces listening on that port. It implies the same opt-in port scan as --ports, includes port details in JSON, and shows port tags in text output.
+
+Filters are ANDed. --command is an exact match against the running command reported by shell integration. --cwd resolves to an absolute path like dor ensure --cwd, relative to the invoking shell's PWD when available.
+
+JSON output (--json) always includes both stable ids and refs, and adds top-level caller_surface_ref/caller_surface_id and focused_surface_ref/focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_ref, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
 
 Text output:
-  * surface:1  terminal  paned  ~/projects/site  pnpm dev  :5173`;
+  * surface:1  terminal  -              paned  ~/projects/site  pnpm dev  :5173`;
 
 export const listCommand: Command = {
   name: 'list',
@@ -51,26 +63,61 @@ export const listCommand: Command = {
 
 function buildListCommand(): Command['command'] {
   const flags: FlagParametersForType<ListFlags, DorCommandContext> = {
+    command: {
+      kind: 'parsed',
+      parse: stringParser,
+      brief: 'Exact running command to match.',
+      optional: true,
+      placeholder: 'text',
+    },
+    cwd: {
+      kind: 'parsed',
+      parse: stringParser,
+      brief: 'Working directory to match.',
+      optional: true,
+      placeholder: 'path',
+    },
     idFormat: {
       kind: 'parsed',
       parse: parseIdFormat,
-      brief: 'Handle format for listed ids.',
+      brief: 'Handle format for text output.',
       optional: true,
-      placeholder: 'refs|uuids|both',
+      placeholder: 'refs|ids|both',
     },
     json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+    kind: {
+      kind: 'parsed',
+      parse: parseSurfaceKind,
+      brief: 'Surface kind to show.',
+      optional: true,
+      placeholder: 'terminal|browser',
+    },
+    port: {
+      kind: 'parsed',
+      parse: parsePort,
+      brief: 'Show terminal Surfaces listening on this TCP port.',
+      optional: true,
+      placeholder: 'number',
+    },
     ports: {
       kind: 'boolean',
       brief: "Include each terminal's listening ports.",
       optional: true,
       withNegated: false,
     },
+    view: {
+      kind: 'parsed',
+      parse: parseSurfaceView,
+      brief: 'Surface view to show.',
+      optional: true,
+      placeholder: 'paned|zoomed|minimized',
+    },
   };
 
   return buildCommand<ListFlags, [], DorCommandContext>({
     docs: {
       brief: 'List Dormouse Surfaces.',
-      customUsage: ['[--ports] [--json] [--id-format refs|uuids|both]'],
+      customUsage: ['[--kind terminal|browser] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json] [--id-format refs|ids|both]'],
       fullDescription: FULL_DESCRIPTION,
     },
     parameters: { flags },
@@ -88,18 +135,40 @@ async function runListCommand(
   if (client instanceof Error) return client;
 
   try {
-    const includePorts = flags.ports === true;
+    const includePorts = flags.ports === true || flags.port !== undefined;
     const response = await client.listSurfaces({ includePorts });
     const env = context.options.env ?? {};
+    const filtered = applyListFilters(response, flags, env);
     const idFormat = flags.idFormat ?? 'refs';
     const stdout = flags.json === true
-      ? renderListJson(response, env, idFormat, includePorts)
-      : renderListText(response, env, idFormat, includePorts);
+      ? renderListJson(filtered, env, includePorts)
+      : renderListText(filtered, env, idFormat, includePorts);
     writeStdout(context, stdout);
     return undefined;
   } catch (error) {
     return new Error(errorMessage(error));
   }
+}
+
+// These are display predicates applied to the host's full surface projection.
+// (Caller-identity targeting — the `pane` field — is filtered host-side in
+// use-dor-control.ts; only `--port` opts into the expensive host port scan.)
+function applyListFilters(
+  response: ListSurfacesResponse,
+  flags: ListFlags,
+  env: CliEnv,
+): ListSurfacesResponse {
+  const cwd = flags.cwd === undefined ? undefined : callerWorkingDirectory(flags.cwd, env);
+  return {
+    ...response,
+    surfaces: response.surfaces.filter((surface) => (
+      (flags.kind === undefined || surface.kind === flags.kind) &&
+      (flags.view === undefined || surface.view === flags.view) &&
+      (flags.command === undefined || surface.command === flags.command) &&
+      (cwd === undefined || surface.cwd === cwd) &&
+      (flags.port === undefined || (surface.ports ?? []).some((port) => port.port === flags.port))
+    )),
+  };
 }
 
 function surfaceLocation(surface: Surface): string {
@@ -118,15 +187,18 @@ function renderListText(
   const callerId = env.DORMOUSE_SURFACE_ID;
   const handles = surfaces.map((surface) => renderHandle(surface, idFormat));
   const locations = surfaces.map(surfaceLocation);
+  const renderModes = surfaces.map((surface) => surface.renderMode ?? '-');
   const handleWidth = Math.max(...handles.map((handle) => handle.length));
-  const typeWidth = Math.max(...surfaces.map((surface) => surface.type.length));
+  const kindWidth = Math.max(...surfaces.map((surface) => surface.kind.length));
+  const renderModeWidth = Math.max(...renderModes.map((renderMode) => renderMode.length));
   const viewWidth = Math.max(...surfaces.map((surface) => surface.view.length));
   const locationWidth = Math.max(...locations.map((location) => location.length));
 
   const lines = surfaces.map((surface, index) => {
     const marker = surface.focused ? '*' : ' ';
     const handle = handles[index].padEnd(handleWidth);
-    const type = surface.type.padEnd(typeWidth);
+    const kind = surface.kind.padEnd(kindWidth);
+    const renderMode = renderModes[index].padEnd(renderModeWidth);
     const view = surface.view.padEnd(viewWidth);
     const location = locations[index].padEnd(locationWidth);
 
@@ -139,7 +211,7 @@ function renderListText(
     }
     const trailer = tags.length > 0 ? `  ${tags.join('  ')}` : '';
 
-    return `${marker} ${handle}  ${type}  ${view}  ${location}  ${surface.title}${trailer}`.trimEnd();
+    return `${marker} ${handle}  ${kind}  ${renderMode}  ${view}  ${location}  ${surface.title}${trailer}`.trimEnd();
   });
 
   return `${lines.join('\n')}\n`;
@@ -148,7 +220,6 @@ function renderListText(
 function renderListJson(
   response: ListSurfacesResponse,
   env: Record<string, string | undefined>,
-  idFormat: IdFormat,
   includePorts: boolean,
 ): string {
   const callerId = env.DORMOUSE_SURFACE_ID;
@@ -156,12 +227,13 @@ function renderListJson(
   const focused = response.surfaces.find((surface) => surface.focused) ?? null;
 
   const payload = {
-    surfaces: response.surfaces.map((surface) => renderSurfaceJson(surface, idFormat, includePorts)),
-    ...(wantsRefs(idFormat) ? { caller_surface_ref: caller?.ref ?? null } : {}),
-    ...(wantsIds(idFormat) ? { caller_surface_id: caller?.id ?? null } : {}),
-    ...(wantsRefs(idFormat) ? { focused_surface_ref: focused?.ref ?? null } : {}),
-    ...(wantsIds(idFormat) ? { focused_surface_id: focused?.id ?? null } : {}),
-    ...(wantsRefs(idFormat) ? { window_ref: response.windowRef, workspace_ref: response.workspaceRef } : {}),
+    surfaces: response.surfaces.map((surface) => renderSurfaceJson(surface, includePorts)),
+    caller_surface_ref: caller?.ref ?? null,
+    caller_surface_id: caller?.id ?? null,
+    focused_surface_ref: focused?.ref ?? null,
+    focused_surface_id: focused?.id ?? null,
+    window_ref: response.windowRef,
+    workspace_ref: response.workspaceRef,
     host: {
       app: env.DORMOUSE_HOST ?? null,
       workspace: env.DORMOUSE_HOST_WORKSPACE ?? null,
@@ -174,17 +246,16 @@ function renderListJson(
 
 function renderSurfaceJson(
   surface: Surface,
-  idFormat: IdFormat,
   includePorts: boolean,
 ): Record<string, unknown> {
   return {
-    ...(wantsIds(idFormat) ? { id: surface.id } : {}),
-    ...(wantsRefs(idFormat) ? { ref: surface.ref, pane_ref: surface.paneRef } : {}),
-    type: surface.type,
+    id: surface.id,
+    ref: surface.ref,
+    kind: surface.kind,
+    render_mode: surface.renderMode,
     view: surface.view,
     title: surface.title,
     focused: surface.focused,
-    index: surface.index,
     cwd: surface.cwd,
     activity: surface.activity,
     ...(surface.exitCode !== undefined ? { exit_code: surface.exitCode } : {}),
@@ -192,7 +263,7 @@ function renderSurfaceJson(
     url: surface.url,
     ringing: surface.ringing,
     todo: surface.todo,
-    ...(includePorts && surface.type === 'terminal'
+    ...(includePorts && surface.kind === 'terminal'
       ? { ports: (surface.ports ?? []).map(renderPortJson) }
       : {}),
   };
@@ -206,4 +277,22 @@ function renderPortJson(port: SurfacePort): Record<string, unknown> {
     pid: port.pid,
     ...(port.processName ? { process_name: port.processName } : {}),
   };
+}
+
+function parseSurfaceKind(value: string): SurfaceKind {
+  if (value === 'terminal' || value === 'browser') return value;
+  throw new SyntaxError(`invalid --kind '${value}'`);
+}
+
+function parseSurfaceView(value: string): SurfaceView {
+  if (value === 'paned' || value === 'zoomed' || value === 'minimized') return value;
+  throw new SyntaxError(`invalid --view '${value}'`);
+}
+
+function parsePort(value: string): number {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new SyntaxError(`invalid --port '${value}'`);
+  }
+  return port;
 }
