@@ -22,8 +22,6 @@ import {
   renderHandle,
   renderJson,
   requireControlClient,
-  wantsIds,
-  wantsRefs,
   writeStdout,
 } from './shared.js';
 
@@ -39,7 +37,7 @@ Text output prints one row per Surface: a * marks the focused Surface, then the 
 
 --ports adds each terminal's listening TCP ports. The host shells out per pane (lsof / PowerShell), so it is opt-in; remote sessions report none.
 
-JSON output (--json) adds top-level caller_surface_ref and focused_surface_ref — the calling and focused Surfaces, null when neither is in the list — plus workspace_ref, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
+JSON output (--json) always includes both stable ids and refs, and adds top-level caller_surface_ref/caller_surface_id and focused_surface_ref/focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_ref, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
 
 Text output:
   * surface:1  terminal  -              paned  ~/projects/site  pnpm dev  :5173`;
@@ -54,9 +52,9 @@ function buildListCommand(): Command['command'] {
     idFormat: {
       kind: 'parsed',
       parse: parseIdFormat,
-      brief: 'Handle format for listed ids.',
+      brief: 'Handle format for text output.',
       optional: true,
-      placeholder: 'refs|uuids|both',
+      placeholder: 'refs|ids|both',
     },
     json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
     ports: {
@@ -70,7 +68,7 @@ function buildListCommand(): Command['command'] {
   return buildCommand<ListFlags, [], DorCommandContext>({
     docs: {
       brief: 'List Dormouse Surfaces.',
-      customUsage: ['[--ports] [--json] [--id-format refs|uuids|both]'],
+      customUsage: ['[--ports] [--json] [--id-format refs|ids|both]'],
       fullDescription: FULL_DESCRIPTION,
     },
     parameters: { flags },
@@ -93,7 +91,7 @@ async function runListCommand(
     const env = context.options.env ?? {};
     const idFormat = flags.idFormat ?? 'refs';
     const stdout = flags.json === true
-      ? renderListJson(response, env, idFormat, includePorts)
+      ? renderListJson(response, env, includePorts)
       : renderListText(response, env, idFormat, includePorts);
     writeStdout(context, stdout);
     return undefined;
@@ -151,7 +149,6 @@ function renderListText(
 function renderListJson(
   response: ListSurfacesResponse,
   env: Record<string, string | undefined>,
-  idFormat: IdFormat,
   includePorts: boolean,
 ): string {
   const callerId = env.DORMOUSE_SURFACE_ID;
@@ -159,12 +156,13 @@ function renderListJson(
   const focused = response.surfaces.find((surface) => surface.focused) ?? null;
 
   const payload = {
-    surfaces: response.surfaces.map((surface) => renderSurfaceJson(surface, idFormat, includePorts)),
-    ...(wantsRefs(idFormat) ? { caller_surface_ref: caller?.ref ?? null } : {}),
-    ...(wantsIds(idFormat) ? { caller_surface_id: caller?.id ?? null } : {}),
-    ...(wantsRefs(idFormat) ? { focused_surface_ref: focused?.ref ?? null } : {}),
-    ...(wantsIds(idFormat) ? { focused_surface_id: focused?.id ?? null } : {}),
-    ...(wantsRefs(idFormat) ? { window_ref: response.windowRef, workspace_ref: response.workspaceRef } : {}),
+    surfaces: response.surfaces.map((surface) => renderSurfaceJson(surface, includePorts)),
+    caller_surface_ref: caller?.ref ?? null,
+    caller_surface_id: caller?.id ?? null,
+    focused_surface_ref: focused?.ref ?? null,
+    focused_surface_id: focused?.id ?? null,
+    window_ref: response.windowRef,
+    workspace_ref: response.workspaceRef,
     host: {
       app: env.DORMOUSE_HOST ?? null,
       workspace: env.DORMOUSE_HOST_WORKSPACE ?? null,
@@ -177,12 +175,12 @@ function renderListJson(
 
 function renderSurfaceJson(
   surface: Surface,
-  idFormat: IdFormat,
   includePorts: boolean,
 ): Record<string, unknown> {
   return {
-    ...(wantsIds(idFormat) ? { id: surface.id } : {}),
-    ...(wantsRefs(idFormat) ? { ref: surface.ref, pane_ref: surface.paneRef } : {}),
+    id: surface.id,
+    ref: surface.ref,
+    pane_ref: surface.paneRef,
     kind: surface.kind,
     render_mode: surface.renderMode,
     view: surface.view,

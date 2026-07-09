@@ -3,7 +3,7 @@ import type {
   CommandContext,
 } from '@stricli/core';
 
-export type IdFormat = 'refs' | 'uuids' | 'both';
+export type IdFormat = 'refs' | 'ids' | 'both';
 export type SplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
 export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
 export type SurfaceKind = 'terminal' | 'browser';

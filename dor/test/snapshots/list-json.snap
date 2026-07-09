@@ -3,6 +3,7 @@ stdout:
 {
   "surfaces": [
     {
+      "id": "11111111-1111-4111-8111-111111111111",
       "ref": "surface:1",
       "pane_ref": "pane:1",
       "kind": "terminal",
@@ -19,6 +20,7 @@ stdout:
       "todo": false
     },
     {
+      "id": "22222222-2222-4222-8222-222222222222",
       "ref": "surface:2",
       "pane_ref": "pane:2",
       "kind": "terminal",
@@ -36,6 +38,7 @@ stdout:
       "todo": true
     },
     {
+      "id": "33333333-3333-4333-8333-333333333333",
       "ref": "surface:3",
       "pane_ref": "pane:3",
       "kind": "browser",
@@ -52,6 +55,7 @@ stdout:
       "todo": false
     },
     {
+      "id": "44444444-4444-4444-8444-444444444444",
       "ref": "surface:4",
       "pane_ref": "pane:4",
       "kind": "terminal",
@@ -69,7 +73,9 @@ stdout:
     }
   ],
   "caller_surface_ref": "surface:2",
+  "caller_surface_id": "22222222-2222-4222-8222-222222222222",
   "focused_surface_ref": "surface:1",
+  "focused_surface_id": "11111111-1111-4111-8111-111111111111",
   "window_ref": "window:1",
   "workspace_ref": "workspace:1",
   "host": {

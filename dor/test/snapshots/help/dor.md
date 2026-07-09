@@ -12,7 +12,7 @@ USAGE
   dor kill --surface id|ref|index [--confirm-if-read text|--confirm-dangerously] [--json]
   dor iframe [--json] [--minimize] [--surface id|ref|index] <url>
   dor agent-browser [--key name|--session name] [args...]
-  dor list [--id-format refs|uuids|both] [--json] [--ports]
+  dor list [--id-format refs|ids|both] [--json] [--ports]
   dor --help
 
 Dormouse bundles the dor CLI into every terminal it launches.

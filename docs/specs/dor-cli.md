@@ -218,8 +218,9 @@ Invariants:
   visible surface has that title, it is selected. If multiple visible surfaces
   match, the command fails and lists the matching surface refs.
 - Short refs use `surface:1`, `pane:2`.
-- List output defaults to refs; commands that list handles accept
-  `--id-format refs|uuids|both`.
+- Text list output defaults to refs; commands that list handles accept
+  `--id-format refs|ids|both` (`uuids` is accepted as a compatibility alias for
+  `ids`). JSON list output always includes both refs and stable ids.
 - Reserved: `workspace:<n>` (and `workspace:<name>` when exactly one Workspace
   matches) and `window:<n>` select a container. The ref grammar is reserved now
   so surface/pane refs never collide with it; the flag and commands that consume
@@ -297,12 +298,14 @@ from `command-detail`.
   the calling terminal with `(you)`, and shows kind, render mode (`-` for
   terminals), `view`, location (cwd for terminals, URL for browser Surfaces),
   title, and `[ringing]` / `[todo]` tags.
-  `--ports` adds each terminal's listening ports. `--json` additionally emits the
-  identity dump `dor identify` used to print — top-level `caller_surface_ref`
-  (matched locally against `DORMOUSE_SURFACE_ID`, `null` when the caller is not
-  in the list), `focused_surface_ref`, and a `host` block (`DORMOUSE_HOST` /
-  `DORMOUSE_HOST_WORKSPACE` / runtime paths). It deliberately does not expose the
-  control socket: the CLI is the public API and the socket is private plumbing.
+  `--ports` adds each terminal's listening ports. `--json` always includes both
+  stable ids and refs, and additionally emits the identity dump `dor identify`
+  used to print — top-level `caller_surface_ref` / `caller_surface_id` (matched
+  locally against `DORMOUSE_SURFACE_ID`, `null` when the caller is not in the
+  list), `focused_surface_ref` / `focused_surface_id`, and a `host` block
+  (`DORMOUSE_HOST` / `DORMOUSE_HOST_WORKSPACE` / runtime paths). It deliberately
+  does not expose the control socket: the CLI is the public API and the socket is
+  private plumbing.
   Replaces the retired cmux-shaped `list-panes` / `list-pane-surfaces` and the
   `identify` command. Filtering by kind/state and workspace scope are staged (see
   [Future](#future)). [impl](../../dor/src/commands/list.ts)

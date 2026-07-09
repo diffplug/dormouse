@@ -23,11 +23,12 @@ export function renderJson(payload: unknown): string {
 }
 
 export function isIdFormat(value: string): value is IdFormat {
-  return value === 'refs' || value === 'uuids' || value === 'both';
+  return value === 'refs' || value === 'ids' || value === 'both';
 }
 
 export function parseIdFormat(value: string): IdFormat {
   if (isIdFormat(value)) return value;
+  if (value === 'uuids') return 'ids';
   throw new SyntaxError(`invalid --id-format '${value}'`);
 }
 
@@ -64,7 +65,7 @@ export function renderHandle(handle: { ref: string; id: string }, idFormat: IdFo
   switch (idFormat) {
     case 'refs':
       return handle.ref;
-    case 'uuids':
+    case 'ids':
       return handle.id;
     case 'both':
       return `${handle.ref} ${handle.id}`;
@@ -72,7 +73,7 @@ export function renderHandle(handle: { ref: string; id: string }, idFormat: IdFo
 }
 
 export function wantsRefs(idFormat: IdFormat): boolean {
-  return idFormat !== 'uuids';
+  return idFormat !== 'ids';
 }
 
 export function wantsIds(idFormat: IdFormat): boolean {

@@ -737,6 +737,37 @@ test('list id-format both output', async () => {
   );
 });
 
+test('list id-format ids output', async () => {
+  await snapshot(
+    'list-id-format-ids',
+    await runCli(['list', '--id-format', 'ids'], { client: fixtureClient(), env: listEnv }),
+  );
+});
+
+test('list accepts uuids as an id-format compatibility alias', async () => {
+  const ids = await runCli(['list', '--id-format', 'ids'], { client: fixtureClient(), env: listEnv });
+  const uuids = await runCli(['list', '--id-format', 'uuids'], { client: fixtureClient(), env: listEnv });
+  assert.equal(uuids.stdout, ids.stdout);
+  assert.equal(uuids.stderr, '');
+  assert.equal(uuids.exitCode, 0);
+});
+
+test('list json schema includes ids and refs regardless of id-format', async () => {
+  const result = await runCli(['list', '--json', '--id-format', 'ids'], { client: fixtureClient(), env: listEnv });
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, '');
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.surfaces[0].id, fixtureSurfaces[0].id);
+  assert.equal(payload.surfaces[0].ref, 'surface:1');
+  assert.equal(payload.surfaces[0].pane_ref, 'pane:1');
+  assert.equal(payload.caller_surface_id, listEnv.DORMOUSE_SURFACE_ID);
+  assert.equal(payload.caller_surface_ref, 'surface:2');
+  assert.equal(payload.focused_surface_id, fixtureSurfaces[0].id);
+  assert.equal(payload.focused_surface_ref, 'surface:1');
+  assert.equal(payload.workspace_ref, 'workspace:1');
+  assert.equal(payload.window_ref, 'window:1');
+});
+
 test('list ports text output', async () => {
   const client = fixtureClient();
   const result = await runCli(['list', '--ports'], { client, env: listEnv });
