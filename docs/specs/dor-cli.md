@@ -289,8 +289,9 @@ from `command-detail`.
 - `dor list` — the unified Surface listing. Lists every Surface in the current
   Workspace (terminals and browser Surfaces, including minimized ones), one row
   per Surface in `surface:N` order. Text marks the focused Surface with `*` and
-  the calling terminal with `(you)`, and shows type, `view`, location (cwd for
-  terminals, URL for browser Surfaces), title, and `[ringing]` / `[todo]` tags.
+  the calling terminal with `(you)`, and shows kind, render mode (`-` for
+  terminals), `view`, location (cwd for terminals, URL for browser Surfaces),
+  title, and `[ringing]` / `[todo]` tags.
   `--ports` adds each terminal's listening ports. `--json` additionally emits the
   identity dump `dor identify` used to print — top-level `caller_surface_ref`
   (matched locally against `DORMOUSE_SURFACE_ID`, `null` when the caller is not
@@ -298,7 +299,7 @@ from `command-detail`.
   `DORMOUSE_HOST_WORKSPACE` / runtime paths). It deliberately does not expose the
   control socket: the CLI is the public API and the socket is private plumbing.
   Replaces the retired cmux-shaped `list-panes` / `list-pane-surfaces` and the
-  `identify` command. Filtering by type/state and workspace scope are staged (see
+  `identify` command. Filtering by kind/state and workspace scope are staged (see
   [Future](#future)). [impl](../../dor/src/commands/list.ts)
   [docs](../../dor/test/snapshots/help/list.md)
 
@@ -306,7 +307,7 @@ from `command-detail`.
 
 - **`dor list` filters** — narrow the listing without post-processing: a
   positional/`--pane` target (reusing the `matchesDorPaneTarget` resolver that
-  already backs the other commands), `--type terminal|browser`, and state filters
+  already backs the other commands), `--kind terminal|browser`, and state filters
   (`--running`, `--alert`/`--todo`). Each ships with its snapshot-tested help.
 - **`dor list` workspace scope** — today `dor list` shows only the active
   Workspace and the noun stays "Surface" (no workspace rows). When workspaces

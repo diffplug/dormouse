@@ -24,13 +24,14 @@ Two independent axes define a browser pane:
 | Target | A bare URL, or a future Dormouse-owned backend process |
 | Render | `ab-screencast`, `ab-popout`, `iframe` |
 
-The render axis is a pane parameter, not a separate surface type. The `dor` CLI
-still reports `iframe` or `agent-browser` as an informative surface type derived
-from `renderMode` (never stored).
+The render axis is a pane parameter, not a separate surface kind. The `dor` CLI
+reports browser panes as `kind: "browser"` and includes the renderer separately
+as `render_mode` derived from `renderMode` (never stored).
 
 Source of truth: `lib/src/components/wall/BrowserPanel.tsx`,
 `lib/src/components/wall/browser-surface.ts`, `lib/src/components/Wall.tsx`
-(`surfaceTypeFromParams`, `componentForSurfaceType`, `createContentSurface`).
+(`surfaceKindFromParams`, `surfaceRenderModeFromParams`,
+`componentForSurfaceType`, `createContentSurface`).
 
 ## Canonical Params
 

@@ -83,7 +83,7 @@ Use -- followed by a command to run an initial command in the new terminal surfa
 
 --surface selects the surface to split. If omitted, Dormouse uses the caller surface when available, then the focused surface.
 
-split does not know about non-terminal surface types. Compose future content commands through the initial command:
+split creates terminal Surfaces. Compose browser content commands through the initial command:
 
   dor split --right -- dor iframe https://example.com
   dor split --auto -- dor agent-browser open https://example.com

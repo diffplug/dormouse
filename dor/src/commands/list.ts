@@ -35,14 +35,14 @@ interface ListFlags {
 
 const FULL_DESCRIPTION = `Lists every Surface in the current Workspace — terminals and browser Surfaces, including minimized ones (view "minimized").
 
-Text output prints one row per Surface: a * marks the focused Surface, then the handle, type, view, location (cwd for terminals, URL for browser Surfaces), and title. Trailing tags: (you) for the calling terminal, [ringing], [todo], and listening ports with --ports.
+Text output prints one row per Surface: a * marks the focused Surface, then the handle, kind, render mode ("-" for terminals), view, location (cwd for terminals, URL for browser Surfaces), and title. Trailing tags: (you) for the calling terminal, [ringing], [todo], and listening ports with --ports.
 
 --ports adds each terminal's listening TCP ports. The host shells out per pane (lsof / PowerShell), so it is opt-in; remote sessions report none.
 
 JSON output (--json) adds top-level caller_surface_ref and focused_surface_ref — the calling and focused Surfaces, null when neither is in the list — plus workspace_ref, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
 
 Text output:
-  * surface:1  terminal  paned  ~/projects/site  pnpm dev  :5173`;
+  * surface:1  terminal  -              paned  ~/projects/site  pnpm dev  :5173`;
 
 export const listCommand: Command = {
   name: 'list',
@@ -118,15 +118,18 @@ function renderListText(
   const callerId = env.DORMOUSE_SURFACE_ID;
   const handles = surfaces.map((surface) => renderHandle(surface, idFormat));
   const locations = surfaces.map(surfaceLocation);
+  const renderModes = surfaces.map((surface) => surface.renderMode ?? '-');
   const handleWidth = Math.max(...handles.map((handle) => handle.length));
-  const typeWidth = Math.max(...surfaces.map((surface) => surface.type.length));
+  const kindWidth = Math.max(...surfaces.map((surface) => surface.kind.length));
+  const renderModeWidth = Math.max(...renderModes.map((renderMode) => renderMode.length));
   const viewWidth = Math.max(...surfaces.map((surface) => surface.view.length));
   const locationWidth = Math.max(...locations.map((location) => location.length));
 
   const lines = surfaces.map((surface, index) => {
     const marker = surface.focused ? '*' : ' ';
     const handle = handles[index].padEnd(handleWidth);
-    const type = surface.type.padEnd(typeWidth);
+    const kind = surface.kind.padEnd(kindWidth);
+    const renderMode = renderModes[index].padEnd(renderModeWidth);
     const view = surface.view.padEnd(viewWidth);
     const location = locations[index].padEnd(locationWidth);
 
@@ -139,7 +142,7 @@ function renderListText(
     }
     const trailer = tags.length > 0 ? `  ${tags.join('  ')}` : '';
 
-    return `${marker} ${handle}  ${type}  ${view}  ${location}  ${surface.title}${trailer}`.trimEnd();
+    return `${marker} ${handle}  ${kind}  ${renderMode}  ${view}  ${location}  ${surface.title}${trailer}`.trimEnd();
   });
 
   return `${lines.join('\n')}\n`;
@@ -180,7 +183,8 @@ function renderSurfaceJson(
   return {
     ...(wantsIds(idFormat) ? { id: surface.id } : {}),
     ...(wantsRefs(idFormat) ? { ref: surface.ref, pane_ref: surface.paneRef } : {}),
-    type: surface.type,
+    kind: surface.kind,
+    render_mode: surface.renderMode,
     view: surface.view,
     title: surface.title,
     focused: surface.focused,
@@ -192,7 +196,7 @@ function renderSurfaceJson(
     url: surface.url,
     ringing: surface.ringing,
     todo: surface.todo,
-    ...(includePorts && surface.type === 'terminal'
+    ...(includePorts && surface.kind === 'terminal'
       ? { ports: (surface.ports ?? []).map(renderPortJson) }
       : {}),
   };

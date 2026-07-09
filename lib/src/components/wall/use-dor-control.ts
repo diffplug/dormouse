@@ -121,7 +121,7 @@ function toSurfacePort(port: OpenPort): DorSurfacePort {
 async function attachSurfacePorts(surfaces: DorSurface[]): Promise<DorSurface[]> {
   const platform = getPlatform();
   return Promise.all(surfaces.map(async (surface) => {
-    if (surface.type !== 'terminal') return surface;
+    if (surface.kind !== 'terminal') return surface;
     try {
       const ports = await platform.getOpenPorts(surface.id);
       return { ...surface, ports: ports.map(toSurfacePort) };
@@ -581,7 +581,7 @@ export function useDorControl({
           detail.respond({ ok: false, error: target.message });
           return;
         }
-        if (target.value.type !== 'terminal') {
+        if (target.value.kind !== 'terminal') {
           detail.respond({ ok: false, error: `surface '${target.value.ref}' is not a terminal` });
           return;
         }
@@ -604,7 +604,7 @@ export function useDorControl({
           detail.respond({ ok: false, error: target.message });
           return;
         }
-        if (target.value.type !== 'terminal') {
+        if (target.value.kind !== 'terminal') {
           detail.respond({ ok: false, error: `surface '${target.value.ref}' is not a terminal` });
           return;
         }

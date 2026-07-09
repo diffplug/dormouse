@@ -7,7 +7,7 @@ USAGE
   dor kill --surface id|ref|index [--confirm-if-read text|--confirm-dangerously]
   dor kill --help
 
-Kills a terminal surface. One confirmation mode is required.
+Kills a surface. One confirmation mode is required.
 
 --confirm-if-read kills only if dor read --surface <surface> would return visible text containing the provided text. The text must contain at least 4 non-whitespace characters.
 

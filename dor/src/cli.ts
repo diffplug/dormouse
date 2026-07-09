@@ -57,8 +57,9 @@ export type {
   SplitSurfaceResponse,
   Surface,
   SurfaceActivity,
+  SurfaceKind,
   SurfacePort,
-  SurfaceType,
+  SurfaceRenderMode,
   SurfaceView,
   VersionMetadata,
 } from './commands/types.js';

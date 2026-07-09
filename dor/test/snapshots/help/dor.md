@@ -27,7 +27,7 @@ COMMANDS
   version        Print the dor CLI version.
   send           Send text or key input to a terminal surface.
   read           Read terminal text from a surface.
-  kill           Kill a terminal surface.
+  kill           Kill a surface.
   iframe         Open a URL in an iframe surface.
   agent-browser  Drive a browser surface via your agent-browser install (alias: dor ab).
   list           List Dormouse Surfaces.

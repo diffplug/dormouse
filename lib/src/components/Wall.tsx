@@ -45,7 +45,8 @@ import type {
   Surface as DorSurface,
   ResolvedSplitDirection as DorResolvedSplitDirection,
   ParseResult,
-  SurfaceType as DorSurfaceType,
+  SurfaceKind as DorSurfaceKind,
+  SurfaceRenderMode as DorSurfaceRenderMode,
   SurfaceView as DorSurfaceView,
 } from 'dor/commands/types';
 import type { PersistedDoor } from '../lib/session-types';
@@ -121,11 +122,12 @@ function persistedPanelTitle(title: string | null | undefined): string {
   return trimmed || UNNAMED_PANEL_TITLE;
 }
 
-function surfaceTypeFromParams(params: unknown): DorSurfaceType {
-  if (!isBrowserParams(params)) return 'terminal';
-  // The CLI surface type tracks the *renderer* (iframe vs agent-browser) so
-  // `dor` output stays informative even though both are one 'browser' surface.
-  return resolveRenderMode(params) === 'iframe' ? 'iframe' : 'agent-browser';
+function surfaceKindFromParams(params: unknown): DorSurfaceKind {
+  return isBrowserParams(params) ? 'browser' : 'terminal';
+}
+
+function surfaceRenderModeFromParams(params: unknown): DorSurfaceRenderMode | null {
+  return isBrowserParams(params) ? resolveRenderMode(params) : null;
 }
 
 /** Killing or swapping away from an agent-browser surface closes its session —
@@ -693,11 +695,12 @@ export function Wall({
     const states = sources.map((source) => terminalStates.get(source.id) ?? createTerminalPaneState());
 
     return sources.map((source, index) => {
-      const type = surfaceTypeFromParams(source.params);
+      const kind = surfaceKindFromParams(source.params);
+      const renderMode = surfaceRenderModeFromParams(source.params);
       const state = states[index];
       const activity = activityStates.get(source.id);
-      const shellActivity = type === 'terminal' ? state.activity : null;
-      const title = type === 'terminal'
+      const shellActivity = kind === 'terminal' ? state.activity : null;
+      const title = kind === 'terminal'
         ? deriveSurfaceLabel(state, states, appTitleForPane, source.title ?? source.id)
         : (source.title ?? source.id);
       const view: DorSurfaceView = source.minimized
@@ -708,20 +711,21 @@ export function Wall({
         id: source.id,
         ref: `surface:${index + 1}`,
         paneRef: `pane:${index + 1}`,
-        type,
+        kind,
+        renderMode,
         title,
         focused: source.id === activeId,
         index,
         indexInPane: 0,
         selectedInPane: true,
         view,
-        cwd: type === 'terminal' ? (state.cwd?.path ?? null) : null,
+        cwd: kind === 'terminal' ? (state.cwd?.path ?? null) : null,
         activity: shellActivity ? shellActivity.kind : null,
         ...(shellActivity?.kind === 'finished' && shellActivity.exitCode !== undefined
           ? { exitCode: shellActivity.exitCode }
           : {}),
-        command: type === 'terminal' ? (state.currentCommand?.displayCommand ?? null) : null,
-        url: type === 'terminal' ? null : browserUrlFromParams(source.params),
+        command: kind === 'terminal' ? (state.currentCommand?.displayCommand ?? null) : null,
+        url: kind === 'terminal' ? null : browserUrlFromParams(source.params),
         ringing: activity?.status === 'ALERT_RINGING',
         todo: activity?.todo === true,
       };
@@ -851,7 +855,7 @@ export function Wall({
 
     const newId = generatePaneId();
     const browserMeta = browserLeafMeta(title, params);
-    const replaceUntouchedTerminal = reference.type === 'terminal' && isUntouched(reference.id);
+    const replaceUntouchedTerminal = reference.kind === 'terminal' && isUntouched(reference.id);
 
     if (replaceUntouchedTerminal) {
       // Whether the user's current selection sits on the pane being replaced.
@@ -1087,11 +1091,11 @@ export function Wall({
       const visible = nav.hasPane(id);
       if (!visible) return;
       const params = nav.paneParams(id);
-      const currentType = surfaceTypeFromParams(params);
+      const currentRenderMode = surfaceRenderModeFromParams(params);
 
       // agent-browser → iframe: frame the active tab's URL, then the replace
       // closes the now-unneeded headless browser. Webview-only.
-      if (currentType === 'agent-browser' && mode === 'iframe') {
+      if ((currentRenderMode === 'ab-screencast' || currentRenderMode === 'ab-popout') && mode === 'iframe') {
         // Canonical params.url (mirrored from the chrome snapshot) first; fall
         // back to the live snapshot for a surface that hasn't reported a tab yet.
         const url = (typeof params?.url === 'string' && params.url) || getAgentBrowserScreenController(id)?.chrome().url;
@@ -1107,7 +1111,7 @@ export function Wall({
       // spawn a session for the URL (absent ⇒ inert, like other host-gated
       // affordances). ab-popout spawns headed directly so the new surface mounts
       // already popped-out (no headless launch + immediate relaunch flash).
-      if (currentType === 'iframe' && (mode === 'ab-screencast' || mode === 'ab-popout')) {
+      if (currentRenderMode === 'iframe' && (mode === 'ab-screencast' || mode === 'ab-popout')) {
         const chromeUrl = getAgentBrowserScreenController(id)?.chrome().url;
         const url = (typeof chromeUrl === 'string' && chromeUrl)
           || (typeof params?.url === 'string' ? params.url : undefined);

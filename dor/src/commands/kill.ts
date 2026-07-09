@@ -40,8 +40,8 @@ export const killCommand: Command = {
   ],
   command: buildCommand<KillFlags, [], DorCommandContext>({
     docs: {
-      brief: 'Kill a terminal surface.',
-      fullDescription: `Kills a terminal surface. One confirmation mode is required.
+      brief: 'Kill a surface.',
+      fullDescription: `Kills a surface. One confirmation mode is required.
 
 --confirm-if-read kills only if dor read --surface <surface> would return visible text containing the provided text. The text must contain at least 4 non-whitespace characters.
 

@@ -16,7 +16,8 @@ const fixtureSurfaces = [
     id: '11111111-1111-4111-8111-111111111111',
     ref: 'surface:1',
     paneRef: 'pane:1',
-    type: 'terminal',
+    kind: 'terminal',
+    renderMode: null,
     title: 'pnpm dev',
     focused: true,
     index: 0,
@@ -34,7 +35,8 @@ const fixtureSurfaces = [
     id: '22222222-2222-4222-8222-222222222222',
     ref: 'surface:2',
     paneRef: 'pane:2',
-    type: 'terminal',
+    kind: 'terminal',
+    renderMode: null,
     title: 'repo "watch"',
     focused: false,
     index: 1,
@@ -53,7 +55,8 @@ const fixtureSurfaces = [
     id: '33333333-3333-4333-8333-333333333333',
     ref: 'surface:3',
     paneRef: 'pane:3',
-    type: 'agent-browser',
+    kind: 'browser',
+    renderMode: 'ab-screencast',
     title: 'Dormouse',
     focused: false,
     index: 2,
@@ -71,7 +74,8 @@ const fixtureSurfaces = [
     id: '44444444-4444-4444-8444-444444444444',
     ref: 'surface:4',
     paneRef: 'pane:4',
-    type: 'terminal',
+    kind: 'terminal',
+    renderMode: null,
     title: '<idle> server.js',
     focused: false,
     index: 3,
@@ -109,7 +113,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         : surfacesFixture;
       // Mirror the host: attach listening ports to terminal Surfaces on request.
       const surfaces = request.includePorts
-        ? matched.map((surface) => (surface.type === 'terminal'
+        ? matched.map((surface) => (surface.kind === 'terminal'
           ? { ...surface, ports: fixturePortsByRef[surface.ref] ?? [] }
           : surface))
         : matched;

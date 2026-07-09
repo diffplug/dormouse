@@ -5,7 +5,8 @@ stdout:
     {
       "ref": "surface:1",
       "pane_ref": "pane:1",
-      "type": "terminal",
+      "kind": "terminal",
+      "render_mode": null,
       "view": "paned",
       "title": "pnpm dev",
       "focused": true,
@@ -20,7 +21,8 @@ stdout:
     {
       "ref": "surface:2",
       "pane_ref": "pane:2",
-      "type": "terminal",
+      "kind": "terminal",
+      "render_mode": null,
       "view": "paned",
       "title": "repo \"watch\"",
       "focused": false,
@@ -36,7 +38,8 @@ stdout:
     {
       "ref": "surface:3",
       "pane_ref": "pane:3",
-      "type": "agent-browser",
+      "kind": "browser",
+      "render_mode": "ab-screencast",
       "view": "paned",
       "title": "Dormouse",
       "focused": false,
@@ -51,7 +54,8 @@ stdout:
     {
       "ref": "surface:4",
       "pane_ref": "pane:4",
-      "type": "terminal",
+      "kind": "terminal",
+      "render_mode": null,
       "view": "minimized",
       "title": "<idle> server.js",
       "focused": false,

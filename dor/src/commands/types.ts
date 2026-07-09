@@ -6,7 +6,8 @@ import type {
 export type IdFormat = 'refs' | 'uuids' | 'both';
 export type SplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
 export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
-export type SurfaceType = 'terminal' | 'iframe' | 'agent-browser';
+export type SurfaceKind = 'terminal' | 'browser';
+export type SurfaceRenderMode = 'iframe' | 'ab-screencast' | 'ab-popout';
 
 /** Where a Surface renders. Minimized Surfaces (baseboard doors) are listed too;
  *  `hidden` is reserved for Surfaces in an inactive Workspace (a future). */
@@ -30,7 +31,8 @@ export interface Surface {
   id: string;
   ref: string;
   paneRef: string;
-  type: SurfaceType;
+  kind: SurfaceKind;
+  renderMode: SurfaceRenderMode | null;
   title: string;
   focused: boolean;
   index: number;
