@@ -374,6 +374,7 @@ their session is held externally by `agent-browser`.
 | --- | --- |
 | Share a dev server | `dor ensure -- npm dev` reuses the command already live in the same resolved cwd (`--restart` re-runs it in place, preserving layout and minimized/visible state). `dor list --command "npm dev" --cwd . --ports --json` returns the Surface with its ports, and the agent opens `dor ab open http://localhost:<port>`. Passing the terminal handle straight to the browser command (`dor ab open surface:N`) is the one unshipped ergonomic — see [Future](#future). |
 | Launch a sub-agent | `dor split -- codex` returns `surface:N`; drive it with `dor send surface:N --text "/review" --key enter` (or `--sequence` for arbitrary ordering), then read it back with `dor read surface:N`. |
+| Wait on a sub-agent | `dor split -- otheragent` returns `surface:5`; the caller watches `dor list --json` for that Surface's `ringing` flag and calls `dor read surface:5` once the peer rings the Dormouse bell to signal it is done. Blocking on the bell directly with `dor await surface:5` (which prints the screen the moment it rings) is staged — see [Future](#future). |
 | Client / server browser testing | `dor ab --key client open <client-url>` and `dor ab --key server open <server-url>` create or reuse two independent browser Surfaces. |
 | Multi-worktree, same command | Two worktrees each run `dor ensure -- npm dev`; the resolved cwd keeps them distinct, and `dor list --command "npm dev" --cwd <worktree> --json` selects the intended one. |
 | Long-running background job | `dor ensure --minimize -- npm test -- --watch` keeps a watcher out of the layout; `dor list --command "npm test -- --watch" --json` rediscovers the minimized Surface after churn, and `read` / `send` / `kill` target it by ref. |
@@ -395,6 +396,22 @@ their session is held externally by `agent-browser`.
   distinct candidate ports fail and list choices until an explicit port selector
   exists. Future tether address selection can choose a non-localhost address from
   the same candidate set without changing the surface-target grammar.
+
+- **`dor await <surface>`** — block until a Surface rings the Dormouse bell, then
+  print its screen (like `dor read`) and exit — turning the alert system
+  (`docs/specs/alert.md`) into an agent synchronization primitive. An agent
+  launches a peer with `dor split -- otheragent`, then `dor await surface:5` parks
+  until that peer signals completion by ringing (the `BEL` / `OSC 9` / `9;4` /
+  `99` / `777` events that already drive the `ringing` flag in `dor list`), so the
+  caller stops polling `dor list --json` in a loop. A Surface already ringing when
+  `await` is called returns immediately; `await` acknowledges the alert track it
+  resolved on, so a later `await` blocks on the next ring and the UI bell clears.
+  It reuses `dor read`'s `--lines` / `--scrollback` / `--json` output shape, needs
+  an extended request timeout with a `--timeout <seconds>` ceiling that exits
+  non-zero on expiry, and fails cleanly if the awaited Surface is killed rather
+  than blocking forever. Backed by a `surface.await` control method subscribing to
+  the host alert state (`docs/specs/alert.md`); like every command it ships with
+  its snapshot-tested help.
 
 - **Additional `dor list` filters** — activity/state filters are deliberately
   deferred: `--running` as shorthand for `--activity running`, full `--activity
