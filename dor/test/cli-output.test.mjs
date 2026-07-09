@@ -390,6 +390,19 @@ test('version output', async () => {
   );
 });
 
+test('version json output', async () => {
+  await snapshot(
+    'version-json',
+    await runCli(['version', '--json'], {
+      versionMetadata: {
+        version: '0.12.0',
+        commit: '6e86b3ba',
+        commitsSinceVersion: 89,
+      },
+    }),
+  );
+});
+
 test('--version and -v alias the version command', async () => {
   const versionMetadata = { version: '0.12.0', commit: '6e86b3ba', commitsSinceVersion: 89 };
   const expected = await runCli(['version'], { versionMetadata });
@@ -405,6 +418,13 @@ test('send text output', async () => {
   await snapshot(
     'send-text',
     await runCli(['send', '--surface', 'surface:2', 'echo hello\\n'], { client: fixtureClient() }),
+  );
+});
+
+test('send json output', async () => {
+  await snapshot(
+    'send-json',
+    await runCli(['send', '--json', '--surface', 'surface:2', '--key', 'ctrl-c'], { client: fixtureClient() }),
   );
 });
 
@@ -500,6 +520,13 @@ test('kill text output', async () => {
   await snapshot(
     'kill-text',
     await runCli(['kill', '--surface', 'surface:2', '--confirm-dangerously'], { client: fixtureClient() }),
+  );
+});
+
+test('kill json output', async () => {
+  await snapshot(
+    'kill-json',
+    await runCli(['kill', '--json', '--surface', 'surface:2', '--confirm-dangerously'], { client: fixtureClient() }),
   );
 });
 

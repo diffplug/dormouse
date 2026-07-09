@@ -7,25 +7,42 @@ import type {
   DorCommandContext,
   VersionMetadata,
 } from './types.js';
-import { writeStdout } from './shared.js';
+import { renderJson, writeStdout } from './shared.js';
+
+interface VersionFlags {
+  readonly json?: boolean;
+}
 
 export const versionCommand: Command = {
   name: 'version',
-  command: buildCommand<{}, [], DorCommandContext>({
+  command: buildCommand<VersionFlags, [], DorCommandContext>({
     docs: {
       brief: 'Print the dor CLI version.',
       fullDescription: `Prints the latest released Dormouse version from CHANGELOG.md, the build commit, and a prerelease-style build suffix when the build contains commits after that version tag.
 
 Text output:
-  dor 0.11.0 [1a2b3c4d] (0.11.0+12)`,
+  dor 0.11.0 [1a2b3c4d] (0.11.0+12)
+
+JSON output:
+  {
+    "version": "0.11.0",
+    "commit": "1a2b3c4d",
+    "commits_since_version": 12,
+    "build": "0.11.0+12"
+  }`,
     },
-    parameters: {},
+    parameters: {
+      flags: {
+        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+      },
+    },
     func: runVersionCommand,
   }),
 };
 
-function runVersionCommand(this: DorCommandContext): void {
-  writeStdout(this, renderVersion(this.options.versionMetadata ?? DOR_VERSION_METADATA));
+function runVersionCommand(this: DorCommandContext, flags: VersionFlags): void {
+  const metadata = this.options.versionMetadata ?? DOR_VERSION_METADATA;
+  writeStdout(this, flags.json === true ? renderVersionJson(metadata) : renderVersion(metadata));
 }
 
 export function renderVersion(metadata: VersionMetadata): string {
@@ -33,4 +50,15 @@ export function renderVersion(metadata: VersionMetadata): string {
     ? ` (${metadata.version}+${metadata.commitsSinceVersion})`
     : '';
   return `dor ${metadata.version} [${metadata.commit}]${suffix}\n`;
+}
+
+function renderVersionJson(metadata: VersionMetadata): string {
+  return renderJson({
+    version: metadata.version,
+    commit: metadata.commit,
+    commits_since_version: metadata.commitsSinceVersion,
+    build: metadata.commitsSinceVersion > 0
+      ? `${metadata.version}+${metadata.commitsSinceVersion}`
+      : metadata.version,
+  });
 }

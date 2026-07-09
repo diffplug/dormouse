@@ -258,6 +258,11 @@ target shell, picks a quoting style with
 (`cmd` / `posix` / `powershell`), and renders a single command string used for
 output, JSON responses, default `ensure` titles, and the launched command alike.
 
+Every first-party command except the `dor agent-browser` / `dor ab` passthrough
+accepts `--json` and emits a stable object with the same handles as its text
+output. `dor ab` forwards arguments to the user's `agent-browser` CLI, so any
+JSON mode there belongs to that delegated command surface rather than to `dor`.
+
 User-facing command docs live in the generated help snapshots. Implementation
 details live in the command files. When `stricli` cannot express a desired
 help shape, commands may declare narrow template-pattern `findReplace` /

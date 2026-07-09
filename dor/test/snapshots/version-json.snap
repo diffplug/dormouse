@@ -1,0 +1,10 @@
+exitCode: 0
+stdout:
+{
+  "version": "0.12.0",
+  "commit": "6e86b3ba",
+  "commits_since_version": 89,
+  "build": "0.12.0+89"
+}
+
+stderr:

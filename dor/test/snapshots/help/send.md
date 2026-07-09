@@ -4,7 +4,7 @@ Invocation: `dor send --help`
 
 ```text
 USAGE
-  dor send [--key value] [--raw] [--sequence json] [--stdin] [--surface id|ref|index] [--text value] [<text>]
+  dor send [--json] [--key value] [--raw] [--sequence json] [--stdin] [--surface id|ref|index] [--text value] [<text>]
   dor send --help
 
 By default, a positional argument is sent as text. Special keys must be sent with --key so values like "enter" are never confused with literal text.
@@ -19,6 +19,14 @@ Supported keys: enter, escape, esc, tab, backspace, delete, up, down, left, righ
 
 Sequence input is an ordered JSON array of {"text":"..."} and {"key":"..."} objects.
 
+JSON output:
+  {
+    "status": "sent",
+    "surface_id": "...",
+    "surface_ref": "surface:3",
+    "input_count": 1
+  }
+
 Examples:
   dor send "echo hello"
   dor send --key enter
@@ -27,6 +35,7 @@ Examples:
   dor send --surface surface:3 --sequence '[{"text":"npm test"},{"key":"enter"}]'
 
 FLAGS
+     [--json]      Print JSON output.
      [--key]       Send a named key or chord.
      [--raw]       Do not interpret backslash escapes in text input.
      [--sequence]  Send an ordered JSON sequence of text and key events.

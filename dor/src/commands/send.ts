@@ -8,12 +8,14 @@ import type {
   SendSurfaceResponse,
 } from './types.js';
 import {
+  renderJson,
   requireControlClient,
   stringParser,
   writeStdout,
 } from './shared.js';
 
 interface SendFlags {
+  readonly json?: boolean;
   readonly key?: string;
   readonly raw?: boolean;
   readonly sequence?: string;
@@ -43,6 +45,14 @@ Supported keys: enter, escape, esc, tab, backspace, delete, up, down, left, righ
 
 Sequence input is an ordered JSON array of {"text":"..."} and {"key":"..."} objects.
 
+JSON output:
+  {
+    "status": "sent",
+    "surface_id": "...",
+    "surface_ref": "surface:3",
+    "input_count": 1
+  }
+
 Examples:
   dor send "echo hello"
   dor send --key enter
@@ -52,6 +62,7 @@ Examples:
     },
     parameters: {
       flags: {
+        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         key: { kind: 'parsed', parse: stringParser, brief: 'Send a named key or chord.', optional: true },
         raw: { kind: 'boolean', brief: 'Do not interpret backslash escapes in text input.', optional: true, withNegated: false },
         sequence: { kind: 'parsed', parse: stringParser, brief: 'Send an ordered JSON sequence of text and key events.', optional: true, placeholder: 'json' },
@@ -87,7 +98,7 @@ async function runSendCommand(this: DorCommandContext, flags: SendFlags, text?: 
       input: encoded.value.input,
       inputCount: encoded.value.inputCount,
     });
-    writeStdout(this, renderSendResponse(response));
+    writeStdout(this, renderSendResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
     return new Error(error instanceof Error ? error.message : String(error));
@@ -218,7 +229,16 @@ function encodeKey(input: string): ParseResult<string> {
   return { ok: false, message: `unsupported key '${input}'` };
 }
 
-function renderSendResponse(response: SendSurfaceResponse): string {
+function renderSendResponse(response: SendSurfaceResponse, json: boolean): string {
+  if (json) {
+    return renderJson({
+      status: response.status,
+      ...(response.surfaceId ? { surface_id: response.surfaceId } : {}),
+      surface_ref: response.surfaceRef,
+      input_count: response.inputCount,
+    });
+  }
+
   const noun = response.inputCount === 1 ? 'input' : 'inputs';
   return `${response.status} ${response.surfaceRef}  [${response.inputCount} ${noun}]\n`;
 }

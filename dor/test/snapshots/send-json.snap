@@ -1,0 +1,10 @@
+exitCode: 0
+stdout:
+{
+  "status": "sent",
+  "surface_id": "22222222-2222-4222-8222-222222222222",
+  "surface_ref": "surface:2",
+  "input_count": 1
+}
+
+stderr:
