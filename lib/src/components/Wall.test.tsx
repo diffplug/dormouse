@@ -151,6 +151,35 @@ describe('Wall on the Lath engine', () => {
     expect(onEvent).not.toHaveBeenCalledWith({ type: 'zoomChange', zoomed: true });
   });
 
+  it('dor kill can target a minimized surface ref', async () => {
+    let response: { ok: boolean; error?: string } | undefined;
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true }));
+    });
+    await flush();
+    expect(container.querySelector('[data-door-id="pane-a"]')).not.toBeNull();
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.kill,
+          params: { surface: 'surface:2', confirmation: { mode: 'dangerously' } },
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+
+    expect(response?.ok).toBe(true);
+    expect(response?.error).toBeUndefined();
+    expect(container.querySelector('[data-door-id="pane-a"]')).toBeNull();
+  });
+
   it('keeps visible terminal sessions mounted until the kill fade completes', async () => {
     globalThis.matchMedia = ((query: string) => ({
       matches: false,

@@ -80,6 +80,31 @@ function renderSurfaceForError(surface: DorSurface): string {
   return `${surface.ref} ${JSON.stringify(surface.title)}`;
 }
 
+function resolveSurfaceTarget(
+  surfaces: DorSurface[],
+  target: string | undefined,
+  callerSurfaceId: string | undefined,
+): ParseResult<DorSurface> {
+  const resolvedTarget = target ?? callerSurfaceId ?? 'focused';
+  const titleTarget = surfaceTitleTarget(resolvedTarget);
+  if (titleTarget !== null) {
+    const matches = surfaces.filter((surface) => surface.title === titleTarget);
+    if (matches.length === 1) return { ok: true, value: matches[0] };
+    if (matches.length > 1) {
+      return {
+        ok: false,
+        message: `surface target '${resolvedTarget}' matched multiple surfaces: ${matches.map(renderSurfaceForError).join(', ')}`,
+      };
+    }
+    return { ok: false, message: `surface target '${resolvedTarget}' was not found` };
+  }
+
+  const matched = surfaces.find((surface) => matchesDorPaneTarget(resolvedTarget, surface))
+    ?? (!target && !callerSurfaceId ? (surfaces[0] ?? null) : null);
+  if (matched) return { ok: true, value: matched };
+  return { ok: false, message: `surface '${resolvedTarget}' was not found` };
+}
+
 function toSurfacePort(port: OpenPort): DorSurfacePort {
   return {
     family: port.family,
@@ -308,27 +333,14 @@ export function useDorControl({
   const resolveVisibleSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
-  ): ParseResult<DorSurface> => {
-    const surfaces = buildDorSurfaces();
-    const resolvedTarget = target ?? callerSurfaceId ?? 'focused';
-    const titleTarget = surfaceTitleTarget(resolvedTarget);
-    if (titleTarget !== null) {
-      const matches = surfaces.filter((surface) => surface.title === titleTarget);
-      if (matches.length === 1) return { ok: true, value: matches[0] };
-      if (matches.length > 1) {
-        return {
-          ok: false,
-          message: `surface target '${resolvedTarget}' matched multiple surfaces: ${matches.map(renderSurfaceForError).join(', ')}`,
-        };
-      }
-      return { ok: false, message: `surface target '${resolvedTarget}' was not found` };
-    }
+  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaces(), target, callerSurfaceId), [buildDorSurfaces]);
 
-    const matched = surfaces.find((surface) => matchesDorPaneTarget(resolvedTarget, surface))
-      ?? (!target && !callerSurfaceId ? (surfaces[0] ?? null) : null);
-    if (matched) return { ok: true, value: matched };
-    return { ok: false, message: `surface '${resolvedTarget}' was not found` };
-  }, [buildDorSurfaces]);
+  const resolveListedSurface = useCallback((
+    target: string | undefined,
+    callerSurfaceId: string | undefined,
+  ): ParseResult<DorSurface> => {
+    return resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId);
+  }, [buildDorSurfaceList]);
 
   const findSurfaceIdRunningCommand = useCallback((command: string, cwdPath: string): string | null => {
     const ids = [
@@ -372,7 +384,7 @@ export function useDorControl({
       // Resolve the split reference surface and confirm it is a live visible pane,
       // responding with the appropriate error and returning null otherwise.
       const resolveSplitTarget = () => {
-        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
+        const target = resolveListedSurface(stringParam(params.surface), detail.surfaceId);
         if (!target.ok) {
           detail.respond({ ok: false, error: target.message });
           return null;
@@ -564,7 +576,7 @@ export function useDorControl({
           detail.respond({ ok: false, error: 'input is required' });
           return;
         }
-        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
+        const target = resolveListedSurface(stringParam(params.surface), detail.surfaceId);
         if (!target.ok) {
           detail.respond({ ok: false, error: target.message });
           return;
@@ -587,7 +599,7 @@ export function useDorControl({
       }
 
       if (detail.method === SURFACE_CONTROL_METHODS.read) {
-        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
+        const target = resolveListedSurface(stringParam(params.surface), detail.surfaceId);
         if (!target.ok) {
           detail.respond({ ok: false, error: target.message });
           return;
@@ -622,7 +634,7 @@ export function useDorControl({
           detail.respond({ ok: false, error: 'surface is required' });
           return;
         }
-        const target = resolveVisibleSurface(surface, detail.surfaceId);
+        const target = resolveListedSurface(surface, detail.surfaceId);
         if (!target.ok) {
           detail.respond({ ok: false, error: target.message });
           return;
@@ -766,5 +778,5 @@ export function useDorControl({
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, resolveVisibleSurface, surfaceRefForId, lath, nav]);
+  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
 }

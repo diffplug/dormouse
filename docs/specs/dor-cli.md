@@ -235,10 +235,12 @@ activity snapshots. It returns `workspace:1` and `window:1`: it reports the
 single active Workspace (Workspace-aware tagging is staged; see
 [Future](#future)). Two builders back this on the host
 (`lib/src/components/Wall.tsx`): `buildDorSurfaces` is the visible-pane
-projection used for `dor` **targeting** (split / kill / send / read), while
-`buildDorSurfaceList` adds the minimized Surfaces for `dor list` — so listing
-sees minimized Surfaces but targeting semantics are unchanged. Minimized
-Surfaces are numbered after the visible panes (matching `surfaceRefForId`).
+projection used for `dor` commands that need geometry (split / browser-surface
+placement), while `buildDorSurfaceList` adds the minimized Surfaces for
+`dor list` and for direct terminal operations (`send`, `read`, `kill`).
+Minimized Surfaces are numbered after the visible panes (matching
+`surfaceRefForId`) and those refs are valid targets for operations that do not
+need a visible reference pane.
 
 When the request sets `includePorts` (`dor list --ports`), the host calls
 `PlatformAdapter.getOpenPorts(id)` (`docs/specs/dor-browser.md` → Dev-Server
