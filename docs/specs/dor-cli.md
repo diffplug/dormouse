@@ -391,6 +391,46 @@ their session is held externally by `agent-browser`.
 
 ## Future
 
+- **`dor skill` — agent-skill distribution** — ship the agent
+  skill (`dor-skill.md`, authored at the repo root) to every coding agent
+  running inside a Dormouse terminal. Distribution splits into content and
+  bootstrap so each can be exactly as stable as it needs to be:
+  - **Content ships with the CLI.** `dor skill` prints the skill markdown.
+    The text is inlined into the compiled entrypoint at build time (esbuild
+    text import; the file moves into the `dor` package — e.g. a top-level
+    `skill.md` there — so the build can import it), keeping the staged package
+    launchers + bundle and version-locking the text to the CLI it documents.
+    The printed text is snapshot-tested alongside the command's help. The
+    skill body deliberately contains no environment detection: if `dor skill`
+    ran, `dor` is by definition available — detection belongs entirely to the
+    stub.
+  - **Bootstrap is a stub that cannot drift.** `dor skill --install` writes
+    the stub as a managed block in the *project's* agent instruction file —
+    `AGENTS.md`, the convention read by Codex, Pi, OpenCode, and most other
+    harnesses, or `CLAUDE.md` where that is what the project has — whose
+    entire content is the detection rule: *if `DORMOUSE_SURFACE_ID` is set in
+    the environment, run `dor skill` and follow it; otherwise this terminal is
+    not Dormouse-hosted and `dor` does not apply.* The stub carries no facts
+    about the CLI, so it can never version-skew; the instructions always come
+    from the running Dormouse. The env-var guard also makes the committed
+    block inert for collaborators who don't run Dormouse — committing it is
+    safe, and is the point: the stub travels with the repo, so one teammate
+    installing it covers every agent and every clone, instead of living in one
+    user's home config. The block is delimited by marker comments and
+    rewritten in place on every run — `dor skill --install` is idempotent,
+    creates the file when the project has none, never touches text outside its
+    markers, and prints what it wrote.
+  - Skill-ecosystem publication (plugin marketplaces, npm) distributes the
+    stub, never a copy of the content.
+  - To workshop before implementing: the file-selection rule (prefer an
+    existing `AGENTS.md`; fall back to `CLAUDE.md` when it exists and does not
+    already import `AGENTS.md`; create `AGENTS.md` when neither exists?);
+    whether the stub says anything to readers without Dormouse (a one-line
+    pointer is honest advertising, more is spam); whether a user-level
+    `--global` variant is also worth offering; whether the canonical skill
+    file keeps its YAML frontmatter now that the stub is an instructions block
+    (nothing would index the frontmatter); and the exact stub wording.
+
 - **Browser open target resolution** — the one unshipped Agent-Workflow
   ergonomic (the Share-a-dev-server shortcut above): `dor ab open <target>` and
   `dor iframe <target>` accept an explicit terminal Surface handle (`surface:N`,

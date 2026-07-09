@@ -12,9 +12,6 @@ backgrounding a process inside your own shell (where its output is invisible
 and it dies with you), you run it in its own **surface** that the user can see
 and that outlives your session.
 
-**Applies when:** `DORMOUSE_SURFACE_ID` is set in your environment. If it is
-not set, you are not in a Dormouse terminal; do not use `dor`.
-
 ## Targeting: three ways to name a surface
 
 Action commands (`read`, `send`, `kill`) take a surface handle — there is
