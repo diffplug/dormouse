@@ -23,7 +23,6 @@ import type {
   Command,
   DorCommandContext,
   HelpPatch,
-  ParseResult,
 } from './commands/types.js';
 
 export type {
@@ -143,13 +142,14 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
   const helpTarget = getHelpTarget(argv);
   const [commandName, ...args] = rewriteHelpArgv(argv);
 
-  if (commandName === 'ensure' && !args.includes('-h') && !args.includes('--help')) {
-    const delimiterCheck = validateEnsureDelimiter(args);
-    if (!delimiterCheck.ok) return fail(delimiterCheck.message);
-  }
-  if (commandName === 'send' && !args.includes('-h') && !args.includes('--help')) {
-    const sendFlagsCheck = validateSendFlags(args);
-    if (!sendFlagsCheck.ok) return fail(sendFlagsCheck.message);
+  // Some commands need argv validated *before* stricli parses it (the `--` command
+  // tail in `dor ensure`, `dor send`'s input-flag ordering). Each owns that check
+  // as `Command.preParse`, defined next to its flags in the command module; here we
+  // just dispatch it. Skipped for help invocations.
+  const command = commandName ? COMMANDS.find((entry) => entry.name === commandName) : undefined;
+  if (command?.preParse && !args.includes('-h') && !args.includes('--help')) {
+    const check = command.preParse(args);
+    if (!check.ok) return fail(check.message);
   }
 
   const capture = createCaptureProcess(options.env);
@@ -324,83 +324,6 @@ function compileHelpPattern(pattern: string): RegExp {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
-}
-
-function validateEnsureDelimiter(args: string[]): ParseResult<void> {
-  const delimiterIndex = args.indexOf('--');
-  if (delimiterIndex === -1) {
-    return { ok: false, message: 'dor ensure requires -- <command...>' };
-  }
-
-  for (let index = 0; index < delimiterIndex; index += 1) {
-    const arg = args[index];
-    if (arg === '--json' || arg === '--minimize' || arg === '--restart') {
-      continue;
-    }
-    if (arg === '--cwd' || arg === '--surface') {
-      const value = args[index + 1];
-      if (!value || value.startsWith('-') || index + 1 >= delimiterIndex) {
-        return { ok: false, message: `${arg} requires a value` };
-      }
-      index += 1;
-      continue;
-    }
-    if (arg.startsWith('-')) {
-      return { ok: false, message: `unknown option '${arg}'` };
-    }
-    return { ok: false, message: `unexpected argument '${arg}' before --` };
-  }
-
-  const command = args.slice(delimiterIndex + 1).join(' ').trim();
-  if (!command) {
-    return { ok: false, message: 'dor ensure requires a command after --' };
-  }
-
-  return { ok: true, value: undefined };
-}
-
-function validateSendFlags(args: string[]): ParseResult<void> {
-  const tracked = new Map<string, number>();
-  const flagPositions = new Map<string, number>();
-  const positionalStart = args.indexOf('--');
-  const scanEnd = positionalStart === -1 ? args.length : positionalStart;
-
-  for (let index = 0; index < scanEnd; index += 1) {
-    const flag = sendFlagName(args[index]);
-    if (!flag) continue;
-
-    if (tracked.has(flag)) {
-      return { ok: false, message: `dor send does not allow duplicate ${flag}` };
-    }
-    tracked.set(flag, index);
-    flagPositions.set(flag, index);
-  }
-
-  const textIndex = flagPositions.get('--text');
-  const keyIndex = flagPositions.get('--key');
-  if (textIndex !== undefined && keyIndex !== undefined && keyIndex < textIndex) {
-    return {
-      ok: false,
-      message: 'when combining --text and --key, put --text before --key; use --sequence for arbitrary ordering',
-    };
-  }
-
-  return { ok: true, value: undefined };
-}
-
-function sendFlagName(arg: string): string | null {
-  const [name] = arg.split('=', 1);
-  switch (name) {
-    case '--json':
-    case '--key':
-    case '--raw':
-    case '--sequence':
-    case '--stdin':
-    case '--text':
-      return name;
-    default:
-      return null;
-  }
 }
 
 function createCaptureProcess(env: CliEnv | undefined): {

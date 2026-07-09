@@ -27,8 +27,55 @@ type SendInput =
   | { kind: 'text'; text: string }
   | { kind: 'key'; key: string };
 
+// stricli parses each flag independently, so it can't enforce "no duplicate input
+// flags" or "--text before --key". `cli.ts` runs this before stricli parses, next
+// to the flag definitions below — keep the recognized-flag list in `sendFlagName`
+// in sync with `parameters.flags`.
+export function validateSendFlags(args: string[]): ParseResult<void> {
+  const flagPositions = new Map<string, number>();
+  const positionalStart = args.indexOf('--');
+  const scanEnd = positionalStart === -1 ? args.length : positionalStart;
+
+  for (let index = 0; index < scanEnd; index += 1) {
+    const flag = sendFlagName(args[index]);
+    if (!flag) continue;
+
+    if (flagPositions.has(flag)) {
+      return { ok: false, message: `dor send does not allow duplicate ${flag}` };
+    }
+    flagPositions.set(flag, index);
+  }
+
+  const textIndex = flagPositions.get('--text');
+  const keyIndex = flagPositions.get('--key');
+  if (textIndex !== undefined && keyIndex !== undefined && keyIndex < textIndex) {
+    return {
+      ok: false,
+      message: 'when combining --text and --key, put --text before --key; use --sequence for arbitrary ordering',
+    };
+  }
+
+  return { ok: true, value: undefined };
+}
+
+function sendFlagName(arg: string): string | null {
+  const [name] = arg.split('=', 1);
+  switch (name) {
+    case '--json':
+    case '--key':
+    case '--raw':
+    case '--sequence':
+    case '--stdin':
+    case '--text':
+      return name;
+    default:
+      return null;
+  }
+}
+
 export const sendCommand: Command = {
   name: 'send',
+  preParse: validateSendFlags,
   helpPatches: [
     {
       scope: 'root',

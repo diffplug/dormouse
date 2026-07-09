@@ -7,6 +7,7 @@ import type {
   Command,
   DorCommandContext,
   EnsureSurfaceResponse,
+  ParseResult,
 } from './types.js';
 import {
   errorMessage,
@@ -35,8 +36,47 @@ const RESTART_TIMEOUT_MS = 60_000;
 // surfaces still respond instantly; this only raises the ceiling for the slow case.
 const ENSURE_TIMEOUT_MS = 20_000;
 
+// stricli treats a bare `--` as "rest are positionals", but it can't express
+// "everything after `--` is one required command tail, and only these flags may
+// precede it". `cli.ts` runs this before stricli parses so the argv-tail contract
+// (and its friendly messages) is enforced next to the flag definitions above —
+// keep the allowed-flag list here in sync with `parameters.flags`.
+export function validateEnsureDelimiter(args: string[]): ParseResult<void> {
+  const delimiterIndex = args.indexOf('--');
+  if (delimiterIndex === -1) {
+    return { ok: false, message: 'dor ensure requires -- <command...>' };
+  }
+
+  for (let index = 0; index < delimiterIndex; index += 1) {
+    const arg = args[index];
+    if (arg === '--json' || arg === '--minimize' || arg === '--restart') {
+      continue;
+    }
+    if (arg === '--cwd' || arg === '--surface') {
+      const value = args[index + 1];
+      if (!value || value.startsWith('-') || index + 1 >= delimiterIndex) {
+        return { ok: false, message: `${arg} requires a value` };
+      }
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('-')) {
+      return { ok: false, message: `unknown option '${arg}'` };
+    }
+    return { ok: false, message: `unexpected argument '${arg}' before --` };
+  }
+
+  const command = args.slice(delimiterIndex + 1).join(' ').trim();
+  if (!command) {
+    return { ok: false, message: 'dor ensure requires a command after --' };
+  }
+
+  return { ok: true, value: undefined };
+}
+
 export const ensureCommand: Command = {
   name: 'ensure',
+  preParse: validateEnsureDelimiter,
   helpPatches: [
     {
       scope: 'root',

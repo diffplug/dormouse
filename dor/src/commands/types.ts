@@ -228,6 +228,12 @@ export interface Command {
   name: string;
   command: StricliCommand<DorCommandContext>;
   helpPatches?: readonly HelpPatch[];
+  /** Argv validation that must run *before* stricli parses (e.g. the `--` command
+   *  tail in `dor ensure`, or `dor send`'s input-flag ordering). Defined next to
+   *  the command's flags so the check and the flag list can't drift apart; `cli.ts`
+   *  dispatches it generically. Receives argv with the command name already
+   *  stripped, and is skipped for help invocations. */
+  preParse?: (args: string[]) => ParseResult<void>;
 }
 
 export interface VersionMetadata {
