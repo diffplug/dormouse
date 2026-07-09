@@ -300,17 +300,23 @@ from `command-detail`.
   the calling terminal with `(you)`, and shows kind, render mode (`-` for
   terminals), `view`, location (cwd for terminals, URL for browser Surfaces),
   title, and `[ringing]` / `[todo]` tags.
-  `--ports` adds each terminal's listening ports. `--json` always includes both
-  stable ids and refs, and additionally emits the identity dump `dor identify`
-  used to print — top-level `caller_surface_ref` / `caller_surface_id` (matched
-  locally against `DORMOUSE_SURFACE_ID`, `null` when the caller is not in the
-  list), `focused_surface_ref` / `focused_surface_id`, and a `host` block
+  Filters are ANDed: `--kind terminal|browser`, `--view
+  paned|zoomed|minimized`, exact `--command <text>`, `--cwd <path>` (resolved
+  like `dor ensure --cwd`, relative to the invoking shell's `PWD` when
+  available), and `--port <number>`. `--ports` adds every terminal's listening
+  ports. `--port` is distinct from `--ports`: it filters to terminal Surfaces
+  that own the port, implies the same opt-in port scan, and includes port details
+  in JSON / text output. `--json` always includes both stable ids and refs, and
+  additionally emits the identity dump `dor identify` used to print — top-level
+  `caller_surface_ref` / `caller_surface_id` (matched locally against
+  `DORMOUSE_SURFACE_ID`, `null` when the caller is not in the list),
+  `focused_surface_ref` / `focused_surface_id`, and a `host` block
   (`DORMOUSE_HOST` / `DORMOUSE_HOST_WORKSPACE` / runtime paths). It deliberately
   does not expose the control socket: the CLI is the public API and the socket is
   private plumbing.
   Replaces the retired cmux-shaped `list-panes` / `list-pane-surfaces` and the
-  `identify` command. Filtering by kind/state and workspace scope are staged (see
-  [Future](#future)). [impl](../../dor/src/commands/list.ts)
+  `identify` command. Filtering by activity/state and workspace scope are staged
+  (see [Future](#future)). [impl](../../dor/src/commands/list.ts)
   [docs](../../dor/test/snapshots/help/list.md)
 
 ## Future
@@ -335,10 +341,10 @@ from `command-detail`.
   | Sharing a dev server | User already has a worktree terminal running `npm dev`. Agent runs `dor ensure -- npm dev`; if the same command is live in the same resolved cwd, Dormouse returns the existing `surface:N`. Restart is `dor ensure --restart -- npm dev`, preserving layout and minimized/visible state. Ports require `dor list --ports --json` and matching the returned row before opening the app in a browser. | `dor ensure -- npm dev` followed by `dor ab open surface:N` or `dor iframe surface:N`; the browser command resolves the terminal Surface to the dev server URL. | Browser open target resolution (below). No surface-wide key needed; the point is seamless discovery of a user-started PTY command plus direct browser handoff. |
   | Launching a sub-agent | Claude runs `dor split -- codex`, captures the returned `surface:N`, then uses `dor send --surface surface:N --sequence '[{"text":"/review"},{"key":"enter"}]'` and `dor read --surface surface:N`. | Optional sugar: `dor send --surface surface:N --text "/review" --enter`. | Send ergonomics: `--enter` / line mode. This is a nice-to-have, not a core gap; `--sequence` is already agent-friendly. |
   | Client/server browser testing | `dor ab --key client open <client-url>` and `dor ab --key server open <server-url>` create or reuse two browser sessions. The `--key` is agent-browser-specific and the passthrough also extracts it later in argv. | ✓ | None. |
-  | Multi-worktree same command | Two worktrees can both run `dor ensure -- npm dev`; matching is disambiguated by resolved cwd, so the commands do not collapse. A bare target such as `dor kill "npm dev"` is intentionally not supported. | `dor list --command "npm dev" --cwd /path/to/worktree --json` discovers the intended one. If a command target exists later, require explicit syntax such as `cmd:"npm dev"` plus cwd and fail on ambiguity. | Command/cwd list filters before target grammar. |
-  | Long-running background job | `dor ensure --minimize -- npm test -- --watch` keeps a watcher out of the main layout. `dor list --json` returns its minimized `surface:N`, and `dor read/send/kill --surface surface:N` can target it. | `dor list --command "npm test -- --watch" --cwd . --json` rediscovers the watcher after layout churn. | Command/cwd filters. Surface-wide `--key watch` stays deferred unless refs plus filters fail this story. |
-  | Port-owner handoff | Agent runs `dor list --ports --json`, finds which terminal owns `:5173`, then opens or reuses a browser surface for that port. | `dor list --port 5173 --kind terminal --json` returns the owning Surface directly; `dor ab --key client open http://localhost:5173` binds the browser side. | `--port` and `--kind` filters. |
-  | Safe cleanup | Automation uses `dor kill --surface surface:N --confirm-if-read text`. The ref must come from recent `dor list --json` or a command response; `title:<exact>` exists but can drift or be ambiguous. | `dor list --command "npm dev" --cwd . --json` followed by `dor kill --surface <ref> --confirm-if-read text`, or a future explicit `cmd:` target that fails unless exactly one live command+cwd match exists. | Filters first; explicit command targets only if the two-step flow is too clumsy. |
+  | Multi-worktree same command | Two worktrees can both run `dor ensure -- npm dev`; matching is disambiguated by resolved cwd, so the commands do not collapse. `dor list --command "npm dev" --cwd /path/to/worktree --json` discovers the intended one. A bare target such as `dor kill "npm dev"` is intentionally not supported. | If a command target exists later, require explicit syntax such as `cmd:"npm dev"` plus cwd and fail on ambiguity. | None for discovery; explicit command targets remain deferred unless refs plus filters are still too clumsy. |
+  | Long-running background job | `dor ensure --minimize -- npm test -- --watch` keeps a watcher out of the main layout. `dor list --command "npm test -- --watch" --cwd . --json` rediscovers the minimized watcher after layout churn, and `dor read/send/kill --surface surface:N` can target it. | ✓ | None. Surface-wide `--key watch` stays deferred unless refs plus filters fail this story. |
+  | Port-owner handoff | Agent runs `dor list --port 5173 --kind terminal --json`, gets the owning Surface directly, then opens or reuses a browser surface for that port with `dor ab --key client open http://localhost:5173`. | ✓ | None. |
+  | Safe cleanup | Automation uses `dor list --command "npm dev" --cwd . --json` followed by `dor kill --surface <ref> --confirm-if-read text`. The ref must come from recent `dor list --json` or a command response; `title:<exact>` exists but can drift or be ambiguous. | A future explicit `cmd:` target that fails unless exactly one live command+cwd match exists. | Explicit command targets only if the two-step flow is too clumsy. |
 
 - **Browser open target resolution** — `dor ab open <target>` and `dor iframe
   <target>` accept a terminal Surface handle wherever they currently accept an
@@ -350,10 +356,13 @@ from `command-detail`.
   exists. Future tether address selection can choose a non-localhost address from
   the same candidate set without changing the surface-target grammar.
 
-- **`dor list` filters** — narrow the listing without post-processing: a
-  positional/`--pane` target (reusing the `matchesDorPaneTarget` resolver that
-  already backs the other commands), `--kind terminal|browser`, and state filters
-  (`--running`, `--alert`/`--todo`). Each ships with its snapshot-tested help.
+- **Additional `dor list` filters** — activity/state filters are deliberately
+  deferred: `--running` as shorthand for `--activity running`, full `--activity
+  unknown|prompt|editing|running|finished`, and possible alert filters such as
+  `--alert` / `--todo`. Add only once a story needs them, and ship each with
+  snapshot-tested help. A positional/`--pane` target can reuse the
+  `matchesDorPaneTarget` resolver that already backs the other commands if list
+  needs target-scoped enumeration.
 - **`dor list` workspace scope** — today `dor list` shows only the active
   Workspace and the noun stays "Surface" (no workspace rows). When workspaces
   land, add `--all` (widen the surface scope to every Workspace, grouped by a

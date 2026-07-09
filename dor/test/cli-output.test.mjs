@@ -768,6 +768,23 @@ test('list json schema includes ids and refs regardless of id-format', async () 
   assert.equal(payload.window_ref, 'window:1');
 });
 
+test('list filters by kind, view, command, and cwd without port scanning', async () => {
+  const client = fixtureClient();
+  const result = await runCli(
+    ['list', '--json', '--kind', 'terminal', '--view', 'paned', '--command', 'pnpm dev', '--cwd', '.'],
+    { client, env: { ...listEnv, PWD: '/Users/me/projects/site' } },
+  );
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, '');
+  assert.deepEqual(client.requests, [{ includePorts: false }]);
+
+  const payload = JSON.parse(result.stdout);
+  assert.deepEqual(payload.surfaces.map((surface) => surface.ref), ['surface:1']);
+  assert.equal(payload.caller_surface_ref, null);
+  assert.equal(payload.focused_surface_ref, 'surface:1');
+  assert.equal(payload.surfaces[0].ports, undefined);
+});
+
 test('list ports text output', async () => {
   const client = fixtureClient();
   const result = await runCli(['list', '--ports'], { client, env: listEnv });
@@ -780,6 +797,18 @@ test('list ports json output', async () => {
     'list-ports-json',
     await runCli(['list', '--ports', '--json'], { client: fixtureClient(), env: listEnv }),
   );
+});
+
+test('list --port filters by listening port and includes port data', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['list', '--port', '5173', '--json'], { client, env: listEnv });
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, '');
+  assert.deepEqual(client.requests, [{ includePorts: true }]);
+
+  const payload = JSON.parse(result.stdout);
+  assert.deepEqual(payload.surfaces.map((surface) => surface.ref), ['surface:1']);
+  assert.deepEqual(payload.surfaces[0].ports.map((port) => port.port), [5173]);
 });
 
 test('list reports a null caller when the calling surface is not in the list', async () => {
