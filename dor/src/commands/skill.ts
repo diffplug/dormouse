@@ -71,13 +71,17 @@ function runSkillCommand(this: DorCommandContext, flags: SkillFlags): void | Err
 function installStub(context: DorCommandContext, json: boolean): void | Error {
   const projectDir = callerWorkingDirectory(undefined, context.options.env);
 
+  // Read both instruction files once up front; the adopt pass and the append
+  // pass below share the contents. `content: null` means the file is absent.
+  const candidates = CANDIDATES.map((name) => {
+    const path = resolvePath(projectDir, name);
+    return { name, path, content: existsSync(path) ? readFileSync(path, 'utf8') : null };
+  });
+
   // First adopt an existing block wherever it already lives, rewriting it in
   // place so hand edits outside the markers survive.
-  for (const name of CANDIDATES) {
-    const path = resolvePath(projectDir, name);
-    if (!existsSync(path)) continue;
-    const content = readFileSync(path, 'utf8');
-    if (!content.includes(BEGIN_MARKER)) continue;
+  for (const { name, path, content } of candidates) {
+    if (content === null || !content.includes(BEGIN_MARKER)) continue;
     const rewritten = rewriteStub(content, name);
     if (rewritten instanceof Error) return rewritten;
     writeFileSync(path, rewritten);
@@ -86,23 +90,13 @@ function installStub(context: DorCommandContext, json: boolean): void | Error {
 
   // No block yet: append to AGENTS.md when it exists, else CLAUDE.md unless it
   // already imports AGENTS.md, else create AGENTS.md.
-  const agentsPath = resolvePath(projectDir, 'AGENTS.md');
-  if (existsSync(agentsPath)) {
-    writeFileSync(agentsPath, appendStub(readFileSync(agentsPath, 'utf8')));
-    return renderInstall(context, 'updated', 'AGENTS.md', json);
-  }
-
-  const claudePath = resolvePath(projectDir, 'CLAUDE.md');
-  if (existsSync(claudePath)) {
-    const content = readFileSync(claudePath, 'utf8');
-    if (!content.includes('@AGENTS.md')) {
-      writeFileSync(claudePath, appendStub(content));
-      return renderInstall(context, 'updated', 'CLAUDE.md', json);
-    }
-  }
-
-  writeFileSync(agentsPath, `${BOOTSTRAP_STUB}\n`);
-  return renderInstall(context, 'created', 'AGENTS.md', json);
+  const [agents, claude] = candidates;
+  const target =
+    agents.content === null && claude.content !== null && !claude.content.includes('@AGENTS.md')
+      ? claude
+      : agents;
+  writeFileSync(target.path, appendStub(target.content ?? ''));
+  return renderInstall(context, target.content === null ? 'created' : 'updated', target.name, json);
 }
 
 // Replace the whole marked region with the current stub; a begin without a

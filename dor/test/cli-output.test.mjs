@@ -16,10 +16,11 @@ const updateSnapshots = process.env.UPDATE_SNAPSHOTS === '1';
 // The markdown the prebuild codegen inlines into the CLI; `dor skill` must print it verbatim.
 const skillMarkdown = await readFile(join(__dirname, '..', 'skill.md'), 'utf8');
 
-// Run against a throwaway project directory, passed to the CLI as its PWD so
-// `dor skill --install` resolves the target files there. Cleaned up after.
-async function withProjectDir(run) {
-  const dir = await mkdtemp(join(tmpdir(), 'dor-skill-'));
+// Run against a throwaway directory, cleaned up after. The skill --install
+// tests pass it to the CLI as its PWD; the agent-browser PATH-resolution test
+// drops a fake binary in it.
+async function withTempDir(prefix, run) {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
   try {
     return await run(dir);
   } finally {
@@ -427,7 +428,7 @@ test('skill --json wraps the markdown', async () => {
 });
 
 test('skill --install creates AGENTS.md when neither file exists', async () => {
-  await withProjectDir(async (dir) => {
+  await withTempDir('dor-skill-', async (dir) => {
     const result = await runCli(['skill', '--install'], { env: { PWD: dir } });
     await snapshot('skill-install-created', result);
     const content = await readFile(join(dir, 'AGENTS.md'), 'utf8');
@@ -438,7 +439,7 @@ test('skill --install creates AGENTS.md when neither file exists', async () => {
 });
 
 test('skill --install appends to an existing AGENTS.md and stays idempotent', async () => {
-  await withProjectDir(async (dir) => {
+  await withTempDir('dor-skill-', async (dir) => {
     const agentsPath = join(dir, 'AGENTS.md');
     await writeFile(agentsPath, '# My project\n\nSome existing guidance.\n');
     const first = await runCli(['skill', '--install'], { env: { PWD: dir } });
@@ -457,7 +458,7 @@ test('skill --install appends to an existing AGENTS.md and stays idempotent', as
 });
 
 test('skill --install writes to CLAUDE.md when it is the only instructions file', async () => {
-  await withProjectDir(async (dir) => {
+  await withTempDir('dor-skill-', async (dir) => {
     const claudePath = join(dir, 'CLAUDE.md');
     await writeFile(claudePath, '# Claude guidance\n');
     const result = await runCli(['skill', '--install'], { env: { PWD: dir } });
@@ -468,7 +469,7 @@ test('skill --install writes to CLAUDE.md when it is the only instructions file'
 });
 
 test('skill --install creates AGENTS.md when CLAUDE.md imports it', async () => {
-  await withProjectDir(async (dir) => {
+  await withTempDir('dor-skill-', async (dir) => {
     const claudePath = join(dir, 'CLAUDE.md');
     const claudeBody = '# Claude guidance\n\n@AGENTS.md\n';
     await writeFile(claudePath, claudeBody);
@@ -480,7 +481,7 @@ test('skill --install creates AGENTS.md when CLAUDE.md imports it', async () => 
 });
 
 test('skill --install rewrites the block in place, preserving surrounding text', async () => {
-  await withProjectDir(async (dir) => {
+  await withTempDir('dor-skill-', async (dir) => {
     const agentsPath = join(dir, 'AGENTS.md');
     const before = '# Top matter\n\n';
     const staleBlock = '<!-- dor-skill:begin — stale -->\nold body\n<!-- dor-skill:end -->';
@@ -499,7 +500,7 @@ test('skill --install rewrites the block in place, preserving surrounding text',
 });
 
 test('skill --install --json reports status and file', async () => {
-  await withProjectDir(async (dir) => {
+  await withTempDir('dor-skill-', async (dir) => {
     const result = await runCli(['skill', '--install', '--json'], { env: { PWD: dir } });
     assert.equal(result.exitCode, 0);
     assert.equal(result.stderr, '');
@@ -806,16 +807,13 @@ test('agent-browser respects DORMOUSE_AGENT_BROWSER_BIN and forwards it as binar
 });
 
 test('agent-browser resolves the binary on PATH to an absolute binaryPath', async () => {
-  const { mkdtemp, writeFile: write, rm } = await import('node:fs/promises');
-  const { tmpdir } = await import('node:os');
-  const dir = await mkdtemp(join(tmpdir(), 'dor-ab-'));
-  try {
+  await withTempDir('dor-ab-', async (dir) => {
     // On Windows a bare name isn't executable and resolveBinaryPath walks
     // PATHEXT (.cmd/.exe/.bat), so the on-disk shim must carry one of those
     // extensions — mirroring how agent-browser actually installs there.
     const ext = process.platform === 'win32' ? '.cmd' : '';
     const binPath = join(dir, `agent-browser${ext}`);
-    await write(binPath, '#!/bin/sh\n', { mode: 0o755 });
+    await writeFile(binPath, '#!/bin/sh\n', { mode: 0o755 });
     const ab = fakeAgentBrowser();
     const client = fixtureClient();
     await runCli(['ab', 'snapshot'], {
@@ -826,9 +824,7 @@ test('agent-browser resolves the binary on PATH to an absolute binaryPath', asyn
       env: { PATH: ['/nonexistent', dir].join(delimiter) },
     });
     assert.equal(client.requests[0].request.binaryPath, binPath);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  });
 });
 
 // The caller terminal (surface:2) plus the host identity `dor list --json` folds
