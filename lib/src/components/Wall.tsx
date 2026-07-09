@@ -815,7 +815,8 @@ export function Wall({
     [buildDorSurfacesInternal],
   );
   const buildDorSurfaceList = useCallback(
-    (): DorSurface[] => [...buildDorSurfacesInternal(true)].sort(compareBySurfaceRef),
+    // buildDorSurfacesInternal already returns a fresh array, so sort it in place.
+    (): DorSurface[] => buildDorSurfacesInternal(true).sort(compareBySurfaceRef),
     [buildDorSurfacesInternal],
   );
 

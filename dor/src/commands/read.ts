@@ -7,6 +7,7 @@ import type {
   ReadSurfaceResponse,
 } from './types.js';
 import {
+  renderJson,
   requireControlClient,
   stringParser,
   writeStdout,
@@ -89,12 +90,12 @@ function parseLineCount(input: string): number {
 
 function renderReadResponse(response: ReadSurfaceResponse, json: boolean): string {
   if (json) {
-    return `${JSON.stringify({
+    return renderJson({
       workspace_ref: response.workspaceRef,
       surface_id: response.surfaceId,
       surface_ref: response.surfaceRef,
       text: response.text,
-    }, null, 2)}\n`;
+    });
   }
 
   // Terminal text comes back with trailing newlines stripped; re-add one so the

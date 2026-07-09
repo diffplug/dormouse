@@ -1,5 +1,7 @@
+import { resolve as resolvePath } from 'node:path';
 import { SocketControlClient } from '../control-client.js';
 import type {
+  CliEnv,
   CliOptions,
   CliResult,
   ControlClient,
@@ -72,14 +74,27 @@ export function renderHandle(handle: { ref: string; id: string }, idFormat: IdFo
   }
 }
 
-export function wantsRefs(idFormat: IdFormat): boolean {
-  return idFormat !== 'ids';
-}
-
-export function wantsIds(idFormat: IdFormat): boolean {
-  return idFormat !== 'refs';
-}
-
 export function writeStdout(context: DorCommandContext, stdout: string): void {
   context.process.stdout.write(stdout);
+}
+
+// Git Bash exports PWD as a POSIX path (`/c/Users/...`). On Windows, resolvePath
+// reads the leading `/c` as a folder under the current drive's root and mangles it
+// to `C:\c\Users\...`, which then matches no surface. Fold the MSYS drive form to a
+// native Windows drive first. No-op off win32 and for paths that already carry a
+// drive letter (e.g. `C:/Users/...`, which some MSYS builds export instead).
+export function msysToWindowsCwd(pwd: string, platform: string): string {
+  if (platform !== 'win32') return pwd;
+  const match = pwd.match(/^\/([A-Za-z])\/(.*)$/);
+  return match ? `${match[1].toUpperCase()}:\\${match[2].replace(/\//g, '\\')}` : pwd;
+}
+
+// The host has no idea where `dor` was launched, so the caller's directory must
+// travel in the request. Prefer the shell's PWD (injectable, matches what the
+// user sees) and fall back to the process cwd. resolvePath canonicalizes both the
+// default and a relative/absolute path into one absolute path the host can key on.
+// Shared by `dor ensure --cwd` and `dor list --cwd`.
+export function callerWorkingDirectory(flag: string | undefined, env: CliEnv | undefined): string {
+  const base = msysToWindowsCwd(env?.PWD ?? process.cwd(), process.platform);
+  return resolvePath(base, flag ?? '.');
 }

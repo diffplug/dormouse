@@ -7,6 +7,7 @@ import type {
   IframeSurfaceResponse,
 } from './types.js';
 import {
+  renderJson,
   requireControlClient,
   stringParser,
   writeStdout,
@@ -97,13 +98,13 @@ function parseIframeUrl(input: string): string {
 
 function renderIframeResponse(response: IframeSurfaceResponse, json: boolean): string {
   if (json) {
-    return `${JSON.stringify({
+    return renderJson({
       status: response.status,
       surface_id: response.surfaceId,
       surface_ref: response.surfaceRef,
       url: response.url,
       minimized: response.minimized,
-    }, null, 2)}\n`;
+    });
   }
 
   const minimized = response.minimized ? '  [minimized]' : '';

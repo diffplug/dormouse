@@ -197,6 +197,19 @@ function normalizeSurfaceRefsNext(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1 ? value : undefined;
 }
 
+/** The conditional-spread of the surface-ref registry fields (`surfaceRefs` +
+ *  its `surfaceRefsNext` counter), so a restored `PersistedSession`'s refs thread
+ *  through `RestoredSession` / `ReconnectResult` without each carry site repeating
+ *  the pair of presence checks. */
+export function carrySurfaceRefs(
+  source: Pick<PersistedSession, 'surfaceRefs' | 'surfaceRefsNext'> | null | undefined,
+): Pick<PersistedSession, 'surfaceRefs' | 'surfaceRefsNext'> {
+  return {
+    ...(source?.surfaceRefs ? { surfaceRefs: source.surfaceRefs } : {}),
+    ...(source?.surfaceRefsNext !== undefined ? { surfaceRefsNext: source.surfaceRefsNext } : {}),
+  };
+}
+
 /**
  * Parse a persisted session blob (`version: 3`), or null if nothing usable is
  * present. A blob that is absent/empty returns null silently; one that is present
@@ -215,23 +228,15 @@ function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession 
   const surfaceRefs = normalizeSurfaceRefs(session.surfaceRefs);
   const surfaceRefsNext = normalizeSurfaceRefsNext(session.surfaceRefsNext);
   const { surfaceRefs: _rawRefs, surfaceRefsNext: _rawNext, ...rest } = session;
-  const refFields = {
-    ...(surfaceRefs ? { surfaceRefs } : {}),
-    ...(surfaceRefsNext !== undefined ? { surfaceRefsNext } : {}),
-  };
-  if (session.panes.every((pane) => typeof pane.untouched === 'boolean')) {
-    return {
-      ...(rest as Omit<PersistedSession, 'surfaceRefs' | 'surfaceRefsNext'>),
-      ...refFields,
-    };
-  }
+  // Fill the `untouched` default only when the blob predates it; otherwise keep
+  // the panes as-is.
+  const panes: PersistedPane[] = session.panes.every((pane) => typeof pane.untouched === 'boolean')
+    ? (session.panes as PersistedPane[])
+    : session.panes.map((pane) => ({ ...pane, untouched: pane.untouched ?? false }));
   return {
-    ...rest,
-    panes: session.panes.map((pane) => ({
-      ...pane,
-      untouched: pane.untouched ?? false,
-    })),
-    ...refFields,
+    ...(rest as Omit<PersistedSession, 'panes' | 'surfaceRefs' | 'surfaceRefsNext'>),
+    panes,
+    ...carrySurfaceRefs({ surfaceRefs, surfaceRefsNext }),
   };
 }
 

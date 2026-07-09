@@ -7,7 +7,6 @@
  * optionally each terminal's listening ports (`--ports` / `--port`).
  */
 
-import { resolve as resolvePath } from 'node:path';
 import { buildCommand, type FlagParametersForType } from '@stricli/core';
 import type {
   CliEnv,
@@ -21,6 +20,7 @@ import type {
   SurfaceView,
 } from './types.js';
 import {
+  callerWorkingDirectory,
   errorMessage,
   parseIdFormat,
   renderHandle,
@@ -150,6 +150,9 @@ async function runListCommand(
   }
 }
 
+// These are display predicates applied to the host's full surface projection.
+// (Caller-identity targeting — the `pane` field — is filtered host-side in
+// use-dor-control.ts; only `--port` opts into the expensive host port scan.)
 function applyListFilters(
   response: ListSurfacesResponse,
   flags: ListFlags,
@@ -292,15 +295,4 @@ function parsePort(value: string): number {
     throw new SyntaxError(`invalid --port '${value}'`);
   }
   return port;
-}
-
-function msysToWindowsCwd(pwd: string, platform: string): string {
-  if (platform !== 'win32') return pwd;
-  const match = pwd.match(/^\/([A-Za-z])\/(.*)$/);
-  return match ? `${match[1].toUpperCase()}:\\${match[2].replace(/\//g, '\\')}` : pwd;
-}
-
-function callerWorkingDirectory(flag: string, env: CliEnv): string {
-  const base = msysToWindowsCwd(env.PWD ?? process.cwd(), process.platform);
-  return resolvePath(base, flag);
 }

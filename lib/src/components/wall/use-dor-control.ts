@@ -85,6 +85,19 @@ function renderSurfaceForError(surface: DorSurface): string {
   return `${surface.ref} ${JSON.stringify(surface.title)}`;
 }
 
+// Resolve exactly one match: ok for a single hit, an ambiguity error for many,
+// null for none (each caller supplies its own not-found / fallback tail).
+function pickSingleMatch(matches: DorSurface[], resolvedTarget: string): ParseResult<DorSurface> | null {
+  if (matches.length === 1) return { ok: true, value: matches[0] };
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      message: `surface target '${resolvedTarget}' matched multiple surfaces: ${matches.map(renderSurfaceForError).join(', ')}`,
+    };
+  }
+  return null;
+}
+
 function resolveSurfaceTarget(
   surfaces: DorSurface[],
   target: string | undefined,
@@ -94,24 +107,13 @@ function resolveSurfaceTarget(
   const titleTarget = surfaceTitleTarget(resolvedTarget);
   if (titleTarget !== null) {
     const matches = surfaces.filter((surface) => surface.title === titleTarget);
-    if (matches.length === 1) return { ok: true, value: matches[0] };
-    if (matches.length > 1) {
-      return {
-        ok: false,
-        message: `surface target '${resolvedTarget}' matched multiple surfaces: ${matches.map(renderSurfaceForError).join(', ')}`,
-      };
-    }
-    return { ok: false, message: `surface target '${resolvedTarget}' was not found` };
+    return pickSingleMatch(matches, resolvedTarget)
+      ?? { ok: false, message: `surface target '${resolvedTarget}' was not found` };
   }
 
   const matches = surfaces.filter((surface) => matchesDorSurfaceTarget(resolvedTarget, surface, callerSurfaceId));
-  if (matches.length === 1) return { ok: true, value: matches[0] };
-  if (matches.length > 1) {
-    return {
-      ok: false,
-      message: `surface target '${resolvedTarget}' matched multiple surfaces: ${matches.map(renderSurfaceForError).join(', ')}`,
-    };
-  }
+  const single = pickSingleMatch(matches, resolvedTarget);
+  if (single) return single;
   const fallback = !target && !callerSurfaceId ? (surfaces[0] ?? null) : null;
   if (fallback) return { ok: true, value: fallback };
   return { ok: false, message: `surface '${resolvedTarget}' was not found` };
@@ -350,9 +352,27 @@ export function useDorControl({
   const resolveListedSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
-  ): ParseResult<DorSurface> => {
-    return resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId);
-  }, [buildDorSurfaceList]);
+  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId), [buildDorSurfaceList]);
+
+  // The shared prelude of the direct-operation handlers (send / read / kill): a
+  // target surface is required and must resolve against the listed surfaces.
+  // Responds with the failure and returns null so the caller just bails.
+  const requireListedSurface = useCallback((
+    surfaceParam: unknown,
+    detail: DorControlRequest,
+  ): DorSurface | null => {
+    const surface = stringParam(surfaceParam);
+    if (!surface) {
+      detail.respond({ ok: false, error: 'surface is required' });
+      return null;
+    }
+    const target = resolveListedSurface(surface, detail.surfaceId);
+    if (!target.ok) {
+      detail.respond({ ok: false, error: target.message });
+      return null;
+    }
+    return target.value;
+  }, [resolveListedSurface]);
 
   const findSurfaceIdRunningCommand = useCallback((command: string, cwdPath: string): string | null => {
     const ids = [
@@ -588,27 +608,19 @@ export function useDorControl({
           detail.respond({ ok: false, error: 'input is required' });
           return;
         }
-        const surface = stringParam(params.surface);
-        if (!surface) {
-          detail.respond({ ok: false, error: 'surface is required' });
+        const target = requireListedSurface(params.surface, detail);
+        if (!target) return;
+        if (target.kind !== 'terminal') {
+          detail.respond({ ok: false, error: `surface '${target.ref}' is not a terminal` });
           return;
         }
-        const target = resolveListedSurface(surface, detail.surfaceId);
-        if (!target.ok) {
-          detail.respond({ ok: false, error: target.message });
-          return;
-        }
-        if (target.value.kind !== 'terminal') {
-          detail.respond({ ok: false, error: `surface '${target.value.ref}' is not a terminal` });
-          return;
-        }
-        getPlatform().writePty(target.value.id, input);
+        getPlatform().writePty(target.id, input);
         detail.respond({
           ok: true,
           result: {
             status: 'sent',
-            surfaceId: target.value.id,
-            surfaceRef: target.value.ref,
+            surfaceId: target.id,
+            surfaceRef: target.ref,
             inputCount: typeof params.inputCount === 'number' ? params.inputCount : 1,
           },
         });
@@ -616,29 +628,21 @@ export function useDorControl({
       }
 
       if (detail.method === SURFACE_CONTROL_METHODS.read) {
-        const surface = stringParam(params.surface);
-        if (!surface) {
-          detail.respond({ ok: false, error: 'surface is required' });
-          return;
-        }
-        const target = resolveListedSurface(surface, detail.surfaceId);
-        if (!target.ok) {
-          detail.respond({ ok: false, error: target.message });
-          return;
-        }
-        if (target.value.kind !== 'terminal') {
-          detail.respond({ ok: false, error: `surface '${target.value.ref}' is not a terminal` });
+        const target = requireListedSurface(params.surface, detail);
+        if (!target) return;
+        if (target.kind !== 'terminal') {
+          detail.respond({ ok: false, error: `surface '${target.ref}' is not a terminal` });
           return;
         }
         const lines = numberParam(params.lines);
         const scrollback = booleanParam(params.scrollback);
-        const text = readSurfaceText(target.value.id, lines, scrollback);
+        const text = readSurfaceText(target.id, lines, scrollback);
         detail.respond({
           ok: true,
           result: {
             workspaceRef: 'workspace:1',
-            surfaceId: target.value.id,
-            surfaceRef: target.value.ref,
+            surfaceId: target.id,
+            surfaceRef: target.ref,
             text,
           },
         });
@@ -651,30 +655,22 @@ export function useDorControl({
           detail.respond({ ok: false, error: 'invalid kill confirmation' });
           return;
         }
-        const surface = stringParam(params.surface);
-        if (!surface) {
-          detail.respond({ ok: false, error: 'surface is required' });
-          return;
-        }
-        const target = resolveListedSurface(surface, detail.surfaceId);
-        if (!target.ok) {
-          detail.respond({ ok: false, error: target.message });
-          return;
-        }
+        const target = requireListedSurface(params.surface, detail);
+        if (!target) return;
         if (confirmation.mode === 'if-read') {
-          const text = readSurfaceText(target.value.id, undefined, false);
+          const text = readSurfaceText(target.id, undefined, false);
           if (!text.includes(confirmation.text)) {
-            detail.respond({ ok: false, error: `surface '${target.value.ref}' read text did not contain confirmation text` });
+            detail.respond({ ok: false, error: `surface '${target.ref}' read text did not contain confirmation text` });
             return;
           }
         }
-        killPaneImmediately(target.value.id);
+        killPaneImmediately(target.id);
         detail.respond({
           ok: true,
           result: {
             status: 'killed',
-            surfaceId: target.value.id,
-            surfaceRef: target.value.ref,
+            surfaceId: target.id,
+            surfaceRef: target.ref,
           },
         });
         return;
@@ -800,5 +796,5 @@ export function useDorControl({
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
+  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireListedSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
 }

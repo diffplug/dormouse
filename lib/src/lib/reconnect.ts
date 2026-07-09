@@ -1,7 +1,7 @@
 import type { LathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter, PtyInfo } from './platform/types';
 import { restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
-import { readPersistedSession, type PersistedDoor, type PersistedSurfaceRefs } from './session-types';
+import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedSurfaceRefs } from './session-types';
 import { persistedLathLayout, restoreSession } from './session-restore';
 
 export interface ReconnectResult {
@@ -98,8 +98,7 @@ function resumeLiveSessions(platform: PlatformAdapter): Promise<ReconnectResult 
       resolve({
         paneIds: ids,
         doors: [],
-        ...(saved?.surfaceRefs ? { surfaceRefs: saved.surfaceRefs } : {}),
-        ...(saved?.surfaceRefsNext !== undefined ? { surfaceRefsNext: saved.surfaceRefsNext } : {}),
+        ...carrySurfaceRefs(saved),
       });
     }
 
@@ -156,7 +155,6 @@ function getSavedResumePlan(savedState: unknown, liveIds: string[]): ReconnectRe
     paneIds: layoutMatchesVisiblePanes ? paneIds : paneIds.filter((id) => liveSet.has(id)),
     doors,
     lathLayout: layoutMatchesVisiblePanes ? lathLayout : undefined,
-    ...(saved.surfaceRefs ? { surfaceRefs: saved.surfaceRefs } : {}),
-    ...(saved.surfaceRefsNext !== undefined ? { surfaceRefsNext: saved.surfaceRefsNext } : {}),
+    ...carrySurfaceRefs(saved),
   };
 }

@@ -145,9 +145,10 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
   // Some commands need argv validated *before* stricli parses it (the `--` command
   // tail in `dor ensure`, `dor send`'s input-flag ordering). Each owns that check
   // as `Command.preParse`, defined next to its flags in the command module; here we
-  // just dispatch it. Skipped for help invocations.
+  // just dispatch it. `helpTarget` already captured whether this is a help
+  // invocation (in which case the command func never runs), so reuse it to skip.
   const command = commandName ? COMMANDS.find((entry) => entry.name === commandName) : undefined;
-  if (command?.preParse && !args.includes('-h') && !args.includes('--help')) {
+  if (command?.preParse && helpTarget === undefined) {
     const check = command.preParse(args);
     if (!check.ok) return fail(check.message);
   }

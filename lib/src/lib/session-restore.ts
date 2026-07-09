@@ -1,6 +1,6 @@
 import { type LathPersistedLayout, isLathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter } from './platform/types';
-import { readPersistedSession, type PersistedDoor, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
+import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
 import { getDefaultShellOpts, restoreBrowserSurfaceTodo, restoreTerminal } from './terminal-registry';
 
 export interface RestoredSession {
@@ -50,7 +50,6 @@ export function restoreSession(platform: PlatformAdapter): RestoredSession | nul
     paneIds: saved.panes.filter((pane) => !doorIds.has(pane.id)).map((p) => p.id),
     lathLayout: persistedLathLayout(saved),
     doors,
-    ...(saved.surfaceRefs ? { surfaceRefs: saved.surfaceRefs } : {}),
-    ...(saved.surfaceRefsNext !== undefined ? { surfaceRefsNext: saved.surfaceRefsNext } : {}),
+    ...carrySurfaceRefs(saved),
   };
 }
