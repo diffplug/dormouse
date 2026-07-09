@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import type { ReactNode } from 'react';
-// Importing from App.tsx runs its `index.css` / `pocket.css` side-effect imports,
-// so the `pk-*` styles and `:root` palette are loaded for these stories.
+// Importing from App.tsx runs its `index.css` side-effect import, loading the
+// shared --color-* theme tokens. The auth chrome is built from the three VSCode
+// list pairs (docs/specs/theme.md); switch themes with the Storybook toolbar.
 import { SetupOrSignin } from '../remote/pocket-app/App';
 
 function wait(ms: number) {
@@ -19,12 +20,13 @@ async function openSetup({ canvasElement }: { canvasElement: HTMLElement }) {
   await wait(50);
 }
 
-// Phone-sized frame with the pocket dark background, matching the real app shell.
+// Phone-sized frame on the app-bg surface, matching the real app shell. Uses a
+// faint app-fg outline for definition since panel-border is often transparent.
 function PhoneFrame({ children }: { children: ReactNode }) {
   return (
     <div
-      className="overflow-hidden border border-border shadow-2xl"
-      style={{ width: 390, height: 760, background: 'var(--pk-bg)' }}
+      className="overflow-hidden rounded-xl shadow-2xl outline outline-1 outline-app-fg/15"
+      style={{ width: 390, height: 760, background: 'var(--color-app-bg)' }}
     >
       {children}
     </div>
@@ -72,7 +74,7 @@ export const CreatingAccount: Story = {
   play: openSetup,
 };
 
-// Failed sign-in: the red `pk-error` banner above the button.
+// Failed sign-in: the red error banner above the button.
 export const Error: Story = {
   args: { error: 'Passkey sign-in was cancelled.' },
 };

@@ -6,9 +6,20 @@
  * real mobile experience: a {@link RemotePtyAdapter} over the session drives
  * `MobileTerminalUi`/`MobileWall` (the same composition the website playground
  * proves out with `FakePtyAdapter`). No bespoke terminal UI.
+ *
+ * Chrome is built from the same three VSCode list pairs as the rest of the app
+ * (docs/specs/theme.md): the page is `app-bg/fg`, the header band is the
+ * *active* pair `header-active-bg/fg`, and host rows are the *inactive* pair
+ * `header-inactive-bg/fg`. Hierarchy is background swaps between those pairs —
+ * never `surface-raised` or `panel-border`, which are near-black / transparent
+ * in themes like Kimbie. Secondary emphasis is foreground *intensity* (alpha on
+ * the pair's own fg), so no fourth color is introduced. The theme is applied to
+ * <body> by `restorePocketTheme()` in `main.tsx` before first paint.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { clsx } from 'clsx';
+import { tv } from 'tailwind-variants';
 import {
   PocketClient,
   type ConnectDecision,
@@ -21,7 +32,6 @@ import { setPlatform } from '../../lib/platform';
 import { disposeAllSessions, initAlertStateReceiver } from '../../lib/terminal-registry';
 import { PocketWall } from './PocketWall';
 import '../../index.css';
-import './pocket.css';
 
 type Phase = 'auth' | 'hosts' | 'wall';
 
@@ -33,6 +43,67 @@ export interface HostView {
 
 /** A phone-friendly default pairing label. */
 const DEVICE_LABEL = 'Dormouse Pocket';
+
+// --- Pocket chrome vocabulary ------------------------------------------------
+//
+// Everything below is one of the three list pairs (app / header-active /
+// header-inactive) plus alpha-on-fg for secondary text. See theme.md.
+
+/**
+ * Buttons.
+ *  - primary  = the active header pair (caramel): the one strong action.
+ *  - secondary = recessed to the page bg; reads as a button when it sits on an
+ *    inactive-header row via the guaranteed app↔inactive delta.
+ *  - ghost = transparent, inherits the surrounding band fg (header actions).
+ */
+const pkButton = tv({
+  base: 'inline-flex items-center justify-center rounded-lg font-medium transition-colors active:brightness-110 disabled:pointer-events-none disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring',
+  variants: {
+    tone: {
+      primary: 'bg-header-active-bg text-header-active-fg',
+      secondary: 'bg-app-bg text-app-fg',
+      ghost: 'text-inherit hover:bg-current/10',
+    },
+    size: {
+      lg: 'min-h-[44px] px-4 text-[13px]',
+      sm: 'min-h-9 px-3 text-[12px]',
+    },
+    block: { true: 'w-full', false: '' },
+  },
+  defaultVariants: { tone: 'primary', size: 'lg', block: false },
+});
+
+const PK = {
+  app: 'flex h-full min-h-0 flex-col bg-app-bg text-app-fg',
+  // Header band = the ACTIVE header pair (the "titlebar").
+  header:
+    'flex shrink-0 items-center gap-2 bg-header-active-bg px-4 pb-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] text-header-active-fg',
+  headerTitle: 'm-0 min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[0.01em]',
+  body:
+    'flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]',
+  bodyCenter: 'justify-center',
+  wallHost: 'flex min-h-0 flex-1 flex-col',
+  // Host row = the INACTIVE header pair (a list item lifted off the page).
+  row: 'flex w-full items-center gap-3 rounded-lg bg-header-inactive-bg px-3.5 py-3 text-left text-header-inactive-fg',
+  rowOffline: 'opacity-55', // presence = intensity, no extra color
+  rowMain: 'min-w-0 flex-1',
+  rowTitle: 'truncate text-[13px] font-semibold',
+  rowSecondary: 'mt-0.5 truncate text-[11px] text-header-inactive-fg/70',
+  rowActions: 'flex shrink-0 items-center gap-2',
+  field: 'flex flex-col gap-1.5',
+  fieldLabel: 'text-[11px] text-app-fg/60',
+  input:
+    'w-full rounded-lg bg-input-bg px-3.5 py-3 text-[16px] text-app-fg outline-none focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-focus-ring',
+  title: 'm-0 text-[20px] font-semibold',
+  lead: 'm-0 text-[13px] leading-relaxed text-app-fg/70',
+  // Error sits on the darker page bg (best red contrast) and is delineated by a
+  // reliable red inset hairline — panel-border is transparent in many themes.
+  error: 'rounded-lg px-3.5 py-2.5 text-[13px] text-error shadow-[inset_0_0_0_1px_var(--color-error)]',
+  empty: 'px-4 py-10 text-center text-[13px] text-app-fg/70',
+  disclosure:
+    'w-fit cursor-pointer text-[12px] text-app-fg/70 underline underline-offset-2 transition-colors hover:text-app-fg',
+  setup: 'flex flex-col gap-3 border-t border-app-fg/15 pt-4',
+} as const;
 
 export default function App(): React.ReactElement {
   const client = useMemo(
@@ -184,21 +255,25 @@ export default function App(): React.ReactElement {
 
   if (phase === 'wall' && activeHost && adapterRef.current) {
     return (
-      <div className="pk-app">
-        <header className="pk-header">
-          <button type="button" className="pk-btn ghost small" onClick={leaveWall}>
+      <div className={PK.app}>
+        <header className={PK.header}>
+          <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={leaveWall}>
             ‹ Hosts
           </button>
-          <h1>{activeHost.label || activeHost.hostId}</h1>
+          <h1 className={PK.headerTitle}>{activeHost.label || activeHost.hostId}</h1>
         </header>
-        <div className="pk-wall-host">
+        <div className={PK.wallHost}>
           <PocketWall adapter={adapterRef.current} />
         </div>
       </div>
     );
   }
 
-  return <div className="pk-body pk-center">…</div>;
+  return (
+    <div className={PK.app}>
+      <div className={clsx(PK.body, PK.bodyCenter)}>…</div>
+    </div>
+  );
 }
 
 // --- SetupOrSignin ---------------------------------------------------------
@@ -219,21 +294,21 @@ export function SetupOrSignin({
   const [label, setLabel] = useState('My Phone');
 
   return (
-    <div className="pk-app">
-      <header className="pk-header">
-        <h1>Dormouse Pocket</h1>
+    <div className={PK.app}>
+      <header className={PK.header}>
+        <h1 className={PK.headerTitle}>Dormouse Pocket</h1>
       </header>
-      <div className="pk-body pk-center">
+      <div className={clsx(PK.body, PK.bodyCenter)}>
         <div>
-          <p className="pk-title">Welcome back</p>
-          <p className="pk-lead">
+          <p className={PK.title}>Welcome back</p>
+          <p className={clsx(PK.lead, 'mt-1')}>
             Sign in with your passkey to reach your enrolled hosts and pick up a terminal session.
           </p>
         </div>
-        {error ? <div className="pk-error">{error}</div> : null}
+        {error ? <div className={PK.error}>{error}</div> : null}
         <button
           type="button"
-          className="pk-btn primary block"
+          className={pkButton({ tone: 'primary', block: true })}
           disabled={busy !== null}
           onClick={onSignin}
         >
@@ -242,34 +317,34 @@ export function SetupOrSignin({
 
         <button
           type="button"
-          className="pk-disclosure"
+          className={PK.disclosure}
           onClick={() => setShowSetup((v) => !v)}
         >
           {showSetup ? '− First-time setup' : '+ First-time setup'}
         </button>
 
         {showSetup ? (
-          <div className="pk-card">
-            <p className="pk-lead" style={{ marginBottom: 12 }}>
+          <div className={PK.setup}>
+            <p className={PK.lead}>
               Create the account and register this device's passkey. Requires the server's setup
               password.
             </p>
-            <div className="pk-field">
-              <label htmlFor="pk-pw">Setup password</label>
+            <div className={PK.field}>
+              <label className={PK.fieldLabel} htmlFor="pk-pw">Setup password</label>
               <input
                 id="pk-pw"
-                className="pk-input"
+                className={PK.input}
                 type="password"
                 autoComplete="off"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
-            <div className="pk-field">
-              <label htmlFor="pk-label">Passkey label</label>
+            <div className={PK.field}>
+              <label className={PK.fieldLabel} htmlFor="pk-label">Passkey label</label>
               <input
                 id="pk-label"
-                className="pk-input"
+                className={PK.input}
                 type="text"
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
@@ -277,7 +352,7 @@ export function SetupOrSignin({
             </div>
             <button
               type="button"
-              className="pk-btn primary block"
+              className={pkButton({ tone: 'primary', block: true })}
               disabled={busy !== null || password.length === 0}
               onClick={() => onSetup(password, label)}
             >
@@ -310,35 +385,38 @@ export function HostsView({
   onConnect: (host: HostView) => void;
 }): React.ReactElement {
   return (
-    <div className="pk-app">
-      <header className="pk-header">
-        <h1>Hosts</h1>
-        <button type="button" className="pk-btn ghost small" disabled={busy !== null} onClick={onRefresh}>
+    <div className={PK.app}>
+      <header className={PK.header}>
+        <h1 className={PK.headerTitle}>Hosts</h1>
+        <button
+          type="button"
+          className={pkButton({ tone: 'ghost', size: 'sm' })}
+          disabled={busy !== null}
+          onClick={onRefresh}
+        >
           {busy === 'refresh' ? '…' : 'Refresh'}
         </button>
       </header>
-      <div className="pk-body">
-        {error ? <div className="pk-error">{error}</div> : null}
+      <div className={PK.body}>
+        {error ? <div className={PK.error}>{error}</div> : null}
         {hosts.length === 0 ? (
-          <div className="pk-empty">No hosts enrolled yet. Enroll one from your laptop.</div>
+          <div className={PK.empty}>No hosts enrolled yet. Enroll one from your laptop.</div>
         ) : (
           hosts.map((host) => {
             const paired = isPaired(host.hostId);
+            const status = !host.online ? 'Offline' : paired ? 'Paired' : 'Not paired';
             return (
-              <div className="pk-row" key={host.hostId}>
-                <div className="pk-row-main">
-                  <div className="pk-row-title">{host.label || host.hostId}</div>
-                  <div className="pk-row-secondary">{paired ? 'Paired' : 'Not paired'}</div>
+              <div className={clsx(PK.row, !host.online && PK.rowOffline)} key={host.hostId}>
+                <div className={PK.rowMain}>
+                  <div className={PK.rowTitle}>{host.label || host.hostId}</div>
+                  <div className={PK.rowSecondary}>{status}</div>
                 </div>
-                <span className={`pk-badge ${host.online ? 'online' : 'offline'}`}>
-                  {host.online ? 'online' : 'offline'}
-                </span>
-                <div className="pk-row-actions">
-                  {!paired ? (
+                <div className={PK.rowActions}>
+                  {host.online && !paired ? (
                     <button
                       type="button"
-                      className="pk-btn small"
-                      disabled={busy !== null || !host.online}
+                      className={pkButton({ tone: 'secondary', size: 'sm' })}
+                      disabled={busy !== null}
                       onClick={() => onPair(host)}
                     >
                       {busy === 'pair' ? '…' : 'Pair'}
@@ -346,7 +424,7 @@ export function HostsView({
                   ) : null}
                   <button
                     type="button"
-                    className="pk-btn small primary"
+                    className={pkButton({ tone: 'primary', size: 'sm' })}
                     disabled={busy !== null || !host.online}
                     onClick={() => onConnect(host)}
                   >
