@@ -33,7 +33,7 @@ export function useSessionPersistence({
   doorsRef: RefObject<DooredItem[]>;
   selectedIdRef: RefObject<string | null>;
   selectedTypeRef: RefObject<WallSelectionKind>;
-  surfaceRefsForSave?: () => PersistedSurfaceRefs;
+  surfaceRefsForSave?: () => { refs: PersistedSurfaceRefs; next: number };
 }): void {
   const sessionSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionSavePromiseRef = useRef<Promise<void> | null>(null);
@@ -48,8 +48,9 @@ export function useSessionPersistence({
       surfaceType: isBrowserParams(p.params) ? ('browser' as const) : ('terminal' as const),
     }));
     const doors = doorsRef.current ?? [];
+    const surfaceRefs = surfaceRefsForSave?.();
     // The Lath tree is the sole persisted layout; doors ride through with their tokens.
-    return saveSession(getPlatform(), panes, doors, lath.serializeLayout(), surfaceRefsForSave?.());
+    return saveSession(getPlatform(), panes, doors, lath.serializeLayout(), surfaceRefs?.refs, surfaceRefs?.next);
   }, [lath, doorsRef, surfaceRefsForSave]);
 
   const persistSessionNow = useCallback(async (): Promise<void> => {

@@ -218,13 +218,15 @@ Invariants:
   current Workspace; `surface:self` selects the invoking Surface from
   `DORMOUSE_SURFACE_ID`.
 - Short refs use `surface:1`, `surface:2`, ... and are Workspace-scoped stable
-  refs, not layout/list positions. Each Workspace starts at `surface:1`, assigns
-  the next number when a Surface is created/restored, persists the map in the
-  session snapshot (`PersistedSession.surfaceRefs`), and never reuses a number
-  for another Surface in that Workspace. Reordering panes, minimizing,
-  reattaching, zooming, focusing, and browser render-mode swaps do not change the
-  ref. Killing/replacing a Surface leaves its ref stale; later use fails instead
-  of silently retargeting.
+  refs, not layout/list positions. Each Workspace starts at `surface:1` and
+  assigns the next number when a Surface is created/restored. The live id→ref map
+  and a separate monotonic counter both persist in the session snapshot
+  (`PersistedSession.surfaceRefs` / `surfaceRefsNext`); the counter — not the max
+  of the surviving map — is the source of truth for the next number, so a killed
+  Surface's entry is dropped from the map immediately without its number ever
+  being reused. Reordering panes, minimizing, reattaching, zooming, focusing, and
+  browser render-mode swaps do not change the ref. Killing a Surface retires its
+  ref; a later target that names it fails instead of silently retargeting.
 - Surface targets also accept `title:<exact display title>`, primarily for human
   recovery; automation should prefer refs/ids from command responses or
   `dor list --json`. Action commands (`read`, `send`, `kill`) resolve against

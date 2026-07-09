@@ -12,6 +12,9 @@ export interface ReconnectResult {
   doors?: PersistedDoor[];
   /** Workspace-scoped stable `dor` Surface refs restored with the session. */
   surfaceRefs?: PersistedSurfaceRefs;
+  /** The Workspace's next `surface:N` counter, carried so a killed ref's number
+   *  is never reused across a resume/restore. */
+  surfaceRefsNext?: number;
 }
 
 /**
@@ -96,6 +99,7 @@ function resumeLiveSessions(platform: PlatformAdapter): Promise<ReconnectResult 
         paneIds: ids,
         doors: [],
         ...(saved?.surfaceRefs ? { surfaceRefs: saved.surfaceRefs } : {}),
+        ...(saved?.surfaceRefsNext !== undefined ? { surfaceRefsNext: saved.surfaceRefsNext } : {}),
       });
     }
 
@@ -153,5 +157,6 @@ function getSavedResumePlan(savedState: unknown, liveIds: string[]): ReconnectRe
     doors,
     lathLayout: layoutMatchesVisiblePanes ? lathLayout : undefined,
     ...(saved.surfaceRefs ? { surfaceRefs: saved.surfaceRefs } : {}),
+    ...(saved.surfaceRefsNext !== undefined ? { surfaceRefsNext: saved.surfaceRefsNext } : {}),
   };
 }

@@ -23,6 +23,9 @@ export async function saveSession(
   // The only layout Dormouse writes.
   lathLayout?: unknown,
   surfaceRefs?: PersistedSurfaceRefs,
+  // The Workspace's next `surface:N` counter, persisted independently of
+  // `surfaceRefs` so pruned (killed) entries never cause a number to be reused.
+  surfaceRefsNext?: number,
 ): Promise<void> {
   const previousPanes = getPreviousPaneMap(platform);
   const allPanes = new Map<string, { id: string; title: string; surfaceType: PersistedSurfaceType }>();
@@ -73,6 +76,7 @@ export async function saveSession(
     doors: persistedDoors,
     ...(lathLayout !== undefined ? { lathLayout } : {}),
     ...(surfaceRefs && Object.keys(surfaceRefs).length > 0 ? { surfaceRefs } : {}),
+    ...(surfaceRefsNext !== undefined && surfaceRefsNext > 1 ? { surfaceRefsNext } : {}),
   };
   platform.saveState(session);
 }

@@ -135,7 +135,10 @@ function surfaceRefNumber(ref: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
-function createSurfaceRefRegistry(initialSurfaceRefs: PersistedSurfaceRefs | undefined): {
+function createSurfaceRefRegistry(
+  initialSurfaceRefs: PersistedSurfaceRefs | undefined,
+  initialSurfaceRefsNext: number | undefined,
+): {
   refs: Map<string, string>;
   nextIndex: number;
 } {
@@ -147,7 +150,13 @@ function createSurfaceRefRegistry(initialSurfaceRefs: PersistedSurfaceRefs | und
     refs.set(id, ref);
     max = Math.max(max, n);
   }
-  return { refs, nextIndex: max + 1 };
+  // The counter is the source of truth (killed entries are pruned from the map, so
+  // `max` alone would let a pruned number be reused). Clamp above `max` too, so a
+  // stale/absent persisted counter can never hand out a live ref's number.
+  const persistedNext = initialSurfaceRefsNext !== undefined && Number.isInteger(initialSurfaceRefsNext)
+    ? initialSurfaceRefsNext
+    : 0;
+  return { refs, nextIndex: Math.max(persistedNext, max + 1) };
 }
 
 function compareBySurfaceRef(a: DorSurface, b: DorSurface): number {
@@ -206,6 +215,7 @@ export function Wall({
   restoredLathLayout,
   initialDoors,
   initialSurfaceRefs,
+  initialSurfaceRefsNext,
   onEvent,
   baseboardNotice,
   dialogHost,
@@ -219,6 +229,7 @@ export function Wall({
   restoredLathLayout?: unknown;
   initialDoors?: PersistedDoor[];
   initialSurfaceRefs?: PersistedSurfaceRefs;
+  initialSurfaceRefsNext?: number;
   onEvent?: (event: WallEvent) => void;
   baseboardNotice?: ReactNode;
   /**
@@ -248,7 +259,7 @@ export function Wall({
   const dorSurfaceRefsRef = useRef<Map<string, string> | null>(null);
   const nextDorSurfaceRefIndexRef = useRef(1);
   if (dorSurfaceRefsRef.current === null) {
-    const registry = createSurfaceRefRegistry(initialSurfaceRefs);
+    const registry = createSurfaceRefRegistry(initialSurfaceRefs, initialSurfaceRefsNext);
     dorSurfaceRefsRef.current = registry.refs;
     nextDorSurfaceRefIndexRef.current = registry.nextIndex;
   }
@@ -266,12 +277,24 @@ export function Wall({
     refs.set(id, ref);
     return ref;
   }, []);
+  // Drop a Surface's ref when it is killed. The counter never rewinds, so its
+  // `surface:N` is retired, not reused — a later target that names it fails
+  // instead of resolving to a different Surface (spec → Handle Model).
+  const forgetSurfaceRef = useCallback((id: string): void => {
+    dorSurfaceRefsRef.current!.delete(id);
+  }, []);
   const transferSurfaceRef = useCallback((fromId: string, toId: string): void => {
     const ref = surfaceRefForId(fromId);
     dorSurfaceRefsRef.current!.set(toId, ref);
+    // The old leaf is being replaced (e.g. a browser render-mode swap); its id is
+    // dead, so hand the ref to the new id and drop the stale entry.
+    dorSurfaceRefsRef.current!.delete(fromId);
   }, [surfaceRefForId]);
-  const surfaceRefsForSave = useCallback((): PersistedSurfaceRefs => {
-    return Object.fromEntries(dorSurfaceRefsRef.current!);
+  const surfaceRefsForSave = useCallback((): { refs: PersistedSurfaceRefs; next: number } => {
+    return {
+      refs: Object.fromEntries(dorSurfaceRefsRef.current!),
+      next: nextDorSurfaceRefIndexRef.current,
+    };
   }, []);
 
   const dialogKeyboardActiveRef = useRef(false);
@@ -465,6 +488,7 @@ export function Wall({
         else setSelectedId(null);
       }
       clearLocalSurfaceActivity(id);
+      forgetSurfaceRef(id);
       fireEvent({ type: 'kill', id });
       return;
     }
@@ -489,6 +513,10 @@ export function Wall({
       // empties the tree and the auto-spawn effect fills it.
       const wasSelectedPane = selectedTypeRef.current === 'pane' && selectedIdRef.current === id;
       lath.store.removeLeaf(id);
+      // Forget the ref only now — while the pane is fading it is still in
+      // `listPanes()`, so an earlier delete would let a `dor` projection re-mint a
+      // fresh ref for the dying pane.
+      forgetSurfaceRef(id);
       if (wasSelectedPane) {
         const survivorId = lath.listPanes()[0]?.id ?? null;
         if (survivorId) selectPane(survivorId);
@@ -497,7 +525,7 @@ export function Wall({
     }, lath.exitMs);
     clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
-  }, [fireEvent, selectPane, lath, nav]);
+  }, [fireEvent, forgetSurfaceRef, selectPane, lath, nav]);
 
   const acceptKill = useCallback(() => {
     const ck = confirmKillRef.current;

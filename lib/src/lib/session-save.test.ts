@@ -266,19 +266,27 @@ describe('saveSession', () => {
     expect(saved.lathLayout).toEqual(lathLayout);
   });
 
-  it('persists workspace-scoped dor surface refs', async () => {
+  it('persists workspace-scoped dor surface refs and the next-ref counter', async () => {
     const platform = createPlatform(null);
 
     await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }], [], undefined, {
-      'pane-a': 'surface:1',
-      'closed-pane': 'surface:2',
-    });
+      'pane-a': 'surface:5',
+    }, 8);
 
     const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
-    expect(saved.surfaceRefs).toEqual({
-      'pane-a': 'surface:1',
-      'closed-pane': 'surface:2',
-    });
+    // Only the live entry is persisted; the counter (8) is kept independently so
+    // the pruned surface:1..4/6..7 numbers are never reused on restore.
+    expect(saved.surfaceRefs).toEqual({ 'pane-a': 'surface:5' });
+    expect(saved.surfaceRefsNext).toBe(8);
+  });
+
+  it('omits the next-ref counter for a fresh workspace that never advanced it', async () => {
+    const platform = createPlatform(null);
+
+    await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }], [], undefined, undefined, 1);
+
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    expect('surfaceRefsNext' in saved).toBe(false);
   });
 
   it('omits lathLayout entirely when not supplied', async () => {

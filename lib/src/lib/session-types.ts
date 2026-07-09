@@ -74,6 +74,10 @@ export interface PersistedSession {
   lathLayout?: unknown;
   /** Stable `dor` short refs scoped to this Workspace. Refs are never reused. */
   surfaceRefs?: PersistedSurfaceRefs;
+  /** Next `surface:N` number to hand out in this Workspace. Persisted alongside
+   *  `surfaceRefs` (not derived from it) so a killed Surface's entry can be dropped
+   *  from `surfaceRefs` immediately without its number ever being reused. */
+  surfaceRefsNext?: number;
 }
 
 export type WorkspaceId = string;
@@ -112,6 +116,7 @@ interface PersistedSessionV3Input {
   doors?: PersistedDoor[];
   lathLayout?: unknown;
   surfaceRefs?: unknown;
+  surfaceRefsNext?: unknown;
 }
 
 // --- Validation guards (reject untrusted blobs) ---
@@ -188,6 +193,10 @@ function normalizeSurfaceRefs(value: unknown): PersistedSurfaceRefs | undefined 
   return Object.keys(refs).length > 0 ? refs : undefined;
 }
 
+function normalizeSurfaceRefsNext(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 ? value : undefined;
+}
+
 /**
  * Parse a persisted session blob (`version: 3`), or null if nothing usable is
  * present. A blob that is absent/empty returns null silently; one that is present
@@ -204,20 +213,25 @@ export function readPersistedSession(raw: unknown): PersistedSession | null {
 
 function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession {
   const surfaceRefs = normalizeSurfaceRefs(session.surfaceRefs);
-  const { surfaceRefs: _rawSurfaceRefs, ...sessionWithoutSurfaceRefs } = session;
+  const surfaceRefsNext = normalizeSurfaceRefsNext(session.surfaceRefsNext);
+  const { surfaceRefs: _rawRefs, surfaceRefsNext: _rawNext, ...rest } = session;
+  const refFields = {
+    ...(surfaceRefs ? { surfaceRefs } : {}),
+    ...(surfaceRefsNext !== undefined ? { surfaceRefsNext } : {}),
+  };
   if (session.panes.every((pane) => typeof pane.untouched === 'boolean')) {
     return {
-      ...(sessionWithoutSurfaceRefs as Omit<PersistedSession, 'surfaceRefs'>),
-      ...(surfaceRefs ? { surfaceRefs } : {}),
+      ...(rest as Omit<PersistedSession, 'surfaceRefs' | 'surfaceRefsNext'>),
+      ...refFields,
     };
   }
   return {
-    ...sessionWithoutSurfaceRefs,
+    ...rest,
     panes: session.panes.map((pane) => ({
       ...pane,
       untouched: pane.untouched ?? false,
     })),
-    ...(surfaceRefs ? { surfaceRefs } : {}),
+    ...refFields,
   };
 }
 

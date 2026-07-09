@@ -10,6 +10,9 @@ export interface RestoredSession {
   doors: PersistedDoor[];
   /** Workspace-scoped stable `dor` Surface refs restored with the session. */
   surfaceRefs?: PersistedSurfaceRefs;
+  /** The Workspace's next `surface:N` counter, restored so a killed ref's number
+   *  is never handed out again. */
+  surfaceRefsNext?: number;
 }
 
 /** The persisted Lath layout a session carries, or undefined when absent/unusable
@@ -48,5 +51,6 @@ export function restoreSession(platform: PlatformAdapter): RestoredSession | nul
     lathLayout: persistedLathLayout(saved),
     doors,
     ...(saved.surfaceRefs ? { surfaceRefs: saved.surfaceRefs } : {}),
+    ...(saved.surfaceRefsNext !== undefined ? { surfaceRefsNext: saved.surfaceRefsNext } : {}),
   };
 }

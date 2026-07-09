@@ -129,6 +129,62 @@ describe('Wall on the Lath engine', () => {
     expect(Object.keys(saved!.lathLayout!.leafMeta ?? {})).toContain('pane-a');
   });
 
+  it('retires a killed surface ref instead of reusing its number, and persists the counter', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    // Split → the new pane gets surface:2.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true }));
+    });
+    await flush();
+
+    // Kill surface:2 → its ref is retired, not recycled.
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.kill,
+          params: { surface: 'surface:2', confirmation: { mode: 'dangerously' } },
+          respond: () => {},
+        },
+      }));
+    });
+    await flush();
+
+    // Split again → the fresh pane must be surface:3, never a reused surface:2.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true }));
+    });
+    await flush();
+
+    let listed: { result?: { surfaces: Array<{ ref: string }> } } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.list,
+          params: {},
+          respond: (r: { result?: { surfaces: Array<{ ref: string }> } }) => { listed = r; },
+        },
+      }));
+    });
+    await flush();
+    expect(listed?.result?.surfaces.map((s) => s.ref)).toEqual(['surface:1', 'surface:3']);
+
+    // The save drops the killed surface:2 entry but keeps the counter past it, so a
+    // later restore still can't hand surface:2 to a different Surface.
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    await flush();
+    await flush();
+
+    const saved = fake.getState() as { surfaceRefs?: Record<string, string>; surfaceRefsNext?: number } | null;
+    expect(Object.values(saved!.surfaceRefs ?? {})).toEqual(['surface:1', 'surface:3']);
+    expect(saved!.surfaceRefsNext).toBe(4);
+  });
+
   it('ignores zoom keyboard requests while a door is selected', async () => {
     const onEvent = vi.fn();
     await act(async () => {

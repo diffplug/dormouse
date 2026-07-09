@@ -139,10 +139,11 @@ describe('restoreSession', () => {
     expect(result?.lathLayout).toEqual(lathLayout);
   });
 
-  it('restores workspace-scoped dor surface refs', () => {
+  it('restores workspace-scoped dor surface refs and the next-ref counter', () => {
     const saved: PersistedSession = {
       version: 3,
       surfaceRefs: { 'pane-a': 'surface:1', 'closed-pane': 'surface:2' },
+      surfaceRefsNext: 9,
       panes: [
         { id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
       ],
@@ -151,6 +152,23 @@ describe('restoreSession', () => {
     const result = restoreSession(createPlatform(saved));
 
     expect(result?.surfaceRefs).toEqual({ 'pane-a': 'surface:1', 'closed-pane': 'surface:2' });
+    expect(result?.surfaceRefsNext).toBe(9);
+  });
+
+  it('discards a malformed next-ref counter without rejecting the session', () => {
+    const saved = {
+      version: 3,
+      surfaceRefs: { 'pane-a': 'surface:1' },
+      surfaceRefsNext: 0,
+      panes: [
+        { id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
+      ],
+    } as unknown as PersistedSession;
+
+    const result = restoreSession(createPlatform(saved));
+
+    expect(result?.surfaceRefs).toEqual({ 'pane-a': 'surface:1' });
+    expect(result?.surfaceRefsNext).toBeUndefined();
   });
 
   it('discards malformed dor surface refs without rejecting the session', () => {
