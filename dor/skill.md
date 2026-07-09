@@ -7,6 +7,20 @@ backgrounding a process inside your own shell (where its output is invisible
 and it dies with you), you run it in its own **surface** that the user can see
 and that outlives your session.
 
+## Two hard rules
+
+These override your usual defaults. They matter more than anything else here:
+
+1. **NEVER start a long-running process — a dev server, a `--watch`, any daemon
+   — as a background subprocess.** It would be invisible to the user and die
+   with your shell. ALWAYS run it with `dor ensure -- <command>`, which puts it
+   in a visible pane that outlives you and gets reused instead of duplicated.
+2. **NEVER use a built-in, native, or bundled browser tool to open, view, or
+   drive a web page.** ALWAYS use `dor ab` (agent-browser), so the page renders
+   in a Dormouse pane the user can watch and you can drive.
+
+The rest of this guide is how to do everything well.
+
 ## Targeting: three ways to name a surface
 
 Action commands (`read`, `send`, `kill`) take a surface handle — there is

@@ -12,15 +12,33 @@ interface SkillFlags {
   readonly json?: boolean;
 }
 
-// The stub is deliberately fact-free: its whole content is the detection rule, so
-// a committed copy carries no `dor` specifics that could drift out of date — the
-// agent runs `dor skill` for the real, always-current instructions.
+// The stub stays near fact-free — the real, always-current instructions live in
+// `dor skill` — but a purely-pointer stub proved too soft: agents skipped it and
+// fell back to native subprocesses and browser tools. So it carries exactly two
+// load-bearing directives (use `dor ensure`, use `dor ab`), stated loudly, because
+// those two behaviors must be redirected *before* an agent would think to run
+// `dor skill`. Both are foundational command names, the least likely `dor` facts
+// to ever drift.
 const BOOTSTRAP_STUB = `<!-- dor-skill:begin — managed by \`dor skill --install\`; edits inside are overwritten -->
+## Running inside Dormouse
+
 If the \`DORMOUSE_SURFACE_ID\` environment variable is set, this terminal is
-hosted by [Dormouse](https://dormouse.sh) and its \`dor\` CLI is on \`PATH\`: run
-\`dor skill\` and follow what it prints to make full use of the terminal
-(background processes in visible panes, browser surfaces, sub-agents). If the
-variable is not set, ignore this section — \`dor\` is not available.
+hosted by [Dormouse](https://dormouse.sh) and the \`dor\` CLI is on your \`PATH\`.
+**Run \`dor skill\` first and do what it says** — it teaches you to use the
+terminal fully (visible panes, browser surfaces, sub-agents). Two rules are
+mandatory whether or not you have read it:
+
+- **NEVER start a long-running process — a dev server, a \`--watch\`, any daemon
+  — as a background subprocess.** It would be invisible to the user and die with
+  your shell. ALWAYS run it with \`dor ensure -- <command>\` (e.g.
+  \`dor ensure -- npm run dev\`), which puts it in a visible pane that outlives
+  you and is reused instead of duplicated on re-runs.
+- **NEVER use a built-in, native, or bundled browser tool to open, view, or
+  drive a web page.** ALWAYS use \`dor ab\` (agent-browser) — \`dor ab open
+  <url>\`, \`dor ab click @e3\`, and so on — so the page renders in a Dormouse
+  pane the user can watch.
+
+If \`DORMOUSE_SURFACE_ID\` is not set, ignore this section — \`dor\` is not here.
 <!-- dor-skill:end -->`;
 
 // Prefix of the opening marker line — enough to detect an existing block.
@@ -38,7 +56,7 @@ export const skillCommand: Command = {
       brief: 'Print the Dormouse agent skill, or install its bootstrap stub.',
       fullDescription: `Prints the Dormouse agent skill — instructions that teach a coding agent to drive Dormouse through the dor CLI: run background processes in visible panes, open browser surfaces, and launch and coordinate sub-agents. The text ships inside the CLI, so it always matches the Dormouse that staged it.
 
---install instead writes a marker-delimited bootstrap stub into the project's agent instructions file. The stub's whole content is the detection rule — if DORMOUSE_SURFACE_ID is set, run \`dor skill\` and follow it — so a committed stub carries no CLI facts of its own and never goes stale.
+--install instead writes a marker-delimited bootstrap stub into the project's agent instructions file. The stub is the detection rule — if DORMOUSE_SURFACE_ID is set, run \`dor skill\` and follow it — plus two loud, mandatory directives (use \`dor ensure\` for long-running processes, \`dor ab\` for browsers) that must land before an agent would think to run \`dor skill\`. It stays otherwise fact-free, so a committed stub does not go stale.
 
 If AGENTS.md or CLAUDE.md already contains the block, it is rewritten in place. Otherwise the stub goes to AGENTS.md when it exists, else to CLAUDE.md when it exists and does not already import AGENTS.md (via \`@AGENTS.md\`), else to a newly created AGENTS.md. Everything outside the markers is left untouched, so re-running is idempotent.
 

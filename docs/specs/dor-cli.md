@@ -406,17 +406,25 @@ into content and bootstrap so each is exactly as stable as it needs to be:
   to the CLI that staged it and the staged package stays launchers + bundle.
   The skill body contains no environment detection: if `dor skill` ran, `dor`
   is by definition available — detection lives only in the stub.
-- **Bootstrap is a stub that cannot drift.** `dor skill --install` writes a
-  marker-delimited block (`<!-- dor-skill:begin` … `dor-skill:end -->`) into
-  the project's agent instructions file, resolved against the invoking
-  shell's PWD like `dor ensure --cwd`. The block's entire content is the
+- **Bootstrap is a loud stub that barely drifts.** `dor skill --install`
+  writes a marker-delimited block (`<!-- dor-skill:begin` …
+  `dor-skill:end -->`) into the project's agent instructions file, resolved
+  against the invoking shell's PWD like `dor ensure --cwd`. Its core is the
   detection rule — *if `DORMOUSE_SURFACE_ID` is set, run `dor skill` and
-  follow it; otherwise ignore this section* — plus a one-line Dormouse
-  pointer, so a committed stub carries no CLI facts and never version-skews,
-  and the env guard keeps it inert for collaborators who don't run Dormouse.
-  Committing it is the point: the stub travels with the repo (`AGENTS.md` is
+  follow it; otherwise ignore this section*. A pointer-only stub proved too
+  soft in practice — agents skipped `dor skill` and fell back to native
+  subprocesses and browser tools — so the block also carries two loud,
+  mandatory directives: never background a long-running process (use
+  `dor ensure`), never use a native browser tool (use `dor ab`). These are
+  the two behaviors that must be redirected *before* an agent would think to
+  run `dor skill`, and both are foundational command names — the least likely
+  `dor` facts to drift — so the stub stays effectively stale-proof. The env
+  guard keeps it inert for collaborators who don't run Dormouse, and
+  committing it is the point: the stub travels with the repo (`AGENTS.md` is
   the convention read by Codex, Pi, OpenCode, and most other harnesses), so
-  one teammate installing it covers every agent and every clone.
+  one teammate installing it covers every agent and every clone. `dor/skill.md`
+  leads with the same two rules so an agent that does run `dor skill` meets
+  them again up front.
 - **File selection.** An existing block in `AGENTS.md` or `CLAUDE.md`
   (checked in that order) is rewritten in place; everything outside the
   markers is untouched, so re-running is idempotent. Otherwise: append to
