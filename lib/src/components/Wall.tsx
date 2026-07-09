@@ -283,12 +283,13 @@ export function Wall({
   const forgetSurfaceRef = useCallback((id: string): void => {
     dorSurfaceRefsRef.current!.delete(id);
   }, []);
-  const transferSurfaceRef = useCallback((fromId: string, toId: string): void => {
+  const transferSurfaceRef = useCallback((fromId: string, toId: string): string => {
     const ref = surfaceRefForId(fromId);
     dorSurfaceRefsRef.current!.set(toId, ref);
     // The old leaf is being replaced (e.g. a browser render-mode swap); its id is
     // dead, so hand the ref to the new id and drop the stale entry.
     dorSurfaceRefsRef.current!.delete(fromId);
+    return ref;
   }, [surfaceRefForId]);
   const surfaceRefsForSave = useCallback((): { refs: PersistedSurfaceRefs; next: number } => {
     return {
@@ -931,6 +932,7 @@ export function Wall({
       // Whether the user's current selection sits on the pane being replaced.
       const selectionReplaced = selectedTypeRef.current === 'pane' && selectedIdRef.current === reference.id;
       // Atomic identity swap in place; then dispose the old terminal session.
+      const ref = transferSurfaceRef(reference.id, newId);
       lath.store.replaceLeaf(reference.id, newId, browserMeta);
       disposeSession(reference.id);
       // Replacing the pane the user is selected on forces selection onto the
@@ -941,7 +943,7 @@ export function Wall({
       // onto the resulting door rather than leave selectedType='pane' pointing
       // at a door id (the overlay would keep a stale rect).
       if (minimized) minimizePane(newId, { select: selectedNew });
-      return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'replaced' } };
+      return { ok: true, value: { id: newId, ref, status: 'replaced' } };
     }
 
     // Split beside the reference by its aspect ratio (autoEdge). The split-event
@@ -957,7 +959,7 @@ export function Wall({
     });
     if (minimized) minimizePane(newId, { select: selectedNew });
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'created' } };
-  }, [generatePaneId, minimizePane, surfaceRefForId, lath, settleAddSelection, nav]);
+  }, [generatePaneId, minimizePane, surfaceRefForId, transferSurfaceRef, lath, settleAddSelection, nav]);
 
   // The last binary path a `dor ab` surface resolved on a terminal's PATH.
   // Re-used to spawn an agent-browser when swapping an iframe embed up to a

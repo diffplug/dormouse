@@ -185,6 +185,64 @@ describe('Wall on the Lath engine', () => {
     expect(saved!.surfaceRefsNext).toBe(4);
   });
 
+  it('preserves the surface ref when an iframe replaces an untouched terminal', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'pane-a');
+
+    try {
+      let response: {
+        ok: boolean;
+        error?: string;
+        result?: { status: string; surfaceId: string; surfaceRef: string };
+      } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.iframe,
+            params: { url: 'http://localhost:5173/' },
+            respond: (r: typeof response) => { response = r; },
+          },
+        }));
+      });
+      await flush();
+
+      expect(response?.ok).toBe(true);
+      expect(response?.error).toBeUndefined();
+      expect(response?.result?.status).toBe('replaced');
+      expect(response?.result?.surfaceRef).toBe('surface:1');
+      const newId = response!.result!.surfaceId;
+      expect(newId).not.toBe('pane-a');
+
+      let listed: { result?: { surfaces: Array<{ id: string; ref: string }> } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.list,
+            params: {},
+            respond: (r: typeof listed) => { listed = r; },
+          },
+        }));
+      });
+      await flush();
+      expect(listed?.result?.surfaces.map((surface) => [surface.id, surface.ref])).toEqual([[newId, 'surface:1']]);
+
+      await act(async () => {
+        window.dispatchEvent(new Event('pagehide'));
+      });
+      await flush();
+      await flush();
+
+      const saved = fake.getState() as { surfaceRefs?: Record<string, string>; surfaceRefsNext?: number } | null;
+      expect(saved!.surfaceRefs).toEqual({ [newId]: 'surface:1' });
+      expect(saved!.surfaceRefsNext).toBe(2);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
   it('ignores zoom keyboard requests while a door is selected', async () => {
     const onEvent = vi.fn();
     await act(async () => {

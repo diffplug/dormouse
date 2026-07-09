@@ -224,9 +224,10 @@ Invariants:
   (`PersistedSession.surfaceRefs` / `surfaceRefsNext`); the counter — not the max
   of the surviving map — is the source of truth for the next number, so a killed
   Surface's entry is dropped from the map immediately without its number ever
-  being reused. Reordering panes, minimizing, reattaching, zooming, focusing, and
-  browser render-mode swaps do not change the ref. Killing a Surface retires its
-  ref; a later target that names it fails instead of silently retargeting.
+  being reused. Reordering panes, minimizing, reattaching, zooming, focusing,
+  replacing an untouched terminal with a browser Surface, and browser render-mode
+  swaps do not change the ref. Killing a Surface retires its ref; a later target
+  that names it fails instead of silently retargeting.
 - Surface targets also accept `title:<exact display title>`, primarily for human
   recovery; automation should prefer refs/ids from command responses or
   `dor list --json`. Action commands (`read`, `send`, `kill`) resolve against

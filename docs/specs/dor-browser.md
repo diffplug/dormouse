@@ -72,7 +72,8 @@ Source of truth: `BrowserPanel.tsx`, `browser-surface.ts`, `Wall.tsx`
 Both CLI entry points use the same content-surface placement rule in
 `Wall.tsx:createContentSurface`: replace an untouched terminal caller in place;
 otherwise split next to the reference surface. `dor iframe` also accepts
-`--surface`, `--minimize`, and `--json`.
+`--surface`, `--minimize`, and `--json`. A replacement preserves the target
+Surface's `surface:N` ref and transfers it to the new browser Surface id.
 
 Both open the surface **focus-neutrally** (like `dor ensure`): it renders in the
 background and the caller keeps focus — except when replacing the pane the user
