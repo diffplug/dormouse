@@ -5,6 +5,7 @@ node_modules/
 # Build output
 dist/
 dor/src/generated-version.ts
+dor/src/generated-skill.ts
 lib/dist/
 lib/dist-pocket/
 *.tsbuildinfo

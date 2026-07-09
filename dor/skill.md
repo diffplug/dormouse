@@ -1,8 +1,3 @@
----
-name: dormouse
-description: Control the Dormouse terminal you are running inside via the `dor` CLI — spawn terminals in visible panes, run dev servers and background jobs where the user can see them, read and type into other terminals, open browser surfaces, and clean up safely. Use whenever the DORMOUSE_SURFACE_ID environment variable is set and you need to run a long-lived process, share a server or URL with the user, test in a browser, launch a sub-agent, or coordinate multiple terminals.
----
-
 # Driving Dormouse with `dor`
 
 You are running inside Dormouse, a multitasking terminal. Every terminal it

@@ -13,6 +13,7 @@ import { killCommand } from './commands/kill.js';
 import { listCommand } from './commands/list.js';
 import { readCommand } from './commands/read.js';
 import { sendCommand } from './commands/send.js';
+import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
 import { versionCommand } from './commands/version.js';
 import { errorMessage, fail } from './commands/shared.js';
@@ -67,6 +68,7 @@ const COMMANDS = [
   splitCommand,
   ensureCommand,
   versionCommand,
+  skillCommand,
   sendCommand,
   readCommand,
   killCommand,
@@ -79,6 +81,7 @@ const ROUTES = {
   split: splitCommand.command,
   ensure: ensureCommand.command,
   version: versionCommand.command,
+  skill: skillCommand.command,
   send: sendCommand.command,
   read: readCommand.command,
   kill: killCommand.command,
