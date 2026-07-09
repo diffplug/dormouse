@@ -598,6 +598,23 @@ export function Wall({
     }
   }, [selectDoor, lath]);
 
+  const addMinimizedSplitDoor = useCallback((referenceId: string, item: DooredItem, select: boolean) => {
+    const index = doorsRef.current.findIndex((door) => door.id === referenceId);
+    const insertAt = index >= 0 ? index + 1 : doorsRef.current.length;
+    const nextDoors = [
+      ...doorsRef.current.slice(0, insertAt),
+      item,
+      ...doorsRef.current.slice(insertAt),
+    ];
+    doorsRef.current = nextDoors;
+    setDoors(nextDoors);
+    if (select) {
+      modeRef.current = 'command';
+      setMode('command');
+      selectDoor(item.id);
+    }
+  }, [selectDoor]);
+
   /** Exit terminal mode */
   const exitTerminalMode = useCallback(() => {
     modeRef.current = 'command';
@@ -743,6 +760,7 @@ export function Wall({
           // Atomic identity swap in place — no transient add/remove.
           lath.store.replaceLeaf(item.id, afterRestore.newId, terminalLeafMeta());
           disposeSession(item.id);
+          forgetSurfaceRef(item.id);
           selectPane(afterRestore.newId);
           if (afterRestore.announce) {
             showShellSpawnNotice(afterRestore.newId, `Switched to ${afterRestore.shellName}`);
@@ -750,7 +768,7 @@ export function Wall({
         }
       });
     }
-  }, [selectPane, removeDoorAndSelect, enterTerminalMode, killPaneImmediately, showShellSpawnNotice, lath, nav]);
+  }, [selectPane, removeDoorAndSelect, enterTerminalMode, killPaneImmediately, forgetSurfaceRef, showShellSpawnNotice, lath, nav]);
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
@@ -825,7 +843,7 @@ export function Wall({
     command,
     direction,
     minimized,
-    referenceId,
+    reference,
     cwd,
     requireIntegration,
     focusNeutral,
@@ -833,7 +851,7 @@ export function Wall({
     command?: string;
     direction: DorResolvedSplitDirection;
     minimized: boolean;
-    referenceId: string;
+    reference: DorSurface;
     cwd?: string;
     requireIntegration?: boolean;
     // `dor ensure` and `dor split -- <command>` must never move focus: the split
@@ -844,9 +862,16 @@ export function Wall({
   }): ParseResult<{
     id: string;
     ref: string;
+    minimized: boolean;
   }> => {
+    const referenceId = reference.id;
     const referenceVisible = nav.hasPane(referenceId);
-    if (!referenceVisible) return { ok: false, message: `surface '${referenceId}' is not visible` };
+    const referenceDoor = !referenceVisible
+      ? doorsRef.current.find((door) => door.id === referenceId)
+      : undefined;
+    if (!referenceVisible && !referenceDoor) {
+      return { ok: false, message: `surface '${reference.ref}' is not in the active workspace` };
+    }
 
     const newId = generatePaneId();
     const defaults = getDefaultShellOpts();
@@ -878,6 +903,34 @@ export function Wall({
       });
     }
 
+    if (referenceDoor) {
+      const edge = edgeForDorDirection(direction);
+      const ref = surfaceRefForId(newId);
+      const token: RestoreToken = {
+        leafId: newId,
+        weight: 0.5,
+        siblingId: referenceId,
+        siblingLeafIds: [referenceId],
+        edge,
+        index: direction === 'left' || direction === 'up' ? 0 : 1,
+        fingerprint: null,
+      };
+      getOrCreateTerminal(newId);
+      addMinimizedSplitDoor(referenceId, {
+        id: newId,
+        title: UNNAMED_PANEL_TITLE,
+        component: 'terminal',
+        tabComponent: 'terminal',
+        token,
+      }, !focusNeutral);
+      onEventRef.current?.({
+        type: 'split',
+        direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
+        source: 'dor',
+      });
+      return { ok: true, value: { id: newId, ref, minimized: true } };
+    }
+
     // The split is inherently background: `dor split` (not focus-neutral) selects
     // the new pane — in passthrough mode selection carries DOM focus, so the user
     // types straight into it; `dor split -- <command>` and `dor ensure`
@@ -894,8 +947,8 @@ export function Wall({
       getOrCreateTerminal(newId);
       minimizePane(newId, { select: selectedNew });
     }
-    return { ok: true, value: { id: newId, ref: surfaceRefForId(newId) } };
-  }, [generatePaneId, minimizePane, surfaceRefForId, lath, settleAddSelection, nav]);
+    return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), minimized } };
+  }, [addMinimizedSplitDoor, generatePaneId, minimizePane, surfaceRefForId, lath, settleAddSelection, nav]);
 
   /**
    * Create a non-terminal content surface (iframe, agent-browser) next to a
@@ -1017,6 +1070,7 @@ export function Wall({
       if (shouldReplaceUntouched) {
         lath.store.replaceLeaf(selectedPaneId!, newId, terminalLeafMeta());
         disposeSession(selectedPaneId!);
+        forgetSurfaceRef(selectedPaneId!);
         selectPane(newId);
         if (detail.announce) {
           showShellSpawnNotice(newId, `Switched to ${shellName}`);
@@ -1049,7 +1103,7 @@ export function Wall({
     };
     window.addEventListener('dormouse:new-terminal', handler);
     return () => window.removeEventListener('dormouse:new-terminal', handler);
-  }, [generatePaneId, surfaceRefForId, selectPane, showShellSpawnNotice, lath, nav]);
+  }, [generatePaneId, surfaceRefForId, forgetSurfaceRef, selectPane, showShellSpawnNotice, lath, nav]);
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
   useDorControl({

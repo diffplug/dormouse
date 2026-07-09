@@ -231,10 +231,14 @@ Invariants:
 - Surface targets also accept `title:<exact display title>`, primarily for human
   recovery; automation should prefer refs/ids from command responses or
   `dor list --json`. Action commands (`read`, `send`, `kill`) resolve against
-  listed Surfaces, including minimized ones. Placement/reference commands
-  (`split`, `ensure`, `iframe`, browser creation) resolve against visible
-  Surfaces. If multiple Surfaces in the relevant scope match, the command fails
-  and lists the matching surface refs.
+  listed Surfaces, including minimized ones. For `split` and `ensure --surface`,
+  the reference target also resolves against the listed Surfaces so minimized
+  peers participate in ambiguity checks; when the resolved reference is
+  minimized, the new terminal is created minimized too and its Door is inserted
+  immediately to the right of the reference Door. Browser placement commands
+  (`iframe`, browser creation) resolve against visible Surfaces. If multiple
+  Surfaces in the relevant scope match, the command fails and lists the matching
+  surface refs.
 - Bare numeric targets and `pane:N` are not Surface handles. Pane refs are
   reserved for future layout-only commands if those commands ever need them.
 - Text list output defaults to refs; commands that list handles accept
@@ -259,11 +263,13 @@ single active Workspace (Workspace-aware tagging is staged; see
 (`lib/src/components/Wall.tsx`): `buildDorSurfaces` is the visible-pane
 projection used for `dor` commands that need geometry (split / browser-surface
 placement), while `buildDorSurfaceList` adds the minimized Surfaces for
-`dor list` and for direct terminal operations (`send`, `read`, `kill`). `dor
-list` rows are sorted by the Workspace-stable `surface:N` ref; the ref registry
-is owned by `Wall` and persisted with the session, independent of Lath layout
-order. Minimized refs remain valid targets for operations that do not need a
-visible reference pane.
+`dor list`, direct terminal operations (`send`, `read`, `kill`), and
+`split`/`ensure --surface` target disambiguation. Visible split references add a
+new pane in Lath; minimized split references add a sibling Door in the
+baseboard. `dor list` rows are sorted by the Workspace-stable `surface:N` ref;
+the ref registry is owned by `Wall` and persisted with the session, independent
+of Lath layout order. Minimized refs remain valid targets for operations that do
+not need a visible reference pane.
 
 When the request sets `includePorts` (`dor list --ports`), the host calls
 `PlatformAdapter.getOpenPorts(id)` (`docs/specs/dor-browser.md` → Dev-Server

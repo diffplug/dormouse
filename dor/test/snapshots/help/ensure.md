@@ -25,7 +25,7 @@ Two surfaces running the same command in different working directories are disti
 
 --restart applies only to an already-running match: it interrupts the live command (Ctrl+C), waits for the shell to return to its prompt, then re-runs the command in place and blocks until the command is live again. A restarted surface keeps its minimized/visible state. If no surface is running the command, --restart behaves like a plain ensure and creates one.
 
---surface selects the surface to split only when creating a new surface. If omitted, Dormouse uses the same caller/focused fallback as dor split.
+--surface selects the surface to split only when creating a new surface. If the target is minimized, the new surface is created minimized too and inserted immediately to the right of the target door. If omitted, Dormouse uses the same caller/focused fallback as dor split.
 
 Text output:
   created surface:3  "npm run dev"

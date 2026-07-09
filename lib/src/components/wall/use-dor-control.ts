@@ -328,11 +328,11 @@ export function useDorControl({
     command?: string;
     direction: DorResolvedSplitDirection;
     minimized: boolean;
-    referenceId: string;
+    reference: DorSurface;
     cwd?: string;
     requireIntegration?: boolean;
     focusNeutral?: boolean;
-  }) => ParseResult<{ id: string; ref: string }>;
+  }) => ParseResult<{ id: string; ref: string; minimized: boolean }>;
   createContentSurface: (args: {
     minimized: boolean;
     params: Record<string, unknown>;
@@ -413,25 +413,20 @@ export function useDorControl({
         return;
       }
 
-      // Resolve the split reference surface and confirm it is a live visible pane,
-      // responding with the appropriate error and returning null otherwise.
+      // Resolve the split reference surface across listed Surfaces. A minimized
+      // reference is valid: the Wall creates the new split as a sibling Door.
       const resolveSplitTarget = () => {
         const target = resolveListedSurface(stringParam(params.surface), detail.surfaceId);
         if (!target.ok) {
           detail.respond({ ok: false, error: target.message });
           return null;
         }
-        const visible = nav.hasPane(target.value.id);
-        if (!visible) {
-          detail.respond({ ok: false, error: `surface '${target.value.ref}' is not visible` });
-          return null;
-        }
         return { target: target.value };
       };
 
       // The `direction: 'auto'` aspect-ratio split resolution.
-      const autoDorDirection = (id: string): DorResolvedSplitDirection =>
-        dorDirectionForEdge(lath.store.autoEdgeFor(id));
+      const autoDorDirection = (surface: DorSurface): DorResolvedSplitDirection =>
+        nav.hasPane(surface.id) ? dorDirectionForEdge(lath.store.autoEdgeFor(surface.id)) : 'right';
 
       if (detail.method === SURFACE_CONTROL_METHODS.list) {
         const matched = buildDorSurfaceList()
@@ -459,7 +454,7 @@ export function useDorControl({
         const resolved = resolveSplitTarget();
         if (!resolved) return;
         const direction = directionParam === 'auto'
-          ? autoDorDirection(resolved.target.id)
+          ? autoDorDirection(resolved.target)
           : directionParam;
         const command = dorCommandString(stringArrayParam(params.command));
         if (params.command !== undefined && !command) {
@@ -470,7 +465,7 @@ export function useDorControl({
           command,
           direction,
           minimized: booleanParam(params.minimized),
-          referenceId: resolved.target.id,
+          reference: resolved.target,
           // Bare `dor split` hands the user a terminal to work in, so focus moves
           // to the new surface. `dor split -- <command>` launches the command in
           // the background and leaves focus on the caller (like `dor ensure`).
@@ -487,7 +482,7 @@ export function useDorControl({
             surfaceId: result.value.id,
             surfaceRef: result.value.ref,
             direction,
-            minimized: booleanParam(params.minimized),
+            minimized: result.value.minimized,
             ...(command ? { command } : {}),
           },
         });
@@ -552,12 +547,12 @@ export function useDorControl({
         }
         const resolved = resolveSplitTarget();
         if (!resolved) return;
-        const direction = autoDorDirection(resolved.target.id);
+        const direction = autoDorDirection(resolved.target);
         const result = createSplitSurface({
           command,
           direction,
           minimized: booleanParam(params.minimized),
-          referenceId: resolved.target.id,
+          reference: resolved.target,
           cwd,
           requireIntegration: true,
           // ensure never steals focus from the caller, matched or freshly created.
@@ -596,7 +591,7 @@ export function useDorControl({
             surfaceRef: result.value.ref,
             command,
             cwd,
-            minimized: booleanParam(params.minimized),
+            minimized: result.value.minimized,
           },
         });
         return;
