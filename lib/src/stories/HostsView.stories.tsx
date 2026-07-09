@@ -6,7 +6,7 @@ import { HostsView, type HostView } from '../remote/pocket-app/App';
 import { PhoneFrame } from './PhoneFrame';
 
 // A paired online host, an unpaired online host (shows Pair + Connect), and an
-// offline host (both actions disabled) — the full row matrix in one frame.
+// offline host (Pair hidden, Connect disabled) — the full row matrix in one frame.
 const MIXED_HOSTS: HostView[] = [
   { hostId: 'host-studio', label: 'Studio iMac', online: true },
   { hostId: 'host-laptop', label: 'MacBook Pro', online: true },
