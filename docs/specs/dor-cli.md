@@ -351,41 +351,44 @@ from `command-detail`.
   (see [Future](#future)). [impl](../../dor/src/commands/list.ts)
   [docs](../../dor/test/snapshots/help/list.md)
 
+## Agent Workflows
+
+A handful of end-to-end agent scenarios are the CLI's product-level acceptance
+tests: each one checks that the commands *compose* into a real automation, not
+just that they work in isolation — orchestration, Surface targeting, browser
+handoff, cleanup, and JSON output holding together across a whole task. They all
+reduce to one shape — **discover the target Surface with `dor list` (filtered),
+then act on it with a handle-taking command** — which is why targeting lives in
+`dor list` while `read` / `send` / `kill` stay handle-taking instead of each
+growing its own match syntax. A bare `dor kill "npm dev"` is intentionally
+unsupported: the two-step composition is the intended shape.
+
+Identity follows the Surface, not a user-supplied key. A terminal Surface is
+named by its Workspace-stable `surface:N` ref, or rediscovered after layout churn
+by `--command` / `--cwd` / `--port`; `dor ensure`'s command+cwd match is an
+implicit key that also lets an agent adopt a command the user started by hand.
+Only browser Surfaces carry an explicit join key (`dor ab --key <name>`), because
+their session is held externally by `agent-browser`.
+
+| Workflow | How the shipped CLI does it |
+| --- | --- |
+| Share a dev server | `dor ensure -- npm dev` reuses the command already live in the same resolved cwd (`--restart` re-runs it in place, preserving layout and minimized/visible state). `dor list --command "npm dev" --cwd . --ports --json` returns the Surface with its ports, and the agent opens `dor ab open http://localhost:<port>`. Passing the terminal handle straight to the browser command (`dor ab open surface:N`) is the one unshipped ergonomic — see [Future](#future). |
+| Launch a sub-agent | `dor split -- codex` returns `surface:N`; drive it with `dor send surface:N --text "/review" --key enter` (or `--sequence` for arbitrary ordering), then read it back with `dor read surface:N`. |
+| Client / server browser testing | `dor ab --key client open <client-url>` and `dor ab --key server open <server-url>` create or reuse two independent browser Surfaces. |
+| Multi-worktree, same command | Two worktrees each run `dor ensure -- npm dev`; the resolved cwd keeps them distinct, and `dor list --command "npm dev" --cwd <worktree> --json` selects the intended one. |
+| Long-running background job | `dor ensure --minimize -- npm test -- --watch` keeps a watcher out of the layout; `dor list --command "npm test -- --watch" --json` rediscovers the minimized Surface after churn, and `read` / `send` / `kill` target it by ref. |
+| Port-owner handoff | `dor list --port 5173 --json` returns the terminal that owns the socket (browser Surfaces never match `--port`), then `dor ab --key client open http://localhost:5173` binds the browser side. |
+| Safe cleanup | `dor list --command "npm dev" --cwd . --json`, then `dor kill <ref> --confirm-if-read <text>`. The ref comes from a recent listing or command response; `title:<exact>` also targets one but can drift. |
+
 ## Future
 
-- **`dor` CLI evaluation stories** — keys are intentionally not a
-  surface-wide concept today. `dor ensure` already has an **implicit**
-  command+cwd idempotency key so an agent can discover and reuse a command the
-  user started by hand. Traditional PTY Surfaces otherwise have identity by PTY:
-  a command is state inside that PTY, and refs/ids from `dor list --json` are the
-  automation handles. Browser Surfaces are different because the controlled
-  session is externally held by `agent-browser`; `dor ab --key <name>` is the
-  stable join key for that external browser session and the Dormouse Surface
-  bound to it.
-
-  These stories are product tests for the whole CLI: command orchestration,
-  targeting, browser handoff, cleanup, JSON automation, and keying. The Dream
-  column is intentionally aspirational and only shows the delta from the current
-  flow; promote implemented deltas above the fold. After the `dor list` filters
-  and positional action targets, the remaining deltas are browser open target
-  resolution and any future story that cannot be expressed cleanly as `dor list`
-  discovery followed by a handle-taking command.
-
-  | Story | Current commands | Dream commands | Needed features |
-  | --- | --- | --- | --- |
-  | Sharing a dev server | User already has a worktree terminal running `npm dev`. Agent runs `dor ensure -- npm dev`; if the same command is live in the same resolved cwd, Dormouse returns the existing `surface:N`. Restart is `dor ensure --restart -- npm dev`, preserving layout and minimized/visible state. To open a browser today, `dor list --command "npm dev" --cwd . --ports --json` returns the matching Surface with ports, then the agent opens `dor ab open http://localhost:<port>`. | `dor ensure -- npm dev` followed by `dor ab open surface:N` or `dor iframe surface:N`; the browser command resolves the terminal Surface to the dev server URL. | Browser open target resolution (below). No surface-wide key needed; the point is seamless discovery of a user-started PTY command plus direct browser handoff. |
-  | Launching a sub-agent | Claude runs `dor split -- codex`, captures the returned `surface:N`, then uses `dor send surface:N --sequence '[{"text":"/review"},{"key":"enter"}]'` or `dor send surface:N --text "/review" --key enter`, followed by `dor read surface:N`. | ✓ | None. `--sequence` remains the fully ordered form; `--text` plus `--key` covers the common "type this line and press enter" case and must appear in that order. |
-  | Client/server browser testing | `dor ab --key client open <client-url>` and `dor ab --key server open <server-url>` create or reuse two browser sessions. The `--key` is agent-browser-specific and the passthrough also extracts it later in argv. | ✓ | None. |
-  | Multi-worktree same command | Two worktrees can both run `dor ensure -- npm dev`; matching is disambiguated by resolved cwd, so the commands do not collapse. `dor list --command "npm dev" --cwd /path/to/worktree --json` discovers the intended one. A bare target such as `dor kill "npm dev"` is intentionally not supported. | ✓ | None. Keep filtered discovery in `dor list`; `read` / `send` / `kill` stay handle-taking commands. |
-  | Long-running background job | `dor ensure --minimize -- npm test -- --watch` keeps a watcher out of the main layout. `dor list --command "npm test -- --watch" --cwd . --json` rediscovers the minimized watcher after layout churn, and `dor read surface:N`, `dor send surface:N ...`, or `dor kill surface:N ...` can target it. | ✓ | None. Surface-wide `--key watch` stays deferred unless refs plus filters fail this story. |
-  | Port-owner handoff | Agent runs `dor list --port 5173 --json`, gets the owning terminal Surface directly, then opens or reuses a browser surface for that port with `dor ab --key client open http://localhost:5173`. Browser Surfaces never match `--port`; a browser can view a dev server, but it does not own the listening socket. | ✓ | None. |
-  | Safe cleanup | Automation uses `dor list --command "npm dev" --cwd . --json` followed by `dor kill <ref> --confirm-if-read text`. The ref must come from recent `dor list --json` or a command response; `title:<exact>` exists but can drift or be ambiguous. | ✓ | None. Avoid duplicating list filters onto `read` / `send` / `kill`; the two-step composition is the intended automation shape. |
-
-- **Browser open target resolution** — `dor ab open <target>` and `dor iframe
-  <target>` accept an explicit terminal Surface handle (`surface:N`,
+- **Browser open target resolution** — the one unshipped Agent-Workflow
+  ergonomic (the Share-a-dev-server shortcut above): `dor ab open <target>` and
+  `dor iframe <target>` accept an explicit terminal Surface handle (`surface:N`,
   `surface:<stable-id>`, `surface:self`, or `surface:focused`) wherever they
-  currently accept an absolute URL. Resolution calls the same host port scan as
-  `dor list --ports`.
+  currently accept an absolute URL, collapsing the two-step
+  `dor list --ports --json` → `dor ab open http://localhost:<port>` dance into
+  one command. Resolution calls the same host port scan as `dor list --ports`.
   V1 groups listening records by port, so one dev server bound on `localhost`, a
   LAN address, and an overlay-network address is still one candidate; Dormouse
   opens `http://localhost:<port>/`. Zero candidate ports fail clearly. Multiple
