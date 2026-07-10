@@ -300,8 +300,23 @@ test('split sends command argv to the host', async () => {
       direction: 'auto',
       minimized: false,
       surface: undefined,
+      focusNeutral: true,
     },
   }]);
+});
+
+test('bare split is focus-stealing; an empty -- tail is not', async () => {
+  const bare = fixtureClient();
+  await runCli(['split'], { client: bare });
+  assert.equal(bare.requests[0].request.focusNeutral, false);
+  assert.equal(bare.requests[0].request.command, undefined);
+
+  // `dor split --` opens a blank terminal without stealing focus: no command to
+  // run, but the `--` marks it focus-neutral, distinct from a bare `dor split`.
+  const emptyTail = fixtureClient();
+  await runCli(['split', '--'], { client: emptyTail });
+  assert.equal(emptyTail.requests[0].request.focusNeutral, true);
+  assert.equal(emptyTail.requests[0].request.command, undefined);
 });
 
 test('ensure text output', async () => {

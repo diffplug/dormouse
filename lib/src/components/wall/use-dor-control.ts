@@ -29,6 +29,7 @@ type DorControlParams = {
   confirmation?: unknown;
   cwd?: unknown;
   direction?: unknown;
+  focusNeutral?: unknown;
   input?: unknown;
   inputCount?: unknown;
   key?: unknown;
@@ -467,9 +468,13 @@ export function useDorControl({
           minimized: booleanParam(params.minimized),
           reference: resolved.target,
           // Bare `dor split` hands the user a terminal to work in, so focus moves
-          // to the new surface. `dor split -- <command>` launches the command in
-          // the background and leaves focus on the caller (like `dor ensure`).
-          focusNeutral: command !== undefined,
+          // to the new surface. Any `--` tail leaves focus on the caller: the CLI
+          // sets focusNeutral whenever `--` is present, covering both
+          // `dor split -- <command>` (background command) and a bare
+          // `dor split --` (blank terminal). The `command !== undefined` fallback
+          // keeps the invariant that an initial command never steals focus even
+          // if a caller omits the flag.
+          focusNeutral: booleanParam(params.focusNeutral) || command !== undefined,
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });

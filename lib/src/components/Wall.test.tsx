@@ -598,6 +598,21 @@ describe('Wall on the Lath engine', () => {
     expect(focusOf(newId)).toBe('false');
   });
 
+  it('dor split -- (empty tail) opens a blank surface without stealing focus', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" showBaseboard />);
+    });
+    await flush();
+    expect(focusOf('pane-a')).toBe('true');
+
+    // No command, but focusNeutral marks the `--` tail: a blank terminal that
+    // does not grab the user's keystrokes (unlike a bare `dor split`).
+    const newId = await dispatchSplit({ direction: 'right', focusNeutral: true });
+
+    expect(focusOf('pane-a')).toBe('true');
+    expect(focusOf(newId)).toBe('false');
+  });
+
   it('seeds multiple initial panes with the aspect-aware layout (geometry is measured before the seed)', async () => {
     // jsdom has no layout, so stub the container measurement wide. The seed reads the
     // store's geometry via `autoEdge`; if that geometry lags behind the measurement

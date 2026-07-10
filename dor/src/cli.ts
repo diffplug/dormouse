@@ -156,12 +156,18 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
     if (!check.ok) return fail(check.message);
   }
 
+  // stricli discards the `--` escape sequence during parsing, so capture its
+  // presence here (pre-parse) for commands that must distinguish an empty
+  // command tail from none — e.g. `dor split --` vs bare `dor split`.
+  const hasArgumentEscape = args.includes('--');
+
   const capture = createCaptureProcess(options.env);
   await runStricli(APPLICATION, commandName ? [commandName, ...args] : [], {
     process: capture.process,
     forCommand: (): DorCommandContext => ({
       process: capture.process,
       options,
+      hasArgumentEscape,
     }),
   });
 

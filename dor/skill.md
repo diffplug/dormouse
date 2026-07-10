@@ -84,12 +84,19 @@ terminal with `(you)`; `--json` adds stable ids and a host/identity block.
 ```sh
 dor split -- npm test          # runs in background; focus stays with you
 dor split --minimize -- ./watch.sh
-dor split                      # bare split: focuses the new empty shell
+dor split --                   # blank terminal, focus stays with you
 ```
 
 Direction flags `--left|--right|--up|--down` (default `--auto`).
 `--surface <ref>` picks which surface to split from. The response includes the
 new surface's ref — save it.
+
+**Never run a bare `dor split` (no `--`).** It moves the user's keyboard focus
+to the new pane, so their next keystrokes land there unpredictably. Bare
+`dor split` exists for a human at the keyboard who wants to start typing in the
+new pane. When you want an empty terminal, always write `dor split --` — same
+blank pane, but focus stays put. The rule is simple: every `dor split` you run
+has a `--`.
 
 ### `dor ensure` — idempotent "make sure this is running"
 
@@ -232,9 +239,10 @@ dor kill surface:N --confirm-if-read "npm run dev"
   raw argv array; Dormouse quotes it correctly for whatever shell the target
   surface runs (POSIX, cmd, PowerShell). Pass `-- npm test -- --watch`, not
   `-- "npm test -- --watch"`.
-- **Focus etiquette.** `dor ensure` and `dor split -- <command>` never steal
-  focus from the user; bare `dor split` intentionally does (it hands them an
-  empty shell to type into). Don't bare-split as part of automation.
+- **Focus etiquette.** `dor ensure` and anything with a `--` tail (`dor split
+  -- <command>`, or a bare-terminal `dor split --`) never steal focus. Only a
+  bare `dor split` with no `--` does — never run that in automation; use
+  `dor split --` for an empty pane instead.
 - **Take refs from responses.** Capture the ref that `split`/`ensure`/`iframe`
   print rather than re-listing and guessing.
 - **`--command` is exact.** Match the command string you launched with,

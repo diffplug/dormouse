@@ -317,11 +317,17 @@ EOF). Command help patches can target the `command-usage` section separately
 from `command-detail`.
 
 - `dor split` [impl](../../dor/src/commands/split.ts) [docs](../../dor/test/snapshots/help/split.md).
-  Bare `dor split` focuses the new surface (in passthrough mode focus follows the
-  selection, so the user types straight into it); `dor split -- <command>` runs
-  the command in the background and leaves focus on the caller, like `dor ensure`.
-  Both are wired through `createSplitSurface`'s `focusNeutral` flag
-  (`lib/src/components/wall/use-dor-control.ts`).
+  Focus turns solely on the presence of the `--` escape sequence, not on whether
+  a command follows it. A truly bare `dor split` (no `--`) focuses the new
+  surface (in passthrough mode focus follows the selection, so the user types
+  straight into it). Any `--` tail leaves focus on the caller, like `dor ensure`:
+  `dor split -- <command>` runs the command in the background, and a bare
+  `dor split --` opens a blank terminal without stealing focus. stricli discards
+  `--` while parsing, so the CLI captures its presence pre-parse
+  (`DorCommandContext.hasArgumentEscape`, set in `dor/src/cli.ts`) and sends it as
+  the request's `focusNeutral`; the host feeds that into `createSplitSurface`'s
+  `focusNeutral`, OR-ed with command presence so an initial command is always
+  focus-neutral (`lib/src/components/wall/use-dor-control.ts`).
 - `dor ensure` [impl](../../dor/src/commands/ensure.ts) [docs](../../dor/test/snapshots/help/ensure.md)
 - `dor version` [impl](../../dor/src/commands/version.ts) [docs](../../dor/test/snapshots/help/version.md)
 - `dor skill` — prints the bundled agent skill, or installs its bootstrap stub

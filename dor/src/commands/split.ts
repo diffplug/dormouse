@@ -77,7 +77,9 @@ export const splitCommand: Command = {
       brief: 'Create a new terminal surface by splitting an existing surface.',
       fullDescription: `If no direction is provided, --auto is used. --auto chooses right when the target surface is wide, down when it is narrow, and right when the target is minimized.
 
-Use -- followed by a command to run an initial command in the new terminal surface. Bare split focuses the new surface so you can start typing in it; split with an initial command runs it in the background and leaves focus on the calling surface.
+Use -- followed by a command to run an initial command in the new terminal surface.
+
+Focus depends only on whether you pass --. A bare "dor split" (no --) moves focus to the new surface so a human can start typing in it — avoid it in automation, since it steals the user's keystrokes. Anything with -- leaves focus on the caller: "dor split -- <command>" runs the command in the background, and a bare "dor split --" opens a blank terminal without stealing focus.
 
 --minimize creates the surface and immediately sends it to the minimized area.
 
@@ -137,6 +139,9 @@ async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...co
       direction: direction.value,
       minimized: flags.minimize === true,
       surface: flags.surface,
+      // A `--` tail — with or without a command — leaves focus on the caller.
+      // Only a truly bare `dor split` (no `--`) moves focus to the new surface.
+      focusNeutral: this.hasArgumentEscape,
     });
     writeStdout(this, renderSplitResponse(response, flags.json === true));
     return undefined;

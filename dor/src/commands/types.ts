@@ -76,6 +76,11 @@ export interface SplitSurfaceRequest {
   direction: SplitDirection;
   minimized: boolean;
   surface?: string;
+  /** Leave focus on the caller instead of moving it to the new surface. True
+   *  whenever the invocation delimited a command tail with `--` — both
+   *  `dor split -- <command>` and a bare `dor split --` (an empty blank-terminal
+   *  tail). Only a truly bare `dor split` (no `--`) is focus-stealing. */
+  focusNeutral: boolean;
 }
 
 export interface SplitSurfaceResponse {
@@ -222,6 +227,11 @@ export interface CliResult {
 
 export interface DorCommandContext extends CommandContext {
   readonly options: CliOptions;
+  /** Whether the raw argv carried the `--` argument-escape sequence. stricli
+   *  consumes `--` and leaves no trace in the parsed positionals, so this is the
+   *  only way a command can tell `dor split --` (empty tail) from a bare
+   *  `dor split`. Computed once in `cli.ts` from the pre-parse argv. */
+  readonly hasArgumentEscape: boolean;
 }
 
 export interface Command {
