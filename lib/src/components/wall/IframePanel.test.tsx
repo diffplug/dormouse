@@ -10,29 +10,9 @@ import type { PaneProps } from './pane-props';
 import { IframePanel } from './IframePanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { PaneWriteContext, WallActionsContext, type PaneWriteActions, type WallActions } from './wall-context';
+import { stubWallActions as stubActions } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-
-function stubActions(overrides: Partial<WallActions> = {}): WallActions {
-  return {
-    onKill: vi.fn(),
-    onMinimize: vi.fn(),
-    onAlertButton: vi.fn(() => 'noop'),
-    onToggleTodo: vi.fn(),
-    onSplitH: vi.fn(),
-    onSplitV: vi.fn(),
-    onZoom: vi.fn(),
-    onClickPanel: vi.fn(),
-    onFocusPane: vi.fn(),
-    onStartRename: vi.fn(),
-    onFinishRename: vi.fn(() => ({ accepted: true })),
-    onCancelRename: vi.fn(),
-    onSwapRenderMode: vi.fn(),
-    resolveSurfaceRef: vi.fn((id: string) => id),
-    onConnectPort: vi.fn(async () => ({ ok: true as const })),
-    ...overrides,
-  };
-}
 
 function paneProps(id: string): PaneProps {
   return { id, title: 'Raw iframe', params: { url: 'http://example.test/app' } };

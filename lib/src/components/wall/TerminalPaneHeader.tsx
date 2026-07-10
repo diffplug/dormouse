@@ -14,12 +14,13 @@ import {
 } from '@phosphor-icons/react';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { TodoAlertDialog } from '../TodoAlertDialog';
-import { TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
+import { POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
 import { bellIconClass } from '../bell-icon-class';
 import { useTodoPillContent } from '../TodoPillBody';
 import type { PaneProps } from './pane-props';
 import { IllegalRenameWarning, type RenameRejection } from './IllegalRenameWarning';
 import { PaneHeaderContextMenu } from './PaneHeaderContextMenu';
+import { useDismissOverlay } from './use-dismiss-overlay';
 import {
   DEFAULT_MOUSE_SELECTION_STATE,
   getMouseSelectionSnapshot,
@@ -130,7 +131,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const [dialogTriggerRect, setDialogTriggerRect] = useState<DOMRect | null>(null);
   const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
   const [titleCandidatesRect, setTitleCandidatesRect] = useState<DOMRect | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; surfaceRef: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [renameWarning, setRenameWarning] = useState<{ rect: DOMRect; reason: RenameRejection; value: string } | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
   const titleCandidates = useMemo(() => titleCandidatesForDisplay(paneState), [paneState]);
@@ -187,25 +188,6 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
     if (!activity.notification) setTodoPreviewRect(null);
   }, [activity.notification]);
 
-  const titleCandidatesOpen = !!titleCandidatesRect;
-  useEffect(() => {
-    if (!titleCandidatesOpen) return;
-    const close = () => setTitleCandidatesRect(null);
-    const closeOnKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') close();
-    };
-    window.addEventListener('pointerdown', close);
-    window.addEventListener('resize', close);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('keydown', closeOnKey);
-    return () => {
-      window.removeEventListener('pointerdown', close);
-      window.removeEventListener('resize', close);
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('keydown', closeOnKey);
-    };
-  }, [titleCandidatesOpen]);
-
   return (
     <div
       ref={tabRef}
@@ -216,7 +198,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
         // right-clicks, so this only fires on the header's bare regions.
         e.preventDefault();
         e.stopPropagation();
-        setContextMenu({ x: e.clientX, y: e.clientY, surfaceRef: actions.resolveSurfaceRef(id) });
+        setContextMenu({ x: e.clientX, y: e.clientY });
       }}
     >
       <div className="flex flex-1 min-w-0 items-center gap-1.5 overflow-hidden">
@@ -417,13 +399,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
         />
       )}
       {contextMenu && (
-        <PaneHeaderContextMenu
-          id={id}
-          anchor={contextMenu}
-          surfaceRef={contextMenu.surfaceRef}
-          onConnect={(url) => actions.onConnectPort(id, url)}
-          onClose={closeContextMenu}
-        />
+        <PaneHeaderContextMenu id={id} anchor={contextMenu} onClose={closeContextMenu} />
       )}
       {renameWarning && (
         <IllegalRenameWarning
@@ -455,6 +431,8 @@ function TitleCandidatesPopover({
     top: anchorRect.bottom + TITLE_CANDIDATES_GAP,
   });
 
+  useDismissOverlay(onClose);
+
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -474,7 +452,7 @@ function TitleCandidatesPopover({
       ref={ref}
       role="dialog"
       aria-label="Title candidates"
-      className="z-[1000] max-w-96 overflow-auto rounded border border-border bg-surface-raised px-2.5 py-2 font-mono text-sm leading-snug text-foreground shadow-md"
+      className={`${POPUP_SURFACE_CLASS} max-w-96 overflow-auto px-2.5 py-2 text-sm leading-snug`}
       style={style}
       onPointerDown={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -546,7 +524,7 @@ function TodoNotificationPreview({
       ref={ref}
       id={id}
       role="tooltip"
-      className="z-[1000] max-w-80 rounded border border-border bg-surface-raised px-2.5 py-2 font-mono text-sm leading-snug text-foreground shadow-md"
+      className={`${POPUP_SURFACE_CLASS} max-w-80 px-2.5 py-2 text-sm leading-snug`}
       style={style}
     >
       {notification.title && (

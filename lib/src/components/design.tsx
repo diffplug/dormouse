@@ -24,6 +24,11 @@ export const DOOR_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem ${
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
 
+// Chrome for small anchored popovers (title candidates, TODO preview, pane
+// context menu, rename warning). Text size and padding vary per popover and
+// stay at the call site; the surface recipe is shared so they can't drift.
+export const POPUP_SURFACE_CLASS = 'z-[1000] rounded border border-border bg-surface-raised font-mono text-foreground shadow-md';
+
 export function PopupButtonRow({
   className,
   ...props

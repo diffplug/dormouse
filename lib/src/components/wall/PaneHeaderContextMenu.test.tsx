@@ -7,39 +7,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneProps } from './pane-props';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { WallActionsContext, type WallActions } from './wall-context';
+import { ensureResizeObserver, stubWallActions as stubActions } from './wall-test-utils';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { setPlatform } from '../../lib/platform';
 import type { OpenPort, PlatformAdapter } from '../../lib/platform/types';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-function stubActions(overrides: Partial<WallActions> = {}): WallActions {
-  return {
-    onKill: vi.fn(),
-    onMinimize: vi.fn(),
-    onAlertButton: vi.fn(() => 'noop'),
-    onToggleTodo: vi.fn(),
-    onSplitH: vi.fn(),
-    onSplitV: vi.fn(),
-    onZoom: vi.fn(),
-    onClickPanel: vi.fn(),
-    onFocusPane: vi.fn(),
-    onStartRename: vi.fn(),
-    onFinishRename: vi.fn(() => ({ accepted: true })),
-    onCancelRename: vi.fn(),
-    onSwapRenderMode: vi.fn(),
-    resolveSurfaceRef: vi.fn((id: string) => id),
-    onConnectPort: vi.fn(async () => ({ ok: true as const })),
-    ...overrides,
-  };
-}
-
 function headerProps(id: string, title: string): PaneProps {
   return { id, title, params: undefined };
 }
 
 function loopbackPort(port: number, processName?: string): OpenPort {
-  return { protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port, pid: 100, ...(processName ? { processName } : {}) };
+  return { protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port, pid: 100, processName };
 }
 
 /** Make the running host able to open a browser surface, so port rows are buttons. */
@@ -57,12 +37,7 @@ beforeEach(() => {
   root = createRoot(container);
   platform = new FakePtyAdapter();
   setPlatform(platform);
-  // jsdom lacks ResizeObserver; the pane header's responsive tier observer needs it.
-  globalThis.ResizeObserver ??= class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  } as unknown as typeof ResizeObserver;
+  ensureResizeObserver();
 });
 
 afterEach(() => {

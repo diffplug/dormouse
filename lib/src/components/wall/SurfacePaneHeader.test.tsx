@@ -13,6 +13,7 @@ import {
 } from './agent-browser-screen';
 import { setDevServerResolution } from './agent-browser-ports';
 import { WallActionsContext, type WallActions } from './wall-context';
+import { stubWallActions as stubActions } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -30,27 +31,6 @@ const CHROME: ChromeSnapshot = {
   title: 'Vite + React',
   key: 'storybook',
 };
-
-function stubActions(overrides: Partial<WallActions> = {}): WallActions {
-  return {
-    onKill: vi.fn(),
-    onMinimize: vi.fn(),
-    onAlertButton: vi.fn(() => 'noop'),
-    onToggleTodo: vi.fn(),
-    onSplitH: vi.fn(),
-    onSplitV: vi.fn(),
-    onZoom: vi.fn(),
-    onClickPanel: vi.fn(),
-    onFocusPane: vi.fn(),
-    onStartRename: vi.fn(),
-    onFinishRename: vi.fn(() => ({ accepted: true })),
-    onCancelRename: vi.fn(),
-    onSwapRenderMode: vi.fn(),
-    resolveSurfaceRef: vi.fn((id: string) => id),
-    onConnectPort: vi.fn(async () => ({ ok: true as const })),
-    ...overrides,
-  };
-}
 
 function register(id: string, chrome: ChromeSnapshot = CHROME) {
   return registerAgentBrowserScreen(id, {
