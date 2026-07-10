@@ -150,8 +150,8 @@ export function IframePanel({ id, title, params }: PaneProps) {
   // Ask the host to front the target with its transparent proxy. The returned
   // URL is a loopback origin that serves the page's bytes (instrumented for
   // loopback) so Dormouse — now the server — gets a keyboard side-channel, an
-  // accurate focus model, and real error pages. Reachability/frame-refusal are
-  // diagnosed by the proxy and shown as a served page inside the frame.
+  // accurate focus model, and real error pages. Reachability is diagnosed by
+  // the proxy and shown as a served page inside the frame.
   const [resolution, setResolution] = useState<Resolution>(() => (sourceUrl ? { kind: 'resolving' } : { kind: 'empty' }));
   useEffect(() => {
     if (!sourceUrl) {
