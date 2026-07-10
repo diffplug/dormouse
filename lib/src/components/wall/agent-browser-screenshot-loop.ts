@@ -19,6 +19,9 @@ export interface ScreenshotLoopDeps {
    *  fresh canvas (bumped on re-attach) still repaints even when the bytes match
    *  the last displayed frame. Absent ⇒ generation 0 (dedup on bytes alone). */
   getDrawGeneration?: () => number;
+  /** Monotonic count of provisional stream paints. A crisp capture whose start
+   *  predates a newer provisional paint is stale and must not overwrite it. */
+  getProvisionalGeneration?: () => number;
   /** Optional gated logger for the high-rate per-shot start/done diagnostics;
    *  absent ⇒ silent. Warnings (stall/failure/error) stay unconditional. */
   log?: (message: string) => void;
@@ -33,8 +36,8 @@ export interface ScreenshotLoop {
 /**
  * Display crisp HiDPI screenshots, paced by stream-frame "pulses". The
  * screencast is CSS-resolution only (Chromium's `Page.startScreencast` ignores
- * deviceScaleFactor), so the panel uses its frames only as change signals and
- * displays device-resolution screenshots captured via the host.
+ * deviceScaleFactor), so the panel paints it provisionally for responsiveness
+ * and uses this loop to replace it with device-resolution host screenshots.
  *
  * Backpressure (we only ever want the latest, and must slow down if capture
  * can't keep up): at most one screenshot in flight; a pulse during a shot sets
@@ -55,7 +58,7 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
   // capture we've already displayed onto this same draw target.
   let lastDrawnKey: string | null = null;
 
-  const display = (bytes: Uint8Array, mime: string, mySeq: number) => {
+  const display = (bytes: Uint8Array, mime: string, mySeq: number, provisionalAtStart: number) => {
     // Identical bytes drawn onto the same canvas generation → nothing to repaint;
     // skip the decode. A fresh canvas bumps the generation, so the same bytes
     // still draw after a re-attach.
@@ -67,7 +70,11 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
     const part = bytes as Uint8Array<ArrayBuffer>;
     createImageBitmap(new Blob([part], { type: mime })).then((bitmap) => {
       // A newer shot landed first (or we're gone) — drop this one.
-      if (disposed || mySeq !== seq) {
+      if (
+        disposed ||
+        mySeq !== seq ||
+        (deps.getProvisionalGeneration?.() ?? 0) !== provisionalAtStart
+      ) {
         bitmap.close();
         return;
       }
@@ -85,6 +92,7 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
     inFlight = true;
     dirty = false;
     const mySeq = ++seq;
+    const provisionalAtStart = deps.getProvisionalGeneration?.() ?? 0;
     lastStart = performance.now();
     deps.log?.(`[agent-browser] screenshot start ${JSON.stringify({ session, seq: mySeq })}`);
     // Watchdog: a capture that never resolves (a wedged host round-trip) must not
@@ -106,8 +114,16 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
       deps.log?.(`[agent-browser] screenshot done ${JSON.stringify({ session, seq: mySeq, ok: res.ok, bytes: res.bytes?.byteLength ?? 0, elapsedMs: Math.round(elapsedMs), dirty })}`);
       avgMs = avgMs * 0.6 + elapsedMs * 0.4;
       inFlight = false;
-      if (res.ok && res.bytes) display(res.bytes, res.mime || 'image/jpeg', mySeq);
-      else console.warn('[agent-browser] screenshot failed:', res.error ?? '(no data)');
+      // A provisional stream frame painted during this capture is visibly newer.
+      // Do not let the stale crisp result overwrite it; the coalesced follow-up
+      // will replace it. Mere `dirty` pulses do not suppress drawing — an idle
+      // animated page still needs periodic crisp frames even without pointer input.
+      const stale = (deps.getProvisionalGeneration?.() ?? 0) !== provisionalAtStart;
+      if (res.ok && res.bytes) {
+        if (!stale) display(res.bytes, res.mime || 'image/jpeg', mySeq, provisionalAtStart);
+      } else {
+        console.warn('[agent-browser] screenshot failed:', res.error ?? '(no data)');
+      }
       if (dirty) schedule();
     }).catch((err) => {
       if (settled) return;

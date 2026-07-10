@@ -195,7 +195,7 @@ All handled in a single capture-phase `keydown` listener on `window`. Every hand
 | `,` | Inline rename | — |
 | `x` / `k` | Kill with confirmation | Restore session + kill confirmation |
 | `m` / `d` | Minimize to door | Restore session (stay in command) |
-| `z` | Toggle maximize/restore | — |
+| `z` | Toggle zoom/unzoom | — |
 | `t` | Toggle TODO flag | — |
 | `a` | Dismiss or toggle alert | — |
 
@@ -336,6 +336,10 @@ The Lath host paints `var(--color-app-bg)` so gutters and rounded pane/header co
 ## Animations
 
 All pane motion is owned by the Lath **animator** — a pure function of time that turns committed layout changes into interpolated frames, applied imperatively to the leaf divs by LathHost (`docs/specs/tiling-engine.md` → "Animation"). Default motion is 440ms `cubic-bezier(0.22, 1, 0.36, 1)`; under reduced motion the animator runs the same code with a 0 duration (instant). The selection overlay measures the leaf divs, which carry the interpolated inline geometry, so `getBoundingClientRect` tracks the tween frame-accurately. There are no CSS entrance/exit classes. Terminal panes, by contrast, do not refit every frame: `TerminalPane`'s resize observer throttles `refitSession` (leading edge, then at most one per ~150ms while resizes keep arriving, plus a trailing call at rest), so a motion or sash drag reflows the xterm buffer and fires a PTY resize a handful of times instead of once per animated cell-boundary crossing, while the resting geometry still gets an exact fit.
+
+### Zoom (elevated expansion)
+
+Zoom is presentation-only: the split tree and every tiled rect remain unchanged. The chosen pane rises above the tiled/dying bands and sashes before expanding from its tiled rect to the Wall rect inset by 6px. The perimeter exposes the tiled layout beneath, making the new stacking relationship visible. Unzoom reverses the geometry while keeping the pane elevated for the whole return; it drops back into the tiled layer only on the settled frame. Source of truth: `presentationTargets`, `LATH_ZOOM_MARGIN`, and the layer-to-z-index mapping in `lib/src/components/wall/LathHost.tsx`; discrete layer lifetime in `lib/src/lib/lath/animator.ts`.
 
 ### Spawn (new pane reveal)
 

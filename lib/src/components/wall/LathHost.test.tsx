@@ -4,7 +4,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LathHost } from './LathHost';
+import { LathHost, LATH_ZOOM_MARGIN } from './LathHost';
 import { createLathWallStore, type LathWallStore, type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { createLathWallEngine } from './lath-wall-engine';
 import { layout } from '../../lib/lath/layout';
@@ -217,16 +217,16 @@ describe('LathHost — sash drag', () => {
 });
 
 describe('LathHost — zoom', () => {
-  it('renders the zoomed leaf full-rect on top, and restores after', () => {
+  it('renders the zoomed leaf inset above the tiled layout, and restores after', () => {
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     mount(store);
 
     act(() => store.setZoomed('a'));
     const a = leafDiv('a')!;
-    expect(a.style.left).toBe('0px');
-    expect(a.style.top).toBe('0px');
-    expect(a.style.width).toBe(`${W}px`);
-    expect(a.style.height).toBe(`${H}px`);
+    expect(a.style.left).toBe(`${LATH_ZOOM_MARGIN}px`);
+    expect(a.style.top).toBe(`${LATH_ZOOM_MARGIN}px`);
+    expect(a.style.width).toBe(`${W - LATH_ZOOM_MARGIN * 2}px`);
+    expect(a.style.height).toBe(`${H - LATH_ZOOM_MARGIN * 2}px`);
     expect(a.style.zIndex).toBe('40');
     // 'b' keeps its tiled rect beneath.
     expect(leafDiv('b')!.style.zIndex).toBe('0');
@@ -377,6 +377,49 @@ describe('LathHost — imperative animation frames', () => {
     expect(widthOf('a')).toBeCloseTo(midWidth, 1);
   });
 
+  it('animates zoom above the tiled panes and stays elevated until unzoom settles', () => {
+    const tree = rowOf('a', 'b');
+    const store = seeded(tree, [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    mount(store, vi.fn(), vi.fn(), DUR);
+    const tiled = layout(tree, RECT, LATH_LAYOUT_OPTS).get('a')!;
+    const zoomed = {
+      x: LATH_ZOOM_MARGIN,
+      y: LATH_ZOOM_MARGIN,
+      width: W - LATH_ZOOM_MARGIN * 2,
+      height: H - LATH_ZOOM_MARGIN * 2,
+    };
+
+    act(() => store.setZoomed('a'));
+    const a = leafDiv('a')!;
+    // Elevation happens before expansion, so no overlapping frame paints under a
+    // neighbor even at the transition's first instant.
+    expect(parseFloat(a.style.left)).toBeCloseTo(tiled.x, 1);
+    expect(widthOf('a')).toBeCloseTo(tiled.width, 1);
+    expect(a.style.zIndex).toBe('40');
+
+    clock += DUR / 2;
+    flushRaf();
+    const eased = LATH_EASING(0.5);
+    expect(parseFloat(a.style.left)).toBeCloseTo(tiled.x + (zoomed.x - tiled.x) * eased, 1);
+    expect(widthOf('a')).toBeCloseTo(tiled.width + (zoomed.width - tiled.width) * eased, 1);
+    expect(a.style.zIndex).toBe('40');
+
+    clock += DUR / 2;
+    flushRaf();
+    expect(parseFloat(a.style.left)).toBeCloseTo(zoomed.x, 1);
+    expect(widthOf('a')).toBeCloseTo(zoomed.width, 1);
+
+    act(() => store.setZoomed(null));
+    expect(a.style.zIndex).toBe('40');
+    clock += DUR / 2;
+    flushRaf();
+    expect(a.style.zIndex).toBe('40');
+    clock += DUR / 2;
+    flushRaf();
+    expect(widthOf('a')).toBeCloseTo(tiled.width, 1);
+    expect(a.style.zIndex).toBe('0');
+  });
+
   it('fades a dying leaf in place with pointer-events off, above the survivors', () => {
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     const { engine } = mount(store, vi.fn(), vi.fn(), DUR);
@@ -399,30 +442,32 @@ describe('LathHost — imperative animation frames', () => {
     expect(rafCbs.length).toBe(0); // settled → loop stops
   });
 
-  it('fades a zoomed dying leaf while keeping its full-rect geometry', () => {
+  it('fades a zoomed dying leaf while keeping its elevated inset geometry', () => {
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     const { engine } = mount(store, vi.fn(), vi.fn(), DUR);
 
     act(() => store.setZoomed('a'));
+    clock += DUR;
+    flushRaf();
     const a = leafDiv('a')!;
-    expect(a.style.left).toBe('0px');
-    expect(a.style.top).toBe('0px');
-    expect(a.style.width).toBe(`${W}px`);
-    expect(a.style.height).toBe(`${H}px`);
+    expect(a.style.left).toBe(`${LATH_ZOOM_MARGIN}px`);
+    expect(a.style.top).toBe(`${LATH_ZOOM_MARGIN}px`);
+    expect(a.style.width).toBe(`${W - LATH_ZOOM_MARGIN * 2}px`);
+    expect(a.style.height).toBe(`${H - LATH_ZOOM_MARGIN * 2}px`);
 
     act(() => engine.markDying('a'));
     expect(a.style.pointerEvents).toBe('none');
-    expect(a.style.zIndex).toBe('35'); // Z_DYING — above tiled survivors and sashes
+    expect(a.style.zIndex).toBe('40'); // elevated zoom stays above the dying band
 
     clock += DUR / 2;
     flushRaf();
     const mid = parseFloat(a.style.opacity);
     expect(mid).toBeGreaterThan(0);
     expect(mid).toBeLessThan(1);
-    expect(a.style.left).toBe('0px');
-    expect(a.style.top).toBe('0px');
-    expect(a.style.width).toBe(`${W}px`);
-    expect(a.style.height).toBe(`${H}px`);
+    expect(a.style.left).toBe(`${LATH_ZOOM_MARGIN}px`);
+    expect(a.style.top).toBe(`${LATH_ZOOM_MARGIN}px`);
+    expect(a.style.width).toBe(`${W - LATH_ZOOM_MARGIN * 2}px`);
+    expect(a.style.height).toBe(`${H - LATH_ZOOM_MARGIN * 2}px`);
   });
 
   it('shrinks the last pane toward its bottom-right corner as it dies', () => {

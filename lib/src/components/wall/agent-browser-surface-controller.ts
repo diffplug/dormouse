@@ -54,6 +54,9 @@ import {
 // immediately, so quick visibility flips — or a StrictMode unmount→remount —
 // don't tear down and rebuild the stream connection.
 export const HIDDEN_PARK_DELAY_MS = 1000;
+/** Keep low-latency stream painting active briefly after pointer input. Continuous
+ *  movement extends the window; idle animated pages stay on the cheaper crisp path. */
+export const PROVISIONAL_INPUT_WINDOW_MS = 250;
 
 // The high-rate `[ab-panel]` stream/screenshot diagnostics fire per frame
 // (~20Hz), so the flag is read ONCE at module load and cached: toggling needs a
@@ -280,6 +283,12 @@ export class AgentBrowserSurfaceController {
   // the new canvas (otherwise the loop would skip the redundant bytes and leave it
   // blank until the page changes).
   private drawGeneration = 0;
+  // Latest-wins generation shared by provisional stream decodes and crisp host
+  // screenshots. A late low-resolution decode must never overwrite a newer crisp
+  // frame (or a provisional frame from a later pointer move).
+  private frameDrawSeq = 0;
+  private provisionalUntil = 0;
+  private provisionalPaintGeneration = 0;
   // Param writes buffered while detached (a minimized popped-out pane can still
   // observe URL changes); flushed on the next attach.
   private pendingParams = new Map<string, unknown>();
@@ -475,6 +484,7 @@ export class AgentBrowserSurfaceController {
     // A fresh canvas mounts blank; bump the draw generation so the screenshot
     // loop repaints it even if the next capture's bytes match the last frame.
     this.drawGeneration += 1;
+    this.frameDrawSeq += 1;
     // Seed + observe the pane size cache before ensureStarted so the first
     // computeScreenSnapshot reads a real size.
     this.setupPaneSizeObserver();
@@ -510,6 +520,7 @@ export class AgentBrowserSurfaceController {
         if (this.disposed || this.attachToken !== token) return;
         this.sink = null;
         this.attachToken = null;
+        this.frameDrawSeq += 1; // cancel a provisional decode aimed at the old canvas
         // The observed viewport died with the unmount; drop the cache (and the
         // pending sync debounce) so the hot paths fall back to no-element behavior.
         this.teardownPaneSizeObserver();
@@ -647,6 +658,7 @@ export class AgentBrowserSurfaceController {
       // A re-attach bumps drawGeneration so a fresh (blank) canvas repaints even
       // when the capture bytes are identical to the last displayed frame.
       getDrawGeneration: () => this.drawGeneration,
+      getProvisionalGeneration: () => this.provisionalPaintGeneration,
       log: abDebugLog,
     });
     const connection = createAgentBrowserConnection({
@@ -657,6 +669,7 @@ export class AgentBrowserSurfaceController {
       runCommand: (targetSession, args, targetBinaryPath) => getPlatform().agentBrowserCommand?.(targetSession, args, targetBinaryPath)
         ?? Promise.resolve({ exitCode: 1, stdout: '', stderr: 'agent-browser commands unavailable' }),
       canSelectTabs: () => !this.poppedOut && !this.relaunching,
+      wantFrameData: () => this.wantsProvisionalFrame(),
       log: abDebugLog,
     });
     this.connection = connection;
@@ -689,6 +702,12 @@ export class AgentBrowserSurfaceController {
         if (event.metadata?.deviceWidth && event.metadata?.deviceHeight) {
           this.device = { width: event.metadata.deviceWidth, height: event.metadata.deviceHeight };
         }
+        // The native stream frame is CSS-resolution but arrives immediately after
+        // hover/animation changes. Paint it as a provisional response, then let the
+        // host screenshot loop replace it with the crisp device-resolution frame.
+        if (event.data && this.wantsProvisionalFrame()) {
+          this.drawProvisionalFrame(event.data);
+        }
         this.maybeDisengageSync();
         this.publishScreen();
         if (!this.poppedOut && !this.relaunching) screenshotLoop.pulse();
@@ -704,7 +723,7 @@ export class AgentBrowserSurfaceController {
     this.setConnectionLost(false);
   }
 
-  private drawBitmap = (bitmap: ImageBitmap): void => {
+  private paintBitmap(bitmap: ImageBitmap): void {
     const canvas = this.sink?.canvas;
     if (!canvas) {
       bitmap.close();
@@ -715,7 +734,43 @@ export class AgentBrowserSurfaceController {
     canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
     bitmap.close();
     this.setHasFrame(true);
+  }
+
+  private drawBitmap = (bitmap: ImageBitmap): void => {
+    // A crisp host screenshot supersedes every provisional decode already in
+    // flight, even when that decode resolves later.
+    this.frameDrawSeq += 1;
+    this.paintBitmap(bitmap);
   };
+
+  private drawProvisionalFrame(data: string): void {
+    const sink = this.sink;
+    if (!sink || typeof createImageBitmap !== 'function') return;
+    let bytes: Uint8Array<ArrayBuffer>;
+    try {
+      const binary = atob(data);
+      bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    } catch {
+      return;
+    }
+    const mySeq = ++this.frameDrawSeq;
+    createImageBitmap(new Blob([bytes], { type: 'image/jpeg' })).then((bitmap) => {
+      if (this.disposed || mySeq !== this.frameDrawSeq || this.sink !== sink) {
+        bitmap.close();
+        return;
+      }
+      this.provisionalPaintGeneration += 1;
+      this.paintBitmap(bitmap);
+    }).catch(() => {
+      // The crisp screenshot path remains authoritative; a malformed/unsupported
+      // provisional frame is only a missed latency optimization.
+    });
+  }
+
+  private wantsProvisionalFrame(): boolean {
+    return !this.hasFrame || !getPlatform().agentBrowserScreenshot || performance.now() <= this.provisionalUntil;
+  }
 
   // agent-browser's stream publishes the initial headed tab list but not every
   // same-tab manual navigation. While popped out, subscribe directly to Chrome
@@ -1259,6 +1314,9 @@ export class AgentBrowserSurfaceController {
   }
 
   send(payload: Record<string, unknown>): void {
+    if (payload.type === 'input_mouse') {
+      this.provisionalUntil = performance.now() + PROVISIONAL_INPUT_WINDOW_MS;
+    }
     this.connection?.send(payload);
   }
 

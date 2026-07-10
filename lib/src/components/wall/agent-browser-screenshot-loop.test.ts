@@ -84,17 +84,47 @@ describe('screenshot loop byte dedup', () => {
 });
 
 describe('screenshot loop backpressure', () => {
-  it('coalesces pulses during an in-flight capture into a single follow-up', async () => {
-    // A capture that stays in flight until we resolve it, so we can pulse during it.
-    let release: ((res: AgentBrowserScreenshotResult) => void) | null = null;
-    const screenshot = vi.fn(() => new Promise<AgentBrowserScreenshotResult>((resolve) => { release = resolve; }));
-    setScreenshot(screenshot as unknown as PlatformAdapter['agentBrowserScreenshot']);
+  it('drops a crisp decode superseded by a provisional paint', async () => {
+    let resolveBitmap: ((bitmap: ImageBitmap) => void) | undefined;
+    vi.stubGlobal('createImageBitmap', vi.fn(() => new Promise<ImageBitmap>((resolve) => { resolveBitmap = resolve; })));
+    setScreenshot(async () => ({ ok: true, bytes: new Uint8Array([7, 8, 9]), mime: 'image/jpeg' }));
     const draw = vi.fn();
+    let provisionalGeneration = 0;
     const loop = createScreenshotLoop({
       getSession: () => 'sess',
       getBinaryPath: () => undefined,
       isCapable: () => true,
       draw,
+      getProvisionalGeneration: () => provisionalGeneration,
+    });
+
+    loop.pulse();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(createImageBitmap).toHaveBeenCalledTimes(1);
+
+    // The host bytes returned first, but their bitmap decode is still pending
+    // when a newer low-latency frame becomes visible.
+    provisionalGeneration += 1;
+    resolveBitmap?.({ width: 4, height: 4, close: vi.fn() } as unknown as ImageBitmap);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(draw).not.toHaveBeenCalled();
+
+    loop.dispose();
+  });
+
+  it('coalesces pulses during an in-flight capture into a single follow-up', async () => {
+    // A capture that stays in flight until we resolve it, so we can pulse during it.
+    const releases: Array<(res: AgentBrowserScreenshotResult) => void> = [];
+    const screenshot = vi.fn(() => new Promise<AgentBrowserScreenshotResult>((resolve) => { releases.push(resolve); }));
+    setScreenshot(screenshot as unknown as PlatformAdapter['agentBrowserScreenshot']);
+    const draw = vi.fn();
+    let provisionalGeneration = 0;
+    const loop = createScreenshotLoop({
+      getSession: () => 'sess',
+      getBinaryPath: () => undefined,
+      isCapable: () => true,
+      draw,
+      getProvisionalGeneration: () => provisionalGeneration,
     });
 
     loop.pulse();
@@ -108,12 +138,19 @@ describe('screenshot loop backpressure', () => {
     loop.pulse();
     expect(screenshot).toHaveBeenCalledTimes(1);
 
-    // Finish capture #1 with a distinct byte payload so it draws.
-    release?.({ ok: true, bytes: new Uint8Array([42]), mime: 'image/jpeg' });
+    // A newer provisional frame paints while capture #1 is in flight. The crisp
+    // result is stale and must NOT overwrite that responsive frame.
+    provisionalGeneration += 1;
+    releases[0]?.({ ok: true, bytes: new Uint8Array([42]), mime: 'image/jpeg' });
     await vi.advanceTimersByTimeAsync(300);
-    expect(draw).toHaveBeenCalledTimes(1);
+    expect(draw).not.toHaveBeenCalled();
     // Exactly one follow-up capture ran for the three coalesced pulses.
     expect(screenshot).toHaveBeenCalledTimes(2);
+
+    // The coalesced follow-up is current and becomes the crisp resting frame.
+    releases[1]?.({ ok: true, bytes: new Uint8Array([43]), mime: 'image/jpeg' });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(draw).toHaveBeenCalledTimes(1);
 
     loop.dispose();
   });

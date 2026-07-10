@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { createAnimator, cubicBezier, LATH_EASING, LATH_MOTION_MS } from './animator';
+import {
+  createAnimator,
+  cubicBezier,
+  LATH_EASING,
+  LATH_LAYER_DYING,
+  LATH_LAYER_ELEVATED,
+  LATH_LAYER_TILED,
+  LATH_MOTION_MS,
+} from './animator';
 import type { Rect } from './model';
 import { R } from './test-util';
 
@@ -131,17 +139,33 @@ describe('animator retarget + framesAt', () => {
     expect(a.framesAt(T0 + DUR / 2).get('x')!.rect).toEqual(C);
     expect(a.settledAt(T0 + DUR / 2)).toBe(true);
   });
+
+  it('rises before moving and stays elevated until its return motion settles', () => {
+    const a = make();
+    a.retarget(new Map([['x', A]]), T0);
+
+    a.retarget(new Map([['x', B]]), T0, undefined, {
+      layers: new Map([['x', LATH_LAYER_ELEVATED]]),
+    });
+    expect(a.framesAt(T0).get('x')!.layer).toBe(LATH_LAYER_ELEVATED);
+    expect(a.framesAt(T0 + DUR).get('x')!.layer).toBe(LATH_LAYER_ELEVATED);
+
+    a.retarget(new Map([['x', A]]), T0 + DUR);
+    expect(a.framesAt(T0 + DUR).get('x')!.layer).toBe(LATH_LAYER_ELEVATED);
+    expect(a.framesAt(T0 + DUR + DUR / 2).get('x')!.layer).toBe(LATH_LAYER_ELEVATED);
+    expect(a.framesAt(T0 + DUR * 2).get('x')!.layer).toBe(LATH_LAYER_TILED);
+  });
 });
 
 describe('animator markDying', () => {
-  it('fades opacity → 0 over the duration with the rect frozen, layer 1', () => {
+  it('fades opacity → 0 over the duration with the rect frozen in the dying layer', () => {
     const a = make();
     a.retarget(new Map([['x', A]]), T0);
     a.markDying('x', T0);
     expect(a.isDying('x')).toBe(true);
     const start = a.framesAt(T0).get('x')!;
     expect(start.opacity).toBe(1);
-    expect(start.layer).toBe(1);
+    expect(start.layer).toBe(LATH_LAYER_DYING);
     expect(start.rect).toEqual(A); // frozen
 
     const mid = a.framesAt(T0 + DUR / 2).get('x')!;
@@ -179,7 +203,7 @@ describe('animator markDying', () => {
     // A commit while x is still in the tree (e.g. another pane resized): x stays dying.
     a.retarget(new Map([['x', A], ['y', B]]), T0);
     expect(a.isDying('x')).toBe(true);
-    expect(a.framesAt(T0).get('x')!.layer).toBe(1);
+    expect(a.framesAt(T0).get('x')!.layer).toBe(LATH_LAYER_DYING);
     // The remove commits: x is gone from the targets → dropped.
     a.retarget(new Map([['y', B]]), T0 + DUR);
     expect(a.isDying('x')).toBe(false);
@@ -191,6 +215,15 @@ describe('animator markDying', () => {
     a.markDying('ghost', T0);
     expect(a.isDying('ghost')).toBe(false);
     expect(a.framesAt(T0).has('ghost')).toBe(false);
+  });
+
+  it('keeps an elevated leaf elevated while it dies', () => {
+    const a = make();
+    a.retarget(new Map([['x', A]]), T0, undefined, {
+      layers: new Map([['x', LATH_LAYER_ELEVATED]]),
+    });
+    a.markDying('x', T0);
+    expect(a.framesAt(T0).get('x')!.layer).toBe(LATH_LAYER_ELEVATED);
   });
 });
 

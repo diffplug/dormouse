@@ -7,6 +7,7 @@ import type { PlatformAdapter } from '../../lib/platform/types';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import {
   HIDDEN_PARK_DELAY_MS,
+  PROVISIONAL_INPUT_WINDOW_MS,
   acquireAgentBrowserSurfaceController,
   disposeAgentBrowserSurfaceController,
   disposeAllAgentBrowserSurfaceControllers,
@@ -150,6 +151,52 @@ describe('view attachment', () => {
     }));
     expect(second.updateParameters).toHaveBeenCalledWith({ url: 'https://example.com/' });
     expect(first.updateParameters).not.toHaveBeenCalled();
+  });
+});
+
+describe('provisional stream paint', () => {
+  it('draws the native stream frame before the crisp screenshot resolves', async () => {
+    let now = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const screenshot = vi.fn(() => new Promise<never>(() => {}));
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserScreenshot'>;
+    platform.agentBrowserScreenshot = screenshot;
+    setPlatform(platform);
+
+    const bitmap = { width: 40, height: 30, close: vi.fn() } as unknown as ImageBitmap;
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => bitmap));
+    const sink = makeSink();
+    const drawImage = vi.fn();
+    sink.canvas.getContext = vi.fn(() => ({ drawImage })) as unknown as typeof sink.canvas.getContext;
+
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 4321 });
+    controller.attachView(sink);
+    await flushMicrotasks();
+
+    controller.send({ type: 'input_mouse', eventType: 'mouseMoved', x: 1, y: 1 });
+    streamSocket(4321)?.emitMessage(JSON.stringify({
+      type: 'frame',
+      data: btoa('low-latency-frame'),
+      metadata: { deviceWidth: 40, deviceHeight: 30 },
+    }));
+    await flushMicrotasks();
+
+    expect(screenshot).toHaveBeenCalled();
+    expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0);
+    expect(sink.canvas.width).toBe(40);
+    expect(sink.canvas.height).toBe(30);
+    expect(controller.snapshot().hasFrame).toBe(true);
+
+    // Once pointer activity is old, an animated page must not keep decoding its
+    // CSS-resolution stream at frame rate; the throttled crisp path remains.
+    now += PROVISIONAL_INPUT_WINDOW_MS + 1;
+    streamSocket(4321)?.emitMessage(JSON.stringify({
+      type: 'frame',
+      data: btoa('idle-animation-frame'),
+      metadata: { deviceWidth: 40, deviceHeight: 30 },
+    }));
+    await flushMicrotasks();
+    expect(createImageBitmap).toHaveBeenCalledTimes(1);
   });
 });
 

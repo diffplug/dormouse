@@ -284,18 +284,26 @@ The stream WebSocket provides:
 - tab snapshots,
 - native `input_mouse` / `input_keyboard` input.
 
-Dormouse does not render the stream JPEG by default. The screencast is
-CSS-resolution only — Chromium's `Page.startScreencast` captures in DIP with no
-DPR knob, so its frames upscale to mush on HiDPI; this is a Chromium limit, not
-agent-browser's, so owning the CDP connection wouldn't change it. So Dormouse
-treats frame messages as change pulses, captures a crisp device-resolution
-screenshot through the host's `agentBrowserScreenshot`, and draws that to canvas
-with latest-only backpressure. A capture whose bytes are identical to the last
-displayed frame (a static page the daemon keeps re-pulsing) costs no decode or
-draw; a re-attach bumps a draw generation so a fresh blank canvas still repaints.
-A host without `agentBrowserScreenshot` renders only the placeholder — stream
-frame bytes are discarded by design (the connection reduces every frame message
-to a `frame-pulse`), so there is no frame-drawing fallback path.
+Dormouse paints a changed stream JPEG immediately as a **provisional frame** for
+the first image and for 250ms after pointer input (continuous movement extends
+the window), then replaces it with a crisp device-resolution screenshot through
+the host's `agentBrowserScreenshot`. This two-stage paint keeps hover and other
+pointer feedback aligned with the live cursor instead of waiting for a
+screenshot child-process round trip, while an idle animated page does not pay to
+decode the stream continuously and the resting image stays sharp on HiDPI. The
+provisional frame is CSS-resolution because Chromium's `Page.startScreencast`
+captures in DIP with no DPR knob; this is a Chromium limit, not agent-browser's.
+
+Both paths are latest-only. A newer stream pulse cancels an older provisional
+decode. A provisional frame painted while a crisp capture is in flight marks
+that capture stale, so it cannot overwrite the newer responsive pixels; one
+coalesced follow-up becomes the crisp resting frame. An unpainted pulse alone
+does not suppress a crisp draw, so idle animated pages still update.
+Byte-identical daemon heartbeat frames are dropped before either path, and
+byte-identical crisp captures skip decode/draw. Re-attach bumps a draw generation
+so a fresh blank canvas repaints.
+A host without `agentBrowserScreenshot` paints every changed provisional stream
+frame as its lower-resolution final image rather than showing only the placeholder.
 
 The high-rate `[ab-panel]`/`[agent-browser]` stream and screenshot console
 diagnostics sit behind the `dormouse.flags.abDebugLogs` localStorage flag, read
@@ -304,6 +312,10 @@ always on as the post-hoc tool.
 
 Important input details:
 
+- Canvas pointer coordinates map through one width-derived scale on both axes;
+  using the frame/device heights would stretch input when a stream frame is
+  shorter than the viewport. Source of truth: `toDevice` in
+  `AgentBrowserPanel.tsx`.
 - `input_keyboard.text` is always sent; non-text keys use `text: ""`.
 - `windowsVirtualKeyCode` comes from a real key map, never `key.charCodeAt(0)`
   (`.` is char 46 = VK_DELETE, so periods would otherwise become Delete presses).
