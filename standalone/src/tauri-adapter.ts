@@ -421,7 +421,7 @@ export class TauriAdapter implements PlatformAdapter {
   // back. Resolves when a handler notifies completion for this requestId, or when
   // the bounded wait elapses — quit must never wedge on a stalled flush. If no
   // handler is registered (quit during boot, before the Wall mounts), resolve
-  // immediately: there is nothing queued to flush. Called by the (future) quit
+  // immediately: there is nothing queued to flush. Called by the quit
   // orchestrator; pairs with drainSessionSaves to await the resulting Rust write.
   requestSessionFlush(timeoutMs: number): Promise<void> {
     if (this.flushHandlers.size === 0) return Promise.resolve();

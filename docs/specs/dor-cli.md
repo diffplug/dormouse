@@ -348,7 +348,8 @@ from `command-detail`.
   additionally emits the identity dump `dor identify` used to print — top-level
   `caller_surface_ref` / `caller_surface_id` (matched locally against
   `DORMOUSE_SURFACE_ID`, `null` when the caller is not in the list),
-  `focused_surface_ref` / `focused_surface_id`, and a `host` block
+  `focused_surface_ref` / `focused_surface_id`, `workspace_ref` / `window_ref`,
+  and a `host` block
   (`DORMOUSE_HOST` / `DORMOUSE_HOST_WORKSPACE` / runtime paths). It deliberately
   does not expose the control socket: the CLI is the public API and the socket is
   private plumbing.
