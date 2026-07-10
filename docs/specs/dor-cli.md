@@ -19,6 +19,7 @@ Source of truth:
 | POSIX / Windows launchers | `dor/bin/dor`, `dor/bin/dor.cmd` |
 | Snapshot tests for CLI output and help text | `dor/test/cli-output.test.mjs`, `dor/test/cli-help.test.mjs`, `dor/test/snapshots/` |
 | Shared staging script | `scripts/stage-dor-cli.mjs` |
+| Agent skill markdown and its inlining codegen | `dor/skill.md`, `scripts/generate-dor-skill.mjs` |
 | Standalone staging/runtime env | `standalone/package.json`, `standalone/src-tauri/src/lib.rs`, `standalone/sidecar/pty-core.js`, `standalone/sidecar/main.js` |
 | VS Code staging/runtime env | `vscode-ext/package.json`, `vscode-ext/src/pty-manager.ts`, `vscode-ext/src/pty-host.js` |
 | Control request routing into the webview | `standalone/src/tauri-adapter.ts`, `vscode-ext/src/message-router.ts`, `lib/src/lib/platform/vscode-adapter.ts` |
@@ -229,8 +230,8 @@ Invariants:
   swaps do not change the ref. Killing a Surface retires its ref; a later target
   that names it fails instead of silently retargeting.
 - Surface targets also accept `title:<exact display title>`, primarily for human
-  recovery; automation should prefer refs/ids from command responses or
-  `dor list --json`. Action commands (`read`, `send`, `kill`) resolve against
+  recovery; automation should prefer refs from command responses or
+  `dor list`. Action commands (`read`, `send`, `kill`) resolve against
   listed Surfaces, including minimized ones. For `split` and `ensure --surface`,
   the reference target also resolves against the listed Surfaces so minimized
   peers participate in ambiguity checks; when the resolved reference is
@@ -289,7 +290,9 @@ output, JSON responses, default `ensure` titles, and the launched command alike.
 
 Every first-party command except the `dor agent-browser` / `dor ab` passthrough
 accepts `--json` and emits a stable object with the same handles as its text
-output. Single-Surface responses always include both `surface_id` (the stable
+output. Text output is the primary interface for agents as well as humans — it
+carries the same refs; `--json` exists for scripts and pipelines that consume
+output mechanically. Single-Surface responses always include both `surface_id` (the stable
 id) and `surface_ref` (the Workspace-stable short ref). `dor ab` forwards
 arguments to the user's `agent-browser` CLI, so any JSON mode there belongs to
 that delegated command surface rather than to `dor`.
@@ -314,13 +317,22 @@ EOF). Command help patches can target the `command-usage` section separately
 from `command-detail`.
 
 - `dor split` [impl](../../dor/src/commands/split.ts) [docs](../../dor/test/snapshots/help/split.md).
-  Bare `dor split` focuses the new surface (in passthrough mode focus follows the
-  selection, so the user types straight into it); `dor split -- <command>` runs
-  the command in the background and leaves focus on the caller, like `dor ensure`.
-  Both are wired through `createSplitSurface`'s `focusNeutral` flag
-  (`lib/src/components/wall/use-dor-control.ts`).
+  Only a bare `dor split` (no `--`, no command) focuses the new surface (in
+  passthrough mode focus follows the selection, so the user types straight into
+  it). Everything else leaves focus on the caller, like `dor ensure`:
+  `dor split -- <command>` runs the command in the background, and a bare
+  `dor split --` opens a blank terminal without stealing focus. stricli discards
+  `--` while parsing, so the CLI captures its presence pre-parse
+  (`DorCommandContext.hasArgumentEscape`, set in `dor/src/cli.ts`) and folds it
+  with command-presence into the request's `focusNeutral` — the single source of
+  truth for the decision. The host honors that field directly
+  (`createSplitSurface`'s `focusNeutral` in
+  `lib/src/components/wall/use-dor-control.ts`).
 - `dor ensure` [impl](../../dor/src/commands/ensure.ts) [docs](../../dor/test/snapshots/help/ensure.md)
 - `dor version` [impl](../../dor/src/commands/version.ts) [docs](../../dor/test/snapshots/help/version.md)
+- `dor skill` — prints the bundled agent skill, or installs its bootstrap stub
+  with `--install`; see [Agent Skill](#agent-skill).
+  [impl](../../dor/src/commands/skill.ts) [docs](../../dor/test/snapshots/help/skill.md)
 - `dor send` [impl](../../dor/src/commands/send.ts) [docs](../../dor/test/snapshots/help/send.md)
 - `dor read` [impl](../../dor/src/commands/read.ts) [docs](../../dor/test/snapshots/help/read.md)
 - `dor kill` [impl](../../dor/src/commands/kill.ts) [docs](../../dor/test/snapshots/help/kill.md)
@@ -353,7 +365,8 @@ from `command-detail`.
   additionally emits the identity dump `dor identify` used to print — top-level
   `caller_surface_ref` / `caller_surface_id` (matched locally against
   `DORMOUSE_SURFACE_ID`, `null` when the caller is not in the list),
-  `focused_surface_ref` / `focused_surface_id`, and a `host` block
+  `focused_surface_ref` / `focused_surface_id`, `workspace_ref` / `window_ref`,
+  and a `host` block
   (`DORMOUSE_HOST` / `DORMOUSE_HOST_WORKSPACE` / runtime paths). It deliberately
   does not expose the control socket: the CLI is the public API and the socket is
   private plumbing.
@@ -421,7 +434,7 @@ sugar + `surface.resolveOpen` call), `dor/src/commands/iframe.ts` /
 A handful of end-to-end agent scenarios are the CLI's product-level acceptance
 tests: each one checks that the commands *compose* into a real automation, not
 just that they work in isolation — orchestration, Surface targeting, browser
-handoff, cleanup, and JSON output holding together across a whole task. They all
+handoff, cleanup, and output holding together across a whole task. They all
 reduce to one shape — **discover the target Surface with `dor list` (filtered),
 then act on it with a handle-taking command** — which is why targeting lives in
 `dor list` while `read` / `send` / `kill` stay handle-taking instead of each
@@ -437,16 +450,66 @@ their session is held externally by `agent-browser`.
 
 | Workflow | How the shipped CLI does it |
 | --- | --- |
-| Share a dev server | `dor ensure -- npm dev` reuses the command already live in the same resolved cwd (`--restart` re-runs it in place, preserving layout and minimized/visible state). `dor ab open surface:N` (or `dor iframe surface:N`) resolves the terminal's dev-server port and opens it in one step — see [Browser Open Target Resolution](#browser-open-target-resolution). The explicit two-step form still works: `dor list --command "npm dev" --cwd . --ports --json`, then `dor ab open http://localhost:<port>`. |
+| Share a dev server | `dor ensure -- npm dev` reuses the command already live in the same resolved cwd (`--restart` re-runs it in place, preserving layout and minimized/visible state). `dor ab open surface:N` (or `dor iframe surface:N`) resolves the terminal's dev-server port and opens it in one step — see [Browser Open Target Resolution](#browser-open-target-resolution). The explicit two-step form still works: `dor list --command "npm dev" --cwd . --ports`, then `dor ab open http://localhost:<port>`. |
 | Launch a sub-agent | `dor split -- codex` returns `surface:N`; drive it with `dor send surface:N --text "/review" --key enter` (or `--sequence` for arbitrary ordering), then read it back with `dor read surface:N`. |
-| Wait on a sub-agent | `dor split -- otheragent` returns `surface:5`; the caller watches `dor list --json` for that Surface's `ringing` flag and calls `dor read surface:5` once the peer rings the Dormouse bell to signal it is done. Blocking on the bell directly with `dor await surface:5` (which prints the screen the moment it rings) is staged — see [Future](#future). |
+| Wait on a sub-agent | `dor split -- otheragent` returns `surface:5`; the caller watches `dor list` for that Surface's `[ringing]` tag and calls `dor read surface:5` once the peer rings the Dormouse bell to signal it is done. Blocking on the bell directly with `dor await surface:5` (which prints the screen the moment it rings) is staged — see [Future](#future). |
 | Client / server browser testing | `dor ab --key client open <client-url>` and `dor ab --key server open <server-url>` create or reuse two independent browser Surfaces. |
-| Multi-worktree, same command | Two worktrees each run `dor ensure -- npm dev`; the resolved cwd keeps them distinct, and `dor list --command "npm dev" --cwd <worktree> --json` selects the intended one. |
-| Long-running background job | `dor ensure --minimize -- npm test -- --watch` keeps a watcher out of the layout; `dor list --command "npm test -- --watch" --json` rediscovers the minimized Surface after churn, and `read` / `send` / `kill` target it by ref. |
-| Port-owner handoff | `dor list --port 5173 --json` returns the terminal that owns the socket (browser Surfaces never match `--port`), then `dor ab --key client open http://localhost:5173` binds the browser side. |
-| Safe cleanup | `dor list --command "npm dev" --cwd . --json`, then `dor kill <ref> --confirm-if-read <text>`. The ref comes from a recent listing or command response; `title:<exact>` also targets one but can drift. |
+| Multi-worktree, same command | Two worktrees each run `dor ensure -- npm dev`; the resolved cwd keeps them distinct, and `dor list --command "npm dev" --cwd <worktree>` selects the intended one. |
+| Long-running background job | `dor ensure --minimize -- npm test -- --watch` keeps a watcher out of the layout; `dor list --command "npm test -- --watch"` rediscovers the minimized Surface after churn, and `read` / `send` / `kill` target it by ref. |
+| Port-owner handoff | `dor list --port 5173` returns the terminal that owns the socket (browser Surfaces never match `--port`), then `dor ab --key client open http://localhost:5173` binds the browser side. |
+| Safe cleanup | `dor list --command "npm dev" --cwd .`, then `dor kill <ref> --confirm-if-read <text>`. The ref comes from a recent listing or command response; `title:<exact>` also targets one but can drift. |
+
+## Agent Skill
+
+`dor/skill.md` is the agent skill: instructions that teach a coding agent
+running inside a Dormouse terminal to drive it through `dor` — the Agent
+Workflows above, recast as a targeting model plus recipes. Distribution splits
+into content and bootstrap so each is exactly as stable as it needs to be:
+
+- **Content ships with the CLI.** `scripts/generate-dor-skill.mjs` (prebuild,
+  like the version metadata) inlines the markdown into the bundle as the
+  gitignored `generated-skill.ts`, so `dor skill` prints text version-locked
+  to the CLI that staged it and the staged package stays launchers + bundle.
+  The skill body contains no environment detection: if `dor skill` ran, `dor`
+  is by definition available — detection lives only in the stub.
+- **Bootstrap is a loud stub that barely drifts.** `dor skill --install`
+  writes a marker-delimited block (`<!-- dor-skill:begin` …
+  `dor-skill:end -->`) into the project's agent instructions file, resolved
+  against the invoking shell's PWD like `dor ensure --cwd`. Its core is the
+  detection rule — *if `DORMOUSE_SURFACE_ID` is set, run `dor skill` and
+  follow it; otherwise ignore this section*. A pointer-only stub proved too
+  soft in practice — agents skipped `dor skill` and fell back to native
+  subprocesses and browser tools — so the block also carries two loud,
+  mandatory directives: never background a long-running process (use
+  `dor ensure`), never use a native browser tool (use `dor ab`). These are
+  the two behaviors that must be redirected *before* an agent would think to
+  run `dor skill`, and both are foundational command names — the least likely
+  `dor` facts to drift — so the stub stays effectively stale-proof. The env
+  guard keeps it inert for collaborators who don't run Dormouse, and
+  committing it is the point: the stub travels with the repo (`AGENTS.md` is
+  the convention read by Codex, Pi, OpenCode, and most other harnesses), so
+  one teammate installing it covers every agent and every clone. `dor/skill.md`
+  leads with the same two rules so an agent that does run `dor skill` meets
+  them again up front.
+- **File selection.** An existing block in `AGENTS.md` or `CLAUDE.md`
+  (checked in that order) is rewritten in place; everything outside the
+  markers is untouched, so re-running is idempotent. Otherwise: append to
+  `AGENTS.md` when it exists; else to `CLAUDE.md` when it exists and does not
+  already import `@AGENTS.md`; else create `AGENTS.md`. A begin marker
+  without a well-ordered end marker fails (`malformed dor-skill block`)
+  rather than guessing. Output reports the bare file name only
+  (`created AGENTS.md` / `updated CLAUDE.md`), never an absolute path.
+
+Source of truth: `dor/src/commands/skill.ts`, `scripts/generate-dor-skill.mjs`,
+`dor/skill.md`; `dor skill` output is asserted byte-identical to `dor/skill.md`
+in `dor/test/cli-output.test.mjs`.
 
 ## Future
+
+- **`dor skill` follow-ons** — skill-ecosystem publication (plugin
+  marketplaces, npm) distributes the bootstrap stub, never a copy of the
+  content. A user-level `--global` install variant waits until a story needs
+  it.
 
 - **`dor await <surface>`** — block until a Surface rings the Dormouse bell, then
   print its screen (like `dor read`) and exit — turning the alert system
@@ -454,7 +517,7 @@ their session is held externally by `agent-browser`.
   launches a peer with `dor split -- otheragent`, then `dor await surface:5` parks
   until that peer signals completion by ringing (the `BEL` / `OSC 9` / `9;4` /
   `99` / `777` events that already drive the `ringing` flag in `dor list`), so the
-  caller stops polling `dor list --json` in a loop. A Surface already ringing when
+  caller stops polling `dor list` in a loop. A Surface already ringing when
   `await` is called returns immediately. Resolving is exactly a human attending the
   ringing Session (`docs/specs/alert.md` → Clearing And TODO): it clears the active
   ring and sets `todo = true`, so the bell goes quiet and the Surface now carries a

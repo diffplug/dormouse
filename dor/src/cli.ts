@@ -13,6 +13,7 @@ import { killCommand } from './commands/kill.js';
 import { listCommand } from './commands/list.js';
 import { readCommand } from './commands/read.js';
 import { sendCommand } from './commands/send.js';
+import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
 import { versionCommand } from './commands/version.js';
 import { errorMessage, fail } from './commands/shared.js';
@@ -69,6 +70,7 @@ const COMMANDS = [
   splitCommand,
   ensureCommand,
   versionCommand,
+  skillCommand,
   sendCommand,
   readCommand,
   killCommand,
@@ -81,6 +83,7 @@ const ROUTES = {
   split: splitCommand.command,
   ensure: ensureCommand.command,
   version: versionCommand.command,
+  skill: skillCommand.command,
   send: sendCommand.command,
   read: readCommand.command,
   kill: killCommand.command,
@@ -155,12 +158,18 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
     if (!check.ok) return fail(check.message);
   }
 
+  // stricli discards the `--` escape sequence during parsing, so capture its
+  // presence here (pre-parse) for commands that must distinguish an empty
+  // command tail from none — e.g. `dor split --` vs bare `dor split`.
+  const hasArgumentEscape = args.includes('--');
+
   const capture = createCaptureProcess(options.env);
   await runStricli(APPLICATION, commandName ? [commandName, ...args] : [], {
     process: capture.process,
     forCommand: (): DorCommandContext => ({
       process: capture.process,
       options,
+      hasArgumentEscape,
     }),
   });
 

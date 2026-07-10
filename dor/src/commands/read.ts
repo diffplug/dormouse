@@ -7,6 +7,7 @@ import type {
   ReadSurfaceResponse,
 } from './types.js';
 import {
+  errorMessage,
   renderJson,
   requireControlClient,
   stringParser,
@@ -76,7 +77,7 @@ async function runReadCommand(this: DorCommandContext, flags: ReadFlags, surface
     writeStdout(this, renderReadResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
-    return new Error(error instanceof Error ? error.message : String(error));
+    return new Error(errorMessage(error));
   }
 }
 

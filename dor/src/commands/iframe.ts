@@ -7,6 +7,7 @@ import type {
   IframeSurfaceResponse,
 } from './types.js';
 import {
+  errorMessage,
   renderJson,
   requireControlClient,
   stringParser,
@@ -97,7 +98,7 @@ async function runIframeCommand(this: DorCommandContext, flags: IframeFlags, tar
     writeStdout(this, renderIframeResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
-    return new Error(error instanceof Error ? error.message : String(error));
+    return new Error(errorMessage(error));
   }
 }
 

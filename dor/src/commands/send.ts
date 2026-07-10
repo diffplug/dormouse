@@ -8,6 +8,7 @@ import type {
   SendSurfaceResponse,
 } from './types.js';
 import {
+  errorMessage,
   renderJson,
   requireControlClient,
   stringParser,
@@ -154,7 +155,7 @@ async function runSendCommand(this: DorCommandContext, flags: SendFlags, surface
     writeStdout(this, renderSendResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
-    return new Error(error instanceof Error ? error.message : String(error));
+    return new Error(errorMessage(error));
   }
 }
 
@@ -191,7 +192,7 @@ function parseSendSequence(input: string): ParseResult<SendInput[]> {
   try {
     parsed = JSON.parse(input);
   } catch (error) {
-    return { ok: false, message: `invalid --sequence JSON: ${error instanceof Error ? error.message : String(error)}` };
+    return { ok: false, message: `invalid --sequence JSON: ${errorMessage(error)}` };
   }
 
   if (!Array.isArray(parsed)) {

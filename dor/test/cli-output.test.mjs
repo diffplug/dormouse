@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCli } from '../dist/cli.js';
@@ -10,6 +12,21 @@ import { msysToWindowsCwd } from '../dist/commands/shared.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const snapshotsDir = join(__dirname, 'snapshots');
 const updateSnapshots = process.env.UPDATE_SNAPSHOTS === '1';
+
+// The markdown the prebuild codegen inlines into the CLI; `dor skill` must print it verbatim.
+const skillMarkdown = await readFile(join(__dirname, '..', 'skill.md'), 'utf8');
+
+// Run against a throwaway directory, cleaned up after. The skill --install
+// tests pass it to the CLI as its PWD; the agent-browser PATH-resolution test
+// drops a fake binary in it.
+async function withTempDir(prefix, run) {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  try {
+    return await run(dir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
 
 const fixtureSurfaces = [
   {
@@ -296,8 +313,29 @@ test('split sends command argv to the host', async () => {
       direction: 'auto',
       minimized: false,
       surface: undefined,
+      focusNeutral: true,
     },
   }]);
+});
+
+test('bare split is focus-stealing; an empty -- tail is not', async () => {
+  const bare = fixtureClient();
+  await runCli(['split'], { client: bare });
+  assert.equal(bare.requests[0].request.focusNeutral, false);
+  assert.equal(bare.requests[0].request.command, undefined);
+
+  // `dor split --` opens a blank terminal without stealing focus: no command to
+  // run, but the `--` marks it focus-neutral, distinct from a bare `dor split`.
+  const emptyTail = fixtureClient();
+  await runCli(['split', '--'], { client: emptyTail });
+  assert.equal(emptyTail.requests[0].request.focusNeutral, true);
+  assert.equal(emptyTail.requests[0].request.command, undefined);
+
+  // The CLI owns the invariant that an initial command is never focus-stealing,
+  // so it stays focus-neutral even without a `--`.
+  const withCommand = fixtureClient();
+  await runCli(['split', 'echo', 'hi'], { client: withCommand });
+  assert.equal(withCommand.requests[0].request.focusNeutral, true);
 });
 
 test('ensure text output', async () => {
@@ -407,6 +445,101 @@ test('--version and -v alias the version command', async () => {
     assert.equal(actual.exitCode, 0, `${flag} should exit 0`);
     assert.equal(actual.stderr, '', `${flag} should not error`);
   }
+});
+
+test('skill prints the bundled markdown verbatim', async () => {
+  const result = await runCli(['skill']);
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, '');
+  assert.equal(result.stdout, skillMarkdown);
+});
+
+test('skill --json wraps the markdown', async () => {
+  const result = await runCli(['skill', '--json']);
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, '');
+  assert.equal(JSON.parse(result.stdout).markdown, skillMarkdown);
+});
+
+test('skill --install creates AGENTS.md when neither file exists', async () => {
+  await withTempDir('dor-skill-', async (dir) => {
+    const result = await runCli(['skill', '--install'], { env: { PWD: dir } });
+    await snapshot('skill-install-created', result);
+    const content = await readFile(join(dir, 'AGENTS.md'), 'utf8');
+    assert.ok(content.startsWith('<!-- dor-skill:begin'));
+    assert.ok(content.endsWith('<!-- dor-skill:end -->\n'));
+    assert.match(content, /DORMOUSE_SURFACE_ID/);
+  });
+});
+
+test('skill --install appends to an existing AGENTS.md and stays idempotent', async () => {
+  await withTempDir('dor-skill-', async (dir) => {
+    const agentsPath = join(dir, 'AGENTS.md');
+    await writeFile(agentsPath, '# My project\n\nSome existing guidance.\n');
+    const first = await runCli(['skill', '--install'], { env: { PWD: dir } });
+    assert.equal(first.exitCode, 0);
+    assert.equal(first.stderr, '');
+    assert.equal(first.stdout, 'updated AGENTS.md\n');
+    const afterFirst = await readFile(agentsPath, 'utf8');
+    assert.ok(afterFirst.startsWith('# My project\n\nSome existing guidance.\n\n<!-- dor-skill:begin'));
+    assert.ok(afterFirst.endsWith('<!-- dor-skill:end -->\n'));
+
+    // Re-running rewrites the block in place, leaving the file byte-identical.
+    const second = await runCli(['skill', '--install'], { env: { PWD: dir } });
+    assert.equal(second.stdout, 'updated AGENTS.md\n');
+    assert.equal(await readFile(agentsPath, 'utf8'), afterFirst);
+  });
+});
+
+test('skill --install writes to CLAUDE.md when it is the only instructions file', async () => {
+  await withTempDir('dor-skill-', async (dir) => {
+    const claudePath = join(dir, 'CLAUDE.md');
+    await writeFile(claudePath, '# Claude guidance\n');
+    const result = await runCli(['skill', '--install'], { env: { PWD: dir } });
+    assert.equal(result.stdout, 'updated CLAUDE.md\n');
+    assert.match(await readFile(claudePath, 'utf8'), /<!-- dor-skill:begin/);
+    assert.equal(existsSync(join(dir, 'AGENTS.md')), false);
+  });
+});
+
+test('skill --install creates AGENTS.md when CLAUDE.md imports it', async () => {
+  await withTempDir('dor-skill-', async (dir) => {
+    const claudePath = join(dir, 'CLAUDE.md');
+    const claudeBody = '# Claude guidance\n\n@AGENTS.md\n';
+    await writeFile(claudePath, claudeBody);
+    const result = await runCli(['skill', '--install'], { env: { PWD: dir } });
+    assert.equal(result.stdout, 'created AGENTS.md\n');
+    assert.match(await readFile(join(dir, 'AGENTS.md'), 'utf8'), /<!-- dor-skill:begin/);
+    assert.equal(await readFile(claudePath, 'utf8'), claudeBody);
+  });
+});
+
+test('skill --install rewrites the block in place, preserving surrounding text', async () => {
+  await withTempDir('dor-skill-', async (dir) => {
+    const agentsPath = join(dir, 'AGENTS.md');
+    const before = '# Top matter\n\n';
+    const staleBlock = '<!-- dor-skill:begin — stale -->\nold body\n<!-- dor-skill:end -->';
+    const after = '\n\n## Footer\n';
+    await writeFile(agentsPath, before + staleBlock + after);
+    const result = await runCli(['skill', '--install'], { env: { PWD: dir } });
+    assert.equal(result.stdout, 'updated AGENTS.md\n');
+    const content = await readFile(agentsPath, 'utf8');
+    assert.ok(content.startsWith(before));
+    assert.ok(content.endsWith(after));
+    assert.doesNotMatch(content, /old body/);
+    assert.match(content, /DORMOUSE_SURFACE_ID/);
+    assert.equal(content.match(/<!-- dor-skill:begin/g).length, 1);
+    assert.equal(content.match(/dor-skill:end -->/g).length, 1);
+  });
+});
+
+test('skill --install --json reports status and file', async () => {
+  await withTempDir('dor-skill-', async (dir) => {
+    const result = await runCli(['skill', '--install', '--json'], { env: { PWD: dir } });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stderr, '');
+    assert.deepEqual(JSON.parse(result.stdout), { status: 'created', file: 'AGENTS.md' });
+  });
 });
 
 test('send text output', async () => {
@@ -825,16 +958,13 @@ test('agent-browser respects DORMOUSE_AGENT_BROWSER_BIN and forwards it as binar
 });
 
 test('agent-browser resolves the binary on PATH to an absolute binaryPath', async () => {
-  const { mkdtemp, writeFile: write, rm } = await import('node:fs/promises');
-  const { tmpdir } = await import('node:os');
-  const dir = await mkdtemp(join(tmpdir(), 'dor-ab-'));
-  try {
+  await withTempDir('dor-ab-', async (dir) => {
     // On Windows a bare name isn't executable and resolveBinaryPath walks
     // PATHEXT (.cmd/.exe/.bat), so the on-disk shim must carry one of those
     // extensions — mirroring how agent-browser actually installs there.
     const ext = process.platform === 'win32' ? '.cmd' : '';
     const binPath = join(dir, `agent-browser${ext}`);
-    await write(binPath, '#!/bin/sh\n', { mode: 0o755 });
+    await writeFile(binPath, '#!/bin/sh\n', { mode: 0o755 });
     const ab = fakeAgentBrowser();
     const client = fixtureClient();
     await runCli(['ab', 'snapshot'], {
@@ -845,9 +975,7 @@ test('agent-browser resolves the binary on PATH to an absolute binaryPath', asyn
       env: { PATH: ['/nonexistent', dir].join(delimiter) },
     });
     assert.equal(client.requests[0].request.binaryPath, binPath);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  });
 });
 
 // The caller terminal (surface:2) plus the host identity `dor list --json` folds

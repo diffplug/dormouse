@@ -76,6 +76,11 @@ export interface SplitSurfaceRequest {
   direction: SplitDirection;
   minimized: boolean;
   surface?: string;
+  /** Leave focus on the caller instead of moving it to the new surface. The CLI
+   *  sets it for every split except a bare `dor split` (no `--`, no command): a
+   *  `--` tail (`dor split -- <command>` or an empty `dor split --`) and an
+   *  initial command both leave focus put. The host honors it as sent. */
+  focusNeutral: boolean;
 }
 
 export interface SplitSurfaceResponse {
@@ -238,6 +243,11 @@ export interface CliResult {
 
 export interface DorCommandContext extends CommandContext {
   readonly options: CliOptions;
+  /** Whether the raw argv carried the `--` argument-escape sequence. stricli
+   *  consumes `--` and leaves no trace in the parsed positionals, so this is the
+   *  only way a command can tell `dor split --` (empty tail) from a bare
+   *  `dor split`. Computed once in `cli.ts` from the pre-parse argv. */
+  readonly hasArgumentEscape: boolean;
 }
 
 export interface Command {

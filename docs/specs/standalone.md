@@ -223,10 +223,10 @@ adapter reads a host-injected seed (`docs/specs/vscode.md`).
 cadence is shared frontend code (`lib/src/components/wall/use-session-persistence.ts`),
 so every adapter benefits: a generation-counter dirty tracker
 (`lib/src/lib/session-dirty.ts`) gates the periodic heartbeat. Two distinct
-trigger classes feed it. **Structural** dockview events (layout change, panel
+trigger classes feed it. **Structural** Lath store commits (layout change, pane
 add/remove) keep their existing 500 ms-debounced *schedule* — the cadence is
 byte-identical to before. **Content** inputs that change the persisted blob with
-no dockview event — terminal output (`onPtyData`: scrollback, OSC CWD, title
+no Lath commit — terminal output (`onPtyData`: scrollback, OSC CWD, title
 candidates), Activity/TODO transitions (`subscribeToActivity`), pane
 title/rename/command state (`subscribeToTerminalPaneState`), active-pane focus
 (`onDidActivePanelChange`), and door-state changes — only *mark dirty*, never
