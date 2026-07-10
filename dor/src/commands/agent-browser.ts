@@ -274,11 +274,17 @@ const OPEN_SUBCOMMANDS = new Set(['open', 'goto', 'navigate']);
 
 /**
  * Rewrite a forwarded navigation argv so agent-browser receives a URL:
- * `surface:` handles resolve via the host port scan, a bare `:port` sugars to
- * `http://localhost:<port>`. Non-navigation commands and plain URLs pass through
- * unchanged. The target is matched by shape (not position), so `open --headed
- * surface:3` resolves too. Only the first special-shaped arg is rewritten —
- * these verbs take a single target.
+ * `surface:` handles resolve via the host port scan, a bare `:port`/`host:port`
+ * sugars to http. Non-navigation commands and plain URLs pass through unchanged.
+ *
+ * The target is matched by shape (not position), which is what lets `open
+ * --headed surface:3` resolve — dor can't know agent-browser's flag arity, so it
+ * can't reliably find "the positional". The trade-off is that a *flag value*
+ * shaped like a target would be grabbed; this is safe because no agent-browser
+ * `open` flag takes a `surface:`/`:port`/`host:port`-shaped value (`--headers` is
+ * JSON, `--init-script` a path, `--enable` a feature name), and `inferredHttpUrl`
+ * rejects a bare-integer host so a stray `n:n` value can't become a URL. Only the
+ * first special-shaped arg is rewritten — these verbs take a single target.
  */
 async function resolveOpenTargetArgs(rest: string[], options: CliOptions): Promise<ParseResult<string[]>> {
   const subcommand = rest.find((arg) => !arg.startsWith('-'));

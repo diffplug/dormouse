@@ -727,6 +727,23 @@ test('agent-browser open defaults a schemeless host:port to http, overriding age
   assert.equal(client.requests.some((entry) => entry.method === 'resolveOpenTarget'), false);
 });
 
+test('agent-browser open does not treat a bare-integer n:n as a host:port target', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  // `800:600` would otherwise be packed by new URL into http://0.0.3.32:600/; a
+  // bare-integer host is not a real target, so it is forwarded verbatim.
+  await runCli(['ab', 'open', '800:600'], { client, execAgentBrowser: ab.exec });
+  assert.equal(ab.calls[0][4], '800:600');
+  assert.equal(client.requests.some((entry) => entry.method === 'resolveOpenTarget'), false);
+});
+
+test('iframe rejects a bare-integer n:n rather than packing it into an IPv4', async () => {
+  const result = await runCli(['iframe', '800:600'], { client: fixtureClient() });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /http:\/\/ or https:\/\//);
+});
+
 test('agent-browser open resolves a surface target behind a flag', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
