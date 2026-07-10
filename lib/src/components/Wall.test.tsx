@@ -590,7 +590,9 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(focusOf('pane-a')).toBe('true');
 
-    const newId = await dispatchSplit({ direction: 'right', command: ['echo', 'hi'] });
+    // The CLI marks a `-- <command>` split focus-neutral (it always sends
+    // focusNeutral when `--` or a command is present).
+    const newId = await dispatchSplit({ direction: 'right', command: ['echo', 'hi'], focusNeutral: true });
 
     // The initial command runs in the background: the caller keeps focus and the
     // new surface is not focused.

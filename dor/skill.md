@@ -91,12 +91,10 @@ Direction flags `--left|--right|--up|--down` (default `--auto`).
 `--surface <ref>` picks which surface to split from. The response includes the
 new surface's ref — save it.
 
-**Never run a bare `dor split` (no `--`).** It moves the user's keyboard focus
-to the new pane, so their next keystrokes land there unpredictably. Bare
-`dor split` exists for a human at the keyboard who wants to start typing in the
-new pane. When you want an empty terminal, always write `dor split --` — same
-blank pane, but focus stays put. The rule is simple: every `dor split` you run
-has a `--`.
+**Never run a bare `dor split` (no `--`)** — it moves the user's keyboard focus
+to the new pane, hijacking their keystrokes. For an empty terminal, write
+`dor split --`: same blank pane, focus stays put. Every `dor split` you run has
+a `--`.
 
 ### `dor ensure` — idempotent "make sure this is running"
 

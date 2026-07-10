@@ -317,6 +317,12 @@ test('bare split is focus-stealing; an empty -- tail is not', async () => {
   await runCli(['split', '--'], { client: emptyTail });
   assert.equal(emptyTail.requests[0].request.focusNeutral, true);
   assert.equal(emptyTail.requests[0].request.command, undefined);
+
+  // The CLI owns the invariant that an initial command is never focus-stealing,
+  // so it stays focus-neutral even without a `--`.
+  const withCommand = fixtureClient();
+  await runCli(['split', 'echo', 'hi'], { client: withCommand });
+  assert.equal(withCommand.requests[0].request.focusNeutral, true);
 });
 
 test('ensure text output', async () => {

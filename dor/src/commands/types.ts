@@ -76,10 +76,10 @@ export interface SplitSurfaceRequest {
   direction: SplitDirection;
   minimized: boolean;
   surface?: string;
-  /** Leave focus on the caller instead of moving it to the new surface. True
-   *  whenever the invocation delimited a command tail with `--` — both
-   *  `dor split -- <command>` and a bare `dor split --` (an empty blank-terminal
-   *  tail). Only a truly bare `dor split` (no `--`) is focus-stealing. */
+  /** Leave focus on the caller instead of moving it to the new surface. The CLI
+   *  sets it for every split except a bare `dor split` (no `--`, no command): a
+   *  `--` tail (`dor split -- <command>` or an empty `dor split --`) and an
+   *  initial command both leave focus put. The host honors it as sent. */
   focusNeutral: boolean;
 }
 

@@ -139,9 +139,10 @@ async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...co
       direction: direction.value,
       minimized: flags.minimize === true,
       surface: flags.surface,
-      // A `--` tail — with or without a command — leaves focus on the caller.
-      // Only a truly bare `dor split` (no `--`) moves focus to the new surface.
-      focusNeutral: this.hasArgumentEscape,
+      // Only a bare `dor split` (no `--`, no command) steals focus; a `--` tail
+      // and an initial command alike leave it on the caller. The CLI owns the
+      // whole decision so the host can honor the field as sent.
+      focusNeutral: this.hasArgumentEscape || command !== undefined,
     });
     writeStdout(this, renderSplitResponse(response, flags.json === true));
     return undefined;
