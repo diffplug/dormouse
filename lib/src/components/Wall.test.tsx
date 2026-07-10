@@ -378,6 +378,63 @@ describe('Wall on the Lath engine', () => {
     expect(onEvent).not.toHaveBeenCalledWith({ type: 'zoomChange', zoomed: true });
   });
 
+  it('gives passthrough focus to a pane when it gains zoom, and unzooms when passthrough focus ends', async () => {
+    const onEvent = vi.fn();
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard onEvent={onEvent} />);
+    });
+    await flush();
+    onEvent.mockClear();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', bubbles: true }));
+    });
+    await flush();
+
+    expect(onEvent).toHaveBeenCalledWith({ type: 'zoomChange', zoomed: true });
+    expect(onEvent).toHaveBeenCalledWith({ type: 'modeChange', mode: 'passthrough' });
+    expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('true');
+
+    // The normal passthrough-exit gesture gives focus back to command mode; zoom
+    // follows focus and begins its return to the tiled layout in the same action.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location: 1, bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location: 2, bubbles: true }));
+    });
+    await flush();
+
+    expect(onEvent).toHaveBeenCalledWith({ type: 'zoomChange', zoomed: false });
+    expect(onEvent).toHaveBeenCalledWith({ type: 'modeChange', mode: 'command' });
+    expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('false');
+  });
+
+  it('unzooms the focused pane when another pane gains focus', async () => {
+    const onEvent = vi.fn();
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard onEvent={onEvent} />);
+    });
+    await flush();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', bubbles: true }));
+    });
+    await flush();
+    expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('true');
+
+    onEvent.mockClear();
+    const paneBHeader = container.querySelector<HTMLElement>('[data-lath-leaf="pane-b"] .lath-leaf-header > div');
+    expect(paneBHeader).not.toBeNull();
+    await act(async () => {
+      paneBHeader!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    await flush();
+
+    expect(onEvent).toHaveBeenCalledWith({ type: 'zoomChange', zoomed: false });
+    expect(onEvent).toHaveBeenCalledWith({ type: 'selectionChange', id: 'pane-b', kind: 'pane' });
+    expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('false');
+    expect(container.querySelector('[data-session-id="pane-b"]')?.getAttribute('data-focused')).toBe('true');
+  });
+
   it('dor kill can target a minimized surface ref', async () => {
     let response: { ok: boolean; error?: string } | undefined;
     await act(async () => {

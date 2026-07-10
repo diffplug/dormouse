@@ -348,9 +348,10 @@ export function Wall({
   // external-drag hit-testing; the chip stays in `doors` until it lands on a target.
   const [doorDrag, setDoorDrag] = useState<{ item: DooredItem; startX: number; startY: number } | null>(null);
   // Zoom is presentation state the store owns (`zoomedId`, cleared when a kill/replace
-  // removes the zoomed leaf); derive the Wall's boolean straight from it rather than
-  // mirroring into local state (docs/specs/tiling-engine.md).
-  const zoomed = useSyncExternalStore(lath.store.subscribe, () => lath.store.getSnapshot().zoomedId !== null);
+  // removes the zoomed leaf). Subscribe to the id (not only its boolean projection)
+  // because focus policy needs to know whether a transition stays on that exact pane.
+  const zoomedId = useSyncExternalStore(lath.store.subscribe, () => lath.store.getSnapshot().zoomedId);
+  const zoomed = zoomedId !== null;
   const [shellSpawnNotice, setShellSpawnNotice] = useState<ShellSpawnNoticeState | null>(null);
   const shellSpawnNoticeCounterRef = useRef(0);
   const shellSpawnNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -415,13 +416,16 @@ export function Wall({
   // --- Helpers ---
 
   /** Select a pane: the Wall state is the sole selection authority (Lath has no
-   *  concept of selection/activation). */
+   *  concept of selection/activation). Moving selection away from the focused,
+   *  zoomed pane starts its return to the tiled layout immediately. */
   const selectPane = useCallback((id: string) => {
+    const currentZoom = lath.store.getSnapshot().zoomedId;
+    if (currentZoom !== null && currentZoom !== id) lath.store.setZoomed(null);
     selectedIdRef.current = id;
     selectedTypeRef.current = 'pane';
     setSelectedId(id);
     setSelectedType('pane');
-  }, []);
+  }, [lath]);
 
   // The shared tail of both reattach paths (click-reattach + drag-out): drop the Door
   // chip from the baseboard and select the now-restored pane.
@@ -544,14 +548,17 @@ export function Wall({
 
   /** Select a door in the baseboard */
   const selectDoor = useCallback((id: string) => {
+    if (lath.store.getSnapshot().zoomedId !== null) lath.store.setZoomed(null);
     selectedIdRef.current = id;
     selectedTypeRef.current = 'door';
     setSelectedId(id);
     setSelectedType('door');
-  }, []);
+  }, [lath]);
 
   /** Enter terminal mode for the given panel */
   const enterTerminalMode = useCallback((id: string) => {
+    const currentZoom = lath.store.getSnapshot().zoomedId;
+    if (currentZoom !== null && currentZoom !== id) lath.store.setZoomed(null);
     modeRef.current = 'passthrough';
     selectedIdRef.current = id;
     selectedTypeRef.current = 'pane';
@@ -561,7 +568,7 @@ export function Wall({
     markSessionAttention(id);
     // Defer focus so it happens after the mousedown/click event finishes.
     requestAnimationFrame(() => focusSession(id, true));
-  }, []);
+  }, [lath]);
   const enterTerminalModeRef = useRef(enterTerminalMode);
   enterTerminalModeRef.current = enterTerminalMode;
 
@@ -617,11 +624,14 @@ export function Wall({
 
   /** Exit terminal mode */
   const exitTerminalMode = useCallback(() => {
+    // Zoom belongs to the focused passthrough pane. Giving keyboard focus back
+    // to the Wall ends zoom even though command-mode selection remains on it.
+    if (lath.store.getSnapshot().zoomedId !== null) lath.store.setZoomed(null);
     modeRef.current = 'command';
     setMode('command');
     const id = selectedIdRef.current;
     if (id) focusSession(id, false);
-  }, []);
+  }, [lath]);
 
   useEffect(() => {
     // An iframe surface taking focus blurs this window without backgrounding the
@@ -1175,12 +1185,21 @@ export function Wall({
     },
     onZoom: (id: string) => {
       if (!nav.hasPane(id)) return;
-      // Zoom is presentation state in the store (the tree is untouched). Toggle:
-      // any leaf zoomed → unzoom; else zoom this leaf. The Wall's `zoomed` boolean
-      // follows via the store subscription (below), which also un-zooms when a
-      // kill/replace clears the zoomed leaf.
-      const zoomedNow = lath.store.getSnapshot().zoomedId !== null;
-      lath.store.setZoomed(zoomedNow ? null : id);
+      // Zoom belongs to focus: toggling an existing zoom unzooms; acquiring zoom
+      // first enters passthrough on this pane (unless it already owns focus).
+      const currentZoom = lath.store.getSnapshot().zoomedId;
+      if (currentZoom !== null) {
+        lath.store.setZoomed(null);
+        return;
+      }
+      if (
+        modeRef.current !== 'passthrough' ||
+        selectedTypeRef.current !== 'pane' ||
+        selectedIdRef.current !== id
+      ) {
+        enterTerminalMode(id);
+      }
+      lath.store.setZoomed(id);
     },
     onClickPanel: (id: string) => {
       setConfirmKill(null);

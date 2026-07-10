@@ -225,7 +225,7 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
           className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
           onClick={(e) => { e.stopPropagation(); actions.onZoom(id); }}
           ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
-          tooltip={zoomed ? 'Unzoom [z]' : 'Zoom [z]'}
+          tooltip={zoomed ? 'Unzoom' : 'Zoom [z]'}
         >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
       </div>
       <div className="ml-1 flex shrink-0 items-center gap-0.5">

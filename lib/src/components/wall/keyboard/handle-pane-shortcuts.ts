@@ -14,7 +14,7 @@ function findAlertButtonForSession(id: string): HTMLButtonElement | null {
 /**
  * Single-pane shortcuts: Enter (focus/reattach), `|`/`%`/`-`/`"` (split),
  * Cmd-Arrow (swap with neighbor), k/x (kill confirm), `,` (rename),
- * m/d (minimize), t/a (todo/alert toggle), z (zoom).
+ * m/d (minimize), t/a (todo/alert toggle), z (zoom + passthrough focus).
  */
 export function handlePaneShortcuts(
   e: KeyboardEvent,

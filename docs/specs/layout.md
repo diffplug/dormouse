@@ -90,7 +90,7 @@ Elements from left to right:
 - Mouse-reporting override icon (only when the inside program requests mouse reporting; hidden in minimal tier)
 - SplitHorizontalIcon `split left/right [|]` (full tier only)
 - SplitVerticalIcon `split top/bottom [-]` (full tier only)
-- ArrowsOutIcon / ArrowsInIcon `zoom / unzoom [z]` (full tier only)
+- ArrowsOutIcon / ArrowsInIcon `zoom [z] / unzoom` (full tier only)
 - ArrowLineDownIcon `minimize [m]`
 - XIcon `kill [x]` (hover turns error-red)
 
@@ -172,6 +172,7 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 **Enter passthrough mode:**
 - Click any pane body or header
 - Press `Enter` on a selected pane in command mode
+- Press `z` on a selected pane in command mode (also zooms it)
 - Click or press `Enter` on a door (restores session first)
 - Focus is deferred via `requestAnimationFrame` so it lands after the click/mousedown event finishes
 
@@ -180,6 +181,7 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 - Detected via capture-phase `keydown` listener on `e.key === 'Meta'` (or `e.key === 'Shift'`) and `e.location` (1 = left, 2 = right). The Meta and Shift tracks are independent, so a Left Cmd followed by a Right Shift does not trigger.
 - Works even when xterm has DOM focus because listener uses capture phase
 - On keyboards without a right Meta key (common on Windows/Linux laptops), the Shift track is the available gesture; both tracks are always active.
+- If the focused pane is zoomed, returning keyboard focus to command mode starts unzoom immediately.
 
 ## Keyboard shortcuts (command mode)
 
@@ -195,7 +197,7 @@ All handled in a single capture-phase `keydown` listener on `window`. Every hand
 | `,` | Inline rename | — |
 | `x` / `k` | Kill with confirmation | Restore session + kill confirmation |
 | `m` / `d` | Minimize to door | Restore session (stay in command) |
-| `z` | Toggle zoom/unzoom | — |
+| `z` | Zoom pane and enter passthrough | — |
 | `t` | Toggle TODO flag | — |
 | `a` | Dismiss or toggle alert | — |
 
@@ -339,7 +341,7 @@ All pane motion is owned by the Lath **animator** — a pure function of time th
 
 ### Zoom (elevated expansion)
 
-Zoom is presentation-only: the split tree and every tiled rect remain unchanged. The chosen pane rises above the tiled/dying bands and sashes before expanding from its tiled rect to the Wall rect inset by half the 30px pane-header height (15px). The perimeter exposes the tiled layout beneath, while a blurred `--color-app-bg` shadow separates the elevated edge from the content below. Unzoom reverses the geometry while keeping the pane elevated and shadowed for the whole return; both elevation effects clear only on the settled frame. Source of truth: `PANE_HEADER_HEIGHT_PX` in `lib/src/components/design.tsx`; `presentationTargets`, `LATH_ZOOM_MARGIN`, `LATH_ZOOM_SHADOW`, and the layer-to-z-index mapping in `lib/src/components/wall/LathHost.tsx`; discrete layer lifetime in `lib/src/lib/lath/animator.ts`.
+Zoom is presentation-only: the split tree and every tiled rect remain unchanged. It is coupled to passthrough focus: acquiring zoom enters passthrough and focuses that pane; exiting passthrough, focusing another pane, or selecting a Door starts unzoom immediately. The chosen pane rises above the tiled/dying bands and sashes before expanding from its tiled rect to the Wall rect inset by half the 30px pane-header height (15px). The perimeter exposes the tiled layout beneath, while a blurred `--color-app-bg` shadow separates the elevated edge from the content below. Unzoom reverses the geometry while keeping the pane elevated and shadowed for the whole return; both elevation effects clear only on the settled frame. Source of truth: focus/zoom orchestration in `selectPane`, `selectDoor`, `enterTerminalMode`, `exitTerminalMode`, and `wallActions.onZoom` in `lib/src/components/Wall.tsx`; `PANE_HEADER_HEIGHT_PX` in `lib/src/components/design.tsx`; `presentationTargets`, `LATH_ZOOM_MARGIN`, `LATH_ZOOM_SHADOW`, and the layer-to-z-index mapping in `lib/src/components/wall/LathHost.tsx`; discrete layer lifetime in `lib/src/lib/lath/animator.ts`.
 
 ### Spawn (new pane reveal)
 
