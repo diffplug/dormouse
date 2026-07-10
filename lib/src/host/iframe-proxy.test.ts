@@ -65,7 +65,10 @@ describe('createIframeProxyUrl — admission', () => {
 });
 
 describe('iframe proxy — serving', () => {
-  it('instruments loopback HTML: strips XFO + CSP, injects the shim, keeps content', async () => {
+  // The proxy no longer branches on loopback vs remote: any http upstream's
+  // frame-blocking headers are stripped and the shim injected. A DENY/none upstream
+  // that would previously be diverted to a "refuses to be embedded" page is framed.
+  it('instruments HTML: strips XFO + CSP, injects the shim, keeps content', async () => {
     const port = await upstream((_q, s) => {
       s.writeHead(200, {
         'content-type': 'text/html',

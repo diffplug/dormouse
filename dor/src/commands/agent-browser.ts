@@ -38,6 +38,12 @@ import type {
   ParseResult,
 } from './types.js';
 import { fail, requireControlClient, stringParser } from './shared.js';
+import {
+  inferredHttpUrl,
+  isSpecialOpenTarget,
+  isSurfaceOpenTarget,
+  resolveSurfaceOpenTarget,
+} from './open-target.js';
 
 const INSTALL_HINT = 'npm i -g agent-browser';
 const INSTALL_DOCS = 'https://agent-browser.dev';
@@ -103,8 +109,17 @@ DORMOUSE_AGENT_BROWSER_BIN) and is never bundled; install it with:
 After a successful command, dor opens (or reuses) the browser surface bound to
 the session: one session is always exactly one surface.
 
+In an "open" command, dor also resolves a Dormouse target in place of a URL:
+a schemeless host:port (and the ":<port>" localhost shorthand) defaults to
+http:// rather than agent-browser's https://, and a terminal Surface handle
+(surface:N, surface:self, surface:focused, or a stable id) resolves to the
+dev-server URL that terminal owns via the host port scan.
+
 Examples:
   dor ab open http://localhost:5173        # key "default"
+  dor ab open localhost:5173                # → http://localhost:5173/
+  dor ab open :5173                         # → http://localhost:5173/
+  dor ab open surface:3                     # open the port terminal surface:3 owns
   dor ab --key storybook open http://localhost:6006
   dor ab click @e3                          # drives key "default"
   dor ab --key storybook reload             # drives key "storybook"`,
@@ -183,7 +198,14 @@ export function extractSessionFlags(args: string[]): ParseResult<ResolvedSession
 export async function runAgentBrowserCli(args: string[], options: CliOptions): Promise<CliResult> {
   const flags = extractSessionFlags(args);
   if (!flags.ok) return fail(flags.message);
-  const { key, session, rest } = flags.value;
+  const { key, session } = flags.value;
+
+  // `dor ab open <target>` accepts a Surface handle / bare :port wherever it
+  // takes a URL; resolve it to a URL before forwarding, because agent-browser
+  // only understands URLs. Every other command's args pass through untouched.
+  const resolvedRest = await resolveOpenTargetArgs(flags.value.rest, options);
+  if (!resolvedRest.ok) return fail(resolvedRest.message);
+  const rest = resolvedRest.value;
 
   const env = options.env ?? {};
   const binary = env[AGENT_BROWSER_BIN_ENV] || DEFAULT_AGENT_BROWSER_BIN;
@@ -244,6 +266,49 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
     stdout: result.stdout,
     stderr: result.stderr + stderrSuffix,
   };
+}
+
+// agent-browser's URL-navigation verbs. `goto` / `navigate` are documented
+// aliases of `open`, so a Dormouse target resolves the same in all three.
+const OPEN_SUBCOMMANDS = new Set(['open', 'goto', 'navigate']);
+
+/**
+ * Rewrite a forwarded navigation argv so agent-browser receives a URL:
+ * `surface:` handles resolve via the host port scan, a bare `:port` sugars to
+ * `http://localhost:<port>`. Non-navigation commands and plain URLs pass through
+ * unchanged. The target is matched by shape (not position), so `open --headed
+ * surface:3` resolves too. Only the first special-shaped arg is rewritten —
+ * these verbs take a single target.
+ */
+async function resolveOpenTargetArgs(rest: string[], options: CliOptions): Promise<ParseResult<string[]>> {
+  const subcommand = rest.find((arg) => !arg.startsWith('-'));
+  if (subcommand === undefined || !OPEN_SUBCOMMANDS.has(subcommand)) return { ok: true, value: rest };
+
+  const index = rest.findIndex((arg) => isSpecialOpenTarget(arg));
+  if (index === -1) return { ok: true, value: rest };
+
+  const raw = rest[index] ?? '';
+  let url: string;
+  if (isSurfaceOpenTarget(raw)) {
+    // A Surface handle only resolves against a live Dormouse host; outside one
+    // there is no control endpoint and the error says so.
+    const client = requireControlClient(options);
+    if (client instanceof Error) return { ok: false, message: client.message };
+    const resolved = await resolveSurfaceOpenTarget(raw, client);
+    if (!resolved.ok) return resolved;
+    url = resolved.value;
+  } else {
+    // A schemeless :port / host:port needs no host round trip. isSpecialOpenTarget
+    // matched a non-surface target, so inference here always succeeds; leave argv
+    // untouched rather than forward a non-URL if that ever changes.
+    const inferred = inferredHttpUrl(raw);
+    if (inferred === null) return { ok: true, value: rest };
+    url = inferred;
+  }
+
+  const next = [...rest];
+  next[index] = url;
+  return { ok: true, value: next };
 }
 
 function shouldManageSurface(exitCode: number, rest: string[]): boolean {

@@ -242,7 +242,7 @@ export function AgentBrowserScreenModal({
             onSelect={() => setRenderMode('iframe')}
             icon={FrameCornersIcon}
             label="iframe embed"
-            features={[[false, 'agents cannot read/write'], [false, 'localhost only'], [true, 'native human experience']]}
+            features={[[false, 'agents cannot read/write'], [false, 'http only'], [true, 'native human experience']]}
           />
         </div>
       ) : (

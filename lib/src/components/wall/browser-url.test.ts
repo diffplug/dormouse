@@ -52,7 +52,14 @@ describe('normalizeNavUrl', () => {
     expect(normalizeNavUrl('app.localhost:3000')).toBe('http://app.localhost:3000');
   });
 
-  it('adds https:// for everything else', () => {
+  it('adds http:// for any host with an explicit port (matches the dor CLI)', () => {
+    // The port is the dev/infra-server signal — LAN and Tailnet hosts speak http.
+    expect(normalizeNavUrl('example.com:8080')).toBe('http://example.com:8080');
+    expect(normalizeNavUrl('box.tailnet.ts.net:3000')).toBe('http://box.tailnet.ts.net:3000');
+    expect(normalizeNavUrl('192.168.1.5:8080/path?q=1')).toBe('http://192.168.1.5:8080/path?q=1');
+  });
+
+  it('adds https:// for a bare remote host with no port', () => {
     expect(normalizeNavUrl('example.com')).toBe('https://example.com');
     expect(normalizeNavUrl('example.com/path?q=1')).toBe('https://example.com/path?q=1');
   });

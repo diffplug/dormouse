@@ -17,6 +17,11 @@ Entry points:
   renderer. The proxy currently instruments only `http://` upstreams; `https://`
   is accepted by the CLI but shown as an unproxyable scheme in the pane.
 
+Both `dor ab open` and `dor iframe` also accept, wherever they take a URL, a
+schemeless `host:port` (defaulted to `http://`, including the `:port` localhost
+shorthand) or a terminal Surface handle resolved to the dev server it owns — see
+`docs/specs/dor-cli.md` → Browser Open Target Resolution.
+
 Two independent axes define a browser pane:
 
 | Axis | Values |
@@ -120,11 +125,15 @@ Header contract:
 - Primary text is URL-oriented: host+path, with query omitted in the live header.
   HTML title is tooltip/secondary state.
 - Clicking the URL opens an inline editor. `normalizeNavUrl` keeps explicit
-  schemes, uses `http://` for bare loopback hosts, and `https://` otherwise.
-  For an iframe-rendered pane a bare remote hostname therefore resolves to
-  `https://`, which the proxy cannot instrument — the pane shows the scheme
-  error with its `dor ab` hint. This is intended: remote sites are steered to
-  the agent-browser renderer rather than silently proxied over plain HTTP.
+  schemes and otherwise picks a scheme the same way the `dor iframe` / `dor ab
+  open` CLI does (`docs/specs/dor-cli.md` → Browser Open Target Resolution): an
+  explicit **port** means `http://` (a `host:port` is a dev/infra server —
+  loopback, LAN, Tailnet), a bare loopback host means `http://`, and only a bare
+  remote host with no port falls back to `https://`. Since the proxy now frames
+  remote `http://` (see Iframe Renderer), a `host:port` typed here renders in the
+  iframe; a bare remote host (→ `https`) is deferred to agent-browser, which is
+  the path for real HTTPS. This scheme rule is shared by the agent-browser header
+  too.
 - Back, forward, and reload are always enabled. Agent-browser sends native
   `back` / `forward` / `reload`; iframe uses parent-side history and re-resolves
   the proxy on reload/back/forward.
@@ -376,15 +385,20 @@ human inspection, but agents cannot drive/read it like agent-browser.
 On hosts with `createIframeProxyUrl`, `IframePanel` frames a per-surface loopback
 proxy URL. On hosts without it, it falls back to a raw uninstrumented iframe.
 
-The proxy instruments `http://` upstreams only:
+The proxy instruments any `http://` upstream — loopback and remote alike:
 
-- Loopback HTTP: strip frame-blocking headers/CSP, inject the shim, pass through
-  HTTP and WebSocket traffic.
-- Remote HTTP that permits framing: best-effort proxy with shim.
-- Remote HTTP that refuses framing: served Dormouse error page with `dor ab`
-  hint, not forced embedding.
-- Unreachable upstream: served Dormouse error page.
-- HTTPS: synchronous `scheme` failure in the panel with `dor ab` hint.
+- HTTP (any host): strip frame-blocking headers (X-Frame-Options / CSP
+  frame-ancestors) and the in-document CSP, inject the shim, pass through HTTP
+  and WebSocket traffic. A site's "do not embed" is overridden rather than
+  obeyed: the embed is the user's own `dor iframe`, not a third party framing the
+  site to deceive its user — the same trust boundary as the agent-browser
+  renderer. (JS framebusting is separately neutralized by the sandbox omitting
+  `allow-top-navigation`.)
+- Unreachable / timed-out upstream: served Dormouse error page.
+- HTTPS: synchronous `scheme` failure in the panel with `dor ab` hint. The
+  agent-browser renderer is the path for pages that need real HTTPS or a login.
+- Link-local / cloud-metadata address: refused (`scheme`), an SSRF guard that
+  stands regardless of the loosened framing policy.
 
 The proxy uses one dedicated `127.0.0.1:0` server per grant. There is no token in
 the path; the dedicated origin is the grant boundary and preserves root-relative
@@ -454,12 +468,13 @@ The optional adapter method is:
 ```ts
 createIframeProxyUrl?(targetUrl: string): Promise<
   | { ok: true; url: string }
-  | { ok: false; reason: 'frame-refused' | 'unreachable' | 'scheme'; detail?: string }
+  | { ok: false; reason: 'unreachable' | 'scheme'; detail?: string }
 >;
 ```
 
-Reachability and frame refusal are normally diagnosed lazily by served error
-pages after the iframe loads the proxy URL, so v1 mostly returns `ok` or
+Reachability is diagnosed lazily by served error pages after the iframe loads
+the proxy URL; frame refusal is not diagnosed at all — any http upstream is
+framed with its frame-blocking headers stripped — so v1 mostly returns `ok` or
 `scheme`.
 
 VS Code routes this through webview request/response messages to
@@ -478,9 +493,10 @@ Security boundaries:
 - proxy binds loopback only,
 - each grant fronts exactly one upstream,
 - no user script is injected,
-- refusing remote sites are diverted to an error page,
 - link-local/cloud-metadata ranges are blocked,
-- other user-supplied `http://` targets are trusted as the user's command.
+- every other user-supplied `http://` target is trusted as the user's command
+  and framed with its frame-blocking headers stripped (the embed is the user's
+  own, not third-party clickjacking).
 
 Source of truth: `lib/src/lib/platform/types.ts`,
 `lib/src/lib/platform/vscode-adapter.ts`, `vscode-ext/src/message-types.ts`,
@@ -490,7 +506,7 @@ Source of truth: `lib/src/lib/platform/types.ts`,
 ## Code Map
 
 - CLI: `dor/src/commands/agent-browser.ts`, `dor/src/commands/iframe.ts`,
-  `dor/src/commands/types.ts`.
+  `dor/src/commands/open-target.ts`, `dor/src/commands/types.ts`.
 - Shell/render swap/lifecycle: `lib/src/components/Wall.tsx`,
   `lib/src/components/wall/BrowserPanel.tsx`,
   `lib/src/components/wall/browser-surface.ts`.

@@ -37,11 +37,8 @@ import type { IframeProxyResult } from '../lib/platform/iframe-proxy-types';
 import {
   STRIP_RESPONSE_HEADERS,
   errorPageHtml,
-  frameRefusedPage,
   instrumentHtml,
   isBlockedAddress,
-  isLoopbackHost,
-  refusesFraming,
   timedOutPage,
   unreachablePage,
   type ErrorPage,
@@ -69,7 +66,6 @@ let log: ProxyLogger = () => {};
 interface Grant {
   /** The fixed upstream this grant fronts (origin + initial path). */
   upstream: URL;
-  isLoopback: boolean;
   port: number;
   proxyOrigin: string;
   server: http.Server;
@@ -115,7 +111,6 @@ export async function createIframeProxyUrl(
 
   const grant: Grant = {
     upstream,
-    isLoopback: isLoopbackHost(upstream.hostname),
     port: 0,
     proxyOrigin: '',
     server: null as unknown as http.Server,
@@ -135,7 +130,7 @@ export async function createIframeProxyUrl(
   grant.port = port;
   grant.proxyOrigin = `http://127.0.0.1:${port}`;
   grants.set(port, grant);
-  log(`[iframe-proxy] ${upstream.href} → ${grant.proxyOrigin} (loopback=${grant.isLoopback})`);
+  log(`[iframe-proxy] ${upstream.href} → ${grant.proxyOrigin}`);
 
   // The proxy origin maps to one fixed upstream, so the full path resolves
   // transparently — keep the upstream's own initial path/search/hash so
@@ -182,13 +177,11 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
       passThrough(grant, upstreamRes, res);
       return;
     }
-    // A remote that forbids embedding is never force-framed — the headers tell
-    // us, so we can divert to an actionable page without reading the body.
-    if (!grant.isLoopback && refusesFraming(upstreamRes.headers)) {
-      upstreamRes.destroy();
-      serveErrorPage(res, frameRefusedPage(grant.upstream));
-      return;
-    }
+    // Any http upstream is framed, loopback or remote: sanitizeResponseHeaders
+    // strips its frame-blocking headers (X-Frame-Options / CSP frame-ancestors)
+    // and streamHtml injects the shim. A site's "do not embed" is overridden
+    // because the embed is the user's own `dor iframe`, not a third party framing
+    // them — the same trust boundary as the agent-browser renderer.
     streamHtml(grant, upstreamRes, res);
   });
   upstreamReq.on('error', (err) => {

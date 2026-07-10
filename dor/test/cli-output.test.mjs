@@ -191,6 +191,19 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         minimized: false,
       };
     },
+    async resolveOpenTarget(request) {
+      this.requests.push({ method: 'resolveOpenTarget', request });
+      // Mirror the host: surface:1 owns port 5173; surface:2 owns nothing.
+      if (request.surface === 'surface:2') {
+        throw new Error("surface 'surface:2' is not serving any port");
+      }
+      return {
+        surfaceId: '11111111-1111-4111-8111-111111111111',
+        surfaceRef: 'surface:1',
+        port: 5173,
+        url: 'http://localhost:5173/',
+      };
+    },
   };
 }
 
@@ -597,7 +610,54 @@ test('iframe json output', async () => {
 });
 
 test('iframe invalid url output', async () => {
-  await snapshot('iframe-invalid-url', await runCli(['iframe', 'localhost:5173'], { client: fixtureClient() }));
+  await snapshot('iframe-invalid-url', await runCli(['iframe', 'ftp://localhost:5173'], { client: fixtureClient() }));
+});
+
+test('iframe resolves a surface handle to its dev-server URL', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['iframe', 'surface:1'], { client });
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, '');
+  // The handle is resolved to a URL, then the iframe surface is created with it.
+  assert.deepEqual(client.requests, [
+    { method: 'resolveOpenTarget', request: { surface: 'surface:1' } },
+    { method: 'iframeSurface', request: { minimized: false, surface: undefined, url: 'http://localhost:5173/' } },
+  ]);
+});
+
+test('iframe sugars a bare :port to a localhost URL without a host round trip', async () => {
+  const client = fixtureClient();
+  await runCli(['iframe', ':5173'], { client });
+  assert.deepEqual(client.requests, [
+    { method: 'iframeSurface', request: { minimized: false, surface: undefined, url: 'http://localhost:5173/' } },
+  ]);
+});
+
+test('iframe defaults a schemeless host:port to http (localhost, LAN, Tailnet)', async () => {
+  for (const [target, url] of [
+    ['localhost:5173', 'http://localhost:5173/'],
+    ['192.168.1.5:8080', 'http://192.168.1.5:8080/'],
+    ['box.tailnet.ts.net:3000', 'http://box.tailnet.ts.net:3000/'],
+  ]) {
+    const client = fixtureClient();
+    await runCli(['iframe', target], { client });
+    assert.deepEqual(client.requests, [
+      { method: 'iframeSurface', request: { minimized: false, surface: undefined, url } },
+    ]);
+  }
+});
+
+test('iframe honors an explicit https scheme (no downgrade to http)', async () => {
+  const client = fixtureClient();
+  await runCli(['iframe', 'https://example.com:8080'], { client });
+  assert.equal(client.requests[0].request.url, 'https://example.com:8080/');
+});
+
+test('iframe surfaces a zero-port resolution error to stderr with exit 1', async () => {
+  const result = await runCli(['iframe', 'surface:2'], { client: fixtureClient() });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /surface 'surface:2' is not serving any port/);
 });
 
 test('agent-browser passthrough output', async () => {
@@ -636,6 +696,59 @@ test('agent-browser raw --session skips key namespacing', async () => {
   await runCli(['ab', '--session', 'mine', 'snapshot'], { client, execAgentBrowser: ab.exec });
   assert.equal(ab.calls[0][2], 'mine');
   assert.deepEqual(client.requests[0].request, { key: undefined, session: 'mine', wsPort: 61141 });
+});
+
+test('agent-browser open resolves a surface handle to a URL before forwarding', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', 'open', 'surface:1'], { client, execAgentBrowser: ab.exec });
+  // The surface handle is resolved via the host, then the URL is forwarded.
+  assert.deepEqual(ab.calls, [
+    ['agent-browser', '--session', 'dormouse.1.default', 'open', 'http://localhost:5173/'],
+    ['agent-browser', '--session', 'dormouse.1.default', 'stream', 'status', '--json'],
+  ]);
+  assert.deepEqual(client.requests[0], { method: 'resolveOpenTarget', request: { surface: 'surface:1' } });
+});
+
+test('agent-browser open sugars a bare :port without a host round trip', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', 'open', ':5173'], { client, execAgentBrowser: ab.exec });
+  assert.equal(ab.calls[0][4], 'http://localhost:5173/');
+  assert.equal(client.requests.some((entry) => entry.method === 'resolveOpenTarget'), false);
+});
+
+test('agent-browser open defaults a schemeless host:port to http, overriding agent-browser https', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', 'open', 'localhost:5173'], { client, execAgentBrowser: ab.exec });
+  // agent-browser would prepend https:// itself; dor forces http for the dev server.
+  assert.equal(ab.calls[0][4], 'http://localhost:5173/');
+  assert.equal(client.requests.some((entry) => entry.method === 'resolveOpenTarget'), false);
+});
+
+test('agent-browser open resolves a surface target behind a flag', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', 'open', '--headed', 'surface:1'], { client, execAgentBrowser: ab.exec });
+  assert.deepEqual(ab.calls[0], ['agent-browser', '--session', 'dormouse.1.default', 'open', '--headed', 'http://localhost:5173/']);
+});
+
+test('agent-browser leaves a plain open URL untouched', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', 'open', 'http://localhost:5173'], { client, execAgentBrowser: ab.exec });
+  assert.equal(ab.calls[0][4], 'http://localhost:5173');
+  assert.equal(client.requests.some((entry) => entry.method === 'resolveOpenTarget'), false);
+});
+
+test('agent-browser open of a surface handle needs a control endpoint', async () => {
+  const ab = fakeAgentBrowser();
+  const result = await runCli(['ab', 'open', 'surface:1'], { execAgentBrowser: ab.exec });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /control endpoint is not available/);
+  // Never forwards an unresolved handle to agent-browser.
+  assert.deepEqual(ab.calls, []);
 });
 
 test('agent-browser close skips surface management', async () => {

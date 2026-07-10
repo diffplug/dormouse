@@ -43,9 +43,12 @@ export function pathDisplay(rawUrl: string): string {
 }
 
 /** Turn a typed address-bar value into a navigable URL: keep an explicit scheme,
- *  otherwise add one — `http://` for loopback hosts (a bare `localhost:5173`
- *  speaks http, and `https` there just SSL-errors), `https://` for everything
- *  else. Empty input ⇒ '' (caller skips navigation). */
+ *  otherwise add one. An explicit port picks `http://` — a bare `host:port` is a
+ *  dev/infra server (the port is the signal), matching `dor iframe` / `dor ab
+ *  open` (docs/specs/dor-cli.md → Browser Open Target Resolution). Without a
+ *  port, `http://` for loopback hosts (a bare `localhost` speaks http, and
+ *  `https` there just SSL-errors) and `https://` for everything else. Empty
+ *  input ⇒ '' (caller skips navigation). */
 export function normalizeNavUrl(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return '';
@@ -54,8 +57,10 @@ export function normalizeNavUrl(raw: string): string {
   // `localhost:5173` is NOT a scheme (no `//`), so it falls through to get one.
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) return trimmed;
   if (/^(about|data|blob|mailto|tel|javascript|view-source|chrome):/i.test(trimmed)) return trimmed;
-  const hostname = trimmed.split(/[/?#]/, 1)[0].split(':', 1)[0];
-  return `${isLoopbackHostname(hostname) ? 'http' : 'https'}://${trimmed}`;
+  const authority = trimmed.split(/[/?#]/, 1)[0];
+  const hostname = authority.split(':', 1)[0];
+  const scheme = /:\d+$/.test(authority) || isLoopbackHostname(hostname) ? 'http' : 'https';
+  return `${scheme}://${trimmed}`;
 }
 
 /** True for hostnames that resolve to the local machine. `*.localhost` is

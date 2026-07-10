@@ -60,7 +60,7 @@ function isTerminalDoor(door: DooredItem): boolean {
 // A process bound here answers `localhost:<port>`: loopback (127.0.0.1 / ::1)
 // or any-interface (0.0.0.0 / ::). A process bound to one specific non-loopback
 // interface is excluded — it isn't reachable as localhost.
-function servesLoopback(address: string): boolean {
+export function servesLoopback(address: string): boolean {
   return address === '127.0.0.1' || address === '::1' || address === '0.0.0.0' || address === '::';
 }
 
