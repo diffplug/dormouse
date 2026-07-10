@@ -19,6 +19,7 @@ import { bellIconClass } from '../bell-icon-class';
 import { useTodoPillContent } from '../TodoPillBody';
 import type { PaneProps } from './pane-props';
 import { IllegalRenameWarning, type RenameRejection } from './IllegalRenameWarning';
+import { PaneHeaderContextMenu } from './PaneHeaderContextMenu';
 import {
   DEFAULT_MOUSE_SELECTION_STATE,
   getMouseSelectionSnapshot,
@@ -129,6 +130,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const [dialogTriggerRect, setDialogTriggerRect] = useState<DOMRect | null>(null);
   const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
   const [titleCandidatesRect, setTitleCandidatesRect] = useState<DOMRect | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; surfaceRef: string } | null>(null);
   const [renameWarning, setRenameWarning] = useState<{ rect: DOMRect; reason: RenameRejection; value: string } | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
   const titleCandidates = useMemo(() => titleCandidatesForDisplay(paneState), [paneState]);
@@ -145,6 +147,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const closeDialog = useCallback(() => setDialogTriggerRect(null), []);
   const closeTodoPreview = useCallback(() => setTodoPreviewRect(null), []);
   const closeTitleCandidates = useCallback(() => setTitleCandidatesRect(null), []);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
   const closeRenameWarning = useCallback(() => setRenameWarning(null), []);
   const submitRename = useCallback((value: string, anchor: HTMLElement) => {
     const rect = anchor.getBoundingClientRect();
@@ -208,6 +211,13 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
       ref={tabRef}
       className={tabVariant({ state: isActiveHeader ? 'active' : 'inactive' })}
       onMouseDown={() => actions.onClickPanel(id)}
+      onContextMenu={(e) => {
+        // The title span and bell button both stopPropagation their own
+        // right-clicks, so this only fires on the header's bare regions.
+        e.preventDefault();
+        e.stopPropagation();
+        setContextMenu({ x: e.clientX, y: e.clientY, surfaceRef: actions.resolveSurfaceRef(id) });
+      }}
     >
       <div className="flex flex-1 min-w-0 items-center gap-1.5 overflow-hidden">
         {isRenaming ? (
@@ -404,6 +414,15 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
           candidates={titleCandidates}
           currentTitle={displayTitleBase}
           onClose={closeTitleCandidates}
+        />
+      )}
+      {contextMenu && (
+        <PaneHeaderContextMenu
+          id={id}
+          anchor={contextMenu}
+          surfaceRef={contextMenu.surfaceRef}
+          onConnect={(url) => actions.onConnectPort(id, url)}
+          onClose={closeContextMenu}
         />
       )}
       {renameWarning && (

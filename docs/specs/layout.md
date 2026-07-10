@@ -81,6 +81,8 @@ The header label is the `DerivedHeader` returned by `deriveHeader(paneState, vis
 
 The diagnostic popup lists the latest entry per `titleCandidates` channel as defined in `docs/specs/terminal-state.md`. Each row shows the channel, latest candidate text, and timestamp. The popup is diagnostic only; it does not change the title priority rules.
 
+Right-clicking the header's bare regions opens a **context menu** at the pointer. The title span and the alert bell own their own right-clicks (both `stopPropagation`, opening the diagnostic popup and the alert dialog respectively), so those take precedence — the context menu only fires on the rest of the header. It is portaled to `document.body`, viewport-clamped, and dismissed like the diagnostic popup (outside `pointerdown`, `Escape`, `resize`, capture-phase `scroll`). It shows the pane's `surface:N` handle (`resolveSurfaceRef`) as a non-interactive monospace row, then the TCP ports the pane's process tree binds: a spinner while `getOpenPorts` runs (once per open — right-click again to rescan), then one `host:port` row per distinct port (the process name muted beside it), or a muted `no listening ports` / `port scan failed` line. Clicking a port row reproduces `dor ab open <url>` for that port (`docs/specs/dor-browser.md` → Pane Context Menu Connect); the rows are inert labels on hosts that cannot open a browser surface. Only terminal panes have this menu. Source of truth: `PaneHeaderContextMenu.tsx`, `TerminalPaneHeader.tsx`.
+
 Elements from left to right:
 
 - Derived session label (click to rename/pin, right-click to inspect title candidates, truncates with ellipsis)
@@ -375,7 +377,8 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/components/wall/wall-types.ts` / `wall-context.tsx` | Shared Wall types and React contexts used by Wall, pane headers, panels, overlays, and the baseboard |
 | `lib/src/components/wall/LathHost.tsx` | The tiling engine's HTML adapter: leaf divs, sashes, the pane/door drag gesture, and imperative animator frame application. Engine internals are mapped in `docs/specs/tiling-engine.md`. |
 | `lib/src/components/wall/TerminalPanel.tsx` | Pane body wrapper; registers the pane's DOM element (`usePaneChrome`) |
-| `lib/src/components/wall/TerminalPaneHeader.tsx` | Pane header with rename, alert/TODO, mouse override, split/zoom/minimize/kill controls |
+| `lib/src/components/wall/TerminalPaneHeader.tsx` | Pane header with rename, alert/TODO, mouse override, split/zoom/minimize/kill controls, and the right-click context menu |
+| `lib/src/components/wall/PaneHeaderContextMenu.tsx` | Pane-header right-click menu: the `surface:N` handle plus the pane's bound TCP ports; a port click connects it to the default browser (`docs/specs/dor-browser.md`) |
 | `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` | Pane/door focus ring and marching-ants overlay; re-measures on Lath store commits + animator frames |
 | `lib/src/components/wall/MarchingAntsRect.tsx` | SVG marching-ants border path and dash sizing |
 | `lib/src/components/wall/MouseOverrideBanner.tsx` | Temporary mouse override banner shown from the header icon |

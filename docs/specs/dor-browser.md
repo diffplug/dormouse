@@ -165,6 +165,28 @@ Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
 `lib/src/components/wall/agent-browser-ports.ts`,
 `lib/src/components/wall/browser-url.ts`.
 
+## Pane Context Menu Connect
+
+The terminal pane header's right-click menu (`docs/specs/layout.md` → Pane
+header) lists the ports a pane's process tree binds using the **same** per-port
+URL selection as `surface.resolveOpen` (`dor ab open <surface>` /
+`dor iframe <surface>`): `listenerUrlsByPort` in `port-url.ts` groups TCP
+listeners into one openable `http://<host>:<port>/` per distinct port
+(loopback-reachable bind wins `localhost`; otherwise the bound LAN/Tailnet
+address, IPv6 bracketed).
+
+Clicking a port row reproduces `dor ab open <url>` against the **default**
+key/session: it runs `agent-browser open <url>` on that session and
+reuses-or-creates the session's browser surface, focus-neutrally (the caller
+keeps focus) — the wall-side mirror of the CLI flow, not the control plane. It is
+host-gated on `agentBrowserCommand`: absent (e.g. the web demo host), the rows
+render as inert labels.
+
+Source of truth: `lib/src/components/wall/connect-port.ts`
+(`connectPortToDefaultBrowser`), the `connectPort` binding in
+`use-dor-control.ts` (reusing `ensureAgentBrowserSurface`),
+`lib/src/components/wall/PaneHeaderContextMenu.tsx`.
+
 ## Display Modal And Render Swaps
 
 The Display modal is the sole GUI for changing render mode and screencast
@@ -511,6 +533,8 @@ Source of truth: `lib/src/lib/platform/types.ts`,
 - Shell/render swap/lifecycle: `lib/src/components/Wall.tsx`,
   `lib/src/components/wall/BrowserPanel.tsx`,
   `lib/src/components/wall/browser-surface.ts`.
+- Pane context-menu connect: `lib/src/components/wall/PaneHeaderContextMenu.tsx`,
+  `lib/src/components/wall/connect-port.ts`, `lib/src/components/wall/port-url.ts`.
 - Chrome/modal: `SurfacePaneHeader.tsx`, `AgentBrowserScreenModal.tsx`,
   `agent-browser-screen.ts`, `browser-url.ts`.
 - Agent-browser renderer: `AgentBrowserPanel.tsx`,
