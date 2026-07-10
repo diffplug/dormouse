@@ -33,7 +33,7 @@ import { layout, sashes } from '../../lib/lath/layout';
 import { LATH_LAYER_DYING, LATH_LAYER_ELEVATED } from '../../lib/lath/animator';
 import { type DropTarget, resize } from '../../lib/lath/ops';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
-import { TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
+import { PANE_HEADER_HEIGHT_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import type { PaneProps } from './pane-props';
 import { type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { nowMs, type LathWallEngine } from './lath-wall-engine';
@@ -54,8 +54,13 @@ const Z_ZOOMED = 40;
 /** The drop-preview overlay floats above every tiled/dying leaf (a drag can't start
  *  while a leaf is zoomed, so it never competes with `Z_ZOOMED`). */
 const Z_PREVIEW = 45;
-/** Reveal a slim band of the tiled layout around an elevated zoomed pane. */
-export const LATH_ZOOM_MARGIN = 6;
+/** Reveal half a pane header of tiled layout around an elevated zoomed pane. */
+export const LATH_ZOOM_MARGIN = PANE_HEADER_HEIGHT_PX / 2;
+
+const PANE_HEADER_STYLE: CSSProperties = {
+  flex: `0 0 ${PANE_HEADER_HEIGHT_PX}px`,
+  height: PANE_HEADER_HEIGHT_PX,
+};
 
 function zoomRect(rect: Rect): Rect {
   const inset = Math.min(LATH_ZOOM_MARGIN, rect.width / 2, rect.height / 2);
@@ -145,7 +150,7 @@ const LathLeafContent = memo(function LathLeafContent({
   const paneProps: PaneProps = { id, title: meta?.title, params: meta?.params };
   return (
     <>
-      <div className="lath-leaf-header" onPointerDown={onHeaderPointerDown}>
+      <div className="lath-leaf-header" style={PANE_HEADER_STYLE} onPointerDown={onHeaderPointerDown}>
         {Tab ? <Tab {...paneProps} /> : null}
       </div>
       <div className="lath-leaf-body">{Body ? <Body {...paneProps} /> : null}</div>

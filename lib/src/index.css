@@ -19,9 +19,10 @@ body {
 /* --- Lath host (the tiling engine binding) ---
  *
  * The HTML adapter for Lath (docs/specs/tiling-engine.md → "Adapters"), mounted by
- * the Wall. app-bg gutters, a terminal-bg body, and a 30px header band. The header
- * and body React components carry their own palette (bg-header-…, bg-terminal-bg)
- * and rounded corners, so this is layout + backgrounds only. */
+ * the Wall. app-bg gutters and a terminal-bg body. LathHost applies the shared
+ * PANE_HEADER_HEIGHT_PX to the header slot inline; the header and body React
+ * components carry their own palette (bg-header-…, bg-terminal-bg) and rounded
+ * corners, so this is structural layout + backgrounds only. */
 
 .lath-host {
   position: absolute;
@@ -41,8 +42,6 @@ body {
 }
 
 .lath-host .lath-leaf-header {
-  flex: 0 0 30px;
-  height: 30px;
   position: relative;
   overflow: visible;
   z-index: 20;

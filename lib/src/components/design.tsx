@@ -7,6 +7,10 @@ import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode, Re
 // App-wide type scale, color strategy, and chrome conventions: see
 // docs/specs/theme.md and AGENTS.md.
 
+/** Desktop pane-header height. Geometry derived from the header (such as the
+ * elevated zoom inset) must use this constant so the chrome stays proportional. */
+export const PANE_HEADER_HEIGHT_PX = 30;
+
 // Pane headers/doors own the top corners; terminal bodies own the bottom.
 // All terminal-radius constants derive from this single source so the CSS
 // class, the SVG-friendly px value, and the inline-style rem string can't

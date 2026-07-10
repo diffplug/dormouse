@@ -13,6 +13,7 @@ import { type DropTarget, move } from '../../lib/lath/ops';
 import { leafTree, type LathNode, type LathTree, type Rect } from '../../lib/lath/model';
 import { leaf, split, tree as treeOf, movePreview as movePreviewAt } from '../../lib/lath/test-util';
 import { leafMeta } from '../../lib/lath/test-fixtures';
+import { PANE_HEADER_HEIGHT_PX } from '../design';
 import type { PaneProps } from './pane-props';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -217,6 +218,15 @@ describe('LathHost — sash drag', () => {
 });
 
 describe('LathHost — zoom', () => {
+  it('insets elevated zoom by half the pane-header height', () => {
+    const store = seeded(leafTree('a'), [['a', leafMeta({ title: 'A' })]]);
+    mount(store);
+
+    const header = container.querySelector<HTMLElement>('.lath-leaf-header')!;
+    expect(header.style.height).toBe(`${PANE_HEADER_HEIGHT_PX}px`);
+    expect(LATH_ZOOM_MARGIN).toBe(PANE_HEADER_HEIGHT_PX / 2);
+  });
+
   it('renders the zoomed leaf inset above the tiled layout, and restores after', () => {
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     mount(store);
