@@ -6,7 +6,9 @@ import type { Surface as DorSurface } from 'dor/commands/types';
 
 const URL = 'http://localhost:5173/';
 const SESSION = sessionForKey('default');
-const reference = { id: 'pane-1', ref: 'surface:1' } as DorSurface;
+const pane = { id: 'pane-1', ref: 'surface:1' } as DorSurface;
+// The reference is handed through lazily (resolved only on the create path).
+const reference = () => ({ ok: true as const, value: pane });
 
 const okEnsure = (): EnsureAgentBrowserSurfaceResult =>
   ({ ok: true, status: 'created', surfaceId: 'pane-2', surfaceRef: 'surface:2', minimized: false });
@@ -16,7 +18,7 @@ const okEnsure = (): EnsureAgentBrowserSurfaceResult =>
 function ensureCallArgs(ensureSurface: ReturnType<typeof vi.fn>) {
   const [args] = ensureSurface.mock.calls.at(-1) ?? [];
   const { reference: lazyReference, ...rest } = args as { reference: () => { ok: boolean; value?: DorSurface } } & Record<string, unknown>;
-  return { ...rest, reference: lazyReference().value };
+  return { ...rest, pane: lazyReference().value };
 }
 
 describe('connectPortToDefaultBrowser', () => {
@@ -31,7 +33,7 @@ describe('connectPortToDefaultBrowser', () => {
     expect(result).toEqual({ ok: true });
     expect(platform.agentBrowserCommand).toHaveBeenCalledWith(SESSION, ['open', URL], '/bin/ab');
     expect(platform.agentBrowserStreamStatus).toHaveBeenCalledWith(SESSION, '/bin/ab');
-    expect(ensureCallArgs(ensureSurface)).toEqual({ key: 'default', session: SESSION, wsPort: 4321, binaryPath: '/bin/ab', reference });
+    expect(ensureCallArgs(ensureSurface)).toEqual({ key: 'default', session: SESSION, wsPort: 4321, binaryPath: '/bin/ab', pane });
   });
 
   it('fails when the host cannot run agent-browser', async () => {
@@ -60,7 +62,7 @@ describe('connectPortToDefaultBrowser', () => {
     const platform = { agentBrowserCommand: vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' })) };
     const result = await connectPortToDefaultBrowser({ url: URL, reference, platform, ensureSurface });
     expect(result).toEqual({ ok: true });
-    expect(ensureCallArgs(ensureSurface)).toEqual({ key: 'default', session: SESSION, wsPort: undefined, binaryPath: undefined, reference });
+    expect(ensureCallArgs(ensureSurface)).toEqual({ key: 'default', session: SESSION, wsPort: undefined, binaryPath: undefined, pane });
   });
 
   it('leaves wsPort undefined when stream status fails', async () => {
@@ -70,7 +72,7 @@ describe('connectPortToDefaultBrowser', () => {
       agentBrowserStreamStatus: vi.fn(async () => ({ ok: false, error: 'nope' })),
     };
     await connectPortToDefaultBrowser({ url: URL, reference, platform, binaryPath: '/bin/ab', ensureSurface });
-    expect(ensureCallArgs(ensureSurface)).toEqual({ key: 'default', session: SESSION, wsPort: undefined, binaryPath: '/bin/ab', reference });
+    expect(ensureCallArgs(ensureSurface)).toEqual({ key: 'default', session: SESSION, wsPort: undefined, binaryPath: '/bin/ab', pane });
   });
 
   it('propagates an ensureSurface failure', async () => {

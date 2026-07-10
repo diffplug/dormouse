@@ -2,6 +2,7 @@ import { createContext } from 'react';
 import type { AlertButtonActionResult, SessionStatus, SetTerminalUserTitleResult } from '../../lib/terminal-registry';
 import type { WallMode } from './wall-types';
 import type { RenderMode } from './agent-browser-screen';
+import type { ConnectPortResult } from './connect-port';
 
 export interface PaneElementsState {
   elements: Map<string, HTMLElement>;
@@ -56,7 +57,7 @@ export interface WallActions {
    *  the URL in the workspace's default agent-browser session and reuse-or-create
    *  its browser surface (`connect-port.ts`). Resolves with a failure message the
    *  menu can surface. */
-  onConnectPort: (id: string, url: string) => Promise<{ ok: true } | { ok: false; message: string }>;
+  onConnectPort: (id: string, url: string) => Promise<ConnectPortResult>;
 }
 
 export const WallActionsContext = createContext<WallActions>({

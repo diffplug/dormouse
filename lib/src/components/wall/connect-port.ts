@@ -6,7 +6,7 @@
  * `ensureSurface`) so it stays unit-testable off the React tree.
  */
 import type { PlatformAdapter } from '../../lib/platform/types';
-import type { Surface as DorSurface } from 'dor/commands/types';
+import type { ParseResult, Surface as DorSurface } from 'dor/commands/types';
 // The browser-safe subpath: dist/agent-browser.js is pure ES, so importing it
 // keeps cross-spawn (the package's Node-only default export) out of the webview.
 import { sessionForKey } from 'dor-lib-common/agent-browser';
@@ -26,8 +26,10 @@ export async function connectPortToDefaultBrowser({
   ensureSurface,
 }: {
   url: string;
-  /** The pane the port belongs to — the split reference for a fresh surface. */
-  reference: DorSurface;
+  /** The pane the port belongs to — the split reference for a fresh surface.
+   *  Lazy for the same reason as `EnsureAgentBrowserSurface`'s: the reuse path
+   *  must succeed even when the pane is no longer visible. */
+  reference: () => ParseResult<DorSurface>;
   platform: ConnectPlatform;
   /** Last binary path a `dor ab` surface resolved; undefined ⇒ host falls back
    *  to PATH / DORMOUSE_AGENT_BROWSER_BIN. */
@@ -53,9 +55,7 @@ export async function connectPortToDefaultBrowser({
     const status = await platform.agentBrowserStreamStatus(session, binaryPath);
     if (status.ok) wsPort = status.wsPort;
   }
-  // The menu resolved its pane eagerly (it's the visible pane under the cursor),
-  // so the lazy reference just hands it through.
-  const ensured = ensureSurface({ key: 'default', session, wsPort, binaryPath, reference: () => ({ ok: true, value: reference }) });
+  const ensured = ensureSurface({ key: 'default', session, wsPort, binaryPath, reference });
   if (!ensured.ok) return { ok: false, message: ensured.message };
   return { ok: true };
 }

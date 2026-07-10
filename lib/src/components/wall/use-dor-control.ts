@@ -20,6 +20,8 @@ import {
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { hostPathDisplay } from './browser-url';
 import { isAgentBrowserParams } from './browser-surface';
+// Runtime import is one-way (connect-port's use-dor-control import is type-only).
+import { connectPortToDefaultBrowser, type ConnectPortResult } from './connect-port';
 import { listenerUrlsByPort } from './port-url';
 import { dorDirectionForEdge, type LathWallEngine } from './lath-wall-engine';
 import type { WallNav } from './keyboard/types';
@@ -368,7 +370,7 @@ export function useDorControl({
   killPaneImmediately: (id: string) => void;
   /** The last binary path a `dor ab` surface resolved on a terminal's PATH. */
   lastAgentBrowserBinaryPathRef: MutableRefObject<string | undefined>;
-}): { ensureAgentBrowserSurface: EnsureAgentBrowserSurface } {
+}): { connectPort: (id: string, url: string) => Promise<ConnectPortResult> } {
   const resolveVisibleSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
@@ -459,14 +461,16 @@ export function useDorControl({
       // Reuse: refresh the stream port (OS-assigned, churns across session
       // restarts) so the panel reconnects to the live stream, and the
       // resolved binary path alongside it.
-      if (!existing.minimized && Object.keys(refreshedParams).length > 0) {
-        lath.store.updateParams(existing.id, refreshedParams);
-      } else if (existing.minimized && Object.keys(refreshedParams).length > 0) {
-        const nextDoors = doorsRef.current.map((door) => door.id === existing.id
-          ? { ...door, params: { ...door.params, ...refreshedParams } }
-          : door);
-        doorsRef.current = nextDoors;
-        setDoors(nextDoors);
+      if (Object.keys(refreshedParams).length > 0) {
+        if (existing.minimized) {
+          const nextDoors = doorsRef.current.map((door) => door.id === existing.id
+            ? { ...door, params: { ...door.params, ...refreshedParams } }
+            : door);
+          doorsRef.current = nextDoors;
+          setDoors(nextDoors);
+        } else {
+          lath.store.updateParams(existing.id, refreshedParams);
+        }
       }
       return {
         ok: true,
@@ -502,6 +506,22 @@ export function useDorControl({
       minimized,
     };
   }, [createContentSurface, findAgentBrowserSurface, lath, setDoors, surfaceRefForId]);
+
+  // The pane context menu's "connect a port" action, bound to this hook's
+  // closure so Wall.tsx delegates in one line instead of re-threading the
+  // hook's internals (`ensureAgentBrowserSurface`, the binary-path ref).
+  const connectPort = useCallback((id: string, url: string) => connectPortToDefaultBrowser({
+    url,
+    // Lazy: the reuse path must succeed even if the pane vanished (e.g. was
+    // minimized) between the right-click and the connect resolving.
+    reference: () => {
+      const surface = buildDorSurfaces().find((candidate) => candidate.id === id);
+      return surface ? { ok: true, value: surface } : { ok: false, message: `surface for pane '${id}' was not found` };
+    },
+    platform: getPlatform(),
+    binaryPath: lastAgentBrowserBinaryPathRef.current,
+    ensureSurface: ensureAgentBrowserSurface,
+  }), [buildDorSurfaces, ensureAgentBrowserSurface, lastAgentBrowserBinaryPathRef]);
 
   useEffect(() => {
     const handler = async (event: Event) => {
@@ -882,5 +902,5 @@ export function useDorControl({
     return () => window.removeEventListener('dormouse:control-request', handler);
   }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
 
-  return { ensureAgentBrowserSurface };
+  return { connectPort };
 }
