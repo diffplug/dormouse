@@ -12,7 +12,7 @@
     "dist"
   ],
   "scripts": {
-    "prebuild": "pnpm --filter dor-lib-common build && node ../scripts/generate-dor-version.mjs",
+    "prebuild": "pnpm --filter dor-lib-common build && node ../scripts/generate-dor-version.mjs && node ../scripts/generate-dor-skill.mjs",
     "build": "tsc -p tsconfig.json && esbuild src/dor.ts --bundle --format=esm --platform=node --outfile=dist/dor.js --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\"",
     "test": "pnpm run build && node --test test/*.test.mjs"
   },

@@ -590,10 +590,27 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(focusOf('pane-a')).toBe('true');
 
-    const newId = await dispatchSplit({ direction: 'right', command: ['echo', 'hi'] });
+    // The CLI marks a `-- <command>` split focus-neutral (it always sends
+    // focusNeutral when `--` or a command is present).
+    const newId = await dispatchSplit({ direction: 'right', command: ['echo', 'hi'], focusNeutral: true });
 
     // The initial command runs in the background: the caller keeps focus and the
     // new surface is not focused.
+    expect(focusOf('pane-a')).toBe('true');
+    expect(focusOf(newId)).toBe('false');
+  });
+
+  it('dor split -- (empty tail) opens a blank surface without stealing focus', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" showBaseboard />);
+    });
+    await flush();
+    expect(focusOf('pane-a')).toBe('true');
+
+    // No command, but focusNeutral marks the `--` tail: a blank terminal that
+    // does not grab the user's keystrokes (unlike a bare `dor split`).
+    const newId = await dispatchSplit({ direction: 'right', focusNeutral: true });
+
     expect(focusOf('pane-a')).toBe('true');
     expect(focusOf(newId)).toBe('false');
   });

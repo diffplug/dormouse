@@ -9,6 +9,7 @@ import type {
   ParseResult,
 } from './types.js';
 import {
+  errorMessage,
   renderJson,
   requireControlClient,
   stringParser,
@@ -84,7 +85,7 @@ async function runKillCommand(this: DorCommandContext, flags: KillFlags, surface
     writeStdout(this, renderKillResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
-    return new Error(error instanceof Error ? error.message : String(error));
+    return new Error(errorMessage(error));
   }
 }
 

@@ -37,7 +37,7 @@ import type {
   DorCommandContext,
   ParseResult,
 } from './types.js';
-import { fail, requireControlClient, stringParser } from './shared.js';
+import { errorMessage, fail, requireControlClient, stringParser } from './shared.js';
 
 const INSTALL_HINT = 'npm i -g agent-browser';
 const INSTALL_DOCS = 'https://agent-browser.dev';
@@ -213,7 +213,7 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
     if (isMissingBinaryError(error)) {
       return fail(missingBinaryMessage(binary));
     }
-    return fail(error instanceof Error ? error.message : String(error));
+    return fail(errorMessage(error));
   }
 
   let stderrSuffix = '';
@@ -234,7 +234,7 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
           ...(binaryPath ? { binaryPath } : {}),
         });
       } catch (error) {
-        stderrSuffix = `Warning: could not open the Dormouse browser surface: ${error instanceof Error ? error.message : String(error)}\n`;
+        stderrSuffix = `Warning: could not open the Dormouse browser surface: ${errorMessage(error)}\n`;
       }
     }
   }
