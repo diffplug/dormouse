@@ -339,7 +339,7 @@ All pane motion is owned by the Lath **animator** — a pure function of time th
 
 ### Zoom (elevated expansion)
 
-Zoom is presentation-only: the split tree and every tiled rect remain unchanged. The chosen pane rises above the tiled/dying bands and sashes before expanding from its tiled rect to the Wall rect inset by half the 30px pane-header height (15px). The perimeter exposes the tiled layout beneath, making the new stacking relationship visible. Unzoom reverses the geometry while keeping the pane elevated for the whole return; it drops back into the tiled layer only on the settled frame. Source of truth: `PANE_HEADER_HEIGHT_PX` in `lib/src/components/design.tsx`; `presentationTargets`, `LATH_ZOOM_MARGIN`, and the layer-to-z-index mapping in `lib/src/components/wall/LathHost.tsx`; discrete layer lifetime in `lib/src/lib/lath/animator.ts`.
+Zoom is presentation-only: the split tree and every tiled rect remain unchanged. The chosen pane rises above the tiled/dying bands and sashes before expanding from its tiled rect to the Wall rect inset by half the 30px pane-header height (15px). The perimeter exposes the tiled layout beneath, while a blurred `--color-app-bg` shadow separates the elevated edge from the content below. Unzoom reverses the geometry while keeping the pane elevated and shadowed for the whole return; both elevation effects clear only on the settled frame. Source of truth: `PANE_HEADER_HEIGHT_PX` in `lib/src/components/design.tsx`; `presentationTargets`, `LATH_ZOOM_MARGIN`, `LATH_ZOOM_SHADOW`, and the layer-to-z-index mapping in `lib/src/components/wall/LathHost.tsx`; discrete layer lifetime in `lib/src/lib/lath/animator.ts`.
 
 ### Spawn (new pane reveal)
 

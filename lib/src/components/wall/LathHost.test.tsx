@@ -4,7 +4,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LathHost, LATH_ZOOM_MARGIN } from './LathHost';
+import { LathHost, LATH_ZOOM_MARGIN, LATH_ZOOM_SHADOW } from './LathHost';
 import { createLathWallStore, type LathWallStore, type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { createLathWallEngine } from './lath-wall-engine';
 import { layout } from '../../lib/lath/layout';
@@ -238,12 +238,15 @@ describe('LathHost — zoom', () => {
     expect(a.style.width).toBe(`${W - LATH_ZOOM_MARGIN * 2}px`);
     expect(a.style.height).toBe(`${H - LATH_ZOOM_MARGIN * 2}px`);
     expect(a.style.zIndex).toBe('40');
+    expect(a.style.boxShadow).toBe(LATH_ZOOM_SHADOW);
     // 'b' keeps its tiled rect beneath.
     expect(leafDiv('b')!.style.zIndex).toBe('0');
+    expect(leafDiv('b')!.style.boxShadow).toBe('');
 
     act(() => store.setZoomed(null));
     const frames = layout(rowOf('a', 'b'), RECT, LATH_LAYOUT_OPTS);
     expect(leafDiv('a')!.style.width).toBe(`${frames.get('a')!.width}px`);
+    expect(leafDiv('a')!.style.boxShadow).toBe('');
   });
 });
 
@@ -406,6 +409,7 @@ describe('LathHost — imperative animation frames', () => {
     expect(parseFloat(a.style.left)).toBeCloseTo(tiled.x, 1);
     expect(widthOf('a')).toBeCloseTo(tiled.width, 1);
     expect(a.style.zIndex).toBe('40');
+    expect(a.style.boxShadow).toBe(LATH_ZOOM_SHADOW);
 
     clock += DUR / 2;
     flushRaf();
@@ -421,13 +425,16 @@ describe('LathHost — imperative animation frames', () => {
 
     act(() => store.setZoomed(null));
     expect(a.style.zIndex).toBe('40');
+    expect(a.style.boxShadow).toBe(LATH_ZOOM_SHADOW);
     clock += DUR / 2;
     flushRaf();
     expect(a.style.zIndex).toBe('40');
+    expect(a.style.boxShadow).toBe(LATH_ZOOM_SHADOW);
     clock += DUR / 2;
     flushRaf();
     expect(widthOf('a')).toBeCloseTo(tiled.width, 1);
     expect(a.style.zIndex).toBe('0');
+    expect(a.style.boxShadow).toBe('');
   });
 
   it('fades a dying leaf in place with pointer-events off, above the survivors', () => {

@@ -56,6 +56,8 @@ const Z_ZOOMED = 40;
 const Z_PREVIEW = 45;
 /** Reveal half a pane header of tiled layout around an elevated zoomed pane. */
 export const LATH_ZOOM_MARGIN = PANE_HEADER_HEIGHT_PX / 2;
+/** Soft app-chrome halo separates the elevated pane from tiled content below. */
+export const LATH_ZOOM_SHADOW = '0 0 5px 5px var(--color-app-bg)';
 
 const PANE_HEADER_STYLE: CSSProperties = {
   flex: `0 0 ${PANE_HEADER_HEIGHT_PX}px`,
@@ -468,6 +470,7 @@ export function LathHost({
         el.style.height = `${f.rect.height}px`;
         el.style.opacity = f.opacity >= 1 ? '' : `${f.opacity}`;
         el.style.zIndex = `${zIndexForLayer(f.layer)}`;
+        el.style.boxShadow = f.layer >= LATH_LAYER_ELEVATED ? LATH_ZOOM_SHADOW : '';
         // Elevated zoom is interactive; only the animator's dying state makes a
         // pane inert while it fades.
         el.style.pointerEvents = animator.isDying(id) ? 'none' : '';
