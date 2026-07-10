@@ -2,4 +2,4 @@ exitCode: 1
 stdout:
 
 stderr:
-Error: Failed to parse "localhost:5173" for url: URL must use http:// or https://
+Error: Failed to parse "ftp://localhost:5173" for target: URL must use http:// or https://

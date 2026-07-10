@@ -18,9 +18,9 @@ export const STRIP_RESPONSE_HEADERS = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
   'te', 'trailer', 'transfer-encoding', 'upgrade',
   // Framing controls — stripped so the proxy origin (which the webview frames)
-  // never inherits a "do not embed" from the upstream. For loopback that is the
-  // whole point; for a frameable remote there is nothing to strip anyway, and a
-  // refusing remote is diverted to an error page before we get here.
+  // never inherits a "do not embed" from the upstream. Applied to every http
+  // upstream, loopback or remote: the embed is the user's own `dor iframe`, so a
+  // site's X-Frame-Options / CSP frame-ancestors is overridden rather than obeyed.
   'x-frame-options', 'content-security-policy', 'content-security-policy-report-only',
 ]);
 
@@ -116,33 +116,6 @@ export function instrumentHtml(body: string): string {
   return shimTag + html;
 }
 
-// A remote refuses framing if it sends any X-Frame-Options or a CSP
-// frame-ancestors that is not the permissive standalone `*`. Conservative on
-// purpose: when in doubt we divert to an error page rather than show a
-// guaranteed-blank frame.
-export function refusesFraming(headers: ProxyHeaders): boolean {
-  if (headers['x-frame-options']) return true;
-  const csp = headers['content-security-policy'];
-  const policies = Array.isArray(csp) ? csp : csp ? [csp] : [];
-  return policies.some((policy) => hasRestrictiveFrameAncestors(policy));
-}
-
-export function hasRestrictiveFrameAncestors(policy: string): boolean {
-  const directives = policy.split(';');
-  for (const directive of directives) {
-    const parts = directive.trim().split(/\s+/).filter(Boolean);
-    if (parts.length === 0 || parts[0].toLowerCase() !== 'frame-ancestors') continue;
-    const sources = parts.slice(1);
-    if (!sources.includes('*')) return true;
-  }
-  return false;
-}
-
-export function isLoopbackHost(hostname: string): boolean {
-  const h = hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h.startsWith('127.');
-}
-
 export function isBlockedAddress(hostname: string): boolean {
   const h = hostname.replace(/^\[|\]$/g, '').toLowerCase();
   // IPv4 link-local / cloud metadata (169.254.0.0/16, incl. 169.254.169.254).
@@ -157,15 +130,6 @@ export function isBlockedAddress(hostname: string): boolean {
 export interface ErrorPage {
   title: string;
   message: string;
-  hint?: string;
-}
-
-export function frameRefusedPage(upstream: URL): ErrorPage {
-  return {
-    title: `${upstream.host} refuses to be embedded`,
-    message: `${upstream.host} sends a frame-blocking header (X-Frame-Options or CSP frame-ancestors), so it can’t be shown in an iframe surface.`,
-    hint: `dor ab open ${upstream.href}`,
-  };
 }
 
 export function unreachablePage(upstream: URL, detail: string): ErrorPage {
@@ -189,9 +153,6 @@ export function escapeHtml(value: string): string {
 }
 
 export function errorPageHtml(page: ErrorPage): string {
-  const hint = page.hint
-    ? `<p class="hint">Try <code>${escapeHtml(page.hint)}</code></p>`
-    : '';
   return `<!doctype html><html><head><meta charset="utf-8">
 <style>
   :root { color-scheme: dark; }
@@ -202,13 +163,11 @@ export function errorPageHtml(page: ErrorPage): string {
   .card { max-width: 34rem; padding: 1.5rem 2rem; text-align: center; }
   h1 { margin: 0 0 .5rem; font-size: 1.05rem; font-weight: 600; color: #e7ebf1; }
   p { margin: .5rem 0; }
-  .hint { margin-top: 1rem; }
   code { background: #20242b; border-radius: 4px; padding: .15rem .4rem;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #e7ebf1; }
 </style></head>
 <body><div class="card">
   <h1>${escapeHtml(page.title)}</h1>
   <p>${escapeHtml(page.message)}</p>
-  ${hint}
 </div></body></html>`;
 }

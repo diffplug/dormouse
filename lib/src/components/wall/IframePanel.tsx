@@ -31,7 +31,7 @@ type Resolution =
   // The host can't run a proxy (e.g. the web host) — keep the blind raw-iframe
   // fallback rather than hiding the surface (Open Decision #4).
   | { kind: 'raw'; src: string }
-  | { kind: 'error'; reason: 'frame-refused' | 'unreachable' | 'scheme'; detail?: string };
+  | { kind: 'error'; reason: 'unreachable' | 'scheme'; detail?: string };
 
 type IframeHistory = {
   entries: string[];
@@ -390,9 +390,9 @@ function PanelMessage({ resolution, url }: { resolution: Resolution; url: string
   }
   // proxied/raw render the iframe itself, never this fallback.
   if (resolution.kind !== 'error') return null;
-  // 'error' — the proxy turned a dead end into something actionable. (Most
-  // unreachable/frame-refused cases are served as a page inside the frame; this
-  // covers the synchronous ones, chiefly an unproxyable scheme.)
+  // 'error' — the proxy turned a dead end into something actionable. (Unreachable
+  // cases are served as a page inside the frame; this covers the synchronous
+  // ones, chiefly an unproxyable scheme such as https://.)
   return (
     <div className={`${base} flex-col gap-2`}>
       <div>{messageFor(resolution)}</div>
@@ -408,9 +408,7 @@ function messageFor(resolution: Extract<Resolution, { kind: 'error' }>): string 
     case 'scheme':
       return resolution.detail
         ? `Can’t frame this URL — ${resolution.detail}.`
-        : 'The iframe surface only frames local http:// servers.';
-    case 'frame-refused':
-      return 'This page refuses to be embedded in a frame.';
+        : 'The iframe surface only frames http:// servers.';
     case 'unreachable':
     default:
       return resolution.detail ? `Couldn’t reach the server — ${resolution.detail}.` : 'Couldn’t reach the server.';

@@ -4,14 +4,24 @@ Invocation: `dor iframe --help`
 
 ```text
 USAGE
-  dor iframe [--json] [--minimize] [--surface id|ref] <url>
+  dor iframe [--json] [--minimize] [--surface id|ref] <target>
   dor iframe --help
 
-Opens a URL in a high-fidelity iframe surface for human inspection.
+Opens a target in a high-fidelity iframe surface for human inspection.
 
 If the caller surface is an untouched terminal, Dormouse replaces that terminal with the iframe. Otherwise Dormouse creates a split next to the caller/focused surface.
 
-The URL must be an absolute http:// or https:// URL. Dormouse does not infer schemes.
+The target is one of:
+  <url>          An absolute http:// or https:// URL (an explicit scheme is
+                 always honored).
+  host:port      A schemeless host:port, defaulted to http:// (e.g.
+                 localhost:5173, box.ts.net:3000). The explicit port marks a
+                 dev/infra server, which is http far more often than not.
+  :<port>        Sugar for http://localhost:<port> (e.g. :5173).
+  surface:<ref>  A terminal Surface handle (surface:N, surface:self,
+                 surface:focused, or a stable id). Dormouse scans that terminal's
+                 listening ports and opens http://localhost:<port>/; it fails if
+                 the terminal owns zero or multiple ports.
 
 Text output:
   created surface:3  "http://localhost:5173"
@@ -34,6 +44,6 @@ FLAGS
       --           All subsequent inputs should be interpreted as arguments
 
 ARGUMENTS
-  url  URL to open.
+  target  URL, host:port, :port, or surface handle to open.
 
 ```

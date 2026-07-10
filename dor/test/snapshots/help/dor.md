@@ -11,7 +11,7 @@ USAGE
   dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw]
   dor read <surface> [--json] [--lines count] [--scrollback]
   dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json]
-  dor iframe [--json] [--minimize] [--surface id|ref] <url>
+  dor iframe [--json] [--minimize] [--surface id|ref] <target>
   dor agent-browser [--key name|--session name] [args...]
   dor list [--command text] [--cwd path] [--id-format refs|ids|both] [--json] [--kind terminal|browser] [--port number] [--ports] [--view paned|zoomed|minimized]
   dor --help
@@ -30,7 +30,7 @@ COMMANDS
   send           Send text or key input to a terminal surface.
   read           Read terminal text from a surface.
   kill           Kill a surface.
-  iframe         Open a URL in an iframe surface.
+  iframe         Open a target in an iframe surface.
   agent-browser  Drive a browser surface via your agent-browser install (alias: dor ab).
   list           List Dormouse Surfaces.
 

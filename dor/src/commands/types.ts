@@ -167,6 +167,21 @@ export interface IframeSurfaceResponse {
   minimized: boolean;
 }
 
+export interface ResolveOpenTargetRequest {
+  /** A terminal Surface handle (surface:N, surface:<stable-id>, surface:self,
+   *  surface:focused) whose dev-server URL should be resolved. */
+  surface: string;
+}
+
+export interface ResolveOpenTargetResponse {
+  surfaceId: string;
+  surfaceRef: string;
+  /** The URL to open — `http://localhost:<port>/` for the single owned port. */
+  url: string;
+  /** The resolved listening port. */
+  port: number;
+}
+
 export interface AgentBrowserSurfaceRequest {
   /** Managed workspace-scoped key; absent when attaching via raw --session. */
   key?: string;
@@ -196,6 +211,7 @@ export interface ControlClient {
   killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse>;
   iframeSurface(request: IframeSurfaceRequest): Promise<IframeSurfaceResponse>;
   agentBrowserSurface(request: AgentBrowserSurfaceRequest): Promise<AgentBrowserSurfaceResponse>;
+  resolveOpenTarget(request: ResolveOpenTargetRequest): Promise<ResolveOpenTargetResponse>;
 }
 
 export interface AgentBrowserExecResult {

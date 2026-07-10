@@ -20,6 +20,7 @@ import {
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { hostPathDisplay } from './browser-url';
 import { isAgentBrowserParams } from './browser-surface';
+import { servesLoopback } from './use-dev-server-ports';
 import { dorDirectionForEdge, type LathWallEngine } from './lath-wall-engine';
 import type { WallNav } from './keyboard/types';
 import type { DooredItem } from './wall-types';
@@ -375,6 +376,22 @@ export function useDorControl({
     return target.value;
   }, [resolveListedSurface]);
 
+  // requireListedSurface plus the terminal-only guard shared by the handlers that
+  // read/write/scan a shell (send / read / resolveOpen). Responds and returns null
+  // on a browser-surface target so the caller just bails.
+  const requireTerminalSurface = useCallback((
+    surfaceParam: unknown,
+    detail: DorControlRequest,
+  ): DorSurface | null => {
+    const target = requireListedSurface(surfaceParam, detail);
+    if (!target) return null;
+    if (target.kind !== 'terminal') {
+      detail.respond({ ok: false, error: `surface '${target.ref}' is not a terminal` });
+      return null;
+    }
+    return target;
+  }, [requireListedSurface]);
+
   const findSurfaceIdRunningCommand = useCallback((command: string, cwdPath: string): string | null => {
     const ids = [
       ...lath.listPanes().map((panel) => panel.id),
@@ -604,12 +621,8 @@ export function useDorControl({
           detail.respond({ ok: false, error: 'input is required' });
           return;
         }
-        const target = requireListedSurface(params.surface, detail);
+        const target = requireTerminalSurface(params.surface, detail);
         if (!target) return;
-        if (target.kind !== 'terminal') {
-          detail.respond({ ok: false, error: `surface '${target.ref}' is not a terminal` });
-          return;
-        }
         getPlatform().writePty(target.id, input);
         detail.respond({
           ok: true,
@@ -624,12 +637,8 @@ export function useDorControl({
       }
 
       if (detail.method === SURFACE_CONTROL_METHODS.read) {
-        const target = requireListedSurface(params.surface, detail);
+        const target = requireTerminalSurface(params.surface, detail);
         if (!target) return;
-        if (target.kind !== 'terminal') {
-          detail.respond({ ok: false, error: `surface '${target.ref}' is not a terminal` });
-          return;
-        }
         const lines = numberParam(params.lines);
         const scrollback = booleanParam(params.scrollback);
         const text = readSurfaceText(target.id, lines, scrollback);
@@ -787,10 +796,62 @@ export function useDorControl({
         return;
       }
 
+      if (detail.method === SURFACE_CONTROL_METHODS.resolveOpen) {
+        // Resolve a terminal Surface handle to the dev-server URL it owns, for
+        // `dor ab open <surface>` / `dor iframe <surface>`. Same port scan as
+        // `dor list --ports`; minimized doors are valid targets. Only terminals
+        // own ports, so a browser-surface target is rejected by the guard.
+        const target = requireTerminalSurface(params.surface, detail);
+        if (!target) return;
+        let ports: OpenPort[];
+        try {
+          ports = await getPlatform().getOpenPorts(target.id);
+        } catch {
+          ports = [];
+        }
+        const tcpPorts = ports.filter((entry) => entry.protocol === 'tcp');
+        // Group every TCP listener by port. A loopback-reachable binding wins
+        // for the localhost URL; otherwise use the bound LAN/Tailnet address.
+        const candidatePorts = [...new Set(tcpPorts.map((entry) => entry.port))].sort((a, b) => a - b);
+        if (candidatePorts.length === 0) {
+          detail.respond({ ok: false, error: `surface '${target.ref}' is not serving any port` });
+          return;
+        }
+        if (candidatePorts.length > 1) {
+          detail.respond({
+            ok: false,
+            error: `surface '${target.ref}' is serving multiple ports (${candidatePorts.join(', ')}); open one explicitly, e.g. http://localhost:${candidatePorts[0]}`,
+          });
+          return;
+        }
+        const port = candidatePorts[0];
+        const portListeners = tcpPorts.filter((entry) => entry.port === port);
+        const loopbackListener = portListeners.find((entry) => servesLoopback(entry.address));
+        const selectedListener = loopbackListener ?? [...portListeners].sort((a, b) => {
+          if (a.family !== b.family) return a.family === 'IPv4' ? -1 : 1;
+          return a.address < b.address ? -1 : a.address > b.address ? 1 : 0;
+        })[0];
+        const host = loopbackListener
+          ? 'localhost'
+          : selectedListener.family === 'IPv6'
+            ? `[${selectedListener.address}]`
+            : selectedListener.address;
+        detail.respond({
+          ok: true,
+          result: {
+            surfaceId: target.id,
+            surfaceRef: target.ref,
+            port,
+            url: `http://${host}:${port}/`,
+          },
+        });
+        return;
+      }
+
       detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
     };
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireListedSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
+  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
 }

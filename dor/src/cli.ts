@@ -50,6 +50,8 @@ export type {
   ReadSurfaceRequest,
   ReadSurfaceResponse,
   ResolvedSplitDirection,
+  ResolveOpenTargetRequest,
+  ResolveOpenTargetResponse,
   SendSurfaceRequest,
   SendSurfaceResponse,
   SplitDirection,

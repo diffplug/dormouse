@@ -1,4 +1,4 @@
-/** Private `surface.iframe` command wiring and URL validation. */
+/** Private `surface.iframe` command wiring and open-target resolution. */
 
 import { buildCommand } from '@stricli/core';
 import type {
@@ -13,10 +13,11 @@ import {
   stringParser,
   writeStdout,
 } from './shared.js';
-
-declare const URL: {
-  new(input: string): { href: string; protocol: string };
-};
+import {
+  isSurfaceOpenTarget,
+  normalizeConcreteOpenUrl,
+  resolveSurfaceOpenTarget,
+} from './open-target.js';
 
 interface IframeFlags {
   readonly json?: boolean;
@@ -28,12 +29,22 @@ export const iframeCommand: Command = {
   name: 'iframe',
   command: buildCommand<IframeFlags, [string], DorCommandContext>({
     docs: {
-      brief: 'Open a URL in an iframe surface.',
-      fullDescription: `Opens a URL in a high-fidelity iframe surface for human inspection.
+      brief: 'Open a target in an iframe surface.',
+      fullDescription: `Opens a target in a high-fidelity iframe surface for human inspection.
 
 If the caller surface is an untouched terminal, Dormouse replaces that terminal with the iframe. Otherwise Dormouse creates a split next to the caller/focused surface.
 
-The URL must be an absolute http:// or https:// URL. Dormouse does not infer schemes.
+The target is one of:
+  <url>          An absolute http:// or https:// URL (an explicit scheme is
+                 always honored).
+  host:port      A schemeless host:port, defaulted to http:// (e.g.
+                 localhost:5173, box.ts.net:3000). The explicit port marks a
+                 dev/infra server, which is http far more often than not.
+  :<port>        Sugar for http://localhost:<port> (e.g. :5173).
+  surface:<ref>  A terminal Surface handle (surface:N, surface:self,
+                 surface:focused, or a stable id). Dormouse scans that terminal's
+                 listening ports and opens http://localhost:<port>/; it fails if
+                 the terminal owns zero or multiple ports.
 
 Text output:
   created surface:3  "http://localhost:5173"
@@ -57,7 +68,7 @@ JSON output:
       positional: {
         kind: 'tuple',
         parameters: [
-          { parse: parseIframeUrl, brief: 'URL to open.', placeholder: 'url' },
+          { parse: parseIframeTarget, brief: 'URL, host:port, :port, or surface handle to open.', placeholder: 'target' },
         ],
       },
     },
@@ -65,9 +76,18 @@ JSON output:
   }),
 };
 
-async function runIframeCommand(this: DorCommandContext, flags: IframeFlags, url: string): Promise<void | Error> {
+async function runIframeCommand(this: DorCommandContext, flags: IframeFlags, target: string): Promise<void | Error> {
   const client = requireControlClient(this.options);
   if (client instanceof Error) return client;
+
+  // A `surface:` handle is resolved to its dev-server URL by the host port scan;
+  // concrete targets (URL / bare :port) were already normalized at parse time.
+  let url = target;
+  if (isSurfaceOpenTarget(target)) {
+    const resolved = await resolveSurfaceOpenTarget(target, client);
+    if (!resolved.ok) return new Error(resolved.message);
+    url = resolved.value;
+  }
 
   try {
     const response = await client.iframeSurface({
@@ -82,19 +102,12 @@ async function runIframeCommand(this: DorCommandContext, flags: IframeFlags, url
   }
 }
 
-function parseIframeUrl(input: string): string {
-  let url: { href: string; protocol: string };
-  try {
-    url = new URL(input);
-  } catch {
-    throw new SyntaxError('URL must be an absolute http:// or https:// URL');
-  }
-
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new SyntaxError('URL must use http:// or https://');
-  }
-
-  return url.href;
+// A `surface:` handle passes through verbatim for async resolution in the func;
+// every other form is normalized to a URL here so a bad target fails at parse
+// time. A schemeless `:port` / `host:port` is inferred to `http://`; only a
+// non-http(s) scheme or otherwise unparseable input is rejected.
+function parseIframeTarget(input: string): string {
+  return isSurfaceOpenTarget(input) ? input : normalizeConcreteOpenUrl(input);
 }
 
 function renderIframeResponse(response: IframeSurfaceResponse, json: boolean): string {

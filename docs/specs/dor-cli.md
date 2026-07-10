@@ -338,11 +338,16 @@ from `command-detail`.
 - `dor kill` [impl](../../dor/src/commands/kill.ts) [docs](../../dor/test/snapshots/help/kill.md)
 - `dor iframe` — **provisional**; high-fidelity URL embed with structural
   limitations; the `iframe` renderer of the unified `browser` surface, see
-  [dor-browser.md](dor-browser.md).
+  [dor-browser.md](dor-browser.md). Its target accepts a Surface handle or a
+  schemeless `host:port` (defaulted to http) as well as a URL — see [Browser Open
+  Target Resolution](#browser-open-target-resolution).
   [impl](../../dor/src/commands/iframe.ts) [docs](../../dor/test/snapshots/help/iframe.md)
 - `dor agent-browser` / `dor ab` — delegates to the user's `agent-browser`,
   rendered in a Dormouse-native surface; the `ab-screencast` renderer of the
-  unified `browser` surface, see [dor-browser.md](dor-browser.md)
+  unified `browser` surface, see [dor-browser.md](dor-browser.md). In an
+  `open` / `goto` / `navigate` command, a Surface handle or schemeless `host:port`
+  target is resolved to a URL before it is forwarded — see [Browser Open Target
+  Resolution](#browser-open-target-resolution).
 - `dor list` — the unified Surface listing. Lists every Surface in the current
   Workspace (terminals and browser Surfaces, including minimized ones), one row
   per Surface in stable `surface:N` order. Text marks the focused Surface with
@@ -370,6 +375,60 @@ from `command-detail`.
   (see [Future](#future)). [impl](../../dor/src/commands/list.ts)
   [docs](../../dor/test/snapshots/help/list.md)
 
+## Browser Open Target Resolution
+
+`dor ab open <target>` and `dor iframe <target>` accept, wherever they take an
+absolute URL:
+
+- a terminal **Surface handle** (`surface:N`, `surface:<stable-id>`,
+  `surface:self`, `surface:focused`) — resolved to the dev server that terminal
+  owns; and
+- a schemeless **`host:port`** — defaulted to `http://` (`localhost:5173`,
+  `box.ts.net:3000`, `192.168.1.5:8080` → `http://…/`), including the bare
+  **`:port`** localhost shorthand (`:5173` → `http://localhost:5173/`). Purely a
+  string rewrite, so it needs no host and works outside Dormouse.
+
+The **explicit port** is the signal for the `http` default: a public HTTPS site
+lives on 443 with no port, whereas a bare `host:port` is overwhelmingly a
+dev/infra server — loopback, a LAN container, a Tailnet peer — which speaks
+`http`. A hostname cannot be classified as public vs. private by inspection
+(`box.ts.net` looks like any other domain), so the CLI does not try; the port is
+the heuristic. An explicit scheme is always honored (`https://host:port` stays
+https), and a public HTTPS service on a nonstandard port is the one case that
+needs the scheme typed. This deliberately overrides `agent-browser`'s own
+`https`-default for a bare `host:port` (a local dev server on https just
+SSL-errors). An input that is neither a URL nor a `host:port` is rejected.
+
+Resolution is CLI-side (`dor/src/commands/open-target.ts`), so `dor ab` can hand
+`agent-browser` a real URL — a handle or bare `host:port` would otherwise reach a
+binary that resolves it differently. For `dor ab`, only the `open` / `goto` /
+`navigate` verbs resolve, and the target is matched by shape (a
+`surface:`/`host:port`/`:port` argument), so `open --headed surface:3` resolves
+too. A Surface handle requires a live control endpoint (it fails clearly outside
+Dormouse); the `host:port` inference does not.
+
+A Surface handle resolves through the `surface.resolveOpen` control method
+(`lib/src/components/wall/use-dor-control.ts`), which runs the same host port
+scan as `dor list --ports` (`PlatformAdapter.getOpenPorts`, visible panes **and**
+minimized doors). V1 groups all TCP listening records by distinct port. For a
+single candidate, Dormouse prefers `http://localhost:<port>/` when a loopback or
+any-interface bind exists; otherwise it opens the specific bound LAN/Tailnet
+address. Multiple bindings for one dev server remain one candidate.
+
+- **Zero** candidate ports fail (`surface:N is not serving any port`).
+- **One** candidate opens its preferred localhost URL or its specific bound
+  address.
+- **Multiple** distinct candidate ports fail and list the choices, until an
+  explicit port selector exists.
+
+Only terminal Surfaces own ports, so a browser-Surface handle is rejected.
+
+Source of truth: `dor/src/commands/open-target.ts` (classification + `:port`
+sugar + `surface.resolveOpen` call), `dor/src/commands/iframe.ts` /
+`dor/src/commands/agent-browser.ts` (the two entry points),
+`dor/src/protocol.ts` (`resolveOpen`), the `surface.resolveOpen` handler in
+`lib/src/components/wall/use-dor-control.ts`.
+
 ## Agent Workflows
 
 A handful of end-to-end agent scenarios are the CLI's product-level acceptance
@@ -391,7 +450,7 @@ their session is held externally by `agent-browser`.
 
 | Workflow | How the shipped CLI does it |
 | --- | --- |
-| Share a dev server | `dor ensure -- npm dev` reuses the command already live in the same resolved cwd (`--restart` re-runs it in place, preserving layout and minimized/visible state). `dor list --command "npm dev" --cwd . --ports` returns the Surface with its ports, and the agent opens `dor ab open http://localhost:<port>`. Passing the terminal handle straight to the browser command (`dor ab open surface:N`) is the one unshipped ergonomic — see [Future](#future). |
+| Share a dev server | `dor ensure -- npm dev` reuses the command already live in the same resolved cwd (`--restart` re-runs it in place, preserving layout and minimized/visible state). `dor ab open surface:N` (or `dor iframe surface:N`) resolves the terminal's dev-server port and opens it in one step — see [Browser Open Target Resolution](#browser-open-target-resolution). The explicit two-step form still works: `dor list --command "npm dev" --cwd . --ports`, then `dor ab open http://localhost:<port>`. |
 | Launch a sub-agent | `dor split -- codex` returns `surface:N`; drive it with `dor send surface:N --text "/review" --key enter` (or `--sequence` for arbitrary ordering), then read it back with `dor read surface:N`. |
 | Wait on a sub-agent | `dor split -- otheragent` returns `surface:5`; the caller watches `dor list` for that Surface's `[ringing]` tag and calls `dor read surface:5` once the peer rings the Dormouse bell to signal it is done. Blocking on the bell directly with `dor await surface:5` (which prints the screen the moment it rings) is staged — see [Future](#future). |
 | Client / server browser testing | `dor ab --key client open <client-url>` and `dor ab --key server open <server-url>` create or reuse two independent browser Surfaces. |
@@ -451,20 +510,6 @@ in `dor/test/cli-output.test.mjs`.
   marketplaces, npm) distributes the bootstrap stub, never a copy of the
   content. A user-level `--global` install variant waits until a story needs
   it.
-
-- **Browser open target resolution** — the one unshipped Agent-Workflow
-  ergonomic (the Share-a-dev-server shortcut above): `dor ab open <target>` and
-  `dor iframe <target>` accept an explicit terminal Surface handle (`surface:N`,
-  `surface:<stable-id>`, `surface:self`, or `surface:focused`) wherever they
-  currently accept an absolute URL, collapsing the two-step
-  `dor list --ports` → `dor ab open http://localhost:<port>` dance into
-  one command. Resolution calls the same host port scan as `dor list --ports`.
-  V1 groups listening records by port, so one dev server bound on `localhost`, a
-  LAN address, and an overlay-network address is still one candidate; Dormouse
-  opens `http://localhost:<port>/`. Zero candidate ports fail clearly. Multiple
-  distinct candidate ports fail and list choices until an explicit port selector
-  exists. Future tether address selection can choose a non-localhost address from
-  the same candidate set without changing the surface-target grammar.
 
 - **`dor await <surface>`** — block until a Surface rings the Dormouse bell, then
   print its screen (like `dor read`) and exit — turning the alert system
