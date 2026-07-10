@@ -427,7 +427,8 @@ Source of truth: `dor/src/commands/open-target.ts` (classification + `:port`
 sugar + `surface.resolveOpen` call), `dor/src/commands/iframe.ts` /
 `dor/src/commands/agent-browser.ts` (the two entry points),
 `dor/src/protocol.ts` (`resolveOpen`), the `surface.resolveOpen` handler in
-`lib/src/components/wall/use-dor-control.ts`.
+`lib/src/components/wall/use-dor-control.ts`, and the port→URL grouping/selection
+in `lib/src/components/wall/port-url.ts` (`listenerUrlsByPort`).
 
 ## Agent Workflows
 

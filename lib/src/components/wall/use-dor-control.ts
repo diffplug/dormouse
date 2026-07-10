@@ -20,7 +20,7 @@ import {
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { hostPathDisplay } from './browser-url';
 import { isAgentBrowserParams } from './browser-surface';
-import { servesLoopback } from './use-dev-server-ports';
+import { listenerUrlsByPort } from './port-url';
 import { dorDirectionForEdge, type LathWallEngine } from './lath-wall-engine';
 import type { WallNav } from './keyboard/types';
 import type { DooredItem } from './wall-types';
@@ -56,6 +56,29 @@ type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
   params?: DorControlParams;
   respond: (response: DorControlResult) => void;
 };
+
+/** Outcome of {@link EnsureAgentBrowserSurface}: the fields the caller maps onto
+ *  its response, or a failure message. `minimized` is the surface's current
+ *  minimized state (the reused surface's, or the requested value for a fresh one). */
+export type EnsureAgentBrowserSurfaceResult =
+  | { ok: true; status: 'created' | 'existing' | 'replaced'; surfaceId: string; surfaceRef: string; minimized: boolean }
+  | { ok: false; message: string };
+
+/** Reuse-or-create the browser surface bound to an agent-browser `session`,
+ *  refreshing its stream port / binary path when reused. This is the surface
+ *  half of `dor ab` — shared by the control plane and the pane context menu's
+ *  "connect a port" action (`connect-port.ts`). */
+export type EnsureAgentBrowserSurface = (args: {
+  key?: string;
+  session: string;
+  wsPort?: number;
+  binaryPath?: string;
+  /** Resolved lazily, only when a fresh surface must be created: the reuse path
+   *  must succeed without a visible reference (e.g. `dor ab` from a minimized
+   *  terminal refreshing an existing surface). */
+  reference: () => ParseResult<DorSurface>;
+  minimized?: boolean;
+}) => EnsureAgentBrowserSurfaceResult;
 
 function isSingletonWorkspaceTarget(target: string | undefined): boolean {
   return !target || target === 'workspace:1' || target === '1';
@@ -345,7 +368,7 @@ export function useDorControl({
   killPaneImmediately: (id: string) => void;
   /** The last binary path a `dor ab` surface resolved on a terminal's PATH. */
   lastAgentBrowserBinaryPathRef: MutableRefObject<string | undefined>;
-}): void {
+}): { ensureAgentBrowserSurface: EnsureAgentBrowserSurface } {
   const resolveVisibleSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
@@ -415,6 +438,70 @@ export function useDorControl({
     if (door) return { id: door.id, minimized: true };
     return null;
   }, [lath]);
+
+  const ensureAgentBrowserSurface = useCallback<EnsureAgentBrowserSurface>(({
+    key,
+    session,
+    wsPort,
+    binaryPath,
+    reference,
+    minimized = false,
+  }) => {
+    // Remember the resolved binary so an embed→screencast swap can spawn one.
+    if (binaryPath) lastAgentBrowserBinaryPathRef.current = binaryPath;
+    const refreshedParams = {
+      ...(wsPort !== undefined ? { wsPort } : {}),
+      ...(binaryPath !== undefined ? { binaryPath } : {}),
+    };
+
+    const existing = findAgentBrowserSurface(session);
+    if (existing) {
+      // Reuse: refresh the stream port (OS-assigned, churns across session
+      // restarts) so the panel reconnects to the live stream, and the
+      // resolved binary path alongside it.
+      if (!existing.minimized && Object.keys(refreshedParams).length > 0) {
+        lath.store.updateParams(existing.id, refreshedParams);
+      } else if (existing.minimized && Object.keys(refreshedParams).length > 0) {
+        const nextDoors = doorsRef.current.map((door) => door.id === existing.id
+          ? { ...door, params: { ...door.params, ...refreshedParams } }
+          : door);
+        doorsRef.current = nextDoors;
+        setDoors(nextDoors);
+      }
+      return {
+        ok: true,
+        status: 'existing',
+        surfaceId: existing.id,
+        surfaceRef: surfaceRefForId(existing.id),
+        minimized: existing.minimized,
+      };
+    }
+
+    const target = reference();
+    if (!target.ok) return { ok: false, message: target.message };
+    const result = createContentSurface({
+      minimized,
+      params: {
+        surfaceType: 'browser',
+        renderMode: 'ab-screencast',
+        session,
+        ...(key !== undefined ? { key } : {}),
+        ...refreshedParams,
+      },
+      reference: target.value,
+      title: key ?? session,
+      // `dor ab` opens the screencast in the background; caller keeps focus.
+      focusNeutral: true,
+    });
+    if (!result.ok) return { ok: false, message: result.message };
+    return {
+      ok: true,
+      status: result.value.status,
+      surfaceId: result.value.id,
+      surfaceRef: result.value.ref,
+      minimized,
+    };
+  }, [createContentSurface, findAgentBrowserSurface, lath, setDoors, surfaceRefForId]);
 
   useEffect(() => {
     const handler = async (event: Event) => {
@@ -723,61 +810,13 @@ export function useDorControl({
           detail.respond({ ok: false, error: 'session is required' });
           return;
         }
-        const key = stringParam(params.key);
-        const wsPort = numberParam(params.wsPort);
-        const binaryPath = stringParam(params.binaryPath);
-        // Remember the resolved binary so an embed→screencast swap can spawn one.
-        if (binaryPath) lastAgentBrowserBinaryPathRef.current = binaryPath;
-        const refreshedParams = {
-          ...(wsPort !== undefined ? { wsPort } : {}),
-          ...(binaryPath !== undefined ? { binaryPath } : {}),
-        };
-
-        const existing = findAgentBrowserSurface(session);
-        if (existing) {
-          // Reuse: refresh the stream port (OS-assigned, churns across session
-          // restarts) so the panel reconnects to the live stream, and the
-          // resolved binary path alongside it.
-          if (!existing.minimized && Object.keys(refreshedParams).length > 0) {
-            lath.store.updateParams(existing.id, refreshedParams);
-          } else if (existing.minimized && Object.keys(refreshedParams).length > 0) {
-            const nextDoors = doorsRef.current.map((door) => door.id === existing.id
-              ? { ...door, params: { ...door.params, ...refreshedParams } }
-              : door);
-            doorsRef.current = nextDoors;
-            setDoors(nextDoors);
-          }
-          detail.respond({
-            ok: true,
-            result: {
-              status: 'existing',
-              surfaceId: existing.id,
-              surfaceRef: surfaceRefForId(existing.id),
-              session,
-              minimized: existing.minimized,
-            },
-          });
-          return;
-        }
-
-        const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
-        if (!target.ok) {
-          detail.respond({ ok: false, error: target.message });
-          return;
-        }
-        const result = createContentSurface({
+        const result = ensureAgentBrowserSurface({
+          key: stringParam(params.key),
+          session,
+          wsPort: numberParam(params.wsPort),
+          binaryPath: stringParam(params.binaryPath),
+          reference: () => resolveVisibleSurface(stringParam(params.surface), detail.surfaceId),
           minimized: booleanParam(params.minimized),
-          params: {
-            surfaceType: 'browser',
-            renderMode: 'ab-screencast',
-            session,
-            ...(key !== undefined ? { key } : {}),
-            ...refreshedParams,
-          },
-          reference: target.value,
-          title: key ?? session,
-          // `dor ab` opens the screencast in the background; caller keeps focus.
-          focusNeutral: true,
         });
         if (!result.ok) {
           detail.respond({ ok: false, error: result.message });
@@ -786,11 +825,11 @@ export function useDorControl({
         detail.respond({
           ok: true,
           result: {
-            status: result.value.status,
-            surfaceId: result.value.id,
-            surfaceRef: result.value.ref,
+            status: result.status,
+            surfaceId: result.surfaceId,
+            surfaceRef: result.surfaceRef,
             session,
-            minimized: booleanParam(params.minimized),
+            minimized: result.minimized,
           },
         });
         return;
@@ -809,40 +848,28 @@ export function useDorControl({
         } catch {
           ports = [];
         }
-        const tcpPorts = ports.filter((entry) => entry.protocol === 'tcp');
-        // Group every TCP listener by port. A loopback-reachable binding wins
-        // for the localhost URL; otherwise use the bound LAN/Tailnet address.
-        const candidatePorts = [...new Set(tcpPorts.map((entry) => entry.port))].sort((a, b) => a - b);
-        if (candidatePorts.length === 0) {
+        // Group every TCP listener into one openable URL per distinct port
+        // (loopback-reachable bind wins localhost; otherwise the bound
+        // LAN/Tailnet address). Shared with the pane context menu's port list.
+        const entries = listenerUrlsByPort(ports);
+        if (entries.length === 0) {
           detail.respond({ ok: false, error: `surface '${target.ref}' is not serving any port` });
           return;
         }
-        if (candidatePorts.length > 1) {
+        if (entries.length > 1) {
           detail.respond({
             ok: false,
-            error: `surface '${target.ref}' is serving multiple ports (${candidatePorts.join(', ')}); open one explicitly, e.g. http://localhost:${candidatePorts[0]}`,
+            error: `surface '${target.ref}' is serving multiple ports (${entries.map((entry) => entry.port).join(', ')}); open one explicitly, e.g. http://localhost:${entries[0].port}`,
           });
           return;
         }
-        const port = candidatePorts[0];
-        const portListeners = tcpPorts.filter((entry) => entry.port === port);
-        const loopbackListener = portListeners.find((entry) => servesLoopback(entry.address));
-        const selectedListener = loopbackListener ?? [...portListeners].sort((a, b) => {
-          if (a.family !== b.family) return a.family === 'IPv4' ? -1 : 1;
-          return a.address < b.address ? -1 : a.address > b.address ? 1 : 0;
-        })[0];
-        const host = loopbackListener
-          ? 'localhost'
-          : selectedListener.family === 'IPv6'
-            ? `[${selectedListener.address}]`
-            : selectedListener.address;
         detail.respond({
           ok: true,
           result: {
             surfaceId: target.id,
             surfaceRef: target.ref,
-            port,
-            url: `http://${host}:${port}/`,
+            port: entries[0].port,
+            url: entries[0].url,
           },
         });
         return;
@@ -853,5 +880,7 @@ export function useDorControl({
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, findAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
+  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
+
+  return { ensureAgentBrowserSurface };
 }

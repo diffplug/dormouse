@@ -161,6 +161,7 @@ polls only while a wanted port is still unmatched. Reload revalidates
 optimistically.
 
 Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
+`lib/src/components/wall/port-url.ts` (the `servesLoopback` predicate),
 `lib/src/components/wall/agent-browser-ports.ts`,
 `lib/src/components/wall/browser-url.ts`.
 

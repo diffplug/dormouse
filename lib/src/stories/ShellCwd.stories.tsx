@@ -53,6 +53,8 @@ const noopActions: WallActions = {
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
   onSwapRenderMode: () => {},
+  resolveSurfaceRef: (id) => id,
+  onConnectPort: async () => ({ ok: true }),
 };
 
 const meta: Meta<typeof ShellCwdMatrix> = {

@@ -71,6 +71,7 @@ import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
 import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
 import { useDorControl } from './wall/use-dor-control';
+import { connectPortToDefaultBrowser } from './wall/connect-port';
 import { useWindowFocused } from './wall/use-window-focused';
 import {
   DialogKeyboardContext,
@@ -1106,7 +1107,7 @@ export function Wall({
   }, [generatePaneId, surfaceRefForId, forgetSurfaceRef, selectPane, showShellSpawnNotice, lath, nav]);
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
-  useDorControl({
+  const { ensureAgentBrowserSurface } = useDorControl({
     lath,
     nav,
     doorsRef,
@@ -1285,7 +1286,20 @@ export function Wall({
         title: hostPathDisplay(url, true),
       });
     },
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, lath, nav]);
+    resolveSurfaceRef: (id) => surfaceRefForId(id),
+    onConnectPort: async (id, url) => {
+      // The pane context menu's "connect a port" action: act like `dor ab open`.
+      const reference = buildDorSurfaces().find((s) => s.id === id);
+      if (!reference) return { ok: false, message: 'pane is gone' };
+      return connectPortToDefaultBrowser({
+        url,
+        reference,
+        platform: getPlatform(),
+        binaryPath: lastAgentBrowserBinaryPathRef.current,
+        ensureSurface: ensureAgentBrowserSurface,
+      });
+    },
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, ensureAgentBrowserSurface, lath, nav]);
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
 
