@@ -17,6 +17,10 @@ Extension Host (vscode-ext/src/)
 ├── pty-manager.ts            — PTY lifecycle, buffering (1M char cap), CWD queries
 ├── pty-host.js               — forked child process wrapping pty-core via node-pty
 ├── session-state.ts          — workspaceState persistence + alert state merging
+├── workspace-chrome.ts       — reflect Workspace union status (bell/TODO) onto native chrome title
+├── shell-selection.ts        — persisted shell picker (workspace/global selectedShellPath)
+├── agent-browser-host.ts     — extension-host wiring + stream relay for the agent-browser surface
+├── iframe-proxy-host.ts      — VS Code binding for the iframe transparent proxy (injects the logger)
 ├── webview-html.ts           — CSP injection, nonce generation, asset URI rewriting
 └── log.ts                    — extension logging
 
