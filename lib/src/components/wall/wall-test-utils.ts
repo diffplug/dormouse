@@ -19,7 +19,7 @@ export function stubWallActions(overrides: Partial<WallActions> = {}): WallActio
     onCancelRename: vi.fn(),
     onSwapRenderMode: vi.fn(),
     resolveSurfaceRef: vi.fn((id: string) => id),
-    onConnectPort: vi.fn(async () => ({ ok: true as const })),
+    onConnectPort: vi.fn(),
     ...overrides,
   };
 }

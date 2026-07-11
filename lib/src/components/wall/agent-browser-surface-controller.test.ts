@@ -279,6 +279,30 @@ describe('updateParams', () => {
 });
 
 describe('stale-port recovery gating', () => {
+  it('stays fully inert for a session-less pane until params deliver the session', async () => {
+    const streamStatus = vi.fn<PlatformAdapter['agentBrowserStreamStatus']>(async () => ({ ok: true, wsPort: 2222 }));
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserStreamStatus'>;
+    platform.agentBrowserStreamStatus = streamStatus;
+    setPlatform(platform);
+
+    // The pane context menu's instant connect mounts its surface WITHOUT a
+    // session precisely so nothing here can race the daemon boot — no recovery
+    // query, no socket (docs/specs/dor-browser.md → Pane Context Menu Connect).
+    // Deriving the session from `key` would silently reintroduce the race.
+    const controller = acquireAgentBrowserSurfaceController('id', { key: 'default', url: 'http://localhost:5173/' });
+    const sink = makeSink();
+    controller.attachView(sink);
+    await flushMicrotasks();
+    expect(streamStatus).not.toHaveBeenCalled();
+    expect(WebSocketMock.instances).toHaveLength(0);
+
+    // The background boot hands over {session, wsPort} in one params write,
+    // which is what brings the stream up.
+    controller.updateParams({ key: 'default', url: 'http://localhost:5173/', session: 'sess', wsPort: 1111 });
+    await flushMicrotasks();
+    expect(streamSocket(1111)?.readyState).toBe(1);
+  });
+
   it('never queries stream status while parked', async () => {
     vi.useFakeTimers();
     try {

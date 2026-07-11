@@ -14,6 +14,9 @@ type ScanState =
   | { status: 'loaded'; entries: PortUrlEntry[] }
   | { status: 'failed' };
 
+// One recipe for both interactive rows (port entries, title candidates).
+const MENU_ROW_CLASS = 'flex w-full items-baseline gap-2 px-2.5 py-1 text-left hover:bg-foreground/10';
+
 /**
  * The right-click menu on a terminal pane header (`docs/specs/layout.md` → Pane
  * header): the pane's `surface:N` handle, then the TCP ports its process tree
@@ -70,7 +73,7 @@ export function PaneHeaderContextMenu({
   // Fire-and-forget: the pane appears immediately and reports its own progress, so
   // the menu closes at once rather than waiting on the daemon boot.
   const connect = (entry: PortUrlEntry) => {
-    void actions.onConnectPort(id, entry.url);
+    actions.onConnectPort(id, entry.url);
     onClose();
   };
 
@@ -113,7 +116,7 @@ export function PaneHeaderContextMenu({
             type="button"
             role="menuitem"
             data-port-entry={entry.port}
-            className="flex w-full items-baseline gap-2 px-2.5 py-1 text-left hover:bg-foreground/10"
+            className={MENU_ROW_CLASS}
             onClick={() => connect(entry)}
           >
             {label}
@@ -129,7 +132,7 @@ export function PaneHeaderContextMenu({
         type="button"
         role="menuitem"
         data-title-candidates-item
-        className="flex w-full items-baseline gap-2 px-2.5 py-1 text-left text-muted hover:bg-foreground/10 hover:text-foreground"
+        className={`${MENU_ROW_CLASS} text-muted hover:text-foreground`}
         onClick={() => { onClose(); onShowTitleCandidates(); }}
       >
         title candidates

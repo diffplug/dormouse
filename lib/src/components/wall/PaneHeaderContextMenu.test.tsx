@@ -101,7 +101,7 @@ describe('PaneHeaderContextMenu — pane header right-click', () => {
     enableConnect(platform);
     platform.spawnPty('term-1');
     platform.setOpenPorts('term-1', [loopbackPort(5173, 'node')]);
-    const onConnectPort = vi.fn(async () => ({ ok: true as const }));
+    const onConnectPort = vi.fn();
     renderHeader(headerProps('term-1', 't'), stubActions({ onConnectPort }));
 
     await act(async () => { fireContextMenu(); });

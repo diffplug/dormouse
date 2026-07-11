@@ -2,7 +2,6 @@ import { createContext } from 'react';
 import type { AlertButtonActionResult, SessionStatus, SetTerminalUserTitleResult } from '../../lib/terminal-registry';
 import type { WallMode } from './wall-types';
 import type { RenderMode } from './agent-browser-screen';
-import type { ConnectPortResult } from './connect-port';
 
 export interface PaneElementsState {
   elements: Map<string, HTMLElement>;
@@ -55,9 +54,9 @@ export interface WallActions {
   resolveSurfaceRef: (id: string) => string;
   /** Act like `dor ab open <url>` for a port the pane's process tree binds: create
    *  the default agent-browser surface immediately, then open the URL on its
-   *  session and connect the pane (`connect-port.ts`). The menu fires-and-forgets;
-   *  the promise (resolving with any failure message) is tapped/logged, not shown. */
-  onConnectPort: (id: string, url: string) => Promise<ConnectPortResult>;
+   *  session and connect the pane (`connect-port.ts`). Fire-and-forget — failures
+   *  are logged, and the pane itself shows loading state. */
+  onConnectPort: (id: string, url: string) => void;
 }
 
 export const WallActionsContext = createContext<WallActions>({
@@ -76,7 +75,7 @@ export const WallActionsContext = createContext<WallActions>({
   onSwapRenderMode: () => {},
   onOpenBrowserPane: () => {},
   resolveSurfaceRef: (id: string) => id,
-  onConnectPort: async () => ({ ok: false, message: 'no Wall is mounted' }),
+  onConnectPort: () => {},
 });
 
 /** Engine-directed writes from a pane/header (title + params). The read side is

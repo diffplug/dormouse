@@ -150,14 +150,6 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const closeTodoPreview = useCallback(() => setTodoPreviewRect(null), []);
   const closeTitleCandidates = useCallback(() => setTitleCandidatesRect(null), []);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
-  // Reachable from the context menu now that the title span owns no right-click.
-  // Anchor to the span; fall back to the menu's pointer position when the span is
-  // absent (e.g. mid-rename, when an input replaces it).
-  const showTitleCandidates = useCallback(() => {
-    const rect = titleSpanRef.current?.getBoundingClientRect()
-      ?? (contextMenu ? new DOMRect(contextMenu.x, contextMenu.y, 0, 0) : null);
-    if (rect) setTitleCandidatesRect(rect);
-  }, [contextMenu]);
   const closeRenameWarning = useCallback(() => setRenameWarning(null), []);
   const submitRename = useCallback((value: string, anchor: HTMLElement) => {
     const rect = anchor.getBoundingClientRect();
@@ -409,7 +401,11 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
           id={id}
           anchor={contextMenu}
           onClose={closeContextMenu}
-          onShowTitleCandidates={showTitleCandidates}
+          // Anchor to the title span; fall back to the menu's pointer position
+          // when the span is absent (mid-rename, when an input replaces it).
+          onShowTitleCandidates={() => setTitleCandidatesRect(
+            titleSpanRef.current?.getBoundingClientRect() ?? new DOMRect(contextMenu.x, contextMenu.y, 0, 0),
+          )}
         />
       )}
       {renameWarning && (

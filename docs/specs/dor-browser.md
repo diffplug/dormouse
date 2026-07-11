@@ -301,6 +301,11 @@ the same zero-resource end state with less thrash. The agent-browser
 daemon/session stays alive throughout and reattaches from persisted params. The
 controller's client resources are released only at pane kill or a render swap
 away from the renderer (`disposeAgentBrowserSurfaceController` in `Wall.tsx`).
+A controller whose params carry no `session` is deliberately inert — no
+connection, no `stream status` query: the instant connect flow
+([Pane Context Menu Connect](#pane-context-menu-connect)) depends on that
+inertness to keep the eager pane from racing the daemon boot, so the session
+must never be derived from `key` here.
 
 Hidden-but-mounted panes park too. A Lath leaf is always mounted (no active-tab
 gating), so a backgrounded window would keep its ~20Hz stream plus per-pulse
