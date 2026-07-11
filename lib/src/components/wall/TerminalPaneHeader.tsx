@@ -126,6 +126,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const isActiveHeader = mode === 'passthrough' && isSelected && windowFocused;
   const isRenaming = renamingId === id;
   const tabRef = useRef<HTMLDivElement>(null);
+  const titleSpanRef = useRef<HTMLSpanElement>(null);
   const suppressAlertClickRef = useRef(false);
   const [tier, setTier] = useState<HeaderTier>('full');
   const [dialogTriggerRect, setDialogTriggerRect] = useState<DOMRect | null>(null);
@@ -149,6 +150,14 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const closeTodoPreview = useCallback(() => setTodoPreviewRect(null), []);
   const closeTitleCandidates = useCallback(() => setTitleCandidatesRect(null), []);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  // Reachable from the context menu now that the title span owns no right-click.
+  // Anchor to the span; fall back to the menu's pointer position when the span is
+  // absent (e.g. mid-rename, when an input replaces it).
+  const showTitleCandidates = useCallback(() => {
+    const rect = titleSpanRef.current?.getBoundingClientRect()
+      ?? (contextMenu ? new DOMRect(contextMenu.x, contextMenu.y, 0, 0) : null);
+    if (rect) setTitleCandidatesRect(rect);
+  }, [contextMenu]);
   const closeRenameWarning = useCallback(() => setRenameWarning(null), []);
   const submitRename = useCallback((value: string, anchor: HTMLElement) => {
     const rect = anchor.getBoundingClientRect();
@@ -194,8 +203,9 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
       className={tabVariant({ state: isActiveHeader ? 'active' : 'inactive' })}
       onMouseDown={() => actions.onClickPanel(id)}
       onContextMenu={(e) => {
-        // The title span and bell button both stopPropagation their own
-        // right-clicks, so this only fires on the header's bare regions.
+        // The whole header opens this one menu; only the bell button
+        // stopPropagations its own right-click (the alert dialog). Right-clicks
+        // on the title now bubble here — the menu offers "title candidates".
         e.preventDefault();
         e.stopPropagation();
         setContextMenu({ x: e.clientX, y: e.clientY });
@@ -222,15 +232,11 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
           />
         ) : (
           <span
+            ref={titleSpanRef}
             data-title-candidates-for={id}
             className="inline-flex max-w-full min-w-0 shrink cursor-text items-baseline overflow-hidden font-medium text-inherit decoration-current/50 underline-offset-2 hover:underline"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); actions.onStartRename(id); }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setTitleCandidatesRect(e.currentTarget.getBoundingClientRect());
-            }}
           >
             <span className="min-w-0 shrink truncate">{displayTitleBase}</span>
             {showsFailGlyph && (
@@ -399,7 +405,12 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
         />
       )}
       {contextMenu && (
-        <PaneHeaderContextMenu id={id} anchor={contextMenu} onClose={closeContextMenu} />
+        <PaneHeaderContextMenu
+          id={id}
+          anchor={contextMenu}
+          onClose={closeContextMenu}
+          onShowTitleCandidates={showTitleCandidates}
+        />
       )}
       {renameWarning && (
         <IllegalRenameWarning

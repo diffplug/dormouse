@@ -97,7 +97,7 @@ describe('PaneHeaderContextMenu — pane header right-click', () => {
     expect(menu?.textContent).toContain('node');
   });
 
-  it('connects a port (dor ab open) and closes the menu on success', async () => {
+  it('fires the connect and closes the menu immediately (loading feedback lives in the pane)', async () => {
     enableConnect(platform);
     platform.spawnPty('term-1');
     platform.setOpenPorts('term-1', [loopbackPort(5173, 'node')]);
@@ -112,23 +112,6 @@ describe('PaneHeaderContextMenu — pane header right-click', () => {
 
     expect(onConnectPort).toHaveBeenCalledWith('term-1', 'http://localhost:5173/');
     expect(menuFor('term-1')).toBeNull();
-  });
-
-  it('surfaces the failure message and keeps rows enabled when connect fails', async () => {
-    enableConnect(platform);
-    platform.spawnPty('term-1');
-    platform.setOpenPorts('term-1', [loopbackPort(5173)]);
-    const onConnectPort = vi.fn(async () => ({ ok: false as const, message: 'agent-browser open exited 1' }));
-    renderHeader(headerProps('term-1', 't'), stubActions({ onConnectPort }));
-
-    await act(async () => { fireContextMenu(); });
-    const button = menuFor('term-1')?.querySelector('button[data-port-entry="5173"]') as HTMLButtonElement;
-    await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-
-    const menu = menuFor('term-1');
-    expect(menu).not.toBeNull();
-    expect(menu?.textContent).toContain('agent-browser open exited 1');
-    expect((menu?.querySelector('button[data-port-entry="5173"]') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('shows an empty state when the scan finds no listening ports', async () => {
@@ -163,5 +146,32 @@ describe('PaneHeaderContextMenu — pane header right-click', () => {
     expect(menuFor('term-1')).not.toBeNull();
     act(() => { window.dispatchEvent(new Event('pointerdown')); });
     expect(menuFor('term-1')).toBeNull();
+  });
+
+  it('opens the one context menu on a title-span right-click (not a second popover)', async () => {
+    renderHeader(headerProps('term-1', 'title'), stubActions());
+
+    const titleSpan = container.querySelector('[data-title-candidates-for="term-1"]') as HTMLElement;
+    expect(titleSpan).not.toBeNull();
+    await act(async () => {
+      titleSpan.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 12 }));
+    });
+
+    expect(menuFor('term-1')).not.toBeNull();
+    // The title span no longer opens its own popover — only the context menu.
+    expect(document.body.querySelector('[aria-label="Title candidates"]')).toBeNull();
+  });
+
+  it('opens the title-candidates popover from the menu item and closes the menu', async () => {
+    renderHeader(headerProps('term-1', 'title'), stubActions());
+
+    await act(async () => { fireContextMenu(); });
+    const item = menuFor('term-1')?.querySelector('[data-title-candidates-item]') as HTMLButtonElement;
+    expect(item).not.toBeNull();
+
+    await act(async () => { item.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(menuFor('term-1')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"][aria-label="Title candidates"]')).not.toBeNull();
   });
 });

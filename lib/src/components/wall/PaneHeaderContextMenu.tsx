@@ -17,26 +17,29 @@ type ScanState =
 /**
  * The right-click menu on a terminal pane header (`docs/specs/layout.md` → Pane
  * header): the pane's `surface:N` handle, then the TCP ports its process tree
- * binds. Clicking a port reproduces `dor ab open <url>` via
- * `WallActions.onConnectPort` (`docs/specs/dor-browser.md` → Pane Context Menu
- * Connect). Port rows are only clickable when the host can run agent-browser;
- * otherwise the list is an inert label (the host-gated-affordance convention).
+ * binds, then a "title candidates" row that opens the diagnostic popover.
+ * Clicking a port fires `dor ab open <url>` via `WallActions.onConnectPort`
+ * (`docs/specs/dor-browser.md` → Pane Context Menu Connect) and closes the menu
+ * immediately — the new pane's own "Connecting…" placeholder is the loading
+ * feedback, and a failure is logged, not shown here. Port rows are only clickable
+ * when the host can run agent-browser; otherwise the list is an inert label (the
+ * host-gated-affordance convention).
  */
 export function PaneHeaderContextMenu({
   id,
   anchor,
   onClose,
+  onShowTitleCandidates,
 }: {
   id: string;
   anchor: { x: number; y: number };
   onClose: () => void;
+  onShowTitleCandidates: () => void;
 }) {
   const actions = useContext(WallActionsContext);
   const ref = useRef<HTMLDivElement>(null);
   const [style, setStyle] = useState<CSSProperties>({ position: 'fixed', left: anchor.x, top: anchor.y });
   const [scan, setScan] = useState<ScanState>({ status: 'scanning' });
-  const [connectingPort, setConnectingPort] = useState<number | null>(null);
-  const [connectError, setConnectError] = useState<string | null>(null);
 
   // Absent ⇒ opening a browser surface isn't supported here; port rows render as
   // plain labels rather than buttons (the list stays informative).
@@ -54,29 +57,22 @@ export function PaneHeaderContextMenu({
   }, [id]);
 
   // Clamp inside the viewport once measured; re-run when the content height
-  // changes (scanning → loaded, or an error line appears).
+  // changes (scanning → loaded).
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
     setStyle(clampOverlayPosition({ left: anchor.x, top: anchor.y, width: rect.width, height: rect.height }));
-  }, [anchor.x, anchor.y, scan, connectError]);
+  }, [anchor.x, anchor.y, scan]);
 
   useDismissOverlay(onClose);
 
-  const connect = async (entry: PortUrlEntry) => {
-    setConnectError(null);
-    setConnectingPort(entry.port);
-    const result = await actions.onConnectPort(id, entry.url);
-    if (result.ok) {
-      onClose();
-    } else {
-      setConnectError(result.message);
-      setConnectingPort(null);
-    }
+  // Fire-and-forget: the pane appears immediately and reports its own progress, so
+  // the menu closes at once rather than waiting on the daemon boot.
+  const connect = (entry: PortUrlEntry) => {
+    void actions.onConnectPort(id, entry.url);
+    onClose();
   };
-
-  const connecting = connectingPort !== null;
 
   return createPortal(
     <div
@@ -117,14 +113,10 @@ export function PaneHeaderContextMenu({
             type="button"
             role="menuitem"
             data-port-entry={entry.port}
-            disabled={connecting}
-            className="flex w-full items-baseline gap-2 px-2.5 py-1 text-left hover:bg-foreground/10 disabled:cursor-default disabled:opacity-60"
+            className="flex w-full items-baseline gap-2 px-2.5 py-1 text-left hover:bg-foreground/10"
             onClick={() => connect(entry)}
           >
             {label}
-            {connectingPort === entry.port && (
-              <CircleNotchIcon className="ml-auto shrink-0 animate-spin" size={13} weight="bold" />
-            )}
           </button>
         ) : (
           <div key={entry.port} data-port-entry={entry.port} className="flex items-baseline gap-2 px-2.5 py-1">
@@ -132,12 +124,16 @@ export function PaneHeaderContextMenu({
           </div>
         );
       })}
-      {connectError && (
-        <>
-          <div className="my-1 border-t border-border" />
-          <div className="truncate px-2.5 py-0.5 text-muted" title={connectError}>{connectError}</div>
-        </>
-      )}
+      <div className="my-1 border-t border-border" />
+      <button
+        type="button"
+        role="menuitem"
+        data-title-candidates-item
+        className="flex w-full items-baseline gap-2 px-2.5 py-1 text-left text-muted hover:bg-foreground/10 hover:text-foreground"
+        onClick={() => { onClose(); onShowTitleCandidates(); }}
+      >
+        title candidates
+      </button>
     </div>,
     document.body,
   );

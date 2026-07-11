@@ -182,9 +182,30 @@ keeps focus) — the wall-side mirror of the CLI flow, not the control plane. It
 host-gated on `agentBrowserCommand`: absent (e.g. the web demo host), the rows
 render as inert labels.
 
+**Instant create.** The click is fire-and-forget: the menu closes at once and the
+pane appears **before** `agent-browser open` runs (a cold daemon boot is 1–3s).
+The eager surface is created **without a `session`** — deliberately: a
+session-less `ab-screencast` pane is inert (the controller's `maybeRecoverStalePort`
+returns early with no session, so it spawns no CLI and cannot race the daemon
+boot), while the panel still shows `Connecting to browser session…`. It carries
+`key: 'default'` and the target `url` so the browser chrome shows the destination
+immediately. Once `open` succeeds, a best-effort `stream status` runs, then the
+pane receives `{session, wsPort, binaryPath}` as **one** params refresh — setting
+`session` reconciles the controller and connects it (safe now: the daemon is up).
+If `open` fails, the pane is still handed the `session` (so its placeholder names
+it) and the failure is logged, not shown in the (already closed) menu.
+
+The eager lookup reuses before it creates: (a) a surface already bound to the
+default session, else (b) a still-booting session-less `key: 'default'` pane from a
+rapid earlier click (so a double-click doesn't spawn two panes), else (c) a fresh
+session-less pane. Accepted edge: a pane persisted mid-boot restores session-less
+and stays a `Connecting…` placeholder — kill it, or connect again (the eager
+lookup reuses it via arm (b)).
+
 Source of truth: `lib/src/components/wall/connect-port.ts`
 (`connectPortToDefaultBrowser`), the `connectPort` binding in
-`use-dor-control.ts` (reusing `ensureAgentBrowserSurface`),
+`use-dor-control.ts` (its `ensureEagerSurface` + `updateSurfaceParams` seams,
+shared with `ensureAgentBrowserSurface`),
 `lib/src/components/wall/PaneHeaderContextMenu.tsx`.
 
 ## Display Modal And Render Swaps

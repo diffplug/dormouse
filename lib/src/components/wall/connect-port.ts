@@ -3,14 +3,20 @@
  * pane context menu (see `dor/src/commands/agent-browser.ts` for the CLI flow).
  * Opens the URL in the workspace's default agent-browser session and reuses or
  * creates that session's browser surface. Dependency-injected (platform +
- * `ensureSurface`) so it stays unit-testable off the React tree.
+ * eager-surface/refresh seams) so it stays unit-testable off the React tree.
+ *
+ * Sequencing (`docs/specs/dor-browser.md` → Pane Context Menu Connect): the pane
+ * is created SYNCHRONOUSLY and WITHOUT a `session`, so it appears the instant the
+ * port is clicked and the controller's stale-port recovery stays inert until the
+ * daemon is up (a session-less agent-browser pane spawns no CLI). The background
+ * `open` + `stream status` then deliver `{session, wsPort, binaryPath}` as one
+ * params refresh.
  */
 import type { PlatformAdapter } from '../../lib/platform/types';
-import type { ParseResult, Surface as DorSurface } from 'dor/commands/types';
+import type { ParseResult } from 'dor/commands/types';
 // The browser-safe subpath: dist/agent-browser.js is pure ES, so importing it
 // keeps cross-spawn (the package's Node-only default export) out of the webview.
 import { sessionForKey } from 'dor-lib-common/agent-browser';
-import type { EnsureAgentBrowserSurface } from './use-dor-control';
 
 /** The host capabilities `connectPortToDefaultBrowser` needs — the same two the
  *  CLI path leans on, narrowed so tests can stub them without a full adapter. */
@@ -20,32 +26,41 @@ export type ConnectPortResult = { ok: true } | { ok: false; message: string };
 
 export async function connectPortToDefaultBrowser({
   url,
-  reference,
   platform,
   binaryPath,
-  ensureSurface,
+  ensureEagerSurface,
+  refreshSurface,
 }: {
   url: string;
-  /** The pane the port belongs to — the split reference for a fresh surface.
-   *  Lazy for the same reason as `EnsureAgentBrowserSurface`'s: the reuse path
-   *  must succeed even when the pane is no longer visible. */
-  reference: () => ParseResult<DorSurface>;
   platform: ConnectPlatform;
   /** Last binary path a `dor ab` surface resolved; undefined ⇒ host falls back
    *  to PATH / DORMOUSE_AGENT_BROWSER_BIN. */
   binaryPath?: string;
-  ensureSurface: EnsureAgentBrowserSurface;
+  /** Reuse-or-create the default browser pane synchronously, before the daemon
+   *  boots, so the pane is on screen the instant the port is clicked. Created
+   *  session-less on purpose (see file header). */
+  ensureEagerSurface: (session: string) => ParseResult<{ surfaceId: string }>;
+  /** Fold a params patch onto the eager surface (visible pane or minimized door)
+   *  — used to hand the pane its `session` and refreshed stream port. */
+  refreshSurface: (surfaceId: string, patch: Record<string, unknown>) => void;
 }): Promise<ConnectPortResult> {
-  const session = sessionForKey('default');
   // Host-gated: no agent-browser runner ⇒ no browser surface (same spirit as the
-  // render-swap guard in Wall.tsx).
+  // render-swap guard in Wall.tsx). Short-circuit before touching the layout.
   if (!platform.agentBrowserCommand) {
     return { ok: false, message: 'opening a browser surface is not supported on this host' };
   }
+  const session = sessionForKey('default');
+  // Pane appears NOW, session-less — the controller can't race the daemon boot.
+  const eager = ensureEagerSurface(session);
+  if (!eager.ok) return { ok: false, message: eager.message };
+
   // 'open' is on the host's subcommand allowlist; the CLI boots the daemon/browser
   // if it isn't already running.
   const opened = await platform.agentBrowserCommand(session, ['open', url], binaryPath);
   if (opened.exitCode !== 0) {
+    // The pane stays; hand it the session so its placeholder names the session
+    // instead of sitting sessionless.
+    refreshSurface(eager.value.surfaceId, { session });
     return { ok: false, message: opened.stderr.trim() || `agent-browser open exited ${opened.exitCode}` };
   }
   // Best-effort stream port so the panel connects straight to the live screencast;
@@ -55,7 +70,12 @@ export async function connectPortToDefaultBrowser({
     const status = await platform.agentBrowserStreamStatus(session, binaryPath);
     if (status.ok) wsPort = status.wsPort;
   }
-  const ensured = ensureSurface({ key: 'default', session, wsPort, binaryPath, reference });
-  if (!ensured.ok) return { ok: false, message: ensured.message };
+  // One params write reconciles the session-less pane: setting `session` connects
+  // the controller (the daemon is up now, so its recovery is safe to run).
+  refreshSurface(eager.value.surfaceId, {
+    session,
+    ...(wsPort !== undefined ? { wsPort } : {}),
+    ...(binaryPath !== undefined ? { binaryPath } : {}),
+  });
   return { ok: true };
 }

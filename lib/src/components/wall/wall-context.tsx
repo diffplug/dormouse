@@ -53,10 +53,10 @@ export interface WallActions {
   /** The stable `surface:N` ref for a pane/door id (minted lazily, exactly as
    *  `dor list` assigns refs). Used by the pane context menu to show the handle. */
   resolveSurfaceRef: (id: string) => string;
-  /** Act like `dor ab open <url>` for a port the pane's process tree binds: open
-   *  the URL in the workspace's default agent-browser session and reuse-or-create
-   *  its browser surface (`connect-port.ts`). Resolves with a failure message the
-   *  menu can surface. */
+  /** Act like `dor ab open <url>` for a port the pane's process tree binds: create
+   *  the default agent-browser surface immediately, then open the URL on its
+   *  session and connect the pane (`connect-port.ts`). The menu fires-and-forgets;
+   *  the promise (resolving with any failure message) is tapped/logged, not shown. */
   onConnectPort: (id: string, url: string) => Promise<ConnectPortResult>;
 }
 

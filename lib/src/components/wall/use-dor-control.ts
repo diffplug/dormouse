@@ -20,7 +20,8 @@ import {
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { hostPathDisplay } from './browser-url';
 import { isAgentBrowserParams } from './browser-surface';
-// Runtime import is one-way (connect-port's use-dor-control import is type-only).
+// One-way import: connect-port no longer depends on this module (its eager-surface
+// and refresh seams are injected as plain functions).
 import { connectPortToDefaultBrowser, type ConnectPortResult } from './connect-port';
 import { listenerUrlsByPort } from './port-url';
 import { dorDirectionForEdge, type LathWallEngine } from './lath-wall-engine';
@@ -441,6 +442,24 @@ export function useDorControl({
     return null;
   }, [lath]);
 
+  // Fold a params patch onto a surface whether it's a visible pane (engine
+  // metadata) or a minimized door (the doorsRef map) — the reuse/refresh
+  // mechanics shared by `ensureAgentBrowserSurface`'s reuse arm and the
+  // connect-port refresh seam. A no-op on an empty patch.
+  const updateSurfaceParams = useCallback((id: string, patch: Record<string, unknown>) => {
+    if (Object.keys(patch).length === 0) return;
+    const door = doorsRef.current.find((candidate) => candidate.id === id);
+    if (door) {
+      const nextDoors = doorsRef.current.map((d) => d.id === id
+        ? { ...d, params: { ...d.params, ...patch } }
+        : d);
+      doorsRef.current = nextDoors;
+      setDoors(nextDoors);
+    } else {
+      lath.store.updateParams(id, patch);
+    }
+  }, [doorsRef, lath, setDoors]);
+
   const ensureAgentBrowserSurface = useCallback<EnsureAgentBrowserSurface>(({
     key,
     session,
@@ -461,17 +480,7 @@ export function useDorControl({
       // Reuse: refresh the stream port (OS-assigned, churns across session
       // restarts) so the panel reconnects to the live stream, and the
       // resolved binary path alongside it.
-      if (Object.keys(refreshedParams).length > 0) {
-        if (existing.minimized) {
-          const nextDoors = doorsRef.current.map((door) => door.id === existing.id
-            ? { ...door, params: { ...door.params, ...refreshedParams } }
-            : door);
-          doorsRef.current = nextDoors;
-          setDoors(nextDoors);
-        } else {
-          lath.store.updateParams(existing.id, refreshedParams);
-        }
-      }
+      updateSurfaceParams(existing.id, refreshedParams);
       return {
         ok: true,
         status: 'existing',
@@ -505,23 +514,64 @@ export function useDorControl({
       surfaceRef: result.value.ref,
       minimized,
     };
-  }, [createContentSurface, findAgentBrowserSurface, lath, setDoors, surfaceRefForId]);
+  }, [createContentSurface, findAgentBrowserSurface, updateSurfaceParams, surfaceRefForId]);
 
   // The pane context menu's "connect a port" action, bound to this hook's
   // closure so Wall.tsx delegates in one line instead of re-threading the
-  // hook's internals (`ensureAgentBrowserSurface`, the binary-path ref).
-  const connectPort = useCallback((id: string, url: string) => connectPortToDefaultBrowser({
-    url,
-    // Lazy: the reuse path must succeed even if the pane vanished (e.g. was
+  // hook's internals. The pane is created eagerly and session-less so it appears
+  // instantly; `connectPortToDefaultBrowser` then hands it its session +
+  // stream port (docs/specs/dor-browser.md → Pane Context Menu Connect).
+  const connectPort = useCallback((id: string, url: string): Promise<ConnectPortResult> => {
+    // Lazy: the create path must succeed even if the pane vanished (e.g. was
     // minimized) between the right-click and the connect resolving.
-    reference: () => {
+    const reference = (): ParseResult<DorSurface> => {
       const surface = buildDorSurfaces().find((candidate) => candidate.id === id);
       return surface ? { ok: true, value: surface } : { ok: false, message: `surface for pane '${id}' was not found` };
-    },
-    platform: getPlatform(),
-    binaryPath: lastAgentBrowserBinaryPathRef.current,
-    ensureSurface: ensureAgentBrowserSurface,
-  }), [buildDorSurfaces, ensureAgentBrowserSurface, lastAgentBrowserBinaryPathRef]);
+    };
+    const ensureEagerSurface = (session: string): ParseResult<{ surfaceId: string }> => {
+      // (a) A surface already bound to this session — reuse; params untouched
+      // (the navigation + final refresh handle the rest).
+      const existing = findAgentBrowserSurface(session);
+      if (existing) return { ok: true, value: { surfaceId: existing.id } };
+      // (b) A still-booting default pane from a rapid earlier connect (created
+      // but not yet handed its session) — reuse it so a second click during the
+      // daemon boot doesn't spawn a duplicate.
+      const isBooting = (params: unknown) =>
+        isAgentBrowserParams(params)
+        && (params as { key?: unknown }).key === 'default'
+        && (params as { session?: unknown }).session === undefined;
+      const bootingId = lath.listPanes().find((candidate) => isBooting(candidate.params))?.id
+        ?? doorsRef.current.find((candidate) => isBooting(candidate.params))?.id;
+      if (bootingId) return { ok: true, value: { surfaceId: bootingId } };
+      // (c) Create it now: NO `session` (keeps the controller's stale-port
+      // recovery inert until the daemon is up), but carry the target `url` so
+      // the browser chrome shows it immediately.
+      const target = reference();
+      if (!target.ok) return { ok: false, message: target.message };
+      const created = createContentSurface({
+        minimized: false,
+        params: { surfaceType: 'browser', renderMode: 'ab-screencast', key: 'default', url },
+        reference: target.value,
+        title: 'default',
+        focusNeutral: true,
+      });
+      if (!created.ok) return { ok: false, message: created.message };
+      return { ok: true, value: { surfaceId: created.value.id } };
+    };
+    const result = connectPortToDefaultBrowser({
+      url,
+      platform: getPlatform(),
+      binaryPath: lastAgentBrowserBinaryPathRef.current,
+      ensureEagerSurface,
+      refreshSurface: updateSurfaceParams,
+    });
+    // The menu no longer surfaces errors (it closes instantly); log a failure the
+    // way the render-swap path in Wall.tsx does.
+    void result.then((outcome) => {
+      if (!outcome.ok) console.warn('[dormouse] connect port failed:', outcome.message);
+    });
+    return result;
+  }, [buildDorSurfaces, createContentSurface, findAgentBrowserSurface, lath, updateSurfaceParams, lastAgentBrowserBinaryPathRef]);
 
   useEffect(() => {
     const handler = async (event: Event) => {
