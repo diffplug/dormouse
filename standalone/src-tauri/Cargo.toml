@@ -1,6 +1,6 @@
 [package]
 name = "dormouse"
-version = "0.11.0"
+version = "1.0.0"
 description = "Persistent multitasking terminal for mice (and hotkey wizards too)"
 authors = ["DiffPlug"]
 license = "FSL-1.1-MIT"
