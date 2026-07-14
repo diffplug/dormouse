@@ -138,6 +138,11 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.artifact-name }}
+          # upload-artifact v4.4+ silently drops dotfiles by default. The zsh
+          # shell integration ships as ZDOTDIR dotfiles (.zshenv/.zshrc/…), so
+          # without this the artifact is missing files the manifest hashed and
+          # local hash verification fails.
+          include-hidden-files: true
           path: |
             standalone/artifact-manifest.sha256
             standalone/src-tauri/target/${{ matrix.target }}/release/dormouse.exe
