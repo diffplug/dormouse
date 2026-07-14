@@ -38,6 +38,14 @@
       "separateMajorMinor": false
     },
     {
+      "description": "Storybook core and its framework/addon packages are versioned in lockstep and their presets import across packages; a partial bump breaks the build, so keep them in one PR",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["storybook", "@storybook/**"],
+      "groupName": "storybook",
+      "groupSlug": "storybook",
+      "separateMajorMinor": false
+    },
+    {
       "description": "@types/node must track the pinned Node runtime major and must not expose APIs newer than the runtime we bundle",
       "matchManagers": ["npm"],
       "matchPackageNames": ["@types/node"],
