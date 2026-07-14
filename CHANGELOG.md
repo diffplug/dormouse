@@ -8,6 +8,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/). Release checklist in [deploy.md](docs/specs/deploy.md).
 
+## [1.0.1] - 2026-07-14
+
+_Recommended bump: **bugfix** — the only change repairs release packaging; no feature or behavior changes._
+
+### Fixed
+- 🖥️ CI release artifacts now include the zsh shell-integration files (`.zshenv`, `.zshrc`, `.zprofile`), which `actions/upload-artifact` silently dropped as hidden dotfiles. This is what blocked the standalone v1.0.0 binaries from shipping — hash verification correctly refused the incomplete artifacts — so 1.0.1 is the first standalone release of the 1.0 feature set. The VS Code extension was unaffected ([7ef0f440](https://github.com/diffplug/dormouse/commit/7ef0f440c8631a9616093e1c682b0425b682369a)).
+
 ## [1.0.0] - 2026-07-14
 ### Added
 - Added the **`dor` CLI**, staged onto the `PATH` of every Dormouse-launched terminal so you — or a coding agent — can drive the terminal grid from the command line. Surface commands open in the background without stealing focus ([#120](https://github.com/diffplug/dormouse/pull/120), [#212](https://github.com/diffplug/dormouse/pull/212), [#234](https://github.com/diffplug/dormouse/pull/234), [#239](https://github.com/diffplug/dormouse/pull/239), [#240](https://github.com/diffplug/dormouse/pull/240)):
