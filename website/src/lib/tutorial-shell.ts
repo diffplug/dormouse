@@ -101,6 +101,14 @@ export class TutorialShell {
         this.lineBuffer = '';
         this.historyIndex = null;
         this.historyDraft = '';
+        // `processCommand` may have launched an interactive program. Any bytes
+        // left in this chunk (e.g. a paste of `cmd\rinput`) belong to that
+        // program, not the shell line editor — forward them and stop parsing.
+        if (this.activeProgram) {
+          const rest = data.slice(index + 1);
+          if (rest) this.activeProgram.handleInput(rest);
+          return;
+        }
       } else if (ch === '\x7f' || ch === '\b') {
         if (this.lineBuffer.length > 0) {
           this.lineBuffer = this.lineBuffer.slice(0, -1);
