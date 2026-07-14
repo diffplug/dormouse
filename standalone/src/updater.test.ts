@@ -26,7 +26,8 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 // Force the Windows code path so the sidecar-kill-before-install branch is
-// exercised. updater.ts only consumes PLATFORM_STRING from this module.
+// exercised. updater.ts consumes IS_WINDOWS (gates the sidecar kill) and
+// PLATFORM_STRING (debug report) from this module.
 vi.mock('dormouse-lib/lib/platform', () => ({
   PLATFORM_STRING: 'Windows',
   IS_WINDOWS: true,
