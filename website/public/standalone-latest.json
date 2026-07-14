@@ -1,19 +1,19 @@
 {
-  "version": "0.11.0",
-  "notes": "See https://github.com/diffplug/dormouse/releases/tag/v0.11.0",
-  "pub_date": "2026-05-29T14:39:22Z",
+  "version": "1.0.1",
+  "notes": "See https://github.com/diffplug/dormouse/releases/tag/v1.0.1",
+  "pub_date": "2026-07-14T22:41:27Z",
   "platforms": {
     "darwin-aarch64": {
-      "url": "https://github.com/diffplug/dormouse/releases/download/v0.11.0/Dormouse-macos-aarch64.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYlpCcFVqWDVhckxKWFcyZ3ZjUnYyQXZGcWFuRFVhdkZTMElaUlFpd01INHJSaU9IYkMrUGJsdFd1eWw5WXJpcnV6Zm0vWnVlN2t4VUVtdUJuR0ZDVVlNL1BBOGtrYndrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgwMDY1NTYxCWZpbGU6RG9ybW91c2UtbWFjb3MtYWFyY2g2NC50YXIuZ3oKanUwUnpZUXcvY1cxaTdvZjZxLys1cFBZUVZvT3pSUkc5WG1BaFhwMUxhVTdyRWNWYUFHTURTNEFKVkp3SjZGMHZsSWQrMkdjNFE3NHJTYkRHOTc5Q0E9PQo="
+      "url": "https://github.com/diffplug/dormouse/releases/download/v1.0.1/Dormouse-macos-aarch64.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYlpCcFVqWDVhckp0c0lRd1NmeWlteVdjdHpWT3Q2N2ZlRGpLS2g3b1ZULzNFTHdGZEh5NCtFSEJjMTA2YUd1eXRqVWVLNUttMFQzVUtiM0tqWXlpTVFuTUZOMDVhZkFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MDY4ODg2CWZpbGU6RG9ybW91c2UtbWFjb3MtYWFyY2g2NC50YXIuZ3oKNzRRYzhXU1h5eTJDUUYwN0c3bEVMalFSeUJ4Z2UrZWYyQjRVd1NNa1VzWHo5d2RMc3ZhSDdBNGN6YjdheFUyVFlwTnA0N0xoMXdTeFArVzBRUlcvQXc9PQo="
     },
     "windows-x86_64": {
-      "url": "https://github.com/diffplug/dormouse/releases/download/v0.11.0/Dormouse-windows-x64-setup.exe",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYlpCcFVqWDVhclBXSUUvVGEyUlZIMHR4WW1EeW1XSFN2Qkp1b0ZybkZySG1PeVA0VWZjMWM2Q3ZpcjRQOWttZWxnWDNVaXhPUUpPUHdFdkR3dHIzR1lGRDFXMEhPa2d3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgwMDY1NTYxCWZpbGU6RG9ybW91c2Utd2luZG93cy14NjQtc2V0dXAuZXhlClBSWERzZ3QxY3d1ZWN6OTI3a2gya2NMc0wyS1gvekJUOTE2WU0zUlJoVFFhWWVJQVZsUjZCYW1vTHBvVS8vem5oUTJ3cVU5WmtSWkZIeXBvU3hJbEJnPT0K"
+      "url": "https://github.com/diffplug/dormouse/releases/download/v1.0.1/Dormouse-windows-x64-setup.exe",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYlpCcFVqWDVhckcydkNFYmtaL240MHdiN2VGRW1GTFNrODM2TmRZeGYwK2tEQTFDSUdJc1VYYUJXSUh4cEhSbDhQdmI5OHREWWRmeW1RTzZ4V01QOXptTjQ3bHhDaGdvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MDY4ODg2CWZpbGU6RG9ybW91c2Utd2luZG93cy14NjQtc2V0dXAuZXhlCkZGNXdYT0I3MTBDbFNmUEZtUVRQdHN0SGlRRkE2cEJaVW1ubXRzQ3RPcFk5UDJBa2F6QXlrakdNL2s2eWhEYmxjWThCRTlaUGd6Y2hiYVdGbTVHU0FRPT0K"
     },
     "linux-x86_64": {
-      "url": "https://github.com/diffplug/dormouse/releases/download/v0.11.0/Dormouse-linux-x86_64.AppImage",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYlpCcFVqWDVhckVXakJjNDg1bVJlYUp5Y04rUldraEFxU2djbVg0RmJTN3VpNWYza2pLa1ZXaURQeWh0TWxVNW1jUFlsTmE3SHluS3pwa0ZVTksrdnNIMVZEZ3VuTXdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgwMDY1NTYyCWZpbGU6RG9ybW91c2UtbGludXgteDg2XzY0LkFwcEltYWdlCnQrRmdwcmw3SHBxTGlURW9MV2l6bXl4cGtmUENHaG9EUUZmVW1ldXcwT3FlY01vMk1pZ2ZaYTBnMjREVDRPaTdzYmRZL2EyZlhXQkhTTWsrZ1ZZS0RRPT0K"
+      "url": "https://github.com/diffplug/dormouse/releases/download/v1.0.1/Dormouse-linux-x86_64.AppImage",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYlpCcFVqWDVhckxRdFI5Um9Xb2NVaCttREdsQytmZEJsa0Q3TXUvN3F4QTl6aTRQRCsyQ3k3RDZkWHRIb0paYkhVZDg4bjJta3JYWGxSdmduVVBocXI2WVNOM1pWUHdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MDY4ODg3CWZpbGU6RG9ybW91c2UtbGludXgteDg2XzY0LkFwcEltYWdlCnhWaGlUZC9EM3RFL2xpSVluU0lsU09ET3hhRVRXT3lrZWFzeDg1QVRBVWs1eGJ0VU5Rc21vR3EyOVZOcFBhU0ozbkxsOGVxYlo3ZkczU1gwTG1HT0NnPT0K"
     }
   }
 }
