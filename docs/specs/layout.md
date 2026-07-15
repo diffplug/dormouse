@@ -172,6 +172,7 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 **Enter passthrough mode:**
 - Click any pane body or header
 - Press `Enter` on a selected pane in command mode
+- Create a terminal through a manual split (`|` / `%` / `-` / `"`, a header split button) or a host New Terminal action; the new pane is selected and focused immediately
 - Press `z` on a selected pane in command mode (also zooms it)
 - Click or press `Enter` on a door (restores session first)
 - Focus is deferred via `requestAnimationFrame` so it lands after the click/mousedown event finishes
@@ -189,8 +190,8 @@ All handled in a single capture-phase `keydown` listener on `window`. Every hand
 
 | Key | On pane | On door |
 |-----|---------|---------|
-| `\|` / `%` | Horizontal split — new pane to the right | — |
-| `-` / `"` | Vertical split — new pane below | — |
+| `\|` / `%` | Horizontal split — new pane to the right, then enter passthrough | — |
+| `-` / `"` | Vertical split — new pane below, then enter passthrough | — |
 | Arrow keys | Spatial navigation between panes | Left/Right between doors, Up to panes |
 | `Cmd/Ctrl+Arrow` | Swap session content with neighbor | — |
 | `Enter` | Enter passthrough mode | Restore session + enter passthrough |
@@ -203,7 +204,7 @@ All handled in a single capture-phase `keydown` listener on `window`. Every hand
 
 ### Split cwd inheritance
 
-When a split is initiated from an existing pane (via `|`/`%`/`-`/`"`, the header split buttons, or `Cmd/Ctrl+Click` on a split icon), the new pane spawns with its source pane's last-known cwd as the spawn directory. The source cwd is read from `getTerminalPaneState(sourceId).cwd`; remote cwds (`isRemote === true`, e.g. an OSC 7 path reported over ssh) are ignored because they aren't usable as a local spawn cwd. When no source cwd is known, when the split has no source pane (initial pane creation), or when the source is remote, the host's default cwd applies. The inherited cwd rides through `setPendingShellOpts` alongside the inherited shell selection and is consumed by `getOrCreateTerminal` on the next `platform.spawnPty`.
+When a split is initiated from an existing pane (via `|`/`%`/`-`/`"`, the header split buttons, or `Cmd/Ctrl+Click` on a split icon), the new pane spawns with its source pane's last-known cwd as the spawn directory, then becomes selected and enters passthrough immediately. Host New Terminal actions use the same focus tail. Repeated layout construction therefore requires re-entering command mode between manual splits. Focus-neutral control-plane creation (`dor split -- …`, `dor ensure`, `dor iframe`, `dor ab`) retains its documented background behavior. The source cwd is read from `getTerminalPaneState(sourceId).cwd`; remote cwds (`isRemote === true`, e.g. an OSC 7 path reported over ssh) are ignored because they aren't usable as a local spawn cwd. When no source cwd is known, when the split has no source pane (initial pane creation), or when the source is remote, the host's default cwd applies. The inherited cwd rides through `setPendingShellOpts` alongside the inherited shell selection and is consumed by `getOrCreateTerminal` on the next `platform.spawnPty`.
 
 ### Kill confirmation
 

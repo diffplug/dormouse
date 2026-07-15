@@ -102,6 +102,10 @@ describe('Wall on the Lath engine', () => {
     });
     await flush();
     expect(leafCount()).toBe(2);
+    const focusedAfterSplit = Array.from(container.querySelectorAll<HTMLElement>('[data-session-id]'))
+      .filter((el) => el.dataset.focused === 'true');
+    expect(focusedAfterSplit).toHaveLength(1);
+    expect(focusedAfterSplit[0].dataset.sessionId).not.toBe('pane-a');
 
     // 3. Kill the second surface (dor kill, dangerously) → back to one leaf.
     await act(async () => {
@@ -133,6 +137,46 @@ describe('Wall on the Lath engine', () => {
     expect(Object.keys(saved!.lathLayout!.leafMeta ?? {})).toContain('pane-a');
   });
 
+  it('manual keyboard splits enter passthrough on the new pane immediately', async () => {
+    const onEvent = vi.fn();
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard onEvent={onEvent} />);
+    });
+    await flush();
+    onEvent.mockClear();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true }));
+    });
+    await flush();
+
+    const panes = Array.from(container.querySelectorAll<HTMLElement>('[data-session-id]'));
+    const newPane = panes.find((pane) => pane.dataset.sessionId !== 'pane-a');
+    expect(newPane?.dataset.focused).toBe('true');
+    expect(panes.find((pane) => pane.dataset.sessionId === 'pane-a')?.dataset.focused).toBe('false');
+    expect(onEvent).toHaveBeenCalledWith({ type: 'modeChange', mode: 'passthrough' });
+    expect(onEvent).toHaveBeenCalledWith({ type: 'selectionChange', id: newPane?.dataset.sessionId, kind: 'pane' });
+  });
+
+  it('host New Terminal actions enter passthrough on the spawned pane', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:new-terminal', {
+        detail: { shell: '/bin/zsh', name: 'zsh' },
+      }));
+    });
+    await flush();
+
+    const panes = Array.from(container.querySelectorAll<HTMLElement>('[data-session-id]'));
+    const newPane = panes.find((pane) => pane.dataset.sessionId !== 'pane-a');
+    expect(newPane?.dataset.focused).toBe('true');
+    expect(panes.find((pane) => pane.dataset.sessionId === 'pane-a')?.dataset.focused).toBe('false');
+  });
+
   it('retires a killed surface ref instead of reusing its number, and persists the counter', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
@@ -157,8 +201,11 @@ describe('Wall on the Lath engine', () => {
     });
     await flush();
 
-    // Split again → the fresh pane must be surface:3, never a reused surface:2.
+    // Manual split entered passthrough; return to command mode before splitting
+    // again. The fresh pane must be surface:3, never a reused surface:2.
     await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location: 1, bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location: 2, bubbles: true }));
       window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true }));
     });
     await flush();

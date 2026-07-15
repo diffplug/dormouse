@@ -1108,14 +1108,16 @@ export function Wall({
       const edge = selectedPaneVisible ? lath.store.autoEdgeFor(selectedPaneId!) : null;
       // The enter hint is derived inside `addLeaf` from the edge it commits.
       lath.store.addLeaf(newId, terminalLeafMeta(), edge ? { refId: selectedPaneId!, edge } : null);
-      selectPane(newId);
+      // A host New Terminal action is an interactive spawn: put the user straight
+      // into the new shell. Replacement paths above preserve their existing mode.
+      enterTerminalMode(newId);
       if (detail.announce) {
         showShellSpawnNotice(newId, `Opened ${shellName}`);
       }
     };
     window.addEventListener('dormouse:new-terminal', handler);
     return () => window.removeEventListener('dormouse:new-terminal', handler);
-  }, [generatePaneId, surfaceRefForId, forgetSurfaceRef, selectPane, showShellSpawnNotice, lath, nav]);
+  }, [generatePaneId, surfaceRefForId, forgetSurfaceRef, selectPane, enterTerminalMode, showShellSpawnNotice, lath, nav]);
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
   useDorControl({
@@ -1154,9 +1156,11 @@ export function Wall({
     const edge: Edge = direction === 'right' ? 'right' : 'bottom';
     // The enter hint is derived inside `addLeaf` from the edge it commits.
     lath.store.addLeaf(newId, terminalLeafMeta(), refId ? { refId, edge } : null);
-    selectPane(newId);
+    // Manual split is an intent to use the new terminal: select it, enter
+    // passthrough, and defer DOM focus through the shared focus path.
+    enterTerminalMode(newId);
     onEventRef.current?.({ type: 'split', direction: splitDirection, source });
-  }, [selectPane, generatePaneId, surfaceRefForId, lath, nav]);
+  }, [enterTerminalMode, generatePaneId, surfaceRefForId, lath, nav]);
 
   // --- Wall actions (for tab buttons) ---
 

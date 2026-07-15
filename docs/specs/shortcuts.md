@@ -21,8 +21,8 @@ In the VS Code extension host, selected workbench chords are mirrored: the termi
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| `\|` or `%` | Split left/right | Split the selected pane into two side-by-side panes. |
-| `-` or `"` | Split top/bottom | Split the selected pane into two stacked panes. |
+| `\|` or `%` | Split left/right | Create a pane to the right, select it, and enter passthrough. |
+| `-` or `"` | Split top/bottom | Create a pane below, select it, and enter passthrough. |
 | `z` | Zoom and focus | Elevate the selected pane and enter passthrough; leaving passthrough or focusing elsewhere ends zoom. |
 | `m` or `d` | Minimize / reattach | Minimize the selected pane to the baseboard, or reattach a minimized door. |
 | `k` or `x` | Kill | Kill the selected pane or door. Prompts for a random character to confirm; untouched (never-typed-in) panes and doors are killed immediately without the prompt. |
