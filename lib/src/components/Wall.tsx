@@ -83,6 +83,7 @@ import {
   SelectedIdContext,
   WindowFocusedContext,
   ZoomedContext,
+  ZoomedIdContext,
   type PaneWriteActions,
   type WallActions,
 } from './wall/wall-context';
@@ -112,6 +113,7 @@ export {
   SelectedIdContext,
   WindowFocusedContext,
   ZoomedContext,
+  ZoomedIdContext,
 } from './wall/wall-context';
 export type { WallActions } from './wall/wall-context';
 export { MarchingAntsRect, roundedRectPath } from './wall/MarchingAntsRect';
@@ -1417,6 +1419,7 @@ export function Wall({
           <DoorElementsContext.Provider value={doorElementsContextValue}>
           <RenamingIdContext.Provider value={renamingPaneId}>
           <ZoomedContext.Provider value={zoomed}>
+          <ZoomedIdContext.Provider value={zoomedId}>
           <WindowFocusedContext.Provider value={windowFocused}>
           <DialogKeyboardContext.Provider value={setDialogKeyboardActive}>
           <div className="flex-1 min-h-0 flex flex-col bg-app-bg text-app-fg font-sans overflow-hidden">
@@ -1477,6 +1480,7 @@ export function Wall({
           </div>
           </DialogKeyboardContext.Provider>
           </WindowFocusedContext.Provider>
+          </ZoomedIdContext.Provider>
           </ZoomedContext.Provider>
           </RenamingIdContext.Provider>
           </DoorElementsContext.Provider>

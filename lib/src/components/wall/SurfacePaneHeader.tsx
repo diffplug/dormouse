@@ -15,7 +15,7 @@ import {
   XIcon,
 } from '@phosphor-icons/react';
 import { HeaderActionButton } from '../HeaderActionButton';
-import { TERMINAL_TOP_RADIUS_CLASS } from '../design';
+import { paneZoomButtonClass, TERMINAL_TOP_RADIUS_CLASS } from '../design';
 import {
   useAgentBrowserChromeSnapshot,
   useAgentBrowserScreenController,
@@ -31,7 +31,7 @@ import {
   SelectedIdContext,
   WallActionsContext,
   WindowFocusedContext,
-  ZoomedContext,
+  ZoomedIdContext,
 } from './wall-context';
 
 /** The far-left chip reflects the surface's render backend at a glance, and
@@ -52,7 +52,7 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const windowFocused = useContext(WindowFocusedContext);
-  const zoomed = useContext(ZoomedContext);
+  const zoomed = useContext(ZoomedIdContext) === id;
   const actions = useContext(WallActionsContext);
   const isActiveHeader = mode === 'passthrough' && selectedId === id && windowFocused;
 
@@ -222,7 +222,7 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
           tooltip={'Split top/bottom [-] or ["]'}
         ><SplitVerticalIcon size={14} /></HeaderActionButton>
         <HeaderActionButton
-          className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
+          className={paneZoomButtonClass(zoomed, isActiveHeader)}
           onClick={(e) => { e.stopPropagation(); actions.onZoom(id); }}
           ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
           tooltip={zoomed ? 'Unzoom' : 'Zoom [z]'}

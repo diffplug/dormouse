@@ -394,6 +394,12 @@ describe('Wall on the Lath engine', () => {
     expect(onEvent).toHaveBeenCalledWith({ type: 'zoomChange', zoomed: true });
     expect(onEvent).toHaveBeenCalledWith({ type: 'modeChange', mode: 'passthrough' });
     expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('true');
+    const unzoom = container.querySelector<HTMLButtonElement>('button[aria-label="Unzoom"]');
+    expect(unzoom).not.toBeNull();
+    // jsdom's document is not window-focused, so Wall renders the inactive
+    // header palette here; the surface-header unit test covers the active pair.
+    expect(unzoom?.className).toContain('bg-header-inactive-fg');
+    expect(unzoom?.className).toContain('text-header-inactive-bg');
 
     // The normal passthrough-exit gesture gives focus back to command mode; zoom
     // follows focus and begins its return to the tiled layout in the same action.
@@ -420,6 +426,9 @@ describe('Wall on the Lath engine', () => {
     });
     await flush();
     expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('true');
+    expect(container.querySelectorAll('button[aria-label="Unzoom"]')).toHaveLength(1);
+    expect(container.querySelector('[data-lath-leaf="pane-a"] button[aria-label="Unzoom"]')).not.toBeNull();
+    expect(container.querySelector('[data-lath-leaf="pane-b"] button[aria-label="Zoom"]')).not.toBeNull();
 
     onEvent.mockClear();
     const paneBHeader = container.querySelector<HTMLElement>('[data-lath-leaf="pane-b"] .lath-leaf-header > div');
