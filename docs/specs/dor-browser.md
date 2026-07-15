@@ -300,8 +300,12 @@ that capture stale, so it cannot overwrite the newer responsive pixels; one
 coalesced follow-up becomes the crisp resting frame. An unpainted pulse alone
 does not suppress a crisp draw, so idle animated pages still update.
 Byte-identical daemon heartbeat frames are dropped before either path, and
-byte-identical crisp captures skip decode/draw. Re-attach bumps a draw generation
-so a fresh blank canvas repaints.
+byte-identical crisp captures skip decode/draw. That byte-dedup assumes the crisp
+loop is the only writer, so anything else that paints the canvas must bump the
+**draw generation** folded into its key: re-attach does (a fresh canvas mounts
+blank), and so does every provisional paint (or a resting page whose crisp bytes
+match the last crisp draw would dedup to a no-op and strand the pane on the blurry
+frame — the sharp-at-rest guarantee above).
 A host without `agentBrowserScreenshot` paints every changed provisional stream
 frame as its lower-resolution final image rather than showing only the placeholder.
 

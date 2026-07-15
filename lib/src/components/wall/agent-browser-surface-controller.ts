@@ -278,10 +278,12 @@ export class AgentBrowserSurfaceController {
   // --- view binding ---
   private sink: AgentBrowserViewSink | null = null;
   private attachToken: object | null = null;
-  // Bumped on every attachView. A fresh view mounts a blank canvas; the screenshot
-  // loop folds this into its byte-dedup key so an identical capture still repaints
-  // the new canvas (otherwise the loop would skip the redundant bytes and leave it
-  // blank until the page changes).
+  // "The canvas changed without the crisp loop drawing it." Bumped on attachView
+  // (a fresh view mounts blank) and on every provisional paint (CSS-resolution
+  // pixels land behind the loop's back). The screenshot loop folds this into its
+  // byte-dedup key so an identical capture still repaints — otherwise it would
+  // skip the redundant bytes and leave the canvas blank, or blurry, until the
+  // page happens to change.
   private drawGeneration = 0;
   // Latest-wins generation shared by provisional stream decodes and crisp host
   // screenshots. A late low-resolution decode must never overwrite a newer crisp
@@ -764,6 +766,14 @@ export class AgentBrowserSurfaceController {
         return;
       }
       this.provisionalPaintGeneration += 1;
+      // This paint puts CSS-resolution pixels on the canvas behind the crisp
+      // loop's back, so its byte-dedup (`lastDrawnKey`) no longer describes what
+      // is on screen: a resting page whose crisp bytes match the last crisp draw
+      // would dedup to a no-op and strand the pane on the blur. Bump the draw
+      // generation for the same reason a re-attach does — the canvas changed
+      // underneath the loop, so the next crisp capture must repaint regardless
+      // of its bytes.
+      this.drawGeneration += 1;
       this.paintBitmap(bitmap);
     }).catch(() => {
       // The crisp screenshot path remains authoritative; a malformed/unsupported
