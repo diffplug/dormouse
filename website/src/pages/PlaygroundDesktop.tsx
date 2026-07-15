@@ -10,24 +10,16 @@ import { TutDetector } from "../lib/tut-detector";
 import { BUSY_DEMO_DURATION_MS, BUSY_DEMO_INTERVAL_MS, TutRunner } from "../lib/tut-runner";
 import { ChangelogRunner } from "../lib/changelog-runner";
 import { POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
-
-const PANE_MAIN = "tut-main";
-const PANE_BOXED = "tut-boxed";
-const PANE_SPLASH = "tut-splash";
-const DESKTOP_PANES: PaneSpec[] = [
-  { id: PANE_MAIN, command: "tut", title: "tutorial" },
-  { id: PANE_BOXED, command: "changelog", title: "changelog" },
-  { id: PANE_SPLASH, command: "ascii-splash", title: "ascii-splash" },
-];
+import {
+  DESKTOP_PANES,
+  DESKTOP_PLAYGROUND_LAYOUT,
+  PANE_BOXED,
+  PANE_MAIN,
+  type DesktopPaneSpec,
+} from "../lib/playground-desktop-layout";
 
 type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
 type WallEvent = import("dormouse-lib/components/Wall").WallEvent;
-
-interface PaneSpec {
-  id: string;
-  command: string;
-  title: string;
-}
 
 function DesktopPlaygroundUnavailable() {
   return (
@@ -82,7 +74,7 @@ function PlaygroundDesktopExperience() {
     window.open(POCKET_PLAYGROUND_PATH, "_blank", "noopener,noreferrer");
   }, []);
 
-  const tryAutoStart = useCallback((pane: PaneSpec) => {
+  const tryAutoStart = useCallback((pane: DesktopPaneSpec) => {
     if (autoStartedRef.current.has(pane.id)) return;
     const shellRegistry = shellRegistryRef.current;
     if (!shellRegistry) return;
@@ -231,7 +223,7 @@ function PlaygroundDesktopExperience() {
       <main className="fixed top-16 right-0 bottom-0 left-0 flex min-h-0 md:top-20">
         {WallModule ? (
           <WallModule.Wall
-            initialPaneIds={[PANE_MAIN, PANE_BOXED, PANE_SPLASH]}
+            restoredLathLayout={DESKTOP_PLAYGROUND_LAYOUT}
             initialMode="passthrough"
             onEvent={handleWallEvent}
           />

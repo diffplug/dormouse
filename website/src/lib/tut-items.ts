@@ -150,7 +150,7 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
       {
         id: 'kb-arrows',
         title: 'Move between panes with arrow keys',
-        hint: 'Use `arrow keys` in command mode.',
+        hint: 'The new pane has focus. Re-enter command mode, then use `arrow keys`.',
       },
       {
         id: 'kb-split-v',

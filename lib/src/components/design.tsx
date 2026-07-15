@@ -7,6 +7,10 @@ import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode, Re
 // App-wide type scale, color strategy, and chrome conventions: see
 // docs/specs/theme.md and AGENTS.md.
 
+/** Desktop pane-header height. Geometry derived from the header (such as the
+ * elevated zoom inset) must use this constant so the chrome stays proportional. */
+export const PANE_HEADER_HEIGHT_PX = 30;
+
 // Pane headers/doors own the top corners; terminal bodies own the bottom.
 // All terminal-radius constants derive from this single source so the CSS
 // class, the SVG-friendly px value, and the inline-style rem string can't
@@ -412,6 +416,19 @@ export const chromeButton = tv({
 });
 
 export type ChromeButtonVariants = VariantProps<typeof chromeButton>;
+
+/** Pane-header zoom control. The zoomed pane swaps its header foreground and
+ * background tokens so Unzoom reads as the active escape hatch in every theme. */
+export function paneZoomButtonClass(zoomed: boolean, activeHeader: boolean): string {
+  return clsx(
+    'flex h-5 min-w-5 items-center justify-center rounded transition-colors',
+    zoomed
+      ? activeHeader
+        ? 'bg-header-active-fg text-header-active-bg'
+        : 'bg-header-inactive-fg text-header-inactive-bg'
+      : 'hover:bg-current/10',
+  );
+}
 
 /** Keyboard shortcut rendered as `[keys]` in muted color. Use everywhere key
  *  bindings appear in UI text so the bracket convention is consistent. */

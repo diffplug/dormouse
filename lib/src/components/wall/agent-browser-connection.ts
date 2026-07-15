@@ -6,8 +6,8 @@ export type { AgentBrowserTab };
 export { parseAgentBrowserTabs };
 
 // Stream messages above this size are frames (a base64 JPEG); status/tabs are
-// small JSON control messages. Consumers display screenshots, so large frames
-// are treated as unparsed "page changed" pulses.
+// small JSON control messages. Large frames parse only while the consumer asks
+// for provisional low-latency hover feedback; the idle hot path stays hash+pulse.
 const FRAME_PULSE_THRESHOLD = 16384;
 const DEBUG_RING_LIMIT = 300;
 
@@ -28,9 +28,22 @@ export interface AgentBrowserStreamStatus {
   viewportHeight?: number;
 }
 
+/** A frame's device dims. Both are required: a partial or zero-sized report can
+ *  neither size the surface nor key a resize, so it degrades to absent metadata
+ *  rather than to a half-filled record (see `frameMetadata`). */
 export interface AgentBrowserFramePulse {
-  deviceWidth?: number;
-  deviceHeight?: number;
+  deviceWidth: number;
+  deviceHeight: number;
+}
+
+/** Read device dims off a stream frame's envelope, in the one place both the
+ *  large (>16KB) and small frame paths share. */
+function frameMetadata(raw: { deviceWidth?: unknown; deviceHeight?: unknown } | undefined): AgentBrowserFramePulse | undefined {
+  const w = raw?.deviceWidth;
+  const h = raw?.deviceHeight;
+  return typeof w === 'number' && w > 0 && typeof h === 'number' && h > 0
+    ? { deviceWidth: w, deviceHeight: h }
+    : undefined;
 }
 
 export interface AgentBrowserSnapshot {
@@ -50,7 +63,13 @@ export type AgentBrowserConnectionEvent =
   | { type: 'connection-error'; port: number }
   | { type: 'status'; status: AgentBrowserStreamStatus }
   | { type: 'tabs'; tabs: AgentBrowserTab[]; previousTabs: AgentBrowserTab[] }
-  | { type: 'frame-pulse'; metadata?: AgentBrowserFramePulse }
+  | {
+      type: 'frame-pulse';
+      metadata?: AgentBrowserFramePulse;
+      /** CSS-resolution stream JPEG, base64 encoded. Present only when the
+       *  consumer requested a provisional paint. */
+      data?: string;
+    }
   | { type: 'debug'; event: AgentBrowserDebugEvent };
 
 export interface AgentBrowserDebugEvent {
@@ -68,6 +87,9 @@ export interface AgentBrowserConnectionDeps {
   getStreamUrl?: (port: number) => Promise<string | undefined>;
   runCommand?: (session: string, args: string[], binaryPath?: string) => Promise<AgentBrowserCommandResult>;
   canSelectTabs?: () => boolean;
+  /** Whether the current stream frame's JPEG bytes are useful to the consumer.
+   *  False keeps the idle hot path at hash+pulse without parsing the large JSON. */
+  wantFrameData?: () => boolean;
   log?: (message: string) => void;
 }
 
@@ -210,16 +232,44 @@ export class AgentBrowserConnection {
   // Drop a frame whose pixels (and device dims) match the previous one — the
   // daemon's heartbeat re-broadcasts an unchanged page, and redrawing it is pure
   // cost. Returns true when the frame is a duplicate the caller should ignore.
-  private isDuplicateFrame(payload: string): boolean {
-    const key = djb2(payload) ^ (payload.length | 0);
+  // The dims are mixed into the hash rather than into the payload string: a frame
+  // is ~100KB of base64 at ~20Hz, so a `${data}@WxH` key would copy all of it just
+  // to hash it and throw it away.
+  private isDuplicateFrame(payload: string, metadata?: AgentBrowserFramePulse): boolean {
+    let key = djb2(payload) ^ (payload.length | 0);
+    if (metadata) key = (key ^ Math.imul(metadata.deviceWidth, 31) ^ metadata.deviceHeight) | 0;
     if (key === this.lastFrameKey) return true;
     this.lastFrameKey = key;
     return false;
   }
 
+  /** The single frame-emission point. `withData` carries the base64 body to the
+   *  consumer for a provisional paint; without it the event is a bare pulse that
+   *  only paces the crisp screenshot loop. */
+  private emitFrame(data: string, metadata: AgentBrowserFramePulse | undefined, withData: boolean): void {
+    if (this.isDuplicateFrame(data, metadata)) return;
+    this.emit({ type: 'frame-pulse', metadata, ...(withData ? { data } : {}) });
+  }
+
   private handleMessage(raw: unknown): void {
     if (typeof raw !== 'string') return;
     if (raw.length > FRAME_PULSE_THRESHOLD) {
+      // `wantFrameData` gates only the parse itself: on the large path it is the
+      // difference between JSON.parsing ~100KB and hashing it, which is the whole
+      // point of the threshold. Emission policy lives in emitFrame. Asked here (and
+      // below) rather than once up top so `status`/`tabs` never pay for it.
+      if (this.deps.wantFrameData?.()) {
+        try {
+          const msg = JSON.parse(raw) as { type?: unknown; data?: unknown; metadata?: { deviceWidth?: unknown; deviceHeight?: unknown } };
+          if (msg.type === 'frame' && typeof msg.data === 'string') {
+            this.emitFrame(msg.data, frameMetadata(msg.metadata), true);
+            return;
+          }
+        } catch {
+          // Older/raw daemons may send the JPEG body without a JSON envelope. It
+          // still drives the crisp capture, just without a provisional paint.
+        }
+      }
       if (this.isDuplicateFrame(raw)) return;
       this.emit({ type: 'frame-pulse' });
       return;
@@ -231,14 +281,7 @@ export class AgentBrowserConnection {
       return;
     }
     if (msg.type === 'frame' && typeof msg.data === 'string') {
-      const metadata = msg.metadata?.deviceWidth && msg.metadata?.deviceHeight
-        ? { deviceWidth: msg.metadata.deviceWidth as number, deviceHeight: msg.metadata.deviceHeight as number }
-        : undefined;
-      // Fold device dims into the identity key so a resize that happens to keep
-      // identical pixels still propagates.
-      const key = metadata ? `${msg.data}@${metadata.deviceWidth}x${metadata.deviceHeight}` : msg.data;
-      if (this.isDuplicateFrame(key)) return;
-      this.emit({ type: 'frame-pulse', metadata });
+      this.emitFrame(msg.data, frameMetadata(msg.metadata), this.deps.wantFrameData?.() ?? false);
     } else if (msg.type === 'status') {
       const status: AgentBrowserStreamStatus = {
         connected: msg.connected === true,

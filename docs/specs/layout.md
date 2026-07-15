@@ -90,7 +90,7 @@ Elements from left to right:
 - Mouse-reporting override icon (only when the inside program requests mouse reporting; hidden in minimal tier)
 - SplitHorizontalIcon `split left/right [|]` (full tier only)
 - SplitVerticalIcon `split top/bottom [-]` (full tier only)
-- ArrowsOutIcon / ArrowsInIcon `zoom / unzoom [z]` (full tier only)
+- ArrowsOutIcon / ArrowsInIcon `zoom [z] / unzoom` (full tier only)
 - ArrowLineDownIcon `minimize [m]`
 - XIcon `kill [x]` (hover turns error-red)
 
@@ -172,6 +172,8 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 **Enter passthrough mode:**
 - Click any pane body or header
 - Press `Enter` on a selected pane in command mode
+- Create a terminal through a manual split (`|` / `%` / `-` / `"`, a header split button) or a host New Terminal action; the new pane is selected and focused immediately
+- Press `z` on a selected pane in command mode (also zooms it)
 - Click or press `Enter` on a door (restores session first)
 - Focus is deferred via `requestAnimationFrame` so it lands after the click/mousedown event finishes
 
@@ -180,6 +182,7 @@ Wall starts in `command` mode by default. Embedders may pass `initialMode="passt
 - Detected via capture-phase `keydown` listener on `e.key === 'Meta'` (or `e.key === 'Shift'`) and `e.location` (1 = left, 2 = right). The Meta and Shift tracks are independent, so a Left Cmd followed by a Right Shift does not trigger.
 - Works even when xterm has DOM focus because listener uses capture phase
 - On keyboards without a right Meta key (common on Windows/Linux laptops), the Shift track is the available gesture; both tracks are always active.
+- If the focused pane is zoomed, returning keyboard focus to command mode starts unzoom immediately.
 
 ## Keyboard shortcuts (command mode)
 
@@ -187,21 +190,21 @@ All handled in a single capture-phase `keydown` listener on `window`. Every hand
 
 | Key | On pane | On door |
 |-----|---------|---------|
-| `\|` / `%` | Horizontal split — new pane to the right | — |
-| `-` / `"` | Vertical split — new pane below | — |
+| `\|` / `%` | Horizontal split — new pane to the right, then enter passthrough | — |
+| `-` / `"` | Vertical split — new pane below, then enter passthrough | — |
 | Arrow keys | Spatial navigation between panes | Left/Right between doors, Up to panes |
 | `Cmd/Ctrl+Arrow` | Swap session content with neighbor | — |
 | `Enter` | Enter passthrough mode | Restore session + enter passthrough |
 | `,` | Inline rename | — |
 | `x` / `k` | Kill with confirmation | Restore session + kill confirmation |
 | `m` / `d` | Minimize to door | Restore session (stay in command) |
-| `z` | Toggle maximize/restore | — |
+| `z` | Zoom pane and enter passthrough | — |
 | `t` | Toggle TODO flag | — |
 | `a` | Dismiss or toggle alert | — |
 
 ### Split cwd inheritance
 
-When a split is initiated from an existing pane (via `|`/`%`/`-`/`"`, the header split buttons, or `Cmd/Ctrl+Click` on a split icon), the new pane spawns with its source pane's last-known cwd as the spawn directory. The source cwd is read from `getTerminalPaneState(sourceId).cwd`; remote cwds (`isRemote === true`, e.g. an OSC 7 path reported over ssh) are ignored because they aren't usable as a local spawn cwd. When no source cwd is known, when the split has no source pane (initial pane creation), or when the source is remote, the host's default cwd applies. The inherited cwd rides through `setPendingShellOpts` alongside the inherited shell selection and is consumed by `getOrCreateTerminal` on the next `platform.spawnPty`.
+When a split is initiated from an existing pane (via `|`/`%`/`-`/`"`, the header split buttons, or `Cmd/Ctrl+Click` on a split icon), the new pane spawns with its source pane's last-known cwd as the spawn directory, then becomes selected and enters passthrough immediately. Host New Terminal actions use the same focus tail. Repeated layout construction therefore requires re-entering command mode between manual splits. Focus-neutral control-plane creation (`dor split -- …`, `dor ensure`, `dor iframe`, `dor ab`) retains its documented background behavior. The source cwd is read from `getTerminalPaneState(sourceId).cwd`; remote cwds (`isRemote === true`, e.g. an OSC 7 path reported over ssh) are ignored because they aren't usable as a local spawn cwd. When no source cwd is known, when the split has no source pane (initial pane creation), or when the source is remote, the host's default cwd applies. The inherited cwd rides through `setPendingShellOpts` alongside the inherited shell selection and is consumed by `getOrCreateTerminal` on the next `platform.spawnPty`.
 
 ### Kill confirmation
 
@@ -327,7 +330,7 @@ Each session also carries `TerminalPaneState` from `docs/specs/terminal-state.md
 
 ## Theme
 
-The Lath host styling lives in the `.lath-host` / `.lath-leaf` rules in `lib/src/index.css`: an app-bg host, a 30px header band per leaf, and a terminal-bg body. The content area uses a 6px top/sides inset and 2px bottom inset (`px-1.5 pt-1.5 pb-0.5` on wrapper, `inset-x-1.5 top-1.5 bottom-0.5` on container); the `LATH_LAYOUT_OPTS` gap of 6px is the only visual separator between panes.
+The Lath host styling lives in the `.lath-host` / `.lath-leaf` rules in `lib/src/index.css`: an app-bg host and a terminal-bg body. Each leaf has a 30px header band applied by LathHost from the shared `PANE_HEADER_HEIGHT_PX` in `lib/src/components/design.tsx`. The content area uses a 6px top/sides inset and 2px bottom inset (`px-1.5 pt-1.5 pb-0.5` on wrapper, `inset-x-1.5 top-1.5 bottom-0.5` on container); the `LATH_LAYOUT_OPTS` gap of 6px is the only visual separator between panes.
 
 Colors use a two-layer CSS variable strategy: `@theme --color-*` tokens → `var(--vscode-*)`. VSCode provides host theme variables in extension mode; standalone and website mode apply bundled or installed theme variables before rendering. Tailwind v4 `@theme` block registers `--color-*` tokens as Tailwind colors (e.g., `bg-app-bg`, `text-app-fg`, `border-border`). See `theme.css` for the full token map.
 
@@ -336,6 +339,10 @@ The Lath host paints `var(--color-app-bg)` so gutters and rounded pane/header co
 ## Animations
 
 All pane motion is owned by the Lath **animator** — a pure function of time that turns committed layout changes into interpolated frames, applied imperatively to the leaf divs by LathHost (`docs/specs/tiling-engine.md` → "Animation"). Default motion is 440ms `cubic-bezier(0.22, 1, 0.36, 1)`; under reduced motion the animator runs the same code with a 0 duration (instant). The selection overlay measures the leaf divs, which carry the interpolated inline geometry, so `getBoundingClientRect` tracks the tween frame-accurately. There are no CSS entrance/exit classes. Terminal panes, by contrast, do not refit every frame: `TerminalPane`'s resize observer throttles `refitSession` (leading edge, then at most one per ~150ms while resizes keep arriving, plus a trailing call at rest), so a motion or sash drag reflows the xterm buffer and fires a PTY resize a handful of times instead of once per animated cell-boundary crossing, while the resting geometry still gets an exact fit.
+
+### Zoom (elevated expansion)
+
+Zoom is presentation-only: the split tree and every tiled rect remain unchanged. It is coupled to passthrough focus: acquiring zoom enters passthrough and focuses that pane; exiting passthrough, focusing another pane, or selecting a Door starts unzoom immediately. Only the zoom owner's header shows Unzoom, with its foreground/background header tokens inverted so the escape action stands out; partially exposed panes retain their normal Zoom control. Only the owner's control toggles zoom off — the perimeter leaves other headers reachable, and their Zoom control hands zoom over (focus included) rather than merely unzooming the owner. The chosen pane rises above the tiled/dying bands and sashes before expanding from its tiled rect to the Wall rect inset by half the 30px pane-header height (15px). The perimeter exposes the tiled layout beneath, while a blurred `--color-app-bg` shadow separates the elevated edge from the content below. Unzoom reverses the geometry while keeping the pane elevated and shadowed for the whole return; both elevation effects clear only on the settled frame. Source of truth: focus/zoom orchestration and `ZoomedIdContext` in `lib/src/components/Wall.tsx`; `paneZoomButtonClass` and `PANE_HEADER_HEIGHT_PX` in `lib/src/components/design.tsx`; `presentationTargets`, `LATH_ZOOM_MARGIN`, `LATH_ZOOM_SHADOW`, and the layer-to-z-index mapping in `lib/src/components/wall/LathHost.tsx`; discrete layer lifetime in `lib/src/lib/lath/animator.ts`.
 
 ### Spawn (new pane reveal)
 

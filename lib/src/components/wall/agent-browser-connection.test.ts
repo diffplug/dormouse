@@ -84,9 +84,16 @@ describe('agent-browser connection', () => {
     const connection = createAgentBrowserConnection({
       session: 'dormouse.1.default',
       streamPort: 1234,
+      wantFrameData: () => true,
     });
     let pulses = 0;
-    connection.subscribe((event) => { if (event.type === 'frame-pulse') pulses += 1; });
+    const provisionalFrames: Array<string | undefined> = [];
+    connection.subscribe((event) => {
+      if (event.type === 'frame-pulse') {
+        pulses += 1;
+        provisionalFrames.push(event.data);
+      }
+    });
 
     await Promise.resolve();
     const ws = WebSocketMock.instances[0];
@@ -104,6 +111,29 @@ describe('agent-browser connection', () => {
 
     ws.emitMessage(frameA); // changed again — forwarded
     expect(pulses).toBe(3);
+    expect(provisionalFrames).toEqual(['AAAAAAAAAA', 'BBBBBBBBBB', 'AAAAAAAAAA']);
+  });
+
+  it('parses a large stream frame for provisional painting', async () => {
+    const connection = createAgentBrowserConnection({
+      session: 'dormouse.1.default',
+      streamPort: 1234,
+      wantFrameData: () => true,
+    });
+    const frames: string[] = [];
+    connection.subscribe((event) => {
+      if (event.type === 'frame-pulse' && event.data) frames.push(event.data);
+    });
+
+    await Promise.resolve();
+    const data = 'A'.repeat(20_000);
+    WebSocketMock.instances[0].emitMessage(JSON.stringify({
+      type: 'frame',
+      data,
+      metadata: { deviceWidth: 800, deviceHeight: 600 },
+    }));
+
+    expect(frames).toEqual([data]);
   });
 
   it('drops identical tab-snapshot re-broadcasts but forwards real changes', async () => {
