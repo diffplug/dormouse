@@ -1,5 +1,4 @@
 import type { LathPersistedLayout } from "dormouse-lib/lib/lath/persistence";
-import { terminalLeafMeta } from "dormouse-lib/components/wall/lath-wall-engine";
 
 export const PANE_MAIN = "tut-main";
 export const PANE_BOXED = "tut-boxed";
@@ -43,7 +42,16 @@ export const DESKTOP_PLAYGROUND_LAYOUT: LathPersistedLayout = {
       ],
     },
   },
+  // Spelled out rather than built with the lib's `terminalLeafMeta`: this module is
+  // imported eagerly by the route, while PlaygroundDesktop deliberately defers the
+  // whole lib (Wall, terminal-registry, platform) behind dynamic imports. Reaching
+  // into `lath-wall-engine` for these three fields would put a static edge into the
+  // subsystem the page is code-splitting away. `playground-desktop-layout.test.ts`
+  // pins the shape against the real engine instead.
   leafMeta: Object.fromEntries(
-    DESKTOP_PANES.map((pane) => [pane.id, terminalLeafMeta(pane.title)]),
+    DESKTOP_PANES.map((pane) => [
+      pane.id,
+      { component: "terminal", tabComponent: "terminal", title: pane.title },
+    ]),
   ),
 };

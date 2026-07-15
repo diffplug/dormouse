@@ -491,6 +491,33 @@ describe('Wall on the Lath engine', () => {
     expect(container.querySelector('[data-session-id="pane-b"]')?.getAttribute('data-focused')).toBe('true');
   });
 
+  it('hands zoom over when a partially exposed pane\'s Zoom control is clicked', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', bubbles: true }));
+    });
+    await flush();
+    expect(container.querySelector('[data-lath-leaf="pane-a"] button[aria-label="Unzoom"]')).not.toBeNull();
+
+    // The elevated pane exposes a perimeter, so pane-b's Zoom control is reachable
+    // while pane-a is zoomed. HeaderActionButton stops mousedown, so no selection
+    // runs first: onZoom itself must hand zoom over rather than only unzoom pane-a.
+    const zoomB = container.querySelector<HTMLButtonElement>('[data-lath-leaf="pane-b"] button[aria-label="Zoom"]');
+    expect(zoomB).not.toBeNull();
+    await act(async () => {
+      zoomB!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-lath-leaf="pane-b"] button[aria-label="Unzoom"]')).not.toBeNull();
+    expect(container.querySelectorAll('button[aria-label="Unzoom"]')).toHaveLength(1);
+    expect(container.querySelector('[data-session-id="pane-b"]')?.getAttribute('data-focused')).toBe('true');
+  });
+
   it('dor kill can target a minimized surface ref', async () => {
     let response: { ok: boolean; error?: string } | undefined;
     await act(async () => {

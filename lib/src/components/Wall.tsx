@@ -1190,10 +1190,14 @@ export function Wall({
     },
     onZoom: (id: string) => {
       if (!nav.hasPane(id)) return;
-      // Zoom belongs to focus: toggling an existing zoom unzooms; acquiring zoom
-      // first enters passthrough on this pane (unless it already owns focus).
+      // Zoom belongs to focus: only the owner's control toggles zoom off. Another
+      // pane's Zoom control means "zoom me" — the elevated pane exposes a
+      // perimeter, so a partially covered header is reachable and must hand zoom
+      // over rather than merely unzoom the owner. Acquiring zoom first enters
+      // passthrough on this pane (unless it already owns focus); selectPane's
+      // `releaseZoomExcept` drops the previous owner on the way through.
       const currentZoom = lath.store.getSnapshot().zoomedId;
-      if (currentZoom !== null) {
+      if (currentZoom === id) {
         lath.store.setZoomed(null);
         return;
       }

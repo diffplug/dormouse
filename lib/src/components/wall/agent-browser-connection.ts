@@ -253,12 +253,12 @@ export class AgentBrowserConnection {
 
   private handleMessage(raw: unknown): void {
     if (typeof raw !== 'string') return;
-    const wantData = this.deps.wantFrameData?.() ?? false;
     if (raw.length > FRAME_PULSE_THRESHOLD) {
       // `wantFrameData` gates only the parse itself: on the large path it is the
       // difference between JSON.parsing ~100KB and hashing it, which is the whole
-      // point of the threshold. Emission policy lives in emitFrame.
-      if (wantData) {
+      // point of the threshold. Emission policy lives in emitFrame. Asked here (and
+      // below) rather than once up top so `status`/`tabs` never pay for it.
+      if (this.deps.wantFrameData?.()) {
         try {
           const msg = JSON.parse(raw) as { type?: unknown; data?: unknown; metadata?: { deviceWidth?: unknown; deviceHeight?: unknown } };
           if (msg.type === 'frame' && typeof msg.data === 'string') {
@@ -281,7 +281,7 @@ export class AgentBrowserConnection {
       return;
     }
     if (msg.type === 'frame' && typeof msg.data === 'string') {
-      this.emitFrame(msg.data, frameMetadata(msg.metadata), wantData);
+      this.emitFrame(msg.data, frameMetadata(msg.metadata), this.deps.wantFrameData?.() ?? false);
     } else if (msg.type === 'status') {
       const status: AgentBrowserStreamStatus = {
         connected: msg.connected === true,
