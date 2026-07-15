@@ -663,6 +663,7 @@ export class AgentBrowserSurfaceController {
       // when the capture bytes are identical to the last displayed frame.
       getDrawGeneration: () => this.drawGeneration,
       getProvisionalGeneration: () => this.provisionalPaintGeneration,
+      getProvisionalDeadline: () => this.provisionalUntil,
       log: abDebugLog,
     });
     const connection = createAgentBrowserConnection({

@@ -295,10 +295,24 @@ provisional frame is CSS-resolution because Chromium's `Page.startScreencast`
 captures in DIP with no DPR knob; this is a Chromium limit, not agent-browser's.
 
 Both paths are latest-only. A newer stream pulse cancels an older provisional
-decode. A provisional frame painted while a crisp capture is in flight marks
-that capture stale, so it cannot overwrite the newer responsive pixels; one
-coalesced follow-up becomes the crisp resting frame. An unpainted pulse alone
-does not suppress a crisp draw, so idle animated pages still update.
+decode. A provisional frame painted while a crisp capture is in flight marks that
+capture stale, so it cannot overwrite the newer responsive pixels.
+
+Because a capture (~120ms) is slower than the stream (~20Hz), *every* capture
+started inside the provisional window is superseded before it resolves. The loop
+therefore does not start one at all while the window is open — it defers to the
+window's end and takes a single settled shot, so a drag costs one host round trip
+instead of one per pulse. This is free of pixels: the deferred shots never drew
+anything, and the frame that lands is the first one started after the last
+provisional paint either way. Continued pointer input pushes the window out, so
+the wait re-arms rather than firing early.
+
+A capture dropped as stale leaves the loop dirty, because nothing else will
+necessarily pulse it again — a single pointer move over a static page pulses once,
+and that pulse is consumed by the very capture the provisional supersedes. Without
+the retry the pane would keep the CSS-resolution frame until the page next changed.
+An unpainted pulse alone does not suppress a crisp draw, so idle animated pages
+still update.
 Byte-identical daemon heartbeat frames are dropped before either path, and
 byte-identical crisp captures skip decode/draw. That byte-dedup assumes the crisp
 loop is the only writer, so anything else that paints the canvas must bump the

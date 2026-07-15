@@ -84,6 +84,81 @@ describe('screenshot loop byte dedup', () => {
 });
 
 describe('screenshot loop backpressure', () => {
+  it('retries after a provisional supersedes the only capture in flight', async () => {
+    // A single pointer move over an otherwise static page: one stream frame paints
+    // provisionally, its pulse is consumed by the capture that frame started, and
+    // the stream then goes quiet. Dropping the stale result without leaving work
+    // pending would strand the pane on the blurry frame until the page changes.
+    let release: ((res: AgentBrowserScreenshotResult) => void) | undefined;
+    const screenshot = vi.fn(() => new Promise<AgentBrowserScreenshotResult>((r) => { release = r; }));
+    setScreenshot(screenshot as unknown as PlatformAdapter['agentBrowserScreenshot']);
+    const draw = vi.fn();
+    let provisionalGeneration = 0;
+    const loop = createScreenshotLoop({
+      getSession: () => 'sess',
+      getBinaryPath: () => undefined,
+      isCapable: () => true,
+      draw,
+      getProvisionalGeneration: () => provisionalGeneration,
+    });
+
+    loop.pulse();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(screenshot).toHaveBeenCalledTimes(1);
+
+    // The provisional lands mid-capture; no further pulses ever arrive.
+    provisionalGeneration += 1;
+    release?.({ ok: true, bytes: new Uint8Array([5, 5, 5]), mime: 'image/jpeg' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(draw).not.toHaveBeenCalled();
+
+    // A retry has to come from the loop itself: nothing is left to pulse it.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(screenshot).toHaveBeenCalledTimes(2);
+
+    // That retry is not superseded, so the crisp frame reaches the canvas.
+    release?.({ ok: true, bytes: new Uint8Array([5, 5, 5]), mime: 'image/jpeg' });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(draw).toHaveBeenCalledTimes(1);
+
+    loop.dispose();
+  });
+
+  it('spends no captures while provisional paints are still landing', async () => {
+    const screenshot = vi.fn(async () => ({ ok: true as const, bytes: new Uint8Array([1, 2]), mime: 'image/jpeg' }));
+    setScreenshot(screenshot);
+    const draw = vi.fn();
+    let provisionalGeneration = 0;
+    let provisionalDeadline = 0;
+    const loop = createScreenshotLoop({
+      getSession: () => 'sess',
+      getBinaryPath: () => undefined,
+      isCapable: () => true,
+      draw,
+      getProvisionalGeneration: () => provisionalGeneration,
+      getProvisionalDeadline: () => provisionalDeadline,
+    });
+
+    // Sustained hover: a stream frame every 50ms paints provisionally, pushes the
+    // 250ms window out, and pulses the loop. Every capture started in here would
+    // resolve after a newer provisional had already painted.
+    for (let i = 0; i < 12; i++) {
+      provisionalDeadline = performance.now() + 250;
+      provisionalGeneration += 1;
+      loop.pulse();
+      await vi.advanceTimersByTimeAsync(50);
+    }
+    expect(screenshot).not.toHaveBeenCalled();
+
+    // Pointer stops: the window lapses and exactly one settled capture sharpens the
+    // resting frame.
+    await vi.advanceTimersByTimeAsync(600);
+    expect(screenshot).toHaveBeenCalledTimes(1);
+    expect(draw).toHaveBeenCalledTimes(1);
+
+    loop.dispose();
+  });
+
   it('drops a crisp decode superseded by a provisional paint', async () => {
     let resolveBitmap: ((bitmap: ImageBitmap) => void) | undefined;
     vi.stubGlobal('createImageBitmap', vi.fn(() => new Promise<ImageBitmap>((resolve) => { resolveBitmap = resolve; })));
