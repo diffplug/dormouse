@@ -82,7 +82,6 @@ import {
   RenamingIdContext,
   SelectedIdContext,
   WindowFocusedContext,
-  ZoomedContext,
   ZoomedIdContext,
   type PaneWriteActions,
   type WallActions,
@@ -112,7 +111,6 @@ export {
   RenamingIdContext,
   SelectedIdContext,
   WindowFocusedContext,
-  ZoomedContext,
   ZoomedIdContext,
 } from './wall/wall-context';
 export type { WallActions } from './wall/wall-context';
@@ -417,17 +415,23 @@ export function Wall({
 
   // --- Helpers ---
 
+  /** Zoom belongs to the focused passthrough pane (docs/specs/layout.md → "Zoom"),
+   *  so every focus transition off its owner starts the return to the tiled layout.
+   *  `keepId` is the pane the transition lands on, or null when focus leaves panes
+   *  entirely (a Door, or back to the Wall). `setZoomed` no-ops when already there. */
+  const releaseZoomExcept = useCallback((keepId: string | null = null) => {
+    if (lath.store.getSnapshot().zoomedId !== keepId) lath.store.setZoomed(null);
+  }, [lath]);
+
   /** Select a pane: the Wall state is the sole selection authority (Lath has no
-   *  concept of selection/activation). Moving selection away from the focused,
-   *  zoomed pane starts its return to the tiled layout immediately. */
+   *  concept of selection/activation). */
   const selectPane = useCallback((id: string) => {
-    const currentZoom = lath.store.getSnapshot().zoomedId;
-    if (currentZoom !== null && currentZoom !== id) lath.store.setZoomed(null);
+    releaseZoomExcept(id);
     selectedIdRef.current = id;
     selectedTypeRef.current = 'pane';
     setSelectedId(id);
     setSelectedType('pane');
-  }, [lath]);
+  }, [releaseZoomExcept]);
 
   // The shared tail of both reattach paths (click-reattach + drag-out): drop the Door
   // chip from the baseboard and select the now-restored pane.
@@ -550,27 +554,22 @@ export function Wall({
 
   /** Select a door in the baseboard */
   const selectDoor = useCallback((id: string) => {
-    if (lath.store.getSnapshot().zoomedId !== null) lath.store.setZoomed(null);
+    releaseZoomExcept();
     selectedIdRef.current = id;
     selectedTypeRef.current = 'door';
     setSelectedId(id);
     setSelectedType('door');
-  }, [lath]);
+  }, [releaseZoomExcept]);
 
   /** Enter terminal mode for the given panel */
   const enterTerminalMode = useCallback((id: string) => {
-    const currentZoom = lath.store.getSnapshot().zoomedId;
-    if (currentZoom !== null && currentZoom !== id) lath.store.setZoomed(null);
+    selectPane(id);
     modeRef.current = 'passthrough';
-    selectedIdRef.current = id;
-    selectedTypeRef.current = 'pane';
-    setSelectedId(id);
-    setSelectedType('pane');
     setMode('passthrough');
     markSessionAttention(id);
     // Defer focus so it happens after the mousedown/click event finishes.
     requestAnimationFrame(() => focusSession(id, true));
-  }, [lath]);
+  }, [selectPane]);
   const enterTerminalModeRef = useRef(enterTerminalMode);
   enterTerminalModeRef.current = enterTerminalMode;
 
@@ -626,14 +625,14 @@ export function Wall({
 
   /** Exit terminal mode */
   const exitTerminalMode = useCallback(() => {
-    // Zoom belongs to the focused passthrough pane. Giving keyboard focus back
-    // to the Wall ends zoom even though command-mode selection remains on it.
-    if (lath.store.getSnapshot().zoomedId !== null) lath.store.setZoomed(null);
+    // Giving keyboard focus back to the Wall ends zoom even though command-mode
+    // selection remains on the pane.
+    releaseZoomExcept();
     modeRef.current = 'command';
     setMode('command');
     const id = selectedIdRef.current;
     if (id) focusSession(id, false);
-  }, [lath]);
+  }, [releaseZoomExcept]);
 
   useEffect(() => {
     // An iframe surface taking focus blurs this window without backgrounding the
@@ -1422,7 +1421,6 @@ export function Wall({
           <PaneElementsContext.Provider value={paneElementsContextValue}>
           <DoorElementsContext.Provider value={doorElementsContextValue}>
           <RenamingIdContext.Provider value={renamingPaneId}>
-          <ZoomedContext.Provider value={zoomed}>
           <ZoomedIdContext.Provider value={zoomedId}>
           <WindowFocusedContext.Provider value={windowFocused}>
           <DialogKeyboardContext.Provider value={setDialogKeyboardActive}>
@@ -1485,7 +1483,6 @@ export function Wall({
           </DialogKeyboardContext.Provider>
           </WindowFocusedContext.Provider>
           </ZoomedIdContext.Provider>
-          </ZoomedContext.Provider>
           </RenamingIdContext.Provider>
           </DoorElementsContext.Provider>
           </PaneElementsContext.Provider>

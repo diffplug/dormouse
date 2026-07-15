@@ -211,7 +211,7 @@ Acceptance matrix — each row is an end-to-end observable, independent of engin
 | 6 | Minimize the last pane | Door created and selected; auto-spawn fills the Wall; **door keeps selection** through the spawn |
 | 7 | Click a door | Reattach at original position when structure allows (exact tier); pane selected |
 | 8 | Embedded page focuses itself (iframe surface) | Selection moves onto that pane — visible jump, same as a click; never a silent desync |
-| 9 | Zoom toggle on a pane | Pane rises, expands to the 6px-inset wall rect, then shrinks and lowers on return; layout identical after |
+| 9 | Zoom toggle on a pane | Pane rises, expands to the 15px-inset wall rect, then shrinks and lowers on return; layout identical after |
 | 10 | Restart the app (harness re-open) | Layout, doors, titles, and params restored |
 | 11 | Kill with animation | Fade in place, survivors tween into the space; a second kill mid-tween retargets cleanly; reduced-motion instant |
 | 12 | Drag a pane to a leaf edge, an ancestor edge, and center | Split-beside-pane, split-beside-column/row, and swap respectively; preview rect matches the committed result; dragging while a door is selected moves selection onto the dragged pane |

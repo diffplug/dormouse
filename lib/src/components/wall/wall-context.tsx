@@ -84,9 +84,9 @@ export const PaneWriteContext = createContext<PaneWriteActions>({
 });
 
 export const RenamingIdContext = createContext<string | null>(null);
-export const ZoomedContext = createContext(false);
-/** Exact zoom owner for pane-local chrome. Kept separate from the public boolean
- * projection so partially exposed panes do not render another pane's Unzoom state. */
+/** Exact zoom owner for pane-local chrome. Pane chrome compares against its own id
+ * rather than reading a boolean, so a partially exposed pane does not render
+ * another pane's Unzoom state. */
 export const ZoomedIdContext = createContext<string | null>(null);
 export const WindowFocusedContext = createContext(true);
 

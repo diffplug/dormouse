@@ -30,7 +30,7 @@ import {
 } from 'react';
 import { type LathTree, type Rect, leaves } from '../../lib/lath/model';
 import { layout, sashes } from '../../lib/lath/layout';
-import { LATH_LAYER_DYING, LATH_LAYER_ELEVATED } from '../../lib/lath/animator';
+import { LATH_LAYER_DYING, LATH_LAYER_ELEVATED, LATH_LAYER_TILED } from '../../lib/lath/animator';
 import { type DropTarget, resize } from '../../lib/lath/ops';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
 import { PANE_HEADER_HEIGHT_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
@@ -384,14 +384,13 @@ export function LathHost({
   }, [dragging, onCommitResize]);
 
   const activeTree = preview ?? snapshot.tree;
-  const { targets: frames } = presentationTargets(activeTree, rect, snapshot.zoomedId);
+  const { targets: frames, layers } = presentationTargets(activeTree, rect, snapshot.zoomedId);
   const sashList = sashes(activeTree, rect, LATH_LAYOUT_OPTS);
 
   // DOM order is sorted-by-id and STABLE across layout changes; z-index (not DOM
   // order) lifts the zoomed leaf, so keyed siblings never reorder. `leaves()`
   // already returns a fresh array, so sort it in place.
   const sortedIds = leaves(snapshot.tree).sort();
-  const zoomedId = snapshot.zoomedId;
 
   // Create-once-per-id callback bundle so the memoized LathLeaf sees a stable
   // `registerEl` identity across commits.
@@ -552,13 +551,15 @@ export function LathHost({
         // Geometry passed as primitives so the memoized leaf can shallow-compare.
         // Zoomed → inset wall rect on top; laid-out → its frame at z 0; neither → hidden.
         const cb = leafCallbacks(id);
+        // Stacking comes from the same layer bands the animator tweens, so this
+        // pre-tween frame agrees with every frame applyFrames writes afterward.
         const geom = f
           ? {
               left: f.x,
               top: f.y,
               width: f.width,
               height: f.height,
-              zIndex: zoomedId === id ? Z_ZOOMED : Z_TILED,
+              zIndex: zIndexForLayer(layers.get(id) ?? LATH_LAYER_TILED),
               hidden: false,
             }
           : { left: 0, top: 0, width: 0, height: 0, zIndex: Z_TILED, hidden: true };

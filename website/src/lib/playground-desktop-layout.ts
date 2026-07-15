@@ -1,4 +1,5 @@
 import type { LathPersistedLayout } from "dormouse-lib/lib/lath/persistence";
+import { terminalLeafMeta } from "dormouse-lib/components/wall/lath-wall-engine";
 
 export const PANE_MAIN = "tut-main";
 export const PANE_BOXED = "tut-boxed";
@@ -43,9 +44,6 @@ export const DESKTOP_PLAYGROUND_LAYOUT: LathPersistedLayout = {
     },
   },
   leafMeta: Object.fromEntries(
-    DESKTOP_PANES.map((pane) => [
-      pane.id,
-      { component: "terminal", tabComponent: "terminal", title: pane.title },
-    ]),
+    DESKTOP_PANES.map((pane) => [pane.id, terminalLeafMeta(pane.title)]),
   ),
 };

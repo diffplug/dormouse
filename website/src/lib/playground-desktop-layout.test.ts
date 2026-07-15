@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { layout } from "dormouse-lib/lib/lath/layout";
 import { validate } from "dormouse-lib/lib/lath/model";
+import { LATH_LAYOUT_OPTS } from "dormouse-lib/components/wall/lath-wall-store";
 import {
   DESKTOP_PLAYGROUND_LAYOUT,
   PANE_BOXED,
@@ -9,7 +10,9 @@ import {
 } from "./playground-desktop-layout";
 
 const WALL = { x: 0, y: 0, width: 1200, height: 720 };
-const OPTS = { gap: 6, minLeaf: { width: 100, height: 60 } };
+// The Wall's real opts, not a copy: a local literal would keep asserting a stale
+// gap after the engine's changed.
+const OPTS = LATH_LAYOUT_OPTS;
 
 describe("desktop playground layout", () => {
   it("is one vertical split with one horizontal split on the right", () => {

@@ -518,9 +518,11 @@ export class AgentBrowserSurfaceController {
       // interleave), and dispose already released everything.
       detach: () => {
         if (this.disposed || this.attachToken !== token) return;
+        // A provisional decode aimed at the old canvas needs no cancelling here:
+        // drawProvisionalFrame captures its sink and drops the bitmap when
+        // `this.sink` has moved on, which clearing it below guarantees.
         this.sink = null;
         this.attachToken = null;
-        this.frameDrawSeq += 1; // cancel a provisional decode aimed at the old canvas
         // The observed viewport died with the unmount; drop the cache (and the
         // pending sync debounce) so the hot paths fall back to no-element behavior.
         this.teardownPaneSizeObserver();
@@ -699,15 +701,16 @@ export class AgentBrowserSurfaceController {
           screenshotLoop.pulse();
         }
       } else if (event.type === 'frame-pulse') {
-        if (event.metadata?.deviceWidth && event.metadata?.deviceHeight) {
+        if (event.metadata) {
           this.device = { width: event.metadata.deviceWidth, height: event.metadata.deviceHeight };
         }
         // The native stream frame is CSS-resolution but arrives immediately after
         // hover/animation changes. Paint it as a provisional response, then let the
         // host screenshot loop replace it with the crisp device-resolution frame.
-        if (event.data && this.wantsProvisionalFrame()) {
-          this.drawProvisionalFrame(event.data);
-        }
+        // The body rides along only when we asked for it (via `wantFrameData`), so
+        // its presence is the request — re-testing `wantsProvisionalFrame` here would
+        // only race its own `provisionalUntil` deadline and drop a frame we wanted.
+        if (event.data) this.drawProvisionalFrame(event.data);
         this.maybeDisengageSync();
         this.publishScreen();
         if (!this.poppedOut && !this.relaunching) screenshotLoop.pulse();

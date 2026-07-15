@@ -28,9 +28,22 @@ export interface AgentBrowserStreamStatus {
   viewportHeight?: number;
 }
 
+/** A frame's device dims. Both are required: a partial or zero-sized report can
+ *  neither size the surface nor key a resize, so it degrades to absent metadata
+ *  rather than to a half-filled record (see `frameMetadata`). */
 export interface AgentBrowserFramePulse {
-  deviceWidth?: number;
-  deviceHeight?: number;
+  deviceWidth: number;
+  deviceHeight: number;
+}
+
+/** Read device dims off a stream frame's envelope, in the one place both the
+ *  large (>16KB) and small frame paths share. */
+function frameMetadata(raw: { deviceWidth?: unknown; deviceHeight?: unknown } | undefined): AgentBrowserFramePulse | undefined {
+  const w = raw?.deviceWidth;
+  const h = raw?.deviceHeight;
+  return typeof w === 'number' && w > 0 && typeof h === 'number' && h > 0
+    ? { deviceWidth: w, deviceHeight: h }
+    : undefined;
 }
 
 export interface AgentBrowserSnapshot {
@@ -219,34 +232,37 @@ export class AgentBrowserConnection {
   // Drop a frame whose pixels (and device dims) match the previous one — the
   // daemon's heartbeat re-broadcasts an unchanged page, and redrawing it is pure
   // cost. Returns true when the frame is a duplicate the caller should ignore.
-  private isDuplicateFrame(payload: string): boolean {
-    const key = djb2(payload) ^ (payload.length | 0);
+  // The dims are mixed into the hash rather than into the payload string: a frame
+  // is ~100KB of base64 at ~20Hz, so a `${data}@WxH` key would copy all of it just
+  // to hash it and throw it away.
+  private isDuplicateFrame(payload: string, metadata?: AgentBrowserFramePulse): boolean {
+    let key = djb2(payload) ^ (payload.length | 0);
+    if (metadata) key = (key ^ Math.imul(metadata.deviceWidth, 31) ^ metadata.deviceHeight) | 0;
     if (key === this.lastFrameKey) return true;
     this.lastFrameKey = key;
     return false;
   }
 
-  private emitFrame(data: string, metadata?: AgentBrowserFramePulse): void {
-    // Fold device dims into the identity key so a resize that happens to keep
-    // identical pixels still propagates.
-    const key = metadata?.deviceWidth && metadata.deviceHeight
-      ? `${data}@${metadata.deviceWidth}x${metadata.deviceHeight}`
-      : data;
-    if (this.isDuplicateFrame(key)) return;
-    this.emit({ type: 'frame-pulse', metadata, data });
+  /** The single frame-emission point. `withData` carries the base64 body to the
+   *  consumer for a provisional paint; without it the event is a bare pulse that
+   *  only paces the crisp screenshot loop. */
+  private emitFrame(data: string, metadata: AgentBrowserFramePulse | undefined, withData: boolean): void {
+    if (this.isDuplicateFrame(data, metadata)) return;
+    this.emit({ type: 'frame-pulse', metadata, ...(withData ? { data } : {}) });
   }
 
   private handleMessage(raw: unknown): void {
     if (typeof raw !== 'string') return;
+    const wantData = this.deps.wantFrameData?.() ?? false;
     if (raw.length > FRAME_PULSE_THRESHOLD) {
-      if (this.deps.wantFrameData?.()) {
+      // `wantFrameData` gates only the parse itself: on the large path it is the
+      // difference between JSON.parsing ~100KB and hashing it, which is the whole
+      // point of the threshold. Emission policy lives in emitFrame.
+      if (wantData) {
         try {
           const msg = JSON.parse(raw) as { type?: unknown; data?: unknown; metadata?: { deviceWidth?: unknown; deviceHeight?: unknown } };
           if (msg.type === 'frame' && typeof msg.data === 'string') {
-            const metadata = typeof msg.metadata?.deviceWidth === 'number' && typeof msg.metadata?.deviceHeight === 'number'
-              ? { deviceWidth: msg.metadata.deviceWidth, deviceHeight: msg.metadata.deviceHeight }
-              : undefined;
-            this.emitFrame(msg.data, metadata);
+            this.emitFrame(msg.data, frameMetadata(msg.metadata), true);
             return;
           }
         } catch {
@@ -265,14 +281,7 @@ export class AgentBrowserConnection {
       return;
     }
     if (msg.type === 'frame' && typeof msg.data === 'string') {
-      const metadata = msg.metadata?.deviceWidth && msg.metadata?.deviceHeight
-        ? { deviceWidth: msg.metadata.deviceWidth as number, deviceHeight: msg.metadata.deviceHeight as number }
-        : undefined;
-      if (this.deps.wantFrameData?.()) this.emitFrame(msg.data, metadata);
-      else {
-        const key = metadata ? `${msg.data}@${metadata.deviceWidth}x${metadata.deviceHeight}` : msg.data;
-        if (!this.isDuplicateFrame(key)) this.emit({ type: 'frame-pulse', metadata });
-      }
+      this.emitFrame(msg.data, frameMetadata(msg.metadata), wantData);
     } else if (msg.type === 'status') {
       const status: AgentBrowserStreamStatus = {
         connected: msg.connected === true,
