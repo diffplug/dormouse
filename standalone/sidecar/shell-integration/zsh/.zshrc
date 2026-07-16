@@ -3,14 +3,27 @@
 # Hands ZDOTDIR back to the user, sources their real .zshrc, then installs the
 # OSC 633 prompt/command hooks. We restore ZDOTDIR *before* running the user's rc
 # so that anything zsh writes relative to ZDOTDIR — .zcompdump, .zsh_history —
-# lands in the user's directory, not ours (which is read-only when shipped). It
-# also means login shells read $USER_ZDOTDIR/.zlogin next (the user's, directly)
-# and child shells behave normally, so this directory needs no .zlogin of its own.
+# lands in the user's directory, not ours: when shipped, this directory lives
+# inside the signed macOS app bundle, and any file written here breaks the
+# bundle's code signature (Gatekeeper then refuses to launch the app as
+# "damaged"). It also means login shells read $USER_ZDOTDIR/.zlogin next (the
+# user's, directly) and child shells behave normally, so this directory needs
+# no .zlogin of its own.
 
 : ${USER_ZDOTDIR:=$HOME}
 ZDOTDIR=${USER_ZDOTDIR}
 if [[ -f ${USER_ZDOTDIR}/.zshrc ]]; then
   builtin source ${USER_ZDOTDIR}/.zshrc
+fi
+
+# macOS /etc/zshrc runs before this file — while ZDOTDIR still points at our
+# directory — and sets HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history; a user
+# .zshenv/.zprofile sourced during that window can do the same. Left alone, zsh
+# would write history into the signed app bundle on shell exit (see above).
+# Redirect it to what /etc/zshrc would have chosen without us. Runs after the
+# user's rc so a HISTFILE they set themselves is never touched.
+if [[ -n ${HISTFILE} && -n ${DORMOUSE_ZDOTDIR} && ${HISTFILE:A} == ${DORMOUSE_ZDOTDIR:A}/* ]]; then
+  HISTFILE=${USER_ZDOTDIR}/.zsh_history
 fi
 
 # Guard against a re-sourced .zshrc installing the hooks twice.
