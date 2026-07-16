@@ -659,7 +659,7 @@ dependencies = [
 
 [[package]]
 name = "dormouse"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "base64 0.22.1",
  "objc2",

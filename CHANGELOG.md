@@ -8,10 +8,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/). Release checklist in [deploy.md](docs/specs/deploy.md).
 
+## [1.1.0] - 2026-07-16
+### Changed
+- Zooming a pane (`z`) now elevates and animates it above the tiled layout and couples it to focus: pressing `z` zooms the pane **and** enters passthrough, and the zoom ends the moment you leave passthrough or focus another pane (rather than staying maximized until you toggle it back). Manual splits (`|` `%` `-` `"`, header split buttons) and Host New Terminal actions now immediately select the new pane and enter passthrough, so building a layout with several splits in a row means re-entering command mode between them; background control-plane creation (`dor split`, `dor ensure`, `dor ab`, `dor iframe`) is unchanged ([#265](https://github.com/diffplug/dormouse/pull/265)).
+
+### Fixed
+- 🖥️ zsh no longer writes its command history (`.zsh_history`) into the signed macOS app bundle, which could corrupt the app's code signature and make Gatekeeper refuse to launch it as "damaged"; history now lands in your home directory as it would without Dormouse ([#266](https://github.com/diffplug/dormouse/pull/266)).
+
 ## [1.0.1] - 2026-07-14
-
-_Recommended bump: **bugfix** — the only change repairs release packaging; no feature or behavior changes._
-
 ### Fixed
 - 🖥️ CI release artifacts now include the zsh shell-integration files (`.zshenv`, `.zshrc`, `.zprofile`), which `actions/upload-artifact` silently dropped as hidden dotfiles. This is what blocked the standalone v1.0.0 binaries from shipping — hash verification correctly refused the incomplete artifacts — so 1.0.1 is the first standalone release of the 1.0 feature set. The VS Code extension was unaffected ([7ef0f440](https://github.com/diffplug/dormouse/commit/7ef0f440c8631a9616093e1c682b0425b682369a)).
 
