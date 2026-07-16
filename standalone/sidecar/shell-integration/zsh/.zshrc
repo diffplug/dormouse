@@ -21,8 +21,10 @@ fi
 # .zshenv/.zprofile sourced during that window can do the same. Left alone, zsh
 # would write history into the signed app bundle on shell exit (see above).
 # Redirect it to what /etc/zshrc would have chosen without us. Runs after the
-# user's rc so a HISTFILE they set themselves is never touched.
-if [[ -n ${HISTFILE} && -n ${DORMOUSE_ZDOTDIR} && ${HISTFILE:A} == ${DORMOUSE_ZDOTDIR:A}/* ]]; then
+# user's rc so a HISTFILE they set themselves is never touched. The directory
+# is quoted so that a user rc enabling GLOB_SUBST (e.g. sh/ksh emulation)
+# can't turn an install path containing glob metacharacters into a pattern.
+if [[ -n ${HISTFILE} && -n ${DORMOUSE_ZDOTDIR} && ${HISTFILE:A} == "${DORMOUSE_ZDOTDIR:A}"/* ]]; then
   HISTFILE=${USER_ZDOTDIR}/.zsh_history
 fi
 
