@@ -1,5 +1,19 @@
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
+
+// Constant-time control-token check. A short-circuiting `!==` compare leaks the
+// token byte-by-byte to a co-resident local process that can time the response,
+// so hash both sides to fixed-length digests (side-stepping timingSafeEqual's
+// length-mismatch throw, which would itself leak the token length) and compare
+// those. Mirrors the SHA-256 + timingSafeEqual pattern the selfhost server uses
+// in server/src/state.ts.
+function tokenMatches(provided, expected) {
+  if (typeof provided !== 'string') return false;
+  const a = crypto.createHash('sha256').update(provided).digest();
+  const b = crypto.createHash('sha256').update(expected).digest();
+  return crypto.timingSafeEqual(a, b);
+}
 
 // The server timeout must outlast the dor client's own deadline so the client
 // always controls the outcome — its longest is `dor ensure --restart` at 60s, so
@@ -57,7 +71,7 @@ function createDorControlServer({ socketPath, token, send, timeoutMs = 65000 }) 
       return;
     }
 
-    if (request.token !== token) {
+    if (!tokenMatches(request.token, token)) {
       writeResponse(socket, { requestId: request.requestId, ok: false, error: 'invalid Dormouse control token' });
       return;
     }

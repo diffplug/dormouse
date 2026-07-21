@@ -1060,11 +1060,15 @@ fn dor_control_socket_path() -> String {
 }
 
 fn dor_control_token() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    format!("{}-{nanos}", std::process::id())
+    // Must be unguessable: it is the sole authenticator for the private `dor`
+    // control socket. A PID+timestamp value is locally discoverable (`ps`) and
+    // bounded by the app's launch window, so draw 24 bytes from the OS CSPRNG and
+    // hex-encode them — matching the VS Code host's randomBytes(24).toString('hex')
+    // in pty-manager.ts. Aborting on CSPRNG failure is deliberate: never fall back
+    // to a weak token.
+    let mut bytes = [0u8; 24];
+    getrandom::getrandom(&mut bytes).expect("OS CSPRNG unavailable for dor control token");
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn dor_cli_paths_from_root(root: PathBuf) -> DorCliPaths {
