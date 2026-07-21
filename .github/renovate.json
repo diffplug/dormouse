@@ -103,6 +103,12 @@
       "matchManagers": ["npm"],
       "matchPackageNames": ["dockview-react"],
       "enabled": false
+    },
+    {
+      "description": "canopy pins the pristine @xterm/addon-webgl to the exact commit the SDF fork's sdf branch is based on (0.20.0-beta.287 == core 6.1.0-beta.288 == gitHead 8aab3103); it is the UpstreamVsFork regression baseline and moves in lockstep with the hand-cut @diffplug/xterm-addon-webgl-sdf tarball, so it must be a manual edit, not a Renovate bump (see canopy/README.md and docs/specs/webgl-text.md)",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["@xterm/addon-webgl"],
+      "enabled": false
     }
   ]
 }
