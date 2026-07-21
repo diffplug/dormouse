@@ -15,7 +15,7 @@ pnpm dev:canopy   # storybook on http://localhost:6007
   no auth). pnpm records an integrity hash in the lockfile.
 - The addon bundles xterm core internals, so `@xterm/xterm` here must be the
   exact beta the fork release was built from — the release version encodes it:
-  `0.20.0-sdf288.1` ⇒ built from `@xterm/xterm@6.1.0-beta.288`.
+  `0.20.0-sdf288.5` ⇒ built from `@xterm/xterm@6.1.0-beta.288`.
 - Renovate cannot see tarball URLs. Bumps are manual: cut a fork release, then
   update the URL (and the `@xterm/xterm` pin if the base beta moved) in
   `package.json` here.
