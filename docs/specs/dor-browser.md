@@ -177,17 +177,29 @@ address, IPv6 bracketed).
 
 Clicking a port row reproduces `dor ab open <url>` against the **default**
 key/session: it runs `agent-browser open <url>` on that session and
-reuses-or-creates the session's browser surface, focus-neutrally (the caller
-keeps focus) — the wall-side mirror of the CLI flow, not the control plane. It is
-host-gated on `agentBrowserCommand`: absent (e.g. the web demo host), the rows
-render as inert labels.
+reuses-or-creates the session's browser surface — the wall-side mirror of the CLI
+flow, not the control plane. It is host-gated on `agentBrowserCommand`: absent
+(e.g. the web demo host), the rows render as inert labels.
+
+**The click reveals its surface.** Unlike `dor ab` (focus-neutral: an agent must
+not steal focus from the human), a menu click *is* the human asking to see that
+browser, so every arm of the eager lookup below ends by selecting the surface —
+reattaching it first when it is minimized, on the same terms as clicking its Door
+chip. Selection only: passthrough stays on the terminal that was right-clicked, so
+connecting a port never redirects the keyboard. This is why a repeat click on an
+already-connected port is visible at all — the session merely re-navigates to the
+URL it is already on, so the selection move is the only feedback.
+Source of truth: `revealSurface` in `Wall.tsx`, threaded into `useDorControl`.
 
 **Instant create.** The click is fire-and-forget: the menu closes at once and the
 pane appears **before** `agent-browser open` runs (a cold daemon boot is 1–3s).
 The eager surface is created **without a `session`** — deliberately: a
 session-less `ab-screencast` pane is inert (the controller's `maybeRecoverStalePort`
 returns early with no session, so it spawns no CLI and cannot race the daemon
-boot), while the panel still shows `Connecting to browser session…`. It carries
+boot), while the panel still shows `Connecting to browser session…` — the
+session-less placeholder branch exists for exactly this pane, and deliberately
+does *not* fall through to the idle `run dor ab open <url>` line, which would ask
+the user to redo the click they just made. It carries
 `key: 'default'` and the target `url` so the browser chrome shows the destination
 immediately. Once `open` succeeds, a best-effort `stream status` runs, then the
 pane receives `{session, wsPort, binaryPath}` as **one** params refresh — setting

@@ -341,6 +341,7 @@ export function useDorControl({
   createSplitSurface,
   createContentSurface,
   killPaneImmediately,
+  revealSurface,
   lastAgentBrowserBinaryPathRef,
 }: {
   /** The Lath engine — visible-pane projection (`lath.listPanes()`), aspect-ratio
@@ -374,6 +375,10 @@ export function useDorControl({
     focusNeutral?: boolean;
   }) => ParseResult<{ id: string; ref: string; status: 'created' | 'replaced' }>;
   killPaneImmediately: (id: string) => void;
+  /** Put the selection on a surface, reattaching it first when it is minimized.
+   *  Used by the human-initiated `connectPort` (a menu click is a request to see
+   *  that surface); the `dor ab` control path stays focus-neutral. */
+  revealSurface: (id: string) => void;
   /** The last binary path a `dor ab` surface resolved on a terminal's PATH. */
   lastAgentBrowserBinaryPathRef: MutableRefObject<string | undefined>;
 }): { connectPort: (id: string, url: string) => Promise<void> } {
@@ -536,10 +541,17 @@ export function useDorControl({
   // Failures are logged, not returned — the menu closes before one can exist.
   const connectPort = useCallback((id: string, url: string): Promise<void> => {
     const ensureEagerSurface = (session: string): ParseResult<{ surfaceId: string }> => {
+      // Every arm below ends on the same surface id, and a menu click is a human
+      // asking to *see* that surface — so reveal it (reattach if minimized, then
+      // select). `dor ab`'s control path stays focus-neutral; this one does not.
+      const reveal = (surfaceId: string): ParseResult<{ surfaceId: string }> => {
+        revealSurface(surfaceId);
+        return { ok: true, value: { surfaceId } };
+      };
       // (a) A surface already bound to this session — reuse; params untouched
       // (the navigation + final refresh handle the rest).
       const existing = findAgentBrowserSurface(session);
-      if (existing) return { ok: true, value: { surfaceId: existing.id } };
+      if (existing) return reveal(existing.id);
       // (b) A still-booting default pane from a rapid earlier connect (created
       // but not yet handed its session) — reuse it so a second click during the
       // daemon boot doesn't spawn a duplicate.
@@ -547,7 +559,7 @@ export function useDorControl({
         isAgentBrowserParams(params)
         && (params as { key?: unknown }).key === 'default'
         && (params as { session?: unknown }).session === undefined);
-      if (booting) return { ok: true, value: { surfaceId: booting.id } };
+      if (booting) return reveal(booting.id);
       // (c) Create it now: NO `session` (keeps the controller's stale-port
       // recovery inert until the daemon is up), but carry the target `url` so
       // the browser chrome shows it immediately.
@@ -560,7 +572,7 @@ export function useDorControl({
         },
       });
       if (!created.ok) return created;
-      return { ok: true, value: { surfaceId: created.surfaceId } };
+      return reveal(created.surfaceId);
     };
     return connectPortToDefaultBrowser({
       url,
@@ -573,7 +585,7 @@ export function useDorControl({
       // the way the render-swap path in Wall.tsx does.
       if (!outcome.ok) console.warn('[dormouse] connect port failed:', outcome.message);
     });
-  }, [buildDorSurfaces, ensureAgentBrowserSurface, findAgentBrowserSurface, findSurfaceByParams, updateSurfaceParams, lastAgentBrowserBinaryPathRef]);
+  }, [buildDorSurfaces, ensureAgentBrowserSurface, findAgentBrowserSurface, findSurfaceByParams, updateSurfaceParams, revealSurface, lastAgentBrowserBinaryPathRef]);
 
   useEffect(() => {
     const handler = async (event: Event) => {
