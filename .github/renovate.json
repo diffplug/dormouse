@@ -38,6 +38,34 @@
       "separateMajorMinor": false
     },
     {
+      "description": "Storybook core and its framework/addon packages are versioned in lockstep and their presets import across packages; a partial bump breaks the build, so keep them in one PR",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["storybook", "@storybook/**"],
+      "groupName": "storybook",
+      "groupSlug": "storybook",
+      "separateMajorMinor": false
+    },
+    {
+      "description": "Vitest runs on top of Vite and pins a peer Vite version; the Vite plugins are released against a Vite major. Bump them in one PR so a Vite/Vitest peer mismatch never lands split across incompatible versions",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["vite", "@vitejs/**", "vitest", "@vitest/**"],
+      "groupName": "vite",
+      "groupSlug": "vite",
+      "separateMajorMinor": false
+    },
+    {
+      "description": "xterm core and its first-party addons ship from one repo on one beta counter, and each addon peers on the exact core beta it was built against — an addon at beta.N requires ^6.1.0-beta.N, which no earlier core beta satisfies. The addons also compile against core internals, so a partial bump lands an unsatisfied peer range and mismatched internals; keep them in one PR. canopy's fork-base pins are excluded below",
+      "matchManagers": ["npm"],
+      "matchPackageNames": [
+        "@xterm/xterm",
+        "@xterm/addon-fit",
+        "@xterm/addon-unicode-graphemes"
+      ],
+      "groupName": "xterm",
+      "groupSlug": "xterm",
+      "separateMajorMinor": false
+    },
+    {
       "description": "@types/node must track the pinned Node runtime major and must not expose APIs newer than the runtime we bundle",
       "matchManagers": ["npm"],
       "matchPackageNames": ["@types/node"],
@@ -86,6 +114,13 @@
       "description": "dockview-react is slated for removal; stay on ^5.1.0 and don't churn through major breaking changes (e.g. v6) on a dependency that's getting kicked out",
       "matchManagers": ["npm"],
       "matchPackageNames": ["dockview-react"],
+      "enabled": false
+    },
+    {
+      "description": "canopy pins the pristine @xterm/addon-webgl AND @xterm/xterm to the exact commit the SDF fork's sdf branch is based on (the addon's beta counter is offset from core's; canopy/README.md records the current correspondence). They are the UpstreamVsFork regression baseline and move in lockstep with the hand-cut @diffplug/xterm-addon-webgl-sdf tarball, which Renovate cannot see, so bumping either one is a manual edit made when the fork rebases — never a Renovate bump (see canopy/README.md and docs/specs/webgl-text.md). File-scoped: lib and standalone still track upstream betas via the xterm group above. Must stay last; later rules win",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["canopy/package.json"],
+      "matchPackageNames": ["@xterm/**"],
       "enabled": false
     }
   ]

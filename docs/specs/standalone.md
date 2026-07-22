@@ -174,7 +174,8 @@ shell controls, the theme picker (`docs/specs/theme.md`), and the window
 controls (minimize / maximize / close via `@tauri-apps/api/window`, with
 window-focus tracking dimming the bar). The shell controls are:
 
-- **`[+]`** — spawns a new terminal with the currently selected shell
+- **`[+]`** — spawns a new terminal with the currently selected shell, selects it,
+  and enters passthrough immediately
   (dispatches the `dormouse:new-terminal` CustomEvent that `Wall` listens
   for; the VS Code equivalent is the `dormouse:newTerminal` postMessage in
   `docs/specs/transport.md`).

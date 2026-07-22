@@ -17,6 +17,10 @@ Extension Host (vscode-ext/src/)
 ├── pty-manager.ts            — PTY lifecycle, buffering (1M char cap), CWD queries
 ├── pty-host.js               — forked child process wrapping pty-core via node-pty
 ├── session-state.ts          — workspaceState persistence + alert state merging
+├── workspace-chrome.ts       — reflect Workspace union status (bell/TODO) onto native chrome title
+├── shell-selection.ts        — persisted shell picker (workspace/global selectedShellPath)
+├── agent-browser-host.ts     — extension-host wiring + stream relay for the agent-browser surface
+├── iframe-proxy-host.ts      — VS Code binding for the iframe transparent proxy (injects the logger)
 ├── webview-html.ts           — CSP injection, nonce generation, asset URI rewriting
 └── log.ts                    — extension logging
 
@@ -125,7 +129,7 @@ Reflection updates on every owned-PTY `AlertManager.onStateChange` and on `claim
 
 The VS Code view title contributes `Dormouse: Select Shell` and `Dormouse: New Terminal`. The selected shell name is mirrored into the `WebviewView.description`, and `dormouse:selectedShell` keeps the webview's default-shell slot current for split/spawn/restore paths.
 
-`dormouse.newTerminal` focuses the Dormouse view and posts `dormouse:newTerminal` with the currently selected shell. `dormouse.selectShell` opens a QuickPick, saves the shell path globally or per workspace, applies the description/default-shell update, and, when the picked shell differs from the previous selection, focuses the view and posts `dormouse:newTerminal` with `replaceUntouched: true` and `announce: true`. The shared `Wall` logic then replaces only a selected untouched terminal in-place; touched terminals cause an additional pane to be spawned instead.
+`dormouse.newTerminal` focuses the Dormouse view and posts `dormouse:newTerminal` with the currently selected shell; the shared Wall selects the new pane and enters passthrough immediately. `dormouse.selectShell` opens a QuickPick, saves the shell path globally or per workspace, applies the description/default-shell update, and, when the picked shell differs from the previous selection, focuses the view and posts `dormouse:newTerminal` with `replaceUntouched: true` and `announce: true`. The shared `Wall` logic then replaces only a selected untouched terminal in-place; touched terminals cause an additional pane to be spawned and focused in passthrough instead.
 
 ### Serialization and restore
 
@@ -177,7 +181,7 @@ TUIs query the terminal's foreground/background/cursor colors with `OSC 10/11/12
 
 Source of truth: `vscode-ext/src/webview-html.ts` assembles the CSP directives (`getNonce()` + the directive list).
 
-`unsafe-inline` for styles is needed because VS Code injects theme CSS variables via inline styles on the body element. Scripts remain nonce-gated (32-char random alphanumeric nonce). The webview HTML is built by Vite from the `lib` package, then at runtime `webview-html.ts` rewrites asset URLs to webview URIs, injects the CSP meta tag, applies nonces to all script tags, and injects initial state via a nonce-gated inline script.
+`unsafe-inline` for styles is needed because VS Code injects theme CSS variables via inline styles on the body element. Scripts remain nonce-gated, with a fresh per-render nonce of 24 CSPRNG bytes (`node:crypto` `randomBytes`) base64url-encoded to 32 characters — a nonce that is guessable is a nonce that is not there, so `Math.random()` is not acceptable here. The webview HTML is built by Vite from the `lib` package, then at runtime `webview-html.ts` rewrites asset URLs to webview URIs, injects the CSP meta tag, applies nonces to all script tags, and injects initial state via a nonce-gated inline script.
 
 ### Build and development
 

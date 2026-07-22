@@ -66,6 +66,8 @@ The workflow defaults `GITHUB_TOKEN` to read-only repository access (`contents: 
 
 **Note:** We do NOT use `tauri-action`'s built-in GitHub Release creation. We create the release locally after signing.
 
+The `build-standalone` artifact upload sets `include-hidden-files: true` — `actions/upload-artifact` v4.4+ silently drops dotfiles by default, but the zsh shell integration ships as ZDOTDIR dotfiles (`standalone/sidecar/shell-integration/zsh/.zshenv` etc.). Without the flag, the artifact is missing files that `artifact-manifest.sha256` hashed (the manifest is generated from the runner's disk, before upload), and Stage 2 hash verification fails. The `vscode-extension` upload keeps the safer default since it only contains `*.vsix` and the manifest.
+
 The CI updater key exists only so Tauri emits updater-shaped artifacts during unsigned builds. It is generated inside the runner, is not stored in source control or GitHub Secrets, and its public key is not the public key trusted by shipped apps. The final release bundles are re-signed locally by `scripts/sign-and-deploy.sh` with the production Tauri updater key before upload.
 
 ### Job: `security-audit`

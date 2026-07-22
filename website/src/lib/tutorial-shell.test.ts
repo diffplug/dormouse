@@ -45,6 +45,22 @@ describe("TutorialShell program dispatch", () => {
     expect(output.join("")).toContain("$ ");
   });
 
+  it("forwards trailing bytes to a program launched within the same chunk", () => {
+    const { program, shell, startProgram } = createHarness();
+
+    // A single chunk (e.g. a paste) both launches the program and carries the
+    // first keystroke for it. The trailing `q` must reach the program, not the
+    // shell line editor.
+    shell.handleInput("ascii-splash --no-mouse\rq");
+
+    expect(startProgram).toHaveBeenCalledWith(
+      "ascii-splash",
+      ["--no-mouse"],
+      expect.any(Function),
+    );
+    expect(program.handleInput).toHaveBeenCalledWith("q");
+  });
+
   it("disposes the active program with the shell", () => {
     const { program, shell } = createHarness();
 

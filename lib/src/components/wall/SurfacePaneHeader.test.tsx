@@ -12,7 +12,14 @@ import {
   type ScreenSnapshot,
 } from './agent-browser-screen';
 import { setDevServerResolution } from './agent-browser-ports';
-import { WallActionsContext, type WallActions } from './wall-context';
+import {
+  ModeContext,
+  SelectedIdContext,
+  WallActionsContext,
+  WindowFocusedContext,
+  ZoomedIdContext,
+  type WallActions,
+} from './wall-context';
 import { stubWallActions as stubActions } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -60,19 +67,45 @@ afterEach(() => {
   container.remove();
 });
 
-function renderHeader(props: PaneProps, actions: WallActions) {
+function renderHeader(
+  props: PaneProps,
+  actions: WallActions,
+  state: { active?: boolean; zoomedId?: string | null } = {},
+) {
   act(() => {
     root.render(
       <StrictMode>
-        <WallActionsContext.Provider value={actions}>
-          <SurfacePaneHeader {...props} />
-        </WallActionsContext.Provider>
+        <ModeContext.Provider value={state.active ? 'passthrough' : 'command'}>
+          <SelectedIdContext.Provider value={state.active ? props.id : null}>
+            <WindowFocusedContext.Provider value={true}>
+              <ZoomedIdContext.Provider value={state.zoomedId ?? null}>
+                <WallActionsContext.Provider value={actions}>
+                  <SurfacePaneHeader {...props} />
+                </WallActionsContext.Provider>
+              </ZoomedIdContext.Provider>
+            </WindowFocusedContext.Provider>
+          </SelectedIdContext.Provider>
+        </ModeContext.Provider>
       </StrictMode>,
     );
   });
 }
 
 describe('SurfacePaneHeader — browser chrome', () => {
+  it('inverts only its own Unzoom control against the active header palette', () => {
+    const props = headerProps('pane-zoom', 'Zoomed');
+    renderHeader(props, stubActions(), { active: true, zoomedId: 'pane-zoom' });
+
+    const unzoom = container.querySelector<HTMLButtonElement>('button[aria-label="Unzoom"]');
+    expect(unzoom).not.toBeNull();
+    expect(unzoom?.className).toContain('bg-header-active-fg');
+    expect(unzoom?.className).toContain('text-header-active-bg');
+
+    renderHeader(props, stubActions(), { active: true, zoomedId: 'another-pane' });
+    expect(container.querySelector('button[aria-label="Unzoom"]')).toBeNull();
+    expect(container.querySelector('button[aria-label="Zoom"]')?.className).toContain('hover:bg-current/10');
+  });
+
   it('shows the URL as primary text with the HTML title as a tooltip', () => {
     const registration = register('pane-url');
     renderHeader(headerProps('pane-url', 'Vite + React'), stubActions());

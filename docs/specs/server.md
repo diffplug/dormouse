@@ -79,6 +79,14 @@ That is the entire persistent state. The Host's ACL is not here — it lives on
 the Host, in webview `localStorage` (`lib/src/lib/local-json-store.ts`),
 which is the whole point of the security model.
 
+`hosts.json` stores `hostToken` — the host↔server relay bearer secret — in
+plaintext, so both files are written owner-only: the state dir is created
+`0o700` and every write lands in a `0o600` temp file before the rename
+(`server/src/state.ts`, `writeAtomic`). Without explicit modes these inherit
+the umask and end up world-readable, handing live host tokens to any other
+local account on a shared machine. Any new file under `$DORMOUSE_STATE_DIR`
+must go through `writeAtomic` for the same reason.
+
 ## WebAuthn without a WebAuthn library
 
 Two facts keep the server dependency-free:

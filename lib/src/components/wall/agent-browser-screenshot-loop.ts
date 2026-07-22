@@ -19,6 +19,16 @@ export interface ScreenshotLoopDeps {
    *  fresh canvas (bumped on re-attach) still repaints even when the bytes match
    *  the last displayed frame. Absent ⇒ generation 0 (dedup on bytes alone). */
   getDrawGeneration?: () => number;
+  /** Monotonic count of provisional stream paints. A crisp capture whose start
+   *  predates a newer provisional paint is stale and must not overwrite it. */
+  getProvisionalGeneration?: () => number;
+  /** `performance.now()` timestamp through which provisional stream paints are
+   *  still expected (continued pointer input pushes it out). While it is in the
+   *  future, a capture is certain to be superseded mid-flight and dropped, so the
+   *  loop waits it out and takes one settled shot at the end instead of burning a
+   *  host round trip per pulse. Absent ⇒ no window; capture on the pacing rule
+   *  alone. */
+  getProvisionalDeadline?: () => number;
   /** Optional gated logger for the high-rate per-shot start/done diagnostics;
    *  absent ⇒ silent. Warnings (stall/failure/error) stay unconditional. */
   log?: (message: string) => void;
@@ -33,8 +43,8 @@ export interface ScreenshotLoop {
 /**
  * Display crisp HiDPI screenshots, paced by stream-frame "pulses". The
  * screencast is CSS-resolution only (Chromium's `Page.startScreencast` ignores
- * deviceScaleFactor), so the panel uses its frames only as change signals and
- * displays device-resolution screenshots captured via the host.
+ * deviceScaleFactor), so the panel paints it provisionally for responsiveness
+ * and uses this loop to replace it with device-resolution host screenshots.
  *
  * Backpressure (we only ever want the latest, and must slow down if capture
  * can't keep up): at most one screenshot in flight; a pulse during a shot sets
@@ -42,6 +52,12 @@ export interface ScreenshotLoop {
  * shot won't start until at least one shot-duration (adaptive EWMA) has passed
  * since the last one began, so a slow capture self-throttles. A static page
  * produces no pulses, so no shots and no cost.
+ *
+ * While the panel is painting provisional stream frames, a shot can't win the race
+ * anyway (`getProvisionalDeadline`), so the loop waits the window out and takes one
+ * settled shot at its end rather than one per pulse. Whatever the loop drops — a
+ * deferred shot or one superseded mid-flight — it stays `dirty`, because the canvas
+ * is left on a CSS-resolution frame and only a later crisp shot can sharpen it.
  */
 export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
   let inFlight = false;
@@ -55,7 +71,7 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
   // capture we've already displayed onto this same draw target.
   let lastDrawnKey: string | null = null;
 
-  const display = (bytes: Uint8Array, mime: string, mySeq: number) => {
+  const display = (bytes: Uint8Array, mime: string, mySeq: number, provisionalAtStart: number) => {
     // Identical bytes drawn onto the same canvas generation → nothing to repaint;
     // skip the decode. A fresh canvas bumps the generation, so the same bytes
     // still draw after a re-attach.
@@ -67,7 +83,11 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
     const part = bytes as Uint8Array<ArrayBuffer>;
     createImageBitmap(new Blob([part], { type: mime })).then((bitmap) => {
       // A newer shot landed first (or we're gone) — drop this one.
-      if (disposed || mySeq !== seq) {
+      if (
+        disposed ||
+        mySeq !== seq ||
+        (deps.getProvisionalGeneration?.() ?? 0) !== provisionalAtStart
+      ) {
         bitmap.close();
         return;
       }
@@ -85,6 +105,7 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
     inFlight = true;
     dirty = false;
     const mySeq = ++seq;
+    const provisionalAtStart = deps.getProvisionalGeneration?.() ?? 0;
     lastStart = performance.now();
     deps.log?.(`[agent-browser] screenshot start ${JSON.stringify({ session, seq: mySeq })}`);
     // Watchdog: a capture that never resolves (a wedged host round-trip) must not
@@ -106,8 +127,24 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
       deps.log?.(`[agent-browser] screenshot done ${JSON.stringify({ session, seq: mySeq, ok: res.ok, bytes: res.bytes?.byteLength ?? 0, elapsedMs: Math.round(elapsedMs), dirty })}`);
       avgMs = avgMs * 0.6 + elapsedMs * 0.4;
       inFlight = false;
-      if (res.ok && res.bytes) display(res.bytes, res.mime || 'image/jpeg', mySeq);
-      else console.warn('[agent-browser] screenshot failed:', res.error ?? '(no data)');
+      // A provisional stream frame painted during this capture is visibly newer.
+      // Do not let the stale crisp result overwrite it. Mere `dirty` pulses do not
+      // suppress drawing — an idle animated page still needs periodic crisp frames
+      // even without pointer input.
+      const stale = (deps.getProvisionalGeneration?.() ?? 0) !== provisionalAtStart;
+      if (res.ok && res.bytes) {
+        if (stale) {
+          // Dropping the result leaves CSS-resolution pixels on the canvas, and the
+          // stream owes us nothing more: a single pointer move over a static page
+          // pulses once, and that pulse was consumed by this very capture. Keep the
+          // work pending so the resting frame still sharpens.
+          dirty = true;
+        } else {
+          display(res.bytes, res.mime || 'image/jpeg', mySeq, provisionalAtStart);
+        }
+      } else {
+        console.warn('[agent-browser] screenshot failed:', res.error ?? '(no data)');
+      }
       if (dirty) schedule();
     }).catch((err) => {
       if (settled) return;
@@ -125,17 +162,29 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
       dirty = true;
       return;
     }
-    // Space shots to ~1.5× the measured capture time since the last START: the
-    // slower capture gets, the more we back off (≈⅔ duty cycle), and the 50ms
+    const now = performance.now();
+    // Two independent reasons to wait; the longer wins.
+    //
+    // Pacing: space shots to ~1.5× the measured capture time since the last START.
+    // The slower capture gets, the more we back off (≈⅔ duty cycle), and the 50ms
     // floor stops a fast/cached/error return from spinning a tight loop.
-    const floor = Math.max(50, avgMs * 1.5);
-    const wait = lastStart + floor - performance.now();
+    const paceWait = lastStart + Math.max(50, avgMs * 1.5) - now;
+    // Provisional window: while stream paints are still landing (~20Hz) any capture
+    // (~120ms) is superseded before it resolves, so every one of them is a host
+    // round trip whose bytes we throw away. The dropped shots were never drawing
+    // anything, so skipping them costs no pixels — the frame that actually lands is
+    // the first one started after the last provisional paint either way.
+    const provisionalWait = (deps.getProvisionalDeadline?.() ?? 0) - now;
+    const wait = Math.max(paceWait, provisionalWait);
     if (wait > 0) {
       dirty = true;
       if (timer === undefined) {
         timer = setTimeout(() => {
           timer = undefined;
-          if (dirty && !inFlight) take();
+          // Re-enter `schedule`, not `take`: continued pointer input pushes the
+          // provisional window past this timer, and re-checking re-arms for the new
+          // end instead of spending a shot that window would supersede.
+          if (dirty && !inFlight) schedule();
         }, wait);
       }
       return;

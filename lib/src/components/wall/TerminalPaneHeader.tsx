@@ -14,7 +14,7 @@ import {
 } from '@phosphor-icons/react';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { TodoAlertDialog } from '../TodoAlertDialog';
-import { POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
+import { paneZoomButtonClass, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
 import { bellIconClass } from '../bell-icon-class';
 import { useTodoPillContent } from '../TodoPillBody';
 import type { PaneProps } from './pane-props';
@@ -53,7 +53,7 @@ import {
   RenamingIdContext,
   SelectedIdContext,
   WindowFocusedContext,
-  ZoomedContext,
+  ZoomedIdContext,
 } from './wall-context';
 
 const tabVariant = tv({
@@ -88,7 +88,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const renamingId = useContext(RenamingIdContext);
-  const zoomed = useContext(ZoomedContext);
+  const zoomed = useContext(ZoomedIdContext) === id;
   const windowFocused = useContext(WindowFocusedContext);
   const setDialogKeyboardActive = useContext(DialogKeyboardContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
@@ -342,10 +342,10 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
                 tooltip={'Split top/bottom [-] or ["]'}
               ><SplitVerticalIcon size={14} /></HeaderActionButton>
               <HeaderActionButton
-                className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
+                className={paneZoomButtonClass(zoomed, isActiveHeader)}
                 onClick={(e) => { e.stopPropagation(); actions.onZoom(id); }}
                 ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
-                tooltip={zoomed ? 'Unzoom [z]' : 'Zoom [z]'}
+                tooltip={zoomed ? 'Unzoom' : 'Zoom [z]'}
               >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
             </div>
           )}

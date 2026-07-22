@@ -324,7 +324,7 @@ function dorCommandString(args: string[] | undefined): string | undefined {
 /**
  * The `dor` control plane: the webview handler for `dormouse:control-request`
  * events (the `surface.*` methods that back the `dor` CLI) plus its private
-   * surface-resolution/query helpers. This is CLI policy — surface targeting,
+ * surface-resolution/query helpers. This is CLI policy — surface targeting,
  * param coercion, command quoting, restart/integration timing — not wall layout;
  * the layout primitives it drives (`createSplitSurface`, `createContentSurface`,
  * `killPaneImmediately`, `buildDorSurfaces`, `surfaceRefForId`) are owned by the

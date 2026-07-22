@@ -20,8 +20,8 @@ not this repo.
   Upstreamable fixes branch off `master` and are cherry-picked into `sdf`.
 - **Versioning**: the addon is published as `@diffplug/xterm-addon-webgl-sdf`
   with versions shaped `<addon-version>-sdf<coreBeta>.<iteration>` (e.g.
-  `0.20.0-sdf288.5` = built from the commit of `@xterm/xterm@6.1.0-beta.288`,
-  iteration 5). The addon bundles xterm core internals, so consumers must pin
+  `0.20.0-sdf291.0` = built from the commit of `@xterm/xterm@6.1.0-beta.291`,
+  iteration 0). The addon bundles xterm core internals, so consumers must pin
   the exact `@xterm/xterm` beta encoded in the version — the pins in
   `canopy/package.json` move in lockstep.
 - **Distribution**: GitHub Release assets consumed as a pnpm tarball-URL
@@ -29,7 +29,14 @@ not this repo.
   even for public reads, and release assets need none. The lockfile records a
   sha512 integrity hash; treat published assets as immutable and cut a new
   iteration instead of replacing one. Renovate cannot see tarball URLs, so
-  version bumps are manual edits of `canopy/package.json`.
+  version bumps are manual edits of `canopy/package.json`. Because the tarball
+  is invisible to it, Renovate would otherwise drift canopy's two sibling pins
+  off the fork base unnoticed, so `.github/renovate.json` disables `@xterm/**`
+  scoped to `canopy/package.json` — both pins move only by hand. `lib/` and
+  `standalone/` keep tracking upstream betas (as one grouped `xterm` PR, since
+  core and its addons peer on the exact matching beta), so between fork rebases
+  the two can sit on different `@xterm/xterm` betas. That divergence is
+  expected and confined to the Storybook-only lab.
 - **Releases are hand-cut today** (build, `npm pack`, `gh release create` per
   FORK.md); automating this is staged in `## Future`.
 - **Dev loop**: `pnpm link ~/projects/xterm.js/addons/addon-webgl` from
@@ -40,6 +47,30 @@ not this repo.
 
 Source of truth: `canopy/package.json` (pins), `canopy/README.md` (bump flow),
 FORK.md in the fork.
+
+## Following upstream
+
+An `@xterm/*` bump is not a dependency chore that stops at `lib/` and
+`standalone/` — it is the trigger to re-evaluate the fork. Leaving the fork on
+an older base makes canopy's `UpstreamVsFork` harness compare against an
+upstream we no longer ship, which is the one thing the harness exists to
+prevent. Each time Renovate opens the grouped `xterm` PR:
+
+1. **Read the upstream diff first** and decide what it is worth. Derive the
+   commit range with `npm view @xterm/xterm@6.1.0-beta.NNN gitHead` and compare
+   on GitHub. Most betas do not touch `addons/addon-webgl`, in which case the
+   bump is a no-op for us and the fork does not move; when they do, that diff
+   is the improvements-and-risks assessment.
+2. **Rebase and release the fork** per the `Merging upstream` section of
+   FORK.md — including its warning that a conflict-free merge is not a correct
+   one, because upstream regularly adds obligations to code we extended without
+   anything conflicting.
+3. **Bump `canopy/package.json`** — tarball URL and both pins together — and
+   update the version-correspondence comment at the `UpstreamWebglAddon` import
+   in `canopy/src/GlTerminal.stories.tsx`.
+
+Land all of it in the same PR as the `@xterm/*` bump, so the tree never records
+a state where lib and the fork disagree about which upstream they track.
 
 ## SDF glyph architecture
 

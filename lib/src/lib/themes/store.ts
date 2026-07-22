@@ -27,7 +27,13 @@ export function getInstalledThemes(): DormouseTheme[] {
   if (!storage) return [];
   try {
     const raw = storage.getItem(INSTALLED_KEY);
-    return raw ? (JSON.parse(raw) as DormouseTheme[]) : [];
+    if (!raw) return [];
+    // Guard against valid-but-wrong-shaped JSON (corrupted or externally
+    // tampered storage): a non-array value would otherwise be returned cast
+    // as DormouseTheme[], and the later `.filter`/spread callers would throw
+    // an uncaught TypeError that breaks theme listing and installation.
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as DormouseTheme[]) : [];
   } catch {
     return [];
   }

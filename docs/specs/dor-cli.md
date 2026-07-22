@@ -66,7 +66,13 @@ Public PTY env:
   folder. Unset under the standalone app (no workspace concept) and for an
   empty VS Code window.
 - `DORMOUSE_CONTROL_SOCKET` and `DORMOUSE_CONTROL_TOKEN` — private control
-  endpoint credentials.
+  endpoint credentials. The token is the socket's sole authenticator, so it is
+  a CSPRNG value (24 random bytes, hex-encoded — `randomBytes` in the VS Code
+  host, the OS CSPRNG via `getrandom` in the standalone host) and the server
+  compares it in constant time (SHA-256 digests through `timingSafeEqual`),
+  never a short-circuiting string compare. Source of truth:
+  [`dor-control-server.js`](../../standalone/sidecar/dor-control-server.js)
+  (`tokenMatches`).
 
 `DORMOUSE_CLI_BIN` is host-internal spawn configuration. Terminals should rely
 on `PATH`, not on that variable.

@@ -142,7 +142,7 @@ A **Session** is the tuple of its `SessionId` plus one state per layer. `Session
 | State | Meaning |
 |---|---|
 | `Paned` | Rendered as a pane in the content area (a Lath leaf) |
-| `Zoomed` | Subset of `Paned` — the selected pane is maximized |
+| `Zoomed` | Subset of `Paned` — the passthrough-focused pane is maximized; acquiring zoom gives it focus, and losing that focus returns it to `Paned` |
 | `Doored` | Rendered as a door on the baseboard |
 | `Hidden` | In neither pane nor door — the webview is closed, the Surface belongs to an inactive Workspace (standalone), or the Surface is mid-transition. Process and Activity are unaffected. |
 

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { randomBytes } from 'crypto';
 
 function serializeForInlineScript(value: unknown): string {
   return JSON.stringify(value ?? null)
@@ -59,11 +60,10 @@ export function getWebviewHtml(
   return html;
 }
 
+/**
+ * A CSP nonce is only as good as its unpredictability, so it comes from the
+ * OS CSPRNG — never `Math.random()`. 24 bytes of base64url is 32 characters.
+ */
 function getNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let nonce = '';
-  for (let i = 0; i < 32; i++) {
-    nonce += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return nonce;
+  return randomBytes(24).toString('base64url');
 }
