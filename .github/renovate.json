@@ -117,7 +117,7 @@
       "enabled": false
     },
     {
-      "description": "canopy pins the pristine @xterm/addon-webgl AND @xterm/xterm to the exact commit the SDF fork's sdf branch is based on (addon 0.20.0-beta.287 == core 6.1.0-beta.288 == gitHead 8aab3103). They are the UpstreamVsFork regression baseline and move in lockstep with the hand-cut @diffplug/xterm-addon-webgl-sdf tarball, which Renovate cannot see, so bumping either one is a manual edit made when the fork rebases — never a Renovate bump (see canopy/README.md and docs/specs/webgl-text.md). File-scoped: lib and standalone still track upstream betas via the xterm group above. Must stay last; later rules win",
+      "description": "canopy pins the pristine @xterm/addon-webgl AND @xterm/xterm to the exact commit the SDF fork's sdf branch is based on (addon 0.20.0-beta.290 == core 6.1.0-beta.291 == gitHead 699f5537). They are the UpstreamVsFork regression baseline and move in lockstep with the hand-cut @diffplug/xterm-addon-webgl-sdf tarball, which Renovate cannot see, so bumping either one is a manual edit made when the fork rebases — never a Renovate bump (see canopy/README.md and docs/specs/webgl-text.md). File-scoped: lib and standalone still track upstream betas via the xterm group above. Must stay last; later rules win",
       "matchManagers": ["npm"],
       "matchFileNames": ["canopy/package.json"],
       "matchPackageNames": ["@xterm/**"],
