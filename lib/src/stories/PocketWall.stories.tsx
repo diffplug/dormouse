@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useRef } from 'react';
 import { toBase64Url, utf8Encode, type DirectoryEntry } from 'server-lib-common';
+import { ConnectedView } from '../remote/pocket-app/App';
 import { PocketWall } from '../remote/pocket-app/PocketWall';
 import { RemotePtyAdapter, type RemoteAdapterClient } from '../remote/client/remote-adapter';
 import type { TerminalHandlers } from '../remote/client/pocket-client';
@@ -70,7 +71,7 @@ class FakeRemoteClient implements RemoteAdapterClient {
   unsubscribe() {}
 }
 
-function PocketWallStory() {
+function PocketWallStory({ connected = false }: { connected?: boolean }) {
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
   if (!adapterRef.current) {
     // Mirror App.tsx's onConnect: stand up the adapter as the platform, prep a
@@ -96,7 +97,19 @@ function PocketWallStory() {
       className="overflow-hidden border border-border shadow-2xl"
       style={{ width: 390, height: 760 }}
     >
-      <PocketWall adapter={adapterRef.current} />
+      {connected ? (
+        <ConnectedView
+          host={{
+            hostId: 'host-studio',
+            label: 'Studio iMac with a deliberately long connected-host title',
+            online: true,
+          }}
+          adapter={adapterRef.current}
+          onLeave={() => {}}
+        />
+      ) : (
+        <PocketWall adapter={adapterRef.current} />
+      )}
     </div>
   );
 }
@@ -116,3 +129,15 @@ type Story = StoryObj<typeof PocketWallStory>;
 // adapter → directory → MobileWall wiring (the composition itself is also
 // exercised by `App/MobileTerminalUi`'s PocketWall story with a FakePtyAdapter).
 export const SingleSession: Story = {};
+
+// Full connected shell: shared header chrome, back action, long-title
+// truncation, and the transition into the remote terminal composition.
+export const ConnectedShell: Story = {
+  args: { connected: true },
+};
+
+// Canonical Pocket default theme, pinned for automated visual regression.
+export const ConnectedShellKimbieDark: Story = {
+  args: { connected: true },
+  globals: { theme: 'Kimbie Dark' },
+};

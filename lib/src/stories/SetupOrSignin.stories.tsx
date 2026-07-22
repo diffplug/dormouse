@@ -1,23 +1,16 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { userEvent, within } from 'storybook/test';
 // Importing from App.tsx runs its `index.css` / `pocket.css` side-effect imports,
 // so Tailwind's utilities and the shell's structural rules load for these stories.
 // Storybook manages the theme tokens (`--vscode-*`) itself.
 import { SetupOrSignin } from '../remote/pocket-app/App';
 import { PhoneFrame } from './PhoneFrame';
 
-function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 // The first-time-setup panel is internal state (`useState(showSetup)`), toggled
 // by the `+ First-time setup` disclosure. Click it so the setup fields render.
 async function openSetup({ canvasElement }: { canvasElement: HTMLElement }) {
-  await wait(50);
-  const disclosure = Array.from(canvasElement.querySelectorAll<HTMLButtonElement>('button')).find(
-    (button) => button.textContent?.includes('First-time setup'),
-  );
-  disclosure?.click();
-  await wait(50);
+  const canvas = within(canvasElement);
+  await userEvent.click(canvas.getByRole('button', { name: /First-time setup/ }));
 }
 
 const meta: Meta<typeof SetupOrSignin> = {
@@ -45,6 +38,11 @@ type Story = StoryObj<typeof SetupOrSignin>;
 // Idle: welcome copy, "Sign in with passkey", setup collapsed.
 export const Welcome: Story = {};
 
+// Canonical Pocket default theme, pinned so Chromatic captures the dark shell.
+export const WelcomeKimbieDark: Story = {
+  globals: { theme: 'Kimbie Dark' },
+};
+
 // Disclosure opened → setup password + label fields + "Create passkey & sign in".
 export const SetupExpanded: Story = {
   play: openSetup,
@@ -64,4 +62,15 @@ export const CreatingAccount: Story = {
 // Failed sign-in: the red error text above the button.
 export const Error: Story = {
   args: { error: 'Passkey sign-in was cancelled.' },
+};
+
+// A setup failure keeps the disclosure open; leave the password focused to
+// snapshot the focus ring and enabled setup action too.
+export const SetupErrorFocused: Story = {
+  args: { error: 'The setup password was rejected.' },
+  play: async (context) => {
+    await openSetup(context);
+    const password = within(context.canvasElement).getByLabelText('Setup password');
+    await userEvent.type(password, 'incorrect password');
+  },
 };

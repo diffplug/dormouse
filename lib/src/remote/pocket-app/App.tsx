@@ -224,22 +224,39 @@ export default function App(): React.ReactElement {
 
   if (phase === 'wall' && activeHost && adapterRef.current) {
     return (
-      <div className={APP_SHELL_CLASS}>
-        <header className={HEADER_CLASS}>
-          <button type="button" className={HEADER_BUTTON_CLASS} onClick={leaveWall}>
-            ‹ Hosts
-          </button>
-          <h1 className={HEADER_TITLE_CLASS}>{activeHost.label || activeHost.hostId}</h1>
-        </header>
-        <div className="flex min-h-0 flex-1 flex-col">
-          <PocketWall adapter={adapterRef.current} />
-        </div>
-      </div>
+      <ConnectedView host={activeHost} adapter={adapterRef.current} onLeave={leaveWall} />
     );
   }
 
   return (
     <div className="flex h-full items-center justify-center bg-app-bg font-mono text-sm text-muted">…</div>
+  );
+}
+
+// --- ConnectedView ---------------------------------------------------------
+
+/** The connected Pocket shell: host navigation chrome over the remote wall. */
+export function ConnectedView({
+  host,
+  adapter,
+  onLeave,
+}: {
+  host: HostView;
+  adapter: RemotePtyAdapter;
+  onLeave: () => void;
+}): React.ReactElement {
+  return (
+    <div className={APP_SHELL_CLASS}>
+      <header className={HEADER_CLASS}>
+        <button type="button" className={HEADER_BUTTON_CLASS} onClick={onLeave}>
+          ‹ Hosts
+        </button>
+        <h1 className={HEADER_TITLE_CLASS}>{host.label || host.hostId}</h1>
+      </header>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <PocketWall adapter={adapter} />
+      </div>
+    </div>
   );
 }
 
