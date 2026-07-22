@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { WebglAddon } from '@diffplug/xterm-addon-webgl-sdf';
 // The pristine upstream addon, pinned to the exact commit the fork's sdf branch is based on
-// (addon 0.20.0-beta.287 and core 6.1.0-beta.288 share gitHead 8aab3103) — the regression
+// (addon 0.20.0-beta.290 and core 6.1.0-beta.291 share gitHead 699f5537) — the regression
 // baseline for the RendererComparison story.
 import { WebglAddon as UpstreamWebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
