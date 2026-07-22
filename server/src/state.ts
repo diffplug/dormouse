@@ -75,11 +75,19 @@ abstract class JsonFileStore {
     return JSON.parse(raw) as T;
   }
 
-  /** Overwrite the whole file atomically (temp file + rename). */
+  /**
+   * Overwrite the whole file atomically (temp file + rename). `hosts.json`
+   * holds `hostToken` in plaintext, so the directory is owner-only (`0o700`)
+   * and every file owner-read/write (`0o600`) — without an explicit mode both
+   * inherit the umask, which on a typical Linux box yields world-readable
+   * `0o755`/`0o644` and leaks live host tokens to every other local account.
+   * The mode only applies when the file is created, so `rename` onto an
+   * existing path keeps the temp file's `0o600`.
+   */
   protected async writeAtomic(value: unknown): Promise<void> {
-    await mkdir(this.#stateDir, { recursive: true });
+    await mkdir(this.#stateDir, { recursive: true, mode: 0o700 });
     const tmp = `${this.#path}.${randomUUID()}.tmp`;
-    await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
     await rename(tmp, this.#path);
   }
 
