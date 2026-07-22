@@ -289,7 +289,7 @@ export const SdfVsRasterAt3x: StoryObj = {
 };
 
 const RENDERER_LABELS: Record<RendererKind, string> = {
-  'upstream': 'upstream @xterm/addon-webgl 0.20.0-beta.287 — same commit as the fork base (regression baseline)',
+  'upstream': 'upstream @xterm/addon-webgl 0.20.0-beta.290 — same commit as the fork base (regression baseline)',
   'fork-raster': 'fork, sdf: false — isolates the instance-layout/shader changes',
   'fork-sdf': 'fork, sdf: true — isolates the SDF glyph path',
 };
