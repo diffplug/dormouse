@@ -22,6 +22,9 @@ export default defineConfig({
       // step to generate it). Alias to source, same as the website and
       // Storybook configs.
       "server-lib-common": fileURLToPath(new URL("../server-lib-common/src", import.meta.url)),
+      // `dor-lib-common` has the same unbuilt-`dist` exports problem, reached via
+      // `Wall` → `useDorControl` → `connect-port`.
+      "dor-lib-common": fileURLToPath(new URL("../dor-lib-common/src", import.meta.url)),
     },
   },
   build: {
