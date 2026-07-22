@@ -54,7 +54,7 @@
       "separateMajorMinor": false
     },
     {
-      "description": "xterm core and its first-party addons ship from one repo on one beta counter, and each addon peers on the exact core beta it was built against (addon-fit 0.12.0-beta.291 requires ^6.1.0-beta.291, which 6.1.0-beta.288 does not satisfy). The addons also compile against core internals, so a partial bump lands an unsatisfied peer range and mismatched internals; keep them in one PR. canopy's fork-base pins are excluded below",
+      "description": "xterm core and its first-party addons ship from one repo on one beta counter, and each addon peers on the exact core beta it was built against — an addon at beta.N requires ^6.1.0-beta.N, which no earlier core beta satisfies. The addons also compile against core internals, so a partial bump lands an unsatisfied peer range and mismatched internals; keep them in one PR. canopy's fork-base pins are excluded below",
       "matchManagers": ["npm"],
       "matchPackageNames": [
         "@xterm/xterm",
@@ -117,7 +117,7 @@
       "enabled": false
     },
     {
-      "description": "canopy pins the pristine @xterm/addon-webgl AND @xterm/xterm to the exact commit the SDF fork's sdf branch is based on (addon 0.20.0-beta.287 == core 6.1.0-beta.288 == gitHead 8aab3103). They are the UpstreamVsFork regression baseline and move in lockstep with the hand-cut @diffplug/xterm-addon-webgl-sdf tarball, which Renovate cannot see, so bumping either one is a manual edit made when the fork rebases — never a Renovate bump (see canopy/README.md and docs/specs/webgl-text.md). File-scoped: lib and standalone still track upstream betas via the xterm group above. Must stay last; later rules win",
+      "description": "canopy pins the pristine @xterm/addon-webgl AND @xterm/xterm to the exact commit the SDF fork's sdf branch is based on (the addon's beta counter is offset from core's; canopy/README.md records the current correspondence). They are the UpstreamVsFork regression baseline and move in lockstep with the hand-cut @diffplug/xterm-addon-webgl-sdf tarball, which Renovate cannot see, so bumping either one is a manual edit made when the fork rebases — never a Renovate bump (see canopy/README.md and docs/specs/webgl-text.md). File-scoped: lib and standalone still track upstream betas via the xterm group above. Must stay last; later rules win",
       "matchManagers": ["npm"],
       "matchFileNames": ["canopy/package.json"],
       "matchPackageNames": ["@xterm/**"],
