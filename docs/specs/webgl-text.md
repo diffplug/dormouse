@@ -29,7 +29,14 @@ not this repo.
   even for public reads, and release assets need none. The lockfile records a
   sha512 integrity hash; treat published assets as immutable and cut a new
   iteration instead of replacing one. Renovate cannot see tarball URLs, so
-  version bumps are manual edits of `canopy/package.json`.
+  version bumps are manual edits of `canopy/package.json`. Because the tarball
+  is invisible to it, Renovate would otherwise drift canopy's two sibling pins
+  off the fork base unnoticed, so `.github/renovate.json` disables `@xterm/**`
+  scoped to `canopy/package.json` — both pins move only by hand. `lib/` and
+  `standalone/` keep tracking upstream betas (as one grouped `xterm` PR, since
+  core and its addons peer on the exact matching beta), so the two sit on
+  different `@xterm/xterm` betas between fork rebases. That divergence is
+  expected and confined to the Storybook-only lab.
 - **Releases are hand-cut today** (build, `npm pack`, `gh release create` per
   FORK.md); automating this is staged in `## Future`.
 - **Dev loop**: `pnpm link ~/projects/xterm.js/addons/addon-webgl` from
