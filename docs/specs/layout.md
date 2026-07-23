@@ -219,7 +219,7 @@ A fixed-positioned element rendered on top of the Lath host. Covers the active e
 - A pane or door can be **active** or **inactive**. Only one element is active at a time.
 - **Passthrough:** `border: 1px solid ${color}` — no glow
 - **Command:** animated SVG marching-ants border — rounded rectangle path with `stroke-dasharray` animation (10px segment, 60% dash / 40% gap, 0.4s cycle, 2px stroke)
-- Border radius: shared terminal radius from `lib/src/components/design.tsx`: full `0.5rem` for panes, `0.5rem 0.5rem 0 0` for doors
+- Border radius follows DESIGN.md's Concentric-Corners Rule: the pane ring's rect is inflated by `SELECTION_RING_INFLATE_PX`, so its radius is the pane radius plus that offset (`PANE_SELECTION_RING_RADIUS_PX` in `lib/src/components/design.tsx`, with the marching-ants path shrinking by half its stroke width so the stroke centerline stays concentric); doors sit at zero offset and keep `0.5rem 0.5rem 0 0`
 - Color from CSS custom property `--mt-selection-terminal`
 - `z-index: 50`, `pointer-events: none`, `transition: 150ms`
 

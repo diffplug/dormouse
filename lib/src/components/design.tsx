@@ -24,6 +24,16 @@ export const TERMINAL_BOTTOM_RADIUS_CLASS = 'rounded-b-lg';
 export const TERMINAL_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem`;
 export const DOOR_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem ${TERMINAL_BORDER_RADIUS_REM}rem 0 0`;
 
+// Concentric-corners rule: when a rounded outline wraps a rounded edge, both
+// arcs must share a corner center — outer radius = inner radius + offset.
+// Never tighten the inner radius to compensate. The pane focus ring draws on
+// a rect inflated by SELECTION_RING_INFLATE_PX, so its radius grows by the
+// same amount; rings at zero offset (doors, the Lath drop preview) keep the
+// pane radius as-is.
+export const SELECTION_RING_INFLATE_PX = 3;
+export const PANE_SELECTION_RING_RADIUS_PX = TERMINAL_BORDER_RADIUS_PX + SELECTION_RING_INFLATE_PX;
+export const PANE_SELECTION_RING_BORDER_RADIUS = `${PANE_SELECTION_RING_RADIUS_PX}px`;
+
 // Letter-spacing for the small semibold TODO pill — wider tracking keeps the
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
@@ -80,7 +90,10 @@ export const modalOverlay = tv({
   variants: {
     scope: {
       viewport: 'fixed inset-0',
-      target: 'rounded',
+      // The target veil covers the target's exact rect (zero offset), so the
+      // Concentric-Corners Rule (DESIGN.md) makes its radius EQUAL the target's
+      // — panes round at rounded-lg (TERMINAL_*_RADIUS_CLASS above).
+      target: 'rounded-lg',
     },
     backdrop: {
       standard: 'bg-app-bg/50',

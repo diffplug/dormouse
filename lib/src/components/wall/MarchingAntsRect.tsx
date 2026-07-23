@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { cfg } from '../../cfg';
-import { TERMINAL_BORDER_RADIUS_PX } from '../design';
+import { PANE_SELECTION_RING_RADIUS_PX, TERMINAL_BORDER_RADIUS_PX } from '../design';
 
 export function roundedRectPath(
   w: number,
@@ -42,7 +42,12 @@ export function MarchingAntsRect({ width, height, isDoor, color, paused }: {
   const [dashStyle, setDashStyle] = useState<{ dasharray: string; offset: number } | null>(null);
   const ma = cfg.marchingAnts;
 
-  const r = TERMINAL_BORDER_RADIUS_PX;
+  // Concentric-corners rule (design.tsx): the pane ring's rect is inflated by
+  // SELECTION_RING_INFLATE_PX, so its edge radius is the pane radius plus that
+  // offset; the door ring draws on the door rect itself and keeps the pane
+  // radius. roundedRectPath then shrinks by `inset` so the stroke CENTERLINE
+  // stays concentric with the wrapped corner.
+  const r = isDoor ? TERMINAL_BORDER_RADIUS_PX : PANE_SELECTION_RING_RADIUS_PX;
   const br = isDoor ? 0 : r;
   const bl = isDoor ? 0 : r;
   const inset = ma.strokeWidth / 2;

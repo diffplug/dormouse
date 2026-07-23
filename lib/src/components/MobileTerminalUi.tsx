@@ -213,7 +213,8 @@ function TouchModeSelector({
       aria-label="Touch mode"
       className="flex h-9 shrink-0 items-center bg-terminal-bg px-2"
     >
-      <div className="grid min-w-0 flex-1 grid-cols-3 gap-1 rounded bg-terminal-bg p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
+      {/* Concentric-Corners Rule (DESIGN.md): 4px chips at p-1 (4px) need an 8px tray. */}
+      <div className="grid min-w-0 flex-1 grid-cols-3 gap-1 rounded-lg bg-terminal-bg p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
         {TOUCH_MODES.map((item) => {
           const selected = item.id === mode;
           const itemDisabled = disabled || (item.id === 'cursor' && !cursorAvailable);
@@ -260,7 +261,8 @@ function KeyboardModeSelector({
       aria-label="Input mode"
       className="flex h-9 shrink-0 items-center border-t border-border bg-header-inactive-bg px-2 text-header-inactive-fg"
     >
-      <nav className="grid min-w-0 flex-1 grid-cols-[1.25fr_repeat(3,minmax(0,1fr))] gap-1 rounded bg-header-inactive-bg p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
+      {/* Concentric-Corners Rule (DESIGN.md): 4px chips at p-1 (4px) need an 8px tray. */}
+      <nav className="grid min-w-0 flex-1 grid-cols-[1.25fr_repeat(3,minmax(0,1fr))] gap-1 rounded-lg bg-header-inactive-bg p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
         {KEYBOARD_MODES.map((item) => (
           <KeyboardModeButton
             key={item.id}

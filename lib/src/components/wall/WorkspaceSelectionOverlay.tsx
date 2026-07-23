@@ -1,7 +1,8 @@
 import { useContext, useEffect, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import {
   DOOR_SELECTION_BORDER_RADIUS,
-  TERMINAL_SELECTION_BORDER_RADIUS,
+  PANE_SELECTION_RING_BORDER_RADIUS,
+  SELECTION_RING_INFLATE_PX,
 } from '../design';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
 import { resolvePaneElement } from './resolve-pane-element';
@@ -49,8 +50,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       return;
     }
 
-    const INFLATE = 3;
-
     const update = () => {
       const targetEl = selectedType === 'door'
         ? doorElements.get(selectedId)
@@ -58,7 +57,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       if (!targetEl) return;
 
       const targetRect = targetEl.getBoundingClientRect();
-      const inflate = selectedType === 'door' ? 0 : INFLATE;
+      const inflate = selectedType === 'door' ? 0 : SELECTION_RING_INFLATE_PX;
       const next = {
         top: targetRect.top - inflate,
         left: targetRect.left - inflate,
@@ -109,7 +108,9 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   };
 
   if (mode === 'passthrough') {
-    style.borderRadius = isDoor ? DOOR_SELECTION_BORDER_RADIUS : TERMINAL_SELECTION_BORDER_RADIUS;
+    // Pane rings sit SELECTION_RING_INFLATE_PX outside the pane edge, so the
+    // concentric radius is the pane radius + that offset (design.tsx).
+    style.borderRadius = isDoor ? DOOR_SELECTION_BORDER_RADIUS : PANE_SELECTION_RING_BORDER_RADIUS;
     style.border = `1px solid ${selectionColor}`;
     return <div style={style} />;
   }

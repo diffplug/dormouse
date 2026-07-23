@@ -185,6 +185,8 @@ Shadows appear only on **raised surfaces that float above content**: popovers, t
 
 **The Inset-Over-Border Rule.** When a surface needs a 1px stroke that may toggle on state change (active vs. inactive), prefer `shadow-[inset_0_0_0_1px_…]` over `border`. The shadow does not affect layout; the border does.
 
+**The Concentric-Corners Rule.** When a rounded corner nests inside another rounded corner (a focus ring wrapping a pane, an outline hugging a rounded surface), both arcs must share a corner center: outer radius = inner radius + the gap between them. Resolve violations by growing the outer radius — never tighten the inner one. Rings at zero offset keep the wrapped element's radius. Source of truth: the `SELECTION_RING_INFLATE_PX` / `PANE_SELECTION_RING_RADIUS_PX` derivation in `lib/src/components/design.tsx`.
+
 ## 5. Components
 
 ### Doors
