@@ -3,17 +3,15 @@ import { useEffect, type RefObject } from 'react';
 /**
  * The pane-header popovers' shared dismissal contract (docs/specs/layout.md):
  * any window `pointerdown` (an overlay that should survive its own clicks stops
- * propagation on its root), Escape, `resize`, or capture-phase `scroll`.
+ * propagation on its root), Escape, `resize`, or capture-phase `scroll` —
+ * except scrolls originating inside `overlayRef` itself, which never dismiss:
+ * internal overflow scrolling (e.g. arrow-key focus moves auto-scrolling an
+ * overflowing list) doesn't move the overlay's anchor, so it must not close it.
  * Register only while the overlay is mounted — consumers render only when open.
- *
- * When `insideRef` is provided, a capture-phase `scroll` whose `event.target`
- * is a Node inside `insideRef.current` does NOT dismiss (arrow-key focus moves
- * auto-scroll the menu's own overflow container, which must not close it).
- * Scrolls from anywhere else still dismiss.
  */
 export function useDismissOverlay(
   onClose: () => void,
-  insideRef?: RefObject<HTMLElement | null>,
+  overlayRef: RefObject<HTMLElement | null>,
 ): void {
   useEffect(() => {
     const close = () => onClose();
@@ -21,8 +19,8 @@ export function useDismissOverlay(
       if (event.key === 'Escape') close();
     };
     const closeOnScroll = (event: Event) => {
-      const inside = insideRef?.current;
-      if (inside && event.target instanceof Node && inside.contains(event.target)) return;
+      const overlay = overlayRef.current;
+      if (overlay && event.target instanceof Node && overlay.contains(event.target)) return;
       close();
     };
     window.addEventListener('pointerdown', close);
@@ -35,5 +33,5 @@ export function useDismissOverlay(
       window.removeEventListener('scroll', closeOnScroll, true);
       window.removeEventListener('keydown', closeOnKey);
     };
-  }, [onClose, insideRef]);
+  }, [onClose, overlayRef]);
 }

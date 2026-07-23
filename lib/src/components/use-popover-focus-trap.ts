@@ -1,4 +1,8 @@
 import { useEffect } from 'react';
+import { stepFocus } from './focus-step';
+
+/** What Tab reaches inside a popover: real buttons plus explicit tab stops. */
+export const POPOVER_FOCUSABLE_SELECTOR = 'button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
  * Manages focus trapping, Escape-to-close, and click-outside-to-close for
@@ -29,18 +33,11 @@ export function usePopoverFocusTrap(
       }
       if (e.key !== 'Tab') return;
 
-      const focusables = Array.from(
-        el.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex]:not([tabindex="-1"])'),
-      );
-      if (focusables.length === 0) return;
-
-      const currentIndex = focusables.findIndex((f) => f === document.activeElement);
-      const nextIndex = currentIndex === -1
-        ? 0
-        : (currentIndex + (e.shiftKey ? -1 : 1) + focusables.length) % focusables.length;
-
       e.preventDefault();
-      focusables[nextIndex]?.focus();
+      stepFocus(
+        Array.from(el.querySelectorAll<HTMLElement>(POPOVER_FOCUSABLE_SELECTOR)),
+        e.shiftKey ? -1 : 1,
+      );
     };
 
     window.addEventListener('mousedown', handleMouseDown);

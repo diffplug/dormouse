@@ -38,7 +38,7 @@ export function IllegalRenameWarning({ anchorRect, reason, attemptedValue, onClo
     });
   }, [anchorRect]);
 
-  useDismissOverlay(onClose);
+  useDismissOverlay(onClose, ref);
 
   useEffect(() => {
     const timeout = window.setTimeout(onClose, AUTO_DISMISS_MS);

@@ -6,7 +6,8 @@ import { clampOverlayPosition } from '../../lib/ui-geometry';
 import { getPlatform } from '../../lib/platform';
 import type { OpenPort } from '../../lib/platform/types';
 import { titleSourceLabel, type TerminalTitle } from '../../lib/terminal-state';
-import { usePopoverFocusTrap } from '../use-popover-focus-trap';
+import { stepFocus } from '../focus-step';
+import { POPOVER_FOCUSABLE_SELECTOR } from '../use-popover-focus-trap';
 import { listenerUrlsByPort, type PortUrlEntry } from './port-url';
 import { useDismissOverlay } from './use-dismiss-overlay';
 import { WallActionsContext } from './wall-context';
@@ -34,8 +35,9 @@ const MENU_ROW_CLASS = 'flex w-full items-baseline gap-2 px-2.5 py-1 text-left h
  * The menu owns the keyboard while open (`docs/specs/layout.md` → Pane header):
  * it takes DOM focus on mount (restoring the prior focus on close so a
  * passthrough terminal gets its keys back), reports dialog-keyboard-active so
- * command-mode keys don't fire underneath, wires `1`–`9` to the port rows,
- * roves `↑`/`↓` across them, and traps Tab/Escape via `usePopoverFocusTrap`.
+ * command-mode keys don't fire underneath, and handles Tab cycling, `↑`/`↓`
+ * roving, and the `1`–`9` port accelerators in one keydown handler. Dismissal
+ * (Escape, outside press, resize, scroll) is owned solely by `useDismissOverlay`.
  */
 export function PaneHeaderContextMenu({
   id,
@@ -81,10 +83,7 @@ export function PaneHeaderContextMenu({
     setStyle(clampOverlayPosition({ left: anchor.x, top: anchor.y, width: rect.width, height: rect.height }));
   }, [anchor.x, anchor.y, scan]);
 
-  // Scrolls inside the menu (arrow-key focus moves auto-scroll the overflowing
-  // list) must not dismiss it; every other scroll still does.
   useDismissOverlay(onClose, ref);
-  usePopoverFocusTrap(ref, onClose);
 
   // Report dialog-keyboard-active so command-mode shortcuts stay dormant while
   // the menu is open (matches TodoAlertDialog).
@@ -111,23 +110,23 @@ export function PaneHeaderContextMenu({
     onClose();
   }, [actions, id, onClose]);
 
-  // Keyboard rove + digit accelerators. Capture phase, scoped to the menu, and
-  // active only while mounted. Enter/Space are left to the focused native button.
+  // Tab cycling + arrow rove + digit accelerators, one handler. Capture phase,
+  // scoped to the menu, and active only while mounted. Enter/Space are left to
+  // the focused native button.
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const handler = (e: KeyboardEvent) => {
       if (!el.contains(document.activeElement)) return;
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        stepFocus(Array.from(el.querySelectorAll<HTMLElement>(POPOVER_FOCUSABLE_SELECTOR)), e.shiftKey ? -1 : 1);
+        return;
+      }
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        const items = Array.from(el.querySelectorAll<HTMLElement>('[role="menuitem"]'));
-        if (items.length === 0) return;
         e.preventDefault();
         e.stopPropagation();
-        const currentIndex = items.findIndex((item) => item === document.activeElement);
-        const nextIndex = currentIndex === -1
-          ? (e.key === 'ArrowDown' ? 0 : items.length - 1)
-          : (currentIndex + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
-        items[nextIndex]?.focus();
+        stepFocus(Array.from(el.querySelectorAll<HTMLElement>('[role="menuitem"]')), e.key === 'ArrowDown' ? 1 : -1);
         return;
       }
       // Digits connect the nth port row — but only when there is a loaded list to

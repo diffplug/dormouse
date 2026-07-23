@@ -3,6 +3,7 @@ import { tv, type VariantProps } from 'tailwind-variants';
 import { XIcon } from '@phosphor-icons/react';
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode, RefObject } from 'react';
+import { stepFocus } from './focus-step';
 
 // App-wide type scale, color strategy, and chrome conventions: see
 // docs/specs/theme.md and AGENTS.md.
@@ -385,16 +386,11 @@ function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElem
 
       if (event.key !== 'Tab') return;
 
-      const focusables = Array.from(modal.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR));
-      if (focusables.length === 0) return;
-
-      const currentIndex = focusables.findIndex((item) => item === document.activeElement);
-      const nextIndex = currentIndex === -1
-        ? 0
-        : (currentIndex + (event.shiftKey ? -1 : 1) + focusables.length) % focusables.length;
-
       event.preventDefault();
-      focusables[nextIndex]?.focus();
+      stepFocus(
+        Array.from(modal.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR)),
+        event.shiftKey ? -1 : 1,
+      );
     };
 
     window.addEventListener('keydown', handleKeyDown, true);

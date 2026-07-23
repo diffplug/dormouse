@@ -391,7 +391,7 @@ function wait(ms: number) {
 
 async function openHeaderContextMenu() {
   await wait(100);
-  const title = document.querySelector<HTMLElement>('[data-title-candidates-for="title-candidates-popup"]');
+  const title = document.querySelector<HTMLElement>('[data-pane-title-for="title-candidates-popup"]');
   if (!title) return;
 
   const rect = title.getBoundingClientRect();

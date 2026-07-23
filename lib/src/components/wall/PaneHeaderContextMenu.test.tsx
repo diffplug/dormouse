@@ -162,7 +162,7 @@ describe('PaneHeaderContextMenu — pane header right-click', () => {
   it('opens the one context menu when a title-span right-click bubbles up', async () => {
     renderHeader(headerProps('term-1', 'title'), stubActions());
 
-    const titleSpan = container.querySelector('[data-title-candidates-for="term-1"]') as HTMLElement;
+    const titleSpan = container.querySelector('[data-pane-title-for="term-1"]') as HTMLElement;
     expect(titleSpan).not.toBeNull();
     await act(async () => {
       titleSpan.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 12 }));

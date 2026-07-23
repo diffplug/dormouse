@@ -217,7 +217,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
           />
         ) : (
           <span
-            data-title-candidates-for={id}
+            data-pane-title-for={id}
             className="inline-flex max-w-full min-w-0 shrink cursor-text items-baseline overflow-hidden font-medium text-inherit decoration-current/50 underline-offset-2 hover:underline"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); actions.onStartRename(id); }}
