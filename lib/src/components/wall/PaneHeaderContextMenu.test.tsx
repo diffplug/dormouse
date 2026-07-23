@@ -11,11 +11,17 @@ import { ensureResizeObserver, stubWallActions as stubActions } from './wall-tes
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { setPlatform } from '../../lib/platform';
 import type { OpenPort, PlatformAdapter } from '../../lib/platform/types';
+import { removeTerminalPaneState, resetTerminalPaneState } from '../../lib/terminal-registry';
+import type { TerminalTitle, TerminalTitleSource } from '../../lib/terminal-state';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 function headerProps(id: string, title: string): PaneProps {
   return { id, title, params: undefined };
+}
+
+function candidate(title: string, source: TerminalTitleSource, updatedAt: number): TerminalTitle {
+  return { title, source, updatedAt };
 }
 
 function loopbackPort(port: number, processName?: string): OpenPort {
@@ -44,6 +50,7 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   platform.reset();
+  removeTerminalPaneState('term-1');
 });
 
 function renderHeader(props: PaneProps, actions: WallActions) {
@@ -148,7 +155,7 @@ describe('PaneHeaderContextMenu — pane header right-click', () => {
     expect(menuFor('term-1')).toBeNull();
   });
 
-  it('opens the one context menu on a title-span right-click (not a second popover)', async () => {
+  it('opens the one context menu when a title-span right-click bubbles up', async () => {
     renderHeader(headerProps('term-1', 'title'), stubActions());
 
     const titleSpan = container.querySelector('[data-title-candidates-for="term-1"]') as HTMLElement;
@@ -158,20 +165,50 @@ describe('PaneHeaderContextMenu — pane header right-click', () => {
     });
 
     expect(menuFor('term-1')).not.toBeNull();
-    // The title span no longer opens its own popover — only the context menu.
-    expect(document.body.querySelector('[aria-label="Title candidates"]')).toBeNull();
   });
 
-  it('opens the title-candidates popover from the menu item and closes the menu', async () => {
-    renderHeader(headerProps('term-1', 'title'), stubActions());
+  it('renders the header row (display title + surface ref) and the title-candidates table inline', async () => {
+    const resolveSurfaceRef = vi.fn(() => 'surface:7');
+    resetTerminalPaneState('term-1', {
+      title: candidate('Pinned API', 'user', 6_000),
+      titleCandidates: {
+        user: candidate('Pinned API', 'user', 6_000),
+        osc0: candidate('dev server', 'osc0', 1_000),
+        osc99: candidate('Codex waiting', 'osc99', 4_000),
+      },
+    });
+    renderHeader(headerProps('term-1', 't'), stubActions({ resolveSurfaceRef }));
 
     await act(async () => { fireContextMenu(); });
-    const item = menuFor('term-1')?.querySelector('[data-title-candidates-item]') as HTMLButtonElement;
-    expect(item).not.toBeNull();
 
-    await act(async () => { item.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const menu = menuFor('term-1');
+    expect(menu).not.toBeNull();
+    // Header row: current display title + surface ref.
+    expect(menu?.textContent).toContain('Pinned API');
+    expect(menu?.textContent).toContain('surface:7');
+    // Candidates table: one row per channel (source label + candidate title).
+    expect(menu?.textContent).toContain('OSC 0');
+    expect(menu?.textContent).toContain('dev server');
+    expect(menu?.textContent).toContain('OSC 99');
+    expect(menu?.textContent).toContain('Codex waiting');
+    expect(menu?.textContent).not.toContain('No title candidates');
+  });
 
+  it('shows the empty title-candidates line when the pane has no candidates', async () => {
+    renderHeader(headerProps('term-1', 't'), stubActions());
+
+    await act(async () => { fireContextMenu(); });
+    expect(menuFor('term-1')?.textContent).toContain('No title candidates');
+  });
+
+  it('closes the menu when the header close button is clicked', async () => {
+    renderHeader(headerProps('term-1', 't'), stubActions());
+
+    await act(async () => { fireContextMenu(); });
+    const closeButton = menuFor('term-1')?.querySelector('button[aria-label="Close menu"]') as HTMLButtonElement;
+    expect(closeButton).not.toBeNull();
+
+    await act(async () => { closeButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(menuFor('term-1')).toBeNull();
-    expect(document.body.querySelector('[role="dialog"][aria-label="Title candidates"]')).not.toBeNull();
   });
 });

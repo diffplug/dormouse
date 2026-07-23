@@ -1,10 +1,11 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { CircleNotchIcon } from '@phosphor-icons/react';
+import { CircleNotchIcon, XIcon } from '@phosphor-icons/react';
 import { POPUP_SURFACE_CLASS } from '../design';
 import { clampOverlayPosition } from '../../lib/ui-geometry';
 import { getPlatform } from '../../lib/platform';
 import type { OpenPort } from '../../lib/platform/types';
+import { titleSourceLabel, type TerminalTitle } from '../../lib/terminal-state';
 import { listenerUrlsByPort, type PortUrlEntry } from './port-url';
 import { useDismissOverlay } from './use-dismiss-overlay';
 import { WallActionsContext } from './wall-context';
@@ -14,14 +15,15 @@ type ScanState =
   | { status: 'loaded'; entries: PortUrlEntry[] }
   | { status: 'failed' };
 
-// One recipe for both interactive rows (port entries, title candidates).
+// One recipe for the interactive port-entry rows.
 const MENU_ROW_CLASS = 'flex w-full items-baseline gap-2 px-2.5 py-1 text-left hover:bg-foreground/10';
 
 /**
  * The right-click menu on a terminal pane header (`docs/specs/layout.md` → Pane
- * header): the pane's `surface:N` handle, then the TCP ports its process tree
- * binds, then a "title candidates" row that opens the diagnostic popover.
- * Clicking a port fires `dor ab open <url>` via `WallActions.onConnectPort`
+ * header): a header row with the current display title, the pane's `surface:N`
+ * handle, and a close button; then the diagnostic title-candidates table (latest
+ * entry per channel); then the TCP ports the pane's process tree binds. Clicking a
+ * port fires `dor ab open <url>` via `WallActions.onConnectPort`
  * (`docs/specs/dor-browser.md` → Pane Context Menu Connect) and closes the menu
  * immediately — the new pane's own "Connecting…" placeholder is the loading
  * feedback, and a failure is logged, not shown here. Port rows are only clickable
@@ -32,12 +34,14 @@ export function PaneHeaderContextMenu({
   id,
   anchor,
   onClose,
-  onShowTitleCandidates,
+  candidates,
+  currentTitle,
 }: {
   id: string;
   anchor: { x: number; y: number };
   onClose: () => void;
-  onShowTitleCandidates: () => void;
+  candidates: TerminalTitle[];
+  currentTitle: string;
 }) {
   const actions = useContext(WallActionsContext);
   const ref = useRef<HTMLDivElement>(null);
@@ -89,7 +93,35 @@ export function PaneHeaderContextMenu({
       onMouseDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <div className="truncate px-2.5 py-0.5 text-muted">{actions.resolveSurfaceRef(id)}</div>
+      <div className="flex items-center gap-2 border-b border-border px-2.5 pb-1.5">
+        <span className="min-w-0 flex-1 truncate font-medium">{currentTitle}</span>
+        <span className="shrink-0 text-muted">{actions.resolveSurfaceRef(id)}</span>
+        <button
+          type="button"
+          className="shrink-0 rounded px-1 text-muted transition-colors hover:bg-current/10 hover:text-foreground"
+          aria-label="Close menu"
+          onClick={onClose}
+        >
+          <XIcon size={12} />
+        </button>
+      </div>
+      <div className="px-2.5 py-1.5">
+        {candidates.length === 0 ? (
+          <div className="text-muted">No title candidates</div>
+        ) : (
+          <div className="space-y-1.5">
+            {candidates.map((candidate) => (
+              <div key={candidate.source} className="grid grid-cols-[4.75rem_minmax(0,1fr)_auto] items-baseline gap-2">
+                <span className="text-muted">{titleSourceLabel(candidate.source)}</span>
+                <span className="min-w-0 truncate" title={candidate.title}>{candidate.title}</span>
+                <time className="text-xs text-muted" dateTime={formatTitleCandidateDateTime(candidate.updatedAt)}>
+                  {formatTitleCandidateTime(candidate.updatedAt)}
+                </time>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
       <div className="my-1 border-t border-border" />
       {scan.status === 'scanning' && (
         <div className="flex items-center gap-2 px-2.5 py-1 text-muted">
@@ -127,17 +159,21 @@ export function PaneHeaderContextMenu({
           </div>
         );
       })}
-      <div className="my-1 border-t border-border" />
-      <button
-        type="button"
-        role="menuitem"
-        data-title-candidates-item
-        className={`${MENU_ROW_CLASS} text-muted hover:text-foreground`}
-        onClick={() => { onClose(); onShowTitleCandidates(); }}
-      >
-        title candidates
-      </button>
     </div>,
     document.body,
   );
+}
+
+function formatTitleCandidateTime(timestamp: number): string {
+  if (!Number.isFinite(timestamp)) return 'unknown';
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+function formatTitleCandidateDateTime(timestamp: number): string | undefined {
+  if (!Number.isFinite(timestamp)) return undefined;
+  return new Date(timestamp).toISOString();
 }

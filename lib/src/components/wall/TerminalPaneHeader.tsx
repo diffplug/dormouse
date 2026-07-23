@@ -20,7 +20,6 @@ import { useTodoPillContent } from '../TodoPillBody';
 import type { PaneProps } from './pane-props';
 import { IllegalRenameWarning, type RenameRejection } from './IllegalRenameWarning';
 import { PaneHeaderContextMenu } from './PaneHeaderContextMenu';
-import { useDismissOverlay } from './use-dismiss-overlay';
 import {
   DEFAULT_MOUSE_SELECTION_STATE,
   getMouseSelectionSnapshot,
@@ -43,8 +42,6 @@ import {
   deriveHeader,
   resolveDisplayPrimary,
   titleCandidatesForDisplay,
-  titleSourceLabel,
-  type TerminalTitle,
 } from '../../lib/terminal-state';
 import {
   DialogKeyboardContext,
@@ -81,8 +78,6 @@ const ALERT_BUTTON_LABELS: Record<SessionStatus, { aria: string; tooltip: string
 };
 const TODO_PREVIEW_GAP = 6;
 const TODO_PREVIEW_MARGIN = 8;
-const TITLE_CANDIDATES_GAP = 6;
-const TITLE_CANDIDATES_MARGIN = 8;
 
 export function TerminalPaneHeader({ id, title }: PaneProps) {
   const mode = useContext(ModeContext);
@@ -126,12 +121,10 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const isActiveHeader = mode === 'passthrough' && isSelected && windowFocused;
   const isRenaming = renamingId === id;
   const tabRef = useRef<HTMLDivElement>(null);
-  const titleSpanRef = useRef<HTMLSpanElement>(null);
   const suppressAlertClickRef = useRef(false);
   const [tier, setTier] = useState<HeaderTier>('full');
   const [dialogTriggerRect, setDialogTriggerRect] = useState<DOMRect | null>(null);
   const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
-  const [titleCandidatesRect, setTitleCandidatesRect] = useState<DOMRect | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [renameWarning, setRenameWarning] = useState<{ rect: DOMRect; reason: RenameRejection; value: string } | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
@@ -148,7 +141,6 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
 
   const closeDialog = useCallback(() => setDialogTriggerRect(null), []);
   const closeTodoPreview = useCallback(() => setTodoPreviewRect(null), []);
-  const closeTitleCandidates = useCallback(() => setTitleCandidatesRect(null), []);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
   const closeRenameWarning = useCallback(() => setRenameWarning(null), []);
   const submitRename = useCallback((value: string, anchor: HTMLElement) => {
@@ -224,7 +216,6 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
           />
         ) : (
           <span
-            ref={titleSpanRef}
             data-title-candidates-for={id}
             className="inline-flex max-w-full min-w-0 shrink cursor-text items-baseline overflow-hidden font-medium text-inherit decoration-current/50 underline-offset-2 hover:underline"
             onMouseDown={(e) => e.stopPropagation()}
@@ -388,24 +379,13 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
           anchorRect={todoPreviewRect}
         />
       )}
-      {titleCandidatesRect && !dialogTriggerRect && (
-        <TitleCandidatesPopover
-          anchorRect={titleCandidatesRect}
-          candidates={titleCandidates}
-          currentTitle={displayTitleBase}
-          onClose={closeTitleCandidates}
-        />
-      )}
       {contextMenu && (
         <PaneHeaderContextMenu
           id={id}
           anchor={contextMenu}
           onClose={closeContextMenu}
-          // Anchor to the title span; fall back to the menu's pointer position
-          // when the span is absent (mid-rename, when an input replaces it).
-          onShowTitleCandidates={() => setTitleCandidatesRect(
-            titleSpanRef.current?.getBoundingClientRect() ?? new DOMRect(contextMenu.x, contextMenu.y, 0, 0),
-          )}
+          candidates={titleCandidates}
+          currentTitle={displayTitleBase}
         />
       )}
       {renameWarning && (
@@ -417,82 +397,6 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
         />
       )}
     </div>
-  );
-}
-
-function TitleCandidatesPopover({
-  anchorRect,
-  candidates,
-  currentTitle,
-  onClose,
-}: {
-  anchorRect: DOMRect;
-  candidates: TerminalTitle[];
-  currentTitle: string;
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [style, setStyle] = useState<CSSProperties>({
-    position: 'fixed',
-    left: anchorRect.left,
-    top: anchorRect.bottom + TITLE_CANDIDATES_GAP,
-  });
-
-  useDismissOverlay(onClose);
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const top = anchorRect.bottom + TITLE_CANDIDATES_GAP;
-    const maxLeft = Math.max(TITLE_CANDIDATES_MARGIN, window.innerWidth - rect.width - TITLE_CANDIDATES_MARGIN);
-    setStyle({
-      position: 'fixed',
-      left: Math.min(Math.max(anchorRect.left, TITLE_CANDIDATES_MARGIN), maxLeft),
-      top,
-      maxHeight: Math.max(80, window.innerHeight - top - TITLE_CANDIDATES_MARGIN),
-    });
-  }, [anchorRect]);
-
-  return createPortal(
-    <div
-      ref={ref}
-      role="dialog"
-      aria-label="Title candidates"
-      className={`${POPUP_SURFACE_CLASS} max-w-96 overflow-auto px-2.5 py-2 text-sm leading-snug`}
-      style={style}
-      onPointerDown={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      <div className="mb-2 flex items-center justify-between gap-3 border-b border-border pb-1.5">
-        <div className="min-w-0 truncate font-medium">{currentTitle}</div>
-        <button
-          type="button"
-          className="shrink-0 rounded px-1 text-muted transition-colors hover:bg-current/10 hover:text-foreground"
-          aria-label="Close title candidates"
-          onClick={onClose}
-        >
-          <XIcon size={12} />
-        </button>
-      </div>
-      {candidates.length === 0 ? (
-        <div className="text-muted">No title candidates</div>
-      ) : (
-        <div className="space-y-1.5">
-          {candidates.map((candidate) => (
-            <div key={candidate.source} className="grid grid-cols-[4.75rem_minmax(0,1fr)_auto] items-baseline gap-2">
-              <span className="text-muted">{titleSourceLabel(candidate.source)}</span>
-              <span className="min-w-0 truncate" title={candidate.title}>{candidate.title}</span>
-              <time className="text-xs text-muted" dateTime={formatTitleCandidateDateTime(candidate.updatedAt)}>
-                {formatTitleCandidateTime(candidate.updatedAt)}
-              </time>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>,
-    document.body,
   );
 }
 
@@ -561,18 +465,4 @@ function formatNotificationPreview(notification: { title: string | null; body: s
   if (parts.length === 0) return undefined;
   const preview = parts.join('\n');
   return preview.length > 512 ? `${preview.slice(0, 509)}...` : preview;
-}
-
-function formatTitleCandidateTime(timestamp: number): string {
-  if (!Number.isFinite(timestamp)) return 'unknown';
-  return new Date(timestamp).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-}
-
-function formatTitleCandidateDateTime(timestamp: number): string | undefined {
-  if (!Number.isFinite(timestamp)) return undefined;
-  return new Date(timestamp).toISOString();
 }
