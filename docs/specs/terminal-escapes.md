@@ -63,7 +63,7 @@ Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js c
 
 (`BEL` is not itself an OSC; it has a row here because a standalone `BEL` is parsed and stripped at the same PTY data boundary as the OSCs.)
 
-Some sequences are dual-purpose. The notification rows for `OSC 9 ; <message> ST`, `OSC 99` (`p=title`/`p=body`), and `OSC 777 ; notify` also feed the title-candidate channel in `terminal-state.md` — see its [Title candidate diagnostics](terminal-state.md#supported-osc-inputs) table. Only the OSC 9 *message* form can become a header/door label; OSC 99 and OSC 777 candidates are stored for the diagnostic popup only. The OSC 9 *progress* form (`OSC 9 ; 4`) carries no text and never contributes a title candidate.
+Some sequences are dual-purpose. The notification rows for `OSC 9 ; <message> ST`, `OSC 99` (`p=title`/`p=body`), and `OSC 777 ; notify` also feed the title-candidate channel in `terminal-state.md` — see its [Title candidate diagnostics](terminal-state.md#supported-osc-inputs) table. Only the OSC 9 *message* form can become a header/door label; OSC 99 and OSC 777 candidates are stored only for the diagnostic title-candidates table in the header context menu. The OSC 9 *progress* form (`OSC 9 ; 4`) carries no text and never contributes a title candidate.
 
 #### OSC color queries on Windows require the bundled ConPTY
 

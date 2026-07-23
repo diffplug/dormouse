@@ -77,13 +77,23 @@ The content area is a tiling layout of panes rendered by Lath (`docs/specs/tilin
 
 Each pane has a 30px header that doubles as a drag handle (a `pointerdown` on the header, past a 5px threshold, begins a Lath pane drag; below the threshold the header's own click behavior stands). The header uses `cursor-grab` / `active:cursor-grabbing`, `select-none`, and the shared terminal top radius from `lib/src/components/design.tsx`. Background and foreground use the `--color-header-active-*` / `--color-header-inactive-*` token pairs, which map to VSCode file-tree list colors.
 
-The header label is the `DerivedHeader` returned by `deriveHeader(paneState, visiblePanes)` in `docs/specs/terminal-state.md` — that spec is the single source of truth for the priority chain (user-pinned title, app-sent overrides, current command title, `<idle> ${LAST_TITLE}` for finished panes, plain `<idle>` for fresh panes), the disambiguator rule, and which OSC sources contribute. Layout's job is to render the result: the primary label truncates with ellipsis, the secondary label (when present) is shown muted next to it, click renames/pins, right-click opens the diagnostic popup.
+The header label is the `DerivedHeader` returned by `deriveHeader(paneState, visiblePanes)` in `docs/specs/terminal-state.md` — that spec is the single source of truth for the priority chain (user-pinned title, app-sent overrides, current command title, `<idle> ${LAST_TITLE}` for finished panes, plain `<idle>` for fresh panes), the disambiguator rule, and which OSC sources contribute. Layout's job is to render the result: the primary label truncates with ellipsis, the secondary label (when present) is shown muted next to it, click renames/pins, right-click — or `>` in command mode — opens the header context menu, which leads with the title-candidates table.
 
-The diagnostic popup lists the latest entry per `titleCandidates` channel as defined in `docs/specs/terminal-state.md`. Each row shows the channel, latest candidate text, and timestamp. The popup is diagnostic only; it does not change the title priority rules.
+Right-clicking anywhere on the header opens the pane's single **context menu** at the pointer; pressing `>` in command mode opens the same menu for the selected pane, anchored under the header's left edge (the handler finds the header via `data-pane-header-for` and dispatches a synthetic `contextmenu` at that corner, so both paths share one code path; browser surfaces and Doors have no such header, so `>` no-ops there). Only the alert bell owns its own right-click (`stopPropagation`, opening the alert dialog); every other region — including the title span — bubbles to this one menu. It is portaled to `document.body`, viewport-clamped, and dismissed by outside `pointerdown`, `Escape`, `resize`, or capture-phase `scroll` — except scrolls originating inside the menu itself, which must not dismiss it (arrow-key focus moves auto-scroll the overflowing list).
+
+Content, top to bottom:
+
+- **Header row** — the current display title, the pane's `surface:N` handle (`resolveSurfaceRef`, muted), and a close button.
+- **Title-candidates table** — the latest entry per `titleCandidates` channel as defined in `docs/specs/terminal-state.md`: channel, latest candidate text, and timestamp per row, or a muted `No title candidates` line. Diagnostic only; it does not change the title priority rules.
+- **Port rows** — the TCP ports the pane's process tree binds: a spinner while `getOpenPorts` runs (once per open — reopen to rescan), then one `host:port` row per distinct port (digit accelerator chip first, process name muted beside it), or a muted `no listening ports` / `port scan failed` line.
+
+The menu owns the keyboard while open: it takes DOM focus on mount and restores the previously focused element on close (so a passthrough terminal gets its keys back), and it registers as dialog-keyboard-active so command-mode keys don't fire underneath (`use-wall-keyboard.ts`). `1`–`9` activate the corresponding port row; presses while the scan is still running are dropped, not buffered — the spinner explains why nothing happened. `↑`/`↓` rove focus across the port rows (wrapping), `Enter`/`Space` activate the focused row, `Tab`/`Shift+Tab` cycle every focusable element, and `Escape` closes.
+
+Activating a port row (click, digit, or `Enter` on the focused row) reproduces `dor ab open <url>` for that port and closes the menu at once (`docs/specs/dor-browser.md` → Pane Context Menu Connect): the browser surface appears immediately and becomes the selection (reattaching first if it was minimized) — the one command-mode gesture whose side effect moves selection off the pane it targeted — and loading/errors surface in the pane, not the menu. On hosts that cannot open a browser surface the rows are inert labels with no digit chips, and digits do nothing. Only terminal panes have this menu. Source of truth: `PaneHeaderContextMenu.tsx`, `TerminalPaneHeader.tsx`, `handle-pane-shortcuts.ts`.
 
 Elements from left to right:
 
-- Derived session label (click to rename/pin, right-click to inspect title candidates, truncates with ellipsis)
+- Derived session label (click to rename/pin, right-click opens the header context menu with the title-candidates table, truncates with ellipsis)
 - Alert bell button (reflects session activity status)
 - TODO pill (if todo state is set; hidden in minimal tier)
 - Flexible gap
@@ -382,7 +392,8 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/components/wall/wall-types.ts` / `wall-context.tsx` | Shared Wall types and React contexts used by Wall, pane headers, panels, overlays, and the baseboard |
 | `lib/src/components/wall/LathHost.tsx` | The tiling engine's HTML adapter: leaf divs, sashes, the pane/door drag gesture, and imperative animator frame application. Engine internals are mapped in `docs/specs/tiling-engine.md`. |
 | `lib/src/components/wall/TerminalPanel.tsx` | Pane body wrapper; registers the pane's DOM element (`usePaneChrome`) |
-| `lib/src/components/wall/TerminalPaneHeader.tsx` | Pane header with rename, alert/TODO, mouse override, split/zoom/minimize/kill controls |
+| `lib/src/components/wall/TerminalPaneHeader.tsx` | Pane header with rename, alert/TODO, mouse override, split/zoom/minimize/kill controls, and the right-click context menu |
+| `lib/src/components/wall/PaneHeaderContextMenu.tsx` | Pane-header right-click menu: the `surface:N` handle plus the pane's bound TCP ports; a port click connects it to the default browser (`docs/specs/dor-browser.md`) |
 | `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` | Pane/door focus ring and marching-ants overlay; re-measures on Lath store commits + animator frames |
 | `lib/src/components/wall/MarchingAntsRect.tsx` | SVG marching-ants border path and dash sizing |
 | `lib/src/components/wall/MouseOverrideBanner.tsx` | Temporary mouse override banner shown from the header icon |

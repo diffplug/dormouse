@@ -49,6 +49,14 @@ export interface WallActions {
    *  window.open, surfaced by the proxy shim) becomes a new pane
    *  (docs/specs/dor-browser.md → "Iframe Shim"). */
   onOpenBrowserPane?: (id: string, url: string) => void;
+  /** The stable `surface:N` ref for a pane/door id (minted lazily, exactly as
+   *  `dor list` assigns refs). Used by the pane context menu to show the handle. */
+  resolveSurfaceRef: (id: string) => string;
+  /** Act like `dor ab open <url>` for a port the pane's process tree binds: create
+   *  the default agent-browser surface immediately, then open the URL on its
+   *  session and connect the pane (`connect-port.ts`). Fire-and-forget — failures
+   *  are logged, and the pane itself shows loading state. */
+  onConnectPort: (id: string, url: string) => void;
 }
 
 export const WallActionsContext = createContext<WallActions>({
@@ -66,6 +74,8 @@ export const WallActionsContext = createContext<WallActions>({
   onCancelRename: () => {},
   onSwapRenderMode: () => {},
   onOpenBrowserPane: () => {},
+  resolveSurfaceRef: (id: string) => id,
+  onConnectPort: () => {},
 });
 
 /** Engine-directed writes from a pane/header (title + params). The read side is

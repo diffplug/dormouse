@@ -23,5 +23,6 @@
   "include": ["src"],
   // The pure rewrite helpers typecheck here (DOM provides URL); the Node proxy
   // server is esbuild-only (bundled per host), like the rest of our host code.
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/host/iframe-proxy.ts", "src/host/agent-browser-host.ts"]
+  // wall-test-utils imports vitest, so it lives with the tests, not the app.
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/components/wall/wall-test-utils.ts", "src/host/iframe-proxy.ts", "src/host/agent-browser-host.ts"]
 }

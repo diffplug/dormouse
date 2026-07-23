@@ -74,6 +74,16 @@ and reads the bytes in Rust so images never ride the JSON-lines pipe shared
 with PTY traffic (`docs/specs/dor-browser.md`). Request/response commands block on the
 sidecar's reply with a timeout; `OPEN_PORT_TIMEOUT_MS` in `lib.rs` mirrors the
 constant in `lib/src/lib/platform/types.ts` and the two must stay in sync.
+
+**Blocking commands must be `#[tauri::command(async)]`.** `request_from_sidecar`
+and `request_from_sidecar_timeout` block the calling thread on a `recv_timeout`,
+and Tauri runs a *plain* sync command on the main thread — where that block stops
+the webview from painting for the whole round trip (up to `AGENT_BROWSER_TIMEOUT`
+= 30s for a hung agent-browser; a cold `agent-browser open` froze the UI ~3s,
+long enough that a pane created instantly before it looked like it never
+appeared). `(async)` runs the same blocking body on a runtime worker instead. The
+three clipboard readers are knowingly still sync: their Windows branches call the
+Win32 clipboard directly rather than the sidecar.
 `pty_graceful_kill_all` (`TauriAdapter.gracefulKillAllPtys`) SIGTERMs every live
 PTY and awaits the sidecar's `gracefulKillDone` (echoing the request's
 `requestId`; bounded at `timeout + 1.5s`). `gracefulKillDone` fires early once

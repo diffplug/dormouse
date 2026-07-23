@@ -783,6 +783,22 @@ export function Wall({
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
+  /** Put the selection on a surface so the user can see it — the human half of
+   *  `connectPort` (clicking a port row is a request to look at that browser).
+   *  A visible pane is selected in place; a minimized one reattaches first, on
+   *  the same terms as clicking its Door chip. Distinct from `onFocusPane`,
+   *  which also enters passthrough on an already-visible pane: connecting a port
+   *  should highlight the browser, not steal the keyboard from the terminal the
+   *  user right-clicked. */
+  const revealSurface = useCallback((id: string) => {
+    if (nav.hasPane(id)) {
+      selectPane(id);
+      return;
+    }
+    const door = doorsRef.current.find((item) => item.id === id);
+    if (door) handleReattachRef.current(door);
+  }, [nav, selectPane]);
+
   // The Surfaces of the current Workspace. `buildDorSurfaces` is the visible-pane
   // projection used for geometry/placement; `buildDorSurfaceList` additionally
   // includes minimized (doored) Surfaces for `dor list` and direct operations.
@@ -1119,7 +1135,7 @@ export function Wall({
   }, [generatePaneId, surfaceRefForId, forgetSurfaceRef, selectPane, enterTerminalMode, showShellSpawnNotice, lath, nav]);
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
-  useDorControl({
+  const { connectPort } = useDorControl({
     lath,
     nav,
     doorsRef,
@@ -1130,6 +1146,7 @@ export function Wall({
     createSplitSurface,
     createContentSurface,
     killPaneImmediately,
+    revealSurface,
     lastAgentBrowserBinaryPathRef,
   });
 
@@ -1313,7 +1330,10 @@ export function Wall({
         title: hostPathDisplay(url, true),
       });
     },
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, lath, nav]);
+    resolveSurfaceRef: surfaceRefForId,
+    // The pane context menu's "connect a port" action: act like `dor ab open`.
+    onConnectPort: connectPort,
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, connectPort, lath, nav]);
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
 

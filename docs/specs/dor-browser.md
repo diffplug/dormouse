@@ -161,8 +161,67 @@ polls only while a wanted port is still unmatched. Reload revalidates
 optimistically.
 
 Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
+`lib/src/components/wall/port-url.ts` (the `servesLoopback` predicate),
 `lib/src/components/wall/agent-browser-ports.ts`,
 `lib/src/components/wall/browser-url.ts`.
+
+## Pane Context Menu Connect
+
+The terminal pane header's context menu (`docs/specs/layout.md` → Pane
+header — right-click, or `>` in command mode; that spec owns the menu's
+layout and keyboard contract) lists the ports a pane's process tree binds
+using the **same** per-port URL selection as `surface.resolveOpen`
+(`dor ab open <surface>` / `dor iframe <surface>`): `listenerUrlsByPort` in
+`port-url.ts` groups TCP listeners into one openable `http://<host>:<port>/`
+per distinct port (loopback-reachable bind wins `localhost`; otherwise the
+bound LAN/Tailnet address, IPv6 bracketed).
+
+Activating a port row — click, its `1`–`9` digit accelerator, or `Enter` on
+the focused row — reproduces `dor ab open <url>` against the **default**
+key/session: it runs `agent-browser open <url>` on that session and
+reuses-or-creates the session's browser surface — the wall-side mirror of the CLI
+flow, not the control plane. It is host-gated on `agentBrowserCommand`: absent
+(e.g. the web demo host), the rows render as inert labels.
+
+**Activation reveals its surface.** Unlike `dor ab` (focus-neutral: an agent must
+not steal focus from the human), activating a menu row — by mouse or keyboard —
+*is* the human asking to see that browser, so every arm of the eager lookup below
+ends by selecting the surface — reattaching it first when it is minimized, on the
+same terms as clicking its Door chip. Selection only: passthrough stays on the
+terminal the menu was opened from, so connecting a port never redirects the
+keyboard. This is why a repeat activation on an already-connected port is visible
+at all — the session merely re-navigates to the URL it is already on, so the
+selection move is the only feedback.
+Source of truth: `revealSurface` in `Wall.tsx`, threaded into `useDorControl`.
+
+**Instant create.** The click is fire-and-forget: the menu closes at once and the
+pane appears **before** `agent-browser open` runs (a cold daemon boot is 1–3s).
+The eager surface is created **without a `session`** — deliberately: a
+session-less `ab-screencast` pane is inert (the controller's `maybeRecoverStalePort`
+returns early with no session, so it spawns no CLI and cannot race the daemon
+boot), while the panel still shows `Connecting to browser session…` — the
+session-less placeholder branch exists for exactly this pane, and deliberately
+does *not* fall through to the idle `run dor ab open <url>` line, which would ask
+the user to redo the click they just made. It carries
+`key: 'default'` and the target `url` so the browser chrome shows the destination
+immediately. Once `open` succeeds, a best-effort `stream status` runs, then the
+pane receives `{session, wsPort, binaryPath}` as **one** params refresh — setting
+`session` reconciles the controller and connects it (safe now: the daemon is up).
+If `open` fails, the pane is still handed the `session` (so its placeholder names
+it) and the failure is logged, not shown in the (already closed) menu.
+
+The eager lookup reuses before it creates: (a) a surface already bound to the
+default session, else (b) a still-booting session-less `key: 'default'` pane from a
+rapid earlier click (so a double-click doesn't spawn two panes), else (c) a fresh
+session-less pane. Accepted edge: a pane persisted mid-boot restores session-less
+and stays a `Connecting…` placeholder — kill it, or connect again (the eager
+lookup reuses it via arm (b)).
+
+Source of truth: `lib/src/components/wall/connect-port.ts`
+(`connectPortToDefaultBrowser`), the `connectPort` binding in
+`use-dor-control.ts` (its `ensureEagerSurface` + `updateSurfaceParams` seams,
+shared with `ensureAgentBrowserSurface`),
+`lib/src/components/wall/PaneHeaderContextMenu.tsx`.
 
 ## Display Modal And Render Swaps
 
@@ -257,6 +316,11 @@ the same zero-resource end state with less thrash. The agent-browser
 daemon/session stays alive throughout and reattaches from persisted params. The
 controller's client resources are released only at pane kill or a render swap
 away from the renderer (`disposeAgentBrowserSurfaceController` in `Wall.tsx`).
+A controller whose params carry no `session` is deliberately inert — no
+connection, no `stream status` query: the instant connect flow
+([Pane Context Menu Connect](#pane-context-menu-connect)) depends on that
+inertness to keep the eager pane from racing the daemon boot, so the session
+must never be derived from `key` here.
 
 Hidden-but-mounted panes park too. A Lath leaf is always mounted (no active-tab
 gating), so a backgrounded window would keep its ~20Hz stream plus per-pulse
@@ -540,6 +604,8 @@ Source of truth: `lib/src/lib/platform/types.ts`,
 - Shell/render swap/lifecycle: `lib/src/components/Wall.tsx`,
   `lib/src/components/wall/BrowserPanel.tsx`,
   `lib/src/components/wall/browser-surface.ts`.
+- Pane context-menu connect: `lib/src/components/wall/PaneHeaderContextMenu.tsx`,
+  `lib/src/components/wall/connect-port.ts`, `lib/src/components/wall/port-url.ts`.
 - Chrome/modal: `SurfacePaneHeader.tsx`, `AgentBrowserScreenModal.tsx`,
   `agent-browser-screen.ts`, `browser-url.ts`.
 - Agent-browser renderer: `AgentBrowserPanel.tsx`,
