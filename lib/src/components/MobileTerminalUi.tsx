@@ -325,16 +325,19 @@ function SessionsPane({
                 'flex min-h-10 min-w-0 items-center gap-2 rounded px-2 text-left font-mono text-xs transition-colors',
                 'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
                 'disabled:pointer-events-none disabled:opacity-60',
+                // Rows sit on the header-inactive reserve, so the inactive row
+                // recesses to the app pair — the guaranteed app↔inactive delta
+                // (theme.md's three-pair rule); surface-raised is unreliable here.
                 active
                   ? 'bg-header-active-bg text-header-active-fg shadow-[inset_0_0_0_1px_var(--color-focus-ring)]'
-                  : 'bg-surface-raised text-foreground hover:bg-header-inactive-bg',
+                  : 'bg-app-bg text-app-fg',
               )}
             >
               <TerminalWindowIcon size={15} weight={active ? 'bold' : 'regular'} className="shrink-0" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium">{session.title}</span>
                 {session.secondary ? (
-                  <span className={clsx('block truncate', active ? 'opacity-70' : 'text-muted')}>{session.secondary}</span>
+                  <span className="block truncate opacity-70">{session.secondary}</span>
                 ) : null}
               </span>
               {session.todo ? (

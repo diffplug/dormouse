@@ -1,12 +1,13 @@
 import type { Meta, StoryObj } from '@storybook/react';
-// Importing from App.tsx runs its `index.css` / `pocket.css` side-effect imports,
-// so Tailwind's utilities and the shell's structural rules load for these stories.
-// Storybook manages the theme tokens (`--vscode-*`) itself.
+// Importing from App.tsx runs its `index.css` side-effect import, so Tailwind's
+// utilities load for these stories. Storybook manages the theme tokens
+// (`--vscode-*`) itself.
 import { HostsView, type HostView } from '../remote/pocket-app/App';
 import { PhoneFrame } from './PhoneFrame';
 
 // A paired online host, an unpaired online host (shows Pair + Connect), and an
-// offline host (both actions disabled) — the full row matrix in one frame.
+// offline host (dimmed row, Pair hidden, Connect disabled) — the full row
+// matrix in one frame.
 const MIXED_HOSTS: HostView[] = [
   { hostId: 'host-studio', label: 'Studio iMac', online: true },
   { hostId: 'host-laptop', label: 'MacBook Pro', online: true },
@@ -61,7 +62,7 @@ export const Empty: Story = {
   args: { hosts: [] },
 };
 
-// Paired+online (Connect only), unpaired+online (Pair + Connect), offline (disabled).
+// Paired+online (Connect only), unpaired+online (Pair + Connect), offline (dimmed).
 export const MixedList: Story = {};
 
 // Canonical Pocket default theme, pinned so Chromatic captures the dark rows.

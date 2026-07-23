@@ -9,8 +9,8 @@ import tailwindcss from "@tailwindcss/vite";
 // server to serve statically (docs/specs/pocket-app.md). It shares the full
 // terminal UI (`MobileTerminalUi`/`MobileWall`) and the themeable design
 // system with the main app, so it needs the same Tailwind + `--vscode-*`
-// theme plumbing (`src/index.css`); `pocket.css` adds only structural
-// document-level rules.
+// theme plumbing (`src/index.css`); the HTML shell carries the structural
+// viewport rules inline.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   root: fileURLToPath(new URL("./pocket", import.meta.url)),

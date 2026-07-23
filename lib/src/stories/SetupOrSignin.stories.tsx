@@ -1,8 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { userEvent, within } from 'storybook/test';
-// Importing from App.tsx runs its `index.css` / `pocket.css` side-effect imports,
-// so Tailwind's utilities and the shell's structural rules load for these stories.
-// Storybook manages the theme tokens (`--vscode-*`) itself.
+// Importing from App.tsx runs its `index.css` side-effect import, so Tailwind's
+// utilities load for these stories. Storybook manages the theme tokens
+// (`--vscode-*`) itself.
 import { SetupOrSignin } from '../remote/pocket-app/App';
 import { PhoneFrame } from './PhoneFrame';
 

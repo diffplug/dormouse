@@ -33,8 +33,8 @@ export function usePocketTheme() {
     restorePocketTheme();
     restoredRef.current = true;
   }
-  // Repeat after hydration so the wall/auth views read real theme variables
-  // even if React reconciled away render-time body styles.
+  // Repeat after hydration so the wall reads real theme variables even if
+  // React reconciled away render-time body styles.
   useBrowserLayoutEffect(() => {
     restorePocketTheme();
   }, []);
