@@ -6,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneProps } from './pane-props';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
-import { WallActionsContext, type WallActions } from './wall-context';
+import { DialogKeyboardContext, WallActionsContext, type WallActions } from './wall-context';
 import { ensureResizeObserver, stubWallActions as stubActions } from './wall-test-utils';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { setPlatform } from '../../lib/platform';
@@ -36,6 +36,7 @@ function enableConnect(platform: FakePtyAdapter): void {
 let container: HTMLDivElement;
 let root: Root;
 let platform: FakePtyAdapter;
+let keyboardActiveSpy: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   container = document.createElement('div');
@@ -44,6 +45,7 @@ beforeEach(() => {
   platform = new FakePtyAdapter();
   setPlatform(platform);
   ensureResizeObserver();
+  keyboardActiveSpy = vi.fn();
 });
 
 afterEach(() => {
@@ -57,9 +59,11 @@ function renderHeader(props: PaneProps, actions: WallActions) {
   act(() => {
     root.render(
       <StrictMode>
-        <WallActionsContext.Provider value={actions}>
-          <TerminalPaneHeader {...props} />
-        </WallActionsContext.Provider>
+        <DialogKeyboardContext.Provider value={keyboardActiveSpy}>
+          <WallActionsContext.Provider value={actions}>
+            <TerminalPaneHeader {...props} />
+          </WallActionsContext.Provider>
+        </DialogKeyboardContext.Provider>
       </StrictMode>,
     );
   });
@@ -209,6 +213,148 @@ describe('PaneHeaderContextMenu — pane header right-click', () => {
     expect(closeButton).not.toBeNull();
 
     await act(async () => { closeButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(menuFor('term-1')).toBeNull();
+  });
+});
+
+const DEFAULT_KB_PORTS: OpenPort[] = [loopbackPort(3000, 'alpha'), loopbackPort(5173, 'beta')];
+
+function keydown(key: string, init: KeyboardEventInit = {}): KeyboardEvent {
+  return new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+}
+
+/** Enable connect, spawn a pty with `ports`, render, and open the menu. */
+async function openConnectableMenu(
+  onConnectPort: ReturnType<typeof vi.fn> = vi.fn(),
+  ports: OpenPort[] = DEFAULT_KB_PORTS,
+): Promise<ReturnType<typeof vi.fn>> {
+  enableConnect(platform);
+  platform.spawnPty('term-1');
+  platform.setOpenPorts('term-1', ports);
+  renderHeader(headerProps('term-1', 't'), stubActions({ onConnectPort }));
+  await act(async () => { fireContextMenu(); });
+  return onConnectPort;
+}
+
+describe('PaneHeaderContextMenu — keyboard access', () => {
+  it('takes DOM focus on the menu container when it opens', async () => {
+    await openConnectableMenu();
+    expect(document.activeElement).toBe(menuFor('term-1'));
+  });
+
+  it('reports dialog-keyboard-active while open and inactive once closed', async () => {
+    await openConnectableMenu();
+    expect(keyboardActiveSpy).toHaveBeenLastCalledWith(true);
+
+    act(() => { window.dispatchEvent(keydown('Escape')); });
+    expect(menuFor('term-1')).toBeNull();
+    expect(keyboardActiveSpy).toHaveBeenLastCalledWith(false);
+  });
+
+  it('renders digit chips and connects the nth port row when its digit is pressed, then closes', async () => {
+    const onConnectPort = vi.fn();
+    await openConnectableMenu(onConnectPort);
+    // First 9 connectable rows carry a digit accelerator chip.
+    expect(menuFor('term-1')?.textContent).toContain('[1]');
+    expect(menuFor('term-1')?.textContent).toContain('[2]');
+
+    act(() => { window.dispatchEvent(keydown('2')); });
+    // Ports sort ascending: 3000 → [1], 5173 → [2].
+    expect(onConnectPort).toHaveBeenCalledWith('term-1', 'http://localhost:5173/');
+    expect(menuFor('term-1')).toBeNull();
+  });
+
+  it('drops a digit press while the port scan is still running', async () => {
+    enableConnect(platform);
+    platform.spawnPty('term-1');
+    platform.getOpenPorts = () => new Promise<OpenPort[]>(() => {}); // never resolves
+    const onConnectPort = vi.fn();
+    renderHeader(headerProps('term-1', 't'), stubActions({ onConnectPort }));
+
+    act(() => { fireContextMenu(); });
+    expect(menuFor('term-1')?.textContent).toContain('scanning ports');
+
+    act(() => { window.dispatchEvent(keydown('1')); });
+    expect(onConnectPort).not.toHaveBeenCalled();
+    expect(menuFor('term-1')).not.toBeNull();
+  });
+
+  it('ignores an out-of-range digit', async () => {
+    const onConnectPort = vi.fn();
+    await openConnectableMenu(onConnectPort);
+
+    act(() => { window.dispatchEvent(keydown('5')); });
+    expect(onConnectPort).not.toHaveBeenCalled();
+    expect(menuFor('term-1')).not.toBeNull();
+  });
+
+  it('renders no digit chips and ignores digits on an inert host', async () => {
+    platform.spawnPty('term-1');
+    platform.setOpenPorts('term-1', DEFAULT_KB_PORTS);
+    const onConnectPort = vi.fn();
+    renderHeader(headerProps('term-1', 't'), stubActions({ onConnectPort }));
+
+    await act(async () => { fireContextMenu(); });
+    expect(menuFor('term-1')?.textContent).not.toContain('[1]');
+
+    act(() => { window.dispatchEvent(keydown('1')); });
+    expect(onConnectPort).not.toHaveBeenCalled();
+    expect(menuFor('term-1')).not.toBeNull();
+  });
+
+  it('roves focus across port rows with the arrow keys, wrapping at the ends', async () => {
+    await openConnectableMenu();
+    const menu = menuFor('term-1')!;
+    const rows = menu.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]');
+    expect(rows.length).toBe(2);
+
+    act(() => { window.dispatchEvent(keydown('ArrowDown')); });
+    expect(document.activeElement).toBe(rows[0]);
+    act(() => { window.dispatchEvent(keydown('ArrowDown')); });
+    expect(document.activeElement).toBe(rows[1]);
+    act(() => { window.dispatchEvent(keydown('ArrowDown')); });
+    expect(document.activeElement).toBe(rows[0]); // wraps past the last
+    act(() => { window.dispatchEvent(keydown('ArrowUp')); });
+    expect(document.activeElement).toBe(rows[1]); // wraps before the first
+  });
+
+  it('cycles focus through every focusable with Tab, including the close button', async () => {
+    await openConnectableMenu();
+    const menu = menuFor('term-1')!;
+    const closeBtn = menu.querySelector<HTMLButtonElement>('button[aria-label="Close menu"]')!;
+    const rows = Array.from(menu.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]'));
+    const order = [closeBtn, rows[0], rows[1]];
+
+    // From the container, Tab lands on the first focusable and wraps through all.
+    for (const expected of [...order, order[0]]) {
+      act(() => { window.dispatchEvent(keydown('Tab')); });
+      expect(document.activeElement).toBe(expected);
+    }
+  });
+
+  it('restores focus to the previously focused element when it closes', async () => {
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    outside.focus();
+    expect(document.activeElement).toBe(outside);
+
+    await openConnectableMenu();
+    expect(document.activeElement).toBe(menuFor('term-1'));
+
+    act(() => { window.dispatchEvent(keydown('Escape')); });
+    expect(menuFor('term-1')).toBeNull();
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+
+  it('survives a scroll originating inside the menu but dismisses on an outside scroll', async () => {
+    await openConnectableMenu();
+    const menu = menuFor('term-1')!;
+
+    act(() => { menu.dispatchEvent(new Event('scroll', { bubbles: false })); });
+    expect(menuFor('term-1')).not.toBeNull();
+
+    act(() => { window.dispatchEvent(new Event('scroll')); });
     expect(menuFor('term-1')).toBeNull();
   });
 });

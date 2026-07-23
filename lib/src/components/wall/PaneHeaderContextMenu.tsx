@@ -1,11 +1,12 @@
-import { useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { CircleNotchIcon, XIcon } from '@phosphor-icons/react';
-import { POPUP_SURFACE_CLASS } from '../design';
+import { POPUP_SURFACE_CLASS, Shortcut } from '../design';
 import { clampOverlayPosition } from '../../lib/ui-geometry';
 import { getPlatform } from '../../lib/platform';
 import type { OpenPort } from '../../lib/platform/types';
 import { titleSourceLabel, type TerminalTitle } from '../../lib/terminal-state';
+import { usePopoverFocusTrap } from '../use-popover-focus-trap';
 import { listenerUrlsByPort, type PortUrlEntry } from './port-url';
 import { useDismissOverlay } from './use-dismiss-overlay';
 import { WallActionsContext } from './wall-context';
@@ -29,17 +30,25 @@ const MENU_ROW_CLASS = 'flex w-full items-baseline gap-2 px-2.5 py-1 text-left h
  * feedback, and a failure is logged, not shown here. Port rows are only clickable
  * when the host can run agent-browser; otherwise the list is an inert label (the
  * host-gated-affordance convention).
+ *
+ * The menu owns the keyboard while open (`docs/specs/layout.md` → Pane header):
+ * it takes DOM focus on mount (restoring the prior focus on close so a
+ * passthrough terminal gets its keys back), reports dialog-keyboard-active so
+ * command-mode keys don't fire underneath, wires `1`–`9` to the port rows,
+ * roves `↑`/`↓` across them, and traps Tab/Escape via `usePopoverFocusTrap`.
  */
 export function PaneHeaderContextMenu({
   id,
   anchor,
   onClose,
+  onKeyboardActiveChange,
   candidates,
   currentTitle,
 }: {
   id: string;
   anchor: { x: number; y: number };
   onClose: () => void;
+  onKeyboardActiveChange: (active: boolean) => void;
   candidates: TerminalTitle[];
   currentTitle: string;
 }) {
@@ -72,22 +81,79 @@ export function PaneHeaderContextMenu({
     setStyle(clampOverlayPosition({ left: anchor.x, top: anchor.y, width: rect.width, height: rect.height }));
   }, [anchor.x, anchor.y, scan]);
 
-  useDismissOverlay(onClose);
+  // Scrolls inside the menu (arrow-key focus moves auto-scroll the overflowing
+  // list) must not dismiss it; every other scroll still does.
+  useDismissOverlay(onClose, ref);
+  usePopoverFocusTrap(ref, onClose);
+
+  // Report dialog-keyboard-active so command-mode shortcuts stay dormant while
+  // the menu is open (matches TodoAlertDialog).
+  useEffect(() => {
+    onKeyboardActiveChange(true);
+    return () => onKeyboardActiveChange(false);
+  }, [onKeyboardActiveChange]);
+
+  // Take DOM focus on the menu container (tabIndex=-1) so our keyboard handlers
+  // fire via `el.contains(document.activeElement)`; restore the prior focus on
+  // close so a passthrough terminal gets its keys back.
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    ref.current?.focus({ preventScroll: true });
+    return () => {
+      if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
+    };
+  }, []);
 
   // Fire-and-forget: the pane appears immediately and reports its own progress, so
   // the menu closes at once rather than waiting on the daemon boot.
-  const connect = (entry: PortUrlEntry) => {
+  const connect = useCallback((entry: PortUrlEntry) => {
     actions.onConnectPort(id, entry.url);
     onClose();
-  };
+  }, [actions, id, onClose]);
+
+  // Keyboard rove + digit accelerators. Capture phase, scoped to the menu, and
+  // active only while mounted. Enter/Space are left to the focused native button.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const handler = (e: KeyboardEvent) => {
+      if (!el.contains(document.activeElement)) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        const items = Array.from(el.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+        if (items.length === 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const currentIndex = items.findIndex((item) => item === document.activeElement);
+        const nextIndex = currentIndex === -1
+          ? (e.key === 'ArrowDown' ? 0 : items.length - 1)
+          : (currentIndex + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+        items[nextIndex]?.focus();
+        return;
+      }
+      // Digits connect the nth port row — but only when there is a loaded list to
+      // index into. Scanning/failed/out-of-range/inert-host presses are dropped,
+      // not buffered.
+      if (canConnect && scan.status === 'loaded' && /^[1-9]$/.test(e.key)) {
+        const entry = scan.entries[Number(e.key) - 1];
+        if (entry) {
+          e.preventDefault();
+          e.stopPropagation();
+          connect(entry);
+        }
+      }
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [canConnect, scan, connect]);
 
   return createPortal(
     <div
       ref={ref}
       role="menu"
       aria-label="Pane actions"
+      tabIndex={-1}
       data-pane-context-menu-for={id}
-      className={`${POPUP_SURFACE_CLASS} max-h-[70vh] w-fit min-w-52 max-w-96 overflow-auto py-1 text-sm`}
+      className={`${POPUP_SURFACE_CLASS} max-h-[70vh] w-fit min-w-52 max-w-96 overflow-auto py-1 text-sm focus:outline-none`}
       style={style}
       onPointerDown={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -135,7 +201,7 @@ export function PaneHeaderContextMenu({
       {scan.status === 'loaded' && scan.entries.length === 0 && (
         <div className="px-2.5 py-1 text-muted">no listening ports</div>
       )}
-      {scan.status === 'loaded' && scan.entries.map((entry) => {
+      {scan.status === 'loaded' && scan.entries.map((entry, index) => {
         const label = (
           <>
             <span className="min-w-0 truncate">{entry.host}:{entry.port}</span>
@@ -151,6 +217,7 @@ export function PaneHeaderContextMenu({
             className={MENU_ROW_CLASS}
             onClick={() => connect(entry)}
           >
+            {index < 9 && <Shortcut className="shrink-0">{index + 1}</Shortcut>}
             {label}
           </button>
         ) : (

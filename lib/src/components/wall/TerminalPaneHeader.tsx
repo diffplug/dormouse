@@ -184,6 +184,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   return (
     <div
       ref={tabRef}
+      data-pane-header-for={id}
       className={tabVariant({ state: isActiveHeader ? 'active' : 'inactive' })}
       onMouseDown={() => actions.onClickPanel(id)}
       onContextMenu={(e) => {
@@ -384,6 +385,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
           id={id}
           anchor={contextMenu}
           onClose={closeContextMenu}
+          onKeyboardActiveChange={setDialogKeyboardActive}
           candidates={titleCandidates}
           currentTitle={displayTitleBase}
         />

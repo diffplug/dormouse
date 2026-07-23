@@ -11,10 +11,15 @@ function findAlertButtonForSession(id: string): HTMLButtonElement | null {
   return document.querySelector<HTMLButtonElement>(`[data-alert-button-for="${CSS.escape(id)}"]`);
 }
 
+function findPaneHeaderForSession(id: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[data-pane-header-for="${CSS.escape(id)}"]`);
+}
+
 /**
  * Single-pane shortcuts: Enter (focus/reattach), `|`/`%`/`-`/`"` (split),
  * Cmd-Arrow (swap with neighbor), k/x (kill confirm), `,` (rename),
- * m/d (minimize), t/a (todo/alert toggle), z (zoom + passthrough focus).
+ * m/d (minimize), t/a (todo/alert toggle), z (zoom + passthrough focus),
+ * `>` (open the selected pane's header context menu).
  */
 export function handlePaneShortcuts(
   e: KeyboardEvent,
@@ -140,6 +145,27 @@ export function handlePaneShortcuts(
     e.preventDefault();
     e.stopPropagation();
     ctx.wallActionsRef.current.onZoom(sid);
+    return true;
+  }
+
+  if (e.key === '>' && sid && ctx.selectedTypeRef.current === 'pane') {
+    e.preventDefault();
+    e.stopPropagation();
+    // Reuse the header's own onContextMenu path: dispatch a synthetic
+    // contextmenu at the header's bottom-left corner so the menu opens anchored
+    // under the header's left edge. Browser-surface panes carry no
+    // `data-pane-header-for`, so the lookup misses and the key is a consumed
+    // no-op — the spec'd behavior for surfaces with no header context menu.
+    const header = findPaneHeaderForSession(sid);
+    if (header) {
+      const rect = header.getBoundingClientRect();
+      header.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left,
+        clientY: rect.bottom,
+      }));
+    }
     return true;
   }
 
