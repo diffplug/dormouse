@@ -167,28 +167,31 @@ Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
 
 ## Pane Context Menu Connect
 
-The terminal pane header's right-click menu (`docs/specs/layout.md` → Pane
-header) lists the ports a pane's process tree binds using the **same** per-port
-URL selection as `surface.resolveOpen` (`dor ab open <surface>` /
-`dor iframe <surface>`): `listenerUrlsByPort` in `port-url.ts` groups TCP
-listeners into one openable `http://<host>:<port>/` per distinct port
-(loopback-reachable bind wins `localhost`; otherwise the bound LAN/Tailnet
-address, IPv6 bracketed).
+The terminal pane header's context menu (`docs/specs/layout.md` → Pane
+header — right-click, or `>` in command mode; that spec owns the menu's
+layout and keyboard contract) lists the ports a pane's process tree binds
+using the **same** per-port URL selection as `surface.resolveOpen`
+(`dor ab open <surface>` / `dor iframe <surface>`): `listenerUrlsByPort` in
+`port-url.ts` groups TCP listeners into one openable `http://<host>:<port>/`
+per distinct port (loopback-reachable bind wins `localhost`; otherwise the
+bound LAN/Tailnet address, IPv6 bracketed).
 
-Clicking a port row reproduces `dor ab open <url>` against the **default**
+Activating a port row — click, its `1`–`9` digit accelerator, or `Enter` on
+the focused row — reproduces `dor ab open <url>` against the **default**
 key/session: it runs `agent-browser open <url>` on that session and
 reuses-or-creates the session's browser surface — the wall-side mirror of the CLI
 flow, not the control plane. It is host-gated on `agentBrowserCommand`: absent
 (e.g. the web demo host), the rows render as inert labels.
 
-**The click reveals its surface.** Unlike `dor ab` (focus-neutral: an agent must
-not steal focus from the human), a menu click *is* the human asking to see that
-browser, so every arm of the eager lookup below ends by selecting the surface —
-reattaching it first when it is minimized, on the same terms as clicking its Door
-chip. Selection only: passthrough stays on the terminal that was right-clicked, so
-connecting a port never redirects the keyboard. This is why a repeat click on an
-already-connected port is visible at all — the session merely re-navigates to the
-URL it is already on, so the selection move is the only feedback.
+**Activation reveals its surface.** Unlike `dor ab` (focus-neutral: an agent must
+not steal focus from the human), activating a menu row — by mouse or keyboard —
+*is* the human asking to see that browser, so every arm of the eager lookup below
+ends by selecting the surface — reattaching it first when it is minimized, on the
+same terms as clicking its Door chip. Selection only: passthrough stays on the
+terminal the menu was opened from, so connecting a port never redirects the
+keyboard. This is why a repeat activation on an already-connected port is visible
+at all — the session merely re-navigates to the URL it is already on, so the
+selection move is the only feedback.
 Source of truth: `revealSurface` in `Wall.tsx`, threaded into `useDorControl`.
 
 **Instant create.** The click is fire-and-forget: the menu closes at once and the
