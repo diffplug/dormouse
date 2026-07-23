@@ -32,6 +32,7 @@ import {
 import { getTerminalInstance, refitSession } from '../../lib/terminal-registry';
 import { doPaste } from '../../lib/clipboard';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
+import { usePocketTheme } from './pocket-theme';
 import {
   activatePane,
   attachableDirectoryEntries,
@@ -40,9 +41,9 @@ import {
 } from './wall-model';
 
 export function PocketWall({ adapter }: { adapter: RemotePtyAdapter }): React.ReactElement {
-  // The theme is applied to <body> once at boot by restorePocketTheme() in
-  // main.tsx (applyTheme writes --vscode-* outside React, so a CSR mount never
-  // reconciles it away); the wall just reads those variables.
+  // App restores the theme before this renders; repeat idempotently so isolated
+  // PocketWall consumers receive the same theme contract too.
+  usePocketTheme();
   const [entries, setEntries] = useState<DirectoryEntry[]>(() => adapter.getDirectoryEntries());
   const [activePaneId, setActivePaneId] = useState<string | null>(null);
   const [touchMode, setTouchMode] = useState<MobileTerminalTouchMode>('gestures');

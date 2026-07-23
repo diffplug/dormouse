@@ -7,14 +7,10 @@
  * `MobileTerminalUi`/`MobileWall` (the same composition the website playground
  * proves out with `FakePtyAdapter`). No bespoke terminal UI.
  *
- * Chrome is built from the same three VSCode list pairs as the rest of the app
- * (docs/specs/theme.md): the page is `app-bg/fg`, the header band is the
- * *active* pair `header-active-bg/fg`, and host rows are the *inactive* pair
- * `header-inactive-bg/fg`. Hierarchy is background swaps between those pairs —
- * never `surface-raised` or `panel-border`, which are near-black / transparent
- * in themes like Kimbie. Secondary emphasis is foreground *intensity* (alpha on
- * the pair's own fg), so no fourth color is introduced. The theme is applied to
- * <body> by `restorePocketTheme()` in `main.tsx` before first paint.
+ * The whole shell — auth screens included — renders on the shared `--vscode-*`
+ * design tokens, restored to <body> before first paint by restorePocketTheme()
+ * in main.tsx. Chrome draws only on the three list pairs — see the vocabulary
+ * below and docs/specs/theme.md.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -68,9 +64,9 @@ const pkButton = tv({
       lg: 'min-h-[44px] px-4 text-[13px]',
       sm: 'min-h-9 px-3 text-[12px]',
     },
-    block: { true: 'w-full' },
+    block: { true: 'w-full', false: '' },
   },
-  defaultVariants: { tone: 'primary', size: 'lg' },
+  defaultVariants: { tone: 'primary', size: 'lg', block: false },
 });
 
 const PK = {
@@ -255,23 +251,40 @@ export default function App(): React.ReactElement {
 
   if (phase === 'wall' && activeHost && adapterRef.current) {
     return (
-      <div className={PK.app}>
-        <header className={PK.header}>
-          <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={leaveWall}>
-            ‹ Hosts
-          </button>
-          <h1 className={PK.headerTitle}>{activeHost.label || activeHost.hostId}</h1>
-        </header>
-        <div className={PK.wallHost}>
-          <PocketWall adapter={adapterRef.current} />
-        </div>
-      </div>
+      <ConnectedView host={activeHost} adapter={adapterRef.current} onLeave={leaveWall} />
     );
   }
 
   return (
     <div className={PK.app}>
       <div className={clsx(PK.body, PK.bodyCenter)}>…</div>
+    </div>
+  );
+}
+
+// --- ConnectedView ---------------------------------------------------------
+
+/** The connected Pocket shell: host navigation chrome over the remote wall. */
+export function ConnectedView({
+  host,
+  adapter,
+  onLeave,
+}: {
+  host: HostView;
+  adapter: RemotePtyAdapter;
+  onLeave: () => void;
+}): React.ReactElement {
+  return (
+    <div className={PK.app}>
+      <header className={PK.header}>
+        <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={onLeave}>
+          ‹ Hosts
+        </button>
+        <h1 className={PK.headerTitle}>{host.label || host.hostId}</h1>
+      </header>
+      <div className={PK.wallHost}>
+        <PocketWall adapter={adapter} />
+      </div>
     </div>
   );
 }
@@ -330,9 +343,9 @@ export function SetupOrSignin({
               password.
             </p>
             <div className={PK.field}>
-              <label className={PK.fieldLabel} htmlFor="pk-pw">Setup password</label>
+              <label className={PK.fieldLabel} htmlFor="pocket-setup-password">Setup password</label>
               <input
-                id="pk-pw"
+                id="pocket-setup-password"
                 className={PK.input}
                 type="password"
                 autoComplete="off"
@@ -341,9 +354,9 @@ export function SetupOrSignin({
               />
             </div>
             <div className={PK.field}>
-              <label className={PK.fieldLabel} htmlFor="pk-label">Passkey label</label>
+              <label className={PK.fieldLabel} htmlFor="pocket-passkey-label">Passkey label</label>
               <input
-                id="pk-label"
+                id="pocket-passkey-label"
                 className={PK.input}
                 type="text"
                 value={label}

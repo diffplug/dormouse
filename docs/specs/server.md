@@ -252,6 +252,11 @@ Served by the server, built from `lib`:
   straight away.
 * Picker renders `directory.snapshot`; tapping a pane attaches with the
   phone's cols/rows and reuses the existing mobile terminal UI (xterm).
+* All of it — auth screens included — renders on the shared themeable design
+  system, with the theme restored before first paint
+  (`docs/specs/pocket-app.md`, Design system and theming). The server serves
+  no styling of its own; its only self-authored output is the plaintext
+  missing-build stub.
 
 ## Testing
 
