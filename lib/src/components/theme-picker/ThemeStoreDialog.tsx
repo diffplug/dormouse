@@ -43,6 +43,9 @@ export function ThemeStoreDialog({
   // list, and any error banner. Reset to a clean slate when the store closes.
   useEffect(() => {
     if (!open) {
+      // Cancel any debounce scheduled by the last keystroke; otherwise it fires
+      // doSearch after close and repopulates results/loading for the old query.
+      if (debounceRef.current) clearTimeout(debounceRef.current);
       setQuery('');
       setResults([]);
       setError(null);

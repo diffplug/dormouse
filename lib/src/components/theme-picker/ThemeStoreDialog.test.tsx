@@ -16,7 +16,10 @@ vi.mock('../../lib/themes', () => ({
   setActiveThemeId: vi.fn(),
 }));
 
+import { searchThemes } from '../../lib/themes';
 import { ThemeStoreDialog } from './ThemeStoreDialog';
+
+const searchThemesMock = vi.mocked(searchThemes);
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -71,5 +74,22 @@ describe('ThemeStoreDialog', () => {
     render(true); // reopen
 
     expect(container.querySelector('input')?.value).toBe('');
+  });
+
+  it('cancels a pending debounce when closed before it fires', () => {
+    vi.useFakeTimers();
+    try {
+      render(true);
+      typeQuery('dracula'); // schedules doSearch in 300ms
+
+      render(false); // close within the debounce window
+      act(() => {
+        vi.advanceTimersByTime(300); // the cancelled timer must not fire
+      });
+
+      expect(searchThemesMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
