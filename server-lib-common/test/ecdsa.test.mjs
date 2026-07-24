@@ -37,10 +37,20 @@ test('DER parsing rejects malformed input', () => {
   assert.throws(() => ecdsaDerToRaw(Uint8Array.of(0x31, 0x00)), /SEQUENCE/);
   assert.throws(() => ecdsaDerToRaw(Uint8Array.of(0x30, 0x06, 0x02, 0x01, 0x01)), /length mismatch/);
   assert.throws(() => ecdsaDerToRaw(Uint8Array.of(0x30, 0x04, 0x03, 0x01, 0x01, 0x02)), /INTEGER/);
+  // A byte appended *outside* the declared SEQUENCE length trips the
+  // length-mismatch guard first (offset + sequenceLength !== der.length).
   const valid = ecdsaRawToDer(globalThis.crypto.getRandomValues(new Uint8Array(64)));
-  const trailing = new Uint8Array(valid.length + 1);
-  trailing.set(valid);
-  assert.throws(() => ecdsaDerToRaw(trailing), /invalid DER/);
+  const extraOutside = new Uint8Array(valid.length + 1);
+  extraOutside.set(valid);
+  assert.throws(() => ecdsaDerToRaw(extraOutside), /length mismatch/);
+  // A byte counted *inside* the SEQUENCE length (declared length bumped to
+  // match) passes the length check and both INTEGER reads, so it reaches the
+  // genuine trailing-bytes branch. `valid[1]` is short-form (< 0x80) and the
+  // two INTEGERs total well under 127, so +1 stays short-form.
+  const extraInside = new Uint8Array(valid.length + 1);
+  extraInside.set(valid);
+  extraInside[1] = valid[1] + 1;
+  assert.throws(() => ecdsaDerToRaw(extraInside), /trailing bytes/);
 });
 
 test('DER parsing rejects integers wider than the curve', () => {
