@@ -26,6 +26,13 @@ describe('trimPersistedScrollback', () => {
     expect(trimPersistedScrollback('aaaa\nbbbb\ncccc\n', 12)).toBe('bbbb\ncccc\n');
   });
 
+  it('keeps the whole tail when the cut already lands on a line boundary', () => {
+    // length 15; the last 10 chars are "bbbb\ncccc\n", which already starts
+    // right after a newline — a clean set of lines filling the cap exactly, so
+    // nothing should be dropped.
+    expect(trimPersistedScrollback('aaaa\nbbbb\ncccc\n', 10)).toBe('bbbb\ncccc\n');
+  });
+
   it('hard-cuts a single line longer than the cap (no newline in tail)', () => {
     expect(trimPersistedScrollback('z'.repeat(100), 20)).toBe('z'.repeat(20));
   });
