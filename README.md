@@ -6,7 +6,7 @@
 
 - **[Playground](https://dormouse.sh/playground)** - try in your browser, no install
 - **[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=diffplug.dormouse)** / **[Open VSX](https://open-vsx.org/extension/diffplug/dormouse)** - works in VS Code and its forks
-- **[Standalone app](https://dormouse.sh#downloads)** - Mac, Windows, Linux
+- **[Standalone app](https://dormouse.sh/#download)** - Mac, Windows, Linux
 
 ## Features
 
