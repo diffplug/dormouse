@@ -1067,7 +1067,7 @@ fn dor_control_token() -> String {
     // in pty-manager.ts. Aborting on CSPRNG failure is deliberate: never fall back
     // to a weak token.
     let mut bytes = [0u8; 24];
-    getrandom::getrandom(&mut bytes).expect("OS CSPRNG unavailable for dor control token");
+    getrandom::fill(&mut bytes).expect("OS CSPRNG unavailable for dor control token");
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
