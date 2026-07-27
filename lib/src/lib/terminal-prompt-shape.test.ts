@@ -7,8 +7,8 @@ describe('derivePromptShape', () => {
   });
 
   it('reads the cmd.exe terminator as ">" regardless of the path', () => {
-    // The trailing "run" looks like ":\>" only at the drive root; the stable
-    // terminator is just ">".
+    // At the drive root the tail ":\>" could be mistaken for the terminator,
+    // but the stable terminator across both paths is just ">".
     expect(derivePromptShape('C:\\Users\\ntwigg>')).toEqual({ terminator: '>', countBefore: 0 });
     expect(derivePromptShape('C:\\>')).toEqual({ terminator: '>', countBefore: 0 });
   });
