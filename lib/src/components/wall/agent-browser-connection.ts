@@ -254,6 +254,17 @@ export class AgentBrowserConnection {
   private handleMessage(raw: unknown): void {
     if (typeof raw !== 'string') return;
     if (raw.length > FRAME_PULSE_THRESHOLD) {
+      // Size alone can't discriminate a frame from a control message: a `tabs`
+      // snapshot with many long URLs/titles crosses the threshold too, and routing
+      // it as a frame would silently drop the tab update. A frame's bulk is a
+      // base64 JPEG body, whose alphabet contains no `"` or `:`, so a compact
+      // `"type":"tabs"`/`"type":"status"` substring can never occur inside a real
+      // frame — it's a zero-false-positive marker for an oversized control message.
+      // Only those pay a parse; frames keep the hash+pulse fast path untouched.
+      if (raw.includes('"type":"tabs"') || raw.includes('"type":"status"')) {
+        this.dispatchControl(raw);
+        return;
+      }
       // `wantFrameData` gates only the parse itself: on the large path it is the
       // difference between JSON.parsing ~100KB and hashing it, which is the whole
       // point of the threshold. Emission policy lives in emitFrame. Asked here (and
@@ -274,6 +285,12 @@ export class AgentBrowserConnection {
       this.emit({ type: 'frame-pulse' });
       return;
     }
+    this.dispatchControl(raw);
+  }
+
+  // Parse a JSON envelope and route it to the frame/status/tabs handlers. Shared
+  // by the small-message path and the oversized-control-message path above.
+  private dispatchControl(raw: string): void {
     let msg: any;
     try {
       msg = JSON.parse(raw);
