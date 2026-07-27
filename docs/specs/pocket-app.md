@@ -82,7 +82,7 @@ Both point the same way: **the Pocket app is always served same-origin with
 its API.** One lib-owned bundle, two deployments:
 
 * **Selfhost (shipped):** the Node server serves the bundle
-  (`lib/dist-pocket`). Selfhost auth never depends on dormouse.dev existing.
+  (`lib/dist-pocket`). Selfhost auth never depends on dormouse.sh existing.
 * **SaaS (staged — see [Future](#future)):** CloudFlare serves the static site
   and routes `/api/*` and `/ws/*` to the dynamic backend (CloudFlare proxies
   WebSockets). The same bundle mounts at the site origin; rpId is the site's.
