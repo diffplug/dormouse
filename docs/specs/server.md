@@ -164,12 +164,12 @@ timestamp.
 phone                        server                        host (laptop)
   |-- signin (passkey) -------->|                              |
   |   generate device key       |                              |
-  |-- pair-request ------------>|-- pair-request ------------->|  approval modal
+  |-- pair -------------------->|-- pair --------------------->|  approval modal
   |                             |                              |  user clicks Approve
   |<-- pair-result -------------|<-- pair-result --------------|  ACL record saved
 ```
 
-The `pair-request` carries the `PairingRequest` shape from `server-lib-common`
+The `pair` frame carries the `PairingRequest` shape from `server-lib-common`
 (`accountId`, `passkeyCredentialId`, `passkeyPublicKeyHash`,
 `devicePublicKey`, `requestedLabel`). The server checks the request's
 credential is a registered passkey of the account (and that its public-key
@@ -189,7 +189,7 @@ approval UI.
 
 ```
 phone                        server                        host
-  |-- connect-request {hostId}->|-- challenge-request -------->|
+  |-- connect {hostId} -------->|-- connect {clientId} ------->|
   |<-- challenge ---------------|<-- challenge (HostChallengeIssuer)
   |   ONE biometric prompt:     |                              |
   |   WebAuthn get({challenge}) |                              |
@@ -197,7 +197,7 @@ phone                        server                        host
   |-- ConnectionRequest ------->|  server verifies the         |
   |                             |  assertion itself, then      |
   |                             |-- ConnectionRequest -------->|  authorizeConnection()
-  |<-- session-established -----|<-- decision -----------------|  (final authority)
+  |<-- decision ----------------|<-- decision -----------------|  (final authority)
   |============ opaque remote-api relay from here ============>|
 ```
 

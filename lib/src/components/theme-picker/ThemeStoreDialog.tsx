@@ -32,8 +32,25 @@ export function ThemeStoreDialog({
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
+    // Only the open transition needs a native call: closing unmounts the
+    // <dialog> (via `if (!open) return null` below), so there is no element
+    // left to `.close()`.
     if (open && !dialog.open) dialog.showModal();
-    if (!open && dialog.open) dialog.close();
+  }, [open]);
+
+  // The component stays mounted (rendering null) while closed, so search state
+  // would otherwise persist — a reopen would flash the previous query, result
+  // list, and any error banner. Reset to a clean slate when the store closes.
+  useEffect(() => {
+    if (!open) {
+      // Cancel any debounce scheduled by the last keystroke; otherwise it fires
+      // doSearch after close and repopulates results/loading for the old query.
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      setQuery('');
+      setResults([]);
+      setError(null);
+      setLoading(false);
+    }
   }, [open]);
 
   useEffect(() => {

@@ -242,7 +242,7 @@ A fixed-positioned element rendered on top of the Lath host. Covers the active e
 
 ### Direction detection
 
-Lath's pure `neighbors(tree, rect, id, direction, opts)` query resolves the nearest pane in an arrow's direction — no DOM rect scanning; it computes against the same laid-out rects the screen shows (`docs/specs/tiling-engine.md` → "Layout"). The keyboard handlers reach it through the engine-neutral `WallNav` seam (`lib/src/components/wall/keyboard/types.ts`), whose `findInDirection` calls `lath.neighborOf`. The semantics:
+Lath's pure `neighbors(tree, rect, id, direction, opts)` query resolves the nearest pane in an arrow's direction — no DOM rect scanning; it computes against the same laid-out rects the screen shows (`docs/specs/tiling-engine.md` → "Layout"). The keyboard handlers reach it through the engine-neutral `WallNav` seam (`lib/src/components/wall/keyboard/types.ts`), whose `findInDirection` calls `lath.store.neighborOf`. The semantics:
 
 1. **Edge-based direction check**: candidate must be strictly beyond the leaf's edge on the primary axis
 2. **Overlap requirement**: candidate overlapping on the secondary axis is preferred
@@ -453,5 +453,5 @@ Activating another Workspace (`switchWorkspace`) mounts the target Workspace's S
 Stage 4 also lifts the single-Workspace cap and wires the lifecycle UX:
 
 - **Create** (`createWorkspace`): adds a new Workspace, gives it a default name (`Workspace N`), makes it active, and spawns a single fresh pane — matching the empty-state behavior in Session persistence above.
-- **Close** (`closeWorkspace`): `kill`s each member Surface and removes the Workspace. Closing a Workspace that contains touched Surfaces confirms first (reusing the kill-confirm vocabulary); the exact confirmation surface is settled in the Storybook UI pass. The last remaining Workspace cannot be closed — there is always one active Workspace, just as there is always one visible pane (corner case #10).
+- **Close** (`closeWorkspace`): `kill`s each member Surface and removes the Workspace. Closing a Workspace that contains touched Surfaces confirms first (reusing the kill-confirm vocabulary); the exact confirmation surface is settled in the Storybook UI pass. The last remaining Workspace cannot be closed — there is always one active Workspace, just as there is always one visible pane (corner case #5).
 - **Rename** (`renameWorkspace`): edits the Workspace `name` only. It does not touch any Surface title or the per-pane inline rename.

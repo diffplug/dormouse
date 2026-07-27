@@ -87,7 +87,7 @@ otherwise dangle on the removed panel); replacing an active-but-unselected pane
 leaves the user's selection, including a door selection, untouched.
 `createContentSurface`'s
 `focusNeutral` routes through the shared `runSurfaceAdd` helper (see
-`docs/specs/layout.md` corner case #12).
+`docs/specs/layout.md` corner case #6).
 
 Surface lifetime owns backing resources:
 

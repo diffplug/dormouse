@@ -22,6 +22,19 @@
       "dependencyDashboardApproval": true
     },
     {
+      "description": "react and react-dom ship from one repo on one version number, and react-dom's client asserts an exact match against react at runtime — a split bump throws \"Incompatible React versions\" and fails the lib test suites. @types/react-dom peers on @types/react and both describe the runtime pair, so keep all four in one PR",
+      "matchManagers": ["npm"],
+      "matchPackageNames": [
+        "react",
+        "react-dom",
+        "@types/react",
+        "@types/react-dom"
+      ],
+      "groupName": "react",
+      "groupSlug": "react",
+      "separateMajorMinor": false
+    },
+    {
       "description": "React Router framework packages are peered and released together; do not split runtime and build tooling by dependency type",
       "matchManagers": ["npm"],
       "matchPackageNames": ["react-router", "@react-router/**"],
