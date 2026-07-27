@@ -21,6 +21,11 @@ export function trimPersistedScrollback(scrollback: string | null, maxChars?: nu
 export function trimPersistedScrollback(scrollback: string | null, maxChars = PERSISTED_SCROLLBACK_MAX_CHARS): string | null {
   if (scrollback === null || scrollback.length <= maxChars) return scrollback;
   const start = scrollback.length - maxChars;
+  // The tail already begins exactly on a line boundary (the preceding char is a
+  // newline), so it has no torn first line. Keep it whole — it's a clean set of
+  // lines that fills the cap exactly; cutting to the next newline would drop a
+  // full line we didn't have to.
+  if (scrollback[start - 1] === '\n') return scrollback.slice(start);
   const i = scrollback.indexOf('\n', start);
   // i === -1: one giant line, no boundary to cut on.
   // i === length - 1: the only newline is the last char, so dropping through
