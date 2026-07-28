@@ -24,14 +24,15 @@ import { resolvePaneElement } from './resolve-pane-element';
 import type { WallMode, WallSelectionKind } from './wall-types';
 import { DoorElementsContext, PaneElementsContext, WindowFocusedContext } from './wall-context';
 import {
-  SelectionRing,
+  CORNER_EDGES,
+  cornerPath,
+  edgePath,
+  isRingCorner,
+  RING_PIECES,
   roundedRectPath,
-  smearCornerPath,
-  smearEdgePath,
-  SMEAR_PIECES,
-  type RingCorner,
   type RingEdge,
-} from './SelectionRing';
+} from '../../lib/ring-geometry';
+import { SelectionRing } from './SelectionRing';
 
 /** The subset of the Lath store the overlay needs — a revision that bumps on every
  *  commit, so the ring re-measures as leaves move / resize / restore. Kept
@@ -92,14 +93,81 @@ interface DisplayedRing {
   speeds: RingEdgeSpeeds | null;
 }
 
-/** Which two edges each corner joins: `[vertical, horizontal]`, matching the
- *  `(a, b)` scale pair `smearCornerPath` blends between. */
-const CORNER_EDGES: Record<RingCorner, [RingEdge, RingEdge]> = {
-  tr: ['right', 'top'],
-  br: ['right', 'bottom'],
-  bl: ['left', 'bottom'],
-  tl: ['left', 'top'],
-};
+/**
+ * Draw the eight-piece motion smear underneath the ring, or hide it when the ring
+ * is settled. `shape.inset` is the effective inset for the active variant, so this
+ * is the only inset in play.
+ *
+ * Each edge smears only by its OWN motion across itself, so the four are
+ * independent — see `docs/specs/layout.md` → "Ring travel" for why a single
+ * ring-centre velocity gets ordinary split layouts wrong.
+ *
+ * Straight edges carry their width in a plain `stroke-width`. Corners cannot —
+ * they have to reach two different widths at once — so each is stroked at unit
+ * width and scaled, which tapers it between its neighbours (`cornerPath`).
+ */
+function writeSmear(
+  group: SVGGElement,
+  rect: RingRect,
+  shape: RingShape,
+  strokeWidth: number,
+  speeds: RingEdgeSpeeds | null,
+): void {
+  if (!speeds) {
+    group.style.display = 'none';
+    return;
+  }
+  group.style.display = '';
+
+  const { smearFullSpeed, smearMaxPx, smearPeakAlpha } = cfg.focusRing;
+  // One signal, two channels. `t` is this edge's speed normalized against the
+  // speed at which the smear is fully developed; extent and intensity are then
+  // independent linear ramps off it, each with its own ceiling. Both start at
+  // zero, so an edge that is not moving contributes nothing rather than laying a
+  // band under the crisp ring.
+  //
+  // Intensity deliberately does NOT divide by the widening factor. Strict ink
+  // conservation ties peak alpha to the extent (a wider smear is proportionally
+  // fainter, total ink fixed), which makes the effect impossible to strengthen by
+  // widening it — the same ink just spreads thinner.
+  const band = (speed: number) => {
+    const t = Math.min(1, speed / smearFullSpeed);
+    return {
+      width: strokeWidth + t * (smearMaxPx - strokeWidth),
+      opacity: t * smearPeakAlpha,
+    };
+  };
+  const bands: Record<RingEdge, ReturnType<typeof band>> = {
+    top: band(speeds.top),
+    right: band(speeds.right),
+    bottom: band(speeds.bottom),
+    left: band(speeds.left),
+  };
+
+  for (const piece of RING_PIECES) {
+    const el = group.querySelector<SVGPathElement>(`[data-piece="${piece}"]`);
+    if (!el) continue;
+    if (!isRingCorner(piece)) {
+      const { width, opacity } = bands[piece];
+      el.setAttribute('d', edgePath(piece, rect, shape));
+      el.setAttribute('stroke-width', `${width}`);
+      el.setAttribute('stroke-opacity', `${opacity}`);
+      el.removeAttribute('transform');
+      continue;
+    }
+    // Corner: `a` is the vertical neighbour's width, `b` the horizontal one, so
+    // the unit stroke renders exactly each neighbour's width where it meets it.
+    const [vertical, horizontal] = CORNER_EDGES[piece];
+    const a = bands[vertical].width;
+    const b = bands[horizontal].width;
+    el.setAttribute('d', cornerPath(piece, rect, shape, a, b));
+    el.setAttribute('stroke-width', '1');
+    el.setAttribute('transform', `scale(${a} ${b})`);
+    // Opacity cannot vary along a stroke, so a corner takes the mean of the two
+    // edges it joins.
+    el.setAttribute('stroke-opacity', `${(bands[vertical].opacity + bands[horizontal].opacity) / 2}`);
+  }
+}
 
 export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, selectedId, selectedType, mode }: {
   /** The Lath store — the overlay re-measures on every commit (`revision` via
@@ -149,89 +217,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   const tweenRef = useRef<RingTween | null>(null);
   const rafRef = useRef<number | null>(null);
 
-  /**
-   * Draw the eight-piece motion smear underneath the ring, or hide it when the
-   * ring is settled.
-   *
-   * Each edge smears only by its OWN motion across itself — an edge sliding
-   * along its own length is unchanged — so the four edges are independent, and
-   * collapsing them to one horizontal and one vertical speed gets common layouts
-   * wrong. Moving between panes that are flush at the top but differ in height,
-   * the top edge translates purely sideways (no perpendicular motion at all, so
-   * it stays crisp) while the bottom edge moves diagonally and smears hard. A
-   * ring-center velocity would average those into one wrong answer for both.
-   *
-   * Straight edges carry their width in a plain `stroke-width`. Corners cannot —
-   * they have to reach two different widths at once — so each is stroked at unit
-   * width and scaled, which tapers it between its neighbours (`smearCornerPath`).
-   */
-  const writeSmear = useCallback((
-    rect: RingRect,
-    shape: RingShape,
-    inset: number,
-    strokeWidth: number,
-    speeds: RingEdgeSpeeds | null,
-  ) => {
-    const group = smearRef.current;
-    if (!group) return;
-    if (!speeds) {
-      group.style.display = 'none';
-      return;
-    }
-    group.style.display = '';
-
-    const { smearFullSpeed, smearMaxPx, smearPeakAlpha } = cfg.focusRing;
-    // One signal, two channels. `t` is this edge's speed normalized against the
-    // speed at which the smear is fully developed; extent and intensity are then
-    // independent linear ramps off it, each with its own ceiling. Both start at
-    // zero, so an edge that is not moving contributes nothing rather than laying a
-    // band under the crisp ring.
-    //
-    // Intensity deliberately does NOT divide by the widening factor. Strict ink
-    // conservation ties peak alpha to the extent (a wider smear is proportionally
-    // fainter, total ink fixed), which makes the effect impossible to strengthen
-    // by widening it — the same ink just spreads thinner.
-    const band = (speed: number) => {
-      const t = smearFullSpeed > 0 ? Math.min(1, speed / smearFullSpeed) : 0;
-      return {
-        width: strokeWidth + t * (smearMaxPx - strokeWidth),
-        opacity: t * smearPeakAlpha,
-      };
-    };
-    const bands = {
-      top: band(speeds.top),
-      right: band(speeds.right),
-      bottom: band(speeds.bottom),
-      left: band(speeds.left),
-    };
-
-    const { width: w, height: h } = rect;
-    const { tl, tr, br, bl } = shape;
-    SMEAR_PIECES.forEach((piece, index) => {
-      const el = group.children[index] as SVGPathElement | undefined;
-      if (!el) return;
-      if (piece === 'top' || piece === 'right' || piece === 'bottom' || piece === 'left') {
-        const { width, opacity } = bands[piece];
-        el.setAttribute('d', smearEdgePath(piece, w, h, tl, tr, br, bl, inset));
-        el.setAttribute('stroke-width', `${width}`);
-        el.setAttribute('stroke-opacity', `${opacity}`);
-        el.removeAttribute('transform');
-        return;
-      }
-      // Corner: `a` is the vertical neighbour's width, `b` the horizontal one, so
-      // the unit stroke renders exactly each neighbour's width where it meets it.
-      const [vertical, horizontal] = CORNER_EDGES[piece];
-      const a = bands[vertical].width;
-      const b = bands[horizontal].width;
-      el.setAttribute('d', smearCornerPath(piece, w, h, tl, tr, br, bl, inset, a, b));
-      el.setAttribute('stroke-width', '1');
-      el.setAttribute('transform', `scale(${a} ${b})`);
-      // Opacity cannot vary along a stroke, so a corner takes the mean of the two
-      // edges it joins.
-      el.setAttribute('stroke-opacity', `${(bands[vertical].opacity + bands[horizontal].opacity) / 2}`);
-    });
-  }, []);
-
   // Write the current frame to the DOM: container geometry, the ring path, the
   // marching-ants dash (command mode), and the directional smear. Reads
   // everything from refs so it is correct no matter which closure calls it (the rAF
@@ -252,10 +237,10 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     const strokeWidth = isAnts ? cfg.marchingAnts.strokeWidth : 1;
     // Solid centers its 1px stroke a fixed strokeWidth/2 (0.5) inside the div edge —
     // pixel-parity with the retired CSS border; ants uses the shape's lerped inset.
-    const effInset = isAnts ? shape.inset : strokeWidth / 2;
+    // Resolved once here so every path builder below sees a single inset.
+    const effShape = isAnts ? shape : { ...shape, inset: strokeWidth / 2 };
 
-    path.setAttribute('d', roundedRectPath(rect.width, rect.height, shape.tl, shape.tr, shape.br, shape.bl, effInset));
-    writeSmear(rect, shape, effInset, strokeWidth, speeds);
+    path.setAttribute('d', roundedRectPath(rect, effShape));
 
     if (isAnts) {
       // Dash sized to the perimeter so the segments stay even as the ring resizes.
@@ -274,6 +259,11 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       path.style.removeProperty('--march-offset');
     }
 
+    // Deliberately last: `getTotalLength()` above forces a synchronous style+layout
+    // flush, so anything dirtied before it gets resolved inside that blocking pass.
+    // Written after, these eight paths fold into the normal end-of-frame update.
+    const smear = smearRef.current;
+    if (smear) writeSmear(smear, rect, effShape, strokeWidth, speeds);
   }, []);
 
   // Re-run the measuring effect after each Lath commit. Runs post-render, so
@@ -379,8 +369,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
         return;
       }
       // Selection identity changed → tween from the current on-screen frame; the
-      // clock restarts (and motion samples reset) so rapid re-selection stays
-      // responsive and the new travel's velocity starts fresh.
+      // clock restarts so rapid re-selection stays responsive.
       if (identity !== displayedIdentityRef.current) {
         tweenRef.current = startRingTween(displayedFrameRef.current, next, performance.now(), FOCUS_MOTION_MS);
         displayedIdentityRef.current = identity;

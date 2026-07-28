@@ -31,9 +31,8 @@ export interface RingFrame {
   shape: RingShape;
 }
 
-/** Perpendicular speed of each ring edge while it travels (px/ms). Each edge
- *  smears only by its OWN motion across itself — sliding along its own length
- *  leaves it unchanged — so the four are independent. */
+/** Perpendicular speed of each ring edge while it travels (px/ms). See
+ *  `sampleRingVelocity` for why the four are independent. */
 export interface RingEdgeSpeeds {
   top: number;
   right: number;
@@ -91,13 +90,21 @@ export function retargetRingTween(tween: RingTween, to: RingFrame): RingTween {
   return { from: tween.from, to, start: tween.start, durationMs: tween.durationMs };
 }
 
+/** Raw (unclamped) progress through the tween, plus the `[0,1]` value the easing
+ *  is evaluated at. Position and velocity MUST read the clock the same way or the
+ *  smear desynchronizes from the ring it describes, so both go through here. A
+ *  zero-duration tween reads as already complete. */
+function progressAt(tween: RingTween, now: number): { raw: number; clamped: number } {
+  const raw = tween.durationMs <= 0 ? 1 : (now - tween.start) / tween.durationMs;
+  return { raw, clamped: raw < 0 ? 0 : raw > 1 ? 1 : raw };
+}
+
 /** Sample the tween at `now`, eased by `LATH_EASING`. Exact at both endpoints
  *  (`LATH_EASING` returns 0/1 at the bounds, so the lerp resolves to `from`/`to`
  *  identically); a zero-duration tween reads as done at `to`. `done` flips true
  *  once the clock reaches the completion instant. */
 export function sampleRingTween(tween: RingTween, now: number): { rect: RingRect; shape: RingShape; done: boolean } {
-  const raw = tween.durationMs <= 0 ? 1 : (now - tween.start) / tween.durationMs;
-  const clamped = raw < 0 ? 0 : raw > 1 ? 1 : raw;
+  const { clamped } = progressAt(tween, now);
   const eased = LATH_EASING(clamped);
   return {
     rect: lerpRect(tween.from.rect, tween.to.rect, eased),
@@ -126,12 +133,11 @@ export function sampleRingTween(tween: RingTween, now: number): { rect: RingRect
  * it never differences wall-clock timestamps, so it needs no smoothing.
  */
 export function sampleRingVelocity(tween: RingTween, now: number): RingEdgeSpeeds {
-  if (tween.durationMs <= 0) return { top: 0, right: 0, bottom: 0, left: 0 };
-  const raw = (now - tween.start) / tween.durationMs;
-  const clamped = raw < 0 ? 0 : raw > 1 ? 1 : raw;
-  // Past the completion instant the ring is parked; the curve's slope is already
-  // ~0 there, but make it exactly 0 so a settled ring can never carry a smear.
-  const rate = raw > 1 ? 0 : LATH_EASING.slope(clamped) / tween.durationMs;
+  const { raw, clamped } = progressAt(tween, now);
+  // At or past the completion instant the ring is parked. `slope` already clamps
+  // its own argument, so this exists only to force an exact zero — a settled ring
+  // must never carry a smear, and the curve's slope merely approaches 0.
+  const rate = raw >= 1 ? 0 : LATH_EASING.slope(clamped) / tween.durationMs;
   const from = tween.from.rect;
   const to = tween.to.rect;
   const edge = (a: number, b: number) => Math.abs(b - a) * rate;

@@ -24,6 +24,12 @@ export interface TerminalEntry {
   isReplaying: boolean;
   untouched: boolean;
   /**
+   * Whether the WebGL renderer has been offered to this terminal yet. Set on
+   * first mount, never cleared — a terminal that fell back to xterm's DOM
+   * renderer stays there for its lifetime (`docs/specs/layout.md` → Renderer).
+   */
+  webglAttempted?: boolean;
+  /**
    * The PTY process has exited (onPtyExit fired or resume restored it as
    * exited) but the pane lingers in the registry showing "[Process exited…]".
    * The directory reports this surface as `alive: false` so the phone's picker

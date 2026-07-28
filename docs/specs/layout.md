@@ -236,7 +236,7 @@ A fixed-positioned element rendered on top of the Lath host. Covers the active e
 
 ### Ring travel
 
-The ring's rect (and its `{tl,tr,br,bl,inset}` shape) is driven **per-frame by a JS tween**, not a CSS transition — the tween writes true interpolated values each rAF frame, the same pointer-events-none carve-out the Lath animator holds (DESIGN.md's "don't animate layout properties" bans CSS transitions on layout props, not this). Motion is `FOCUS_MOTION_MS` (220ms — half `LATH_MOTION_MS`) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`. Source of truth: the pure tween core `lib/src/lib/rect-tween.ts`; the overlay's rAF loop in `WorkspaceSelectionOverlay.tsx`; the SVG renderer `lib/src/components/wall/SelectionRing.tsx`.
+The ring's rect (and its `{tl,tr,br,bl,inset}` shape) is driven **per-frame by a JS tween**, not a CSS transition — the tween writes true interpolated values each rAF frame, the same pointer-events-none carve-out the Lath animator holds (DESIGN.md's "don't animate layout properties" bans CSS transitions on layout props, not this). Motion is `FOCUS_MOTION_MS` (220ms — half `LATH_MOTION_MS`) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`. Source of truth: the pure tween core `lib/src/lib/rect-tween.ts` (position and velocity); the pure outline/smear geometry `lib/src/lib/ring-geometry.ts`; the overlay's rAF loop in `WorkspaceSelectionOverlay.tsx`; the SVG shell `lib/src/components/wall/SelectionRing.tsx`.
 
 Per-frame writes are **imperative** — the same React-owns-structure / frame-owns-mutations split LathHost uses for the animator. `SelectionRing` renders a stable shell once (per variant/color/focus change) and lifts its DOM nodes (container div, ring path, smear group) back to the overlay via refs; the rAF loop writes `top/left/width/height`, the path `d`, the marching-ants dash, and every smear piece's `d` / width / opacity directly, and re-applies once after any structural render (pre-paint, so a freshly mounted ring never flashes). Do **not** reintroduce per-frame React state: a per-frame reconcile of this subtree competes with the travel for the frame budget.
 
@@ -250,7 +250,7 @@ Per-frame writes are **imperative** — the same React-owns-structure / frame-ow
   - **Extent and intensity are deliberately independent.** `smearMaxPx` is how far the smear reaches, `smearPeakAlpha` how strongly it reads, and `smearFullSpeed` the speed at which both max out. Alpha is *not* divided by the widening factor: strict ink conservation ties peak alpha to the extent, which makes the effect impossible to strengthen by widening — a wider band just spreads the same ink thinner. `smearFullSpeed` sets the shape over a travel: low values pin nearly every move at full smear (uniform blur), high values make blur track speed so short hops smear less than long jumps.
   - **Per-edge, not per-axis.** Collapsing the four edges to one horizontal and one vertical speed (e.g. from the ring *centre's* velocity) is wrong for ordinary split layouts: moving between panes that are flush at the top but differ in height, the top edge translates purely sideways and must stay crisp while the bottom edge moves diagonally and smears hard. A centre velocity averages those into the same wrong answer for both.
   - **Two layers, because the geometry is incompatible.** The ring is one closed path so the marching-ants dash phase runs unbroken around the perimeter; SVG `stroke-width` is a single scalar, so that one path cannot carry four different widths. The smear is therefore a sibling `<g data-ring="smear">` of eight solid pieces drawn underneath, and the ring (`<path data-ring="outline">`) is never transformed, re-dashed, or re-alpha'd — it renders exactly as it did before any smear existed. Keeping all dash bookkeeping on the untouched path is the point of the split.
-  - **Eight pieces: four edges plus four corners.** Straight edges carry their width in a plain `stroke-width` and need no transform. A corner cannot — it has to reach two different widths at once — so each corner arc is stroked at unit width and given `transform: scale(a, b)` with `a` the vertical neighbour's width and `b` the horizontal neighbour's. Under that scale a unit stroke renders `b` thick where its tangent is horizontal and `a` thick where vertical, interpolating between, so the corner tapers between its two edges with no seam at either join; `smearCornerPath` pre-divides the arc by the same `(a, b)` so the on-screen curve is unchanged. Opacity cannot vary along a stroke, so a corner takes the mean of its two edges'. Source of truth: `smearEdgePath` / `smearCornerPath` in `lib/src/components/wall/SelectionRing.tsx`, `SMEAR_PIECES` for the render/index order.
+  - **Eight pieces: four edges plus four corners.** Straight edges carry their width in a plain `stroke-width` and need no transform. A corner cannot — it has to reach two different widths at once — so each corner arc is stroked at unit width and given `transform: scale(a, b)` with `a` the vertical neighbour's width and `b` the horizontal neighbour's. Under that scale a unit stroke renders `b` thick where its tangent is horizontal and `a` thick where vertical, interpolating between, so the corner tapers between its two edges with no seam at either join; `cornerPath` pre-divides the arc by the same `(a, b)` so the on-screen curve is unchanged. Opacity cannot vary along a stroke, so a corner takes the mean of its two edges'. Every piece is cut from ONE shared point set (`ringPoints`), which is also what `roundedRectPath` walks — so the smear provably tiles the ring rather than agreeing with it by inspection, and `ring-geometry.test.ts` pins that. The overlay finds each piece by its `data-piece` attribute, never by index, so render order stays presentational. Source of truth: `lib/src/lib/ring-geometry.ts`.
   - This replaced an SVG `feGaussianBlur`. **Do not go back**: WebKit CPU-rasterizes SVG filters every frame, measured in Safari 26.5 at 25.6ms/frame with 31 of 98 frames over 25ms during travel, versus a locked 16.7ms with zero dropped frames. Stroke widths, scale transforms and opacities are GPU-composited and cost nothing. CSS `filter: blur()` is also free, so the cost is SVG filters specifically, not blur.
 
 ### Position tracking
@@ -371,10 +371,24 @@ Degradation is therefore never worse than the pre-WebGL behavior, but it is also
 one-way: a pane that loses its context stays on the DOM renderer even after other
 panes close. Re-arming the focused pane after a loss is unbuilt — see `## Future`.
 
+The addon is loaded on a session's **first mount**, not at creation. A GL context
+is a scarce per-page resource, and cold restore builds a session for every
+persisted pane *including minimized doors*, which never paint — claiming contexts
+at create would spend the budget on invisible surfaces and, since eviction is
+oldest-first and one-way, permanently demote the earliest-restored panes.
+`TerminalEntry.webglAttempted` keeps it to once per session.
+
+Which renderer a terminal ended up on is recorded as `data-renderer="webgl"|"dom"`
+on its host element, so the outcome is inspectable rather than silent — including
+after a context loss demotes a pane. `cfg.terminal.webglRenderer` disables the
+whole path; `.storybook/preview.ts` pins it off under Chromatic, because a canvas
+snapshots as an opaque bitmap that varies with the runner's GPU while styled spans
+diff deterministically.
+
 Verified in Safari 26.5 (the numbers above) and structurally in Chrome. **Not yet
 verified inside Tauri's WKWebView**: same engine as Safari and Tauri does not
-disable the GPU, so it is expected to work, but nobody has confirmed the
-standalone app gets the WebGL renderer rather than silently falling back.
+disable the GPU, so it is expected to work — read `data-renderer` on a pane's host
+element to confirm.
 
 Source of truth: `tryEnableWebglRenderer` in `lib/src/lib/terminal-lifecycle.ts`.
 Not to be confused with the SDF fork in `docs/specs/webgl-text.md`, which is a
@@ -457,7 +471,8 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/components/wall/TerminalPaneHeader.tsx` | Pane header with rename, alert/TODO, mouse override, split/zoom/minimize/kill controls, and the right-click context menu |
 | `lib/src/components/wall/PaneHeaderContextMenu.tsx` | Pane-header right-click menu: the `surface:N` handle plus the pane's bound TCP ports; a port click connects it to the default browser (`docs/specs/dor-browser.md`) |
 | `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` | Pane/door focus ring: the JS travel tween + rAF loop; re-measures on Lath store commits + animator frames; computes the directional motion-blur velocity |
-| `lib/src/components/wall/SelectionRing.tsx` | The single SVG ring renderer (`solid` passthrough / `ants` command), dash sizing, and the directional motion-blur filter |
+| `lib/src/components/wall/SelectionRing.tsx` | The SVG shell: one ring path (`solid` passthrough / `ants` command) plus the eight-piece smear group, all driven imperatively |
+| `lib/src/lib/ring-geometry.ts` | Pure ring outline + smear-piece path geometry, and the piece/corner taxonomy |
 | `lib/src/components/wall/MouseOverrideBanner.tsx` | Temporary mouse override banner shown from the header icon |
 | `lib/src/components/wall/use-wall-keyboard.ts` | Capture-phase keyboard dispatch for mode switching, pane/door commands, copy/paste, selection drag keys |
 | `lib/src/lib/vscode-keybindings.ts` | VS Code-hosted workbench chord mirror allowlist |

@@ -33,6 +33,13 @@ export const cfg = {
     /** xterm cursor blink. Disabled under Chromatic so the cursor renders as a
      *  stable solid block rather than being captured mid-blink (non-deterministic). */
     cursorBlink: true,
+    /** Render terminals through `@xterm/addon-webgl` instead of xterm's DOM
+     *  renderer. Disabled under Chromatic: the GPU path paints into a `<canvas>`,
+     *  which snapshots as an opaque bitmap subject to driver differences, whereas
+     *  the DOM renderer emits styled spans that diff deterministically. Turning it
+     *  off also gives a way to A/B the renderer when diagnosing a rendering bug
+     *  (`docs/specs/layout.md` → Renderer). */
+    webglRenderer: true,
   },
   layout: {
     /** When false, Lath pane geometry changes (split / restore / kill / drag) apply

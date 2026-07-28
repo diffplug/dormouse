@@ -78,24 +78,23 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): Eas
     return s;
   };
 
-  const eased = ((t: number): number => {
+  const eased = (t: number): number => {
     if (t <= 0) return 0;
     if (t >= 1) return 1;
     return sampleY(solveX(t));
-  }) as Easing;
+  };
 
   // dy/dt = (dy/ds) / (dx/ds), both evaluated at the parametric s the solver
   // already finds for this t. Endpoints are clamped inward rather than evaluated
-  // at exactly 0/1: the curve is only defined on [0,1], and a control point on
-  // the axis (x1 === 0) makes dx/ds vanish there, which would divide by zero.
-  eased.slope = (t: number): number => {
-    const clamped = t <= 0 ? 0 : t >= 1 ? 1 : t;
-    const s = solveX(clamped);
+  // outside [0,1], where the curve is undefined; the `dx` guard covers a control
+  // point sitting on the axis (x1 === 0), which makes dx/ds vanish at t = 0.
+  const slope = (t: number): number => {
+    const s = solveX(t <= 0 ? 0 : t >= 1 ? 1 : t);
     const dx = sampleDX(s);
     return Math.abs(dx) < 1e-6 ? 0 : sampleDY(s) / dx;
   };
 
-  return eased;
+  return Object.assign(eased, { slope });
 }
 
 /** The house easing (`cubic-bezier(0.22, 1, 0.36, 1)`), solved in JS to match the

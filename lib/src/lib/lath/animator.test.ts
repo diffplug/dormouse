@@ -54,6 +54,42 @@ describe('cubicBezier', () => {
   });
 });
 
+describe('cubicBezier slope', () => {
+  it('is 1 everywhere on a linear curve', () => {
+    const linear = cubicBezier(1 / 3, 1 / 3, 2 / 3, 2 / 3);
+    for (const t of [0, 0.25, 0.5, 0.8, 1]) {
+      expect(linear.slope(t)).toBeCloseTo(1, 5);
+    }
+  });
+
+  it('opens at y1/x1 on the house curve and decays to rest', () => {
+    // dy/dx at t=0 is 3*y1 / 3*x1 — the ease-out's peak, 4.545x its average.
+    expect(LATH_EASING.slope(0)).toBeCloseTo(1 / 0.22, 5);
+    expect(LATH_EASING.slope(1)).toBeCloseTo(0, 5);
+  });
+
+  it('decreases monotonically across the unit interval', () => {
+    let prev = Infinity;
+    for (let t = 0; t <= 1.0001; t += 0.05) {
+      const v = LATH_EASING.slope(t);
+      expect(v).toBeLessThanOrEqual(prev + 1e-9);
+      prev = v;
+    }
+  });
+
+  it('clamps to the endpoint slopes outside [0,1]', () => {
+    expect(LATH_EASING.slope(-5)).toBe(LATH_EASING.slope(0));
+    expect(LATH_EASING.slope(5)).toBe(LATH_EASING.slope(1));
+  });
+
+  it('returns 0 rather than dividing by zero when a control point sits on the axis', () => {
+    // x1 === 0 makes dx/ds vanish at t=0; nothing in-repo uses such a curve, but
+    // the guard exists so a future easing cannot produce Infinity/NaN.
+    expect(cubicBezier(0, 1, 0.36, 1).slope(0)).toBe(0);
+    expect(Number.isFinite(cubicBezier(0, 1, 0.36, 1).slope(0.5))).toBe(true);
+  });
+});
+
 describe('animator retarget + framesAt', () => {
   it('appears instantly at the target when there is no enter hint', () => {
     const a = make();

@@ -1,101 +1,7 @@
 import { type Ref } from 'react';
 import { cfg } from '../../cfg';
+import { RING_PIECES } from '../../lib/ring-geometry';
 import { FOCUS_MOTION_MS } from '../design';
-
-/** The ring outline: one closed rounded rect whose stroke centerline sits
- *  `inset` inside the container on every side. */
-export function roundedRectPath(
-  w: number,
-  h: number,
-  tl: number,
-  tr: number,
-  br: number,
-  bl: number,
-  inset: number,
-): string {
-  const { rtl, rtr, rbr, rbl, i } = ringCorners(tl, tr, br, bl, inset);
-  return (
-    `M ${w / 2},${i} ` +
-    `L ${w - i - rtr},${i} ` +
-    `Q ${w - i},${i} ${w - i},${i + rtr} ` +
-    `L ${w - i},${h - i - rbr} ` +
-    `Q ${w - i},${h - i} ${w - i - rbr},${h - i} ` +
-    `L ${i + rbl},${h - i} ` +
-    `Q ${i},${h - i} ${i},${h - i - rbl} ` +
-    `L ${i},${i + rtl} ` +
-    `Q ${i},${i} ${i + rtl},${i} ` +
-    'Z'
-  );
-}
-
-function ringCorners(tl: number, tr: number, br: number, bl: number, inset: number) {
-  return {
-    i: inset,
-    rtl: Math.max(0, tl - inset),
-    rtr: Math.max(0, tr - inset),
-    rbr: Math.max(0, br - inset),
-    rbl: Math.max(0, bl - inset),
-  };
-}
-
-/** The eight motion-smear pieces, in the order `SelectionRing` renders them and
- *  `WorkspaceSelectionOverlay` indexes the group's children. Straight edges take
- *  a plain `stroke-width`; corners taper between their two neighbours' widths
- *  via a `scale()` (see `smearCornerPath`). */
-export const SMEAR_PIECES = ['top', 'right', 'bottom', 'left', 'tr', 'br', 'bl', 'tl'] as const;
-export type SmearPiece = (typeof SMEAR_PIECES)[number];
-export type RingCorner = 'tr' | 'br' | 'bl' | 'tl';
-export type RingEdge = 'top' | 'right' | 'bottom' | 'left';
-
-/** One edge's straight centerline, spanning the gap between its two corner arcs. */
-export function smearEdgePath(
-  edge: RingEdge,
-  w: number, h: number,
-  tl: number, tr: number, br: number, bl: number,
-  inset: number,
-): string {
-  const { rtl, rtr, rbr, rbl, i } = ringCorners(tl, tr, br, bl, inset);
-  switch (edge) {
-    case 'top': return `M ${i + rtl},${i} L ${w - i - rtr},${i}`;
-    case 'right': return `M ${w - i},${i + rtr} L ${w - i},${h - i - rbr}`;
-    case 'bottom': return `M ${w - i - rbr},${h - i} L ${i + rbl},${h - i}`;
-    case 'left': return `M ${i},${h - i - rbl} L ${i},${i + rtl}`;
-  }
-}
-
-/**
- * One corner's quarter-arc centerline, pre-divided by `(a, b)` so that a sibling
- * `transform: scale(a, b)` restores the on-screen arc exactly.
- *
- * The scale is what makes the corner taper. Under `scale(a, b)` a unit stroke
- * renders `b` thick where the tangent is horizontal and `a` thick where it is
- * vertical, interpolating smoothly in between — so passing the horizontal
- * neighbour's width as `b` and the vertical neighbour's as `a` blends the corner
- * between its two edges with no seam at either join. That is the whole reason
- * corners are separate elements: a straight edge can carry its own width in a
- * plain `stroke-width`, but a corner has to reach two different widths at once.
- */
-export function smearCornerPath(
-  corner: RingCorner,
-  w: number, h: number,
-  tl: number, tr: number, br: number, bl: number,
-  inset: number,
-  a: number, b: number,
-): string {
-  const { rtl, rtr, rbr, rbl, i } = ringCorners(tl, tr, br, bl, inset);
-  const X = (v: number) => v / a;
-  const Y = (v: number) => v / b;
-  switch (corner) {
-    case 'tr':
-      return `M ${X(w - i - rtr)},${Y(i)} Q ${X(w - i)},${Y(i)} ${X(w - i)},${Y(i + rtr)}`;
-    case 'br':
-      return `M ${X(w - i)},${Y(h - i - rbr)} Q ${X(w - i)},${Y(h - i)} ${X(w - i - rbr)},${Y(h - i)}`;
-    case 'bl':
-      return `M ${X(i + rbl)},${Y(h - i)} Q ${X(i)},${Y(h - i)} ${X(i)},${Y(h - i - rbl)}`;
-    case 'tl':
-      return `M ${X(i)},${Y(i + rtl)} Q ${X(i)},${Y(i)} ${X(i + rtl)},${Y(i)}`;
-  }
-}
 
 // SelectionRing is a STABLE structural shell — it renders the ring's DOM once per
 // variant/color/focus change and hands its nodes back through refs; the overlay
@@ -151,9 +57,12 @@ export function SelectionRing({
         {/* Smear first so it sits behind the ring. Hidden outright when settled,
             which is what keeps a resting ring byte-identical for Chromatic. */}
         <g ref={smearRef} data-ring="smear" style={{ display: 'none' }}>
-          {SMEAR_PIECES.map((piece) => (
+          {RING_PIECES.map((piece) => (
             <path
               key={piece}
+              // Looked up by name, never by index — render order here is
+              // presentational and must not be load-bearing.
+              data-piece={piece}
               fill="none"
               stroke={color}
               // Corners are stroked at unit width and scaled; straight edges

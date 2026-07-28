@@ -151,12 +151,12 @@ afterEach(() => {
   globalThis.cancelAnimationFrame = realCaf;
 });
 
-/** Two panes, `a` at rect A and `b` at rect B, both connected to the document. */
-function twoPanes(): Map<string, HTMLElement> {
+/** Two panes, `a` and `b`, both connected to the document. */
+function twoPanes(a: Rectish = A, b: Rectish = B): Map<string, HTMLElement> {
   const elA = document.createElement('div');
   const elB = document.createElement('div');
-  stubRect(elA, A);
-  stubRect(elB, B);
+  stubRect(elA, a);
+  stubRect(elB, b);
   document.body.append(elA, elB);
   return new Map([['a', elA], ['b', elB]]);
 }
@@ -286,15 +286,15 @@ describe('SelectionRing settled render', () => {
 });
 
 describe('SelectionRing motion smear', () => {
-  /** The eight smear pieces, in render order: top, right, bottom, left, then the
-   *  four corners. See `SMEAR_PIECES`. */
+  /** The eight smear pieces, looked up by `data-piece` — deliberately not by
+   *  index, so render order stays presentational. */
   function smearPieces() {
     const group = container.querySelector('[data-ring="smear"]') as SVGGElement;
-    const at = (i: number) => group.children[i] as SVGPathElement;
+    const at = (name: string) => group.querySelector(`[data-piece="${name}"]`) as SVGPathElement;
     return {
       group,
-      top: at(0), right: at(1), bottom: at(2), left: at(3),
-      tr: at(4), br: at(5), bl: at(6), tl: at(7),
+      top: at('top'), right: at('right'), bottom: at('bottom'), left: at('left'),
+      tr: at('tr'), br: at('br'), bl: at('bl'), tl: at('tl'),
     };
   }
   const widthOf = (el: SVGPathElement) => Number(el.getAttribute('stroke-width'));
@@ -308,14 +308,7 @@ describe('SelectionRing motion smear', () => {
   const FLUSH_A: Rectish = { top: 0, left: 0, width: 100, height: 200 };
   const FLUSH_B: Rectish = { top: 0, left: 300, width: 100, height: 60 };
 
-  function flushPanes(): Map<string, HTMLElement> {
-    const elA = document.createElement('div');
-    const elB = document.createElement('div');
-    stubRect(elA, FLUSH_A);
-    stubRect(elB, FLUSH_B);
-    document.body.append(elA, elB);
-    return new Map([['a', elA], ['b', elB]]);
-  }
+  const flushPanes = () => twoPanes(FLUSH_A, FLUSH_B);
 
   it('smears each edge by its own perpendicular motion, not the ring centre', async () => {
     const store = makeStore();
