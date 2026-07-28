@@ -186,17 +186,21 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     }
     group.style.display = '';
 
-    const { smearGain, smearMaxPx } = cfg.focusRing;
+    const { smearGain, smearMaxPx, smearPeakAlpha } = cfg.focusRing;
     const maxScale = smearMaxPx / strokeWidth;
-    // Width from this edge's own perpendicular speed; alpha conserves ink the way
-    // a real smear does (spreading one stroke-width across N drops peak alpha to
-    // 1/N) and fades in from zero, so an edge that is not moving contributes
-    // nothing rather than laying a solid band under the ring.
+    // Extent and intensity are INDEPENDENT knobs. Both ramp from zero with this
+    // edge's own speed — so an edge that is not moving contributes nothing rather
+    // than laying a band under the crisp ring — but alpha ramps toward an explicit
+    // `smearPeakAlpha` rather than toward `1/scale`. Strict ink conservation ties
+    // peak alpha to the cap (a wider smear is proportionally fainter, total ink
+    // fixed), which means widening the smear cannot make it more prominent: it
+    // just spreads the same ink thinner. Trading that for an explicit peak is what
+    // lets `smearMaxPx` control reach and `smearPeakAlpha` control strength.
     const band = (speed: number) => {
       const width = Math.min(smearMaxPx, strokeWidth + speed * smearGain);
       const scale = width / strokeWidth;
       const fade = maxScale > 1 ? Math.min(1, (scale - 1) / (maxScale - 1)) : 0;
-      return { width, opacity: fade / scale };
+      return { width, opacity: fade * smearPeakAlpha };
     };
     const bands = {
       top: band(speeds.top),

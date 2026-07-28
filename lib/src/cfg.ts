@@ -51,14 +51,19 @@ export const cfg = {
     // never smears while the bottom edge does. A settled or reduced-motion ring has
     // null speeds, so it never smears (see WorkspaceSelectionOverlay).
     /** Per-edge band width = clamp(strokeWidth + speed * smearGain, .., smearMaxPx).
-     *  Gain 3 puts a typical adjacent-pane travel (~1.5px/ms) near the cap; the eased
-     *  peak at travel start clamps, then decays continuously back to the base width. */
+     *  Gain 3 keeps a fast adjacent-pane travel near the cap at its eased peak, then
+     *  decays continuously back to the base width as the tween settles. */
     smearGain: 3,
-    /** Hard cap on a smear band's width (px). Unlike the Gaussian blur this replaced,
-     *  the falloff is chosen rather than dictated: alpha is divided by the widening
-     *  factor to conserve ink, so the cap is a legibility knob, not a vanishing point.
-     *  6px on the 2px ants stroke is a 3x spread at 1/3 alpha. */
-    smearMaxPx: 6,
+    /** How far a smear band reaches at full speed (px) — the effect's EXTENT. 12px on
+     *  the 2px ants stroke is a 6x spread. Independent of intensity: see
+     *  smearPeakAlpha, and the note in WorkspaceSelectionOverlay on why this is not
+     *  tied to alpha by ink conservation. */
+    smearMaxPx: 12,
+    /** Alpha a band reaches at full speed — the effect's INTENSITY. Kept well under 1
+     *  so the smear reads as motion behind the ring rather than as a second, fatter
+     *  ring; raise it (not smearMaxPx) to make the blur punchier without extending
+     *  its reach. */
+    smearPeakAlpha: 1 / 3,
     /** EMA weight of the newest speed sample (0..1). The raw finite-difference speeds
      *  jitter with rAF frame-timing noise, which makes the smear pulse; blending
      *  toward the previous smoothed value steadies it. 1 = no smoothing (rawest),
