@@ -78,6 +78,50 @@ function ringPoints(rect: RingRect, shape: RingShape) {
 
 const fmt = ([x, y]: Point, sx = 1, sy = 1) => `${x / sx},${y / sy}`;
 
+const dist = ([ax, ay]: Point, [bx, by]: Point) => Math.hypot(bx - ax, by - ay);
+
+/**
+ * Arc length of one corner, as a multiple of its radius.
+ *
+ * A corner is the quadratic Bézier `P0=(-r,0) P1=(0,0) P2=(0,r)` about the box
+ * corner, so `x(t) = r(2t - t²)`, `y(t) = r t²` and `|B'(t)| = 2r√(2t² - 2t + 1)`.
+ * Substituting `u = t - ½` gives the closed form
+ *
+ *   ∫₀¹ |B'| dt = 2√2 · [ (u/2)√(u²+¼) + ⅛ln(u + √(u²+¼)) ]₀^½ · 2r
+ *
+ * which evaluates to the constant below. Note this is a *quadratic* quarter-turn,
+ * NOT a quarter circle (that would be π/2 ≈ 1.5708) — the two differ by 3%, which
+ * is exactly the kind of silent dash-spacing drift a hand-waved constant causes.
+ * Verified against Simpson's rule and a 3M-segment polyline of the real curve to
+ * 1e-12; `ring-geometry.test.ts` re-checks it against a flattened path.
+ */
+const QUARTER_TURN = 1.6232252401402307;
+
+/**
+ * Exact length of the ring outline, for sizing the marching-ants dash.
+ *
+ * Closed form on purpose: the alternative, `SVGGeometryElement.getTotalLength()`,
+ * forces a synchronous style+layout flush on every frame of a travel, and its cost
+ * scales with the whole document rather than this one path. It is also only an
+ * approximation — browsers flatten curves to compute it — whereas this is the true
+ * length. Derived from the same `ringPoints` the path itself is built from, so it
+ * cannot drift from what `roundedRectPath` emits.
+ */
+export function ringPerimeter(rect: RingRect, shape: RingShape): number {
+  const { edges, corners } = ringPoints(rect, shape);
+  let total = 0;
+  for (const edge of RING_EDGES) {
+    const [from, to] = edges[edge];
+    total += dist(from, to);
+  }
+  for (const corner of RING_CORNERS) {
+    // |P0 - P1| is the corner radius by construction.
+    const [from, ctrl] = corners[corner];
+    total += QUARTER_TURN * dist(from, ctrl);
+  }
+  return total;
+}
+
 /** The ring outline: one closed rounded rect whose stroke centerline sits
  *  `shape.inset` inside the container on every side. */
 export function roundedRectPath(rect: RingRect, shape: RingShape): string {

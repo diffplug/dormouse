@@ -18,6 +18,7 @@ import {
 } from './wall-context';
 import type { WallMode } from './wall-types';
 import { cfg } from '../../cfg';
+import { ringPerimeter } from '../../lib/ring-geometry';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -134,8 +135,6 @@ beforeEach(() => {
   globalThis.ResizeObserver ??= class {
     observe() {} unobserve() {} disconnect() {}
   } as unknown as typeof ResizeObserver;
-  // The ants variant sizes its dash via SVG getTotalLength (unimplemented in jsdom).
-  (SVGElement.prototype as unknown as { getTotalLength?: () => number }).getTotalLength ??= () => 100;
   noReducedMotion();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -393,14 +392,27 @@ describe('SelectionRing motion smear', () => {
     await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
 
     const path = container.querySelector('[data-ring="outline"]')!;
-    expect(path.getAttribute('stroke-dasharray')).toBe('6 4');
-    expect(path.style.getPropertyValue('--march-offset')).toBe('-10px');
+    // Real geometry, not a stubbed perimeter: pane A inflated by 4 is 108x208 with
+    // 12px radii on a 0.5 inset, so `ringPerimeter` is the length the dash divides.
+    const dashOf = (el: Element) => el.getAttribute('stroke-dasharray')!.split(' ').map(Number);
+    const settled = ringPerimeter(
+      { top: 0, left: 0, width: FLUSH_A.width + INFLATE * 2, height: FLUSH_A.height + INFLATE * 2 },
+      { tl: 12, tr: 12, br: 12, bl: 12, inset: INFLATE - 3.5 },
+    );
+    const period = settled / Math.round(settled / cfg.marchingAnts.segLen);
+    const [dash, gap] = dashOf(path);
+    expect(dash + gap).toBeCloseTo(period, 9);
+    expect(dash / (dash + gap)).toBeCloseTo(cfg.marchingAnts.dashFraction, 9);
+    expect(path.style.getPropertyValue('--march-offset')).toBe(`-${period}px`);
 
     await act(async () => root.render(<Harness selectedId="b" mode="command" store={store} panes={panes} />));
     await frame(16);
 
-    expect(path.getAttribute('stroke-dasharray')).toBe('6 4');
-    expect(path.style.getPropertyValue('--march-offset')).toBe('-10px');
+    // Mid-travel the ring is a different size, so the dash resizes with it — but
+    // the period must still be exactly one dash+gap or the keyframe jumps.
+    const [d2, g2] = dashOf(path);
+    expect(path.style.getPropertyValue('--march-offset')).toBe(`-${d2 + g2}px`);
+    expect(d2 / (d2 + g2)).toBeCloseTo(cfg.marchingAnts.dashFraction, 9);
     expect(path.getAttribute('transform')).toBeNull();
     expect(path.getAttribute('stroke-opacity')).toBeNull();
   });

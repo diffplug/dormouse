@@ -29,6 +29,7 @@ import {
   edgePath,
   isRingCorner,
   RING_PIECES,
+  ringPerimeter,
   roundedRectPath,
   type RingEdge,
 } from '../../lib/ring-geometry';
@@ -244,7 +245,10 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
     if (isAnts) {
       // Dash sized to the perimeter so the segments stay even as the ring resizes.
-      const len = path.getTotalLength();
+      // Computed in closed form rather than via `path.getTotalLength()`, which
+      // forces a synchronous style+layout flush on every frame of a travel at a
+      // cost that scales with the whole document, not this one path.
+      const len = ringPerimeter(rect, effShape);
       const count = Math.max(1, Math.round(len / cfg.marchingAnts.segLen));
       const adjusted = len / count;
       const dash = adjusted * cfg.marchingAnts.dashFraction;
@@ -259,9 +263,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       path.style.removeProperty('--march-offset');
     }
 
-    // Deliberately last: `getTotalLength()` above forces a synchronous style+layout
-    // flush, so anything dirtied before it gets resolved inside that blocking pass.
-    // Written after, these eight paths fold into the normal end-of-frame update.
     const smear = smearRef.current;
     if (smear) writeSmear(smear, rect, effShape, strokeWidth, speeds);
   }, []);

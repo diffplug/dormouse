@@ -61,8 +61,6 @@ beforeEach(() => {
     removeListener() {},
     dispatchEvent() { return false; },
   })) as unknown as typeof matchMedia;
-  // The selection ring's ants variant calls SVG getTotalLength (unimplemented in jsdom).
-  (SVGElement.prototype as unknown as { getTotalLength?: () => number }).getTotalLength ??= () => 100;
   Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
     configurable: true,
     value: vi.fn(() => null),

@@ -5,6 +5,7 @@ import {
   cornerPath,
   edgePath,
   isRingCorner,
+  ringPerimeter,
   roundedRectPath,
   type RingCorner,
 } from './ring-geometry';
@@ -69,6 +70,61 @@ describe('ring-geometry', () => {
     expect(to).toEqual(ctrl);
     // ...and the outline still closes over the same corner.
     expect(points(roundedRectPath(RECT, DOOR))).toContainEqual(ctrl);
+  });
+
+  describe('ringPerimeter', () => {
+    /** Walk the emitted `d` and measure it by brute force: straight runs exactly,
+     *  quadratic corners by dense flattening. Independent of QUARTER_TURN, so this
+     *  catches a wrong constant rather than restating it. */
+    function measure(d: string, steps = 20_000): number {
+      const tokens = d.trim().split(/(?=[MLQZ])/).map((t) => t.trim()).filter(Boolean);
+      const nums = (t: string) => [...t.matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])] as const);
+      let cur: readonly [number, number] = [0, 0];
+      let start: readonly [number, number] = [0, 0];
+      let total = 0;
+      const hyp = (a: readonly [number, number], b: readonly [number, number]) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+      for (const token of tokens) {
+        const op = token[0];
+        const pts = nums(token);
+        if (op === 'M') { cur = pts[0]; start = pts[0]; continue; }
+        if (op === 'L') { total += hyp(cur, pts[0]); cur = pts[0]; continue; }
+        if (op === 'Z') { total += hyp(cur, start); cur = start; continue; }
+        // Q: flatten the quadratic finely.
+        const [ctrl, end] = pts;
+        let prev = cur;
+        for (let k = 1; k <= steps; k++) {
+          const t = k / steps;
+          const mt = 1 - t;
+          const p = [
+            mt * mt * cur[0] + 2 * mt * t * ctrl[0] + t * t * end[0],
+            mt * mt * cur[1] + 2 * mt * t * ctrl[1] + t * t * end[1],
+          ] as const;
+          total += hyp(prev, p);
+          prev = p;
+        }
+        cur = end;
+      }
+      return total;
+    }
+
+    it('matches a brute-force measurement of the path it emits', () => {
+      for (const shape of [SHAPE, DOOR, { ...SHAPE, inset: 0 }, { ...SHAPE, tl: 30, br: 2 }]) {
+        expect(ringPerimeter(RECT, shape)).toBeCloseTo(measure(roundedRectPath(RECT, shape)), 4);
+      }
+    });
+
+    it('is not the quarter-CIRCLE length — the corners are quadratics', () => {
+      // A 3% trap: swapping in PI/2 would silently shift every dash.
+      const square: RingShape = { tl: 20, tr: 20, br: 20, bl: 20, inset: 0 };
+      const circleApprox = 2 * (RECT.width + RECT.height) + (Math.PI / 2 - 2) * 80;
+      expect(ringPerimeter(RECT, square)).not.toBeCloseTo(circleApprox, 1);
+      expect(ringPerimeter(RECT, square)).toBeCloseTo(measure(roundedRectPath(RECT, square)), 4);
+    });
+
+    it('reduces to the plain rectangle when every corner is square', () => {
+      const sharp: RingShape = { tl: 0, tr: 0, br: 0, bl: 0, inset: 3 };
+      expect(ringPerimeter(RECT, sharp)).toBeCloseTo(2 * ((RECT.width - 6) + (RECT.height - 6)), 9);
+    });
   });
 
   it('insets the outline symmetrically on every side', () => {
