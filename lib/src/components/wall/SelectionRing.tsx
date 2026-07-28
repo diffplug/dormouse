@@ -1,5 +1,6 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react';
+import { type Ref } from 'react';
 import { cfg } from '../../cfg';
+import { FOCUS_MOTION_MS } from '../design';
 
 export function roundedRectPath(
   w: number,
@@ -37,104 +38,73 @@ export interface RingVelocity {
   y: number;
 }
 
-// The corner radii and stroke `inset` are computed by the overlay
-// (WorkspaceSelectionOverlay's `ringShape`) and lerped by the ring tween, so a
-// pane↔door selection morphs its shape here instead of popping.
+// SelectionRing is a STABLE structural shell — it renders the ring's DOM once per
+// variant/color/focus change and hands its nodes back through refs; the overlay
+// then drives geometry, the path `d`, and the blur filter imperatively from its rAF
+// loop (never per-frame React). This is the same split LathHost uses for the Lath
+// animator: React owns structure, the animation frame owns the DOM mutations. It
+// matters because WebKit rasterizes the SVG blur on the CPU every frame, so a
+// per-frame React reconcile of this subtree competes with that raster for the frame
+// budget and makes Safari choppy.
 //
-//  - `variant='ants'`: 2px dashed stroke, marching animation, using the shape's
-//    lerped `inset` (pane 0.5 ⇄ door 1) so the centerline stays on the gutter
-//    midline. This is the command-mode ring.
-//  - `variant='solid'`: 1px stroke, no dash/animation, replacing the retired 1px
-//    CSS border in passthrough mode. It ignores the shape's `inset` and centers
-//    its stroke a fixed strokeWidth/2 (0.5) inside the div edge — pixel-identical
-//    to the old border for both panes and doors (whose solid insets coincide),
-//    while that `inset` channel keeps carrying the ants-only morph.
+//  - `variant='ants'`: 2px dashed stroke, marching animation (the dash geometry and
+//    `--march-offset` are written imperatively). Command-mode ring.
+//  - `variant='solid'`: 1px stroke, no dash/animation. Passthrough ring, replacing
+//    the retired 1px CSS border (pixel-identical stroke placement).
 //
-// `velocity` drives the directional motion blur; it is null on a settled ring, so
-// a resting or reduced-motion render is always clean (no filter).
+// Geometry (`top/left/width/height`, `d`, the blur `<filter>` region/`stdDeviation`,
+// and the marching-ants dash) is NEVER in this JSX, so a React re-render of the
+// shell leaves the imperative writes untouched.
 export function SelectionRing({
-  variant, width, height, tl, tr, br, bl, inset, color, paused, velocity,
+  variant, color, windowFocused, filterId, containerRef, pathRef, filterRef, blurRef,
 }: {
   variant: 'ants' | 'solid';
-  width: number;
-  height: number;
-  tl: number;
-  tr: number;
-  br: number;
-  bl: number;
-  inset: number;
   color: string;
-  paused?: boolean;
-  velocity?: RingVelocity | null;
+  windowFocused: boolean;
+  filterId: string;
+  containerRef: Ref<HTMLDivElement>;
+  pathRef: Ref<SVGPathElement>;
+  filterRef: Ref<SVGFilterElement>;
+  blurRef: Ref<SVGFEGaussianBlurElement>;
 }) {
-  const svgRef = useRef<SVGPathElement>(null);
-  const [dashStyle, setDashStyle] = useState<{ dasharray: string; offset: number } | null>(null);
-  const rawId = useId();
   const ma = cfg.marchingAnts;
-  const fr = cfg.focusRing;
-
   const isAnts = variant === 'ants';
-  const strokeWidth = isAnts ? ma.strokeWidth : 1;
-  const effInset = isAnts ? inset : strokeWidth / 2;
-
-  const d = roundedRectPath(width, height, tl, tr, br, bl, effInset);
-
-  useLayoutEffect(() => {
-    // Solid has no dash sizing; leave `dashStyle` null (no getTotalLength either).
-    if (!isAnts) {
-      setDashStyle(null);
-      return;
-    }
-    const path = svgRef.current;
-    if (!path) return;
-    const len = path.getTotalLength();
-    const count = Math.max(1, Math.round(len / ma.segLen));
-    const adjusted = len / count;
-    const dash = adjusted * ma.dashFraction;
-    const gap = adjusted * (1 - ma.dashFraction);
-    setDashStyle({ dasharray: `${dash} ${gap}`, offset: adjusted });
-  }, [isAnts, width, height, tl, tr, br, bl, effInset, ma.dashFraction, ma.segLen]);
-
-  // Directional motion blur: per-axis Gaussian sigma from the ring's center
-  // velocity, clamped so a fast full-viewport travel smears without going soupy.
-  // Attached only while actually moving (sigma > a quarter px on an axis) — a
-  // settled ring carries no filter, keeping snapshot renders deterministic.
-  let filterId: string | null = null;
-  let sx = 0;
-  let sy = 0;
-  if (velocity) {
-    sx = Math.min(fr.blurMaxPx, Math.abs(velocity.x) * fr.blurGain);
-    sy = Math.min(fr.blurMaxPx, Math.abs(velocity.y) * fr.blurGain);
-    if (sx > 0.25 || sy > 0.25) filterId = `selection-ring-blur-${rawId.replace(/:/g, '')}`;
-  }
 
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible' }}
+    <div
+      ref={containerRef}
+      style={{
+        position: 'fixed',
+        pointerEvents: 'none',
+        zIndex: 50,
+        // Geometry is written imperatively (see the overlay's rAF loop); only the
+        // unfocus-saturate fade rides a CSS transition.
+        transition: `filter ${FOCUS_MOTION_MS}ms`,
+        filter: windowFocused ? undefined : 'saturate(0.3)',
+      }}
     >
-      {filterId && (
-        // Region padded to ±50% so the blur isn't clipped at the path bounds.
-        // sRGB interpolation (not the filter default linearRGB) keeps the blurred
-        // smear the ring's true color/brightness instead of muddying it.
-        <filter id={filterId} x="-50%" y="-50%" width="200%" height="200%" colorInterpolationFilters="sRGB">
-          <feGaussianBlur stdDeviation={`${sx} ${sy}`} />
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible' }}
+      >
+        {/* Always present (region + stdDeviation set imperatively); the path only
+            references it via a `filter` attr while actually moving. sRGB
+            interpolation (not the filter default linearRGB) keeps the blurred smear
+            the ring's true color/brightness instead of muddying it. */}
+        <filter ref={filterRef} id={filterId} filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB">
+          <feGaussianBlur ref={blurRef} />
         </filter>
-      )}
-      <path
-        ref={svgRef}
-        d={d}
-        fill="none"
-        stroke={color}
-        strokeWidth={strokeWidth}
-        strokeDasharray={dashStyle?.dasharray}
-        filter={filterId ? `url(#${filterId})` : undefined}
-        style={dashStyle ? {
-          animation: `marching-ants ${ma.cycleDuration}s linear infinite`,
-          animationPlayState: (ma.paused || paused) ? 'paused' : 'running',
-          ['--march-offset' as string]: `-${dashStyle.offset}px`,
-        } : undefined}
-      />
-    </svg>
+        <path
+          ref={pathRef}
+          fill="none"
+          stroke={color}
+          strokeWidth={isAnts ? ma.strokeWidth : 1}
+          style={isAnts ? {
+            animation: `marching-ants ${ma.cycleDuration}s linear infinite`,
+            animationPlayState: (ma.paused || !windowFocused) ? 'paused' : 'running',
+          } : undefined}
+        />
+      </svg>
+    </div>
   );
 }

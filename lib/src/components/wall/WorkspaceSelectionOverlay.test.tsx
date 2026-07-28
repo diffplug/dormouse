@@ -255,13 +255,11 @@ describe('SelectionRing settled render', () => {
     await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
 
     expect(rafCbs.size).toBe(0); // settled: no tween running
-    const svg = container.querySelector('svg');
-    expect(svg).not.toBeNull();
-    const path = svg!.querySelector('path');
+    const path = container.querySelector('path');
     expect(path).not.toBeNull();
     expect(path!.getAttribute('stroke-width')).toBe('1');
     expect(path!.getAttribute('stroke-dasharray')).toBeNull();
+    // A settled ring never references the blur filter (deterministic snapshots).
     expect(path!.getAttribute('filter')).toBeNull();
-    expect(svg!.querySelector('filter')).toBeNull();
   });
 });
