@@ -11,6 +11,7 @@ import { AgentBrowserPanel, HIDDEN_PARK_DELAY_MS } from './AgentBrowserPanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { disposeAllAgentBrowserSurfaceControllers } from './agent-browser-surface-controller';
 import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, type PaneWriteActions, type WallActions } from './wall-context';
+import { stubWallActions as stubActions } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -31,24 +32,6 @@ class ResizeObserverMock {
   disconnect() {}
 }
 
-function stubActions(overrides: Partial<WallActions> = {}): WallActions {
-  return {
-    onKill: vi.fn(),
-    onMinimize: vi.fn(),
-    onAlertButton: vi.fn(() => 'noop'),
-    onToggleTodo: vi.fn(),
-    onSplitH: vi.fn(),
-    onSplitV: vi.fn(),
-    onZoom: vi.fn(),
-    onClickPanel: vi.fn(),
-    onFocusPane: vi.fn(),
-    onStartRename: vi.fn(),
-    onFinishRename: vi.fn(() => ({ accepted: true })),
-    onCancelRename: vi.fn(),
-    onSwapRenderMode: vi.fn(),
-    ...overrides,
-  };
-}
 
 function paneProps(id: string, params: TestPanelParams = DEFAULT_PARAMS): PaneProps {
   return { id, title: 'Browser', params };

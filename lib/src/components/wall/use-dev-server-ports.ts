@@ -37,6 +37,7 @@ import {
 import type { DooredItem } from './wall-types';
 import type { LathWallEngine } from './lath-wall-engine';
 import { isBrowserParams } from './browser-surface';
+import { servesLoopback } from './port-url';
 
 // Wait this long after interest changes before scanning, so a tab's open +
 // initial screencast settle first and quick navigation coalesces into one scan.
@@ -55,13 +56,6 @@ function isTerminalParams(params: unknown): boolean {
 
 function isTerminalDoor(door: DooredItem): boolean {
   return (door.component ?? 'terminal') === 'terminal';
-}
-
-// A process bound here answers `localhost:<port>`: loopback (127.0.0.1 / ::1)
-// or any-interface (0.0.0.0 / ::). A process bound to one specific non-loopback
-// interface is excluded — it isn't reachable as localhost.
-export function servesLoopback(address: string): boolean {
-  return address === '127.0.0.1' || address === '::1' || address === '0.0.0.0' || address === '::';
 }
 
 // requestIdleCallback isn't universal (absent in WKWebView / Tauri on macOS),

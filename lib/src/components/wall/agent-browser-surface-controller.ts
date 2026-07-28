@@ -884,6 +884,11 @@ export class AgentBrowserSurfaceController {
     // query (mirrors the old effect's cleanup running on every dep change).
     const gen = ++this.recoveryGen;
     const session = this.session;
+    // Session-less is deliberate inertness, not just a null-guard: the pane
+    // context menu's eager connect creates its surface WITHOUT a session
+    // precisely so no recovery/CLI spawn can race the daemon boot
+    // (docs/specs/dor-browser.md → Pane Context Menu Connect). Never derive the
+    // session from `key` here — that would silently reintroduce the race.
     if (!session) return;
     // A parked pane must never query the daemon: a `stream status` at the wrong
     // moment can spawn a competing daemon, and it's a pointless CLI spawn per

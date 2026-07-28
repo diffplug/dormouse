@@ -152,7 +152,9 @@ fds, closing the pipe — which is why none of this surfaced on macOS.)
 Resolution: `dor-lib-common`'s package `exports` point at its built `dist` (clean,
 Node-type-free `.d.ts` for `dor`'s `tsc`, which deliberately avoids `@types/node`);
 every esbuild/Vite consumer (`dist/dor.js`, the sidecar `.cjs`, vscode-ext) inlines
-it. `dor`'s `prebuild` builds `dor-lib-common` first so its `.d.ts` exists.
+it. The `dor` and `dormouse-lib` prebuilds build `dor-lib-common` first so its
+`.d.ts` files exist before either package typechecks imports through those
+exports.
 
 ## Host Plumbing
 
@@ -433,7 +435,8 @@ Source of truth: `dor/src/commands/open-target.ts` (classification + `:port`
 sugar + `surface.resolveOpen` call), `dor/src/commands/iframe.ts` /
 `dor/src/commands/agent-browser.ts` (the two entry points),
 `dor/src/protocol.ts` (`resolveOpen`), the `surface.resolveOpen` handler in
-`lib/src/components/wall/use-dor-control.ts`.
+`lib/src/components/wall/use-dor-control.ts`, and the port→URL grouping/selection
+in `lib/src/components/wall/port-url.ts` (`listenerUrlsByPort`).
 
 ## Agent Workflows
 

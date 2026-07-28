@@ -315,6 +315,15 @@ fn request_from_sidecar(
     request_from_sidecar_timeout(state, event, data, Duration::from_secs(1))
 }
 
+/// INVARIANT: every `#[tauri::command]` that reaches these two blocking helpers
+/// must be declared `#[tauri::command(async)]` (or be an `async fn`). Tauri runs
+/// a plain sync command on the **main thread**, where the `recv_timeout` below
+/// stops the webview from painting for the whole round trip — up to
+/// `AGENT_BROWSER_TIMEOUT` (30s) for a hung agent-browser, and a visible ~3s
+/// freeze on a cold `agent-browser open`, which is long enough to look like a
+/// pane that never appeared. `(async)` moves the same blocking body onto a
+/// runtime worker, so the UI keeps rendering while the sidecar works.
+
 fn request_from_sidecar_timeout(
     state: &SidecarState,
     event: &str,
@@ -417,7 +426,7 @@ fn dor_control_response(state: tauri::State<'_, SidecarState>, response: DorCont
     send_to_sidecar(&state, msg.to_string());
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn pty_get_cwd(
     state: tauri::State<'_, SidecarState>,
     id: String,
@@ -431,7 +440,7 @@ fn pty_get_cwd(
 // Mirrors `OPEN_PORT_TIMEOUT_MS` in `lib/src/lib/platform/types.ts` — keep in sync.
 const OPEN_PORT_TIMEOUT_MS: u64 = 3000;
 
-#[tauri::command]
+#[tauri::command(async)]
 fn pty_get_open_ports(
     state: tauri::State<'_, SidecarState>,
     id: String,
@@ -448,7 +457,7 @@ fn pty_get_open_ports(
         .unwrap_or_else(|| JsonValue::Array(Vec::new())))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn pty_get_scrollback(
     state: tauri::State<'_, SidecarState>,
     id: String,
@@ -481,7 +490,7 @@ async fn pty_graceful_kill_all(
 // Stands up the loopback iframe proxy in the sidecar and returns the
 // IframeProxyResult JSON the webview's IframePanel expects. The proxy server is
 // the shared lib/src/host/iframe-proxy.ts; this only bridges the request.
-#[tauri::command]
+#[tauri::command(async)]
 fn iframe_create_proxy_url(
     state: tauri::State<'_, SidecarState>,
     target: String,
@@ -514,7 +523,7 @@ fn agent_browser_forward(
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn agent_browser_command(
     state: tauri::State<'_, SidecarState>,
     session: String,
@@ -528,7 +537,7 @@ fn agent_browser_command(
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn agent_browser_edit(
     state: tauri::State<'_, SidecarState>,
     session: String,
@@ -542,7 +551,7 @@ fn agent_browser_edit(
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn agent_browser_stream_status(
     state: tauri::State<'_, SidecarState>,
     session: String,
@@ -555,7 +564,7 @@ fn agent_browser_stream_status(
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn agent_browser_open(
     state: tauri::State<'_, SidecarState>,
     url: String,
@@ -570,7 +579,7 @@ fn agent_browser_open(
 }
 
 // `rect` is accepted by the adapter but unused — no window positioning today.
-#[tauri::command]
+#[tauri::command(async)]
 fn agent_browser_pop_out(
     state: tauri::State<'_, SidecarState>,
     session: String,
@@ -584,7 +593,7 @@ fn agent_browser_pop_out(
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn agent_browser_pop_in(
     state: tauri::State<'_, SidecarState>,
     session: String,
@@ -604,7 +613,7 @@ fn agent_browser_pop_in(
 // decodes with createImageBitmap). A base64 `bytesBase64` field is kept as a
 // fallback for a stale sidecar bundle (dev-time version skew), but the path
 // branch is preferred.
-#[tauri::command]
+#[tauri::command(async)]
 fn agent_browser_screenshot(
     state: tauri::State<'_, SidecarState>,
     session: String,
@@ -923,7 +932,7 @@ struct ShellInfo {
     args: Vec<String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_available_shells(state: tauri::State<'_, SidecarState>) -> Result<Vec<ShellInfo>, String> {
     let response = request_from_sidecar_timeout(&state, "pty:getShells", serde_json::json!({}), Duration::from_secs(10))?;
     let shells: Vec<ShellInfo> = response

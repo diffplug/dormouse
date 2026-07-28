@@ -3,6 +3,7 @@ import { tv, type VariantProps } from 'tailwind-variants';
 import { XIcon } from '@phosphor-icons/react';
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode, RefObject } from 'react';
+import { stepFocus } from './focus-step';
 
 // App-wide type scale, color strategy, and chrome conventions: see
 // docs/specs/theme.md and AGENTS.md.
@@ -27,6 +28,11 @@ export const DOOR_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem ${
 // Letter-spacing for the small semibold TODO pill — wider tracking keeps the
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
+
+// Chrome for small anchored popovers (title candidates, TODO preview, pane
+// context menu, rename warning). Text size and padding vary per popover and
+// stay at the call site; the surface recipe is shared so they can't drift.
+export const POPUP_SURFACE_CLASS = 'z-[1000] rounded border border-border bg-surface-raised font-mono text-foreground shadow-md';
 
 export function PopupButtonRow({
   className,
@@ -380,16 +386,11 @@ function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElem
 
       if (event.key !== 'Tab') return;
 
-      const focusables = Array.from(modal.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR));
-      if (focusables.length === 0) return;
-
-      const currentIndex = focusables.findIndex((item) => item === document.activeElement);
-      const nextIndex = currentIndex === -1
-        ? 0
-        : (currentIndex + (event.shiftKey ? -1 : 1) + focusables.length) % focusables.length;
-
       event.preventDefault();
-      focusables[nextIndex]?.focus();
+      stepFocus(
+        Array.from(modal.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR)),
+        event.shiftKey ? -1 : 1,
+      );
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
