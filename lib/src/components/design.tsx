@@ -48,6 +48,23 @@ export const SELECTION_RING_INFLATE_PX = (PANE_GUTTER_PX + 1) / 2;
 export const PANE_SELECTION_RING_RADIUS_PX = TERMINAL_BORDER_RADIUS_PX + SELECTION_RING_INFLATE_PX;
 export const PANE_SELECTION_RING_BORDER_RADIUS = `${PANE_SELECTION_RING_RADIUS_PX}px`;
 
+// Focus-ring motion. The selection ring's travel between panes/doors, the pane
+// header's active/inactive palette crossfade, and the ring's unfocus-saturate
+// fade all run on this single duration so they resolve as one gesture. Half the
+// Lath layout motion (LATH_MOTION_MS = 440) — the ring is a light overlay chasing
+// geometry the wall has already committed, so it settles quicker. The ring travel
+// itself is a JS tween on a pointer-events-none overlay (WorkspaceSelectionOverlay
+// + rect-tween.ts), the same per-frame carve-out the Lath animator holds against
+// DESIGN.md's "don't animate layout properties" rule.
+export const FOCUS_MOTION_MS = 220;
+
+// The pane-header palette crossfade, as a complete Tailwind literal so the
+// scanner emits it (a template built from FOCUS_MOTION_MS would be invisible to
+// it). The duration + house curve are asserted against FOCUS_MOTION_MS in
+// design.test.ts so this literal can't silently drift from the ring's timing.
+export const HEADER_PALETTE_TRANSITION_CLASS =
+  'transition-colors duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none';
+
 // Letter-spacing for the small semibold TODO pill — wider tracking keeps the
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
@@ -448,7 +465,9 @@ export type ChromeButtonVariants = VariantProps<typeof chromeButton>;
  * background tokens so Unzoom reads as the active escape hatch in every theme. */
 export function paneZoomButtonClass(zoomed: boolean, activeHeader: boolean): string {
   return clsx(
-    'flex h-5 min-w-5 items-center justify-center rounded transition-colors',
+    // The zoom pill's tokens flip with the header palette, so it rides the same
+    // crossfade timing as the header background instead of the default transition.
+    `flex h-5 min-w-5 items-center justify-center rounded ${HEADER_PALETTE_TRANSITION_CLASS}`,
     zoomed
       ? activeHeader
         ? 'bg-header-active-fg text-header-active-bg'

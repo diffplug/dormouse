@@ -221,12 +221,22 @@ A fixed-positioned element rendered on top of the Lath host. Covers the active e
 - **Command:** animated SVG marching-ants border — rounded rectangle path with `stroke-dasharray` animation (10px segment, 60% dash / 40% gap, 0.4s cycle, 2px stroke)
 - Border radius follows DESIGN.md's Concentric-Corners Rule: the pane ring's rect is inflated by `SELECTION_RING_INFLATE_PX`, so its radius is the pane radius plus that offset (`PANE_SELECTION_RING_RADIUS_PX` in `lib/src/components/design.tsx`, with the marching-ants path inset so its stroke centerline sits on the same gutter midline, concentric with the pane corner); doors sit at zero offset and keep `0.5rem 0.5rem 0 0`
 - Color from CSS custom property `--mt-selection-terminal`
-- `z-index: 50`, `pointer-events: none`, `transition: 150ms`
+- `z-index: 50`, `pointer-events: none`
+
+### Ring travel
+
+The ring's rect (and its `{tl,tr,br,bl,inset}` shape) is driven **per-frame by a JS tween**, not a CSS transition — the tween writes true interpolated values each rAF frame, the same pointer-events-none carve-out the Lath animator holds (DESIGN.md's "don't animate layout properties" bans CSS transitions on layout props, not this). Motion is `FOCUS_MOTION_MS` (220ms — half `LATH_MOTION_MS`) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`. Source of truth: the pure tween core `lib/src/lib/rect-tween.ts`; the overlay's rAF loop in `WorkspaceSelectionOverlay.tsx`.
+
+- **Identity change → tween.** When the incoming measurement's identity (`${selectedType}:${selectedId}`) differs from the one on screen, the ring glides from its current interpolated position to the new target, clock restarted (arrow-key spam stays responsive).
+- **Same identity → snap 1:1.** A same-identity re-measure with no tween in flight (sash drag, window resize, a settled leaf's store commit) writes the new rect directly — the ring tracks the geometry exactly instead of easing behind it.
+- **In-flight retarget.** A same-identity re-measure *during* a tween retargets the destination without resetting the clock, so the ring converges on a moving target (select-a-neighbor-during-kill) and still lands on the original completion instant.
+- **Snap gate.** `!cfg.layout.animate` (Chromatic) or `prefersReducedMotion()` → the ring settles instantly, mirroring the animator's 0-duration path (`lath-wall-engine.ts`). Only the unfocus-saturate fade keeps a CSS transition (`filter ${FOCUS_MOTION_MS}ms`), unconditionally.
+- Pane↔door selection morphs the corner radii (12px all-round ⇄ `8,8,0,0`) and stroke inset through the same tween, so the shape lerps instead of popping.
 
 ### Position tracking
 - Each pane body registers its DOM element in a `paneElements` Map on mount and removes it on unmount (`usePaneChrome`); the overlay resolves the enclosing Lath leaf (`[data-lath-leaf]`) via `resolvePaneElement` so the ring covers the full leaf (header + body)
 - Door elements are registered by the `Baseboard` via `DoorElementsContext` from `components/wall/wall-context.tsx` (queries `[data-door-id]` attributes)
-- Updates on: selection change, resize (`ResizeObserver`), every Lath store commit (`revision` via `useSyncExternalStore`), and — while an animation runs — every animator frame (so the ring tracks kills, restores, and tweens frame-accurately, with its 150ms CSS transition dropped)
+- Re-measures on: selection change, resize (`ResizeObserver`), every Lath store commit (`revision` via `useSyncExternalStore`), and — while the wall streams animator frames — every frame (so the ring tracks kills, restores, and tweens frame-accurately). If the selected leaf is momentarily absent the overlay bails and holds the last rect.
 
 ## Spatial navigation
 

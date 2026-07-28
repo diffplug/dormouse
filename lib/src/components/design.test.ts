@@ -9,6 +9,8 @@ import {
   SELECTION_RING_INFLATE_PX,
   PANE_SELECTION_RING_RADIUS_PX,
   PANE_SELECTION_RING_BORDER_RADIUS,
+  FOCUS_MOTION_MS,
+  HEADER_PALETTE_TRANSITION_CLASS,
 } from './design';
 
 // The terminal radius is consumed by SVG path math (px), Tailwind classes,
@@ -46,5 +48,19 @@ describe('terminal radius constants', () => {
     expect(SELECTION_RING_INFLATE_PX - 0.5).toBe(PANE_GUTTER_PX / 2);
     expect(PANE_GUTTER_PX % 2).toBe(1);
     expect(Number.isInteger(SELECTION_RING_INFLATE_PX)).toBe(true);
+  });
+});
+
+// The header palette crossfade must resolve on the same timing as the focus
+// ring's travel. Tailwind can't build a class from a JS constant, so the class
+// is a hand-written literal — this ties it back to FOCUS_MOTION_MS and the house
+// curve so the two can't silently drift apart.
+describe('focus-ring motion timing', () => {
+  it('header crossfade duration + curve track FOCUS_MOTION_MS', () => {
+    expect(FOCUS_MOTION_MS).toBe(220);
+    expect(HEADER_PALETTE_TRANSITION_CLASS).toContain(`duration-[${FOCUS_MOTION_MS}ms]`);
+    expect(HEADER_PALETTE_TRANSITION_CLASS).toContain('ease-[cubic-bezier(0.22,1,0.36,1)]');
+    // Reduced motion nulls the crossfade, mirroring the ring's snap gate.
+    expect(HEADER_PALETTE_TRANSITION_CLASS).toContain('motion-reduce:transition-none');
   });
 });

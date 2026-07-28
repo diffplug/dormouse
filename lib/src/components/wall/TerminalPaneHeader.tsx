@@ -14,7 +14,7 @@ import {
 } from '@phosphor-icons/react';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { TodoAlertDialog } from '../TodoAlertDialog';
-import { paneZoomButtonClass, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
+import { HEADER_PALETTE_TRANSITION_CLASS, paneZoomButtonClass, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
 import { bellIconClass } from '../bell-icon-class';
 import { useTodoPillContent } from '../TodoPillBody';
 import type { PaneProps } from './pane-props';
@@ -55,7 +55,9 @@ import {
 } from './wall-context';
 
 const tabVariant = tv({
-  base: `flex h-full w-full cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing`,
+  // The active/inactive palette swap crossfades in step with the focus ring's
+  // travel (HEADER_PALETTE_TRANSITION_CLASS); children inherit via `text-inherit`.
+  base: `flex h-full w-full cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS}`,
   variants: {
     state: {
       active: 'bg-header-active-bg text-header-active-fg',

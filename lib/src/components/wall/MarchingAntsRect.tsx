@@ -1,11 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { cfg } from '../../cfg';
-import {
-  PANE_GUTTER_PX,
-  PANE_SELECTION_RING_RADIUS_PX,
-  SELECTION_RING_INFLATE_PX,
-  TERMINAL_BORDER_RADIUS_PX,
-} from '../design';
 
 export function roundedRectPath(
   w: number,
@@ -36,10 +30,19 @@ export function roundedRectPath(
   );
 }
 
-export function MarchingAntsRect({ width, height, isDoor, color, paused }: {
+// The corner radii and stroke `inset` are computed by the overlay
+// (WorkspaceSelectionOverlay's `ringShape`) and lerped by the ring tween, so a
+// pane↔door selection morphs its shape here instead of popping. `inset` shrinks
+// the path so the stroke CENTERLINE stays concentric with the wrapped corner (see
+// the ringShape comment for the gutter-centering derivation).
+export function MarchingAntsRect({ width, height, tl, tr, br, bl, inset, color, paused }: {
   width: number;
   height: number;
-  isDoor: boolean;
+  tl: number;
+  tr: number;
+  br: number;
+  bl: number;
+  inset: number;
   color: string;
   paused?: boolean;
 }) {
@@ -47,21 +50,7 @@ export function MarchingAntsRect({ width, height, isDoor, color, paused }: {
   const [dashStyle, setDashStyle] = useState<{ dasharray: string; offset: number } | null>(null);
   const ma = cfg.marchingAnts;
 
-  // Concentric-corners rule (design.tsx): the pane ring's rect is inflated by
-  // SELECTION_RING_INFLATE_PX, so its edge radius is the pane radius plus that
-  // offset; the door ring draws on the door rect itself and keeps the pane
-  // radius. roundedRectPath then shrinks by `inset` so the stroke CENTERLINE
-  // stays concentric with the wrapped corner.
-  //
-  // The pane inset places the stroke centerline at PANE_GUTTER_PX / 2 from the
-  // pane edge — the same gutter-centered line the 1px passthrough border sits
-  // on. The door ring has no gutter; it straddles the door edge instead.
-  const r = isDoor ? TERMINAL_BORDER_RADIUS_PX : PANE_SELECTION_RING_RADIUS_PX;
-  const br = isDoor ? 0 : r;
-  const bl = isDoor ? 0 : r;
-  const inset = isDoor ? ma.strokeWidth / 2 : SELECTION_RING_INFLATE_PX - PANE_GUTTER_PX / 2;
-
-  const d = roundedRectPath(width, height, r, r, br, bl, inset);
+  const d = roundedRectPath(width, height, tl, tr, br, bl, inset);
 
   useLayoutEffect(() => {
     const path = svgRef.current;
@@ -72,7 +61,7 @@ export function MarchingAntsRect({ width, height, isDoor, color, paused }: {
     const dash = adjusted * ma.dashFraction;
     const gap = adjusted * (1 - ma.dashFraction);
     setDashStyle({ dasharray: `${dash} ${gap}`, offset: adjusted });
-  }, [width, height, isDoor, ma.dashFraction, ma.segLen]);
+  }, [width, height, tl, tr, br, bl, inset, ma.dashFraction, ma.segLen]);
 
   return (
     <svg

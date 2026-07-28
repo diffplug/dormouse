@@ -15,7 +15,7 @@ import {
   XIcon,
 } from '@phosphor-icons/react';
 import { HeaderActionButton } from '../HeaderActionButton';
-import { paneZoomButtonClass, TERMINAL_TOP_RADIUS_CLASS } from '../design';
+import { HEADER_PALETTE_TRANSITION_CLASS, paneZoomButtonClass, TERMINAL_TOP_RADIUS_CLASS } from '../design';
 import {
   useAgentBrowserChromeSnapshot,
   useAgentBrowserScreenController,
@@ -97,7 +97,7 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
 
   return (
     <div
-      className={`flex h-full w-full cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${isActiveHeader ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg'}`}
+      className={`flex h-full w-full cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS} ${isActiveHeader ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg'}`}
       onMouseDown={() => actions.onClickPanel(id)}
     >
       {screen && screenSnapshot && chrome ? (
