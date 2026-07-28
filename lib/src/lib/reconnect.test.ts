@@ -65,6 +65,7 @@ function createPlatform(ptys: PtyInfo[], savedState: PersistedSession | null): P
     notifySessionFlushComplete: vi.fn(),
     alertRemove: vi.fn(),
     alertSetWatchedCommands: vi.fn(),
+    alertSetCommandWatched: vi.fn(),
     alertDismiss: vi.fn(),
     alertAttend: vi.fn(),
     alertResize: vi.fn(),
@@ -74,6 +75,8 @@ function createPlatform(ptys: PtyInfo[], savedState: PersistedSession | null): P
     alertClearTodo: vi.fn(),
     onAlertState: vi.fn(),
     offAlertState: vi.fn(),
+    onWatchedCommands: vi.fn(),
+    offWatchedCommands: vi.fn(),
     saveState: vi.fn(),
     getState: vi.fn(() => savedState),
   };

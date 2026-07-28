@@ -61,7 +61,7 @@ Rules:
 - A `commandStart` for a watched name starts a **fresh** monitor; `commandFinish`, `promptStart`, and `promptEnd` end the command and dispose it. Editing the rule set re-derives WATCHING across every live Session immediately.
 - A WATCHING ring outlives its monitor. Watching switches off the moment the watched command exits, which is usually the same moment the ring was raised, so the ring is held in the Session entry (`watchingRinging`) rather than in the monitor.
 - Removing a rule is the one thing that *does* silence a WATCHING ring: it is the user saying "stop alerting on this". A command merely ending never does.
-- The rule set is app-global and persisted (`dormouse:watched-commands`). It starts empty, so WATCHING is off everywhere until the user turns it on. Source of truth: `lib/src/lib/watched-commands.ts`. The renderer owns the persisted copy and pushes it to the manager through `alertSetWatchedCommands`, because in VS Code the manager runs in the extension host, which has no `localStorage`.
+- The rule set is app-global and persisted (`dormouse:watched-commands`). It starts empty, so WATCHING is off everywhere until the user turns it on. Source of truth: `lib/src/lib/watched-commands.ts` (renderer mirror) and `lib/src/lib/watched-command-host.ts` (multi-renderer coordinator). In VS Code the shared extension host is authoritative: the first renderer seeds it from persisted storage, edits cross the boundary as single-command mutations, and the host broadcasts its canonical snapshot to every webview. A stale webview can therefore neither replace unrelated rules nor keep reporting an obsolete rule list.
 
 **Limitation:** WATCHING needs the shell to report command boundaries (`OSC 633` / `OSC 133`). Shells without integration — `cmd.exe`, `fish`, or any shell where injection did not take (`docs/specs/terminal-escapes.md`) — never report a command name, so WATCHING never engages there and the bell reports "nothing is running". Terminal-report and command-exit alerts are unaffected. This is accepted rather than worked around: the keystroke fallback in `docs/specs/terminal-state.md` is renderer-side and lower confidence, and routing it into the manager would buy those shells a worse version of a feature at the cost of a second command-tracking path.
 
@@ -192,6 +192,7 @@ Alert-specific robustness requirements: multiple Sessions ring independently; mi
 | `lib/src/lib/activity-monitor.ts` | Per-Session WATCHING state machine (output/silence timers) |
 | `lib/src/lib/alert-manager.ts` | `AlertManager`: the three tracks, the rule set, attention, TODO, notification storage, status projection |
 | `lib/src/lib/watched-commands.ts` | Persisted WATCHING rule set and its push to the host |
+| `lib/src/lib/watched-command-host.ts` | First-seed + mutation/broadcast coordinator for a host shared by multiple renderers |
 | `lib/src/lib/terminal-protocol.ts` | Notification/progress OSC parsing (`OSC 9` / `9;4` / `99` / `777`, BEL), sanitization limits, OSC 99 chunk state |
 | `lib/src/lib/session-activity-store.ts` | React activity snapshot store, primed alert state, bell transition table, platform delegates |
 | `lib/src/lib/workspace-union.ts` | `computeWorkspaceUnion` projection |

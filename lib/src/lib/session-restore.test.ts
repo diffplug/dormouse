@@ -43,6 +43,7 @@ function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
     notifySessionFlushComplete: vi.fn(),
     alertRemove: vi.fn(),
     alertSetWatchedCommands: vi.fn(),
+    alertSetCommandWatched: vi.fn(),
     alertDismiss: vi.fn(),
     alertAttend: vi.fn(),
     alertResize: vi.fn(),
@@ -52,6 +53,8 @@ function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
     alertClearTodo: vi.fn(),
     onAlertState: vi.fn(),
     offAlertState: vi.fn(),
+    onWatchedCommands: vi.fn(),
+    offWatchedCommands: vi.fn(),
     saveState: vi.fn(),
     getState: vi.fn(() => savedState),
   };

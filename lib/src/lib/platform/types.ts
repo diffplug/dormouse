@@ -226,8 +226,10 @@ export interface PlatformAdapter {
 
   // Alert management
   alertRemove(id: string): void;
-  /** Replace the WATCHING rule set (bare command names) — see `docs/specs/alert.md`. */
+  /** Offer persisted WATCHING rules as the host's startup seed. */
   alertSetWatchedCommands(names: string[]): void;
+  /** Mutate one bare-command WATCHING rule without replacing unrelated rules. */
+  alertSetCommandWatched(name: string, watched: boolean): void;
   alertDismiss(id: string): void;
   alertAttend(id: string): void;
   alertResize(id: string): void;
@@ -237,6 +239,9 @@ export interface PlatformAdapter {
   alertClearTodo(id: string): void;
   onAlertState(handler: (detail: AlertStateDetail) => void): void;
   offAlertState(handler: (detail: AlertStateDetail) => void): void;
+  /** Receive the host's canonical WATCHING rule snapshot. */
+  onWatchedCommands(handler: (names: string[]) => void): void;
+  offWatchedCommands(handler: (names: string[]) => void): void;
 
   // State persistence
   saveState(state: unknown): void;

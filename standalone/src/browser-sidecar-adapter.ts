@@ -206,6 +206,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   alertRemove(id: string): void { this.alertManager.remove(id); }
   alertSetWatchedCommands(names: string[]): void { this.alertManager.setWatchedCommands(names); }
+  alertSetCommandWatched(name: string, watched: boolean): void { this.alertManager.setCommandWatched(name, watched); }
   alertDismiss(id: string): void { this.alertManager.dismissAlert(id); }
   alertAttend(id: string): void { this.alertManager.attend(id); }
   alertResize(id: string): void { this.alertManager.onResize(id); }
@@ -215,6 +216,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
   onAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.add(handler); }
   offAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.delete(handler); }
+  onWatchedCommands(_handler: (names: string[]) => void): void {}
+  offWatchedCommands(_handler: (names: string[]) => void): void {}
 
   private static STATE_KEY = 'dormouse.browser-sidecar.session';
 

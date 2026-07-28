@@ -457,6 +457,10 @@ export class TauriAdapter implements PlatformAdapter {
     this.alertManager.setWatchedCommands(names);
   }
 
+  alertSetCommandWatched(name: string, watched: boolean): void {
+    this.alertManager.setCommandWatched(name, watched);
+  }
+
   alertDismiss(id: string): void {
     this.alertManager.dismissAlert(id);
   }
@@ -492,6 +496,10 @@ export class TauriAdapter implements PlatformAdapter {
   offAlertState(handler: (detail: AlertStateDetail) => void): void {
     this.alertStateHandlers.delete(handler);
   }
+
+  onWatchedCommands(_handler: (names: string[]) => void): void {}
+
+  offWatchedCommands(_handler: (names: string[]) => void): void {}
 
   // --- State persistence ---
 

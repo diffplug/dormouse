@@ -173,6 +173,21 @@ export class AlertManager {
     }
   }
 
+  /** Apply one command-rule mutation without replacing unrelated rules. */
+  setCommandWatched(name: string, watched: boolean): void {
+    const trimmed = name.trim();
+    if (!trimmed || this.watchedCommands.has(trimmed) === watched) return;
+    const next = new Set(this.watchedCommands);
+    if (watched) next.add(trimmed);
+    else next.delete(trimmed);
+    this.setWatchedCommands([...next]);
+  }
+
+  /** Sorted snapshot used by hosts that mirror the rule set to renderers. */
+  getWatchedCommands(): string[] {
+    return [...this.watchedCommands].sort();
+  }
+
   /**
    * WATCHING follows the foreground command's name: on while a watched command
    * runs, off at the prompt. Returns whether the monitor changed.

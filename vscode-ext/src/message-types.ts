@@ -35,7 +35,8 @@ export type WebviewMessage =
   | ({ type: 'dor:controlResponse' } & DorControlResponsePayload)
   // Alert actions
   | { type: 'alert:remove'; id: string }
-  | { type: 'alert:setWatchedCommands'; names: string[] }
+  | { type: 'alert:initializeWatchedCommands'; names: string[] }
+  | { type: 'alert:setCommandWatched'; name: string; watched: boolean }
   | { type: 'alert:dismiss'; id: string }
   | { type: 'alert:attend'; id: string }
   | { type: 'alert:resize'; id: string }
@@ -92,4 +93,5 @@ export type ExtensionMessage =
     todo: TodoState;
     notification: ActivityNotification | null;
     attentionDismissedRing: boolean;
-  };
+  }
+  | { type: 'alert:watchedCommands'; names: string[] };

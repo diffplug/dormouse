@@ -7,11 +7,10 @@ import { getPlatform } from './platform';
  * command, not of a Session — enabling it while `claude` runs enables it for
  * every Session running `claude`, now and later. See `docs/specs/alert.md`.
  *
- * This lives renderer-side because that is where the UI and `localStorage` are.
- * The authoritative copy for alert decisions is `AlertManager`'s, which is fed
- * by `alertSetWatchedCommands` on every mutation and once at startup — required
- * because in VS Code the manager runs in the extension host, which has no
- * `localStorage` (`docs/specs/vscode.md`).
+ * This renderer-side copy drives the UI and persists to `localStorage`. In
+ * VS Code it is a mirror of the extension host's authoritative copy: the first
+ * renderer seeds the host, mutations are sent as individual command deltas,
+ * and the host broadcasts its canonical snapshot to every webview.
  */
 const STORAGE_KEY = 'dormouse:watched-commands';
 
@@ -24,6 +23,10 @@ function readStored(): string[] {
   // Dedupe and drop blanks defensively: the key is user-visible in devtools and
   // a malformed entry would otherwise show up as a blank row in the rule list.
   return [...new Set(raw.map((name) => name.trim()).filter(Boolean))].sort();
+}
+
+function normalize(names: string[]): string[] {
+  return [...new Set(names.map((name) => name.trim()).filter(Boolean))].sort();
 }
 
 let watched: string[] = readStored();
@@ -56,14 +59,23 @@ export function setCommandWatched(name: string, on: boolean): void {
     ? [...watched, trimmed].sort()
     : watched.filter((entry) => entry !== trimmed);
   saveJson(STORAGE_KEY, watched);
-  publishWatchedCommands();
+  getPlatform().alertSetCommandWatched(trimmed, on);
+  listeners.forEach((listener) => listener());
+}
+
+/** Replace the renderer mirror with the host's canonical rule set. */
+export function applyWatchedCommandsFromHost(names: string[]): void {
+  const next = normalize(names);
+  if (next.length === watched.length && next.every((name, index) => name === watched[index])) return;
+  watched = next;
+  saveJson(STORAGE_KEY, watched);
   listeners.forEach((listener) => listener());
 }
 
 /**
- * Push the current rule set to the host's `AlertManager`. Called on every
- * mutation and once from `initAlertStateReceiver`, so a freshly connected host
- * (cold start, VS Code webview reload) learns the rules before any command runs.
+ * Offer the renderer's persisted rule set as the host's startup seed. In
+ * multi-webview VS Code only the first seed after an extension-host start is
+ * accepted; the host replies to every renderer with its canonical snapshot.
  */
 export function publishWatchedCommands(): void {
   getPlatform().alertSetWatchedCommands(watched);

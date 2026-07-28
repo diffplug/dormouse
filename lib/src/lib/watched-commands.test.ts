@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const alertSetWatchedCommands = vi.fn();
+const alertSetCommandWatched = vi.fn();
 
 vi.mock('./platform', () => ({
-  getPlatform: () => ({ alertSetWatchedCommands }),
+  getPlatform: () => ({ alertSetWatchedCommands, alertSetCommandWatched }),
 }));
 
 import { commandArgv0 } from './terminal-state';
 import {
+  applyWatchedCommandsFromHost,
   getWatchedCommands,
   isCommandWatched,
   publishWatchedCommands,
@@ -22,6 +24,7 @@ function clearRules(): void {
 afterEach(() => {
   clearRules();
   alertSetWatchedCommands.mockClear();
+  alertSetCommandWatched.mockClear();
 });
 
 describe('commandArgv0', () => {
@@ -85,17 +88,31 @@ describe('watched-commands store', () => {
     expect(isCommandWatched('')).toBe(false);
   });
 
-  it('pushes the rule set to the platform on every mutation and on demand', () => {
+  it('sends mutations as deltas and offers the full rule set only as a startup seed', () => {
     setCommandWatched('claude', true);
-    expect(alertSetWatchedCommands).toHaveBeenLastCalledWith(['claude']);
+    expect(alertSetCommandWatched).toHaveBeenLastCalledWith('claude', true);
+    expect(alertSetWatchedCommands).not.toHaveBeenCalled();
 
     // A no-op write must not churn the host.
-    alertSetWatchedCommands.mockClear();
+    alertSetCommandWatched.mockClear();
     setCommandWatched('claude', true);
-    expect(alertSetWatchedCommands).not.toHaveBeenCalled();
+    expect(alertSetCommandWatched).not.toHaveBeenCalled();
 
     publishWatchedCommands();
     expect(alertSetWatchedCommands).toHaveBeenLastCalledWith(['claude']);
+  });
+
+  it('replaces a stale renderer mirror with the host snapshot', () => {
+    const listener = vi.fn();
+    subscribeToWatchedCommands(listener);
+    setCommandWatched('npm', true);
+    listener.mockClear();
+
+    applyWatchedCommandsFromHost(['claude', 'npm', 'claude']);
+
+    expect(getWatchedCommands()).toEqual(['claude', 'npm']);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(alertSetCommandWatched).toHaveBeenCalledTimes(1);
   });
 
   it('notifies subscribers on change only', () => {

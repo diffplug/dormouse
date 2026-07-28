@@ -347,6 +347,7 @@ export class RemotePtyAdapter implements PlatformAdapter {
   // phone-side alert controls are inert.
   alertRemove(): void {}
   alertSetWatchedCommands(): void {}
+  alertSetCommandWatched(): void {}
   alertDismiss(): void {}
   alertAttend(): void {}
   alertResize(): void {}
@@ -356,6 +357,8 @@ export class RemotePtyAdapter implements PlatformAdapter {
   alertClearTodo(): void {}
   onAlertState(): void {}
   offAlertState(): void {}
+  onWatchedCommands(): void {}
+  offWatchedCommands(): void {}
 
   saveState(state: unknown): void {
     this.#savedState = state;

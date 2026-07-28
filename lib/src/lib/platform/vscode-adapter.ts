@@ -21,6 +21,7 @@ export class VSCodeAdapter implements PlatformAdapter {
   private replayHandlers = new Set<(detail: { id: string; data: string }) => void>();
   private flushRequestHandlers = new Set<(detail: { requestId: string }) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
+  private watchedCommandHandlers = new Set<(names: string[]) => void>();
 
   constructor() {
     this.vscode = acquireVsCodeApi();
@@ -98,6 +99,10 @@ export class VSCodeAdapter implements PlatformAdapter {
             notification: msg.notification ?? null,
             attentionDismissedRing: msg.attentionDismissedRing,
           });
+        }
+      } else if (msg.type === 'alert:watchedCommands') {
+        for (const handler of this.watchedCommandHandlers) {
+          handler(msg.names);
         }
       } else if (msg.type === 'dormouse:newTerminal') {
         window.dispatchEvent(new CustomEvent('dormouse:new-terminal', {
@@ -391,7 +396,11 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   alertSetWatchedCommands(names: string[]): void {
-    this.vscode.postMessage({ type: 'alert:setWatchedCommands', names });
+    this.vscode.postMessage({ type: 'alert:initializeWatchedCommands', names });
+  }
+
+  alertSetCommandWatched(name: string, watched: boolean): void {
+    this.vscode.postMessage({ type: 'alert:setCommandWatched', name, watched });
   }
 
   alertDismiss(id: string): void {
@@ -428,6 +437,14 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   offAlertState(handler: (detail: AlertStateDetail) => void): void {
     this.alertStateHandlers.delete(handler);
+  }
+
+  onWatchedCommands(handler: (names: string[]) => void): void {
+    this.watchedCommandHandlers.add(handler);
+  }
+
+  offWatchedCommands(handler: (names: string[]) => void): void {
+    this.watchedCommandHandlers.delete(handler);
   }
 
   // --- State persistence ---

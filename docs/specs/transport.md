@@ -97,6 +97,9 @@ Workspace union status (`docs/specs/alert.md`) adds no new message. Standalone c
 
 | Direction | Message | Source type | Contract |
 | --- | --- | --- | --- |
+| Webview → host | `alert:initializeWatchedCommands` | `WebviewMessage` | Offer the renderer's persisted WATCHING rules as the startup seed. A multi-webview host accepts only the first seed in its lifetime and replies with its canonical snapshot. |
+| Webview → host | `alert:setCommandWatched` | `WebviewMessage` | Add or remove one bare command key without replacing unrelated app-global rules. |
+| Host → webview | `alert:watchedCommands` | `ExtensionMessage` | Canonical full WATCHING snapshot broadcast after initialization or mutation; each renderer replaces and persists its local mirror. |
 | Webview → host | `dormouse:openExternal` | `WebviewMessage` | Request the host to open a user-confirmed external URI from an OSC 8 hyperlink. Hosts must revalidate and reject malformed, control-character-bearing, or blocked pseudo-scheme targets (`javascript:`, `data:`, `blob:`, `about:`). |
 | Webview → host | `pty:getOpenPorts` | `WebviewMessage` | Request the TCP listening ports opened by a PTY's shell process **and all of its descendant subprocesses**. The host resolves them from the PTY's root pid and replies with `pty:openPorts`. Source of truth: `getOpenPortsForPid()` in `standalone/sidecar/pty-core.js` (the VS Code extension loads it through the `lib/pty-core.cjs` shim). |
 | Host → webview | `pty:openPorts` | `ExtensionMessage` | Reply to `pty:getOpenPorts`: `ports: OpenPort[]` (`{ protocol, family, address, port, pid, processName }`), de-duplicated by `(family, address, port)` and sorted by port. Empty array when the PTY is gone or enumeration fails. |

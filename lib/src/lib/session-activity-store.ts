@@ -3,7 +3,12 @@ import type { AlertStateDetail } from './platform/types';
 import type { PersistedAlertState, PersistedPane } from './session-types';
 import { getPlatform } from './platform';
 import { getRunningCommandArgv0 } from './terminal-state-store';
-import { isCommandWatched, publishWatchedCommands, setCommandWatched } from './watched-commands';
+import {
+  applyWatchedCommandsFromHost,
+  isCommandWatched,
+  publishWatchedCommands,
+  setCommandWatched,
+} from './watched-commands';
 import {
   getEntryByPtyId,
   registry,
@@ -165,6 +170,7 @@ export function consumePrimedActivity(id: string): Partial<ActivityState> | unde
 }
 
 let currentAlertHandler: ((detail: AlertStateDetail) => void) | null = null;
+let currentWatchedCommandsHandler: ((names: string[]) => void) | null = null;
 
 export function initAlertStateReceiver(): void {
   const platform = getPlatform();
@@ -192,9 +198,14 @@ export function initAlertStateReceiver(): void {
     }
   };
   platform.onAlertState(currentAlertHandler);
-  // The manager starts with an empty rule set and (in VS Code) lives in the
-  // extension host, which cannot read our localStorage — hand it the rules now,
-  // before any command can start.
+  if (currentWatchedCommandsHandler) {
+    platform.offWatchedCommands(currentWatchedCommandsHandler);
+  }
+  currentWatchedCommandsHandler = applyWatchedCommandsFromHost;
+  platform.onWatchedCommands(currentWatchedCommandsHandler);
+  // The host cannot read renderer localStorage. Offer our persisted copy as its
+  // startup seed after installing the canonical-snapshot listener, so a second
+  // VS Code webview is corrected rather than replacing the shared rule set.
   publishWatchedCommands();
 }
 
@@ -202,7 +213,7 @@ export function initAlertStateReceiver(): void {
  * The bell-button transition table (`docs/specs/alert.md` -> UI Contract). This
  * is the only copy: WATCHING is a rule keyed on the foreground command's name,
  * so enabling and disabling both resolve to a rule-set edit, and the manager
- * learns about it through `alertSetWatchedCommands` like any other rule change.
+ * learns about it through a command-level mutation like any other rule change.
  */
 export function dismissOrToggleAlert(id: string, displayedStatus: SessionStatus): AlertButtonActionResult {
   const entry = registry.get(id);
