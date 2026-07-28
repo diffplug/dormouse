@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
 import { AlertManager } from '../../lib/src/lib/alert-manager';
 import { WatchedCommandHost } from '../../lib/src/lib/watched-command-host';
+import { AlertSettingsHost } from '../../lib/src/lib/alert-settings-host';
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
@@ -44,6 +45,7 @@ const ALLOWED_WORKBENCH_COMMANDS = new Set<string>(VSCODE_WORKBENCH_COMMANDS);
 // across webview collapse/expand cycles.
 const alertManager = new AlertManager();
 const watchedCommandHost = new WatchedCommandHost(alertManager);
+const alertSettingsHost = new AlertSettingsHost(alertManager);
 const alertProtocolParsers = new Map<string, TerminalProtocolParser>();
 
 // The extension-host parser has no DOM, so webviews push their resolved terminal
@@ -173,6 +175,12 @@ export function attachRouter(
     void webview.postMessage({
       type: 'alert:watchedCommands',
       names,
+    } satisfies ExtensionMessage);
+  });
+  const removeAlertSettingsListener = alertSettingsHost.subscribe((settings) => {
+    void webview.postMessage({
+      type: 'alert:settings',
+      settings,
     } satisfies ExtensionMessage);
   });
 
@@ -614,6 +622,14 @@ export function attachRouter(
       case 'alert:setCommandWatched':
         watchedCommandHost.setCommandWatched(msg.name, msg.watched);
         break;
+      // The host revalidates and clamps: a webview must never be able to install
+      // a NaN or absurd timer (`docs/specs/transport.md`).
+      case 'alert:initializeSettings':
+        alertSettingsHost.initialize(msg.settings);
+        break;
+      case 'alert:updateSettings':
+        alertSettingsHost.update(msg.settings);
+        break;
       case 'alert:dismiss':
         alertManager.dismissAlert(msg.id);
         break;
@@ -647,6 +663,7 @@ export function attachRouter(
       disposed = true;
       activeRouters.delete(router);
       removeWatchedCommandListener();
+      removeAlertSettingsListener();
       resolveAllFlushRequests();
       disconnectWebview?.();
       disconnectWebview = null;

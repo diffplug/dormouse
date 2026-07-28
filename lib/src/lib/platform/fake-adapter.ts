@@ -1,5 +1,6 @@
 import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
 import { AlertManager } from '../alert-manager';
+import type { AlertSettings } from '../alert-settings';
 import { normalizeExternalUri } from '../external-links';
 import {
   applyTerminalProtocolEvents,
@@ -245,6 +246,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   alertRemove(id: string): void { this.alertManager.remove(id); }
   alertSetWatchedCommands(names: string[]): void { this.alertManager.setWatchedCommands(names); }
   alertSetCommandWatched(name: string, watched: boolean): void { this.alertManager.setCommandWatched(name, watched); }
+  alertPublishSettings(settings: AlertSettings): void { this.alertManager.setInactivityTimeoutMs(settings.inactivityTimeoutMs); }
   alertDismiss(id: string): void { this.alertManager.dismissAlert(id); }
   alertAttend(id: string): void { this.alertManager.attend(id); }
   alertResize(id: string): void { this.alertManager.onResize(id); }
@@ -254,8 +256,12 @@ export class FakePtyAdapter implements PlatformAdapter {
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
   onAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.add(handler); }
   offAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.delete(handler); }
+  // Single renderer owning the AlertManager, so localStorage is the only store
+  // and there is no canonical snapshot to broadcast back.
   onWatchedCommands(_handler: (names: string[]) => void): void {}
   offWatchedCommands(_handler: (names: string[]) => void): void {}
+  onAlertSettings(_handler: (settings: AlertSettings) => void): void {}
+  offAlertSettings(_handler: (settings: AlertSettings) => void): void {}
 
   private savedState: unknown = null;
   saveState(state: unknown): void { this.savedState = state; }

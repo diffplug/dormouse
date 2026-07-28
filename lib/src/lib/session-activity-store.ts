@@ -1,5 +1,6 @@
 import type { SessionStatus } from './activity-monitor';
 import type { AlertStateDetail } from './platform/types';
+import { applyAlertSettingsFromHost, publishAlertSettings } from './alert-settings';
 import type { PersistedAlertState, PersistedPane } from './session-types';
 import { getPlatform } from './platform';
 import { getRunningCommandArgv0 } from './terminal-state-store';
@@ -203,10 +204,14 @@ export function initAlertStateReceiver(): void {
   }
   currentWatchedCommandsHandler = applyWatchedCommandsFromHost;
   platform.onWatchedCommands(currentWatchedCommandsHandler);
-  // The host cannot read renderer localStorage. Offer our persisted copy as its
-  // startup seed after installing the canonical-snapshot listener, so a second
-  // VS Code webview is corrected rather than replacing the shared rule set.
+  // No off/on dance: this is a stable module function and handlers live in a
+  // Set, so re-registering it is a no-op.
+  platform.onAlertSettings(applyAlertSettingsFromHost);
+  // The host cannot read renderer localStorage. Offer our persisted copies as
+  // its startup seed after installing the canonical-snapshot listeners, so a
+  // second VS Code webview is corrected rather than replacing shared state.
   publishWatchedCommands();
+  publishAlertSettings();
 }
 
 /**

@@ -1,5 +1,6 @@
 import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
+import type { AlertSettings } from '../alert-settings';
 import { setDefaultShellOpts } from '../shell-defaults';
 import {
   collectTerminalSemanticEvents,
@@ -22,6 +23,7 @@ export class VSCodeAdapter implements PlatformAdapter {
   private flushRequestHandlers = new Set<(detail: { requestId: string }) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private watchedCommandHandlers = new Set<(names: string[]) => void>();
+  private alertSettingsHandlers = new Set<(settings: AlertSettings) => void>();
 
   constructor() {
     this.vscode = acquireVsCodeApi();
@@ -103,6 +105,10 @@ export class VSCodeAdapter implements PlatformAdapter {
       } else if (msg.type === 'alert:watchedCommands') {
         for (const handler of this.watchedCommandHandlers) {
           handler(msg.names);
+        }
+      } else if (msg.type === 'alert:settings') {
+        for (const handler of this.alertSettingsHandlers) {
+          handler(msg.settings);
         }
       } else if (msg.type === 'dormouse:newTerminal') {
         window.dispatchEvent(new CustomEvent('dormouse:new-terminal', {
@@ -403,6 +409,13 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.vscode.postMessage({ type: 'alert:setCommandWatched', name, watched });
   }
 
+  alertPublishSettings(settings: AlertSettings, opts: { seed: boolean }): void {
+    this.vscode.postMessage({
+      type: opts.seed ? 'alert:initializeSettings' : 'alert:updateSettings',
+      settings,
+    });
+  }
+
   alertDismiss(id: string): void {
     this.vscode.postMessage({ type: 'alert:dismiss', id });
   }
@@ -445,6 +458,14 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   offWatchedCommands(handler: (names: string[]) => void): void {
     this.watchedCommandHandlers.delete(handler);
+  }
+
+  onAlertSettings(handler: (settings: AlertSettings) => void): void {
+    this.alertSettingsHandlers.add(handler);
+  }
+
+  offAlertSettings(handler: (settings: AlertSettings) => void): void {
+    this.alertSettingsHandlers.delete(handler);
   }
 
   // --- State persistence ---

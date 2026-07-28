@@ -108,8 +108,6 @@ interface AlertEntry {
   attentionDismissedRing: boolean;
 }
 
-const T_USER_ATTENTION = cfg.alert.userAttention;
-
 /**
  * Manages ActivityMonitors, attention tracking, and todo state for PTY sessions.
  *
@@ -123,6 +121,28 @@ export class AlertManager {
   private listeners = new Set<(id: string, state: AlertState) => void>();
   private lastEmitted = new Map<string, AlertState>();
   private watchedCommands = new Set<string>();
+  private inactivityTimeoutMs = cfg.alert.userAttention;
+
+  // --- Settings ---
+
+  /**
+   * The walk-away window (`docs/specs/alert.md` -> Attention): how long
+   * "looking at this pane" lasts, and — because the same idea gates it — the
+   * minimum runtime a command needs before its exit is allowed to ring.
+   *
+   * `AlertSettingsHost` clamps before this is reached, but the value originates
+   * in a renderer and ends up in `setTimeout`, so nonsense is rejected here too
+   * rather than trusted from one caller away.
+   */
+  setInactivityTimeoutMs(ms: number): void {
+    if (!Number.isFinite(ms) || ms <= 0 || ms === this.inactivityTimeoutMs) return;
+    this.inactivityTimeoutMs = ms;
+    // Re-arm from now so a shortened window takes effect immediately instead of
+    // waiting out the window that was already running.
+    if (this.attentionTimer !== null && this.attentionId !== null) {
+      this.setAttention(this.attentionId);
+    }
+  }
 
   // --- State change subscription ---
 
@@ -387,7 +407,7 @@ export class AlertManager {
     if (!watch || !wasArmed) return wasArmed;
     if (this.hasAttention(id)) return true;
 
-    if (Date.now() - watch.startedAt < T_USER_ATTENTION) return true;
+    if (Date.now() - watch.startedAt < this.inactivityTimeoutMs) return true;
 
     this.setCommandExitRinging(id, entry, watch, exitCode);
     return true;
@@ -478,7 +498,7 @@ export class AlertManager {
         }
       }
       this.attentionTimer = null;
-    }, T_USER_ATTENTION);
+    }, this.inactivityTimeoutMs);
   }
 
   /** Mark that the user is paying attention to this session. */

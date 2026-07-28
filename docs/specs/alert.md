@@ -17,7 +17,7 @@ Internally these are three independent tracks — `watchingRingingCommand` + the
 ## Non-goals
 
 - No process heuristics. Dormouse never decides on its own that `vim`, `npm dev`, agents, or test runners deserve alerts. WATCHING applies only to command names the user explicitly asked for.
-- No sound, native OS notifications, browser notifications, or separate progress-bar widget.
+- No native OS notifications, browser notifications, or separate progress-bar widget. The one audible channel is the opt-in spoken alarm below, which says a Pane name and nothing else; Dormouse plays no sound effects.
 - No process-tree introspection for command-exit alerts; normalized terminal semantic events are the reliable input.
 - No HTML, Markdown, ANSI styling, clickable actions, custom icons, or remote-controlled buttons in notification previews.
 - No Door-specific alert menu that changes the Door actions defined in `docs/specs/layout.md`.
@@ -47,9 +47,11 @@ Persist only `todo` and the sanitized `notification` (plus `status` for diagnost
 
 These do not count as attention: mere visibility, command-mode selection, hover, a Door existing in the baseboard, or reattaching a Door with `d` into command mode.
 
-Attention is lost when the attention timer expires, the app loses focus, the attended Session is minimized or destroyed, or another Session becomes attended. `T_USER_ATTENTION` also acts as the minimum runtime for command-exit alerts.
+Attention is lost when the attention timer expires, the app loses focus, the attended Session is minimized or destroyed, or another Session becomes attended. `T_USER_ATTENTION` also acts as the minimum runtime for command-exit alerts: a command that ran for less than the walk-away window was probably watched, so its exit does not ring.
 
-Source of truth: `cfg.alert` in `lib/src/cfg.ts` defines `T_USER_ATTENTION` and the other timer defaults and their purpose.
+`T_USER_ATTENTION` is the user-facing **inactivity timeout** (Alarm settings below). It is instance state on the `AlertManager`, not a module constant, and both uses above follow the configured value. Changing it re-arms a live attention timer from that moment, so shortening the window applies immediately rather than after the window already running.
+
+Source of truth: `cfg.alert` in `lib/src/cfg.ts` defines the shipped default for `T_USER_ATTENTION` and the other timer defaults and their purpose; `AlertManager.setInactivityTimeoutMs` installs the configured override.
 
 ## WATCHING Track
 
@@ -127,6 +129,44 @@ Clearing behavior:
 
 `attentionDismissedRing` exists so the next bell click after an attention-based dismissal opens the dialog instead of silently editing a rule. Starting or stopping a WATCHING monitor, or advancing another alarm track, does not consume the flag; only the explicit dismiss path does.
 
+## Alarm settings
+
+A second app-global store sits beside the WATCHING rule set: the alarm settings, edited in one dialog reached from the far right of the baseboard.
+
+Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mirror, persisted at `dormouse:alert-settings`) and `lib/src/lib/alert-settings-host.ts` (multi-renderer coordinator).
+
+| Field | Meaning |
+|---|---|
+| `inactivityTimeoutMs` | `T_USER_ATTENTION` — the walk-away window defined under Attention above. |
+| `speakEnabled` / `speakDelayMs` | Spoken alarms, below. |
+| `pushEnabled` / `pushDelayMs` | Reserved for the push notifications in `## Future`. Persisted and relayed so the field shape does not change when push lands, but the UI renders the whole group disabled and nothing reads them. |
+
+Rules:
+
+- Every field is validated and clamped on read *and* on write (`normalizeAlertSettings`), so a hand-edited `localStorage` blob or a hostile message can never install a `NaN` or absurd timer. Unknown keys are dropped and missing keys defaulted, so the blob evolves additively with no version field. The shipped defaults come from `cfg.alert`, keeping `lib/src/cfg.ts` the one place a default is written down.
+- Distribution mirrors the WATCHING rule set exactly, and for the same reason — in VS Code the `AlertManager` lives in the shared extension host, and each webview has its own origin and therefore its own `localStorage`. The first renderer seeds the host, an edit replaces the host's copy, and the host broadcasts its canonical snapshot to every webview. The **whole** blob is relayed, not just the field the host consumes, so two webviews cannot disagree about whether alarms speak. The host revalidates everything it receives.
+- Single-webview hosts (standalone, browser sidecar, Storybook) own the `AlertManager` in the renderer, so they apply the settings inline and broadcast nothing back.
+
+### Spoken alarms
+
+When a Session transitions into `ALERT_RINGING` and is still ringing `speakDelayMs` later, Dormouse says that Pane's name out loud. Source of truth: `lib/src/lib/alert-speech.ts`, armed once by `useAlertSpeech` in `Wall`.
+
+- Any of the three tracks qualifies. "Not attended" is track-agnostic.
+- **Only the derived Pane label is ever spoken** — never `ActivityNotification` title or body. This is a security rule, not a style one: any program can emit `OSC 9`, and speaking its text would let it choose what the machine says out loud. The label comes from `deriveSessionLabel` in `lib/src/lib/session-label.ts` — the one id-keyed label derivation, shared with the dev-server chip — falling back to `terminal`.
+- The trigger is a fresh transition into `ALERT_RINGING`, held to the same standard as the bell (WATCHING Track, last bullet). A Session observed for the first time *already* ringing never speaks, which is what keeps a restore or a reconnect replaying a latched ring silent.
+- Attending, dismissing, or killing the Pane during the delay cancels the utterance; so does switching the setting off. Both the ring and the setting are re-read when the timer fires rather than captured when it was scheduled.
+- One utterance per ring. A Session that rings, is cleared, and rings again speaks twice. Sessions ring and speak independently.
+- Renderer-side, via `window.speechSynthesis`. Where that is absent — Tauri on Linux (WebKitGTK ships no speech backend), or a test environment — speaking is a silent no-op rather than an error. `speak()` is the single seam a native host path would replace.
+- Desktop shell only: `MobileWall` / Pocket does not arm it and has no settings UI.
+
+### Settings dialog
+
+Reached from a control at the far right of the baseboard; placement and the baseboard's right cluster belong to `docs/specs/layout.md`. Source of truth: `lib/src/components/AlertSettingsDialog.tsx`.
+
+- Lists every watched command with a remove control, and **cannot add one**. WATCHING is keyed on a running command's name, so creating a rule stays a bell click / `a` press in the tab running it; the empty state says so. This dialog and the bell dialog are the two places a rule set on a since-closed Pane can be found and removed — they render the same `WatchedCommandList`, so the list has one implementation.
+- Delays are shown in seconds and committed on blur or `Enter`, never per keystroke — typing `3` on the way to `30` must not briefly install a 3-second timer. An out-of-range or empty entry snaps back to whatever the store clamped it to.
+- The push group renders inside a disabled `<fieldset>` with no device name.
+
 ## Workspace union
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers and the definitions of the three union fields (`ringing`, `todo`, `count`).
@@ -193,10 +233,28 @@ Alert-specific robustness requirements: multiple Sessions ring independently; mi
 | `lib/src/lib/alert-manager.ts` | `AlertManager`: the three tracks, the rule set, attention, TODO, notification storage, status projection |
 | `lib/src/lib/watched-commands.ts` | Persisted WATCHING rule set and its push to the host |
 | `lib/src/lib/watched-command-host.ts` | First-seed + mutation/broadcast coordinator for a host shared by multiple renderers |
+| `lib/src/lib/alert-settings.ts` | Persisted alarm settings, their validation/clamping, and their push to the host |
+| `lib/src/lib/alert-settings-host.ts` | First-seed + replace/broadcast coordinator for the settings blob |
+| `lib/src/lib/alert-speech.ts` | Fresh-ring detection, the delay, and the spoken Pane label |
+| `lib/src/lib/session-label.ts` | `deriveSessionLabel`: the id-keyed Surface label over the live stores |
+| `lib/src/components/wall/use-alert-speech.ts` | Arms spoken alarms for the lifetime of the desktop shell |
 | `lib/src/lib/terminal-protocol.ts` | Notification/progress OSC parsing (`OSC 9` / `9;4` / `99` / `777`, BEL), sanitization limits, OSC 99 chunk state |
 | `lib/src/lib/session-activity-store.ts` | React activity snapshot store, primed alert state, bell transition table, platform delegates |
 | `lib/src/lib/workspace-union.ts` | `computeWorkspaceUnion` projection |
 | `lib/src/components/bell-icon-class.ts` | Bell tilt/animation mapping from public status |
 | `lib/src/components/wall/TerminalPaneHeader.tsx` | Bell button, TODO pill, notification preview |
 | `lib/src/components/TodoAlertDialog.tsx` | TODO + WATCHING-rule switches, notification detail, watched-command list |
+| `lib/src/components/AlertSettingsDialog.tsx` | App-global Alarm settings: rule list, inactivity timeout, spoken alarms, disabled push group |
+| `lib/src/components/WatchedCommandList.tsx` | The WATCHING rule set with per-rule remove, shared by both dialogs |
 | `lib/src/components/Door.tsx` | Door bell + TODO display |
+
+## Future
+
+**Scope: alarm-push** — deliver an unattended alarm to a phone, so the user learns about it away from the machine. `pushEnabled` / `pushDelayMs` already persist and relay (Alarm settings above) and the dialog already renders the group, disabled, so landing this changes no stored shape.
+
+Staged in order:
+
+1. **Device registry.** Reuse the paired-Client identities the Host already holds — `docs/specs/remote-security-model.md` defines the ACL, and a registered Pocket Client is exactly the device a push should reach. The dialog's "Push will be sent to —" line names the chosen device once there is one to name.
+2. **Delivery.** A push travels Host -> Server -> Client. The Server relay is the only component that can reach a backgrounded phone, so this needs a wire method beyond the terminal-only protocol-v1 in `docs/specs/remote-api.md`.
+3. **Payload rule.** Same rule as spoken alarms: the Pane label only, never `ActivityNotification` text. Terminal output must not be able to choose what a push says.
+4. **Cancellation.** Attending on the laptop before `pushDelayMs` cancels, matching the speech path. Whether a delivered push can be recalled once the user attends is undecided.

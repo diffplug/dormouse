@@ -136,6 +136,15 @@ truth: `WatchedCommandHost` in
 `lib/src/lib/watched-command-host.ts` and the alert cases in
 `vscode-ext/src/message-router.ts`.
 
+The alarm settings (`docs/specs/alert.md` → Alarm settings) ride the same shape
+for the same reason, through `alert:initializeSettings` /
+`alert:updateSettings` / `alert:settings` and `AlertSettingsHost` in
+`lib/src/lib/alert-settings-host.ts`. Two details are specific to it: the host
+consumes only `inactivityTimeoutMs` (it installs it on the shared
+`AlertManager`) yet relays the whole blob so renderer-only fields stay in sync
+across webviews, and it revalidates every inbound blob — these are
+renderer-supplied numbers that become host timers.
+
 ### Shell selection
 
 The VS Code view title contributes `Dormouse: Select Shell` and `Dormouse: New Terminal`. The selected shell name is mirrored into the `WebviewView.description`, and `dormouse:selectedShell` keeps the webview's default-shell slot current for split/spawn/restore paths.

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Baseboard } from '../components/Baseboard';
 import type { DooredItem } from '../components/Wall';
@@ -31,11 +32,12 @@ function userTitleState(title: string, index: number): TerminalPaneState {
   });
 }
 
-function BaseboardStory({ items }: { items: DooredItem[] }) {
+function BaseboardStory({ items, notice }: { items: DooredItem[]; notice?: ReactNode }) {
   return (
     <div className="bg-app-bg" style={{ width: '100%' }}>
       <Baseboard
         items={items}
+        notice={notice}
         onReattach={(item) => console.log('Reattach:', item.id)}
       />
     </div>
@@ -133,6 +135,35 @@ export const OverflowWithRingingDoor: Story = {
       status: 'WATCHING_DISABLED',
 
       todo: true,
+    },
+  }),
+  decorators: [
+    (Story) => (
+      <div style={{ width: 500 }}>
+        <Story />
+      </div>
+    ),
+  ],
+};
+
+/**
+ * Every right-hand element at once — overflow arrow, host notice, and the alarm
+ * settings button — in a narrow baseboard. The door-fitting budget subtracts the
+ * measured cluster, so doors must stop short of it rather than sliding under it.
+ */
+export const OverflowWithNoticeAndSettings: Story = {
+  args: {
+    items: overflowWithRingingDoorItems,
+    notice: (
+      <span className="flex h-5 items-center rounded bg-surface-raised px-1.5 text-sm font-mono text-muted">
+        Update ready
+      </span>
+    ),
+  },
+  parameters: withState(overflowWithRingingDoorItems, {
+    p5: {
+      status: 'ALERT_RINGING',
+      todo: false,
     },
   }),
   decorators: [

@@ -1,4 +1,5 @@
 import type { AlertState } from '../alert-manager';
+import type { AlertSettings } from '../alert-settings';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 // Defined in its own dependency-free file so the Node proxy in lib/src/host can
 // share it without pulling this browser-typed module into a Node tsconfig.
@@ -230,6 +231,12 @@ export interface PlatformAdapter {
   alertSetWatchedCommands(names: string[]): void;
   /** Mutate one bare-command WATCHING rule without replacing unrelated rules. */
   alertSetCommandWatched(name: string, watched: boolean): void;
+  /**
+   * Push alarm settings to the host. `seed: true` offers them as the startup
+   * seed, which a multi-webview host accepts only once; `seed: false` is a user
+   * edit and always replaces.
+   */
+  alertPublishSettings(settings: AlertSettings, opts: { seed: boolean }): void;
   alertDismiss(id: string): void;
   alertAttend(id: string): void;
   alertResize(id: string): void;
@@ -242,6 +249,9 @@ export interface PlatformAdapter {
   /** Receive the host's canonical WATCHING rule snapshot. */
   onWatchedCommands(handler: (names: string[]) => void): void;
   offWatchedCommands(handler: (names: string[]) => void): void;
+  /** Receive the host's canonical alarm settings. */
+  onAlertSettings(handler: (settings: AlertSettings) => void): void;
+  offAlertSettings(handler: (settings: AlertSettings) => void): void;
 
   // State persistence
   saveState(state: unknown): void;

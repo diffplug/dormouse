@@ -1,7 +1,8 @@
 import { useLayoutEffect, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { XIcon } from '@phosphor-icons/react';
-import { Shortcut } from './design';
+import { OnOffSwitch, Shortcut } from './design';
+import { WatchedCommandList } from './WatchedCommandList';
 import { usePopoverFocusTrap } from './use-popover-focus-trap';
 import { clampOverlayPosition, pointInConvexPolygon } from '../lib/ui-geometry';
 import {
@@ -184,21 +185,7 @@ export function TodoAlertDialog({
       {watched.length > 0 && (
         <div className="mb-3 max-w-72 border-t border-border pt-2">
           <div className="mb-1 text-sm font-medium text-muted">Alerting on</div>
-          <ul className="flex flex-col gap-0.5">
-            {watched.map((name) => (
-              <li key={name} className="flex items-center justify-between gap-3">
-                <span className="min-w-0 truncate font-mono text-sm text-foreground">{name}</span>
-                <button
-                  type="button"
-                  aria-label={`Stop alerting on all ${name}`}
-                  className="shrink-0 rounded p-0.5 text-muted hover:bg-foreground/10 hover:text-foreground"
-                  onClick={() => setCommandWatched(name, false)}
-                >
-                  <XIcon size={12} weight="bold" />
-                </button>
-              </li>
-            ))}
-          </ul>
+          <WatchedCommandList />
         </div>
       )}
 
@@ -222,36 +209,5 @@ export function TodoAlertDialog({
       </div>
     </div>,
     document.body,
-  );
-}
-
-function OnOffSwitch({
-  on,
-  onEnable,
-  onDisable,
-  label,
-}: {
-  on: boolean;
-  onEnable: () => void;
-  onDisable: () => void;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-label={`${label} ${on ? 'on' : 'off'}`}
-      onClick={() => (on ? onDisable() : onEnable())}
-      className="relative inline-flex h-5 w-14 items-center rounded-full border border-border bg-app-bg text-sm font-medium"
-    >
-      <span
-        aria-hidden
-        className="absolute inset-y-0.5 w-[calc(50%-2px)] rounded-full bg-header-active-bg/25 transition-transform"
-        style={{ transform: on ? 'translateX(2px)' : 'translateX(calc(100% + 2px))' }}
-      />
-      <span className={['z-10 flex-1 text-center', on ? 'text-header-active-bg' : 'text-muted'].join(' ')}>on</span>
-      <span className={['z-10 flex-1 text-center', on ? 'text-muted' : 'text-header-active-bg'].join(' ')}>off</span>
-    </button>
   );
 }

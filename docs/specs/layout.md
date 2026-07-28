@@ -126,6 +126,8 @@ Below the content area is the baseboard (`h-7`, 28px). It is visible by default 
 
 `Wall` accepts `showBaseboard={false}` for constrained embedders such as the website's mobile Pocket playground, where a separate bottom navigation owns the area below the terminal and door workflows are outside the prototype scope. The main app shell keeps the default `showBaseboard=true`.
 
+The far right of the baseboard is a single flex cluster, right-aligned as a unit: the `N more →` overflow arrow, then the host-supplied `notice` slot (standalone puts the update banner there), then an always-present **Alarm settings** button opening the dialog specified in `docs/specs/alert.md` → Alarm settings. Every baseboard-level button shares one class constant in `Baseboard.tsx`. The cluster's always-present part is measured and subtracted from the door-fitting budget below; the overflow arrow stays out of that measurement because its presence is an *output* of the fit, so measuring it would feed back into its own input.
+
 When a session is minimized, it becomes a **door** on the baseboard. The door displays the same derived terminal label as the pane header, a TODO badge (if set), and an alert bell icon with activity dot. It uses the bottom edge of the window as its bottom border, with left, top, and right borders using the shared terminal top radius from `lib/src/components/design.tsx` — resembling a mouse hole and matching pane rounding. Door dimensions: `min-w-[68px] max-w-[220px] h-6`.
 
 ### Door interaction
@@ -140,6 +142,7 @@ When a session is minimized, it becomes a **door** on the baseboard. The door di
 
 Doors are measured in a hidden off-screen container first:
 
+- Subtract the measured right cluster (notice + alarm settings) and its gap from the available width before fitting anything — that space is never available to doors.
 - If they all fit, display them all. If there is remaining space, show the keyboard shortcut hint.
 - If they do not all fit:
   - Reserve space for a `N more →` button on the right edge
@@ -480,7 +483,7 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/components/wall/use-session-persistence.ts` | Debounced layout/session save, flush requests, pagehide, PTY exit, file-drop paste routing |
 | `lib/src/components/wall/use-dor-control.ts` | The `dor` CLI's webview control-plane hook (`useDorControl`): the `dormouse:control-request` handler for `surface.*` methods plus its surface-resolution/param-coercion/command-quoting helpers (`docs/specs/dor-cli.md`) |
 | `lib/src/components/wall/use-window-focused.ts` | Window focus tracking hook for header and selection overlay dimming |
-| `lib/src/components/Baseboard.tsx` | Always-visible bottom strip with door components, overflow arrows, and shortcut hints |
+| `lib/src/components/Baseboard.tsx` | Always-visible bottom strip with door components, overflow arrows, shortcut hints, and the right cluster (notice slot + alarm settings button) |
 | `lib/src/components/Door.tsx` | Individual door element — mouse-hole styled button with alert/TODO indicators |
 | `lib/src/components/TerminalPane.tsx` | Thin xterm.js mount point — mounts/unmounts persistent session elements |
 | `lib/src/lib/terminal-registry.ts` | Public facade preserving registry imports |

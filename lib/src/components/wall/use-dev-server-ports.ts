@@ -26,8 +26,7 @@
  */
 import { useEffect } from 'react';
 import { getPlatform } from '../../lib/platform';
-import { getActivitySnapshot, getTerminalPaneStateSnapshot } from '../../lib/terminal-registry';
-import { buildAppTitleResolver, deriveSurfaceLabel, DEFAULT_IDLE_TITLE } from '../../lib/terminal-state';
+import { deriveSessionLabel } from '../../lib/session-label';
 import {
   getWantedDevServerPorts,
   setDevServerResolution,
@@ -90,20 +89,6 @@ export function useDevServerPortCorrelation({
     // Ports already matched to a pane. We don't rescan these until a reload
     // (clears the whole set) or the port leaves "wanted" (navigation).
     const settled = new Set<number>();
-
-    // Concise pane label (e.g. `pnpm dev`), mirroring buildDorSurfaces; falls
-    // back to the panel/door title. Works for visible panes and minimized doors
-    // alike (both keep their pty + terminal state).
-    const labelForPane = (id: string, fallbackTitle: string | null): string => {
-      const states = getTerminalPaneStateSnapshot();
-      const state = states.get(id);
-      if (state) {
-        const appTitleForPane = buildAppTitleResolver(states, getActivitySnapshot());
-        const primary = deriveSurfaceLabel(state, [state], appTitleForPane, fallbackTitle);
-        if (primary && primary !== DEFAULT_IDLE_TITLE) return primary;
-      }
-      return fallbackTitle?.trim() || 'terminal';
-    };
 
     const resolveOnce = async (): Promise<ResolveOutcome> => {
       if (cancelled || running) return 'busy';
@@ -173,7 +158,7 @@ export function useDevServerPortCorrelation({
           // (e.g. the dev server is still starting up).
           if (list.length === 1) {
             settled.add(port);
-            setDevServerResolution(port, { paneId: list[0], label: labelForPane(list[0], titles.get(list[0]) ?? null) });
+            setDevServerResolution(port, { paneId: list[0], label: deriveSessionLabel(list[0], titles.get(list[0]) ?? null) });
           } else {
             setDevServerResolution(port, null);
           }

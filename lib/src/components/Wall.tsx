@@ -70,6 +70,7 @@ import type { WallNav } from './wall/keyboard/types';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
 import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
+import { useAlertSpeech } from './wall/use-alert-speech';
 import { useDorControl } from './wall/use-dor-control';
 import { useWindowFocused } from './wall/use-window-focused';
 import {
@@ -731,6 +732,9 @@ export function Wall({
 
   // --- Dev-server port → pane correlation (browser header connection chip) ---
   useDevServerPortCorrelation({ lath, doorsRef });
+
+  // --- Spoken alarms (`docs/specs/alert.md` -> Alarm settings) ---
+  useAlertSpeech();
 
   // --- Reattach ---
 
