@@ -9,9 +9,11 @@ import {
   disposeAllSessions,
   getActivitySnapshot,
   getTerminalPaneStateSnapshot,
+  getWatchedCommands,
   primeActivity,
   removeTerminalPaneState,
   resetTerminalPaneState,
+  setCommandWatched,
   type ActivityState,
   type TerminalPaneState,
 } from '../src/lib/terminal-registry';
@@ -55,6 +57,16 @@ const FIRST_STORYBOOK_THEME = Object.keys(VSCODE_THEMES)[0] ?? '';
 const DEFAULT_STORYBOOK_THEME = VSCODE_THEMES[PREFERRED_STORYBOOK_THEME]
   ? PREFERRED_STORYBOOK_THEME
   : FIRST_STORYBOOK_THEME;
+
+/**
+ * Replace the WATCHING rule set (`docs/specs/alert.md`). The set is app-global
+ * and persists to localStorage, so a story that sets a rule would otherwise leak
+ * it into every story that runs after it — always clear before applying.
+ */
+function applyWatchedCommands(names: readonly string[]): void {
+  for (const existing of getWatchedCommands()) setCommandWatched(existing, false);
+  for (const name of names) setCommandWatched(name, true);
+}
 
 function setStylePropertyIfChanged(
   style: CSSStyleDeclaration,
@@ -178,6 +190,9 @@ const preview: Preview = {
             byId?: Record<string, Partial<TerminalPaneState>>;
           }
         | undefined;
+      const primedWatchedCommands = context.parameters?.primedWatchedCommands as
+        | readonly string[]
+        | undefined;
       const platform = fakePlatform as FakePtyAdapter;
 
       if (scenario) platform.setDefaultScenario(scenario);
@@ -187,6 +202,7 @@ const preview: Preview = {
         let raf2 = 0;
 
         const applyPrimedState = () => {
+          applyWatchedCommands(primedWatchedCommands ?? []);
           clearPrimedActivity();
           for (const id of getTerminalPaneStateSnapshot().keys()) {
             removeTerminalPaneState(id);
@@ -216,6 +232,7 @@ const preview: Preview = {
         return () => {
           window.cancelAnimationFrame(raf1);
           window.cancelAnimationFrame(raf2);
+          applyWatchedCommands([]);
           clearPrimedActivity();
           for (const id of getTerminalPaneStateSnapshot().keys()) {
             removeTerminalPaneState(id);
@@ -223,7 +240,7 @@ const preview: Preview = {
           platform.clearDefaultScenario();
           disposeAllSessions();
         };
-      }, [platform, primedSessionState, primedTerminalState]);
+      }, [platform, primedSessionState, primedTerminalState, primedWatchedCommands]);
 
       return createElement(Story);
     },

@@ -141,7 +141,9 @@ export function TodoAlertDialog({
         <XIcon size={12} weight="bold" />
       </button>
 
-      <div className="mb-3 grid w-fit grid-cols-[auto_auto_auto] items-center gap-x-2 gap-y-2">
+      {/* pr-6 keeps the right-hand switches clear of the absolutely-positioned
+          close button, whatever the rows end up containing. */}
+      <div className="mb-3 grid w-fit grid-cols-[auto_auto_auto] items-center gap-x-2 gap-y-2 pr-6">
         <Shortcut>t</Shortcut>
         <span className="text-sm font-medium text-foreground">TODO</span>
         <OnOffSwitch
@@ -154,8 +156,13 @@ export function TodoAlertDialog({
         {argv0 && (
           <>
             <Shortcut>a</Shortcut>
-            <span className="text-sm font-medium text-foreground">
-              Alert on all <span className="font-mono">"{argv0}"</span>
+            {/* argv0 is a basename so it is normally short, but nothing enforces
+                that — cap it so a pathological name truncates instead of
+                stretching the dialog. The full name stays readable in the rule
+                list below and in the title attribute. */}
+            <span className="flex min-w-0 items-baseline gap-1.5 text-sm font-medium text-foreground">
+              <span className="shrink-0">Alert on all</span>
+              <span className="min-w-0 max-w-48 truncate font-mono" title={argv0}>"{argv0}"</span>
             </span>
             <OnOffSwitch
               on={watched.includes(argv0)}

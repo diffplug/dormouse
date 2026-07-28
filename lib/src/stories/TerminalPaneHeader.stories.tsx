@@ -10,7 +10,7 @@ import {
   type WallActions,
 } from '../components/Wall';
 import type { ActivityNotification } from '../lib/alert-manager';
-import type { SetTerminalUserTitleResult } from '../lib/terminal-registry';
+import { summarizeCommandLine, type SetTerminalUserTitleResult } from '../lib/terminal-registry';
 import { removeMouseSelectionState, setMouseReporting, setOverride } from '../lib/mouse-selection';
 
 const SESSION_ID = 'tab-story';
@@ -48,12 +48,44 @@ function primedState(state: Record<string, unknown>) {
   };
 }
 
+/**
+ * Report a foreground command the way shell integration would. WATCHING is keyed
+ * on the running command's name (`docs/specs/alert.md`), so without this the
+ * bell has no rule to name and every dialog renders its "nothing is running"
+ * variant. `startedAt` is fixed rather than `Date.now()` for deterministic
+ * Chromatic snapshots.
+ */
+function primedRunningCommand(rawCommandLine: string) {
+  return {
+    primedTerminalState: {
+      byId: {
+        [SESSION_ID]: {
+          activity: { kind: 'running' as const },
+          currentCommand: {
+            id: 'story-run',
+            rawCommandLine,
+            displayCommand: summarizeCommandLine(rawCommandLine),
+            cwdAtStart: null,
+            startedAt: 0,
+            source: 'osc633_E' as const,
+          },
+        },
+      },
+    },
+  };
+}
+
 function primedNotificationState(notification: ActivityNotification, status = 'WATCHING_DISABLED') {
-  return primedState({
-    status,
-    todo: true,
-    notification,
-  });
+  return {
+    // A program that rang was, by definition, running something — so these
+    // dialogs show the rule switch alongside the notification detail.
+    ...primedRunningCommand('pnpm test'),
+    ...primedState({
+      status,
+      todo: true,
+      notification,
+    }),
+  };
 }
 
 function TabStory({
@@ -121,6 +153,38 @@ async function openAlertRightClickDialog() {
     clientY: rect.top + rect.height / 2,
   }));
   await wait(100);
+}
+
+/**
+ * Hover the bell so its tooltip renders — the tooltip is what carries the
+ * command-scoped wording, e.g. `Alert on all "claude"` vs `Alerts are per
+ * command`.
+ *
+ * Hover rather than focus: a programmatic `.focus()` does not reliably drive
+ * React's `onFocus` here, while `mouseover` is exactly what React synthesizes
+ * `onMouseEnter` from. Retried because the primed-state decorator applies over
+ * two rAFs and can re-render the header out from under an early hover; throws
+ * if the tooltip never appears, so a regression surfaces in the Interactions
+ * panel instead of as a silently empty snapshot.
+ */
+async function hoverAlertButton() {
+  const start = performance.now();
+  while (performance.now() - start < 2000) {
+    const bell = document.querySelector<HTMLButtonElement>(`[data-alert-button-for="${SESSION_ID}"]`);
+    const rect = bell?.getBoundingClientRect();
+    if (bell && rect) {
+      bell.dispatchEvent(new MouseEvent('mouseover', {
+        bubbles: true,
+        cancelable: true,
+        relatedTarget: document.body,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+      }));
+    }
+    await wait(50);
+    if (document.querySelector('[role="tooltip"]')) return;
+  }
+  throw new Error('alert bell tooltip never rendered');
 }
 
 async function openTodoNotificationPreview() {
@@ -297,12 +361,47 @@ export const AlertRinging: Story = {
   }),
 };
 
+// --- Command-keyed WATCHING (docs/specs/alert.md) --------------------------
+//
+// The bell acts on the *running command's* rule, not on this pane, so what it
+// offers depends on what the pane is running and whether a rule already exists.
+
 export const AlertRightClickDialog: Story = {
-  parameters: primedState({
-    status: 'NOTHING_TO_SHOW',
-    todo: false,
-  }),
+  parameters: {
+    ...primedRunningCommand('claude --resume'),
+    ...primedState({ status: 'NOTHING_TO_SHOW', todo: false, watchingEnabled: true }),
+    primedWatchedCommands: ['claude'],
+  },
   play: openAlertRightClickDialog,
+};
+
+/** A pane at a prompt: no argv0, so the dialog explains instead of offering a switch. */
+export const AlertDialogNoCommandRunning: Story = {
+  parameters: primedState({ status: 'WATCHING_DISABLED', todo: false }),
+  play: openAlertRightClickDialog,
+};
+
+export const BellTooltipOffersRule: Story = {
+  parameters: {
+    ...primedRunningCommand('claude --resume'),
+    ...primedState({ status: 'WATCHING_DISABLED', todo: false }),
+    primedWatchedCommands: [],
+  },
+  play: hoverAlertButton,
+};
+
+export const BellTooltipRemovesRule: Story = {
+  parameters: {
+    ...primedRunningCommand('claude --resume'),
+    ...primedState({ status: 'NOTHING_TO_SHOW', todo: false, watchingEnabled: true }),
+    primedWatchedCommands: ['claude'],
+  },
+  play: hoverAlertButton,
+};
+
+export const BellTooltipNoCommandRunning: Story = {
+  parameters: primedState({ status: 'WATCHING_DISABLED', todo: false }),
+  play: hoverAlertButton,
 };
 
 export const TodoOnly: Story = {
