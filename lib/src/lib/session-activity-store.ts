@@ -170,42 +170,43 @@ export function consumePrimedActivity(id: string): Partial<ActivityState> | unde
   return primed;
 }
 
-let currentAlertHandler: ((detail: AlertStateDetail) => void) | null = null;
-let currentWatchedCommandsHandler: ((names: string[]) => void) | null = null;
+/**
+ * Fold one host alert-state update into the registry, or stage it if the PTY's
+ * entry does not exist yet (the host can report before the terminal is minted).
+ */
+function handleAlertState(detail: AlertStateDetail): void {
+  const entry = getEntryByPtyId(detail.id);
+  if (entry) {
+    entry.alertStatus = detail.status;
+    entry.watchingEnabled = detail.watchingEnabled;
+    entry.todo = detail.todo;
+    entry.notification = detail.notification;
+    entry.attentionDismissedRing = detail.attentionDismissedRing;
+    primedActivityStates.delete(detail.id);
+    notifyActivityListeners();
+  } else {
+    primeActivity(detail.id, {
+      status: detail.status,
+      watchingEnabled: detail.watchingEnabled,
+      todo: detail.todo,
+      notification: detail.notification,
+    });
+  }
+}
 
+/**
+ * Subscribe the renderer to the host's alert channels and offer it our
+ * persisted app-global state.
+ *
+ * Safe to call more than once — Pocket and the website playground call it from
+ * an effect. Every handler here is a stable module-level function and adapters
+ * hold handlers in a `Set`, so re-registering is a no-op and no deregistration
+ * bookkeeping is needed.
+ */
 export function initAlertStateReceiver(): void {
   const platform = getPlatform();
-  if (currentAlertHandler) {
-    platform.offAlertState(currentAlertHandler);
-  }
-
-  currentAlertHandler = (detail) => {
-    const entry = getEntryByPtyId(detail.id);
-    if (entry) {
-      entry.alertStatus = detail.status;
-      entry.watchingEnabled = detail.watchingEnabled;
-      entry.todo = detail.todo;
-      entry.notification = detail.notification;
-      entry.attentionDismissedRing = detail.attentionDismissedRing;
-      primedActivityStates.delete(detail.id);
-      notifyActivityListeners();
-    } else {
-      primeActivity(detail.id, {
-        status: detail.status,
-        watchingEnabled: detail.watchingEnabled,
-        todo: detail.todo,
-        notification: detail.notification,
-      });
-    }
-  };
-  platform.onAlertState(currentAlertHandler);
-  if (currentWatchedCommandsHandler) {
-    platform.offWatchedCommands(currentWatchedCommandsHandler);
-  }
-  currentWatchedCommandsHandler = applyWatchedCommandsFromHost;
-  platform.onWatchedCommands(currentWatchedCommandsHandler);
-  // No off/on dance: this is a stable module function and handlers live in a
-  // Set, so re-registering it is a no-op.
+  platform.onAlertState(handleAlertState);
+  platform.onWatchedCommands(applyWatchedCommandsFromHost);
   platform.onAlertSettings(applyAlertSettingsFromHost);
   // The host cannot read renderer localStorage. Offer our persisted copies as
   // its startup seed after installing the canonical-snapshot listeners, so a
