@@ -40,6 +40,7 @@ import {
   swap,
 } from '../../lib/lath/ops';
 import type { LeafMeta } from '../../lib/lath/persistence';
+import { PANE_GUTTER_PX } from '../design';
 
 // Re-exported for the wall modules that read/write the store's meta map — the type
 // itself lives with the persisted-layout wire format it serializes into.
@@ -50,7 +51,7 @@ export type { LeafMeta };
  *  the HTML adapter (LathHost) lays out with it and reports it back via
  *  `setLayoutGeometry`, so the store's queries (restore / resize / neighbors /
  *  autoEdge) match the screen. */
-export const LATH_LAYOUT_OPTS: LayoutOpts = { gap: 6, minLeaf: { width: 100, height: 60 } };
+export const LATH_LAYOUT_OPTS: LayoutOpts = { gap: PANE_GUTTER_PX, minLeaf: { width: 100, height: 60 } };
 
 /** An immutable view of the store. `getSnapshot` returns the same object identity
  *  until the next commit, as `useSyncExternalStore` requires. */

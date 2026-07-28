@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { cfg } from '../cfg';
 
 /** Even-odd cross-product test for a convex polygon. Vertices may run in either winding order. */
 export function pointInConvexPolygon(
@@ -22,6 +23,13 @@ export function pointInConvexPolygon(
 export function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined'
     && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** True when chrome motion must resolve instantly: layout animation is disabled
+ *  (Chromatic) or the user prefers reduced motion. The single snap gate shared
+ *  by the Lath animator's duration and the focus ring's travel. */
+export function motionIsInstant(): boolean {
+  return !cfg.layout.animate || prefersReducedMotion();
 }
 
 /** Clamp a fixed-position overlay so it stays inside the viewport with a margin. */

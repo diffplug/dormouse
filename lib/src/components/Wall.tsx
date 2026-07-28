@@ -114,7 +114,7 @@ export {
   ZoomedIdContext,
 } from './wall/wall-context';
 export type { WallActions } from './wall/wall-context';
-export { MarchingAntsRect, roundedRectPath } from './wall/MarchingAntsRect';
+export { SelectionRing, roundedRectPath } from './wall/SelectionRing';
 export { TerminalPaneHeader } from './wall/TerminalPaneHeader';
 
 function persistedPanelTitle(title: string | null | undefined): string {
@@ -1448,8 +1448,9 @@ export function Wall({
           <DialogKeyboardContext.Provider value={setDialogKeyboardActive}>
           <div className="flex-1 min-h-0 flex flex-col bg-app-bg text-app-fg font-sans overflow-hidden">
             {/* The tiling area — 2px bottom inset keeps rounded panes distinct from the baseboard when present. */}
-            <div className={clsx('flex-1 min-h-0 relative px-1.5 pt-1.5', showBaseboard ? 'pb-0.5' : 'pb-1.5')}>
-              <div className={clsx('absolute inset-x-1.5 top-1.5', showBaseboard ? 'bottom-0.5' : 'bottom-1.5')}>
+            {/* 1.75 = PANE_GUTTER_PX (7px) in design.tsx — keep in sync. */}
+            <div className={clsx('flex-1 min-h-0 relative px-1.75 pt-1.75', showBaseboard ? 'pb-0.5' : 'pb-1.75')}>
+              <div className={clsx('absolute inset-x-1.75 top-1.75', showBaseboard ? 'bottom-0.5' : 'bottom-1.75')}>
                 <LathHost
                   lath={lath}
                   onCommitResize={onCommitResize}

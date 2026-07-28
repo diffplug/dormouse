@@ -35,7 +35,7 @@ The user can navigate between all elements using the mouse, or by entering `comm
 Wall
 ├── Context providers (Mode, SelectedId, WallActions, PaneElements, DoorElements, RenamingId, Zoomed, WindowFocused)
 │   └── div (h-screen, flex col)
-│       ├── Content wrapper (flex-1, 6px top/sides inset, 2px bottom inset)
+│       ├── Content wrapper (flex-1, 7px top/sides inset, 2px bottom inset)
 │       │   ├── LathHost (the tiling engine's HTML adapter)
 │       │   │   └── Leaf divs (one Surface per leaf, absolutely positioned, never re-parented)
 │       │   │       ├── TerminalPanel → TerminalPane → xterm.js  (or BrowserPanel)
@@ -65,7 +65,7 @@ Wall
 
 ## Content
 
-The content area is a tiling layout of panes rendered by Lath (`docs/specs/tiling-engine.md`). Each pane is one **leaf** in Lath's split tree — a stable, absolutely-positioned div that is never re-parented (so a moved `<iframe>` never reloads and a focused xterm never blurs). Panes are separated by a 6px gap. There is no tab stacking: one Surface per leaf, always.
+The content area is a tiling layout of panes rendered by Lath (`docs/specs/tiling-engine.md`). Each pane is one **leaf** in Lath's split tree — a stable, absolutely-positioned div that is never re-parented (so a moved `<iframe>` never reloads and a focused xterm never blurs). Panes are separated by a 7px gap — odd on purpose, so the 1px selection ring can center in it on whole pixels (see Selection overlay). There is no tab stacking: one Surface per leaf, always.
 
 ### Tiling constraints
 
@@ -122,7 +122,7 @@ The mouse-override icon only appears when the inside program has requested mouse
 
 ## Baseboard
 
-Below the content area is the baseboard (`h-7`, 28px). It is visible by default and has no top divider. The content area ends 2px above it, leaving a narrow theme-colored gap that keeps rounded pane corners distinct from the baseboard. Its horizontal padding matches the content wrapper's 6px inset, so doors align with the panes above. When empty, it shows keyboard shortcut hints when there are no doors and the container is wider than 350px — platform-aware: `LCmd → RCmd to enter command mode` on macOS, `LShift → RShift to enter command mode` elsewhere (`Baseboard.tsx`).
+Below the content area is the baseboard (`h-7`, 28px). It is visible by default and has no top divider. The content area ends 2px above it, leaving a narrow theme-colored gap that keeps rounded pane corners distinct from the baseboard. Its horizontal padding matches the content wrapper's 7px inset, so doors align with the panes above. When empty, it shows keyboard shortcut hints when there are no doors and the container is wider than 350px — platform-aware: `LCmd → RCmd to enter command mode` on macOS, `LShift → RShift to enter command mode` elsewhere (`Baseboard.tsx`).
 
 `Wall` accepts `showBaseboard={false}` for constrained embedders such as the website's mobile Pocket playground, where a separate bottom navigation owns the area below the terminal and door workflows are outside the prototype scope. The main app shell keeps the default `showBaseboard=true`.
 
@@ -224,19 +224,33 @@ Untouched sessions skip this confirmation. A newly spawned shell starts `untouch
 
 ## Selection overlay
 
-A fixed-positioned element rendered on top of the Lath host. Covers the active element's area inflated by 3px (half the 6px gap) for panes; doors are not inflated.
+A fixed-positioned element rendered on top of the Lath host. Covers the active element's area inflated by `SELECTION_RING_INFLATE_PX` (4px) for panes; doors are not inflated. The inflate is derived in `lib/src/components/design.tsx` so both ring strokes center on the gutter's midline: the 1px passthrough border spans [3px, 4px] from the pane edge — dead center of the 7px gutter, on whole pixels because the gutter is odd.
 
 - A pane or door can be **active** or **inactive**. Only one element is active at a time.
-- **Passthrough:** `border: 1px solid ${color}` — no glow
-- **Command:** animated SVG marching-ants border — rounded rectangle path with `stroke-dasharray` animation (10px segment, 60% dash / 40% gap, 0.4s cycle, 2px stroke)
-- Border radius: shared terminal radius from `lib/src/components/design.tsx`: full `0.5rem` for panes, `0.5rem 0.5rem 0 0` for doors
+- One SVG renderer (`SelectionRing`, `variant: 'ants' | 'solid'`) draws both modes:
+- **Passthrough:** `variant='solid'` — a 1px solid SVG stroke that replaced the old `border: 1px solid ${color}` CSS border, placed pixel-identically (centerline `strokeWidth/2` inside the div edge for both panes and doors), no glow
+- **Command:** `variant='ants'` — animated SVG marching-ants border, rounded rectangle path with `stroke-dasharray` animation (10px segment, 60% dash / 40% gap, 0.4s cycle, 2px stroke)
+- Border radius follows DESIGN.md's Concentric-Corners Rule: the pane ring's rect is inflated by `SELECTION_RING_INFLATE_PX`, so its radius is the pane radius plus that offset (`PANE_SELECTION_RING_RADIUS_PX` in `lib/src/components/design.tsx`, with the marching-ants path inset so its stroke centerline sits on the same gutter midline, concentric with the pane corner); doors sit at zero offset and keep `0.5rem 0.5rem 0 0`
 - Color from CSS custom property `--mt-selection-terminal`
-- `z-index: 50`, `pointer-events: none`, `transition: 150ms`
+- `z-index: 50`, `pointer-events: none`
+
+### Ring travel
+
+The ring's rect (and its `{tl,tr,br,bl,inset}` shape) is driven **per-frame by a JS tween**, not a CSS transition — the tween writes true interpolated values each rAF frame, the same pointer-events-none carve-out the Lath animator holds (DESIGN.md's "don't animate layout properties" bans CSS transitions on layout props, not this). Motion is `FOCUS_MOTION_MS` (220ms — half `LATH_MOTION_MS`) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`. Source of truth: the pure tween core `lib/src/lib/rect-tween.ts`; the overlay's rAF loop in `WorkspaceSelectionOverlay.tsx`; the SVG renderer `lib/src/components/wall/SelectionRing.tsx`.
+
+Per-frame writes are **imperative** — the same React-owns-structure / frame-owns-mutations split LathHost uses for the animator. `SelectionRing` renders a stable shell once (per variant/color/focus change) and lifts its DOM nodes (container div, path, blur `<filter>`/`<feGaussianBlur>`) back to the overlay via refs; the rAF loop writes `top/left/width/height`, the path `d`, the marching-ants dash, and the blur region/`stdDeviation` directly, and re-applies once after any structural render (pre-paint, so a freshly mounted ring never flashes). Do **not** reintroduce per-frame React state: WebKit rasterizes the SVG blur on the CPU every frame, and a per-frame reconcile of this subtree competes with that raster for the frame budget (Safari choppiness).
+
+- **Identity change → tween.** When the incoming measurement's identity (`${selectedType}:${selectedId}`) differs from the one on screen, the ring glides from its current interpolated position to the new target, clock restarted (arrow-key spam stays responsive).
+- **Same identity → snap 1:1.** A same-identity re-measure with no tween in flight (sash drag, window resize, a settled leaf's store commit) writes the new rect directly — the ring tracks the geometry exactly instead of easing behind it.
+- **In-flight retarget.** A same-identity re-measure *during* a tween retargets the destination without resetting the clock, so the ring converges on a moving target (select-a-neighbor-during-kill) and still lands on the original completion instant.
+- **Snap gate.** `!cfg.layout.animate` (Chromatic) or `prefersReducedMotion()` → the ring settles instantly, mirroring the animator's 0-duration path (`lath-wall-engine.ts`). Only the unfocus-saturate fade keeps a CSS transition (`filter ${FOCUS_MOTION_MS}ms`), unconditionally.
+- Pane↔door selection morphs the corner radii (12px all-round ⇄ `8,8,0,0`) and stroke inset through the same tween, so the shape lerps instead of popping.
+- **Directional motion blur.** While travelling, the ring smears in its direction of motion: the overlay computes the ring center's per-frame velocity from the tween (EMA-smoothed to shed rAF frame-timing jitter) and feeds an SVG `feGaussianBlur` whose per-axis `stdDeviation` scales with axis speed, clamped at `cfg.focusRing.blurMaxPx`. The filter region is `userSpaceOnUse`, padded only ~3σ around the ring, so WebKit's per-frame CPU raster stays close to the pane area instead of the `objectBoundingBox` default's ~4×. The filter is attached only while moving; a settled or reduced-motion ring has null velocity and renders clean (no filter), so snapshots stay deterministic. Tunables in `cfg.focusRing` (`blurGain` / `blurMaxPx` / `blurSmoothing`).
 
 ### Position tracking
 - Each pane body registers its DOM element in a `paneElements` Map on mount and removes it on unmount (`usePaneChrome`); the overlay resolves the enclosing Lath leaf (`[data-lath-leaf]`) via `resolvePaneElement` so the ring covers the full leaf (header + body)
 - Door elements are registered by the `Baseboard` via `DoorElementsContext` from `components/wall/wall-context.tsx` (queries `[data-door-id]` attributes)
-- Updates on: selection change, resize (`ResizeObserver`), every Lath store commit (`revision` via `useSyncExternalStore`), and — while an animation runs — every animator frame (so the ring tracks kills, restores, and tweens frame-accurately, with its 150ms CSS transition dropped)
+- Re-measures on: selection change, resize (`ResizeObserver`), every Lath store commit (`revision` via `useSyncExternalStore`), and — while the wall streams animator frames — every frame (so the ring tracks kills, restores, and tweens frame-accurately). If the selected leaf is momentarily absent the overlay bails and holds the last rect.
 
 ## Spatial navigation
 
@@ -340,7 +354,7 @@ Each session also carries `TerminalPaneState` from `docs/specs/terminal-state.md
 
 ## Theme
 
-The Lath host styling lives in the `.lath-host` / `.lath-leaf` rules in `lib/src/index.css`: an app-bg host and a terminal-bg body. Each leaf has a 30px header band applied by LathHost from the shared `PANE_HEADER_HEIGHT_PX` in `lib/src/components/design.tsx`. The content area uses a 6px top/sides inset and 2px bottom inset (`px-1.5 pt-1.5 pb-0.5` on wrapper, `inset-x-1.5 top-1.5 bottom-0.5` on container); the `LATH_LAYOUT_OPTS` gap of 6px is the only visual separator between panes.
+The Lath host styling lives in the `.lath-host` / `.lath-leaf` rules in `lib/src/index.css`: an app-bg host and a terminal-bg body. Each leaf has a 30px header band applied by LathHost from the shared `PANE_HEADER_HEIGHT_PX` in `lib/src/components/design.tsx`. The content area uses a 7px top/sides inset and 2px bottom inset (`px-1.75 pt-1.75 pb-0.5` on wrapper, `inset-x-1.75 top-1.75 bottom-0.5` on container); the `LATH_LAYOUT_OPTS` gap of 7px (`PANE_GUTTER_PX`) is the only visual separator between panes.
 
 Colors use a two-layer CSS variable strategy: `@theme --color-*` tokens → `var(--vscode-*)`. VSCode provides host theme variables in extension mode; standalone and website mode apply bundled or installed theme variables before rendering. Tailwind v4 `@theme` block registers `--color-*` tokens as Tailwind colors (e.g., `bg-app-bg`, `text-app-fg`, `border-border`). See `theme.css` for the full token map.
 
@@ -394,8 +408,8 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/components/wall/TerminalPanel.tsx` | Pane body wrapper; registers the pane's DOM element (`usePaneChrome`) |
 | `lib/src/components/wall/TerminalPaneHeader.tsx` | Pane header with rename, alert/TODO, mouse override, split/zoom/minimize/kill controls, and the right-click context menu |
 | `lib/src/components/wall/PaneHeaderContextMenu.tsx` | Pane-header right-click menu: the `surface:N` handle plus the pane's bound TCP ports; a port click connects it to the default browser (`docs/specs/dor-browser.md`) |
-| `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` | Pane/door focus ring and marching-ants overlay; re-measures on Lath store commits + animator frames |
-| `lib/src/components/wall/MarchingAntsRect.tsx` | SVG marching-ants border path and dash sizing |
+| `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` | Pane/door focus ring: the JS travel tween + rAF loop; re-measures on Lath store commits + animator frames; computes the directional motion-blur velocity |
+| `lib/src/components/wall/SelectionRing.tsx` | The single SVG ring renderer (`solid` passthrough / `ants` command), dash sizing, and the directional motion-blur filter |
 | `lib/src/components/wall/MouseOverrideBanner.tsx` | Temporary mouse override banner shown from the header icon |
 | `lib/src/components/wall/use-wall-keyboard.ts` | Capture-phase keyboard dispatch for mode switching, pane/door commands, copy/paste, selection drag keys |
 | `lib/src/lib/vscode-keybindings.ts` | VS Code-hosted workbench chord mirror allowlist |

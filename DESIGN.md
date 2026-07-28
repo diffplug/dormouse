@@ -185,6 +185,8 @@ Shadows appear only on **raised surfaces that float above content**: popovers, t
 
 **The Inset-Over-Border Rule.** When a surface needs a 1px stroke that may toggle on state change (active vs. inactive), prefer `shadow-[inset_0_0_0_1px_…]` over `border`. The shadow does not affect layout; the border does.
 
+**The Concentric-Corners Rule.** When a rounded corner nests inside another rounded corner (a focus ring wrapping a pane, an outline hugging a rounded surface), both arcs must share a corner center: outer radius = inner radius + the gap between them. Resolve violations by growing the outer radius — never tighten the inner one. Rings at zero offset keep the wrapped element's radius. Source of truth: the `SELECTION_RING_INFLATE_PX` / `PANE_SELECTION_RING_RADIUS_PX` derivation in `lib/src/components/design.tsx`.
+
 ## 5. Components
 
 ### Doors
@@ -246,6 +248,9 @@ The most distinctive motion in the system. Implemented as `clip-path` reveals, n
 #### Marching Ants (Command Mode)
 The selection ring around the focused pane in command mode is an SVG with `stroke-dasharray` and an infinite `marching-ants` keyframe that increments `stroke-dashoffset` by `var(--march-offset)`. Color: `var(--color-focus-ring)`. This is the system's only ongoing animation; it is meant to be the visual signature of "you are now in command mode."
 
+#### Focus Ring Travel & Header Crossfade
+When selection moves between panes/doors, the focus ring **glides** to the new target over 220ms (`FOCUS_MOTION_MS`, half the pane-motion duration) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`, and the source/destination pane headers crossfade their active/inactive palette over the same 220ms (`HEADER_PALETTE_TRANSITION_CLASS` in `design.tsx`), so the two read as one gesture. The ring's rect is a per-frame JS tween (`rect-tween.ts`), not a CSS transition; same-identity re-measures (sash drag, window resize, animator frames) snap 1:1, and a pane↔door move lerps the corner radii so the shape never pops. Reduced motion nulls both: the ring snaps and the header palette swaps instantly.
+
 ## 6. Do's and Don'ts
 
 ### Do:
@@ -266,7 +271,7 @@ The selection ring around the focused pane in command mode is an SVG with `strok
 - **Don't** introduce a `text-muted` color inside an active or inactive pane header. Header-internal text inherits the header foreground; muting inside it breaks the focus signal.
 - **Don't** use rounded SaaS cards, gradient accents, gradient text, or glassmorphism. PRODUCT.md names these directly: "Generic SaaS (rounded cards, gradients, startup illustrations)," "Electron bloat (Slack — heavy, slow-feeling, too much chrome)."
 - **Don't** use hacker-aesthetic green-on-black, terminal-cliché Matrix tints, or any color that signals "this is a programmer tool." The user's theme decides what color this tool is.
-- **Don't** animate layout properties (`width`, `height`, `top`, `left`, `padding`). Pane transitions use `clip-path` and `opacity` deliberately so layout measurements stay valid mid-animation.
+- **Don't** animate layout properties (`width`, `height`, `top`, `left`, `padding`) **with a CSS transition**. Pane transitions use `clip-path` and `opacity` deliberately so layout measurements stay valid mid-animation. The one carve-out is a JS tween that writes true per-frame values on a `pointer-events: none` overlay (the Lath animator; the focus ring's `rect-tween`): it moves through real intermediate geometry every frame rather than letting the browser interpolate an opaque box, so measurements stay valid — a CSS `transition: top/left/width/height` does not qualify and stays banned.
 - **Don't** add an emoji, mascot, or illustration to chrome. PRODUCT.md is explicit: "Overly playful (too many animations, emojis, mascots)."
 - **Don't** wrap things in containers. Most surfaces don't need one; the host's sidebar already is the container.
 - **Don't** introduce a new pass-through `--mt-*` token or a one-off color for tabs, badges, accents, or button hovers. If a new rendered surface truly needs a token that isn't in the hierarchy above, update `theme.css` and `design.tsx` together, document the addition in `docs/specs/theme.md`, and update `CONSUMED_VSCODE_KEYS` in `bundle-themes.mjs`.

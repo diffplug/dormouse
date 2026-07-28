@@ -23,7 +23,46 @@ export const TERMINAL_BORDER_RADIUS_PX = TERMINAL_BORDER_RADIUS_REM * 16;
 export const TERMINAL_TOP_RADIUS_CLASS = 'rounded-t-lg';
 export const TERMINAL_BOTTOM_RADIUS_CLASS = 'rounded-b-lg';
 export const TERMINAL_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem`;
-export const DOOR_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem ${TERMINAL_BORDER_RADIUS_REM}rem 0 0`;
+
+// The gutter between panes (and around the wall's top/sides — the baseboard
+// side stays a tight 2px). Deliberately ODD: the passthrough ring is a 1px
+// stroke, and a 1px stroke can only sit dead-center of a gutter on whole
+// device pixels when the gutter is odd. Consumed by LATH_LAYOUT_OPTS.gap and
+// mirrored by the Tailwind inset classes in Wall.tsx / Baseboard.tsx
+// (`*-1.75` = 7px) — keep them in sync.
+export const PANE_GUTTER_PX = 7;
+
+// Concentric-corners rule: when a rounded outline wraps a rounded edge, both
+// arcs must share a corner center — outer radius = inner radius + offset.
+// Never tighten the inner radius to compensate. The pane focus ring draws on
+// a rect inflated by SELECTION_RING_INFLATE_PX, so its radius grows by the
+// same amount; rings at zero offset (doors, the Lath drop preview) keep the
+// pane radius as-is.
+//
+// The inflate is derived so the ring is CENTERED in the gutter: the 1px
+// passthrough border draws just inside the inflated rect, spanning
+// [INFLATE-1, INFLATE] from the pane edge, so its center sits at
+// INFLATE - 0.5 = PANE_GUTTER_PX / 2. (Both selection-ring strokes center on
+// the same line via their path inset — see SelectionRing.)
+export const SELECTION_RING_INFLATE_PX = (PANE_GUTTER_PX + 1) / 2;
+export const PANE_SELECTION_RING_RADIUS_PX = TERMINAL_BORDER_RADIUS_PX + SELECTION_RING_INFLATE_PX;
+
+// Focus-ring motion. The selection ring's travel between panes/doors, the pane
+// header's active/inactive palette crossfade, and the ring's unfocus-saturate
+// fade all run on this single duration so they resolve as one gesture. Half the
+// Lath layout motion (LATH_MOTION_MS = 440) — the ring is a light overlay chasing
+// geometry the wall has already committed, so it settles quicker. The ring travel
+// itself is a JS tween on a pointer-events-none overlay (WorkspaceSelectionOverlay
+// + rect-tween.ts), the same per-frame carve-out the Lath animator holds against
+// DESIGN.md's "don't animate layout properties" rule.
+export const FOCUS_MOTION_MS = 220;
+
+// The pane-header palette crossfade, as a complete Tailwind literal so the
+// scanner emits it (a template built from FOCUS_MOTION_MS would be invisible to
+// it). The duration + house curve are asserted against FOCUS_MOTION_MS in
+// design.test.ts so this literal can't silently drift from the ring's timing.
+export const HEADER_PALETTE_TRANSITION_CLASS =
+  'transition-colors duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none';
 
 // Letter-spacing for the small semibold TODO pill — wider tracking keeps the
 // tiny label legible. Shared so both pill sites stay in sync.
@@ -86,7 +125,10 @@ export const modalOverlay = tv({
   variants: {
     scope: {
       viewport: 'fixed inset-0',
-      target: 'rounded',
+      // The target veil covers the target's exact rect (zero offset), so the
+      // Concentric-Corners Rule (DESIGN.md) makes its radius EQUAL the target's
+      // — panes round at rounded-lg (TERMINAL_*_RADIUS_CLASS above).
+      target: 'rounded-lg',
     },
     backdrop: {
       standard: 'bg-app-bg/50',
@@ -422,7 +464,9 @@ export type ChromeButtonVariants = VariantProps<typeof chromeButton>;
  * background tokens so Unzoom reads as the active escape hatch in every theme. */
 export function paneZoomButtonClass(zoomed: boolean, activeHeader: boolean): string {
   return clsx(
-    'flex h-5 min-w-5 items-center justify-center rounded transition-colors',
+    // The zoom pill's tokens flip with the header palette, so it rides the same
+    // crossfade timing as the header background instead of the default transition.
+    `flex h-5 min-w-5 items-center justify-center rounded ${HEADER_PALETTE_TRANSITION_CLASS}`,
     zoomed
       ? activeHeader
         ? 'bg-header-active-fg text-header-active-bg'
