@@ -41,7 +41,6 @@ typography:
     fontWeight: 500
 rounded:
   sm: "4px"
-  md: "6px"
   lg: "8px"
 spacing:
   xs: "2px"
@@ -52,7 +51,7 @@ components:
   door:
     backgroundColor: "{colors.door-bg}"
     textColor: "{colors.door-fg}"
-    rounded: "{rounded.md}"
+    rounded: "{rounded.lg}"
     height: "24px"
     padding: "0 10px"
     typography: "{typography.body}"
@@ -192,7 +191,7 @@ Shadows appear only on **raised surfaces that float above content**: popovers, t
 
 ### Doors
 Doors are the pane-header indicators on the baseboard. The most signature component in the system.
-- **Shape:** top corners only — `rounded-t-md` (6px). The bottom is square so the door visually anchors to the baseboard. The pane body owns the bottom corners (`rounded-b-md`); together they form one continuous rounded rectangle when expanded.
+- **Shape:** top corners only — `rounded-t-lg` (8px). The bottom is square so the door visually anchors to the baseboard. The pane body owns the bottom corners (`rounded-b-lg`); together they form one continuous rounded rectangle when expanded.
 - **Surface:** `bg-door-bg` + `text-door-fg`. These resolve at runtime via `computeDynamicPalette()` and may match either the inactive-header palette or the terminal palette, whichever has stronger separation from `app-bg`.
 - **Dimensions:** `h-6` (24px), `min-w-[68px]`, `max-w-[220px]`, horizontal padding `px-2.5` (10px), `gap-2` between title and badges.
 - **Type:** `text-sm font-medium font-mono`.
@@ -259,7 +258,7 @@ The selection ring around the focused pane in command mode is an SVG with `strok
 - **Do** render keybindings as `[k]` via `<Shortcut>` / `renderShortcuts`. Always muted, always bracketed.
 - **Do** gate every keyframe animation behind `@media (prefers-reduced-motion: reduce)`. The pattern is in `theme.css` already; reuse it.
 - **Do** use `shadow-[inset_0_0_0_1px_var(--color-…)]` instead of `border` when a stroke may toggle on state change. Border shifts layout; inset shadow does not.
-- **Do** treat doors as the navigation primitive. Doors own `rounded-t-md`; terminal bodies own `rounded-b-md`; together they form one rectangle.
+- **Do** treat doors as the navigation primitive. Doors own `rounded-t-lg`; terminal bodies own `rounded-b-lg`; together they form one rectangle.
 - **Do** use the spring-overshoot curve `cubic-bezier(0.34, 1.56, 0.64, 1)` only for state-resolution moments (TODO check, kill confirm, copy flash), and keep durations short (220–500ms).
 
 ### Don't:

@@ -14,13 +14,13 @@ export const PANE_HEADER_HEIGHT_PX = 30;
 // Pane headers/doors own the top corners; terminal bodies own the bottom.
 // All terminal-radius constants derive from this single source so the CSS
 // class, the SVG-friendly px value, and the inline-style rem string can't
-// drift apart. Tailwind's `md` step is 0.375rem; if that ever changes, both
+// drift apart. Tailwind's `lg` step is 0.5rem; if that ever changes, both
 // the class names and BASE_REM must move together.
 // Keep the class names as literals so Tailwind's scanner emits them.
-const TERMINAL_BORDER_RADIUS_REM = 0.375;
+const TERMINAL_BORDER_RADIUS_REM = 0.5;
 export const TERMINAL_BORDER_RADIUS_PX = TERMINAL_BORDER_RADIUS_REM * 16;
-export const TERMINAL_TOP_RADIUS_CLASS = 'rounded-t-md';
-export const TERMINAL_BOTTOM_RADIUS_CLASS = 'rounded-b-md';
+export const TERMINAL_TOP_RADIUS_CLASS = 'rounded-t-lg';
+export const TERMINAL_BOTTOM_RADIUS_CLASS = 'rounded-b-lg';
 export const TERMINAL_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem`;
 export const DOOR_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem ${TERMINAL_BORDER_RADIUS_REM}rem 0 0`;
 
@@ -106,8 +106,8 @@ export const modalOverlay = tv({
       viewport: 'fixed inset-0',
       // The target veil covers the target's exact rect (zero offset), so the
       // Concentric-Corners Rule (DESIGN.md) makes its radius EQUAL the target's
-      // — panes round at rounded-md (TERMINAL_*_RADIUS_CLASS above).
-      target: 'rounded-md',
+      // — panes round at rounded-lg (TERMINAL_*_RADIUS_CLASS above).
+      target: 'rounded-lg',
     },
     backdrop: {
       standard: 'bg-app-bg/50',
