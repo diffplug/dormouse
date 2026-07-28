@@ -1,6 +1,11 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { cfg } from '../../cfg';
-import { PANE_SELECTION_RING_RADIUS_PX, TERMINAL_BORDER_RADIUS_PX } from '../design';
+import {
+  PANE_GUTTER_PX,
+  PANE_SELECTION_RING_RADIUS_PX,
+  SELECTION_RING_INFLATE_PX,
+  TERMINAL_BORDER_RADIUS_PX,
+} from '../design';
 
 export function roundedRectPath(
   w: number,
@@ -47,10 +52,14 @@ export function MarchingAntsRect({ width, height, isDoor, color, paused }: {
   // offset; the door ring draws on the door rect itself and keeps the pane
   // radius. roundedRectPath then shrinks by `inset` so the stroke CENTERLINE
   // stays concentric with the wrapped corner.
+  //
+  // The pane inset places the stroke centerline at PANE_GUTTER_PX / 2 from the
+  // pane edge — the same gutter-centered line the 1px passthrough border sits
+  // on. The door ring has no gutter; it straddles the door edge instead.
   const r = isDoor ? TERMINAL_BORDER_RADIUS_PX : PANE_SELECTION_RING_RADIUS_PX;
   const br = isDoor ? 0 : r;
   const bl = isDoor ? 0 : r;
-  const inset = ma.strokeWidth / 2;
+  const inset = isDoor ? ma.strokeWidth / 2 : SELECTION_RING_INFLATE_PX - PANE_GUTTER_PX / 2;
 
   const d = roundedRectPath(width, height, r, r, br, bl, inset);
 

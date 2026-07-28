@@ -35,7 +35,7 @@ The user can navigate between all elements using the mouse, or by entering `comm
 Wall
 ├── Context providers (Mode, SelectedId, WallActions, PaneElements, DoorElements, RenamingId, Zoomed, WindowFocused)
 │   └── div (h-screen, flex col)
-│       ├── Content wrapper (flex-1, 6px top/sides inset, 2px bottom inset)
+│       ├── Content wrapper (flex-1, 7px top/sides inset, 2px bottom inset)
 │       │   ├── LathHost (the tiling engine's HTML adapter)
 │       │   │   └── Leaf divs (one Surface per leaf, absolutely positioned, never re-parented)
 │       │   │       ├── TerminalPanel → TerminalPane → xterm.js  (or BrowserPanel)
@@ -65,7 +65,7 @@ Wall
 
 ## Content
 
-The content area is a tiling layout of panes rendered by Lath (`docs/specs/tiling-engine.md`). Each pane is one **leaf** in Lath's split tree — a stable, absolutely-positioned div that is never re-parented (so a moved `<iframe>` never reloads and a focused xterm never blurs). Panes are separated by a 6px gap. There is no tab stacking: one Surface per leaf, always.
+The content area is a tiling layout of panes rendered by Lath (`docs/specs/tiling-engine.md`). Each pane is one **leaf** in Lath's split tree — a stable, absolutely-positioned div that is never re-parented (so a moved `<iframe>` never reloads and a focused xterm never blurs). Panes are separated by a 7px gap — odd on purpose, so the 1px selection ring can center in it on whole pixels (see Selection overlay). There is no tab stacking: one Surface per leaf, always.
 
 ### Tiling constraints
 
@@ -112,7 +112,7 @@ The mouse-override icon only appears when the inside program has requested mouse
 
 ## Baseboard
 
-Below the content area is the baseboard (`h-7`, 28px). It is visible by default and has no top divider. The content area ends 2px above it, leaving a narrow theme-colored gap that keeps rounded pane corners distinct from the baseboard. Its horizontal padding matches the content wrapper's 6px inset, so doors align with the panes above. When empty, it shows keyboard shortcut hints when there are no doors and the container is wider than 350px — platform-aware: `LCmd → RCmd to enter command mode` on macOS, `LShift → RShift to enter command mode` elsewhere (`Baseboard.tsx`).
+Below the content area is the baseboard (`h-7`, 28px). It is visible by default and has no top divider. The content area ends 2px above it, leaving a narrow theme-colored gap that keeps rounded pane corners distinct from the baseboard. Its horizontal padding matches the content wrapper's 7px inset, so doors align with the panes above. When empty, it shows keyboard shortcut hints when there are no doors and the container is wider than 350px — platform-aware: `LCmd → RCmd to enter command mode` on macOS, `LShift → RShift to enter command mode` elsewhere (`Baseboard.tsx`).
 
 `Wall` accepts `showBaseboard={false}` for constrained embedders such as the website's mobile Pocket playground, where a separate bottom navigation owns the area below the terminal and door workflows are outside the prototype scope. The main app shell keeps the default `showBaseboard=true`.
 
@@ -214,12 +214,12 @@ Untouched sessions skip this confirmation. A newly spawned shell starts `untouch
 
 ## Selection overlay
 
-A fixed-positioned element rendered on top of the Lath host. Covers the active element's area inflated by 3px (half the 6px gap) for panes; doors are not inflated.
+A fixed-positioned element rendered on top of the Lath host. Covers the active element's area inflated by `SELECTION_RING_INFLATE_PX` (4px) for panes; doors are not inflated. The inflate is derived in `lib/src/components/design.tsx` so both ring strokes center on the gutter's midline: the 1px passthrough border spans [3px, 4px] from the pane edge — dead center of the 7px gutter, on whole pixels because the gutter is odd.
 
 - A pane or door can be **active** or **inactive**. Only one element is active at a time.
 - **Passthrough:** `border: 1px solid ${color}` — no glow
 - **Command:** animated SVG marching-ants border — rounded rectangle path with `stroke-dasharray` animation (10px segment, 60% dash / 40% gap, 0.4s cycle, 2px stroke)
-- Border radius follows DESIGN.md's Concentric-Corners Rule: the pane ring's rect is inflated by `SELECTION_RING_INFLATE_PX`, so its radius is the pane radius plus that offset (`PANE_SELECTION_RING_RADIUS_PX` in `lib/src/components/design.tsx`, with the marching-ants path shrinking by half its stroke width so the stroke centerline stays concentric); doors sit at zero offset and keep `0.5rem 0.5rem 0 0`
+- Border radius follows DESIGN.md's Concentric-Corners Rule: the pane ring's rect is inflated by `SELECTION_RING_INFLATE_PX`, so its radius is the pane radius plus that offset (`PANE_SELECTION_RING_RADIUS_PX` in `lib/src/components/design.tsx`, with the marching-ants path inset so its stroke centerline sits on the same gutter midline, concentric with the pane corner); doors sit at zero offset and keep `0.5rem 0.5rem 0 0`
 - Color from CSS custom property `--mt-selection-terminal`
 - `z-index: 50`, `pointer-events: none`, `transition: 150ms`
 
@@ -330,7 +330,7 @@ Each session also carries `TerminalPaneState` from `docs/specs/terminal-state.md
 
 ## Theme
 
-The Lath host styling lives in the `.lath-host` / `.lath-leaf` rules in `lib/src/index.css`: an app-bg host and a terminal-bg body. Each leaf has a 30px header band applied by LathHost from the shared `PANE_HEADER_HEIGHT_PX` in `lib/src/components/design.tsx`. The content area uses a 6px top/sides inset and 2px bottom inset (`px-1.5 pt-1.5 pb-0.5` on wrapper, `inset-x-1.5 top-1.5 bottom-0.5` on container); the `LATH_LAYOUT_OPTS` gap of 6px is the only visual separator between panes.
+The Lath host styling lives in the `.lath-host` / `.lath-leaf` rules in `lib/src/index.css`: an app-bg host and a terminal-bg body. Each leaf has a 30px header band applied by LathHost from the shared `PANE_HEADER_HEIGHT_PX` in `lib/src/components/design.tsx`. The content area uses a 7px top/sides inset and 2px bottom inset (`px-1.75 pt-1.75 pb-0.5` on wrapper, `inset-x-1.75 top-1.75 bottom-0.5` on container); the `LATH_LAYOUT_OPTS` gap of 7px (`PANE_GUTTER_PX`) is the only visual separator between panes.
 
 Colors use a two-layer CSS variable strategy: `@theme --color-*` tokens → `var(--vscode-*)`. VSCode provides host theme variables in extension mode; standalone and website mode apply bundled or installed theme variables before rendering. Tailwind v4 `@theme` block registers `--color-*` tokens as Tailwind colors (e.g., `bg-app-bg`, `text-app-fg`, `border-border`). See `theme.css` for the full token map.
 

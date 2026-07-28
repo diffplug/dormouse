@@ -5,6 +5,7 @@ import {
   TERMINAL_BOTTOM_RADIUS_CLASS,
   TERMINAL_SELECTION_BORDER_RADIUS,
   DOOR_SELECTION_BORDER_RADIUS,
+  PANE_GUTTER_PX,
   SELECTION_RING_INFLATE_PX,
   PANE_SELECTION_RING_RADIUS_PX,
   PANE_SELECTION_RING_BORDER_RADIUS,
@@ -35,5 +36,15 @@ describe('terminal radius constants', () => {
   it('pane focus ring radius is concentric with the pane corner', () => {
     expect(PANE_SELECTION_RING_RADIUS_PX).toBe(TERMINAL_BORDER_RADIUS_PX + SELECTION_RING_INFLATE_PX);
     expect(PANE_SELECTION_RING_BORDER_RADIUS).toBe(`${PANE_SELECTION_RING_RADIUS_PX}px`);
+  });
+
+  // The 1px passthrough border draws just inside the inflated rect, spanning
+  // [INFLATE-1, INFLATE] from the pane edge. Centering it in the gutter needs
+  // its middle (INFLATE - 0.5) on the gutter's centerline — which only lands
+  // on whole pixels because the gutter is odd.
+  it('pane focus ring is centered in the gutter, on whole pixels', () => {
+    expect(SELECTION_RING_INFLATE_PX - 0.5).toBe(PANE_GUTTER_PX / 2);
+    expect(PANE_GUTTER_PX % 2).toBe(1);
+    expect(Number.isInteger(SELECTION_RING_INFLATE_PX)).toBe(true);
   });
 });

@@ -152,7 +152,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   return (
     <div
       ref={containerRef}
-      className="flex h-7 shrink-0 items-end gap-1.5 bg-app-bg px-1.5 pt-1"
+      className="flex h-7 shrink-0 items-end gap-1.5 bg-app-bg px-1.75 pt-1"
     >
       {/* Hidden measurement pass — doors + overflow arrow */}
       <div ref={measureEl} className="absolute -left-[9999px] flex gap-1.5" aria-hidden>

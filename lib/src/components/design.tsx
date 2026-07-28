@@ -24,13 +24,27 @@ export const TERMINAL_BOTTOM_RADIUS_CLASS = 'rounded-b-lg';
 export const TERMINAL_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem`;
 export const DOOR_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem ${TERMINAL_BORDER_RADIUS_REM}rem 0 0`;
 
+// The gutter between panes (and around the wall's top/sides — the baseboard
+// side stays a tight 2px). Deliberately ODD: the passthrough ring is a 1px
+// stroke, and a 1px stroke can only sit dead-center of a gutter on whole
+// device pixels when the gutter is odd. Consumed by LATH_LAYOUT_OPTS.gap and
+// mirrored by the Tailwind inset classes in Wall.tsx / Baseboard.tsx
+// (`*-1.75` = 7px) — keep them in sync.
+export const PANE_GUTTER_PX = 7;
+
 // Concentric-corners rule: when a rounded outline wraps a rounded edge, both
 // arcs must share a corner center — outer radius = inner radius + offset.
 // Never tighten the inner radius to compensate. The pane focus ring draws on
 // a rect inflated by SELECTION_RING_INFLATE_PX, so its radius grows by the
 // same amount; rings at zero offset (doors, the Lath drop preview) keep the
 // pane radius as-is.
-export const SELECTION_RING_INFLATE_PX = 3;
+//
+// The inflate is derived so the ring is CENTERED in the gutter: the 1px
+// passthrough border draws just inside the inflated rect, spanning
+// [INFLATE-1, INFLATE] from the pane edge, so its center sits at
+// INFLATE - 0.5 = PANE_GUTTER_PX / 2. (The marching-ants stroke centers on
+// the same line via its path inset — see MarchingAntsRect.)
+export const SELECTION_RING_INFLATE_PX = (PANE_GUTTER_PX + 1) / 2;
 export const PANE_SELECTION_RING_RADIUS_PX = TERMINAL_BORDER_RADIUS_PX + SELECTION_RING_INFLATE_PX;
 export const PANE_SELECTION_RING_BORDER_RADIUS = `${PANE_SELECTION_RING_RADIUS_PX}px`;
 
