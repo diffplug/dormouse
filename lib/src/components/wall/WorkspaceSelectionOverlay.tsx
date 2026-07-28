@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   FOCUS_MOTION_MS,
   PANE_GUTTER_PX,
@@ -11,7 +11,9 @@ import { motionIsInstant } from '../../lib/ui-geometry';
 import {
   retargetRingTween,
   sampleRingTween,
+  sampleRingVelocity,
   startRingTween,
+  type RingEdgeSpeeds,
   type RingFrame,
   type RingRect,
   type RingShape,
@@ -21,7 +23,17 @@ import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
 import { resolvePaneElement } from './resolve-pane-element';
 import type { WallMode, WallSelectionKind } from './wall-types';
 import { DoorElementsContext, PaneElementsContext, WindowFocusedContext } from './wall-context';
-import { SelectionRing, roundedRectPath, type RingVelocity } from './SelectionRing';
+import {
+  CORNER_EDGES,
+  cornerPath,
+  edgePath,
+  isRingCorner,
+  RING_PIECES,
+  ringPerimeter,
+  roundedRectPath,
+  type RingEdge,
+} from '../../lib/ring-geometry';
+import { SelectionRing } from './SelectionRing';
 
 /** The subset of the Lath store the overlay needs — a revision that bumps on every
  *  commit, so the ring re-measures as leaves move / resize / restore. Kept
@@ -73,13 +85,89 @@ function framesEqual(a: RingFrame, b: RingFrame): boolean {
   );
 }
 
-/** The frame the ring currently shows: geometry plus the motion-blur `velocity`,
- *  which is populated only while a tween runs; a settled ring carries null velocity,
+/** The frame the ring currently shows: geometry plus the per-edge motion-smear
+ *  `speeds`, populated only while a tween runs; a settled ring carries null speeds,
  *  so its render is clean. Held in a ref and written to the DOM imperatively. */
 interface DisplayedRing {
   rect: RingRect;
   shape: RingShape;
-  velocity: RingVelocity | null;
+  speeds: RingEdgeSpeeds | null;
+}
+
+/**
+ * Draw the eight-piece motion smear underneath the ring, or hide it when the ring
+ * is settled. `shape.inset` is the effective inset for the active variant, so this
+ * is the only inset in play.
+ *
+ * Each edge smears only by its OWN motion across itself, so the four are
+ * independent — see `docs/specs/layout.md` → "Ring travel" for why a single
+ * ring-centre velocity gets ordinary split layouts wrong.
+ *
+ * Straight edges carry their width in a plain `stroke-width`. Corners cannot —
+ * they have to reach two different widths at once — so each is stroked at unit
+ * width and scaled, which tapers it between its neighbours (`cornerPath`).
+ */
+function writeSmear(
+  group: SVGGElement,
+  rect: RingRect,
+  shape: RingShape,
+  strokeWidth: number,
+  speeds: RingEdgeSpeeds | null,
+): void {
+  if (!speeds) {
+    group.style.display = 'none';
+    return;
+  }
+  group.style.display = '';
+
+  const { smearFullSpeed, smearMaxPx, smearPeakAlpha } = cfg.focusRing;
+  // One signal, two channels. `t` is this edge's speed normalized against the
+  // speed at which the smear is fully developed; extent and intensity are then
+  // independent linear ramps off it, each with its own ceiling. Both start at
+  // zero, so an edge that is not moving contributes nothing rather than laying a
+  // band under the crisp ring.
+  //
+  // Intensity deliberately does NOT divide by the widening factor. Strict ink
+  // conservation ties peak alpha to the extent (a wider smear is proportionally
+  // fainter, total ink fixed), which makes the effect impossible to strengthen by
+  // widening it — the same ink just spreads thinner.
+  const band = (speed: number) => {
+    const t = Math.min(1, speed / smearFullSpeed);
+    return {
+      width: strokeWidth + t * (smearMaxPx - strokeWidth),
+      opacity: t * smearPeakAlpha,
+    };
+  };
+  const bands: Record<RingEdge, ReturnType<typeof band>> = {
+    top: band(speeds.top),
+    right: band(speeds.right),
+    bottom: band(speeds.bottom),
+    left: band(speeds.left),
+  };
+
+  for (const piece of RING_PIECES) {
+    const el = group.querySelector<SVGPathElement>(`[data-piece="${piece}"]`);
+    if (!el) continue;
+    if (!isRingCorner(piece)) {
+      const { width, opacity } = bands[piece];
+      el.setAttribute('d', edgePath(piece, rect, shape));
+      el.setAttribute('stroke-width', `${width}`);
+      el.setAttribute('stroke-opacity', `${opacity}`);
+      el.removeAttribute('transform');
+      continue;
+    }
+    // Corner: `a` is the vertical neighbour's width, `b` the horizontal one, so
+    // the unit stroke renders exactly each neighbour's width where it meets it.
+    const [vertical, horizontal] = CORNER_EDGES[piece];
+    const a = bands[vertical].width;
+    const b = bands[horizontal].width;
+    el.setAttribute('d', cornerPath(piece, rect, shape, a, b));
+    el.setAttribute('stroke-width', '1');
+    el.setAttribute('transform', `scale(${a} ${b})`);
+    // Opacity cannot vary along a stroke, so a corner takes the mean of the two
+    // edges it joins.
+    el.setAttribute('stroke-opacity', `${(bands[vertical].opacity + bands[horizontal].opacity) / 2}`);
+  }
 }
 
 export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, selectedId, selectedType, mode }: {
@@ -111,9 +199,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   // the mutations).
   const containerRef = useRef<HTMLDivElement>(null);
   const pathRef = useRef<SVGPathElement>(null);
-  const filterRef = useRef<SVGFilterElement>(null);
-  const blurRef = useRef<SVGFEGaussianBlurElement>(null);
-  const filterId = `selection-ring-blur-${useId().replace(/:/g, '')}`;
+  const smearRef = useRef<SVGGElement>(null);
 
   // Latest values the imperative writer reads. `frameRef` is the frame on screen;
   // `modeRef` mirrors the current mode so any `applyRing` closure derives the right
@@ -132,15 +218,8 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   const tweenRef = useRef<RingTween | null>(null);
   const rafRef = useRef<number | null>(null);
 
-  // Motion-blur inputs, sampled inside the rAF loop: the previous center + timestamp
-  // (finite-difference velocity source) and the EMA-smoothed velocity that drives
-  // the directional blur. Both are cleared at tween start / on settle so a resting
-  // ring renders with zero blur (Chromatic determinism).
-  const prevCenterRef = useRef<{ x: number; y: number; t: number } | null>(null);
-  const smoothedVelRef = useRef<RingVelocity | null>(null);
-
   // Write the current frame to the DOM: container geometry, the ring path, the
-  // marching-ants dash (command mode), and the directional-blur filter. Reads
+  // marching-ants dash (command mode), and the directional smear. Reads
   // everything from refs so it is correct no matter which closure calls it (the rAF
   // tick, a snap, or the post-render re-apply below).
   const applyRing = useCallback(() => {
@@ -148,7 +227,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     const container = containerRef.current;
     const path = pathRef.current;
     if (!frame || !container || !path) return;
-    const { rect, shape, velocity } = frame;
+    const { rect, shape, speeds } = frame;
 
     container.style.top = `${rect.top}px`;
     container.style.left = `${rect.left}px`;
@@ -159,16 +238,21 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     const strokeWidth = isAnts ? cfg.marchingAnts.strokeWidth : 1;
     // Solid centers its 1px stroke a fixed strokeWidth/2 (0.5) inside the div edge —
     // pixel-parity with the retired CSS border; ants uses the shape's lerped inset.
-    const effInset = isAnts ? shape.inset : strokeWidth / 2;
-    path.setAttribute('d', roundedRectPath(rect.width, rect.height, shape.tl, shape.tr, shape.br, shape.bl, effInset));
+    // Resolved once here so every path builder below sees a single inset.
+    const effShape = isAnts ? shape : { ...shape, inset: strokeWidth / 2 };
+
+    path.setAttribute('d', roundedRectPath(rect, effShape));
 
     if (isAnts) {
       // Dash sized to the perimeter so the segments stay even as the ring resizes.
-      const len = path.getTotalLength();
+      // Computed in closed form rather than via `path.getTotalLength()`, which
+      // forces a synchronous style+layout flush on every frame of a travel at a
+      // cost that scales with the whole document, not this one path.
+      const len = ringPerimeter(rect, effShape);
       const count = Math.max(1, Math.round(len / cfg.marchingAnts.segLen));
       const adjusted = len / count;
       const dash = adjusted * cfg.marchingAnts.dashFraction;
-      const gap = adjusted * (1 - cfg.marchingAnts.dashFraction);
+      const gap = adjusted - dash;
       path.setAttribute('stroke-dasharray', `${dash} ${gap}`);
       path.style.setProperty('--march-offset', `-${adjusted}px`);
     } else {
@@ -179,43 +263,15 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       path.style.removeProperty('--march-offset');
     }
 
-    // Directional motion blur — per-axis sigma from the ring center velocity. The
-    // filter stays attached for the WHOLE travel (velocity non-null), with sigma
-    // running continuously down to zero: attaching only above a sigma threshold
-    // popped the ring between crisp and blurred at each end of the glide, which
-    // reads as jank even at a solid 60fps. A settled ring (null velocity) carries
-    // no filter at all. The region hugs the ring (userSpaceOnUse, ~3σ pad) so
-    // WebKit's per-frame CPU raster stays small.
-    let sx = 0;
-    let sy = 0;
-    if (velocity) {
-      sx = Math.min(cfg.focusRing.blurMaxPx, Math.abs(velocity.x) * cfg.focusRing.blurGain);
-      sy = Math.min(cfg.focusRing.blurMaxPx, Math.abs(velocity.y) * cfg.focusRing.blurGain);
-    }
-    const filt = filterRef.current;
-    const blur = blurRef.current;
-    if (velocity && filt && blur) {
-      const pad = Math.ceil(3 * cfg.focusRing.blurMaxPx) + 2;
-      filt.setAttribute('x', `${-pad}`);
-      filt.setAttribute('y', `${-pad}`);
-      filt.setAttribute('width', `${rect.width + pad * 2}`);
-      filt.setAttribute('height', `${rect.height + pad * 2}`);
-      blur.setAttribute('stdDeviation', `${sx} ${sy}`);
-      path.setAttribute('filter', `url(#${filterId})`);
-    } else {
-      path.removeAttribute('filter');
-    }
-  }, [filterId]);
+    const smear = smearRef.current;
+    if (smear) writeSmear(smear, rect, effShape, strokeWidth, speeds);
+  }, []);
 
   // Re-run the measuring effect after each Lath commit. Runs post-render, so
   // `getBoundingClientRect` sees the repositioned leaf divs.
   const lathRevision = useSyncExternalStore(lathStore.subscribe, () => lathStore.getSnapshot().revision);
 
   useEffect(() => {
-    const resetMotionSamples = () => {
-      prevCenterRef.current = null;
-      smoothedVelRef.current = null;
-    };
     // Show a frame: record it, then either apply it now (already mounted) or mount
     // the shell (the post-render layout effect applies it before paint).
     const show = (frame: DisplayedRing) => {
@@ -229,11 +285,11 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       }
     };
     const showSettled = (frame: RingFrame) =>
-      show({ rect: frame.rect, shape: frame.shape, velocity: null });
+      show({ rect: frame.rect, shape: frame.shape, speeds: null });
 
-    // Per-frame imperative loop: sample the tween, derive the smoothed blur
-    // velocity, write the DOM, and self-schedule — no React state, so a travelling
-    // ring never reconciles.
+    // Per-frame imperative loop: sample the tween's position and velocity, write
+    // the DOM, and self-schedule — no React state, so a travelling ring never
+    // reconciles.
     const tick = () => {
       rafRef.current = null;
       const tween = tweenRef.current;
@@ -241,38 +297,19 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       const now = performance.now();
       const { rect, shape, done } = sampleRingTween(tween, now);
       if (done) {
-        // Settled: drop the tween and motion samples so the final render is clean.
+        // Settled: drop the tween so the final render is clean.
         tweenRef.current = null;
-        resetMotionSamples();
         showSettled({ rect, shape });
         return;
       }
-      // Finite-difference velocity of the ring center (px/ms); null on the first
-      // frame or a zero dt.
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      const prev = prevCenterRef.current;
-      const dt = prev ? now - prev.t : 0;
-      const raw: RingVelocity | null = prev && dt > 0
-        ? { x: (cx - prev.x) / dt, y: (cy - prev.y) / dt }
-        : null;
-      prevCenterRef.current = { x: cx, y: cy, t: now };
+      // Velocity comes from the tween's analytic derivative, so it is exact on the
+      // FIRST frame — where the house ease-out is 4.5x its average speed and the
+      // smear should be strongest. Finite-differencing rendered positions cannot
+      // do that: it has no previous sample to difference on frame one, and that
+      // frame alone covers ~31% of a 220ms travel.
+      const speeds = sampleRingVelocity(tween, now);
 
-      // Low-pass the raw finite-difference velocity so rAF frame-timing jitter
-      // doesn't make the blur pulse. Seeded from ZERO on purpose: the house
-      // ease-out starts at peak speed, so a first-sample seed would pop the ring
-      // from crisp to fully smeared in one frame — from zero, the smear swells in
-      // over ~2 frames (imperceptible as lag at 60fps). A settled ring's null
-      // velocity resets the filter.
-      let velocity: RingVelocity | null = null;
-      if (raw) {
-        const a = cfg.focusRing.blurSmoothing;
-        const sm = smoothedVelRef.current ?? { x: 0, y: 0 };
-        velocity = { x: sm.x + (raw.x - sm.x) * a, y: sm.y + (raw.y - sm.y) * a };
-        smoothedVelRef.current = velocity;
-      }
-
-      frameRef.current = { rect, shape, velocity };
+      frameRef.current = { rect, shape, speeds };
       displayedFrameRef.current = { rect, shape };
       applyRing();
       rafRef.current = requestAnimationFrame(tick);
@@ -289,7 +326,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     const snapTo = (frame: RingFrame, identity: string) => {
       tweenRef.current = null;
       cancelTick();
-      resetMotionSamples();
       displayedIdentityRef.current = identity;
       showSettled(frame);
     };
@@ -297,7 +333,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     if (!selectedId) {
       tweenRef.current = null;
       cancelTick();
-      resetMotionSamples();
       displayedIdentityRef.current = null;
       displayedFrameRef.current = null;
       frameRef.current = null;
@@ -335,10 +370,8 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
         return;
       }
       // Selection identity changed → tween from the current on-screen frame; the
-      // clock restarts (and motion samples reset) so rapid re-selection stays
-      // responsive and the new travel's velocity starts fresh.
+      // clock restarts so rapid re-selection stays responsive.
       if (identity !== displayedIdentityRef.current) {
-        resetMotionSamples();
         tweenRef.current = startRingTween(displayedFrameRef.current, next, performance.now(), FOCUS_MOTION_MS);
         displayedIdentityRef.current = identity;
         scheduleTick();
@@ -397,11 +430,9 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       variant={mode === 'passthrough' ? 'solid' : 'ants'}
       color={selectionColor}
       windowFocused={windowFocused}
-      filterId={filterId}
       containerRef={containerRef}
       pathRef={pathRef}
-      filterRef={filterRef}
-      blurRef={blurRef}
+      smearRef={smearRef}
     />
   );
 }

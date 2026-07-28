@@ -29,6 +29,10 @@ if (window?.navigator?.userAgent?.includes('Chromatic')) {
   // A blinking cursor is captured on-or-off depending on the frame; freeze it to a
   // stable solid block so the terminal contributes no non-determinism.
   cfg.terminal.cursorBlink = false;
+  // Keep terminals on the DOM renderer. WebGL paints into a <canvas>, which
+  // snapshots as an opaque bitmap and varies with the GPU/driver the runner
+  // happens to get; styled spans diff deterministically.
+  cfg.terminal.webglRenderer = false;
   // Snap pane splits/restores to their final geometry instead of tweening. A
   // mid-tween split resizes panes through many transient widths, and xterm's DOM
   // renderer can latch a frame where a pane is still narrow — freezing its last

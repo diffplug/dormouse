@@ -31,6 +31,15 @@ export interface RingFrame {
   shape: RingShape;
 }
 
+/** Perpendicular speed of each ring edge while it travels (px/ms). See
+ *  `sampleRingVelocity` for why the four are independent. */
+export interface RingEdgeSpeeds {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
 /** A ring motion segment: interpolate `from → to` over `[start, start+durationMs]`,
  *  eased by the house curve. The same shape as the Lath animator's `Segment`,
  *  minus the DOM. */
@@ -81,17 +90,61 @@ export function retargetRingTween(tween: RingTween, to: RingFrame): RingTween {
   return { from: tween.from, to, start: tween.start, durationMs: tween.durationMs };
 }
 
+/** Raw (unclamped) progress through the tween, plus the `[0,1]` value the easing
+ *  is evaluated at. Position and velocity MUST read the clock the same way or the
+ *  smear desynchronizes from the ring it describes, so both go through here. A
+ *  zero-duration tween reads as already complete. */
+function progressAt(tween: RingTween, now: number): { raw: number; clamped: number } {
+  const raw = tween.durationMs <= 0 ? 1 : (now - tween.start) / tween.durationMs;
+  return { raw, clamped: raw < 0 ? 0 : raw > 1 ? 1 : raw };
+}
+
 /** Sample the tween at `now`, eased by `LATH_EASING`. Exact at both endpoints
  *  (`LATH_EASING` returns 0/1 at the bounds, so the lerp resolves to `from`/`to`
  *  identically); a zero-duration tween reads as done at `to`. `done` flips true
  *  once the clock reaches the completion instant. */
 export function sampleRingTween(tween: RingTween, now: number): { rect: RingRect; shape: RingShape; done: boolean } {
-  const raw = tween.durationMs <= 0 ? 1 : (now - tween.start) / tween.durationMs;
-  const clamped = raw < 0 ? 0 : raw > 1 ? 1 : raw;
+  const { clamped } = progressAt(tween, now);
   const eased = LATH_EASING(clamped);
   return {
     rect: lerpRect(tween.from.rect, tween.to.rect, eased),
     shape: lerpShape(tween.from.shape, tween.to.shape, eased),
     done: clamped >= 1,
+  };
+}
+
+/**
+ * Each edge's perpendicular speed at `now`, in px/ms — the exact derivative of
+ * `sampleRingTween`, not a difference of two samples.
+ *
+ * The rect is a plain lerp of `from → to` under `LATH_EASING`, so every edge's
+ * position is `from + (to - from) * E(t)` and its speed falls straight out as
+ * `|to - from| * E'(t) / durationMs`. Only the component ACROSS each edge counts
+ * (a horizontal edge is moved by `top`/`bottom`, a vertical one by `left`/
+ * `right`); motion along an edge slides it along its own length and smears
+ * nothing.
+ *
+ * Analytic rather than finite-differenced on purpose. Differencing successive
+ * frames costs a frame of lag, reports nothing at all on the first frame (there
+ * is no previous sample yet), and under-reports a decelerating curve because a
+ * backward difference averages over the interval. On a 220ms ease-out whose
+ * velocity peaks at 4.5x its average at `t = 0`, those three losses land exactly
+ * where the smear should be strongest. This is also jitter-free by construction:
+ * it never differences wall-clock timestamps, so it needs no smoothing.
+ */
+export function sampleRingVelocity(tween: RingTween, now: number): RingEdgeSpeeds {
+  const { raw, clamped } = progressAt(tween, now);
+  // At or past the completion instant the ring is parked. `slope` already clamps
+  // its own argument, so this exists only to force an exact zero — a settled ring
+  // must never carry a smear, and the curve's slope merely approaches 0.
+  const rate = raw >= 1 ? 0 : LATH_EASING.slope(clamped) / tween.durationMs;
+  const from = tween.from.rect;
+  const to = tween.to.rect;
+  const edge = (a: number, b: number) => Math.abs(b - a) * rate;
+  return {
+    top: edge(from.top, to.top),
+    bottom: edge(from.top + from.height, to.top + to.height),
+    left: edge(from.left, to.left),
+    right: edge(from.left + from.width, to.left + to.width),
   };
 }

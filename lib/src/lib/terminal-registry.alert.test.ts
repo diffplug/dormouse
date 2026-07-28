@@ -133,6 +133,13 @@ class MockElement {
   style: Record<string, string> = {};
   parentElement: MockElement | null = null;
   children: MockElement[] = [];
+  attributes: Record<string, string> = {};
+
+  // `mountElement` stamps `data-renderer` here to record which renderer the
+  // terminal ended up on (see `tryEnableWebglRenderer`).
+  setAttribute(name: string, value: string): void {
+    this.attributes[name] = value;
+  }
 
   appendChild(child: MockElement): MockElement {
     child.remove();

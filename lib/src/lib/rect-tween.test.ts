@@ -3,6 +3,7 @@ import { LATH_EASING } from './lath/animator';
 import {
   retargetRingTween,
   sampleRingTween,
+  sampleRingVelocity,
   startRingTween,
   type RingFrame,
 } from './rect-tween';
@@ -109,5 +110,48 @@ describe('rect-tween', () => {
     expect(mid.shape.inset).toBeCloseTo(0.5 + (1 - 0.5) * e, 6);
     // Endpoints remain exact door geometry.
     expect(sampleRingTween(tween, DUR).shape).toEqual(DOOR_SHAPE);
+  });
+});
+
+describe('sampleRingVelocity', () => {
+  // The whole reason this exists rather than differencing rendered frames: the
+  // house ease-out is fastest at t=0, and a difference has nothing to report there.
+  it('is fastest at the very start and decays monotonically to zero', () => {
+    const tween = startRingTween(A, B, 0, DUR);
+    const speeds = [0, 20, 40, 60, 90, 120, 160, 200, DUR].map(
+      (t) => sampleRingVelocity(tween, t).left,
+    );
+    expect(speeds[0]).toBeGreaterThan(0);
+    for (let i = 1; i < speeds.length; i++) {
+      expect(speeds[i]).toBeLessThan(speeds[i - 1]);
+    }
+    expect(speeds[speeds.length - 1]).toBeCloseTo(0, 6);
+  });
+
+  it('matches the curve: peak is E\'(0) x distance / duration', () => {
+    const tween = startRingTween(A, B, 0, DUR);
+    // Left edge travels 0 → 300 over 220ms; E'(0) for cubic-bezier(.22,1,.36,1)
+    // is y1/x1 = 1/0.22 = 4.545…, so the opening speed is 4.545x the average.
+    expect(sampleRingVelocity(tween, 0).left).toBeCloseTo((300 / DUR) * (1 / 0.22), 4);
+  });
+
+  it('reports each edge independently, so a flush edge never smears', () => {
+    // Same top, different height: the top edge only translates sideways, which
+    // slides it along its own length — no perpendicular motion, no smear.
+    const from: RingFrame = { rect: { top: 0, left: 0, width: 100, height: 200 }, shape: PANE_SHAPE };
+    const to: RingFrame = { rect: { top: 0, left: 300, width: 100, height: 60 }, shape: PANE_SHAPE };
+    const v = sampleRingVelocity(startRingTween(from, to, 0, DUR), 0);
+    expect(v.top).toBe(0);
+    expect(v.bottom).toBeGreaterThan(0); // 200 → 60, moves across itself
+    expect(v.left).toBeGreaterThan(0);
+    expect(v.left).toBeCloseTo(v.right, 6); // both translate at the same rate
+  });
+
+  it('is zero once settled, and for a zero-duration tween', () => {
+    const tween = startRingTween(A, B, 0, DUR);
+    expect(sampleRingVelocity(tween, DUR).left).toBeCloseTo(0, 6);
+    expect(sampleRingVelocity(tween, DUR * 2).left).toBe(0);
+    const snap = startRingTween(A, B, 0, 0);
+    expect(sampleRingVelocity(snap, 0)).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
   });
 });

@@ -1,71 +1,38 @@
 import { type Ref } from 'react';
 import { cfg } from '../../cfg';
+import { RING_PIECES } from '../../lib/ring-geometry';
 import { FOCUS_MOTION_MS } from '../design';
-
-export function roundedRectPath(
-  w: number,
-  h: number,
-  tl: number,
-  tr: number,
-  br: number,
-  bl: number,
-  inset: number,
-): string {
-  const i = inset;
-  const rtl = Math.max(0, tl - i);
-  const rtr = Math.max(0, tr - i);
-  const rbr = Math.max(0, br - i);
-  const rbl = Math.max(0, bl - i);
-  const mx = w / 2;
-  return (
-    `M ${mx},${i} ` +
-    `L ${w - i - rtr},${i} ` +
-    `Q ${w - i},${i} ${w - i},${i + rtr} ` +
-    `L ${w - i},${h - i - rbr} ` +
-    `Q ${w - i},${h - i} ${w - i - rbr},${h - i} ` +
-    `L ${i + rbl},${h - i} ` +
-    `Q ${i},${h - i} ${i},${h - i - rbl} ` +
-    `L ${i},${i + rtl} ` +
-    `Q ${i},${i} ${i + rtl},${i} ` +
-    'Z'
-  );
-}
-
-/** Per-axis center velocity of the ring while it travels (px/ms), or null when
- *  settled. Drives the directional motion-blur filter. */
-export interface RingVelocity {
-  x: number;
-  y: number;
-}
 
 // SelectionRing is a STABLE structural shell — it renders the ring's DOM once per
 // variant/color/focus change and hands its nodes back through refs; the overlay
-// then drives geometry, the path `d`, and the blur filter imperatively from its rAF
-// loop (never per-frame React). This is the same split LathHost uses for the Lath
-// animator: React owns structure, the animation frame owns the DOM mutations. It
-// matters because WebKit rasterizes the SVG blur on the CPU every frame, so a
-// per-frame React reconcile of this subtree competes with that raster for the frame
-// budget and makes Safari choppy.
+// then drives geometry, the path `d`, and the motion smear imperatively from its
+// rAF loop (never per-frame React). This is the same split LathHost uses for the
+// Lath animator: React owns structure, the animation frame owns the DOM mutations.
 //
 //  - `variant='ants'`: 2px dashed stroke, marching animation (the dash geometry and
 //    `--march-offset` are written imperatively). Command-mode ring.
 //  - `variant='solid'`: 1px stroke, no dash/animation. Passthrough ring, replacing
 //    the retired 1px CSS border (pixel-identical stroke placement).
 //
-// Geometry (`top/left/width/height`, `d`, the blur `<filter>` region/`stdDeviation`,
-// and the marching-ants dash) is NEVER in this JSX, so a React re-render of the
-// shell leaves the imperative writes untouched.
+// Two layers, because the ring and its motion smear want incompatible geometry.
+// The ring is ONE closed path so the marching-ants dash phase runs unbroken around
+// the perimeter; the smear needs four independent edge widths, which a single
+// stroke cannot carry. So the smear is a sibling group of eight solid pieces
+// underneath, and the ring itself is never transformed or dashed differently —
+// it stays exactly what it was before any smear existed.
+//
+// Geometry (`top/left/width/height`, every `d`, the smear widths/opacities, and
+// the marching-ants dash) is NEVER in this JSX, so a React re-render of the shell
+// leaves the imperative writes untouched.
 export function SelectionRing({
-  variant, color, windowFocused, filterId, containerRef, pathRef, filterRef, blurRef,
+  variant, color, windowFocused, containerRef, pathRef, smearRef,
 }: {
   variant: 'ants' | 'solid';
   color: string;
   windowFocused: boolean;
-  filterId: string;
   containerRef: Ref<HTMLDivElement>;
   pathRef: Ref<SVGPathElement>;
-  filterRef: Ref<SVGFilterElement>;
-  blurRef: Ref<SVGFEGaussianBlurElement>;
+  smearRef: Ref<SVGGElement>;
 }) {
   const ma = cfg.marchingAnts;
   const isAnts = variant === 'ants';
@@ -87,15 +54,29 @@ export function SelectionRing({
         xmlns="http://www.w3.org/2000/svg"
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible' }}
       >
-        {/* Always present (region + stdDeviation set imperatively); the path only
-            references it via a `filter` attr while actually moving. sRGB
-            interpolation (not the filter default linearRGB) keeps the blurred smear
-            the ring's true color/brightness instead of muddying it. */}
-        <filter ref={filterRef} id={filterId} filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB">
-          <feGaussianBlur ref={blurRef} />
-        </filter>
+        {/* Smear first so it sits behind the ring. Hidden outright when settled,
+            which is what keeps a resting ring byte-identical for Chromatic. */}
+        <g ref={smearRef} data-ring="smear" style={{ display: 'none' }}>
+          {RING_PIECES.map((piece) => (
+            <path
+              key={piece}
+              // Looked up by name, never by index — render order here is
+              // presentational and must not be load-bearing.
+              data-piece={piece}
+              fill="none"
+              stroke={color}
+              // Corners are stroked at unit width and scaled; straight edges
+              // overwrite this with their own width. Both are imperative.
+              strokeWidth={1}
+              transform-origin="0 0"
+            />
+          ))}
+        </g>
         <path
           ref={pathRef}
+          // Stable hook: the smear group renders eight paths ahead of this one,
+          // so positional selectors no longer find the ring.
+          data-ring="outline"
           fill="none"
           stroke={color}
           strokeWidth={isAnts ? ma.strokeWidth : 1}
