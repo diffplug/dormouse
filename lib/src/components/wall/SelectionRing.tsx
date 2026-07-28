@@ -38,16 +38,6 @@ function ringCorners(tl: number, tr: number, br: number, bl: number, inset: numb
   };
 }
 
-/** Perpendicular speed of each ring edge while it travels (px/ms), or null when
- *  settled. Each edge smears only by its OWN motion across itself — sliding
- *  along its own length leaves it unchanged — so the four are independent. */
-export interface RingEdgeSpeeds {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
-}
-
 /** The eight motion-smear pieces, in the order `SelectionRing` renders them and
  *  `WorkspaceSelectionOverlay` indexes the group's children. Straight edges take
  *  a plain `stroke-width`; corners taper between their two neighbours' widths

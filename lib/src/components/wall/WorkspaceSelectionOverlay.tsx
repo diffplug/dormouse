@@ -11,7 +11,9 @@ import { motionIsInstant } from '../../lib/ui-geometry';
 import {
   retargetRingTween,
   sampleRingTween,
+  sampleRingVelocity,
   startRingTween,
+  type RingEdgeSpeeds,
   type RingFrame,
   type RingRect,
   type RingShape,
@@ -29,7 +31,6 @@ import {
   SMEAR_PIECES,
   type RingCorner,
   type RingEdge,
-  type RingEdgeSpeeds,
 } from './SelectionRing';
 
 /** The subset of the Lath store the overlay needs — a revision that bumps on every
@@ -148,13 +149,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   const tweenRef = useRef<RingTween | null>(null);
   const rafRef = useRef<number | null>(null);
 
-  // Motion-smear inputs, sampled inside the rAF loop: the previous edge positions +
-  // timestamp (the finite-difference source) and the EMA-smoothed per-edge speeds
-  // that drive the smear. Both are cleared at tween start / on settle so a resting
-  // ring renders with no smear at all (Chromatic determinism).
-  const prevEdgesRef = useRef<{ top: number; right: number; bottom: number; left: number; t: number } | null>(null);
-  const smoothedSpeedsRef = useRef<RingEdgeSpeeds | null>(null);
-
   /**
    * Draw the eight-piece motion smear underneath the ring, or hide it when the
    * ring is settled.
@@ -186,21 +180,23 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     }
     group.style.display = '';
 
-    const { smearGain, smearMaxPx, smearPeakAlpha } = cfg.focusRing;
-    const maxScale = smearMaxPx / strokeWidth;
-    // Extent and intensity are INDEPENDENT knobs. Both ramp from zero with this
-    // edge's own speed — so an edge that is not moving contributes nothing rather
-    // than laying a band under the crisp ring — but alpha ramps toward an explicit
-    // `smearPeakAlpha` rather than toward `1/scale`. Strict ink conservation ties
-    // peak alpha to the cap (a wider smear is proportionally fainter, total ink
-    // fixed), which means widening the smear cannot make it more prominent: it
-    // just spreads the same ink thinner. Trading that for an explicit peak is what
-    // lets `smearMaxPx` control reach and `smearPeakAlpha` control strength.
+    const { smearFullSpeed, smearMaxPx, smearPeakAlpha } = cfg.focusRing;
+    // One signal, two channels. `t` is this edge's speed normalized against the
+    // speed at which the smear is fully developed; extent and intensity are then
+    // independent linear ramps off it, each with its own ceiling. Both start at
+    // zero, so an edge that is not moving contributes nothing rather than laying a
+    // band under the crisp ring.
+    //
+    // Intensity deliberately does NOT divide by the widening factor. Strict ink
+    // conservation ties peak alpha to the extent (a wider smear is proportionally
+    // fainter, total ink fixed), which makes the effect impossible to strengthen
+    // by widening it — the same ink just spreads thinner.
     const band = (speed: number) => {
-      const width = Math.min(smearMaxPx, strokeWidth + speed * smearGain);
-      const scale = width / strokeWidth;
-      const fade = maxScale > 1 ? Math.min(1, (scale - 1) / (maxScale - 1)) : 0;
-      return { width, opacity: fade * smearPeakAlpha };
+      const t = smearFullSpeed > 0 ? Math.min(1, speed / smearFullSpeed) : 0;
+      return {
+        width: strokeWidth + t * (smearMaxPx - strokeWidth),
+        opacity: t * smearPeakAlpha,
+      };
     };
     const bands = {
       top: band(speeds.top),
@@ -285,10 +281,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   const lathRevision = useSyncExternalStore(lathStore.subscribe, () => lathStore.getSnapshot().revision);
 
   useEffect(() => {
-    const resetMotionSamples = () => {
-      prevEdgesRef.current = null;
-      smoothedSpeedsRef.current = null;
-    };
     // Show a frame: record it, then either apply it now (already mounted) or mount
     // the shell (the post-render layout effect applies it before paint).
     const show = (frame: DisplayedRing) => {
@@ -304,9 +296,9 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     const showSettled = (frame: RingFrame) =>
       show({ rect: frame.rect, shape: frame.shape, speeds: null });
 
-    // Per-frame imperative loop: sample the tween, derive the smoothed blur
-    // velocity, write the DOM, and self-schedule — no React state, so a travelling
-    // ring never reconciles.
+    // Per-frame imperative loop: sample the tween's position and velocity, write
+    // the DOM, and self-schedule — no React state, so a travelling ring never
+    // reconciles.
     const tick = () => {
       rafRef.current = null;
       const tween = tweenRef.current;
@@ -314,52 +306,17 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       const now = performance.now();
       const { rect, shape, done } = sampleRingTween(tween, now);
       if (done) {
-        // Settled: drop the tween and motion samples so the final render is clean.
+        // Settled: drop the tween so the final render is clean.
         tweenRef.current = null;
-        resetMotionSamples();
         showSettled({ rect, shape });
         return;
       }
-      // Finite-difference each EDGE's own perpendicular speed (px/ms), not the
-      // ring center's velocity: a horizontal edge only smears by vertical motion
-      // and a vertical edge only by horizontal motion, and the four edges of a
-      // resizing rect move independently. Null on the first frame or a zero dt.
-      const edges = {
-        top: rect.top,
-        right: rect.left + rect.width,
-        bottom: rect.top + rect.height,
-        left: rect.left,
-      };
-      const prev = prevEdgesRef.current;
-      const dt = prev ? now - prev.t : 0;
-      const raw: RingEdgeSpeeds | null = prev && dt > 0
-        ? {
-          top: Math.abs(edges.top - prev.top) / dt,
-          right: Math.abs(edges.right - prev.right) / dt,
-          bottom: Math.abs(edges.bottom - prev.bottom) / dt,
-          left: Math.abs(edges.left - prev.left) / dt,
-        }
-        : null;
-      prevEdgesRef.current = { ...edges, t: now };
-
-      // Low-pass the raw finite-difference speeds so rAF frame-timing jitter
-      // doesn't make the smear pulse. Seeded from ZERO on purpose: the house
-      // ease-out starts at peak speed, so a first-sample seed would pop the ring
-      // from crisp to fully smeared in one frame — from zero, the smear swells in
-      // over ~2 frames (imperceptible as lag at 60fps). A settled ring's null
-      // speeds clear the smear.
-      let speeds: RingEdgeSpeeds | null = null;
-      if (raw) {
-        const a = cfg.focusRing.smearSmoothing;
-        const sm = smoothedSpeedsRef.current ?? { top: 0, right: 0, bottom: 0, left: 0 };
-        speeds = {
-          top: sm.top + (raw.top - sm.top) * a,
-          right: sm.right + (raw.right - sm.right) * a,
-          bottom: sm.bottom + (raw.bottom - sm.bottom) * a,
-          left: sm.left + (raw.left - sm.left) * a,
-        };
-        smoothedSpeedsRef.current = speeds;
-      }
+      // Velocity comes from the tween's analytic derivative, so it is exact on the
+      // FIRST frame — where the house ease-out is 4.5x its average speed and the
+      // smear should be strongest. Finite-differencing rendered positions cannot
+      // do that: it has no previous sample to difference on frame one, and that
+      // frame alone covers ~31% of a 220ms travel.
+      const speeds = sampleRingVelocity(tween, now);
 
       frameRef.current = { rect, shape, speeds };
       displayedFrameRef.current = { rect, shape };
@@ -378,7 +335,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     const snapTo = (frame: RingFrame, identity: string) => {
       tweenRef.current = null;
       cancelTick();
-      resetMotionSamples();
       displayedIdentityRef.current = identity;
       showSettled(frame);
     };
@@ -386,7 +342,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     if (!selectedId) {
       tweenRef.current = null;
       cancelTick();
-      resetMotionSamples();
       displayedIdentityRef.current = null;
       displayedFrameRef.current = null;
       frameRef.current = null;
@@ -427,7 +382,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       // clock restarts (and motion samples reset) so rapid re-selection stays
       // responsive and the new travel's velocity starts fresh.
       if (identity !== displayedIdentityRef.current) {
-        resetMotionSamples();
         tweenRef.current = startRingTween(displayedFrameRef.current, next, performance.now(), FOCUS_MOTION_MS);
         displayedIdentityRef.current = identity;
         scheduleTick();

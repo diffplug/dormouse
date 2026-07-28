@@ -50,10 +50,14 @@ export const cfg = {
     // the four are independent — moving between panes flush at the top, the top edge
     // never smears while the bottom edge does. A settled or reduced-motion ring has
     // null speeds, so it never smears (see WorkspaceSelectionOverlay).
-    /** Per-edge band width = clamp(strokeWidth + speed * smearGain, .., smearMaxPx).
-     *  Gain 3 keeps a fast adjacent-pane travel near the cap at its eased peak, then
-     *  decays continuously back to the base width as the tween settles. */
-    smearGain: 3,
+    /** Edge speed (px/ms) at which the smear is fully developed — the knob that sets
+     *  the effect's SHAPE over a travel. Below it, extent and intensity scale
+     *  linearly with speed; at or above it, both sit at their ceilings. The house
+     *  ease-out peaks around 16 px/ms on a full-width pane travel and averages ~3.7,
+     *  so 8 holds full smear through the fast opening and then decays with real
+     *  velocity. Lower it for a more uniform blur, raise it to make blur track speed
+     *  more closely (short hops then smear noticeably less than long jumps). */
+    smearFullSpeed: 8,
     /** How far a smear band reaches at full speed (px) — the effect's EXTENT. 12px on
      *  the 2px ants stroke is a 6x spread. Independent of intensity: see
      *  smearPeakAlpha, and the note in WorkspaceSelectionOverlay on why this is not
@@ -64,11 +68,5 @@ export const cfg = {
      *  ring; raise it (not smearMaxPx) to make the blur punchier without extending
      *  its reach. */
     smearPeakAlpha: 1 / 3,
-    /** EMA weight of the newest speed sample (0..1). The raw finite-difference speeds
-     *  jitter with rAF frame-timing noise, which makes the smear pulse; blending
-     *  toward the previous smoothed value steadies it. 1 = no smoothing (rawest),
-     *  lower = steadier but slightly laggier. 0.6 removes single-frame spikes with no
-     *  perceptible lag over the 220ms travel. */
-    smearSmoothing: 0.6,
   },
 };

@@ -324,8 +324,7 @@ describe('SelectionRing motion smear', () => {
     expect(smearPieces().group.style.display).toBe('none'); // settled: no smear
 
     await act(async () => root.render(<Harness selectedId="b" mode="command" store={store} panes={panes} />));
-    await frame(16); // seeds the sampler — the first tick has no previous edges
-    await frame(16); // now moving
+    await frame(16); // one tick is enough — velocity is analytic, not differenced
 
     const p = smearPieces();
     expect(p.group.style.display).toBe('');
@@ -344,12 +343,41 @@ describe('SelectionRing motion smear', () => {
     expect(smearPieces().group.style.display).toBe('none');
   });
 
+  // The regression this file exists to hold: velocity is highest on the opening
+  // frame, so the smear must be too. Differencing rendered positions could not do
+  // it — there is no previous sample on frame one, so the smear used to be hidden
+  // outright for the frame covering ~31% of the travel, then peaked mid-flight.
+  it('is strongest on the very first frame and decays from there', async () => {
+    const store = makeStore();
+    const panes = flushPanes();
+    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+    await act(async () => root.render(<Harness selectedId="b" mode="command" store={store} panes={panes} />));
+
+    const widths: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      await frame(16);
+      const p = smearPieces();
+      if (p.group.style.display === 'none') break;
+      widths.push(widthOf(p.left));
+    }
+
+    expect(widths.length).toBeGreaterThan(3);
+    // Already smearing on the opening frame — it is never crisp. Deliberately not
+    // asserting the cap: this harness's travel is short enough that it stays under
+    // `smearFullSpeed`, which is the proportional behaviour working, not a failure.
+    expect(widths[0]).toBeGreaterThan(cfg.marchingAnts.strokeWidth);
+    // ...and that opening frame is the peak: non-increasing after, ending narrower.
+    for (let i = 1; i < widths.length; i++) {
+      expect(widths[i]).toBeLessThanOrEqual(widths[i - 1]);
+    }
+    expect(widths[widths.length - 1]).toBeLessThan(widths[0]);
+  });
+
   it('tapers each corner between the two edge widths it joins', async () => {
     const store = makeStore();
     const panes = flushPanes();
     await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
     await act(async () => root.render(<Harness selectedId="b" mode="command" store={store} panes={panes} />));
-    await frame(16);
     await frame(16);
 
     const p = smearPieces();
@@ -376,7 +404,6 @@ describe('SelectionRing motion smear', () => {
     expect(path.style.getPropertyValue('--march-offset')).toBe('-10px');
 
     await act(async () => root.render(<Harness selectedId="b" mode="command" store={store} panes={panes} />));
-    await frame(16);
     await frame(16);
 
     expect(path.getAttribute('stroke-dasharray')).toBe('6 4');

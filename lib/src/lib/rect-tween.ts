@@ -31,6 +31,16 @@ export interface RingFrame {
   shape: RingShape;
 }
 
+/** Perpendicular speed of each ring edge while it travels (px/ms). Each edge
+ *  smears only by its OWN motion across itself — sliding along its own length
+ *  leaves it unchanged — so the four are independent. */
+export interface RingEdgeSpeeds {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
 /** A ring motion segment: interpolate `from → to` over `[start, start+durationMs]`,
  *  eased by the house curve. The same shape as the Lath animator's `Segment`,
  *  minus the DOM. */
@@ -93,5 +103,42 @@ export function sampleRingTween(tween: RingTween, now: number): { rect: RingRect
     rect: lerpRect(tween.from.rect, tween.to.rect, eased),
     shape: lerpShape(tween.from.shape, tween.to.shape, eased),
     done: clamped >= 1,
+  };
+}
+
+/**
+ * Each edge's perpendicular speed at `now`, in px/ms — the exact derivative of
+ * `sampleRingTween`, not a difference of two samples.
+ *
+ * The rect is a plain lerp of `from → to` under `LATH_EASING`, so every edge's
+ * position is `from + (to - from) * E(t)` and its speed falls straight out as
+ * `|to - from| * E'(t) / durationMs`. Only the component ACROSS each edge counts
+ * (a horizontal edge is moved by `top`/`bottom`, a vertical one by `left`/
+ * `right`); motion along an edge slides it along its own length and smears
+ * nothing.
+ *
+ * Analytic rather than finite-differenced on purpose. Differencing successive
+ * frames costs a frame of lag, reports nothing at all on the first frame (there
+ * is no previous sample yet), and under-reports a decelerating curve because a
+ * backward difference averages over the interval. On a 220ms ease-out whose
+ * velocity peaks at 4.5x its average at `t = 0`, those three losses land exactly
+ * where the smear should be strongest. This is also jitter-free by construction:
+ * it never differences wall-clock timestamps, so it needs no smoothing.
+ */
+export function sampleRingVelocity(tween: RingTween, now: number): RingEdgeSpeeds {
+  if (tween.durationMs <= 0) return { top: 0, right: 0, bottom: 0, left: 0 };
+  const raw = (now - tween.start) / tween.durationMs;
+  const clamped = raw < 0 ? 0 : raw > 1 ? 1 : raw;
+  // Past the completion instant the ring is parked; the curve's slope is already
+  // ~0 there, but make it exactly 0 so a settled ring can never carry a smear.
+  const rate = raw > 1 ? 0 : LATH_EASING.slope(clamped) / tween.durationMs;
+  const from = tween.from.rect;
+  const to = tween.to.rect;
+  const edge = (a: number, b: number) => Math.abs(b - a) * rate;
+  return {
+    top: edge(from.top, to.top),
+    bottom: edge(from.top + from.height, to.top + to.height),
+    left: edge(from.left, to.left),
+    right: edge(from.left + from.width, to.left + to.width),
   };
 }

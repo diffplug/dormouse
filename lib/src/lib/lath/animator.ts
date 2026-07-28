@@ -25,10 +25,23 @@ export type EnterFrom = Edge | 'top-left';
 /** House motion, matched to the pre-Lath CSS constants. */
 export const LATH_MOTION_MS = 440;
 
+/** A `t → eased` progress mapping, carrying its own analytic derivative. */
+export interface Easing {
+  (t: number): number;
+  /** `dEased/dt` at `t`, in eased-units per t-unit. Callers that need a *rate*
+   *  (rather than a position) should use this instead of finite-differencing
+   *  successive samples: differencing costs a frame of lag, cannot report
+   *  anything on the first frame, and under-reports a curve that is bending —
+   *  all three of which are visible on a 220ms ease-out. Clamped to the
+   *  endpoints' one-sided slopes outside `[0, 1]`. */
+  slope(t: number): number;
+}
+
 /** Cubic-bezier easing solver: `(x1,y1)`/`(x2,y2)` are the two control points of a
  *  curve from `(0,0)` to `(1,1)`. Returns a `t → eased` progress mapping (Newton–
- *  Raphson with a bisection fallback), exact at the endpoints. Exported for tests. */
-export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t: number) => number {
+ *  Raphson with a bisection fallback), exact at the endpoints, plus `slope()` for
+ *  its derivative. Exported for tests. */
+export function cubicBezier(x1: number, y1: number, x2: number, y2: number): Easing {
   // Polynomial coefficients of the cubic bezier in each axis (P0 = 0, P3 = 1).
   const cx = 3 * x1;
   const bx = 3 * (x2 - x1) - cx;
@@ -39,6 +52,7 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t:
   const sampleX = (s: number): number => ((ax * s + bx) * s + cx) * s;
   const sampleY = (s: number): number => ((ay * s + by) * s + cy) * s;
   const sampleDX = (s: number): number => (3 * ax * s + 2 * bx) * s + cx;
+  const sampleDY = (s: number): number => (3 * ay * s + 2 * by) * s + cy;
 
   const solveX = (x: number): number => {
     // Newton–Raphson from x as the initial guess.
@@ -64,11 +78,24 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t:
     return s;
   };
 
-  return (t: number): number => {
+  const eased = ((t: number): number => {
     if (t <= 0) return 0;
     if (t >= 1) return 1;
     return sampleY(solveX(t));
+  }) as Easing;
+
+  // dy/dt = (dy/ds) / (dx/ds), both evaluated at the parametric s the solver
+  // already finds for this t. Endpoints are clamped inward rather than evaluated
+  // at exactly 0/1: the curve is only defined on [0,1], and a control point on
+  // the axis (x1 === 0) makes dx/ds vanish there, which would divide by zero.
+  eased.slope = (t: number): number => {
+    const clamped = t <= 0 ? 0 : t >= 1 ? 1 : t;
+    const s = solveX(clamped);
+    const dx = sampleDX(s);
+    return Math.abs(dx) < 1e-6 ? 0 : sampleDY(s) / dx;
   };
+
+  return eased;
 }
 
 /** The house easing (`cubic-bezier(0.22, 1, 0.36, 1)`), solved in JS to match the
