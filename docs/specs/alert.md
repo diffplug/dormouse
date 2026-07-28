@@ -12,7 +12,7 @@ Dormouse can owe the user attention in three ways:
 
 Terminal-report and command-exit alerts do not require WATCHING. All three share the same attention suppression rule: do not ring if the user is actively attending that Session at the completion moment.
 
-Internally these are three independent tracks — `watchingRinging` + the `ActivityMonitor`, `protocolStatus` + `progress`, and `commandExitStatus` + `commandExitWatch`. Each runs IDLE -> busy/armed -> ringing without entangling the others, and each latches its own ring in the entry until it is cleared.
+Internally these are three independent tracks — `watchingRingingCommand` + the `ActivityMonitor`, `protocolStatus` + `progress`, and `commandExitStatus` + `commandExitWatch`. Each runs IDLE -> busy/armed -> ringing without entangling the others, and each latches its own ring in the entry until it is cleared.
 
 ## Non-goals
 
@@ -59,8 +59,8 @@ Rules:
 
 - The key is `commandArgv0(rawCommandLine)` in `lib/src/lib/terminal-state.ts`: take everything before the first pipeline/compound boundary, skip leading `VAR=value` assignments and a leading `env`, then reduce argv[0] to its basename. `claude`, `/usr/local/bin/claude --resume`, and `FOO=1 env BAR=2 claude` all key on `claude`. `foo | claude` keys on `foo`, matching what bash's `DEBUG` trap reports.
 - A `commandStart` for a watched name starts a **fresh** monitor; `commandFinish`, `promptStart`, and `promptEnd` end the command and dispose it. Editing the rule set re-derives WATCHING across every live Session immediately.
-- A WATCHING ring outlives its monitor. Watching switches off the moment the watched command exits, which is usually the same moment the ring was raised, so the ring is held in the Session entry (`watchingRinging`) rather than in the monitor.
-- Removing a rule is the one thing that *does* silence a WATCHING ring: it is the user saying "stop alerting on this". A command merely ending never does.
+- A WATCHING ring outlives its monitor. Watching switches off the moment the watched command exits, which is usually the same moment the ring was raised, so the ring and its originating command key are held in the Session entry (`watchingRingingCommand`) rather than in the monitor.
+- Removing a rule is the one thing that *does* silence a WATCHING ring: it is the user saying "stop alerting on this". The latched originating key makes this work after the command has exited and its monitor is gone. A command merely ending never clears the ring.
 - The rule set is app-global and persisted (`dormouse:watched-commands`). It starts empty, so WATCHING is off everywhere until the user turns it on. Source of truth: `lib/src/lib/watched-commands.ts` (renderer mirror) and `lib/src/lib/watched-command-host.ts` (multi-renderer coordinator). In VS Code the shared extension host is authoritative: the first renderer seeds it from persisted storage, edits cross the boundary as single-command mutations, and the host broadcasts its canonical snapshot to every webview. A stale webview can therefore neither replace unrelated rules nor keep reporting an obsolete rule list.
 
 **Limitation:** WATCHING needs the shell to report command boundaries (`OSC 633` / `OSC 133`). Shells without integration — `cmd.exe`, `fish`, or any shell where injection did not take (`docs/specs/terminal-escapes.md`) — never report a command name, so WATCHING never engages there and the bell reports "nothing is running". Terminal-report and command-exit alerts are unaffected. This is accepted rather than worked around: the keystroke fallback in `docs/specs/terminal-state.md` is renderer-side and lower confidence, and routing it into the manager would buy those shells a worse version of a feature at the cost of a second command-tracking path.

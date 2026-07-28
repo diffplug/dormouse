@@ -556,6 +556,24 @@ describe('AlertManager in isolation', () => {
     });
   });
 
+  it('silences a latched WATCHING ring when its rule is removed after command exit', () => {
+    const id = 'exited-ring-dies-with-rule';
+    driveToRinging(id);
+    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_RINGING',
+      watchingEnabled: false,
+    });
+
+    manager.setWatchedCommands([]);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'WATCHING_DISABLED',
+      watchingEnabled: false,
+      todo: false,
+    });
+  });
+
   it('keeps the command-exit arm hidden while WATCHING owns the display', () => {
     const id = 'arm-under-watching';
     runWatchedCommand(id);

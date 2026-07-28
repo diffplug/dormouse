@@ -96,7 +96,8 @@ export const DEFAULT_ALERT_STATE: AlertState = {
  */
 interface AlertEntry {
   monitor: ActivityMonitor | null;
-  watchingRinging: boolean;
+  /** Command rule that raised the latched WATCHING ring, even after command exit. */
+  watchingRingingCommand: string | null;
   protocolStatus: ProtocolStatus;
   progress: ActiveProtocolProgress | null;
   commandExitStatus: CommandExitStatus;
@@ -160,13 +161,15 @@ export class AlertManager {
     if (next.size === this.watchedCommands.size && [...next].every((name) => this.watchedCommands.has(name))) return;
     this.watchedCommands = next;
     for (const [id, entry] of this.entries) {
-      const wasWatching = !!entry.monitor;
       let changed = this.applyWatchingRule(id, entry);
       // Dropping a rule is an explicit "stop alerting on this", so it also
-      // silences the ring that rule already raised. A command *ending* does the
-      // opposite — see setWatching.
-      if (wasWatching && !entry.monitor && entry.watchingRinging) {
-        entry.watchingRinging = false;
+      // silences the ring that rule already raised. The originating key stays
+      // latched after command exit precisely so this still works at a prompt.
+      if (
+        entry.watchingRingingCommand !== null
+        && !this.watchedCommands.has(entry.watchingRingingCommand)
+      ) {
+        entry.watchingRingingCommand = null;
         changed = true;
       }
       if (changed) this.notify(id);
@@ -202,9 +205,9 @@ export class AlertManager {
     if (enabled) {
       entry.monitor = this.createMonitor(id);
     } else {
-      // `watchingRinging` deliberately survives: watching switches off the
-      // moment the watched command exits, which is usually the same moment its
-      // ring was raised. Only an explicit rule removal clears it.
+      // The latched WATCHING ring deliberately survives: watching switches off
+      // the moment the watched command exits. Only removing its command rule
+      // clears it.
       entry.monitor?.dispose();
       entry.monitor = null;
     }
@@ -225,7 +228,7 @@ export class AlertManager {
             entry.monitor?.attend();
             return;
           }
-          entry.watchingRinging = true;
+          entry.watchingRingingCommand = entry.commandExitWatch?.argv0 ?? null;
         }
 
         this.notify(id);
@@ -443,8 +446,8 @@ export class AlertManager {
       entry.commandExitStatus = 'IDLE';
       cleared = true;
     }
-    if (entry.watchingRinging) {
-      entry.watchingRinging = false;
+    if (entry.watchingRingingCommand !== null) {
+      entry.watchingRingingCommand = null;
       cleared = true;
     }
     // A live monitor still latched at ALERT_RINGING would re-ring on its next
@@ -596,7 +599,7 @@ export class AlertManager {
     const entry = this.getOrCreateEntry(id);
     entry.todo = state.todo === true;
     entry.notification = entry.todo ? normalizeActivityNotification(state.notification) : null;
-    entry.watchingRinging = false;
+    entry.watchingRingingCommand = null;
     entry.protocolStatus = 'IDLE';
     entry.progress = null;
     entry.commandExitStatus = 'IDLE';
@@ -621,7 +624,7 @@ export class AlertManager {
     if (
       entry.protocolStatus === 'ALERT_RINGING'
       || entry.commandExitStatus === 'ALERT_RINGING'
-      || entry.watchingRinging
+      || entry.watchingRingingCommand !== null
     ) return 'ALERT_RINGING';
     if (entry.protocolStatus === 'OSC_NOTIF_BUSY') return 'OSC_NOTIF_BUSY';
     // WATCHING outranks the command-exit arm: a watched command is by
@@ -638,7 +641,7 @@ export class AlertManager {
     if (!entry) {
       entry = {
         monitor: null,
-        watchingRinging: false,
+        watchingRingingCommand: null,
         protocolStatus: 'IDLE',
         progress: null,
         commandExitStatus: 'IDLE',
