@@ -101,6 +101,7 @@ function PlaygroundDesktopExperience() {
   const autoStartedRef = useRef<Set<string>>(new Set());
   const spawnUnsubRef = useRef<(() => void) | null>(null);
   const busyDemoDisposeRef = useRef<(() => void) | null>(null);
+  const busyDemoFinishTimerRef = useRef<number | null>(null);
   const demoTimersRef = useRef<number[]>([]);
 
   const handleOpenGithub = useCallback(() => {
@@ -171,6 +172,10 @@ function PlaygroundDesktopExperience() {
               // up the other pane (docs/specs/alert.md).
               onTriggerBusyDemo: () => {
                 busyDemoDisposeRef.current?.();
+                if (busyDemoFinishTimerRef.current !== null) {
+                  window.clearTimeout(busyDemoFinishTimerRef.current);
+                  busyDemoFinishTimerRef.current = null;
+                }
                 for (const paneId of ALERT_DEMO_PANES) {
                   startFakeCommand(adapter, registry, paneId, "longtask");
                 }
@@ -183,17 +188,16 @@ function PlaygroundDesktopExperience() {
                   BUSY_DEMO_DURATION_MS,
                   BUSY_DEMO_INTERVAL_MS,
                 );
-                demoTimersRef.current.push(
-                  window.setTimeout(() => {
-                    for (const paneId of ALERT_DEMO_PANES) {
-                      finishFakeCommand(adapter, registry, paneId);
-                      // The pane's real program is still drawing, so put its
-                      // actual command line back rather than leaving the pane
-                      // looking idle.
-                      shellRegistryRef.current?.ensureShell(paneId).reportRunningCommand();
-                    }
-                  }, WATCH_DEMO_COMMAND_MS),
-                );
+                busyDemoFinishTimerRef.current = window.setTimeout(() => {
+                  busyDemoFinishTimerRef.current = null;
+                  for (const paneId of ALERT_DEMO_PANES) {
+                    finishFakeCommand(adapter, registry, paneId);
+                    // The pane's real program is still drawing, so put its
+                    // actual command line back rather than leaving the pane
+                    // looking idle.
+                    shellRegistryRef.current?.ensureShell(paneId).reportRunningCommand();
+                  }
+                }, WATCH_DEMO_COMMAND_MS);
               },
               // Terminal reports need no rule at all — this is a raw OSC 777
               // notification, parsed by the same code a real PTY feeds.
@@ -271,6 +275,10 @@ function PlaygroundDesktopExperience() {
       spawnUnsubRef.current = null;
       busyDemoDisposeRef.current?.();
       busyDemoDisposeRef.current = null;
+      if (busyDemoFinishTimerRef.current !== null) {
+        window.clearTimeout(busyDemoFinishTimerRef.current);
+        busyDemoFinishTimerRef.current = null;
+      }
       for (const timer of demoTimersRef.current) window.clearTimeout(timer);
       demoTimersRef.current = [];
     };
