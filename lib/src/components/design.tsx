@@ -22,7 +22,6 @@ export const TERMINAL_BORDER_RADIUS_PX = TERMINAL_BORDER_RADIUS_REM * 16;
 export const TERMINAL_TOP_RADIUS_CLASS = 'rounded-t-lg';
 export const TERMINAL_BOTTOM_RADIUS_CLASS = 'rounded-b-lg';
 export const TERMINAL_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem`;
-export const DOOR_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem ${TERMINAL_BORDER_RADIUS_REM}rem 0 0`;
 
 // The gutter between panes (and around the wall's top/sides — the baseboard
 // side stays a tight 2px). Deliberately ODD: the passthrough ring is a 1px
@@ -46,7 +45,6 @@ export const PANE_GUTTER_PX = 7;
 // the same line via its path inset — see MarchingAntsRect.)
 export const SELECTION_RING_INFLATE_PX = (PANE_GUTTER_PX + 1) / 2;
 export const PANE_SELECTION_RING_RADIUS_PX = TERMINAL_BORDER_RADIUS_PX + SELECTION_RING_INFLATE_PX;
-export const PANE_SELECTION_RING_BORDER_RADIUS = `${PANE_SELECTION_RING_RADIUS_PX}px`;
 
 // Focus-ring motion. The selection ring's travel between panes/doors, the pane
 // header's active/inactive palette crossfade, and the ring's unfocus-saturate

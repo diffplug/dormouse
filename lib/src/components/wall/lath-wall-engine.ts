@@ -23,8 +23,7 @@ import {
   LATH_MOTION_MS,
   createAnimator,
 } from '../../lib/lath/animator';
-import { prefersReducedMotion } from '../../lib/ui-geometry';
-import { cfg } from '../../cfg';
+import { motionIsInstant } from '../../lib/ui-geometry';
 import { UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
 import type { ResolvedSplitDirection as DorResolvedSplitDirection } from 'dor/commands/types';
 import {
@@ -164,11 +163,11 @@ export function createLathWallEngine(
 ): LathWallEngine {
   const snapshot = (): LathWallSnapshot => store.getSnapshot();
 
-  // 0 under reduced motion (or when layout animation is disabled, e.g. Chromatic),
+  // 0 when motion must be instant (reduced motion, or Chromatic's animate=false),
   // so entry/exit/tween all collapse to instant through the very same code path.
   // Tests inject a fixed duration (or 0) via `opts`.
   const durationMs =
-    opts?.durationMs ?? (!cfg.layout.animate || prefersReducedMotion() ? 0 : LATH_MOTION_MS);
+    opts?.durationMs ?? (motionIsInstant() ? 0 : LATH_MOTION_MS);
   const animator = createAnimator({ durationMs, easing: LATH_EASING });
 
   // Presentation-only side state (never in the store snapshot): the frame/wake

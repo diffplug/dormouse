@@ -7,7 +7,7 @@ import {
   TERMINAL_BORDER_RADIUS_PX,
 } from '../design';
 import { cfg } from '../../cfg';
-import { prefersReducedMotion } from '../../lib/ui-geometry';
+import { motionIsInstant } from '../../lib/ui-geometry';
 import {
   retargetRingTween,
   sampleRingTween,
@@ -151,6 +151,9 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
     const isDoor = selectedType === 'door';
     const identity = `${selectedType}:${selectedId}`;
+    // Evaluated once per effect run, not per frame — the effect re-runs on every
+    // Lath commit, which is plenty fresh for an OS-preference toggle.
+    const instant = motionIsInstant();
 
     const update = () => {
       const targetEl = isDoor
@@ -160,14 +163,15 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
       const next = measureFrame(targetEl, isDoor);
 
-      // Snap gate: no layout animation (Chromatic) or reduced motion → the ring
-      // settles instantly, mirroring lath-wall-engine.ts's 0-duration path.
-      if (!cfg.layout.animate || prefersReducedMotion()) {
+      // Snap gate: the same instant-motion predicate the Lath animator's
+      // duration uses (motionIsInstant), so the ring and the leaves agree.
+      if (instant) {
         snapTo(next, identity);
         return;
       }
-      // Ring appearing (nothing shown yet) → snap; there is no `from` to glide from.
-      if (!displayedFrameRef.current || displayedIdentityRef.current === null) {
+      // Ring appearing (nothing shown yet) → snap; there is no `from` to glide
+      // from. (snapTo/clear keep frame and identity in lockstep.)
+      if (!displayedFrameRef.current) {
         snapTo(next, identity);
         return;
       }
