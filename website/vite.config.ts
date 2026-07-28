@@ -24,6 +24,10 @@ export default defineConfig(({ mode }) => ({
         __dirname,
         "node_modules/ascii-splash/dist",
       ),
+      // ascii-splash's pattern registry statically imports PhotoPattern, which
+      // statically imports `sharp`. The playground never builds a photo slot,
+      // so keep the native module out of the bundle. See sharp-browser-stub.ts.
+      sharp: path.resolve(__dirname, "src/lib/sharp-browser-stub.ts"),
       "@standalone-latest": path.resolve(
         __dirname,
         "public/standalone-latest.json",
