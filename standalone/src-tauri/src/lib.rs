@@ -1733,9 +1733,12 @@ mod tests {
                 .trim();
 
             // Extract the fn body by brace-counting from the signature onward.
-            // Rust requires balanced (and `{{`/`}}`-escaped) braces, so a plain
-            // char count over valid source returns to depth 0 exactly at the
-            // fn's closing brace.
+            // This is a naive char count, not a lexer: a lone `{`/`}` inside a
+            // string or char literal (e.g. `'{'`, or `"missing }"`) would throw
+            // off the depth. It holds across the command bodies scanned here
+            // because none of them contain such a literal; a future command that
+            // did would need a real tokenizer. Good enough to enforce the
+            // async-attribute invariant, not a general Rust brace matcher.
             let mut depth = 0i32;
             let mut started = false;
             let mut body = String::new();
@@ -1754,7 +1757,15 @@ mod tests {
                 }
             }
 
-            if body.contains("request_from_sidecar") && !(is_async_attr || is_async_fn) {
+            // Match direct callers of the blocking helper *and* the
+            // agent-browser commands, which reach it transitively through the
+            // `agent_browser_forward` wrapper (their bodies never name
+            // `request_from_sidecar` directly). That family carries the longest
+            // timeout (AGENT_BROWSER_TIMEOUT = 30s), so it's the worst case to
+            // let slip plain-sync.
+            let reaches_sidecar =
+                body.contains("request_from_sidecar") || body.contains("agent_browser_forward");
+            if reaches_sidecar && !(is_async_attr || is_async_fn) {
                 offenders.push(name.to_string());
             }
         }
