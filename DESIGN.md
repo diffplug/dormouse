@@ -97,6 +97,8 @@ The system is intentionally minimal and bg-only. Chrome recedes; terminals are t
 
 The system explicitly rejects: rounded SaaS cards, gradient accents, hacker-aesthetic green-on-black, "Slack-style" Electron chrome bloat, decorative animations, and any token that hardcodes a color. If a user installs a high-contrast theme, the chrome can look flatter than usual: that is accepted, not "fixed" with overrides.
 
+**Scope.** This design system governs every product surface: the lib components, the VS Code webview, the standalone app, and the server-served Pocket app — auth screens included (`docs/specs/pocket-app.md`). The marketing website keeps its own separate "homepage" design system (`website/src/index.css`: Ubuntu Mono / Ubuntu Sans Mono, a fixed dark palette, the caramel accent), scoped to marketing pages only. The two share nothing except lib components embedded in the site's playgrounds, which bring this system's tokens with them; product surfaces never consume homepage tokens, and marketing chrome never consumes `--vscode-*`.
+
 **Key Characteristics:**
 - Host-theme-driven palette: every color is a `var(--vscode-*)` passthrough.
 - Bg-only chrome: no decorative borders, no resting shadows, no accent stripes.

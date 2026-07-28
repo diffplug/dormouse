@@ -1,23 +1,41 @@
 /**
- * Pocket's theme bootstrap. The whole Pocket app — the auth/hosts chrome *and*
- * the terminal wall — is themed by the shared VSCode-token system
- * (docs/specs/theme.md): applyTheme() writes `--vscode-*` onto <body>, and
- * theme.css maps those to the `--color-*` tokens both surfaces consume.
+ * Theme boot for the Pocket shell. The whole app — auth screens included —
+ * runs on the shared `--vscode-*` token system (lib/src/theme.css;
+ * docs/specs/theme.md), so the theme must be restored before first paint,
+ * before any `--vscode-*` vars exist on body.
  *
- * Kimbie Dark is the brand default — dormouse's homepage is a Kimbie Dark
- * clone — so an app-surface signin screen that renders in Kimbie Dark is also
- * on-brand. restoreActiveTheme() honors a user's persisted choice first, then
- * falls back to this default.
+ * The theme restoration never runs at module import time on purpose: Storybook
+ * imports these modules and manages its own themes.
  */
-import { restoreActiveTheme } from '../../lib/themes';
 
-const POCKET_THEME_ID = 'vscode.theme-kimbie-dark.kimbie-dark';
+import { useEffect, useLayoutEffect, useRef } from 'react';
+import { getAppliedThemeSnapshot, restoreActiveTheme } from '../../lib/themes';
 
-/**
- * Apply the persisted-or-default theme to <body>. Call before first paint so
- * the auth screens (not just the wall) render with `--vscode-*` / `--color-*`
- * present. Idempotent.
- */
+/** Same default theme the website playground restores, unless the user picked one. */
+export const POCKET_THEME_ID = 'vscode.theme-kimbie-dark.kimbie-dark';
+
+const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+
 export function restorePocketTheme(): void {
-  restoreActiveTheme(POCKET_THEME_ID);
+  const theme = restoreActiveTheme(POCKET_THEME_ID);
+  if (!theme || typeof document === 'undefined') return;
+  // Browser chrome outside the body: form-control palette and the
+  // address-bar / status-bar tint follow the applied theme.
+  document.documentElement.style.colorScheme = theme.type;
+  const appBg = getAppliedThemeSnapshot()?.resolvedVars['--vscode-sideBar-background'];
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (appBg && meta) meta.setAttribute('content', appBg);
+}
+
+export function usePocketTheme() {
+  const restoredRef = useRef(false);
+  if (!restoredRef.current) {
+    restorePocketTheme();
+    restoredRef.current = true;
+  }
+  // Repeat after hydration so the wall reads real theme variables even if
+  // React reconciled away render-time body styles.
+  useBrowserLayoutEffect(() => {
+    restorePocketTheme();
+  }, []);
 }

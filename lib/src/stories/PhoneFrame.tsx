@@ -6,11 +6,19 @@ import type { ReactNode } from 'react';
  * app-fg outline for definition since panel-border is transparent in many
  * themes (see docs/specs/theme.md).
  */
-export function PhoneFrame({ children }: { children: ReactNode }) {
+export function PhoneFrame({
+  children,
+  width = 390,
+  height = 760,
+}: {
+  children: ReactNode;
+  width?: number;
+  height?: number;
+}) {
   return (
     <div
       className="overflow-hidden rounded-xl shadow-2xl outline outline-1 outline-app-fg/15"
-      style={{ width: 390, height: 760, background: 'var(--color-app-bg)' }}
+      style={{ width, height, background: 'var(--color-app-bg)' }}
     >
       {children}
     </div>

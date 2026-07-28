@@ -8,7 +8,12 @@ theme-appropriate xterm.js colors.
 
 VSCode extension mode gets `--vscode-*` variables from VSCode. Standalone and
 website mode apply the same shape of variables to `document.body` with
-`applyTheme()` from a bundled or installed Dormouse theme. Both paths run the
+`applyTheme()` from a bundled or installed Dormouse theme. The Pocket app is
+a fourth host: it restores the persisted/bundled theme with
+`restoreActiveTheme()` before its first paint — auth screens included — and
+additionally syncs document-level browser chrome (`color-scheme`,
+`meta[name="theme-color"]`); see
+[pocket-app.md](./pocket-app.md#design-system-and-theming). All paths run the
 same consumed-token resolver from `lib/src/lib/themes/vscode-color-resolver.ts`
 so omitted theme JSON keys behave like VSCode registry defaults before
 Dormouse renders.

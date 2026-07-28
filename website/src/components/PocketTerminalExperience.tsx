@@ -14,7 +14,11 @@ import { TutRunner } from "../lib/tut-runner";
 import { POCKET_TUTORIAL_PROFILE, type ItemId } from "../lib/tut-items";
 import { ChangelogRunner } from "../lib/changelog-runner";
 
-export const POCKET_THEME_ID = "vscode.theme-kimbie-dark.kimbie-dark";
+// The default theme is defined by the real Pocket app so this playground —
+// whose whole purpose is proving out that experience — cannot drift from it.
+import { POCKET_THEME_ID } from "dormouse-lib/remote/pocket-app/pocket-theme";
+
+export { POCKET_THEME_ID };
 
 type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
 type MobileGestureInputId = import("dormouse-lib/lib/mobile-gesture-menu").MobileGestureInputId;

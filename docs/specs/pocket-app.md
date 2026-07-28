@@ -74,6 +74,51 @@ default, matching the homepage brand.
 The server (`server/`) stays the only dynamic code: accounts, relay, and
 static serving of the built Pocket bundle.
 
+## Design system and theming
+
+Pocket is a product surface, not a marketing page: all of it — the auth
+screens included — renders on the shared themeable design system
+(`--color-*` tokens over `--vscode-*`; [theme.md](./theme.md), `DESIGN.md`).
+The website's separate "homepage" design system (`website/src/index.css`) is
+never used by Pocket or anything else the server serves. There is no
+Pocket-specific palette; changing the theme re-skins the auth screens and
+the wall together.
+
+Pocket has no VS Code host and boots into auth long before a Wall exists, so
+the app restores the theme itself before first paint: `main.tsx` calls
+`restorePocketTheme()` (`lib/src/remote/pocket-app/pocket-theme.ts`) before
+the first render, with the Kimbie Dark default; `PocketWall` repeats it
+idempotently via `usePocketTheme()` for isolated consumers (stories). The
+default is one shared `POCKET_THEME_ID` constant that the website playground
+imports, so the playground cannot drift from the real Pocket default.
+Restoring also syncs document-level browser chrome that in-app hosts don't
+need: `color-scheme` on the root element (native form controls, scrollbars)
+and the `<meta name="theme-color">` address-bar tint, taken from the applied
+theme's type and resolved `sideBar.background`. The static meta values in
+`lib/pocket/index.html` are pre-boot placeholders only.
+
+Phone-specific exceptions to the desktop chrome scale (`DESIGN.md`'s
+Two-Step Rule), kept deliberately narrow:
+
+* Form inputs use 16px text: smaller input text triggers iOS zoom-on-focus,
+  and 10–12px inputs are illegible at thumb distance.
+* Chrome type runs a step larger than desktop (13px body, 11–12px
+  secondary), and touch targets are taller: 44px block actions, 36px row
+  actions.
+
+The chrome itself follows theme.md's three-pair rule: the page is the app
+pair, the header band is the active-header pair (the "titlebar", doubling as
+the primary-action tone), and host rows are the inactive-header pair.
+Secondary text is alpha on the owning pair's foreground, and presence is
+intensity — an offline row drops to `opacity-55`; there is no online badge,
+no border, no `surface-raised`, no `muted`. The one status color is
+`text-error`, delineated by a red inset hairline for the error notice
+(panel-border is transparent in many themes). Source of truth:
+`lib/src/remote/pocket-app/App.tsx` (views + the `pkButton`/`PK`
+vocabulary), `lib/src/remote/pocket-app/pocket-theme.ts` (theme boot +
+browser-chrome sync), `lib/pocket/index.html` (structural viewport rules +
+pre-boot color fallbacks).
+
 ## Deployment: same-origin, always
 
 WebAuthn binds passkeys to the serving origin, and Chrome's Private Network
@@ -100,3 +145,6 @@ code.
    `MobileTerminalUi` + `MobileWall` independently.
 2. **CloudFlare routing** — the SaaS deployment above; deferred until SaaS.
    Nothing in the shipped architecture needs rework for it.
+3. **Theme picker in Pocket** — the app restores the persisted theme but
+   exposes no picker; add the shared `ThemePicker` (and its theme-debugger
+   entry) once its dropdown is phone-friendly.

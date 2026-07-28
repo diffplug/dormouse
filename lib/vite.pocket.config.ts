@@ -7,9 +7,10 @@ import tailwindcss from "@tailwindcss/vite";
 // Pocket phone web app. Its HTML lives in `pocket/index.html` and pulls in
 // `src/remote/pocket-app/main.tsx`; the build lands in `dist-pocket/` for the
 // server to serve statically (docs/specs/pocket-app.md). It shares the full
-// terminal UI (`MobileTerminalUi`/`MobileWall`) with the main app, so it needs
-// the same Tailwind + `--vscode-*` theme plumbing (`src/index.css`); the auth
-// views are styled with the same shared `--color-*` tokens (docs/specs/theme.md).
+// terminal UI (`MobileTerminalUi`/`MobileWall`) and the themeable design
+// system with the main app, so it needs the same Tailwind + `--vscode-*`
+// theme plumbing (`src/index.css`); the HTML shell carries the structural
+// viewport rules inline.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   root: fileURLToPath(new URL("./pocket", import.meta.url)),
