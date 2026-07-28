@@ -652,7 +652,7 @@ fn agent_browser_screenshot(
 // Clipboard reads run natively on Windows (see clipboard_win) to avoid the
 // console-window flicker of shelling out to PowerShell; other platforms keep the
 // sidecar path (pbpaste/xclip never pop a console window).
-#[tauri::command]
+#[tauri::command(async)]
 fn read_clipboard_file_paths(
     state: tauri::State<'_, SidecarState>,
 ) -> Result<Vec<String>, String> {
@@ -672,7 +672,7 @@ fn read_clipboard_file_paths(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn read_clipboard_image_as_file_path(
     state: tauri::State<'_, SidecarState>,
 ) -> Result<Option<String>, String> {
@@ -691,7 +691,7 @@ fn read_clipboard_image_as_file_path(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn read_clipboard_text(
     state: tauri::State<'_, SidecarState>,
 ) -> Result<String, String> {
@@ -1686,5 +1686,95 @@ mod tests {
         assert_eq!(session_file_name("../../evil"), "______evil.json");
         assert_eq!(session_file_name("main"), "main.json");
         assert_eq!(session_file_name("a/b"), "a_b.json");
+    }
+
+    // Enforces the INVARIANT documented above `request_from_sidecar_timeout`:
+    // every `#[tauri::command]` whose body reaches the blocking sidecar helpers
+    // must be `#[tauri::command(async)]` (or an `async fn`). A plain-sync command
+    // runs on the main thread, where `recv_timeout` freezes the webview for the
+    // whole round trip — up to 10s on a clipboard image paste. Three clipboard
+    // commands once slipped through the async port; this scans the source so the
+    // omission can't silently recur.
+    #[test]
+    fn sidecar_commands_are_async() {
+        let src = include_str!("lib.rs");
+        let lines: Vec<&str> = src.lines().collect();
+        let mut offenders: Vec<String> = Vec::new();
+
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with("#[tauri::command") {
+                continue;
+            }
+            let is_async_attr = trimmed.contains("(async)");
+
+            // Skip any further attribute lines / blanks down to the fn signature.
+            let mut j = i + 1;
+            while j < lines.len() {
+                let t = lines[j].trim_start();
+                if t.starts_with("#[") || t.is_empty() {
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+            if j >= lines.len() {
+                continue;
+            }
+            let sig = lines[j].trim_start();
+            let is_async_fn = sig.starts_with("async fn") || sig.starts_with("pub async fn");
+            let name = sig
+                .trim_start_matches("pub ")
+                .trim_start_matches("async ")
+                .trim_start_matches("fn ")
+                .split('(')
+                .next()
+                .unwrap_or("<unknown>")
+                .trim();
+
+            // Extract the fn body by brace-counting from the signature onward.
+            // This is a naive char count, not a lexer: a lone `{`/`}` inside a
+            // string or char literal (e.g. `'{'`, or `"missing }"`) would throw
+            // off the depth. It holds across the command bodies scanned here
+            // because none of them contain such a literal; a future command that
+            // did would need a real tokenizer. Good enough to enforce the
+            // async-attribute invariant, not a general Rust brace matcher.
+            let mut depth = 0i32;
+            let mut started = false;
+            let mut body = String::new();
+            for l in &lines[j..] {
+                for ch in l.chars() {
+                    if ch == '{' {
+                        depth += 1;
+                        started = true;
+                    } else if ch == '}' {
+                        depth -= 1;
+                    }
+                }
+                body.push_str(l);
+                if started && depth == 0 {
+                    break;
+                }
+            }
+
+            // Match direct callers of the blocking helper *and* the
+            // agent-browser commands, which reach it transitively through the
+            // `agent_browser_forward` wrapper (their bodies never name
+            // `request_from_sidecar` directly). That family carries the longest
+            // timeout (AGENT_BROWSER_TIMEOUT = 30s), so it's the worst case to
+            // let slip plain-sync.
+            let reaches_sidecar =
+                body.contains("request_from_sidecar") || body.contains("agent_browser_forward");
+            if reaches_sidecar && !(is_async_attr || is_async_fn) {
+                offenders.push(name.to_string());
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "these #[tauri::command] fns reach the blocking sidecar helpers but are \
+             not declared #[tauri::command(async)] (see the INVARIANT above \
+             request_from_sidecar_timeout): {offenders:?}",
+        );
     }
 }
