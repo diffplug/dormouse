@@ -498,19 +498,11 @@ export class TauriAdapter implements PlatformAdapter {
     this.alertStateHandlers.add(handler);
   }
 
-  offAlertState(handler: (detail: AlertStateDetail) => void): void {
-    this.alertStateHandlers.delete(handler);
-  }
-
   // Single webview owning the AlertManager, so localStorage is the only store
   // and there is no canonical snapshot to broadcast back.
   onWatchedCommands(_handler: (names: string[]) => void): void {}
 
-  offWatchedCommands(_handler: (names: string[]) => void): void {}
-
   onAlertSettings(_handler: (settings: AlertSettings) => void): void {}
-
-  offAlertSettings(_handler: (settings: AlertSettings) => void): void {}
 
   // --- State persistence ---
 

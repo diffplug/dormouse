@@ -244,14 +244,16 @@ export interface PlatformAdapter {
   alertToggleTodo(id: string): void;
   alertMarkTodo(id: string): void;
   alertClearTodo(id: string): void;
+  // Alert subscriptions have no `off` counterpart, unlike the PTY listeners
+  // above: their handlers are stable module-level functions registered once for
+  // the renderer's lifetime (`initAlertStateReceiver`), so adapters store them
+  // in a `Set` and re-registration is idempotent. Add the pair back if a
+  // caller ever needs to unsubscribe.
   onAlertState(handler: (detail: AlertStateDetail) => void): void;
-  offAlertState(handler: (detail: AlertStateDetail) => void): void;
   /** Receive the host's canonical WATCHING rule snapshot. */
   onWatchedCommands(handler: (names: string[]) => void): void;
-  offWatchedCommands(handler: (names: string[]) => void): void;
   /** Receive the host's canonical alarm settings. */
   onAlertSettings(handler: (settings: AlertSettings) => void): void;
-  offAlertSettings(handler: (settings: AlertSettings) => void): void;
 
   // State persistence
   saveState(state: unknown): void;

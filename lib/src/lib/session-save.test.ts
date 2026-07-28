@@ -60,9 +60,7 @@ function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
     alertMarkTodo: () => {},
     alertClearTodo: () => {},
     onAlertState: () => {},
-    offAlertState: () => {},
     onWatchedCommands: () => {},
-    offWatchedCommands: () => {},
     saveState: vi.fn((state: unknown) => {
       persistedState = state;
     }),

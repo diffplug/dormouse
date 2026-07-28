@@ -255,13 +255,10 @@ export class FakePtyAdapter implements PlatformAdapter {
   alertMarkTodo(id: string): void { this.alertManager.markTodo(id); }
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
   onAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.add(handler); }
-  offAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.delete(handler); }
   // Single renderer owning the AlertManager, so localStorage is the only store
   // and there is no canonical snapshot to broadcast back.
   onWatchedCommands(_handler: (names: string[]) => void): void {}
-  offWatchedCommands(_handler: (names: string[]) => void): void {}
   onAlertSettings(_handler: (settings: AlertSettings) => void): void {}
-  offAlertSettings(_handler: (settings: AlertSettings) => void): void {}
 
   private savedState: unknown = null;
   saveState(state: unknown): void { this.savedState = state; }

@@ -448,24 +448,12 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.alertStateHandlers.add(handler);
   }
 
-  offAlertState(handler: (detail: AlertStateDetail) => void): void {
-    this.alertStateHandlers.delete(handler);
-  }
-
   onWatchedCommands(handler: (names: string[]) => void): void {
     this.watchedCommandHandlers.add(handler);
   }
 
-  offWatchedCommands(handler: (names: string[]) => void): void {
-    this.watchedCommandHandlers.delete(handler);
-  }
-
   onAlertSettings(handler: (settings: AlertSettings) => void): void {
     this.alertSettingsHandlers.add(handler);
-  }
-
-  offAlertSettings(handler: (settings: AlertSettings) => void): void {
-    this.alertSettingsHandlers.delete(handler);
   }
 
   // --- State persistence ---

@@ -357,11 +357,8 @@ export class RemotePtyAdapter implements PlatformAdapter {
   alertMarkTodo(): void {}
   alertClearTodo(): void {}
   onAlertState(): void {}
-  offAlertState(): void {}
   onWatchedCommands(): void {}
-  offWatchedCommands(): void {}
   onAlertSettings(): void {}
-  offAlertSettings(): void {}
 
   saveState(state: unknown): void {
     this.#savedState = state;

@@ -217,12 +217,9 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   alertMarkTodo(id: string): void { this.alertManager.markTodo(id); }
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
   onAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.add(handler); }
-  offAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.delete(handler); }
   // See TauriAdapter: single webview, so nothing is broadcast back.
   onWatchedCommands(_handler: (names: string[]) => void): void {}
-  offWatchedCommands(_handler: (names: string[]) => void): void {}
   onAlertSettings(_handler: (settings: AlertSettings) => void): void {}
-  offAlertSettings(_handler: (settings: AlertSettings) => void): void {}
 
   private static STATE_KEY = 'dormouse.browser-sidecar.session';
 
