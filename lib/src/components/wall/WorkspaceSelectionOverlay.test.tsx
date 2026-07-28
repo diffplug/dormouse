@@ -133,6 +133,8 @@ beforeEach(() => {
   globalThis.ResizeObserver ??= class {
     observe() {} unobserve() {} disconnect() {}
   } as unknown as typeof ResizeObserver;
+  // The ants variant sizes its dash via SVG getTotalLength (unimplemented in jsdom).
+  (SVGElement.prototype as unknown as { getTotalLength?: () => number }).getTotalLength ??= () => 100;
   noReducedMotion();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -261,5 +263,22 @@ describe('SelectionRing settled render', () => {
     expect(path!.getAttribute('stroke-dasharray')).toBeNull();
     // A settled ring never references the blur filter (deterministic snapshots).
     expect(path!.getAttribute('filter')).toBeNull();
+  });
+
+  // The path element is shared across variants and the dash is an imperative write
+  // React never reconciles away — a command→passthrough flip must clear it, or the
+  // 1px solid ring renders the ants' dash as a dotted line.
+  it('clears the ants dash when flipping command → passthrough', async () => {
+    const store = makeStore();
+    const panes = twoPanes();
+    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+
+    const path = container.querySelector('path');
+    expect(path!.getAttribute('stroke-dasharray')).not.toBeNull();
+
+    await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
+    expect(path!.getAttribute('stroke-width')).toBe('1');
+    expect(path!.getAttribute('stroke-dasharray')).toBeNull();
+    expect(path!.style.getPropertyValue('--march-offset')).toBe('');
   });
 });

@@ -171,6 +171,12 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       const gap = adjusted * (1 - cfg.marchingAnts.dashFraction);
       path.setAttribute('stroke-dasharray', `${dash} ${gap}`);
       path.style.setProperty('--march-offset', `-${adjusted}px`);
+    } else {
+      // The path element is shared across variants and the dash is an imperative
+      // write React never reconciles away — clear it, or a command→passthrough
+      // flip leaves the 1px solid ring rendering the ants' dash (a dotted line).
+      path.removeAttribute('stroke-dasharray');
+      path.style.removeProperty('--march-offset');
     }
 
     // Directional motion blur — per-axis sigma from the ring center velocity. The
