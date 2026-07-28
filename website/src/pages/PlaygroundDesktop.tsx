@@ -187,6 +187,10 @@ function PlaygroundDesktopExperience() {
                   window.setTimeout(() => {
                     for (const paneId of ALERT_DEMO_PANES) {
                       finishFakeCommand(adapter, registry, paneId);
+                      // The pane's real program is still drawing, so put its
+                      // actual command line back rather than leaving the pane
+                      // looking idle.
+                      shellRegistryRef.current?.ensureShell(paneId).reportRunningCommand();
                     }
                   }, WATCH_DEMO_COMMAND_MS),
                 );
@@ -208,6 +212,7 @@ function PlaygroundDesktopExperience() {
                 demoTimersRef.current.push(
                   window.setTimeout(() => {
                     finishFakeCommand(adapter, registry, PANE_SPLASH);
+                    shellRegistryRef.current?.ensureShell(PANE_SPLASH).reportRunningCommand();
                   }, BUSY_DEMO_DURATION_MS),
                 );
               },

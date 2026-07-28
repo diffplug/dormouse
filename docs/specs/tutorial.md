@@ -52,7 +52,7 @@ Below the sections the menu lists `Starred on GitHub` (persisted separately, cal
 
 Four keys are intercepted by `TutRunner` while a specific section is open — they are **not** real Dormouse shortcuts. The three alert demos all report their fake commands through `OSC 633 ; E / C / D` written with `FakePtyAdapter.sendOutput`, which the fake adapter runs through the real `TerminalProtocolParser`; the OSCs are stripped from visible output, so a demo never disturbs the TUI its pane is drawing. Each demo's duration must outlast `cfg.alert.userAttention` so the bell actually rings rather than being suppressed as "user is looking"; see the comments in `tut-runner.ts`.
 
-- **`s`** (Alerts section) — starts a fake `longtask` on *both* alert demo panes (`tut-boxed`, `tut-splash`) and drives `FakePtyAdapter.pumpActivity` on `tut-boxed`, animating an in-place countdown. Two panes running one command is what makes `al-spreads` observable: WATCHING is keyed on the command name, so a single bell click lights both (`docs/specs/alert.md`). The pump always targets `tut-boxed` because it is the quiet pane — `tut-splash` animates forever, so it stays `BUSY` and can never reach `ALERT_RINGING`. The fake exit is reported `WATCH_DEMO_COMMAND_MS` later, not when the burst ends: WATCHING rings on *silence from a still-running command*, and reporting the exit early would dispose the monitor before it could ring.
+- **`s`** (Alerts section) — reports a fake `longtask` on *both* alert demo panes (`tut-boxed`, `tut-splash`), overriding the command their shell is really running, and drives `FakePtyAdapter.pumpActivity` on `tut-boxed` with an in-place countdown. Two panes running one command is what makes `al-spreads` observable: WATCHING is keyed on the command name, so a single bell click lights both (`docs/specs/alert.md`). The pump always targets `tut-boxed` because it is the quiet pane — `tut-splash` animates forever, so it stays `BUSY` and can never reach `ALERT_RINGING`. The fake exit is reported `WATCH_DEMO_COMMAND_MS` later, not when the burst ends: WATCHING rings on *silence from a still-running command*, and reporting the exit early would dispose the monitor before it could ring. Afterwards each pane's real command line is put back via `TutorialShell.reportRunningCommand()`, so a pane whose TUI is still drawing never looks idle.
 - **`n`** (Alerts section) — writes a raw `OSC 777` notification to `tut-boxed`, exercising the terminal-report track, which needs no WATCHING rule.
 - **`x`** (Alerts section) — starts a fake `slowbuild` on `tut-splash` and reports its exit after the same duration. Deliberately an *unwatched* command name, so the command-exit track (rather than WATCHING) owns the bell; the user has to attend the pane and leave it for the ring to arm.
 - **`p`** (Copy paste section) — toggles the **Place To Paste** scratch modal (`website/src/components/PlaceToPaste.tsx`) via `onTogglePlaceToPaste`. Only wired on desktop; Pocket omits the callback.
@@ -68,6 +68,14 @@ is all the playground needs. Minimum useful behavior:
 
 * Echo typed characters and maintain a command-line buffer; Enter submits,
   Backspace edits.
+* Report shell integration for every command it runs — `OSC 633 ; A/B` around
+  the prompt, `633 ; E` + `633 ; C` on launch, `633 ; D` on exit (`127` for an
+  unknown command). This is load-bearing rather than cosmetic: WATCHING is keyed
+  on the running command's name (`docs/specs/alert.md`), so without it no
+  playground pane could be alerted on at all — every bell would report "nothing
+  is running", including the pane hosting the tutorial itself. It also means
+  playground panes are OSC-driven, so the keystroke fallback in
+  `docs/specs/terminal-state.md` never engages there.
 * Up/Down arrows recall command history at the shell prompt; Escape, Tab, and Left/Right are no-ops at the base prompt (full-screen runners like `ascii-splash` give them behavior).
 * When a fake full-screen app such as `ascii-splash`, `splash`, `changelog`, or
   `tut` is running, `Ctrl+C` sends `\x03` to that app; if the app exits, the
