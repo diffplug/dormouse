@@ -129,6 +129,35 @@ describe('VSCodeAdapter PTY exit handling', () => {
     });
   });
 
+  it('sends watched-command initialization and mutations as distinct messages', () => {
+    const adapter = new VSCodeAdapter();
+
+    adapter.alertSetWatchedCommands(['claude']);
+    adapter.alertSetCommandWatched('npm', true);
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'alert:initializeWatchedCommands',
+      names: ['claude'],
+    });
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'alert:setCommandWatched',
+      name: 'npm',
+      watched: true,
+    });
+  });
+
+  it('forwards the host canonical watched-command snapshot', () => {
+    const adapter = new VSCodeAdapter();
+    const snapshots: string[][] = [];
+    adapter.onWatchedCommands((names) => snapshots.push(names));
+
+    windowTarget.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'alert:watchedCommands', names: ['claude', 'npm'] },
+    }));
+
+    expect(snapshots).toEqual([['claude', 'npm']]);
+  });
+
   it('parses replay buffers into semantic events and strips OSCs before forwarding', () => {
     const adapter = new VSCodeAdapter();
     const replays: Array<{ id: string; data: string }> = [];

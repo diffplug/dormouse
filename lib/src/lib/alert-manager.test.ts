@@ -18,9 +18,21 @@ describe('AlertManager in isolation', () => {
   // Timing from cfg.alert:
   // busyCandidateGap=1500, busyConfirmGap=500, mightNeedAttention=2000, needsAttentionConfirm=3000
 
+  /**
+   * WATCHING is keyed on the foreground command's name, so the only way to turn
+   * it on is to run a watched command (`docs/specs/alert.md`).
+   */
+  function runWatchedCommand(id: string, commandLine = 'longtask'): void {
+    manager.setWatchedCommands(['longtask']);
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+  }
+
   it('state machine advances through silence to ALERT_RINGING', () => {
     const id = 'test-pty';
-    manager.toggleAlert(id);
+    runWatchedCommand(id);
     expect(manager.getState(id).status).toBe('NOTHING_TO_SHOW');
 
     // Simulate sustained output over 2 seconds
@@ -49,7 +61,7 @@ describe('AlertManager in isolation', () => {
   it('reproduces the exact user scenario: alert set, 5s task, collapse after 2s, wait 60s', () => {
     const id = 'user-scenario';
 
-    manager.toggleAlert(id);
+    runWatchedCommand(id);
     manager.clearAttention(id);
 
     for (let t = 0; t < 5_000; t += 200) {
@@ -65,7 +77,7 @@ describe('AlertManager in isolation', () => {
 
   it('ALERT_RINGING latches when user has no attention (view hidden)', () => {
     const id = 'latch-test';
-    manager.toggleAlert(id);
+    runWatchedCommand(id);
     manager.clearAttention(id);
 
     manager.onData(id);
@@ -94,7 +106,7 @@ describe('AlertManager in isolation', () => {
 
   it('ALERT_RINGING resets on data when user has attention', () => {
     const id = 'reset-test';
-    manager.toggleAlert(id);
+    runWatchedCommand(id);
 
     manager.attend(id);
     manager.onData(id);
@@ -119,7 +131,7 @@ describe('AlertManager in isolation', () => {
       if (_id === id) states.push(state.status);
     });
 
-    manager.toggleAlert(id);
+    runWatchedCommand(id);
     manager.clearAttention(id);
 
     manager.onData(id);
@@ -140,7 +152,7 @@ describe('AlertManager in isolation', () => {
   //  recovery timers — were removed when TODO was simplified to a plain boolean.)
 
   function driveToRinging(id: string): void {
-    manager.toggleAlert(id);
+    runWatchedCommand(id);
     manager.clearAttention(id);
     manager.onData(id);
     vi.advanceTimersByTime(1_600);
@@ -244,36 +256,24 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('opens the bell menu for protocol progress when WATCHING is disabled', () => {
-    const id = 'osc-progress-menu';
+  it('dropping the rule disposes only the monitor, leaving protocol progress armed', () => {
+    const id = 'osc-progress-drop-rule';
 
-    manager.updateProtocolProgress(id, { state: 'normal', percent: 25 });
-
-    expect(manager.dismissOrToggleAlert(id, 'OSC_NOTIF_BUSY')).toBe('menu');
-    expect(manager.getState(id)).toMatchObject({
-      status: 'OSC_NOTIF_BUSY',
-      watchingEnabled: false,
-    });
-  });
-
-  it('disables only WATCHING for protocol progress when WATCHING is enabled', () => {
-    const id = 'osc-progress-disable-watching';
-
-    manager.toggleAlert(id);
+    runWatchedCommand(id);
     manager.updateProtocolProgress(id, { state: 'normal', percent: 25 });
     expect(manager.getState(id)).toMatchObject({
       status: 'OSC_NOTIF_BUSY',
       watchingEnabled: true,
     });
 
-    expect(manager.dismissOrToggleAlert(id, 'OSC_NOTIF_BUSY')).toBe('disabled');
+    manager.setWatchedCommands([]);
     expect(manager.getState(id)).toMatchObject({
       status: 'OSC_NOTIF_BUSY',
       watchingEnabled: false,
     });
   });
 
-  it('opens the dialog after an attention-dismissed ring even when WATCHING is disabled', () => {
+  it('attending a ring leaves attentionDismissedRing for the bell table to consume', () => {
     const id = 'attention-dismissed-watching-disabled';
 
     // A protocol ring needs no WATCHING; attending it dismisses the ring and
@@ -284,15 +284,33 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
       todo: true,
+      attentionDismissedRing: true,
     });
 
-    // The next bell click must open the dialog, not silently enable WATCHING.
-    expect(manager.dismissOrToggleAlert(id, 'WATCHING_DISABLED')).toBe('dismissed');
-    expect(manager.getState(id).watchingEnabled).toBe(false);
+    // An explicit dismiss is the click that consumes the flag.
+    manager.dismissAlert(id);
+    expect(manager.getState(id).attentionDismissedRing).toBe(false);
+  });
 
-    // Flag consumed: the click after that enables WATCHING as usual.
-    expect(manager.dismissOrToggleAlert(id, 'WATCHING_DISABLED')).toBe('enabled');
-    expect(manager.getState(id).watchingEnabled).toBe(true);
+  it('keeps attentionDismissedRing when a watched command starts before bell dismissal', () => {
+    const id = 'attention-dismissed-then-watched-command';
+    manager.setWatchedCommands(['claude']);
+    manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
+    manager.attend(id);
+
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'claude --resume' },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+
+    expect(manager.getState(id)).toMatchObject({
+      watchingEnabled: true,
+      todo: true,
+      attentionDismissedRing: true,
+    });
+
+    manager.dismissAlert(id);
+    expect(manager.getState(id).attentionDismissedRing).toBe(false);
   });
 
   it('protocol completion is suppressed while the user has attention', () => {
@@ -455,6 +473,139 @@ describe('AlertManager in isolation', () => {
       todo: false,
       notification: null,
     });
+  });
+
+  // --- Command-keyed WATCHING ---
+
+  it('turns WATCHING on for a watched command and off again when it finishes', () => {
+    const id = 'rule-lifecycle';
+    manager.setWatchedCommands(['claude']);
+    expect(manager.getState(id).watchingEnabled).toBe(false);
+
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'claude --print hello' },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+    expect(manager.getState(id).watchingEnabled).toBe(true);
+
+    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+    expect(manager.getState(id).watchingEnabled).toBe(false);
+  });
+
+  it('matches on the bare program name, not the whole command line', () => {
+    const id = 'rule-argv0';
+    manager.setWatchedCommands(['claude']);
+
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'FOO=1 env BAR=2 /usr/local/bin/claude --resume' },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+    expect(manager.getState(id).watchingEnabled).toBe(true);
+  });
+
+  it('leaves an unwatched command alone', () => {
+    const id = 'rule-miss';
+    manager.setWatchedCommands(['claude']);
+
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'git status' },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+    expect(manager.getState(id).watchingEnabled).toBe(false);
+  });
+
+  it('turns WATCHING off at the prompt even without a finish event', () => {
+    const id = 'rule-prompt';
+    runWatchedCommand(id);
+    expect(manager.getState(id).watchingEnabled).toBe(true);
+
+    manager.applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
+    expect(manager.getState(id).watchingEnabled).toBe(false);
+  });
+
+  it('applies a newly added rule to every session already running that command', () => {
+    const a = 'rule-live-a';
+    const b = 'rule-live-b';
+    for (const id of [a, b]) {
+      manager.applyTerminalSemanticEvents(id, [
+        { type: 'commandLine', commandLine: 'claude' },
+        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+      ]);
+    }
+    expect(manager.getState(a).watchingEnabled).toBe(false);
+    expect(manager.getState(b).watchingEnabled).toBe(false);
+
+    manager.setWatchedCommands(['claude']);
+    expect(manager.getState(a).watchingEnabled).toBe(true);
+    expect(manager.getState(b).watchingEnabled).toBe(true);
+
+    manager.setWatchedCommands([]);
+    expect(manager.getState(a).watchingEnabled).toBe(false);
+    expect(manager.getState(b).watchingEnabled).toBe(false);
+  });
+
+  it('keeps a WATCHING ring after the watched command exits and takes watching with it', () => {
+    const id = 'ring-outlives-monitor';
+    driveToRinging(id);
+
+    // The command exiting disposes the monitor; the ring it already raised is
+    // the whole point of watching, so it has to survive.
+    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_RINGING',
+      watchingEnabled: false,
+    });
+
+    manager.dismissAlert(id);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'WATCHING_DISABLED',
+      todo: true,
+    });
+  });
+
+  it('silences a WATCHING ring when the rule is explicitly removed', () => {
+    const id = 'ring-dies-with-rule';
+    driveToRinging(id);
+
+    // Unlike the command ending, dropping the rule is the user saying "stop
+    // alerting on this" — the ring goes with it.
+    manager.setWatchedCommands([]);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'WATCHING_DISABLED',
+      watchingEnabled: false,
+      todo: false,
+    });
+  });
+
+  it('silences a latched WATCHING ring when its rule is removed after command exit', () => {
+    const id = 'exited-ring-dies-with-rule';
+    driveToRinging(id);
+    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_RINGING',
+      watchingEnabled: false,
+    });
+
+    manager.setWatchedCommands([]);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'WATCHING_DISABLED',
+      watchingEnabled: false,
+      todo: false,
+    });
+  });
+
+  it('keeps the command-exit arm hidden while WATCHING owns the display', () => {
+    const id = 'arm-under-watching';
+    runWatchedCommand(id);
+    manager.attend(id);
+    manager.clearAttention(id);
+
+    // Armed underneath, but the monitor's own state is what the bell shows.
+    expect(manager.getState(id).status).toBe('NOTHING_TO_SHOW');
+
+    manager.setWatchedCommands([]);
+    expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
   });
 
   it('preserves richer protocol detail when protocol and command exit both ring', () => {

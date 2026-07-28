@@ -167,7 +167,7 @@ Non-OSC title source:
 
 - `user` — user-pinned title set via the inline rename UI (`setTerminalUserTitle`). Always wins over every other candidate.
 
-The `user_input` command fallback is best effort. It is sufficient for headers and grouping, but command-exit alerting may treat it as lower confidence or ignore it until deeper shell integration exists.
+The `user_input` command fallback is best effort and renderer-only: it is sufficient for headers and grouping, but the `AlertManager` never sees it. Command-exit alerting and command-keyed WATCHING both need real shell integration, and `docs/specs/alert.md` records that as a deliberate limitation rather than plumbing the heuristic into a second command-tracking path.
 
 The parser accepts both BEL and ST terminators and handles split chunks. Supported-but-malformed semantic OSCs are consumed without changing state. Unsupported OSC pass-through vs. consume/ignore behavior is defined centrally in `docs/specs/terminal-escapes.md`.
 

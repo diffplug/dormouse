@@ -21,12 +21,15 @@ const KEYBOARD_ITEM_IDS = [
 ] as const;
 
 const ALERT_ITEM_IDS = [
-  "al-enable",
+  "al-watch-cmd",
+  "al-spreads",
   "al-busy",
   "al-ring",
   "al-todo-auto",
   "al-todo-clear",
   "al-todo-manual",
+  "al-notif",
+  "al-cmd-exit",
 ] as const;
 
 const COPY_ITEM_IDS = [
@@ -177,28 +180,33 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
   },
   {
     id: 'alert',
-    title: 'Alert and TODO',
+    title: 'Alerts and attention',
     items: [
       {
-        id: 'al-enable',
-        title: 'Enable WATCHING on a pane',
-        hint: 'Click the bell on the pane you want to use, or press `a` in command mode with that pane selected.',
+        id: 'al-watch-cmd',
+        title: 'Alert me whenever `longtask` runs',
+        hint: 'Press `s` to start a fake `longtask`, then click that pane\'s bell (or select it and press `a`). Alerts belong to the command, not the tab — the bell says "Alert on all longtask".',
+      },
+      {
+        id: 'al-spreads',
+        title: 'The rule covers every pane running that command',
+        hint: 'Both fake tasks light up from the one bell you clicked. Any pane you open later that runs `longtask` will watch too, with no extra clicks.',
       },
       {
         id: 'al-busy',
-        title: 'Watch the bell tilt while a task runs',
-        hint: 'Press `s` here to start a fake busy task on that WATCHING-enabled pane.',
+        title: 'The bell tilts while the command works',
+        hint: 'Press `s` again if the task already finished.',
       },
       {
         id: 'al-ring',
-        title: 'Bell rings when the task completes',
+        title: 'It rings when the command goes quiet',
         hint:
           `Don't type! If you type, Dormouse will think you are paying attention to this task and the bell will not ring. The bell only rings if (a) the pane is not selected or (b) you have not interacted with the pane for the past ${USER_ATTENTION_SECS} seconds.`,
       },
       {
         id: 'al-todo-auto',
-        title: 'TODO tag appears when you dismiss the ringing alert',
-        hint: 'Click the bell or interact with the pane to dismiss.',
+        title: 'Dismissing a ringing alert leaves a TODO behind',
+        hint: 'Click the bell or interact with the pane to dismiss. The TODO is there so a ring you waved away does not vanish without a trace.',
       },
       {
         id: 'al-todo-clear',
@@ -206,9 +214,23 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
       },
       {
         id: 'al-todo-manual',
-        title: 'Manually add a TODO',
+        title: 'Add a TODO by hand',
         hint: 'Press `t` in command mode, or right-click the bell.',
       },
+      {
+        id: 'al-notif',
+        title: 'A program can ring the bell itself',
+        hint: 'Press `n` for a fake build that sends a desktop notification. This needs no rule at all — any program that emits `BEL`, `OSC 9`, `OSC 777`, or `OSC 99` rings, and its message shows on the TODO tag.',
+      },
+      {
+        id: 'al-cmd-exit',
+        title: 'A long command that finished while you were away',
+        hint:
+          `Press \`x\` to start a slow build in another pane, click into that pane, then click back here and wait. Dormouse rings for any command that ran longer than ${USER_ATTENTION_SECS} seconds and finished after you walked away — again, no rule needed.`,
+      },
+    ],
+    prose: [
+      'Three different things can ring the bell: a rule you set on a command name, a notification the program sends, and a long command finishing while you were elsewhere. None of them ring while you are actually looking at the pane.',
     ],
   },
   COPY_PASTE_SECTION,

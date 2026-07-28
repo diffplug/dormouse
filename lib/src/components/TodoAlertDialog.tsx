@@ -7,13 +7,17 @@ import { clampOverlayPosition, pointInConvexPolygon } from '../lib/ui-geometry';
 import {
   clearSessionTodo,
   DEFAULT_ACTIVITY_STATE,
-  disableSessionAlert,
   dismissOrToggleAlert,
   getActivity,
   getActivitySnapshot,
+  getRunningCommandArgv0,
+  getTerminalPaneStateSnapshot,
+  getWatchedCommandsSnapshot,
   markSessionTodo,
+  setCommandWatched,
   subscribeToActivity,
-  toggleSessionAlert,
+  subscribeToTerminalPaneState,
+  subscribeToWatchedCommands,
   toggleSessionTodo,
 } from '../lib/terminal-registry';
 
@@ -30,6 +34,11 @@ export function TodoAlertDialog({
 }) {
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const activity = activityStates.get(sessionId) ?? DEFAULT_ACTIVITY_STATE;
+  const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
+  // WATCHING is a rule on the running command, so the switch is only meaningful
+  // while something is running (`docs/specs/alert.md`).
+  useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
+  const argv0 = getRunningCommandArgv0(sessionId);
   const dialogRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<CSSProperties>({
     left: triggerRect.left,
@@ -132,7 +141,9 @@ export function TodoAlertDialog({
         <XIcon size={12} weight="bold" />
       </button>
 
-      <div className="mb-3 grid w-fit grid-cols-[auto_auto_auto] items-center gap-x-2 gap-y-2">
+      {/* pr-6 keeps the right-hand switches clear of the absolutely-positioned
+          close button, whatever the rows end up containing. */}
+      <div className="mb-3 grid w-fit grid-cols-[auto_auto_auto] items-center gap-x-2 gap-y-2 pr-6">
         <Shortcut>t</Shortcut>
         <span className="text-sm font-medium text-foreground">TODO</span>
         <OnOffSwitch
@@ -142,15 +153,54 @@ export function TodoAlertDialog({
           label="TODO"
         />
 
-        <Shortcut>a</Shortcut>
-        <span className="text-sm font-medium text-foreground">WATCHING</span>
-        <OnOffSwitch
-          on={activity.watchingEnabled}
-          onEnable={() => toggleSessionAlert(sessionId)}
-          onDisable={() => disableSessionAlert(sessionId)}
-          label="WATCHING"
-        />
+        {argv0 && (
+          <>
+            <Shortcut>a</Shortcut>
+            {/* argv0 is a basename so it is normally short, but nothing enforces
+                that — cap it so a pathological name truncates instead of
+                stretching the dialog. The full name stays readable in the rule
+                list below and in the title attribute. */}
+            <span className="flex min-w-0 items-baseline gap-1.5 text-sm font-medium text-foreground">
+              <span className="shrink-0">Alert on all</span>
+              <span className="min-w-0 max-w-48 truncate font-mono" title={argv0}>"{argv0}"</span>
+            </span>
+            <OnOffSwitch
+              on={watched.includes(argv0)}
+              onEnable={() => setCommandWatched(argv0, true)}
+              onDisable={() => setCommandWatched(argv0, false)}
+              label={`Alert on all ${argv0}`}
+            />
+          </>
+        )}
       </div>
+
+      {!argv0 && (
+        <div className="mb-3 max-w-72 border-t border-border pt-2 text-sm leading-relaxed text-muted">
+          Nothing is running in this tab. Alerts are enabled per command — start
+          something, then press <Shortcut>a</Shortcut> to alert on every tab running it.
+        </div>
+      )}
+
+      {watched.length > 0 && (
+        <div className="mb-3 max-w-72 border-t border-border pt-2">
+          <div className="mb-1 text-sm font-medium text-muted">Alerting on</div>
+          <ul className="flex flex-col gap-0.5">
+            {watched.map((name) => (
+              <li key={name} className="flex items-center justify-between gap-3">
+                <span className="min-w-0 truncate font-mono text-sm text-foreground">{name}</span>
+                <button
+                  type="button"
+                  aria-label={`Stop alerting on all ${name}`}
+                  className="shrink-0 rounded p-0.5 text-muted hover:bg-foreground/10 hover:text-foreground"
+                  onClick={() => setCommandWatched(name, false)}
+                >
+                  <XIcon size={12} weight="bold" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {activity.notification && (
         <div className="mb-3 max-w-80 border-t border-border pt-2 text-sm leading-relaxed text-foreground">

@@ -1,5 +1,5 @@
 import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
-import { AlertManager, type SessionStatus } from '../alert-manager';
+import { AlertManager } from '../alert-manager';
 import { normalizeExternalUri } from '../external-links';
 import {
   applyTerminalProtocolEvents,
@@ -243,10 +243,9 @@ export class FakePtyAdapter implements PlatformAdapter {
 
   // Alert management (local AlertManager, same as TauriAdapter)
   alertRemove(id: string): void { this.alertManager.remove(id); }
-  alertToggle(id: string): void { this.alertManager.toggleAlert(id); }
-  alertDisable(id: string): void { this.alertManager.disableAlert(id); }
+  alertSetWatchedCommands(names: string[]): void { this.alertManager.setWatchedCommands(names); }
+  alertSetCommandWatched(name: string, watched: boolean): void { this.alertManager.setCommandWatched(name, watched); }
   alertDismiss(id: string): void { this.alertManager.dismissAlert(id); }
-  alertDismissOrToggle(id: string, displayedStatus: string): void { this.alertManager.dismissOrToggleAlert(id, displayedStatus as SessionStatus); }
   alertAttend(id: string): void { this.alertManager.attend(id); }
   alertResize(id: string): void { this.alertManager.onResize(id); }
   alertClearAttention(id?: string): void { this.alertManager.clearAttention(id); }
@@ -255,6 +254,8 @@ export class FakePtyAdapter implements PlatformAdapter {
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
   onAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.add(handler); }
   offAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.delete(handler); }
+  onWatchedCommands(_handler: (names: string[]) => void): void {}
+  offWatchedCommands(_handler: (names: string[]) => void): void {}
 
   private savedState: unknown = null;
   saveState(state: unknown): void { this.savedState = state; }

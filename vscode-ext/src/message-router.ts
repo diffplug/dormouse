@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
-import { AlertManager, type SessionStatus } from '../../lib/src/lib/alert-manager';
+import { AlertManager } from '../../lib/src/lib/alert-manager';
+import { WatchedCommandHost } from '../../lib/src/lib/watched-command-host';
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
@@ -42,6 +43,7 @@ const ALLOWED_WORKBENCH_COMMANDS = new Set<string>(VSCODE_WORKBENCH_COMMANDS);
 // Shared alert manager — survives router disposal so alert state persists
 // across webview collapse/expand cycles.
 const alertManager = new AlertManager();
+const watchedCommandHost = new WatchedCommandHost(alertManager);
 const alertProtocolParsers = new Map<string, TerminalProtocolParser>();
 
 // The extension-host parser has no DOM, so webviews push their resolved terminal
@@ -167,6 +169,12 @@ export function attachRouter(
   // Webview-facing subscriptions — only active when the webview has live content.
   // Subscribed on dormouse:init, unsubscribed when webview content is gone.
   let disconnectWebview: (() => void) | null = null;
+  const removeWatchedCommandListener = watchedCommandHost.subscribe((names) => {
+    void webview.postMessage({
+      type: 'alert:watchedCommands',
+      names,
+    } satisfies ExtensionMessage);
+  });
 
   function claim(id: string): void {
     ownedPtyIds.add(id);
@@ -600,17 +608,14 @@ export function attachRouter(
       case 'alert:remove':
         alertManager.remove(msg.id);
         break;
-      case 'alert:toggle':
-        alertManager.toggleAlert(msg.id);
+      case 'alert:initializeWatchedCommands':
+        watchedCommandHost.initialize(msg.names);
         break;
-      case 'alert:disable':
-        alertManager.disableAlert(msg.id);
+      case 'alert:setCommandWatched':
+        watchedCommandHost.setCommandWatched(msg.name, msg.watched);
         break;
       case 'alert:dismiss':
         alertManager.dismissAlert(msg.id);
-        break;
-      case 'alert:dismissOrToggle':
-        alertManager.dismissOrToggleAlert(msg.id, msg.displayedStatus as SessionStatus);
         break;
       case 'alert:attend':
         alertManager.attend(msg.id);
@@ -641,6 +646,7 @@ export function attachRouter(
       if (disposed) return;
       disposed = true;
       activeRouters.delete(router);
+      removeWatchedCommandListener();
       resolveAllFlushRequests();
       disconnectWebview?.();
       disconnectWebview = null;

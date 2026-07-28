@@ -13,7 +13,7 @@ The website playground has canonical device-specific routes:
 
 The `tut` TUI has two device profiles, defined in `website/src/lib/tut-items.ts` (`DESKTOP_TUTORIAL_PROFILE`, `POCKET_TUTORIAL_PROFILE`):
 
-- **Desktop** starts at the top-level menu; sections: Keyboard navigation, Alert and TODO, Copy paste.
+- **Desktop** starts at the top-level menu; sections: Keyboard navigation, Alerts and attention, Copy paste. The alert section covers all three of the tracks in `docs/specs/alert.md` — the command-keyed WATCHING rule and how it spreads across panes, program-sent terminal reports, and a command exiting while the user was away.
 - **Pocket** starts directly inside Gesture navigation (`initialSectionId`); sections: Gesture navigation, Copy paste.
 
 All section/item titles, hints, and prose live in `tut-items.ts`; the menu, Flappy Term, and star copy live in `tut-runner.ts`. This spec does not duplicate that text. Item ids are stable — they are the localStorage key suffixes.
@@ -50,9 +50,11 @@ Below the sections the menu lists `Starred on GitHub` (persisted separately, cal
 
 ### Runner-local intercepts
 
-Two keys are intercepted by `TutRunner` while a specific section is open — they are **not** real Dormouse shortcuts:
+Four keys are intercepted by `TutRunner` while a specific section is open — they are **not** real Dormouse shortcuts. The three alert demos all report their fake commands through `OSC 633 ; E / C / D` written with `FakePtyAdapter.sendOutput`, which the fake adapter runs through the real `TerminalProtocolParser`; the OSCs are stripped from visible output, so a demo never disturbs the TUI its pane is drawing. Each demo's duration must outlast `cfg.alert.userAttention` so the bell actually rings rather than being suppressed as "user is looking"; see the comments in `tut-runner.ts`.
 
-- **`s`** (Alert section) — drives a fake busy task on the WATCHING-enabled pane via `FakePtyAdapter.pumpActivity` (no text output) and animates an in-place countdown. The duration must outlast `cfg.alert.userAttention` so the bell actually rings rather than being suppressed as "user is looking"; see the comment in `tut-runner.ts`. Falls back to `PANE_BOXED` if no WATCHING pane is known.
+- **`s`** (Alerts section) — reports a fake `longtask` on *both* alert demo panes (`tut-boxed`, `tut-splash`), overriding the command their shell is really running, and drives `FakePtyAdapter.pumpActivity` on `tut-boxed` with an in-place countdown. Two panes running one command is what makes `al-spreads` observable: WATCHING is keyed on the command name, so a single bell click lights both (`docs/specs/alert.md`). The pump always targets `tut-boxed` because it is the quiet pane — `tut-splash` animates forever, so it stays `BUSY` and can never reach `ALERT_RINGING`. The fake exit is reported `WATCH_DEMO_COMMAND_MS` later, not when the burst ends: WATCHING rings on *silence from a still-running command*, and reporting the exit early would dispose the monitor before it could ring. Restarting the demo after its countdown finishes cancels that prior delayed exit before starting the new run, so an old completion cannot terminate the new fake command. Afterwards each pane's real command line is put back via `TutorialShell.reportRunningCommand()`, so a pane whose TUI is still drawing never looks idle.
+- **`n`** (Alerts section) — writes a raw `OSC 777` notification to `tut-boxed`, exercising the terminal-report track, which needs no WATCHING rule.
+- **`x`** (Alerts section) — starts a fake `slowbuild` on `tut-splash` and reports its exit after the same duration. Deliberately an *unwatched* command name, so the command-exit track (rather than WATCHING) owns the bell; the user has to attend the pane and leave it for the ring to arm.
 - **`p`** (Copy paste section) — toggles the **Place To Paste** scratch modal (`website/src/components/PlaceToPaste.tsx`) via `onTogglePlaceToPaste`. Only wired on desktop; Pocket omits the callback.
 
 ### Pocket Copy paste specifics
@@ -66,6 +68,14 @@ is all the playground needs. Minimum useful behavior:
 
 * Echo typed characters and maintain a command-line buffer; Enter submits,
   Backspace edits.
+* Report shell integration for every command it runs — `OSC 633 ; A/B` around
+  the prompt, `633 ; E` + `633 ; C` on launch, `633 ; D` on exit (`127` for an
+  unknown command). This is load-bearing rather than cosmetic: WATCHING is keyed
+  on the running command's name (`docs/specs/alert.md`), so without it no
+  playground pane could be alerted on at all — every bell would report "nothing
+  is running", including the pane hosting the tutorial itself. It also means
+  playground panes are OSC-driven, so the keystroke fallback in
+  `docs/specs/terminal-state.md` never engages there.
 * Up/Down arrows recall command history at the shell prompt; Escape, Tab, and Left/Right are no-ops at the base prompt (full-screen runners like `ascii-splash` give them behavior).
 * When a fake full-screen app such as `ascii-splash`, `splash`, `changelog`, or
   `tut` is running, `Ctrl+C` sends `\x03` to that app; if the app exits, the
@@ -93,7 +103,8 @@ These exist in `dormouse-lib` (or `MobileTerminalUi`) specifically so the browse
 
 - **`WallEvent.kill` / `WallEvent.move` / `WallEvent.paneAdded`** — discriminants on the `WallEvent` union (`lib/src/components/wall/wall-types.ts`); `kill` fires from `acceptKill`, `move` from `handle-pane-shortcuts.ts` after the Cmd/Ctrl-Arrow swap. `paneAdded` fires once per pane that becomes visible (seed ids, splits, dor surfaces, restores, auto-spawn) via the Lath store-subscription leaf-id diff (seed ids announced explicitly so they are emitted too) — so the page can create a fake shell for each pane without touching the tiling engine.
 - **`FakePtyAdapter.pumpActivity(id, durationMs, intervalMs)`** — drives the alert manager for a fixed duration with no data output (used by the `s` busy demo).
-- **`FakePtyAdapter.sendOutput(id, data)`** — pushes data through the data handlers as if the PTY produced it, also driving `alertManager.onData()`.
+- **`FakePtyAdapter.sendOutput(id, data)`** — pushes data through the real protocol parser as if the PTY produced it, driving `alertManager.onData()` for visible bytes and the notification/semantic-event paths for OSCs. This is what lets the alert demos fake shell integration and a program-sent notification without a real shell. Unlike `writePty`, it is not suppressed while a scenario is playing.
+- **`subscribeToWatchedCommands` / `getWatchedCommands`** (`lib/src/lib/watched-commands.ts`, re-exported from `terminal-registry`) — the WATCHING rule set, which `TutDetector` watches to credit `al-watch-cmd`.
 - **`MobileTerminalUi.onGestureInput(input, data)`** — optional callback fired only for radial-menu actions, so Pocket credits gesture items without mistaking native keyboard input for gestures.
 
 `SCENARIO_TUTORIAL_MOTD` was removed — the runner owns the main pane's screen.

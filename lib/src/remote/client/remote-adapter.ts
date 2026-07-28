@@ -346,10 +346,9 @@ export class RemotePtyAdapter implements PlatformAdapter {
   // Alerts are Host-authoritative (surfaced via the directory snapshot), so the
   // phone-side alert controls are inert.
   alertRemove(): void {}
-  alertToggle(): void {}
-  alertDisable(): void {}
+  alertSetWatchedCommands(): void {}
+  alertSetCommandWatched(): void {}
   alertDismiss(): void {}
-  alertDismissOrToggle(): void {}
   alertAttend(): void {}
   alertResize(): void {}
   alertClearAttention(): void {}
@@ -358,6 +357,8 @@ export class RemotePtyAdapter implements PlatformAdapter {
   alertClearTodo(): void {}
   onAlertState(): void {}
   offAlertState(): void {}
+  onWatchedCommands(): void {}
+  offWatchedCommands(): void {}
 
   saveState(state: unknown): void {
     this.#savedState = state;

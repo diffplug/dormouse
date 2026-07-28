@@ -18,11 +18,26 @@ export type StartProgram = (
   onExit: () => void,
 ) => InteractiveProgram | null;
 
+// VS Code shell-integration sequences (`docs/specs/terminal-escapes.md`). The
+// fake shell reports command boundaries like a real integrated shell, so
+// playground panes get the same terminal state a native pane would. This is
+// load-bearing, not decoration: WATCHING is keyed on the running command's name
+// (`docs/specs/alert.md`), so without these no playground pane could be alerted
+// on at all — the bell would only ever report "nothing is running".
+const OSC_PROMPT_START = '\x1b]633;A\x07';
+const OSC_PROMPT_END = '\x1b]633;B\x07';
+const OSC_COMMAND_START = '\x1b]633;C\x07';
+const oscCommandLine = (commandLine: string) => `\x1b]633;E;${commandLine}\x07`;
+const oscCommandFinish = (exitCode: number) => `\x1b]633;D;${exitCode}\x07`;
+
+/** Exit code a POSIX shell uses for an unrecognized command. */
+const EXIT_COMMAND_NOT_FOUND = 127;
+
 /**
  * Minimal browser shell for playground panes. Provides line editing,
- * command history, and dispatch to interactive programs (`tut`,
- * `ascii-splash`, ...) supplied by the host. Output goes through
- * `sendOutput`; input bytes arrive via `handleInput`.
+ * command history, dispatch to interactive programs (`tut`, `ascii-splash`,
+ * ...) supplied by the host, and shell-integration reporting for all of it.
+ * Output goes through `sendOutput`; input bytes arrive via `handleInput`.
  */
 export class TutorialShell {
   private lineBuffer = '';
@@ -33,6 +48,7 @@ export class TutorialShell {
   private startProgram: StartProgram;
   private activeProgram: InteractiveProgram | null = null;
   private promptShown = false;
+  private runningCommandLine: string | null = null;
 
   constructor(
     sendOutput: SendOutput,
@@ -47,22 +63,50 @@ export class TutorialShell {
   dispose(): void {
     this.activeProgram?.dispose();
     this.activeProgram = null;
+    this.runningCommandLine = null;
   }
 
   /** Programmatically run a command. Used to auto-launch `tut` on mount. */
   runCommand(name: string, args: string[] = []): void {
     if (this.activeProgram) return;
+    if (!this.launch(name, args, [name, ...args].join(' '))) {
+      this.sendOutput(`${fg(90)}Unknown command: ${name}${RESET}\r\n`);
+      this.finishCommand(EXIT_COMMAND_NOT_FOUND);
+    }
+  }
+
+  /**
+   * Re-announce the running program's command line. The alert tutorial
+   * temporarily reports a different command on a pane to demo a WATCHING rule
+   * (`docs/specs/tutorial.md`); this restores the truth afterwards without
+   * disturbing the program's screen. No-op at a prompt.
+   */
+  reportRunningCommand(): void {
+    if (this.runningCommandLine === null) return;
+    this.sendOutput(oscCommandLine(this.runningCommandLine) + OSC_COMMAND_START);
+  }
+
+  /**
+   * Announce and start `name`. Returns false when the command is unknown, in
+   * which case the caller prints its own message and closes the run out.
+   */
+  private launch(name: string, args: string[], commandLine: string): boolean {
+    this.runningCommandLine = commandLine;
+    this.sendOutput(oscCommandLine(commandLine) + OSC_COMMAND_START);
     const program = this.startProgram(name, args, () => {
       this.activeProgram = null;
-      this.showPrompt();
+      this.finishCommand(0);
     });
-    if (!program) {
-      this.sendOutput(`${fg(90)}Unknown command: ${name}${RESET}\r\n`);
-      this.showPrompt();
-      return;
-    }
+    if (!program) return false;
     this.activeProgram = program;
     this.activeProgram.start();
+    return true;
+  }
+
+  private finishCommand(exitCode: number): void {
+    this.runningCommandLine = null;
+    this.sendOutput(oscCommandFinish(exitCode));
+    this.showPrompt();
   }
 
   handleInput(data: string): void {
@@ -168,23 +212,16 @@ export class TutorialShell {
       return;
     }
     const [name, ...args] = cmd.split(/\s+/);
-    const program = this.startProgram(name, args, () => {
-      this.activeProgram = null;
-      this.showPrompt();
-    });
-    if (!program) {
+    if (!this.launch(name, args, cmd)) {
       this.sendOutput(
         `${fg(90)}Unknown command. Try ${fg(36)}tut${fg(90)}, ${fg(36)}ascii-splash${fg(90)}, or ${fg(36)}changelog${fg(90)}.${RESET}\r\n`,
       );
-      this.showPrompt();
-      return;
+      this.finishCommand(EXIT_COMMAND_NOT_FOUND);
     }
-    this.activeProgram = program;
-    this.activeProgram.start();
   }
 
   private showPrompt(): void {
-    this.sendOutput(PROMPT);
+    this.sendOutput(OSC_PROMPT_START + PROMPT + OSC_PROMPT_END);
     this.promptShown = true;
   }
 }

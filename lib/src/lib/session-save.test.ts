@@ -50,10 +50,9 @@ function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
     offRequestSessionFlush: () => {},
     notifySessionFlushComplete: () => {},
     alertRemove: () => {},
-    alertToggle: () => {},
-    alertDisable: () => {},
+    alertSetWatchedCommands: () => {},
+    alertSetCommandWatched: () => {},
     alertDismiss: () => {},
-    alertDismissOrToggle: () => {},
     alertAttend: () => {},
     alertResize: () => {},
     alertClearAttention: () => {},
@@ -62,6 +61,8 @@ function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
     alertClearTodo: () => {},
     onAlertState: () => {},
     offAlertState: () => {},
+    onWatchedCommands: () => {},
+    offWatchedCommands: () => {},
     saveState: vi.fn((state: unknown) => {
       persistedState = state;
     }),
