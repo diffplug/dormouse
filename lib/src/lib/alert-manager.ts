@@ -211,7 +211,6 @@ export class AlertManager {
       entry.monitor?.dispose();
       entry.monitor = null;
     }
-    entry.attentionDismissedRing = false;
     return true;
   }
 
@@ -272,7 +271,6 @@ export class AlertManager {
 
     if (
       entry.protocolStatus === 'OSC_NOTIF_BUSY'
-      && !entry.attentionDismissedRing
       && entry.progress?.state === progress.state
       && entry.progress?.percent === progress.percent
     ) {
@@ -281,7 +279,6 @@ export class AlertManager {
 
     entry.progress = { state: progress.state, percent: progress.percent };
     entry.protocolStatus = 'OSC_NOTIF_BUSY';
-    entry.attentionDismissedRing = false;
     this.notify(id);
   }
 
@@ -314,7 +311,6 @@ export class AlertManager {
     entry.todo = true;
     entry.protocolStatus = 'ALERT_RINGING';
     entry.progress = null;
-    entry.attentionDismissedRing = false;
     this.notify(id);
   }
 
@@ -410,7 +406,6 @@ export class AlertManager {
     if (entry.commandExitStatus !== 'IDLE') return false;
     if (entry.commandExitWatch.seenWithAttentionAt === null) return false;
     entry.commandExitStatus = 'COMMAND_EXIT_ARMED';
-    entry.attentionDismissedRing = false;
     return true;
   }
 
@@ -430,7 +425,6 @@ export class AlertManager {
         body: formatCommandExitBody(watch.displayCommand, exitCode),
       };
     }
-    entry.attentionDismissedRing = false;
     this.notify(id);
   }
 

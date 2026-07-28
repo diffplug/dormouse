@@ -125,7 +125,7 @@ Clearing behavior:
 - Removing a WATCHING rule disposes the monitors it owned and silences their WATCHING rings. It does not clear protocol progress, command-exit arms, TODO, or notification detail.
 - Destroying the Session clears all alert, TODO, notification, attention, protocol, and command-exit state.
 
-`attentionDismissedRing` exists so the next bell click after an attention-based dismissal opens the dialog instead of silently editing a rule. An explicit dismiss consumes it.
+`attentionDismissedRing` exists so the next bell click after an attention-based dismissal opens the dialog instead of silently editing a rule. Starting or stopping a WATCHING monitor, or advancing another alarm track, does not consume the flag; only the explicit dismiss path does.
 
 ## Workspace union
 

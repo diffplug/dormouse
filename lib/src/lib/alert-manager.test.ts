@@ -292,6 +292,27 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).attentionDismissedRing).toBe(false);
   });
 
+  it('keeps attentionDismissedRing when a watched command starts before bell dismissal', () => {
+    const id = 'attention-dismissed-then-watched-command';
+    manager.setWatchedCommands(['claude']);
+    manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
+    manager.attend(id);
+
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'claude --resume' },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+
+    expect(manager.getState(id)).toMatchObject({
+      watchingEnabled: true,
+      todo: true,
+      attentionDismissedRing: true,
+    });
+
+    manager.dismissAlert(id);
+    expect(manager.getState(id).attentionDismissedRing).toBe(false);
+  });
+
   it('protocol completion is suppressed while the user has attention', () => {
     const id = 'osc-progress-attention';
 
