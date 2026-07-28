@@ -17,6 +17,7 @@ import {
   type PaneElementsState,
 } from './wall-context';
 import type { WallMode } from './wall-types';
+import { cfg } from '../../cfg';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -257,7 +258,7 @@ describe('SelectionRing settled render', () => {
     await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
 
     expect(rafCbs.size).toBe(0); // settled: no tween running
-    const path = container.querySelector('path');
+    const path = container.querySelector('[data-ring="outline"]');
     expect(path).not.toBeNull();
     expect(path!.getAttribute('stroke-width')).toBe('1');
     expect(path!.getAttribute('stroke-dasharray')).toBeNull();
@@ -274,7 +275,7 @@ describe('SelectionRing settled render', () => {
     const panes = twoPanes();
     await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
 
-    const path = container.querySelector('path');
+    const path = container.querySelector('[data-ring="outline"]');
     expect(path!.getAttribute('stroke-dasharray')).not.toBeNull();
 
     await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
@@ -284,36 +285,103 @@ describe('SelectionRing settled render', () => {
   });
 });
 
-describe('SelectionRing ants under motion smear', () => {
-  // Under a non-uniform scale an edge's dash length and its thickness ride
-  // different axes, so a fully smeared edge would render a 6px dash 6px thick —
-  // square beads, not ants. The duty cycle opens toward solid as the smear grows
-  // so the gaps close instead. The dash PERIOD must not move: `--march-offset`
-  // is one dash+gap, and the `marching-ants` keyframe jumps every cycle if that
-  // stops being true. `getTotalLength` is stubbed at 100, so count === 10 and
-  // one period is exactly 10px.
-  it('dissolves the ants into a solid streak while smearing, keeping one dash period', async () => {
+describe('SelectionRing motion smear', () => {
+  /** The eight smear pieces, in render order: top, right, bottom, left, then the
+   *  four corners. See `SMEAR_PIECES`. */
+  function smearPieces() {
+    const group = container.querySelector('[data-ring="smear"]') as SVGGElement;
+    const at = (i: number) => group.children[i] as SVGPathElement;
+    return {
+      group,
+      top: at(0), right: at(1), bottom: at(2), left: at(3),
+      tr: at(4), br: at(5), bl: at(6), tl: at(7),
+    };
+  }
+  const widthOf = (el: SVGPathElement) => Number(el.getAttribute('stroke-width'));
+  const opacityOf = (el: SVGPathElement) => Number(el.getAttribute('stroke-opacity'));
+
+  // Two panes flush at the top, differing in height — the layout that motivated
+  // the per-edge model. Travelling A→B the top edge translates purely sideways,
+  // so it never crosses itself and must not smear at all, while the bottom edge
+  // moves diagonally and smears hard. A single ring-center velocity would average
+  // those into the same wrong answer for both.
+  const FLUSH_A: Rectish = { top: 0, left: 0, width: 100, height: 200 };
+  const FLUSH_B: Rectish = { top: 0, left: 300, width: 100, height: 60 };
+
+  function flushPanes(): Map<string, HTMLElement> {
+    const elA = document.createElement('div');
+    const elB = document.createElement('div');
+    stubRect(elA, FLUSH_A);
+    stubRect(elB, FLUSH_B);
+    document.body.append(elA, elB);
+    return new Map([['a', elA], ['b', elB]]);
+  }
+
+  it('smears each edge by its own perpendicular motion, not the ring centre', async () => {
     const store = makeStore();
-    const panes = twoPanes();
+    const panes = flushPanes();
+    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+    expect(smearPieces().group.style.display).toBe('none'); // settled: no smear
+
+    await act(async () => root.render(<Harness selectedId="b" mode="command" store={store} panes={panes} />));
+    await frame(16); // seeds the sampler — the first tick has no previous edges
+    await frame(16); // now moving
+
+    const p = smearPieces();
+    expect(p.group.style.display).toBe('');
+    // Tops are flush, so the top edge has zero perpendicular speed: base width,
+    // and fully transparent so it lays no band under the crisp ring.
+    expect(widthOf(p.top)).toBe(cfg.marchingAnts.strokeWidth);
+    expect(opacityOf(p.top)).toBe(0);
+    // The bottom edge jumps 140px, so it smears — strictly wider and visible.
+    expect(widthOf(p.bottom)).toBeGreaterThan(widthOf(p.top));
+    expect(opacityOf(p.bottom)).toBeGreaterThan(0);
+    // Both vertical edges translate sideways at the same rate, so they match.
+    expect(widthOf(p.left)).toBeCloseTo(widthOf(p.right));
+    expect(widthOf(p.left)).toBeGreaterThan(widthOf(p.top));
+
+    await frame(400); // settle
+    expect(smearPieces().group.style.display).toBe('none');
+  });
+
+  it('tapers each corner between the two edge widths it joins', async () => {
+    const store = makeStore();
+    const panes = flushPanes();
+    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+    await act(async () => root.render(<Harness selectedId="b" mode="command" store={store} panes={panes} />));
+    await frame(16);
+    await frame(16);
+
+    const p = smearPieces();
+    // A corner is stroked at unit width and scaled, so `scale(a b)` renders the
+    // vertical neighbour's width where its tangent is vertical and the horizontal
+    // neighbour's where it is horizontal — no seam at either join.
+    expect(widthOf(p.tr)).toBe(1);
+    expect(p.tr.getAttribute('transform'))
+      .toBe(`scale(${widthOf(p.right)} ${widthOf(p.top)})`);
+    expect(p.bl.getAttribute('transform'))
+      .toBe(`scale(${widthOf(p.left)} ${widthOf(p.bottom)})`);
+  });
+
+  // The ring itself is never transformed or re-dashed: keeping it one unbroken
+  // path is what makes the marching-ants phase continuous around the perimeter,
+  // and the smear lives in a sibling layer precisely so this stays true.
+  it('leaves the ants ring crisp and unbroken while smearing', async () => {
+    const store = makeStore();
+    const panes = flushPanes();
     await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
 
-    const path = container.querySelector('path')!;
-    // Settled: the configured 60/40 duty cycle over the stubbed 100px perimeter.
+    const path = container.querySelector('[data-ring="outline"]')!;
     expect(path.getAttribute('stroke-dasharray')).toBe('6 4');
     expect(path.style.getPropertyValue('--march-offset')).toBe('-10px');
 
     await act(async () => root.render(<Harness selectedId="b" mode="command" store={store} panes={panes} />));
-    await frame(16); // seeds the velocity sampler — the first tick has no prev center
-    await frame(16); // now past the smear cap on both axes
+    await frame(16);
+    await frame(16);
 
-    expect(path.getAttribute('transform')).toBe('scale(3 3)');
-    const [dash, gap] = path.getAttribute('stroke-dasharray')!.split(' ').map(Number);
-    expect(gap).toBe(0); // gaps closed: a streak, not 6x6 beads
-    expect(dash + gap).toBeCloseTo(10); // still exactly one --march-offset period
-    expect(path.style.getPropertyValue('--march-offset')).toBe('-10px');
-
-    await frame(400); // settle → ants re-form, smear cleared
     expect(path.getAttribute('stroke-dasharray')).toBe('6 4');
+    expect(path.style.getPropertyValue('--march-offset')).toBe('-10px');
     expect(path.getAttribute('transform')).toBeNull();
+    expect(path.getAttribute('stroke-opacity')).toBeNull();
   });
 });

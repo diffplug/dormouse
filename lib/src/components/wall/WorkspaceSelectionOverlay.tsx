@@ -21,7 +21,16 @@ import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
 import { resolvePaneElement } from './resolve-pane-element';
 import type { WallMode, WallSelectionKind } from './wall-types';
 import { DoorElementsContext, PaneElementsContext, WindowFocusedContext } from './wall-context';
-import { SelectionRing, roundedRectPath, type RingVelocity } from './SelectionRing';
+import {
+  SelectionRing,
+  roundedRectPath,
+  smearCornerPath,
+  smearEdgePath,
+  SMEAR_PIECES,
+  type RingCorner,
+  type RingEdge,
+  type RingEdgeSpeeds,
+} from './SelectionRing';
 
 /** The subset of the Lath store the overlay needs — a revision that bumps on every
  *  commit, so the ring re-measures as leaves move / resize / restore. Kept
@@ -73,14 +82,23 @@ function framesEqual(a: RingFrame, b: RingFrame): boolean {
   );
 }
 
-/** The frame the ring currently shows: geometry plus the motion-smear `velocity`,
- *  which is populated only while a tween runs; a settled ring carries null velocity,
+/** The frame the ring currently shows: geometry plus the per-edge motion-smear
+ *  `speeds`, populated only while a tween runs; a settled ring carries null speeds,
  *  so its render is clean. Held in a ref and written to the DOM imperatively. */
 interface DisplayedRing {
   rect: RingRect;
   shape: RingShape;
-  velocity: RingVelocity | null;
+  speeds: RingEdgeSpeeds | null;
 }
+
+/** Which two edges each corner joins: `[vertical, horizontal]`, matching the
+ *  `(a, b)` scale pair `smearCornerPath` blends between. */
+const CORNER_EDGES: Record<RingCorner, [RingEdge, RingEdge]> = {
+  tr: ['right', 'top'],
+  br: ['right', 'bottom'],
+  bl: ['left', 'bottom'],
+  tl: ['left', 'top'],
+};
 
 export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, selectedId, selectedType, mode }: {
   /** The Lath store — the overlay re-measures on every commit (`revision` via
@@ -111,6 +129,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   // the mutations).
   const containerRef = useRef<HTMLDivElement>(null);
   const pathRef = useRef<SVGPathElement>(null);
+  const smearRef = useRef<SVGGElement>(null);
 
   // Latest values the imperative writer reads. `frameRef` is the frame on screen;
   // `modeRef` mirrors the current mode so any `applyRing` closure derives the right
@@ -129,12 +148,89 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   const tweenRef = useRef<RingTween | null>(null);
   const rafRef = useRef<number | null>(null);
 
-  // Motion-smear inputs, sampled inside the rAF loop: the previous center + timestamp
-  // (finite-difference velocity source) and the EMA-smoothed velocity that drives
-  // the directional smear. Both are cleared at tween start / on settle so a resting
+  // Motion-smear inputs, sampled inside the rAF loop: the previous edge positions +
+  // timestamp (the finite-difference source) and the EMA-smoothed per-edge speeds
+  // that drive the smear. Both are cleared at tween start / on settle so a resting
   // ring renders with no smear at all (Chromatic determinism).
-  const prevCenterRef = useRef<{ x: number; y: number; t: number } | null>(null);
-  const smoothedVelRef = useRef<RingVelocity | null>(null);
+  const prevEdgesRef = useRef<{ top: number; right: number; bottom: number; left: number; t: number } | null>(null);
+  const smoothedSpeedsRef = useRef<RingEdgeSpeeds | null>(null);
+
+  /**
+   * Draw the eight-piece motion smear underneath the ring, or hide it when the
+   * ring is settled.
+   *
+   * Each edge smears only by its OWN motion across itself — an edge sliding
+   * along its own length is unchanged — so the four edges are independent, and
+   * collapsing them to one horizontal and one vertical speed gets common layouts
+   * wrong. Moving between panes that are flush at the top but differ in height,
+   * the top edge translates purely sideways (no perpendicular motion at all, so
+   * it stays crisp) while the bottom edge moves diagonally and smears hard. A
+   * ring-center velocity would average those into one wrong answer for both.
+   *
+   * Straight edges carry their width in a plain `stroke-width`. Corners cannot —
+   * they have to reach two different widths at once — so each is stroked at unit
+   * width and scaled, which tapers it between its neighbours (`smearCornerPath`).
+   */
+  const writeSmear = useCallback((
+    rect: RingRect,
+    shape: RingShape,
+    inset: number,
+    strokeWidth: number,
+    speeds: RingEdgeSpeeds | null,
+  ) => {
+    const group = smearRef.current;
+    if (!group) return;
+    if (!speeds) {
+      group.style.display = 'none';
+      return;
+    }
+    group.style.display = '';
+
+    const { smearGain, smearMaxPx } = cfg.focusRing;
+    const maxScale = smearMaxPx / strokeWidth;
+    // Width from this edge's own perpendicular speed; alpha conserves ink the way
+    // a real smear does (spreading one stroke-width across N drops peak alpha to
+    // 1/N) and fades in from zero, so an edge that is not moving contributes
+    // nothing rather than laying a solid band under the ring.
+    const band = (speed: number) => {
+      const width = Math.min(smearMaxPx, strokeWidth + speed * smearGain);
+      const scale = width / strokeWidth;
+      const fade = maxScale > 1 ? Math.min(1, (scale - 1) / (maxScale - 1)) : 0;
+      return { width, opacity: fade / scale };
+    };
+    const bands = {
+      top: band(speeds.top),
+      right: band(speeds.right),
+      bottom: band(speeds.bottom),
+      left: band(speeds.left),
+    };
+
+    const { width: w, height: h } = rect;
+    const { tl, tr, br, bl } = shape;
+    SMEAR_PIECES.forEach((piece, index) => {
+      const el = group.children[index] as SVGPathElement | undefined;
+      if (!el) return;
+      if (piece === 'top' || piece === 'right' || piece === 'bottom' || piece === 'left') {
+        const { width, opacity } = bands[piece];
+        el.setAttribute('d', smearEdgePath(piece, w, h, tl, tr, br, bl, inset));
+        el.setAttribute('stroke-width', `${width}`);
+        el.setAttribute('stroke-opacity', `${opacity}`);
+        el.removeAttribute('transform');
+        return;
+      }
+      // Corner: `a` is the vertical neighbour's width, `b` the horizontal one, so
+      // the unit stroke renders exactly each neighbour's width where it meets it.
+      const [vertical, horizontal] = CORNER_EDGES[piece];
+      const a = bands[vertical].width;
+      const b = bands[horizontal].width;
+      el.setAttribute('d', smearCornerPath(piece, w, h, tl, tr, br, bl, inset, a, b));
+      el.setAttribute('stroke-width', '1');
+      el.setAttribute('transform', `scale(${a} ${b})`);
+      // Opacity cannot vary along a stroke, so a corner takes the mean of the two
+      // edges it joins.
+      el.setAttribute('stroke-opacity', `${(bands[vertical].opacity + bands[horizontal].opacity) / 2}`);
+    });
+  }, []);
 
   // Write the current frame to the DOM: container geometry, the ring path, the
   // marching-ants dash (command mode), and the directional smear. Reads
@@ -145,7 +241,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     const container = containerRef.current;
     const path = pathRef.current;
     if (!frame || !container || !path) return;
-    const { rect, shape, velocity } = frame;
+    const { rect, shape, speeds } = frame;
 
     container.style.top = `${rect.top}px`;
     container.style.left = `${rect.left}px`;
@@ -158,75 +254,15 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     // pixel-parity with the retired CSS border; ants uses the shape's lerped inset.
     const effInset = isAnts ? shape.inset : strokeWidth / 2;
 
-    // Directional motion smear. A moving line smears PERPENDICULAR to its travel:
-    // a vertical edge sliding sideways sweeps into a band, while a horizontal edge
-    // sliding sideways just slides along itself and barely changes. So horizontal
-    // speed widens the vertical edges and vice versa. Under `scale(sx, sy)` a
-    // vertical stroke's width is measured in x (scales by sx) and a horizontal
-    // stroke's in y (sy), which is exactly that mapping — and the counter-scaled
-    // path keeps the on-screen geometry pixel-identical (see `roundedRectPath`).
-    //
-    // This replaces an SVG `feGaussianBlur`. Same physical effect, but WebKit
-    // CPU-rasterizes SVG filters every frame: measured on the website playground,
-    // the filter cost 25.6ms/frame with 31 of 98 frames over 25ms during travel,
-    // versus a locked 16.7ms/0-dropped without it. A scale transform and a stroke
-    // opacity are GPU-composited and cost nothing.
-    const { smearGain, smearMaxPx } = cfg.focusRing;
-    let sx = 1;
-    let sy = 1;
-    let strokeOpacity = 1;
-    if (velocity) {
-      const widthFor = (v: number) =>
-        Math.min(smearMaxPx, strokeWidth + Math.abs(v) * smearGain);
-      const wx = widthFor(velocity.x);
-      const wy = widthFor(velocity.y);
-      sx = wx / strokeWidth;
-      sy = wy / strokeWidth;
-      // Conserve ink the way a real smear does: spreading one stroke-width of
-      // color across N drops peak alpha to 1/N. Without this the ring reads as a
-      // border that briefly got thick rather than as something moving fast.
-      strokeOpacity = 1 / Math.max(sx, sy);
-    }
-    path.setAttribute('d', roundedRectPath(rect.width, rect.height, shape.tl, shape.tr, shape.br, shape.bl, effInset, sx, sy));
-    // A settled ring carries no transform at all, so it is byte-identical to the
-    // pre-smear output (Chromatic determinism).
-    if (velocity) {
-      path.setAttribute('transform', `scale(${sx} ${sy})`);
-      path.setAttribute('stroke-opacity', `${strokeOpacity}`);
-    } else {
-      path.removeAttribute('transform');
-      path.removeAttribute('stroke-opacity');
-    }
+    path.setAttribute('d', roundedRectPath(rect.width, rect.height, shape.tl, shape.tr, shape.br, shape.bl, effInset));
+    writeSmear(rect, shape, effInset, strokeWidth, speeds);
 
     if (isAnts) {
       // Dash sized to the perimeter so the segments stay even as the ring resizes.
       const len = path.getTotalLength();
       const count = Math.max(1, Math.round(len / cfg.marchingAnts.segLen));
       const adjusted = len / count;
-      // Dissolve the ants into a solid streak as the smear grows. Under
-      // scale(sx, sy) an edge's dash length and its thickness ride DIFFERENT
-      // axes (a horizontal edge's length scales by sx, its thickness by sy), so
-      // a fully smeared edge renders a 6px dash 6px thick — square beads, not
-      // ants. The two edge families want reciprocal corrections, so no single
-      // stroke-dasharray can hold the 3:1 aspect on both; rather than fight
-      // that, close the gaps. That is also what a real smear does to the edge
-      // running PARALLEL to the travel (its dashes slide into each other), so
-      // both families end up consistent.
-      //
-      // The dash PERIOD is deliberately untouched: `--march-offset` must stay
-      // exactly one dash+gap or the `marching-ants` keyframe jumps every cycle.
-      // Scaling the period with the smear instead would swing it 10→30px
-      // mid-travel, and since dash boundaries sit at integer multiples of the
-      // period measured from the path start, that slides far-side dashes ~50px
-      // in a single frame — the ants visibly stream around the perimeter.
-      const smearScale = Math.max(sx, sy);
-      const maxScale = smearMaxPx / strokeWidth;
-      const dissolve = maxScale > 1 ? Math.min(1, (smearScale - 1) / (maxScale - 1)) : 0;
-      const dashFraction = cfg.marchingAnts.dashFraction
-        + (1 - cfg.marchingAnts.dashFraction) * dissolve;
-      const dash = adjusted * dashFraction;
-      // Subtract rather than recompute, so `dash + gap === adjusted` exactly —
-      // that equality is the `--march-offset` contract.
+      const dash = adjusted * cfg.marchingAnts.dashFraction;
       const gap = adjusted - dash;
       path.setAttribute('stroke-dasharray', `${dash} ${gap}`);
       path.style.setProperty('--march-offset', `-${adjusted}px`);
@@ -246,8 +282,8 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
   useEffect(() => {
     const resetMotionSamples = () => {
-      prevCenterRef.current = null;
-      smoothedVelRef.current = null;
+      prevEdgesRef.current = null;
+      smoothedSpeedsRef.current = null;
     };
     // Show a frame: record it, then either apply it now (already mounted) or mount
     // the shell (the post-render layout effect applies it before paint).
@@ -262,7 +298,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       }
     };
     const showSettled = (frame: RingFrame) =>
-      show({ rect: frame.rect, shape: frame.shape, velocity: null });
+      show({ rect: frame.rect, shape: frame.shape, speeds: null });
 
     // Per-frame imperative loop: sample the tween, derive the smoothed blur
     // velocity, write the DOM, and self-schedule — no React state, so a travelling
@@ -280,32 +316,48 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
         showSettled({ rect, shape });
         return;
       }
-      // Finite-difference velocity of the ring center (px/ms); null on the first
-      // frame or a zero dt.
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      const prev = prevCenterRef.current;
+      // Finite-difference each EDGE's own perpendicular speed (px/ms), not the
+      // ring center's velocity: a horizontal edge only smears by vertical motion
+      // and a vertical edge only by horizontal motion, and the four edges of a
+      // resizing rect move independently. Null on the first frame or a zero dt.
+      const edges = {
+        top: rect.top,
+        right: rect.left + rect.width,
+        bottom: rect.top + rect.height,
+        left: rect.left,
+      };
+      const prev = prevEdgesRef.current;
       const dt = prev ? now - prev.t : 0;
-      const raw: RingVelocity | null = prev && dt > 0
-        ? { x: (cx - prev.x) / dt, y: (cy - prev.y) / dt }
+      const raw: RingEdgeSpeeds | null = prev && dt > 0
+        ? {
+          top: Math.abs(edges.top - prev.top) / dt,
+          right: Math.abs(edges.right - prev.right) / dt,
+          bottom: Math.abs(edges.bottom - prev.bottom) / dt,
+          left: Math.abs(edges.left - prev.left) / dt,
+        }
         : null;
-      prevCenterRef.current = { x: cx, y: cy, t: now };
+      prevEdgesRef.current = { ...edges, t: now };
 
-      // Low-pass the raw finite-difference velocity so rAF frame-timing jitter
+      // Low-pass the raw finite-difference speeds so rAF frame-timing jitter
       // doesn't make the smear pulse. Seeded from ZERO on purpose: the house
       // ease-out starts at peak speed, so a first-sample seed would pop the ring
       // from crisp to fully smeared in one frame — from zero, the smear swells in
       // over ~2 frames (imperceptible as lag at 60fps). A settled ring's null
-      // velocity clears the smear.
-      let velocity: RingVelocity | null = null;
+      // speeds clear the smear.
+      let speeds: RingEdgeSpeeds | null = null;
       if (raw) {
         const a = cfg.focusRing.smearSmoothing;
-        const sm = smoothedVelRef.current ?? { x: 0, y: 0 };
-        velocity = { x: sm.x + (raw.x - sm.x) * a, y: sm.y + (raw.y - sm.y) * a };
-        smoothedVelRef.current = velocity;
+        const sm = smoothedSpeedsRef.current ?? { top: 0, right: 0, bottom: 0, left: 0 };
+        speeds = {
+          top: sm.top + (raw.top - sm.top) * a,
+          right: sm.right + (raw.right - sm.right) * a,
+          bottom: sm.bottom + (raw.bottom - sm.bottom) * a,
+          left: sm.left + (raw.left - sm.left) * a,
+        };
+        smoothedSpeedsRef.current = speeds;
       }
 
-      frameRef.current = { rect, shape, velocity };
+      frameRef.current = { rect, shape, speeds };
       displayedFrameRef.current = { rect, shape };
       applyRing();
       rafRef.current = requestAnimationFrame(tick);
@@ -432,6 +484,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       windowFocused={windowFocused}
       containerRef={containerRef}
       pathRef={pathRef}
+      smearRef={smearRef}
     />
   );
 }
