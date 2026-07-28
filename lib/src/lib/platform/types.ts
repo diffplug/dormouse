@@ -226,10 +226,9 @@ export interface PlatformAdapter {
 
   // Alert management
   alertRemove(id: string): void;
-  alertToggle(id: string): void;
-  alertDisable(id: string): void;
+  /** Replace the WATCHING rule set (bare command names) — see `docs/specs/alert.md`. */
+  alertSetWatchedCommands(names: string[]): void;
   alertDismiss(id: string): void;
-  alertDismissOrToggle(id: string, displayedStatus: string): void;
   alertAttend(id: string): void;
   alertResize(id: string): void;
   alertClearAttention(id?: string): void;

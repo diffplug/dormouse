@@ -15,7 +15,7 @@ import type {
   PlatformAdapter,
   PtyInfo,
 } from "dormouse-lib/lib/platform/types";
-import { AlertManager, type SessionStatus } from "dormouse-lib/lib/alert-manager";
+import { AlertManager } from "dormouse-lib/lib/alert-manager";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
 import { TauriSessionStore } from "./tauri-session-store";
@@ -453,20 +453,12 @@ export class TauriAdapter implements PlatformAdapter {
     this.alertManager.remove(id);
   }
 
-  alertToggle(id: string): void {
-    this.alertManager.toggleAlert(id);
-  }
-
-  alertDisable(id: string): void {
-    this.alertManager.disableAlert(id);
+  alertSetWatchedCommands(names: string[]): void {
+    this.alertManager.setWatchedCommands(names);
   }
 
   alertDismiss(id: string): void {
     this.alertManager.dismissAlert(id);
-  }
-
-  alertDismissOrToggle(id: string, displayedStatus: string): void {
-    this.alertManager.dismissOrToggleAlert(id, displayedStatus as SessionStatus);
   }
 
   alertAttend(id: string): void {

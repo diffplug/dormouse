@@ -14,11 +14,11 @@ function activity(
 
 function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityState>()) {
   let activityListener: (() => void) | null = null;
+  let watchedListener: (() => void) | null = null;
   let mouseListener: (() => void) | null = null;
   let activitySnapshot = initialActivitySnapshot;
+  let watchedCommands: string[] = [];
   let mouseSnapshot = new Map<string, MouseSelectionState>();
-  const onWatchingDemoPaneChange = vi.fn();
-
   const state = new TutorialState();
   const detector = new TutDetector(
     state,
@@ -28,6 +28,13 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
         activityListener = listener;
         return () => {
           activityListener = null;
+        };
+      },
+      getWatchedCommands: () => watchedCommands,
+      subscribeToWatchedCommands: (listener) => {
+        watchedListener = listener;
+        return () => {
+          watchedListener = null;
         };
       },
     },
@@ -40,7 +47,6 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
         };
       },
     },
-    { onWatchingDemoPaneChange },
   );
 
   detector.start();
@@ -52,6 +58,10 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
       activitySnapshot = snapshot;
       activityListener?.();
     },
+    setWatchedCommands: (names: string[]) => {
+      watchedCommands = names;
+      watchedListener?.();
+    },
     setMouseSnapshot: (snapshot: Map<string, MouseSelectionState>) => {
       mouseSnapshot = snapshot;
       mouseListener?.();
@@ -60,7 +70,6 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
     // Wall.selectPane fires on both engines); the detector reads kb-arrows from it.
     selectPane: (id: string) =>
       detector.handleWallEvent({ type: "selectionChange", id, kind: "pane" }),
-    onWatchingDemoPaneChange,
   };
 }
 
@@ -157,75 +166,58 @@ describe("TutDetector", () => {
     expect(state.isComplete("al-ring")).toBe(true);
   });
 
-  it("credits al-enable after a newly-created pane is first observed disabled", () => {
+  it("credits al-watch-cmd once a rule exists", () => {
+    const { state, setWatchedCommands } = makeDetectorHarness();
+
+    expect(state.isComplete("al-watch-cmd")).toBe(false);
+    setWatchedCommands(["longtask"]);
+    expect(state.isComplete("al-watch-cmd")).toBe(true);
+  });
+
+  it("credits al-spreads only when a second pane lights up from the same rule", () => {
     const { state, setActivitySnapshot } = makeDetectorHarness();
 
     setActivitySnapshot(new Map([
-      ["pane-a", activity("WATCHING_DISABLED")],
-    ]));
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("NOTHING_TO_SHOW")],
-    ]));
-
-    expect(state.isComplete("al-enable")).toBe(true);
-  });
-
-  it("does not credit al-enable for projected command-exit status while WATCHING is off", () => {
-    const { state, onWatchingDemoPaneChange, setActivitySnapshot } = makeDetectorHarness();
-
-    onWatchingDemoPaneChange.mockClear();
-    setActivitySnapshot(new Map([
       ["pane-a", activity("WATCHING_DISABLED", false, false)],
+      ["pane-b", activity("WATCHING_DISABLED", false, false)],
     ]));
     setActivitySnapshot(new Map([
-      ["pane-a", activity("COMMAND_EXIT_ARMED", false, false)],
+      ["pane-a", activity("NOTHING_TO_SHOW", false, true)],
+      ["pane-b", activity("WATCHING_DISABLED", false, false)],
     ]));
+    expect(state.isComplete("al-spreads")).toBe(false);
 
-    expect(state.isComplete("al-enable")).toBe(false);
-    expect(onWatchingDemoPaneChange).not.toHaveBeenCalled();
+    setActivitySnapshot(new Map([
+      ["pane-a", activity("NOTHING_TO_SHOW", false, true)],
+      ["pane-b", activity("NOTHING_TO_SHOW", false, true)],
+    ]));
+    expect(state.isComplete("al-spreads")).toBe(true);
   });
 
-  it("credits al-enable when WATCHING turns on under an existing projected status", () => {
-    const { state, onWatchingDemoPaneChange, setActivitySnapshot } = makeDetectorHarness();
+
+  it("credits al-notif for a program-sent notification and al-cmd-exit for a command exit", () => {
+    const { state, setActivitySnapshot } = makeDetectorHarness();
+
+    setActivitySnapshot(new Map([["pane-a", activity("WATCHING_DISABLED", false, false)]]));
+    setActivitySnapshot(new Map([
+      ["pane-a", {
+        ...activity("ALERT_RINGING", true, false),
+        notification: { source: "OSC 777", title: "Build finished", body: "3 packages" },
+      }],
+    ]));
+    expect(state.isComplete("al-notif")).toBe(true);
+    expect(state.isComplete("al-cmd-exit")).toBe(false);
+    // The ring set TODO itself, so this is not a hand-added one.
+    expect(state.isComplete("al-todo-manual")).toBe(false);
 
     setActivitySnapshot(new Map([
-      ["pane-a", activity("COMMAND_EXIT_ARMED", false, false)],
+      ["pane-a", {
+        ...activity("ALERT_RINGING", true, false),
+        notification: { source: "COMMAND_EXIT", title: "Command finished", body: "slowbuild exited 0" },
+      }],
     ]));
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("COMMAND_EXIT_ARMED", false, true)],
-    ]));
-
-    expect(state.isComplete("al-enable")).toBe(true);
-    expect(onWatchingDemoPaneChange).toHaveBeenLastCalledWith("pane-a");
+    expect(state.isComplete("al-cmd-exit")).toBe(true);
   });
 
-  it("does not seed the WATCHING demo pane from projected alert status", () => {
-    const { onWatchingDemoPaneChange } = makeDetectorHarness(new Map([
-      ["pane-a", activity("ALERT_RINGING", false, false)],
-    ]));
 
-    expect(onWatchingDemoPaneChange).toHaveBeenLastCalledWith(null);
-  });
-
-  it("tracks the pane whose WATCHING was enabled for the busy demo", () => {
-    const { onWatchingDemoPaneChange, setActivitySnapshot } = makeDetectorHarness();
-
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("WATCHING_DISABLED")],
-      ["pane-b", activity("WATCHING_DISABLED")],
-    ]));
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("WATCHING_DISABLED")],
-      ["pane-b", activity("NOTHING_TO_SHOW")],
-    ]));
-
-    expect(onWatchingDemoPaneChange).toHaveBeenLastCalledWith("pane-b");
-
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("WATCHING_DISABLED")],
-      ["pane-b", activity("WATCHING_DISABLED")],
-    ]));
-
-    expect(onWatchingDemoPaneChange).toHaveBeenLastCalledWith(null);
-  });
 });

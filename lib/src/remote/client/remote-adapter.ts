@@ -346,10 +346,8 @@ export class RemotePtyAdapter implements PlatformAdapter {
   // Alerts are Host-authoritative (surfaced via the directory snapshot), so the
   // phone-side alert controls are inert.
   alertRemove(): void {}
-  alertToggle(): void {}
-  alertDisable(): void {}
+  alertSetWatchedCommands(): void {}
   alertDismiss(): void {}
-  alertDismissOrToggle(): void {}
   alertAttend(): void {}
   alertResize(): void {}
   alertClearAttention(): void {}

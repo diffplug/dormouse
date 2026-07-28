@@ -20,7 +20,6 @@ function toPersistedAlert(alert: AlertState | undefined, fallback: PersistedAler
   if (!alert) return fallback ?? null;
   return {
     status: alert.status,
-    watchingEnabled: alert.watchingEnabled,
     todo: alert.todo,
     notification: alert.notification,
   };

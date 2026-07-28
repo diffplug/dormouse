@@ -1,9 +1,14 @@
 import type { SessionStatus } from './activity-monitor';
 import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
 
+/**
+ * Only the TODO reminder and its notification detail survive a restart.
+ * WATCHING is not persisted per Session — it is derived from the global rule
+ * set keyed on the running command (`docs/specs/alert.md`). `status` is written
+ * for diagnostics and older readers; restore never resurrects a ring from it.
+ */
 export interface PersistedAlertState {
   status: SessionStatus;
-  watchingEnabled?: boolean;
   todo: TodoState;
   notification?: ActivityNotification | null;
 }
@@ -129,7 +134,6 @@ function isPersistedAlertShape(value: unknown): boolean {
   if (value === null) return true;
   if (!isRecord(value)) return false;
   if (typeof value.status !== 'string') return false;
-  if (value.watchingEnabled !== undefined && typeof value.watchingEnabled !== 'boolean') return false;
   if (typeof value.todo !== 'boolean') return false;
   return value.notification === undefined || value.notification === null || isActivityNotificationShape(value.notification);
 }

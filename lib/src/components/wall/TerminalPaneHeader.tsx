@@ -37,6 +37,7 @@ import {
 } from '../../lib/terminal-registry';
 import {
   buildAppTitleResolver,
+  commandArgv0,
   createTerminalPaneState,
   COMMAND_FAIL_GLYPH,
   deriveHeader,
@@ -67,17 +68,17 @@ const tabVariant = tv({
 
 type HeaderTier = 'full' | 'compact' | 'minimal';
 
-const ALERT_BUTTON_ENABLED = { aria: 'Disable watching', tooltip: '[a] Disable WATCHING' };
-const ALERT_BUTTON_LABELS: Record<SessionStatus, { aria: string; tooltip: string }> = {
-  WATCHING_DISABLED: { aria: 'Enable watching', tooltip: '[a] Enable WATCHING' },
-  NOTHING_TO_SHOW: ALERT_BUTTON_ENABLED,
-  MIGHT_BE_BUSY: ALERT_BUTTON_ENABLED,
-  BUSY: ALERT_BUTTON_ENABLED,
-  MIGHT_NEED_ATTENTION: ALERT_BUTTON_ENABLED,
-  ALERT_RINGING: { aria: 'Alert ringing', tooltip: 'Alert ringing' },
-  OSC_NOTIF_BUSY: { aria: 'Progress active', tooltip: 'Progress active' },
-  COMMAND_EXIT_ARMED: { aria: 'Command running', tooltip: 'Command running' },
-};
+// WATCHING is a rule on the running command, so the bell says which command it
+// would act on rather than naming an abstract toggle (`docs/specs/alert.md`).
+function alertButtonLabelsFor(status: SessionStatus, argv0: string | null): { aria: string; tooltip: string } {
+  if (status === 'ALERT_RINGING') return { aria: 'Alert ringing', tooltip: 'Alert ringing' };
+  if (status === 'OSC_NOTIF_BUSY') return { aria: 'Progress active', tooltip: 'Progress active' };
+  if (status === 'COMMAND_EXIT_ARMED') return { aria: 'Command running', tooltip: 'Command running' };
+  if (!argv0) return { aria: 'Alerts are per command', tooltip: '[a] Alerts are per command' };
+  return status === 'WATCHING_DISABLED'
+    ? { aria: `Alert on all ${argv0}`, tooltip: `[a] Alert on all "${argv0}"` }
+    : { aria: `Stop alerting on all ${argv0}`, tooltip: `[a] Stop alerting on all "${argv0}"` };
+}
 const TODO_PREVIEW_GAP = 6;
 const TODO_PREVIEW_MARGIN = 8;
 
@@ -132,7 +133,10 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const todoPill = useTodoPillContent(activity.todo);
   const titleCandidates = useMemo(() => titleCandidatesForDisplay(paneState), [paneState]);
   const showTodoPill = todoPill.visible && tier !== 'minimal';
-  const alertButtonLabels = ALERT_BUTTON_LABELS[activity.status];
+  const runningArgv0 = paneState.currentCommand?.rawCommandLine
+    ? commandArgv0(paneState.currentCommand.rawCommandLine)
+    : null;
+  const alertButtonLabels = alertButtonLabelsFor(activity.status, runningArgv0);
   const alertButtonAriaLabel = alertButtonLabels.aria;
   const alertButtonTooltip = alertButtonLabels.tooltip;
   const alertButtonTooltipDetail = activity.status === 'ALERT_RINGING'
@@ -161,7 +165,9 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
 
   const triggerAlertButtonAction = useCallback((displayedStatus: SessionStatus, button: HTMLButtonElement) => {
     const result = actions.onAlertButton(id, displayedStatus);
-    if (result === 'dismissed' || result === 'menu') {
+    // 'no-command' opens the dialog too — it is where we explain that alerts are
+    // keyed on the running command and there is nothing running here.
+    if (result === 'dismissed' || result === 'menu' || result === 'no-command') {
       setDialogTriggerRect(button.getBoundingClientRect());
     }
   }, [actions, id]);

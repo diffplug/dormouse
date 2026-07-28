@@ -109,7 +109,9 @@ import {
   focusSession,
   getOrCreateTerminal,
   getActivity,
+  getWatchedCommands,
   initAlertStateReceiver,
+  setCommandWatched,
   isUntouched,
   markSessionAttention,
   markSessionTodo,
@@ -210,6 +212,28 @@ function reattachDoorViaD(id: string): void {
   mountElement(id, createContainer() as unknown as HTMLElement);
 }
 
+/**
+ * Declare a foreground command via shell integration. WATCHING is keyed on the
+ * running command's name, so every WATCHING story needs one (`docs/specs/alert.md`).
+ * OSC-only output produces no visible data, so it never counts as activity.
+ */
+function runCommand(id: string, commandLine = 'longtask'): void {
+  // sendOutput, not writePty: writePty is suppressed while a scenario plays.
+  fakePlatform.sendOutput(id, `\x1b]633;E;${commandLine}\x07\x1b]633;C\x07`);
+}
+
+/** Run `commandLine` and turn its WATCHING rule on, as the bell would. */
+function enableAlert(id: string, commandLine = 'longtask'): void {
+  runCommand(id, commandLine);
+  toggleSessionAlert(id);
+  expect(getActivity(id).watchingEnabled).toBe(true);
+}
+
+/** The rule set is app-global and outlives a single test. */
+function clearWatchedCommands(): void {
+  for (const name of getWatchedCommands()) setCommandWatched(name, false);
+}
+
 // Timing helpers based on cfg.alert values:
 // busyCandidateGap=1500, busyConfirmGap=500, mightNeedAttention=2000, needsAttentionConfirm=3000
 
@@ -234,6 +258,7 @@ function installRegistryTestGlobals(): void {
   vi.useFakeTimers();
   fakePlatform.reset();
   initAlertStateReceiver();
+  clearWatchedCommands();
 
   const documentElement = new MockElement();
   vi.stubGlobal('document', {
@@ -255,6 +280,7 @@ function installRegistryTestGlobals(): void {
 }
 
 function uninstallRegistryTestGlobals(): void {
+  clearWatchedCommands();
   disposeAllSessions();
   fakePlatform.reset();
   vi.unstubAllGlobals();
@@ -348,7 +374,7 @@ describe('terminal-registry alert behavior', () => {
         name: 'quick-response',
       }),
     );
-    toggleSessionAlert(id);
+    enableAlert(id);
     attendSession(id);
 
     advance(12_000);
@@ -369,7 +395,7 @@ describe('terminal-registry alert behavior', () => {
         { at: 1_800, data: 'more work' },
       ], { name: 'long-running' }),
     );
-    toggleSessionAlert(id);
+    enableAlert(id);
     attendSession(id);
 
     advance(1_800);
@@ -389,7 +415,7 @@ describe('terminal-registry alert behavior', () => {
   it('Story 3: busy session pauses, then resumes', () => {
     const id = 'story-3';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     driveToBusy(id);
     advance(2_000);
@@ -403,7 +429,7 @@ describe('terminal-registry alert behavior', () => {
   it('Story 4: completion while still attended does not ring', () => {
     const id = 'story-4';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
     attendSession(id);
 
     driveToBusy(id);
@@ -419,7 +445,7 @@ describe('terminal-registry alert behavior', () => {
   it('Story 5: user attends to a ringing pane — turns TODO on', () => {
     const id = 'story-5';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     driveToRingingNeedsAttention(id);
     attendSession(id);
@@ -433,7 +459,7 @@ describe('terminal-registry alert behavior', () => {
   it('Story 6: dismiss resets to NOTHING_TO_SHOW and turns TODO on; can ring again later', () => {
     const id = 'story-6';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     driveToRingingNeedsAttention(id);
     dismissSessionAlert(id);
@@ -457,7 +483,7 @@ describe('terminal-registry alert behavior', () => {
   it('Story 7: marking TODO clears ring and resets status, leaves alerts enabled', () => {
     const id = 'story-7';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     driveToRingingNeedsAttention(id);
     markSessionTodo(id);
@@ -519,7 +545,7 @@ describe('terminal-registry alert behavior', () => {
   it('Story 8: disable alerts clears ring and stops tracking', () => {
     const id = 'story-8';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     driveToRingingNeedsAttention(id);
     disableSessionAlert(id);
@@ -542,7 +568,7 @@ describe('terminal-registry alert behavior', () => {
   it('Story 9: new output while ringing latches until user attends', () => {
     const id = 'story-9';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     driveToRingingNeedsAttention(id);
     emitOutput(id, 'shell prompt');
@@ -561,7 +587,7 @@ describe('terminal-registry alert behavior', () => {
   it('Story 10: minimize preserves state, click reattach clears ring', () => {
     const id = 'story-10';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
     attendSession(id);
 
     minimizeSession(id);
@@ -580,7 +606,7 @@ describe('terminal-registry alert behavior', () => {
   it('Story 11: minimize preserves state, d reattach does not clear ring', () => {
     const id = 'story-11';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
     attendSession(id);
 
     minimizeSession(id);
@@ -596,7 +622,7 @@ describe('terminal-registry alert behavior', () => {
   it('Story 12: resize noise never creates a false alert', () => {
     const id = 'story-12';
     const entry = createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     entry.terminal.emitResize(120, 40);
     emitOutput(id, 'redraw noise');
@@ -613,8 +639,10 @@ describe('terminal-registry alert behavior', () => {
     const beta = 'story-13-b';
     createSession(alpha);
     createSession(beta);
-    toggleSessionAlert(alpha);
-    toggleSessionAlert(beta);
+    // One rule, two sessions running it — enabling on alpha covers beta.
+    enableAlert(alpha);
+    runCommand(beta);
+    expect(getActivity(beta).watchingEnabled).toBe(true);
 
     driveToRingingNeedsAttention(alpha);
     driveToRingingNeedsAttention(beta);
@@ -635,7 +663,7 @@ describe('terminal-registry alert behavior', () => {
   it('Story 14: destroying a session clears alert, TODO, and attention state', () => {
     const id = 'story-14';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
     driveToRingingNeedsAttention(id);
     toggleSessionTodo(id);
 
@@ -647,8 +675,10 @@ describe('terminal-registry alert behavior', () => {
     disposeSession(id);
     expect(getActivity(id)).toEqual(DEFAULT_ACTIVITY_STATE);
 
+    // The rule outlives the Session, so the replacement watches immediately.
     createSession(id);
-    toggleSessionAlert(id);
+    runCommand(id);
+    expect(getActivity(id).watchingEnabled).toBe(true);
     driveToBusy(id);
     expireAttention(id);
     advance(2_000);
@@ -663,7 +693,7 @@ describe('terminal-registry alert behavior', () => {
   it('marks attention from terminal input and clears ringing immediately', () => {
     const id = 'input-attention';
     const entry = createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     driveToRingingNeedsAttention(id);
     entry.terminal.emitInput('x');
@@ -677,7 +707,7 @@ describe('terminal-registry alert behavior', () => {
   it('Enter that dismisses a ringing alert leaves the auto-created TODO visible', () => {
     const id = 'enter-dismisses-ringing';
     const entry = createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     driveToRingingNeedsAttention(id);
     entry.terminal.emitInput('\r');
@@ -711,7 +741,7 @@ describe('terminal-registry alert behavior', () => {
     emitOutput(id, 'old output');
     advance(5_000);
 
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     expect(getActivity(id).status).toBe('NOTHING_TO_SHOW');
 
@@ -725,7 +755,7 @@ describe('terminal-registry alert behavior', () => {
   it('Enter (\\r) in passthrough clears an on-TODO', () => {
     const id = 'enter-clears-todo';
     const entry = createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     driveToRingingNeedsAttention(id);
     attendSession(id);
@@ -738,7 +768,7 @@ describe('terminal-registry alert behavior', () => {
   it('printable input without Enter does not clear a TODO', () => {
     const id = 'printable-keeps-todo';
     const entry = createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     driveToRingingNeedsAttention(id);
     attendSession(id);
@@ -751,7 +781,7 @@ describe('terminal-registry alert behavior', () => {
   it('focus-report control sequences do not clear a TODO', () => {
     const id = 'todo-focus-report';
     const entry = createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     driveToRingingNeedsAttention(id);
     attendSession(id);
@@ -828,7 +858,7 @@ describe('terminal-registry alert behavior', () => {
   it('new output while ringing without attention does not turn TODO on', () => {
     const id = 'ringing-output-no-todo';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     driveToRingingNeedsAttention(id);
     emitOutput(id, 'next task');
@@ -842,7 +872,7 @@ describe('terminal-registry alert behavior', () => {
   it('disabling alerts while ringing does not turn TODO on', () => {
     const id = 'disable-no-todo';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     driveToRingingNeedsAttention(id);
     disableSessionAlert(id);
@@ -856,8 +886,9 @@ describe('terminal-registry alert behavior', () => {
   it('alert button enables alerts from WATCHING_DISABLED', () => {
     const id = 'alert-button-enable';
     createSession(id);
+    runCommand(id);
 
-    dismissOrToggleAlert(id, 'WATCHING_DISABLED');
+    expect(dismissOrToggleAlert(id, 'WATCHING_DISABLED')).toBe('enabled');
 
     expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
@@ -865,10 +896,41 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
+  it('alert button reports no-command at a prompt instead of enabling', () => {
+    const id = 'alert-button-no-command';
+    createSession(id);
+
+    // WATCHING is keyed on the running command; with nothing running there is
+    // no rule to create, so the header opens the dialog to explain that.
+    expect(dismissOrToggleAlert(id, 'WATCHING_DISABLED')).toBe('no-command');
+    expect(getActivity(id).watchingEnabled).toBe(false);
+    expect(getWatchedCommands()).toEqual([]);
+  });
+
+  it('alert button turns the rule on for every session running that command', () => {
+    const alpha = 'alert-button-spread-a';
+    const beta = 'alert-button-spread-b';
+    createSession(alpha);
+    createSession(beta);
+    runCommand(alpha, 'claude --resume');
+    runCommand(beta, '/usr/local/bin/claude');
+
+    expect(dismissOrToggleAlert(alpha, 'WATCHING_DISABLED')).toBe('enabled');
+
+    expect(getWatchedCommands()).toEqual(['claude']);
+    expect(getActivity(alpha).watchingEnabled).toBe(true);
+    expect(getActivity(beta).watchingEnabled).toBe(true);
+
+    // Turning it off anywhere turns it off everywhere.
+    expect(dismissOrToggleAlert(beta, 'NOTHING_TO_SHOW')).toBe('disabled');
+    expect(getActivity(alpha).watchingEnabled).toBe(false);
+    expect(getActivity(beta).watchingEnabled).toBe(false);
+  });
+
   it('alert button disables alerts from enabled non-ringing states', () => {
     const id = 'alert-button-disable';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
     driveToBusy(id);
 
     dismissOrToggleAlert(id, 'BUSY');
@@ -882,7 +944,7 @@ describe('terminal-registry alert behavior', () => {
   it('alert button dismisses ringing alerts and turns TODO on', () => {
     const id = 'alert-button-dismiss';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
     driveToRingingNeedsAttention(id);
 
     dismissOrToggleAlert(id, 'ALERT_RINGING');
@@ -896,7 +958,7 @@ describe('terminal-registry alert behavior', () => {
   it('clicking a bell rendered as ringing does not disable alerts after attention already reset it', () => {
     const id = 'displayed-ringing-dismiss';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     driveToRingingNeedsAttention(id);
     markSessionAttention(id);
@@ -917,7 +979,7 @@ describe('terminal-registry alert behavior', () => {
   it('a bell click immediately after attention clears ringing is treated as a dismiss, not disable', () => {
     const id = 'recent-ringing-dismiss';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     driveToRingingNeedsAttention(id);
     markSessionAttention(id);
@@ -937,7 +999,7 @@ describe('terminal-registry alert behavior', () => {
   it('programmatic terminal focus does not count as attention', () => {
     const id = 'focus-without-attention';
     createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
 
     driveToRingingNeedsAttention(id);
     focusSession(id, true);
@@ -951,7 +1013,7 @@ describe('terminal-registry alert behavior', () => {
   it('ignores prompt redraw output immediately after a resize', () => {
     const id = 'resize-debounce';
     const session = createSession(id);
-    toggleSessionAlert(id);
+    enableAlert(id);
     markSessionAttention(id);
 
     session.terminal.emitResize(120, 30);

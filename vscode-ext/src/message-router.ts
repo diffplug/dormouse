@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
-import { AlertManager, type SessionStatus } from '../../lib/src/lib/alert-manager';
+import { AlertManager } from '../../lib/src/lib/alert-manager';
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
@@ -600,17 +600,11 @@ export function attachRouter(
       case 'alert:remove':
         alertManager.remove(msg.id);
         break;
-      case 'alert:toggle':
-        alertManager.toggleAlert(msg.id);
-        break;
-      case 'alert:disable':
-        alertManager.disableAlert(msg.id);
+      case 'alert:setWatchedCommands':
+        alertManager.setWatchedCommands(msg.names);
         break;
       case 'alert:dismiss':
         alertManager.dismissAlert(msg.id);
-        break;
-      case 'alert:dismissOrToggle':
-        alertManager.dismissOrToggleAlert(msg.id, msg.displayedStatus as SessionStatus);
         break;
       case 'alert:attend':
         alertManager.attend(msg.id);

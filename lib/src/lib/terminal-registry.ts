@@ -1,6 +1,6 @@
 export type { SessionStatus } from './activity-monitor';
-export type { TodoState, AlertButtonActionResult } from './alert-manager';
-export type { ActivityState } from './session-activity-store';
+export type { TodoState } from './alert-manager';
+export type { ActivityState, AlertButtonActionResult } from './session-activity-store';
 export type { TerminalEntry, TerminalOverlayDims } from './terminal-store';
 export type {
   CommandRun,
@@ -59,12 +59,21 @@ export type { SurfaceFocusHandle } from './terminal-lifecycle';
 export { setDefaultShellOpts, getDefaultShellOpts } from './shell-defaults';
 
 export {
+  getWatchedCommands,
+  getWatchedCommandsSnapshot,
+  isCommandWatched,
+  setCommandWatched,
+  subscribeToWatchedCommands,
+} from './watched-commands';
+
+export {
   applyTerminalSemanticEvents,
   applyTerminalSemanticEventsByPtyId,
   countRunningSessions,
   ensureTerminalPaneState,
   fillTerminalProcessCwd,
   fillTerminalProcessCwdByPtyId,
+  getRunningCommandArgv0,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
   isPaneOscDriven,

@@ -1,14 +1,22 @@
 import type { SessionStatus } from './activity-monitor';
-import type { AlertButtonActionResult } from './alert-manager';
 import type { AlertStateDetail } from './platform/types';
 import type { PersistedAlertState, PersistedPane } from './session-types';
 import { getPlatform } from './platform';
+import { getRunningCommandArgv0 } from './terminal-state-store';
+import { isCommandWatched, publishWatchedCommands, setCommandWatched } from './watched-commands';
 import {
   getEntryByPtyId,
   registry,
   resolveTerminalSessionId,
   type ActivityState,
 } from './terminal-store';
+
+/**
+ * What the bell click resolved to, so the caller knows whether to open the
+ * alert dialog. `no-command` means the pane is at a prompt: WATCHING is keyed
+ * on the running command, so there is nothing to enable.
+ */
+export type AlertButtonActionResult = 'enabled' | 'disabled' | 'dismissed' | 'menu' | 'no-command' | 'noop';
 
 export type { ActivityState } from './terminal-store';
 
@@ -94,7 +102,6 @@ export function getLivePersistedAlertState(id: string): PersistedAlertState | nu
   if (!state) return null;
   return {
     status: state.status,
-    watchingEnabled: state.watchingEnabled,
     todo: state.todo,
     notification: state.notification,
   };
@@ -185,41 +192,59 @@ export function initAlertStateReceiver(): void {
     }
   };
   platform.onAlertState(currentAlertHandler);
+  // The manager starts with an empty rule set and (in VS Code) lives in the
+  // extension host, which cannot read our localStorage — hand it the rules now,
+  // before any command can start.
+  publishWatchedCommands();
 }
 
+/**
+ * The bell-button transition table (`docs/specs/alert.md` -> UI Contract). This
+ * is the only copy: WATCHING is a rule keyed on the foreground command's name,
+ * so enabling and disabling both resolve to a rule-set edit, and the manager
+ * learns about it through `alertSetWatchedCommands` like any other rule change.
+ */
 export function dismissOrToggleAlert(id: string, displayedStatus: SessionStatus): AlertButtonActionResult {
   const entry = registry.get(id);
-  let result: AlertButtonActionResult;
-  switch (displayedStatus) {
-    case 'WATCHING_DISABLED':
-      // Mirrors AlertManager.dismissOrToggleAlert: after an attention-based
-      // dismissal the next click opens the dialog, even from WATCHING_DISABLED.
-      result = entry?.attentionDismissedRing ? 'dismissed' : 'enabled';
-      break;
-    case 'ALERT_RINGING':
-      result = 'dismissed';
-      break;
-    case 'OSC_NOTIF_BUSY':
-    case 'COMMAND_EXIT_ARMED':
-      result = entry?.attentionDismissedRing ? 'dismissed' : entry?.watchingEnabled ? 'disabled' : 'menu';
-      break;
-    default:
-      if (entry?.attentionDismissedRing) {
-        result = 'dismissed';
-        break;
-      }
-      result = 'disabled';
+
+  if (displayedStatus === 'ALERT_RINGING') {
+    dismissSessionAlert(id);
+    return 'dismissed';
   }
-  getPlatform().alertDismissOrToggle(resolveTerminalSessionId(id), displayedStatus);
-  return result;
+
+  // An attention-based dismissal leaves a flag behind so this next click opens
+  // the dialog rather than silently editing a rule.
+  if (entry?.attentionDismissedRing) {
+    dismissSessionAlert(id);
+    return 'dismissed';
+  }
+
+  // Everything else is "turn the rule for the running command on or off".
+  const argv0 = getRunningCommandArgv0(id);
+  if (!argv0) return 'no-command';
+
+  if (isCommandWatched(argv0)) {
+    setCommandWatched(argv0, false);
+    return 'disabled';
+  }
+
+  // A protocol/command-exit alarm needs no rule, so clicking through one would
+  // enable WATCHING by surprise. Show the detail dialog instead.
+  if (displayedStatus === 'OSC_NOTIF_BUSY' || displayedStatus === 'COMMAND_EXIT_ARMED') return 'menu';
+
+  setCommandWatched(argv0, true);
+  return 'enabled';
 }
 
+/** Turn the rule for whatever `id` is running on/off; no-op at a prompt. */
 export function toggleSessionAlert(id: string): void {
-  getPlatform().alertToggle(resolveTerminalSessionId(id));
+  const argv0 = getRunningCommandArgv0(id);
+  if (argv0) setCommandWatched(argv0, !isCommandWatched(argv0));
 }
 
 export function disableSessionAlert(id: string): void {
-  getPlatform().alertDisable(resolveTerminalSessionId(id));
+  const argv0 = getRunningCommandArgv0(id);
+  if (argv0) setCommandWatched(argv0, false);
 }
 
 export function dismissSessionAlert(id: string): void {

@@ -390,20 +390,12 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.vscode.postMessage({ type: 'alert:remove', id });
   }
 
-  alertToggle(id: string): void {
-    this.vscode.postMessage({ type: 'alert:toggle', id });
-  }
-
-  alertDisable(id: string): void {
-    this.vscode.postMessage({ type: 'alert:disable', id });
+  alertSetWatchedCommands(names: string[]): void {
+    this.vscode.postMessage({ type: 'alert:setWatchedCommands', names });
   }
 
   alertDismiss(id: string): void {
     this.vscode.postMessage({ type: 'alert:dismiss', id });
-  }
-
-  alertDismissOrToggle(id: string, displayedStatus: string): void {
-    this.vscode.postMessage({ type: 'alert:dismissOrToggle', id, displayedStatus });
   }
 
   alertAttend(id: string): void {

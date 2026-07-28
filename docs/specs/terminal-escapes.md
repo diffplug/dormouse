@@ -44,21 +44,21 @@ Unknown non-iTerm2 OSC families pass through to xterm.js unchanged so xterm.js c
 
 | Sequence | Purpose | Spec |
 |---|---|---|
-| `BEL` (standalone, outside an OSC) | Generic terminal-bell notification | [alert.md](alert.md#standalone-bel) |
+| `BEL` (standalone, outside an OSC) | Generic terminal-bell notification | [alert.md](alert.md#terminal-reports) |
 | `OSC 0 ; <title> ST` | Window/icon title | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 2 ; <title> ST` | Window title | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 7 ; file://host/path ST` | CWD (xterm-style URI) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 8 ; <params> ; <URI> ST ... OSC 8 ; ; ST` | Explicit hyperlink region; passed through to xterm.js for rendering, then opened only after Dormouse shows the real target in a confirmation dialog. | This spec |
 | `OSC 10 ; ? ST` / `OSC 11 ; ? ST` / `OSC 12 ; ? ST` | Foreground / background / cursor color **query**. Dormouse answers from the active terminal theme with `OSC <code> ; rgb:RRRR/GGGG/BBBB ST` (16-bit channels) and consumes the query, so background-detecting TUIs (e.g. Codex's adaptive composer "pill") see the real colors instead of assuming dark. The parser needs the theme colors: the **standalone** frontend adapter reads them directly (`getTerminalTheme()`); the **VS Code** extension-host parser has no DOM, so the webview pushes them up via `dormouse:themeColors` (see [vscode.md](vscode.md#osc-color-query-answering)). Only the `?` (report) form is intercepted; color *set* requests pass through to xterm.js. Until the theme is known (before the first push, or if unparseable) the query falls through to xterm.js. | This spec |
-| `OSC 9 ; <message> ST` | iTerm2 legacy notification | [alert.md](alert.md#osc-9) |
-| `OSC 9 ; 4 ; <state> [; <progress>] ST` | iTerm2 progress | [alert.md](alert.md#osc-94-progress) |
+| `OSC 9 ; <message> ST` | iTerm2 legacy notification | [alert.md](alert.md#terminal-reports) |
+| `OSC 9 ; 4 ; <state> [; <progress>] ST` | iTerm2 progress | [alert.md](alert.md#terminal-reports) |
 | `OSC 9 ; 9 ; <cwd> ST` | CWD (Windows Terminal / ConEmu) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
-| `OSC 99 ; <metadata> ; <payload> ST` | kitty desktop notification | [alert.md](alert.md#osc-99) |
+| `OSC 99 ; <metadata> ; <payload> ST` | kitty desktop notification | [alert.md](alert.md#terminal-reports) |
 | `OSC 133 ; A/B/C/D [...] ST` | Prompt/command boundaries; command-exit alert input | [terminal-state.md](terminal-state.md#supported-osc-inputs), [alert.md](alert.md#command-exit-track) |
 | `OSC 633 ; A/B/C/D ST` | VS Code prompt/command boundaries; command-exit alert input | [terminal-state.md](terminal-state.md#supported-osc-inputs), [alert.md](alert.md#command-exit-track) |
 | `OSC 633 ; E ; <commandline> [; <nonce>] ST` | VS Code command line | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 633 ; P ; Cwd=<cwd> ST` | CWD (VS Code) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
-| `OSC 777 ; notify ; <title> ; <body> ST` | rxvt/WezTerm notification | [alert.md](alert.md#osc-777) |
+| `OSC 777 ; notify ; <title> ; <body> ST` | rxvt/WezTerm notification | [alert.md](alert.md#terminal-reports) |
 | `OSC 1337 ; CurrentDir=<cwd> ST` | CWD (iTerm2 compatibility) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 
 (`BEL` is not itself an OSC; it has a row here because a standalone `BEL` is parsed and stripped at the same PTY data boundary as the OSCs.)

@@ -89,7 +89,7 @@ describe("TutRunner snapshots", () => {
     dispose();
   });
 
-  it("renders Alert and TODO with all items incomplete", () => {
+  it("renders the alert section with all items incomplete", () => {
     const { sendKeys, lastFrame, dispose } = mountRunner();
     sendKeys("\x1b[B\r");
     expect(lastFrame()).toMatchSnapshot();
@@ -219,7 +219,7 @@ describe("TutRunner snapshots", () => {
 
     expect(lastFrame()).toContain("🐭 FlappyTerm 🐭");
     expect(lastFrame()).not.toContain("???");
-    expect(lastFrame()).toContain("[LOCKED 0/17]");
+    expect(lastFrame()).toContain("[LOCKED 0/20]");
     expect(lastFrame()).toContain("Dormouse Playground Tutorial");
     dispose();
   });

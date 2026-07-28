@@ -1,5 +1,5 @@
 import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo } from './types';
-import { AlertManager, type SessionStatus } from '../alert-manager';
+import { AlertManager } from '../alert-manager';
 import { normalizeExternalUri } from '../external-links';
 import {
   applyTerminalProtocolEvents,
@@ -243,10 +243,8 @@ export class FakePtyAdapter implements PlatformAdapter {
 
   // Alert management (local AlertManager, same as TauriAdapter)
   alertRemove(id: string): void { this.alertManager.remove(id); }
-  alertToggle(id: string): void { this.alertManager.toggleAlert(id); }
-  alertDisable(id: string): void { this.alertManager.disableAlert(id); }
+  alertSetWatchedCommands(names: string[]): void { this.alertManager.setWatchedCommands(names); }
   alertDismiss(id: string): void { this.alertManager.dismissAlert(id); }
-  alertDismissOrToggle(id: string, displayedStatus: string): void { this.alertManager.dismissOrToggleAlert(id, displayedStatus as SessionStatus); }
   alertAttend(id: string): void { this.alertManager.attend(id); }
   alertResize(id: string): void { this.alertManager.onResize(id); }
   alertClearAttention(id?: string): void { this.alertManager.clearAttention(id); }

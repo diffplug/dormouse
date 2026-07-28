@@ -1,4 +1,5 @@
 import {
+  commandArgv0,
   createTerminalPaneState,
   cwdFromManualPath,
   cwdFromProcessPath,
@@ -61,6 +62,17 @@ export function getTerminalPaneStateSnapshot(): Map<string, TerminalPaneState> {
 
 export function getTerminalPaneState(id: string): TerminalPaneState {
   return paneStates.get(id) ?? createTerminalPaneState();
+}
+
+/**
+ * The bare program name of the pane's foreground command, or null when the pane
+ * is at a prompt (or its shell reported no command line). This is the key the
+ * WATCHING rule set is stored under, so the bell and the alert dialog both use
+ * it to decide which rule they are toggling — see `docs/specs/alert.md`.
+ */
+export function getRunningCommandArgv0(id: string): string | null {
+  const raw = paneStates.get(id)?.currentCommand?.rawCommandLine;
+  return raw ? commandArgv0(raw) : null;
 }
 
 // Count sessions whose latest activity is a live/running command (not an idle

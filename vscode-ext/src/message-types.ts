@@ -35,10 +35,8 @@ export type WebviewMessage =
   | ({ type: 'dor:controlResponse' } & DorControlResponsePayload)
   // Alert actions
   | { type: 'alert:remove'; id: string }
-  | { type: 'alert:toggle'; id: string }
-  | { type: 'alert:disable'; id: string }
+  | { type: 'alert:setWatchedCommands'; names: string[] }
   | { type: 'alert:dismiss'; id: string }
-  | { type: 'alert:dismissOrToggle'; id: string; displayedStatus: string }
   | { type: 'alert:attend'; id: string }
   | { type: 'alert:resize'; id: string }
   | { type: 'alert:clearAttention'; id?: string }
