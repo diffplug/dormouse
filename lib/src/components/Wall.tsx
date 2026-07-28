@@ -114,7 +114,7 @@ export {
   ZoomedIdContext,
 } from './wall/wall-context';
 export type { WallActions } from './wall/wall-context';
-export { MarchingAntsRect, roundedRectPath } from './wall/MarchingAntsRect';
+export { SelectionRing, roundedRectPath } from './wall/SelectionRing';
 export { TerminalPaneHeader } from './wall/TerminalPaneHeader';
 
 function persistedPanelTitle(title: string | null | undefined): string {

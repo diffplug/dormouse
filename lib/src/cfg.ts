@@ -43,4 +43,26 @@ export const cfg = {
      *  Snapping straight to the final geometry removes that whole race. */
     animate: true,
   },
+  focusRing: {
+    /** EXPERIMENTAL. Motion treatment while the focus ring travels between panes:
+     *  'none' (today's plain tween), 'directional' (Gaussian smear along the travel
+     *  axis), or 'trail' (fading ghost copies). A settled or reduced-motion ring is
+     *  always clean regardless — the treatment rides the tween's per-frame velocity,
+     *  which is null when not travelling. */
+    motionBlur: 'directional' as 'none' | 'directional' | 'trail',
+    /** directional: per-axis blur sigma = clamp(|v_axis| * blurGain, 0, blurMaxPx),
+     *  with v in px/ms. Gain 3 puts a typical adjacent-pane travel (~1.5px/ms) at
+     *  sigma ~4-5; the eased peak at travel start clamps at blurMaxPx then decays. */
+    blurGain: 3,
+    /** directional: hard cap on blur sigma (px) so the fastest travels don't smear
+     *  into soup. Capped near the ants stroke width: a 1px line at sigma 6 falls to
+     *  ~7% peak alpha and effectively vanishes mid-flight (verified in stills);
+     *  sigma 3 keeps both ring modes legible while still reading as motion. */
+    blurMaxPx: 3,
+    /** trail: how many ghost copies trail the live ring. */
+    trailCount: 3,
+    /** trail: per-copy opacity falloff — ghost i (0 = nearest) fades to
+     *  trailFalloff^(i+1). */
+    trailFalloff: 0.45,
+  },
 };

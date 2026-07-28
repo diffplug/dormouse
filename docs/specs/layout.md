@@ -217,21 +217,23 @@ Untouched sessions skip this confirmation. A newly spawned shell starts `untouch
 A fixed-positioned element rendered on top of the Lath host. Covers the active element's area inflated by `SELECTION_RING_INFLATE_PX` (4px) for panes; doors are not inflated. The inflate is derived in `lib/src/components/design.tsx` so both ring strokes center on the gutter's midline: the 1px passthrough border spans [3px, 4px] from the pane edge — dead center of the 7px gutter, on whole pixels because the gutter is odd.
 
 - A pane or door can be **active** or **inactive**. Only one element is active at a time.
-- **Passthrough:** `border: 1px solid ${color}` — no glow
-- **Command:** animated SVG marching-ants border — rounded rectangle path with `stroke-dasharray` animation (10px segment, 60% dash / 40% gap, 0.4s cycle, 2px stroke)
+- One SVG renderer (`SelectionRing`, `variant: 'ants' | 'solid'`) draws both modes:
+- **Passthrough:** `variant='solid'` — a 1px solid SVG stroke that replaced the old `border: 1px solid ${color}` CSS border, placed pixel-identically (centerline `strokeWidth/2` inside the div edge for both panes and doors), no glow
+- **Command:** `variant='ants'` — animated SVG marching-ants border, rounded rectangle path with `stroke-dasharray` animation (10px segment, 60% dash / 40% gap, 0.4s cycle, 2px stroke)
 - Border radius follows DESIGN.md's Concentric-Corners Rule: the pane ring's rect is inflated by `SELECTION_RING_INFLATE_PX`, so its radius is the pane radius plus that offset (`PANE_SELECTION_RING_RADIUS_PX` in `lib/src/components/design.tsx`, with the marching-ants path inset so its stroke centerline sits on the same gutter midline, concentric with the pane corner); doors sit at zero offset and keep `0.5rem 0.5rem 0 0`
 - Color from CSS custom property `--mt-selection-terminal`
 - `z-index: 50`, `pointer-events: none`
 
 ### Ring travel
 
-The ring's rect (and its `{tl,tr,br,bl,inset}` shape) is driven **per-frame by a JS tween**, not a CSS transition — the tween writes true interpolated values each rAF frame, the same pointer-events-none carve-out the Lath animator holds (DESIGN.md's "don't animate layout properties" bans CSS transitions on layout props, not this). Motion is `FOCUS_MOTION_MS` (220ms — half `LATH_MOTION_MS`) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`. Source of truth: the pure tween core `lib/src/lib/rect-tween.ts`; the overlay's rAF loop in `WorkspaceSelectionOverlay.tsx`.
+The ring's rect (and its `{tl,tr,br,bl,inset}` shape) is driven **per-frame by a JS tween**, not a CSS transition — the tween writes true interpolated values each rAF frame, the same pointer-events-none carve-out the Lath animator holds (DESIGN.md's "don't animate layout properties" bans CSS transitions on layout props, not this). Motion is `FOCUS_MOTION_MS` (220ms — half `LATH_MOTION_MS`) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`. Source of truth: the pure tween core `lib/src/lib/rect-tween.ts`; the overlay's rAF loop in `WorkspaceSelectionOverlay.tsx`; the SVG renderer `lib/src/components/wall/SelectionRing.tsx`.
 
 - **Identity change → tween.** When the incoming measurement's identity (`${selectedType}:${selectedId}`) differs from the one on screen, the ring glides from its current interpolated position to the new target, clock restarted (arrow-key spam stays responsive).
 - **Same identity → snap 1:1.** A same-identity re-measure with no tween in flight (sash drag, window resize, a settled leaf's store commit) writes the new rect directly — the ring tracks the geometry exactly instead of easing behind it.
 - **In-flight retarget.** A same-identity re-measure *during* a tween retargets the destination without resetting the clock, so the ring converges on a moving target (select-a-neighbor-during-kill) and still lands on the original completion instant.
 - **Snap gate.** `!cfg.layout.animate` (Chromatic) or `prefersReducedMotion()` → the ring settles instantly, mirroring the animator's 0-duration path (`lath-wall-engine.ts`). Only the unfocus-saturate fade keeps a CSS transition (`filter ${FOCUS_MOTION_MS}ms`), unconditionally.
 - Pane↔door selection morphs the corner radii (12px all-round ⇄ `8,8,0,0`) and stroke inset through the same tween, so the shape lerps instead of popping.
+- **Experimental motion treatment** (`cfg.focusRing.motionBlur`, currently defaulted to `'directional'` for dogfooding): the overlay computes the ring center's per-frame velocity from the tween and, for `'directional'`, feeds an SVG `feGaussianBlur` whose per-axis `stdDeviation` scales with axis speed (clamped); for `'trail'`, renders a few fading ghost copies of recent frames behind the live ring. A settled or reduced-motion ring has null velocity / no ghosts, so it always renders clean — this is a live A/B pending a decision, not shipped chrome.
 
 ### Position tracking
 - Each pane body registers its DOM element in a `paneElements` Map on mount and removes it on unmount (`usePaneChrome`); the overlay resolves the enclosing Lath leaf (`[data-lath-leaf]`) via `resolvePaneElement` so the ring covers the full leaf (header + body)
@@ -393,8 +395,8 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/components/wall/LathHost.tsx` | The tiling engine's HTML adapter: leaf divs, sashes, the pane/door drag gesture, and imperative animator frame application. Engine internals are mapped in `docs/specs/tiling-engine.md`. |
 | `lib/src/components/wall/TerminalPanel.tsx` | Pane body wrapper; registers the pane's DOM element (`usePaneChrome`) |
 | `lib/src/components/wall/TerminalPaneHeader.tsx` | Pane header with rename, alert/TODO, mouse override, split/zoom/minimize/kill controls |
-| `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` | Pane/door focus ring and marching-ants overlay; re-measures on Lath store commits + animator frames |
-| `lib/src/components/wall/MarchingAntsRect.tsx` | SVG marching-ants border path and dash sizing |
+| `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` | Pane/door focus ring: the JS travel tween + rAF loop; re-measures on Lath store commits + animator frames; computes the experimental motion-blur velocity/trail inputs |
+| `lib/src/components/wall/SelectionRing.tsx` | The single SVG ring renderer (`solid` passthrough / `ants` command), dash sizing, and the experimental directional-blur filter + trail ghosts |
 | `lib/src/components/wall/MouseOverrideBanner.tsx` | Temporary mouse override banner shown from the header icon |
 | `lib/src/components/wall/use-wall-keyboard.ts` | Capture-phase keyboard dispatch for mode switching, pane/door commands, copy/paste, selection drag keys |
 | `lib/src/lib/vscode-keybindings.ts` | VS Code-hosted workbench chord mirror allowlist |

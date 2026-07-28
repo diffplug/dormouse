@@ -41,8 +41,8 @@ export const PANE_GUTTER_PX = 7;
 // The inflate is derived so the ring is CENTERED in the gutter: the 1px
 // passthrough border draws just inside the inflated rect, spanning
 // [INFLATE-1, INFLATE] from the pane edge, so its center sits at
-// INFLATE - 0.5 = PANE_GUTTER_PX / 2. (The marching-ants stroke centers on
-// the same line via its path inset — see MarchingAntsRect.)
+// INFLATE - 0.5 = PANE_GUTTER_PX / 2. (Both selection-ring strokes center on
+// the same line via their path inset — see SelectionRing.)
 export const SELECTION_RING_INFLATE_PX = (PANE_GUTTER_PX + 1) / 2;
 export const PANE_SELECTION_RING_RADIUS_PX = TERMINAL_BORDER_RADIUS_PX + SELECTION_RING_INFLATE_PX;
 
