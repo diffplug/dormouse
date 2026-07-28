@@ -9,6 +9,12 @@ No project-specific tend preferences yet beyond the notes below. Add guidance he
 
 When asking permission to file an issue upstream (e.g. at `max-sixty/tend`), do **not** include the standing-exception offer ("I can treat this target as file-directly going forward"). nedtwigg wants to keep approving each cross-repo issue individually — keep asking each time, and skip the offer. ([diffplug/dormouse#168](https://github.com/diffplug/dormouse/issues/168#issuecomment-4836133002))
 
+## The Chromatic `UI Tests` check is human-gated — don't wait it out in a gated-approval poll
+
+After approving a visually-changing PR the approval is gated, so the CI Monitoring poll runs to dismiss-on-red. One status context — **`UI Tests`** (Chromatic, `target_url` → `chromatic.com/build...`) — stays `PENDING` for the entire poll because Chromatic holds it open until a maintainer accepts or rejects the visual diffs in the Chromatic UI; it does **not** auto-terminalize in-session. Its sibling **`Storybook Publish`** (also Chromatic) *does* terminalize normally, so this applies only to `UI Tests`.
+
+When `UI Tests` is the only non-terminal check and every automated check is green (Build & Test, Visual Regression Tests, verify, Standalone Smoketest, Cloudflare Pages, Storybook Publish), treat it as human-gated: stop polling, confirm nothing flipped to FAILURE, and keep the approval standing — don't wait out the poll cap. Polling it to the cap wastes ~9–17 job-minutes per visually-changing PR with no added signal. (Observed on #203, #289, #317.)
+
 ## Settled upstream rulings — don't re-file
 
 Before a `review-runs`/`review-reviewers` sweep flags a tend behavior as waste or files it upstream, check this list — these were already raised and ruled on, so re-filing burns a session and spams upstream:
