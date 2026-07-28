@@ -46,6 +46,8 @@ const loggingActions: WallActions = {
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
   onSwapRenderMode: (id, mode) => console.log('[story] swap render', id, mode),
+  resolveSurfaceRef: (id) => id,
+  onConnectPort: (id, url) => console.log('[story] connect port', id, url),
 };
 
 interface StoryArgs {

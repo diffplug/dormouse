@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
+import { POPUP_SURFACE_CLASS } from '../design';
 import type { SetTerminalUserTitleResult } from '../../lib/terminal-registry';
+import { useDismissOverlay } from './use-dismiss-overlay';
 
 export type RenameRejection = Extract<SetTerminalUserTitleResult, { accepted: false }>['reason'];
 
@@ -36,23 +38,11 @@ export function IllegalRenameWarning({ anchorRect, reason, attemptedValue, onClo
     });
   }, [anchorRect]);
 
+  useDismissOverlay(onClose, ref);
+
   useEffect(() => {
-    const dismiss = () => onClose();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') dismiss();
-    };
-    const timeout = window.setTimeout(dismiss, AUTO_DISMISS_MS);
-    window.addEventListener('pointerdown', dismiss);
-    window.addEventListener('resize', dismiss);
-    window.addEventListener('scroll', dismiss, true);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.clearTimeout(timeout);
-      window.removeEventListener('pointerdown', dismiss);
-      window.removeEventListener('resize', dismiss);
-      window.removeEventListener('scroll', dismiss, true);
-      window.removeEventListener('keydown', onKey);
-    };
+    const timeout = window.setTimeout(onClose, AUTO_DISMISS_MS);
+    return () => window.clearTimeout(timeout);
   }, [onClose]);
 
   return createPortal(
@@ -61,7 +51,7 @@ export function IllegalRenameWarning({ anchorRect, reason, attemptedValue, onClo
       role="alert"
       data-testid="illegal-rename-warning"
       aria-label={`Illegal name: ${describeReason(reason, attemptedValue)}`}
-      className="z-[1000] max-w-72 rounded border border-border bg-surface-raised px-2.5 py-1.5 font-mono text-xs leading-snug text-foreground shadow-md"
+      className={`${POPUP_SURFACE_CLASS} max-w-72 px-2.5 py-1.5 text-xs leading-snug`}
       style={style}
       onPointerDown={(e) => e.stopPropagation()}
     >

@@ -783,6 +783,20 @@ export function Wall({
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
+  /** Focus a surface for the human half of `connectPort`: activating a port row
+   *  is an explicit request to look at and control that browser. A visible pane
+   *  enters passthrough in place; a minimized one reattaches on the same terms
+   *  as clicking its Door chip. This is deliberately unlike `dor ab`, whose
+   *  agent-initiated control path remains focus-neutral. */
+  const revealSurface = useCallback((id: string) => {
+    if (nav.hasPane(id)) {
+      enterTerminalMode(id);
+      return;
+    }
+    const door = doorsRef.current.find((item) => item.id === id);
+    if (door) handleReattachRef.current(door);
+  }, [nav, enterTerminalMode]);
+
   // The Surfaces of the current Workspace. `buildDorSurfaces` is the visible-pane
   // projection used for geometry/placement; `buildDorSurfaceList` additionally
   // includes minimized (doored) Surfaces for `dor list` and direct operations.
@@ -1119,7 +1133,7 @@ export function Wall({
   }, [generatePaneId, surfaceRefForId, forgetSurfaceRef, selectPane, enterTerminalMode, showShellSpawnNotice, lath, nav]);
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
-  useDorControl({
+  const { connectPort } = useDorControl({
     lath,
     nav,
     doorsRef,
@@ -1130,6 +1144,7 @@ export function Wall({
     createSplitSurface,
     createContentSurface,
     killPaneImmediately,
+    revealSurface,
     lastAgentBrowserBinaryPathRef,
   });
 
@@ -1313,7 +1328,10 @@ export function Wall({
         title: hostPathDisplay(url, true),
       });
     },
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, lath, nav]);
+    resolveSurfaceRef: surfaceRefForId,
+    // The pane context menu's "connect a port" action: act like `dor ab open`.
+    onConnectPort: connectPort,
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, connectPort, lath, nav]);
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
 

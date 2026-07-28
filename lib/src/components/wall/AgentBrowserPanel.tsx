@@ -317,7 +317,12 @@ export function AgentBrowserPanel({ id, params: rawParams, renderMode: renderMod
   // --- placeholder state (derived from the snapshot) ---
 
   const placeholder = (() => {
-    if (!streamPort) return `Waiting for browser session ${session ?? ''} — run dor ab open <url>`;
+    // Session-less: the pane context menu's eager connect pane, on screen before
+    // the daemon boots (docs/specs/dor-browser.md → Pane Context Menu Connect).
+    // It is mid-boot, not idle — telling the user to run `dor ab open` here would
+    // ask them to redo the click they just made.
+    if (!session) return 'Connecting to browser session…';
+    if (!streamPort) return `Waiting for browser session ${session} — run dor ab open <url>`;
     if (connectionLost || status?.connected === false) {
       return `Browser session ${session ?? ''} ended — run dor ab open <url> to restart it, or close this surface.`;
     }

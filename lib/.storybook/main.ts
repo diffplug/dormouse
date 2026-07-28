@@ -30,6 +30,11 @@ const config: StorybookConfig = {
       // at a `dist` the Storybook/Chromatic job never builds, so alias the bare
       // specifier to source too.
       'server-lib-common': path.resolve(here, '..', '..', 'server-lib-common', 'src'),
+      // And `Wall` → `useDorControl` → `connect-port` imports
+      // `dor-lib-common/agent-browser`, whose `exports` point at the same kind of
+      // unbuilt `dist`. The directory alias covers the subpath and the bare
+      // specifier both.
+      'dor-lib-common': path.resolve(here, '..', '..', 'dor-lib-common', 'src'),
     };
     return config;
   },

@@ -53,6 +53,8 @@ const noopActions: WallActions = {
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
   onSwapRenderMode: () => {},
+  resolveSurfaceRef: (id) => id,
+  onConnectPort: () => {},
 };
 
 const meta: Meta<typeof ShellCwdMatrix> = {
@@ -121,16 +123,16 @@ export const TitleFallbacksAndPinnedTitles: Story = storyFor([
   caseState('title-long-user', 'Long user title', idle({ cwd: manual('/repo/app'), title: terminalTitle('my-extremely-long-running-background-process-with-a-very-descriptive-name', 'user') }), 'Truncates before controls'),
 ]);
 
-export const TitleCandidatePopup: Story = {
+export const TitleCandidatesInHeaderMenu: Story = {
   ...storyFor([
     caseState(
       'title-candidates-popup',
-      'Title candidates popup',
+      'Title candidates in header menu',
       titleCandidateState(),
-      'Right-click popup lists each latest title channel',
+      'Right-click menu embeds the latest title per channel above the port rows',
     ),
   ]),
-  play: openTitleCandidatesPopup,
+  play: openHeaderContextMenu,
 };
 
 export const GroupingKeys: Story = storyFor([
@@ -387,9 +389,9 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function openTitleCandidatesPopup() {
+async function openHeaderContextMenu() {
   await wait(100);
-  const title = document.querySelector<HTMLElement>('[data-title-candidates-for="title-candidates-popup"]');
+  const title = document.querySelector<HTMLElement>('[data-pane-title-for="title-candidates-popup"]');
   if (!title) return;
 
   const rect = title.getBoundingClientRect();

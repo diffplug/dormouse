@@ -10,9 +10,11 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
+import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { Wall } from './Wall';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
+import type { PlatformAdapter } from '../lib/platform/types';
 import * as terminalRegistry from '../lib/terminal-registry';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -708,6 +710,22 @@ describe('Wall on the Lath engine', () => {
     return response!.result!.surfaceId!;
   }
 
+  async function dispatchAgentBrowser(params: Record<string, unknown>): Promise<string> {
+    let response: { ok: boolean; result?: { surfaceId?: string } } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.agentBrowser,
+          params,
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+    expect(response?.ok).toBe(true);
+    return response!.result!.surfaceId!;
+  }
+
   it('dor split transfers focus to the new surface (passthrough)', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" showBaseboard />);
@@ -738,6 +756,79 @@ describe('Wall on the Lath engine', () => {
     // new surface is not focused.
     expect(focusOf('pane-a')).toBe('true');
     expect(focusOf(newId)).toBe('false');
+  });
+
+  it('keeps dor agent-browser focus-neutral but enters passthrough for a user port activation', async () => {
+    const defaultSession = sessionForKey('default');
+    const onEvent = vi.fn();
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+
+    try {
+      // The CLI arm creates Browser B without moving selection or keyboard input
+      // away from the passthrough terminal.
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" showBaseboard onEvent={onEvent} />);
+      });
+      await flush();
+      expect(focusOf('pane-a')).toBe('true');
+
+      const browserId = await dispatchAgentBrowser({
+        session: defaultSession,
+        surface: 'surface:1',
+      });
+      expect(focusOf('pane-a')).toBe('true');
+
+      // Return to command mode, then invoke the human right-click path. Even
+      // from command mode, activating a port is an explicit focus request:
+      // Browser B becomes selected in passthrough.
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location: 1, bubbles: true }));
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location: 2, bubbles: true }));
+      });
+      await flush();
+
+      (fake as PlatformAdapter).agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+      if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
+      fake.setOpenPorts('pane-a', [{
+        protocol: 'tcp',
+        family: 'IPv4',
+        address: '127.0.0.1',
+        port: 5173,
+        pid: 100,
+        processName: 'vite',
+      }]);
+      onEvent.mockClear();
+
+      const header = container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!;
+      await act(async () => {
+        header.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 10,
+          clientY: 10,
+        }));
+      });
+      await flush();
+
+      const portRow = document.querySelector<HTMLButtonElement>(
+        '[data-pane-context-menu-for="pane-a"] button[data-port-entry="5173"]',
+      );
+      expect(portRow).not.toBeNull();
+      await act(async () => {
+        portRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      await flush();
+
+      expect(onEvent).toHaveBeenCalledWith({ type: 'selectionChange', id: browserId, kind: 'pane' });
+      expect(onEvent).toHaveBeenCalledWith({ type: 'modeChange', mode: 'passthrough' });
+      expect((fake as PlatformAdapter).agentBrowserCommand).toHaveBeenCalledWith(
+        defaultSession,
+        ['open', 'http://localhost:5173/'],
+        undefined,
+      );
+    } finally {
+      untouchedSpy.mockRestore();
+    }
   });
 
   it('dor split -- (empty tail) opens a blank surface without stealing focus', async () => {
