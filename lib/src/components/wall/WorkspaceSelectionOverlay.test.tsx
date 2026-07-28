@@ -17,7 +17,6 @@ import {
   type PaneElementsState,
 } from './wall-context';
 import type { WallMode } from './wall-types';
-import { cfg } from '../../cfg';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -247,32 +246,22 @@ describe('WorkspaceSelectionOverlay ring travel', () => {
 });
 
 describe('SelectionRing settled render', () => {
-  // A resting ring (first-appearance snap → no tween → null velocity, empty trail)
-  // must render clean no matter what motion treatment is configured — this is what
-  // keeps Chromatic deterministic — and the passthrough ring must be a 1px solid
-  // stroke, pixel-parity with the retired CSS border.
-  for (const mb of ['none', 'directional', 'trail'] as const) {
-    it(`is a 1px non-dashed stroke with no filter or ghosts (motionBlur=${mb})`, async () => {
-      const prev = cfg.focusRing.motionBlur;
-      cfg.focusRing.motionBlur = mb;
-      try {
-        const store = makeStore();
-        const panes = twoPanes();
-        await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
+  // A resting ring (first-appearance snap → no tween → null velocity) renders with
+  // no motion-blur filter — this is what keeps Chromatic deterministic — and the
+  // passthrough ring is a 1px solid stroke, pixel-parity with the retired CSS border.
+  it('is a 1px non-dashed stroke with no motion-blur filter', async () => {
+    const store = makeStore();
+    const panes = twoPanes();
+    await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
 
-        expect(rafCbs.size).toBe(0); // settled: no tween running
-        const svg = container.querySelector('svg');
-        expect(svg).not.toBeNull();
-        const paths = svg!.querySelectorAll('path');
-        expect(paths.length).toBe(1); // no trailing ghost paths
-        const path = paths[0];
-        expect(path.getAttribute('stroke-width')).toBe('1');
-        expect(path.getAttribute('stroke-dasharray')).toBeNull();
-        expect(path.getAttribute('filter')).toBeNull();
-        expect(svg!.querySelector('filter')).toBeNull();
-      } finally {
-        cfg.focusRing.motionBlur = prev;
-      }
-    });
-  }
+    expect(rafCbs.size).toBe(0); // settled: no tween running
+    const svg = container.querySelector('svg');
+    expect(svg).not.toBeNull();
+    const path = svg!.querySelector('path');
+    expect(path).not.toBeNull();
+    expect(path!.getAttribute('stroke-width')).toBe('1');
+    expect(path!.getAttribute('stroke-dasharray')).toBeNull();
+    expect(path!.getAttribute('filter')).toBeNull();
+    expect(svg!.querySelector('filter')).toBeNull();
+  });
 });

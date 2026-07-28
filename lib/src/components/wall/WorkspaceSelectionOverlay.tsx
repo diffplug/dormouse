@@ -21,7 +21,7 @@ import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
 import { resolvePaneElement } from './resolve-pane-element';
 import type { WallMode, WallSelectionKind } from './wall-types';
 import { DoorElementsContext, PaneElementsContext, WindowFocusedContext } from './wall-context';
-import { SelectionRing, type RingGhost, type RingVelocity } from './SelectionRing';
+import { SelectionRing, type RingVelocity } from './SelectionRing';
 
 /** The subset of the Lath store the overlay needs — a revision that bumps on every
  *  commit, so the ring re-measures as leaves move / resize / restore. Kept
@@ -73,47 +73,20 @@ function framesEqual(a: RingFrame, b: RingFrame): boolean {
   );
 }
 
-/** The presentation frame the overlay renders: the tween's geometry plus the two
- *  experimental motion-treatment channels. `velocity`/`ghosts` are populated only
- *  while a tween runs (and only for the matching `cfg.focusRing.motionBlur` mode);
- *  a settled ring carries neither, so its render is always clean. */
+/** The presentation frame the overlay renders: the tween's geometry plus the
+ *  motion-blur `velocity`, which is populated only while a tween runs; a settled
+ *  ring carries null velocity, so its render is always clean. */
 interface DisplayedRing {
   rect: RingRect;
   shape: RingShape;
   velocity: RingVelocity | null;
-  ghosts: RingGhost[];
 }
 
 /** True when two displayed frames are indistinguishable — same geometry AND both
- *  settled (no velocity, no ghosts). Used to skip redundant re-renders on a
- *  same-geometry re-measure; a moving frame never matches (its rect changes). */
+ *  settled (no velocity). Used to skip redundant re-renders on a same-geometry
+ *  re-measure; a moving frame never matches (its rect changes). */
 function displayedEqual(a: DisplayedRing, b: DisplayedRing): boolean {
-  return (
-    framesEqual(a, b)
-    && !a.velocity && !b.velocity
-    && a.ghosts.length === 0 && b.ghosts.length === 0
-  );
-}
-
-/** Every-other recent frame behind the live one, nearest first, up to trailCount,
- *  re-expressed in the live ring's local SVG coordinates (offset from the live
- *  rect's top-left). Two-frame spacing spreads the trail so ghosts don't clump on
- *  the head. The live frame itself is `buf[len-1]` and is skipped. */
-function buildGhosts(buf: RingFrame[], live: RingRect): RingGhost[] {
-  const ghosts: RingGhost[] = [];
-  for (let i = 1; i <= cfg.focusRing.trailCount; i++) {
-    const idx = buf.length - 1 - i * 2;
-    if (idx < 0) break;
-    const g = buf[idx];
-    ghosts.push({
-      dx: g.rect.left - live.left,
-      dy: g.rect.top - live.top,
-      width: g.rect.width,
-      height: g.rect.height,
-      tl: g.shape.tl, tr: g.shape.tr, br: g.shape.br, bl: g.shape.bl,
-    });
-  }
-  return ghosts;
+  return framesEqual(a, b) && !a.velocity && !b.velocity;
 }
 
 export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, selectedId, selectedType, mode }: {
@@ -144,12 +117,12 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   const tweenRef = useRef<RingTween | null>(null);
   const rafRef = useRef<number | null>(null);
 
-  // Experimental motion-blur inputs, sampled inside the rAF loop: the previous
-  // center + timestamp (finite-difference velocity source) and a short ring buffer
-  // of recent frames (trail ghosts). Both are cleared at tween start / on settle so
-  // a resting ring renders with zero blur/trail (Chromatic determinism).
+  // Motion-blur inputs, sampled inside the rAF loop: the previous center + timestamp
+  // (finite-difference velocity source) and the EMA-smoothed velocity that drives
+  // the directional blur. Both are cleared at tween start / on settle so a resting
+  // ring renders with zero blur (Chromatic determinism).
   const prevCenterRef = useRef<{ x: number; y: number; t: number } | null>(null);
-  const trailBufRef = useRef<RingFrame[]>([]);
+  const smoothedVelRef = useRef<RingVelocity | null>(null);
 
   // Re-run the measuring effect after each Lath commit. Runs post-render, so
   // `getBoundingClientRect` sees the repositioned leaf divs.
@@ -163,10 +136,10 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     // A settled (non-travelling) frame: geometry only, no motion treatment. Used by
     // snaps and same-identity re-measures.
     const commitSettled = (frame: RingFrame) =>
-      commitDisplayed({ rect: frame.rect, shape: frame.shape, velocity: null, ghosts: [] });
+      commitDisplayed({ rect: frame.rect, shape: frame.shape, velocity: null });
     const resetMotionSamples = () => {
       prevCenterRef.current = null;
-      trailBufRef.current = [];
+      smoothedVelRef.current = null;
     };
 
     // One `setState` per frame. Samples the live tween at wall-clock `now`, derives
@@ -179,8 +152,8 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       const now = performance.now();
       const { rect, shape, done } = sampleRingTween(tween, now);
       if (done) {
-        // The ring has settled: drop the tween and all motion samples so the final
-        // render is clean (no blur, no ghosts).
+        // The ring has settled: drop the tween and motion samples so the final
+        // render is clean (no blur).
         tweenRef.current = null;
         resetMotionSamples();
         commitSettled({ rect, shape });
@@ -192,24 +165,25 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
       const cy = rect.top + rect.height / 2;
       const prev = prevCenterRef.current;
       const dt = prev ? now - prev.t : 0;
-      const velocity: RingVelocity | null = prev && dt > 0
+      const raw: RingVelocity | null = prev && dt > 0
         ? { x: (cx - prev.x) / dt, y: (cy - prev.y) / dt }
         : null;
       prevCenterRef.current = { x: cx, y: cy, t: now };
 
-      const buf = trailBufRef.current;
-      buf.push({ rect, shape });
-      if (buf.length > cfg.focusRing.trailCount * 2 + 1) buf.shift();
+      // Low-pass the raw finite-difference velocity so rAF frame-timing jitter
+      // doesn't make the blur pulse. Seeded from the first real sample (no ramp-up
+      // lag); a settled ring's null velocity resets the filter.
+      let velocity: RingVelocity | null = null;
+      if (raw) {
+        const a = cfg.focusRing.blurSmoothing;
+        const sm = smoothedVelRef.current;
+        velocity = sm
+          ? { x: sm.x + (raw.x - sm.x) * a, y: sm.y + (raw.y - sm.y) * a }
+          : raw;
+        smoothedVelRef.current = velocity;
+      }
 
-      // Only the selected treatment feeds the renderer; the other channel stays
-      // empty so 'none' renders exactly today's output.
-      const mb = cfg.focusRing.motionBlur;
-      commitDisplayed({
-        rect,
-        shape,
-        velocity: mb === 'directional' ? velocity : null,
-        ghosts: mb === 'trail' ? buildGhosts(buf, rect) : [],
-      });
+      commitDisplayed({ rect, shape, velocity });
       rafRef.current = requestAnimationFrame(tick);
     };
     const scheduleTick = () => {
@@ -312,7 +286,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
   if (!displayed || !selectedId) return null;
 
-  const { rect, shape, velocity, ghosts } = displayed;
+  const { rect, shape, velocity } = displayed;
   const style: CSSProperties = {
     position: 'fixed',
     pointerEvents: 'none',
@@ -329,8 +303,8 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
   // One SVG ring for both modes: passthrough draws the 1px solid stroke that
   // replaced the old CSS border (pixel-identical placement); command draws the 2px
-  // marching ants. The experimental motion channels (velocity / ghosts) ride along
-  // and are empty on a settled ring.
+  // marching ants. The `velocity` channel drives the directional blur and is null on
+  // a settled ring.
   return (
     <div style={style}>
       <SelectionRing
@@ -345,7 +319,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
         color={selectionColor}
         paused={!windowFocused}
         velocity={velocity}
-        ghosts={ghosts}
       />
     </div>
   );

@@ -233,7 +233,7 @@ The ring's rect (and its `{tl,tr,br,bl,inset}` shape) is driven **per-frame by a
 - **In-flight retarget.** A same-identity re-measure *during* a tween retargets the destination without resetting the clock, so the ring converges on a moving target (select-a-neighbor-during-kill) and still lands on the original completion instant.
 - **Snap gate.** `!cfg.layout.animate` (Chromatic) or `prefersReducedMotion()` → the ring settles instantly, mirroring the animator's 0-duration path (`lath-wall-engine.ts`). Only the unfocus-saturate fade keeps a CSS transition (`filter ${FOCUS_MOTION_MS}ms`), unconditionally.
 - Pane↔door selection morphs the corner radii (12px all-round ⇄ `8,8,0,0`) and stroke inset through the same tween, so the shape lerps instead of popping.
-- **Experimental motion treatment** (`cfg.focusRing.motionBlur`, currently defaulted to `'directional'` for dogfooding): the overlay computes the ring center's per-frame velocity from the tween and, for `'directional'`, feeds an SVG `feGaussianBlur` whose per-axis `stdDeviation` scales with axis speed (clamped); for `'trail'`, renders a few fading ghost copies of recent frames behind the live ring. A settled or reduced-motion ring has null velocity / no ghosts, so it always renders clean — this is a live A/B pending a decision, not shipped chrome.
+- **Directional motion blur.** While travelling, the ring smears in its direction of motion: the overlay computes the ring center's per-frame velocity from the tween (EMA-smoothed to shed rAF frame-timing jitter) and feeds an SVG `feGaussianBlur` whose per-axis `stdDeviation` scales with axis speed, clamped at `cfg.focusRing.blurMaxPx`. The filter is attached only while moving; a settled or reduced-motion ring has null velocity and renders clean (no filter), so snapshots stay deterministic. Tunables in `cfg.focusRing` (`blurGain` / `blurMaxPx` / `blurSmoothing`).
 
 ### Position tracking
 - Each pane body registers its DOM element in a `paneElements` Map on mount and removes it on unmount (`usePaneChrome`); the overlay resolves the enclosing Lath leaf (`[data-lath-leaf]`) via `resolvePaneElement` so the ring covers the full leaf (header + body)
@@ -395,8 +395,8 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/components/wall/LathHost.tsx` | The tiling engine's HTML adapter: leaf divs, sashes, the pane/door drag gesture, and imperative animator frame application. Engine internals are mapped in `docs/specs/tiling-engine.md`. |
 | `lib/src/components/wall/TerminalPanel.tsx` | Pane body wrapper; registers the pane's DOM element (`usePaneChrome`) |
 | `lib/src/components/wall/TerminalPaneHeader.tsx` | Pane header with rename, alert/TODO, mouse override, split/zoom/minimize/kill controls |
-| `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` | Pane/door focus ring: the JS travel tween + rAF loop; re-measures on Lath store commits + animator frames; computes the experimental motion-blur velocity/trail inputs |
-| `lib/src/components/wall/SelectionRing.tsx` | The single SVG ring renderer (`solid` passthrough / `ants` command), dash sizing, and the experimental directional-blur filter + trail ghosts |
+| `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` | Pane/door focus ring: the JS travel tween + rAF loop; re-measures on Lath store commits + animator frames; computes the directional motion-blur velocity |
+| `lib/src/components/wall/SelectionRing.tsx` | The single SVG ring renderer (`solid` passthrough / `ants` command), dash sizing, and the directional motion-blur filter |
 | `lib/src/components/wall/MouseOverrideBanner.tsx` | Temporary mouse override banner shown from the header icon |
 | `lib/src/components/wall/use-wall-keyboard.ts` | Capture-phase keyboard dispatch for mode switching, pane/door commands, copy/paste, selection drag keys |
 | `lib/src/lib/vscode-keybindings.ts` | VS Code-hosted workbench chord mirror allowlist |

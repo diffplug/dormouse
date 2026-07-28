@@ -31,24 +31,10 @@ export function roundedRectPath(
 }
 
 /** Per-axis center velocity of the ring while it travels (px/ms), or null when
- *  settled. Drives the experimental 'directional' motion-blur filter. */
+ *  settled. Drives the directional motion-blur filter. */
 export interface RingVelocity {
   x: number;
   y: number;
-}
-
-/** One trail ghost, in the live ring's local SVG coordinates: `dx/dy` offset it
- *  from the live rect's top-left (the SVG origin) so a past position renders inside
- *  the same overflow-visible SVG as the live path. Experimental 'trail' mode only. */
-export interface RingGhost {
-  dx: number;
-  dy: number;
-  width: number;
-  height: number;
-  tl: number;
-  tr: number;
-  br: number;
-  bl: number;
 }
 
 // The corner radii and stroke `inset` are computed by the overlay
@@ -64,11 +50,10 @@ export interface RingGhost {
 //    to the old border for both panes and doors (whose solid insets coincide),
 //    while that `inset` channel keeps carrying the ants-only morph.
 //
-// `velocity` and `ghosts` are the two experimental motion treatments behind
-// `cfg.focusRing.motionBlur`; both are absent on a settled ring, so a resting or
-// reduced-motion render is always clean (no filter, no ghost paths).
+// `velocity` drives the directional motion blur; it is null on a settled ring, so
+// a resting or reduced-motion render is always clean (no filter).
 export function SelectionRing({
-  variant, width, height, tl, tr, br, bl, inset, color, paused, velocity, ghosts,
+  variant, width, height, tl, tr, br, bl, inset, color, paused, velocity,
 }: {
   variant: 'ants' | 'solid';
   width: number;
@@ -81,7 +66,6 @@ export function SelectionRing({
   color: string;
   paused?: boolean;
   velocity?: RingVelocity | null;
-  ghosts?: RingGhost[];
 }) {
   const svgRef = useRef<SVGPathElement>(null);
   const [dashStyle, setDashStyle] = useState<{ dasharray: string; offset: number } | null>(null);
@@ -131,23 +115,12 @@ export function SelectionRing({
     >
       {filterId && (
         // Region padded to ±50% so the blur isn't clipped at the path bounds.
-        <filter id={filterId} x="-50%" y="-50%" width="200%" height="200%">
+        // sRGB interpolation (not the filter default linearRGB) keeps the blurred
+        // smear the ring's true color/brightness instead of muddying it.
+        <filter id={filterId} x="-50%" y="-50%" width="200%" height="200%" colorInterpolationFilters="sRGB">
           <feGaussianBlur stdDeviation={`${sx} ${sy}`} />
         </filter>
       )}
-      {ghosts?.map((g, i) => (
-        // Ghosts are always solid strokes (dashes on trailing copies look noisy),
-        // fading by trailFalloff^(i+1) with the nearest ghost most opaque.
-        <path
-          key={i}
-          transform={`translate(${g.dx} ${g.dy})`}
-          d={roundedRectPath(g.width, g.height, g.tl, g.tr, g.br, g.bl, effInset)}
-          fill="none"
-          stroke={color}
-          strokeWidth={strokeWidth}
-          opacity={Math.pow(fr.trailFalloff, i + 1)}
-        />
-      ))}
       <path
         ref={svgRef}
         d={d}

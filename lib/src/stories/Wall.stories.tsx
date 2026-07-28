@@ -1,5 +1,4 @@
-import type { Decorator, Meta, StoryObj } from '@storybook/react';
-import { useEffect } from 'react';
+import type { Meta, StoryObj } from '@storybook/react';
 import { Wall } from '../components/Wall';
 import {
   flattenScenario,
@@ -8,7 +7,6 @@ import {
   SCENARIO_ANSI_COLORS,
 } from '../lib/platform';
 import type { ActivityState } from '../lib/terminal-registry';
-import { cfg } from '../cfg';
 import { settleTerminals } from './settle-terminals';
 
 const meta: Meta<typeof Wall> = {
@@ -79,49 +77,6 @@ export const WithAnsiColors: Story = {
 
 export const MultiPane: Story = {
   parameters: { fakePty: { scenario: flattenScenario(SCENARIO_LS_OUTPUT) } },
-  play: async () => {
-    await splitPanes();
-    await settleTerminals();
-  },
-};
-
-// EXPERIMENTAL focus-ring motion-blur comparison. Each story clones MultiPane and
-// pins cfg.focusRing.motionBlur so the three variants can be A/B'd live by moving
-// the selection between panes (command mode + arrows). Restores on unmount so it
-// doesn't leak into other stories. Chromatic-safe: with cfg.layout.animate=false
-// the ring never tweens → velocity is null → identical to the baseline snapshot.
-function motionBlurDecorator(mode: 'none' | 'directional' | 'trail'): Decorator {
-  return (Story) => {
-    cfg.focusRing.motionBlur = mode;
-    useEffect(() => {
-      cfg.focusRing.motionBlur = mode;
-      return () => { cfg.focusRing.motionBlur = 'none'; };
-    }, []);
-    return <Story />;
-  };
-}
-
-export const FocusTravelBaseline: Story = {
-  parameters: { fakePty: { scenario: flattenScenario(SCENARIO_LS_OUTPUT) } },
-  decorators: [motionBlurDecorator('none')],
-  play: async () => {
-    await splitPanes();
-    await settleTerminals();
-  },
-};
-
-export const FocusTravelDirectionalBlur: Story = {
-  parameters: { fakePty: { scenario: flattenScenario(SCENARIO_LS_OUTPUT) } },
-  decorators: [motionBlurDecorator('directional')],
-  play: async () => {
-    await splitPanes();
-    await settleTerminals();
-  },
-};
-
-export const FocusTravelTrail: Story = {
-  parameters: { fakePty: { scenario: flattenScenario(SCENARIO_LS_OUTPUT) } },
-  decorators: [motionBlurDecorator('trail')],
   play: async () => {
     await splitPanes();
     await settleTerminals();
