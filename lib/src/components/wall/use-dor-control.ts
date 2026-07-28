@@ -542,8 +542,9 @@ export function useDorControl({
   const connectPort = useCallback((id: string, url: string): Promise<void> => {
     const ensureEagerSurface = (session: string): ParseResult<{ surfaceId: string }> => {
       // Every arm below ends on the same surface id, and a menu click is a human
-      // asking to *see* that surface — so reveal it (reattach if minimized, then
-      // select). `dor ab`'s control path stays focus-neutral; this one does not.
+      // asking to see and control that surface — so focus it in passthrough
+      // (reattach first if minimized). `dor ab`'s control path stays
+      // focus-neutral; this one does not.
       const reveal = (surfaceId: string): ParseResult<{ surfaceId: string }> => {
         revealSurface(surfaceId);
         return { ok: true, value: { surfaceId } };

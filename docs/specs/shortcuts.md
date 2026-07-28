@@ -66,7 +66,7 @@ On macOS, `Ctrl+C` passes through to the running program (only `⌘C` copies); `
 | Prompted character | Confirm kill | Type the character shown in the kill prompt to confirm termination. |
 | `a` (alert dialog open) | Toggle alert | Same as command-mode `a`. |
 | `t` (alert dialog open) | Toggle todo | Same as command-mode `t`. |
-| `1`–`9` (header context menu open) | Connect port | Open a browser surface on the nth port row. Dropped while the port scan is running; inert on hosts that can't open a browser surface. |
+| `1`–`9` (header context menu open) | Connect port | Open the nth port row in a browser surface, select it, and enter passthrough. Dropped while the port scan is running; inert on hosts that can't open a browser surface. |
 | `↑` / `↓` (header context menu open) | Move row focus | Rove focus across port rows, wrapping; `Enter` or `Space` activates the focused row. |
 
 ## Implementation references

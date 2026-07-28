@@ -152,7 +152,9 @@ fds, closing the pipe — which is why none of this surfaced on macOS.)
 Resolution: `dor-lib-common`'s package `exports` point at its built `dist` (clean,
 Node-type-free `.d.ts` for `dor`'s `tsc`, which deliberately avoids `@types/node`);
 every esbuild/Vite consumer (`dist/dor.js`, the sidecar `.cjs`, vscode-ext) inlines
-it. `dor`'s `prebuild` builds `dor-lib-common` first so its `.d.ts` exists.
+it. The `dor` and `dormouse-lib` prebuilds build `dor-lib-common` first so its
+`.d.ts` files exist before either package typechecks imports through those
+exports.
 
 ## Host Plumbing
 

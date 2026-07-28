@@ -185,13 +185,13 @@ flow, not the control plane. It is host-gated on `agentBrowserCommand`: absent
 
 **Activation reveals its surface.** Unlike `dor ab` (focus-neutral: an agent must
 not steal focus from the human), activating a menu row — by mouse or keyboard —
-*is* the human asking to see that browser, so every arm of the eager lookup below
-ends by selecting the surface — reattaching it first when it is minimized, on the
-same terms as clicking its Door chip. Selection only: passthrough stays on the
-terminal the menu was opened from, so connecting a port never redirects the
-keyboard. This is why a repeat activation on an already-connected port is visible
-at all — the session merely re-navigates to the URL it is already on, so the
-selection move is the only feedback.
+*is* the human asking to see and control that browser, so every arm of the eager
+lookup below ends by selecting the surface **in passthrough mode** — reattaching
+it first when it is minimized, on the same terms as clicking its Door chip. This
+applies even when the menu was opened from command mode with `>`: activation
+hands keyboard input to the browser. This is why a repeat activation on an
+already-connected port is visible at all — the session merely re-navigates to
+the URL it is already on, so the focus transfer is the only feedback.
 Source of truth: `revealSurface` in `Wall.tsx`, threaded into `useDorControl`.
 
 **Instant create.** The click is fire-and-forget: the menu closes at once and the

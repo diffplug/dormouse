@@ -33,11 +33,12 @@ const MENU_ROW_CLASS = 'flex w-full items-baseline gap-2 px-2.5 py-1 text-left h
  * host-gated-affordance convention).
  *
  * The menu owns the keyboard while open (`docs/specs/layout.md` → Pane header):
- * it takes DOM focus on mount (restoring the prior focus on close so a
- * passthrough terminal gets its keys back), reports dialog-keyboard-active so
- * command-mode keys don't fire underneath, and handles Tab cycling, `↑`/`↓`
- * roving, and the `1`–`9` port accelerators in one keydown handler. Dismissal
- * (Escape, outside press, resize, scroll) is owned solely by `useDismissOverlay`.
+ * it takes DOM focus on mount (restoring the prior focus when a dismissal leaves
+ * input ownership unchanged; a port activation focuses its browser instead),
+ * reports dialog-keyboard-active so command-mode keys don't fire underneath,
+ * and handles Tab cycling, `↑`/`↓` roving, and the `1`–`9` port accelerators in
+ * one keydown handler. Dismissal (Escape, outside press, resize, scroll) is owned
+ * solely by `useDismissOverlay`.
  */
 export function PaneHeaderContextMenu({
   id,
@@ -94,7 +95,8 @@ export function PaneHeaderContextMenu({
 
   // Take DOM focus on the menu container (tabIndex=-1) so our keyboard handlers
   // fire via `el.contains(document.activeElement)`; restore the prior focus on
-  // close so a passthrough terminal gets its keys back.
+  // close. A port activation's passthrough transition subsequently focuses the
+  // destination browser, superseding this generic popover cleanup.
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
     ref.current?.focus({ preventScroll: true });

@@ -783,21 +783,19 @@ export function Wall({
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
-  /** Put the selection on a surface so the user can see it — the human half of
-   *  `connectPort` (clicking a port row is a request to look at that browser).
-   *  A visible pane is selected in place; a minimized one reattaches first, on
-   *  the same terms as clicking its Door chip. Distinct from `onFocusPane`,
-   *  which also enters passthrough on an already-visible pane: connecting a port
-   *  should highlight the browser, not steal the keyboard from the terminal the
-   *  user right-clicked. */
+  /** Focus a surface for the human half of `connectPort`: activating a port row
+   *  is an explicit request to look at and control that browser. A visible pane
+   *  enters passthrough in place; a minimized one reattaches on the same terms
+   *  as clicking its Door chip. This is deliberately unlike `dor ab`, whose
+   *  agent-initiated control path remains focus-neutral. */
   const revealSurface = useCallback((id: string) => {
     if (nav.hasPane(id)) {
-      selectPane(id);
+      enterTerminalMode(id);
       return;
     }
     const door = doorsRef.current.find((item) => item.id === id);
     if (door) handleReattachRef.current(door);
-  }, [nav, selectPane]);
+  }, [nav, enterTerminalMode]);
 
   // The Surfaces of the current Workspace. `buildDorSurfaces` is the visible-pane
   // projection used for geometry/placement; `buildDorSurfaceList` additionally
