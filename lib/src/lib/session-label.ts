@@ -10,9 +10,10 @@ import { getTerminalPaneStateSnapshot } from './terminal-state-store';
  *
  * `deriveSurfaceLabel` in `terminal-state.ts` is the pure derivation. This is
  * the id-keyed wrapper over the live stores, kept in one place because every
- * caller needs the same "an idle pane is called `terminal`" fallback — and one
- * of them (spoken alarms) may only ever say a derived label, never terminal
- * output (`docs/specs/alert.md` -> Spoken alarms).
+ * caller needs the same "an idle pane is called `terminal`" fallback. Spoken
+ * alarms intentionally say this exact derived label, including a terminal-
+ * supplied OSC 0/2/9 title when it wins the normal display priority
+ * (`docs/specs/alert.md` -> Spoken alarms).
  */
 export function deriveSessionLabel(id: string, fallbackTitle: string | null = null): string {
   const states = getTerminalPaneStateSnapshot();

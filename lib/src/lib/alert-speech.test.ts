@@ -8,6 +8,8 @@ import { startAlertSpeech } from './alert-speech';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from './alert-settings';
 import { clearPrimedActivity, primeActivity } from './session-activity-store';
 import type { SessionStatus } from './activity-monitor';
+import { removeTerminalPaneState, resetTerminalPaneState } from './terminal-state-store';
+import type { TerminalTitleSource } from './terminal-state';
 
 const SPEAK_DELAY_MS = 10_000;
 
@@ -50,6 +52,7 @@ beforeEach(() => {
 afterEach(() => {
   stopSpeech?.();
   stopSpeech = null;
+  for (const id of ['osc0-title', 'osc2-title', 'osc9-title']) removeTerminalPaneState(id);
   clearPrimedActivity();
   applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
   vi.useRealTimers();
@@ -71,6 +74,50 @@ describe('spoken alarms', () => {
 
     vi.advanceTimersByTime(1);
     expect(spoken).toEqual(['terminal']);
+  });
+
+  it('speaks terminal-supplied OSC 0/2/9 titles when they are the pane label', () => {
+    const sources: TerminalTitleSource[] = ['osc0', 'osc2', 'osc9'];
+    for (const [index, source] of sources.entries()) {
+      const id = `${source}-title`;
+      resetTerminalPaneState(id, {
+        activity: { kind: 'running' },
+        currentCommand: {
+          id: `cmd-${index}`,
+          rawCommandLine: 'sleep 60',
+          displayCommand: 'sleep 60',
+          cwdAtStart: null,
+          startedAt: 10,
+          source: 'osc133_boundaries',
+        },
+        // OSC 0/2 come from terminal semantic state. OSC 9 is exercised below
+        // through the alert-backed app-title resolver used by the display label.
+        titleCandidates: source === 'osc9'
+          ? {}
+          : { [source]: { title: `program title ${source}`, source, updatedAt: 20 } },
+      });
+    }
+
+    start();
+    for (const source of sources) {
+      const id = `${source}-title`;
+      setStatus(id, 'NOTHING_TO_SHOW');
+      if (source === 'osc9') {
+        primeActivity(id, {
+          status: 'ALERT_RINGING',
+          notification: { source: 'OSC 9', title: null, body: 'program title osc9' },
+        });
+      } else {
+        setStatus(id, 'ALERT_RINGING');
+      }
+    }
+    vi.advanceTimersByTime(SPEAK_DELAY_MS);
+
+    expect(spoken).toEqual([
+      'program title osc0',
+      'program title osc2',
+      'program title osc9',
+    ]);
   });
 
   it('stays silent when the user attends before the delay elapses', () => {

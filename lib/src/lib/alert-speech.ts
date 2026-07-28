@@ -6,8 +6,9 @@ import { deriveSessionLabel } from './session-label';
  * Spoken alarms (`docs/specs/alert.md` -> Alarm settings). When a Session rings
  * and stays unattended for `speakDelayMs`, say its pane name out loud.
  *
- * Only the derived pane label is ever spoken — never the `ActivityNotification`
- * text — so a program that emits `OSC 9` cannot choose what the machine says.
+ * Speech uses the same derived pane label as the visible UI. That intentionally
+ * includes terminal-supplied OSC 0/2/9 titles when they win label derivation;
+ * `ActivityNotification` fields are not chosen as a separate speech payload.
  *
  * Renderer-side by design: the ring already arrives here as an activity-store
  * transition, and the delay timer needs no host round-trip. `speak()` is the

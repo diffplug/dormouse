@@ -152,7 +152,7 @@ Rules:
 When a Session transitions into `ALERT_RINGING` and is still ringing `speakDelayMs` later, Dormouse says that Pane's name out loud. Source of truth: `lib/src/lib/alert-speech.ts`, armed once by `useAlertSpeech` in `Wall`.
 
 - Any of the three tracks qualifies. "Not attended" is track-agnostic.
-- **Only the derived Pane label is ever spoken** — never `ActivityNotification` title or body. This is a security rule, not a style one: any program can emit `OSC 9`, and speaking its text would let it choose what the machine says out loud. The label comes from `deriveSessionLabel` in `lib/src/lib/session-label.ts` — the one id-keyed label derivation, shared with the dev-server chip — falling back to `terminal`.
+- **The derived Pane label is spoken, including terminal-supplied title overrides.** It comes from `deriveSessionLabel` in `lib/src/lib/session-label.ts` — the one id-keyed label derivation shared with the dev-server chip — and falls back to `terminal`. `OSC 0`, `OSC 2`, and legacy `OSC 9` message text can therefore be spoken when that text currently wins the normal Pane-label derivation. This is deliberate: opting into spoken alarms opts into hearing the Pane name Dormouse displays, even when a program supplied that name. A ringing `ActivityNotification` title/body is not itself the speech payload, but an `OSC 9` message body is also an input to normal Pane-label derivation and can be spoken on that basis.
 - The trigger is a fresh transition into `ALERT_RINGING`, held to the same standard as the bell (WATCHING Track, last bullet). A Session observed for the first time *already* ringing never speaks, which is what keeps a restore or a reconnect replaying a latched ring silent.
 - Attending, dismissing, or killing the Pane during the delay cancels the utterance; so does switching the setting off. Both the ring and the setting are re-read when the timer fires rather than captured when it was scheduled.
 - One utterance per ring. A Session that rings, is cleared, and rings again speaks twice. Sessions ring and speak independently.
@@ -221,7 +221,7 @@ Notification text is untrusted terminal output.
 - Strip C0/C1 controls after protocol parsing, collapse whitespace controls to spaces, and trim.
 - Store at most the `TITLE_LIMIT` / `BODY_LIMIT` code points defined in `lib/src/lib/terminal-protocol.ts`, only the latest `ActivityNotification` rather than unbounded history, and cap/expire incomplete OSC 99 parser state.
 - Never execute commands, open URLs, copy to clipboard, read files, focus outside Dormouse, or render protocol-supplied icons/buttons/actions.
-- Notification text may appear only as plain text in visible UI and accessible labels, and layout must tolerate long text, CJK, RTL, combining marks, and emoji without pushing fixed controls out of bounds.
+- Wherever notification text appears in visible UI or accessible labels, it is plain text, and layout must tolerate long text, CJK, RTL, combining marks, and emoji without pushing fixed controls out of bounds. Sanitized terminal-supplied `OSC 0` / `OSC 2` / `OSC 9` text also participates in normal Pane-label derivation, and the resulting label may be sent to the opt-in speech channel as defined above.
 
 Alert-specific robustness requirements: multiple Sessions ring independently; minimize, reattach, rerender, resize, and theme changes preserve existing alert state without creating new rings; an exited Session may keep ringing until attended, dismissed, or destroyed; ringing must not rely on color alone and must respect `prefers-reduced-motion`.
 
@@ -256,5 +256,5 @@ Staged in order:
 
 1. **Device registry.** Reuse the paired-Client identities the Host already holds — `docs/specs/remote-security-model.md` defines the ACL, and a registered Pocket Client is exactly the device a push should reach. The dialog's "Push will be sent to —" line names the chosen device once there is one to name.
 2. **Delivery.** A push travels Host -> Server -> Client. The Server relay is the only component that can reach a backgrounded phone, so this needs a wire method beyond the terminal-only protocol-v1 in `docs/specs/remote-api.md`.
-3. **Payload rule.** Same rule as spoken alarms: the Pane label only, never `ActivityNotification` text. Terminal output must not be able to choose what a push says.
+3. **Payload rule.** Same rule as spoken alarms: send the derived Pane label rather than the ringing notification's title/body as such. Terminal-supplied `OSC 0` / `OSC 2` / `OSC 9` text can therefore appear when it is the winning Pane label.
 4. **Cancellation.** Attending on the laptop before `pushDelayMs` cancels, matching the speech path. Whether a delivered push can be recalled once the user attends is undecided.
