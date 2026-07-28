@@ -1,6 +1,7 @@
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
+import { WebglAddon } from '@xterm/addon-webgl';
 import { getPlatform, IS_MAC, IS_WINDOWS } from './platform';
 import { cfg } from '../cfg';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
@@ -99,6 +100,44 @@ function readDisplayTextFromBuffer(terminal: Terminal, range: IBufferRange): str
   }
 }
 
+/**
+ * Swap xterm's DOM renderer for the WebGL one. Must run *after*
+ * `terminal.open()` — the addon reaches for the screen element.
+ *
+ * The DOM renderer emits one `<span>` per style run per row, so a TUI that
+ * paints every cell a different truecolor (an animated pattern, `btop`, a
+ * syntax-highlighted pager) turns into one span-with-inline-style per cell,
+ * rebuilt every frame. On a 99x25 pane that is ~1150 elements of style
+ * recalc + layout per frame; WebKit spends ~95ms/frame on it and the whole
+ * page drops to ~9fps. The WebGL renderer rasterizes the same grid from a
+ * glyph atlas and leaves the DOM untouched.
+ *
+ * Falls back to the DOM renderer whenever WebGL is unavailable: no GL
+ * context (headless/jsdom, blocklisted GPU) throws at construction, and
+ * exceeding the browser's live-context budget fires `onContextLoss` later.
+ * Both paths dispose the addon, which is xterm's documented signal to
+ * resume DOM rendering — degraded, never broken.
+ */
+function tryEnableWebglRenderer(terminal: Terminal): void {
+  // Cheap pre-check so environments that could never succeed don't pay for a
+  // doomed context request. jsdom in particular has no `getContext`, and
+  // attempting one makes every terminal-creating unit test log a
+  // "Not implemented" error through the virtual console.
+  if (typeof WebGL2RenderingContext === 'undefined') return;
+  let addon: WebglAddon;
+  try {
+    addon = new WebglAddon();
+  } catch {
+    return;
+  }
+  addon.onContextLoss(() => addon.dispose());
+  try {
+    terminal.loadAddon(addon);
+  } catch {
+    addon.dispose();
+  }
+}
+
 function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDivElement } {
   const styles = getComputedStyle(document.body);
   const editorFontSize = parseInt(styles.getPropertyValue('--vscode-editor-font-size'), 10) || 12;
@@ -151,6 +190,7 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
   element.style.width = '100%';
   element.style.height = '100%';
   terminal.open(element);
+  tryEnableWebglRenderer(terminal);
   paintTerminalHost(element, terminal, theme.background);
 
   return { terminal, fit, element };

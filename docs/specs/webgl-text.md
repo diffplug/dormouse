@@ -13,6 +13,11 @@ this spec does not restate its release recipe. File pointers under
 `addons/addon-webgl/` refer to the fork repo (cloned at `~/projects/xterm.js`),
 not this repo.
 
+**Two webgl addons, one repo.** Production terminals render through *stock*
+`@xterm/addon-webgl` (`docs/specs/layout.md` → "Renderer"); only `canopy/`
+consumes the SDF fork. Everything below is about the fork. "Does Dormouse use
+WebGL?" is answered by layout.md, not here.
+
 ## Fork pipeline
 
 - **Repo/branches**: `master` on diffplug/xterm.js is a pristine fast-forward

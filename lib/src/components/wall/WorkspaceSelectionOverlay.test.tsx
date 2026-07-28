@@ -248,10 +248,10 @@ describe('WorkspaceSelectionOverlay ring travel', () => {
 });
 
 describe('SelectionRing settled render', () => {
-  // A resting ring (first-appearance snap → no tween → null velocity) renders with
-  // no motion-blur filter — this is what keeps Chromatic deterministic — and the
+  // A resting ring (first-appearance snap → no tween → null velocity) carries no
+  // motion smear at all — this is what keeps Chromatic deterministic — and the
   // passthrough ring is a 1px solid stroke, pixel-parity with the retired CSS border.
-  it('is a 1px non-dashed stroke with no motion-blur filter', async () => {
+  it('is a 1px non-dashed stroke with no motion smear', async () => {
     const store = makeStore();
     const panes = twoPanes();
     await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
@@ -261,8 +261,9 @@ describe('SelectionRing settled render', () => {
     expect(path).not.toBeNull();
     expect(path!.getAttribute('stroke-width')).toBe('1');
     expect(path!.getAttribute('stroke-dasharray')).toBeNull();
-    // A settled ring never references the blur filter (deterministic snapshots).
-    expect(path!.getAttribute('filter')).toBeNull();
+    // A settled ring carries neither smear attribute (deterministic snapshots).
+    expect(path!.getAttribute('transform')).toBeNull();
+    expect(path!.getAttribute('stroke-opacity')).toBeNull();
   });
 
   // The path element is shared across variants and the dash is an imperative write
@@ -280,5 +281,39 @@ describe('SelectionRing settled render', () => {
     expect(path!.getAttribute('stroke-width')).toBe('1');
     expect(path!.getAttribute('stroke-dasharray')).toBeNull();
     expect(path!.style.getPropertyValue('--march-offset')).toBe('');
+  });
+});
+
+describe('SelectionRing ants under motion smear', () => {
+  // Under a non-uniform scale an edge's dash length and its thickness ride
+  // different axes, so a fully smeared edge would render a 6px dash 6px thick —
+  // square beads, not ants. The duty cycle opens toward solid as the smear grows
+  // so the gaps close instead. The dash PERIOD must not move: `--march-offset`
+  // is one dash+gap, and the `marching-ants` keyframe jumps every cycle if that
+  // stops being true. `getTotalLength` is stubbed at 100, so count === 10 and
+  // one period is exactly 10px.
+  it('dissolves the ants into a solid streak while smearing, keeping one dash period', async () => {
+    const store = makeStore();
+    const panes = twoPanes();
+    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+
+    const path = container.querySelector('path')!;
+    // Settled: the configured 60/40 duty cycle over the stubbed 100px perimeter.
+    expect(path.getAttribute('stroke-dasharray')).toBe('6 4');
+    expect(path.style.getPropertyValue('--march-offset')).toBe('-10px');
+
+    await act(async () => root.render(<Harness selectedId="b" mode="command" store={store} panes={panes} />));
+    await frame(16); // seeds the velocity sampler — the first tick has no prev center
+    await frame(16); // now past the smear cap on both axes
+
+    expect(path.getAttribute('transform')).toBe('scale(3 3)');
+    const [dash, gap] = path.getAttribute('stroke-dasharray')!.split(' ').map(Number);
+    expect(gap).toBe(0); // gaps closed: a streak, not 6x6 beads
+    expect(dash + gap).toBeCloseTo(10); // still exactly one --march-offset period
+    expect(path.style.getPropertyValue('--march-offset')).toBe('-10px');
+
+    await frame(400); // settle → ants re-form, smear cleared
+    expect(path.getAttribute('stroke-dasharray')).toBe('6 4');
+    expect(path.getAttribute('transform')).toBeNull();
   });
 });
