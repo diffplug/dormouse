@@ -278,4 +278,28 @@ describe('push device list', () => {
     });
     expect(getPushDevices()).toEqual({ status: 'error', devices: [] });
   });
+
+  it('discards a refresh that resolves after the Host stopped', async () => {
+    // Without the generation fence, the resolving fetch would overwrite the
+    // reset's `no-host` with a `ready` list naming devices nothing can reach —
+    // and since the reset cleared the refresher, it would stick all session.
+    let resolveFetch: (response: Response) => void = () => {};
+    const pending = refreshPushDevices({
+      enrollment: ENROLLMENT,
+      activeRecords: () => records,
+      fetch: (() =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        })) as unknown as typeof globalThis.fetch,
+    });
+
+    resetPushDevices();
+    resolveFetch({
+      ok: true,
+      json: async () => ({ devices: [{ devicePublicKey: 'device-phone', subscribedAt: 1 }] }),
+    } as Response);
+    await pending;
+
+    expect(getPushDevices()).toEqual({ status: 'no-host', devices: [] });
+  });
 });

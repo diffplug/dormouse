@@ -24,7 +24,12 @@ import {
 import { getAlertSettings } from '../../lib/alert-settings';
 import { watchUnattendedRings } from '../../lib/alert-ring-watch';
 import { deriveSessionLabel } from '../../lib/session-label';
-import { setPushDevices, type PushDevice } from '../../lib/push-devices';
+import {
+  getPushDevicesGeneration,
+  setPushDevices,
+  type PushDevice,
+  type PushDevicesState,
+} from '../../lib/push-devices';
 import type { HostEnrollment } from './enrollment';
 
 /**
@@ -105,11 +110,19 @@ async function loadPushDevices(deps: AlertPushDeps): Promise<PushDevice[]> {
  * devices are subscribed" are different things to show a user.
  */
 export async function refreshPushDevices(deps: AlertPushDeps): Promise<void> {
-  setPushDevices({ status: 'loading', devices: [] });
+  // Writes are fenced on the store's generation: a refresh whose request is
+  // still in flight when the Host stops (or is replaced by re-enrollment) must
+  // discard its result, or a stale device list would overwrite `no-host` for
+  // the rest of the session.
+  const generation = getPushDevicesGeneration();
+  const commit = (next: PushDevicesState) => {
+    if (getPushDevicesGeneration() === generation) setPushDevices(next);
+  };
+  commit({ status: 'loading', devices: [] });
   try {
-    setPushDevices({ status: 'ready', devices: await loadPushDevices(deps) });
+    commit({ status: 'ready', devices: await loadPushDevices(deps) });
   } catch {
-    setPushDevices({ status: 'error', devices: [] });
+    commit({ status: 'error', devices: [] });
   }
 }
 
