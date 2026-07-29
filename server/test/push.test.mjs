@@ -236,6 +236,26 @@ test('a non-https endpoint is rejected', async () => {
   assert.equal(res.status, 400);
 });
 
+test('private and link-local https endpoints are rejected', async () => {
+  const { app, host, sessionToken } = await pushApp();
+  const client = await SimClient.create({ origin: ORIGIN });
+
+  for (const endpoint of [
+    'https://127.0.0.1/push',
+    'https://169.254.169.254/latest/meta-data',
+    'https://10.0.0.1/internal',
+    'https://[::1]/push',
+  ]) {
+    const res = await subscribe(app, {
+      sessionToken,
+      host,
+      client,
+      sub: subscription(endpoint),
+    });
+    assert.equal(res.status, 400, endpoint);
+  }
+});
+
 test('subscribing to an unknown host is rejected', async () => {
   const { app, sessionToken } = await pushApp();
   const client = await SimClient.create({ origin: ORIGIN });

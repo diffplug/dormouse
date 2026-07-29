@@ -23,6 +23,10 @@ import { createECDH, timingSafeEqual } from 'node:crypto';
 import webpush from 'web-push';
 
 import type { StoredPushSubscription } from './state.js';
+import {
+  createPublicPushAgent,
+  isPublicHttpsPushEndpoint,
+} from './push-endpoint.js';
 
 /** What a push service needs to reach one browser. */
 export interface PushTarget {
@@ -128,9 +132,16 @@ function endpointOrigin(endpoint: string): string {
 }
 
 export function createWebPushSender(keys: VapidKeys, subject: string): PushSender {
+  const agent = createPublicPushAgent();
   return {
     async send(target, payload) {
       try {
+        // The registration route applies the same cheap check, but enforce it
+        // again for legacy or manually edited state. Node may connect to an IP
+        // literal without invoking the Agent's DNS lookup.
+        if (!isPublicHttpsPushEndpoint(target.endpoint)) {
+          throw new Error('push endpoint is not a public HTTPS URL');
+        }
         await webpush.sendNotification(
           { endpoint: target.endpoint, keys: { ...target.keys } },
           payload,
@@ -138,6 +149,7 @@ export function createWebPushSender(keys: VapidKeys, subject: string): PushSende
             vapidDetails: { subject, publicKey: keys.publicKey, privateKey: keys.privateKey },
             TTL: PUSH_TTL_SECONDS,
             urgency: 'high',
+            agent,
           },
         );
         return 'delivered';

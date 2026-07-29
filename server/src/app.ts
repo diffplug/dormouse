@@ -79,6 +79,7 @@ import {
 } from './state.js';
 import type { StoredHost } from './state.js';
 import type { PushSender } from './push.js';
+import { isPublicHttpsPushEndpoint } from './push-endpoint.js';
 
 /** Runtime configuration; see `index.ts` for how env maps onto this. */
 export interface AppConfig {
@@ -485,11 +486,11 @@ export function createApp(config: AppConfig): CreatedApp {
       return c.json({ error: 'malformed request' }, 400);
     }
 
-    // The server POSTs to this endpoint later, so an unconstrained value is an
-    // SSRF primitive pointed at whatever the subscriber names. Every real push
-    // service is https.
-    if (!isHttpsUrl(body.subscription.endpoint)) {
-      return c.json({ error: 'endpoint must be an https URL' }, 400);
+    // The server POSTs to this endpoint later. Reject obvious local/literal
+    // targets now; the real sender also filters the DNS result used by its TLS
+    // connection, closing hostname rebinding and mixed-answer bypasses.
+    if (!isPublicHttpsPushEndpoint(body.subscription.endpoint)) {
+      return c.json({ error: 'endpoint must be a public https URL' }, 400);
     }
 
     // Subscribing to a host that does not exist would strand a row no Host can
@@ -765,14 +766,6 @@ const PUSH_TEXT_LIMIT = 200;
 function bearerToken(c: Context<AppEnv>): string | null {
   const match = /^Bearer (.+)$/.exec(c.req.header('Authorization') ?? '');
   return match ? match[1]! : null;
-}
-
-function isHttpsUrl(value: string): boolean {
-  try {
-    return new URL(value).protocol === 'https:';
-  } catch {
-    return false;
-  }
 }
 
 /** True if `value` is a `PushSubscriptionPayload` with both encryption keys. */

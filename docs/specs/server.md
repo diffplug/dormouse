@@ -195,8 +195,16 @@ Source of truth: `server/src/push.ts` and the routes in `server/src/app.ts`.
 - **A subscription authorizes nothing.** It is a delivery address the Host may
   write to; the Host's ACL remains the only thing that decides what a Client may
   reach ([remote-security-model.md](./remote-security-model.md)).
-- **Endpoints must be https.** The server POSTs to whatever a subscriber names,
-  so an unconstrained value would be an SSRF primitive.
+- **Endpoint egress is public HTTPS only.** Registration rejects credentials,
+  localhost, and non-public IP literals. Delivery uses a dedicated HTTPS agent
+  whose connection-time DNS lookup rejects loopback, private, carrier-grade NAT
+  (including Tailscale's `100.64/10`), link-local, documentation, benchmark,
+  multicast, reserved, IPv4-mapped, unique-local, and site-local ranges. A
+  hostname with any blocked answer is rejected wholesale; the accepted DNS
+  result is the one handed to the socket, so mixed answers and rebinding cannot
+  create a second unchecked resolution. Source of truth:
+  `server/src/push-endpoint.ts`, wired into registration in
+  `server/src/app.ts` and delivery in `server/src/push.ts`.
 - **Payload text is re-sanitized at this boundary** even though the Host already
   did it, because it originates in a renderer and is ultimately Pane-derived
   ([alert.md](./alert.md) -> Text And Security). Both sides call the same
