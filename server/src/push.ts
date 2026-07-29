@@ -102,6 +102,14 @@ function decodeVapidKey(value: string, name: 'public' | 'private', length: numbe
  */
 export const PUSH_TTL_SECONDS = 300;
 
+function endpointOrigin(endpoint: string): string {
+  try {
+    return new URL(endpoint).origin;
+  } catch {
+    return '<invalid endpoint>';
+  }
+}
+
 export function createWebPushSender(keys: VapidKeys, subject: string): PushSender {
   return {
     async send(target, payload) {
@@ -122,6 +130,14 @@ export function createWebPushSender(keys: VapidKeys, subject: string): PushSende
         // for good — the browser was uninstalled, permission revoked, or the
         // endpoint rotated. Anything else may succeed on the next alarm.
         if (status === 404 || status === 410) return 'expired';
+        // The only trace this failure leaves: the send route folds it into a
+        // count, so a rotated VAPID key or a wedged push service would
+        // otherwise fail every alarm with nothing anywhere. The endpoint is a
+        // bearer capability — log its origin only.
+        console.warn(
+          `push delivery failed for ${endpointOrigin(target.endpoint)}:`,
+          status ?? (err instanceof Error ? err.message : String(err)),
+        );
         return 'failed';
       }
     },

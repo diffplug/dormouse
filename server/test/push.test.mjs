@@ -303,7 +303,7 @@ test('send fans out to every named device', async () => {
     tag: 'pane-1',
   });
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { delivered: 2, expired: 0, unknown: 0 });
+  assert.deepEqual(await res.json(), { delivered: 2, expired: 0, unknown: 0, failed: 0 });
   assert.equal(sender.sent.length, 2);
   assert.deepEqual(JSON.parse(sender.sent[0].payload), {
     title: 'build finished',
@@ -338,7 +338,7 @@ test('send addresses only the named devices', async () => {
     title: 'x',
     body: 'y',
   });
-  assert.deepEqual(await res.json(), { delivered: 1, expired: 0, unknown: 0 });
+  assert.deepEqual(await res.json(), { delivered: 1, expired: 0, unknown: 0, failed: 0 });
   assert.equal(sender.sent.length, 1);
   assert.equal(sender.sent[0].endpoint, 'https://push.example.com/phone');
 });
@@ -350,7 +350,7 @@ test('a named device with no subscription counts as unknown, not delivered', asy
     title: 'x',
     body: 'y',
   });
-  assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 1 });
+  assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 1, failed: 0 });
 });
 
 test('a subscription the push service calls gone is dropped', async () => {
@@ -364,7 +364,7 @@ test('a subscription the push service calls gone is dropped', async () => {
     title: 'x',
     body: 'y',
   });
-  assert.deepEqual(await res.json(), { delivered: 0, expired: 1, unknown: 0 });
+  assert.deepEqual(await res.json(), { delivered: 0, expired: 1, unknown: 0, failed: 0 });
 
   const stored = JSON.parse(await readFile(join(stateDir, 'push-subscriptions.json'), 'utf8'));
   assert.deepEqual(stored, []);
@@ -381,7 +381,7 @@ test('a transient failure leaves the subscription in place', async () => {
     title: 'x',
     body: 'y',
   });
-  assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 0 });
+  assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 0, failed: 1 });
 
   const stored = JSON.parse(await readFile(join(stateDir, 'push-subscriptions.json'), 'utf8'));
   assert.equal(stored.length, 1);
@@ -399,7 +399,7 @@ test('a host cannot push to another host subscribers', async () => {
     title: 'x',
     body: 'y',
   });
-  assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 1 });
+  assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 1, failed: 0 });
   assert.equal(sender.sent.length, 0);
 });
 

@@ -184,8 +184,12 @@ Source of truth: `server/src/push.ts` and the routes in `server/src/app.ts`.
   ([alert.md](./alert.md) -> Text And Security). Both sides call the same
   `boundedPushText`, so the two layers cannot enforce different rules.
 - **Delivery outcomes prune.** 404/410 means the subscription is permanently
-  gone and its row is deleted; anything else is transient and left alone. TTL is
-  300s — an alarm that arrives an hour late is noise, not information.
+  gone and its row is deleted; anything else is transient and left alone, but
+  never silent: the refusal is logged (origin only — the endpoint is a bearer
+  capability) and counted in the response's `failed`, since the route answers
+  200 either way and the Host needs to tell an all-failed fan-out from
+  success. TTL is 300s — an alarm that arrives an hour late is noise, not
+  information.
 - Push is disabled, not half-working, when no VAPID key is configured: the
   config route reports `null` and subscribe/send answer 503.
 

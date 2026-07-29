@@ -46,7 +46,10 @@ function fakeFetch(): typeof globalThis.fetch {
         }),
       } as Response;
     }
-    return { ok: true, json: async () => ({ delivered: 1, expired: 0, unknown: 0 }) } as Response;
+    return {
+      ok: true,
+      json: async () => ({ delivered: 1, expired: 0, unknown: 0, failed: 0 }),
+    } as Response;
   }) as unknown as typeof globalThis.fetch;
 }
 
@@ -197,6 +200,25 @@ describe('alarm push', () => {
     await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS);
     expect(requests).toHaveLength(1);
     expect(requests[0]!.url).toContain('/api/push/send');
+  });
+
+  it('warns when the server accepted the send but no phone got it', async () => {
+    // The send route answers 200 with counts even when every delivery failed —
+    // a rotated VAPID key or a wedged push service must not be silent.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stop = startAlertPush({
+      enrollment: ENROLLMENT,
+      activeRecords: () => records,
+      fetch: (async () => ({
+        ok: true,
+        json: async () => ({ delivered: 0, expired: 0, unknown: 0, failed: 1 }),
+      })) as unknown as typeof globalThis.fetch,
+    });
+    ring('pty-1');
+
+    await vi.advanceTimersByTimeAsync(PUSH_DELAY_MS);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('warns rather than failing silently when the server rejects the send', async () => {

@@ -185,6 +185,12 @@ export interface PushSendResponse {
   expired: number;
   /** Named devices with no subscription for this Host. */
   unknown: number;
+  /**
+   * Deliveries the push service refused for a transient-looking reason; the
+   * rows are kept. Reported so the Host can tell an all-failed fan-out from
+   * success — the HTTP status is 200 either way.
+   */
+  failed: number;
 }
 
 // ---------------------------------------------------------------------------

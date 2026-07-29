@@ -20,6 +20,7 @@ import {
   boundedPushText,
   type HostAclRecord,
   type PushDevicesResponse,
+  type PushSendResponse,
 } from 'server-lib-common';
 import { getAlertSettings } from '../../lib/alert-settings';
 import { watchUnattendedRings } from '../../lib/alert-ring-watch';
@@ -141,7 +142,7 @@ async function sendPush(deps: AlertPushDeps, sessionId: string): Promise<void> {
   const devicePublicKeys = deps.activeRecords().map((record) => record.devicePublicKey);
   if (devicePublicKeys.length === 0) return;
 
-  await hostFetch(deps, API_ROUTES.pushSend, {
+  const response = await hostFetch(deps, API_ROUTES.pushSend, {
     devicePublicKeys,
     title: toPushText(deriveSessionLabel(sessionId)),
     body: PUSH_BODY,
@@ -150,6 +151,14 @@ async function sendPush(deps: AlertPushDeps, sessionId: string): Promise<void> {
     // only — a tag is never displayed.
     tag: sessionId,
   });
+  // `hostFetch` threw on a non-2xx; this is the quieter failure class — the
+  // Server accepted the send but a push service refused delivery, which it
+  // reports in counts on an HTTP 200. Without this check an all-failed fan-out
+  // is indistinguishable from success.
+  const result = (await response.json()) as PushSendResponse;
+  if (result.failed > 0 || result.delivered === 0) {
+    console.warn('remote-host: push was not delivered to every device', result);
+  }
 }
 
 /**

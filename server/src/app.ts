@@ -586,6 +586,7 @@ export function createApp(config: AppConfig): CreatedApp {
       delivered: results.filter((r) => r.result === 'delivered').length,
       expired: expired.length,
       unknown: names.filter((n) => !targets.some((t) => t.devicePublicKey === n)).length,
+      failed: results.filter((r) => r.result === 'failed').length,
     };
     return c.json(res);
   });
