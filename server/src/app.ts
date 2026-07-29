@@ -563,7 +563,11 @@ export function createApp(config: AppConfig): CreatedApp {
         limit: PUSH_TEXT_LIMIT,
         fallback: 'A terminal needs attention.',
       }),
-      ...(typeof body.tag === 'string' && body.tag ? { tag: body.tag.slice(0, PUSH_TEXT_LIMIT) } : {}),
+      ...(typeof body.tag === 'string' && body.tag
+        ? // Code-point slice for the same reason as `boundedPushText`: a cut
+          // mid-surrogate would ship a lone half.
+          { tag: Array.from(body.tag).slice(0, PUSH_TEXT_LIMIT).join('') }
+        : {}),
     });
 
     const results = await Promise.all(

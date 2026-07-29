@@ -127,11 +127,14 @@ export function boundedPushText(
   const cleaned = value
     // C0, DEL, and C1 control characters.
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
-    // Zero-width and joiner characters, bidi embedding/override marks, bidi
-    // isolates, and the BOM. Dropped rather than spaced: they carry no width,
-    // so replacing them would invent gaps in an otherwise fine title.
-    .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, '')
+    // The Arabic letter mark, zero-width and joiner characters, bidi
+    // embedding/override marks, bidi isolates, and the BOM. Dropped rather
+    // than spaced: they carry no width, so replacing them would invent gaps
+    // in an otherwise fine title.
+    .replace(/[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  return cleaned.slice(0, limit).trim() || fallback;
+  // Capped in code points, not UTF-16 units: a `.slice` landing mid-surrogate
+  // would ship a lone half that renders as U+FFFD on the phone.
+  return Array.from(cleaned).slice(0, limit).join('').trim() || fallback;
 }

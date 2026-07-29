@@ -108,6 +108,17 @@ describe('toPushText', () => {
     expect(toPushText('build ‮finished')).toBe('build finished');
   });
 
+  it('strips the Arabic letter mark with the rest of the bidi set', () => {
+    expect(toPushText('a؜b')).toBe('ab');
+  });
+
+  it('never cuts a surrogate pair at the cap', () => {
+    // A UTF-16 slice landing mid-surrogate would ship a lone half that the
+    // phone renders as U+FFFD.
+    const capped = toPushText('x'.repeat(99) + '🚀');
+    expect(capped.endsWith('🚀')).toBe(true);
+  });
+
   it('strips zero-width characters rather than spacing them out', () => {
     expect(toPushText('bu​ild')).toBe('build');
   });

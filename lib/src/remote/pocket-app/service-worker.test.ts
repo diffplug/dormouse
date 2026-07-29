@@ -93,6 +93,7 @@ describe('Pocket push service worker', () => {
       'build \u202ereversed',
       'zero\u200bwidth\u2060joiner',
       'isolate\u2066text\u2069end',
+      'arabic\u061cmark',
       '\ufeffbom',
       '  collapse   me \n\t ',
       '',
@@ -101,11 +102,22 @@ describe('Pocket push service worker', () => {
       'ünïcödé ✓ 日本語',
       'x'.repeat(textLimit + 50),
       'a'.repeat(textLimit - 1),
+      // An astral code point straddling the cap: both copies must cut on the
+      // code-point boundary, never mid-surrogate.
+      'a'.repeat(textLimit - 1) + '🚀🚀',
     ];
 
     for (const value of corpus) {
       expect(text(value, fallback)).toBe(boundedPushText(value, { limit: textLimit, fallback }));
     }
+  });
+
+  it('never splits a surrogate pair at the cap', () => {
+    // Mirror equality alone would also pass if both copies shipped the same
+    // lone half; this pins the actual behavior.
+    const { text, textLimit } = loadWorker();
+    const capped = text('a'.repeat(textLimit - 1) + '🚀', 'FALLBACK');
+    expect(capped.endsWith('🚀')).toBe(true);
   });
 
   it('falls back for non-string fields exactly as the shared rule does', () => {

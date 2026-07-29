@@ -44,7 +44,9 @@ export function toSpokenText(label: string): string {
     .replace(/[<>&]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  return cleaned.slice(0, SPEECH_LIMIT).trim() || 'terminal';
+  // Capped in code points, matching `boundedPushText`: a cut mid-surrogate
+  // would hand the engine a lone half.
+  return Array.from(cleaned).slice(0, SPEECH_LIMIT).join('').trim() || 'terminal';
 }
 
 function speak(text: string): void {
