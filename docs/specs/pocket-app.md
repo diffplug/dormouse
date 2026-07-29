@@ -214,7 +214,10 @@ Source of truth: `isInstalledWebApp` / `requiresInstallForPush` in
 - Every unavailable reason is named in the UI rather than left as a missing
   button — `needs-install`, `no-worker` (registration failed, usually an
   insecure origin), `denied`, `unsupported`. A push that silently never arrives
-  should always have a visible cause.
+  should always have a visible cause. `needs-install` is checked before any
+  capability probe: in an iOS Safari tab, `Notification` and `PushManager` are
+  themselves absent, so probing first would answer `unsupported` when the
+  actionable answer is "install".
 - The passkey-partition case is checked **up front**, right after sign-in
   (`PocketClient.hasPasskeyMaterial`), not on a failed Pair tap. Everything up
   to that tap succeeds, so the failure is otherwise inexplicable; the notice

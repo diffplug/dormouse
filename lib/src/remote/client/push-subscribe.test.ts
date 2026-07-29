@@ -135,6 +135,13 @@ describe('getPushAvailability', () => {
     await expect(getPushAvailability()).resolves.toBe('needs-install');
   });
 
+  it('prefers needs-install over unsupported on iOS, where Notification is also absent in a tab', async () => {
+    // The real iOS Safari tab shape: service workers exist, but the
+    // Notification interface itself is exposed only to installed web apps.
+    stubBrowser({ standalone: false, notification: false, pushManager: false });
+    await expect(getPushAvailability()).resolves.toBe('needs-install');
+  });
+
   it('reports no-worker when registration failed', async () => {
     stubBrowser({});
     getRegistration.mockResolvedValue(null);

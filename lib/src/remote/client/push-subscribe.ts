@@ -53,13 +53,18 @@ export function requiresInstallForPush(): boolean {
 }
 
 export async function getPushAvailability(): Promise<PushAvailability> {
-  if (!('serviceWorker' in navigator) || typeof globalThis.Notification !== 'function') {
+  // Checked before any capability probe: on iOS, `Notification` and
+  // `PushManager` are both simply absent outside an installed web app, so in a
+  // Safari tab every probe below would answer `unsupported` when the actionable
+  // answer is "install".
+  if (requiresInstallForPush() && !isInstalledWebApp()) return 'needs-install';
+  if (
+    !('serviceWorker' in navigator) ||
+    typeof globalThis.Notification !== 'function' ||
+    !('PushManager' in globalThis)
+  ) {
     return 'unsupported';
   }
-  // On iOS the Push API is simply absent outside an installed web app, so this
-  // check and the one below can both be the reason — report the actionable one.
-  if (requiresInstallForPush() && !isInstalledWebApp()) return 'needs-install';
-  if (!('PushManager' in globalThis)) return 'unsupported';
 
   // Awaited rather than probed: registration is kicked off during boot and may
   // still be in flight, so a bare `getRegistration()` would report a transient
