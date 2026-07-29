@@ -154,7 +154,7 @@ so `node --test` can drive setup → pairing → connect end to end via
 | `POST /api/push/challenge`       | session token  | `{ challenge }` for the device signature below (no body — the challenge is a pool-wide nonce; the host binding lives in the signature) |
 | `POST /api/push/subscribe`       | session token + device signature | Upserts the `(hostId, devicePublicKey)` subscription |
 | `GET /api/push/subscriptions`    | session token  | The account's registrations for the current VAPID key as identities, so a reloaded Client can tell which Hosts it already registered with. With push disabled, returns the stored identities for diagnosis |
-| `GET /api/push/devices`          | host token     | The `devicePublicKey`s subscribed to **this** Host  |
+| `GET /api/push/devices`          | host token     | The `devicePublicKey`s subscribed to **this** Host under the current VAPID key |
 | `POST /api/push/send`            | host token     | Fans a notification out to the named devices; `devicePublicKeys` is required |
 | `GET /ws/host`                   | host token     | The Host's relay socket                            |
 | `GET /ws/client`                 | session token  | A Client's relay socket                            |
@@ -184,12 +184,15 @@ Source of truth: `server/src/push.ts` and the routes in `server/src/app.ts`.
   that reports on an identity the caller does not hold. Both return identities
   only — the endpoint and its keys are a bearer capability to notify that phone
   and never leave the Server.
-- **Client readback is VAPID-current.** With push configured,
-  `/api/push/subscriptions` omits rows registered under a different (or legacy
-  unknown) public key. Those endpoints cannot receive a send signed by the
-  current key, and hiding them is what exposes Pocket's re-registration action
-  after rotation. The file rows are retained until that upsert; when push is
-  disabled the route still returns their identities for diagnosis.
+- **Delivery views are VAPID-current.** With push configured,
+  `/api/push/subscriptions` and the Host's `/api/push/devices` omit rows
+  registered under a different (or legacy unknown) public key, and
+  `/api/push/send` never targets them. Those endpoints cannot receive a send
+  signed by the current key; hiding them exposes Pocket's re-registration
+  action and keeps the Host from naming or retrying an unreachable device after
+  rotation. The file rows are retained until that upsert; when push is disabled
+  the Client subscriptions route still returns their identities for diagnosis,
+  while the Host has no deliverable devices.
 - **The subscription is bound to a Client identity by signature.** The Client
   signs `(hostId, challenge, devicePublicKey, endpoint)` with its device key
   under `PUSH_SUBSCRIBE_DOMAIN` — deliberately *not* `DEVICE_AUTH_DOMAIN`, since

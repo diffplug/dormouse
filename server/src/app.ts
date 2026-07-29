@@ -561,7 +561,7 @@ export function createApp(config: AppConfig): CreatedApp {
   });
 
   app.get(API_ROUTES.pushDevices, requireHost, async (c) => {
-    const subscriptions = await pushStore.listForHost(c.get('host').hostId);
+    const subscriptions = await currentPushSubscriptionsForHost(c.get('host').hostId);
     // Identities only. The Host holds the ACL and is the only side that can turn
     // a devicePublicKey into a human label, so the Server never learns one.
     const res: PushDevicesResponse = {
@@ -591,7 +591,7 @@ export function createApp(config: AppConfig): CreatedApp {
 
     // The Host is identified by its token, never by the body: a Host can only
     // ever reach subscriptions registered against itself.
-    const subscriptions = await pushStore.listForHost(c.get('host').hostId);
+    const subscriptions = await currentPushSubscriptionsForHost(c.get('host').hostId);
     const targets = subscriptions.filter((s) => names.includes(s.devicePublicKey));
 
     // Title and body originate in a renderer and are ultimately Pane-derived,
@@ -631,6 +631,17 @@ export function createApp(config: AppConfig): CreatedApp {
     };
     return c.json(res);
   });
+
+  /**
+   * Only subscriptions minted for the active VAPID key are deliverable.
+   * Old-key rows remain on disk so Pocket can diagnose and repair a rotation,
+   * but they must never appear in the Host's device view or send fan-out.
+   */
+  async function currentPushSubscriptionsForHost(hostId: string) {
+    if (!config.vapidPublicKey) return [];
+    const subscriptions = await pushStore.listForHost(hostId);
+    return subscriptions.filter((s) => s.vapidPublicKey === config.vapidPublicKey);
+  }
 
   // --- The relay: one host socket per hostId, many client sockets ----------
   // Auth rides the `token` query param (browsers cannot set WS headers). A bad

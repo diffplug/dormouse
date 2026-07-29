@@ -428,6 +428,22 @@ test('a host cannot see another host subscribers', async () => {
   assert.deepEqual(await res.json(), { devices: [] });
 });
 
+test('devices hides subscriptions registered under an old VAPID key', async () => {
+  const { app, stateDir, host, sessionToken } = await pushApp();
+  const client = await SimClient.create({ origin: ORIGIN });
+  await subscribe(app, { sessionToken, host, client });
+
+  const path = join(stateDir, 'push-subscriptions.json');
+  const stored = JSON.parse(await readFile(path, 'utf8'));
+  stored[0].vapidPublicKey = 'BOldVapidPublicKey';
+  await writeFile(path, `${JSON.stringify(stored, null, 2)}\n`);
+
+  const res = await app.request(API_ROUTES.pushDevices, {
+    headers: { Authorization: `Bearer ${host.hostToken}` },
+  });
+  assert.deepEqual(await res.json(), { devices: [] });
+});
+
 test('devices rejects a session token — it is host-gated', async () => {
   const { app, sessionToken } = await pushApp();
   const res = await app.request(API_ROUTES.pushDevices, {
@@ -500,6 +516,25 @@ test('a named device with no subscription counts as unknown, not delivered', asy
     body: 'y',
   });
   assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 1, failed: 0 });
+});
+
+test('send treats a subscription registered under an old VAPID key as unknown', async () => {
+  const { app, sender, stateDir, host, sessionToken } = await pushApp();
+  const client = await SimClient.create({ origin: ORIGIN });
+  await subscribe(app, { sessionToken, host, client });
+
+  const path = join(stateDir, 'push-subscriptions.json');
+  const stored = JSON.parse(await readFile(path, 'utf8'));
+  stored[0].vapidPublicKey = 'BOldVapidPublicKey';
+  await writeFile(path, `${JSON.stringify(stored, null, 2)}\n`);
+
+  const res = await sendAs(app, host.hostToken, {
+    devicePublicKeys: [client.deviceKey.devicePublicKey],
+    title: 'x',
+    body: 'y',
+  });
+  assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 1, failed: 0 });
+  assert.equal(sender.sent.length, 0);
 });
 
 test('a subscription the push service calls gone is dropped', async () => {
