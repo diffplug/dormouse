@@ -18,6 +18,8 @@
  * injectable clock.
  */
 
+import { createECDH, timingSafeEqual } from 'node:crypto';
+
 import webpush from 'web-push';
 
 import type { StoredPushSubscription } from './state.js';
@@ -54,6 +56,43 @@ export const DEFAULT_VAPID_SUBJECT = 'mailto:admin@localhost';
 /** Generate a VAPID keypair in the exact encoding the sender expects. */
 export function generateVapidKeys(): VapidKeys {
   return webpush.generateVAPIDKeys();
+}
+
+/**
+ * Fail-fast validation for configured or persisted VAPID keys.
+ *
+ * `web-push` validates each key's shape only when sending and does not verify
+ * that the public key belongs to the private key. Derive the P-256 public point
+ * here so a mismatched pair cannot let the server start in a state where every
+ * delivery will fail.
+ */
+export function assertVapidKeyPair(keys: VapidKeys): void {
+  const publicKey = decodeVapidKey(keys.publicKey, 'public', 65);
+  const privateKey = decodeVapidKey(keys.privateKey, 'private', 32);
+
+  let derivedPublicKey: Buffer;
+  try {
+    const curve = createECDH('prime256v1');
+    curve.setPrivateKey(privateKey);
+    derivedPublicKey = curve.getPublicKey();
+  } catch {
+    throw new Error('VAPID private key is not a valid P-256 scalar.');
+  }
+
+  if (!timingSafeEqual(publicKey, derivedPublicKey)) {
+    throw new Error('VAPID public and private keys do not form a matching keypair.');
+  }
+}
+
+function decodeVapidKey(value: string, name: 'public' | 'private', length: number): Buffer {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+    throw new Error(`VAPID ${name} key must be unpadded base64url.`);
+  }
+  const decoded = Buffer.from(value, 'base64url');
+  if (decoded.length !== length || decoded.toString('base64url') !== value) {
+    throw new Error(`VAPID ${name} key must decode to exactly ${length} bytes.`);
+  }
+  return decoded;
 }
 
 /**

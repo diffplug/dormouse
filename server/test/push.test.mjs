@@ -16,9 +16,21 @@ import { join } from 'node:path';
 import { API_ROUTES, signPushSubscribe } from 'server-lib-common';
 
 import { SimClient } from '../../server-lib-common/test/harness/actors.mjs';
+import { assertVapidKeyPair, generateVapidKeys } from '../dist/push.js';
 import { ORIGIN, enrollHost, fakePushSender, freshApp, ownerSession, post } from './helpers.mjs';
 
 const VAPID_PUBLIC = 'BJxKIjEEuJH0dLHTAcMFVYRnLsIBWcuMt5S1FCdDLbxCkmpUuLfHTFzWSFCPFTFsFvT8sVFTFxKIjEE';
+
+test('VAPID validation rejects valid keys that do not form a pair', () => {
+  const first = generateVapidKeys();
+  const second = generateVapidKeys();
+
+  assert.doesNotThrow(() => assertVapidKeyPair(first));
+  assert.throws(
+    () => assertVapidKeyPair({ publicKey: first.publicKey, privateKey: second.privateKey }),
+    /matching keypair/,
+  );
+});
 
 function subscription(endpoint = 'https://push.example.com/sub/abc') {
   return { endpoint, keys: { p256dh: 'BFakeP256dhKey', auth: 'FakeAuthSecret' } };

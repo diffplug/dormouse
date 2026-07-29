@@ -10,7 +10,12 @@ import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 
 import { createApp } from './app.js';
-import { DEFAULT_VAPID_SUBJECT, createWebPushSender, generateVapidKeys } from './push.js';
+import {
+  DEFAULT_VAPID_SUBJECT,
+  assertVapidKeyPair,
+  createWebPushSender,
+  generateVapidKeys,
+} from './push.js';
 import { VapidStore } from './state.js';
 
 const port = Number(process.env.PORT ?? 3000);
@@ -49,6 +54,12 @@ const vapid =
   envVapidPublic && envVapidPrivate
     ? { publicKey: envVapidPublic, privateKey: envVapidPrivate }
     : await new VapidStore(stateDir).loadOrCreate(generateVapidKeys);
+try {
+  assertVapidKeyPair(vapid);
+} catch (err) {
+  console.error(`Invalid VAPID configuration: ${err instanceof Error ? err.message : String(err)}`);
+  process.exit(1);
+}
 const vapidSubject = process.env.DORMOUSE_VAPID_SUBJECT ?? DEFAULT_VAPID_SUBJECT;
 
 const { app, injectWebSocket } = createApp({
