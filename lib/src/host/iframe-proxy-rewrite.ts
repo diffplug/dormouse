@@ -177,8 +177,12 @@ export function isBlockedAddress(hostname: string): boolean {
   if (/^fe[89ab][0-9a-f]:/.test(h)) return true;
   // Resolve the host to its 32-bit IPv4 value across every equivalent encoding
   // (decimal/octal/hex, short forms, IPv4-mapped IPv6) and range-check the
-  // link-local / cloud-metadata block. A literal-string match on 169.254.* only
-  // would let ::ffff:169.254.169.254 or 2852039166 slip past the same guard.
+  // link-local / cloud-metadata block. The genuine end-to-end hole a literal
+  // 169.254.* match leaves is the IPv6-embedded form (::ffff:169.254.169.254),
+  // which the WHATWG URL parser normalizes to a hex-group spelling the regex
+  // can't see; the numeric-IPv4 spellings are collapsed by that same parser
+  // before the guard runs, so canonicalizing them here is defense-in-depth
+  // against callers that don't pre-normalize rather than a live bypass fix.
   const v4 = h.includes(':') ? embeddedIPv4(h) : parseIPv4(h);
   return v4 !== null && v4 >= LINK_LOCAL_V4_START && v4 <= LINK_LOCAL_V4_END;
 }

@@ -63,7 +63,10 @@ describe('isBlockedAddress', () => {
     expect(isBlockedAddress('fe80::1')).toBe(true);
   });
   it('blocks the metadata endpoint under equivalent IPv4 encodings', () => {
-    // Alternate encodings the OS resolver treats as 169.254.169.254.
+    // Defense-in-depth: for http: upstreams the WHATWG URL parser already
+    // collapses these to 169.254.169.254 before the guard sees them, so the
+    // guard must not rely on that pre-normalization — it canonicalizes them
+    // itself.
     expect(isBlockedAddress('2852039166')).toBe(true); // 32-bit decimal
     expect(isBlockedAddress('0xa9fea9fe')).toBe(true); // 32-bit hex
     expect(isBlockedAddress('0xA9.0xFE.0xA9.0xFE')).toBe(true); // dotted hex
