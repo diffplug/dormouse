@@ -13,10 +13,13 @@ import {
   getWatchedCommands,
   primeActivity,
   removeTerminalPaneState,
+  resetPushDevices,
   resetTerminalPaneState,
   setCommandWatched,
+  setPushDevices,
   type ActivityState,
   type AlertSettings,
+  type PushDevicesState,
   type TerminalPaneState,
 } from '../src/lib/terminal-registry';
 import { computeDynamicPalette } from '../src/lib/themes/dynamic-palette';
@@ -202,6 +205,9 @@ const preview: Preview = {
       const primedAlertSettings = context.parameters?.primedAlertSettings as
         | Partial<AlertSettings>
         | undefined;
+      const primedPushDevices = context.parameters?.primedPushDevices as
+        | PushDevicesState
+        | undefined;
       const platform = fakePlatform as FakePtyAdapter;
 
       if (scenario) platform.setDefaultScenario(scenario);
@@ -217,6 +223,11 @@ const preview: Preview = {
           // applyAlertSettingsFromHost normalizes, so a partial — or undefined —
           // resets every field it does not name.
           applyAlertSettingsFromHost(primedAlertSettings);
+          // The push-device list is renderer-only derived state normally written
+          // by the remote Host, which no story runs — so a story that wants the
+          // Alarm dialog's device line names one, and every other story resets
+          // to `no-host`.
+          setPushDevices(primedPushDevices ?? { status: 'no-host', devices: [] });
           clearPrimedActivity();
           for (const id of getTerminalPaneStateSnapshot().keys()) {
             removeTerminalPaneState(id);
@@ -248,6 +259,7 @@ const preview: Preview = {
           window.cancelAnimationFrame(raf2);
           applyWatchedCommands([]);
           applyAlertSettingsFromHost(undefined);
+          resetPushDevices();
           clearPrimedActivity();
           for (const id of getTerminalPaneStateSnapshot().keys()) {
             removeTerminalPaneState(id);
@@ -255,7 +267,7 @@ const preview: Preview = {
           platform.clearDefaultScenario();
           disposeAllSessions();
         };
-      }, [platform, primedSessionState, primedTerminalState, primedWatchedCommands, primedAlertSettings]);
+      }, [platform, primedSessionState, primedTerminalState, primedWatchedCommands, primedAlertSettings, primedPushDevices]);
 
       return createElement(Story);
     },

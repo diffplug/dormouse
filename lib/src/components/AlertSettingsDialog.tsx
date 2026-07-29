@@ -11,13 +11,29 @@ import { WatchedCommandList } from './WatchedCommandList';
 import {
   clampAlertDelayMs,
   getAlertSettings,
+  getPushDevices,
   getWatchedCommandsSnapshot,
   subscribeToAlertSettings,
+  subscribeToPushDevices,
   subscribeToWatchedCommands,
   updateAlertSettings,
+  type PushDevicesState,
 } from '../lib/terminal-registry';
 
 const TITLE_ID = 'alert-settings-dialog-title';
+
+/**
+ * The "Push will be sent to …" line. Every state names a cause, because a push
+ * that silently goes nowhere is indistinguishable from one that is broken.
+ * `no-host` is the ordinary case for a build with no remote Host at all.
+ */
+function describePushTargets(push: PushDevicesState): string {
+  if (push.status === 'loading') return 'Looking for devices…';
+  if (push.status === 'error') return 'Could not reach the server to list devices.';
+  if (push.status === 'no-host') return 'Connect this machine to a Dormouse server to send push.';
+  if (push.devices.length === 0) return 'No device has enabled alerts in Dormouse Pocket yet.';
+  return `Push will be sent to ${push.devices.map((device) => device.label).join(', ')}`;
+}
 
 /**
  * The app-global Alarm settings (`docs/specs/alert.md` -> Alarm settings),
@@ -31,6 +47,7 @@ const TITLE_ID = 'alert-settings-dialog-title';
 export function AlertSettingsDialog({ onClose }: { onClose: () => void }) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
+  const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const closeRef = useRef<HTMLButtonElement>(null);
 
   return (
@@ -93,16 +110,22 @@ export function AlertSettingsDialog({ onClose }: { onClose: () => void }) {
         </div>
       </section>
 
-      {/* Push is designed but not built — see `docs/specs/alert.md` -> Future.
-          `disabled` on the fieldset natively disables every control inside, so
-          these rows need no handlers and no per-control `disabled`. */}
-      <fieldset disabled className="mt-4 border-t border-border pt-3 opacity-40">
-        <SwitchRow label="Send push notification if not attended" on={settings.pushEnabled} />
-        <div className={`mt-2 ${UNDER_SWITCH_INDENT}`}>
-          <SecondsField label="Delay before push:" valueMs={settings.pushDelayMs} />
-          <div className="mt-1 text-sm text-muted">Push will be sent to —</div>
+      <section className="mt-4 border-t border-border pt-3">
+        <SwitchRow
+          label="Send push notification if not attended"
+          on={settings.pushEnabled}
+          onChange={(pushEnabled) => updateAlertSettings({ pushEnabled })}
+        />
+        <div className={`mt-2 ${UNDER_SWITCH_INDENT} ${settings.pushEnabled ? '' : 'opacity-50'}`}>
+          <SecondsField
+            label="Delay before push:"
+            valueMs={settings.pushDelayMs}
+            disabled={!settings.pushEnabled}
+            onCommit={(pushDelayMs) => updateAlertSettings({ pushDelayMs })}
+          />
+          <div className="mt-1 text-sm leading-relaxed text-muted">{describePushTargets(push)}</div>
         </div>
-      </fieldset>
+      </section>
     </ModalFrame>
   );
 }

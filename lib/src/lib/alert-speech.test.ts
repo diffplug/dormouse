@@ -102,6 +102,11 @@ describe('toSpokenText', () => {
   });
 });
 
+/**
+ * Only the speech-specific half lives here: the payload that reaches the
+ * engine, and that the sink is wired to `speakEnabled`. The ring/delay/cancel
+ * rules are shared with push and covered in `alert-ring-watch.test.ts`.
+ */
 describe('spoken alarms', () => {
   it('speaks the pane label once the delay elapses with the ring unattended', () => {
     start();
@@ -158,29 +163,7 @@ describe('spoken alarms', () => {
     ]);
   });
 
-  it('stays silent when the user attends before the delay elapses', () => {
-    start();
-    ring('pty-1');
-
-    vi.advanceTimersByTime(SPEAK_DELAY_MS - 1);
-    setStatus('pty-1', 'NOTHING_TO_SHOW');
-
-    vi.advanceTimersByTime(60_000);
-    expect(spoken).toEqual([]);
-  });
-
-  it('stays silent when the pane is killed during the delay', () => {
-    start();
-    ring('pty-1');
-
-    vi.advanceTimersByTime(SPEAK_DELAY_MS - 1);
-    clearPrimedActivity('pty-1');
-
-    vi.advanceTimersByTime(60_000);
-    expect(spoken).toEqual([]);
-  });
-
-  it('speaks nothing while the setting is off', () => {
+  it('speaks nothing while speakEnabled is off', () => {
     applyAlertSettingsFromHost({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: false });
     start();
     ring('pty-1');
@@ -189,61 +172,17 @@ describe('spoken alarms', () => {
     expect(spoken).toEqual([]);
   });
 
-  it('drops a scheduled utterance if speech is switched off during the delay', () => {
+  it('uses speakDelayMs as the delay', () => {
+    applyAlertSettingsFromHost({
+      ...DEFAULT_ALERT_SETTINGS,
+      speakEnabled: true,
+      speakDelayMs: 3_000,
+    });
     start();
     ring('pty-1');
 
-    vi.advanceTimersByTime(SPEAK_DELAY_MS - 1);
-    applyAlertSettingsFromHost({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: false });
-
-    vi.advanceTimersByTime(60_000);
-    expect(spoken).toEqual([]);
-  });
-
-  it('speaks exactly once per ring, not once per store notification', () => {
-    start();
-    ring('pty-1');
-    // Unrelated churn in the store — a rerender, a TODO toggle, another pane.
-    primeActivity('pty-1', { status: 'ALERT_RINGING', todo: true });
-    setStatus('pty-2', 'BUSY');
-
-    vi.advanceTimersByTime(60_000);
+    vi.advanceTimersByTime(3_000);
     expect(spoken).toEqual(['terminal']);
-  });
-
-  it('speaks again after a ring is cleared and a fresh one arrives', () => {
-    start();
-    ring('pty-1');
-    vi.advanceTimersByTime(SPEAK_DELAY_MS);
-    expect(spoken).toEqual(['terminal']);
-
-    setStatus('pty-1', 'NOTHING_TO_SHOW');
-    setStatus('pty-1', 'ALERT_RINGING');
-    vi.advanceTimersByTime(SPEAK_DELAY_MS);
-    expect(spoken).toEqual(['terminal', 'terminal']);
-  });
-
-  it('is silent for a Session first seen already ringing (restore / reconnect)', () => {
-    // `docs/specs/alert.md`: a ring must come from a fresh transition, never
-    // from a remount or a restored snapshot.
-    setStatus('restored', 'ALERT_RINGING');
-    start();
-
-    vi.advanceTimersByTime(60_000);
-    expect(spoken).toEqual([]);
-  });
-
-  it('speaks for each ringing Session independently', () => {
-    start();
-    ring('pty-1');
-    vi.advanceTimersByTime(4_000);
-    ring('pty-2');
-
-    vi.advanceTimersByTime(SPEAK_DELAY_MS - 4_000);
-    expect(spoken).toHaveLength(1);
-
-    vi.advanceTimersByTime(4_000);
-    expect(spoken).toHaveLength(2);
   });
 
   it('no-ops when the host webview has no speech backend', () => {
@@ -252,16 +191,5 @@ describe('spoken alarms', () => {
     ring('pty-1');
 
     expect(() => vi.advanceTimersByTime(60_000)).not.toThrow();
-  });
-
-  it('cancels every pending utterance when the watcher is disposed', () => {
-    start();
-    ring('pty-1');
-
-    stopSpeech?.();
-    stopSpeech = null;
-
-    vi.advanceTimersByTime(60_000);
-    expect(spoken).toEqual([]);
   });
 });

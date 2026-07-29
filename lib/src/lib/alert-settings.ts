@@ -21,9 +21,9 @@ export interface AlertSettings {
   speakEnabled: boolean;
   /** ms after a ring before speaking, if the ring is still unattended. */
   speakDelayMs: number;
-  /** Reserved — the push UI is rendered disabled. See `docs/specs/alert.md` -> Future. */
+  /** Push an unattended alarm to paired phones after `pushDelayMs`. */
   pushEnabled: boolean;
-  /** Reserved — see `pushEnabled`. */
+  /** ms after a ring before pushing, if the ring is still unattended. */
   pushDelayMs: number;
 }
 
