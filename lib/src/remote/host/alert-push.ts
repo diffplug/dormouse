@@ -105,19 +105,27 @@ async function loadPushDevices(deps: AlertPushDeps): Promise<PushDevice[]> {
     }));
 }
 
+let pushDevicesRefreshSequence = 0;
+
 /**
  * Refresh the push-device list the Alarm settings dialog reads. Failure is
  * reported as `error` rather than an empty list: "we could not ask" and "no
  * devices are subscribed" are different things to show a user.
  */
 export async function refreshPushDevices(deps: AlertPushDeps): Promise<void> {
-  // Writes are fenced on the store's generation: a refresh whose request is
-  // still in flight when the Host stops (or is replaced by re-enrollment) must
-  // discard its result, or a stale device list would overwrite `no-host` for
-  // the rest of the session.
+  // Writes are fenced on both Host generation and request order. Generation
+  // discards a request that outlives stop/re-enrollment; sequence makes
+  // overlapping requests for the same Host latest-request-wins, so a slow
+  // startup refresh cannot overwrite a newer dialog refresh.
   const generation = getPushDevicesGeneration();
+  const sequence = ++pushDevicesRefreshSequence;
   const commit = (next: PushDevicesState) => {
-    if (getPushDevicesGeneration() === generation) setPushDevices(next);
+    if (
+      getPushDevicesGeneration() === generation &&
+      pushDevicesRefreshSequence === sequence
+    ) {
+      setPushDevices(next);
+    }
   };
   commit({ status: 'loading', devices: [] });
   try {

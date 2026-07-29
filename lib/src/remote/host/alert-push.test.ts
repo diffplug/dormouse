@@ -324,4 +324,47 @@ describe('push device list', () => {
 
     expect(getPushDevices()).toEqual({ status: 'no-host', devices: [] });
   });
+
+  it('keeps a newer refresh when an older request resolves last', async () => {
+    records = [
+      aclRecord('device-phone', 'iPhone Safari'),
+      aclRecord('device-tablet', 'iPad'),
+    ];
+    let resolveOlder: (response: Response) => void = () => {};
+    const older = refreshPushDevices({
+      enrollment: ENROLLMENT,
+      activeRecords: () => records,
+      fetch: (() =>
+        new Promise((resolve) => {
+          resolveOlder = resolve;
+        })) as unknown as typeof globalThis.fetch,
+    });
+    const newer = refreshPushDevices({
+      enrollment: ENROLLMENT,
+      activeRecords: () => records,
+      fetch: (async () => ({
+        ok: true,
+        json: async () => ({
+          devices: [{ devicePublicKey: 'device-tablet', subscribedAt: 2 }],
+        }),
+      })) as unknown as typeof globalThis.fetch,
+    });
+
+    await newer;
+    expect(getPushDevices().devices).toEqual([
+      { devicePublicKey: 'device-tablet', label: 'iPad' },
+    ]);
+
+    resolveOlder({
+      ok: true,
+      json: async () => ({
+        devices: [{ devicePublicKey: 'device-phone', subscribedAt: 1 }],
+      }),
+    } as Response);
+    await older;
+
+    expect(getPushDevices().devices).toEqual([
+      { devicePublicKey: 'device-tablet', label: 'iPad' },
+    ]);
+  });
 });
