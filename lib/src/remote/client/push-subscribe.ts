@@ -105,19 +105,27 @@ export async function subscribeToPushInBrowser(
     );
   }
 
-  // An existing subscription was minted against whatever key was configured at
-  // the time. Reusing one from a rotated VAPID key yields a subscription the
-  // server can never sign for, so replace rather than reuse.
-  const existing = await registration.pushManager.getSubscription();
-  if (existing) await existing.unsubscribe().catch(() => undefined);
+  // One subscription belongs to the service-worker scope and is therefore
+  // shared by every Host. Reuse it when it was minted for this VAPID key; only
+  // a real key rotation should invalidate endpoints already registered with
+  // other Hosts.
+  const applicationServerKeyBytes = fromBase64Url(applicationServerKey);
+  let subscription = await registration.pushManager.getSubscription();
+  if (
+    subscription &&
+    !sameBytes(subscription.options.applicationServerKey, applicationServerKeyBytes)
+  ) {
+    await subscription.unsubscribe().catch(() => undefined);
+    subscription = null;
+  }
 
-  const subscription = await registration.pushManager.subscribe({
+  subscription ??= await registration.pushManager.subscribe({
     // Mandatory in Chrome and on iOS: a promise that every push we receive
     // becomes a visible notification. `sw.js` keeps it.
     userVisibleOnly: true,
     // Passed as bytes rather than the base64url string: browsers disagree about
     // accepting the string form.
-    applicationServerKey: fromBase64Url(applicationServerKey) as BufferSource,
+    applicationServerKey: applicationServerKeyBytes as BufferSource,
   });
 
   const json = subscription.toJSON() as { endpoint?: string; keys?: Record<string, string> };
@@ -128,4 +136,10 @@ export async function subscribeToPushInBrowser(
     throw new Error('The browser returned an incomplete push subscription.');
   }
   return { endpoint, keys: { p256dh, auth } };
+}
+
+function sameBytes(actual: ArrayBuffer | null, expected: Uint8Array): boolean {
+  if (!actual) return false;
+  const bytes = new Uint8Array(actual);
+  return bytes.length === expected.length && bytes.every((byte, index) => byte === expected[index]);
 }

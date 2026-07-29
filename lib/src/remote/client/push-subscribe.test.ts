@@ -180,4 +180,65 @@ describe('subscribeToPushInBrowser', () => {
       async () => 'denied';
     await expect(subscribeToPushInBrowser('BKey')).rejects.toThrow(/browser settings/i);
   });
+
+  it('reuses a scope-wide subscription minted for the same VAPID key', async () => {
+    stubBrowser({});
+    (globalThis.Notification as unknown as { requestPermission: unknown }).requestPermission =
+      async () => 'granted';
+    const unsubscribe = vi.fn();
+    const subscribe = vi.fn();
+    const existing = {
+      endpoint: 'https://push.example/existing',
+      options: { applicationServerKey: Uint8Array.of(1, 2, 3).buffer },
+      unsubscribe,
+      toJSON: () => ({
+        endpoint: 'https://push.example/existing',
+        keys: { p256dh: 'p256dh', auth: 'auth' },
+      }),
+    };
+    getRegistration.mockResolvedValue({
+      pushManager: { getSubscription: async () => existing, subscribe },
+    });
+
+    await expect(subscribeToPushInBrowser('AQID')).resolves.toEqual({
+      endpoint: 'https://push.example/existing',
+      keys: { p256dh: 'p256dh', auth: 'auth' },
+    });
+    expect(unsubscribe).not.toHaveBeenCalled();
+    expect(subscribe).not.toHaveBeenCalled();
+  });
+
+  it('rotates the subscription when the VAPID key changed', async () => {
+    stubBrowser({});
+    (globalThis.Notification as unknown as { requestPermission: unknown }).requestPermission =
+      async () => 'granted';
+    const unsubscribe = vi.fn().mockResolvedValue(true);
+    const replacement = {
+      endpoint: 'https://push.example/replacement',
+      toJSON: () => ({
+        endpoint: 'https://push.example/replacement',
+        keys: { p256dh: 'new-p256dh', auth: 'new-auth' },
+      }),
+    };
+    const subscribe = vi.fn().mockResolvedValue(replacement);
+    getRegistration.mockResolvedValue({
+      pushManager: {
+        getSubscription: async () => ({
+          options: { applicationServerKey: Uint8Array.of(9, 9, 9).buffer },
+          unsubscribe,
+        }),
+        subscribe,
+      },
+    });
+
+    await expect(subscribeToPushInBrowser('AQID')).resolves.toEqual({
+      endpoint: 'https://push.example/replacement',
+      keys: { p256dh: 'new-p256dh', auth: 'new-auth' },
+    });
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(subscribe).toHaveBeenCalledWith({
+      userVisibleOnly: true,
+      applicationServerKey: Uint8Array.of(1, 2, 3),
+    });
+  });
 });
