@@ -117,6 +117,27 @@ Limitations: active XSS can *use* the key, browser or OS compromise defeats
 the model, and clearing browser data destroys the key. Device-key loss is a
 recoverable event (see [Device Key Loss](#device-key-loss)).
 
+Sign-in returns the asserted passkey's **public** key, so any browser profile
+holding a synced passkey can build pair and connect requests rather than only
+the one that registered it. This is deliberately not a weakening: the key is
+public, the Host receives it in every `ConnectionRequest` regardless, and every
+guarantee below still holds — a Client that signs in has merely asked, and
+reaches nothing until the Host's local approval adds *its own device key* to the
+ACL. What it removes is an artifact of the wire that made each new browser
+profile register a redundant second passkey.
+
+The device key has one use outside connection establishment: a Client signs its
+Web Push subscription with it, so the Server can bind that subscription to the
+same identity the Host's ACL records and the Host can address a push by
+`devicePublicKey` ([server.md](./server.md) -> Web Push). That signature carries
+its own domain tag (`PUSH_SUBSCRIBE_DOMAIN` in
+`server-lib-common/src/security/push.ts`) rather than `DEVICE_AUTH_DOMAIN`,
+because the Server relays Host-issued challenges during `connect` and therefore
+sees them in transit — sharing one domain would let a challenge captured in one
+protocol be presented to the other. **A push subscription authorizes nothing:**
+it is a delivery address, it grants no access, and losing or forging one cannot
+move a Client across the ACL boundary.
+
 ## Host Authorization
 
 Each Host maintains a local authorization list. **The ACL is authoritative**;

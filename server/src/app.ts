@@ -39,13 +39,24 @@ import {
   helloResponse,
   toBase64Url,
   utf8Decode,
+  boundedPushText,
   verifyPasskeyAssertion,
+  verifyPushSubscribeSignature,
 } from 'server-lib-common';
 import type {
   HostEnrollRequest,
   HostEnrollResponse,
   HostsResponse,
   PasskeyAssertion,
+  PushChallengeResponse,
+  PushConfigResponse,
+  PushDevicesResponse,
+  PushSendRequest,
+  PushSendResponse,
+  PushSubscribeRequest,
+  PushSubscribeResponse,
+  PushSubscriptionPayload,
+  PushSubscriptionsResponse,
   ReauthFinishRequest,
   ReauthFinishResponse,
   SetupBeginRequest,
@@ -60,8 +71,15 @@ import type {
 import { Handshake } from './handshake.js';
 import { RelayHub } from './relay.js';
 import type { ClientConn, HostConn } from './relay.js';
-import { AccountStore, DuplicateCredentialError, HostStore } from './state.js';
+import {
+  AccountStore,
+  DuplicateCredentialError,
+  HostStore,
+  PushSubscriptionStore,
+} from './state.js';
 import type { StoredHost } from './state.js';
+import type { PushSender } from './push.js';
+import { isPublicHttpsPushEndpoint } from './push-endpoint.js';
 
 /** Runtime configuration; see `index.ts` for how env maps onto this. */
 export interface AppConfig {
@@ -87,6 +105,19 @@ export interface AppConfig {
   readonly pocketDir?: string;
   /** Injectable clock (epoch ms) for tests; defaults to `Date.now`. */
   readonly now?: () => number;
+  /**
+   * Base64url VAPID public key handed to browsers so they can subscribe. Absent
+   * disables push: the config route reports `null` and subscribe/send 503,
+   * rather than letting a phone register against a key the server cannot sign
+   * with.
+   */
+  readonly vapidPublicKey?: string;
+  /**
+   * Web Push delivery. Injectable for the same reason as `now` — the send route
+   * is testable without a real push service. `index.ts` supplies the `web-push`
+   * implementation.
+   */
+  readonly pushSender?: PushSender;
 }
 
 /** A live sign-in session held in memory (server.md: everything transient is in memory). */
@@ -169,6 +200,7 @@ export function createApp(config: AppConfig): CreatedApp {
   const rpId = originUrl.hostname;
   const accounts = new AccountStore(config.stateDir, now);
   const hostStore = new HostStore(config.stateDir, now);
+  const pushStore = new PushSubscriptionStore(config.stateDir, now);
   const sessions = new SessionStore(now);
   // Server-side handshake policy layered on the transport-dumb hub (slice 3).
   const handshake = new Handshake(accounts, {
@@ -181,6 +213,11 @@ export function createApp(config: AppConfig): CreatedApp {
   // Separate issuers per flow: a setup challenge cannot be redeemed at sign-in.
   const setupChallenges = new HostChallengeIssuer({ now });
   const signinChallenges = new HostChallengeIssuer({ now });
+  // Push subscribe gets its own issuer too, so a challenge minted for one flow
+  // can never be redeemed in another. Its signature also carries a distinct
+  // domain tag (PUSH_SUBSCRIBE_DOMAIN), which is the half that matters when the
+  // other side of the exchange is a Host challenge this server merely relayed.
+  const pushChallenges = new HostChallengeIssuer({ now });
 
   // Precompute a fixed-length digest of the expected password so the
   // constant-time compare never has to branch on length (timingSafeEqual
@@ -287,7 +324,9 @@ export function createApp(config: AppConfig): CreatedApp {
    */
   const verifyFreshAssertion = async (
     assertion: SigninFinishRequest['assertion'] | undefined,
-  ): Promise<{ ok: true } | { ok: false; status: 400 | 401 | 404; error: string }> => {
+  ): Promise<
+    { ok: true; publicKey: string } | { ok: false; status: 400 | 401 | 404; error: string }
+  > => {
     if (!assertion || typeof assertion.credentialId !== 'string') {
       return { ok: false, status: 400, error: 'malformed assertion' };
     }
@@ -317,7 +356,10 @@ export function createApp(config: AppConfig): CreatedApp {
     if (!result.ok) {
       return { ok: false, status: 401, error: `assertion rejected: ${result.reason}` };
     }
-    return { ok: true };
+    // The verified passkey's public key travels back to the caller. It is
+    // public, and a Client needs it to build pair/connect requests — see
+    // `SigninFinishResponse.passkeyPublicKey`.
+    return { ok: true, publicKey: stored.publicKey };
   };
 
   app.post(API_ROUTES.signinFinish, async (c) => {
@@ -330,6 +372,7 @@ export function createApp(config: AppConfig): CreatedApp {
       sessionToken: token,
       accountId: session.accountId,
       expiresAt: session.expiresAt,
+      passkeyPublicKey: verdict.publicKey,
     };
     return c.json(res);
   });
@@ -353,9 +396,8 @@ export function createApp(config: AppConfig): CreatedApp {
 
   // Gate a route on a valid `Authorization: Bearer` session token.
   const requireSession: MiddlewareHandler<AppEnv> = async (c, next) => {
-    const header = c.req.header('Authorization') ?? '';
-    const match = /^Bearer (.+)$/.exec(header);
-    const session = match ? sessions.validate(match[1]!) : null;
+    const token = bearerToken(c);
+    const session = token ? sessions.validate(token) : null;
     if (!session) return c.json({ error: 'unauthorized' }, 401);
     c.set('session', session);
     await next();
@@ -395,6 +437,194 @@ export function createApp(config: AppConfig): CreatedApp {
         label: h.label,
         online: hub.isHostOnline(h.hostId),
       })),
+    };
+    return c.json(res);
+  });
+
+  // --- Web Push: subscriptions (client-facing) and delivery (host-facing) --
+  // See alert.md "Push notifications". Two audiences, two credentials: a
+  // Client registers its own subscription with a session token plus a device
+  // signature; a Host reads and sends with its `hostToken`.
+
+  // Gate a route on a valid `Authorization: Bearer` host token. Mirrors
+  // `requireSession`, resolving through the constant-time `findByToken`.
+  const requireHost: MiddlewareHandler<AppEnv> = async (c, next) => {
+    const token = bearerToken(c);
+    const host = token ? await hostStore.findByToken(token) : undefined;
+    if (!host) return c.json({ error: 'unauthorized' }, 401);
+    c.set('host', host);
+    await next();
+  };
+
+  app.get(API_ROUTES.pushConfig, (c) => {
+    // The VAPID public key is public by construction — it ships to every
+    // browser that subscribes — so this needs no auth.
+    const res: PushConfigResponse = { applicationServerKey: config.vapidPublicKey ?? null };
+    return c.json(res);
+  });
+
+  // No body: the challenge is a pool-wide single-use nonce. What binds it to a
+  // host is the signature verified at subscribe, not anything stated here.
+  app.post(API_ROUTES.pushChallenge, requireSession, (c) => {
+    if (!config.vapidPublicKey) return c.json({ error: 'push is not configured' }, 503);
+    const { challenge, expiresAt } = pushChallenges.issue();
+    const res: PushChallengeResponse = { challenge, expiresAt };
+    return c.json(res);
+  });
+
+  app.post(API_ROUTES.pushSubscribe, requireSession, async (c) => {
+    if (!config.vapidPublicKey) return c.json({ error: 'push is not configured' }, 503);
+    const body = await readJson<PushSubscribeRequest>(c);
+    if (
+      !body ||
+      typeof body.hostId !== 'string' ||
+      typeof body.devicePublicKey !== 'string' ||
+      typeof body.challenge !== 'string' ||
+      typeof body.signature !== 'string' ||
+      !isSubscriptionPayload(body.subscription)
+    ) {
+      return c.json({ error: 'malformed request' }, 400);
+    }
+
+    // The server POSTs to this endpoint later. Reject obvious local/literal
+    // targets now; the real sender also filters the DNS result used by its TLS
+    // connection, closing hostname rebinding and mixed-answer bypasses.
+    if (!isPublicHttpsPushEndpoint(body.subscription.endpoint)) {
+      return c.json({ error: 'endpoint must be a public https URL' }, 400);
+    }
+
+    // Subscribing to a host that does not exist would strand a row no Host can
+    // ever read or prune.
+    const hosts = await hostStore.list();
+    if (!hosts.some((h) => h.hostId === body.hostId)) {
+      return c.json({ error: 'unknown host' }, 404);
+    }
+
+    // Single-use, consumed BEFORE verifying, so a captured request can never be
+    // replayed even when the signature is good (same rule as sign-in).
+    if (!pushChallenges.consume(body.challenge)) {
+      return c.json({ error: 'unrecognized or expired challenge' }, 400);
+    }
+
+    const verified = await verifyPushSubscribeSignature(
+      {
+        hostId: body.hostId,
+        challenge: body.challenge,
+        devicePublicKey: body.devicePublicKey,
+        endpoint: body.subscription.endpoint,
+      },
+      body.signature,
+    );
+    if (!verified) return c.json({ error: 'device signature rejected' }, 401);
+
+    const stored = await pushStore.upsert({
+      hostId: body.hostId,
+      devicePublicKey: body.devicePublicKey,
+      endpoint: body.subscription.endpoint,
+      keys: body.subscription.keys,
+      vapidPublicKey: config.vapidPublicKey,
+    });
+    const res: PushSubscribeResponse = { subscribedAt: stored.subscribedAt };
+    return c.json(res);
+  });
+
+  app.get(API_ROUTES.pushSubscriptions, requireSession, async (c) => {
+    // Not filtered by a caller-supplied devicePublicKey: that would be an
+    // enumeration primitive over an input the caller need not own. The account
+    // owns these rows, so the account's session may read them and the Client
+    // filters to its own device.
+    //
+    // No 503 when push is unconfigured — rows can outlive a key being removed,
+    // and the truthful answer is the list, not an error.
+    const allSubscriptions = await pushStore.list();
+    // A row registered under an old VAPID key cannot receive a send signed by
+    // the current key. Hide it from the "Alerts on" readback so Pocket offers
+    // the per-Host repair action. Missing keys are legacy rows and stale in the
+    // same way. When push is disabled the raw rows remain readable, preserving
+    // the route's diagnostic behavior without claiming they are deliverable.
+    const subscriptions = config.vapidPublicKey
+      ? allSubscriptions.filter((s) => s.vapidPublicKey === config.vapidPublicKey)
+      : allSubscriptions;
+    // Identities only: the endpoint and its keys are a bearer capability to
+    // notify that phone, and never leave the Server.
+    const res: PushSubscriptionsResponse = {
+      subscriptions: subscriptions.map((s) => ({
+        hostId: s.hostId,
+        devicePublicKey: s.devicePublicKey,
+        subscribedAt: s.subscribedAt,
+      })),
+    };
+    return c.json(res);
+  });
+
+  app.get(API_ROUTES.pushDevices, requireHost, async (c) => {
+    const subscriptions = await pushStore.listForHost(c.get('host').hostId);
+    // Identities only. The Host holds the ACL and is the only side that can turn
+    // a devicePublicKey into a human label, so the Server never learns one.
+    const res: PushDevicesResponse = {
+      devices: subscriptions.map((s) => ({
+        devicePublicKey: s.devicePublicKey,
+        subscribedAt: s.subscribedAt,
+      })),
+    };
+    return c.json(res);
+  });
+
+  app.post(API_ROUTES.pushSend, requireHost, async (c) => {
+    const sender = config.pushSender;
+    if (!sender) return c.json({ error: 'push is not configured' }, 503);
+    const body = await readJson<PushSendRequest>(c);
+    if (!body || typeof body.title !== 'string' || typeof body.body !== 'string') {
+      return c.json({ error: 'malformed request' }, 400);
+    }
+    // Targets are required. The Host holds the ACL and is the only party that
+    // may decide who a push reaches; a Server that fanned out on its own would
+    // keep notifying a Client the Host had revoked, since nothing propagates a
+    // revocation today (docs/specs/remote-security-model.md).
+    const names = body.devicePublicKeys;
+    if (!Array.isArray(names) || names.length === 0 || names.some((n) => typeof n !== 'string')) {
+      return c.json({ error: 'devicePublicKeys must be a non-empty array' }, 400);
+    }
+
+    // The Host is identified by its token, never by the body: a Host can only
+    // ever reach subscriptions registered against itself.
+    const subscriptions = await pushStore.listForHost(c.get('host').hostId);
+    const targets = subscriptions.filter((s) => names.includes(s.devicePublicKey));
+
+    // Title and body originate in a renderer and are ultimately Pane-derived,
+    // so they are re-bounded here rather than trusted — the same
+    // revalidate-at-the-boundary rule the alarm settings follow, through the
+    // same shared function the Host used (`boundedPushText`).
+    const payload = JSON.stringify({
+      title: boundedPushText(body.title, { limit: PUSH_TEXT_LIMIT, fallback: 'Dormouse' }),
+      body: boundedPushText(body.body, {
+        limit: PUSH_TEXT_LIMIT,
+        fallback: 'A terminal needs attention.',
+      }),
+      ...(typeof body.tag === 'string' && body.tag
+        ? // Code-point slice for the same reason as `boundedPushText`: a cut
+          // mid-surrogate would ship a lone half.
+          { tag: Array.from(body.tag).slice(0, PUSH_TEXT_LIMIT).join('') }
+        : {}),
+    });
+
+    const results = await Promise.all(
+      targets.map(async (s) => ({
+        endpoint: s.endpoint,
+        result: await sender.send({ endpoint: s.endpoint, keys: s.keys }, payload),
+      })),
+    );
+    // Forget subscriptions the push service called permanently gone, so a
+    // reinstalled phone does not leave a row that fails on every alarm. Batched
+    // into one rewrite rather than one per endpoint.
+    const expired = results.filter((r) => r.result === 'expired');
+    if (expired.length > 0) await pushStore.removeEndpoints(expired.map((r) => r.endpoint));
+
+    const res: PushSendResponse = {
+      delivered: results.filter((r) => r.result === 'delivered').length,
+      expired: expired.length,
+      unknown: names.filter((n) => !targets.some((t) => t.devicePublicKey === n)).length,
+      failed: results.filter((r) => r.result === 'failed').length,
     };
     return c.json(res);
   });
@@ -527,6 +757,28 @@ async function readJson<T>(c: { req: { json(): Promise<unknown> } }): Promise<T 
   } catch {
     return null;
   }
+}
+
+/** Longest push title/body we will forward; see the send route for why. */
+const PUSH_TEXT_LIMIT = 200;
+
+/** Read an `Authorization: Bearer <token>` header, or null if absent/malformed. */
+function bearerToken(c: Context<AppEnv>): string | null {
+  const match = /^Bearer (.+)$/.exec(c.req.header('Authorization') ?? '');
+  return match ? match[1]! : null;
+}
+
+/** True if `value` is a `PushSubscriptionPayload` with both encryption keys. */
+function isSubscriptionPayload(value: unknown): value is PushSubscriptionPayload {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as PushSubscriptionPayload;
+  return (
+    typeof v.endpoint === 'string' &&
+    !!v.keys &&
+    typeof v.keys === 'object' &&
+    typeof v.keys.p256dh === 'string' &&
+    typeof v.keys.auth === 'string'
+  );
 }
 
 /** Decode base64url clientDataJSON to its parsed object, or `null` if malformed. */

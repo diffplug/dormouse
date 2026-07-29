@@ -21,6 +21,7 @@ import {
 
 import {
   hasRecoverablePairingFailure,
+  PASSKEY_UNAVAILABLE_MESSAGE,
   PocketClient,
   type PocketSocket,
   type PocketStorage,
@@ -34,6 +35,11 @@ import type { PasskeyRegistration, WebAuthnClient } from './webauthn';
 const CREDENTIAL_ID = 'cred-123';
 const PASSKEY_PUBLIC_KEY = 'pk-spki-b64u';
 const RP_ID = 'localhost';
+
+it('directs a missing passkey cache back through sign-in', () => {
+  expect(PASSKEY_UNAVAILABLE_MESSAGE).toContain('Sign in again');
+  expect(PASSKEY_UNAVAILABLE_MESSAGE).not.toContain('device that first created');
+});
 
 /** A base64url string usable as a real challenge (device signing decodes it). */
 function b64uChallenge(seed: number): string {
@@ -217,7 +223,12 @@ const AUTH_ROUTES = {
   }),
   '/api/signin/begin': () => ({ json: { challenge: b64uChallenge(9), rpId: RP_ID } }),
   '/api/signin/finish': () => ({
-    json: { sessionToken: 'tok-abc', accountId: SELFHOST_ACCOUNT_ID, expiresAt: 1 },
+    json: {
+      sessionToken: 'tok-abc',
+      accountId: SELFHOST_ACCOUNT_ID,
+      expiresAt: 1,
+      passkeyPublicKey: PASSKEY_PUBLIC_KEY,
+    },
   }),
   '/api/hosts': () => ({ json: { hosts: [{ hostId: 'h1', label: 'Laptop', online: true }] } }),
 } as const;
@@ -259,11 +270,87 @@ describe('setup + signin', () => {
     expect(hostsCall.headers.authorization).toBe('Bearer tok-abc');
   });
 
+  /**
+   * The account-centric half of the model: a synced passkey is enough to pair
+   * from a browser profile that never performed the registration — an iOS Home
+   * Screen install, a second browser — because sign-in returns the asserted
+   * passkey's public key. Before this, only the registering profile could build
+   * a pairing request, which forced a redundant second passkey per install.
+   *
+   * The device-centric half is untouched: this Client still needs its own
+   * approval on the Host before it reaches anything.
+   */
+  it('can pair after signing in on a profile that never registered', async () => {
+    const harness = makeClient({ ...AUTH_ROUTES });
+    // No setup() — this profile's storage starts empty, as a fresh install's does.
+    await harness.client.signin();
+
+    const open = harness.client.openSocket();
+    harness.socket.fireOpen();
+    await open;
+
+    const pairing = harness.client.pair('h1', 'iPhone (Home Screen)');
+    const frame = await nextSent(harness.socket, (f) => f.t === 'pair');
+    harness.socket.server({ t: 'pair-result', approved: true, record: { hostId: 'h1' } });
+    await pairing;
+
+    // The request carries the hash of the key sign-in handed back.
+    const request = (frame as { request: { passkeyPublicKeyHash: string } }).request;
+    expect(request.passkeyPublicKeyHash).toBe(await hashPasskeyPublicKey(PASSKEY_PUBLIC_KEY));
+  });
+
   it('rejects with the server error message on a failed request', async () => {
     const harness = makeClient({
       '/api/setup/begin': () => ({ status: 401, json: { error: 'invalid setup password' } }),
     });
     await expect(harness.client.setup('wrong', 'Phone')).rejects.toThrow('invalid setup password');
+  });
+});
+
+describe('listPushSubscribedHosts', () => {
+  /**
+   * The Server answers with the whole account's registrations, so the filter to
+   * "this device" happens client-side — that is what keeps the API from being
+   * an enumeration primitive over a `devicePublicKey` the caller does not hold.
+   */
+  it('keeps only the Hosts this device registered', async () => {
+    const device = await generateDeviceKeyPair();
+    const harness = makeClient(
+      {
+        ...AUTH_ROUTES,
+        '/api/push/subscriptions': () => ({
+          json: {
+            subscriptions: [
+              { hostId: 'h1', devicePublicKey: device.devicePublicKey, subscribedAt: 1 },
+              { hostId: 'h2', devicePublicKey: 'some-other-device', subscribedAt: 2 },
+              { hostId: 'h3', devicePublicKey: device.devicePublicKey, subscribedAt: 3 },
+            ],
+          },
+        }),
+      },
+      { deviceKey: async () => device },
+    );
+    await harness.client.setup('pw', 'My Phone');
+    await harness.client.signin();
+
+    expect(await harness.client.listPushSubscribedHosts()).toEqual(['h1', 'h3']);
+    const call = harness.calls.find((c) => c.url.endsWith('/api/push/subscriptions'))!;
+    expect(call.method).toBe('GET');
+    expect(call.headers.authorization).toBe('Bearer tok-abc');
+    // The device identity is never sent — the Server has no input to filter on.
+    expect(call.body).toBeUndefined();
+  });
+
+  it('is empty when this device registered nothing', async () => {
+    const harness = makeClient({
+      ...AUTH_ROUTES,
+      '/api/push/subscriptions': () => ({
+        json: { subscriptions: [{ hostId: 'h1', devicePublicKey: 'other', subscribedAt: 1 }] },
+      }),
+    });
+    await harness.client.setup('pw', 'My Phone');
+    await harness.client.signin();
+    expect(await harness.client.listPushSubscribedHosts()).toEqual([]);
   });
 });
 

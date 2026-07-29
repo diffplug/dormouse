@@ -35,6 +35,8 @@ export async function freshApp({
   origin = ORIGIN,
   now,
   requireUserVerification,
+  vapidPublicKey,
+  pushSender,
 } = {}) {
   const stateDir = await mkdtemp(join(tmpdir(), 'dormouse-server-'));
   const created = createApp({
@@ -43,8 +45,32 @@ export async function freshApp({
     stateDir,
     now,
     requireUserVerification,
+    vapidPublicKey,
+    pushSender,
   });
   return { ...created, stateDir, origin, rpId: new URL(origin).hostname };
+}
+
+/**
+ * A {@link PushSender} that records instead of sending. `expire` / `fail` name
+ * endpoints that should report those outcomes, so the pruning and counting
+ * paths are testable without a real push service.
+ */
+export function fakePushSender() {
+  const sent = [];
+  const expired = new Set();
+  const failing = new Set();
+  return {
+    sent,
+    expire: (endpoint) => expired.add(endpoint),
+    fail: (endpoint) => failing.add(endpoint),
+    async send(target, payload) {
+      sent.push({ endpoint: target.endpoint, keys: target.keys, payload });
+      if (expired.has(target.endpoint)) return 'expired';
+      if (failing.has(target.endpoint)) return 'failed';
+      return 'delivered';
+    },
+  };
 }
 
 export function post(app, path, body) {

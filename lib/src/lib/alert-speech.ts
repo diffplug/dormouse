@@ -1,20 +1,23 @@
 import { getAlertSettings } from './alert-settings';
-import { getActivity, getActivitySnapshot, subscribeToActivity } from './session-activity-store';
+import { watchUnattendedRings } from './alert-ring-watch';
 import { deriveSessionLabel } from './session-label';
 
 /**
  * Spoken alarms (`docs/specs/alert.md` -> Alarm settings). When a Session rings
  * and stays unattended for `speakDelayMs`, say its pane name out loud.
  *
+ * The ring detection, delay, and cancellation rules live in
+ * `alert-ring-watch.ts`, shared with push notifications; this module is only
+ * the speech sink and its sanitizer.
+ *
  * Speech uses the same derived pane label as the visible UI, passed through
  * `toSpokenText`. That intentionally includes terminal-supplied OSC 0/2/9 titles
  * when they win label derivation; `ActivityNotification` fields are not chosen
  * as a separate speech payload.
  *
- * Renderer-side by design: the ring already arrives here as an activity-store
- * transition, and the delay timer needs no host round-trip. `speak()` is the
- * single seam a future native `PlatformAdapter.speak?()` would slot into for
- * hosts whose webview has no speech backend (Tauri on Linux/WebKitGTK).
+ * `speak()` is the single seam a future native `PlatformAdapter.speak?()` would
+ * slot into for hosts whose webview has no speech backend (Tauri on
+ * Linux/WebKitGTK).
  */
 
 /** Longest utterance we will produce. A pane title has no useful upper bound. */
@@ -41,7 +44,9 @@ export function toSpokenText(label: string): string {
     .replace(/[<>&]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  return cleaned.slice(0, SPEECH_LIMIT).trim() || 'terminal';
+  // Capped in code points, matching `boundedPushText`: a cut mid-surrogate
+  // would hand the engine a lone half.
+  return Array.from(cleaned).slice(0, SPEECH_LIMIT).join('').trim() || 'terminal';
 }
 
 function speak(text: string): void {
@@ -61,64 +66,9 @@ function speak(text: string): void {
  * Returns a disposer that cancels every pending utterance.
  */
 export function startAlertSpeech(): () => void {
-  // Last seen status per Session. A Session missing from this map has never been
-  // observed, so its first sighting can never count as a transition — that is
-  // what keeps a restore or reconnect that arrives already ringing silent
-  // (`docs/specs/alert.md` -> WATCHING Track).
-  const lastStatus = new Map<string, string>();
-  const pending = new Map<string, ReturnType<typeof setTimeout>>();
-
-  const cancel = (id: string): void => {
-    const timer = pending.get(id);
-    if (timer === undefined) return;
-    clearTimeout(timer);
-    pending.delete(id);
-  };
-
-  const onActivityChange = (): void => {
-    const snapshot = getActivitySnapshot();
-
-    for (const [id, state] of snapshot) {
-      const previous = lastStatus.get(id);
-      lastStatus.set(id, state.status);
-
-      if (state.status !== 'ALERT_RINGING') {
-        // Attended, dismissed, or never ringing — either way nothing to say.
-        cancel(id);
-        continue;
-      }
-      // Already ringing, or seen for the first time already ringing.
-      if (previous === 'ALERT_RINGING' || previous === undefined) continue;
-
-      const { speakEnabled, speakDelayMs } = getAlertSettings();
-      if (!speakEnabled) continue;
-
-      pending.set(id, setTimeout(() => {
-        pending.delete(id);
-        // Re-read rather than trusting the closure: the user may have attended
-        // or dismissed during the delay, and the setting may have been toggled.
-        if (getActivity(id).status !== 'ALERT_RINGING') return;
-        if (!getAlertSettings().speakEnabled) return;
-        speak(deriveSessionLabel(id));
-      }, speakDelayMs));
-    }
-
-    // A Session that left the store entirely (pane killed) must not speak.
-    for (const id of [...lastStatus.keys()]) {
-      if (snapshot.has(id)) continue;
-      lastStatus.delete(id);
-      cancel(id);
-    }
-  };
-
-  // Seed from the current snapshot so nothing already on screen counts as fresh.
-  onActivityChange();
-  const unsubscribe = subscribeToActivity(onActivityChange);
-
-  return () => {
-    unsubscribe();
-    for (const timer of pending.values()) clearTimeout(timer);
-    pending.clear();
-    lastStatus.clear();
-  };
+  return watchUnattendedRings({
+    enabled: () => getAlertSettings().speakEnabled,
+    delayMs: () => getAlertSettings().speakDelayMs,
+    fire: (id) => speak(deriveSessionLabel(id)),
+  });
 }

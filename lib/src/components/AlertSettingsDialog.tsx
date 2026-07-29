@@ -1,4 +1,4 @@
-import { useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   ModalCloseButton,
   ModalFrame,
@@ -11,13 +11,37 @@ import { WatchedCommandList } from './WatchedCommandList';
 import {
   clampAlertDelayMs,
   getAlertSettings,
+  getPushDevices,
+  refreshPushDevicesNow,
   getWatchedCommandsSnapshot,
   subscribeToAlertSettings,
+  subscribeToPushDevices,
   subscribeToWatchedCommands,
   updateAlertSettings,
+  type PushDevicesState,
 } from '../lib/terminal-registry';
 
 const TITLE_ID = 'alert-settings-dialog-title';
+
+/**
+ * The "Push will be sent to …" line. Every state names a cause, because a push
+ * that silently goes nowhere is indistinguishable from one that is broken.
+ * `no-host` is the ordinary case for a build with no remote Host at all.
+ *
+ * The list is deliberately scoped to *this* machine, not the account: the ACL
+ * that authorizes these devices lives on the Host and never on the Server
+ * (`docs/specs/remote-security-model.md`), so there is no account-wide device
+ * list to show and the copy must not imply one.
+ */
+function describePushTargets(push: PushDevicesState): string {
+  if (push.status === 'loading') return 'Looking for devices…';
+  if (push.status === 'error') return 'Could not reach the server to list devices.';
+  if (push.status === 'no-host') return 'Connect this machine to a Dormouse server to send push.';
+  if (push.devices.length === 0) {
+    return 'No device paired with this machine has enabled alerts in Dormouse Pocket yet.';
+  }
+  return `Push will be sent to ${push.devices.map((device) => device.label).join(', ')}`;
+}
 
 /**
  * The app-global Alarm settings (`docs/specs/alert.md` -> Alarm settings),
@@ -31,7 +55,12 @@ const TITLE_ID = 'alert-settings-dialog-title';
 export function AlertSettingsDialog({ onClose }: { onClose: () => void }) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
+  const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const closeRef = useRef<HTMLButtonElement>(null);
+
+  // A phone can enable alerts long after this machine booted, so re-read the
+  // list on open rather than showing whatever was true at Host start.
+  useEffect(() => refreshPushDevicesNow(), []);
 
   return (
     <ModalFrame
@@ -77,33 +106,66 @@ export function AlertSettingsDialog({ onClose }: { onClose: () => void }) {
         </div>
       </section>
 
-      <section className="mt-4 border-t border-border pt-3">
-        <SwitchRow
-          label="Speak out loud if not attended"
-          on={settings.speakEnabled}
-          onChange={(speakEnabled) => updateAlertSettings({ speakEnabled })}
-        />
-        <div className={`mt-2 ${UNDER_SWITCH_INDENT} ${settings.speakEnabled ? '' : 'opacity-50'}`}>
-          <SecondsField
-            label="Delay before speaking:"
-            valueMs={settings.speakDelayMs}
-            disabled={!settings.speakEnabled}
-            onCommit={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
-          />
-        </div>
-      </section>
+      <AlarmSinkSection
+        switchLabel="Speak out loud if not attended"
+        delayLabel="Delay before speaking:"
+        enabled={settings.speakEnabled}
+        delayMs={settings.speakDelayMs}
+        onToggle={(speakEnabled) => updateAlertSettings({ speakEnabled })}
+        onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
+      />
 
-      {/* Push is designed but not built — see `docs/specs/alert.md` -> Future.
-          `disabled` on the fieldset natively disables every control inside, so
-          these rows need no handlers and no per-control `disabled`. */}
-      <fieldset disabled className="mt-4 border-t border-border pt-3 opacity-40">
-        <SwitchRow label="Send push notification if not attended" on={settings.pushEnabled} />
-        <div className={`mt-2 ${UNDER_SWITCH_INDENT}`}>
-          <SecondsField label="Delay before push:" valueMs={settings.pushDelayMs} />
-          <div className="mt-1 text-sm text-muted">Push will be sent to —</div>
-        </div>
-      </fieldset>
+      <AlarmSinkSection
+        switchLabel="Send push notification if not attended"
+        delayLabel="Delay before push:"
+        enabled={settings.pushEnabled}
+        delayMs={settings.pushDelayMs}
+        onToggle={(pushEnabled) => updateAlertSettings({ pushEnabled })}
+        onCommitDelay={(pushDelayMs) => updateAlertSettings({ pushDelayMs })}
+      >
+        {describePushTargets(push)}
+      </AlarmSinkSection>
     </ModalFrame>
+  );
+}
+
+/**
+ * One alarm sink: a switch that gates an indented delay field, with optional
+ * explanatory text under it. Speech and push are the same shape, so the layout
+ * and the dimming rule have one implementation rather than two that drift.
+ */
+function AlarmSinkSection({
+  switchLabel,
+  delayLabel,
+  enabled,
+  delayMs,
+  onToggle,
+  onCommitDelay,
+  children,
+}: {
+  switchLabel: string;
+  delayLabel: string;
+  enabled: boolean;
+  delayMs: number;
+  onToggle: (next: boolean) => void;
+  onCommitDelay: (ms: number) => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <section className="mt-4 border-t border-border pt-3">
+      <SwitchRow label={switchLabel} on={enabled} onChange={onToggle} />
+      <div className={`mt-2 ${UNDER_SWITCH_INDENT} ${enabled ? '' : 'opacity-50'}`}>
+        <SecondsField
+          label={delayLabel}
+          valueMs={delayMs}
+          disabled={!enabled}
+          onCommit={onCommitDelay}
+        />
+        {children ? (
+          <div className="mt-1 text-sm leading-relaxed text-muted">{children}</div>
+        ) : null}
+      </div>
+    </section>
   );
 }
 

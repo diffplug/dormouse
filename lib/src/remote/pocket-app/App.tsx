@@ -23,6 +23,13 @@ import {
 } from '../client/pocket-client';
 import { browserWebAuthn } from '../client/webauthn';
 import { getOrCreateDeviceKey } from '../client/device-key';
+import {
+  getPushAvailability,
+  hasCurrentPushSubscription,
+  isInstalledWebApp,
+  subscribeToPushInBrowser,
+  type PushAvailability,
+} from '../client/push-subscribe';
 import { RemotePtyAdapter } from '../client/remote-adapter';
 import { setPlatform } from '../../lib/platform';
 import { disposeAllSessions, initAlertStateReceiver } from '../../lib/terminal-registry';
@@ -37,8 +44,26 @@ export interface HostView {
   online: boolean;
 }
 
-/** A phone-friendly default pairing label. */
-const DEVICE_LABEL = 'Dormouse Pocket';
+export type PushConfigStatus = 'loading' | 'ready' | 'disabled' | 'error';
+
+type PushConfigState =
+  | { status: 'loading' }
+  | { status: 'ready'; key: string }
+  | { status: 'disabled' }
+  | { status: 'error' };
+
+/**
+ * The label this Client suggests at pairing.
+ *
+ * One phone can hold two Client identities — a Safari tab and a Home Screen
+ * install have separate storage and therefore separate device keys — and they
+ * are genuinely separate delivery targets that cannot be merged. Naming the
+ * mode is what lets the person approving on the laptop, and the alarm dialog
+ * afterwards, tell them apart.
+ */
+function deviceLabel(): string {
+  return isInstalledWebApp() ? 'Dormouse Pocket (Home Screen)' : 'Dormouse Pocket (browser)';
+}
 
 // --- Pocket chrome vocabulary ------------------------------------------------
 //
@@ -86,6 +111,13 @@ const PK = {
   rowTitle: 'truncate text-[13px] font-semibold',
   rowSecondary: 'mt-0.5 truncate text-[11px] text-header-inactive-fg/70',
   rowActions: 'flex shrink-0 items-center gap-2',
+  // Push sits under its host row as secondary chrome: page bg, alpha-on-fg.
+  pushRow: 'flex items-center gap-3 px-3.5 text-[11px] text-app-fg/70',
+  // An actionable notice: the inactive-header pair, so it reads as a raised
+  // block like a host row rather than as an error (which owns `text-error`).
+  notice: 'flex flex-col gap-2 rounded-lg bg-header-inactive-bg px-3.5 py-3 text-header-inactive-fg',
+  noticeTitle: 'text-[13px] font-semibold',
+  noticeBody: 'm-0 text-[12px] leading-relaxed text-header-inactive-fg/70',
   field: 'flex flex-col gap-1.5',
   fieldLabel: 'text-[11px] text-app-fg/60',
   input:
@@ -120,7 +152,75 @@ export default function App(): React.ReactElement {
   const [hosts, setHosts] = useState<HostView[]>([]);
   const [pairedIds, setPairedIds] = useState<Set<string>>(() => new Set());
   const [activeHost, setActiveHost] = useState<HostView | null>(null);
+  const [pushState, setPushState] = useState<PushAvailability | null>(null);
+  const [pushSubscribedHostIds, setPushSubscribedHostIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [pushSubscriptionCurrent, setPushSubscriptionCurrent] = useState(false);
+  const [pushConfig, setPushConfig] = useState<PushConfigState>({ status: 'loading' });
+  /**
+   * Per-Host registration completion versions. The Server read below replaces
+   * the whole set, except for Hosts whose version advanced after that read
+   * began. A counter per Host (rather than a Set) also detects a repeated repair
+   * of the same Host.
+   */
+  const pushEnableVersionsRef = useRef<Map<string, number>>(new Map());
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
+
+  // Availability depends on browser state the app cannot change (permission,
+  // whether it was launched from the Home Screen), so it is read once the hosts
+  // list is on screen rather than tracked as a store. The VAPID key is fetched
+  // here too, so the Enable tap has no network round trip in front of the
+  // permission prompt — iOS drops transient activation across one.
+  useEffect(() => {
+    if (phase !== 'hosts') return;
+    let live = true;
+    setPushConfig({ status: 'loading' });
+    setPushSubscriptionCurrent(false);
+    void getPushAvailability().then((state) => {
+      if (live) setPushState(state);
+    });
+    void client
+      .getPushConfig()
+      .then(async (key) => {
+        const subscriptionCurrent =
+          key !== null ? await hasCurrentPushSubscription(key).catch(() => false) : false;
+        if (live) {
+          setPushConfig(key === null ? { status: 'disabled' } : { status: 'ready', key });
+          setPushSubscriptionCurrent(subscriptionCurrent);
+        }
+      })
+      .catch(() => {
+        if (live) setPushConfig({ status: 'error' });
+      });
+    // Which Hosts this device already registered with. Without it a reload
+    // re-offers Enable alerts for every Host, including ones the Server already
+    // holds a row for. Authoritative rather than merged, so a row pruned after
+    // a 410 stops claiming alerts are on.
+    setPushSubscribedHostIds(new Set());
+    const enableVersionsAtStart = new Map(pushEnableVersionsRef.current);
+    void client
+      .listPushSubscribedHosts()
+      .then((hostIds) => {
+        if (live) {
+          setPushSubscribedHostIds(
+            reconcilePushSubscribedHosts(
+              hostIds,
+              enableVersionsAtStart,
+              pushEnableVersionsRef.current,
+            ),
+          );
+        }
+      })
+      .catch(() => {
+        // Best-effort: the previous snapshot was cleared before this request,
+        // while any Enable that completed since then added itself back. That
+        // re-offers an idempotent action instead of preserving a stale claim.
+      });
+    return () => {
+      live = false;
+    };
+  }, [phase, client]);
 
   // The client nulls its socket on any close, so an action taken after a
   // server restart / network drop must reopen it rather than reuse a dead
@@ -201,10 +301,55 @@ export default function App(): React.ReactElement {
   const onPair = (host: HostView) =>
     run('pair', async () => {
       await ensureSocket();
-      const result = await client.pair(host.hostId, DEVICE_LABEL);
+      const result = await client.pair(host.hostId, deviceLabel());
       if (!result.approved) throw new Error(result.error ?? 'Pairing was denied.');
       setPairedIds((prev) => new Set(prev).add(host.hostId));
     });
+
+  // The VAPID key was prefetched before this action becomes available, so the
+  // permission prompt has no network round trip in front of it — iOS drops the
+  // transient activation required by requestPermission across one.
+  const onEnablePush = (host: HostView) =>
+    run('push', async () => {
+      if (pushConfig.status !== 'ready') {
+        throw new Error('Check the server configuration before enabling alerts.');
+      }
+      const subscription = await subscribeToPushInBrowser(pushConfig.key);
+      await client.subscribeToPush(host.hostId, subscription);
+      pushEnableVersionsRef.current.set(
+        host.hostId,
+        (pushEnableVersionsRef.current.get(host.hostId) ?? 0) + 1,
+      );
+      setPushSubscriptionCurrent(true);
+      setPushSubscribedHostIds((prev) => new Set(prev).add(host.hostId));
+    });
+
+  // A config retry deliberately stops after caching the key. The next tap on
+  // Enable alerts is the fresh user gesture the iOS permission prompt requires.
+  const onRetryPushConfig = () =>
+    run('push-config', async () => {
+      setPushConfig({ status: 'loading' });
+      try {
+        const key = await client.getPushConfig();
+        const subscriptionCurrent =
+          key !== null ? await hasCurrentPushSubscription(key).catch(() => false) : false;
+        setPushConfig(key === null ? { status: 'disabled' } : { status: 'ready', key });
+        setPushSubscriptionCurrent(subscriptionCurrent);
+      } catch (err) {
+        setPushConfig({ status: 'error' });
+        throw err;
+      }
+    });
+
+  const onSetup = useCallback(
+    (password: string, label: string) =>
+      run('setup', async () => {
+        await client.setup(password, label);
+        await client.signin();
+        await loadHosts();
+      }),
+    [client, loadHosts, run],
+  );
 
   const leaveWall = () => {
     teardownAdapter();
@@ -225,12 +370,7 @@ export default function App(): React.ReactElement {
             await client.signin();
             await loadHosts();
           })}
-        onSetup={(password, label) =>
-          run('setup', async () => {
-            await client.setup(password, label);
-            await client.signin();
-            await loadHosts();
-          })}
+        onSetup={onSetup}
       />
     );
   }
@@ -242,9 +382,14 @@ export default function App(): React.ReactElement {
         busy={busy}
         error={error}
         isPaired={(id) => pairedIds.has(id)}
+        isPushSubscribed={(id) => pushSubscriptionCurrent && pushSubscribedHostIds.has(id)}
+        pushState={pushState}
+        pushConfigStatus={pushConfig.status}
         onRefresh={() => run('refresh', loadHosts)}
         onPair={onPair}
         onConnect={onConnect}
+        onEnablePush={onEnablePush}
+        onRetryPushConfig={onRetryPushConfig}
       />
     );
   }
@@ -260,6 +405,23 @@ export default function App(): React.ReactElement {
       <div className={clsx(PK.body, PK.bodyCenter)}>…</div>
     </div>
   );
+}
+
+/**
+ * Apply an authoritative Server snapshot without losing a registration that
+ * completed after the read began. Earlier local ids are deliberately omitted
+ * when the Server no longer reports them: pruning must self-correct the UI.
+ */
+export function reconcilePushSubscribedHosts(
+  serverHostIds: readonly string[],
+  enableVersionsAtReadStart: ReadonlyMap<string, number>,
+  enableVersionsNow: ReadonlyMap<string, number>,
+): Set<string> {
+  const reconciled = new Set(serverHostIds);
+  for (const [hostId, version] of enableVersionsNow) {
+    if (version > (enableVersionsAtReadStart.get(hostId) ?? 0)) reconciled.add(hostId);
+  }
+  return reconciled;
 }
 
 // --- ConnectedView ---------------------------------------------------------
@@ -303,8 +465,6 @@ export function SetupOrSignin({
   onSetup: (password: string, label: string) => void;
 }): React.ReactElement {
   const [showSetup, setShowSetup] = useState(false);
-  const [password, setPassword] = useState('');
-  const [label, setLabel] = useState('My Phone');
 
   return (
     <div className={PK.app}>
@@ -342,35 +502,12 @@ export function SetupOrSignin({
               Create the account and register this device's passkey. Requires the server's setup
               password.
             </p>
-            <div className={PK.field}>
-              <label className={PK.fieldLabel} htmlFor="pocket-setup-password">Setup password</label>
-              <input
-                id="pocket-setup-password"
-                className={PK.input}
-                type="password"
-                autoComplete="off"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-            <div className={PK.field}>
-              <label className={PK.fieldLabel} htmlFor="pocket-passkey-label">Passkey label</label>
-              <input
-                id="pocket-passkey-label"
-                className={PK.input}
-                type="text"
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-              />
-            </div>
-            <button
-              type="button"
-              className={pkButton({ tone: 'primary', block: true })}
-              disabled={busy !== null || password.length === 0}
-              onClick={() => onSetup(password, label)}
-            >
-              {busy === 'setup' ? 'Creating…' : 'Create passkey & sign in'}
-            </button>
+            <PasskeySetupFields
+              idPrefix="pocket-setup"
+              busy={busy}
+              submitLabel="Create passkey & sign in"
+              onSubmit={onSetup}
+            />
           </div>
         ) : null}
       </div>
@@ -380,22 +517,129 @@ export function SetupOrSignin({
 
 // --- HostsView -------------------------------------------------------------
 
+/**
+ * Shown on iOS when Pocket is running in a Safari tab. Web Push is granted only
+ * to a Home Screen web app, and there is no API to prompt for that install — it
+ * can only be described.
+ *
+ * The second line matters: a tab cannot see whether the app is *also* installed
+ * (separate storage, no shared signal), so this notice shows even to someone
+ * who already installed it and simply opened the wrong window.
+ */
+function InstallNotice(): React.ReactElement {
+  return (
+    <div className={PK.notice}>
+      <div className={PK.noticeTitle}>Add Dormouse to your Home Screen</div>
+      <p className={PK.noticeBody}>
+        Alerts only reach you from the installed app — iOS does not deliver them to a Safari
+        tab. Tap Share, then <strong>Add to Home Screen</strong>, and open Dormouse from
+        there.
+      </p>
+      <p className={PK.noticeBody}>Already added it? Open it from your Home Screen instead of this tab.</p>
+    </div>
+  );
+}
+
+/**
+ * The setup-password + label pair and its submit button, shared by the auth
+ * screen and the local-passkey notice — the same credential form in two places,
+ * so its ids, autocomplete rules, and disabled logic have one definition.
+ */
+function PasskeySetupFields({
+  idPrefix,
+  busy,
+  submitLabel,
+  onSubmit,
+}: {
+  idPrefix: string;
+  busy: string | null;
+  submitLabel: string;
+  onSubmit: (password: string, label: string) => void;
+}): React.ReactElement {
+  const [password, setPassword] = useState('');
+  const [label, setLabel] = useState('My Phone');
+
+  return (
+    <>
+      <div className={PK.field}>
+        <label className={PK.fieldLabel} htmlFor={`${idPrefix}-password`}>Setup password</label>
+        <input
+          id={`${idPrefix}-password`}
+          className={PK.input}
+          type="password"
+          autoComplete="off"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+      </div>
+      <div className={PK.field}>
+        <label className={PK.fieldLabel} htmlFor={`${idPrefix}-label`}>Passkey label</label>
+        <input
+          id={`${idPrefix}-label`}
+          className={PK.input}
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+        />
+      </div>
+      <button
+        type="button"
+        className={pkButton({ tone: 'primary', block: true })}
+        disabled={busy !== null || password.length === 0}
+        onClick={() => onSubmit(password, label)}
+      >
+        {busy === 'setup' ? 'Creating…' : submitLabel}
+      </button>
+    </>
+  );
+}
+
+/**
+ * The push row's copy. Only `ready` is actionable; the rest explain why not, so
+ * "my phone never buzzes" always has a visible cause. `needs-install` is the
+ * iOS rule — Web Push is granted only to a Home Screen web app — and is the one
+ * state the user resolves outside the app entirely.
+ */
+type HostPushState = PushAvailability | 'subscribed';
+
+const PUSH_COPY: Record<HostPushState, string> = {
+  ready: 'Get an alert when a terminal needs attention.',
+  subscribed: 'Alerts on.',
+  denied: 'Notifications are blocked for this site in your browser settings.',
+  unsupported: 'This browser cannot receive push notifications.',
+  'no-worker': 'Background worker unavailable — the server must be served over https.',
+  'needs-install': 'Alerts need the installed app — see above.',
+};
+
 export function HostsView({
   hosts,
   busy,
   error,
   isPaired,
+  isPushSubscribed,
+  pushState,
+  pushConfigStatus = 'ready',
   onRefresh,
   onPair,
   onConnect,
+  onEnablePush,
+  onRetryPushConfig,
 }: {
   hosts: HostView[];
   busy: string | null;
   error: string | null;
   isPaired: (hostId: string) => boolean;
+  /** True only after this Host's server registration succeeds in this session. */
+  isPushSubscribed: (hostId: string) => boolean;
+  /** Null until the browser has been asked; see the effect in `App`. */
+  pushState: PushAvailability | null;
+  /** Whether the Server's VAPID public key is already cached for a permission tap. */
+  pushConfigStatus?: PushConfigStatus;
   onRefresh: () => void;
   onPair: (host: HostView) => void;
   onConnect: (host: HostView) => void;
+  onEnablePush: (host: HostView) => void;
+  onRetryPushConfig: () => void;
 }): React.ReactElement {
   return (
     <div className={PK.app}>
@@ -412,38 +656,88 @@ export function HostsView({
       </header>
       <div className={PK.body}>
         {error ? <div className={PK.error}>{error}</div> : null}
+        {/* Install advice is moot when the server cannot push at all — the
+            rows below already say push is disabled, and the ritual the notice
+            describes would end at that same message. */}
+        {pushConfigStatus !== 'disabled' && pushState === 'needs-install' ? (
+          <InstallNotice />
+        ) : null}
         {hosts.length === 0 ? (
           <div className={PK.empty}>No hosts enrolled yet. Enroll one from your laptop.</div>
         ) : (
           hosts.map((host) => {
             const paired = isPaired(host.hostId);
+            const hostPushState: HostPushState = isPushSubscribed(host.hostId)
+              ? 'subscribed'
+              : pushState ?? 'ready';
+            const pushCopy =
+              pushConfigStatus === 'disabled'
+                ? 'This server has push notifications disabled.'
+                : hostPushState !== 'ready'
+                  ? PUSH_COPY[hostPushState]
+                  : pushConfigStatus === 'loading'
+                    ? 'Checking whether this server can send alerts…'
+                    : pushConfigStatus === 'error'
+                      ? 'Could not check whether this server can send alerts.'
+                      : PUSH_COPY.ready;
             const status = !host.online ? 'Offline' : paired ? 'Paired' : 'Not paired';
             return (
-              <div className={clsx(PK.row, !host.online && PK.rowOffline)} key={host.hostId}>
-                <div className={PK.rowMain}>
-                  <div className={PK.rowTitle}>{host.label || host.hostId}</div>
-                  <div className={PK.rowSecondary}>{status}</div>
-                </div>
-                <div className={PK.rowActions}>
-                  {host.online && !paired ? (
+              <div key={host.hostId} className="flex flex-col gap-1.5">
+                <div className={clsx(PK.row, !host.online && PK.rowOffline)}>
+                  <div className={PK.rowMain}>
+                    <div className={PK.rowTitle}>{host.label || host.hostId}</div>
+                    <div className={PK.rowSecondary}>{status}</div>
+                  </div>
+                  <div className={PK.rowActions}>
+                    {host.online && !paired ? (
+                      <button
+                        type="button"
+                        className={pkButton({ tone: 'secondary', size: 'sm' })}
+                        disabled={busy !== null}
+                        onClick={() => onPair(host)}
+                      >
+                        {busy === 'pair' ? '…' : 'Pair'}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
-                      className={pkButton({ tone: 'secondary', size: 'sm' })}
-                      disabled={busy !== null}
-                      onClick={() => onPair(host)}
+                      className={pkButton({ tone: 'primary', size: 'sm' })}
+                      disabled={busy !== null || !host.online}
+                      onClick={() => onConnect(host)}
                     >
-                      {busy === 'pair' ? '…' : 'Pair'}
+                      {busy === 'connect' ? '…' : 'Connect'}
                     </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className={pkButton({ tone: 'primary', size: 'sm' })}
-                    disabled={busy !== null || !host.online}
-                    onClick={() => onConnect(host)}
-                  >
-                    {busy === 'connect' ? '…' : 'Connect'}
-                  </button>
+                  </div>
                 </div>
+                {/* Push is per (host, device), so it belongs to the host row —
+                    and only once paired, since an unpaired Host would have no
+                    reason to address this device. */}
+                {paired && pushState ? (
+                  <div className={PK.pushRow}>
+                    <span className="min-w-0 flex-1">
+                      {pushCopy}
+                    </span>
+                    {hostPushState === 'ready' && pushConfigStatus === 'ready' ? (
+                      <button
+                        type="button"
+                        className={pkButton({ tone: 'secondary', size: 'sm' })}
+                        disabled={busy !== null}
+                        onClick={() => onEnablePush(host)}
+                      >
+                        {busy === 'push' ? '…' : 'Enable alerts'}
+                      </button>
+                    ) : hostPushState === 'ready' && pushConfigStatus === 'error' ? (
+                      <button
+                        type="button"
+                        className={pkButton({ tone: 'secondary', size: 'sm' })}
+                        disabled={busy !== null}
+                        onClick={onRetryPushConfig}
+                      >
+                        {busy === 'push-config' ? '…' : 'Retry'}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             );
           })

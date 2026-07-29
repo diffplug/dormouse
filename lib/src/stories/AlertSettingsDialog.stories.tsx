@@ -4,10 +4,10 @@ import { AlertSettingsDialog } from '../components/AlertSettingsDialog';
 /**
  * The app-global Alarm settings, normally opened from the far right of the
  * baseboard. Rendering the dialog directly keeps these stories about its own
- * content — the rule list, the two live settings, and the disabled push group —
- * rather than about the button that opens it (`Baseboard.stories.tsx` covers
- * that). Everything here is driven by story `parameters`, since the rule set and
- * the settings are app-global stores rather than props.
+ * content — the rule list and the three settings groups — rather than about the
+ * button that opens it (`Baseboard.stories.tsx` covers that). Everything here is
+ * driven by story `parameters`, since the rule set, the settings, and the
+ * push-device list are app-global stores rather than props.
  */
 function DialogStory() {
   return <AlertSettingsDialog onClose={() => {}} />;
@@ -53,8 +53,61 @@ export const SpeechEnabled: Story = {
 };
 
 /**
- * Non-default timings, proving both number fields render the stored value rather
- * than a hardcoded one. Push stays greyed regardless of what its fields hold.
+ * Push on, with one subscribed phone — the mockup's "Push will be sent to …"
+ * case. The device line is the join of the server's subscriptions and the
+ * Host's ACL labels, so a story has to prime it directly.
+ */
+export const PushEnabled: Story = {
+  parameters: {
+    primedWatchedCommands: ['claude', 'codex'],
+    primedAlertSettings: { pushEnabled: true },
+    primedPushDevices: {
+      status: 'ready',
+      devices: [{ devicePublicKey: 'device-1', label: 'iPhone Safari' }],
+    },
+  },
+};
+
+/** Fan-out: several devices have enabled alerts, so all of them are named. */
+export const PushManyDevices: Story = {
+  parameters: {
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: { pushEnabled: true },
+    primedPushDevices: {
+      status: 'ready',
+      devices: [
+        { devicePublicKey: 'device-1', label: 'iPhone Safari' },
+        { devicePublicKey: 'device-2', label: 'iPad' },
+        { devicePublicKey: 'device-3', label: 'Pixel Chrome' },
+      ],
+    },
+  },
+};
+
+/**
+ * Push on but nothing subscribed — the state a user lands in before installing
+ * Pocket to their Home Screen. It must say so rather than look broken.
+ */
+export const PushNoDevices: Story = {
+  parameters: {
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: { pushEnabled: true },
+    primedPushDevices: { status: 'ready', devices: [] },
+  },
+};
+
+/** No remote Host at all — the ordinary case for a machine that never enrolled. */
+export const PushNoHost: Story = {
+  parameters: {
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: { pushEnabled: true },
+    primedPushDevices: { status: 'no-host', devices: [] },
+  },
+};
+
+/**
+ * Non-default timings, proving every number field renders the stored value
+ * rather than a hardcoded one.
  */
 export const CustomTimings: Story = {
   parameters: {

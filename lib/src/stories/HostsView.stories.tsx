@@ -38,9 +38,14 @@ const meta: Meta<typeof HostsView> = {
     busy: null,
     error: null,
     isPaired,
+    pushState: 'ready',
+    pushConfigStatus: 'ready',
+    isPushSubscribed: () => false,
     onRefresh: () => {},
     onPair: () => {},
     onConnect: () => {},
+    onEnablePush: () => {},
+    onRetryPushConfig: () => {},
   },
   decorators: [
     (Story, context) => (
@@ -99,4 +104,63 @@ export const Refreshing: Story = {
 // Host dropped → the red error text above the list.
 export const Error: Story = {
   args: { error: 'The host disconnected.' },
+};
+
+// Registered with this Host → its row states it, with no action. Driven by the
+// per-Host marker, not by browser availability: a scope-wide PushSubscription
+// says nothing about which Hosts hold a server row.
+export const PushSubscribed: Story = {
+  args: { isPushSubscribed: () => true },
+};
+
+// One Host registered, one not — the case a scope-wide check got wrong.
+export const PushSubscribedOneHost: Story = {
+  args: { isPushSubscribed: (hostId: string) => hostId === 'host-studio' },
+};
+
+// The iOS case: Web Push is granted only to a Home Screen web app, so the row
+// asks for the one step the user must take outside the app.
+export const PushNeedsInstall: Story = {
+  args: { pushState: 'needs-install' },
+};
+
+// Blocked in browser settings → explained, not silently missing.
+export const PushDenied: Story = {
+  args: { pushState: 'denied' },
+};
+
+// Subscribing in flight → the push button shows "…".
+export const PushEnabling: Story = {
+  args: { busy: 'push' },
+};
+
+// The service worker never registered — usually an insecure origin.
+export const PushNoWorker: Story = {
+  args: { pushState: 'no-worker' },
+};
+
+/**
+ * iOS, running in a Safari tab. Web Push only reaches an installed app and
+ * there is no API to prompt for that, so the notice describes the steps — and
+ * allows for someone who already installed it and opened the wrong window,
+ * which a tab cannot distinguish. A definitively push-disabled Server hides the
+ * notice so it cannot disagree with the push row beneath it.
+ */
+export const NeedsHomeScreenInstall: Story = {
+  args: { pushState: 'needs-install' },
+};
+
+// The server was started without VAPID keys, so there is nothing to enable.
+export const PushUnconfigured: Story = {
+  args: { pushConfigStatus: 'disabled' },
+};
+
+// The config prefetch must finish before a permission-triggering tap is offered.
+export const PushConfigLoading: Story = {
+  args: { pushConfigStatus: 'loading' },
+};
+
+// A failed prefetch retries separately; Enable appears only after it succeeds.
+export const PushConfigError: Story = {
+  args: { pushConfigStatus: 'error' },
 };

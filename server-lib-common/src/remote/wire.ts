@@ -22,6 +22,12 @@ export const API_ROUTES = {
   reauthFinish: '/api/reauth/finish',
   hostEnroll: '/api/host/enroll',
   hosts: '/api/hosts',
+  pushConfig: '/api/push/config',
+  pushChallenge: '/api/push/challenge',
+  pushSubscribe: '/api/push/subscribe',
+  pushSubscriptions: '/api/push/subscriptions',
+  pushDevices: '/api/push/devices',
+  pushSend: '/api/push/send',
 } as const;
 
 export const WS_ROUTES = {
@@ -74,6 +80,21 @@ export interface SigninFinishResponse {
   sessionToken: string;
   accountId: string;
   expiresAt: number;
+  /**
+   * Base64url SPKI of the passkey that was just asserted.
+   *
+   * Returned so a browser that did not *register* this passkey can still pair
+   * and connect: both requests carry the public key (as a hash for pairing, in
+   * full for a connection), and without this the Client could only get it by
+   * having performed the registration itself — which forced a second passkey
+   * on every new browser profile, most visibly an iOS Home Screen install.
+   *
+   * Handing it out costs nothing. It is a *public* key the Host is given in
+   * every `ConnectionRequest` anyway, and possessing it authorizes nothing: a
+   * connection still requires a fresh assertion, a device-key signature, and
+   * both halves on one active ACL record (docs/specs/remote-security-model.md).
+   */
+  passkeyPublicKey: string;
 }
 
 /**
@@ -106,6 +127,105 @@ export interface HostEnrollResponse {
 
 export interface HostsResponse {
   hosts: Array<{ hostId: string; label: string; online: boolean }>;
+}
+
+// ---------------------------------------------------------------------------
+// Web Push (see alert.md "Push notifications" and server.md "HTTP API").
+//
+// Two audiences with different credentials: the Pocket Client registers its own
+// subscription with a session token plus a device signature, and the Host reads
+// and sends with its `hostToken`. Subscriptions are keyed on the PAIR
+// (hostId, devicePublicKey), so a Client subscribes once per Host it is paired
+// with and a Host can only ever see or reach its own subscribers.
+
+/** Public VAPID key, needed by the browser before it can subscribe. */
+export interface PushConfigResponse {
+  /** Base64url VAPID application server key, or null when push is unconfigured. */
+  applicationServerKey: string | null;
+}
+
+export interface PushChallengeResponse {
+  /** Base64url challenge to sign with the device key. */
+  challenge: string;
+  expiresAt: number;
+}
+
+/** The browser's `PushSubscription`, narrowed to what delivery needs. */
+export interface PushSubscriptionPayload {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
+
+export interface PushSubscribeRequest {
+  hostId: string;
+  /** Base64url raw P-256 point — the Client identity in the Host's ACL. */
+  devicePublicKey: string;
+  challenge: string;
+  /** Base64url device signature over `pushSubscribePayload`. */
+  signature: string;
+  subscription: PushSubscriptionPayload;
+}
+export interface PushSubscribeResponse {
+  subscribedAt: number;
+}
+
+/**
+ * Session auth. The account's push registrations, so a Client that reloaded can
+ * tell which Hosts it is already registered with instead of re-offering the
+ * action for all of them.
+ *
+ * Deliberately **not** parameterized by `devicePublicKey`: an endpoint that
+ * answered "which Hosts is device X registered with" would be an enumeration
+ * primitive over an input the caller need not own. This returns what the
+ * account owns and the Client filters to its own device — the same scoping
+ * `GET /api/hosts` already uses, and correct per-tenant if the SaaS mode in
+ * `## Future` lands.
+ *
+ * Identities only. The endpoint and its keys are a bearer capability to notify
+ * that phone and never leave the Server.
+ */
+export interface PushSubscriptionsResponse {
+  subscriptions: Array<{ hostId: string; devicePublicKey: string; subscribedAt: number }>;
+}
+
+/**
+ * Host-token auth. Returns identities only — the Host holds the ACL and is the
+ * only side that can turn a `devicePublicKey` into a human label, so the Server
+ * never learns one (docs/specs/remote-security-model.md).
+ */
+export interface PushDevicesResponse {
+  devices: Array<{ devicePublicKey: string; subscribedAt: number }>;
+}
+
+/**
+ * Host-token auth. `devicePublicKeys` is required and non-empty: the Host holds
+ * the ACL and is the only party that may decide who a push reaches, so the
+ * Server never selects recipients itself.
+ */
+export interface PushSendRequest {
+  devicePublicKeys: string[];
+  title: string;
+  body: string;
+  /**
+   * Collapse key. The alarm path tags per Session so a Pane that rings, is
+   * cleared, and rings again replaces its own notification instead of stacking
+   * copies on the lock screen.
+   */
+  tag?: string;
+}
+export interface PushSendResponse {
+  /** How many subscriptions accepted the push. */
+  delivered: number;
+  /** Subscriptions the push service rejected as gone; these are now dropped. */
+  expired: number;
+  /** Named devices with no subscription for this Host. */
+  unknown: number;
+  /**
+   * Deliveries the push service refused for a transient-looking reason; the
+   * rows are kept. Reported so the Host can tell an all-failed fan-out from
+   * success — the HTTP status is 200 either way.
+   */
+  failed: number;
 }
 
 // ---------------------------------------------------------------------------

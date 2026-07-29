@@ -25,6 +25,7 @@ import {
   WS_TOKEN_PARAM,
   hashPasskeyPublicKey,
   signDeviceChallenge,
+  signPushSubscribe,
   type ClientFrame,
   type ConnectionFailure,
   type ConnectionRequest,
@@ -35,6 +36,11 @@ import {
   type HostAclRecord,
   type HostsResponse,
   type PairingRequest,
+  type PushChallengeResponse,
+  type PushConfigResponse,
+  type PushSubscribeResponse,
+  type PushSubscriptionPayload,
+  type PushSubscriptionsResponse,
   type ReauthFinishResponse,
   type RemoteEventMsg,
   type RemoteResponse,
@@ -54,10 +60,10 @@ import type { RemoteWebSocket } from '../ws';
 export type PocketSocket = RemoteWebSocket;
 
 /**
- * Persistent per-device state. Passkey public keys are stashed at registration
- * keyed by credential id, because the wire never returns a passkey's public key
- * on sign-in — so pairing/connecting can only build its request on the device
- * that created the passkey (a documented POC limitation).
+ * Persistent per-device state. Passkey public keys are cached by credential id
+ * at registration *and* at sign-in — the Server returns the asserted key — so
+ * any browser profile holding a synced passkey can build pair and connect
+ * requests, not only the one that performed the registration.
  */
 export interface PocketStorage {
   getPasskeyPublicKey(credentialId: string): string | null;
@@ -188,8 +194,8 @@ export class PocketClient {
       clientDataJSON: registration.clientDataJSON,
       label,
     });
-    // Stash the public key so this device can later build pairing/connect
-    // requests (the wire never hands it back on sign-in).
+    // Cache immediately so this profile can build pairing/connect requests;
+    // sign-in also refreshes this value from the Server's verified response.
     this.#storage.setPasskeyPublicKey(registration.credentialId, registration.publicKey);
     this.#credentialId = registration.credentialId;
     return finish;
@@ -203,6 +209,12 @@ export class PocketClient {
     const finish = await this.#api<SigninFinishResponse>(API_ROUTES.signinFinish, { assertion });
     this.#sessionToken = finish.sessionToken;
     this.#credentialId = assertion.credentialId;
+    // Signing in is enough to pair from here. The Server returns the asserted
+    // passkey's public key, so a browser profile that never performed the
+    // registration — an iOS Home Screen install, a second browser — can still
+    // build pair and connect requests instead of being pushed into creating a
+    // redundant second passkey.
+    this.#storage.setPasskeyPublicKey(assertion.credentialId, finish.passkeyPublicKey);
     return finish;
   }
 
@@ -213,6 +225,76 @@ export class PocketClient {
       { method: 'GET', headers: { authorization: `Bearer ${this.#requireToken()}` } },
     );
     return response.hosts;
+  }
+
+  // --- Web Push ------------------------------------------------------------
+
+  /**
+   * The VAPID public key a browser needs before it can subscribe, or `null`
+   * when the server has push disabled. Unauthenticated — the key is public by
+   * construction.
+   */
+  async getPushConfig(): Promise<string | null> {
+    const response = await this.#api<PushConfigResponse>(
+      API_ROUTES.pushConfig,
+      undefined,
+      { method: 'GET' },
+    );
+    return response.applicationServerKey;
+  }
+
+  /**
+   * The Hosts **this device** is already registered to receive push from.
+   *
+   * The Server answers with the whole account's registrations and the filter
+   * happens here, so there is no endpoint that reports on a `devicePublicKey`
+   * the caller does not hold. Lets a reloaded Pocket show "Alerts on." instead
+   * of re-offering an action already taken.
+   */
+  async listPushSubscribedHosts(): Promise<string[]> {
+    const response = await this.#api<PushSubscriptionsResponse>(
+      API_ROUTES.pushSubscriptions,
+      undefined,
+      { method: 'GET', headers: { authorization: `Bearer ${this.#requireToken()}` } },
+    );
+    const { devicePublicKey } = await this.#getDeviceKey();
+    return response.subscriptions
+      .filter((s) => s.devicePublicKey === devicePublicKey)
+      .map((s) => s.hostId);
+  }
+
+  /**
+   * Register a browser push subscription against `hostId`, signing it with this
+   * device's key so the Server can bind it to the same Client identity the
+   * Host's ACL records. Subscriptions are per (host, device): a phone paired
+   * with two laptops subscribes twice.
+   *
+   * The signature covers the endpoint, so a captured one cannot be reused to
+   * register a different endpoint under this identity.
+   */
+  async subscribeToPush(
+    hostId: string,
+    subscription: PushSubscriptionPayload,
+  ): Promise<PushSubscribeResponse> {
+    const token = this.#requireToken();
+    const auth = { authorization: `Bearer ${token}` };
+    const { challenge } = await this.#api<PushChallengeResponse>(
+      API_ROUTES.pushChallenge,
+      undefined,
+      { headers: auth },
+    );
+    const deviceKey = await this.#getDeviceKey();
+    const signature = await signPushSubscribe(deviceKey.privateKey, {
+      hostId,
+      challenge,
+      devicePublicKey: deviceKey.devicePublicKey,
+      endpoint: subscription.endpoint,
+    });
+    return this.#api<PushSubscribeResponse>(
+      API_ROUTES.pushSubscribe,
+      { hostId, devicePublicKey: deviceKey.devicePublicKey, challenge, signature, subscription },
+      { headers: auth },
+    );
   }
 
   // --- Relay socket --------------------------------------------------------
@@ -577,8 +659,8 @@ export class PocketClient {
 }
 
 export const PASSKEY_UNAVAILABLE_MESSAGE =
-  "This device does not hold the passkey's public key, so it cannot pair or connect. " +
-  'Pair from the device that first created the passkey (POC limitation).';
+  "This app no longer has the signed-in passkey's public key, so it cannot pair or connect. " +
+  'Sign in again to restore it.';
 
 const RECOVERABLE_PAIRING_FAILURES = new Set<ConnectionFailure>([
   'passkey-not-paired',

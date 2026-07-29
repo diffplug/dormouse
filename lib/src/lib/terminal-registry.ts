@@ -75,6 +75,16 @@ export {
 } from './alert-settings';
 export type { AlertSettings } from './alert-settings';
 
+export {
+  getPushDevices,
+  refreshPushDevicesNow,
+  resetPushDevices,
+  setPushDevices,
+  setPushDevicesRefresher,
+  subscribeToPushDevices,
+} from './push-devices';
+export type { PushDevice, PushDevicesState } from './push-devices';
+
 export { deriveSessionLabel } from './session-label';
 
 export {
