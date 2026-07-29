@@ -323,7 +323,9 @@ export function createApp(config: AppConfig): CreatedApp {
    */
   const verifyFreshAssertion = async (
     assertion: SigninFinishRequest['assertion'] | undefined,
-  ): Promise<{ ok: true } | { ok: false; status: 400 | 401 | 404; error: string }> => {
+  ): Promise<
+    { ok: true; publicKey: string } | { ok: false; status: 400 | 401 | 404; error: string }
+  > => {
     if (!assertion || typeof assertion.credentialId !== 'string') {
       return { ok: false, status: 400, error: 'malformed assertion' };
     }
@@ -353,7 +355,10 @@ export function createApp(config: AppConfig): CreatedApp {
     if (!result.ok) {
       return { ok: false, status: 401, error: `assertion rejected: ${result.reason}` };
     }
-    return { ok: true };
+    // The verified passkey's public key travels back to the caller. It is
+    // public, and a Client needs it to build pair/connect requests — see
+    // `SigninFinishResponse.passkeyPublicKey`.
+    return { ok: true, publicKey: stored.publicKey };
   };
 
   app.post(API_ROUTES.signinFinish, async (c) => {
@@ -366,6 +371,7 @@ export function createApp(config: AppConfig): CreatedApp {
       sessionToken: token,
       accountId: session.accountId,
       expiresAt: session.expiresAt,
+      passkeyPublicKey: verdict.publicKey,
     };
     return c.json(res);
   });

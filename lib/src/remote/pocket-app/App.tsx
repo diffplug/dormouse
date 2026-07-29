@@ -25,6 +25,7 @@ import { browserWebAuthn } from '../client/webauthn';
 import { getOrCreateDeviceKey } from '../client/device-key';
 import {
   getPushAvailability,
+  isInstalledWebApp,
   subscribeToPushInBrowser,
   type PushAvailability,
 } from '../client/push-subscribe';
@@ -50,8 +51,18 @@ type PushConfigState =
   | { status: 'disabled' }
   | { status: 'error' };
 
-/** A phone-friendly default pairing label. */
-const DEVICE_LABEL = 'Dormouse Pocket';
+/**
+ * The label this Client suggests at pairing.
+ *
+ * One phone can hold two Client identities — a Safari tab and a Home Screen
+ * install have separate storage and therefore separate device keys — and they
+ * are genuinely separate delivery targets that cannot be merged. Naming the
+ * mode is what lets the person approving on the laptop, and the alarm dialog
+ * afterwards, tell them apart.
+ */
+function deviceLabel(): string {
+  return isInstalledWebApp() ? 'Dormouse Pocket (Home Screen)' : 'Dormouse Pocket (browser)';
+}
 
 // --- Pocket chrome vocabulary ------------------------------------------------
 //
@@ -275,7 +286,7 @@ export default function App(): React.ReactElement {
   const onPair = (host: HostView) =>
     run('pair', async () => {
       await ensureSocket();
-      const result = await client.pair(host.hostId, DEVICE_LABEL);
+      const result = await client.pair(host.hostId, deviceLabel());
       if (!result.approved) throw new Error(result.error ?? 'Pairing was denied.');
       setPairedIds((prev) => new Set(prev).add(host.hostId));
     });
@@ -352,13 +363,11 @@ export default function App(): React.ReactElement {
         isPushSubscribed={(id) => pushSubscribedHostIds.has(id)}
         pushState={pushState}
         pushConfigStatus={pushConfig.status}
-        needsLocalPasskey={!client.hasPasskeyMaterial()}
         onRefresh={() => run('refresh', loadHosts)}
         onPair={onPair}
         onConnect={onConnect}
         onEnablePush={onEnablePush}
         onRetryPushConfig={onRetryPushConfig}
-        onSetup={onSetup}
       />
     );
   }
@@ -493,41 +502,6 @@ function InstallNotice(): React.ReactElement {
 }
 
 /**
- * Shown when sign-in worked but this profile holds no passkey public key, so
- * pairing and connecting would both fail.
- *
- * The usual cause is the Home Screen install: its storage is partitioned away
- * from the Safari tab that created the account, and the wire never returns a
- * passkey's public key on sign-in. The passkey itself synced, which is exactly
- * why the failure would otherwise look inexplicable — everything up to the tap
- * succeeds.
- */
-function LocalPasskeyNotice({
-  busy,
-  onSetup,
-}: {
-  busy: string | null;
-  onSetup: (password: string, label: string) => void;
-}): React.ReactElement {
-  return (
-    <div className={PK.notice}>
-      <div className={PK.noticeTitle}>Finish setting up this app</div>
-      <p className={PK.noticeBody}>
-        You are signed in, but this app has its own storage and does not hold a passkey yet —
-        so it cannot pair or connect. Register one here with the server's setup password. It is
-        added to the same account.
-      </p>
-      <PasskeySetupFields
-        idPrefix="pocket-local"
-        busy={busy}
-        submitLabel="Create passkey for this app"
-        onSubmit={onSetup}
-      />
-    </div>
-  );
-}
-
-/**
  * The setup-password + label pair and its submit button, shared by the auth
  * screen and the local-passkey notice — the same credential form in two places,
  * so its ids, autocomplete rules, and disabled logic have one definition.
@@ -605,14 +579,12 @@ export function HostsView({
   isPaired,
   isPushSubscribed,
   pushState,
-  needsLocalPasskey,
   pushConfigStatus = 'ready',
   onRefresh,
   onPair,
   onConnect,
   onEnablePush,
   onRetryPushConfig,
-  onSetup,
 }: {
   hosts: HostView[];
   busy: string | null;
@@ -622,8 +594,6 @@ export function HostsView({
   isPushSubscribed: (hostId: string) => boolean;
   /** Null until the browser has been asked; see the effect in `App`. */
   pushState: PushAvailability | null;
-  /** Signed in, but this profile cannot pair — see {@link LocalPasskeyNotice}. */
-  needsLocalPasskey: boolean;
   /** Whether the Server's VAPID public key is already cached for a permission tap. */
   pushConfigStatus?: PushConfigStatus;
   onRefresh: () => void;
@@ -631,7 +601,6 @@ export function HostsView({
   onConnect: (host: HostView) => void;
   onEnablePush: (host: HostView) => void;
   onRetryPushConfig: () => void;
-  onSetup: (password: string, label: string) => void;
 }): React.ReactElement {
   return (
     <div className={PK.app}>
@@ -654,7 +623,6 @@ export function HostsView({
         {pushConfigStatus !== 'disabled' && pushState === 'needs-install' ? (
           <InstallNotice />
         ) : null}
-        {needsLocalPasskey ? <LocalPasskeyNotice busy={busy} onSetup={onSetup} /> : null}
         {hosts.length === 0 ? (
           <div className={PK.empty}>No hosts enrolled yet. Enroll one from your laptop.</div>
         ) : (

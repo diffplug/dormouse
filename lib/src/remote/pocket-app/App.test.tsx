@@ -49,13 +49,11 @@ function renderHosts(
           isPushSubscribed={overrides.isPushSubscribed ?? (() => false)}
           pushState={overrides.pushState ?? 'ready'}
           pushConfigStatus={overrides.pushConfigStatus ?? 'ready'}
-          needsLocalPasskey={false}
           onRefresh={() => undefined}
           onPair={() => undefined}
           onConnect={() => undefined}
           onEnablePush={overrides.onEnablePush ?? (() => undefined)}
           onRetryPushConfig={overrides.onRetryPushConfig ?? (() => undefined)}
-          onSetup={() => undefined}
         />
       </StrictMode>,
     );

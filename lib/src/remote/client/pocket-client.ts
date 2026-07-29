@@ -60,10 +60,10 @@ import type { RemoteWebSocket } from '../ws';
 export type PocketSocket = RemoteWebSocket;
 
 /**
- * Persistent per-device state. Passkey public keys are stashed at registration
- * keyed by credential id, because the wire never returns a passkey's public key
- * on sign-in — so pairing/connecting can only build its request on the device
- * that created the passkey (a documented POC limitation).
+ * Persistent per-device state. Passkey public keys are cached by credential id
+ * at registration *and* at sign-in — the Server returns the asserted key — so
+ * any browser profile holding a synced passkey can build pair and connect
+ * requests, not only the one that performed the registration.
  */
 export interface PocketStorage {
   getPasskeyPublicKey(credentialId: string): string | null;
@@ -171,22 +171,6 @@ export class PocketClient {
     return this.#storage.isPaired(hostId);
   }
 
-  /**
-   * True when this browser profile holds the public key for the signed-in
-   * passkey, and can therefore pair and connect.
-   *
-   * False is the ordinary state after signing in with a *synced* passkey on a
-   * profile that did not create it — most notably an iOS Home Screen install,
-   * whose storage is partitioned away from the Safari tab that set the account
-   * up. The passkey itself syncs, so sign-in succeeds and only the later pair
-   * or connect fails; checking up front lets the UI explain that instead of
-   * surfacing {@link PASSKEY_UNAVAILABLE_MESSAGE} after a tap.
-   */
-  hasPasskeyMaterial(): boolean {
-    if (!this.#credentialId) return false;
-    return this.#storage.getPasskeyPublicKey(this.#credentialId) !== null;
-  }
-
   /** Notified when the Host drops (a `host-gone` frame or a closed socket). */
   setOnHostGone(callback: (() => void) | null): void {
     this.#onHostGone = callback;
@@ -225,6 +209,12 @@ export class PocketClient {
     const finish = await this.#api<SigninFinishResponse>(API_ROUTES.signinFinish, { assertion });
     this.#sessionToken = finish.sessionToken;
     this.#credentialId = assertion.credentialId;
+    // Signing in is enough to pair from here. The Server returns the asserted
+    // passkey's public key, so a browser profile that never performed the
+    // registration — an iOS Home Screen install, a second browser — can still
+    // build pair and connect requests instead of being pushed into creating a
+    // redundant second passkey.
+    this.#storage.setPasskeyPublicKey(assertion.credentialId, finish.passkeyPublicKey);
     return finish;
   }
 

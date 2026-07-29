@@ -180,23 +180,32 @@ output by hand.
 
 **The installed app is a separate storage partition from the browser tab.** On
 iOS, cookies, `localStorage`, and IndexedDB are not shared between Safari and a
-Home Screen web app. Two consequences follow, and both are setup order, not
-bugs:
+Home Screen web app, so the install generates its own device key and is a
+*different Client* than the same phone's Safari tab.
 
-- The installed app generates its own device key, so it is a *different Client*
-  than the same phone's Safari tab and needs its own pairing approval.
-- Signing in there with a synced passkey is not enough to pair or connect. The
-  wire never returns a passkey's public key on sign-in, so `PocketStorage`
-  caches it at registration — and that cache is in the tab's partition, not the
-  installed app's, which surfaces as `PASSKEY_UNAVAILABLE_MESSAGE`. First-time
-  setup must be run again *inside* the installed app, registering an additional
-  passkey on the account. This is the documented POC limitation in
-  `lib/src/remote/client/pocket-client.ts` — "pairing can only happen on the
-  device that created the passkey" — where the installed app counts as a
-  different device.
+Exactly one consequence survives, and it is the security model working as
+designed: the install needs **its own pairing approval** on each Host. Signing
+in is not enough to reach a machine, and a Client the user has not approved
+there must not inherit access
+([remote-security-model.md](./remote-security-model.md)).
 
-So the order is: install to the Home Screen **first**, then set up, pair, and
-enable alerts from within it.
+Signing in *is* enough to ask. `SigninFinishResponse` returns the asserted
+passkey's public key, which a Client needs to build pair and connect requests,
+so a profile that never performed the registration can still pair. Without it
+only the registering browser could — which forced a redundant second passkey on
+every new install and was an artifact of the wire, not a property of the trust
+model. The key is public: the Host is handed it in every `ConnectionRequest`
+anyway, and holding it authorizes nothing.
+
+So the order is: install to the Home Screen **first**, then sign in, approve the
+pairing on the machine, and enable alerts from within it.
+
+Because one phone can hold two Client identities this way, Pocket names the mode
+in the label it suggests at pairing — `Dormouse Pocket (Home Screen)` versus
+`Dormouse Pocket (browser)` — so the person approving on the laptop, and the
+Alarm settings dialog afterwards, can tell two entries for one phone apart. They
+cannot be merged: separate device keys are separate delivery targets. Source of
+truth: `deviceLabel` in `lib/src/remote/pocket-app/App.tsx`.
 
 ### Detecting install state, and what cannot be detected
 
@@ -224,10 +233,6 @@ Source of truth: `isInstalledWebApp` / `requiresInstallForPush` in
   capability probe: in an iOS Safari tab, `Notification` and `PushManager` are
   themselves absent, so probing first would answer `unsupported` when the
   actionable answer is "install".
-- The passkey-partition case is checked **up front**, right after sign-in
-  (`PocketClient.hasPasskeyMaterial`), not on a failed Pair tap. Everything up
-  to that tap succeeds, so the failure is otherwise inexplicable; the notice
-  offers first-time setup inline.
 
 Because registration is best-effort and asynchronous, both the availability
 check and the subscribe path await the tracked registration promise from

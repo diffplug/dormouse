@@ -41,13 +41,11 @@ const meta: Meta<typeof HostsView> = {
     pushState: 'ready',
     pushConfigStatus: 'ready',
     isPushSubscribed: () => false,
-    needsLocalPasskey: false,
     onRefresh: () => {},
     onPair: () => {},
     onConnect: () => {},
     onEnablePush: () => {},
     onRetryPushConfig: () => {},
-    onSetup: () => {},
   },
   decorators: [
     (Story, context) => (
@@ -150,20 +148,6 @@ export const PushNoWorker: Story = {
  */
 export const NeedsHomeScreenInstall: Story = {
   args: { pushState: 'needs-install' },
-};
-
-/**
- * Signed in on a profile that holds no passkey public key — the Home Screen
- * install's partitioned storage. Pair and Connect would both fail, so the
- * notice offers the fix inline rather than waiting for a failed tap.
- */
-export const NeedsLocalPasskey: Story = {
-  args: { needsLocalPasskey: true },
-};
-
-// Both at once: a first run in a Safari tab on iOS after setup happened elsewhere.
-export const NeedsInstallAndPasskey: Story = {
-  args: { pushState: 'needs-install', needsLocalPasskey: true },
 };
 
 // The server was started without VAPID keys, so there is nothing to enable.

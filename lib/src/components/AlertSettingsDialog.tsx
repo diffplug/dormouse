@@ -27,12 +27,19 @@ const TITLE_ID = 'alert-settings-dialog-title';
  * The "Push will be sent to …" line. Every state names a cause, because a push
  * that silently goes nowhere is indistinguishable from one that is broken.
  * `no-host` is the ordinary case for a build with no remote Host at all.
+ *
+ * The list is deliberately scoped to *this* machine, not the account: the ACL
+ * that authorizes these devices lives on the Host and never on the Server
+ * (`docs/specs/remote-security-model.md`), so there is no account-wide device
+ * list to show and the copy must not imply one.
  */
 function describePushTargets(push: PushDevicesState): string {
   if (push.status === 'loading') return 'Looking for devices…';
   if (push.status === 'error') return 'Could not reach the server to list devices.';
   if (push.status === 'no-host') return 'Connect this machine to a Dormouse server to send push.';
-  if (push.devices.length === 0) return 'No device has enabled alerts in Dormouse Pocket yet.';
+  if (push.devices.length === 0) {
+    return 'No device paired with this machine has enabled alerts in Dormouse Pocket yet.';
+  }
   return `Push will be sent to ${push.devices.map((device) => device.label).join(', ')}`;
 }
 

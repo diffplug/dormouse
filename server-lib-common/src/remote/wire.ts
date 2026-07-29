@@ -80,6 +80,21 @@ export interface SigninFinishResponse {
   sessionToken: string;
   accountId: string;
   expiresAt: number;
+  /**
+   * Base64url SPKI of the passkey that was just asserted.
+   *
+   * Returned so a browser that did not *register* this passkey can still pair
+   * and connect: both requests carry the public key (as a hash for pairing, in
+   * full for a connection), and without this the Client could only get it by
+   * having performed the registration itself — which forced a second passkey
+   * on every new browser profile, most visibly an iOS Home Screen install.
+   *
+   * Handing it out costs nothing. It is a *public* key the Host is given in
+   * every `ConnectionRequest` anyway, and possessing it authorizes nothing: a
+   * connection still requires a fresh assertion, a device-key signature, and
+   * both halves on one active ACL record (docs/specs/remote-security-model.md).
+   */
+  passkeyPublicKey: string;
 }
 
 /**

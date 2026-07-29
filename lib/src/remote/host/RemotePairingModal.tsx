@@ -32,8 +32,13 @@ export function RemotePairingModal({
       <h2 id="remote-pairing-title" className="mb-1 text-base font-bold text-foreground">
         Pair a new device
       </h2>
-      <p className="mb-3 text-sm text-muted">
-        A device is requesting remote access to this terminal.
+      {/* Signing in is not enough to reach this machine — approving here is.
+          Saying so is the whole point of the prompt: every browser is a
+          separate device even on hardware already paired, so this must not read
+          as a formality (`docs/specs/remote-security-model.md`). */}
+      <p className="mb-3 text-sm leading-relaxed text-muted">
+        This device signed in to your account and is asking to reach this
+        machine's terminals. Approve only if you are the one asking.
       </p>
 
       <ModalReviewBlock density="default" className="mb-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
@@ -44,6 +49,11 @@ export function RemotePairingModal({
         <span className="text-muted">Key</span>
         <span className="text-foreground">{fingerprint}…</span>
       </ModalReviewBlock>
+
+      <p className="mb-4 text-sm leading-relaxed text-muted">
+        Approving adds it to this machine only. Your other machines are
+        unaffected, and each asks separately.
+      </p>
 
       <div className="flex justify-end gap-2">
         <button

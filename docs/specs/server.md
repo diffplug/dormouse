@@ -136,7 +136,7 @@ so `node --test` can drive setup → pairing → connect end to end via
 | `POST /api/setup/begin`          | setup password | `{ challenge }` for registration. Only the password gates it — re-presenting the password adds another passkey to the account |
 | `POST /api/setup/finish`         | setup password | `{ credentialId, publicKey, clientDataJSON }` → creates/updates `account.json` |
 | `POST /api/signin/begin`         | —              | `{ challenge }` for sign-in                        |
-| `POST /api/signin/finish`        | —              | full assertion → verified → `{ sessionToken }` (random, in-memory, hours-scale TTL) |
+| `POST /api/signin/finish`        | —              | full assertion → verified → `{ sessionToken, passkeyPublicKey }` (token is random, in-memory, hours-scale TTL) |
 | `POST /api/reauth/begin`         | session token  | `{ challenge }` to re-assert presence on the current session |
 | `POST /api/reauth/finish`        | session token  | full assertion → verified (same checks as sign-in) → refreshes the session's presence stamp; the token and relay socket are kept |
 | `POST /api/host/enroll`          | setup password | `{ label }` → `{ hostId, hostToken, origin, rpId }`; appends to `hosts.json` |

@@ -217,7 +217,12 @@ const AUTH_ROUTES = {
   }),
   '/api/signin/begin': () => ({ json: { challenge: b64uChallenge(9), rpId: RP_ID } }),
   '/api/signin/finish': () => ({
-    json: { sessionToken: 'tok-abc', accountId: SELFHOST_ACCOUNT_ID, expiresAt: 1 },
+    json: {
+      sessionToken: 'tok-abc',
+      accountId: SELFHOST_ACCOUNT_ID,
+      expiresAt: 1,
+      passkeyPublicKey: PASSKEY_PUBLIC_KEY,
+    },
   }),
   '/api/hosts': () => ({ json: { hosts: [{ hostId: 'h1', label: 'Laptop', online: true }] } }),
 } as const;
@@ -257,6 +262,35 @@ describe('setup + signin', () => {
     const hostsCall = harness.calls.find((c) => c.url.endsWith('/api/hosts'))!;
     expect(hostsCall.method).toBe('GET');
     expect(hostsCall.headers.authorization).toBe('Bearer tok-abc');
+  });
+
+  /**
+   * The account-centric half of the model: a synced passkey is enough to pair
+   * from a browser profile that never performed the registration — an iOS Home
+   * Screen install, a second browser — because sign-in returns the asserted
+   * passkey's public key. Before this, only the registering profile could build
+   * a pairing request, which forced a redundant second passkey per install.
+   *
+   * The device-centric half is untouched: this Client still needs its own
+   * approval on the Host before it reaches anything.
+   */
+  it('can pair after signing in on a profile that never registered', async () => {
+    const harness = makeClient({ ...AUTH_ROUTES });
+    // No setup() — this profile's storage starts empty, as a fresh install's does.
+    await harness.client.signin();
+
+    const open = harness.client.openSocket();
+    harness.socket.fireOpen();
+    await open;
+
+    const pairing = harness.client.pair('h1', 'iPhone (Home Screen)');
+    const frame = await nextSent(harness.socket, (f) => f.t === 'pair');
+    harness.socket.server({ t: 'pair-result', approved: true, record: { hostId: 'h1' } });
+    await pairing;
+
+    // The request carries the hash of the key sign-in handed back.
+    const request = (frame as { request: { passkeyPublicKeyHash: string } }).request;
+    expect(request.passkeyPublicKeyHash).toBe(await hashPasskeyPublicKey(PASSKEY_PUBLIC_KEY));
   });
 
   it('rejects with the server error message on a failed request', async () => {
