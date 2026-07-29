@@ -172,6 +172,26 @@ output by hand.
   There is no deep link to an individual Pane, because protocol-v1 carries no
   routable surface ref.
 
+**The installed app is a separate storage partition from the browser tab.** On
+iOS, cookies, `localStorage`, and IndexedDB are not shared between Safari and a
+Home Screen web app. Two consequences follow, and both are setup order, not
+bugs:
+
+- The installed app generates its own device key, so it is a *different Client*
+  than the same phone's Safari tab and needs its own pairing approval.
+- Signing in there with a synced passkey is not enough to pair or connect. The
+  wire never returns a passkey's public key on sign-in, so `PocketStorage`
+  caches it at registration — and that cache is in the tab's partition, not the
+  installed app's, which surfaces as `PASSKEY_UNAVAILABLE_MESSAGE`. First-time
+  setup must be run again *inside* the installed app, registering an additional
+  passkey on the account. This is the documented POC limitation in
+  `lib/src/remote/client/pocket-client.ts` — "pairing can only happen on the
+  device that created the passkey" — where the installed app counts as a
+  different device.
+
+So the order is: install to the Home Screen **first**, then set up, pair, and
+enable alerts from within it.
+
 The existing static serving needs no special-casing: `serveStatic` already
 answers `application/manifest+json` for `.webmanifest` and `text/javascript` for
 `sw.js`.
