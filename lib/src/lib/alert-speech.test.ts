@@ -5,6 +5,7 @@ vi.mock('./platform', () => ({
 }));
 
 import { startAlertSpeech, toSpokenText } from './alert-speech';
+import { getAlertSpeechState } from './alert-speech-state';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from './alert-settings';
 import { clearPrimedActivity, primeActivity } from './session-activity-store';
 import type { SessionStatus } from './activity-monitor';
@@ -15,13 +16,30 @@ const SPEAK_DELAY_MS = 10_000;
 
 /** Utterances passed to the stubbed Web Speech API, in order. */
 let spoken: string[];
+let utterances: StubUtterance[];
 let stopSpeech: (() => void) | null = null;
+
+interface StubUtterance {
+  text: string;
+  onstart: (() => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+}
 
 function stubSpeechSynthesis(): void {
   spoken = [];
-  vi.stubGlobal('speechSynthesis', { speak: (u: { text: string }) => spoken.push(u.text) });
+  utterances = [];
+  vi.stubGlobal('speechSynthesis', {
+    speak: (utterance: StubUtterance) => {
+      spoken.push(utterance.text);
+      utterances.push(utterance);
+    },
+  });
   vi.stubGlobal('SpeechSynthesisUtterance', class {
     text: string;
+    onstart: (() => void) | null = null;
+    onend: (() => void) | null = null;
+    onerror: (() => void) | null = null;
     constructor(text: string) { this.text = text; }
   });
 }
@@ -82,6 +100,11 @@ describe('toSpokenText', () => {
   it('strips ampersands and control characters from untrusted titles', () => {
     expect(toSpokenText('make&test')).toBe('make test');
     expect(toSpokenText('build\u0007done\u001b')).toBe('build done');
+  });
+
+  it('drops asterisks instead of saying “asterisk” aloud', () => {
+    expect(toSpokenText('eight *')).toBe('eight');
+    expect(toSpokenText('build*finished')).toBe('build finished');
   });
 
   it('collapses the whitespace its own substitutions create', () => {
@@ -185,11 +208,74 @@ describe('spoken alarms', () => {
     expect(spoken).toEqual(['terminal']);
   });
 
+  it('publishes SPEAKING on actual start, then SPOKEN on end', () => {
+    start();
+    ring('pty-1');
+    vi.advanceTimersByTime(SPEAK_DELAY_MS);
+
+    expect(getAlertSpeechState('pty-1')).toBeNull();
+    utterances[0].onstart?.();
+    expect(getAlertSpeechState('pty-1')).toBe('speaking');
+
+    utterances[0].onend?.();
+    expect(getAlertSpeechState('pty-1')).toBe('spoken');
+  });
+
+  it('keeps SPOKEN through unrelated churn while the ring remains unresolved', () => {
+    start();
+    ring('pty-1');
+    vi.advanceTimersByTime(SPEAK_DELAY_MS);
+    utterances[0].onstart?.();
+    utterances[0].onend?.();
+
+    primeActivity('pty-1', { status: 'ALERT_RINGING', todo: true });
+    setStatus('another-pane', 'BUSY');
+    expect(getAlertSpeechState('pty-1')).toBe('spoken');
+  });
+
+  it('clears delivery state when attention or another deliberate action resolves the ring', () => {
+    start();
+    ring('pty-1');
+    vi.advanceTimersByTime(SPEAK_DELAY_MS);
+    utterances[0].onstart?.();
+    expect(getAlertSpeechState('pty-1')).toBe('speaking');
+
+    setStatus('pty-1', 'NOTHING_TO_SHOW');
+    expect(getAlertSpeechState('pty-1')).toBeNull();
+
+    // The engine can finish after the user attends. Its stale callback must not
+    // resurrect HAS SPOKEN after the resolution.
+    utterances[0].onend?.();
+    expect(getAlertSpeechState('pty-1')).toBeNull();
+  });
+
+  it('does not publish a queued utterance that starts after the ring was resolved', () => {
+    start();
+    ring('pty-1');
+    vi.advanceTimersByTime(SPEAK_DELAY_MS);
+
+    setStatus('pty-1', 'NOTHING_TO_SHOW');
+    utterances[0].onstart?.();
+    utterances[0].onend?.();
+    expect(getAlertSpeechState('pty-1')).toBeNull();
+  });
+
+  it('records SPOKEN after an engine error if the utterance really began', () => {
+    start();
+    ring('pty-1');
+    vi.advanceTimersByTime(SPEAK_DELAY_MS);
+    utterances[0].onstart?.();
+    utterances[0].onerror?.();
+
+    expect(getAlertSpeechState('pty-1')).toBe('spoken');
+  });
+
   it('no-ops when the host webview has no speech backend', () => {
     vi.stubGlobal('speechSynthesis', undefined);
     start();
     ring('pty-1');
 
     expect(() => vi.advanceTimersByTime(60_000)).not.toThrow();
+    expect(getAlertSpeechState('pty-1')).toBeNull();
   });
 });
