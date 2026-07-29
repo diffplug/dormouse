@@ -138,6 +138,16 @@ export async function subscribeToPushInBrowser(
   return { endpoint, keys: { p256dh, auth } };
 }
 
+/**
+ * Whether an existing subscription was minted for `expected`.
+ *
+ * A null key means the browser did not report which key the subscription
+ * carries, so this answers false and the caller rotates. That is the safe
+ * direction — a stale endpoint the Server cannot sign for is worse than a
+ * needless rotation — but it does invalidate other Hosts' stored endpoints, so
+ * it is only correct because every Push-capable browser populates
+ * `PushSubscriptionOptions.applicationServerKey`.
+ */
 function sameBytes(actual: ArrayBuffer | null, expected: Uint8Array): boolean {
   if (!actual) return false;
   const bytes = new Uint8Array(actual);

@@ -39,6 +39,7 @@ const meta: Meta<typeof HostsView> = {
     error: null,
     isPaired,
     pushState: 'ready',
+    isPushSubscribed: () => false,
     needsLocalPasskey: false,
     onRefresh: () => {},
     onPair: () => {},
@@ -105,9 +106,16 @@ export const Error: Story = {
   args: { error: 'The host disconnected.' },
 };
 
-// Alerts already on for this device → the push row states it, with no action.
+// Registered with this Host → its row states it, with no action. Driven by the
+// per-Host marker, not by browser availability: a scope-wide PushSubscription
+// says nothing about which Hosts hold a server row.
 export const PushSubscribed: Story = {
-  args: { pushState: 'subscribed' },
+  args: { isPushSubscribed: () => true },
+};
+
+// One Host registered, one not — the case a scope-wide check got wrong.
+export const PushSubscribedOneHost: Story = {
+  args: { isPushSubscribed: (hostId: string) => hostId === 'host-studio' },
 };
 
 // The iOS case: Web Push is granted only to a Home Screen web app, so the row
