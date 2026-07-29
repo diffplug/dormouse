@@ -56,6 +56,7 @@ import type {
   PushSubscribeRequest,
   PushSubscribeResponse,
   PushSubscriptionPayload,
+  PushSubscriptionsResponse,
   ReauthFinishRequest,
   ReauthFinishResponse,
   SetupBeginRequest,
@@ -516,6 +517,27 @@ export function createApp(config: AppConfig): CreatedApp {
       keys: body.subscription.keys,
     });
     const res: PushSubscribeResponse = { subscribedAt: stored.subscribedAt };
+    return c.json(res);
+  });
+
+  app.get(API_ROUTES.pushSubscriptions, requireSession, async (c) => {
+    // Not filtered by a caller-supplied devicePublicKey: that would be an
+    // enumeration primitive over an input the caller need not own. The account
+    // owns these rows, so the account's session may read them and the Client
+    // filters to its own device.
+    //
+    // No 503 when push is unconfigured — rows can outlive a key being removed,
+    // and the truthful answer is the list, not an error.
+    const subscriptions = await pushStore.list();
+    // Identities only: the endpoint and its keys are a bearer capability to
+    // notify that phone, and never leave the Server.
+    const res: PushSubscriptionsResponse = {
+      subscriptions: subscriptions.map((s) => ({
+        hostId: s.hostId,
+        devicePublicKey: s.devicePublicKey,
+        subscribedAt: s.subscribedAt,
+      })),
+    };
     return c.json(res);
   });
 

@@ -258,6 +258,61 @@ test('re-subscribing replaces the row rather than accumulating one per rotation'
   assert.equal(stored[0].endpoint, 'https://push.example.com/2');
 });
 
+// --- subscriptions (client-facing) -----------------------------------------
+
+test('subscriptions lets a reloaded client find the Hosts it already registered', async () => {
+  const { app, host, sessionToken } = await pushApp();
+  const { body: other } = await enrollHost(app, { label: 'Other laptop' });
+  const client = await SimClient.create({ origin: ORIGIN });
+  await subscribe(app, { sessionToken, host, client });
+
+  const res = await app.request(API_ROUTES.pushSubscriptions, {
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  assert.equal(res.status, 200);
+  const { subscriptions } = await res.json();
+  assert.equal(subscriptions.length, 1);
+  assert.equal(subscriptions[0].hostId, host.hostId);
+  assert.equal(subscriptions[0].devicePublicKey, client.deviceKey.devicePublicKey);
+  assert.equal(typeof subscriptions[0].subscribedAt, 'number');
+  assert.notEqual(subscriptions[0].hostId, other.hostId);
+});
+
+test('subscriptions never returns the endpoint or its keys', async () => {
+  // Those are a bearer capability to notify the phone; only identities leave.
+  const { app, host, sessionToken } = await pushApp();
+  const client = await SimClient.create({ origin: ORIGIN });
+  await subscribe(app, { sessionToken, host, client });
+
+  const res = await app.request(API_ROUTES.pushSubscriptions, {
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  const body = await res.text();
+  assert.equal(body.includes('push.example.com'), false);
+  assert.equal(body.includes('FakeAuthSecret'), false);
+  assert.equal(body.includes('BFakeP256dhKey'), false);
+});
+
+test('subscriptions requires a session and rejects a host token', async () => {
+  const { app, host } = await pushApp();
+  assert.equal((await app.request(API_ROUTES.pushSubscriptions)).status, 401);
+  const asHost = await app.request(API_ROUTES.pushSubscriptions, {
+    headers: { Authorization: `Bearer ${host.hostToken}` },
+  });
+  assert.equal(asHost.status, 401);
+});
+
+test('subscriptions answers the truth rather than 503 when push is unconfigured', async () => {
+  // Rows can outlive a key being removed, so an error would be a lie.
+  const { app } = await freshApp();
+  const { sessionToken } = await ownerSession(app);
+  const res = await app.request(API_ROUTES.pushSubscriptions, {
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { subscriptions: [] });
+});
+
 // --- devices ---------------------------------------------------------------
 
 test('devices lists this host subscribers by identity, never a label', async () => {

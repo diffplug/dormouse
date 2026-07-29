@@ -144,6 +144,7 @@ so `node --test` can drive setup → pairing → connect end to end via
 | `GET /api/push/config`           | —              | `{ applicationServerKey }` — the VAPID public key, or `null` when push is unconfigured. Public by construction |
 | `POST /api/push/challenge`       | session token  | `{ challenge }` for the device signature below (no body — the challenge is a pool-wide nonce; the host binding lives in the signature) |
 | `POST /api/push/subscribe`       | session token + device signature | Upserts the `(hostId, devicePublicKey)` subscription |
+| `GET /api/push/subscriptions`    | session token  | The account's registrations as identities, so a reloaded Client can tell which Hosts it already registered with |
 | `GET /api/push/devices`          | host token     | The `devicePublicKey`s subscribed to **this** Host  |
 | `POST /api/push/send`            | host token     | Fans a notification out to the named devices; `devicePublicKeys` is required |
 | `GET /ws/host`                   | host token     | The Host's relay socket                            |
@@ -167,6 +168,13 @@ Source of truth: `server/src/push.ts` and the routes in `server/src/app.ts`.
 - **The Server never selects recipients.** `devicePublicKeys` is required and
   non-empty; an absent or empty list is a 400, not a fan-out. The Host holds the
   ACL and is the only party that may decide who a push reaches.
+- **Reads are scoped by credential, never by a supplied identity.** A Host token
+  reads its own subscribers (`/api/push/devices`); a session reads the account's
+  registrations (`/api/push/subscriptions`) and the Client filters to its own
+  device. Neither takes a `devicePublicKey` as input, so there is no endpoint
+  that reports on an identity the caller does not hold. Both return identities
+  only — the endpoint and its keys are a bearer capability to notify that phone
+  and never leave the Server.
 - **The subscription is bound to a Client identity by signature.** The Client
   signs `(hostId, challenge, devicePublicKey, endpoint)` with its device key
   under `PUSH_SUBSCRIBE_DOMAIN` — deliberately *not* `DEVICE_AUTH_DOMAIN`, since

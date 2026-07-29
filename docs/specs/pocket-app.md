@@ -248,12 +248,23 @@ Browser availability and Host registration are separate states. A
 `PushSubscription` belongs to the service-worker scope, while the Server stores
 one row per `(hostId, devicePublicKey)`. An existing browser subscription
 therefore leaves Enable alerts available for every Host that has not completed
-registration in the current Hosts view; only a successful
-`POST /api/push/subscribe` changes that Host's copy to Alerts on. The marker is
-intentionally not persisted: after a reload Pocket offers the idempotent
-registration again, so a missing Server row or a prior failed POST can always
-be repaired. Source of truth: `getPushAvailability` in
-`lib/src/remote/client/push-subscribe.ts` and the per-Host set in
+registration; only a successful `POST /api/push/subscribe` changes that Host's
+copy to Alerts on.
+
+Which Hosts those are is read back from the Server when the Hosts view opens,
+not remembered locally, so a reload does not re-offer an action already taken
+and a row pruned after a 410 stops claiming alerts are on. The read is
+`GET /api/push/subscriptions`, which returns the **account's** registrations as
+identities and is filtered to this device by `PocketClient`. It is deliberately
+not parameterized by `devicePublicKey`: an endpoint answering "which Hosts is
+device X registered with" would be an enumeration primitive over an input the
+caller need not own, where the account's own rows are already its to read — the
+same scoping `GET /api/hosts` uses. The response is authoritative and replaces
+the set, except that a registration completed while the read was in flight
+wins, since it is the newer fact. A failed read leaves the set empty, which
+re-offers an idempotent action — the harmless direction to be wrong in. Source
+of truth: `getPushAvailability` in `lib/src/remote/client/push-subscribe.ts`,
+`PocketClient.listPushSubscribedHosts`, and the per-Host set in
 `lib/src/remote/pocket-app/App.tsx`.
 
 Registering another Host or retrying that POST reuses the service-worker

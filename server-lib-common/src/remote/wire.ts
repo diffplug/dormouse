@@ -25,6 +25,7 @@ export const API_ROUTES = {
   pushConfig: '/api/push/config',
   pushChallenge: '/api/push/challenge',
   pushSubscribe: '/api/push/subscribe',
+  pushSubscriptions: '/api/push/subscriptions',
   pushDevices: '/api/push/devices',
   pushSend: '/api/push/send',
 } as const;
@@ -151,6 +152,25 @@ export interface PushSubscribeRequest {
 }
 export interface PushSubscribeResponse {
   subscribedAt: number;
+}
+
+/**
+ * Session auth. The account's push registrations, so a Client that reloaded can
+ * tell which Hosts it is already registered with instead of re-offering the
+ * action for all of them.
+ *
+ * Deliberately **not** parameterized by `devicePublicKey`: an endpoint that
+ * answered "which Hosts is device X registered with" would be an enumeration
+ * primitive over an input the caller need not own. This returns what the
+ * account owns and the Client filters to its own device — the same scoping
+ * `GET /api/hosts` already uses, and correct per-tenant if the SaaS mode in
+ * `## Future` lands.
+ *
+ * Identities only. The endpoint and its keys are a bearer capability to notify
+ * that phone and never leave the Server.
+ */
+export interface PushSubscriptionsResponse {
+  subscriptions: Array<{ hostId: string; devicePublicKey: string; subscribedAt: number }>;
 }
 
 /**

@@ -40,6 +40,7 @@ import {
   type PushConfigResponse,
   type PushSubscribeResponse,
   type PushSubscriptionPayload,
+  type PushSubscriptionsResponse,
   type ReauthFinishResponse,
   type RemoteEventMsg,
   type RemoteResponse,
@@ -250,6 +251,26 @@ export class PocketClient {
       { method: 'GET' },
     );
     return response.applicationServerKey;
+  }
+
+  /**
+   * The Hosts **this device** is already registered to receive push from.
+   *
+   * The Server answers with the whole account's registrations and the filter
+   * happens here, so there is no endpoint that reports on a `devicePublicKey`
+   * the caller does not hold. Lets a reloaded Pocket show "Alerts on." instead
+   * of re-offering an action already taken.
+   */
+  async listPushSubscribedHosts(): Promise<string[]> {
+    const response = await this.#api<PushSubscriptionsResponse>(
+      API_ROUTES.pushSubscriptions,
+      undefined,
+      { method: 'GET', headers: { authorization: `Bearer ${this.#requireToken()}` } },
+    );
+    const { devicePublicKey } = await this.#getDeviceKey();
+    return response.subscriptions
+      .filter((s) => s.devicePublicKey === devicePublicKey)
+      .map((s) => s.hostId);
   }
 
   /**

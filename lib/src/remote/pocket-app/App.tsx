@@ -145,6 +145,12 @@ export default function App(): React.ReactElement {
     () => new Set(),
   );
   const [pushConfig, setPushConfig] = useState<PushConfigState>({ status: 'loading' });
+  /**
+   * How many registrations this session has completed. The Server read below
+   * replaces the whole set, so it must not land on top of an Enable that
+   * finished while it was in flight.
+   */
+  const pushEnablesRef = useRef(0);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
 
   // Availability depends on browser state the app cannot change (permission,
@@ -168,6 +174,22 @@ export default function App(): React.ReactElement {
       })
       .catch(() => {
         if (live) setPushConfig({ status: 'error' });
+      });
+    // Which Hosts this device already registered with. Without it a reload
+    // re-offers Enable alerts for every Host, including ones the Server already
+    // holds a row for. Authoritative rather than merged, so a row pruned after
+    // a 410 stops claiming alerts are on.
+    const enablesAtStart = pushEnablesRef.current;
+    void client
+      .listPushSubscribedHosts()
+      .then((hostIds) => {
+        if (live && pushEnablesRef.current === enablesAtStart) {
+          setPushSubscribedHostIds(new Set(hostIds));
+        }
+      })
+      .catch(() => {
+        // Best-effort: leaving the set empty re-offers an idempotent action,
+        // which is the harmless direction to be wrong in.
       });
     return () => {
       live = false;
@@ -268,6 +290,7 @@ export default function App(): React.ReactElement {
       }
       const subscription = await subscribeToPushInBrowser(pushConfig.key);
       await client.subscribeToPush(host.hostId, subscription);
+      pushEnablesRef.current += 1;
       setPushSubscribedHostIds((prev) => new Set(prev).add(host.hostId));
     });
 

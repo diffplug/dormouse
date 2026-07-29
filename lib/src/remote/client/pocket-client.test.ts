@@ -267,6 +267,53 @@ describe('setup + signin', () => {
   });
 });
 
+describe('listPushSubscribedHosts', () => {
+  /**
+   * The Server answers with the whole account's registrations, so the filter to
+   * "this device" happens client-side — that is what keeps the API from being
+   * an enumeration primitive over a `devicePublicKey` the caller does not hold.
+   */
+  it('keeps only the Hosts this device registered', async () => {
+    const device = await generateDeviceKeyPair();
+    const harness = makeClient(
+      {
+        ...AUTH_ROUTES,
+        '/api/push/subscriptions': () => ({
+          json: {
+            subscriptions: [
+              { hostId: 'h1', devicePublicKey: device.devicePublicKey, subscribedAt: 1 },
+              { hostId: 'h2', devicePublicKey: 'some-other-device', subscribedAt: 2 },
+              { hostId: 'h3', devicePublicKey: device.devicePublicKey, subscribedAt: 3 },
+            ],
+          },
+        }),
+      },
+      { deviceKey: async () => device },
+    );
+    await harness.client.setup('pw', 'My Phone');
+    await harness.client.signin();
+
+    expect(await harness.client.listPushSubscribedHosts()).toEqual(['h1', 'h3']);
+    const call = harness.calls.find((c) => c.url.endsWith('/api/push/subscriptions'))!;
+    expect(call.method).toBe('GET');
+    expect(call.headers.authorization).toBe('Bearer tok-abc');
+    // The device identity is never sent — the Server has no input to filter on.
+    expect(call.body).toBeUndefined();
+  });
+
+  it('is empty when this device registered nothing', async () => {
+    const harness = makeClient({
+      ...AUTH_ROUTES,
+      '/api/push/subscriptions': () => ({
+        json: { subscriptions: [{ hostId: 'h1', devicePublicKey: 'other', subscribedAt: 1 }] },
+      }),
+    });
+    await harness.client.setup('pw', 'My Phone');
+    await harness.client.signin();
+    expect(await harness.client.listPushSubscribedHosts()).toEqual([]);
+  });
+});
+
 describe('pair', () => {
   it('sends a well-formed pairing frame and resolves on pair-result', async () => {
     const { client, socket } = await signedIn();
