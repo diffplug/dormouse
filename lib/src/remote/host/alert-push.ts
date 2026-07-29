@@ -15,7 +15,12 @@
  * phone whose app is closed.
  */
 
-import { API_ROUTES, type HostAclRecord, type PushDevicesResponse } from 'server-lib-common';
+import {
+  API_ROUTES,
+  boundedPushText,
+  type HostAclRecord,
+  type PushDevicesResponse,
+} from 'server-lib-common';
 import { getAlertSettings } from '../../lib/alert-settings';
 import { watchUnattendedRings } from '../../lib/alert-ring-watch';
 import { deriveSessionLabel } from '../../lib/session-label';
@@ -33,31 +38,13 @@ const PUSH_TITLE_LIMIT = 100;
 const PUSH_BODY = 'Needs attention';
 
 /**
- * Reduce a display label to something safe to put in an OS notification.
- *
- * Deliberately NOT `toSpokenText`. That function strips angle brackets because
- * WebKit's speech synthesizer wedges on them — irrelevant here, and it would
- * mangle a perfectly good title like `<idle>` for no reason. What matters at
- * this sink is different: the string crosses a network to a third-party push
- * service and is rendered by the OS, and it is ultimately terminal-supplied
- * (`OSC 0`/`2`/`9` titles reach the Pane label — `docs/specs/alert.md` -> Text
- * And Security).
- *
- * So: control characters go, and so do the Unicode bidi and zero-width format
- * characters, which can visually reorder or hide text in a notification —
- * a spoofing vector a program could otherwise aim at your lock screen.
+ * Apply this sink's bounds to a Pane label. The rule itself is
+ * `boundedPushText` in `server-lib-common`, shared with the Server so the
+ * sanitization has one implementation rather than a strong copy here and a
+ * weaker one there; this wrapper only names the sink's limit and fallback.
  */
 export function toPushText(label: string): string {
-  const cleaned = label
-    // C0, DEL, and C1 control characters.
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
-    // Zero-width and joiner characters, bidi embedding/override marks, bidi
-    // isolates, and the BOM. Dropped rather than spaced: they carry no width,
-    // so replacing them would invent gaps in an otherwise fine title.
-    .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned.slice(0, PUSH_TITLE_LIMIT).trim() || 'terminal';
+  return boundedPushText(label, { limit: PUSH_TITLE_LIMIT, fallback: 'terminal' });
 }
 
 export interface AlertPushDeps {
@@ -68,23 +55,39 @@ export interface AlertPushDeps {
   readonly fetch?: typeof globalThis.fetch;
 }
 
+/** The Host's one authenticated call to the Server. */
+async function hostFetch(
+  deps: AlertPushDeps,
+  route: string,
+  body?: unknown,
+): Promise<Response> {
+  const doFetch = deps.fetch ?? globalThis.fetch;
+  const response = await doFetch(`${deps.enrollment.serverUrl}${route}`, {
+    ...(body === undefined
+      ? {}
+      : { method: 'POST', body: JSON.stringify(body) }),
+    headers: {
+      authorization: `Bearer ${deps.enrollment.hostToken}`,
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+    },
+  });
+  // Checked here so both call sites fail loudly. A send that swallowed a 401
+  // from a revoked host token would leave push permanently broken and silent —
+  // the failure mode this whole feature is most prone to.
+  if (!response.ok) throw new Error(`${route} failed (${response.status})`);
+  return response;
+}
+
 /**
- * The devices a push may go to: subscribed on the Server **and** still active in
- * the Host's ACL.
+ * The devices the settings dialog names: subscribed on the Server **and** still
+ * active in the Host's ACL, joined to the ACL's human labels.
  *
- * The intersection is the security-relevant half. A revoked Client keeps its
- * server-side subscription row — nothing propagates a revocation today
- * (`docs/specs/remote-security-model.md` -> Future) — so a Host that let the
- * Server fan out on its own would keep pushing Pane labels to a phone it had
- * already de-authorized. Naming the targets keeps the access decision on the
- * Host, where the model puts it.
+ * Only the Host can do this join — it holds the ACL, and the Server never
+ * learns a label (`docs/specs/remote-security-model.md`). The send path does
+ * not need it, and deliberately does not pay for it; see {@link sendPush}.
  */
 async function loadPushDevices(deps: AlertPushDeps): Promise<PushDevice[]> {
-  const doFetch = deps.fetch ?? globalThis.fetch;
-  const response = await doFetch(`${deps.enrollment.serverUrl}${API_ROUTES.pushDevices}`, {
-    headers: { authorization: `Bearer ${deps.enrollment.hostToken}` },
-  });
-  if (!response.ok) throw new Error(`push devices failed (${response.status})`);
+  const response = await hostFetch(deps, API_ROUTES.pushDevices);
   const body = (await response.json()) as PushDevicesResponse;
 
   const labels = new Map(deps.activeRecords().map((r) => [r.devicePublicKey, r.label]));
@@ -111,27 +114,28 @@ export async function refreshPushDevices(deps: AlertPushDeps): Promise<void> {
 }
 
 async function sendPush(deps: AlertPushDeps, sessionId: string): Promise<void> {
-  // Re-read the targets at send time rather than trusting a cached list: a
-  // device revoked since the last refresh must not be pushed to.
-  const devices = await loadPushDevices(deps);
-  if (devices.length === 0) return;
+  // Read straight from the ACL, which is local and in-memory, rather than
+  // asking the Server which devices are subscribed: the Server intersects the
+  // names it is given with its own subscriptions anyway, so the target set is
+  // identical and this costs one round trip instead of two on the one path
+  // whose whole value is timeliness.
+  //
+  // Naming targets at all is the security-relevant part. Nothing propagates a
+  // revocation today (`docs/specs/remote-security-model.md` -> Future), so a
+  // revoked Client keeps its subscription row; letting the Server choose
+  // recipients would keep pushing Pane labels to a de-authorized phone. Read at
+  // send time, so a revocation during the delay takes effect.
+  const devicePublicKeys = deps.activeRecords().map((record) => record.devicePublicKey);
+  if (devicePublicKeys.length === 0) return;
 
-  const doFetch = deps.fetch ?? globalThis.fetch;
-  await doFetch(`${deps.enrollment.serverUrl}${API_ROUTES.pushSend}`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${deps.enrollment.hostToken}`,
-    },
-    body: JSON.stringify({
-      devicePublicKeys: devices.map((d) => d.devicePublicKey),
-      title: toPushText(deriveSessionLabel(sessionId)),
-      body: PUSH_BODY,
-      // Per-Session collapse key: a Pane that rings, is cleared, and rings again
-      // replaces its own notification rather than stacking copies. Internal ids
-      // only — a tag is never displayed.
-      tag: sessionId,
-    }),
+  await hostFetch(deps, API_ROUTES.pushSend, {
+    devicePublicKeys,
+    title: toPushText(deriveSessionLabel(sessionId)),
+    body: PUSH_BODY,
+    // Per-Session collapse key: a Pane that rings, is cleared, and rings again
+    // replaces its own notification rather than stacking copies. Internal ids
+    // only — a tag is never displayed.
+    tag: sessionId,
   });
 }
 

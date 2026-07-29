@@ -1,4 +1,4 @@
-import { useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   ModalCloseButton,
   ModalFrame,
@@ -12,6 +12,7 @@ import {
   clampAlertDelayMs,
   getAlertSettings,
   getPushDevices,
+  refreshPushDevicesNow,
   getWatchedCommandsSnapshot,
   subscribeToAlertSettings,
   subscribeToPushDevices,
@@ -49,6 +50,10 @@ export function AlertSettingsDialog({ onClose }: { onClose: () => void }) {
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const closeRef = useRef<HTMLButtonElement>(null);
+
+  // A phone can enable alerts long after this machine booted, so re-read the
+  // list on open rather than showing whatever was true at Host start.
+  useEffect(() => refreshPushDevicesNow(), []);
 
   return (
     <ModalFrame
@@ -94,39 +99,66 @@ export function AlertSettingsDialog({ onClose }: { onClose: () => void }) {
         </div>
       </section>
 
-      <section className="mt-4 border-t border-border pt-3">
-        <SwitchRow
-          label="Speak out loud if not attended"
-          on={settings.speakEnabled}
-          onChange={(speakEnabled) => updateAlertSettings({ speakEnabled })}
-        />
-        <div className={`mt-2 ${UNDER_SWITCH_INDENT} ${settings.speakEnabled ? '' : 'opacity-50'}`}>
-          <SecondsField
-            label="Delay before speaking:"
-            valueMs={settings.speakDelayMs}
-            disabled={!settings.speakEnabled}
-            onCommit={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
-          />
-        </div>
-      </section>
+      <AlarmSinkSection
+        switchLabel="Speak out loud if not attended"
+        delayLabel="Delay before speaking:"
+        enabled={settings.speakEnabled}
+        delayMs={settings.speakDelayMs}
+        onToggle={(speakEnabled) => updateAlertSettings({ speakEnabled })}
+        onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
+      />
 
-      <section className="mt-4 border-t border-border pt-3">
-        <SwitchRow
-          label="Send push notification if not attended"
-          on={settings.pushEnabled}
-          onChange={(pushEnabled) => updateAlertSettings({ pushEnabled })}
-        />
-        <div className={`mt-2 ${UNDER_SWITCH_INDENT} ${settings.pushEnabled ? '' : 'opacity-50'}`}>
-          <SecondsField
-            label="Delay before push:"
-            valueMs={settings.pushDelayMs}
-            disabled={!settings.pushEnabled}
-            onCommit={(pushDelayMs) => updateAlertSettings({ pushDelayMs })}
-          />
-          <div className="mt-1 text-sm leading-relaxed text-muted">{describePushTargets(push)}</div>
-        </div>
-      </section>
+      <AlarmSinkSection
+        switchLabel="Send push notification if not attended"
+        delayLabel="Delay before push:"
+        enabled={settings.pushEnabled}
+        delayMs={settings.pushDelayMs}
+        onToggle={(pushEnabled) => updateAlertSettings({ pushEnabled })}
+        onCommitDelay={(pushDelayMs) => updateAlertSettings({ pushDelayMs })}
+      >
+        {describePushTargets(push)}
+      </AlarmSinkSection>
     </ModalFrame>
+  );
+}
+
+/**
+ * One alarm sink: a switch that gates an indented delay field, with optional
+ * explanatory text under it. Speech and push are the same shape, so the layout
+ * and the dimming rule have one implementation rather than two that drift.
+ */
+function AlarmSinkSection({
+  switchLabel,
+  delayLabel,
+  enabled,
+  delayMs,
+  onToggle,
+  onCommitDelay,
+  children,
+}: {
+  switchLabel: string;
+  delayLabel: string;
+  enabled: boolean;
+  delayMs: number;
+  onToggle: (next: boolean) => void;
+  onCommitDelay: (ms: number) => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <section className="mt-4 border-t border-border pt-3">
+      <SwitchRow label={switchLabel} on={enabled} onChange={onToggle} />
+      <div className={`mt-2 ${UNDER_SWITCH_INDENT} ${enabled ? '' : 'opacity-50'}`}>
+        <SecondsField
+          label={delayLabel}
+          valueMs={delayMs}
+          disabled={!enabled}
+          onCommit={onCommitDelay}
+        />
+        {children ? (
+          <div className="mt-1 text-sm leading-relaxed text-muted">{children}</div>
+        ) : null}
+      </div>
+    </section>
   );
 }
 

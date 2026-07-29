@@ -128,9 +128,6 @@ export interface PushConfigResponse {
   applicationServerKey: string | null;
 }
 
-export interface PushChallengeRequest {
-  hostId: string;
-}
 export interface PushChallengeResponse {
   /** Base64url challenge to sign with the device key. */
   challenge: string;
@@ -166,11 +163,12 @@ export interface PushDevicesResponse {
 }
 
 /**
- * Host-token auth. `devicePublicKeys` empty means "every device subscribed to
- * this Host" — the fan-out the alarm path uses.
+ * Host-token auth. `devicePublicKeys` is required and non-empty: the Host holds
+ * the ACL and is the only party that may decide who a push reaches, so the
+ * Server never selects recipients itself.
  */
 export interface PushSendRequest {
-  devicePublicKeys?: string[];
+  devicePublicKeys: string[];
   title: string;
   body: string;
   /**

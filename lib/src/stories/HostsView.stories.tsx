@@ -39,10 +39,12 @@ const meta: Meta<typeof HostsView> = {
     error: null,
     isPaired,
     pushState: 'ready',
+    needsLocalPasskey: false,
     onRefresh: () => {},
     onPair: () => {},
     onConnect: () => {},
     onEnablePush: () => {},
+    onSetup: () => {},
   },
   decorators: [
     (Story, context) => (
@@ -133,10 +135,11 @@ export const PushNoWorker: Story = {
  * iOS, running in a Safari tab. Web Push only reaches an installed app and
  * there is no API to prompt for that, so the notice describes the steps — and
  * allows for someone who already installed it and opened the wrong window,
- * which a tab cannot distinguish.
+ * which a tab cannot distinguish. The notice is driven by `pushState` alone, so
+ * it cannot disagree with the push row beneath it.
  */
 export const NeedsHomeScreenInstall: Story = {
-  args: { needsHomeScreenInstall: true, pushState: 'needs-install' },
+  args: { pushState: 'needs-install' },
 };
 
 /**
@@ -145,10 +148,15 @@ export const NeedsHomeScreenInstall: Story = {
  * notice offers the fix inline rather than waiting for a failed tap.
  */
 export const NeedsLocalPasskey: Story = {
-  args: { needsLocalPasskey: true, pushState: 'needs-install', needsHomeScreenInstall: false },
+  args: { needsLocalPasskey: true },
 };
 
 // Both at once: a first run in a Safari tab on iOS after setup happened elsewhere.
 export const NeedsInstallAndPasskey: Story = {
-  args: { needsHomeScreenInstall: true, needsLocalPasskey: true, pushState: 'needs-install' },
+  args: { pushState: 'needs-install', needsLocalPasskey: true },
+};
+
+// The server was started without VAPID keys, so there is nothing to enable.
+export const PushUnconfigured: Story = {
+  args: { pushConfigured: false },
 };

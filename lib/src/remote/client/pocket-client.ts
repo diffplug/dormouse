@@ -269,7 +269,7 @@ export class PocketClient {
     const auth = { authorization: `Bearer ${token}` };
     const { challenge } = await this.#api<PushChallengeResponse>(
       API_ROUTES.pushChallenge,
-      { hostId },
+      undefined,
       { headers: auth },
     );
     const deviceKey = await this.#getDeviceKey();

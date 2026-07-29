@@ -186,6 +186,22 @@ test('a challenge is single-use', async () => {
   assert.equal((await authed(app, API_ROUTES.pushSubscribe, sessionToken, body)).status, 400);
 });
 
+test('a malformed devicePublicKey is denied, not thrown', async () => {
+  // The verifier decodes base64url from the body, so garbage must produce a
+  // denial rather than an unhandled rejection on a session-token route.
+  const { app, host, sessionToken } = await pushApp();
+  const challengeRes = await authed(app, API_ROUTES.pushChallenge, sessionToken, {});
+  const { challenge } = await challengeRes.json();
+  const res = await authed(app, API_ROUTES.pushSubscribe, sessionToken, {
+    hostId: host.hostId,
+    devicePublicKey: 'not!valid!base64url',
+    challenge,
+    signature: 'also!garbage',
+    subscription: subscription(),
+  });
+  assert.equal(res.status, 401);
+});
+
 test('a non-https endpoint is rejected', async () => {
   const { app, host, sessionToken } = await pushApp();
   const client = await SimClient.create({ origin: ORIGIN });
@@ -261,14 +277,19 @@ test('devices rejects a session token — it is host-gated', async () => {
 
 // --- send ------------------------------------------------------------------
 
-test('send with no named devices fans out to every subscriber of this host', async () => {
+test('send fans out to every named device', async () => {
   const { app, sender, host, sessionToken } = await pushApp();
   const phone = await SimClient.create({ origin: ORIGIN });
   const tablet = await SimClient.create({ origin: ORIGIN });
   await subscribe(app, { sessionToken, host, client: phone, sub: subscription('https://push.example.com/phone') });
   await subscribe(app, { sessionToken, host, client: tablet, sub: subscription('https://push.example.com/tablet') });
 
-  const res = await sendAs(app, host.hostToken, { title: 'build finished', body: 'zsh', tag: 'pane-1' });
+  const res = await sendAs(app, host.hostToken, {
+    devicePublicKeys: [phone.deviceKey.devicePublicKey, tablet.deviceKey.devicePublicKey],
+    title: 'build finished',
+    body: 'zsh',
+    tag: 'pane-1',
+  });
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { delivered: 2, expired: 0, unknown: 0 });
   assert.equal(sender.sent.length, 2);
@@ -277,6 +298,20 @@ test('send with no named devices fans out to every subscriber of this host', asy
     body: 'zsh',
     tag: 'pane-1',
   });
+});
+
+test('send without named devices is rejected — the Host must choose recipients', async () => {
+  // The Host holds the ACL; a Server that picked recipients itself would keep
+  // notifying a Client the Host had revoked.
+  const { app, sender, host, sessionToken } = await pushApp();
+  const client = await SimClient.create({ origin: ORIGIN });
+  await subscribe(app, { sessionToken, host, client });
+
+  for (const body of [{ title: 'x', body: 'y' }, { devicePublicKeys: [], title: 'x', body: 'y' }]) {
+    const res = await sendAs(app, host.hostToken, body);
+    assert.equal(res.status, 400);
+  }
+  assert.equal(sender.sent.length, 0);
 });
 
 test('send addresses only the named devices', async () => {
@@ -312,7 +347,11 @@ test('a subscription the push service calls gone is dropped', async () => {
   await subscribe(app, { sessionToken, host, client, sub: subscription('https://push.example.com/dead') });
   sender.expire('https://push.example.com/dead');
 
-  const res = await sendAs(app, host.hostToken, { title: 'x', body: 'y' });
+  const res = await sendAs(app, host.hostToken, {
+    devicePublicKeys: [client.deviceKey.devicePublicKey],
+    title: 'x',
+    body: 'y',
+  });
   assert.deepEqual(await res.json(), { delivered: 0, expired: 1, unknown: 0 });
 
   const stored = JSON.parse(await readFile(join(stateDir, 'push-subscriptions.json'), 'utf8'));
@@ -325,7 +364,11 @@ test('a transient failure leaves the subscription in place', async () => {
   await subscribe(app, { sessionToken, host, client, sub: subscription('https://push.example.com/flaky') });
   sender.fail('https://push.example.com/flaky');
 
-  const res = await sendAs(app, host.hostToken, { title: 'x', body: 'y' });
+  const res = await sendAs(app, host.hostToken, {
+    devicePublicKeys: [client.deviceKey.devicePublicKey],
+    title: 'x',
+    body: 'y',
+  });
   assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 0 });
 
   const stored = JSON.parse(await readFile(join(stateDir, 'push-subscriptions.json'), 'utf8'));
@@ -359,10 +402,31 @@ test('payload text is bounded and collapsed at the server boundary', async () =>
   const client = await SimClient.create({ origin: ORIGIN });
   await subscribe(app, { sessionToken, host, client });
 
-  await sendAs(app, host.hostToken, { title: `${'x'.repeat(500)}`, body: 'a\n\n  b' });
+  await sendAs(app, host.hostToken, {
+    devicePublicKeys: [client.deviceKey.devicePublicKey],
+    title: `${'x'.repeat(500)}`,
+    body: 'a\n\n  b',
+  });
   const payload = JSON.parse(sender.sent[0].payload);
   assert.equal(payload.title.length, 200);
   assert.equal(payload.body, 'a b');
+});
+
+test('control and bidi characters are stripped at the server boundary', async () => {
+  // The Host already sanitizes, but this text is Pane-derived and therefore
+  // terminal-supplied; both layers run the same shared rule.
+  const { app, sender, host, sessionToken } = await pushApp();
+  const client = await SimClient.create({ origin: ORIGIN });
+  await subscribe(app, { sessionToken, host, client });
+
+  await sendAs(app, host.hostToken, {
+    devicePublicKeys: [client.deviceKey.devicePublicKey],
+    title: 'build\u0000finished',
+    body: 'wat\u202ech',
+  });
+  const payload = JSON.parse(sender.sent[0].payload);
+  assert.equal(payload.title, 'build finished');
+  assert.equal(payload.body, 'watch');
 });
 
 test('an all-whitespace payload falls back rather than pushing an empty notification', async () => {
@@ -370,7 +434,11 @@ test('an all-whitespace payload falls back rather than pushing an empty notifica
   const client = await SimClient.create({ origin: ORIGIN });
   await subscribe(app, { sessionToken, host, client });
 
-  await sendAs(app, host.hostToken, { title: '   ', body: '' });
+  await sendAs(app, host.hostToken, {
+    devicePublicKeys: [client.deviceKey.devicePublicKey],
+    title: '   ',
+    body: '',
+  });
   const payload = JSON.parse(sender.sent[0].payload);
   assert.equal(payload.title, 'Dormouse');
   assert.equal(payload.body, 'A terminal needs attention.');

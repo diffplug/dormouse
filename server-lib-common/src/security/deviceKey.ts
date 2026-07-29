@@ -79,38 +79,74 @@ export function deviceAuthPayload(context: DeviceAuthContext): Uint8Array {
   ]);
 }
 
+/**
+ * Sign arbitrary bytes with a device private key. Returns base64url.
+ *
+ * The payload must be domain-separated by its builder — see
+ * {@link deviceAuthPayload} and `push.ts`'s `pushSubscribePayload`. This helper
+ * deliberately knows nothing about which statement is being made, so every
+ * device-key signature in the system shares one algorithm and one encoding.
+ */
+export async function signDevicePayload(
+  privateKey: CryptoKeyLike,
+  payload: Uint8Array,
+  crypto: WebCryptoLike = getWebCrypto(),
+): Promise<string> {
+  const signature = await crypto.subtle.sign(DEVICE_SIGN_ALGORITHM, privateKey, payload);
+  return toBase64Url(new Uint8Array(signature));
+}
+
+/**
+ * Verify a device-key signature over `payload`. Returns false (never throws)
+ * for malformed keys, malformed signatures, or any mismatch — a verifier that
+ * threw would turn a hostile input into an unhandled rejection.
+ */
+export async function verifyDevicePayload(
+  devicePublicKey: string,
+  payload: Uint8Array,
+  signature: string,
+  crypto: WebCryptoLike = getWebCrypto(),
+): Promise<boolean> {
+  try {
+    const publicKey = await importDevicePublicKey(devicePublicKey, crypto);
+    return await crypto.subtle.verify(
+      DEVICE_SIGN_ALGORITHM,
+      publicKey,
+      fromBase64Url(signature),
+      payload,
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Client side: sign a Host challenge with the device private key. Returns base64url. */
-export async function signDeviceChallenge(
+export function signDeviceChallenge(
   privateKey: CryptoKeyLike,
   context: DeviceAuthContext,
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<string> {
-  const signature = await crypto.subtle.sign(
-    DEVICE_SIGN_ALGORITHM,
-    privateKey,
-    deviceAuthPayload(context),
-  );
-  return toBase64Url(new Uint8Array(signature));
+  return signDevicePayload(privateKey, deviceAuthPayload(context), crypto);
 }
 
 /**
  * Host side: verify a device-key signature. Returns false (never throws) for
  * malformed keys, malformed signatures, or any mismatch with the context.
+ *
+ * Building the payload is inside the guard because it decodes base64url from
+ * the context, which throws on garbage — and a hostile input must produce a
+ * denial, not an unhandled rejection.
  */
 export async function verifyDeviceChallengeSignature(
   context: DeviceAuthContext,
   signature: string,
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<boolean> {
+  let payload: Uint8Array;
   try {
-    const publicKey = await importDevicePublicKey(context.devicePublicKey, crypto);
-    return await crypto.subtle.verify(
-      DEVICE_SIGN_ALGORITHM,
-      publicKey,
-      fromBase64Url(signature),
-      deviceAuthPayload(context),
-    );
+    payload = deviceAuthPayload(context);
   } catch {
     return false;
   }
+  return verifyDevicePayload(context.devicePublicKey, payload, signature, crypto);
 }

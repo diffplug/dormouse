@@ -25,8 +25,6 @@ import { browserWebAuthn } from '../client/webauthn';
 import { getOrCreateDeviceKey } from '../client/device-key';
 import {
   getPushAvailability,
-  isInstalledWebApp,
-  requiresInstallForPush,
   subscribeToPushInBrowser,
   type PushAvailability,
 } from '../client/push-subscribe';
@@ -135,22 +133,33 @@ export default function App(): React.ReactElement {
   const [pairedIds, setPairedIds] = useState<Set<string>>(() => new Set());
   const [activeHost, setActiveHost] = useState<HostView | null>(null);
   const [pushState, setPushState] = useState<PushAvailability | null>(null);
-  const [needsLocalPasskey, setNeedsLocalPasskey] = useState(false);
+  /** undefined = not asked yet, null = this server has push disabled. */
+  const [pushKey, setPushKey] = useState<string | null | undefined>(undefined);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
 
   // Availability depends on browser state the app cannot change (permission,
-  // whether it was launched from the Home Screen), so it is read once the
-  // hosts list is on screen rather than tracked as a store.
+  // whether it was launched from the Home Screen), so it is read once the hosts
+  // list is on screen rather than tracked as a store. The VAPID key is fetched
+  // here too, so the Enable tap has no network round trip in front of the
+  // permission prompt — iOS drops transient activation across one.
   useEffect(() => {
     if (phase !== 'hosts') return;
     let live = true;
     void getPushAvailability().then((state) => {
       if (live) setPushState(state);
     });
+    void client
+      .getPushConfig()
+      .then((key) => {
+        if (live) setPushKey(key);
+      })
+      .catch(() => {
+        if (live) setPushKey(null);
+      });
     return () => {
       live = false;
     };
-  }, [phase]);
+  }, [phase, client]);
 
   // The client nulls its socket on any close, so an action taken after a
   // server restart / network drop must reopen it rather than reuse a dead
@@ -177,10 +186,6 @@ export default function App(): React.ReactElement {
     const list = await client.listHosts();
     setHosts(list);
     setPairedIds(new Set(list.filter((h) => client.isPaired(h.hostId)).map((h) => h.hostId)));
-    // Checked here rather than on a failed Pair tap: signing in with a synced
-    // passkey succeeds on a profile that never created one, and only the pair
-    // or connect afterwards fails.
-    setNeedsLocalPasskey(!client.hasPasskeyMaterial());
     setPhase('hosts');
   }, [client, ensureSocket]);
 
@@ -240,16 +245,25 @@ export default function App(): React.ReactElement {
       setPairedIds((prev) => new Set(prev).add(host.hostId));
     });
 
-  // Permission must be requested from the gesture itself, so this runs straight
-  // off the tap rather than behind any await the browser could disown.
+  // The VAPID key was prefetched with availability, so the permission prompt is
+  // reached without a network round trip that could cost transient activation.
   const onEnablePush = (host: HostView) =>
     run('push', async () => {
-      const applicationServerKey = await client.getPushConfig();
-      if (!applicationServerKey) throw new Error('This server has push notifications disabled.');
-      const subscription = await subscribeToPushInBrowser(applicationServerKey);
+      if (!pushKey) throw new Error('This server has push notifications disabled.');
+      const subscription = await subscribeToPushInBrowser(pushKey);
       await client.subscribeToPush(host.hostId, subscription);
       setPushState('subscribed');
     });
+
+  const onSetup = useCallback(
+    (password: string, label: string) =>
+      run('setup', async () => {
+        await client.setup(password, label);
+        await client.signin();
+        await loadHosts();
+      }),
+    [client, loadHosts, run],
+  );
 
   const leaveWall = () => {
     teardownAdapter();
@@ -270,12 +284,7 @@ export default function App(): React.ReactElement {
             await client.signin();
             await loadHosts();
           })}
-        onSetup={(password, label) =>
-          run('setup', async () => {
-            await client.setup(password, label);
-            await client.signin();
-            await loadHosts();
-          })}
+        onSetup={onSetup}
       />
     );
   }
@@ -288,18 +297,13 @@ export default function App(): React.ReactElement {
         error={error}
         isPaired={(id) => pairedIds.has(id)}
         pushState={pushState}
-        needsLocalPasskey={needsLocalPasskey}
-        needsHomeScreenInstall={requiresInstallForPush() && !isInstalledWebApp()}
+        pushConfigured={pushKey !== null}
+        needsLocalPasskey={!client.hasPasskeyMaterial()}
         onRefresh={() => run('refresh', loadHosts)}
         onPair={onPair}
         onConnect={onConnect}
         onEnablePush={onEnablePush}
-        onSetup={(password, label) =>
-          run('setup', async () => {
-            await client.setup(password, label);
-            await client.signin();
-            await loadHosts();
-          })}
+        onSetup={onSetup}
       />
     );
   }
@@ -358,8 +362,6 @@ export function SetupOrSignin({
   onSetup: (password: string, label: string) => void;
 }): React.ReactElement {
   const [showSetup, setShowSetup] = useState(false);
-  const [password, setPassword] = useState('');
-  const [label, setLabel] = useState('My Phone');
 
   return (
     <div className={PK.app}>
@@ -397,35 +399,12 @@ export function SetupOrSignin({
               Create the account and register this device's passkey. Requires the server's setup
               password.
             </p>
-            <div className={PK.field}>
-              <label className={PK.fieldLabel} htmlFor="pocket-setup-password">Setup password</label>
-              <input
-                id="pocket-setup-password"
-                className={PK.input}
-                type="password"
-                autoComplete="off"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-            <div className={PK.field}>
-              <label className={PK.fieldLabel} htmlFor="pocket-passkey-label">Passkey label</label>
-              <input
-                id="pocket-passkey-label"
-                className={PK.input}
-                type="text"
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-              />
-            </div>
-            <button
-              type="button"
-              className={pkButton({ tone: 'primary', block: true })}
-              disabled={busy !== null || password.length === 0}
-              onClick={() => onSetup(password, label)}
-            >
-              {busy === 'setup' ? 'Creating…' : 'Create passkey & sign in'}
-            </button>
+            <PasskeySetupFields
+              idPrefix="pocket-setup"
+              busy={busy}
+              submitLabel="Create passkey & sign in"
+              onSubmit={onSetup}
+            />
           </div>
         ) : null}
       </div>
@@ -473,11 +452,8 @@ function LocalPasskeyNotice({
   onSetup,
 }: {
   busy: string | null;
-  onSetup?: (password: string, label: string) => void;
+  onSetup: (password: string, label: string) => void;
 }): React.ReactElement {
-  const [password, setPassword] = useState('');
-  const [label, setLabel] = useState('My Phone');
-
   return (
     <div className={PK.notice}>
       <div className={PK.noticeTitle}>Finish setting up this app</div>
@@ -486,10 +462,41 @@ function LocalPasskeyNotice({
         so it cannot pair or connect. Register one here with the server's setup password. It is
         added to the same account.
       </p>
+      <PasskeySetupFields
+        idPrefix="pocket-local"
+        busy={busy}
+        submitLabel="Create passkey for this app"
+        onSubmit={onSetup}
+      />
+    </div>
+  );
+}
+
+/**
+ * The setup-password + label pair and its submit button, shared by the auth
+ * screen and the local-passkey notice — the same credential form in two places,
+ * so its ids, autocomplete rules, and disabled logic have one definition.
+ */
+function PasskeySetupFields({
+  idPrefix,
+  busy,
+  submitLabel,
+  onSubmit,
+}: {
+  idPrefix: string;
+  busy: string | null;
+  submitLabel: string;
+  onSubmit: (password: string, label: string) => void;
+}): React.ReactElement {
+  const [password, setPassword] = useState('');
+  const [label, setLabel] = useState('My Phone');
+
+  return (
+    <>
       <div className={PK.field}>
-        <label className={PK.fieldLabel} htmlFor="pocket-local-password">Setup password</label>
+        <label className={PK.fieldLabel} htmlFor={`${idPrefix}-password`}>Setup password</label>
         <input
-          id="pocket-local-password"
+          id={`${idPrefix}-password`}
           className={PK.input}
           type="password"
           autoComplete="off"
@@ -498,9 +505,9 @@ function LocalPasskeyNotice({
         />
       </div>
       <div className={PK.field}>
-        <label className={PK.fieldLabel} htmlFor="pocket-local-label">Passkey label</label>
+        <label className={PK.fieldLabel} htmlFor={`${idPrefix}-label`}>Passkey label</label>
         <input
-          id="pocket-local-label"
+          id={`${idPrefix}-label`}
           className={PK.input}
           type="text"
           value={label}
@@ -511,11 +518,11 @@ function LocalPasskeyNotice({
         type="button"
         className={pkButton({ tone: 'primary', block: true })}
         disabled={busy !== null || password.length === 0}
-        onClick={() => onSetup?.(password, label)}
+        onClick={() => onSubmit(password, label)}
       >
-        {busy === 'setup' ? 'Creating…' : 'Create passkey for this app'}
+        {busy === 'setup' ? 'Creating…' : submitLabel}
       </button>
-    </div>
+    </>
   );
 }
 
@@ -531,7 +538,7 @@ const PUSH_COPY: Record<PushAvailability, string> = {
   denied: 'Notifications are blocked for this site in your browser settings.',
   unsupported: 'This browser cannot receive push notifications.',
   'no-worker': 'Background worker unavailable — the server must be served over https.',
-  'needs-install': 'Add Dormouse to your Home Screen to receive alerts.',
+  'needs-install': 'Alerts need the installed app — see above.',
 };
 
 export function HostsView({
@@ -540,8 +547,8 @@ export function HostsView({
   error,
   isPaired,
   pushState,
-  needsLocalPasskey = false,
-  needsHomeScreenInstall = false,
+  needsLocalPasskey,
+  pushConfigured = true,
   onRefresh,
   onPair,
   onConnect,
@@ -555,14 +562,14 @@ export function HostsView({
   /** Null until the browser has been asked; see the effect in `App`. */
   pushState: PushAvailability | null;
   /** Signed in, but this profile cannot pair — see {@link LocalPasskeyNotice}. */
-  needsLocalPasskey?: boolean;
-  /** On iOS, and running in a tab rather than from the Home Screen. */
-  needsHomeScreenInstall?: boolean;
+  needsLocalPasskey: boolean;
+  /** False when the server has no VAPID key, so there is nothing to enable. */
+  pushConfigured?: boolean;
   onRefresh: () => void;
   onPair: (host: HostView) => void;
   onConnect: (host: HostView) => void;
   onEnablePush: (host: HostView) => void;
-  onSetup?: (password: string, label: string) => void;
+  onSetup: (password: string, label: string) => void;
 }): React.ReactElement {
   return (
     <div className={PK.app}>
@@ -579,7 +586,7 @@ export function HostsView({
       </header>
       <div className={PK.body}>
         {error ? <div className={PK.error}>{error}</div> : null}
-        {needsHomeScreenInstall ? <InstallNotice /> : null}
+        {pushState === 'needs-install' ? <InstallNotice /> : null}
         {needsLocalPasskey ? <LocalPasskeyNotice busy={busy} onSetup={onSetup} /> : null}
         {hosts.length === 0 ? (
           <div className={PK.empty}>No hosts enrolled yet. Enroll one from your laptop.</div>
@@ -620,8 +627,12 @@ export function HostsView({
                     reason to address this device. */}
                 {paired && pushState ? (
                   <div className={PK.pushRow}>
-                    <span className="min-w-0 flex-1">{PUSH_COPY[pushState]}</span>
-                    {pushState === 'ready' ? (
+                    <span className="min-w-0 flex-1">
+                      {pushConfigured
+                        ? PUSH_COPY[pushState]
+                        : 'This server has push notifications disabled.'}
+                    </span>
+                    {pushState === 'ready' && pushConfigured ? (
                       <button
                         type="button"
                         className={pkButton({ tone: 'secondary', size: 'sm' })}

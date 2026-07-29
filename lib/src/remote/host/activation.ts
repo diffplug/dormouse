@@ -14,7 +14,7 @@
  *   window.dormouseRemoteHost.clearEnrollment()
  */
 
-import { resetPushDevices } from '../../lib/push-devices';
+import { resetPushDevices, setPushDevicesRefresher } from '../../lib/push-devices';
 import { refreshPushDevices, startAlertPush, type AlertPushDeps } from './alert-push';
 import { clearEnrollment, enrollHost, getEnrollment, type HostEnrollment } from './enrollment';
 import { RemoteApiSession } from './remote-api';
@@ -44,8 +44,10 @@ function startFromEnrollment(enrollment: HostEnrollment): RemoteHost {
     activeRecords: () => host.activeRecords,
   };
   stopPush = startAlertPush(deps);
-  // Populate the Alarm settings dialog's device line up front, so opening it
-  // does not have to wait on a round trip.
+  // Populate the Alarm settings dialog's device line up front, and let the
+  // dialog ask for a fresh one when it opens — a phone can subscribe long after
+  // the Host booted, and a list only read at startup would name it never.
+  setPushDevicesRefresher(() => void refreshPushDevices(deps));
   void refreshPushDevices(deps);
 
   return host;

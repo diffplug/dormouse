@@ -39,6 +39,7 @@ import {
   helloResponse,
   toBase64Url,
   utf8Decode,
+  boundedPushText,
   verifyPasskeyAssertion,
   verifyPushSubscribeSignature,
 } from 'server-lib-common';
@@ -47,7 +48,6 @@ import type {
   HostEnrollResponse,
   HostsResponse,
   PasskeyAssertion,
-  PushChallengeRequest,
   PushChallengeResponse,
   PushConfigResponse,
   PushDevicesResponse,
@@ -388,9 +388,8 @@ export function createApp(config: AppConfig): CreatedApp {
 
   // Gate a route on a valid `Authorization: Bearer` session token.
   const requireSession: MiddlewareHandler<AppEnv> = async (c, next) => {
-    const header = c.req.header('Authorization') ?? '';
-    const match = /^Bearer (.+)$/.exec(header);
-    const session = match ? sessions.validate(match[1]!) : null;
+    const token = bearerToken(c);
+    const session = token ? sessions.validate(token) : null;
     if (!session) return c.json({ error: 'unauthorized' }, 401);
     c.set('session', session);
     await next();
@@ -442,9 +441,8 @@ export function createApp(config: AppConfig): CreatedApp {
   // Gate a route on a valid `Authorization: Bearer` host token. Mirrors
   // `requireSession`, resolving through the constant-time `findByToken`.
   const requireHost: MiddlewareHandler<AppEnv> = async (c, next) => {
-    const header = c.req.header('Authorization') ?? '';
-    const match = /^Bearer (.+)$/.exec(header);
-    const host = match ? await hostStore.findByToken(match[1]!) : undefined;
+    const token = bearerToken(c);
+    const host = token ? await hostStore.findByToken(token) : undefined;
     if (!host) return c.json({ error: 'unauthorized' }, 401);
     c.set('host', host);
     await next();
@@ -457,12 +455,10 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.json(res);
   });
 
-  app.post(API_ROUTES.pushChallenge, requireSession, async (c) => {
+  // No body: the challenge is a pool-wide single-use nonce. What binds it to a
+  // host is the signature verified at subscribe, not anything stated here.
+  app.post(API_ROUTES.pushChallenge, requireSession, (c) => {
     if (!config.vapidPublicKey) return c.json({ error: 'push is not configured' }, 503);
-    const body = await readJson<PushChallengeRequest>(c);
-    if (!body || typeof body.hostId !== 'string') {
-      return c.json({ error: 'malformed request' }, 400);
-    }
     const { challenge, expiresAt } = pushChallenges.issue();
     const res: PushChallengeResponse = { challenge, expiresAt };
     return c.json(res);
@@ -537,53 +533,55 @@ export function createApp(config: AppConfig): CreatedApp {
   });
 
   app.post(API_ROUTES.pushSend, requireHost, async (c) => {
-    if (!config.pushSender) return c.json({ error: 'push is not configured' }, 503);
+    const sender = config.pushSender;
+    if (!sender) return c.json({ error: 'push is not configured' }, 503);
     const body = await readJson<PushSendRequest>(c);
     if (!body || typeof body.title !== 'string' || typeof body.body !== 'string') {
       return c.json({ error: 'malformed request' }, 400);
     }
+    // Targets are required. The Host holds the ACL and is the only party that
+    // may decide who a push reaches; a Server that fanned out on its own would
+    // keep notifying a Client the Host had revoked, since nothing propagates a
+    // revocation today (docs/specs/remote-security-model.md).
     const names = body.devicePublicKeys;
-    if (names !== undefined && !(Array.isArray(names) && names.every((n) => typeof n === 'string'))) {
-      return c.json({ error: 'malformed request' }, 400);
+    if (!Array.isArray(names) || names.length === 0 || names.some((n) => typeof n !== 'string')) {
+      return c.json({ error: 'devicePublicKeys must be a non-empty array' }, 400);
     }
 
     // The Host is identified by its token, never by the body: a Host can only
     // ever reach subscriptions registered against itself.
-    const hostId = c.get('host').hostId;
-    const subscriptions = await pushStore.listForHost(hostId);
-    // Absent or empty means "every device subscribed to this Host" — the
-    // fan-out the alarm path uses.
-    const targets =
-      names && names.length > 0
-        ? subscriptions.filter((s) => names.includes(s.devicePublicKey))
-        : subscriptions;
+    const subscriptions = await pushStore.listForHost(c.get('host').hostId);
+    const targets = subscriptions.filter((s) => names.includes(s.devicePublicKey));
 
     // Title and body originate in a renderer and are ultimately Pane-derived,
-    // so bound them here too rather than trusting the caller's cap — the same
-    // revalidate-at-the-boundary rule the alarm settings follow.
+    // so they are re-bounded here rather than trusted — the same
+    // revalidate-at-the-boundary rule the alarm settings follow, through the
+    // same shared function the Host used (`boundedPushText`).
     const payload = JSON.stringify({
-      title: boundedText(body.title, 'Dormouse'),
-      body: boundedText(body.body, 'A terminal needs attention.'),
-      ...(typeof body.tag === 'string' && body.tag ? { tag: body.tag.slice(0, 200) } : {}),
+      title: boundedPushText(body.title, { limit: PUSH_TEXT_LIMIT, fallback: 'Dormouse' }),
+      body: boundedPushText(body.body, {
+        limit: PUSH_TEXT_LIMIT,
+        fallback: 'A terminal needs attention.',
+      }),
+      ...(typeof body.tag === 'string' && body.tag ? { tag: body.tag.slice(0, PUSH_TEXT_LIMIT) } : {}),
     });
 
     const results = await Promise.all(
       targets.map(async (s) => ({
         endpoint: s.endpoint,
-        result: await config.pushSender!.send({ endpoint: s.endpoint, keys: s.keys }, payload),
+        result: await sender.send({ endpoint: s.endpoint, keys: s.keys }, payload),
       })),
     );
     // Forget subscriptions the push service called permanently gone, so a
-    // reinstalled phone does not leave a row that fails on every alarm.
-    for (const { endpoint, result } of results) {
-      if (result === 'expired') await pushStore.removeByEndpoint(endpoint);
-    }
+    // reinstalled phone does not leave a row that fails on every alarm. Batched
+    // into one rewrite rather than one per endpoint.
+    const expired = results.filter((r) => r.result === 'expired');
+    if (expired.length > 0) await pushStore.removeEndpoints(expired.map((r) => r.endpoint));
 
-    const named = names && names.length > 0 ? names.length : targets.length;
     const res: PushSendResponse = {
       delivered: results.filter((r) => r.result === 'delivered').length,
-      expired: results.filter((r) => r.result === 'expired').length,
-      unknown: Math.max(0, named - targets.length),
+      expired: expired.length,
+      unknown: names.filter((n) => !targets.some((t) => t.devicePublicKey === n)).length,
     };
     return c.json(res);
   });
@@ -721,10 +719,10 @@ async function readJson<T>(c: { req: { json(): Promise<unknown> } }): Promise<T 
 /** Longest push title/body we will forward; see the send route for why. */
 const PUSH_TEXT_LIMIT = 200;
 
-/** Collapse an untrusted string to a bounded single line, or `fallback`. */
-function boundedText(value: string, fallback: string): string {
-  const cleaned = value.replace(/\s+/g, ' ').trim().slice(0, PUSH_TEXT_LIMIT).trim();
-  return cleaned || fallback;
+/** Read an `Authorization: Bearer <token>` header, or null if absent/malformed. */
+function bearerToken(c: Context<AppEnv>): string | null {
+  const match = /^Bearer (.+)$/.exec(c.req.header('Authorization') ?? '');
+  return match ? match[1]! : null;
 }
 
 function isHttpsUrl(value: string): boolean {

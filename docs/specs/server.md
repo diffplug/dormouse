@@ -142,10 +142,10 @@ so `node --test` can drive setup → pairing → connect end to end via
 | `POST /api/host/enroll`          | setup password | `{ label }` → `{ hostId, hostToken, origin, rpId }`; appends to `hosts.json` |
 | `GET /api/hosts`                 | session token  | Enrolled hosts + whether each is currently connected |
 | `GET /api/push/config`           | —              | `{ applicationServerKey }` — the VAPID public key, or `null` when push is unconfigured. Public by construction |
-| `POST /api/push/challenge`       | session token  | `{ challenge }` for the device signature below      |
+| `POST /api/push/challenge`       | session token  | `{ challenge }` for the device signature below (no body — the challenge is a pool-wide nonce; the host binding lives in the signature) |
 | `POST /api/push/subscribe`       | session token + device signature | Upserts the `(hostId, devicePublicKey)` subscription |
 | `GET /api/push/devices`          | host token     | The `devicePublicKey`s subscribed to **this** Host  |
-| `POST /api/push/send`            | host token     | Fans a notification out to this Host's subscribers  |
+| `POST /api/push/send`            | host token     | Fans a notification out to the named devices; `devicePublicKeys` is required |
 | `GET /ws/host`                   | host token     | The Host's relay socket                            |
 | `GET /ws/client`                 | session token  | A Client's relay socket                            |
 
@@ -164,6 +164,9 @@ Source of truth: `server/src/push.ts` and the routes in `server/src/app.ts`.
   with a session token; a Host reads and sends with its `hostToken`. The send
   route takes the `hostId` from the token and never from the body, so naming a
   device explicitly cannot escape the calling Host's own scope.
+- **The Server never selects recipients.** `devicePublicKeys` is required and
+  non-empty; an absent or empty list is a 400, not a fan-out. The Host holds the
+  ACL and is the only party that may decide who a push reaches.
 - **The subscription is bound to a Client identity by signature.** The Client
   signs `(hostId, challenge, devicePublicKey, endpoint)` with its device key
   under `PUSH_SUBSCRIBE_DOMAIN` — deliberately *not* `DEVICE_AUTH_DOMAIN`, since
@@ -176,9 +179,10 @@ Source of truth: `server/src/push.ts` and the routes in `server/src/app.ts`.
   reach ([remote-security-model.md](./remote-security-model.md)).
 - **Endpoints must be https.** The server POSTs to whatever a subscriber names,
   so an unconstrained value would be an SSRF primitive.
-- **Payload text is bounded and collapsed at this boundary** even though the
-  Host already caps it, because it originates in a renderer and is ultimately
-  Pane-derived ([alert.md](./alert.md) -> Text And Security).
+- **Payload text is re-sanitized at this boundary** even though the Host already
+  did it, because it originates in a renderer and is ultimately Pane-derived
+  ([alert.md](./alert.md) -> Text And Security). Both sides call the same
+  `boundedPushText`, so the two layers cannot enforce different rules.
 - **Delivery outcomes prune.** 404/410 means the subscription is permanently
   gone and its row is deleted; anything else is transient and left alone. TTL is
   300s — an alarm that arrives an hour late is noise, not information.

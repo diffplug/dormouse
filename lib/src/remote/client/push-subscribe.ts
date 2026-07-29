@@ -126,10 +126,3 @@ export async function subscribeToPushInBrowser(
   }
   return { endpoint, keys: { p256dh, auth } };
 }
-
-/** Drop the local subscription. The server row is pruned when delivery 410s. */
-export async function unsubscribeFromPushInBrowser(): Promise<void> {
-  const registration = await getPushServiceWorkerRegistration();
-  const existing = await registration?.pushManager.getSubscription();
-  await existing?.unsubscribe();
-}

@@ -264,17 +264,21 @@ export class PushSubscriptionStore extends JsonFileStore {
   }
 
   /**
-   * Drop a subscription the push service reported as gone. Matched on endpoint
+   * Drop subscriptions the push service reported as gone. Matched on endpoint
    * rather than device so a stale row cannot outlive its endpoint even if the
    * same device has since re-subscribed with a new one.
+   *
+   * Takes the whole set because a fan-out can expire several at once, and one
+   * rewrite is both cheaper and less code than a serialized call per endpoint.
    */
-  removeByEndpoint(endpoint: string): Promise<boolean> {
+  removeEndpoints(endpoints: readonly string[]): Promise<number> {
     return this.mutate(async () => {
+      const gone = new Set(endpoints);
       const all = await this.list();
-      const kept = all.filter((s) => s.endpoint !== endpoint);
-      if (kept.length === all.length) return false;
+      const kept = all.filter((s) => !gone.has(s.endpoint));
+      if (kept.length === all.length) return 0;
       await this.writeAtomic(kept);
-      return true;
+      return all.length - kept.length;
     });
   }
 }
@@ -306,8 +310,9 @@ export class VapidStore extends JsonFileStore {
 
   /**
    * Return the persisted keypair, generating and saving one on first call.
-   * Runs under the mutex so two concurrent boots cannot each mint a keypair and
-   * have one silently overwrite the other.
+   * Serialized with this store's other writes like every other mutation — note
+   * the mutex is per-process, so two servers sharing a state dir would still
+   * race; sharing one is already unsupported.
    */
   loadOrCreate(generate: () => { publicKey: string; privateKey: string }): Promise<StoredVapidKeys> {
     return this.mutate(async () => {

@@ -17,9 +17,10 @@
  * different statement under a different domain — see below.
  */
 
-import { fromBase64Url, lengthPrefixedConcat, toBase64Url, utf8Encode } from './bytes.js';
-import { importDevicePublicKey, DEVICE_SIGN_ALGORITHM } from './deviceKey.js';
+import { fromBase64Url, lengthPrefixedConcat, utf8Encode } from './bytes.js';
+import { signDevicePayload, verifyDevicePayload } from './deviceKey.js';
 import { getWebCrypto, type CryptoKeyLike, type WebCryptoLike } from './webcrypto.js';
+
 
 /**
  * Domain-separation tag for the push-subscription statement. Deliberately NOT
@@ -65,37 +66,72 @@ export function pushSubscribePayload(context: PushSubscribeContext): Uint8Array 
 }
 
 /** Client side: sign a subscription with the device private key. Returns base64url. */
-export async function signPushSubscribe(
+export function signPushSubscribe(
   privateKey: CryptoKeyLike,
   context: PushSubscribeContext,
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<string> {
-  const signature = await crypto.subtle.sign(
-    DEVICE_SIGN_ALGORITHM,
-    privateKey,
-    pushSubscribePayload(context),
-  );
-  return toBase64Url(new Uint8Array(signature));
+  return signDevicePayload(privateKey, pushSubscribePayload(context), crypto);
 }
 
 /**
  * Server side: verify a push-subscribe signature. Returns false (never throws)
  * for malformed keys, malformed signatures, or any mismatch with the context.
+ *
+ * Building the payload is inside the guard because it decodes base64url from
+ * the context, which throws on garbage — and this route is reachable by anyone
+ * holding a session token, so a hostile body must produce a denial rather than
+ * an unhandled rejection.
  */
 export async function verifyPushSubscribeSignature(
   context: PushSubscribeContext,
   signature: string,
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<boolean> {
+  let payload: Uint8Array;
   try {
-    const publicKey = await importDevicePublicKey(context.devicePublicKey, crypto);
-    return await crypto.subtle.verify(
-      DEVICE_SIGN_ALGORITHM,
-      publicKey,
-      fromBase64Url(signature),
-      pushSubscribePayload(context),
-    );
+    payload = pushSubscribePayload(context);
   } catch {
     return false;
   }
+  return verifyDevicePayload(context.devicePublicKey, payload, signature, crypto);
+}
+
+// ---------------------------------------------------------------------------
+// Payload text
+
+/**
+ * Reduce untrusted text to something safe to put in an OS notification.
+ *
+ * Shared by the Host (which builds the payload from a Pane label) and the
+ * Server (which revalidates before handing it to a push service), so the rule
+ * has one implementation across both runtimes rather than a strong copy and a
+ * weak one. `lib/pocket/public/sw.js` mirrors it a third time at the render
+ * sink; that file is copied verbatim into the build and can import nothing.
+ *
+ * The label is ultimately terminal-supplied — `OSC 0`/`2`/`9` titles reach the
+ * Pane label (`docs/specs/alert.md` -> Text And Security) — so beyond bounding
+ * the length this strips control characters and the Unicode bidi and
+ * zero-width format characters, which can visually reorder or hide text on a
+ * lock screen.
+ *
+ * Note this deliberately keeps angle brackets. Stripping those is a
+ * speech-engine rule (`toSpokenText`), where WebKit wedges on them; a
+ * notification renders plain text and a title like `<idle>` should survive.
+ */
+export function boundedPushText(
+  value: unknown,
+  { limit, fallback }: { limit: number; fallback: string },
+): string {
+  if (typeof value !== 'string') return fallback;
+  const cleaned = value
+    // C0, DEL, and C1 control characters.
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    // Zero-width and joiner characters, bidi embedding/override marks, bidi
+    // isolates, and the BOM. Dropped rather than spaced: they carry no width,
+    // so replacing them would invent gaps in an otherwise fine title.
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.slice(0, limit).trim() || fallback;
 }
