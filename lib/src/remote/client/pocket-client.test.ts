@@ -21,6 +21,7 @@ import {
 
 import {
   hasRecoverablePairingFailure,
+  PASSKEY_UNAVAILABLE_MESSAGE,
   PocketClient,
   type PocketSocket,
   type PocketStorage,
@@ -34,6 +35,11 @@ import type { PasskeyRegistration, WebAuthnClient } from './webauthn';
 const CREDENTIAL_ID = 'cred-123';
 const PASSKEY_PUBLIC_KEY = 'pk-spki-b64u';
 const RP_ID = 'localhost';
+
+it('directs a missing passkey cache back through sign-in', () => {
+  expect(PASSKEY_UNAVAILABLE_MESSAGE).toContain('Sign in again');
+  expect(PASSKEY_UNAVAILABLE_MESSAGE).not.toContain('device that first created');
+});
 
 /** A base64url string usable as a real challenge (device signing decodes it). */
 function b64uChallenge(seed: number): string {

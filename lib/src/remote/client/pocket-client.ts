@@ -194,8 +194,8 @@ export class PocketClient {
       clientDataJSON: registration.clientDataJSON,
       label,
     });
-    // Stash the public key so this device can later build pairing/connect
-    // requests (the wire never hands it back on sign-in).
+    // Cache immediately so this profile can build pairing/connect requests;
+    // sign-in also refreshes this value from the Server's verified response.
     this.#storage.setPasskeyPublicKey(registration.credentialId, registration.publicKey);
     this.#credentialId = registration.credentialId;
     return finish;
@@ -659,8 +659,8 @@ export class PocketClient {
 }
 
 export const PASSKEY_UNAVAILABLE_MESSAGE =
-  "This device does not hold the passkey's public key, so it cannot pair or connect. " +
-  'Pair from the device that first created the passkey (POC limitation).';
+  "This app no longer has the signed-in passkey's public key, so it cannot pair or connect. " +
+  'Sign in again to restore it.';
 
 const RECOVERABLE_PAIRING_FAILURES = new Set<ConnectionFailure>([
   'passkey-not-paired',

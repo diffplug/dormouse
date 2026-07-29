@@ -386,11 +386,11 @@ First-time setup (password + label) creates the passkey and signs you in →
 Hosts → **Pair** → approve in the modal on the laptop → **Connect** (one
 biometric prompt) → pick a pane → type.
 
-Limitations to know about: pair/connect only works from the browser that
-registered the passkey (the passkey public key is stored client-side at
-registration); clearing site data destroys the device key → re-pair, per the
-security model; a dropped WebSocket sends you back to the Hosts view —
-reconnect by tapping Connect again.
+Limitations to know about: each browser storage partition has its own device key
+and therefore needs its own Host pairing, even when a synced passkey signs it
+in; clearing site data destroys that device key → re-pair, per the security
+model; a dropped WebSocket sends you back to the Hosts view — reconnect by
+tapping Connect again.
 
 Everything past this loop (browser surfaces, in-flight replay, thumbnails,
 the tethering display, WebRTC) is staged in remote-api.md `## Future` as

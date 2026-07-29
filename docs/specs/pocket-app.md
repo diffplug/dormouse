@@ -197,6 +197,11 @@ every new install and was an artifact of the wire, not a property of the trust
 model. The key is public: the Host is handed it in every `ConnectionRequest`
 anyway, and holding it authorizes nothing.
 
+If that cached public key disappears during a live session, Pocket directs the
+user to sign in again; the verified sign-in response restores it on any profile.
+Source of truth: `PASSKEY_UNAVAILABLE_MESSAGE` and `PocketClient.signin` in
+`lib/src/remote/client/pocket-client.ts`.
+
 So the order is: install to the Home Screen **first**, then sign in, approve the
 pairing on the machine, and enable alerts from within it.
 
