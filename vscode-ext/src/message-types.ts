@@ -1,4 +1,5 @@
 import type { ActivityNotification, SessionStatus, TodoState } from '../../lib/src/lib/alert-manager';
+import type { AlertSettings } from '../../lib/src/lib/alert-settings';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { TerminalColors } from '../../lib/src/lib/terminal-protocol';
 import type { DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
@@ -37,6 +38,8 @@ export type WebviewMessage =
   | { type: 'alert:remove'; id: string }
   | { type: 'alert:initializeWatchedCommands'; names: string[] }
   | { type: 'alert:setCommandWatched'; name: string; watched: boolean }
+  | { type: 'alert:initializeSettings'; settings: AlertSettings }
+  | { type: 'alert:updateSettings'; settings: AlertSettings }
   | { type: 'alert:dismiss'; id: string }
   | { type: 'alert:attend'; id: string }
   | { type: 'alert:resize'; id: string }
@@ -94,4 +97,5 @@ export type ExtensionMessage =
     notification: ActivityNotification | null;
     attentionDismissedRing: boolean;
   }
-  | { type: 'alert:watchedCommands'; names: string[] };
+  | { type: 'alert:watchedCommands'; names: string[] }
+  | { type: 'alert:settings'; settings: AlertSettings };

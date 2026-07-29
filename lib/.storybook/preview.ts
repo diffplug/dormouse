@@ -5,6 +5,7 @@ import '../src/theme.css';
 import '../src/index.css';
 import { initPlatform, type FakePtyAdapter, type FakeScenario } from '../src/lib/platform';
 import {
+  applyAlertSettingsFromHost,
   clearPrimedActivity,
   disposeAllSessions,
   getActivitySnapshot,
@@ -15,6 +16,7 @@ import {
   resetTerminalPaneState,
   setCommandWatched,
   type ActivityState,
+  type AlertSettings,
   type TerminalPaneState,
 } from '../src/lib/terminal-registry';
 import { computeDynamicPalette } from '../src/lib/themes/dynamic-palette';
@@ -197,6 +199,9 @@ const preview: Preview = {
       const primedWatchedCommands = context.parameters?.primedWatchedCommands as
         | readonly string[]
         | undefined;
+      const primedAlertSettings = context.parameters?.primedAlertSettings as
+        | Partial<AlertSettings>
+        | undefined;
       const platform = fakePlatform as FakePtyAdapter;
 
       if (scenario) platform.setDefaultScenario(scenario);
@@ -207,6 +212,11 @@ const preview: Preview = {
 
         const applyPrimedState = () => {
           applyWatchedCommands(primedWatchedCommands ?? []);
+          // Alarm settings (`docs/specs/alert.md` -> Alarm settings) leak between
+          // stories the same way the rule set above does. No merge needed:
+          // applyAlertSettingsFromHost normalizes, so a partial — or undefined —
+          // resets every field it does not name.
+          applyAlertSettingsFromHost(primedAlertSettings);
           clearPrimedActivity();
           for (const id of getTerminalPaneStateSnapshot().keys()) {
             removeTerminalPaneState(id);
@@ -237,6 +247,7 @@ const preview: Preview = {
           window.cancelAnimationFrame(raf1);
           window.cancelAnimationFrame(raf2);
           applyWatchedCommands([]);
+          applyAlertSettingsFromHost(undefined);
           clearPrimedActivity();
           for (const id of getTerminalPaneStateSnapshot().keys()) {
             removeTerminalPaneState(id);
@@ -244,7 +255,7 @@ const preview: Preview = {
           platform.clearDefaultScenario();
           disposeAllSessions();
         };
-      }, [platform, primedSessionState, primedTerminalState, primedWatchedCommands]);
+      }, [platform, primedSessionState, primedTerminalState, primedWatchedCommands, primedAlertSettings]);
 
       return createElement(Story);
     },

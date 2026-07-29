@@ -118,6 +118,7 @@ import {
   resumeTerminal,
   restoreTerminal,
   setPendingShellOpts,
+  subscribeToActivity,
   toggleSessionAlert,
   toggleSessionTodo,
 } from './terminal-registry';
@@ -304,6 +305,26 @@ describe('terminal-registry alert behavior', () => {
     createSession(id);
 
     expect(isUntouched(id)).toBe(true);
+  });
+
+  /**
+   * The receiver keeps no deregistration bookkeeping: every handler it installs
+   * is a stable module-level function and adapters hold handlers in a `Set`, so
+   * re-registering is a no-op. Pocket and the website playground call it from an
+   * effect, so a second registration would apply every host update twice.
+   */
+  it('stays singly subscribed when initAlertStateReceiver is called again', () => {
+    const id = 'double-init';
+    const listener = vi.fn();
+
+    initAlertStateReceiver();
+    initAlertStateReceiver();
+    const unsubscribe = subscribeToActivity(listener);
+    platformModule.getPlatform().alertMarkTodo(id);
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(getActivity(id).todo).toBe(true);
+    unsubscribe();
   });
 
   it('marks a session touched on first real terminal input', () => {

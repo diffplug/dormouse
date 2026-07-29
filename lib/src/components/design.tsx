@@ -2,7 +2,7 @@ import { clsx } from 'clsx';
 import { tv, type VariantProps } from 'tailwind-variants';
 import { XIcon } from '@phosphor-icons/react';
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode, RefObject } from 'react';
+import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { stepFocus } from './focus-step';
 
 // App-wide type scale, color strategy, and chrome conventions: see
@@ -244,6 +244,86 @@ export const ModalCloseButton = forwardRef<HTMLButtonElement, ModalCloseButtonPr
     );
   },
 );
+
+// Form controls. The app has no checkbox anywhere: a boolean is an OnOffSwitch,
+// and a number is a NumericInput. Both live here so dialogs share one vocabulary
+// rather than each restyling a bare <input> (DESIGN.md -> Inputs).
+
+export type NumericInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'type' | 'value'> & {
+  value: string;
+  onChange: (next: string) => void;
+  /** Max digits the field holds — sizes the box so rows stay compact. */
+  chars?: number;
+};
+
+/**
+ * A compact underlined number field. Filters non-numeric input at the keystroke
+ * rather than relying on `type="number"`, whose spinners and locale parsing do
+ * not fit the app's chrome.
+ */
+export const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
+  function NumericInput({ value, onChange, chars = 4, className, style, ...props }, ref) {
+    return (
+      <input
+        ref={ref}
+        type="text"
+        inputMode="numeric"
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ''))}
+        style={{ width: `calc(${chars}ch + 0.5rem)`, ...style }}
+        className={clsx(
+          'border-0 border-b border-border bg-transparent px-0.5 py-0.5 font-mono text-foreground outline-none focus:border-focus-ring',
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
+);
+
+/**
+ * Left margin that lines content up under an `OnOffSwitch`'s label rather than
+ * its pill: the switch's `w-14` plus the usual `gap-3` between them. Lives here
+ * so it moves with the switch's own geometry.
+ */
+export const UNDER_SWITCH_INDENT = 'ml-[4.25rem]';
+
+/**
+ * The app's boolean control: a two-position pill reading "on | off". Rendered as
+ * a `role="switch"` button, so it is disabled natively by a surrounding
+ * `<fieldset disabled>`.
+ */
+export function OnOffSwitch({
+  on,
+  onEnable,
+  onDisable,
+  label,
+}: {
+  on: boolean;
+  onEnable: () => void;
+  onDisable: () => void;
+  /** Describes what is being switched; announced with the current position. */
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={`${label} ${on ? 'on' : 'off'}`}
+      onClick={() => (on ? onDisable() : onEnable())}
+      className="relative inline-flex h-5 w-14 items-center rounded-full border border-border bg-app-bg text-sm font-medium"
+    >
+      <span
+        aria-hidden
+        className="absolute inset-y-0.5 w-[calc(50%-2px)] rounded-full bg-header-active-bg/25 transition-transform"
+        style={{ transform: on ? 'translateX(2px)' : 'translateX(calc(100% + 2px))' }}
+      />
+      <span className={clsx('z-10 flex-1 text-center', on ? 'text-header-active-bg' : 'text-muted')}>on</span>
+      <span className={clsx('z-10 flex-1 text-center', on ? 'text-muted' : 'text-header-active-bg')}>off</span>
+    </button>
+  );
+}
 
 export function useMeasuredElementRect(element: HTMLElement | null): ModalRect | null {
   const [rect, setRect] = useState<ModalRect | null>(null);

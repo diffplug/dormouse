@@ -67,6 +67,17 @@ export {
 } from './watched-commands';
 
 export {
+  applyAlertSettingsFromHost,
+  clampAlertDelayMs,
+  getAlertSettings,
+  subscribeToAlertSettings,
+  updateAlertSettings,
+} from './alert-settings';
+export type { AlertSettings } from './alert-settings';
+
+export { deriveSessionLabel } from './session-label';
+
+export {
   applyTerminalSemanticEvents,
   applyTerminalSemanticEventsByPtyId,
   countRunningSessions,

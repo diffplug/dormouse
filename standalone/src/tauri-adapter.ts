@@ -16,6 +16,7 @@ import type {
   PtyInfo,
 } from "dormouse-lib/lib/platform/types";
 import { AlertManager } from "dormouse-lib/lib/alert-manager";
+import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
 import { TauriSessionStore } from "./tauri-session-store";
@@ -461,6 +462,10 @@ export class TauriAdapter implements PlatformAdapter {
     this.alertManager.setCommandWatched(name, watched);
   }
 
+  alertPublishSettings(settings: AlertSettings): void {
+    this.alertManager.setInactivityTimeoutMs(settings.inactivityTimeoutMs);
+  }
+
   alertDismiss(id: string): void {
     this.alertManager.dismissAlert(id);
   }
@@ -493,13 +498,11 @@ export class TauriAdapter implements PlatformAdapter {
     this.alertStateHandlers.add(handler);
   }
 
-  offAlertState(handler: (detail: AlertStateDetail) => void): void {
-    this.alertStateHandlers.delete(handler);
-  }
-
+  // Single webview owning the AlertManager, so localStorage is the only store
+  // and there is no canonical snapshot to broadcast back.
   onWatchedCommands(_handler: (names: string[]) => void): void {}
 
-  offWatchedCommands(_handler: (names: string[]) => void): void {}
+  onAlertSettings(_handler: (settings: AlertSettings) => void): void {}
 
   // --- State persistence ---
 

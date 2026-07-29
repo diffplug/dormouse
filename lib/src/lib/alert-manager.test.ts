@@ -627,4 +627,86 @@ describe('AlertManager in isolation', () => {
       notification: { source: 'OSC 9', title: null, body: 'Build finished' },
     });
   });
+
+  // --- Configurable inactivity timeout (`docs/specs/alert.md` -> Alarm settings) ---
+
+  describe('setInactivityTimeoutMs', () => {
+    it('expires attention on the configured window instead of the default 15s', () => {
+      const id = 'short-window';
+      manager.setInactivityTimeoutMs(3_000);
+
+      manager.attend(id);
+      manager.applyTerminalSemanticEvents(id, [
+        { type: 'commandLine', commandLine: 'pnpm build' },
+        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+      ]);
+
+      vi.advanceTimersByTime(2_999);
+      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
+
+      vi.advanceTimersByTime(1);
+      expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
+    });
+
+    it('gates the command-exit minimum runtime on the same window', () => {
+      const id = 'short-runtime-gate';
+      manager.setInactivityTimeoutMs(3_000);
+
+      manager.attend(id);
+      manager.applyTerminalSemanticEvents(id, [
+        { type: 'commandLine', commandLine: 'git status' },
+        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+      ]);
+      manager.clearAttention(id);
+
+      // Under the default 15s window this runtime would be too short to ring.
+      vi.advanceTimersByTime(4_000);
+      manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+
+      expect(manager.getState(id)).toMatchObject({
+        status: 'ALERT_RINGING',
+        notification: { source: 'COMMAND_EXIT', body: 'git status exited 0' },
+      });
+    });
+
+    it('re-arms a live attention timer so a shortened window applies immediately', () => {
+      const id = 're-arm';
+
+      manager.attend(id);
+      manager.applyTerminalSemanticEvents(id, [
+        { type: 'commandLine', commandLine: 'pnpm build' },
+        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+      ]);
+
+      vi.advanceTimersByTime(10_000);
+      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
+
+      // Shortening mid-window restarts the countdown from now rather than
+      // firing instantly or waiting out the original 15s.
+      manager.setInactivityTimeoutMs(3_000);
+      vi.advanceTimersByTime(2_999);
+      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
+
+      vi.advanceTimersByTime(1);
+      expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
+    });
+
+    it('ignores a nonsensical value rather than installing a broken timer', () => {
+      const id = 'bad-value';
+      manager.setInactivityTimeoutMs(Number.NaN);
+      manager.setInactivityTimeoutMs(0);
+      manager.setInactivityTimeoutMs(-1);
+
+      manager.attend(id);
+      manager.applyTerminalSemanticEvents(id, [
+        { type: 'commandLine', commandLine: 'pnpm build' },
+        { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+      ]);
+
+      vi.advanceTimersByTime(14_999);
+      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
+      vi.advanceTimersByTime(1);
+      expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
+    });
+  });
 });

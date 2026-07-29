@@ -1,7 +1,8 @@
-import { useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
-import { CaretLeftIcon, CaretRightIcon } from '@phosphor-icons/react';
+import { useEffect, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
+import { CaretLeftIcon, CaretRightIcon, SlidersHorizontalIcon } from '@phosphor-icons/react';
+import { AlertSettingsDialog } from './AlertSettingsDialog';
 import { Door } from './Door';
-import { DoorElementsContext } from './wall/wall-context';
+import { DialogKeyboardContext, DoorElementsContext } from './wall/wall-context';
 import type { DooredItem } from './wall/wall-types';
 import { IS_MAC } from '../lib/platform';
 import {
@@ -13,6 +14,10 @@ import {
   subscribeToTerminalPaneState,
 } from '../lib/terminal-registry';
 import { createTerminalPaneState, deriveSurfaceLabel, type TerminalPaneState } from '../lib/terminal-state';
+
+/** Shared look for every baseboard-level button (DESIGN.md -> Navigation). */
+const BASEBOARD_BUTTON_CLASS =
+  'flex h-5 shrink-0 items-center gap-1 rounded px-1.5 pb-px text-sm font-medium font-mono text-muted transition-colors hover:bg-surface-raised hover:text-foreground';
 
 export interface BaseboardProps {
   items: DooredItem[];
@@ -38,13 +43,38 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const [startIndex, setStartIndex] = useState(0);
   const doorWidthsRef = useRef<number[]>([]);
   const arrowMeasureEl = useRef<HTMLButtonElement>(null);
+  const rightClusterEl = useRef<HTMLDivElement>(null);
+  const [rightClusterWidth, setRightClusterWidth] = useState(0);
   const layoutMetrics = useRef({ doorGap: 0, arrowWidth: 0 });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const setDialogKeyboardActive = useContext(DialogKeyboardContext);
+
+  // Suppress command-mode key dispatch while the settings dialog owns the
+  // keyboard, so typing a timeout doesn't trigger pane shortcuts.
+  useEffect(() => {
+    setDialogKeyboardActive(settingsOpen);
+    return () => setDialogKeyboardActive(false);
+  }, [settingsOpen, setDialogKeyboardActive]);
 
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
       setContainerWidth(entry.contentRect.width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // The right cluster's width is never available to doors, so the fitting budget
+  // below subtracts it. Observed rather than measured on render: the host's
+  // `notice` element is referentially stable, so it appears and disappears
+  // through its own internal state without ever re-rendering this component.
+  useLayoutEffect(() => {
+    const el = rightClusterEl.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setRightClusterWidth(entry.contentRect.width);
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -94,7 +124,9 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     const widths = doorWidthsRef.current;
     const { doorGap, arrowWidth } = layoutMetrics.current;
     const hasLeftOverflow = startIndex > 0;
-    let budget = availableWidth - (hasLeftOverflow ? arrowWidth : 0);
+    const budget = availableWidth
+      - (hasLeftOverflow ? arrowWidth : 0)
+      - (rightClusterWidth + doorGap);
 
     for (let i = startIndex; i < items.length; i++) {
       const doorW = (widths[i] || 100) + (visibleCount > 0 ? doorGap : 0);
@@ -170,7 +202,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
           );
         })}
       </div>
-      <button ref={arrowMeasureEl} className="absolute -left-[9999px] flex h-5 shrink-0 items-center gap-1 rounded px-1.5 pb-px text-sm font-medium font-mono text-muted" aria-hidden tabIndex={-1}>
+      <button ref={arrowMeasureEl} className={`absolute -left-[9999px] ${BASEBOARD_BUTTON_CLASS}`} aria-hidden tabIndex={-1}>
         9 more <CaretRightIcon size={10} weight="bold" />
       </button>
 
@@ -182,7 +214,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
 
       {hiddenLeft > 0 && (
         <button
-          className="flex h-5 shrink-0 items-center gap-1 rounded px-1.5 pb-px text-sm font-medium font-mono text-muted transition-colors hover:bg-surface-raised hover:text-foreground"
+          className={BASEBOARD_BUTTON_CLASS}
           onClick={scrollLeft}
         >
           <CaretLeftIcon size={10} weight="bold" />
@@ -206,17 +238,37 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         );
       })}
 
-      {hiddenRight > 0 && (
-        <button
-          className="ml-auto flex h-5 shrink-0 items-center gap-1 rounded px-1.5 pb-px text-sm font-medium font-mono text-muted transition-colors hover:bg-surface-raised hover:text-foreground"
-          onClick={scrollRight}
-        >
-          {hiddenRight} more
-          <CaretRightIcon size={10} weight="bold" />
-        </button>
-      )}
+      {/* One right-hand cluster. Previously the overflow arrow and the notice
+          each carried their own `ml-auto`, which split the free space between
+          them. The arrow keeps its per-iteration reserve in the fitting loop;
+          only the always-present part below is measured, so cluster width never
+          depends on the fitting result it feeds. */}
+      <div className="ml-auto flex shrink-0 items-end gap-1.5">
+        {hiddenRight > 0 && (
+          <button
+            className={BASEBOARD_BUTTON_CLASS}
+            onClick={scrollRight}
+          >
+            {hiddenRight} more
+            <CaretRightIcon size={10} weight="bold" />
+          </button>
+        )}
 
-      {notice && <div className="ml-auto shrink-0">{notice}</div>}
+        <div ref={rightClusterEl} className="flex shrink-0 items-end gap-1.5">
+          {notice}
+
+          <button
+            className={BASEBOARD_BUTTON_CLASS}
+            aria-label="Alarm settings"
+            title="Alarm settings"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <SlidersHorizontalIcon size={11} weight="bold" />
+          </button>
+        </div>
+      </div>
+
+      {settingsOpen && <AlertSettingsDialog onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }
