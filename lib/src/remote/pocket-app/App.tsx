@@ -159,11 +159,12 @@ export default function App(): React.ReactElement {
   const [pushSubscriptionCurrent, setPushSubscriptionCurrent] = useState(false);
   const [pushConfig, setPushConfig] = useState<PushConfigState>({ status: 'loading' });
   /**
-   * How many registrations this session has completed. The Server read below
-   * replaces the whole set, so it must not land on top of an Enable that
-   * finished while it was in flight.
+   * Per-Host registration completion versions. The Server read below replaces
+   * the whole set, except for Hosts whose version advanced after that read
+   * began. A counter per Host (rather than a Set) also detects a repeated repair
+   * of the same Host.
    */
-  const pushEnablesRef = useRef(0);
+  const pushEnableVersionsRef = useRef<Map<string, number>>(new Map());
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
 
   // Availability depends on browser state the app cannot change (permission,
@@ -196,12 +197,18 @@ export default function App(): React.ReactElement {
     // re-offers Enable alerts for every Host, including ones the Server already
     // holds a row for. Authoritative rather than merged, so a row pruned after
     // a 410 stops claiming alerts are on.
-    const enablesAtStart = pushEnablesRef.current;
+    const enableVersionsAtStart = new Map(pushEnableVersionsRef.current);
     void client
       .listPushSubscribedHosts()
       .then((hostIds) => {
-        if (live && pushEnablesRef.current === enablesAtStart) {
-          setPushSubscribedHostIds(new Set(hostIds));
+        if (live) {
+          setPushSubscribedHostIds(
+            reconcilePushSubscribedHosts(
+              hostIds,
+              enableVersionsAtStart,
+              pushEnableVersionsRef.current,
+            ),
+          );
         }
       })
       .catch(() => {
@@ -307,7 +314,10 @@ export default function App(): React.ReactElement {
       }
       const subscription = await subscribeToPushInBrowser(pushConfig.key);
       await client.subscribeToPush(host.hostId, subscription);
-      pushEnablesRef.current += 1;
+      pushEnableVersionsRef.current.set(
+        host.hostId,
+        (pushEnableVersionsRef.current.get(host.hostId) ?? 0) + 1,
+      );
       setPushSubscriptionCurrent(true);
       setPushSubscribedHostIds((prev) => new Set(prev).add(host.hostId));
     });
@@ -393,6 +403,23 @@ export default function App(): React.ReactElement {
       <div className={clsx(PK.body, PK.bodyCenter)}>…</div>
     </div>
   );
+}
+
+/**
+ * Apply an authoritative Server snapshot without losing a registration that
+ * completed after the read began. Earlier local ids are deliberately omitted
+ * when the Server no longer reports them: pruning must self-correct the UI.
+ */
+export function reconcilePushSubscribedHosts(
+  serverHostIds: readonly string[],
+  enableVersionsAtReadStart: ReadonlyMap<string, number>,
+  enableVersionsNow: ReadonlyMap<string, number>,
+): Set<string> {
+  const reconciled = new Set(serverHostIds);
+  for (const [hostId, version] of enableVersionsNow) {
+    if (version > (enableVersionsAtReadStart.get(hostId) ?? 0)) reconciled.add(hostId);
+  }
+  return reconciled;
 }
 
 // --- ConnectedView ---------------------------------------------------------
