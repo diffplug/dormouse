@@ -62,10 +62,28 @@ describe('isBlockedAddress', () => {
     expect(isBlockedAddress('169.254.0.1')).toBe(true);
     expect(isBlockedAddress('fe80::1')).toBe(true);
   });
+  it('blocks the metadata endpoint under equivalent IPv4 encodings', () => {
+    // Alternate encodings the OS resolver treats as 169.254.169.254.
+    expect(isBlockedAddress('2852039166')).toBe(true); // 32-bit decimal
+    expect(isBlockedAddress('0xa9fea9fe')).toBe(true); // 32-bit hex
+    expect(isBlockedAddress('0xA9.0xFE.0xA9.0xFE')).toBe(true); // dotted hex
+    expect(isBlockedAddress('0251.0376.0251.0376')).toBe(true); // dotted octal
+    expect(isBlockedAddress('169.254.43518')).toBe(true); // short form
+  });
+  it('blocks the metadata endpoint wrapped in IPv6', () => {
+    expect(isBlockedAddress('::ffff:169.254.169.254')).toBe(true); // mapped, dotted
+    expect(isBlockedAddress('::ffff:a9fe:a9fe')).toBe(true); // mapped, hex
+    expect(isBlockedAddress('[::ffff:169.254.169.254]')).toBe(true); // bracketed
+    expect(isBlockedAddress('::169.254.169.254')).toBe(true); // compat form
+  });
   it('allows ordinary hosts', () => {
     expect(isBlockedAddress('127.0.0.1')).toBe(false);
     expect(isBlockedAddress('localhost')).toBe(false);
     expect(isBlockedAddress('example.com')).toBe(false);
+    expect(isBlockedAddress('::1')).toBe(false); // loopback
+    expect(isBlockedAddress('10.0.0.1')).toBe(false); // private, trusted
+    expect(isBlockedAddress('169.255.0.1')).toBe(false); // just outside the /16
+    expect(isBlockedAddress('2852094976')).toBe(false); // 169.255.0.0 as decimal
   });
 });
 

@@ -116,13 +116,71 @@ export function instrumentHtml(body: string): string {
   return shimTag + html;
 }
 
+// 169.254.0.0/16 — IPv4 link-local, incl. the 169.254.169.254 cloud-metadata
+// endpoint — as a numeric range so every equivalent encoding is caught.
+const LINK_LOCAL_V4_START = 0xa9fe0000; // 169.254.0.0
+const LINK_LOCAL_V4_END = 0xa9feffff; // 169.254.255.255
+
+// Parse one dotted-quad component with inet_aton semantics: hex (0x…), octal
+// (leading 0), or decimal. Returns null for anything else.
+function parseIPv4Part(part: string): number | null {
+  if (/^0x[0-9a-f]+$/.test(part)) return parseInt(part.slice(2), 16);
+  if (/^0[0-7]+$/.test(part)) return parseInt(part, 8);
+  if (/^(0|[1-9][0-9]*)$/.test(part)) return parseInt(part, 10);
+  return null;
+}
+
+// Parse a hostname as an IPv4 literal the way the OS resolver (getaddrinfo /
+// inet_aton) would — including short forms and non-decimal encodings — so that
+// 2852039166, 0xA9FEA9FE, 0251.0376.0251.0376 and 169.254.169.254 all collapse
+// to the same 32-bit value. Returns null when the string isn't a numeric IPv4.
+function parseIPv4(host: string): number | null {
+  const parts = host.split('.');
+  if (parts.length === 0 || parts.length > 4) return null;
+  const nums: number[] = [];
+  for (const part of parts) {
+    const n = parseIPv4Part(part);
+    if (n === null) return null;
+    nums.push(n);
+  }
+  // Every part but the last is a single byte; the last fills the remainder.
+  for (let i = 0; i < nums.length - 1; i++) {
+    if (nums[i] > 0xff) return null;
+  }
+  const last = nums[nums.length - 1];
+  if (last > Math.pow(256, 5 - nums.length) - 1) return null;
+  let value = last;
+  for (let i = 0; i < nums.length - 1; i++) {
+    value += nums[i] * Math.pow(256, 3 - i);
+  }
+  return value >>> 0 === value ? value : null;
+}
+
+// Extract the 32-bit IPv4 address embedded in an IPv4-mapped or IPv4-compatible
+// IPv6 literal (::ffff:169.254.169.254, ::ffff:a9fe:a9fe, ::169.254.169.254),
+// or null if this isn't such an address.
+function embeddedIPv4(h: string): number | null {
+  const m = h.match(/^::(?:ffff:)?(.+)$/);
+  if (!m) return null;
+  const tail = m[1];
+  if (tail.includes('.')) return parseIPv4(tail.slice(tail.lastIndexOf(':') + 1));
+  const groups = tail.split(':');
+  if (groups.length === 2 && groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) {
+    return ((parseInt(groups[0], 16) << 16) >>> 0) + parseInt(groups[1], 16);
+  }
+  return null;
+}
+
 export function isBlockedAddress(hostname: string): boolean {
   const h = hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  // IPv4 link-local / cloud metadata (169.254.0.0/16, incl. 169.254.169.254).
-  if (/^169\.254\./.test(h)) return true;
   // IPv6 link-local (fe80::/10).
   if (/^fe[89ab][0-9a-f]:/.test(h)) return true;
-  return false;
+  // Resolve the host to its 32-bit IPv4 value across every equivalent encoding
+  // (decimal/octal/hex, short forms, IPv4-mapped IPv6) and range-check the
+  // link-local / cloud-metadata block. A literal-string match on 169.254.* only
+  // would let ::ffff:169.254.169.254 or 2852039166 slip past the same guard.
+  const v4 = h.includes(':') ? embeddedIPv4(h) : parseIPv4(h);
+  return v4 !== null && v4 >= LINK_LOCAL_V4_START && v4 <= LINK_LOCAL_V4_END;
 }
 
 // --- Served error / diagnostic pages ----------------------------------------
