@@ -5,7 +5,7 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { HostsView, type HostView } from './App';
+import { HostsView, type HostView, type PushConfigStatus } from './App';
 import type { PushAvailability } from '../client/push-subscribe';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -33,8 +33,9 @@ function renderHosts(
   overrides: {
     isPushSubscribed?: (hostId: string) => boolean;
     pushState?: PushAvailability | null;
-    pushConfigured?: boolean;
+    pushConfigStatus?: PushConfigStatus;
     onEnablePush?: (host: HostView) => void;
+    onRetryPushConfig?: () => void;
   } = {},
 ) {
   act(() => {
@@ -47,12 +48,13 @@ function renderHosts(
           isPaired={() => true}
           isPushSubscribed={overrides.isPushSubscribed ?? (() => false)}
           pushState={overrides.pushState ?? 'ready'}
-          pushConfigured={overrides.pushConfigured ?? true}
+          pushConfigStatus={overrides.pushConfigStatus ?? 'ready'}
           needsLocalPasskey={false}
           onRefresh={() => undefined}
           onPair={() => undefined}
           onConnect={() => undefined}
           onEnablePush={overrides.onEnablePush ?? (() => undefined)}
+          onRetryPushConfig={overrides.onRetryPushConfig ?? (() => undefined)}
           onSetup={() => undefined}
         />
       </StrictMode>,
@@ -74,6 +76,10 @@ function pushRowFor(label: string): HTMLElement {
 
 function enableButtonIn(row: HTMLElement): HTMLButtonElement | null {
   return [...row.querySelectorAll('button')].find((b) => b.textContent === 'Enable alerts') ?? null;
+}
+
+function retryButtonIn(row: HTMLElement): HTMLButtonElement | null {
+  return [...row.querySelectorAll('button')].find((b) => b.textContent === 'Retry') ?? null;
 }
 
 describe('HostsView push registration', () => {
@@ -121,7 +127,7 @@ describe('HostsView push registration', () => {
   });
 
   it('reports a server with push disabled rather than the browser state', () => {
-    renderHosts({ pushConfigured: false });
+    renderHosts({ pushConfigStatus: 'disabled' });
 
     const row = pushRowFor('First laptop');
     expect(row.textContent).toContain('server has push notifications disabled');
@@ -131,11 +137,30 @@ describe('HostsView push registration', () => {
   it('does not advise installing when the server cannot push at all', () => {
     // The install ritual the notice describes would end at the same "push is
     // disabled" copy the rows already show — advice and rows must not contradict.
-    renderHosts({ pushState: 'needs-install', pushConfigured: false });
+    renderHosts({ pushState: 'needs-install', pushConfigStatus: 'disabled' });
 
     expect(container.textContent).not.toContain('Add Dormouse to your Home Screen');
     expect(pushRowFor('First laptop').textContent).toContain(
       'server has push notifications disabled',
     );
+  });
+
+  it('does not offer Enable alerts until the VAPID key is cached', () => {
+    renderHosts({ pushConfigStatus: 'loading' });
+
+    const row = pushRowFor('First laptop');
+    expect(row.textContent).toContain('Checking whether this server can send alerts');
+    expect(enableButtonIn(row)).toBeNull();
+  });
+
+  it('retries config separately from the permission-triggering Enable tap', () => {
+    const onRetryPushConfig = vi.fn();
+    renderHosts({ pushConfigStatus: 'error', onRetryPushConfig });
+
+    const row = pushRowFor('First laptop');
+    expect(row.textContent).toContain('Could not check');
+    expect(enableButtonIn(row)).toBeNull();
+    act(() => retryButtonIn(row)!.click());
+    expect(onRetryPushConfig).toHaveBeenCalledOnce();
   });
 });

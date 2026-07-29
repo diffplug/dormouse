@@ -235,6 +235,15 @@ check and the subscribe path await the tracked registration promise from
 `navigator.serviceWorker.ready`, which never settles when registration failed —
 that would hang the button the user just tapped, with no way out.
 
+The Server's VAPID public key is also prefetched before Pocket offers Enable
+alerts. The config state is explicit (`loading`, `ready`, `disabled`, or
+`error`): a failed fetch offers Retry, which only caches the key, and a
+successful retry then reveals Enable. Permission is requested on that separate,
+fresh tap, because putting a network round trip between an iOS user gesture and
+`Notification.requestPermission()` can consume the transient activation.
+Source of truth: the push-config state and actions in
+`lib/src/remote/pocket-app/App.tsx`.
+
 Browser availability and Host registration are separate states. A
 `PushSubscription` belongs to the service-worker scope, while the Server stores
 one row per `(hostId, devicePublicKey)`. An existing browser subscription

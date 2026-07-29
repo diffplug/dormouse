@@ -39,12 +39,14 @@ const meta: Meta<typeof HostsView> = {
     error: null,
     isPaired,
     pushState: 'ready',
+    pushConfigStatus: 'ready',
     isPushSubscribed: () => false,
     needsLocalPasskey: false,
     onRefresh: () => {},
     onPair: () => {},
     onConnect: () => {},
     onEnablePush: () => {},
+    onRetryPushConfig: () => {},
     onSetup: () => {},
   },
   decorators: [
@@ -143,8 +145,8 @@ export const PushNoWorker: Story = {
  * iOS, running in a Safari tab. Web Push only reaches an installed app and
  * there is no API to prompt for that, so the notice describes the steps — and
  * allows for someone who already installed it and opened the wrong window,
- * which a tab cannot distinguish. The notice is driven by `pushState` alone, so
- * it cannot disagree with the push row beneath it.
+ * which a tab cannot distinguish. A definitively push-disabled Server hides the
+ * notice so it cannot disagree with the push row beneath it.
  */
 export const NeedsHomeScreenInstall: Story = {
   args: { pushState: 'needs-install' },
@@ -166,5 +168,15 @@ export const NeedsInstallAndPasskey: Story = {
 
 // The server was started without VAPID keys, so there is nothing to enable.
 export const PushUnconfigured: Story = {
-  args: { pushConfigured: false },
+  args: { pushConfigStatus: 'disabled' },
+};
+
+// The config prefetch must finish before a permission-triggering tap is offered.
+export const PushConfigLoading: Story = {
+  args: { pushConfigStatus: 'loading' },
+};
+
+// A failed prefetch retries separately; Enable appears only after it succeeds.
+export const PushConfigError: Story = {
+  args: { pushConfigStatus: 'error' },
 };

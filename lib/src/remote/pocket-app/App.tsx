@@ -42,6 +42,14 @@ export interface HostView {
   online: boolean;
 }
 
+export type PushConfigStatus = 'loading' | 'ready' | 'disabled' | 'error';
+
+type PushConfigState =
+  | { status: 'loading' }
+  | { status: 'ready'; key: string }
+  | { status: 'disabled' }
+  | { status: 'error' };
+
 /** A phone-friendly default pairing label. */
 const DEVICE_LABEL = 'Dormouse Pocket';
 
@@ -136,13 +144,7 @@ export default function App(): React.ReactElement {
   const [pushSubscribedHostIds, setPushSubscribedHostIds] = useState<Set<string>>(
     () => new Set(),
   );
-  /**
-   * undefined = unknown (not asked yet, or the ask failed), null = this server
-   * answered that push is disabled. Only a real server answer may set null:
-   * the copy it drives blames the server, and a transient fetch failure must
-   * not latch that accusation for the rest of the session.
-   */
-  const [pushKey, setPushKey] = useState<string | null | undefined>(undefined);
+  const [pushConfig, setPushConfig] = useState<PushConfigState>({ status: 'loading' });
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
 
   // Availability depends on browser state the app cannot change (permission,
@@ -153,17 +155,19 @@ export default function App(): React.ReactElement {
   useEffect(() => {
     if (phase !== 'hosts') return;
     let live = true;
+    setPushConfig({ status: 'loading' });
     void getPushAvailability().then((state) => {
       if (live) setPushState(state);
     });
     void client
       .getPushConfig()
       .then((key) => {
-        if (live) setPushKey(key);
+        if (live) {
+          setPushConfig(key === null ? { status: 'disabled' } : { status: 'ready', key });
+        }
       })
       .catch(() => {
-        // Leave the tri-state at "unknown": the Enable tap re-asks on demand,
-        // which beats claiming the server disabled push when the fetch failed.
+        if (live) setPushConfig({ status: 'error' });
       });
     return () => {
       live = false;
@@ -254,22 +258,31 @@ export default function App(): React.ReactElement {
       setPairedIds((prev) => new Set(prev).add(host.hostId));
     });
 
-  // The VAPID key was prefetched with availability, so the permission prompt is
-  // normally reached without a network round trip that could cost transient
-  // activation. If the prefetch failed or is still in flight, re-ask now —
-  // paying the round trip beats refusing a tap the server would have honored.
+  // The VAPID key was prefetched before this action becomes available, so the
+  // permission prompt has no network round trip in front of it — iOS drops the
+  // transient activation required by requestPermission across one.
   const onEnablePush = (host: HostView) =>
     run('push', async () => {
-      const key =
-        pushKey ??
-        (await client.getPushConfig().then((fetched) => {
-          setPushKey(fetched);
-          return fetched;
-        }));
-      if (!key) throw new Error('This server has push notifications disabled.');
-      const subscription = await subscribeToPushInBrowser(key);
+      if (pushConfig.status !== 'ready') {
+        throw new Error('Check the server configuration before enabling alerts.');
+      }
+      const subscription = await subscribeToPushInBrowser(pushConfig.key);
       await client.subscribeToPush(host.hostId, subscription);
       setPushSubscribedHostIds((prev) => new Set(prev).add(host.hostId));
+    });
+
+  // A config retry deliberately stops after caching the key. The next tap on
+  // Enable alerts is the fresh user gesture the iOS permission prompt requires.
+  const onRetryPushConfig = () =>
+    run('push-config', async () => {
+      setPushConfig({ status: 'loading' });
+      try {
+        const key = await client.getPushConfig();
+        setPushConfig(key === null ? { status: 'disabled' } : { status: 'ready', key });
+      } catch (err) {
+        setPushConfig({ status: 'error' });
+        throw err;
+      }
     });
 
   const onSetup = useCallback(
@@ -315,12 +328,13 @@ export default function App(): React.ReactElement {
         isPaired={(id) => pairedIds.has(id)}
         isPushSubscribed={(id) => pushSubscribedHostIds.has(id)}
         pushState={pushState}
-        pushConfigured={pushKey !== null}
+        pushConfigStatus={pushConfig.status}
         needsLocalPasskey={!client.hasPasskeyMaterial()}
         onRefresh={() => run('refresh', loadHosts)}
         onPair={onPair}
         onConnect={onConnect}
         onEnablePush={onEnablePush}
+        onRetryPushConfig={onRetryPushConfig}
         onSetup={onSetup}
       />
     );
@@ -569,11 +583,12 @@ export function HostsView({
   isPushSubscribed,
   pushState,
   needsLocalPasskey,
-  pushConfigured = true,
+  pushConfigStatus = 'ready',
   onRefresh,
   onPair,
   onConnect,
   onEnablePush,
+  onRetryPushConfig,
   onSetup,
 }: {
   hosts: HostView[];
@@ -586,12 +601,13 @@ export function HostsView({
   pushState: PushAvailability | null;
   /** Signed in, but this profile cannot pair — see {@link LocalPasskeyNotice}. */
   needsLocalPasskey: boolean;
-  /** False when the server has no VAPID key, so there is nothing to enable. */
-  pushConfigured?: boolean;
+  /** Whether the Server's VAPID public key is already cached for a permission tap. */
+  pushConfigStatus?: PushConfigStatus;
   onRefresh: () => void;
   onPair: (host: HostView) => void;
   onConnect: (host: HostView) => void;
   onEnablePush: (host: HostView) => void;
+  onRetryPushConfig: () => void;
   onSetup: (password: string, label: string) => void;
 }): React.ReactElement {
   return (
@@ -612,7 +628,9 @@ export function HostsView({
         {/* Install advice is moot when the server cannot push at all — the
             rows below already say push is disabled, and the ritual the notice
             describes would end at that same message. */}
-        {pushConfigured && pushState === 'needs-install' ? <InstallNotice /> : null}
+        {pushConfigStatus !== 'disabled' && pushState === 'needs-install' ? (
+          <InstallNotice />
+        ) : null}
         {needsLocalPasskey ? <LocalPasskeyNotice busy={busy} onSetup={onSetup} /> : null}
         {hosts.length === 0 ? (
           <div className={PK.empty}>No hosts enrolled yet. Enroll one from your laptop.</div>
@@ -622,6 +640,16 @@ export function HostsView({
             const hostPushState: HostPushState = isPushSubscribed(host.hostId)
               ? 'subscribed'
               : pushState ?? 'ready';
+            const pushCopy =
+              pushConfigStatus === 'disabled'
+                ? 'This server has push notifications disabled.'
+                : hostPushState !== 'ready'
+                  ? PUSH_COPY[hostPushState]
+                  : pushConfigStatus === 'loading'
+                    ? 'Checking whether this server can send alerts…'
+                    : pushConfigStatus === 'error'
+                      ? 'Could not check whether this server can send alerts.'
+                      : PUSH_COPY.ready;
             const status = !host.online ? 'Offline' : paired ? 'Paired' : 'Not paired';
             return (
               <div key={host.hostId} className="flex flex-col gap-1.5">
@@ -657,11 +685,9 @@ export function HostsView({
                 {paired && pushState ? (
                   <div className={PK.pushRow}>
                     <span className="min-w-0 flex-1">
-                      {pushConfigured
-                        ? PUSH_COPY[hostPushState]
-                        : 'This server has push notifications disabled.'}
+                      {pushCopy}
                     </span>
-                    {hostPushState === 'ready' && pushConfigured ? (
+                    {hostPushState === 'ready' && pushConfigStatus === 'ready' ? (
                       <button
                         type="button"
                         className={pkButton({ tone: 'secondary', size: 'sm' })}
@@ -669,6 +695,15 @@ export function HostsView({
                         onClick={() => onEnablePush(host)}
                       >
                         {busy === 'push' ? '…' : 'Enable alerts'}
+                      </button>
+                    ) : hostPushState === 'ready' && pushConfigStatus === 'error' ? (
+                      <button
+                        type="button"
+                        className={pkButton({ tone: 'secondary', size: 'sm' })}
+                        disabled={busy !== null}
+                        onClick={onRetryPushConfig}
+                      >
+                        {busy === 'push-config' ? '…' : 'Retry'}
                       </button>
                     ) : null}
                   </div>
