@@ -4,7 +4,7 @@ vi.mock('./platform', () => ({
   getPlatform: () => ({ alertPublishSettings: vi.fn() }),
 }));
 
-import { startAlertSpeech } from './alert-speech';
+import { startAlertSpeech, toSpokenText } from './alert-speech';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from './alert-settings';
 import { clearPrimedActivity, primeActivity } from './session-activity-store';
 import type { SessionStatus } from './activity-monitor';
@@ -63,6 +63,44 @@ afterEach(() => {
 function start(): void {
   stopSpeech = startAlertSpeech();
 }
+
+/**
+ * WebKit drops an utterance containing angle brackets and leaves the
+ * synthesizer wedged for the rest of the page's life, so every later alarm is
+ * silent too. Pane labels carry `<idle>` chrome, and terminal-supplied titles
+ * reach speech — so this is a denial-of-service guard, not just tidiness.
+ */
+describe('toSpokenText', () => {
+  it('strips the angle brackets that wedge the engine', () => {
+    expect(toSpokenText('<idle> build finished')).toBe('idle build finished');
+  });
+
+  it('separates rather than joins, so stripped text does not run together', () => {
+    expect(toSpokenText('a<b>c')).toBe('a b c');
+  });
+
+  it('strips ampersands and control characters from untrusted titles', () => {
+    expect(toSpokenText('make&test')).toBe('make test');
+    expect(toSpokenText('build\u0007done\u001b')).toBe('build done');
+  });
+
+  it('collapses the whitespace its own substitutions create', () => {
+    expect(toSpokenText('  <a>   <b>  ')).toBe('a b');
+  });
+
+  it('caps length, since a terminal title has no useful bound', () => {
+    expect(toSpokenText('x'.repeat(500))).toHaveLength(120);
+  });
+
+  it('falls back rather than handing the engine an empty utterance', () => {
+    expect(toSpokenText('<>')).toBe('terminal');
+    expect(toSpokenText('   ')).toBe('terminal');
+  });
+
+  it('leaves an ordinary label alone', () => {
+    expect(toSpokenText('pnpm test')).toBe('pnpm test');
+  });
+});
 
 describe('spoken alarms', () => {
   it('speaks the pane label once the delay elapses with the ring unattended', () => {
