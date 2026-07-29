@@ -332,7 +332,7 @@ Submitted values are rejected when empty or when they fail the `setTerminalUserT
 
 For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getOrCreateTerminal(id)` on React mount and `unmountElement(id)` on React unmount. The session (xterm.js instance, PTY, DOM element) persists in the registry across mount/unmount cycles — the DOM element is detached from its container but the Registry entry stays `Mounted`. A browser surface's pane ID is a Surface id with no registry entry or PTY (`docs/specs/glossary.md`); its DOM is hosted by LathHost's leaf div and it is reconstructed from persisted params, not from the registry.
 
-- **Create**: `getOrCreateTerminal` spawns xterm.js + UnicodeGraphemesAddon + FitAddon + WebglAddon + PTY, returns existing if already created. The xterm instance sets `allowProposedApi: true` because UnicodeGraphemesAddon activates through xterm's proposed Unicode API. The WebGL addon must load *after* `terminal.open()`; the others may load before (see "Renderer" below).
+- **Create**: `getOrCreateTerminal` spawns xterm.js + UnicodeGraphemesAddon + FitAddon + PTY, returns existing if already created. The xterm instance sets `allowProposedApi: true` because UnicodeGraphemesAddon activates through xterm's proposed Unicode API. The WebGL addon is *not* loaded at create — it is claimed lazily on the session's first mount (see "Renderer" below).
 - **Resume**: `resumeTerminal` creates xterm entry and writes replay data without spawning a new PTY. Used when the webview is recreated while the host retains Live PTYs (Link: Severed → Resuming → Live).
 - **Restore**: `restoreTerminal` creates xterm entry and spawns a new PTY with saved cwd and scrollback. Used on cold start from a saved Snapshot (Link: Cold → Live).
 - **Untouched**: new `getOrCreateTerminal` sessions start untouched. `isUntouched(id)` exposes the flag, and user-originated PTY input clears it via the registry input paths. Resume/restore seed the persisted flag; missing legacy snapshot data defaults to touched (`false`) so close confirmation remains conservative.
@@ -344,10 +344,13 @@ For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getO
 
 ### Renderer
 
-Every terminal renders through stock `@xterm/addon-webgl`, loaded in
-`createXtermHost` immediately after `terminal.open()` (the addon reaches for the
-screen element, so load order matters). xterm's built-in DOM renderer is the
-fallback, never the default.
+Every terminal renders through stock `@xterm/addon-webgl`, claimed lazily by
+`tryEnableWebglRenderer` on a session's first `mountElement` — not in
+`createXtermHost` — and guarded by `webglAttempted` so each session claims at
+most one GL context. First paint is the earliest point worth the context: a
+session created but never mounted (e.g. a minimized door awaiting restore) never
+allocates one, keeping scarce GL contexts for terminals that are actually shown.
+xterm's built-in DOM renderer is the fallback, never the default.
 
 The DOM renderer emits one `<span>` per style run per row, so a TUI that paints
 every cell its own truecolor collapses to one span-with-inline-style *per cell*,
