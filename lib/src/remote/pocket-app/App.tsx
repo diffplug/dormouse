@@ -136,7 +136,12 @@ export default function App(): React.ReactElement {
   const [pushSubscribedHostIds, setPushSubscribedHostIds] = useState<Set<string>>(
     () => new Set(),
   );
-  /** undefined = not asked yet, null = this server has push disabled. */
+  /**
+   * undefined = unknown (not asked yet, or the ask failed), null = this server
+   * answered that push is disabled. Only a real server answer may set null:
+   * the copy it drives blames the server, and a transient fetch failure must
+   * not latch that accusation for the rest of the session.
+   */
   const [pushKey, setPushKey] = useState<string | null | undefined>(undefined);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
 
@@ -157,7 +162,8 @@ export default function App(): React.ReactElement {
         if (live) setPushKey(key);
       })
       .catch(() => {
-        if (live) setPushKey(null);
+        // Leave the tri-state at "unknown": the Enable tap re-asks on demand,
+        // which beats claiming the server disabled push when the fetch failed.
       });
     return () => {
       live = false;
@@ -249,11 +255,19 @@ export default function App(): React.ReactElement {
     });
 
   // The VAPID key was prefetched with availability, so the permission prompt is
-  // reached without a network round trip that could cost transient activation.
+  // normally reached without a network round trip that could cost transient
+  // activation. If the prefetch failed or is still in flight, re-ask now —
+  // paying the round trip beats refusing a tap the server would have honored.
   const onEnablePush = (host: HostView) =>
     run('push', async () => {
-      if (!pushKey) throw new Error('This server has push notifications disabled.');
-      const subscription = await subscribeToPushInBrowser(pushKey);
+      const key =
+        pushKey ??
+        (await client.getPushConfig().then((fetched) => {
+          setPushKey(fetched);
+          return fetched;
+        }));
+      if (!key) throw new Error('This server has push notifications disabled.');
+      const subscription = await subscribeToPushInBrowser(key);
       await client.subscribeToPush(host.hostId, subscription);
       setPushSubscribedHostIds((prev) => new Set(prev).add(host.hostId));
     });
