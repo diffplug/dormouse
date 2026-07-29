@@ -13,6 +13,7 @@ import { createApp } from './app.js';
 import {
   DEFAULT_VAPID_SUBJECT,
   assertVapidKeyPair,
+  assertVapidSubject,
   createWebPushSender,
   generateVapidKeys,
 } from './push.js';
@@ -54,13 +55,14 @@ const vapid =
   envVapidPublic && envVapidPrivate
     ? { publicKey: envVapidPublic, privateKey: envVapidPrivate }
     : await new VapidStore(stateDir).loadOrCreate(generateVapidKeys);
+const vapidSubject = process.env.DORMOUSE_VAPID_SUBJECT ?? DEFAULT_VAPID_SUBJECT;
 try {
   assertVapidKeyPair(vapid);
+  assertVapidSubject(vapidSubject);
 } catch (err) {
   console.error(`Invalid VAPID configuration: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 }
-const vapidSubject = process.env.DORMOUSE_VAPID_SUBJECT ?? DEFAULT_VAPID_SUBJECT;
 
 const { app, injectWebSocket } = createApp({
   setupPassword,

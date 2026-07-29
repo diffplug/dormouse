@@ -84,6 +84,23 @@ export function assertVapidKeyPair(keys: VapidKeys): void {
   }
 }
 
+/**
+ * Validate the operator contact before the first delivery. `web-push` performs
+ * this check while constructing a send, which would otherwise let a malformed
+ * environment value survive startup and fail every notification at runtime.
+ */
+export function assertVapidSubject(subject: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(subject);
+  } catch {
+    throw new Error('VAPID subject must be a valid mailto: or https: URL.');
+  }
+  if (parsed.protocol !== 'mailto:' && parsed.protocol !== 'https:') {
+    throw new Error('VAPID subject must be a valid mailto: or https: URL.');
+  }
+}
+
 function decodeVapidKey(value: string, name: 'public' | 'private', length: number): Buffer {
   if (!/^[A-Za-z0-9_-]+$/.test(value)) {
     throw new Error(`VAPID ${name} key must be unpadded base64url.`);

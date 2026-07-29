@@ -35,7 +35,7 @@ UI lives in `lib`/`standalone`.
 | `DORMOUSE_STATE_DIR`      | Where the JSON state files live. Default `./data`.         |
 | `PORT`                    | Default 3000.                                              |
 | `DORMOUSE_VAPID_PUBLIC_KEY` / `DORMOUSE_VAPID_PRIVATE_KEY` | Web Push signing keypair. Set both or neither. At startup the Server decodes both, derives the P-256 public point from the private key, and exits on a missing, malformed, or mismatched pair. Unset, the server mints a pair on first boot and persists it to `vapid.json`. |
-| `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292). Default `mailto:admin@localhost`. |
+| `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292). Default `mailto:admin@localhost`. The Server parses and validates it at startup and exits on an invalid value. |
 
 WebAuthn requires a secure context: `localhost` works for development; for a
 real phone, put the server behind TLS (`tailscale serve` is the intended

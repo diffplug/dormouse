@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { API_ROUTES, signPushSubscribe } from 'server-lib-common';
 
 import { SimClient } from '../../server-lib-common/test/harness/actors.mjs';
-import { assertVapidKeyPair, generateVapidKeys } from '../dist/push.js';
+import { assertVapidKeyPair, assertVapidSubject, generateVapidKeys } from '../dist/push.js';
 import { ORIGIN, enrollHost, fakePushSender, freshApp, ownerSession, post } from './helpers.mjs';
 
 const VAPID_PUBLIC = 'BJxKIjEEuJH0dLHTAcMFVYRnLsIBWcuMt5S1FCdDLbxCkmpUuLfHTFzWSFCPFTFsFvT8sVFTFxKIjEE';
@@ -30,6 +30,15 @@ test('VAPID validation rejects valid keys that do not form a pair', () => {
     () => assertVapidKeyPair({ publicKey: first.publicKey, privateKey: second.privateKey }),
     /matching keypair/,
   );
+});
+
+test('VAPID subject validation accepts contact URLs and rejects invalid values', () => {
+  assert.doesNotThrow(() => assertVapidSubject('mailto:admin@example.com'));
+  assert.doesNotThrow(() => assertVapidSubject('https://example.com/push-contact'));
+
+  for (const subject of ['', 'admin@example.com', 'http://example.com/contact']) {
+    assert.throws(() => assertVapidSubject(subject), /valid mailto: or https: URL/);
+  }
 });
 
 function subscription(endpoint = 'https://push.example.com/sub/abc') {
