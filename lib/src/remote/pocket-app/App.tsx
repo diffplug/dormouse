@@ -609,7 +609,10 @@ export function HostsView({
       </header>
       <div className={PK.body}>
         {error ? <div className={PK.error}>{error}</div> : null}
-        {pushState === 'needs-install' ? <InstallNotice /> : null}
+        {/* Install advice is moot when the server cannot push at all — the
+            rows below already say push is disabled, and the ritual the notice
+            describes would end at that same message. */}
+        {pushConfigured && pushState === 'needs-install' ? <InstallNotice /> : null}
         {needsLocalPasskey ? <LocalPasskeyNotice busy={busy} onSetup={onSetup} /> : null}
         {hosts.length === 0 ? (
           <div className={PK.empty}>No hosts enrolled yet. Enroll one from your laptop.</div>

@@ -127,4 +127,15 @@ describe('HostsView push registration', () => {
     expect(row.textContent).toContain('server has push notifications disabled');
     expect(enableButtonIn(row)).toBeNull();
   });
+
+  it('does not advise installing when the server cannot push at all', () => {
+    // The install ritual the notice describes would end at the same "push is
+    // disabled" copy the rows already show — advice and rows must not contradict.
+    renderHosts({ pushState: 'needs-install', pushConfigured: false });
+
+    expect(container.textContent).not.toContain('Add Dormouse to your Home Screen');
+    expect(pushRowFor('First laptop').textContent).toContain(
+      'server has push notifications disabled',
+    );
+  });
 });
