@@ -68,6 +68,7 @@ export interface DynamicPaletteVars {
   '--color-alarm-vs-header-active'?: string;
   '--color-alarm-vs-header-inactive'?: string;
   '--color-alarm-vs-door'?: string;
+  '--color-alarm-vs-terminal'?: string;
 }
 
 export function computeDynamicPalette(
@@ -116,6 +117,10 @@ export function computeDynamicPalette(
   const doorRgb = rgbOfVar('--color-door-bg');
   if (doorRgb) {
     result['--color-alarm-vs-door'] = pickAlarmColor(doorRgb);
+  }
+  const terminalRgb = rgbOfVar('--color-terminal-bg');
+  if (terminalRgb) {
+    result['--color-alarm-vs-terminal'] = pickAlarmColor(terminalRgb);
   }
 
   return result;

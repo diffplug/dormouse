@@ -32,6 +32,7 @@ export function useDynamicPalette(): void {
       document.body.style.removeProperty('--color-alarm-vs-header-active');
       document.body.style.removeProperty('--color-alarm-vs-header-inactive');
       document.body.style.removeProperty('--color-alarm-vs-door');
+      document.body.style.removeProperty('--color-alarm-vs-terminal');
     };
   }, []);
 }

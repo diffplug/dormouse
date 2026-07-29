@@ -68,6 +68,13 @@ export const HEADER_PALETTE_TRANSITION_CLASS =
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
 
+// Spoken-alarm delivery is intentionally louder than resting chrome. The
+// animation freezes under reduced motion; `--color-alarm-vs-terminal` is the
+// dynamic black/white contrast pick for the terminal body behind the overlay.
+export const ALERT_SPEECH_TRACKING_CLASS = 'tracking-[0.12em]';
+export const ALERT_SPEAKING_ANIMATION_CLASS =
+  'motion-safe:animate-speech-alarm-pulse motion-reduce:animate-none';
+
 // Chrome for small anchored popovers (title candidates, TODO preview, pane
 // context menu, rename warning). Text size and padding vary per popover and
 // stay at the call site; the surface recipe is shared so they can't drift.

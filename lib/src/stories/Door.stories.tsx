@@ -35,6 +35,7 @@ const meta: Meta<typeof DoorStory> = {
     title: { control: 'text' },
     status: { control: 'radio', options: ['WATCHING_DISABLED', 'NOTHING_TO_SHOW', 'MIGHT_BE_BUSY', 'BUSY', 'OSC_NOTIF_BUSY', 'COMMAND_EXIT_ARMED', 'MIGHT_NEED_ATTENTION', 'ALERT_RINGING'] },
     todo: { control: 'boolean' },
+    speechState: { control: 'radio', options: [undefined, 'speaking', 'spoken'] },
     width: { control: 'number' },
     reducedMotion: { control: 'boolean' },
   },
@@ -54,6 +55,8 @@ export const AlertRinging: Story = { args: { status: 'ALERT_RINGING' } };
 export const TodoOnly: Story = { args: { todo: true } };
 export const TodoAndAlertEnabled: Story = { args: { todo: true, status: 'NOTHING_TO_SHOW' } };
 export const TodoAndAlertRinging: Story = { args: { todo: true, status: 'ALERT_RINGING' } };
+export const Speaking: Story = { args: { status: 'ALERT_RINGING', todo: true, speechState: 'speaking' } };
+export const HasSpoken: Story = { args: { status: 'ALERT_RINGING', todo: true, speechState: 'spoken' } };
 export const LongTitleWithIndicators: Story = {
   args: {
     title: 'my-extremely-long-running-background-process-with-a-very-descriptive-name',
