@@ -36,7 +36,7 @@ const SPEECH_LIMIT = 120;
 export function toSpokenText(label: string): string {
   const cleaned = label
     // Control characters are meaningless aloud and arrive with untrusted
-    // terminal titles. eslint-disable-next-line no-control-regex
+    // terminal titles.
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
     .replace(/[<>&]/g, ' ')
     .replace(/\s+/g, ' ')
