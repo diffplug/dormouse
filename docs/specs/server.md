@@ -92,8 +92,13 @@ rotation. Rows are keyed on the **pair** (`hostId`, `devicePublicKey`), so a
 phone paired with two laptops subscribes twice and a Host can only ever read or
 reach its own subscribers. Each row records the public VAPID key it was
 registered under, so a key rotation makes the Client readback treat the row as
-stale and offer re-registration rather than claiming delivery still works. It
-holds no label — the Server never learns one.
+stale and offer re-registration rather than claiming delivery still works.
+Because one service-worker scope has only one subscription, an upsert whose
+endpoint, encryption keys, or VAPID key differs from an existing row for that
+device atomically deletes all of the device's prior Host rows; the response
+tells Pocket to discard the same stale Host ids. It holds no label — the Server
+never learns one. Source of truth: `PushSubscriptionStore.upsert` in
+`server/src/state.ts` and the subscribe route in `server/src/app.ts`.
 
 `hosts.json` stores `hostToken` — the host↔server relay bearer secret — in
 plaintext, and `vapid.json` a private key, so both files are written owner-only:

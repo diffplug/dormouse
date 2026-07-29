@@ -298,9 +298,14 @@ Registering another Host or retrying that POST reuses the service-worker
 scope's existing `PushSubscription` when its `applicationServerKey` matches the
 Server's VAPID public key byte-for-byte. Pocket unsubscribes and creates a new
 endpoint only when the key differs, because replacing a matching subscription
-would invalidate the endpoint already stored for every other Host. Source of
-truth: `subscribeToPushInBrowser` in
-`lib/src/remote/client/push-subscribe.ts`.
+would invalidate the endpoint already stored for every other Host. If the
+subscription disappeared or had to rotate, the subscribe response reports that
+the Server atomically invalidated this device's other Host rows; Pocket keeps
+only the Host it just repaired. A subscriptions read that began before that
+reset cannot restore its stale snapshot. Source of truth:
+`subscribeToPushInBrowser` in `lib/src/remote/client/push-subscribe.ts`,
+`PushSubscriptionStore.upsert` in `server/src/state.ts`, and the reset/version
+reconciliation in `lib/src/remote/pocket-app/App.tsx`.
 
 The existing static serving needs no special-casing: `serveStatic` already
 answers `application/manifest+json` for `.webmanifest` and `text/javascript` for

@@ -222,6 +222,15 @@ export interface StoredPushSubscription {
   readonly subscribedAt: number;
 }
 
+export interface PushSubscriptionUpsertResult {
+  readonly subscription: StoredPushSubscription;
+  /**
+   * True when the incoming delivery address differed from an existing row for
+   * this device, so all of the device's previous Host rows were invalidated.
+   */
+  readonly deviceRegistrationsReset: boolean;
+}
+
 /**
  * Push subscriptions (`push-subscriptions.json`), keyed on the PAIR
  * (`hostId`, `devicePublicKey`) — one Client subscribes once per Host it is
@@ -249,19 +258,31 @@ export class PushSubscriptionStore extends JsonFileStore {
     return all.filter((s) => s.hostId === hostId);
   }
 
-  /** Replace any existing subscription for this (host, device), or add one. */
+  /**
+   * Replace any existing subscription for this (host, device), or add one.
+   *
+   * A service-worker scope has one subscription shared by every Host. If its
+   * endpoint, encryption keys, or VAPID key changes, every row for this device
+   * points at the old delivery address. Drop those sibling rows atomically so
+   * readback cannot claim they are still active.
+   */
   upsert(
     record: Omit<StoredPushSubscription, 'subscribedAt'>,
-  ): Promise<StoredPushSubscription> {
+  ): Promise<PushSubscriptionUpsertResult> {
     return this.mutate(async () => {
       const all = await this.list();
       const stored: StoredPushSubscription = { ...record, subscribedAt: this.now() };
-      const kept = all.filter(
-        (s) => !(s.hostId === record.hostId && s.devicePublicKey === record.devicePublicKey),
+      const deviceRegistrationsReset = all.some(
+        (s) => s.devicePublicKey === record.devicePublicKey && !samePushAddress(s, record),
+      );
+      const kept = all.filter((s) =>
+        deviceRegistrationsReset
+          ? s.devicePublicKey !== record.devicePublicKey
+          : !(s.hostId === record.hostId && s.devicePublicKey === record.devicePublicKey),
       );
       kept.push(stored);
       await this.writeAtomic(kept);
-      return stored;
+      return { subscription: stored, deviceRegistrationsReset };
     });
   }
 
@@ -283,6 +304,18 @@ export class PushSubscriptionStore extends JsonFileStore {
       return all.length - kept.length;
     });
   }
+}
+
+function samePushAddress(
+  left: Omit<StoredPushSubscription, 'subscribedAt'>,
+  right: Omit<StoredPushSubscription, 'subscribedAt'>,
+): boolean {
+  return (
+    left.endpoint === right.endpoint &&
+    left.keys.p256dh === right.keys.p256dh &&
+    left.keys.auth === right.keys.auth &&
+    left.vapidPublicKey === right.vapidPublicKey
+  );
 }
 
 /** The VAPID keypair as stored in `vapid.json`. Both values are base64url. */

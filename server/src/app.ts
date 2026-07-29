@@ -524,7 +524,10 @@ export function createApp(config: AppConfig): CreatedApp {
       keys: body.subscription.keys,
       vapidPublicKey: config.vapidPublicKey,
     });
-    const res: PushSubscribeResponse = { subscribedAt: stored.subscribedAt };
+    const res: PushSubscribeResponse = {
+      subscribedAt: stored.subscription.subscribedAt,
+      deviceRegistrationsReset: stored.deviceRegistrationsReset,
+    };
     return c.json(res);
   });
 

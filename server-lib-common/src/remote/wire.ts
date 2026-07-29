@@ -167,6 +167,12 @@ export interface PushSubscribeRequest {
 }
 export interface PushSubscribeResponse {
   subscribedAt: number;
+  /**
+   * True when this subscription replaced a different delivery address for the
+   * device. The Server drops every other Host row for that device in the same
+   * mutation, because one service-worker scope has only one subscription.
+   */
+  deviceRegistrationsReset: boolean;
 }
 
 /**

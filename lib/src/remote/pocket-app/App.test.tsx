@@ -191,4 +191,16 @@ describe('push registration reconciliation', () => {
 
     expect([...reconciled]).toEqual(['host-a']);
   });
+
+  it('discards a snapshot taken before the browser subscription was replaced', () => {
+    const reconciled = reconcilePushSubscribedHosts(
+      ['stale-host-a', 'stale-host-b'],
+      new Map(),
+      new Map([['repaired-host', 1]]),
+      0,
+      1,
+    );
+
+    expect([...reconciled]).toEqual(['repaired-host']);
+  });
 });

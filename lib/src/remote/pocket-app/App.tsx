@@ -165,6 +165,12 @@ export default function App(): React.ReactElement {
    * of the same Host.
    */
   const pushEnableVersionsRef = useRef<Map<string, number>>(new Map());
+  /**
+   * Advances when the Server atomically drops this device's old Host rows
+   * after a browser subscription rotation. A read that began before the reset
+   * must not restore its now-stale snapshot.
+   */
+  const pushRegistrationResetVersionRef = useRef(0);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
 
   // Availability depends on browser state the app cannot change (permission,
@@ -199,6 +205,7 @@ export default function App(): React.ReactElement {
     // a 410 stops claiming alerts are on.
     setPushSubscribedHostIds(new Set());
     const enableVersionsAtStart = new Map(pushEnableVersionsRef.current);
+    const resetVersionAtStart = pushRegistrationResetVersionRef.current;
     void client
       .listPushSubscribedHosts()
       .then((hostIds) => {
@@ -208,6 +215,8 @@ export default function App(): React.ReactElement {
               hostIds,
               enableVersionsAtStart,
               pushEnableVersionsRef.current,
+              resetVersionAtStart,
+              pushRegistrationResetVersionRef.current,
             ),
           );
         }
@@ -315,13 +324,18 @@ export default function App(): React.ReactElement {
         throw new Error('Check the server configuration before enabling alerts.');
       }
       const subscription = await subscribeToPushInBrowser(pushConfig.key);
-      await client.subscribeToPush(host.hostId, subscription);
+      const result = await client.subscribeToPush(host.hostId, subscription);
       pushEnableVersionsRef.current.set(
         host.hostId,
         (pushEnableVersionsRef.current.get(host.hostId) ?? 0) + 1,
       );
+      if (result.deviceRegistrationsReset) pushRegistrationResetVersionRef.current += 1;
       setPushSubscriptionCurrent(true);
-      setPushSubscribedHostIds((prev) => new Set(prev).add(host.hostId));
+      setPushSubscribedHostIds((prev) =>
+        result.deviceRegistrationsReset
+          ? new Set([host.hostId])
+          : new Set(prev).add(host.hostId),
+      );
     });
 
   // A config retry deliberately stops after caching the key. The next tap on
@@ -416,8 +430,11 @@ export function reconcilePushSubscribedHosts(
   serverHostIds: readonly string[],
   enableVersionsAtReadStart: ReadonlyMap<string, number>,
   enableVersionsNow: ReadonlyMap<string, number>,
+  resetVersionAtReadStart = 0,
+  resetVersionNow = 0,
 ): Set<string> {
-  const reconciled = new Set(serverHostIds);
+  const reconciled =
+    resetVersionNow > resetVersionAtReadStart ? new Set<string>() : new Set(serverHostIds);
   for (const [hostId, version] of enableVersionsNow) {
     if (version > (enableVersionsAtReadStart.get(hostId) ?? 0)) reconciled.add(hostId);
   }

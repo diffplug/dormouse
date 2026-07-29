@@ -279,6 +279,51 @@ test('re-subscribing replaces the row rather than accumulating one per rotation'
   assert.equal(stored[0].endpoint, 'https://push.example.com/2');
 });
 
+test('rotating a device subscription invalidates its registrations for other Hosts', async () => {
+  const { app, stateDir, host, sessionToken } = await pushApp();
+  const { body: other } = await enrollHost(app, { label: 'Other laptop' });
+  const client = await SimClient.create({ origin: ORIGIN });
+  const original = subscription('https://push.example.com/original');
+
+  assert.equal(
+    (
+      await subscribe(app, {
+        sessionToken,
+        host,
+        client,
+        sub: original,
+      })
+    ).status,
+    200,
+  );
+  assert.equal(
+    (
+      await subscribe(app, {
+        sessionToken,
+        host: other,
+        client,
+        sub: original,
+      })
+    ).status,
+    200,
+  );
+
+  const replacement = await subscribe(app, {
+    sessionToken,
+    host,
+    client,
+    sub: subscription('https://push.example.com/replacement'),
+  });
+  const replacementBody = await replacement.json();
+  assert.equal(typeof replacementBody.subscribedAt, 'number');
+  assert.equal(replacementBody.deviceRegistrationsReset, true);
+
+  const stored = JSON.parse(await readFile(join(stateDir, 'push-subscriptions.json'), 'utf8'));
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].hostId, host.hostId);
+  assert.equal(stored[0].endpoint, 'https://push.example.com/replacement');
+});
+
 // --- subscriptions (client-facing) -----------------------------------------
 
 test('subscriptions lets a reloaded client find the Hosts it already registered', async () => {
