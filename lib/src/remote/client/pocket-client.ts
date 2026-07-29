@@ -170,6 +170,22 @@ export class PocketClient {
     return this.#storage.isPaired(hostId);
   }
 
+  /**
+   * True when this browser profile holds the public key for the signed-in
+   * passkey, and can therefore pair and connect.
+   *
+   * False is the ordinary state after signing in with a *synced* passkey on a
+   * profile that did not create it — most notably an iOS Home Screen install,
+   * whose storage is partitioned away from the Safari tab that set the account
+   * up. The passkey itself syncs, so sign-in succeeds and only the later pair
+   * or connect fails; checking up front lets the UI explain that instead of
+   * surfacing {@link PASSKEY_UNAVAILABLE_MESSAGE} after a tap.
+   */
+  hasPasskeyMaterial(): boolean {
+    if (!this.#credentialId) return false;
+    return this.#storage.getPasskeyPublicKey(this.#credentialId) !== null;
+  }
+
   /** Notified when the Host drops (a `host-gone` frame or a closed socket). */
   setOnHostGone(callback: (() => void) | null): void {
     this.#onHostGone = callback;

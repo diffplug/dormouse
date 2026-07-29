@@ -16,11 +16,30 @@
 /** Registered at the root so one worker covers the whole single-page app. */
 const SERVICE_WORKER_URL = '/sw.js';
 
+/**
+ * The in-flight or settled registration, `null` if it failed or was never
+ * attempted. Held so the subscribe path can await *this* rather than
+ * `navigator.serviceWorker.ready`, which never settles when registration
+ * failed — that would hang the button the user just tapped with no way out.
+ */
+let registration: Promise<ServiceWorkerRegistration | null> = Promise.resolve(null);
+
 export function registerPushServiceWorker(): void {
   if (!('serviceWorker' in navigator)) return;
-  navigator.serviceWorker.register(SERVICE_WORKER_URL, { scope: '/' }).catch((error: unknown) => {
-    // Loud but not fatal: without this, "push silently never arrives" has no
-    // visible cause anywhere in the app.
-    console.warn('pocket: service worker registration failed; push is unavailable', error);
-  });
+  registration = navigator.serviceWorker
+    .register(SERVICE_WORKER_URL, { scope: '/' })
+    .catch((error: unknown) => {
+      // Loud but not fatal: without this, "push silently never arrives" has no
+      // visible cause anywhere in the app.
+      console.warn('pocket: service worker registration failed; push is unavailable', error);
+      return null;
+    });
+}
+
+/**
+ * The registered worker, or `null` if registration failed. Resolves once
+ * registration settles, so a caller can never observe a half-registered state.
+ */
+export function getPushServiceWorkerRegistration(): Promise<ServiceWorkerRegistration | null> {
+  return registration;
 }

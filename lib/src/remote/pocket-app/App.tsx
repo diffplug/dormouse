@@ -25,6 +25,8 @@ import { browserWebAuthn } from '../client/webauthn';
 import { getOrCreateDeviceKey } from '../client/device-key';
 import {
   getPushAvailability,
+  isInstalledWebApp,
+  requiresInstallForPush,
   subscribeToPushInBrowser,
   type PushAvailability,
 } from '../client/push-subscribe';
@@ -93,6 +95,11 @@ const PK = {
   rowActions: 'flex shrink-0 items-center gap-2',
   // Push sits under its host row as secondary chrome: page bg, alpha-on-fg.
   pushRow: 'flex items-center gap-3 px-3.5 text-[11px] text-app-fg/70',
+  // An actionable notice: the inactive-header pair, so it reads as a raised
+  // block like a host row rather than as an error (which owns `text-error`).
+  notice: 'flex flex-col gap-2 rounded-lg bg-header-inactive-bg px-3.5 py-3 text-header-inactive-fg',
+  noticeTitle: 'text-[13px] font-semibold',
+  noticeBody: 'm-0 text-[12px] leading-relaxed text-header-inactive-fg/70',
   field: 'flex flex-col gap-1.5',
   fieldLabel: 'text-[11px] text-app-fg/60',
   input:
@@ -128,6 +135,7 @@ export default function App(): React.ReactElement {
   const [pairedIds, setPairedIds] = useState<Set<string>>(() => new Set());
   const [activeHost, setActiveHost] = useState<HostView | null>(null);
   const [pushState, setPushState] = useState<PushAvailability | null>(null);
+  const [needsLocalPasskey, setNeedsLocalPasskey] = useState(false);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
 
   // Availability depends on browser state the app cannot change (permission,
@@ -169,6 +177,10 @@ export default function App(): React.ReactElement {
     const list = await client.listHosts();
     setHosts(list);
     setPairedIds(new Set(list.filter((h) => client.isPaired(h.hostId)).map((h) => h.hostId)));
+    // Checked here rather than on a failed Pair tap: signing in with a synced
+    // passkey succeeds on a profile that never created one, and only the pair
+    // or connect afterwards fails.
+    setNeedsLocalPasskey(!client.hasPasskeyMaterial());
     setPhase('hosts');
   }, [client, ensureSocket]);
 
@@ -276,10 +288,18 @@ export default function App(): React.ReactElement {
         error={error}
         isPaired={(id) => pairedIds.has(id)}
         pushState={pushState}
+        needsLocalPasskey={needsLocalPasskey}
+        needsHomeScreenInstall={requiresInstallForPush() && !isInstalledWebApp()}
         onRefresh={() => run('refresh', loadHosts)}
         onPair={onPair}
         onConnect={onConnect}
         onEnablePush={onEnablePush}
+        onSetup={(password, label) =>
+          run('setup', async () => {
+            await client.setup(password, label);
+            await client.signin();
+            await loadHosts();
+          })}
       />
     );
   }
@@ -416,6 +436,90 @@ export function SetupOrSignin({
 // --- HostsView -------------------------------------------------------------
 
 /**
+ * Shown on iOS when Pocket is running in a Safari tab. Web Push is granted only
+ * to a Home Screen web app, and there is no API to prompt for that install — it
+ * can only be described.
+ *
+ * The second line matters: a tab cannot see whether the app is *also* installed
+ * (separate storage, no shared signal), so this notice shows even to someone
+ * who already installed it and simply opened the wrong window.
+ */
+function InstallNotice(): React.ReactElement {
+  return (
+    <div className={PK.notice}>
+      <div className={PK.noticeTitle}>Add Dormouse to your Home Screen</div>
+      <p className={PK.noticeBody}>
+        Alerts only reach you from the installed app — iOS does not deliver them to a Safari
+        tab. Tap Share, then <strong>Add to Home Screen</strong>, and open Dormouse from
+        there.
+      </p>
+      <p className={PK.noticeBody}>Already added it? Open it from your Home Screen instead of this tab.</p>
+    </div>
+  );
+}
+
+/**
+ * Shown when sign-in worked but this profile holds no passkey public key, so
+ * pairing and connecting would both fail.
+ *
+ * The usual cause is the Home Screen install: its storage is partitioned away
+ * from the Safari tab that created the account, and the wire never returns a
+ * passkey's public key on sign-in. The passkey itself synced, which is exactly
+ * why the failure would otherwise look inexplicable — everything up to the tap
+ * succeeds.
+ */
+function LocalPasskeyNotice({
+  busy,
+  onSetup,
+}: {
+  busy: string | null;
+  onSetup?: (password: string, label: string) => void;
+}): React.ReactElement {
+  const [password, setPassword] = useState('');
+  const [label, setLabel] = useState('My Phone');
+
+  return (
+    <div className={PK.notice}>
+      <div className={PK.noticeTitle}>Finish setting up this app</div>
+      <p className={PK.noticeBody}>
+        You are signed in, but this app has its own storage and does not hold a passkey yet —
+        so it cannot pair or connect. Register one here with the server's setup password. It is
+        added to the same account.
+      </p>
+      <div className={PK.field}>
+        <label className={PK.fieldLabel} htmlFor="pocket-local-password">Setup password</label>
+        <input
+          id="pocket-local-password"
+          className={PK.input}
+          type="password"
+          autoComplete="off"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+      </div>
+      <div className={PK.field}>
+        <label className={PK.fieldLabel} htmlFor="pocket-local-label">Passkey label</label>
+        <input
+          id="pocket-local-label"
+          className={PK.input}
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+        />
+      </div>
+      <button
+        type="button"
+        className={pkButton({ tone: 'primary', block: true })}
+        disabled={busy !== null || password.length === 0}
+        onClick={() => onSetup?.(password, label)}
+      >
+        {busy === 'setup' ? 'Creating…' : 'Create passkey for this app'}
+      </button>
+    </div>
+  );
+}
+
+/**
  * The push row's copy. Only `ready` is actionable; the rest explain why not, so
  * "my phone never buzzes" always has a visible cause. `needs-install` is the
  * iOS rule — Web Push is granted only to a Home Screen web app — and is the one
@@ -426,6 +530,7 @@ const PUSH_COPY: Record<PushAvailability, string> = {
   subscribed: 'Alerts on.',
   denied: 'Notifications are blocked for this site in your browser settings.',
   unsupported: 'This browser cannot receive push notifications.',
+  'no-worker': 'Background worker unavailable — the server must be served over https.',
   'needs-install': 'Add Dormouse to your Home Screen to receive alerts.',
 };
 
@@ -435,10 +540,13 @@ export function HostsView({
   error,
   isPaired,
   pushState,
+  needsLocalPasskey = false,
+  needsHomeScreenInstall = false,
   onRefresh,
   onPair,
   onConnect,
   onEnablePush,
+  onSetup,
 }: {
   hosts: HostView[];
   busy: string | null;
@@ -446,10 +554,15 @@ export function HostsView({
   isPaired: (hostId: string) => boolean;
   /** Null until the browser has been asked; see the effect in `App`. */
   pushState: PushAvailability | null;
+  /** Signed in, but this profile cannot pair — see {@link LocalPasskeyNotice}. */
+  needsLocalPasskey?: boolean;
+  /** On iOS, and running in a tab rather than from the Home Screen. */
+  needsHomeScreenInstall?: boolean;
   onRefresh: () => void;
   onPair: (host: HostView) => void;
   onConnect: (host: HostView) => void;
   onEnablePush: (host: HostView) => void;
+  onSetup?: (password: string, label: string) => void;
 }): React.ReactElement {
   return (
     <div className={PK.app}>
@@ -466,6 +579,8 @@ export function HostsView({
       </header>
       <div className={PK.body}>
         {error ? <div className={PK.error}>{error}</div> : null}
+        {needsHomeScreenInstall ? <InstallNotice /> : null}
+        {needsLocalPasskey ? <LocalPasskeyNotice busy={busy} onSetup={onSetup} /> : null}
         {hosts.length === 0 ? (
           <div className={PK.empty}>No hosts enrolled yet. Enroll one from your laptop.</div>
         ) : (

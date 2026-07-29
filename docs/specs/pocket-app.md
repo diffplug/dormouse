@@ -192,6 +192,40 @@ bugs:
 So the order is: install to the Home Screen **first**, then set up, pair, and
 enable alerts from within it.
 
+### Detecting install state, and what cannot be detected
+
+Source of truth: `isInstalledWebApp` / `requiresInstallForPush` in
+`lib/src/remote/client/push-subscribe.ts`, surfaced by the notices in
+`lib/src/remote/pocket-app/App.tsx`.
+
+- **Installed** is `navigator.standalone === true` (iOS) or the standard
+  `(display-mode: standalone)` media query.
+- **Install is required** is the *presence* of `navigator.standalone`, even when
+  it is `false`. The property is iOS/iPadOS Safari only and `undefined`
+  everywhere else — including macOS Safari, where Web Push works in an ordinary
+  tab and an install prompt would be wrong. This deliberately avoids parsing a
+  user-agent string, which iPadOS makes unreliable by reporting as a Mac.
+- **A tab cannot see whether the app is also installed.** The two have separate
+  storage and share no signal, so the install notice necessarily also shows to
+  someone who installed it and opened the wrong window; the copy says so rather
+  than insisting they install it twice.
+- **iOS cannot be prompted.** There is no `beforeinstallprompt` there, so
+  installing can only be described, never triggered.
+- Every unavailable reason is named in the UI rather than left as a missing
+  button — `needs-install`, `no-worker` (registration failed, usually an
+  insecure origin), `denied`, `unsupported`. A push that silently never arrives
+  should always have a visible cause.
+- The passkey-partition case is checked **up front**, right after sign-in
+  (`PocketClient.hasPasskeyMaterial`), not on a failed Pair tap. Everything up
+  to that tap succeeds, so the failure is otherwise inexplicable; the notice
+  offers first-time setup inline.
+
+Because registration is best-effort and asynchronous, both the availability
+check and the subscribe path await the tracked registration promise from
+`lib/src/remote/pocket-app/service-worker.ts` rather than
+`navigator.serviceWorker.ready`, which never settles when registration failed —
+that would hang the button the user just tapped, with no way out.
+
 The existing static serving needs no special-casing: `serveStatic` already
 answers `application/manifest+json` for `.webmanifest` and `text/javascript` for
 `sw.js`.

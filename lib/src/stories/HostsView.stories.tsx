@@ -123,3 +123,32 @@ export const PushDenied: Story = {
 export const PushEnabling: Story = {
   args: { busy: 'push' },
 };
+
+// The service worker never registered — usually an insecure origin.
+export const PushNoWorker: Story = {
+  args: { pushState: 'no-worker' },
+};
+
+/**
+ * iOS, running in a Safari tab. Web Push only reaches an installed app and
+ * there is no API to prompt for that, so the notice describes the steps — and
+ * allows for someone who already installed it and opened the wrong window,
+ * which a tab cannot distinguish.
+ */
+export const NeedsHomeScreenInstall: Story = {
+  args: { needsHomeScreenInstall: true, pushState: 'needs-install' },
+};
+
+/**
+ * Signed in on a profile that holds no passkey public key — the Home Screen
+ * install's partitioned storage. Pair and Connect would both fail, so the
+ * notice offers the fix inline rather than waiting for a failed tap.
+ */
+export const NeedsLocalPasskey: Story = {
+  args: { needsLocalPasskey: true, pushState: 'needs-install', needsHomeScreenInstall: false },
+};
+
+// Both at once: a first run in a Safari tab on iOS after setup happened elsewhere.
+export const NeedsInstallAndPasskey: Story = {
+  args: { needsHomeScreenInstall: true, needsLocalPasskey: true, pushState: 'needs-install' },
+};
