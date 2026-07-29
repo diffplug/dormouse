@@ -226,6 +226,18 @@ check and the subscribe path await the tracked registration promise from
 `navigator.serviceWorker.ready`, which never settles when registration failed —
 that would hang the button the user just tapped, with no way out.
 
+Browser availability and Host registration are separate states. A
+`PushSubscription` belongs to the service-worker scope, while the Server stores
+one row per `(hostId, devicePublicKey)`. An existing browser subscription
+therefore leaves Enable alerts available for every Host that has not completed
+registration in the current Hosts view; only a successful
+`POST /api/push/subscribe` changes that Host's copy to Alerts on. The marker is
+intentionally not persisted: after a reload Pocket offers the idempotent
+registration again, so a missing Server row or a prior failed POST can always
+be repaired. Source of truth: `getPushAvailability` in
+`lib/src/remote/client/push-subscribe.ts` and the per-Host set in
+`lib/src/remote/pocket-app/App.tsx`.
+
 The existing static serving needs no special-casing: `serveStatic` already
 answers `application/manifest+json` for `.webmanifest` and `text/javascript` for
 `sw.js`.

@@ -23,8 +23,7 @@ export type PushAvailability =
   | 'unsupported'
   | 'needs-install'
   | 'no-worker'
-  | 'denied'
-  | 'subscribed';
+  | 'denied';
 
 /**
  * True when the page is running as an installed web app rather than a tab.
@@ -69,7 +68,11 @@ export async function getPushAvailability(): Promise<PushAvailability> {
   if (!registration) return 'no-worker';
 
   if (Notification.permission === 'denied') return 'denied';
-  return (await registration.pushManager.getSubscription()) ? 'subscribed' : 'ready';
+  // A PushSubscription belongs to this service-worker registration, not to a
+  // Host. Its existence says the browser can register that endpoint with a
+  // Host; only a successful `/api/push/subscribe` says a particular Host has
+  // been registered.
+  return 'ready';
 }
 
 /**

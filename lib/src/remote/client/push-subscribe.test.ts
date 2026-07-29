@@ -102,10 +102,10 @@ describe('getPushAvailability', () => {
     await expect(getPushAvailability()).resolves.toBe('ready');
   });
 
-  it('reports subscribed when a subscription already exists', async () => {
+  it('reports ready when a scope-wide subscription already exists', async () => {
     stubBrowser({});
     getRegistration.mockResolvedValue(registration({ endpoint: 'https://push.example/x' }));
-    await expect(getPushAvailability()).resolves.toBe('subscribed');
+    await expect(getPushAvailability()).resolves.toBe('ready');
   });
 
   it('reports unsupported without a service worker', async () => {

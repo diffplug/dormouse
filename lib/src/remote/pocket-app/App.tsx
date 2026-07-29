@@ -133,6 +133,9 @@ export default function App(): React.ReactElement {
   const [pairedIds, setPairedIds] = useState<Set<string>>(() => new Set());
   const [activeHost, setActiveHost] = useState<HostView | null>(null);
   const [pushState, setPushState] = useState<PushAvailability | null>(null);
+  const [pushSubscribedHostIds, setPushSubscribedHostIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   /** undefined = not asked yet, null = this server has push disabled. */
   const [pushKey, setPushKey] = useState<string | null | undefined>(undefined);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
@@ -252,7 +255,7 @@ export default function App(): React.ReactElement {
       if (!pushKey) throw new Error('This server has push notifications disabled.');
       const subscription = await subscribeToPushInBrowser(pushKey);
       await client.subscribeToPush(host.hostId, subscription);
-      setPushState('subscribed');
+      setPushSubscribedHostIds((prev) => new Set(prev).add(host.hostId));
     });
 
   const onSetup = useCallback(
@@ -296,6 +299,7 @@ export default function App(): React.ReactElement {
         busy={busy}
         error={error}
         isPaired={(id) => pairedIds.has(id)}
+        isPushSubscribed={(id) => pushSubscribedHostIds.has(id)}
         pushState={pushState}
         pushConfigured={pushKey !== null}
         needsLocalPasskey={!client.hasPasskeyMaterial()}
@@ -532,7 +536,9 @@ function PasskeySetupFields({
  * iOS rule — Web Push is granted only to a Home Screen web app — and is the one
  * state the user resolves outside the app entirely.
  */
-const PUSH_COPY: Record<PushAvailability, string> = {
+type HostPushState = PushAvailability | 'subscribed';
+
+const PUSH_COPY: Record<HostPushState, string> = {
   ready: 'Get an alert when a terminal needs attention.',
   subscribed: 'Alerts on.',
   denied: 'Notifications are blocked for this site in your browser settings.',
@@ -546,6 +552,7 @@ export function HostsView({
   busy,
   error,
   isPaired,
+  isPushSubscribed,
   pushState,
   needsLocalPasskey,
   pushConfigured = true,
@@ -559,6 +566,8 @@ export function HostsView({
   busy: string | null;
   error: string | null;
   isPaired: (hostId: string) => boolean;
+  /** True only after this Host's server registration succeeds in this session. */
+  isPushSubscribed: (hostId: string) => boolean;
   /** Null until the browser has been asked; see the effect in `App`. */
   pushState: PushAvailability | null;
   /** Signed in, but this profile cannot pair — see {@link LocalPasskeyNotice}. */
@@ -593,6 +602,9 @@ export function HostsView({
         ) : (
           hosts.map((host) => {
             const paired = isPaired(host.hostId);
+            const hostPushState: HostPushState = isPushSubscribed(host.hostId)
+              ? 'subscribed'
+              : pushState ?? 'ready';
             const status = !host.online ? 'Offline' : paired ? 'Paired' : 'Not paired';
             return (
               <div key={host.hostId} className="flex flex-col gap-1.5">
@@ -629,10 +641,10 @@ export function HostsView({
                   <div className={PK.pushRow}>
                     <span className="min-w-0 flex-1">
                       {pushConfigured
-                        ? PUSH_COPY[pushState]
+                        ? PUSH_COPY[hostPushState]
                         : 'This server has push notifications disabled.'}
                     </span>
-                    {pushState === 'ready' && pushConfigured ? (
+                    {hostPushState === 'ready' && pushConfigured ? (
                       <button
                         type="button"
                         className={pkButton({ tone: 'secondary', size: 'sm' })}
