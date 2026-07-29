@@ -62,6 +62,11 @@ lib/src/remote/
     remote-adapter.ts    RemotePtyAdapter (PlatformAdapter over pocket-client)
   host/            the laptop side (enrollment, approval modal, ACL, bridge)
   pocket-app/      the app shell: auth views + the mobile wall composition
+    service-worker.ts    best-effort registration of the push worker
+
+lib/pocket/        the app's HTML shell and its verbatim-copied static assets
+  index.html
+  public/          manifest, icons, sw.js — see Installable web app below
 ```
 
 Both the auth views and the wall are themed by the shared VSCode `--color-*`
@@ -118,6 +123,58 @@ no border, no `surface-raised`, no `muted`. The one status color is
 vocabulary), `lib/src/remote/pocket-app/pocket-theme.ts` (theme boot +
 browser-chrome sync), `lib/pocket/index.html` (structural viewport rules +
 pre-boot color fallbacks).
+
+## Installable web app
+
+Pocket ships a web app manifest and a service worker so it can be installed to
+a phone's home screen and receive Web Push while backgrounded or closed. Source
+of truth: `lib/pocket/public/manifest.webmanifest`, `lib/pocket/public/sw.js`,
+and `registerPushServiceWorker()` in
+`lib/src/remote/pocket-app/service-worker.ts`, called from `main.tsx`.
+
+**On iOS, installing is a prerequisite, not a nicety.** Web Push is granted only
+to a Home Screen web app — never to a Safari tab — which is why the manifest
+sets `display: standalone` (iOS ignores any other value for this purpose) and
+why permission must be requested from a real user gesture. Adding to the Home
+Screen is a manual step that cannot be automated or prompted for. iOS also
+ignores the manifest's `icons` and honors only `apple-touch-icon`, so
+`lib/pocket/index.html` declares both.
+
+The three static assets live in `lib/pocket/public/` rather than the bundle
+because Vite copies `publicDir` verbatim. A service worker must be served from
+the scope it controls, under a stable path, with no content hash in its name —
+all three of which bundling would break. `emptyOutDir` wipes `lib/dist-pocket`
+on every build, so they have to be checked-in source, never dropped into the
+output by hand.
+
+- **The worker caches nothing and registers no `fetch` handler.** Pocket is
+  useless without a live relay connection, so an offline cache would buy no
+  working screens while actively fighting `registerPocketServing`, which
+  re-reads `index.html` per request precisely because a rebuild swaps in new
+  content-hashed assets. It handles `push` and `notificationclick`, and nothing
+  else.
+- **A push that cannot be parsed still shows a notification.** Subscribing with
+  `userVisibleOnly: true` promises the browser that every delivery becomes
+  visible; a browser that catches the worker showing none substitutes its own
+  "site updated in the background" notice and counts it against the
+  subscription. Malformed and payload-less pushes therefore fall back to generic
+  text rather than returning early.
+- **Payload text is re-bounded at the sink.** The Host already caps and
+  sanitizes, but the worker coerces `title`/`body` to bounded single-line
+  strings anyway, because the string is Pane-derived and therefore ultimately
+  terminal-supplied ([alert.md](./alert.md) -> Text And Security).
+- **Registration is best-effort and never awaited.** Every screen works without
+  the worker, so a failure warns and boot continues. Failure is ordinary on a
+  browser without support and on an insecure origin — service workers need a
+  secure context, and only `localhost` is exempt, the same constraint WebAuthn
+  imposes below.
+- Clicking a notification focuses the app and leaves the user on the directory.
+  There is no deep link to an individual Pane, because protocol-v1 carries no
+  routable surface ref.
+
+The existing static serving needs no special-casing: `serveStatic` already
+answers `application/manifest+json` for `.webmanifest` and `text/javascript` for
+`sw.js`.
 
 ## Deployment: same-origin, always
 
