@@ -4,6 +4,9 @@ How the phone client (Dormouse Pocket) is structured and deployed. Companion
 to [remote-api.md](./remote-api.md) (the protocol) and
 [server.md](./server.md) (the selfhost server).
 
+> See `docs/specs/glossary.md` for Session / Pane vocabulary. This spec uses it
+> when naming what a notification or a directory row refers to.
+
 ## The seam: the remote session is a platform adapter
 
 `lib` renders every Dormouse surface through a `PlatformAdapter`
@@ -60,6 +63,7 @@ lib/src/remote/
     device-key.ts        non-extractable device key in IndexedDB
     webauthn.ts          navigator.credentials wrappers
     remote-adapter.ts    RemotePtyAdapter (PlatformAdapter over pocket-client)
+    push-subscribe.ts    push availability + the browser half of subscribing
   host/            the laptop side (enrollment, approval modal, ACL, bridge)
   pocket-app/      the app shell: auth views + the mobile wall composition
     service-worker.ts    best-effort registration of the push worker
