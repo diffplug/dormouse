@@ -197,6 +197,7 @@ export default function App(): React.ReactElement {
     // re-offers Enable alerts for every Host, including ones the Server already
     // holds a row for. Authoritative rather than merged, so a row pruned after
     // a 410 stops claiming alerts are on.
+    setPushSubscribedHostIds(new Set());
     const enableVersionsAtStart = new Map(pushEnableVersionsRef.current);
     void client
       .listPushSubscribedHosts()
@@ -212,8 +213,9 @@ export default function App(): React.ReactElement {
         }
       })
       .catch(() => {
-        // Best-effort: leaving the set empty re-offers an idempotent action,
-        // which is the harmless direction to be wrong in.
+        // Best-effort: the previous snapshot was cleared before this request,
+        // while any Enable that completed since then added itself back. That
+        // re-offers an idempotent action instead of preserving a stale claim.
       });
     return () => {
       live = false;

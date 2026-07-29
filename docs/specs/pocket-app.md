@@ -269,9 +269,10 @@ the set, except that a registration completed while the read was in flight
 wins, since it is the newer fact: Pocket merges the Server snapshot with the
 specific Host registrations whose per-Host completion version advanced after
 that request began (including a repeated repair of the same Host), while
-earlier local ids remain subject to authoritative removal. A failed read leaves
-the set empty, which re-offers an idempotent action — the harmless direction to
-be wrong in.
+earlier local ids remain subject to authoritative removal. Pocket clears the
+previous snapshot when a read begins; if the read fails, only registrations
+that completed since then can have added themselves back. That re-offers an
+idempotent action instead of preserving a stale **Alerts on** claim.
 Source of truth: `getPushAvailability` in
 `lib/src/remote/client/push-subscribe.ts`,
 `PocketClient.listPushSubscribedHosts`, and `reconcilePushSubscribedHosts` in
