@@ -20,6 +20,7 @@ export * from './security/deviceKey.js';
 export * from './security/challenge.js';
 export * from './security/passkey.js';
 export * from './security/acl.js';
+export * from './security/push.js';
 export * from './security/pairing.js';
 export * from './security/connection.js';
 

@@ -34,6 +34,8 @@ UI lives in `lib`/`standalone`.
 | `DORMOUSE_ORIGIN`         | External origin, e.g. `https://dormouse.tailnet.ts.net`. Source of the WebAuthn `rpId`/`origin` and the Host's `ConnectionPolicy`. Defaults to `http://localhost:<port>` for dev. |
 | `DORMOUSE_STATE_DIR`      | Where the JSON state files live. Default `./data`.         |
 | `PORT`                    | Default 3000.                                              |
+| `DORMOUSE_VAPID_PUBLIC_KEY` / `DORMOUSE_VAPID_PRIVATE_KEY` | Web Push signing keypair. Set both or neither — setting exactly one exits, because a mismatched pair silently invalidates every subscription. Unset, the server mints a pair on first boot and persists it to `vapid.json`. |
+| `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292). Default `mailto:admin@localhost`. |
 
 WebAuthn requires a secure context: `localhost` works for development; for a
 real phone, put the server behind TLS (`tailscale serve` is the intended
@@ -73,14 +75,25 @@ $DORMOUSE_STATE_DIR/
                    passkeys: [{ credentialId, publicKey /* SPKI b64u */,
                                 label, createdAt }] }
   hosts.json     [{ hostId, hostToken, label, enrolledAt }]
+  push-subscriptions.json
+                 [{ hostId, devicePublicKey, endpoint, keys, subscribedAt }]
+  vapid.json     { publicKey, privateKey, createdAt }   (only when unset by env)
 ```
 
 That is the entire persistent state. The Host's ACL is not here — it lives on
 the Host, in webview `localStorage` (`lib/src/lib/local-json-store.ts`),
 which is the whole point of the security model.
 
+`push-subscriptions.json` is the one store that deletes rather than appends: a
+push service reports a dead subscription with 404/410, and a browser that
+rotates its endpoint must replace the stale row rather than leave one per
+rotation. Rows are keyed on the **pair** (`hostId`, `devicePublicKey`), so a
+phone paired with two laptops subscribes twice and a Host can only ever read or
+reach its own subscribers. It holds no label — the Server never learns one.
+
 `hosts.json` stores `hostToken` — the host↔server relay bearer secret — in
-plaintext, so both files are written owner-only: the state dir is created
+plaintext, and `vapid.json` a private key, so both files are written owner-only:
+the state dir is created
 `0o700` and every write lands in a `0o600` temp file before the rename
 (`server/src/state.ts`, `writeAtomic`). Without explicit modes these inherit
 the umask and end up world-readable, handing live host tokens to any other
@@ -128,11 +141,49 @@ so `node --test` can drive setup → pairing → connect end to end via
 | `POST /api/reauth/finish`        | session token  | full assertion → verified (same checks as sign-in) → refreshes the session's presence stamp; the token and relay socket are kept |
 | `POST /api/host/enroll`          | setup password | `{ label }` → `{ hostId, hostToken, origin, rpId }`; appends to `hosts.json` |
 | `GET /api/hosts`                 | session token  | Enrolled hosts + whether each is currently connected |
+| `GET /api/push/config`           | —              | `{ applicationServerKey }` — the VAPID public key, or `null` when push is unconfigured. Public by construction |
+| `POST /api/push/challenge`       | session token  | `{ challenge }` for the device signature below      |
+| `POST /api/push/subscribe`       | session token + device signature | Upserts the `(hostId, devicePublicKey)` subscription |
+| `GET /api/push/devices`          | host token     | The `devicePublicKey`s subscribed to **this** Host  |
+| `POST /api/push/send`            | host token     | Fans a notification out to this Host's subscribers  |
 | `GET /ws/host`                   | host token     | The Host's relay socket                            |
 | `GET /ws/client`                 | session token  | A Client's relay socket                            |
 
 The setup password is compared in constant time with a small fixed delay on
 failure; that is the extent of the hardening today.
+
+### Web Push
+
+The relay routes between two live sockets; a push has to reach a phone whose app
+is closed. That is a separate capability, so it is plain HTTP rather than a new
+relay frame, and delivery goes out to the platform's push service (APNs, FCM)
+through `web-push` — the one third-party runtime dependency the server has.
+Source of truth: `server/src/push.ts` and the routes in `server/src/app.ts`.
+
+- **Two audiences, two credentials.** A Client registers its own subscription
+  with a session token; a Host reads and sends with its `hostToken`. The send
+  route takes the `hostId` from the token and never from the body, so naming a
+  device explicitly cannot escape the calling Host's own scope.
+- **The subscription is bound to a Client identity by signature.** The Client
+  signs `(hostId, challenge, devicePublicKey, endpoint)` with its device key
+  under `PUSH_SUBSCRIBE_DOMAIN` — deliberately *not* `DEVICE_AUTH_DOMAIN`, since
+  the Server relays Host-issued challenges during `connect` and so sees them in
+  transit. Binding the endpoint is what stops a captured signature registering a
+  different endpoint under the same identity. The challenge is single-use and
+  consumed before verification, as at sign-in.
+- **A subscription authorizes nothing.** It is a delivery address the Host may
+  write to; the Host's ACL remains the only thing that decides what a Client may
+  reach ([remote-security-model.md](./remote-security-model.md)).
+- **Endpoints must be https.** The server POSTs to whatever a subscriber names,
+  so an unconstrained value would be an SSRF primitive.
+- **Payload text is bounded and collapsed at this boundary** even though the
+  Host already caps it, because it originates in a renderer and is ultimately
+  Pane-derived ([alert.md](./alert.md) -> Text And Security).
+- **Delivery outcomes prune.** 404/410 means the subscription is permanently
+  gone and its row is deleted; anything else is transient and left alone. TTL is
+  300s — an alarm that arrives an hour late is noise, not information.
+- Push is disabled, not half-working, when no VAPID key is configured: the
+  config route reports `null` and subscribe/send answer 503.
 
 ## Relay
 

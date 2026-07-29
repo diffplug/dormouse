@@ -25,6 +25,7 @@ import {
   WS_TOKEN_PARAM,
   hashPasskeyPublicKey,
   signDeviceChallenge,
+  signPushSubscribe,
   type ClientFrame,
   type ConnectionFailure,
   type ConnectionRequest,
@@ -35,6 +36,10 @@ import {
   type HostAclRecord,
   type HostsResponse,
   type PairingRequest,
+  type PushChallengeResponse,
+  type PushConfigResponse,
+  type PushSubscribeResponse,
+  type PushSubscriptionPayload,
   type ReauthFinishResponse,
   type RemoteEventMsg,
   type RemoteResponse,
@@ -213,6 +218,56 @@ export class PocketClient {
       { method: 'GET', headers: { authorization: `Bearer ${this.#requireToken()}` } },
     );
     return response.hosts;
+  }
+
+  // --- Web Push ------------------------------------------------------------
+
+  /**
+   * The VAPID public key a browser needs before it can subscribe, or `null`
+   * when the server has push disabled. Unauthenticated — the key is public by
+   * construction.
+   */
+  async getPushConfig(): Promise<string | null> {
+    const response = await this.#api<PushConfigResponse>(
+      API_ROUTES.pushConfig,
+      undefined,
+      { method: 'GET' },
+    );
+    return response.applicationServerKey;
+  }
+
+  /**
+   * Register a browser push subscription against `hostId`, signing it with this
+   * device's key so the Server can bind it to the same Client identity the
+   * Host's ACL records. Subscriptions are per (host, device): a phone paired
+   * with two laptops subscribes twice.
+   *
+   * The signature covers the endpoint, so a captured one cannot be reused to
+   * register a different endpoint under this identity.
+   */
+  async subscribeToPush(
+    hostId: string,
+    subscription: PushSubscriptionPayload,
+  ): Promise<PushSubscribeResponse> {
+    const token = this.#requireToken();
+    const auth = { authorization: `Bearer ${token}` };
+    const { challenge } = await this.#api<PushChallengeResponse>(
+      API_ROUTES.pushChallenge,
+      { hostId },
+      { headers: auth },
+    );
+    const deviceKey = await this.#getDeviceKey();
+    const signature = await signPushSubscribe(deviceKey.privateKey, {
+      hostId,
+      challenge,
+      devicePublicKey: deviceKey.devicePublicKey,
+      endpoint: subscription.endpoint,
+    });
+    return this.#api<PushSubscribeResponse>(
+      API_ROUTES.pushSubscribe,
+      { hostId, devicePublicKey: deviceKey.devicePublicKey, challenge, signature, subscription },
+      { headers: auth },
+    );
   }
 
   // --- Relay socket --------------------------------------------------------

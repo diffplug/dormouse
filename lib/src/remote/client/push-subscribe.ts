@@ -1,0 +1,110 @@
+/**
+ * The browser half of push subscription (docs/specs/pocket-app.md ->
+ * Installable web app, docs/specs/alert.md -> Push notifications).
+ *
+ * This module only talks to browser APIs — permission, the service worker
+ * registration, and `pushManager.subscribe`. Registering the result with the
+ * Server is `PocketClient.subscribeToPush`, which already holds the session
+ * token and the device key the Server demands.
+ */
+
+import { fromBase64Url, type PushSubscriptionPayload } from 'server-lib-common';
+
+/**
+ * Why the user cannot subscribe right now, or `ready` if they can.
+ *
+ * `needs-install` is the iOS rule: Web Push is granted only to a Home Screen
+ * web app, never to a Safari tab. It is a *hint* for the UI, not the gate — the
+ * gate is `subscribe()` failing, because only the browser knows for certain.
+ */
+export type PushAvailability = 'ready' | 'unsupported' | 'needs-install' | 'denied' | 'subscribed';
+
+/**
+ * True when the page is running as an installed web app rather than a tab.
+ * `navigator.standalone` is the iOS signal; the media query is the standard one.
+ */
+function isInstalledWebApp(): boolean {
+  const nav = navigator as Navigator & { standalone?: boolean };
+  if (nav.standalone === true) return true;
+  return globalThis.matchMedia?.('(display-mode: standalone)').matches ?? false;
+}
+
+/**
+ * True on Safari's web-app-capable browsers. Detected by the *presence* of the
+ * non-standard `navigator.standalone` rather than by parsing a user-agent
+ * string, which iPadOS deliberately makes unreliable by reporting as a Mac.
+ */
+function requiresInstallForPush(): boolean {
+  return typeof (navigator as Navigator & { standalone?: boolean }).standalone === 'boolean';
+}
+
+export async function getPushAvailability(): Promise<PushAvailability> {
+  if (!('serviceWorker' in navigator) || typeof globalThis.Notification !== 'function') {
+    return 'unsupported';
+  }
+  // On iOS the Push API is simply absent outside an installed web app, so this
+  // check and the one below can both be the reason — report the actionable one.
+  if (requiresInstallForPush() && !isInstalledWebApp()) return 'needs-install';
+  if (!('PushManager' in globalThis)) return 'unsupported';
+  if (Notification.permission === 'denied') return 'denied';
+
+  const registration = await navigator.serviceWorker.getRegistration();
+  const existing = await registration?.pushManager.getSubscription();
+  return existing ? 'subscribed' : 'ready';
+}
+
+/**
+ * Ask for permission and subscribe. **Must be called from a user gesture** —
+ * iOS rejects a permission request that is not, and there is no way to recover
+ * from a denial in the same session.
+ *
+ * Returns the subscription in the shape the Server stores, or throws with a
+ * message worth showing.
+ */
+export async function subscribeToPushInBrowser(
+  applicationServerKey: string,
+): Promise<PushSubscriptionPayload> {
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') {
+    throw new Error(
+      permission === 'denied'
+        ? 'Notifications are blocked for this site. Enable them in your browser settings.'
+        : 'Notification permission was dismissed.',
+    );
+  }
+
+  // `ready` rather than `getRegistration()`: the worker is registered during
+  // boot and may still be installing when the user taps.
+  const registration = await navigator.serviceWorker.ready;
+
+  // An existing subscription was minted against whatever key was configured at
+  // the time. Reusing one from a rotated VAPID key yields a subscription the
+  // server can never sign for, so replace rather than reuse.
+  const existing = await registration.pushManager.getSubscription();
+  if (existing) await existing.unsubscribe().catch(() => undefined);
+
+  const subscription = await registration.pushManager.subscribe({
+    // Mandatory in Chrome and on iOS: a promise that every push we receive
+    // becomes a visible notification. `sw.js` keeps it.
+    userVisibleOnly: true,
+    // Passed as bytes rather than the base64url string: browsers disagree about
+    // accepting the string form.
+    applicationServerKey: fromBase64Url(applicationServerKey) as BufferSource,
+  });
+
+  const json = subscription.toJSON() as { endpoint?: string; keys?: Record<string, string> };
+  const endpoint = json.endpoint ?? subscription.endpoint;
+  const p256dh = json.keys?.p256dh;
+  const auth = json.keys?.auth;
+  if (!endpoint || !p256dh || !auth) {
+    throw new Error('The browser returned an incomplete push subscription.');
+  }
+  return { endpoint, keys: { p256dh, auth } };
+}
+
+/** Drop the local subscription. The server row is pruned when delivery 410s. */
+export async function unsubscribeFromPushInBrowser(): Promise<void> {
+  const registration = await navigator.serviceWorker.getRegistration();
+  const existing = await registration?.pushManager.getSubscription();
+  await existing?.unsubscribe();
+}

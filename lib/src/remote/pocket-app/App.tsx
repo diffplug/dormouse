@@ -23,6 +23,11 @@ import {
 } from '../client/pocket-client';
 import { browserWebAuthn } from '../client/webauthn';
 import { getOrCreateDeviceKey } from '../client/device-key';
+import {
+  getPushAvailability,
+  subscribeToPushInBrowser,
+  type PushAvailability,
+} from '../client/push-subscribe';
 import { RemotePtyAdapter } from '../client/remote-adapter';
 import { setPlatform } from '../../lib/platform';
 import { disposeAllSessions, initAlertStateReceiver } from '../../lib/terminal-registry';
@@ -86,6 +91,8 @@ const PK = {
   rowTitle: 'truncate text-[13px] font-semibold',
   rowSecondary: 'mt-0.5 truncate text-[11px] text-header-inactive-fg/70',
   rowActions: 'flex shrink-0 items-center gap-2',
+  // Push sits under its host row as secondary chrome: page bg, alpha-on-fg.
+  pushRow: 'flex items-center gap-3 px-3.5 text-[11px] text-app-fg/70',
   field: 'flex flex-col gap-1.5',
   fieldLabel: 'text-[11px] text-app-fg/60',
   input:
@@ -120,7 +127,22 @@ export default function App(): React.ReactElement {
   const [hosts, setHosts] = useState<HostView[]>([]);
   const [pairedIds, setPairedIds] = useState<Set<string>>(() => new Set());
   const [activeHost, setActiveHost] = useState<HostView | null>(null);
+  const [pushState, setPushState] = useState<PushAvailability | null>(null);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
+
+  // Availability depends on browser state the app cannot change (permission,
+  // whether it was launched from the Home Screen), so it is read once the
+  // hosts list is on screen rather than tracked as a store.
+  useEffect(() => {
+    if (phase !== 'hosts') return;
+    let live = true;
+    void getPushAvailability().then((state) => {
+      if (live) setPushState(state);
+    });
+    return () => {
+      live = false;
+    };
+  }, [phase]);
 
   // The client nulls its socket on any close, so an action taken after a
   // server restart / network drop must reopen it rather than reuse a dead
@@ -206,6 +228,17 @@ export default function App(): React.ReactElement {
       setPairedIds((prev) => new Set(prev).add(host.hostId));
     });
 
+  // Permission must be requested from the gesture itself, so this runs straight
+  // off the tap rather than behind any await the browser could disown.
+  const onEnablePush = (host: HostView) =>
+    run('push', async () => {
+      const applicationServerKey = await client.getPushConfig();
+      if (!applicationServerKey) throw new Error('This server has push notifications disabled.');
+      const subscription = await subscribeToPushInBrowser(applicationServerKey);
+      await client.subscribeToPush(host.hostId, subscription);
+      setPushState('subscribed');
+    });
+
   const leaveWall = () => {
     teardownAdapter();
     client.close();
@@ -242,9 +275,11 @@ export default function App(): React.ReactElement {
         busy={busy}
         error={error}
         isPaired={(id) => pairedIds.has(id)}
+        pushState={pushState}
         onRefresh={() => run('refresh', loadHosts)}
         onPair={onPair}
         onConnect={onConnect}
+        onEnablePush={onEnablePush}
       />
     );
   }
@@ -380,22 +415,41 @@ export function SetupOrSignin({
 
 // --- HostsView -------------------------------------------------------------
 
+/**
+ * The push row's copy. Only `ready` is actionable; the rest explain why not, so
+ * "my phone never buzzes" always has a visible cause. `needs-install` is the
+ * iOS rule — Web Push is granted only to a Home Screen web app — and is the one
+ * state the user resolves outside the app entirely.
+ */
+const PUSH_COPY: Record<PushAvailability, string> = {
+  ready: 'Get an alert when a terminal needs attention.',
+  subscribed: 'Alerts on.',
+  denied: 'Notifications are blocked for this site in your browser settings.',
+  unsupported: 'This browser cannot receive push notifications.',
+  'needs-install': 'Add Dormouse to your Home Screen to receive alerts.',
+};
+
 export function HostsView({
   hosts,
   busy,
   error,
   isPaired,
+  pushState,
   onRefresh,
   onPair,
   onConnect,
+  onEnablePush,
 }: {
   hosts: HostView[];
   busy: string | null;
   error: string | null;
   isPaired: (hostId: string) => boolean;
+  /** Null until the browser has been asked; see the effect in `App`. */
+  pushState: PushAvailability | null;
   onRefresh: () => void;
   onPair: (host: HostView) => void;
   onConnect: (host: HostView) => void;
+  onEnablePush: (host: HostView) => void;
 }): React.ReactElement {
   return (
     <div className={PK.app}>
@@ -419,31 +473,51 @@ export function HostsView({
             const paired = isPaired(host.hostId);
             const status = !host.online ? 'Offline' : paired ? 'Paired' : 'Not paired';
             return (
-              <div className={clsx(PK.row, !host.online && PK.rowOffline)} key={host.hostId}>
-                <div className={PK.rowMain}>
-                  <div className={PK.rowTitle}>{host.label || host.hostId}</div>
-                  <div className={PK.rowSecondary}>{status}</div>
-                </div>
-                <div className={PK.rowActions}>
-                  {host.online && !paired ? (
+              <div key={host.hostId} className="flex flex-col gap-1.5">
+                <div className={clsx(PK.row, !host.online && PK.rowOffline)}>
+                  <div className={PK.rowMain}>
+                    <div className={PK.rowTitle}>{host.label || host.hostId}</div>
+                    <div className={PK.rowSecondary}>{status}</div>
+                  </div>
+                  <div className={PK.rowActions}>
+                    {host.online && !paired ? (
+                      <button
+                        type="button"
+                        className={pkButton({ tone: 'secondary', size: 'sm' })}
+                        disabled={busy !== null}
+                        onClick={() => onPair(host)}
+                      >
+                        {busy === 'pair' ? '…' : 'Pair'}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
-                      className={pkButton({ tone: 'secondary', size: 'sm' })}
-                      disabled={busy !== null}
-                      onClick={() => onPair(host)}
+                      className={pkButton({ tone: 'primary', size: 'sm' })}
+                      disabled={busy !== null || !host.online}
+                      onClick={() => onConnect(host)}
                     >
-                      {busy === 'pair' ? '…' : 'Pair'}
+                      {busy === 'connect' ? '…' : 'Connect'}
                     </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className={pkButton({ tone: 'primary', size: 'sm' })}
-                    disabled={busy !== null || !host.online}
-                    onClick={() => onConnect(host)}
-                  >
-                    {busy === 'connect' ? '…' : 'Connect'}
-                  </button>
+                  </div>
                 </div>
+                {/* Push is per (host, device), so it belongs to the host row —
+                    and only once paired, since an unpaired Host would have no
+                    reason to address this device. */}
+                {paired && pushState ? (
+                  <div className={PK.pushRow}>
+                    <span className="min-w-0 flex-1">{PUSH_COPY[pushState]}</span>
+                    {pushState === 'ready' ? (
+                      <button
+                        type="button"
+                        className={pkButton({ tone: 'secondary', size: 'sm' })}
+                        disabled={busy !== null}
+                        onClick={() => onEnablePush(host)}
+                      >
+                        {busy === 'push' ? '…' : 'Enable alerts'}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             );
           })

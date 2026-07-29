@@ -5,6 +5,10 @@
  *     { accountId: "owner", passkeys: [{ credentialId, publicKey, label, createdAt }] }
  *   $DORMOUSE_STATE_DIR/hosts.json
  *     [{ hostId, hostToken, label, enrolledAt }]
+ *   $DORMOUSE_STATE_DIR/push-subscriptions.json
+ *     [{ hostId, devicePublicKey, endpoint, keys, subscribedAt }]
+ *   $DORMOUSE_STATE_DIR/vapid.json
+ *     { publicKey, privateKey, createdAt }   (only when not supplied by env)
  *
  * Deliberately not a database: one account, a handful of passkeys and hosts,
  * hand-editable for revocation. Writes go through a temp-file-plus-rename so a
@@ -18,6 +22,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { join } from 'node:path';
 
 import { SELFHOST_ACCOUNT_ID, toBase64Url } from 'server-lib-common';
+import type { PushSubscriptionPayload } from 'server-lib-common';
 
 /** A registered passkey as stored on disk. `publicKey` is base64url SPKI. */
 export interface StoredPasskey {
@@ -202,6 +207,115 @@ export class HostStore extends JsonFileStore {
       hosts.push(host);
       await this.writeAtomic(hosts);
       return host;
+    });
+  }
+}
+
+/** A Web Push subscription as stored in `push-subscriptions.json`. */
+export interface StoredPushSubscription {
+  readonly hostId: string;
+  readonly devicePublicKey: string;
+  readonly endpoint: string;
+  readonly keys: PushSubscriptionPayload['keys'];
+  readonly subscribedAt: number;
+}
+
+/**
+ * Push subscriptions (`push-subscriptions.json`), keyed on the PAIR
+ * (`hostId`, `devicePublicKey`) — one Client subscribes once per Host it is
+ * paired with, and a Host can only ever see or reach its own subscribers.
+ *
+ * Unlike its append-only siblings this store deletes: a push service reports a
+ * dead subscription with 404/410, and re-subscribing after a browser rotates
+ * the endpoint must replace the stale row rather than accumulate one per
+ * rotation. Both paths run under the inherited mutex.
+ *
+ * No secret of ours lives here, but the endpoint plus its keys IS a bearer
+ * capability to notify that phone, so the inherited `0o600` still matters.
+ */
+export class PushSubscriptionStore extends JsonFileStore {
+  constructor(stateDir: string, now: () => number = () => Date.now()) {
+    super(stateDir, 'push-subscriptions.json', now);
+  }
+
+  list(): Promise<StoredPushSubscription[]> {
+    return this.read<StoredPushSubscription[]>([]);
+  }
+
+  async listForHost(hostId: string): Promise<StoredPushSubscription[]> {
+    const all = await this.list();
+    return all.filter((s) => s.hostId === hostId);
+  }
+
+  /** Replace any existing subscription for this (host, device), or add one. */
+  upsert(
+    record: Omit<StoredPushSubscription, 'subscribedAt'>,
+  ): Promise<StoredPushSubscription> {
+    return this.mutate(async () => {
+      const all = await this.list();
+      const stored: StoredPushSubscription = { ...record, subscribedAt: this.now() };
+      const kept = all.filter(
+        (s) => !(s.hostId === record.hostId && s.devicePublicKey === record.devicePublicKey),
+      );
+      kept.push(stored);
+      await this.writeAtomic(kept);
+      return stored;
+    });
+  }
+
+  /**
+   * Drop a subscription the push service reported as gone. Matched on endpoint
+   * rather than device so a stale row cannot outlive its endpoint even if the
+   * same device has since re-subscribed with a new one.
+   */
+  removeByEndpoint(endpoint: string): Promise<boolean> {
+    return this.mutate(async () => {
+      const all = await this.list();
+      const kept = all.filter((s) => s.endpoint !== endpoint);
+      if (kept.length === all.length) return false;
+      await this.writeAtomic(kept);
+      return true;
+    });
+  }
+}
+
+/** The VAPID keypair as stored in `vapid.json`. Both values are base64url. */
+export interface StoredVapidKeys {
+  readonly publicKey: string;
+  readonly privateKey: string;
+  readonly createdAt: number;
+}
+
+/**
+ * VAPID keypair custody (`vapid.json`). Only used when the keys are not
+ * supplied by env: a selfhost POC should not need a key ceremony before push
+ * works, but the keypair must still survive a restart or every phone's
+ * subscription is silently invalidated.
+ *
+ * This file holds a private key, which is exactly what the inherited
+ * `0o700`/`0o600` handling exists for.
+ */
+export class VapidStore extends JsonFileStore {
+  constructor(stateDir: string, now: () => number = () => Date.now()) {
+    super(stateDir, 'vapid.json', now);
+  }
+
+  load(): Promise<StoredVapidKeys | null> {
+    return this.read<StoredVapidKeys | null>(null);
+  }
+
+  /**
+   * Return the persisted keypair, generating and saving one on first call.
+   * Runs under the mutex so two concurrent boots cannot each mint a keypair and
+   * have one silently overwrite the other.
+   */
+  loadOrCreate(generate: () => { publicKey: string; privateKey: string }): Promise<StoredVapidKeys> {
+    return this.mutate(async () => {
+      const existing = await this.load();
+      if (existing) return existing;
+      const created: StoredVapidKeys = { ...generate(), createdAt: this.now() };
+      await this.writeAtomic(created);
+      return created;
     });
   }
 }

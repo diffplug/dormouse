@@ -38,9 +38,11 @@ const meta: Meta<typeof HostsView> = {
     busy: null,
     error: null,
     isPaired,
+    pushState: 'ready',
     onRefresh: () => {},
     onPair: () => {},
     onConnect: () => {},
+    onEnablePush: () => {},
   },
   decorators: [
     (Story, context) => (
@@ -99,4 +101,25 @@ export const Refreshing: Story = {
 // Host dropped → the red error text above the list.
 export const Error: Story = {
   args: { error: 'The host disconnected.' },
+};
+
+// Alerts already on for this device → the push row states it, with no action.
+export const PushSubscribed: Story = {
+  args: { pushState: 'subscribed' },
+};
+
+// The iOS case: Web Push is granted only to a Home Screen web app, so the row
+// asks for the one step the user must take outside the app.
+export const PushNeedsInstall: Story = {
+  args: { pushState: 'needs-install' },
+};
+
+// Blocked in browser settings → explained, not silently missing.
+export const PushDenied: Story = {
+  args: { pushState: 'denied' },
+};
+
+// Subscribing in flight → the push button shows "…".
+export const PushEnabling: Story = {
+  args: { busy: 'push' },
 };

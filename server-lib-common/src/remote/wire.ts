@@ -22,6 +22,11 @@ export const API_ROUTES = {
   reauthFinish: '/api/reauth/finish',
   hostEnroll: '/api/host/enroll',
   hosts: '/api/hosts',
+  pushConfig: '/api/push/config',
+  pushChallenge: '/api/push/challenge',
+  pushSubscribe: '/api/push/subscribe',
+  pushDevices: '/api/push/devices',
+  pushSend: '/api/push/send',
 } as const;
 
 export const WS_ROUTES = {
@@ -106,6 +111,82 @@ export interface HostEnrollResponse {
 
 export interface HostsResponse {
   hosts: Array<{ hostId: string; label: string; online: boolean }>;
+}
+
+// ---------------------------------------------------------------------------
+// Web Push (see alert.md "Push notifications" and server.md "HTTP API").
+//
+// Two audiences with different credentials: the Pocket Client registers its own
+// subscription with a session token plus a device signature, and the Host reads
+// and sends with its `hostToken`. Subscriptions are keyed on the PAIR
+// (hostId, devicePublicKey), so a Client subscribes once per Host it is paired
+// with and a Host can only ever see or reach its own subscribers.
+
+/** Public VAPID key, needed by the browser before it can subscribe. */
+export interface PushConfigResponse {
+  /** Base64url VAPID application server key, or null when push is unconfigured. */
+  applicationServerKey: string | null;
+}
+
+export interface PushChallengeRequest {
+  hostId: string;
+}
+export interface PushChallengeResponse {
+  /** Base64url challenge to sign with the device key. */
+  challenge: string;
+  expiresAt: number;
+}
+
+/** The browser's `PushSubscription`, narrowed to what delivery needs. */
+export interface PushSubscriptionPayload {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
+
+export interface PushSubscribeRequest {
+  hostId: string;
+  /** Base64url raw P-256 point — the Client identity in the Host's ACL. */
+  devicePublicKey: string;
+  challenge: string;
+  /** Base64url device signature over `pushSubscribePayload`. */
+  signature: string;
+  subscription: PushSubscriptionPayload;
+}
+export interface PushSubscribeResponse {
+  subscribedAt: number;
+}
+
+/**
+ * Host-token auth. Returns identities only — the Host holds the ACL and is the
+ * only side that can turn a `devicePublicKey` into a human label, so the Server
+ * never learns one (docs/specs/remote-security-model.md).
+ */
+export interface PushDevicesResponse {
+  devices: Array<{ devicePublicKey: string; subscribedAt: number }>;
+}
+
+/**
+ * Host-token auth. `devicePublicKeys` empty means "every device subscribed to
+ * this Host" — the fan-out the alarm path uses.
+ */
+export interface PushSendRequest {
+  devicePublicKeys?: string[];
+  title: string;
+  body: string;
+  /**
+   * Collapse key. The alarm path tags per Session so a Pane that rings, is
+   * cleared, and rings again replaces its own notification instead of stacking
+   * copies on the lock screen.
+   */
+  tag?: string;
+}
+export interface PushSendResponse {
+  /** How many subscriptions accepted the push. */
+  delivered: number;
+  /** Subscriptions the push service rejected as gone; these are now dropped. */
+  expired: number;
+  /** Named devices with no subscription for this Host. */
+  unknown: number;
 }
 
 // ---------------------------------------------------------------------------
