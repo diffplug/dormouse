@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { boundedPushText } from 'server-lib-common';
 
 type WorkerListener = (event: {
-  data?: { json(): unknown };
+  data?: { json(): unknown; text?(): string };
   waitUntil(promise: Promise<unknown>): void;
 }) => void;
 
@@ -53,6 +53,80 @@ function loadWorker(): WorkerHarness {
 }
 
 describe('Pocket push service worker', () => {
+  it('pins the render-sink cap to the Server rule', () => {
+    // The mirror corpus below borrows `TEXT_LIMIT` from the worker itself, so
+    // without this literal a drifted limit would still pass every assertion.
+    // 200 is the Server's `PUSH_TEXT_LIMIT` (`server/src/app.ts`).
+    expect(loadWorker().textLimit).toBe(200);
+  });
+
+  it('shows the generic notification for a payload-less push', async () => {
+    // `userVisibleOnly` promises the browser every delivery becomes visible;
+    // returning early would incur the penalty notice instead.
+    const { listeners, showNotification } = loadWorker();
+
+    let pending: Promise<unknown> | undefined;
+    listeners.get('push')!({
+      waitUntil: (promise) => {
+        pending = promise;
+      },
+    });
+    await pending;
+
+    expect(showNotification).toHaveBeenCalledWith(
+      'Dormouse',
+      expect.objectContaining({ body: 'A terminal needs attention.' }),
+    );
+  });
+
+  it('surfaces raw text when the payload is not JSON', async () => {
+    const { listeners, showNotification } = loadWorker();
+
+    let pending: Promise<unknown> | undefined;
+    listeners.get('push')!({
+      data: {
+        json: () => {
+          throw new Error('not json');
+        },
+        text: () => 'plain alarm',
+      },
+      waitUntil: (promise) => {
+        pending = promise;
+      },
+    });
+    await pending;
+
+    expect(showNotification).toHaveBeenCalledWith(
+      'Dormouse',
+      expect.objectContaining({ body: 'plain alarm' }),
+    );
+  });
+
+  it('still notifies when both payload reads throw', async () => {
+    const { listeners, showNotification } = loadWorker();
+
+    let pending: Promise<unknown> | undefined;
+    listeners.get('push')!({
+      data: {
+        json: () => {
+          throw new Error('not json');
+        },
+        text: () => {
+          throw new Error('unreadable');
+        },
+      },
+      waitUntil: (promise) => {
+        pending = promise;
+      },
+    });
+    await pending;
+
+    expect(showNotification).toHaveBeenCalledWith(
+      'Dormouse',
+      expect.objectContaining({ body: 'A terminal needs attention.' }),
+    );
+  });
+
   it('strips controls, bidi marks, and zero-width characters at the notification sink', async () => {
     const { listeners, showNotification } = loadWorker();
 

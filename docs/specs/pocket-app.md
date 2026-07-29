@@ -158,7 +158,9 @@ output by hand.
   visible; a browser that catches the worker showing none substitutes its own
   "site updated in the background" notice and counts it against the
   subscription. Malformed and payload-less pushes therefore fall back to generic
-  text rather than returning early.
+  text rather than returning early — even when reading the raw text itself
+  throws, which is guarded separately so no payload shape can exit the handler
+  without a notification.
 - **Payload text is re-bounded at the sink.** The Host already caps and
   sanitizes, but the worker coerces `title`/`body` to bounded single-line
   strings anyway, because the string is Pane-derived and therefore ultimately
