@@ -25,6 +25,7 @@ import { browserWebAuthn } from '../client/webauthn';
 import { getOrCreateDeviceKey } from '../client/device-key';
 import {
   getPushAvailability,
+  hasCurrentPushSubscription,
   isInstalledWebApp,
   subscribeToPushInBrowser,
   type PushAvailability,
@@ -155,6 +156,7 @@ export default function App(): React.ReactElement {
   const [pushSubscribedHostIds, setPushSubscribedHostIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [pushSubscriptionCurrent, setPushSubscriptionCurrent] = useState(false);
   const [pushConfig, setPushConfig] = useState<PushConfigState>({ status: 'loading' });
   /**
    * How many registrations this session has completed. The Server read below
@@ -173,14 +175,18 @@ export default function App(): React.ReactElement {
     if (phase !== 'hosts') return;
     let live = true;
     setPushConfig({ status: 'loading' });
+    setPushSubscriptionCurrent(false);
     void getPushAvailability().then((state) => {
       if (live) setPushState(state);
     });
     void client
       .getPushConfig()
-      .then((key) => {
+      .then(async (key) => {
+        const subscriptionCurrent =
+          key !== null ? await hasCurrentPushSubscription(key).catch(() => false) : false;
         if (live) {
           setPushConfig(key === null ? { status: 'disabled' } : { status: 'ready', key });
+          setPushSubscriptionCurrent(subscriptionCurrent);
         }
       })
       .catch(() => {
@@ -302,6 +308,7 @@ export default function App(): React.ReactElement {
       const subscription = await subscribeToPushInBrowser(pushConfig.key);
       await client.subscribeToPush(host.hostId, subscription);
       pushEnablesRef.current += 1;
+      setPushSubscriptionCurrent(true);
       setPushSubscribedHostIds((prev) => new Set(prev).add(host.hostId));
     });
 
@@ -312,7 +319,10 @@ export default function App(): React.ReactElement {
       setPushConfig({ status: 'loading' });
       try {
         const key = await client.getPushConfig();
+        const subscriptionCurrent =
+          key !== null ? await hasCurrentPushSubscription(key).catch(() => false) : false;
         setPushConfig(key === null ? { status: 'disabled' } : { status: 'ready', key });
+        setPushSubscriptionCurrent(subscriptionCurrent);
       } catch (err) {
         setPushConfig({ status: 'error' });
         throw err;
@@ -360,7 +370,7 @@ export default function App(): React.ReactElement {
         busy={busy}
         error={error}
         isPaired={(id) => pairedIds.has(id)}
-        isPushSubscribed={(id) => pushSubscribedHostIds.has(id)}
+        isPushSubscribed={(id) => pushSubscriptionCurrent && pushSubscribedHostIds.has(id)}
         pushState={pushState}
         pushConfigStatus={pushConfig.status}
         onRefresh={() => run('refresh', loadHosts)}

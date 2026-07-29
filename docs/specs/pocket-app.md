@@ -272,6 +272,17 @@ of truth: `getPushAvailability` in `lib/src/remote/client/push-subscribe.ts`,
 `PocketClient.listPushSubscribedHosts`, and the per-Host set in
 `lib/src/remote/pocket-app/App.tsx`.
 
+The row is necessary but not sufficient for **Alerts on**: Pocket also verifies
+that notification permission remains granted and the service-worker scope still
+holds a `PushSubscription` minted for the Server's current VAPID key. A missing
+subscription, revoked permission, or VAPID rotation therefore exposes Enable
+again instead of letting a stale Server row hide the repair path. The Server
+also omits rows registered under an old VAPID key, so repairing one Host after a
+rotation cannot make the other Hosts' old endpoints look current. Source of
+truth: `hasCurrentPushSubscription` in
+`lib/src/remote/client/push-subscribe.ts`, the `vapidPublicKey` field in
+`server/src/state.ts`, and the subscriptions read in `server/src/app.ts`.
+
 Registering another Host or retrying that POST reuses the service-worker
 scope's existing `PushSubscription` when its `applicationServerKey` matches the
 Server's VAPID public key byte-for-byte. Pocket unsubscribes and creates a new

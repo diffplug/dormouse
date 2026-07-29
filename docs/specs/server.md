@@ -76,7 +76,8 @@ $DORMOUSE_STATE_DIR/
                                 label, createdAt }] }
   hosts.json     [{ hostId, hostToken, label, enrolledAt }]
   push-subscriptions.json
-                 [{ hostId, devicePublicKey, endpoint, keys, subscribedAt }]
+                 [{ hostId, devicePublicKey, endpoint, keys,
+                    vapidPublicKey, subscribedAt }]
   vapid.json     { publicKey, privateKey, createdAt }   (only when unset by env)
 ```
 
@@ -89,7 +90,10 @@ push service reports a dead subscription with 404/410, and a browser that
 rotates its endpoint must replace the stale row rather than leave one per
 rotation. Rows are keyed on the **pair** (`hostId`, `devicePublicKey`), so a
 phone paired with two laptops subscribes twice and a Host can only ever read or
-reach its own subscribers. It holds no label — the Server never learns one.
+reach its own subscribers. Each row records the public VAPID key it was
+registered under, so a key rotation makes the Client readback treat the row as
+stale and offer re-registration rather than claiming delivery still works. It
+holds no label — the Server never learns one.
 
 `hosts.json` stores `hostToken` — the host↔server relay bearer secret — in
 plaintext, and `vapid.json` a private key, so both files are written owner-only:
@@ -144,7 +148,7 @@ so `node --test` can drive setup → pairing → connect end to end via
 | `GET /api/push/config`           | —              | `{ applicationServerKey }` — the VAPID public key, or `null` when push is unconfigured. Public by construction |
 | `POST /api/push/challenge`       | session token  | `{ challenge }` for the device signature below (no body — the challenge is a pool-wide nonce; the host binding lives in the signature) |
 | `POST /api/push/subscribe`       | session token + device signature | Upserts the `(hostId, devicePublicKey)` subscription |
-| `GET /api/push/subscriptions`    | session token  | The account's registrations as identities, so a reloaded Client can tell which Hosts it already registered with |
+| `GET /api/push/subscriptions`    | session token  | The account's registrations for the current VAPID key as identities, so a reloaded Client can tell which Hosts it already registered with. With push disabled, returns the stored identities for diagnosis |
 | `GET /api/push/devices`          | host token     | The `devicePublicKey`s subscribed to **this** Host  |
 | `POST /api/push/send`            | host token     | Fans a notification out to the named devices; `devicePublicKeys` is required |
 | `GET /ws/host`                   | host token     | The Host's relay socket                            |
@@ -175,6 +179,12 @@ Source of truth: `server/src/push.ts` and the routes in `server/src/app.ts`.
   that reports on an identity the caller does not hold. Both return identities
   only — the endpoint and its keys are a bearer capability to notify that phone
   and never leave the Server.
+- **Client readback is VAPID-current.** With push configured,
+  `/api/push/subscriptions` omits rows registered under a different (or legacy
+  unknown) public key. Those endpoints cannot receive a send signed by the
+  current key, and hiding them is what exposes Pocket's re-registration action
+  after rotation. The file rows are retained until that upsert; when push is
+  disabled the route still returns their identities for diagnosis.
 - **The subscription is bound to a Client identity by signature.** The Client
   signs `(hostId, challenge, devicePublicKey, endpoint)` with its device key
   under `PUSH_SUBSCRIBE_DOMAIN` — deliberately *not* `DEVICE_AUTH_DOMAIN`, since

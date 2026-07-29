@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { API_ROUTES, signPushSubscribe } from 'server-lib-common';
@@ -121,6 +121,7 @@ test('subscribe round-trip persists the subscription owner-only', async () => {
   assert.equal(stored.length, 1);
   assert.equal(stored[0].hostId, host.hostId);
   assert.equal(stored[0].devicePublicKey, client.deviceKey.devicePublicKey);
+  assert.equal(stored[0].vapidPublicKey, VAPID_PUBLIC);
   // The endpoint plus its keys is a bearer capability to notify that phone.
   assert.equal((await stat(path)).mode & 0o777, 0o600);
 });
@@ -291,6 +292,25 @@ test('subscriptions never returns the endpoint or its keys', async () => {
   assert.equal(body.includes('push.example.com'), false);
   assert.equal(body.includes('FakeAuthSecret'), false);
   assert.equal(body.includes('BFakeP256dhKey'), false);
+});
+
+test('subscriptions hides rows registered under an old VAPID key', async () => {
+  const { app, stateDir, host, sessionToken } = await pushApp();
+  const client = await SimClient.create({ origin: ORIGIN });
+  await subscribe(app, { sessionToken, host, client });
+
+  // Model a Server key rotation while preserving the existing state file. The
+  // endpoint is now unusable with the current signer and Pocket must be offered
+  // the repair action instead of seeing "Alerts on."
+  const path = join(stateDir, 'push-subscriptions.json');
+  const stored = JSON.parse(await readFile(path, 'utf8'));
+  stored[0].vapidPublicKey = 'BOldVapidPublicKey';
+  await writeFile(path, `${JSON.stringify(stored, null, 2)}\n`);
+
+  const res = await app.request(API_ROUTES.pushSubscriptions, {
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  assert.deepEqual(await res.json(), { subscriptions: [] });
 });
 
 test('subscriptions requires a session and rejects a host token', async () => {

@@ -6,7 +6,7 @@
  *   $DORMOUSE_STATE_DIR/hosts.json
  *     [{ hostId, hostToken, label, enrolledAt }]
  *   $DORMOUSE_STATE_DIR/push-subscriptions.json
- *     [{ hostId, devicePublicKey, endpoint, keys, subscribedAt }]
+ *     [{ hostId, devicePublicKey, endpoint, keys, vapidPublicKey, subscribedAt }]
  *   $DORMOUSE_STATE_DIR/vapid.json
  *     { publicKey, privateKey, createdAt }   (only when not supplied by env)
  *
@@ -217,6 +217,8 @@ export interface StoredPushSubscription {
   readonly devicePublicKey: string;
   readonly endpoint: string;
   readonly keys: PushSubscriptionPayload['keys'];
+  /** Public VAPID key this endpoint was minted and registered under. */
+  readonly vapidPublicKey: string;
   readonly subscribedAt: number;
 }
 

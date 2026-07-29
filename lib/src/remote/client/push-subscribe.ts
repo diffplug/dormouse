@@ -81,6 +81,35 @@ export async function getPushAvailability(): Promise<PushAvailability> {
 }
 
 /**
+ * Whether the browser can still deliver through a subscription minted for the
+ * Server's current VAPID key.
+ *
+ * A Server row alone is not enough to claim "Alerts on": permission may have
+ * been revoked, the browser subscription may have disappeared, or the Server
+ * may have rotated its VAPID key. In all three cases Pocket must leave Enable
+ * available so {@link subscribeToPushInBrowser} can repair the registration.
+ */
+export async function hasCurrentPushSubscription(
+  applicationServerKey: string,
+): Promise<boolean> {
+  if (
+    !('serviceWorker' in navigator) ||
+    typeof globalThis.Notification !== 'function' ||
+    Notification.permission !== 'granted' ||
+    !('PushManager' in globalThis)
+  ) {
+    return false;
+  }
+  const registration = await getPushServiceWorkerRegistration();
+  const subscription = await registration?.pushManager.getSubscription();
+  return (
+    subscription !== null &&
+    subscription !== undefined &&
+    sameBytes(subscription.options.applicationServerKey, fromBase64Url(applicationServerKey))
+  );
+}
+
+/**
  * Ask for permission and subscribe. **Must be called from a user gesture** —
  * iOS rejects a permission request that is not, and there is no way to recover
  * from a denial in the same session.

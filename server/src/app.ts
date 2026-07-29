@@ -521,6 +521,7 @@ export function createApp(config: AppConfig): CreatedApp {
       devicePublicKey: body.devicePublicKey,
       endpoint: body.subscription.endpoint,
       keys: body.subscription.keys,
+      vapidPublicKey: config.vapidPublicKey,
     });
     const res: PushSubscribeResponse = { subscribedAt: stored.subscribedAt };
     return c.json(res);
@@ -534,7 +535,15 @@ export function createApp(config: AppConfig): CreatedApp {
     //
     // No 503 when push is unconfigured — rows can outlive a key being removed,
     // and the truthful answer is the list, not an error.
-    const subscriptions = await pushStore.list();
+    const allSubscriptions = await pushStore.list();
+    // A row registered under an old VAPID key cannot receive a send signed by
+    // the current key. Hide it from the "Alerts on" readback so Pocket offers
+    // the per-Host repair action. Missing keys are legacy rows and stale in the
+    // same way. When push is disabled the raw rows remain readable, preserving
+    // the route's diagnostic behavior without claiming they are deliverable.
+    const subscriptions = config.vapidPublicKey
+      ? allSubscriptions.filter((s) => s.vapidPublicKey === config.vapidPublicKey)
+      : allSubscriptions;
     // Identities only: the endpoint and its keys are a bearer capability to
     // notify that phone, and never leave the Server.
     const res: PushSubscriptionsResponse = {

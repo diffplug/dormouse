@@ -7,6 +7,7 @@ vi.mock('../pocket-app/service-worker', () => ({
 
 import {
   getPushAvailability,
+  hasCurrentPushSubscription,
   isInstalledWebApp,
   requiresInstallForPush,
   subscribeToPushInBrowser,
@@ -160,6 +161,48 @@ describe('getPushAvailability', () => {
     const pending = getPushAvailability();
     resolve(registration());
     await expect(pending).resolves.toBe('ready');
+  });
+});
+
+describe('hasCurrentPushSubscription', () => {
+  it('accepts a granted subscription minted for the current VAPID key', async () => {
+    stubBrowser({ permission: 'granted' });
+    getRegistration.mockResolvedValue(
+      registration({
+        options: { applicationServerKey: Uint8Array.of(1, 2, 3).buffer },
+      }),
+    );
+
+    await expect(hasCurrentPushSubscription('AQID')).resolves.toBe(true);
+  });
+
+  it('rejects a subscription minted for an old VAPID key', async () => {
+    stubBrowser({ permission: 'granted' });
+    getRegistration.mockResolvedValue(
+      registration({
+        options: { applicationServerKey: Uint8Array.of(9, 9, 9).buffer },
+      }),
+    );
+
+    await expect(hasCurrentPushSubscription('AQID')).resolves.toBe(false);
+  });
+
+  it('rejects a stored subscription after notification permission is revoked', async () => {
+    stubBrowser({ permission: 'denied' });
+    getRegistration.mockResolvedValue(
+      registration({
+        options: { applicationServerKey: Uint8Array.of(1, 2, 3).buffer },
+      }),
+    );
+
+    await expect(hasCurrentPushSubscription('AQID')).resolves.toBe(false);
+  });
+
+  it('rejects a missing browser subscription even if the Server may still hold a row', async () => {
+    stubBrowser({ permission: 'granted' });
+    getRegistration.mockResolvedValue(registration(null));
+
+    await expect(hasCurrentPushSubscription('AQID')).resolves.toBe(false);
   });
 });
 
