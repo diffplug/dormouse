@@ -81,9 +81,12 @@ and Tauri runs a *plain* sync command on the main thread — where that block st
 the webview from painting for the whole round trip (up to `AGENT_BROWSER_TIMEOUT`
 = 30s for a hung agent-browser; a cold `agent-browser open` froze the UI ~3s,
 long enough that a pane created instantly before it looked like it never
-appeared). `(async)` runs the same blocking body on a runtime worker instead. The
-three clipboard readers are knowingly still sync: their Windows branches call the
-Win32 clipboard directly rather than the sidecar.
+appeared). `(async)` runs the same blocking body on a runtime worker instead —
+including the three clipboard readers (`read_clipboard_text`,
+`read_clipboard_file_paths`, `read_clipboard_image_as_file_path`), whose
+non-Windows branches round-trip through the sidecar and would otherwise freeze
+the webview during a paste. Their Windows branches read the Win32 clipboard
+directly, but `(async)` applies to the whole command either way.
 `pty_graceful_kill_all` (`TauriAdapter.gracefulKillAllPtys`) SIGTERMs every live
 PTY and awaits the sidecar's `gracefulKillDone` (echoing the request's
 `requestId`; bounded at `timeout + 1.5s`). `gracefulKillDone` fires early once
