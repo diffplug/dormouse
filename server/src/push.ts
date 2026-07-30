@@ -119,9 +119,12 @@ function decodeVapidKey(value: string, name: 'public' | 'private', length: numbe
 /**
  * Real delivery through `web-push`. TTL is deliberately short: an alarm that
  * arrives an hour late is noise, not information, so a push service holding one
- * for an offline phone should drop it rather than deliver it stale.
+ * for an offline phone should drop it rather than deliver it stale. The
+ * request timeout is a separate bound on socket inactivity while talking to
+ * the push service.
  */
 export const PUSH_TTL_SECONDS = 300;
+export const PUSH_REQUEST_TIMEOUT_MS = 10_000;
 
 function endpointOrigin(endpoint: string): string {
   try {
@@ -148,6 +151,7 @@ export function createWebPushSender(keys: VapidKeys, subject: string): PushSende
           {
             vapidDetails: { subject, publicKey: keys.publicKey, privateKey: keys.privateKey },
             TTL: PUSH_TTL_SECONDS,
+            timeout: PUSH_REQUEST_TIMEOUT_MS,
             urgency: 'high',
             agent,
           },

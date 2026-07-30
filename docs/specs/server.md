@@ -222,8 +222,9 @@ Source of truth: `server/src/push.ts` and the routes in `server/src/app.ts`.
   never silent: the refusal is logged (origin only — the endpoint is a bearer
   capability) and counted in the response's `failed`, since the route answers
   200 either way and the Host needs to tell an all-failed fan-out from
-  success. TTL is 300s — an alarm that arrives an hour late is noise, not
-  information.
+  success. Each push-service request has a 10-second socket-inactivity timeout,
+  which resolves as `failed`; this is separate from the 300-second provider
+  TTL, which prevents a delayed alarm from arriving after it is useful.
 - Push is disabled, not half-working, when no VAPID key is configured: the
   config route reports `null` and subscribe/send answer 503.
 

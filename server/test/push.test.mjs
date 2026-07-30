@@ -14,9 +14,16 @@ import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { API_ROUTES, signPushSubscribe } from 'server-lib-common';
+import webpush from 'web-push';
 
 import { SimClient } from '../../server-lib-common/test/harness/actors.mjs';
-import { assertVapidKeyPair, assertVapidSubject, generateVapidKeys } from '../dist/push.js';
+import {
+  PUSH_REQUEST_TIMEOUT_MS,
+  assertVapidKeyPair,
+  assertVapidSubject,
+  createWebPushSender,
+  generateVapidKeys,
+} from '../dist/push.js';
 import { ORIGIN, enrollHost, fakePushSender, freshApp, ownerSession, post } from './helpers.mjs';
 
 const VAPID_PUBLIC = 'BJxKIjEEuJH0dLHTAcMFVYRnLsIBWcuMt5S1FCdDLbxCkmpUuLfHTFzWSFCPFTFsFvT8sVFTFxKIjEE';
@@ -38,6 +45,25 @@ test('VAPID subject validation accepts contact URLs and rejects invalid values',
 
   for (const subject of ['', 'admin@example.com', 'http://example.com/contact']) {
     assert.throws(() => assertVapidSubject(subject), /valid mailto: or https: URL/);
+  }
+});
+
+test('real delivery gives push-service requests a bounded socket timeout', async () => {
+  const originalSendNotification = webpush.sendNotification;
+  let requestOptions;
+  webpush.sendNotification = async (_subscription, _payload, options) => {
+    requestOptions = options;
+    return { statusCode: 201, body: '', headers: {} };
+  };
+
+  try {
+    const sender = createWebPushSender(generateVapidKeys(), 'mailto:admin@example.com');
+    const result = await sender.send(subscription(), '{}');
+    assert.equal(result, 'delivered');
+    assert.equal(requestOptions.timeout, PUSH_REQUEST_TIMEOUT_MS);
+    assert.equal(PUSH_REQUEST_TIMEOUT_MS, 10_000);
+  } finally {
+    webpush.sendNotification = originalSendNotification;
   }
 });
 
