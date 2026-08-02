@@ -51,11 +51,58 @@ export interface VapidKeys {
 }
 
 /**
- * `mailto:` or `https:` contact for the push service operator, per RFC 8292.
- * Push services may use it to reach whoever is responsible for a misbehaving
- * sender; some reject a JWT without one.
+ * Hosts a push service will not accept in a VAPID subject. Apple answers
+ * `403 {"reason":"BadJwtToken"}` for a loopback subject — verified against
+ * `web.push.apple.com` for both `mailto:admin@localhost` and
+ * `https://localhost:3000`, while `mailto:admin@example.com` and an ordinary
+ * https origin were accepted. Apple does not check that the contact is
+ * *reachable*, only that it is not loopback.
  */
-export const DEFAULT_VAPID_SUBJECT = 'mailto:admin@localhost';
+const LOOPBACK_SUBJECT_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+
+/** The host a subject names: the domain half for `mailto:`, the hostname otherwise. */
+function subjectHost(subject: URL): string {
+  if (subject.protocol === 'mailto:') {
+    const at = subject.pathname.lastIndexOf('@');
+    return at === -1 ? '' : subject.pathname.slice(at + 1).toLowerCase();
+  }
+  return subject.hostname.toLowerCase();
+}
+
+function isLoopbackSubjectHost(host: string): boolean {
+  if (!host) return false;
+  if (LOOPBACK_SUBJECT_HOSTS.has(host)) return true;
+  // RFC 6761 reserves the whole `.localhost` TLD for loopback.
+  if (host.endsWith('.localhost')) return true;
+  return /^127\./.test(host);
+}
+
+/**
+ * The `mailto:`/`https:` operator contact to sign VAPID JWTs with (RFC 8292)
+ * when `DORMOUSE_VAPID_SUBJECT` is unset, or `null` when this deployment has no
+ * usable one and push must stay off.
+ *
+ * The server's own origin is the right zero-config answer: it is a real contact
+ * for whoever runs this server, and every deployment that can serve Pocket at
+ * all already has a valid https origin, because WebAuthn requires one. A
+ * loopback dev server has no such contact — and could not reach a phone anyway,
+ * since the phone cannot route to it. Returning `null` there disables push
+ * rather than inventing a placeholder contact that a push service may reject,
+ * which is the failure this default exists to prevent: the previous default
+ * (`mailto:admin@localhost`) let the server boot clean, answer 200 on send, and
+ * silently deliver nothing to any iPhone.
+ */
+export function defaultVapidSubject(origin: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'https:') return null;
+  if (isLoopbackSubjectHost(parsed.hostname.toLowerCase())) return null;
+  return parsed.origin;
+}
 
 /** Generate a VAPID keypair in the exact encoding the sender expects. */
 export function generateVapidKeys(): VapidKeys {
@@ -90,8 +137,14 @@ export function assertVapidKeyPair(keys: VapidKeys): void {
 
 /**
  * Validate the operator contact before the first delivery. `web-push` performs
- * this check while constructing a send, which would otherwise let a malformed
- * environment value survive startup and fail every notification at runtime.
+ * the syntax half of this check while constructing a send, which would
+ * otherwise let a malformed environment value survive startup and fail every
+ * notification at runtime.
+ *
+ * The loopback rule is stricter than `web-push`'s: it warns about a loopback
+ * *https* subject on every send and says nothing at all about `mailto:` at
+ * `localhost`, and a warning buried in send-time stderr is exactly how a
+ * deployment ends up delivering nothing to iPhones without noticing.
  */
 export function assertVapidSubject(subject: string): void {
   let parsed: URL;
@@ -102,6 +155,13 @@ export function assertVapidSubject(subject: string): void {
   }
   if (parsed.protocol !== 'mailto:' && parsed.protocol !== 'https:') {
     throw new Error('VAPID subject must be a valid mailto: or https: URL.');
+  }
+  if (isLoopbackSubjectHost(subjectHost(parsed))) {
+    throw new Error(
+      'VAPID subject must not name a loopback host — Apple rejects such a JWT with ' +
+        'BadJwtToken, so every push to an iPhone would fail. Use a routable contact, ' +
+        "e.g. this server's https origin or a real mailto: address.",
+    );
   }
 }
 
@@ -129,6 +189,25 @@ function endpointOrigin(endpoint: string): string {
   } catch {
     return '<invalid endpoint>';
   }
+}
+
+/**
+ * The push service's own explanation of a rejection, e.g. Apple's
+ * `{"reason":"BadJwtToken"}`. Worth logging because the status code alone does
+ * not distinguish a bad VAPID subject from a bad key from a bad payload, and
+ * this is the only place that explanation is ever visible. Whitespace-collapsed
+ * and capped so an HTML error page cannot flood the log.
+ */
+const MAX_LOGGED_ERROR_BODY = 200;
+
+function pushErrorDetail(err: unknown): string {
+  const body = (err as { body?: unknown }).body;
+  if (typeof body !== 'string') return '';
+  const collapsed = body.replace(/\s+/g, ' ').trim();
+  if (!collapsed) return '';
+  return collapsed.length > MAX_LOGGED_ERROR_BODY
+    ? `${collapsed.slice(0, MAX_LOGGED_ERROR_BODY)}…`
+    : collapsed;
 }
 
 export function createWebPushSender(keys: VapidKeys, subject: string): PushSender {
@@ -166,6 +245,7 @@ export function createWebPushSender(keys: VapidKeys, subject: string): PushSende
         console.warn(
           `push delivery failed for ${endpointOrigin(target.endpoint)}:`,
           status ?? (err instanceof Error ? err.message : String(err)),
+          pushErrorDetail(err),
         );
         return 'failed';
       }
