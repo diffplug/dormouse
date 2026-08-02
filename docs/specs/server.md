@@ -157,6 +157,14 @@ so `node --test` can drive setup → pairing → connect end to end via
 The setup password is compared in constant time with a small fixed delay on
 failure; that is the extent of the hardening today.
 
+Every session-gated route — including the `/ws/client` upgrade, which is
+rejected before `injectWebSocket` ever sees it — answers an unknown or expired
+token with 401 and the shared `UNAUTHORIZED_ERROR` from
+`server-lib-common/src/remote/wire.ts`. That exact string is load-bearing:
+Pocket keys its "sign in again" recovery on it, and a bare 401 is ambiguous,
+since a wrong setup password and a rejected device signature answer 401 as well
+([pocket-app.md](./pocket-app.md) -> An expired session drops to sign-in).
+
 ### Web Push
 
 The relay routes between two live sockets; a push has to reach a phone whose app
