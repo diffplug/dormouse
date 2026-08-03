@@ -322,8 +322,8 @@ importers:
         specifier: ^2.1.10
         version: 2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       ascii-splash:
-        specifier: 0.6.0
-        version: 0.6.0(@types/node@24.13.3)
+        specifier: 0.6.1
+        version: 0.6.1(@types/node@24.13.3)
       dormouse-lib:
         specifier: workspace:*
         version: link:../lib
@@ -2222,8 +2222,8 @@ packages:
     resolution: {integrity: sha512-COROpnaoap1E2F000S62r6A60uHZnmlvomhfyT2DlTcrY1OrBKn2UhH7qn5wTC9zMvD0AY7csdPSNwKP+7WiQw==}
     engines: {node: '>= 0.4'}
 
-  ascii-splash@0.6.0:
-    resolution: {integrity: sha512-jZNILSEW2h9Paoe2g4LmQWnfm6Og21gel992uE2IYh0Gx3Z2jm8CplppYmNaYGDRXIYOtUKfYI0cfaAMKGtkuw==}
+  ascii-splash@0.6.1:
+    resolution: {integrity: sha512-aDgbgBuIYY2H8z6SvthI0mF7Fjxw6ZoRefThtZEr3Nq8k0VCYlu4SL/hpxcDI279hbtSArpajqaFMLpIyTR47w==}
     engines: {node: '>=20.0.0'}
     hasBin: true
 
@@ -3792,8 +3792,8 @@ packages:
       vite-plus:
         optional: true
 
-  string-kit@0.19.3:
-    resolution: {integrity: sha512-94p913R6+Ea6656A39bqJeHgt64HM9RSq36oc0F8N8Mz76g5+cLaqEwkouqguEDrJ4rhVQpS+tKz214FdtMoqA==}
+  string-kit@0.19.5:
+    resolution: {integrity: sha512-MqNWtQQw6xMFbOSa26HfyS5uyDu1tR4OEPz44VDP6JWa/S0E0N11uw8CXrPt5hme/tBXRp5AmoIvFl5B9lt7PA==}
     engines: {node: '>=14.15.0'}
 
   string-width@4.2.3:
@@ -3886,8 +3886,8 @@ packages:
     resolution: {integrity: sha512-ujeqbceABgwMZxEJnk2HDY2DlnUZ+9oEcb1KzTVfYHio0UE6dG71n60d8D2I4qNvleWrrXpmjpt7vZeF1LnMZQ==}
     engines: {node: '>=6'}
 
-  terminal-kit@3.1.2:
-    resolution: {integrity: sha512-ro2FyU4A+NwA74DLTYTnoCFYuFpgV1aM07IS6MPrJeajoI2hwF44EdUqjoTmKEl6srYDWtbVkc/b1C16iUnxFQ==}
+  terminal-kit@3.1.4:
+    resolution: {integrity: sha512-0BfyIa7pY69E+UgV0P655uNk2rjp2eWTA0uZCTMlGzyrgcrH7kO6yZDGdHqB2vNF5uEjQ5+6ZilHfGtzrhLQNg==}
     engines: {node: '>=16.13.0'}
 
   terminal-link@4.0.0:
@@ -5909,13 +5909,13 @@ snapshots:
 
   aria-query@5.3.2: {}
 
-  ascii-splash@0.6.0(@types/node@24.13.3):
+  ascii-splash@0.6.1(@types/node@24.13.3):
     dependencies:
       commander: 14.0.3
       conf: 15.1.0
       sharp: 0.35.3(@types/node@24.13.3)
       simplex-noise: 4.0.3
-      terminal-kit: 3.1.2
+      terminal-kit: 3.1.4
     transitivePeerDependencies:
       - '@types/node'
 
@@ -7439,7 +7439,7 @@ snapshots:
       - react
       - utf-8-validate
 
-  string-kit@0.19.3: {}
+  string-kit@0.19.5: {}
 
   string-width@4.2.3:
     dependencies:
@@ -7533,7 +7533,7 @@ snapshots:
       readable-stream: 3.6.2
     optional: true
 
-  terminal-kit@3.1.2:
+  terminal-kit@3.1.4:
     dependencies:
       '@cronvel/get-pixels': 3.4.1
       chroma-js: 2.6.0
@@ -7541,7 +7541,7 @@ snapshots:
       ndarray: 1.0.19
       nextgen-events: 1.5.3
       seventh: 0.9.4
-      string-kit: 0.19.3
+      string-kit: 0.19.5
       tree-kit: 0.8.10
 
   terminal-link@4.0.0:
