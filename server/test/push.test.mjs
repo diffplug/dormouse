@@ -16,7 +16,12 @@ import { join } from 'node:path';
 import { API_ROUTES, signPushSubscribe } from 'server-lib-common';
 
 import { SimClient } from '../../server-lib-common/test/harness/actors.mjs';
-import { assertVapidKeyPair, assertVapidSubject, generateVapidKeys } from '../dist/push.js';
+import {
+  assertVapidKeyPair,
+  assertVapidSubject,
+  defaultVapidSubject,
+  generateVapidKeys,
+} from '../dist/push.js';
 import { ORIGIN, enrollHost, fakePushSender, freshApp, ownerSession, post } from './helpers.mjs';
 
 const VAPID_PUBLIC = 'BJxKIjEEuJH0dLHTAcMFVYRnLsIBWcuMt5S1FCdDLbxCkmpUuLfHTFzWSFCPFTFsFvT8sVFTFxKIjEE';
@@ -38,6 +43,45 @@ test('VAPID subject validation accepts contact URLs and rejects invalid values',
 
   for (const subject of ['', 'admin@example.com', 'http://example.com/contact']) {
     assert.throws(() => assertVapidSubject(subject), /valid mailto: or https: URL/);
+  }
+});
+
+// Apple answers 403 BadJwtToken for a loopback subject, so accepting one would
+// boot a server that reports success and delivers nothing to any iPhone.
+test('VAPID subject validation rejects loopback contacts', () => {
+  for (const subject of [
+    'mailto:admin@localhost',
+    'mailto:admin@dev.localhost',
+    'mailto:admin@127.0.0.1',
+    'https://localhost:3000',
+    'https://127.0.0.1:3000',
+    'https://[::1]:3000',
+  ]) {
+    assert.throws(() => assertVapidSubject(subject), /loopback host/, subject);
+  }
+});
+
+test('default VAPID subject is the https origin, and absent for one push cannot use', () => {
+  assert.equal(
+    defaultVapidSubject('https://dormouse.example.com'),
+    'https://dormouse.example.com',
+  );
+  // Only the origin — a path or trailing slash is not part of the contact.
+  assert.equal(
+    defaultVapidSubject('https://dormouse.example.com/pocket/'),
+    'https://dormouse.example.com',
+  );
+
+  // No usable contact → push off rather than a placeholder a service rejects.
+  for (const origin of [
+    'http://localhost:3000',
+    'https://localhost:3000',
+    'https://127.0.0.1:3000',
+    'https://[::1]:3000',
+    'http://dormouse.example.com',
+    'not a url',
+  ]) {
+    assert.equal(defaultVapidSubject(origin), null, origin);
   }
 });
 
