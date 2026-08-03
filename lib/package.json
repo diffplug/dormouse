@@ -19,10 +19,10 @@
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
-    "@xterm/addon-fit": "0.12.0-beta.291",
-    "@xterm/addon-unicode-graphemes": "0.5.0-beta.291",
+    "@xterm/addon-fit": "0.12.0-beta.292",
+    "@xterm/addon-unicode-graphemes": "0.5.0-beta.292",
     "@xterm/addon-webgl": "0.20.0-beta.291",
-    "@xterm/xterm": "6.1.0-beta.291",
+    "@xterm/xterm": "6.1.0-beta.292",
     "clsx": "^2.1.1",
     "dor-lib-common": "workspace:*",
     "fflate": "0.8.3",
