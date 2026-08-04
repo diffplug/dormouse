@@ -1,5 +1,6 @@
 export type { SessionStatus } from './activity-monitor';
 export type { TodoState } from './alert-manager';
+export type { AlertSpeechState } from './alert-speech-state';
 export type { ActivityState, AlertButtonActionResult } from './session-activity-store';
 export type { TerminalEntry, TerminalOverlayDims } from './terminal-store';
 export type {
@@ -86,6 +87,12 @@ export {
 export type { PushDevice, PushDevicesState } from './push-devices';
 
 export { deriveSessionLabel } from './session-label';
+
+export {
+  getAlertSpeechState,
+  getAlertSpeechSnapshot,
+  subscribeToAlertSpeech,
+} from './alert-speech-state';
 
 export {
   applyTerminalSemanticEvents,

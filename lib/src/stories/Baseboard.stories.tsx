@@ -88,6 +88,27 @@ export const OneRingingDoor: Story = {
   }),
 };
 
+export const OneSpeakingDoor: Story = {
+  args: {
+    items: oneRingingDoorItems,
+  },
+  parameters: {
+    ...withState(oneRingingDoorItems, {
+      p1: { status: 'ALERT_RINGING', todo: true },
+    }),
+    primedAlertSpeech: { p1: 'speaking' },
+  },
+};
+
+export const AlarmOutputsEnabled: Story = {
+  args: {
+    items: [],
+  },
+  parameters: {
+    primedAlertSettings: { speakEnabled: true, pushEnabled: true },
+  },
+};
+
 export const MixedDoorStates: Story = {
   args: {
     items: mixedDoorStateItems,

@@ -23,6 +23,11 @@ import {
   type TerminalPaneState,
 } from '../src/lib/terminal-registry';
 import { computeDynamicPalette } from '../src/lib/themes/dynamic-palette';
+import {
+  clearAllAlertSpeechStates,
+  setAlertSpeechState,
+  type AlertSpeechState,
+} from '../src/lib/alert-speech-state';
 import { VSCODE_THEMES, VSCODE_THEME_TYPES } from './themes';
 import { cfg } from '../src/cfg';
 
@@ -60,6 +65,7 @@ const DYNAMIC_PALETTE_VARS = [
   '--color-alarm-vs-header-active',
   '--color-alarm-vs-header-inactive',
   '--color-alarm-vs-door',
+  '--color-alarm-vs-terminal',
 ] as const;
 const PREFERRED_STORYBOOK_THEME = 'Light (Visual Studio)';
 const FIRST_STORYBOOK_THEME = Object.keys(VSCODE_THEMES)[0] ?? '';
@@ -208,6 +214,9 @@ const preview: Preview = {
       const primedPushDevices = context.parameters?.primedPushDevices as
         | PushDevicesState
         | undefined;
+      const primedAlertSpeech = context.parameters?.primedAlertSpeech as
+        | Record<string, AlertSpeechState>
+        | undefined;
       const platform = fakePlatform as FakePtyAdapter;
 
       if (scenario) platform.setDefaultScenario(scenario);
@@ -228,6 +237,10 @@ const preview: Preview = {
           // Alarm dialog's device line names one, and every other story resets
           // to `no-host`.
           setPushDevices(primedPushDevices ?? { status: 'no-host', devices: [] });
+          clearAllAlertSpeechStates();
+          for (const [id, state] of Object.entries(primedAlertSpeech ?? {})) {
+            setAlertSpeechState(id, state);
+          }
           clearPrimedActivity();
           for (const id of getTerminalPaneStateSnapshot().keys()) {
             removeTerminalPaneState(id);
@@ -260,6 +273,7 @@ const preview: Preview = {
           applyWatchedCommands([]);
           applyAlertSettingsFromHost(undefined);
           resetPushDevices();
+          clearAllAlertSpeechStates();
           clearPrimedActivity();
           for (const id of getTerminalPaneStateSnapshot().keys()) {
             removeTerminalPaneState(id);
@@ -267,7 +281,7 @@ const preview: Preview = {
           platform.clearDefaultScenario();
           disposeAllSessions();
         };
-      }, [platform, primedSessionState, primedTerminalState, primedWatchedCommands, primedAlertSettings, primedPushDevices]);
+      }, [platform, primedSessionState, primedTerminalState, primedWatchedCommands, primedAlertSettings, primedPushDevices, primedAlertSpeech]);
 
       return createElement(Story);
     },

@@ -153,10 +153,12 @@ When a Session transitions into `ALERT_RINGING` and is still ringing `speakDelay
 
 - Any of the three tracks qualifies. "Not attended" is track-agnostic.
 - **The derived Pane label is spoken, including terminal-supplied title overrides.** It comes from `deriveSessionLabel` in `lib/src/lib/session-label.ts` — the one id-keyed label derivation shared with the dev-server chip — and falls back to `terminal`. `OSC 0`, `OSC 2`, and legacy `OSC 9` message text can therefore be spoken when that text currently wins the normal Pane-label derivation. This is deliberate: opting into spoken alarms opts into hearing the Pane name Dormouse displays, even when a program supplied that name. A ringing `ActivityNotification` title/body is not itself the speech payload, but an `OSC 9` message body is also an input to normal Pane-label derivation and can be spoken on that basis.
-- **The label is sanitized before it reaches the engine** (`toSpokenText` in `lib/src/lib/alert-speech.ts`): angle brackets, ampersands, and control characters become spaces, whitespace collapses, the result is capped, and an empty result falls back to `terminal`. This is a robustness *and* security requirement, not tidiness — WebKit silently drops an utterance containing angle brackets **and leaves the synthesizer wedged**, so every later utterance is dropped too until the page reloads. Pane labels carry chrome like `<idle>`, and terminal-supplied titles reach speech, so without sanitization any program could permanently disable spoken alarms for the session by putting a `<` in its title.
+- **The label is sanitized before it reaches the engine** (`toSpokenText` in `lib/src/lib/alert-speech.ts`): angle brackets, ampersands, asterisks, and control characters become spaces, whitespace collapses, the result is capped, and an empty result falls back to `terminal`. This is a robustness *and* security requirement, not tidiness — WebKit silently drops an utterance containing angle brackets **and leaves the synthesizer wedged**, so every later utterance is dropped too until the page reloads. Pane labels carry chrome like `<idle>`, and terminal-supplied titles reach speech, so without sanitization any program could permanently disable spoken alarms for the session by putting a `<` in its title. Asterisks are removed for clarity: a label such as `eight *` must not be announced as “eight asterisk.”
 - The trigger is a fresh transition into `ALERT_RINGING`, held to the same standard as the bell (WATCHING Track, last bullet). A Session observed for the first time *already* ringing never speaks, which is what keeps a restore or a reconnect replaying a latched ring silent.
 - Attending, dismissing, or killing the Pane during the delay cancels the utterance; so does switching the setting off. Both the ring and the setting are re-read when the timer fires rather than captured when it was scheduled.
 - One utterance per ring. A Session that rings, is cleared, and rings again speaks twice. Sessions ring and speak independently.
+- **Delivery state follows actual engine callbacks, not queue admission.** `AlertSpeechState` in `lib/src/lib/alert-speech-state.ts` is a renderer-local `speaking | spoken` map keyed by Session. The engine's `start` event publishes `speaking`; `end`, or `error` after a real start, publishes `spoken`. An utterance that never starts publishes neither. Each utterance carries an opaque generation token, so a late callback from a resolved or older ring cannot overwrite a newer ring or resurrect a cleared marker.
+- `speaking` / `spoken` remains only while the originating Session is still `ALERT_RINGING`. Any deliberate action that resolves the ring clears it: clicking or entering the Pane, typing in passthrough, clicking/pressing `Enter` on its Door, dismissing the bell, or marking/clearing TODO. Mere visibility, hover, or command-mode selection does not. Killing the Session also clears it. The state is not persisted or sent to the host, so restore/reconnect never recreates it.
 - Renderer-side, via `window.speechSynthesis`. Where that is absent — Tauri on Linux (WebKitGTK ships no speech backend), or a test environment — speaking is a silent no-op rather than an error. `speak()` is the single seam a native host path would replace.
 - Desktop shell only: `MobileWall` / Pocket does not arm it and has no settings UI.
 
@@ -220,6 +222,8 @@ The dialog carries the TODO switch, the WATCHING rule switch for the running com
 
 The TODO pill always displays `TODO`; remote notification text belongs in preview/detail surfaces, not inside the pill. Clicking the pill clears TODO. On clear, the pill briefly shows the success flourish before unmounting.
 
+Spoken-alarm delivery is deliberately much louder than the bell. While the engine is actually speaking, a pointer-transparent treatment spans the whole terminal Pane with an animated high-contrast inset and an explicit `SPEAKING` label. After the utterance settles, the animation stops but a static high-contrast inset and `SPOKEN` label remain until the ring is resolved. `prefers-reduced-motion` keeps the strong static `SPEAKING` treatment and suppresses only the pulse. Placement and sizing belong to `docs/specs/layout.md`; source of truth: `lib/src/components/wall/AlertSpeechIndicator.tsx`.
+
 ### Door
 
 A Door is display-only for alert state:
@@ -227,6 +231,7 @@ A Door is display-only for alert state:
 - show the bell only when `status !== 'WATCHING_DISABLED'`
 - show the TODO pill when `todo === true`
 - use the same bell tilt/animation mapping as the Pane header
+- while its Session is `speaking` or `spoken`, replace the compact bell/TODO cluster with the explicit speech label; `SPEAKING` inverts and pulses the whole Door, while `SPOKEN` keeps a static high-contrast inset
 - do not expose a Door-specific alert menu
 
 Click or `Enter` on a Door reattaches into passthrough, counts as attention, and clears a ring. `d` reattaches in command mode, does not count as attention, and leaves the ring intact.
@@ -255,6 +260,7 @@ Alert-specific robustness requirements: multiple Sessions ring independently; mi
 | `lib/src/lib/alert-settings-host.ts` | First-seed + replace/broadcast coordinator for the settings blob |
 | `lib/src/lib/alert-ring-watch.ts` | The shared unattended-ring machine: fresh-ring detection, the delay, the re-check, cancellation |
 | `lib/src/lib/alert-speech.ts` | The speech sink and `toSpokenText` |
+| `lib/src/lib/alert-speech-state.ts` | Transient per-Session `speaking` / `spoken` delivery state |
 | `lib/src/remote/host/alert-push.ts` | The push sink, `toPushText`, and the ACL-intersected target list |
 | `lib/src/remote/host/activation.ts` | Arms the push sink for the lifetime of the remote Host (start, stop, re-enroll) |
 | `lib/src/lib/push-devices.ts` | Renderer-only store of the devices a push would reach, read by the settings dialog |
@@ -265,6 +271,7 @@ Alert-specific robustness requirements: multiple Sessions ring independently; mi
 | `lib/src/lib/workspace-union.ts` | `computeWorkspaceUnion` projection |
 | `lib/src/components/bell-icon-class.ts` | Bell tilt/animation mapping from public status |
 | `lib/src/components/wall/TerminalPaneHeader.tsx` | Bell button, TODO pill, notification preview |
+| `lib/src/components/wall/AlertSpeechIndicator.tsx` | Whole-Pane `SPEAKING` / `SPOKEN` treatment |
 | `lib/src/components/TodoAlertDialog.tsx` | TODO + WATCHING-rule switches, notification detail, watched-command list |
 | `lib/src/components/AlertSettingsDialog.tsx` | App-global Alarm settings: rule list, inactivity timeout, spoken alarms, push notifications |
 | `lib/src/components/WatchedCommandList.tsx` | The WATCHING rule set with per-rule remove, shared by both dialogs |

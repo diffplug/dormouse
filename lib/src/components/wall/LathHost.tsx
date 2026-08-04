@@ -42,6 +42,7 @@ import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
+import { AlertSpeechIndicator } from './AlertSpeechIndicator';
 
 /** Widened pointer target over each (thin) sash band, in px. */
 const SASH_HIT = 8;
@@ -132,7 +133,8 @@ type LeafCallbacks = {
  *  identity (id / meta / resolved components / the stable header-press handler), so a
  *  geometry-only frame — a sash-drag preview or a resize commit re-renders the
  *  positioned wrapper — never re-renders the header or body. Returned as a fragment so
- *  the header/body stay direct flex children of `.lath-leaf`. A mounted leaf is always
+ *  the header/body and pointer-transparent speech overlay stay direct children of
+ *  `.lath-leaf`. A mounted leaf is always
  *  engine-visible, so the pane props carry no visibility flag (docs/specs/
  *  tiling-engine.md → "Pane props contract"). */
 const LathLeafContent = memo(function LathLeafContent({
@@ -156,6 +158,7 @@ const LathLeafContent = memo(function LathLeafContent({
         {Tab ? <Tab {...paneProps} /> : null}
       </div>
       <div className="lath-leaf-body">{Body ? <Body {...paneProps} /> : null}</div>
+      {meta?.component === 'terminal' ? <AlertSpeechIndicator sessionId={id} /> : null}
     </>
   );
 });

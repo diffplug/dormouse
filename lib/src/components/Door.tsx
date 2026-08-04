@@ -1,15 +1,21 @@
 import { type PointerEvent as ReactPointerEvent } from 'react';
-import { BellIcon } from '@phosphor-icons/react';
-import type { SessionStatus, TodoState } from '../lib/terminal-registry';
+import { BellIcon, SpeakerHighIcon } from '@phosphor-icons/react';
+import type { AlertSpeechState, SessionStatus, TodoState } from '../lib/terminal-registry';
 import { useTodoPillContent } from './TodoPillBody';
 import { bellIconClass } from './bell-icon-class';
-import { TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
+import {
+  ALERT_SPEAKING_ANIMATION_CLASS,
+  ALERT_SPEECH_TRACKING_CLASS,
+  TERMINAL_TOP_RADIUS_CLASS,
+  TODO_PILL_TRACKING_CLASS,
+} from './design';
 
 export interface DoorProps {
   doorId?: string;
   title: string;
   status?: SessionStatus;
   todo?: TodoState;
+  speechState?: AlertSpeechState;
   onClick?: () => void;
   /** When provided, a primary-button press reports its start point and the Wall begins
    *  an (inactive) LathHost drag — LathHost owns the threshold, click suppression, and
@@ -23,12 +29,14 @@ export function Door({
   title,
   status = 'WATCHING_DISABLED',
   todo = false,
+  speechState,
   onClick,
   onDragPress,
 }: DoorProps) {
   const showBell = status !== 'WATCHING_DISABLED';
   const alertRinging = status === 'ALERT_RINGING';
   const todoPill = useTodoPillContent(todo);
+  const speechLabel = speechState === 'speaking' ? 'SPEAKING' : speechState === 'spoken' ? 'SPOKEN' : null;
 
   const onPointerDown = onDragPress
     ? (e: ReactPointerEvent<HTMLButtonElement>): void => {
@@ -43,17 +51,35 @@ export function Door({
       className={[
         'relative flex h-6 max-w-[220px] min-w-[68px] items-center gap-2 overflow-hidden px-2.5',
         TERMINAL_TOP_RADIUS_CLASS,
-        'bg-door-bg text-door-fg',
+        speechState === 'speaking'
+          ? `bg-alarm-vs-door text-door-bg ${ALERT_SPEAKING_ANIMATION_CLASS}`
+          : 'bg-door-bg text-door-fg',
+        speechState === 'spoken'
+          ? 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]'
+          : '',
         'text-sm font-medium font-mono',
       ].join(' ')}
       onClick={onClick}
       onPointerDown={onPointerDown}
-      title={title}
+      title={speechLabel ? `${title} — ${speechLabel.toLowerCase()}` : title}
+      aria-label={speechLabel ? `${title}, ${speechLabel.toLowerCase()}` : undefined}
+      data-alert-speech-state={speechState}
     >
       <span className="min-w-0 flex-1 truncate">
         {title}
       </span>
-      {(todoPill.visible || showBell) && (
+      {speechLabel ? (
+        <span
+          className={[
+            'flex shrink-0 items-center gap-1 text-xs font-bold',
+            ALERT_SPEECH_TRACKING_CLASS,
+            speechState === 'spoken' ? 'text-alarm-vs-door' : '',
+          ].join(' ')}
+        >
+          <SpeakerHighIcon size={13} weight="fill" />
+          <span>{speechLabel}</span>
+        </span>
+      ) : (todoPill.visible || showBell) && (
         <span className="flex shrink-0 items-center gap-1.5">
           {todoPill.visible && (
             <span
