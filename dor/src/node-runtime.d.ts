@@ -24,7 +24,6 @@ declare module 'node:path' {
 
 declare const process: {
   platform: string;
-  ppid: number;
   cwd(): string;
 };
 
