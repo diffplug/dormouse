@@ -87,6 +87,20 @@ describe('Fake Scenarios', () => {
       expect(flat.exitCode).toBeUndefined();
     });
 
+    it('preserves endsWithPrompt', () => {
+      const flat = flattenScenario(SCENARIO_SHELL_PROMPT);
+      expect(flat.endsWithPrompt).toBe(true);
+    });
+
+    it('omits endsWithPrompt when original has none', () => {
+      const scenario: FakeScenario = {
+        name: 'no-prompt',
+        chunks: [{ delay: 50, data: 'done' }],
+      };
+      const flat = flattenScenario(scenario);
+      expect(flat.endsWithPrompt).toBeUndefined();
+    });
+
     it('produces valid structure from real scenarios', () => {
       const flat = flattenScenario(SCENARIO_LS_OUTPUT);
       validateScenario(flat);
