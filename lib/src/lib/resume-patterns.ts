@@ -23,15 +23,19 @@ const BUILTIN_PATTERNS: ResumePattern[] = [
 ];
 
 /**
- * Scan the last 50 lines of scrollback for known resume commands.
- * Returns the full resume command string, or null if none found.
+ * Scan the last 50 lines of scrollback for known resume commands, newest line
+ * first. Returns the full resume command string for the most recent match, or
+ * null if none found. Recency matters: a pane that resumed more than once prints
+ * a fresh resume hint each time, and only the latest one resumes the *current*
+ * session — scanning oldest-first would persist a stale session id.
  */
 export function detectResumeCommand(scrollback: string): string | null {
   const lines = scrollback.split('\n').slice(-50);
-  const text = lines.join('\n');
-  for (const pattern of BUILTIN_PATTERNS) {
-    const match = text.match(pattern.regex);
-    if (match) return pattern.extract(match);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    for (const pattern of BUILTIN_PATTERNS) {
+      const match = lines[i].match(pattern.regex);
+      if (match) return pattern.extract(match);
+    }
   }
   return null;
 }

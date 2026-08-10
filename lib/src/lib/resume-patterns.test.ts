@@ -37,4 +37,15 @@ describe('detectResumeCommand', () => {
     const scrollback = filler + '\ncodex resume recent456\n';
     expect(detectResumeCommand(scrollback)).toBe('codex resume recent456');
   });
+
+  it('returns the most recent match when the same command repeats', () => {
+    const scrollback =
+      'codex resume old123\nmore output\ncodex resume new789\n$ ';
+    expect(detectResumeCommand(scrollback)).toBe('codex resume new789');
+  });
+
+  it('prefers the most recent command across pattern types', () => {
+    const scrollback = 'codex resume abc\nlater\nclaude --resume xyz\n$ ';
+    expect(detectResumeCommand(scrollback)).toBe('claude --resume xyz');
+  });
 });
