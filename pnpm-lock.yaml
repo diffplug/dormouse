@@ -90,17 +90,17 @@ importers:
         specifier: ^2.1.10
         version: 2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@xterm/addon-fit':
-        specifier: 0.12.0-beta.291
-        version: 0.12.0-beta.291(@xterm/xterm@6.1.0-beta.291)
+        specifier: 0.12.0-beta.299
+        version: 0.12.0-beta.299(@xterm/xterm@6.1.0-beta.302)
       '@xterm/addon-unicode-graphemes':
-        specifier: 0.5.0-beta.291
-        version: 0.5.0-beta.291(@xterm/xterm@6.1.0-beta.291)
+        specifier: 0.5.0-beta.299
+        version: 0.5.0-beta.299(@xterm/xterm@6.1.0-beta.302)
       '@xterm/addon-webgl':
         specifier: 0.20.0-beta.291
-        version: 0.20.0-beta.291(@xterm/xterm@6.1.0-beta.291)
+        version: 0.20.0-beta.291(@xterm/xterm@6.1.0-beta.302)
       '@xterm/xterm':
-        specifier: 6.1.0-beta.291
-        version: 6.1.0-beta.291
+        specifier: 6.1.0-beta.302
+        version: 6.1.0-beta.302
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
@@ -215,17 +215,17 @@ importers:
         specifier: ^2.10.1
         version: 2.10.1
       '@xterm/addon-fit':
-        specifier: 0.12.0-beta.291
-        version: 0.12.0-beta.291(@xterm/xterm@6.1.0-beta.291)
+        specifier: 0.12.0-beta.299
+        version: 0.12.0-beta.299(@xterm/xterm@6.1.0-beta.302)
       '@xterm/addon-unicode-graphemes':
-        specifier: 0.5.0-beta.291
-        version: 0.5.0-beta.291(@xterm/xterm@6.1.0-beta.291)
+        specifier: 0.5.0-beta.299
+        version: 0.5.0-beta.299(@xterm/xterm@6.1.0-beta.302)
       '@xterm/addon-webgl':
         specifier: 0.20.0-beta.291
-        version: 0.20.0-beta.291(@xterm/xterm@6.1.0-beta.291)
+        version: 0.20.0-beta.291(@xterm/xterm@6.1.0-beta.302)
       '@xterm/xterm':
-        specifier: 6.1.0-beta.291
-        version: 6.1.0-beta.291
+        specifier: 6.1.0-beta.302
+        version: 6.1.0-beta.302
       dormouse-lib:
         specifier: workspace:*
         version: link:../lib
@@ -2149,15 +2149,15 @@ packages:
   '@webcontainer/env@1.1.1':
     resolution: {integrity: sha512-6aN99yL695Hi9SuIk1oC88l9o0gmxL1nGWWQ/kNy81HigJ0FoaoTXpytCj6ItzgyCEwA9kF1wixsTuv5cjsgng==}
 
-  '@xterm/addon-fit@0.12.0-beta.291':
-    resolution: {integrity: sha512-bxJ4g8YKPily7Lc8NpkYBm6QmSyNhzGo1g5uXJl1g1zSHeM0GV1/Q5BQB/Y/C340+jcNb6CsFGj/VDgsXGLzIA==}
+  '@xterm/addon-fit@0.12.0-beta.299':
+    resolution: {integrity: sha512-LnofeCMLCf4e3eHN6qz27OdDgcNVh/L2oMqCHHgKraNTCGyKmf1BFWQczFF4PEg63LQvNFiItK62YOQhzDyHMw==}
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.291
+      '@xterm/xterm': ^6.1.0-beta.301
 
-  '@xterm/addon-unicode-graphemes@0.5.0-beta.291':
-    resolution: {integrity: sha512-dKM5YHfU3sHD2jRTNbRVxrhg6b5yMS4c3vBGO8c15a+28zPftPM+FY34guWJRTVa/xgGvbS9VaYI4K6iL2o3NA==}
+  '@xterm/addon-unicode-graphemes@0.5.0-beta.299':
+    resolution: {integrity: sha512-cH6D7pLGM2OCwXogBM1tO/s9sBfOIp70FeMN/FXz8eqULlImdwTrLrBEQ/qzcz59KeUCo8PCMd5UlxoDK/kfDg==}
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.291
+      '@xterm/xterm': ^6.1.0-beta.301
 
   '@xterm/addon-webgl@0.20.0-beta.290':
     resolution: {integrity: sha512-vHQCXsBp3rDermQSBCtN75U26DmoWI6SbCQ0oRjkuJR4r1B6SIyJBXuWPhHAXkCs86+iaStuafAdQDNO73cGWA==}
@@ -2171,6 +2171,9 @@ packages:
 
   '@xterm/xterm@6.1.0-beta.291':
     resolution: {integrity: sha512-Q6IjxogKIu7fBkXHcn4vQhfHvtwhIv/NN8LR0knCAxPA06/jXuHwreqX9Y/4zvzj7m8u6OBndOJDCUAxLmRfQQ==}
+
+  '@xterm/xterm@6.1.0-beta.302':
+    resolution: {integrity: sha512-yTlcgFDNe0ZE7U1RA1JX9oZkVOE8gKvLLh55tMHrS3/ZHkJCOWHlC0mFt3GYyWChSQ1XF+VY0iIme7ZktSaMRA==}
 
   acorn@8.17.0:
     resolution: {integrity: sha512-xRQbDb9BnwDafYNn6Vwl839DYVjqXYb1XVGtWAZ1kcDc6iwAL4hg3B1dZlRiuENFeO2H53gFG3in621AdERVAg==}
@@ -5854,23 +5857,25 @@ snapshots:
 
   '@webcontainer/env@1.1.1': {}
 
-  '@xterm/addon-fit@0.12.0-beta.291(@xterm/xterm@6.1.0-beta.291)':
+  '@xterm/addon-fit@0.12.0-beta.299(@xterm/xterm@6.1.0-beta.302)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.291
+      '@xterm/xterm': 6.1.0-beta.302
 
-  '@xterm/addon-unicode-graphemes@0.5.0-beta.291(@xterm/xterm@6.1.0-beta.291)':
+  '@xterm/addon-unicode-graphemes@0.5.0-beta.299(@xterm/xterm@6.1.0-beta.302)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.291
+      '@xterm/xterm': 6.1.0-beta.302
 
   '@xterm/addon-webgl@0.20.0-beta.290(@xterm/xterm@6.1.0-beta.291)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.291
 
-  '@xterm/addon-webgl@0.20.0-beta.291(@xterm/xterm@6.1.0-beta.291)':
+  '@xterm/addon-webgl@0.20.0-beta.291(@xterm/xterm@6.1.0-beta.302)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.291
+      '@xterm/xterm': 6.1.0-beta.302
 
   '@xterm/xterm@6.1.0-beta.291': {}
+
+  '@xterm/xterm@6.1.0-beta.302': {}
 
   acorn@8.17.0: {}
 
