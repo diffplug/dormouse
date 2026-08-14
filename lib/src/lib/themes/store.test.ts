@@ -56,6 +56,22 @@ describe('theme store', () => {
     expect(getInstalledThemes().map((t) => t.id)).toEqual(['recover']);
   });
 
+  it('drops malformed array elements while keeping well-formed themes', () => {
+    // Corrupted or externally tampered storage: a valid array whose elements
+    // are the wrong shape (null / missing id). Before the per-element guard,
+    // Array.isArray passed and these reached getTheme()'s `.find(t => t.id)`
+    // and addInstalledTheme()'s `.filter(t => t.id)`, throwing on `null.id`.
+    localStorage.setItem(
+      INSTALLED_KEY,
+      JSON.stringify([null, { label: 'no id' }, makeInstalledTheme('good')]),
+    );
+
+    expect(getInstalledThemes().map((t) => t.id)).toEqual(['good']);
+    expect(() => getAllThemes()).not.toThrow();
+    expect(() => addInstalledTheme(makeInstalledTheme('recover'))).not.toThrow();
+    expect(getInstalledThemes().map((t) => t.id)).toEqual(['good', 'recover']);
+  });
+
   it('returns [] for non-JSON garbage in storage', () => {
     localStorage.setItem(INSTALLED_KEY, 'not json at all');
     expect(getInstalledThemes()).toEqual([]);
