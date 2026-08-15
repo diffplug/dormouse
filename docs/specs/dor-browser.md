@@ -69,7 +69,7 @@ Invariants:
   `renderer: 'always'` workaround — the constraint is gone at the root, not healed.
 
 Source of truth: `BrowserPanel.tsx`, `browser-surface.ts`, `Wall.tsx`
-(`rendererForParams`, `replaceSurface`), `AgentBrowserPanel.tsx`
+(`rendererForParams`, `replaceSurface`), `agent-browser-surface-controller.ts`
 (`rememberRestorableUrl`, URL mirror), `IframePanel.tsx` (`applyFrameUrl`).
 
 ## Placement And Lifetime
@@ -261,7 +261,7 @@ Swap behavior:
 | `ab-*` -> `iframe` | Uses canonical `params.url`; if multiple tabs exist, requires the user to press `c` in the warning overlay because only the active tab survives. |
 
 Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`,
-`AgentBrowserPanel.tsx` (`screenActions`, sync effects, pop-out/pop-in),
+`agent-browser-surface-controller.ts` (`screenActions`, sync effects, pop-out/pop-in),
 `Wall.tsx` (`onSwapRenderMode`), Storybook
 `lib/src/stories/AgentBrowserScreenModal.stories.tsx`.
 
@@ -433,8 +433,8 @@ same-tab navigation and so a headed window close can auto-revert to headless.
 Hosts close tracked popped-out sessions on shutdown to avoid orphan headed
 windows.
 
-Source of truth: `AgentBrowserPanel.tsx` (pop-out state, CDP observer,
-auto-revert), `lib/src/host/agent-browser-host.ts` (`popOut`, `popIn`,
+Source of truth: `agent-browser-surface-controller.ts` (pop-out state, CDP
+observer, auto-revert), `lib/src/host/agent-browser-host.ts` (`popOut`, `popIn`,
 `closePoppedOut`), VS Code/standalone shutdown wiring.
 
 ### Agent-Browser Host Capabilities
