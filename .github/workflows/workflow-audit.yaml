@@ -10,16 +10,20 @@ name: workflow-audit
 # forward rather than skipping commits.
 #
 # Reports the *unexplained*. Two routine sources are classified and
-# skipped, each on evidence an attacker cannot mint rather than on the
-# commit's self-declared author (`%an` is free text from git config):
+# skipped on the *content* of the diff, not on the commit's self-declared
+# author (`%an` is free text from git config) and not on the identity
+# signals that accompany a Renovate commit — none of which is conclusive
+# against a token holding `repo` + `workflow` write (see the comment on
+# `is_renovate_pin_bump`):
 #
-#   - Renovate pin bumps — GitHub-signed (`verification.verified`), and
-#     every changed line in .github/workflows/ is a `uses:` line whose
-#     action name is unchanged, only its ref. "Same action, new pin."
+#   - Renovate pin bumps — every changed line in .github/workflows/ is a
+#     `uses:` line whose action name is unchanged, only its ref. "Same
+#     action, new pin."
 #   - tend regeneration — the changed tend-*.yaml files reproduce
 #     byte-for-byte from `uvx tend@<version> init` at the version in the
 #     files' own generated header, run against that commit's own
-#     .config/tend.yaml.
+#     .config/tend.yaml — which the commit must leave untouched, or
+#     "reproducible" is true by construction.
 #
 # Both classifiers fail open: any error, ambiguity, or unparseable input
 # reports the commit. A silent run is the healthy steady state and keeps
@@ -40,6 +44,11 @@ permissions:
   contents: read
   issues: write
   actions: read
+  # `is_renovate_pin_bump` reads /commits/{sha}/pulls. Declaring a
+  # permissions block sets every scope not listed to `none`, and the
+  # classifier fails open — so without this the Renovate arm would 403,
+  # report every bump, and quietly undo this workflow's whole effect.
+  pull-requests: read
 
 jobs:
   audit:
