@@ -427,7 +427,7 @@ describe('FakePtyAdapter', () => {
     ]);
   });
 
-  it('killing already-killed terminals does not double-fire handlers', () => {
+  it('re-killing a terminal fires exit again (no re-kill guard)', () => {
     const { adapter, exitEvents } = createAdapter();
     adapter.spawnPty('t1');
     adapter.killPty('t1');
