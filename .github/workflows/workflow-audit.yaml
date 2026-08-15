@@ -1,9 +1,13 @@
 name: workflow-audit
 
-# Nightly audit of every commit touching .github/workflows/. Surfaces
-# changes from feature branches and direct pushes, not just the main
-# branch — so a bot push that adds a new workflow file gets a visible
-# issue even if it never opens a PR.
+# Nightly audit of every commit touching .github/workflows/ or
+# .config/tend.yaml. Surfaces changes from feature branches and direct
+# pushes, not just the main branch — so a bot push that adds a new
+# workflow file gets a visible issue even if it never opens a PR.
+#
+# The config is in the window because it is an input to the generated
+# workflows, so an edit to it is a workflow change made one step
+# earlier.
 #
 # Gap-resistant: the "since" lower bound comes from the previous
 # successful run's API timestamp, so a failed run pushes the window
@@ -23,7 +27,8 @@ name: workflow-audit
 #     byte-for-byte from `uvx tend@<version> init` at the version in the
 #     files' own generated header, run against that commit's own
 #     .config/tend.yaml — which the commit must leave untouched, or
-#     "reproducible" is true by construction.
+#     "reproducible" is true by construction. The config being in the
+#     window is what closes the same trick split across two commits.
 #
 # Both classifiers fail open: any error, ambiguity, or unparseable input
 # reports the commit. A silent run is the healthy steady state and keeps
@@ -78,8 +83,16 @@ jobs:
           fi
           echo "Auditing commits since: $SINCE"
 
+          # .config/tend.yaml is in the window, not just .github/workflows/.
+          # Without it, a commit editing only the config never enters the audit,
+          # and a later commit regenerating from it leaves the config untouched,
+          # passes the same-commit guard in is_tend_regen, and reproduces
+          # byte-for-byte against a config nothing ever looked at. Widening the
+          # window makes the config edit an auditable commit reported on its own
+          # content — both classifiers already fail open on it, since each scopes
+          # its own diff to .github/workflows/ and comes back empty.
           COMMITS=$(git log --all --since="$SINCE" --pretty=format:'%H' \
-            -- .github/workflows/ | sort -u)
+            -- .github/workflows/ .config/tend.yaml | sort -u)
 
           if [ -z "$COMMITS" ]; then
             echo "No workflow file changes since $SINCE."
@@ -207,11 +220,11 @@ jobs:
             parents=$(git rev-list --parents -n1 "$sha" | cut -d' ' -f2-)
             nparents=$(printf '%s\n' "$parents" | wc -w | tr -d ' ')
             if [ "$nparents" -le 1 ]; then
-              git show --name-only --pretty='' "$sha" -- .github/workflows/
+              git show --name-only --pretty='' "$sha" -- .github/workflows/ .config/tend.yaml
               return
             fi
             for p in $parents; do
-              cur=$(git diff --name-only "$p" "$sha" -- .github/workflows/ | sort -u)
+              cur=$(git diff --name-only "$p" "$sha" -- .github/workflows/ .config/tend.yaml | sort -u)
               if [ "$first" -eq 1 ]; then
                 acc="$cur"; first=0
               else
@@ -232,7 +245,7 @@ jobs:
             fi
 
             if is_renovate_pin_bump "$sha"; then
-              echo "- \`${sha:0:7}\` — $SUBJECT (signed Renovate pin bump)" >> "$SKIPPED"
+              echo "- \`${sha:0:7}\` — $SUBJECT (Renovate pin bump: same action, new ref)" >> "$SKIPPED"
               continue
             fi
             if is_tend_regen "$sha"; then
