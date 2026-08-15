@@ -14,6 +14,7 @@ import {
   setSelection as setMouseSelection,
 } from './mouse-selection';
 import { extractSelectionText } from './selection-text';
+import { clearResumeOffer } from './resume-offers';
 import {
   pendingShellOpts,
   registry,
@@ -261,6 +262,8 @@ function wireXtermHandlers(
 
     if (!isReplayTerminalReport) {
       markSessionTouched(id);
+      // Answered by doing something else (docs/specs/layout.md -> Resume offer).
+      clearResumeOffer(id);
     }
 
     const isSyntheticTerminalReport = inputIsSyntheticTerminalReport(input);
@@ -550,7 +553,21 @@ export function disposeSession(id: string): void {
   registry.delete(id);
   removeTerminalPaneState(id);
   removeMouseSelectionState(id);
+  clearResumeOffer(id);
   notifyActivityListeners();
+}
+
+/**
+ * Take a restored pane's resume offer: type the command at its fresh shell and
+ * run it. Written straight to the PTY rather than through a bracketed paste —
+ * bracketed paste exists to stop an embedded newline from executing, which is
+ * the opposite of what this button is for.
+ */
+export function runResumeCommand(id: string, command: string): void {
+  if (!command) return;
+  clearResumeOffer(id);
+  markSessionTouched(id);
+  getPlatform().writePty(id, `${command}\r`);
 }
 
 export function refitSession(id: string): void {

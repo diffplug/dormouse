@@ -51,6 +51,7 @@ export {
   registerSurfaceFocusHandle,
   restoreTerminal,
   resumeTerminal,
+  runResumeCommand,
   setPendingShellOpts,
   unmountElement,
 } from './terminal-lifecycle';

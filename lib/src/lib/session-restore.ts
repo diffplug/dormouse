@@ -1,6 +1,7 @@
 import { type LathPersistedLayout, isLathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter } from './platform/types';
 import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
+import { offerResumeCommand } from './resume-offers';
 import { getDefaultShellOpts, restoreBrowserSurfaceTodo, restoreTerminal } from './terminal-registry';
 
 export interface RestoredSession {
@@ -44,6 +45,12 @@ export function restoreSession(platform: PlatformAdapter): RestoredSession | nul
       args: shellOpts?.args,
       untouched: pane.untouched,
     });
+    // The replayed scrollback ends in an agent's resume hint, but the process
+    // that wrote it is gone and `restoreTerminal` just spawned a fresh shell.
+    // Offer the reconnect (docs/specs/layout.md -> Resume offer). Restore only:
+    // the live-resume path in reconnect.ts never reaches here, because there the
+    // process is still Live and has nothing to resume.
+    offerResumeCommand(pane.id, pane.resumeCommand);
   }
 
   return {

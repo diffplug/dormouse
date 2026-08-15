@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectResumeCommand } from './resume-patterns';
+import { detectResumeCommand, resumeCommandLabel } from './resume-patterns';
 
 describe('detectResumeCommand', () => {
   it('detects codex resume command', () => {
@@ -47,5 +47,20 @@ describe('detectResumeCommand', () => {
   it('prefers the most recent command across pattern types', () => {
     const scrollback = 'codex resume abc\nlater\nclaude --resume xyz\n$ ';
     expect(detectResumeCommand(scrollback)).toBe('claude --resume xyz');
+  });
+});
+
+describe('resumeCommandLabel', () => {
+  it('drops the session argument', () => {
+    expect(resumeCommandLabel('claude --resume 4f2c9b1e-6a03-4d5e')).toBe('claude --resume');
+    expect(resumeCommandLabel('codex resume 01JCX8ZK5Q7M3N')).toBe('codex resume');
+  });
+
+  it('keeps an argument-free command whole', () => {
+    expect(resumeCommandLabel('claude --continue')).toBe('claude --continue');
+  });
+
+  it('falls back to the command itself when no pattern claims it', () => {
+    expect(resumeCommandLabel('nvim -S Session.vim')).toBe('nvim -S Session.vim');
   });
 });

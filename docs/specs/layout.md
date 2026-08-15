@@ -335,12 +335,26 @@ For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getO
 - **Create**: `getOrCreateTerminal` spawns xterm.js + UnicodeGraphemesAddon + FitAddon + PTY, returns existing if already created. The xterm instance sets `allowProposedApi: true` because UnicodeGraphemesAddon activates through xterm's proposed Unicode API. The WebGL addon is *not* loaded at create — it is claimed lazily on the session's first mount (see "Renderer" below).
 - **Resume**: `resumeTerminal` creates xterm entry and writes replay data without spawning a new PTY. Used when the webview is recreated while the host retains Live PTYs (Link: Severed → Resuming → Live).
 - **Restore**: `restoreTerminal` creates xterm entry and spawns a new PTY with saved cwd and scrollback. Used on cold start from a saved Snapshot (Link: Cold → Live).
+- **Resume offer**: a restored pane whose snapshot carried a `resumeCommand` (`docs/specs/transport.md`) offers to run it — the replayed scrollback ends in an agent's resume hint, but the process that wrote it is gone and the pane now holds a fresh shell. See "Resume offer" below.
 - **Untouched**: new `getOrCreateTerminal` sessions start untouched. `isUntouched(id)` exposes the flag, and user-originated PTY input clears it via the registry input paths. Resume/restore seed the persisted flag; missing legacy snapshot data defaults to touched (`false`) so close confirmation remains conservative.
 - **Shell selection replacement**: the standalone shell dropdown and VS Code shell picker send `dormouse:new-terminal` with `replaceUntouched` when the selected shell type changes. `Wall` always creates a new session id and a fresh `surface:N` ref for that request. If the currently selected pane or door is untouched, the new terminal takes over the same leaf via a Lath `replace` op (an atomic identity swap; doors first reattach through the normal restore path), the old untouched session is disposed, and the replaced Surface's ref is retired. If the selected terminal is touched or no terminal is selected, the request spawns a new pane beside the selected one. Announced shell-selection spawns show a transient pane-anchored notice such as `Switched to zsh` or `Opened bash`.
 - During resume/restore replay, xterm.js may emit terminal-generated replies for OSC/CSI/DCS queries that were embedded in saved output. The registry drops those replay-time replies before they reach the new shell. This filter is limited to query/focus reports, and must not swallow user keyboard escape sequences such as arrows, function keys, or bracketed paste.
 - **mount / unmount (DOM)**: `mountElement` reparents the persistent DOM element into a container; `unmountElement` removes it. The Registry entry survives.
 - **Dispose**: `disposeSession` kills the PTY, disposes xterm, removes the registry entry. Only called on explicit kill (`x`).
 - **Swap**: the Cmd/Ctrl+Arrow swap trades two leaf identities via a Lath `swap` op — per-leaf metadata and registry entries are keyed by id, so they follow the swap with no DOM reattach or title swap (see "Cmd/Ctrl+Arrow swap" above).
+
+### Resume offer
+
+A cold **restore** replays a Session's saved scrollback into a *fresh* shell. When that scrollback ended in an agent's resume hint, the snapshot carries the command as `PersistedPane.resumeCommand` (`docs/specs/transport.md`), and the restored pane offers to run it: two buttons at the pane's bottom-right, `Run <invocation>` and `Dismiss`.
+
+- **Seeded by restore only.** `restoreSession` seeds the offer per terminal pane; **resume** never does, because there the process is still Live and has nothing to resume. Browser surfaces are skipped with the rest of the terminal restore path.
+- **Retired** by taking it, dismissing it, the user's first input into the pane (the same non-replay input branch that clears `untouched`), or session dispose. It does not survive into the next save — the offer lives only in the runtime store, and the next restore re-seeds from the snapshot.
+- **Untouched is not the gate.** A Session that ran an agent is touched by definition, so `isUntouched` would suppress the offer in exactly the case it exists for. Retirement keys off *post-restore* input instead.
+- **Hidden, not retired, while a command is running** (`activity.kind === 'running'`): the offer types into the shell, and a shell with a foreground process is not listening. Shells without OSC integration report `unknown` and keep the offer.
+- **Taking it** writes `<command>\r` straight to the PTY and marks the Session touched. Not a bracketed paste — bracketing exists to stop an embedded newline from executing, which is the opposite of the intent. A click landing before the fresh shell has drawn its first prompt can still be swallowed by shell startup, the same hazard `typeCommandWhenPromptReady` guards for launched commands; the offer accepts it rather than delaying the button, since restore-then-click is far slower than spawn-then-type.
+- **The button carries the invocation, not the command.** `Run claude --resume`, never `Run claude --resume <uuid>` — the session id is already on screen in the replayed scrollback directly above. The full command is the button's tooltip.
+
+Source of truth: `lib/src/lib/resume-offers.ts` (store), `runResumeCommand` in `lib/src/lib/terminal-lifecycle.ts`, `lib/src/components/wall/ResumeBanner.tsx` (the pane-mounted offer + its presentational `ResumeBannerView`), seeded in `lib/src/lib/session-restore.ts`.
 
 ### Renderer
 
@@ -505,7 +519,9 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/lib/session-save.ts` | Serialization: collects layout, scrollback, cwd, alert state for persistence |
 | `lib/src/lib/session-restore.ts` | Deserialization: loads saved session, calls `restoreTerminal()` for each pane |
 | `lib/src/lib/reconnect.ts` | Priority-based recovery: live PTYs first, then saved session, then empty |
-| `lib/src/lib/resume-patterns.ts` | Detects resumable commands (`claude --resume`, etc.) in scrollback |
+| `lib/src/lib/resume-patterns.ts` | Detects resumable commands (`claude --resume`, etc.) in scrollback, newest line first, and labels them with the invocation alone |
+| `lib/src/lib/resume-offers.ts` | Pending resume offers per Session — seeded by cold restore, retired on take/dismiss/input/dispose |
+| `lib/src/components/wall/ResumeBanner.tsx` | The restored pane's `Run <invocation>` / `Dismiss` offer |
 | `lib/src/index.css` | Lath host styling — `.lath-host` / `.lath-leaf` / `.lath-sash` / drop-preview layout and background flattening |
 | `lib/src/theme.css` | Two-layer VSCode theme token system (`@theme --color-*` → `--vscode-*`) and Tailwind v4 `@theme` integration |
 

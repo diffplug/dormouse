@@ -1,7 +1,5 @@
 import type { PlatformAdapter } from './platform/types';
-import { browserPersistedPane, readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedSurfaceType } from './session-types';
-import { detectResumeCommand } from './resume-patterns';
-import { trimPersistedScrollback } from './scrollback-trim';
+import { browserPersistedPane, readPersistedSession, terminalPersistedContent, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedSurfaceType } from './session-types';
 import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched, resolveTerminalSessionId } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 
@@ -56,15 +54,11 @@ export async function saveSession(
         platform.getScrollback(sessionId),
         platform.getCwd(sessionId),
       ]);
-      // Resume-command patterns live at the tail, so trimming before detection
-      // is safe.
-      const trimmedScrollback = trimPersistedScrollback(scrollback ?? previousPane?.scrollback ?? null);
       return {
         id: pane.id,
         title: pane.title,
         cwd: cwd ?? previousPane?.cwd ?? null,
-        scrollback: trimmedScrollback,
-        resumeCommand: trimmedScrollback ? detectResumeCommand(trimmedScrollback) : null,
+        ...terminalPersistedContent(scrollback ?? previousPane?.scrollback ?? null),
         untouched: isUntouched(pane.id),
         alert: liveAlert ?? previousPane?.alert ?? null,
       };

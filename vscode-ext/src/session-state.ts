@@ -1,8 +1,7 @@
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
 import type { AlertState } from '../../lib/src/lib/alert-manager';
-import { browserPersistedPane, readPersistedSession, type PersistedAlertState, type PersistedPane, type PersistedSession } from '../../lib/src/lib/session-types';
-import { trimPersistedScrollback } from '../../lib/src/lib/scrollback-trim';
+import { browserPersistedPane, readPersistedSession, terminalPersistedContent, type PersistedAlertState, type PersistedPane, type PersistedSession } from '../../lib/src/lib/session-types';
 import { log } from './log';
 
 const SESSION_STATE_KEY = 'dormouse.session';
@@ -81,8 +80,10 @@ export async function refreshSavedSessionStateFromPtys(
       return {
         ...pane,
         cwd: cwd ?? pane.cwd ?? null,
-        // Mirrors the frontend save path (session-save.ts).
-        scrollback: trimPersistedScrollback(scrollback ?? pane.scrollback ?? null),
+        // Re-derives the resume command from the scrollback being written rather
+        // than carrying the saved one forward — this is the save VS Code restores
+        // from, and a pane that resumed again has a newer hint at the tail.
+        ...terminalPersistedContent(scrollback ?? pane.scrollback ?? null),
         alert,
       };
     }),
