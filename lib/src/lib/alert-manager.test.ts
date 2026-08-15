@@ -492,6 +492,29 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).watchingEnabled).toBe(false);
   });
 
+  it('notifies subscribers when WATCHING turns off as a watched command finishes', () => {
+    const id = 'rule-finish-notify';
+    manager.setWatchedCommands(['claude']);
+
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'claude' },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+    expect(manager.getState(id).watchingEnabled).toBe(true);
+
+    // Subscribe after the command has started so we only capture the finish.
+    const watching: boolean[] = [];
+    manager.onStateChange((_id, state) => {
+      if (_id === id) watching.push(state.watchingEnabled);
+    });
+
+    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+
+    expect(manager.getState(id).watchingEnabled).toBe(false);
+    // The off-transition must reach subscribers, not just live getState reads.
+    expect(watching).toContain(false);
+  });
+
   it('matches on the bare program name, not the whole command line', () => {
     const id = 'rule-argv0';
     manager.setWatchedCommands(['claude']);
