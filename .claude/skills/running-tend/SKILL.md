@@ -17,7 +17,7 @@ When `UI Tests` is the only non-terminal check and every automated check is gree
 
 ## `tend check`'s org-level `repo-secret-allowlist` FAIL is a known false positive
 
-`tend check` reports all ten `diffplug` org-level secrets (`BUILDCACHE_*`, `CHOCO_*`, `GPG_*`, `GRADLE_*`, `NEXUS_*`) as available to this repo's workflows. They are not. Every one has `visibility: selected`, and none of their selected-repositories lists includes `diffplug/dormouse` — verify with:
+`tend check` reports all ten `diffplug` org-level secrets (`BUILDCACHE_*`, `CHOCO_*`, `GPG_*`, `GRADLE_*`, `NEXUS_*`) as available to this repo's workflows. They are not. Every one has `visibility: selected`, and none of their selected-repositories lists includes `diffplug/dormouse` — verify with (org-admin only; the workflow token 403s on this endpoint, so take the ruling as given from CI):
 
 ```
 gh api orgs/diffplug/actions/secrets/NEXUS_USER/repositories --jq '.repositories[].full_name'
