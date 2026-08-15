@@ -147,7 +147,7 @@ export const PushNoWorker: Story = {
  * notice so it cannot disagree with the push row beneath it.
  */
 export const NeedsHomeScreenInstall: Story = {
-  args: { pushState: 'needs-install' },
+  args: { pushState: 'needs-install', pushConfigStatus: 'disabled' },
 };
 
 // The server was started without VAPID keys, so there is nothing to enable.
