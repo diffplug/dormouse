@@ -57,6 +57,7 @@ export function flattenScenario(scenario: FakeScenario): FakeScenario {
     name: scenario.name,
     chunks: [{ delay: 0, data: allData }],
     exitCode: scenario.exitCode,
+    endsWithPrompt: scenario.endsWithPrompt,
   };
 }
 
@@ -161,4 +162,5 @@ export const SCENARIO_FAST_OUTPUT: FakeScenario = {
     ),
     instant(PROMPT, 200),
   ],
+  endsWithPrompt: true,
 };
