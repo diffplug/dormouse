@@ -1,6 +1,5 @@
 import { useCallback, useContext, useSyncExternalStore } from 'react';
-import { clsx } from 'clsx';
-import { modalActionButton } from '../design';
+import { PopupButtonRow, popupButton } from '../design';
 import { resumeCommandLabel } from '../../lib/resume-patterns';
 import {
   clearResumeOffer,
@@ -35,11 +34,13 @@ export interface ResumeBannerViewProps {
  *
  * Sits bottom-right — the opposite corner from `MouseOverrideBanner`, so the two
  * never collide, and clear of the left-aligned prompt it is offering to type into.
+ * Same `PopupButtonRow` vocabulary as that sibling: one raised surface owning the
+ * border, background, and shadow, with the run action carrying the accent tone.
  */
 export function ResumeBannerView({ command, onResume, onDismiss }: ResumeBannerViewProps) {
   return (
-    <div
-      className="absolute right-1 bottom-1 z-20 flex items-center gap-1"
+    <PopupButtonRow
+      className="absolute right-1 bottom-1 z-20 whitespace-nowrap"
       // The terminal owns mouse events inside the pane; keep the offer's own
       // clicks from starting a selection drag underneath it.
       onMouseDown={(e) => e.stopPropagation()}
@@ -50,19 +51,15 @@ export function ResumeBannerView({ command, onResume, onDismiss }: ResumeBannerV
         // The full command with its id is the tooltip: available on demand,
         // never occupying chrome.
         title={command}
-        // Transparent border, not none: the secondary button next to it carries a
-        // real 1px border, and without this the two sit at different heights.
-        className={clsx(modalActionButton({ tone: 'primary' }), 'border border-transparent shadow-md')}
+        className={popupButton({ tone: 'primary' })}
         onClick={onResume}
       >Run {resumeCommandLabel(command)}</button>
       <button
         type="button"
-        // Secondary is a hairline over terminal content, so it carries its own
-        // opaque surface rather than letting output show through the button.
-        className={clsx(modalActionButton({ tone: 'secondary' }), 'bg-surface-raised shadow-md')}
+        className={popupButton({ tone: 'muted' })}
         onClick={onDismiss}
       >Dismiss</button>
-    </div>
+    </PopupButtonRow>
   );
 }
 

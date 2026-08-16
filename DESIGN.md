@@ -207,6 +207,12 @@ The icon-and-tooltip button used inside pane headers (kill, alert toggle, todo, 
 - **Hover:** `hover:bg-current/10` — a 10%-opacity wash of the current text color. Theme-agnostic, works light or dark.
 - **Tooltip:** rendered through a portal as a `PopupButtonRow` 8px below the button, with `text-sm` primary line and an optional muted detail line. Keybindings inside the tooltip auto-render as `[bracketed]` shortcuts.
 
+#### Popup Button (`popupButton`)
+The flat segments inside a `PopupButtonRow` — the row owns the border, background, shadow, and `text-sm`, so a segment contributes only padding and tone.
+- **Tones:** `foreground` (default), `muted` (`text-muted`, hover to full foreground), and `primary` — `bg-header-active-bg` + `text-header-active-fg`, for the one emphasized action in rows that ask rather than offer (the restored pane's resume offer).
+- **Hover:** the default wash is `hover:bg-foreground/10`. A filled tone holds its fill instead — the wash sets *background*, so on `primary` it would replace the accent rather than sit over it. This matches the modal primary button, which likewise has no hover treatment.
+- **Flash:** `flashed` swaps in `animate-copy-flash` with `bg-header-active-bg/25` for copy-confirm moments.
+
 #### Chrome Button (window controls)
 The Windows/Linux native-style window control row in the standalone app bar.
 - **Variants:** `icon` (h-5 min-w-5, hover bg-current/10), `labeled` (h-5 min-w-5 px-1.5 text-xs), `window` (w-11, hover bg-current/10), `windowClose` (w-11, hover bg `#b92a1b` text-white).
