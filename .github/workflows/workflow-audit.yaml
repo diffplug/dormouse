@@ -14,17 +14,16 @@ name: workflow-audit
 # forward rather than skipping commits.
 #
 # Reports the *unexplained*. Two routine sources are classified and
-# skipped on the *content* of the diff, not on the commit's self-declared
-# author (`%an` is free text from git config) and not on the identity
-# signals that accompany a Renovate commit — none of which is conclusive
-# against a token holding `repo` + `workflow` write (see the comment on
-# `is_renovate_pin_bump`):
+# skipped on independently checked provenance and content (see the
+# classifier comments for the trust boundary):
 #
-#   - Renovate pin bumps — every changed line in .github/workflows/ is a
-#     `uses:` line whose action name is unchanged, only its ref. "Same
-#     action, new pin." The commit must leave .config/tend.yaml alone,
-#     as the regen arm requires, or the config would ride along
-#     unexamined in a pin-shaped diff.
+#   - Renovate pin bumps — a valid GitHub-signed commit authored by
+#     Renovate and committed by `web-flow`, associated only with
+#     Renovate-authored PRs, where every changed line in
+#     .github/workflows/ is a `uses:` line whose action name is unchanged,
+#     only its ref. "Same action, new pin." The commit must leave
+#     .config/tend.yaml alone, as the regen arm requires, or the config
+#     would ride along unexamined in a pin-shaped diff.
 #   - tend regeneration — the changed tend-*.yaml files reproduce
 #     byte-for-byte from `uvx tend@<version> init` at the version in the
 #     files' own generated header, run against that commit's own
@@ -103,36 +102,33 @@ jobs:
             exit 0
           fi
 
-          # A routine Renovate pin bump: every changed line under
+          # A routine Renovate pin bump: a GitHub-signed commit authored by
+          # Renovate and committed by `web-flow`, associated only with
+          # Renovate-authored PRs, where every changed line under
           # .github/workflows/ is a `uses:` whose action name is unchanged.
           #
-          # The content test is the control. None of the identity signals below
-          # is conclusive against a token holding `repo` + `workflow` write:
+          # The signed author/committer pair is the provenance control. GitHub's
+          # automatically signed `createCommitOnBranch` mutation binds the author
+          # to the authenticating credential and does not allow an author or
+          # committer override. The REST paths that do allow those fields to be
+          # supplied do not add GitHub's signature; they require the caller to
+          # supply one. Requiring both `author.login == "renovate[bot]"` and
+          # `committer.login == "web-flow"` on a valid signature therefore
+          # rejects a caller-supplied Renovate author as well as a commit signed
+          # by some other identity. Renovate-authored PR association is separate
+          # server-side corroboration.
           #
-          #   - The signature on a Renovate commit is GitHub's *web-flow* key
-          #     (`committer.login == "web-flow"`), which GitHub applies to
-          #     anything created through its API, with the `author` on that call
-          #     supplied by the caller. It attests that GitHub made the commit,
-          #     not that Renovate did.
-          #   - `.author.login` resolves from the commit's email, which is
-          #     settable.
-          #   - PR authorship *is* assigned server-side from the authenticated
-          #     identity and cannot be set by the caller — but a push onto an
-          #     existing `renovate/*` branch inherits that branch's PR.
-          #
-          # Together they narrow the field; what bounds the damage is that the
-          # diff can express nothing but a new ref for an already-referenced
-          # action. A pin-only diff can still repoint `actions/checkout` at
-          # `evil/action`, which is why the action name is compared. The residual
-          # is a ref the attacker controls *within that action's own repo* —
-          # the same trust Renovate bumps already rest on (see "GitHub Actions
-          # Policies" in SECURITY.md).
+          # The content test remains an independent bound: a pin-only diff can
+          # still repoint `actions/checkout` at `evil/action`, which is why the
+          # action name is compared. The residual is a ref selected by Renovate
+          # within that action's own repo — the same trust Renovate bumps already
+          # rest on (see "GitHub Actions Policies" in SECURITY.md).
           is_renovate_pin_bump() {
             local sha="$1" login pr_authors diff changed removed added
 
             login=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha" \
-              --jq '[.commit.verification.verified, (.author.login // "")] | @tsv' \
-              | awk -F'\t' '$1 == "true" { print $2 }') || return 1
+              --jq '[.commit.verification.verified, .commit.verification.reason, (.author.login // ""), (.committer.login // "")] | @tsv' \
+              | awk -F'\t' '$1 == "true" && $2 == "valid" && $4 == "web-flow" { print $3 }') || return 1
             [ "$login" = "renovate[bot]" ] || return 1
 
             pr_authors=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha/pulls" \
