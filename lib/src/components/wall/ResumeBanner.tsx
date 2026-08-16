@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useContext, useSyncExternalStore } from 'react';
 import { clsx } from 'clsx';
 import { modalActionButton } from '../design';
 import { resumeCommandLabel } from '../../lib/resume-patterns';
@@ -12,6 +12,7 @@ import {
   runResumeCommand,
   subscribeToTerminalPaneState,
 } from '../../lib/terminal-registry';
+import { WallActionsContext } from './wall-context';
 
 export interface ResumeBannerViewProps {
   /** The resume command detected in the restored scrollback
@@ -75,6 +76,7 @@ export function ResumeBannerView({ command, onResume, onDismiss }: ResumeBannerV
  * retires it on the user's first keystroke.
  */
 export function ResumeBanner({ terminalId }: { terminalId: string }) {
+  const actions = useContext(WallActionsContext);
   const offers = useSyncExternalStore(subscribeToResumeOffers, getResumeOfferSnapshot);
   // Selects the one enum this gate needs rather than the whole pane-state map:
   // that store hands out a new snapshot identity on every semantic event, and
@@ -91,7 +93,14 @@ export function ResumeBanner({ terminalId }: { terminalId: string }) {
   return (
     <ResumeBannerView
       command={command}
-      onResume={() => runResumeCommand(terminalId, command)}
+      onResume={() => {
+        // The banner stops its mousedown from reaching TerminalPanel so the
+        // terminal cannot begin a selection underneath it. Reproduce the pane
+        // click transition explicitly before the button unmounts: this selects
+        // the pane, enters passthrough, and defers xterm focus until after click.
+        actions.onClickPanel(terminalId);
+        runResumeCommand(terminalId, command);
+      }}
       onDismiss={() => clearResumeOffer(terminalId)}
     />
   );

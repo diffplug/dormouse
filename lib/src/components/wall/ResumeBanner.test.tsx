@@ -10,6 +10,8 @@ import {
   getResumeOffer,
   offerResumeCommand,
 } from '../../lib/resume-offers';
+import { WallActionsContext } from './wall-context';
+import { stubWallActions } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -28,11 +30,13 @@ vi.mock('../../lib/terminal-registry', () => ({
 
 let container: HTMLDivElement;
 let root: Root;
+let wallActions: ReturnType<typeof stubWallActions>;
 
 beforeEach(() => {
   __resetResumeOffersForTests();
   registry.paneStates.clear();
   registry.getTerminalPaneStateSnapshot.mockReturnValue(registry.paneStates);
+  wallActions = stubWallActions();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -48,7 +52,9 @@ function render(terminalId: string) {
   act(() => {
     root.render(
       <StrictMode>
-        <ResumeBanner terminalId={terminalId} />
+        <WallActionsContext.Provider value={wallActions}>
+          <ResumeBanner terminalId={terminalId} />
+        </WallActionsContext.Provider>
       </StrictMode>,
     );
   });
@@ -101,7 +107,10 @@ describe('ResumeBanner', () => {
       buttonLabelled('Run claude --resume')?.click();
     });
 
+    expect(wallActions.onClickPanel).toHaveBeenCalledWith('pane-a');
     expect(registry.runResumeCommand).toHaveBeenCalledWith('pane-a', 'claude --resume 4f2c9b1e-6a03');
+    expect(vi.mocked(wallActions.onClickPanel).mock.invocationCallOrder[0])
+      .toBeLessThan(registry.runResumeCommand.mock.invocationCallOrder[0]);
   });
 
   it('retires the offer on Dismiss', () => {
