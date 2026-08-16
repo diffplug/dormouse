@@ -117,6 +117,7 @@ import {
   markSessionTodo,
   resumeTerminal,
   restoreTerminal,
+  runResumeCommand,
   setPendingShellOpts,
   subscribeToActivity,
   toggleSessionAlert,
@@ -370,6 +371,18 @@ describe('terminal-registry alert behavior', () => {
     pasteFilePaths(id, ['/tmp/example file.txt']);
 
     expect(isUntouched(id)).toBe(false);
+  });
+
+  it('rejects an unsafe persisted resume command before PTY execution', () => {
+    const id = 'unsafe-resume-command';
+    const received: string[] = [];
+    createSession(id);
+    fakePlatform.setInputHandler(id, (data) => received.push(data));
+
+    runResumeCommand(id, 'claude --resume $(touch${IFS}/tmp/pwn)');
+
+    expect(received).toEqual([]);
+    expect(isUntouched(id)).toBe(true);
   });
 
   it('seeds untouched state on resume and restore while defaulting missing state to touched', () => {

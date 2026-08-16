@@ -17,6 +17,16 @@ describe('detectResumeCommand', () => {
     expect(detectResumeCommand(scrollback)).toBe('claude --continue');
   });
 
+  it('strips terminal styling from a captured id', () => {
+    const scrollback = 'claude --resume 4f2c9b1e-6a03-4d5e\x1b[0m\n';
+    expect(detectResumeCommand(scrollback)).toBe('claude --resume 4f2c9b1e-6a03-4d5e');
+  });
+
+  it('rejects shell syntax instead of persisting executable scrollback', () => {
+    expect(detectResumeCommand('claude --resume $(touch${IFS}/tmp/pwn)\n')).toBeNull();
+    expect(detectResumeCommand('codex resume safe; touch /tmp/pwn\n')).toBeNull();
+  });
+
   it('returns null when no pattern matches', () => {
     const scrollback = 'regular output\n$ ls\nfile1 file2\n$ ';
     expect(detectResumeCommand(scrollback)).toBeNull();

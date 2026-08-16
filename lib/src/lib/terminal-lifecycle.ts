@@ -15,6 +15,7 @@ import {
 } from './mouse-selection';
 import { extractSelectionText } from './selection-text';
 import { clearResumeOffer } from './resume-offers';
+import { normalizeResumeCommand } from './resume-patterns';
 import {
   pendingShellOpts,
   registry,
@@ -564,10 +565,11 @@ export function disposeSession(id: string): void {
  * the opposite of what this button is for.
  */
 export function runResumeCommand(id: string, command: string): void {
-  if (!command) return;
+  const normalized = normalizeResumeCommand(command);
   clearResumeOffer(id);
+  if (!normalized) return;
   markSessionTouched(id);
-  getPlatform().writePty(id, `${command}\r`);
+  getPlatform().writePty(id, `${normalized}\r`);
 }
 
 export function refitSession(id: string): void {

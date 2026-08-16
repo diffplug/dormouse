@@ -14,6 +14,8 @@
  * DOM or platform dependencies — safe to unit-test.
  */
 
+import { normalizeResumeCommand } from './resume-patterns';
+
 const offers = new Map<string, string>();
 const listeners = new Set<() => void>();
 let cachedSnapshot: ReadonlyMap<string, string> | null = null;
@@ -43,12 +45,13 @@ export function getResumeOffer(id: string): string | null {
 /** Seed the offer a restored pane makes. An empty command clears instead, so a
  *  snapshot with no detected resume command can be passed through unguarded. */
 export function offerResumeCommand(id: string, command: string | null): void {
-  if (!command) {
+  const normalized = command ? normalizeResumeCommand(command) : null;
+  if (!normalized) {
     clearResumeOffer(id);
     return;
   }
-  if (offers.get(id) === command) return;
-  offers.set(id, command);
+  if (offers.get(id) === normalized) return;
+  offers.set(id, normalized);
   notify();
 }
 

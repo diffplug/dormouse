@@ -9,21 +9,62 @@ interface ResumePattern {
   regex: RegExp;
 }
 
+// Claude and Codex currently emit opaque ASCII identifiers (UUID/ULID-shaped).
+// Keep this deliberately narrower than a shell word: the captured value is
+// later executed, so punctuation with shell meaning must never enter it.
+const RESUME_ID = String.raw`[A-Za-z0-9][A-Za-z0-9_-]*`;
+
 const BUILTIN_PATTERNS: ResumePattern[] = [
-  { label: 'codex resume', regex: /codex resume (\S+)/ },
-  { label: 'claude --resume', regex: /claude --resume (\S+)/ },
-  { label: 'claude --continue', regex: /claude --continue/ },
+  {
+    label: 'codex resume',
+    regex: new RegExp(String.raw`\bcodex resume (${RESUME_ID})(?=$|[ \t\r\n])`),
+  },
+  {
+    label: 'claude --resume',
+    regex: new RegExp(String.raw`\bclaude --resume (${RESUME_ID})(?=$|[ \t\r\n])`),
+  },
+  {
+    label: 'claude --continue',
+    regex: /\bclaude --continue(?=$|[ \t\r\n])/,
+  },
 ];
 
 /** How far back a resume hint is still considered current. */
 const SCAN_LINES = 50;
 
+/** Remove terminal presentation controls before interpreting visible output. */
+function stripTerminalControls(input: string): string {
+  return input
+    // String controls: OSC (BEL or ST terminated) and DCS (ST terminated).
+    .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '')
+    .replace(/\x1bP[\s\S]*?\x1b\\/g, '')
+    // CSI, charset designators, and remaining two-byte ESC sequences.
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1b[()][A-Za-z0-9]/g, '')
+    .replace(/\x1b[@-_]/g, '')
+    // Preserve LF/CR/TAB as text boundaries; discard other C0/C1 controls.
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, '');
+}
+
 function resumeCommandIn(line: string): string | null {
+  const visible = stripTerminalControls(line);
   for (const { label, regex } of BUILTIN_PATTERNS) {
-    const match = line.match(regex);
+    const match = visible.match(regex);
     if (match) return match[1] ? `${label} ${match[1]}` : label;
   }
   return null;
+}
+
+/**
+ * Return the canonical executable form of a resume command, or null when the
+ * value contains anything beyond one of the known invocations and its expected
+ * identifier grammar. Used again at restore/run boundaries because persisted
+ * snapshots may have been written by an older detector.
+ */
+export function normalizeResumeCommand(command: string): string | null {
+  const visible = stripTerminalControls(command).trim();
+  const detected = resumeCommandIn(visible);
+  return detected === visible ? detected : null;
 }
 
 /**

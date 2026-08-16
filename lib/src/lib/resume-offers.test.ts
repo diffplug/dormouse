@@ -27,6 +27,11 @@ describe('resume-offers', () => {
     expect(getResumeOfferSnapshot().size).toBe(0);
   });
 
+  it('rejects a non-canonical persisted command', () => {
+    offerResumeCommand('pane-a', 'claude --resume $(touch${IFS}/tmp/pwn)');
+    expect(getResumeOffer('pane-a')).toBeNull();
+  });
+
   it('clears an existing offer when re-seeded with null', () => {
     offerResumeCommand('pane-a', 'claude --resume abc');
     offerResumeCommand('pane-a', null);
