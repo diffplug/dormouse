@@ -569,6 +569,10 @@ export function runResumeCommand(id: string, command: string): void {
   clearResumeOffer(id);
   if (!normalized) return;
   markSessionTouched(id);
+  // This direct platform write bypasses xterm's onData keystroke fallback.
+  // Seed the same semantic command state first so non-integrated shells still
+  // report a running agent for headers, grouping, and quit protection.
+  seedLaunchedCommand(id, normalized);
   getPlatform().writePty(id, `${normalized}\r`);
 }
 

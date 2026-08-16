@@ -193,14 +193,16 @@ export function recordTerminalUserInputByPtyId(ptyId: string, input: string, rea
   recordTerminalUserInput(resolvePaneStateIdByPtyId(ptyId), input, reader);
 }
 
-// `dor split/ensure -- <command>` spawns a real interactive shell and types the
-// command into it once it reaches a prompt (see typeCommandWhenPromptReady),
-// rather than running `shell -c command`. We seed that command here at spawn,
-// before it is typed, for two reasons. First, it is the readiness sentinel:
+// Programmatically launched interactive commands bypass xterm's onData
+// keystroke fallback, so callers seed their semantic command state here before
+// the PTY write. `dor split/ensure -- <command>` does this at spawn, before
+// typeCommandWhenPromptReady types it. The cold-restore resume action does it
+// immediately before its direct write. For split/ensure it is also the readiness
+// sentinel:
 // typeCommandWhenPromptReady waits for this currentCommand to clear, which
 // happens when the shell draws its first prompt (OSC promptStart, or the
 // keystroke heuristic's prompt detector for shells without integration) — the
-// signal the shell can take input. Second, it bridges the matching window until
+// signal the shell can take input. It then bridges the matching window until
 // the command is typed and the integration re-reports it via OSC 633, so
 // `dor ensure` can match a surface it (or a prior ensure) created. Sourced as
 // `user_input` so it does not mark the pane OSC-driven and so the first-prompt

@@ -95,6 +95,7 @@ import { makeAlertScenario, type FakePtyAdapter, type FakeScenario } from './pla
 import {
   DEFAULT_ACTIVITY_STATE,
   applyTerminalSemanticEvents,
+  countRunningSessions,
   isPaneOscDriven,
   mountElement,
   clearLocalSurfaceActivity,
@@ -109,6 +110,7 @@ import {
   focusSession,
   getOrCreateTerminal,
   getActivity,
+  getTerminalPaneState,
   getWatchedCommands,
   initAlertStateReceiver,
   setCommandWatched,
@@ -383,6 +385,29 @@ describe('terminal-registry alert behavior', () => {
 
     expect(received).toEqual([]);
     expect(isUntouched(id)).toBe(true);
+  });
+
+  it('seeds semantic command state before writing a resume command', () => {
+    const id = 'tracked-resume-command';
+    const received: string[] = [];
+    let stateAtWrite: ReturnType<typeof getTerminalPaneState> | null = null;
+    createSession(id);
+    fakePlatform.setInputHandler(id, (data) => {
+      received.push(data);
+      stateAtWrite = getTerminalPaneState(id);
+    });
+
+    runResumeCommand(id, 'claude --resume 4f2c9b1e-6a03');
+
+    expect(received).toEqual(['claude --resume 4f2c9b1e-6a03\r']);
+    expect(stateAtWrite).toMatchObject({
+      activity: { kind: 'running' },
+      currentCommand: {
+        rawCommandLine: 'claude --resume 4f2c9b1e-6a03',
+        source: 'user_input',
+      },
+    });
+    expect(countRunningSessions()).toBe(1);
   });
 
   it('seeds untouched state on resume and restore while defaulting missing state to touched', () => {

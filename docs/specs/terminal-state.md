@@ -169,6 +169,8 @@ Non-OSC title source:
 
 The `user_input` command fallback is best effort and renderer-only: it is sufficient for headers and grouping, but the `AlertManager` never sees it. Command-exit alerting and command-keyed WATCHING both need real shell integration, and `docs/specs/alert.md` records that as a deliberate limitation rather than plumbing the heuristic into a second command-tracking path.
 
+Programmatic interactive launches that write directly to the platform PTY bypass xterm's keystroke fallback. They therefore emit `commandLine` + `commandStart(source: "user_input")` synchronously before the write: both `dor split/ensure -- <command>` and a cold-restore resume offer use `seedLaunchedCommand`. This keeps headers, grouping, and `countRunningSessions` correct on shells without OSC integration; an integrated shell's later boundaries remain authoritative. Source of truth: `seedLaunchedCommand` and its callers in `lib/src/lib/terminal-state-store.ts` and `lib/src/lib/terminal-lifecycle.ts`.
+
 The parser accepts both BEL and ST terminators and handles split chunks. Supported-but-malformed semantic OSCs are consumed without changing state. Unsupported OSC pass-through vs. consume/ignore behavior is defined centrally in `docs/specs/terminal-escapes.md`.
 
 ## Reducer
