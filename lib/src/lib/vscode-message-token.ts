@@ -15,13 +15,8 @@
  * cannot read the parent's globals across origins, so it cannot produce the
  * token, and the adapter drops anything that doesn't carry it.
  *
- * This is the same shape as `iframe-proxy-registry.ts` — a tiny module holding
- * the trust criterion so the listener stays a one-line guard — but keyed on an
- * unguessable secret rather than an origin, because the VS Code host's internal
- * frame topology is not something the webview can verify.
- *
- * Deliberately not the CSP nonce: that one authorizes script execution, this
- * one authenticates a message sender. Separate purposes, separate secrets.
+ * The spec section above covers why a token rather than an `event.source` /
+ * `event.origin` check, and why this is not the CSP nonce.
  */
 
 /** Global the host injects the per-boot token into. */
@@ -36,9 +31,7 @@ export const HOST_MESSAGE_TOKEN_FIELD = '__dormouseToken';
  * webview served without a token fails closed rather than open.
  */
 export function readHostMessageToken(): string | null {
-  const raw = (globalThis as typeof globalThis & {
-    __DORMOUSE_MESSAGE_TOKEN__?: unknown;
-  })[HOST_MESSAGE_TOKEN_GLOBAL];
+  const raw = (globalThis as unknown as Record<string, unknown>)[HOST_MESSAGE_TOKEN_GLOBAL];
   return typeof raw === 'string' && raw.length > 0 ? raw : null;
 }
 

@@ -1,49 +1,41 @@
 import * as vscode from 'vscode';
-import { randomBytes } from 'crypto';
 import { HOST_MESSAGE_TOKEN_FIELD } from '../../lib/src/lib/vscode-message-token';
+import { getWebviewHtml } from './webview-html';
 import type { ExtensionMessage } from './message-types';
-import { log } from './log';
 
 /**
- * Per-boot message tokens, keyed by the webview they were minted for.
- *
- * Minted by `getWebviewHtml` (the one place that builds a webview document) and
- * read back here, so a token can never drift from the document that carries it:
- * re-serving a webview's HTML mints a new token and replaces the old entry, and
- * a disposed webview drops out on its own. See `docs/specs/vscode.md` →
- * "Webview message authentication" and `lib/src/lib/vscode-message-token.ts`
- * for the trust model.
+ * The host's handle on a served webview. `serveWebview` returns one of these
+ * *instead of* the `vscode.Webview`, so `post` is the only send path a caller
+ * has — the "every send carries the token" rule is a type error to break rather
+ * than a convention to remember. See `docs/specs/vscode.md` → "Webview message
+ * authentication" and `lib/src/lib/vscode-message-token.ts` for the trust model.
  */
-const tokens = new WeakMap<vscode.Webview, string>();
-
-/**
- * Mint and record this webview's message token. Called once per document, from
- * `getWebviewHtml`, which injects the returned value into the page.
- *
- * Same reasoning as the CSP nonce next to it: a guessable token is not a token,
- * so it comes from the OS CSPRNG. 24 bytes of base64url is 32 characters.
- */
-export function mintWebviewMessageToken(webview: vscode.Webview): string {
-  const token = randomBytes(24).toString('base64url');
-  tokens.set(webview, token);
-  return token;
+export interface WebviewChannel {
+  /** Send to the webview, stamped with the token its document was served with. */
+  post(message: ExtensionMessage): Thenable<boolean>;
+  onDidReceiveMessage: vscode.Webview['onDidReceiveMessage'];
 }
 
 /**
- * Post a message to a webview, stamped with its token.
+ * Serve a webview its document and return the channel for talking to it.
  *
- * Every host → webview send must go through here; the webview drops anything
- * unstamped. A send to a webview that was never served through `getWebviewHtml`
- * has no token to stamp, so it is dropped with a log line and reported as
- * undelivered — the same `false` the VS Code API returns for a dead webview,
- * which the retry/reject paths in `extension.ts` and `forwardDorControlRequest`
- * already handle.
+ * Minting, injecting, and assigning the HTML happen together here so a token
+ * can never drift from the document that carries it: re-serving mints a new
+ * token and yields a new channel, and there is no way to obtain a sender for a
+ * webview that was never served.
  */
-export function postToWebview(webview: vscode.Webview, message: ExtensionMessage): Thenable<boolean> {
-  const token = tokens.get(webview);
-  if (!token) {
-    log.error(`[messaging] dropping ${message.type}: webview has no message token`);
-    return Promise.resolve(false);
-  }
-  return webview.postMessage({ ...message, [HOST_MESSAGE_TOKEN_FIELD]: token });
+export function serveWebview(
+  webview: vscode.Webview,
+  mediaPath: string,
+  initialState?: unknown,
+  selectedShell?: { shell?: string; args?: string[] } | null,
+): WebviewChannel {
+  const { html, messageToken } = getWebviewHtml(webview, mediaPath, initialState, selectedShell);
+  webview.html = html;
+
+  return {
+    // Spread rather than mutate: callers own the message they passed in.
+    post: (message) => webview.postMessage({ ...message, [HOST_MESSAGE_TOKEN_FIELD]: messageToken }),
+    onDidReceiveMessage: webview.onDidReceiveMessage.bind(webview),
+  };
 }

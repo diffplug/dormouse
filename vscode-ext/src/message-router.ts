@@ -22,7 +22,7 @@ import type { DorControlRequest } from './pty-manager';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
 import { log } from './log';
-import { postToWebview } from './webview-messaging';
+import type { WebviewChannel } from './webview-messaging';
 
 const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
   readClipboardFilePaths(): Promise<string[]>;
@@ -148,7 +148,7 @@ export async function flushAllSessions(timeoutMs = 1000): Promise<void> {
 }
 
 export function attachRouter(
-  webview: vscode.Webview,
+  channel: WebviewChannel,
   options?: {
     reconnect?: boolean;
     killOnDispose?: boolean;
@@ -164,10 +164,10 @@ export function attachRouter(
   const reconnect = options?.reconnect ?? false;
   const killOnDispose = options?.killOnDispose ?? false;
 
-  // Every host → webview send goes through here so it carries this webview's
-  // message token; the webview drops anything unstamped. See
-  // docs/specs/vscode.md → "Webview message authentication".
-  const post = (message: ExtensionMessage): Thenable<boolean> => postToWebview(webview, message);
+  // The router's only send path — it stamps this webview's message token, which
+  // the webview requires (docs/specs/vscode.md → "Webview message
+  // authentication"). A raw `vscode.Webview` never reaches this scope.
+  const post = (message: ExtensionMessage): Thenable<boolean> => channel.post(message);
 
   // Track which PTY IDs were spawned (or reconnected) through this webview
   const ownedPtyIds = new Set<string>();
@@ -321,7 +321,7 @@ export function attachRouter(
   }
 
   // Route webview messages to the PTY manager
-  const messageDisposable = webview.onDidReceiveMessage((msg: WebviewMessage) => {
+  const messageDisposable = channel.onDidReceiveMessage((msg: WebviewMessage) => {
     switch (msg.type) {
       case 'pty:spawn': {
         claim(msg.id);

@@ -38,9 +38,9 @@ const HOST_TOKEN = 'test-host-message-token';
  * token stamp `postToWebview` adds. Framed content can't read the token, so a
  * forged message is just this without the stamp.
  */
-function hostMessage(data: Record<string, unknown>): MessageEvent {
+function hostMessage(data: Record<string, unknown>, token: unknown = HOST_TOKEN): MessageEvent {
   return new MessageEvent('message', {
-    data: { ...data, [HOST_MESSAGE_TOKEN_FIELD]: HOST_TOKEN },
+    data: { ...data, [HOST_MESSAGE_TOKEN_FIELD]: token },
   });
 }
 
@@ -264,10 +264,8 @@ describe('VSCodeAdapter PTY exit handling', () => {
     }]);
   });
 
-  // A webview's window receives `parent.postMessage` from every framed surface
-  // (`dor iframe`, agent-browser), so "arrived as a message event" is not
-  // evidence the extension host sent it. See docs/specs/vscode.md → "Webview
-  // message authentication".
+  // "Arrived as a message event" is not evidence the extension host sent it.
+  // See ../vscode-message-token.ts.
   describe('host message authentication', () => {
     /** What framed content can produce: the right shape, no token. */
     function forgedMessage(data: Record<string, unknown>): MessageEvent {
@@ -344,9 +342,7 @@ describe('VSCodeAdapter PTY exit handling', () => {
       const exits: unknown[] = [];
       adapter.onPtyExit((detail) => exits.push(detail));
 
-      windowTarget.dispatchEvent(new MessageEvent('message', {
-        data: { type: 'pty:exit', id: 'pane-1', exitCode: 7, [HOST_MESSAGE_TOKEN_FIELD]: 'guessed' },
-      }));
+      windowTarget.dispatchEvent(hostMessage({ type: 'pty:exit', id: 'pane-1', exitCode: 7 }, 'guessed'));
 
       expect(exits).toEqual([]);
     });
@@ -376,9 +372,6 @@ describe('VSCodeAdapter PTY exit handling', () => {
       adapter.onPtyExit((detail) => exits.push(detail));
 
       windowTarget.dispatchEvent(hostMessage({ type: 'pty:exit', id: 'pane-1', exitCode: 7 }));
-      windowTarget.dispatchEvent(new MessageEvent('message', {
-        data: { type: 'pty:exit', id: 'pane-1', exitCode: 7, [HOST_MESSAGE_TOKEN_FIELD]: undefined },
-      }));
 
       expect(exits).toEqual([]);
     });

@@ -1,8 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { attachRouter, getAlertStates } from './message-router';
-import { getWebviewHtml } from './webview-html';
-import { postToWebview } from './webview-messaging';
+import { serveWebview, type WebviewChannel } from './webview-messaging';
 import { getSavedSessionState, saveSessionState, mergeAlertStates } from './session-state';
 import type { ExtensionMessage } from './message-types';
 import * as ptyManager from './pty-manager';
@@ -12,6 +11,9 @@ import { log } from './log';
 
 export class DormouseViewProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
+  // Set once the view has been served a document; until then there is nothing
+  // to talk to, and `postMessage` reports undelivered like a disposed view.
+  private channel: WebviewChannel | undefined;
   private routerDisposable: vscode.Disposable | undefined;
   private description: string | undefined;
   private selectedShell: { shell?: string; args?: string[] } | null = null;
@@ -19,9 +21,7 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
   constructor(private readonly context: vscode.ExtensionContext) {}
 
   postMessage(msg: ExtensionMessage): Thenable<boolean> {
-    // Stamped with the view's message token like every other host → webview
-    // send (docs/specs/vscode.md → "Webview message authentication").
-    return this.view ? postToWebview(this.view.webview, msg) : Promise.resolve(false);
+    return this.channel?.post(msg) ?? Promise.resolve(false);
   }
 
   setDescription(text: string | undefined): void {
@@ -71,10 +71,10 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
     }
 
     const savedSession = getSavedSessionState(this.context);
-    view.webview.html = getWebviewHtml(view.webview, mediaPath, savedSession, this.selectedShell);
+    this.channel = serveWebview(view.webview, mediaPath, savedSession, this.selectedShell);
 
     this.routerDisposable?.dispose();
-    this.routerDisposable = attachRouter(view.webview, {
+    this.routerDisposable = attachRouter(this.channel, {
       reconnect: true,
       savedSession,
       onSaveState: (state) => {
@@ -95,6 +95,7 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
       log.info('[view] onDidDispose fired — releasing router (PTYs remain alive)');
       this.routerDisposable?.dispose();
       this.routerDisposable = undefined;
+      this.channel = undefined;
       this.view = undefined;
     });
   }

@@ -64,11 +64,8 @@ export class VSCodeAdapter implements PlatformAdapter {
     onTerminalThemeChange(() => this.pushThemeColors());
 
     window.addEventListener('message', (event: MessageEvent) => {
-      // A webview's window also receives `parent.postMessage` from any framed
-      // surface (`dor iframe`, agent-browser), and several branches below turn
-      // a message into a PTY write or terminal state. Authenticate the sender
-      // before looking at `type` at all — see docs/specs/vscode.md → "Webview
-      // message authentication".
+      // Authenticate the sender before looking at `type` at all — see
+      // ../vscode-message-token.ts.
       if (!isHostMessage(event.data, this.hostMessageToken)) return;
       const msg = event.data;
       if (!msg.type) return;
@@ -177,7 +174,7 @@ export class VSCodeAdapter implements PlatformAdapter {
         // a forged one racing the real reply would win on first match.
         if (!isHostMessage(event.data, this.hostMessageToken)) return;
         const msg = event.data;
-        if (msg?.type === responseType && msg.requestId === requestId) {
+        if (msg.type === responseType && msg.requestId === requestId) {
           clearTimeout(timeout);
           window.removeEventListener('message', handler);
           resolve(extract(msg));
