@@ -17,6 +17,21 @@ describe('stripTerminalControls', () => {
     expect(stripTerminalControls('prev line\n\x1b]0;t\x9cuser@host repo % ')).toBe(
       'prev line\nuser@host repo % ',
     );
+    // xterm aborts a string control on CAN/SUB and ends it on a bare ESC, so
+    // the text behind one is rendered output — the swallow below must not eat
+    // the prompt trailing any of the three.
+    expect(stripTerminalControls('prev line\n\x1b]0;t\x18user@host repo % ')).toBe(
+      'prev line\nuser@host repo % ',
+    );
+    expect(stripTerminalControls('prev line\n\x1b]0;t\x1auser@host repo % ')).toBe(
+      'prev line\nuser@host repo % ',
+    );
+    expect(stripTerminalControls('prev line\n\x1b]0;t\x1b[0muser@host repo % ')).toBe(
+      'prev line\nuser@host repo % ',
+    );
+    expect(stripTerminalControls('prev line\n\x1b_Gf=100;xx\x18user@host repo % ')).toBe(
+      'prev line\nuser@host repo % ',
+    );
   });
 
   it('swallows the rest of the input after an unterminated string control', () => {

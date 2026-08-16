@@ -14,9 +14,13 @@ export function stripTerminalControls(input: string): string {
   return (
     input
       // String controls: OSC (BEL or ST terminated); DCS/SOS/PM/APC (ST
-      // terminated). ST is `\x1b\\` or its 8-bit form `\x9c`.
-      .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\|\x9c)/g, '')
-      .replace(/\x1b[PX^_][\s\S]*?(?:\x1b\\|\x9c)/g, '')
+      // terminated). ST is `\x1b\\` or its 8-bit form `\x9c`; xterm also ends a
+      // string control on CAN/SUB (abort) or a bare ESC, so the text behind one
+      // is visible output, not payload. `\x1b\\` must be tried before the
+      // bare-ESC lookahead so a 7-bit ST is consumed whole; the lookahead
+      // leaves a following sequence for the rules below.
+      .replace(/\x1b\][\s\S]*?(?:\x07|[\x18\x1a\x9c]|\x1b\\|(?=\x1b))/g, '')
+      .replace(/\x1b[PX^_][\s\S]*?(?:[\x18\x1a\x9c]|\x1b\\|(?=\x1b))/g, '')
       // An UNterminated string control (a chunk or trim cut mid-sequence)
       // swallows the rest of the input. Without this the ESC catch-all below
       // would strip only the introducer and promote the payload — an OSC window
