@@ -110,9 +110,13 @@ jobs:
           # The signed author/committer pair is the provenance control. GitHub's
           # automatically signed `createCommitOnBranch` mutation binds the author
           # to the authenticating credential and does not allow an author or
-          # committer override. The REST paths that do allow those fields to be
-          # supplied do not add GitHub's signature; they require the caller to
-          # supply one. Requiring both `author.login == "renovate[bot]"` and
+          # committer override. And on the REST paths that do accept those
+          # fields, GitHub's rule is that a bot signature is applied only when
+          # the request "contains no custom author information, custom
+          # committer information, and no custom signature information" —
+          # supplying an author means the commit is not signed at all, rather
+          # than signed by the caller.
+          # Requiring both `author.login == "renovate[bot]"` and
           # `committer.login == "web-flow"` on a valid signature therefore
           # rejects a caller-supplied Renovate author as well as a commit signed
           # by some other identity. Renovate-authored PR association is separate
