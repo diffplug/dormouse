@@ -1,13 +1,45 @@
 name: workflow-audit
 
-# Nightly audit of every commit touching .github/workflows/. Surfaces
-# changes from feature branches and direct pushes, not just the main
-# branch — so a bot push that adds a new workflow file gets a visible
-# issue even if it never opens a PR.
+# Nightly audit of every commit touching .github/workflows/ or
+# .config/tend.yaml. Surfaces changes from feature branches and direct
+# pushes, not just the main branch — so a bot push that adds a new
+# workflow file gets a visible issue even if it never opens a PR.
+#
+# The config is in the window because it is an input to the generated
+# workflows, so an edit to it is a workflow change made one step
+# earlier.
 #
 # Gap-resistant: the "since" lower bound comes from the previous
 # successful run's API timestamp, so a failed run pushes the window
 # forward rather than skipping commits.
+#
+# Reports the *unexplained*. Two routine sources are classified and
+# skipped on independently checked provenance and content (see the
+# classifier comments for the trust boundary):
+#
+#   - Renovate pin bumps — a valid GitHub-signed commit authored by
+#     Renovate and committed by `web-flow`, associated only with
+#     Renovate-authored PRs, where every changed line in
+#     .github/workflows/ is a `uses:` line whose action name is unchanged,
+#     only its ref. "Same action, new pin." The commit must leave
+#     .config/tend.yaml alone, as the regen arm requires, or the config
+#     would ride along unexamined in a pin-shaped diff.
+#   - tend regeneration — the changed tend-*.yaml files reproduce
+#     byte-for-byte from `uvx tend@<version> init` at the version in the
+#     files' own generated header, run against that commit's own
+#     .config/tend.yaml — which the commit must leave untouched, or
+#     "reproducible" is true by construction. The config being in the
+#     window is what closes the same trick split across two commits.
+#
+# Both classifiers fail open: any error, ambiguity, or unparseable input
+# reports the commit. A silent run is the healthy steady state and keeps
+# the SECURITY.md 48-hour liveness check green — that check keys on a
+# successful *run*, not on an issue existing.
+#
+# Deliberately not deduped by (branch, file-set): that would let a
+# benign change be reported once and a later force-push of malicious
+# content to the same branch and files pass unremarked. Every commit is
+# classified on its own content.
 
 on:
   schedule:
@@ -18,6 +50,11 @@ permissions:
   contents: read
   issues: write
   actions: read
+  # `is_renovate_pin_bump` reads /commits/{sha}/pulls. Declaring a
+  # permissions block sets every scope not listed to `none`, and the
+  # classifier fails open — so without this the Renovate arm would 403,
+  # report every bump, and quietly undo this workflow's whole effect.
+  pull-requests: read
 
 jobs:
   audit:
@@ -29,6 +66,9 @@ jobs:
 
       - name: Fetch all branches
         run: git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
       - name: Audit workflow file changes
         env:
@@ -44,39 +84,235 @@ jobs:
           fi
           echo "Auditing commits since: $SINCE"
 
+          # .config/tend.yaml is in the window, not just .github/workflows/.
+          # Without it, a commit editing only the config never enters the audit,
+          # and a later commit regenerating from it leaves the config untouched,
+          # passes the same-commit guard in is_tend_regen, and reproduces
+          # byte-for-byte against a config nothing ever looked at. Widening the
+          # window makes the config edit an auditable commit reported on its own
+          # content. Both classifiers refuse any commit that touches the config,
+          # so nothing in the widened window can be swallowed by an arm that
+          # doesn't inspect it — that pairing is the invariant, not either half.
           COMMITS=$(git log --all --since="$SINCE" --pretty=format:'%H' \
-            -- .github/workflows/ | sort -u)
+            -- .github/workflows/ .config/tend.yaml | sort -u)
 
           if [ -z "$COMMITS" ]; then
-            echo "No workflow file changes since $SINCE."
+            echo "No workflow or tend-config changes since $SINCE."
+            echo "No workflow or tend-config changes since \`$SINCE\`." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
-          COUNT=$(echo "$COMMITS" | wc -l | tr -d ' ')
+          # A routine Renovate pin bump: a GitHub-signed commit authored by
+          # Renovate and committed by `web-flow`, associated only with
+          # Renovate-authored PRs, where every changed line under
+          # .github/workflows/ is a `uses:` whose action name is unchanged.
+          #
+          # The signed author/committer pair is the provenance control. GitHub's
+          # automatically signed `createCommitOnBranch` mutation binds the author
+          # to the authenticating credential and does not allow an author or
+          # committer override. And on the REST paths that do accept those
+          # fields, GitHub's rule is that a bot signature is applied only when
+          # the request "contains no custom author information, custom
+          # committer information, and no custom signature information" —
+          # supplying an author means the commit is not signed at all, rather
+          # than signed by the caller.
+          # Requiring both `author.login == "renovate[bot]"` and
+          # `committer.login == "web-flow"` on a valid signature therefore
+          # rejects a caller-supplied Renovate author as well as a commit signed
+          # by some other identity. Renovate-authored PR association is separate
+          # server-side corroboration.
+          #
+          # The content test remains an independent bound: a pin-only diff can
+          # still repoint `actions/checkout` at `evil/action`, which is why the
+          # action name is compared. The residual is a ref selected by Renovate
+          # within that action's own repo — the same trust Renovate bumps already
+          # rest on (see "GitHub Actions Policies" in SECURITY.md).
+          is_renovate_pin_bump() {
+            local sha="$1" login pr_authors diff changed removed added
+
+            login=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha" \
+              --jq '[.commit.verification.verified, .commit.verification.reason, (.author.login // ""), (.committer.login // "")] | @tsv' \
+              | awk -F'\t' '$1 == "true" && $2 == "valid" && $4 == "web-flow" { print $3 }') || return 1
+            [ "$login" = "renovate[bot]" ] || return 1
+
+            pr_authors=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha/pulls" \
+              --jq 'if length == 0 then "" else ([.[].user.login] | unique | join(",")) end') || return 1
+            [ "$pr_authors" = "renovate[bot]" ] || return 1
+
+            # Same requirement as is_tend_regen, for the same reason: the content
+            # test below reads only .github/workflows/, so a config edit carried
+            # in a pin-bump-shaped commit would ride along unexamined. With both
+            # arms refusing it, any commit touching the config must be reported
+            # by one of them — the window covers two paths and neither classifier
+            # can silently swallow the one it doesn't inspect.
+            [ -z "$(git show --name-only --pretty='' "$sha" -- .config/tend.yaml)" ] || return 1
+
+            diff=$(git show --format='' -U0 "$sha" -- .github/workflows/) || return 1
+            # Content lines only — drop diff headers and hunk markers.
+            changed=$(printf '%s\n' "$diff" \
+              | grep -E '^[+-]' \
+              | grep -Ev '^(\+\+\+|---)' || true)
+            [ -n "$changed" ] || return 1
+
+            # Every changed line must be a `uses:` line.
+            if printf '%s\n' "$changed" | grep -qvE '^[+-][[:space:]]*(- )?uses:[[:space:]]'; then
+              return 1
+            fi
+
+            # ...and the set of action names must be identical on both sides,
+            # so only the ref after `@` moved.
+            removed=$(printf '%s\n' "$changed" | grep '^-' \
+              | sed -E 's/^-[[:space:]]*(- )?uses:[[:space:]]*//; s/@.*//' | sort)
+            added=$(printf '%s\n' "$changed" | grep '^+' \
+              | sed -E 's/^\+[[:space:]]*(- )?uses:[[:space:]]*//; s/@.*//' | sort)
+            [ "$removed" = "$added" ] || return 1
+
+            return 0
+          }
+
+          # A routine tend regeneration: only tend-*.yaml changed, and those
+          # files reproduce byte-for-byte from the upstream generator at the
+          # version their own header names. Identity is irrelevant here — the
+          # bot's own PAT is the credential this audit exists to watch, so the
+          # only acceptable evidence is that the content is reproducible.
+          is_tend_regen() {
+            local sha="$1" files version tmp rc
+            files=$(git show --name-only --pretty='' "$sha" -- .github/workflows/)
+            [ -n "$files" ] || return 1
+            if printf '%s\n' "$files" | grep -qvE '^\.github/workflows/tend-[a-z-]+\.yaml$'; then
+              return 1
+            fi
+
+            # The generator's output is only as trustworthy as its input, and
+            # .config/tend.yaml is outside this audit's window — a commit that
+            # edits it reproduces byte-for-byte by construction. Its values land
+            # verbatim in the generated YAML (`bot_name` inside GitHub expression
+            # strings in tend-mention.yaml; `watched_workflows` as the
+            # `on: workflow_run: workflows:` list in tend-ci-fix.yaml), so
+            # "reproducible" would imply "safe" only if the upstream generator
+            # escapes its config inputs — an assumption about someone else's code
+            # holding up a control that exists because the bot can author
+            # workflows. Real regen commits are version bumps that leave the
+            # config untouched, so this costs nothing.
+            [ -z "$(git show --name-only --pretty='' "$sha" -- .config/tend.yaml)" ] || return 1
+
+            version=$(git show "$sha:.github/workflows/tend-review.yaml" 2>/dev/null \
+              | sed -nE '1s/^# Generated by tend ([0-9]+\.[0-9]+\.[0-9]+)\..*/\1/p')
+            [ -n "$version" ] || return 1
+
+            tmp=$(mktemp -d)
+            rc=1
+            if git worktree add --detach "$tmp" "$sha" >/dev/null 2>&1; then
+              if (cd "$tmp" && uvx "tend@$version" init >/dev/null 2>&1); then
+                if [ -z "$(cd "$tmp" && git status --porcelain -- .github/workflows/)" ]; then
+                  rc=0
+                fi
+              fi
+              git worktree remove --force "$tmp" >/dev/null 2>&1 || true
+            fi
+            rm -rf "$tmp"
+            return $rc
+          }
+
           REPORT=$(mktemp)
-          {
-            echo "$COUNT commit(s) touching \`.github/workflows/\` since \`$SINCE\`:"
-            echo ""
-            for sha in $COMMITS; do
-              AUTHOR=$(git show -s --format='%an <%ae>' "$sha")
-              DATE=$(git show -s --format='%ci' "$sha")
-              SUBJECT=$(git show -s --format='%s' "$sha")
-              REFS=$(git branch -a --contains "$sha" 2>/dev/null \
-                | grep -v 'HEAD ->' | head -10 \
-                | sed 's/^[[:space:]]*//' | paste -sd ', ' -)
-              FILES=$(git show --name-only --pretty='' "$sha" -- .github/workflows/)
+          SKIPPED=$(mktemp)
+          COUNT=0
+
+          # What this commit itself changed under .github/workflows/.
+          #
+          # For a merge, `git show --name-only` reports nothing, which would
+          # otherwise produce a contentless report *and* hide an evil merge —
+          # content present in the merge result but in neither parent. So a
+          # merge is diffed against every parent and intersected: a file taken
+          # wholesale from one side is unchanged relative to that side and drops
+          # out, leaving only what the merge itself introduced.
+          own_changes() {
+            local sha="$1" parents nparents acc cur first=1
+            parents=$(git rev-list --parents -n1 "$sha" | cut -d' ' -f2-)
+            nparents=$(printf '%s\n' "$parents" | wc -w | tr -d ' ')
+            if [ "$nparents" -le 1 ]; then
+              git show --name-only --pretty='' "$sha" -- .github/workflows/ .config/tend.yaml
+              return
+            fi
+            for p in $parents; do
+              cur=$(git diff --name-only "$p" "$sha" -- .github/workflows/ .config/tend.yaml | sort -u)
+              if [ "$first" -eq 1 ]; then
+                acc="$cur"; first=0
+              else
+                acc=$(comm -12 <(printf '%s\n' "$acc") <(printf '%s\n' "$cur"))
+              fi
+            done
+            printf '%s\n' "$acc" | sed '/^$/d'
+          }
+
+          for sha in $COMMITS; do
+            SUBJECT=$(git show -s --format='%s' "$sha")
+            FILES=$(own_changes "$sha")
+
+            # Nothing attributable to this commit — a merge that only carried
+            # branch commits the audit sees on their own.
+            if [ -z "$FILES" ]; then
+              continue
+            fi
+
+            if is_renovate_pin_bump "$sha"; then
+              echo "- \`${sha:0:7}\` — $SUBJECT (Renovate pin bump: same action, new ref)" >> "$SKIPPED"
+              continue
+            fi
+            if is_tend_regen "$sha"; then
+              echo "- \`${sha:0:7}\` — $SUBJECT (reproduces from the tend generator)" >> "$SKIPPED"
+              continue
+            fi
+
+            COUNT=$((COUNT + 1))
+            AUTHOR=$(git show -s --format='%an <%ae>' "$sha")
+            DATE=$(git show -s --format='%ci' "$sha")
+            REFS=$(git branch -a --contains "$sha" 2>/dev/null \
+              | grep -v 'HEAD ->' | head -10 \
+              | sed 's/^[*[:space:]]*//' | paste -sd ', ' - || true)
+            {
               echo "### \`${sha:0:7}\` — $SUBJECT"
               echo ""
-              echo "- **Author:** $AUTHOR"
+              echo "- **Author:** $AUTHOR (self-declared; not proof of origin)"
               echo "- **Date:** $DATE"
-              echo "- **Refs:** $REFS"
+              echo "- **Refs:** ${REFS:-none — unreferenced commit}"
               echo "- **Files:**"
               echo "$FILES" | sed 's|^|  - `|; s|$|`|'
               echo "- [View diff](https://github.com/$GITHUB_REPOSITORY/commit/$sha)"
               echo ""
-            done
-          } > "$REPORT"
+            } >> "$REPORT"
+          done
 
-          TITLE="[workflow-audit] $COUNT change(s) on $(date -u +%Y-%m-%d)"
+          {
+            echo "## workflow-audit"
+            echo ""
+            echo "Window: since \`$SINCE\`"
+            echo ""
+            if [ -s "$SKIPPED" ]; then
+              echo "Explained (not reported):"
+              echo ""
+              cat "$SKIPPED"
+              echo ""
+            fi
+            echo "Unexplained: $COUNT"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No unexplained workflow changes since $SINCE."
+            exit 0
+          fi
+
+          BODY=$(mktemp)
+          {
+            echo "$COUNT unexplained commit(s) touching \`.github/workflows/\` or \`.config/tend.yaml\` since \`$SINCE\`."
+            echo ""
+            echo "Routine Renovate pin bumps and reproducible tend regenerations are"
+            echo "classified and omitted — see the run summary for what was skipped."
+            echo "Everything below needs a human to account for it."
+            echo ""
+            cat "$REPORT"
+          } > "$BODY"
+
+          TITLE="[workflow-audit] $COUNT unexplained change(s) on $(date -u +%Y-%m-%d)"
           gh issue create --repo "$GITHUB_REPOSITORY" \
-            --title "$TITLE" --body-file "$REPORT"
+            --title "$TITLE" --body-file "$BODY"
