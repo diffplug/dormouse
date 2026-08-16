@@ -7,7 +7,7 @@ import {
   subscribeToResumeOffers,
 } from '../../lib/resume-offers';
 import {
-  getTerminalPaneStateSnapshot,
+  getTerminalPaneState,
   runResumeCommand,
   subscribeToTerminalPaneState,
 } from '../../lib/terminal-registry';
@@ -81,7 +81,7 @@ export function ResumeBanner({ terminalId }: { terminalId: string }) {
   // re-render all of them on every title/prompt/cwd event to render nothing.
   const activityKind = useSyncExternalStore(
     subscribeToTerminalPaneState,
-    useCallback(() => getTerminalPaneStateSnapshot().get(terminalId)?.activity.kind, [terminalId]),
+    useCallback(() => getTerminalPaneState(terminalId).activity.kind, [terminalId]),
   );
   const command = offers.get(terminalId);
   if (!command) return null;

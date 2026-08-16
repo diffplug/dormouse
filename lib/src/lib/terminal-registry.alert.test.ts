@@ -410,6 +410,22 @@ describe('terminal-registry alert behavior', () => {
     expect(countRunningSessions()).toBe(1);
   });
 
+  it('does not run a resume command in a pane whose process has exited', () => {
+    const id = 'dead-resume-command';
+    const received: string[] = [];
+    const entry = createSession(id);
+    fakePlatform.setInputHandler(id, (data) => received.push(data));
+    // The shell a restore spawned died (e.g. its saved cwd is gone), so there is
+    // nothing to type into — and seeding a command start nothing will ever
+    // finish would leave this pane counted as running forever.
+    entry.exited = true;
+
+    runResumeCommand(id, 'claude --resume 4f2c9b1e-6a03');
+
+    expect(received).toEqual([]);
+    expect(countRunningSessions()).toBe(0);
+  });
+
   it('seeds untouched state on resume and restore while defaulting missing state to touched', () => {
     resumeTerminal('resume-untouched', null, { alive: true, untouched: true });
     resumeTerminal('resume-legacy', null, { alive: true });

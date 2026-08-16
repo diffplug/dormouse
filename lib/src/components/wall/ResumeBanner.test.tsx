@@ -17,13 +17,13 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const registry = vi.hoisted(() => ({
   paneStates: new Map<string, { activity: { kind: string } }>(),
-  getTerminalPaneStateSnapshot: vi.fn(),
+  getTerminalPaneState: vi.fn(),
   runResumeCommand: vi.fn(),
   subscribeToTerminalPaneState: vi.fn(() => () => {}),
 }));
 
 vi.mock('../../lib/terminal-registry', () => ({
-  getTerminalPaneStateSnapshot: registry.getTerminalPaneStateSnapshot,
+  getTerminalPaneState: registry.getTerminalPaneState,
   runResumeCommand: registry.runResumeCommand,
   subscribeToTerminalPaneState: registry.subscribeToTerminalPaneState,
 }));
@@ -35,7 +35,10 @@ let wallActions: ReturnType<typeof stubWallActions>;
 beforeEach(() => {
   __resetResumeOffersForTests();
   registry.paneStates.clear();
-  registry.getTerminalPaneStateSnapshot.mockReturnValue(registry.paneStates);
+  // Mirrors the real accessor: a pane with no state reads as `unknown`.
+  registry.getTerminalPaneState.mockImplementation(
+    (id: string) => registry.paneStates.get(id) ?? { activity: { kind: 'unknown' } },
+  );
   wallActions = stubWallActions();
   container = document.createElement('div');
   document.body.appendChild(container);

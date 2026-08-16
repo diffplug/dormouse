@@ -37,6 +37,8 @@ export {
 
 export { resolveTerminalSessionId } from './terminal-store';
 
+export { clearResumeOffer } from './resume-offers';
+
 export {
   disposeAllSessions,
   disposeSession,

@@ -22,6 +22,12 @@ describe('detectResumeCommand', () => {
     expect(detectResumeCommand(scrollback)).toBe('claude --resume 4f2c9b1e-6a03-4d5e');
   });
 
+  it('never promotes an unterminated string control payload to visible text', () => {
+    // A chunk or trim cut mid-OSC would otherwise leave the window title behind
+    // as text, and a title is not something the pane can resume.
+    expect(detectResumeCommand('\x1b]0;claude --resume evil\nprompt$ ')).toBeNull();
+  });
+
   it('rejects shell syntax instead of persisting executable scrollback', () => {
     expect(detectResumeCommand('claude --resume $(touch${IFS}/tmp/pwn)\n')).toBeNull();
     expect(detectResumeCommand('codex resume safe; touch /tmp/pwn\n')).toBeNull();

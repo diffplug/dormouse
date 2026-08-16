@@ -5,7 +5,9 @@ interface ResumePattern {
    *  detected command is this label plus the captured argument, so the button can
    *  never name something different from what it runs. */
   label: string;
-  /** Capture group 1 is the session argument, when the invocation takes one. */
+  /** Capture group 1 is the session argument, when the invocation takes one.
+   *  Global (scanning wants every match in a line); every use must therefore
+   *  reset `lastIndex` or go through `matchAll`, which does. */
   regex: RegExp;
 }
 
@@ -14,18 +16,22 @@ interface ResumePattern {
 // later executed, so punctuation with shell meaning must never enter it.
 const RESUME_ID = String.raw`[A-Za-z0-9][A-Za-z0-9_-]*`;
 
+/** The character after the invocation must end it — the identifier grammar above
+ *  is the only thing that may be captured into an executable command. */
+const ENDS_INVOCATION = String.raw`(?=$|[ \t\r\n])`;
+
 const BUILTIN_PATTERNS: ResumePattern[] = [
   {
     label: 'codex resume',
-    regex: new RegExp(String.raw`\bcodex resume (${RESUME_ID})(?=$|[ \t\r\n])`),
+    regex: new RegExp(String.raw`\bcodex resume (${RESUME_ID})${ENDS_INVOCATION}`, 'g'),
   },
   {
     label: 'claude --resume',
-    regex: new RegExp(String.raw`\bclaude --resume (${RESUME_ID})(?=$|[ \t\r\n])`),
+    regex: new RegExp(String.raw`\bclaude --resume (${RESUME_ID})${ENDS_INVOCATION}`, 'g'),
   },
   {
     label: 'claude --continue',
-    regex: /\bclaude --continue(?=$|[ \t\r\n])/,
+    regex: new RegExp(String.raw`\bclaude --continue${ENDS_INVOCATION}`, 'g'),
   },
 ];
 
@@ -38,6 +44,11 @@ function stripTerminalControls(input: string): string {
     // String controls: OSC (BEL or ST terminated) and DCS (ST terminated).
     .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '')
     .replace(/\x1bP[\s\S]*?\x1b\\/g, '')
+    // An UNterminated string control (a chunk or trim cut mid-sequence) swallows
+    // the rest of the input. Without this the ESC catch-all below would strip
+    // only the introducer and promote the payload — an OSC window title, say —
+    // into text that reads as terminal output.
+    .replace(/\x1b[\]P][\s\S]*$/, '')
     // CSI, charset designators, and remaining two-byte ESC sequences.
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/\x1b[()][A-Za-z0-9]/g, '')
@@ -46,12 +57,12 @@ function stripTerminalControls(input: string): string {
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, '');
 }
 
-function resumeCommandIn(line: string): string | null {
-  const visible = stripTerminalControls(line);
+/** Rightmost resume command in already-stripped text (`matchAll` leaves the
+ *  shared patterns' `lastIndex` untouched — it scans against a clone). */
+function resumeCommandInVisible(visible: string): string | null {
   let latest: { index: number; command: string } | null = null;
   for (const { label, regex } of BUILTIN_PATTERNS) {
-    const globalRegex = new RegExp(regex.source, `${regex.flags}g`);
-    for (const match of visible.matchAll(globalRegex)) {
+    for (const match of visible.matchAll(regex)) {
       const index = match.index;
       if (latest && latest.index > index) continue;
       latest = {
@@ -63,6 +74,10 @@ function resumeCommandIn(line: string): string | null {
   return latest?.command ?? null;
 }
 
+function resumeCommandIn(line: string): string | null {
+  return resumeCommandInVisible(stripTerminalControls(line));
+}
+
 /**
  * Return the canonical executable form of a resume command, or null when the
  * value contains anything beyond one of the known invocations and its expected
@@ -71,7 +86,7 @@ function resumeCommandIn(line: string): string | null {
  */
 export function normalizeResumeCommand(command: string): string | null {
   const visible = stripTerminalControls(command).trim();
-  const detected = resumeCommandIn(visible);
+  const detected = resumeCommandInVisible(visible);
   return detected === visible ? detected : null;
 }
 
@@ -105,8 +120,11 @@ export function detectResumeCommand(scrollback: string): string | null {
  * the command itself for a string no pattern claims.
  */
 export function resumeCommandLabel(command: string): string {
-  for (const { label, regex } of BUILTIN_PATTERNS) {
-    if (regex.test(command)) return label;
+  for (const { label } of BUILTIN_PATTERNS) {
+    // A canonical command is exactly `label` or `label <id>` (normalizeResumeCommand),
+    // so a prefix test is exact here — and it can't be tripped by a shared
+    // pattern's `lastIndex` the way `regex.test` would be.
+    if (command === label || command.startsWith(`${label} `)) return label;
   }
   return command;
 }

@@ -233,6 +233,9 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
     // The process is gone, so any command we seeded for this pane is no longer
     // live; clear it so `dor ensure` stops matching a dead surface.
     finishLaunchedCommandByPtyId(id, detail.exitCode);
+    // Same reason retires the resume offer: it types into a shell, and there is
+    // no shell left (docs/specs/layout.md -> Resume offer).
+    clearResumeOffer(id);
   };
   platform.onPtyData(handleData);
   platform.onPtyExit(handleExit);
@@ -567,7 +570,11 @@ export function disposeSession(id: string): void {
 export function runResumeCommand(id: string, command: string): void {
   const normalized = normalizeResumeCommand(command);
   clearResumeOffer(id);
-  if (!normalized) return;
+  const entry = registry.get(id);
+  // A gone shell can't run anything, and the seed below would then be a command
+  // start nothing ever finishes — `countRunningSessions` would count this pane as
+  // running forever (a spurious quit confirmation, a phantom running header).
+  if (!normalized || !entry || entry.exited) return;
   markSessionTouched(id);
   // This direct platform write bypasses xterm's onData keystroke fallback.
   // Seed the same semantic command state first so non-integrated shells still
