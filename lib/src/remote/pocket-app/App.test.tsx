@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  completePushSubscriptionRegistration,
   HostsView,
   reconcilePushSubscribedHosts,
   type HostView,
@@ -169,6 +170,32 @@ describe('HostsView push registration', () => {
 });
 
 describe('push registration reconciliation', () => {
+  it('retains a browser subscription reset across a lost registration response', async () => {
+    const pendingReset = { current: false };
+    const replacement = {
+      subscription: {
+        endpoint: 'https://push.example/replacement',
+        keys: { p256dh: 'p256dh', auth: 'auth' },
+      },
+      subscriptionChanged: true,
+    };
+
+    await expect(
+      completePushSubscriptionRegistration(replacement, pendingReset, async () => {
+        throw new Error('response lost');
+      }),
+    ).rejects.toThrow('response lost');
+    expect(pendingReset.current).toBe(true);
+
+    const reset = await completePushSubscriptionRegistration(
+      { ...replacement, subscriptionChanged: false },
+      pendingReset,
+      async () => ({ deviceRegistrationsReset: false }),
+    );
+    expect(reset).toBe(true);
+    expect(pendingReset.current).toBe(false);
+  });
+
   it('keeps the server snapshot plus only registrations completed during the read', () => {
     const reconciled = reconcilePushSubscribedHosts(
       ['host-a', 'host-b'],

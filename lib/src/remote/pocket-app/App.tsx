@@ -171,6 +171,12 @@ export default function App(): React.ReactElement {
    * must not restore its now-stale snapshot.
    */
   const pushRegistrationResetVersionRef = useRef(0);
+  /**
+   * Set before registering a newly-created browser subscription and cleared
+   * only after a Server response. If the POST committed but its response was
+   * lost, the idempotent retry still knows the cached Host set is invalid.
+   */
+  const pushRegistrationResetPendingRef = useRef(false);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
 
   // Availability depends on browser state the app cannot change (permission,
@@ -323,18 +329,20 @@ export default function App(): React.ReactElement {
       if (pushConfig.status !== 'ready') {
         throw new Error('Check the server configuration before enabling alerts.');
       }
-      const subscription = await subscribeToPushInBrowser(pushConfig.key);
-      const result = await client.subscribeToPush(host.hostId, subscription);
+      const browserSubscription = await subscribeToPushInBrowser(pushConfig.key);
+      const deviceRegistrationsReset = await completePushSubscriptionRegistration(
+        browserSubscription,
+        pushRegistrationResetPendingRef,
+        (subscription) => client.subscribeToPush(host.hostId, subscription),
+      );
       pushEnableVersionsRef.current.set(
         host.hostId,
         (pushEnableVersionsRef.current.get(host.hostId) ?? 0) + 1,
       );
-      if (result.deviceRegistrationsReset) pushRegistrationResetVersionRef.current += 1;
+      if (deviceRegistrationsReset) pushRegistrationResetVersionRef.current += 1;
       setPushSubscriptionCurrent(true);
       setPushSubscribedHostIds((prev) =>
-        result.deviceRegistrationsReset
-          ? new Set([host.hostId])
-          : new Set(prev).add(host.hostId),
+        deviceRegistrationsReset ? new Set([host.hostId]) : new Set(prev).add(host.hostId),
       );
     });
 
@@ -419,6 +427,28 @@ export default function App(): React.ReactElement {
       <div className={clsx(PK.body, PK.bodyCenter)}>…</div>
     </div>
   );
+}
+
+type PushRegistrationResetRef = { current: boolean };
+
+/**
+ * Register one browser subscription while retaining evidence of a browser-side
+ * replacement until a Server response arrives. A lost response may mean the
+ * Server already deleted sibling Host rows; its idempotent retry cannot report
+ * that deletion again, so the retained browser fact must win.
+ */
+export async function completePushSubscriptionRegistration(
+  browserSubscription: Awaited<ReturnType<typeof subscribeToPushInBrowser>>,
+  pendingReset: PushRegistrationResetRef,
+  register: (
+    subscription: Awaited<ReturnType<typeof subscribeToPushInBrowser>>['subscription'],
+  ) => Promise<{ deviceRegistrationsReset: boolean }>,
+): Promise<boolean> {
+  if (browserSubscription.subscriptionChanged) pendingReset.current = true;
+  const result = await register(browserSubscription.subscription);
+  const deviceRegistrationsReset = pendingReset.current || result.deviceRegistrationsReset;
+  pendingReset.current = false;
+  return deviceRegistrationsReset;
 }
 
 /**

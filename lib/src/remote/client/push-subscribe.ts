@@ -11,6 +11,16 @@
 import { fromBase64Url, type PushSubscriptionPayload } from 'server-lib-common';
 import { getPushServiceWorkerRegistration } from '../pocket-app/service-worker';
 
+export interface BrowserPushSubscription {
+  subscription: PushSubscriptionPayload;
+  /**
+   * True when this call created a new delivery address. The Pocket shell keeps
+   * this fact until the Server registration succeeds, because a committed POST
+   * whose response was lost reports an idempotent `false` when retried.
+   */
+  subscriptionChanged: boolean;
+}
+
 /**
  * Why the user cannot subscribe right now, or `ready` if they can.
  *
@@ -119,7 +129,7 @@ export async function hasCurrentPushSubscription(
  */
 export async function subscribeToPushInBrowser(
   applicationServerKey: string,
-): Promise<PushSubscriptionPayload> {
+): Promise<BrowserPushSubscription> {
   // Checked before the permission prompt so a missing worker fails with an
   // explanation rather than after the user has already answered a dialog.
   const registration = await getPushServiceWorkerRegistration();
@@ -153,14 +163,17 @@ export async function subscribeToPushInBrowser(
     subscription = null;
   }
 
-  subscription ??= await registration.pushManager.subscribe({
-    // Mandatory in Chrome and on iOS: a promise that every push we receive
-    // becomes a visible notification. `sw.js` keeps it.
-    userVisibleOnly: true,
-    // Passed as bytes rather than the base64url string: browsers disagree about
-    // accepting the string form.
-    applicationServerKey: applicationServerKeyBytes as BufferSource,
-  });
+  const subscriptionChanged = subscription === null;
+  subscription ??= await registration.pushManager.subscribe(
+    {
+      // Mandatory in Chrome and on iOS: a promise that every push we receive
+      // becomes a visible notification. `sw.js` keeps it.
+      userVisibleOnly: true,
+      // Passed as bytes rather than the base64url string: browsers disagree about
+      // accepting the string form.
+      applicationServerKey: applicationServerKeyBytes as BufferSource,
+    },
+  );
 
   const json = subscription.toJSON() as { endpoint?: string; keys?: Record<string, string> };
   const endpoint = json.endpoint ?? subscription.endpoint;
@@ -169,7 +182,10 @@ export async function subscribeToPushInBrowser(
   if (!endpoint || !p256dh || !auth) {
     throw new Error('The browser returned an incomplete push subscription.');
   }
-  return { endpoint, keys: { p256dh, auth } };
+  return {
+    subscription: { endpoint, keys: { p256dh, auth } },
+    subscriptionChanged,
+  };
 }
 
 /**

@@ -251,8 +251,11 @@ describe('subscribeToPushInBrowser', () => {
     });
 
     await expect(subscribeToPushInBrowser('AQID')).resolves.toEqual({
-      endpoint: 'https://push.example/existing',
-      keys: { p256dh: 'p256dh', auth: 'auth' },
+      subscription: {
+        endpoint: 'https://push.example/existing',
+        keys: { p256dh: 'p256dh', auth: 'auth' },
+      },
+      subscriptionChanged: false,
     });
     expect(unsubscribe).not.toHaveBeenCalled();
     expect(subscribe).not.toHaveBeenCalled();
@@ -282,8 +285,11 @@ describe('subscribeToPushInBrowser', () => {
     });
 
     await expect(subscribeToPushInBrowser('AQID')).resolves.toEqual({
-      endpoint: 'https://push.example/replacement',
-      keys: { p256dh: 'new-p256dh', auth: 'new-auth' },
+      subscription: {
+        endpoint: 'https://push.example/replacement',
+        keys: { p256dh: 'new-p256dh', auth: 'new-auth' },
+      },
+      subscriptionChanged: true,
     });
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(subscribe).toHaveBeenCalledWith({
