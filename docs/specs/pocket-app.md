@@ -301,8 +301,10 @@ scope's existing `PushSubscription` when its `applicationServerKey` matches the
 Server's VAPID public key byte-for-byte. Pocket unsubscribes and creates a new
 endpoint only when the key differs, because replacing a matching subscription
 would invalidate the endpoint already stored for every other Host. If the
-subscription disappeared or had to rotate, Pocket retains that browser-side
-reset fact until a subscribe response arrives. It therefore keeps only the Host
+subscription disappeared or had to rotate, Pocket records that browser-side
+reset fact at the moment the old delivery address stops being valid — before
+the replacement is minted, so a `subscribe()` that throws cannot take it away —
+and retains it until a subscribe response arrives. It therefore keeps only the Host
 it just repaired even when the first POST committed but lost its response and
 the idempotent retry can no longer report that the Server atomically invalidated
 the other Host rows. A subscriptions read that began before that reset cannot

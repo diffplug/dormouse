@@ -77,7 +77,7 @@ import {
   HostStore,
   PushSubscriptionStore,
 } from './state.js';
-import type { StoredHost } from './state.js';
+import type { StoredHost, StoredPushSubscription } from './state.js';
 import type { PushSender } from './push.js';
 import { isPublicHttpsPushEndpoint } from './push-endpoint.js';
 
@@ -546,7 +546,7 @@ export function createApp(config: AppConfig): CreatedApp {
     // same way. When push is disabled the raw rows remain readable, preserving
     // the route's diagnostic behavior without claiming they are deliverable.
     const subscriptions = config.vapidPublicKey
-      ? allSubscriptions.filter((s) => s.vapidPublicKey === config.vapidPublicKey)
+      ? allSubscriptions.filter(isVapidCurrent)
       : allSubscriptions;
     // Identities only: the endpoint and its keys are a bearer capability to
     // notify that phone, and never leave the Server.
@@ -633,6 +633,15 @@ export function createApp(config: AppConfig): CreatedApp {
   });
 
   /**
+   * Whether a stored row was minted for the active VAPID key, and is therefore
+   * deliverable. The one definition both the Client readback and the Host-facing
+   * views below filter on; they differ only in what an unconfigured key means.
+   */
+  function isVapidCurrent(s: StoredPushSubscription): boolean {
+    return s.vapidPublicKey === config.vapidPublicKey;
+  }
+
+  /**
    * Only subscriptions minted for the active VAPID key are deliverable.
    * Old-key rows remain on disk so Pocket can diagnose and repair a rotation,
    * but they must never appear in the Host's device view or send fan-out.
@@ -640,7 +649,7 @@ export function createApp(config: AppConfig): CreatedApp {
   async function currentPushSubscriptionsForHost(hostId: string) {
     if (!config.vapidPublicKey) return [];
     const subscriptions = await pushStore.listForHost(hostId);
-    return subscriptions.filter((s) => s.vapidPublicKey === config.vapidPublicKey);
+    return subscriptions.filter(isVapidCurrent);
   }
 
   // --- The relay: one host socket per hostId, many client sockets ----------

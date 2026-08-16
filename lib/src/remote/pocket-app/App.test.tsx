@@ -204,6 +204,8 @@ describe('push registration reconciliation', () => {
         ['stale-local', { version: 1, resetVersion: 0 }],
         ['host-c', { version: 2, resetVersion: 0 }],
       ]),
+      0,
+      0,
     );
 
     expect([...reconciled]).toEqual(['host-a', 'host-b', 'host-c']);
@@ -214,6 +216,8 @@ describe('push registration reconciliation', () => {
       [],
       new Map([['host-a', { version: 1, resetVersion: 0 }]]),
       new Map([['host-a', { version: 2, resetVersion: 0 }]]),
+      0,
+      0,
     );
 
     expect([...reconciled]).toEqual(['host-a']);

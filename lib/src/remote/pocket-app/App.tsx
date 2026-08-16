@@ -13,7 +13,7 @@
  * below and docs/specs/theme.md.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { clsx } from 'clsx';
 import { tv } from 'tailwind-variants';
 import {
@@ -28,6 +28,7 @@ import {
   hasCurrentPushSubscription,
   isInstalledWebApp,
   subscribeToPushInBrowser,
+  type BrowserPushSubscription,
   type PushAvailability,
 } from '../client/push-subscribe';
 import { RemotePtyAdapter } from '../client/remote-adapter';
@@ -180,9 +181,10 @@ export default function App(): React.ReactElement {
    */
   const pushRegistrationResetVersionRef = useRef(0);
   /**
-   * Set before registering a newly-created browser subscription and cleared
-   * only after a Server response. If the POST committed but its response was
-   * lost, the idempotent retry still knows the cached Host set is invalid.
+   * Set the moment the browser replaces its delivery address and cleared only
+   * after a Server response. If the POST committed but its response was lost —
+   * or `subscribe()` itself threw after the old address was already gone — the
+   * next attempt still knows the cached Host set is invalid.
    */
   const pushRegistrationResetPendingRef = useRef(false);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
@@ -337,13 +339,20 @@ export default function App(): React.ReactElement {
       if (pushConfig.status !== 'ready') {
         throw new Error('Check the server configuration before enabling alerts.');
       }
-      const browserSubscription = await subscribeToPushInBrowser(pushConfig.key);
+      const browserSubscription = await subscribeToPushInBrowser(pushConfig.key, () => {
+        pushRegistrationResetPendingRef.current = true;
+      });
       const deviceRegistrationsReset = await completePushSubscriptionRegistration(
         browserSubscription,
         pushRegistrationResetPendingRef,
         (subscription) => client.subscribeToPush(host.hostId, subscription),
       );
-      if (deviceRegistrationsReset) pushRegistrationResetVersionRef.current += 1;
+      if (deviceRegistrationsReset) {
+        pushRegistrationResetVersionRef.current += 1;
+        // Every surviving record belongs to a dead epoch and can never match the
+        // gate in `reconcilePushSubscribedHosts` again.
+        pushEnableCompletionsRef.current.clear();
+      }
       pushEnableCompletionsRef.current.set(host.hostId, {
         version: ++pushEnableCompletionVersionRef.current,
         resetVersion: pushRegistrationResetVersionRef.current,
@@ -437,19 +446,21 @@ export default function App(): React.ReactElement {
   );
 }
 
-type PushRegistrationResetRef = { current: boolean };
-
 /**
  * Register one browser subscription while retaining evidence of a browser-side
  * replacement until a Server response arrives. A lost response may mean the
  * Server already deleted sibling Host rows; its idempotent retry cannot report
  * that deletion again, so the retained browser fact must win.
+ *
+ * `pendingReset` may already be set by `subscribeToPushInBrowser`'s
+ * replacement callback; re-reading `subscriptionChanged` keeps this correct for
+ * a caller that did not pass one.
  */
 export async function completePushSubscriptionRegistration(
-  browserSubscription: Awaited<ReturnType<typeof subscribeToPushInBrowser>>,
-  pendingReset: PushRegistrationResetRef,
+  browserSubscription: BrowserPushSubscription,
+  pendingReset: RefObject<boolean>,
   register: (
-    subscription: Awaited<ReturnType<typeof subscribeToPushInBrowser>>['subscription'],
+    subscription: BrowserPushSubscription['subscription'],
   ) => Promise<{ deviceRegistrationsReset: boolean }>,
 ): Promise<boolean> {
   if (browserSubscription.subscriptionChanged) pendingReset.current = true;
@@ -468,8 +479,10 @@ export function reconcilePushSubscribedHosts(
   serverHostIds: readonly string[],
   enableCompletionsAtReadStart: ReadonlyMap<string, PushEnableCompletion>,
   enableCompletionsNow: ReadonlyMap<string, PushEnableCompletion>,
-  resetVersionAtReadStart = 0,
-  resetVersionNow = 0,
+  // Required, not defaulted: an omitted epoch would silently discard every
+  // completion recorded after a reset and trust a snapshot taken before it.
+  resetVersionAtReadStart: number,
+  resetVersionNow: number,
 ): Set<string> {
   const reconciled =
     resetVersionNow > resetVersionAtReadStart ? new Set<string>() : new Set(serverHostIds);

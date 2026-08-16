@@ -310,10 +310,13 @@ function samePushAddress(
   left: Omit<StoredPushSubscription, 'subscribedAt'>,
   right: Omit<StoredPushSubscription, 'subscribedAt'>,
 ): boolean {
+  // Optional chaining because `left` is whatever is on disk: this file is
+  // hand-editable by design, and a row missing `keys` must read as a different
+  // address (forcing a reset) rather than throw out of the subscribe route.
   return (
     left.endpoint === right.endpoint &&
-    left.keys.p256dh === right.keys.p256dh &&
-    left.keys.auth === right.keys.auth &&
+    left.keys?.p256dh === right.keys?.p256dh &&
+    left.keys?.auth === right.keys?.auth &&
     left.vapidPublicKey === right.vapidPublicKey
   );
 }

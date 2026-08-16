@@ -22,6 +22,16 @@ export interface BrowserPushSubscription {
 }
 
 /**
+ * Called the moment the previously registered delivery address stops being
+ * valid — before the replacement is minted, so the fact survives a `subscribe()`
+ * that throws. {@link BrowserPushSubscription.subscriptionChanged} reports the
+ * same thing on the success path; this exists because a throw between
+ * `unsubscribe()` and the return would otherwise leave every other Host still
+ * claiming alerts through an endpoint that is already dead.
+ */
+export type DeliveryAddressReplacedCallback = () => void;
+
+/**
  * Why the user cannot subscribe right now, or `ready` if they can.
  *
  * `needs-install` is the iOS rule: Web Push is granted only to a Home Screen
@@ -129,6 +139,7 @@ export async function hasCurrentPushSubscription(
  */
 export async function subscribeToPushInBrowser(
   applicationServerKey: string,
+  onDeliveryAddressReplaced?: DeliveryAddressReplacedCallback,
 ): Promise<BrowserPushSubscription> {
   // Checked before the permission prompt so a missing worker fails with an
   // explanation rather than after the user has already answered a dialog.
@@ -163,17 +174,21 @@ export async function subscribeToPushInBrowser(
     subscription = null;
   }
 
-  const subscriptionChanged = subscription === null;
-  subscription ??= await registration.pushManager.subscribe(
-    {
-      // Mandatory in Chrome and on iOS: a promise that every push we receive
-      // becomes a visible notification. `sw.js` keeps it.
-      userVisibleOnly: true,
-      // Passed as bytes rather than the base64url string: browsers disagree about
-      // accepting the string form.
-      applicationServerKey: applicationServerKeyBytes as BufferSource,
-    },
-  );
+  // Nullish rather than `=== null` so it cannot disagree with the `??=` below,
+  // which is what actually decides whether a new address gets minted.
+  const subscriptionChanged = subscription == null;
+  // Announced before the round trip, not after: the old address is already gone
+  // (either unsubscribed above or never there), so a `subscribe()` that throws
+  // must not take that fact with it.
+  if (subscriptionChanged) onDeliveryAddressReplaced?.();
+  subscription ??= await registration.pushManager.subscribe({
+    // Mandatory in Chrome and on iOS: a promise that every push we receive
+    // becomes a visible notification. `sw.js` keeps it.
+    userVisibleOnly: true,
+    // Passed as bytes rather than the base64url string: browsers disagree about
+    // accepting the string form.
+    applicationServerKey: applicationServerKeyBytes as BufferSource,
+  });
 
   const json = subscription.toJSON() as { endpoint?: string; keys?: Record<string, string> };
   const endpoint = json.endpoint ?? subscription.endpoint;

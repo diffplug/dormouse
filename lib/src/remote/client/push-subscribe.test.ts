@@ -297,4 +297,30 @@ describe('subscribeToPushInBrowser', () => {
       applicationServerKey: Uint8Array.of(1, 2, 3),
     });
   });
+
+  it('reports the replaced delivery address even when subscribe throws', async () => {
+    // The old endpoint is dead as soon as `unsubscribe` resolves. If the
+    // failure swallowed that fact, every other Host would keep claiming alerts
+    // through an address nothing can reach.
+    stubBrowser({});
+    (globalThis.Notification as unknown as { requestPermission: unknown }).requestPermission =
+      async () => 'granted';
+    const unsubscribe = vi.fn().mockResolvedValue(true);
+    const subscribe = vi.fn().mockRejectedValue(new Error('push service unreachable'));
+    getRegistration.mockResolvedValue({
+      pushManager: {
+        getSubscription: async () => ({
+          options: { applicationServerKey: Uint8Array.of(9, 9, 9).buffer },
+          unsubscribe,
+        }),
+        subscribe,
+      },
+    });
+    const onReplaced = vi.fn();
+
+    await expect(subscribeToPushInBrowser('AQID', onReplaced)).rejects.toThrow(
+      'push service unreachable',
+    );
+    expect(onReplaced).toHaveBeenCalledOnce();
+  });
 });
