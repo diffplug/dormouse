@@ -199,10 +199,10 @@ describe('push registration reconciliation', () => {
   it('keeps the server snapshot plus only registrations completed during the read', () => {
     const reconciled = reconcilePushSubscribedHosts(
       ['host-a', 'host-b'],
-      new Map([['stale-local', 1]]),
+      new Map([['stale-local', { version: 1, resetVersion: 0 }]]),
       new Map([
-        ['stale-local', 1],
-        ['host-c', 1],
+        ['stale-local', { version: 1, resetVersion: 0 }],
+        ['host-c', { version: 2, resetVersion: 0 }],
       ]),
     );
 
@@ -212,8 +212,8 @@ describe('push registration reconciliation', () => {
   it('keeps a repeated registration of the same Host completed during the read', () => {
     const reconciled = reconcilePushSubscribedHosts(
       [],
-      new Map([['host-a', 1]]),
-      new Map([['host-a', 2]]),
+      new Map([['host-a', { version: 1, resetVersion: 0 }]]),
+      new Map([['host-a', { version: 2, resetVersion: 0 }]]),
     );
 
     expect([...reconciled]).toEqual(['host-a']);
@@ -223,7 +223,22 @@ describe('push registration reconciliation', () => {
     const reconciled = reconcilePushSubscribedHosts(
       ['stale-host-a', 'stale-host-b'],
       new Map(),
-      new Map([['repaired-host', 1]]),
+      new Map([['repaired-host', { version: 1, resetVersion: 1 }]]),
+      0,
+      1,
+    );
+
+    expect([...reconciled]).toEqual(['repaired-host']);
+  });
+
+  it('drops Enable completions from before a later reset during the read', () => {
+    const reconciled = reconcilePushSubscribedHosts(
+      ['snapshot-host'],
+      new Map(),
+      new Map([
+        ['pre-reset-host', { version: 1, resetVersion: 0 }],
+        ['repaired-host', { version: 2, resetVersion: 1 }],
+      ]),
       0,
       1,
     );

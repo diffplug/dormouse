@@ -52,6 +52,13 @@ type PushConfigState =
   | { status: 'disabled' }
   | { status: 'error' };
 
+export interface PushEnableCompletion {
+  /** Globally increasing so replacing an older record is always detectable. */
+  version: number;
+  /** The browser-subscription reset epoch in which this registration completed. */
+  resetVersion: number;
+}
+
 /**
  * The label this Client suggests at pairing.
  *
@@ -159,12 +166,13 @@ export default function App(): React.ReactElement {
   const [pushSubscriptionCurrent, setPushSubscriptionCurrent] = useState(false);
   const [pushConfig, setPushConfig] = useState<PushConfigState>({ status: 'loading' });
   /**
-   * Per-Host registration completion versions. The Server read below replaces
-   * the whole set, except for Hosts whose version advanced after that read
-   * began. A counter per Host (rather than a Set) also detects a repeated repair
-   * of the same Host.
+   * The latest registration completion for each Host. The Server read below
+   * replaces the whole set, except for Hosts whose completion advanced after
+   * that read began in the current reset epoch.
    */
-  const pushEnableVersionsRef = useRef<Map<string, number>>(new Map());
+  const pushEnableCompletionsRef = useRef<Map<string, PushEnableCompletion>>(new Map());
+  /** Monotonic across reset epochs so replacing an older Host record still advances. */
+  const pushEnableCompletionVersionRef = useRef(0);
   /**
    * Advances when the Server atomically drops this device's old Host rows
    * after a browser subscription rotation. A read that began before the reset
@@ -210,7 +218,7 @@ export default function App(): React.ReactElement {
     // holds a row for. Authoritative rather than merged, so a row pruned after
     // a 410 stops claiming alerts are on.
     setPushSubscribedHostIds(new Set());
-    const enableVersionsAtStart = new Map(pushEnableVersionsRef.current);
+    const enableCompletionsAtStart = new Map(pushEnableCompletionsRef.current);
     const resetVersionAtStart = pushRegistrationResetVersionRef.current;
     void client
       .listPushSubscribedHosts()
@@ -219,8 +227,8 @@ export default function App(): React.ReactElement {
           setPushSubscribedHostIds(
             reconcilePushSubscribedHosts(
               hostIds,
-              enableVersionsAtStart,
-              pushEnableVersionsRef.current,
+              enableCompletionsAtStart,
+              pushEnableCompletionsRef.current,
               resetVersionAtStart,
               pushRegistrationResetVersionRef.current,
             ),
@@ -335,11 +343,11 @@ export default function App(): React.ReactElement {
         pushRegistrationResetPendingRef,
         (subscription) => client.subscribeToPush(host.hostId, subscription),
       );
-      pushEnableVersionsRef.current.set(
-        host.hostId,
-        (pushEnableVersionsRef.current.get(host.hostId) ?? 0) + 1,
-      );
       if (deviceRegistrationsReset) pushRegistrationResetVersionRef.current += 1;
+      pushEnableCompletionsRef.current.set(host.hostId, {
+        version: ++pushEnableCompletionVersionRef.current,
+        resetVersion: pushRegistrationResetVersionRef.current,
+      });
       setPushSubscriptionCurrent(true);
       setPushSubscribedHostIds((prev) =>
         deviceRegistrationsReset ? new Set([host.hostId]) : new Set(prev).add(host.hostId),
@@ -458,15 +466,20 @@ export async function completePushSubscriptionRegistration(
  */
 export function reconcilePushSubscribedHosts(
   serverHostIds: readonly string[],
-  enableVersionsAtReadStart: ReadonlyMap<string, number>,
-  enableVersionsNow: ReadonlyMap<string, number>,
+  enableCompletionsAtReadStart: ReadonlyMap<string, PushEnableCompletion>,
+  enableCompletionsNow: ReadonlyMap<string, PushEnableCompletion>,
   resetVersionAtReadStart = 0,
   resetVersionNow = 0,
 ): Set<string> {
   const reconciled =
     resetVersionNow > resetVersionAtReadStart ? new Set<string>() : new Set(serverHostIds);
-  for (const [hostId, version] of enableVersionsNow) {
-    if (version > (enableVersionsAtReadStart.get(hostId) ?? 0)) reconciled.add(hostId);
+  for (const [hostId, completion] of enableCompletionsNow) {
+    if (
+      completion.resetVersion === resetVersionNow &&
+      completion.version > (enableCompletionsAtReadStart.get(hostId)?.version ?? 0)
+    ) {
+      reconciled.add(hostId);
+    }
   }
   return reconciled;
 }

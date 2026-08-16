@@ -271,13 +271,15 @@ device X registered with" would be an enumeration primitive over an input the
 caller need not own, where the account's own rows are already its to read — the
 same scoping `GET /api/hosts` uses. The response is authoritative and replaces
 the set, except that a registration completed while the read was in flight
-wins, since it is the newer fact: Pocket merges the Server snapshot with the
-specific Host registrations whose per-Host completion version advanced after
-that request began (including a repeated repair of the same Host), while
-earlier local ids remain subject to authoritative removal. Pocket clears the
-previous snapshot when a read begins; if the read fails, only registrations
-that completed since then can have added themselves back. That re-offers an
-idempotent action instead of preserving a stale **Alerts on** claim.
+wins, since it is the newer fact: Pocket records each Host's latest completion
+with a globally increasing version and the current browser-subscription reset
+epoch. It merges only records that advanced after the request began and belong
+to the latest epoch (including a repeated repair of the same Host), so a later
+reset cannot let an earlier completion restore a deleted row. Earlier local ids
+remain subject to authoritative removal. Pocket clears the previous snapshot
+when a read begins; if the read fails, only registrations that completed since
+then can have added themselves back. That re-offers an idempotent action instead
+of preserving a stale **Alerts on** claim.
 Source of truth: `getPushAvailability` in
 `lib/src/remote/client/push-subscribe.ts`,
 `PocketClient.listPushSubscribedHosts`, and `reconcilePushSubscribedHosts` in
