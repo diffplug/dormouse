@@ -4,7 +4,7 @@ import * as ptyManager from './pty-manager';
 import { DormouseViewProvider } from './webview-view-provider';
 import { attachRouter, flushAllSessions, getAlertStates } from './message-router';
 import { closePoppedOutSessions } from './agent-browser-host';
-import { getWebviewHtml } from './webview-html';
+import { serveWebview } from './webview-messaging';
 import { log } from './log';
 import { mergeAlertStates, refreshSavedSessionStateFromPtys } from './session-state';
 import { readPersistedSession } from '../../lib/src/lib/session-types';
@@ -47,9 +47,9 @@ function setupPanel(
     light: vscode.Uri.file(path.join(context.extensionPath, 'icon-tiny-light.png')),
     dark: vscode.Uri.file(path.join(context.extensionPath, 'icon-tiny-dark.png')),
   };
-  panel.webview.html = getWebviewHtml(panel.webview, mediaPath, initialState, getSelectedShell?.());
+  const channel = serveWebview(panel.webview, mediaPath, initialState, getSelectedShell?.());
 
-  const router = attachRouter(panel.webview, {
+  const router = attachRouter(channel, {
     reconnect: !!savedState,
     killOnDispose: true,
     savedSession: readPersistedSession(initialState),
