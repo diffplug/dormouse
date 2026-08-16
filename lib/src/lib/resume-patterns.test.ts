@@ -58,6 +58,16 @@ describe('detectResumeCommand', () => {
     const scrollback = 'codex resume abc\nlater\nclaude --resume xyz\n$ ';
     expect(detectResumeCommand(scrollback)).toBe('claude --resume xyz');
   });
+
+  it('prefers the rightmost pattern after a carriage-return redraw', () => {
+    const scrollback = 'codex resume old123\rclaude --resume new789';
+    expect(detectResumeCommand(scrollback)).toBe('claude --resume new789');
+  });
+
+  it('prefers the rightmost repeated pattern in one raw segment', () => {
+    const scrollback = 'codex resume old123\rcodex resume new789';
+    expect(detectResumeCommand(scrollback)).toBe('codex resume new789');
+  });
 });
 
 describe('resumeCommandLabel', () => {

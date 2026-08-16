@@ -48,11 +48,19 @@ function stripTerminalControls(input: string): string {
 
 function resumeCommandIn(line: string): string | null {
   const visible = stripTerminalControls(line);
+  let latest: { index: number; command: string } | null = null;
   for (const { label, regex } of BUILTIN_PATTERNS) {
-    const match = visible.match(regex);
-    if (match) return match[1] ? `${label} ${match[1]}` : label;
+    const globalRegex = new RegExp(regex.source, `${regex.flags}g`);
+    for (const match of visible.matchAll(globalRegex)) {
+      const index = match.index;
+      if (latest && latest.index > index) continue;
+      latest = {
+        index,
+        command: match[1] ? `${label} ${match[1]}` : label,
+      };
+    }
   }
-  return null;
+  return latest?.command ?? null;
 }
 
 /**
@@ -70,9 +78,11 @@ export function normalizeResumeCommand(command: string): string | null {
 /**
  * Scan the last 50 lines of scrollback for known resume commands, newest line
  * first. Returns the full resume command string for the most recent match, or
- * null if none found. Recency matters: a pane that resumed more than once prints
- * a fresh resume hint each time, and only the latest one resumes the *current*
- * session — scanning oldest-first would persist a stale session id.
+ * null if none found. Within one LF-delimited raw output segment, the rightmost
+ * match wins (PTY redraws may use CR without LF). Recency matters: a pane that
+ * resumed more than once prints a fresh resume hint each time, and only the
+ * latest one resumes the *current* session — scanning oldest-first or preferring
+ * pattern order would persist a stale session id.
  *
  * Walks the tail rather than splitting the whole buffer: this runs per pane on
  * every save, over scrollback capped at 100k chars (`scrollback-trim.ts`), and
