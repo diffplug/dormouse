@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { attachRouter, getAlertStates } from './message-router';
 import { getWebviewHtml } from './webview-html';
+import { postToWebview } from './webview-messaging';
 import { getSavedSessionState, saveSessionState, mergeAlertStates } from './session-state';
 import type { ExtensionMessage } from './message-types';
 import * as ptyManager from './pty-manager';
@@ -18,7 +19,9 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
   constructor(private readonly context: vscode.ExtensionContext) {}
 
   postMessage(msg: ExtensionMessage): Thenable<boolean> {
-    return this.view?.webview.postMessage(msg) ?? Promise.resolve(false);
+    // Stamped with the view's message token like every other host → webview
+    // send (docs/specs/vscode.md → "Webview message authentication").
+    return this.view ? postToWebview(this.view.webview, msg) : Promise.resolve(false);
   }
 
   setDescription(text: string | undefined): void {

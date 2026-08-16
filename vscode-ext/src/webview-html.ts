@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { randomBytes } from 'crypto';
+import { HOST_MESSAGE_TOKEN_GLOBAL } from '../../lib/src/lib/vscode-message-token';
+import { mintWebviewMessageToken } from './webview-messaging';
 
 function serializeForInlineScript(value: unknown): string {
   return JSON.stringify(value ?? null)
@@ -21,6 +23,10 @@ export function getWebviewHtml(
 
   const mediaUri = webview.asWebviewUri(vscode.Uri.file(mediaPath));
   const nonce = getNonce();
+  // Separate secret from the nonce above: the nonce authorizes script
+  // execution, this authenticates the sender of every host → webview message so
+  // framed content can't forge one (lib/src/lib/vscode-message-token.ts).
+  const messageToken = mintWebviewMessageToken(webview);
 
   html = html.replace(/(href|src)="\.?\/?assets\//g, `$1="${mediaUri}/assets/`);
 
@@ -54,7 +60,7 @@ export function getWebviewHtml(
   // get a duplicate nonce attribute from the regex above.
   html = html.replace(
     '</head>',
-    `    <script nonce="${nonce}">globalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};</script>\n  </head>`,
+    `    <script nonce="${nonce}">globalThis.${HOST_MESSAGE_TOKEN_GLOBAL} = ${serializeForInlineScript(messageToken)};\nglobalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};</script>\n  </head>`,
   );
 
   return html;

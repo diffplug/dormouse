@@ -21,7 +21,8 @@ Extension Host (vscode-ext/src/)
 ├── shell-selection.ts        — persisted shell picker (workspace/global selectedShellPath)
 ├── agent-browser-host.ts     — extension-host wiring + stream relay for the agent-browser surface
 ├── iframe-proxy-host.ts      — VS Code binding for the iframe transparent proxy (injects the logger)
-├── webview-html.ts           — CSP injection, nonce generation, asset URI rewriting
+├── webview-html.ts           — CSP injection, nonce + message-token generation, asset URI rewriting
+├── webview-messaging.ts      — per-webview message tokens; the single host → webview send path
 └── log.ts                    — extension logging
 
 Shared PTY Core (standalone/sidecar/)
@@ -57,6 +58,7 @@ Frontend Library (lib/src/)
     ├── session-types.ts          — PersistedSession/PersistedPane/PersistedAlertState types
     ├── resume-patterns.ts        — detect resumable commands from scrollback
     ├── resolve-pane-element.ts   — resolve a pane element to its Lath leaf (overlay measurement)
+    ├── vscode-message-token.ts   — host-message token constants + the `isHostMessage` guard
     └── platform/
         ├── types.ts              — PlatformAdapter interface
         ├── index.ts              — adapter factory (auto-detects VS Code vs fake)
@@ -75,6 +77,7 @@ Universal PTY/transport invariants live in `docs/specs/transport.md`. The rules 
 - **mergeAlertStates on every save path.** Both the frontend periodic save (`onSaveState` callback) and the backend deactivate refresh (`refreshSavedSessionStateFromPtys`) must merge current alert states. Missing this causes alert state to revert on restore.
 - **retainContextWhenHidden.** Set on both `WebviewPanel` (editor tabs) and `WebviewView` (bottom panel) so that xterm.js DOM, scrollback, and PTY subscriptions survive panel hide/show without going through a resume.
 - **Two save sources.** Session state is saved from two places: the frontend (debounced 500ms + 30s interval via `dormouse:saveState`) and the backend (deactivate flushes webviews then refreshes from live PTYs). Both paths must produce consistent state.
+- **Every host → webview send carries the message token.** The webview's `window` is a shared inbox that framed surfaces can also post to, so the adapter drops any `message` that isn't stamped with the per-boot token. Adding a send path that bypasses `postToWebview` breaks that message (visibly — it is simply ignored); adding a `message` listener that skips `isHostMessage` reopens the forgery hole. See "Webview message authentication" below.
 - **Workbench keybindings mirror for selected chords.** `lib/src/lib/vscode-keybindings.ts` is the source of truth for the VS Code-hosted mirror allowlist. For `Ctrl/Cmd+P`, `Ctrl/Cmd+Shift+P`, `Ctrl/Cmd+B`, and `F1`, xterm still processes the key while the webview also posts `dormouse:runWorkbenchCommand`; `message-router.ts` validates that request against the same small command set before calling `vscode.commands.executeCommand`.
 
 ### Extension manifest (current)
@@ -202,6 +205,26 @@ TUIs query the terminal's foreground/background/cursor colors with `OSC 10/11/12
 Source of truth: `vscode-ext/src/webview-html.ts` assembles the CSP directives (`getNonce()` + the directive list).
 
 `unsafe-inline` for styles is needed because VS Code injects theme CSS variables via inline styles on the body element. Scripts remain nonce-gated, with a fresh per-render nonce of 24 CSPRNG bytes (`node:crypto` `randomBytes`) base64url-encoded to 32 characters — a nonce that is guessable is a nonce that is not there, so `Math.random()` is not acceptable here. The webview HTML is built by Vite from the `lib` package, then at runtime `webview-html.ts` rewrites asset URLs to webview URIs, injects the CSP meta tag, applies nonces to all script tags, and injects initial state via a nonce-gated inline script.
+
+### Webview message authentication
+
+The CSP governs what the webview document may *load*. It says nothing about who may *message* it — and in VS Code the webview's `window` is a shared inbox. The extension host posts to it, and so can any framed surface (`dor iframe`, agent-browser; `docs/specs/dor-browser.md`) via `parent.postMessage`, which crosses origin and sandbox boundaries by design. Several inbound message types are consequential: `dor:controlRequest` becomes a `dormouse:control-request` event that `use-dor-control.ts` can turn into a `writePty` call, and the `pty:*` family drives what the user sees in a terminal. `event.data.type` is attacker-chosen, so it cannot be the thing that decides trust.
+
+So host-originated messages are authenticated by a **per-boot message token**:
+
+- `getWebviewHtml` mints one token per webview document — 24 CSPRNG bytes, base64url, minted by `mintWebviewMessageToken` — and injects it as `globalThis.__DORMOUSE_MESSAGE_TOKEN__` in the same nonce-gated inline script that seeds the other `__DORMOUSE_*` globals. Re-serving a webview's HTML mints a new token; tokens are held in a `WeakMap` keyed by `vscode.Webview`, so they follow webview lifetime with no cleanup.
+- **Every** host → webview send goes through `postToWebview`, which stamps the message with that webview's token. `attachRouter` exposes it as a local `post()` (all router sends use it) and `DormouseViewProvider.postMessage` routes through it. A send to a webview with no minted token is dropped and reported as undelivered (`false`) — the same signal the VS Code API gives for a dead webview, which the `dormouse:newTerminal` retry loop and `forwardDorControlRequest`'s rejection path already handle.
+- `VSCodeAdapter` captures the token **once, at construction**, and both of its `message` listeners — the main dispatcher and the per-request reply listener inside `requestResponse` — call `isHostMessage(event.data, token)` before reading anything else, including `type`.
+
+Why a token rather than checking `event.source`/`event.origin`: a source check would have to assert something about VS Code's internal webview frame topology, which is undocumented and can change between releases. A token depends on nothing but itself. It is deliberately **not** the CSP nonce — that nonce authorizes script execution, this token authenticates a message sender; conflating them makes both harder to reason about, and the nonce appears in markup the page can read.
+
+The guard fails closed in both directions: a webview served without the global accepts nothing, and a host send without a token delivers nothing. Framed content cannot read the parent's globals cross-origin, so it cannot produce the token.
+
+This is the same shape as the origin check the Wall already applies to messages from proxied iframes (`isProxyOrigin` in `lib/src/lib/iframe-proxy-registry.ts`, used by `use-wall-keyboard.ts` and `IframePanel.tsx`) — a small module holding the trust criterion so each listener stays a one-line guard. Those two listeners validate their own senders and are unaffected by the token; the token covers only the adapter's host channel.
+
+Scope is VS Code. The standalone adapters receive the equivalent events over Tauri's `listen()` IPC and the dev harness's host WebSocket (`docs/specs/standalone.md`, `docs/specs/transport.md`), never `window.postMessage`, so they have no forgeable inbox to guard.
+
+Source of truth: `lib/src/lib/vscode-message-token.ts` (constants + `isHostMessage`), `vscode-ext/src/webview-messaging.ts` (mint + `postToWebview`), `vscode-ext/src/webview-html.ts` (injection), `lib/src/lib/platform/vscode-adapter.ts` (both guards). Tests: the `host message authentication` block in `lib/src/lib/platform/vscode-adapter.test.ts`.
 
 ### Build and development
 
