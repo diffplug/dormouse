@@ -220,7 +220,7 @@ Only the single extension step described above is offered. There is no multi-lev
 
 ### 8.1 Overview
 
-Paste reads the system clipboard and writes the content to the PTY. Paste keystrokes are **intercepted by the terminal**, not forwarded to the inside program. The inside program only receives the pasted bytes (optionally wrapped in bracketed-paste markers; see §8.5).
+Paste reads the system clipboard and writes the content to the PTY. Paste keystrokes are **intercepted by the terminal**, not forwarded to the inside program. The inside program only receives the pasted bytes (optionally wrapped in bracketed-paste markers; see §8.5). A non-empty clipboard or file-path paste counts as user input: before the direct PTY write it marks the Session touched and retires any cold-restore resume offer (`docs/specs/layout.md`).
 
 Paste behavior differs by platform to match each OS's native convention.
 
