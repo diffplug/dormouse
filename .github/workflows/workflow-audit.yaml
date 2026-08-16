@@ -22,7 +22,9 @@ name: workflow-audit
 #
 #   - Renovate pin bumps — every changed line in .github/workflows/ is a
 #     `uses:` line whose action name is unchanged, only its ref. "Same
-#     action, new pin."
+#     action, new pin." The commit must leave .config/tend.yaml alone,
+#     as the regen arm requires, or the config would ride along
+#     unexamined in a pin-shaped diff.
 #   - tend regeneration — the changed tend-*.yaml files reproduce
 #     byte-for-byte from `uvx tend@<version> init` at the version in the
 #     files' own generated header, run against that commit's own
@@ -89,14 +91,15 @@ jobs:
           # passes the same-commit guard in is_tend_regen, and reproduces
           # byte-for-byte against a config nothing ever looked at. Widening the
           # window makes the config edit an auditable commit reported on its own
-          # content — both classifiers already fail open on it, since each scopes
-          # its own diff to .github/workflows/ and comes back empty.
+          # content. Both classifiers refuse any commit that touches the config,
+          # so nothing in the widened window can be swallowed by an arm that
+          # doesn't inspect it — that pairing is the invariant, not either half.
           COMMITS=$(git log --all --since="$SINCE" --pretty=format:'%H' \
             -- .github/workflows/ .config/tend.yaml | sort -u)
 
           if [ -z "$COMMITS" ]; then
-            echo "No workflow file changes since $SINCE."
-            echo "No workflow file changes since \`$SINCE\`." >> "$GITHUB_STEP_SUMMARY"
+            echo "No workflow or tend-config changes since $SINCE."
+            echo "No workflow or tend-config changes since \`$SINCE\`." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
@@ -135,6 +138,14 @@ jobs:
             pr_authors=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha/pulls" \
               --jq 'if length == 0 then "" else ([.[].user.login] | unique | join(",")) end') || return 1
             [ "$pr_authors" = "renovate[bot]" ] || return 1
+
+            # Same requirement as is_tend_regen, for the same reason: the content
+            # test below reads only .github/workflows/, so a config edit carried
+            # in a pin-bump-shaped commit would ride along unexamined. With both
+            # arms refusing it, any commit touching the config must be reported
+            # by one of them — the window covers two paths and neither classifier
+            # can silently swallow the one it doesn't inspect.
+            [ -z "$(git show --name-only --pretty='' "$sha" -- .config/tend.yaml)" ] || return 1
 
             diff=$(git show --format='' -U0 "$sha" -- .github/workflows/) || return 1
             # Content lines only — drop diff headers and hunk markers.
@@ -293,7 +304,7 @@ jobs:
 
           BODY=$(mktemp)
           {
-            echo "$COUNT unexplained commit(s) touching \`.github/workflows/\` since \`$SINCE\`."
+            echo "$COUNT unexplained commit(s) touching \`.github/workflows/\` or \`.config/tend.yaml\` since \`$SINCE\`."
             echo ""
             echo "Routine Renovate pin bumps and reproducible tend regenerations are"
             echo "classified and omitted — see the run summary for what was skipped."
