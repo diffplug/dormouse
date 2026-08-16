@@ -35,7 +35,7 @@ const HOST_TOKEN = 'test-host-message-token';
 
 /**
  * Build the `message` event the extension host would post: the payload plus the
- * token stamp `postToWebview` adds. Framed content can't read the token, so a
+ * token stamp `serveWebview`'s channel adds. Framed content can't read the
  * forged message is just this without the stamp.
  */
 function hostMessage(data: Record<string, unknown>, token: unknown = HOST_TOKEN): MessageEvent {
