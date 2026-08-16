@@ -15,16 +15,6 @@ After approving a visually-changing PR the approval is gated, so the CI Monitori
 
 When `UI Tests` is the only non-terminal check and every automated check is green (Build & Test, Visual Regression Tests, verify, Standalone Smoketest, Cloudflare Pages, Storybook Publish), treat it as human-gated: stop polling, confirm nothing flipped to FAILURE, and keep the approval standing — don't wait out the poll cap. Polling it to the cap wastes ~9–17 job-minutes per visually-changing PR with no added signal. (Observed on #203, #289, #317.)
 
-## `tend check`'s org-level `repo-secret-allowlist` FAIL is a known false positive
-
-`tend check` reports all ten `diffplug` org-level secrets (`BUILDCACHE_*`, `CHOCO_*`, `GPG_*`, `GRADLE_*`, `NEXUS_*`) as available to this repo's workflows. They are not. Every one has `visibility: selected`, and none of their selected-repositories lists includes `diffplug/dormouse` — verify with (org-admin only; the workflow token 403s on this endpoint, so take the ruling as given from CI):
-
-```
-gh api orgs/diffplug/actions/secrets/NEXUS_USER/repositories --jq '.repositories[].full_name'
-```
-
-The sweep enumerates org secrets without consulting visibility, so no repo-side configuration can clear it — the secrets are already at the tightest scoping GitHub offers. Do **not** add them to `secrets.allowed` in `.config/tend.yaml`: that entry means "any workflow here can read this token," which is false, and it would suppress the warning if one of them were ever genuinely shared with this repo. Filed upstream as [max-sixty/tend#993](https://github.com/max-sixty/tend/issues/993); leave the FAIL standing until it's fixed, and don't report it as new drift on [#339](https://github.com/diffplug/dormouse/issues/339).
-
 ## Settled upstream rulings — don't re-file
 
 Before a `review-runs`/`review-reviewers` sweep flags a tend behavior as waste or files it upstream, check this list — these were already raised and ruled on, so re-filing burns a session and spams upstream:
