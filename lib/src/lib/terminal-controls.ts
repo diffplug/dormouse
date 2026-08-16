@@ -13,16 +13,17 @@
 export function stripTerminalControls(input: string): string {
   return (
     input
-      // String controls: OSC (BEL or ST terminated) and DCS (ST terminated).
-      .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '')
-      .replace(/\x1bP[\s\S]*?\x1b\\/g, '')
+      // String controls: OSC (BEL or ST terminated); DCS/SOS/PM/APC (ST
+      // terminated). ST is `\x1b\\` or its 8-bit form `\x9c`.
+      .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\|\x9c)/g, '')
+      .replace(/\x1b[PX^_][\s\S]*?(?:\x1b\\|\x9c)/g, '')
       // An UNterminated string control (a chunk or trim cut mid-sequence)
       // swallows the rest of the input. Without this the ESC catch-all below
       // would strip only the introducer and promote the payload — an OSC window
       // title, say — into text that reads as terminal output. Nothing before the
       // cut is lost: the terminated forms above have already been removed, so
       // whatever remains really is an unclosed payload.
-      .replace(/\x1b[\]P][\s\S]*$/, '')
+      .replace(/\x1b[\]PX^_][\s\S]*$/, '')
       // CSI, charset designators, and remaining two-byte ESC sequences.
       .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
       .replace(/\x1b[()][A-Za-z0-9]/g, '')
