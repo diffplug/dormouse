@@ -16,6 +16,7 @@ import {
   type PromptSubmitState,
 } from './terminal-command-input';
 import { derivePromptShape, extractCommand, type PromptShape } from './terminal-prompt-shape';
+import { stripTerminalControls } from './terminal-controls';
 import { getSessionIdByPtyId } from './terminal-store';
 
 const paneStates = new Map<string, TerminalPaneState>();
@@ -334,7 +335,11 @@ function resolvePaneStateIdByPtyId(ptyId: string): string {
 // integration, returning the prompt line (for shape learning) or null. Custom
 // prompts that lack the path/user context signal (`/`, `~`, `@`, `:`) or a
 // recognized terminator (`$`, `#`, `%`, `>`) won't match — intentional, since
-// false positives would prematurely flip a running command back to idle.
+// false positives would prematurely flip a running command back to idle. The
+// 1024-char tail this reads lands mid-sequence routinely, which is why the
+// shared `stripTerminalControls` swallows an unterminated string control: a
+// buffer ending in a half-arrived title OSC would otherwise offer its payload
+// up as the last visible line.
 function detectReturnedShellPrompt(output: string): string | null {
   const visible = stripAltScreenSpans(output);
   const text = stripTerminalControls(visible).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -406,15 +411,6 @@ function stripAltScreenSpans(input: string): string {
     }
   }
   return result;
-}
-
-function stripTerminalControls(input: string): string {
-  return input
-    .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '')
-    .replace(/\x1bP[\s\S]*?\x1b\\/g, '')
-    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
-    .replace(/\x1b[()][A-Za-z0-9]/g, '')
-    .replace(/\x1b[@-_]/g, '');
 }
 
 function notifyTerminalPaneStateListeners(): void {

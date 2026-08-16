@@ -1,3 +1,5 @@
+import { stripTerminalControls } from './terminal-controls';
+
 interface ResumePattern {
   /** The invocation without its volatile session argument. What the UI offers to
    *  run: the session id is already on screen in the scrollback above the offer,
@@ -43,25 +45,6 @@ const BUILTIN_PATTERNS: ResumePattern[] = [
 /** How far back a resume hint is still considered current. */
 const SCAN_LINES = 50;
 
-/** Remove terminal presentation controls before interpreting visible output. */
-function stripTerminalControls(input: string): string {
-  return input
-    // String controls: OSC (BEL or ST terminated) and DCS (ST terminated).
-    .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '')
-    .replace(/\x1bP[\s\S]*?\x1b\\/g, '')
-    // An UNterminated string control (a chunk or trim cut mid-sequence) swallows
-    // the rest of the input. Without this the ESC catch-all below would strip
-    // only the introducer and promote the payload — an OSC window title, say —
-    // into text that reads as terminal output.
-    .replace(/\x1b[\]P][\s\S]*$/, '')
-    // CSI, charset designators, and remaining two-byte ESC sequences.
-    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
-    .replace(/\x1b[()][A-Za-z0-9]/g, '')
-    .replace(/\x1b[@-_]/g, '')
-    // Preserve LF/CR/TAB as text boundaries; discard other C0/C1 controls.
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, '');
-}
-
 /** Rightmost resume command in already-stripped text (`matchAll` leaves the
  *  shared patterns' `lastIndex` untouched — it scans against a clone). */
 function resumeCommandInVisible(visible: string): string | null {
@@ -77,10 +60,6 @@ function resumeCommandInVisible(visible: string): string | null {
     }
   }
   return latest?.command ?? null;
-}
-
-function resumeCommandIn(line: string): string | null {
-  return resumeCommandInVisible(stripTerminalControls(line));
 }
 
 /**
@@ -107,14 +86,29 @@ export function normalizeResumeCommand(command: string): string | null {
  * Walks the tail rather than splitting the whole buffer: this runs per pane on
  * every save, over scrollback capped at 100k chars (`scrollback-trim.ts`), and
  * all but the last 50 lines would be allocated only to be discarded.
+ *
+ * The window is stripped once, *before* it is split into segments, so a string
+ * control whose payload contains an LF is removed as a unit — stripping each
+ * raw segment independently would hand the second half of an OSC title back as
+ * visible text. For the same reason an unterminated control swallows the rest
+ * of the window rather than the rest of its segment: with no terminator in
+ * view, everything after the introducer is payload as far as this can tell, and
+ * failing toward "no offer" is the safe direction. A payload whose introducer
+ * fell off the front of the window (a trim or a chunk eviction can strand one)
+ * is not recoverable here — nothing marks it as payload — but it grants no more
+ * than ordinary output does, which is already a source of offers.
  */
 export function detectResumeCommand(scrollback: string): string | null {
-  let end = scrollback.length;
-  for (let scanned = 0; scanned < SCAN_LINES && end > 0; scanned++) {
-    const start = scrollback.lastIndexOf('\n', end - 1) + 1;
-    const found = resumeCommandIn(scrollback.slice(start, end));
+  let cursor = scrollback.length;
+  let windowStart = 0;
+  for (let scanned = 0; scanned < SCAN_LINES && cursor > 0; scanned++) {
+    windowStart = scrollback.lastIndexOf('\n', cursor - 1) + 1;
+    cursor = windowStart - 1;
+  }
+  const segments = stripTerminalControls(scrollback.slice(windowStart)).split('\n');
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const found = resumeCommandInVisible(segments[i]);
     if (found) return found;
-    end = start - 1;
   }
   return null;
 }

@@ -28,6 +28,22 @@ describe('detectResumeCommand', () => {
     expect(detectResumeCommand('\x1b]0;claude --resume evil\nprompt$ ')).toBeNull();
   });
 
+  it('does not surrender a string-control payload that spans a newline', () => {
+    // The scan window is stripped as a whole before it is split, so an OSC
+    // whose payload carries an LF is removed as a unit. Stripping each raw
+    // segment on its own handed the second half back as visible text.
+    expect(detectResumeCommand('\x1b]0;title\nclaude --resume evil\x07\nuser$ ')).toBeNull();
+    expect(detectResumeCommand('\x1bPtmux;a\nclaude --resume evil\x1b\\\nuser$ ')).toBeNull();
+  });
+
+  it('reads a hint that follows a terminated title on the same line', () => {
+    // The unterminated-swallow rule must not eat text after a control that did
+    // close: this is the ordinary case of a shell repainting its title.
+    expect(detectResumeCommand('\x1b]0;~/proj\x07claude --resume abc123\n$ ')).toBe(
+      'claude --resume abc123',
+    );
+  });
+
   it('reads a hint wrapped in prose punctuation', () => {
     // Rendering a command inside backticks, quotes or parens is how agents
     // normally print one mid-sentence; requiring whitespace after the id lost
