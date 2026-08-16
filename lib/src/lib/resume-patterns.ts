@@ -16,9 +16,14 @@ interface ResumePattern {
 // later executed, so punctuation with shell meaning must never enter it.
 const RESUME_ID = String.raw`[A-Za-z0-9][A-Za-z0-9_-]*`;
 
-/** The character after the invocation must end it — the identifier grammar above
- *  is the only thing that may be captured into an executable command. */
-const ENDS_INVOCATION = String.raw`(?=$|[ \t\r\n])`;
+/** The invocation must not be the prefix of a longer word — `claude --continuex`
+ *  is not an offer to continue. Nothing stronger belongs here: agents render a
+ *  hint inside prose punctuation as often as bare (`Resume with
+ *  \`claude --resume <id>\`.`), and requiring whitespace or end-of-line after it
+ *  silently dropped every one of those. Safety comes from RESUME_ID plus the
+ *  rebuild below, not from what follows the match; and because RESUME_ID is
+ *  greedy this lookahead can never truncate an id, only reject a longer word. */
+const ENDS_INVOCATION = String.raw`(?![A-Za-z0-9_-])`;
 
 const BUILTIN_PATTERNS: ResumePattern[] = [
   {

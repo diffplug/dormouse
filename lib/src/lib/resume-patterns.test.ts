@@ -28,9 +28,28 @@ describe('detectResumeCommand', () => {
     expect(detectResumeCommand('\x1b]0;claude --resume evil\nprompt$ ')).toBeNull();
   });
 
-  it('rejects shell syntax instead of persisting executable scrollback', () => {
+  it('reads a hint wrapped in prose punctuation', () => {
+    // Rendering a command inside backticks, quotes or parens is how agents
+    // normally print one mid-sentence; requiring whitespace after the id lost
+    // every such hint.
+    expect(detectResumeCommand('Resume with `claude --resume abc123`.\n')).toBe(
+      'claude --resume abc123',
+    );
+    expect(detectResumeCommand("run 'codex resume 01JCX' now\n")).toBe('codex resume 01JCX');
+    expect(detectResumeCommand('(claude --continue)\n')).toBe('claude --continue');
+  });
+
+  it('never captures shell syntax, only the invocation in front of it', () => {
+    // The command is rebuilt as label + captured id, so what trails the id is
+    // dropped rather than persisted — but an id that is *made of* shell syntax
+    // never matches in the first place.
     expect(detectResumeCommand('claude --resume $(touch${IFS}/tmp/pwn)\n')).toBeNull();
-    expect(detectResumeCommand('codex resume safe; touch /tmp/pwn\n')).toBeNull();
+    expect(detectResumeCommand('codex resume safe; touch /tmp/pwn\n')).toBe('codex resume safe');
+  });
+
+  it('does not match an invocation that is the prefix of a longer word', () => {
+    expect(detectResumeCommand('claude --continuex\n')).toBeNull();
+    expect(detectResumeCommand('claude --continue-session\n')).toBeNull();
   });
 
   it('returns null when no pattern matches', () => {
