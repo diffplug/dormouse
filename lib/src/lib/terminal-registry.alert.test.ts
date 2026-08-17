@@ -95,6 +95,7 @@ import { makeAlertScenario, type FakePtyAdapter, type FakeScenario } from './pla
 import {
   DEFAULT_ACTIVITY_STATE,
   applyTerminalSemanticEvents,
+  countRunningSessions,
   isPaneOscDriven,
   mountElement,
   clearLocalSurfaceActivity,
@@ -109,6 +110,7 @@ import {
   focusSession,
   getOrCreateTerminal,
   getActivity,
+  getTerminalPaneState,
   getWatchedCommands,
   initAlertStateReceiver,
   setCommandWatched,
@@ -117,6 +119,7 @@ import {
   markSessionTodo,
   resumeTerminal,
   restoreTerminal,
+  runResumeCommand,
   setPendingShellOpts,
   subscribeToActivity,
   toggleSessionAlert,
@@ -370,6 +373,57 @@ describe('terminal-registry alert behavior', () => {
     pasteFilePaths(id, ['/tmp/example file.txt']);
 
     expect(isUntouched(id)).toBe(false);
+  });
+
+  it('rejects an unsafe persisted resume command before PTY execution', () => {
+    const id = 'unsafe-resume-command';
+    const received: string[] = [];
+    createSession(id);
+    fakePlatform.setInputHandler(id, (data) => received.push(data));
+
+    runResumeCommand(id, 'claude --resume $(touch${IFS}/tmp/pwn)');
+
+    expect(received).toEqual([]);
+    expect(isUntouched(id)).toBe(true);
+  });
+
+  it('seeds semantic command state before writing a resume command', () => {
+    const id = 'tracked-resume-command';
+    const received: string[] = [];
+    let stateAtWrite: ReturnType<typeof getTerminalPaneState> | null = null;
+    createSession(id);
+    fakePlatform.setInputHandler(id, (data) => {
+      received.push(data);
+      stateAtWrite = getTerminalPaneState(id);
+    });
+
+    runResumeCommand(id, 'claude --resume 4f2c9b1e-6a03');
+
+    expect(received).toEqual(['claude --resume 4f2c9b1e-6a03\r']);
+    expect(stateAtWrite).toMatchObject({
+      activity: { kind: 'running' },
+      currentCommand: {
+        rawCommandLine: 'claude --resume 4f2c9b1e-6a03',
+        source: 'user_input',
+      },
+    });
+    expect(countRunningSessions()).toBe(1);
+  });
+
+  it('does not run a resume command in a pane whose process has exited', () => {
+    const id = 'dead-resume-command';
+    const received: string[] = [];
+    const entry = createSession(id);
+    fakePlatform.setInputHandler(id, (data) => received.push(data));
+    // The shell a restore spawned died (e.g. its saved cwd is gone), so there is
+    // nothing to type into — and seeding a command start nothing will ever
+    // finish would leave this pane counted as running forever.
+    entry.exited = true;
+
+    runResumeCommand(id, 'claude --resume 4f2c9b1e-6a03');
+
+    expect(received).toEqual([]);
+    expect(countRunningSessions()).toBe(0);
   });
 
   it('seeds untouched state on resume and restore while defaulting missing state to touched', () => {

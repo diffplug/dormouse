@@ -16,6 +16,7 @@ import {
   type PromptSubmitState,
 } from './terminal-command-input';
 import { derivePromptShape, extractCommand, type PromptShape } from './terminal-prompt-shape';
+import { stripTerminalControls } from './terminal-controls';
 import { getSessionIdByPtyId } from './terminal-store';
 
 const paneStates = new Map<string, TerminalPaneState>();
@@ -193,14 +194,16 @@ export function recordTerminalUserInputByPtyId(ptyId: string, input: string, rea
   recordTerminalUserInput(resolvePaneStateIdByPtyId(ptyId), input, reader);
 }
 
-// `dor split/ensure -- <command>` spawns a real interactive shell and types the
-// command into it once it reaches a prompt (see typeCommandWhenPromptReady),
-// rather than running `shell -c command`. We seed that command here at spawn,
-// before it is typed, for two reasons. First, it is the readiness sentinel:
+// Programmatically launched interactive commands bypass xterm's onData
+// keystroke fallback, so callers seed their semantic command state here before
+// the PTY write. `dor split/ensure -- <command>` does this at spawn, before
+// typeCommandWhenPromptReady types it. The cold-restore resume action does it
+// immediately before its direct write. For split/ensure it is also the readiness
+// sentinel:
 // typeCommandWhenPromptReady waits for this currentCommand to clear, which
 // happens when the shell draws its first prompt (OSC promptStart, or the
 // keystroke heuristic's prompt detector for shells without integration) — the
-// signal the shell can take input. Second, it bridges the matching window until
+// signal the shell can take input. It then bridges the matching window until
 // the command is typed and the integration re-reports it via OSC 633, so
 // `dor ensure` can match a surface it (or a prior ensure) created. Sourced as
 // `user_input` so it does not mark the pane OSC-driven and so the first-prompt
@@ -332,7 +335,11 @@ function resolvePaneStateIdByPtyId(ptyId: string): string {
 // integration, returning the prompt line (for shape learning) or null. Custom
 // prompts that lack the path/user context signal (`/`, `~`, `@`, `:`) or a
 // recognized terminator (`$`, `#`, `%`, `>`) won't match — intentional, since
-// false positives would prematurely flip a running command back to idle.
+// false positives would prematurely flip a running command back to idle. The
+// 1024-char tail this reads lands mid-sequence routinely, which is why the
+// shared `stripTerminalControls` swallows an unterminated string control: a
+// buffer ending in a half-arrived title OSC would otherwise offer its payload
+// up as the last visible line.
 function detectReturnedShellPrompt(output: string): string | null {
   const visible = stripAltScreenSpans(output);
   const text = stripTerminalControls(visible).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -404,15 +411,6 @@ function stripAltScreenSpans(input: string): string {
     }
   }
   return result;
-}
-
-function stripTerminalControls(input: string): string {
-  return input
-    .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '')
-    .replace(/\x1bP[\s\S]*?\x1b\\/g, '')
-    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
-    .replace(/\x1b[()][A-Za-z0-9]/g, '')
-    .replace(/\x1b[@-_]/g, '');
 }
 
 function notifyTerminalPaneStateListeners(): void {

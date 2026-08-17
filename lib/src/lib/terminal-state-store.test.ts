@@ -116,6 +116,23 @@ describe('terminal semantic state store command input fallback', () => {
     expect(getTerminalPaneState('pane').currentCommand?.displayCommand).toBe('lazygit');
   });
 
+  it('does not read a half-arrived title OSC as a returned prompt', () => {
+    // The 1024-char tail this detector reads cuts mid-sequence routinely, and a
+    // title that carries the prompt string would otherwise land as the last
+    // visible line and flip a running command back to idle.
+    submit('pane', 'lazygit');
+    recordTerminalOutput('pane', 'still working\r\n\x1b]0;user@host:~/repo$ ');
+
+    expect(getTerminalPaneState('pane').currentCommand?.displayCommand).toBe('lazygit');
+  });
+
+  it('still sees a real prompt trailed by a half-arrived title OSC', () => {
+    submit('pane', 'lazygit');
+    recordTerminalOutput('pane', '\r\nuser@host repo % \x1b]0;~/re');
+
+    expect(getTerminalPaneState('pane').currentCommand).toBeNull();
+  });
+
   it('ignores prompt-shaped lines emitted inside the alt-screen buffer', () => {
     submit('pane', 'lazygit');
     recordTerminalOutput(

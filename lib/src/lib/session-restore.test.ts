@@ -15,6 +15,7 @@ vi.mock('./terminal-registry', () => ({
 }));
 
 import { restoreSession } from './session-restore';
+import { __resetResumeOffersForTests, getResumeOffer } from './resume-offers';
 
 function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
   return {
@@ -61,6 +62,37 @@ function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
 describe('restoreSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    __resetResumeOffersForTests();
+  });
+
+  it('offers the saved resume command to each restored terminal', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      panes: [
+        { id: 'pane-a', title: 'A', cwd: null, scrollback: 'claude --resume abc\n', resumeCommand: 'claude --resume abc', untouched: false },
+        { id: 'pane-b', title: 'B', cwd: null, scrollback: 'no agent here\n', resumeCommand: null, untouched: false },
+      ],
+    };
+
+    restoreSession(createPlatform(saved));
+
+    expect(getResumeOffer('pane-a')).toBe('claude --resume abc');
+    expect(getResumeOffer('pane-b')).toBeNull();
+  });
+
+  it('makes no resume offer for a browser surface', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      panes: [
+        // A browser pane's terminal-only fields are always blank, but the offer
+        // must be keyed off surface kind rather than trusting that.
+        { id: 'pane-web', title: 'localhost', cwd: null, scrollback: null, resumeCommand: 'claude --resume abc', untouched: false, surfaceType: 'browser' },
+      ],
+    };
+
+    restoreSession(createPlatform(saved));
+
+    expect(getResumeOffer('pane-web')).toBeNull();
   });
 
   it('spawns restored terminals with the configured default shell', () => {
