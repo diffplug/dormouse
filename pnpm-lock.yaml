@@ -96,8 +96,8 @@ importers:
         specifier: 0.5.0-beta.291
         version: 0.5.0-beta.291(@xterm/xterm@6.1.0-beta.291)
       '@xterm/addon-webgl':
-        specifier: 0.20.0-beta.291
-        version: 0.20.0-beta.291(@xterm/xterm@6.1.0-beta.291)
+        specifier: 0.20.0-beta.298
+        version: 0.20.0-beta.298(@xterm/xterm@6.1.0-beta.291)
       '@xterm/xterm':
         specifier: 6.1.0-beta.291
         version: 6.1.0-beta.291
@@ -221,8 +221,8 @@ importers:
         specifier: 0.5.0-beta.291
         version: 0.5.0-beta.291(@xterm/xterm@6.1.0-beta.291)
       '@xterm/addon-webgl':
-        specifier: 0.20.0-beta.291
-        version: 0.20.0-beta.291(@xterm/xterm@6.1.0-beta.291)
+        specifier: 0.20.0-beta.298
+        version: 0.20.0-beta.298(@xterm/xterm@6.1.0-beta.291)
       '@xterm/xterm':
         specifier: 6.1.0-beta.291
         version: 6.1.0-beta.291
@@ -2171,10 +2171,10 @@ packages:
     peerDependencies:
       '@xterm/xterm': ^6.1.0-beta.291
 
-  '@xterm/addon-webgl@0.20.0-beta.291':
-    resolution: {integrity: sha512-gH7r5g8f2NWMhBtaeApuwLQTJmX4uq7zT0okjeNWkFAD0nxzbUPB+kt6sogZZ5K90XYPt2OLu/bhuvF6DmKqOQ==}
+  '@xterm/addon-webgl@0.20.0-beta.298':
+    resolution: {integrity: sha512-65jZWGSV3nu2jVyc/r2H31Q+oXnDX8IhcSquREVlDjqmfOINXhAufBj2zcK6BCgYT0jrdx7y64VFgVcQ3vAkRA==}
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.292
+      '@xterm/xterm': ^6.1.0-beta.301
 
   '@xterm/xterm@6.1.0-beta.291':
     resolution: {integrity: sha512-Q6IjxogKIu7fBkXHcn4vQhfHvtwhIv/NN8LR0knCAxPA06/jXuHwreqX9Y/4zvzj7m8u6OBndOJDCUAxLmRfQQ==}
@@ -5848,7 +5848,7 @@ snapshots:
     dependencies:
       '@xterm/xterm': 6.1.0-beta.291
 
-  '@xterm/addon-webgl@0.20.0-beta.291(@xterm/xterm@6.1.0-beta.291)':
+  '@xterm/addon-webgl@0.20.0-beta.298(@xterm/xterm@6.1.0-beta.291)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.291
 
