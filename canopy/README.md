@@ -15,11 +15,14 @@ pnpm dev:canopy   # storybook on http://localhost:6007
   no auth). pnpm records an integrity hash in the lockfile.
 - The addon bundles xterm core internals, so `@xterm/xterm` here must be the
   exact beta the fork release was built from — the release version encodes it:
-  `0.20.0-sdf291.0` ⇒ built from `@xterm/xterm@6.1.0-beta.291`.
+  `0.20.0-sdf301.0` ⇒ built from `@xterm/xterm@6.1.0-beta.301`.
 - Renovate cannot see tarball URLs, and `.github/renovate.json` disables
   `@xterm/**` for this file so it cannot drift the two pins off the fork base
-  either. Bumps are manual: cut a fork release, then update the URL and both
-  pins here. The trigger and the review process are in
+  either. Bumps are manual: cut a fork release, then
+  `node scripts/xterm-bump.mjs --canopy <forkVersion>` from the repo root
+  rewrites the URL and both pins together. `scripts/xterm-lint.mjs` (in
+  `pnpm test`) fails if the `-sdfNNN` in the URL and the `@xterm/xterm` pin ever
+  disagree. The trigger and the review process are in
   `docs/specs/webgl-text.md`; the fork-side recipe is in FORK.md on the `sdf`
   branch.
 
@@ -30,8 +33,9 @@ stacked: pristine upstream `@xterm/addon-webgl`, the fork with `sdf: false`
 (isolates the instance-layout/shader changes), and the fork with `sdf: true`
 (isolates the SDF glyph path). The upstream pin must be the same commit as the
 fork base — the addon's beta counter is offset from core's (addon
-`0.20.0-beta.290` == core `6.1.0-beta.291` == commit `699f5537`); re-derive it
-with `npm view @xterm/addon-webgl@<ver> gitHead` when the fork rebases.
+`0.20.0-beta.298` == core `6.1.0-beta.301` == commit `8c9b9fdb`); re-derive it
+with `npm view @xterm/addon-webgl@<ver> gitHead` when the fork rebases, or let
+`node scripts/xterm-bump.mjs --canopy <forkVersion>` pick the matching addon.
 
 Story content writes PUA glyphs (powerline chevrons etc.) as `\uE0BX` escapes,
 never literal characters — the literals are invisible in editors and were once

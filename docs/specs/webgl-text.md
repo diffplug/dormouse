@@ -37,11 +37,25 @@ WebGL?" is answered by layout.md, not here.
   version bumps are manual edits of `canopy/package.json`. Because the tarball
   is invisible to it, Renovate would otherwise drift canopy's two sibling pins
   off the fork base unnoticed, so `.github/renovate.json` disables `@xterm/**`
-  scoped to `canopy/package.json` — both pins move only by hand. `lib/` and
-  `standalone/` keep tracking upstream betas (as one grouped `xterm` PR, since
-  core and its addons peer on the exact matching beta), so between fork rebases
-  the two can sit on different `@xterm/xterm` betas. That divergence is
-  expected and confined to the Storybook-only lab.
+  scoped to `canopy/package.json` — both pins move only by hand (or via
+  `node scripts/xterm-bump.mjs --canopy <forkVersion>`, which rewrites the URL
+  and both pins from the commit the fork version encodes). `lib/` and
+  `standalone/` keep tracking upstream betas as one grouped `xterm` PR, so
+  between fork rebases the two can sit on different `@xterm/xterm` betas. That
+  divergence is expected and confined to the Storybook-only lab.
+- **Upstream pins are per-commit, not per-latest.** The four `@xterm/*`
+  packages ship from one repo but carry independent beta counters — an addon is
+  published only when its own content changes — and each addon's
+  `peerDependencies['@xterm/xterm']` names the exact core version published
+  from the same commit. So "the latest of each" is routinely a set spanning two
+  commits, and because `^6.1.0-beta.N` admits every later beta, nothing in npm
+  or pnpm complains while addons run against core internals they were not
+  compiled against. `scripts/xterm-lint.mjs` (offline, in `pnpm test`) enforces
+  three things this depends on: every addon pin's peer range equals `^` its
+  workspace's core pin, `lib` and `standalone` agree, and canopy's `-sdfNNN`
+  tarball version matches its core pin. `scripts/xterm-bump.mjs`
+  (`pnpm bump:xterm`) derives the newest set that all four packages published
+  from one commit and writes it.
 - **Releases are hand-cut today** (build, `npm pack`, `gh release create` per
   FORK.md); automating this is staged in `## Future`.
 - **Dev loop**: `pnpm link ~/projects/xterm.js/addons/addon-webgl` from
@@ -51,7 +65,8 @@ WebGL?" is answered by layout.md, not here.
   and reinstall before trusting a tarball verification.
 
 Source of truth: `canopy/package.json` (pins), `canopy/README.md` (bump flow),
-FORK.md in the fork.
+`scripts/xterm-lint.mjs` + `scripts/xterm-bump.mjs` (the pin invariants and the
+tool that satisfies them), FORK.md in the fork.
 
 ## Following upstream
 
@@ -61,18 +76,21 @@ an older base makes canopy's `UpstreamVsFork` harness compare against an
 upstream we no longer ship, which is the one thing the harness exists to
 prevent. Each time Renovate opens the grouped `xterm` PR:
 
-1. **Read the upstream diff first** and decide what it is worth. Derive the
-   commit range with `npm view @xterm/xterm@6.1.0-beta.NNN gitHead` and compare
-   on GitHub. Most betas do not touch `addons/addon-webgl`, in which case the
-   bump is a no-op for us and the fork does not move; when they do, that diff
-   is the improvements-and-risks assessment.
+1. **Read the upstream diff first** and decide what it is worth. Start with
+   `node scripts/xterm-bump.mjs --dry-run`: it names the newest coherent set
+   (which is often an older core than Renovate proposed), prints the commit
+   range from canopy's fork base to it, and lists the files in that range under
+   `addons/addon-webgl/`. Most betas touch none of them, in which case the bump
+   is a no-op for us and the fork does not move; when they do, that diff is the
+   improvements-and-risks assessment.
 2. **Rebase and release the fork** per the `Merging upstream` section of
    FORK.md — including its warning that a conflict-free merge is not a correct
    one, because upstream regularly adds obligations to code we extended without
    anything conflicting.
-3. **Bump `canopy/package.json`** — tarball URL and both pins together — and
-   update the version-correspondence comment at the `UpstreamWebglAddon` import
-   in `canopy/src/GlTerminal.stories.tsx`.
+3. **Bump `canopy/package.json`** — `node scripts/xterm-bump.mjs --canopy
+   <forkVersion>` moves the tarball URL and both pins together — and update the
+   version-correspondence comment at the `UpstreamWebglAddon` import in
+   `canopy/src/GlTerminal.stories.tsx`.
 
 Land all of it in the same PR as the `@xterm/*` bump, so the tree never records
 a state where lib and the fork disagree about which upstream they track.
