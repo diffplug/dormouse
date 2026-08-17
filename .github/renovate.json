@@ -67,14 +67,9 @@
       "separateMajorMinor": false
     },
     {
-      "description": "xterm core and its first-party addons ship from one repo on one beta counter, and each addon peers on the exact core beta of the commit it was built from, which no earlier core beta satisfies. The counters are not always aligned — addon-webgl's is offset from core's, so 0.20.0-beta.298 peers on ^6.1.0-beta.301 — which is why every addon has to be named here rather than inferred. The addons also compile against core internals, so a partial bump lands an unsatisfied peer range and mismatched internals; keep them in one PR. canopy's fork-base pins are excluded below",
+      "description": "xterm core and its first-party addons ship from one repo on one beta counter, and each addon peers on the exact core beta of the commit it was built from, which no earlier core beta satisfies. The counters are not always aligned — addon-webgl's is offset from core's, so 0.20.0-beta.298 peers on ^6.1.0-beta.301, and even a grouped bump can resolve to a pair whose peer range is unsatisfied. What the group buys is that core and the addons arrive in one PR and are tested together; they also compile against core internals, so a partial bump lands mismatched internals. Matched by scope so a newly added addon is grouped automatically; canopy's fork-base pins are excluded below",
       "matchManagers": ["npm"],
-      "matchPackageNames": [
-        "@xterm/xterm",
-        "@xterm/addon-fit",
-        "@xterm/addon-unicode-graphemes",
-        "@xterm/addon-webgl"
-      ],
+      "matchPackageNames": ["@xterm/**"],
       "groupName": "xterm",
       "groupSlug": "xterm",
       "separateMajorMinor": false
