@@ -147,9 +147,9 @@ Versioning: the standalone top-level snapshot is a `PersistedWindow` (its own `v
 
 *Who writes it.* Exactly one writer: a host teardown that interrupted a running agent, reading the live in-memory buffer (`captureAgentRecoveryCommands` in `vscode-ext/src/session-state.ts`). The renderer save path never derives it and never guesses. Standalone writes it never, because standalone persists no Session state at all.
 
-*Who reads it.* Cold restore, which auto-runs it (`docs/specs/layout.md` → "Agent resume on cold restore"); nothing reads it on resume, where the agent is still Live. The read is destructive — `consumeRecoveryCommands` unlinks the record before the webview is served, so an auto-resume happens exactly once and a failed activation does not replay it. Source of truth: `getRecoveryCommands` in `vscode-adapter.ts`, `restoreSession` in `session-restore.ts`.
+*Who reads it.* Cold restore, which auto-runs it (`docs/specs/layout.md` → "Agent resume on cold restore"); nothing reads it on resume, where the agent is still Live. Exactly-once holds on two levels, because the capture interrupts every live PTY and those panes are spread across the Dormouse view and any number of editor panels. `takeRecoveryCommands` reads and unlinks the file on the first call of an activation, so the durable copy is gone before any webview is served and a failed activation cannot replay it; within the activation each webview claims only the entries matching *its own* saved pane ids, and a claimed entry leaves the map. So no container can delete another's commands by resolving first, and a view that is disposed and re-resolved (moving the panel container, say) restores without re-running the agent. Source of truth: `takeRecoveryCommands` in `vscode-ext/src/session-state.ts`, `getRecoveryCommands` in `vscode-adapter.ts`, `restoreSession` in `session-restore.ts`.
 
-*Detection.* `detectResumeCommand` strips terminal presentation controls and accepts only the agents' opaque ASCII id grammar (alphanumeric, hyphen, underscore); shell punctuation is never captured into executable state, because this string is executed. Text *around* the invocation is not part of that judgement — codex's real hint is prose on the same line (`To continue this session, run codex resume <id>`), so the prose-tolerant match is load-bearing rather than hypothetical; the command is rebuilt as invocation + captured id and anything trailing the id is dropped. The one thing that must follow the invocation is a word break, so `claude --continuex` is not an offer to continue. The scan window is stripped as a whole, in one pass, so a string control whose payload spans an LF is removed as a unit, and an *unterminated* string control (OSC, DCS, SOS, PM, APC) swallows the rest of the window rather than surrendering its payload — a window title cut mid-sequence does not read as terminal output. "Terminated" tracks what the renderer honours rather than ECMA-48 alone: ST in both forms (`\x1b\\`, `\x9c`), BEL for OSC, and — because xterm's parser aborts a string control on CAN/SUB and ends one on a bare ESC — those three as well, so a prompt printed behind an aborted sequence stays visible instead of being swallowed. A payload whose *introducer* fell off the front of the window (the sidecar's chunk-evicting buffer can strand one) is not recoverable at this layer, since nothing left in view marks it as payload; it grants no more than ordinary output already does. Stripping is the shared `stripTerminalControls` in `lib/src/lib/terminal-controls.ts` — one implementation, so a hardening step cannot reach detection while missing the prompt detector that reads the same kind of tail slice (`docs/specs/terminal-state.md`). Detection strips in **boundary mode**: every CSI *except* SGR becomes a newline rather than vanishing, because deleting one welds text that was never adjacent on screen. Cursor moves are the obvious case, but erasures count too — `\x1b[2K` means the text before it on that line is gone, so what follows is a new region. SGR is the exemption, since a colour change genuinely leaves its text contiguous. Backspace gets the same treatment for the same reason. Observed in the wild as a stored `claude --resume <uuid>codex` — a redraw had put `\x1b[K\x1b[1;1H` between the tail of a stale echoed command and the start of the next, and the greedy id pattern ate across the seam. Because no pattern can span the newline a boundary leaves, the stripped window is then scanned **whole** and the rightmost match wins: that is the newest hint by position, so carriage-return-only redraws still select the newest visible one and pattern order never outranks recency. Restore revalidates through `normalizeResumeCommand` before typing, as defense against a snapshot written by an older detector. Source of truth: `lib/src/lib/resume-patterns.ts`.
+*Detection.* `detectResumeCommand` strips terminal presentation controls and accepts only the agents' opaque ASCII id grammar (alphanumeric, hyphen, underscore); shell punctuation is never captured into executable state, because this string is executed. Text *around* the invocation is not part of that judgement — codex's real hint is prose on the same line (`To continue this session, run codex resume <id>`), so the prose-tolerant match is load-bearing rather than hypothetical; the command is rebuilt as invocation + captured id and anything trailing the id is dropped. The one thing that must follow the invocation is a word break, so `claude --continuex` is not an offer to continue. The scan window is stripped as a whole, in one pass, so a string control whose payload spans an LF is removed as a unit, and an *unterminated* string control (OSC, DCS, SOS, PM, APC) swallows the rest of the window rather than surrendering its payload — a window title cut mid-sequence does not read as terminal output. "Terminated" tracks what the renderer honours rather than ECMA-48 alone: ST in both forms (`\x1b\\`, `\x9c`), BEL for OSC, and — because xterm's parser aborts a string control on CAN/SUB and ends one on a bare ESC — those three as well, so a prompt printed behind an aborted sequence stays visible instead of being swallowed. A payload whose *introducer* fell off the front of the window (the sidecar's chunk-evicting buffer can strand one) is not recoverable at this layer, since nothing left in view marks it as payload; it grants no more than ordinary output already does. A CSI the window was cut off *inside* is swallowed for the same reason a string control is: a tail ending `\x1b[38;5` must not surrender `38;5` as text for the greedy id pattern to absorb. Every escape sequence is matched by its full ECMA-48 shape — ESC, intermediates, one final byte — rather than by the Fe range alone, because `ESC 7`/`ESC 8` (DECSC/DECRC) and `ESC c` (RIS) have finals outside it and stripping only their introducer leaks the final byte into the text as a digit or a letter. Stripping is the shared `stripTerminalControls` in `lib/src/lib/terminal-controls.ts` — one implementation, so a hardening step cannot reach detection while missing the prompt detector that reads the same kind of tail slice (`docs/specs/terminal-state.md`). Detection strips in **boundary mode**, whose rule is inverted: *every* control becomes a newline rather than vanishing, except the two classes that neither move the cursor nor erase — SGR and charset designators, where the text either side really is contiguous. Deleting the rest welds text that was never adjacent on screen. Cursor moves are the obvious case, and not only CSI ones: `ESC M` (RI) is how a TUI scrolls up, `ESC 7`/`ESC 8` bracket a redraw, `ESC c` resets outright, and VT/FF move the cursor down. Erasures count too — `\x1b[2K` means the text before it on that line is gone, so what follows is a new region. Backspace gets the same treatment for the same reason. Observed in the wild as a stored `claude --resume <uuid>codex` — a redraw had put `\x1b[K\x1b[1;1H` between the tail of a stale echoed command and the start of the next, and the greedy id pattern ate across the seam. Because no pattern can span the newline a boundary leaves, the stripped window is then scanned **whole** and the rightmost match wins: that is the newest hint by position, so carriage-return-only redraws still select the newest visible one and pattern order never outranks recency. Restore revalidates through `normalizeResumeCommand` before typing, as defense against a snapshot written by an older detector. Source of truth: `lib/src/lib/resume-patterns.ts`.
 
 Every saved-session entry point must pass through `readPersistedSession()`. That reader accepts both the canonical parsed object and a JSON-stringified session blob before validating it (covering host state APIs that may hand back the inner serialized JSON string); a present-but-unreadable blob is logged and discarded so the caller starts fresh — a corrupt save can never block startup.
 
@@ -226,7 +226,13 @@ The trigger is therefore the **explicit ask**, not the clock:
 1. one `^C` to every live PTY;
 2. poll, and send one more `^C` to a pane that has yielded nothing — either the
    moment it shows `Press Ctrl-C again`, or once ~600 ms have passed and the pane
-   has been silent for ~200 ms.
+   has been silent for ~200 ms. Both clocks start when the first press is *acked*,
+   not when the teardown step is entered: they are statements about the agent, and
+   the agent's clock starts when the `^C` lands. Measuring from entry folds the
+   interrupt's own round trip (up to its 400 ms timeout) into the window and can
+   fire the blind press while codex is still inside its first ~255 ms of silence.
+   The poll's wall-clock ceiling is the one timing anchored to entry instead,
+   because that one is a shutdown budget rather than an agent timing.
 
    Both agents' reaction to `^C` is state-dependent, which is why neither a phrase
    gate nor a timer alone is enough. Observed in a real pane: codex answered the
@@ -396,19 +402,32 @@ stop mattering. The record is written the moment each command is found, so being
 killed mid-poll costs at most a late agent's command rather than everything
 detected so far.
 
-Recovery is scoped to the `WebviewView`. An editor `WebviewPanel` persists via
-webview-side `vscode.setState()`, which the extension host cannot write during
-teardown, so panels get no recovery until a host-side per-panel store exists.
+Recovery covers editor `WebviewPanel`s as well as the `WebviewView`, and it has to:
+the capture interrupts every live PTY, so a panel's agent pays the same interrupted
+turn whether or not it can recover. It needs no host-side per-panel store, because
+the record is keyed by *surface id* rather than owned by a container — a panel gets
+its pane ids from the `vscode.setState()` blob VS Code hands back at
+`deserializeWebviewPanel`, and claims exactly those entries.
 
-Source of truth: `captureAgentRecoveryCommands` / `consumeRecoveryCommands` in
-`vscode-ext/src/session-state.ts`, `deactivate()` in `vscode-ext/src/extension.ts`,
-`interrupt` in `vscode-ext/src/pty-manager.ts`.
+Step 2 also clears any previous record before its first early return. Consumption
+only happens when a container actually resolves, so a session where the Dormouse
+view is never opened would otherwise carry the record forward and auto-run a
+week-old invocation on some much later restore.
+
+Source of truth: `captureAgentRecoveryCommands` / `takeRecoveryCommands` in
+`vscode-ext/src/session-state.ts`, `deactivate()` + `setupPanel` in
+`vscode-ext/src/extension.ts`, `resolveWebviewView` in
+`vscode-ext/src/webview-view-provider.ts`, `interrupt` in
+`vscode-ext/src/pty-manager.ts`.
 
 ## Universal invariants
 
 These rules apply to every adapter. Adapter-specific layering (deactivate ordering, save APIs, panel retention) lives in the adapter spec, e.g. `docs/specs/vscode.md` (deactivate ordering) and `docs/specs/standalone.md` §Quit flow (quit teardown ordering).
 
-- **Scrollback buffers survive PTY exit.** In the shared `pty-core.js`, only the hard `kill`/`killAll` (or host-process exit) clears a PTY's scrollback buffer; natural exit, signal-driven exit, and `gracefulKillAll` leave it readable via `getScrollback`. Both hosts' teardown orderings rest on this contract — capture-after-graceful-kill is only correct because the buffer outlives the process.
+- **Scrollback buffers survive PTY exit.** In the shared `pty-core.js`, only the hard `kill`/`killAll` (or host-process exit) clears a PTY's scrollback buffer; natural exit, signal-driven exit, and `gracefulKillAll` leave it readable via `getScrollback`. Recovery capture no longer depends on this (it runs *before* any kill — see "VS Code teardown ordering"), but a final flush that reads a pane whose shell has just exited still does.
+- **A position in a pane's output is a received count, not a buffer length.** The host-side buffer is capped (1 MB) and evicts from the front, so `scrollbackChars` goes flat while output keeps flowing — on exactly the long-running agent pane recovery exists for. Anything marking a point in the stream, or watching a pane for growth, reads the monotonic `getScrollbackReceived` and slices with `getScrollbackSince`, which joins only the chunks spanning the mark. Source of truth: `vscode-ext/src/pty-manager.ts`.
+- **A spawn that fails still reports an exit.** `pty-core.spawn` answers a node-pty failure with `error` *and* `exit`. `error` is a host-side log line that reaches no webview, so without the exit a pane keeps any command seeded for it as permanently running — a phantom running header, a `countRunningSessions` that never returns to zero, and a quit confirmation on every attempt to close. Reachable whenever a persisted or selected shell binary is gone.
+- **Whole-host acks are correlated by request id.** `interrupt` and `gracefulKillAll` both run on a teardown path with a timeout, so a timed-out call's ack still arrives afterwards. Matching on message type alone let that stale reply resolve the *next* call the instant it was issued. The pty-host echoes `requestId` on `interruptDone` / `gracefulKillDone` and the caller compares it.
 - **Shell login args are shell-specific.** The shared `pty-core.js` launches POSIX shells with `-l` only for shells that accept it. `csh`/`tcsh` must be spawned without `-l` so users whose login shell is C-shell-derived can open a usable terminal in any adapter.
 - **Replayed scrollback ends with a newline.** Output replayed into xterm.js on **resume** must end with `\n`, or zsh prints a `%` artifact at the top of the terminal. (Cold **restore** replays nothing — scrollback is not persisted.)
 - **Replay drops terminal replies only.** While saved output is being replayed into xterm.js, terminal-generated OSC/CSI/DCS query and focus reports are dropped so they do not enter the resumed/restored shell's input buffer. The replay filter must preserve user keyboard escape sequences, including arrows, function keys, and bracketed paste.
@@ -417,13 +436,3 @@ These rules apply to every adapter. Adapter-specific layering (deactivate orderi
 - **Replay filtering does not re-fire alerts.** `pty:replay` re-injects buffered output into xterm.js but must not re-trigger `AlertManager`, activity-monitor events, or protocol notifications.
 
 
-## Future
-
-### Recovery for editor-tab panels
-
-An editor `WebviewPanel` persists through webview-side `vscode.setState()`, which
-the extension host cannot write during `deactivate()`, so recovery is scoped to
-the `WebviewView` (see "VS Code teardown ordering"). Supporting panels needs a
-host-side per-panel store — a `workspaceState` slot keyed by panel id, written by
-the same `onSaveState` the view already uses — so that teardown has somewhere to
-read from and write to. The capture and auto-run machinery underneath is unchanged.

@@ -539,10 +539,10 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/lib/activity-monitor.ts` | Per-session activity state machine: output timing → alert escalation |
 | `lib/src/lib/alert-manager.ts` | Manages ActivityMonitors + attention tracking + TODO state per session |
 | `lib/src/lib/session-types.ts` | Type definitions for persisted sessions (`PersistedPane`, `PersistedDoor`, `PersistedSession`) |
-| `lib/src/lib/session-save.ts` | Serialization: collects layout, scrollback, cwd, alert state for persistence |
+| `lib/src/lib/session-save.ts` | Serialization: collects layout, cwd, alert state for persistence (never scrollback) |
 | `lib/src/lib/session-restore.ts` | Deserialization: loads saved session, calls `restoreTerminal()` for each pane |
 | `lib/src/lib/reconnect.ts` | Priority-based recovery: live PTYs first, then saved session, then empty |
-| `lib/src/lib/resume-patterns.ts` | Detects an agent resume invocation in a live buffer, newest line first, and labels it with the invocation alone |
+| `lib/src/lib/resume-patterns.ts` | Detects an agent resume invocation in a live buffer — rightmost (newest) match in the tail window, rebuilt as invocation + captured id |
 | `lib/src/index.css` | Lath host styling — `.lath-host` / `.lath-leaf` / `.lath-sash` / drop-preview layout and background flattening |
 | `lib/src/theme.css` | Two-layer VSCode theme token system (`@theme --color-*` → `--vscode-*`) and Tailwind v4 `@theme` integration |
 
