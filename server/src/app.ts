@@ -32,6 +32,7 @@ import {
   HELLO_ROUTE,
   HostChallengeIssuer,
   SELFHOST_ACCOUNT_ID,
+  UNAUTHORIZED_ERROR,
   WS_ROUTES,
   WS_TOKEN_PARAM,
   fromBase64Url,
@@ -398,7 +399,7 @@ export function createApp(config: AppConfig): CreatedApp {
   const requireSession: MiddlewareHandler<AppEnv> = async (c, next) => {
     const token = bearerToken(c);
     const session = token ? sessions.validate(token) : null;
-    if (!session) return c.json({ error: 'unauthorized' }, 401);
+    if (!session) return c.json({ error: UNAUTHORIZED_ERROR }, 401);
     c.set('session', session);
     await next();
   };
@@ -665,7 +666,7 @@ export function createApp(config: AppConfig): CreatedApp {
     (c, next) => {
       const token = c.req.query(WS_TOKEN_PARAM);
       const session = token ? sessions.validate(token) : null;
-      if (!session) return c.json({ error: 'unauthorized' }, 401);
+      if (!session) return c.json({ error: UNAUTHORIZED_ERROR }, 401);
       return next();
     },
     upgradeWebSocket((c) => {
