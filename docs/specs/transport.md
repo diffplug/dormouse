@@ -141,13 +141,13 @@ The wrapping lives at the **standalone adapter boundary**, not in the shared sav
 
 Versioning: the standalone top-level snapshot is a `PersistedWindow` (its own `version: 1`) wrapping v3 sessions. `readPersistedWindow` drops Workspaces whose inner session is unreadable and repairs a dangling `activeWorkspaceId` to the first Workspace; an unreadable or corrupt blob is logged and discarded so startup continues fresh rather than blocking on a bad save. VS Code hands back a bare `PersistedSession` — its single Workspace.
 
-**The recovery command.** Each terminal `PersistedPane` records `resumeCommand`: one agent resume invocation (`claude --resume <id>`, `claude --continue`, `codex resume <id>`), or `null`. It is the *only* recovery field and the only thing that survives a teardown — scrollback is never persisted (see "What is persisted" below).
+**The recovery command.** One agent resume invocation per surface (`claude --resume <id>`, `claude --continue`, `codex resume <id>`). It is the only thing that survives a teardown — scrollback is never persisted (see "What is persisted" below).
 
-*Who writes it.* Exactly one writer: a host teardown that interrupted a running agent, reading the live in-memory buffer (`captureAgentRecoveryCommands` in `vscode-ext/src/session-state.ts`). The renderer save path never derives it and never guesses — `session-save.ts` carries the previous value forward untouched, so a periodic save cannot clobber a captured command with a stale one. Standalone writes it never, because standalone persists no Session state at all.
+*It is not part of the persisted session.* `PersistedPane` carries no `resumeCommand`, and `normalizeSessionV3` strips one out of a pre-upgrade blob the same way it strips a transcript. The command is host-owned and single-use, so it travels out of band: the host puts `surfaceId -> invocation` on the webview's boot payload, and the renderer reads it through `PlatformAdapter.getRecoveryCommands()`. Keeping it off the session shape is what makes the one-shot guarantee structural rather than procedural — the webview has nothing to write back, so no save/restore cycle can carry a stale invocation past the destructive read below. An adapter whose host captures nothing simply omits the method.
 
-*Host-authoritative.* An adapter whose state read prefers a webview-owned copy must still take `resumeCommand` from the host. VS Code persists the webview's `vscode.setState()` snapshot across a window reload, and that snapshot's last write happens *before* the teardown that captures the command — so preferring it wholesale drops every recovery on exactly the boundary the field exists for, while layout and cwd restore normally and hide the failure. `withRecoveryCommands` (`session-types.ts`) overlays the host's commands onto the webview snapshot, once, on the first read; re-applying on later reads would re-run the agent on every save/restore cycle within a session.
+*Who writes it.* Exactly one writer: a host teardown that interrupted a running agent, reading the live in-memory buffer (`captureAgentRecoveryCommands` in `vscode-ext/src/session-state.ts`). The renderer save path never derives it and never guesses. Standalone writes it never, because standalone persists no Session state at all.
 
-*Who reads it.* Cold restore, which auto-runs it (`docs/specs/layout.md` → "Agent resume on cold restore"); nothing reads it on resume, where the agent is still Live. The read is destructive — the host clears the field from durable state before handing the copy that carries it to the webview (`consumeRecoveryCommands`), so an auto-resume happens exactly once and a failed activation does not replay it.
+*Who reads it.* Cold restore, which auto-runs it (`docs/specs/layout.md` → "Agent resume on cold restore"); nothing reads it on resume, where the agent is still Live. The read is destructive — `consumeRecoveryCommands` unlinks the record before the webview is served, so an auto-resume happens exactly once and a failed activation does not replay it. Source of truth: `getRecoveryCommands` in `vscode-adapter.ts`, `restoreSession` in `session-restore.ts`.
 
 *Detection.* `detectResumeCommand` strips terminal presentation controls and accepts only the agents' opaque ASCII id grammar (alphanumeric, hyphen, underscore); shell punctuation is never captured into executable state, because this string is executed. Text *around* the invocation is not part of that judgement — codex's real hint is prose on the same line (`To continue this session, run codex resume <id>`), so the prose-tolerant match is load-bearing rather than hypothetical; the command is rebuilt as invocation + captured id and anything trailing the id is dropped. The one thing that must follow the invocation is a word break, so `claude --continuex` is not an offer to continue. The scan window is stripped as a whole *before* it is split into segments, so a string control whose payload spans an LF is removed as a unit, and an *unterminated* string control (OSC, DCS, SOS, PM, APC) swallows the rest of the window rather than surrendering its payload — a window title cut mid-sequence does not read as terminal output. "Terminated" tracks what the renderer honours rather than ECMA-48 alone: ST in both forms (`\x1b\\`, `\x9c`), BEL for OSC, and — because xterm's parser aborts a string control on CAN/SUB and ends one on a bare ESC — those three as well, so a prompt printed behind an aborted sequence stays visible instead of being swallowed. A payload whose *introducer* fell off the front of the window (the sidecar's chunk-evicting buffer can strand one) is not recoverable at this layer, since nothing left in view marks it as payload; it grants no more than ordinary output already does. Stripping is the shared `stripTerminalControls` in `lib/src/lib/terminal-controls.ts` — one implementation, so a hardening step cannot reach detection while missing the prompt detector that reads the same kind of tail slice (`docs/specs/terminal-state.md`). Detection strips in **boundary mode**: a cursor-moving sequence becomes a newline rather than vanishing, because deleting it welds text that was never adjacent on screen. Observed in the wild as a stored `claude --resume <uuid>codex` — a redraw had put `\x1b[K\x1b[1;1H` between the tail of a stale echoed command and the start of the next, and the greedy id pattern ate across the seam. SGR is exempt, since a colour change genuinely leaves its text contiguous. Detection scans the last 50 LF-delimited raw segments **newest first** and chooses the rightmost match within a segment, so carriage-return-only redraws still select the newest visible hint and pattern order never outranks recency. Restore revalidates through `normalizeResumeCommand` before typing, as defense against a snapshot written by an older detector. Source of truth: `lib/src/lib/resume-patterns.ts`.
 
@@ -369,16 +369,16 @@ Each wait is bounded, and a timeout loses the recovery command rather than delay
 shutdown.
 
 Step 2 writes its own record — `recovery.json` under `context.storageUri`, written
-synchronously and replaced temp-then-rename — rather than `workspaceState` or
-`PersistedPane.resumeCommand`. Two reasons, and both are the sort that only show up
-in a real shutdown. `workspaceState.update()` hands its value to VS Code's storage
-service, which batches the SQLite flush on its own schedule; by `deactivate()` that
-service is already tearing down, so the write never lands however early it is issued
+synchronously and replaced temp-then-rename — rather than `workspaceState` or the
+session blob. Two reasons, and both are the sort that only show up in a real
+shutdown. `workspaceState.update()` hands its value to VS Code's storage service,
+which batches the SQLite flush on its own schedule; by `deactivate()` that service
+is already tearing down, so the write never lands however early it is issued
 (measured: detection complete at +276 ms, record never written). And a later
-`flushAllSessions` would overwrite the session blob with the webview's copy, whose
-`resumeCommand` is the stale `null` it last saw — a separate record makes the write
-order stop mattering. The record is written the moment each command is found, so
-being killed mid-poll costs at most a late agent's command rather than everything
+`flushAllSessions` would overwrite the session blob with the webview's copy, which
+knows nothing of what was just captured — a separate record makes the write order
+stop mattering. The record is written the moment each command is found, so being
+killed mid-poll costs at most a late agent's command rather than everything
 detected so far.
 
 Recovery is scoped to the `WebviewView`. An editor `WebviewPanel` persists via

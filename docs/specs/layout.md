@@ -335,7 +335,7 @@ For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getO
 - **Create**: `getOrCreateTerminal` spawns xterm.js + UnicodeGraphemesAddon + FitAddon + PTY, returns existing if already created. The xterm instance sets `allowProposedApi: true` because UnicodeGraphemesAddon activates through xterm's proposed Unicode API. The WebGL addon is *not* loaded at create — it is claimed lazily on the session's first mount (see "Renderer" below).
 - **Resume**: `resumeTerminal` creates xterm entry and writes replay data without spawning a new PTY. Used when the webview is recreated while the host retains Live PTYs (Link: Severed → Resuming → Live).
 - **Restore**: `restoreTerminal` creates xterm entry and spawns a new PTY with the saved cwd. It replays no transcript — scrollback is not persisted (`docs/specs/transport.md` → "What is persisted"). Used on cold start from a saved Snapshot (Link: Cold → Live).
-- **Agent resume**: a restored pane whose snapshot carried a `resumeCommand` re-runs it automatically. See "Agent resume on cold restore" below.
+- **Agent resume**: a restored pane the host captured a resume invocation for re-runs it automatically. See "Agent resume on cold restore" below.
 - **Untouched**: new `getOrCreateTerminal` sessions start untouched. `isUntouched(id)` exposes the flag, and user-originated PTY input clears it via the registry input paths. Resume/restore seed the persisted flag; missing legacy snapshot data defaults to touched (`false`) so close confirmation remains conservative.
 - **Shell selection replacement**: the standalone shell dropdown and VS Code shell picker send `dormouse:new-terminal` with `replaceUntouched` when the selected shell type changes. `Wall` always creates a new session id and a fresh `surface:N` ref for that request. If the currently selected pane or door is untouched, the new terminal takes over the same leaf via a Lath `replace` op (an atomic identity swap; doors first reattach through the normal restore path), the old untouched session is disposed, and the replaced Surface's ref is retired. If the selected terminal is touched or no terminal is selected, the request spawns a new pane beside the selected one. Announced shell-selection spawns show a transient pane-anchored notice such as `Switched to zsh` or `Opened bash`.
 - During **resume** replay, xterm.js may emit terminal-generated replies for OSC/CSI/DCS queries that were embedded in buffered output. The registry drops those replay-time replies before they reach the new shell. This filter is limited to query/focus reports, and must not swallow user keyboard escape sequences such as arrows, function keys, or bracketed paste.
@@ -346,9 +346,10 @@ For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getO
 ### Agent resume on cold restore
 
 A cold **restore** spawns a *fresh* shell and replays nothing. What can come back
-is the agent the host interrupted on its way down: when the snapshot carries
-`PersistedPane.resumeCommand` (`docs/specs/transport.md` → "Capturing the recovery
-command"), the restored pane runs it — no prompt, no button.
+is the agent the host interrupted on its way down: when the host's boot payload
+carries an invocation for that surface (`PlatformAdapter.getRecoveryCommands`;
+`docs/specs/transport.md` → "The recovery command"), the restored pane runs it —
+no prompt, no button.
 
 - **Restore only.** `restoreSession` passes the command to `restoreTerminal` per
   terminal pane; **resume** never does, because there the agent is still Live and

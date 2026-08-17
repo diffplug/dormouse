@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { attachRouter, getAlertStates } from './message-router';
 import { serveWebview, type WebviewChannel } from './webview-messaging';
-import { consumeRecoveryCommands, saveSessionState, mergeAlertStates } from './session-state';
+import { consumeRecoveryCommands, getSavedSessionState, saveSessionState, mergeAlertStates } from './session-state';
 import type { ExtensionMessage } from './message-types';
 import * as ptyManager from './pty-manager';
 import { resolveSelectedShell } from './shell-selection';
@@ -70,11 +70,12 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    // Destructive read: any recovery command is cleared from durable state before
-    // the webview is handed the copy that carries it, so an auto-resume happens
-    // exactly once (docs/specs/transport.md -> "Consuming it").
-    const savedSession = await consumeRecoveryCommands(this.context);
-    this.channel = serveWebview(view.webview, mediaPath, savedSession, this.selectedShell);
+    const savedSession = getSavedSessionState(this.context);
+    // Destructive read, and deliberately separate from the session: the commands
+    // ride their own boot global, so the webview cannot save them back and a
+    // resume happens exactly once (docs/specs/transport.md -> "Consuming it").
+    const recoveryCommands = consumeRecoveryCommands(this.context);
+    this.channel = serveWebview(view.webview, mediaPath, savedSession, this.selectedShell, recoveryCommands);
 
     this.routerDisposable?.dispose();
     this.routerDisposable = attachRouter(this.channel, {

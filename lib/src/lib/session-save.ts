@@ -55,11 +55,6 @@ export async function saveSession(
         id: pane.id,
         title: pane.title,
         cwd: cwd ?? previousPane?.cwd ?? null,
-        // Never derived here. A recovery command is written only by a host
-        // teardown that interrupted a running agent, strictly after this save
-        // (docs/specs/transport.md -> "Capturing the recovery command"), so a
-        // periodic save must not clobber it with a stale value or a guess.
-        resumeCommand: previousPane?.resumeCommand ?? null,
         untouched: isUntouched(pane.id),
         alert: liveAlert ?? previousPane?.alert ?? null,
       };

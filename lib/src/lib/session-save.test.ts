@@ -85,7 +85,7 @@ describe('saveSession', () => {
     const platform = createPlatform({
       version: 3,
       layout: null,
-      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, resumeCommand: null, alert: null }],
+      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, alert: null }],
     });
 
     terminalRegistryMocks.getLivePersistedAlertState.mockReturnValue({ status: 'NOTHING_TO_SHOW', todo: true });
@@ -228,12 +228,13 @@ describe('saveSession', () => {
     expect(platform.getCwd).not.toHaveBeenCalledWith('door-web');
   });
 
-  it('never persists scrollback, and never derives a resume command', async () => {
-    // There is no longer a renderer-side way to read scrollback at all —
-    // `PlatformAdapter` has no `getScrollback` — so the strongest statement here
-    // is about the record: it carries no transcript and no guessed hint. Only a
-    // host teardown that interrupted a running agent writes `resumeCommand`
-    // (docs/specs/transport.md -> "Capturing the recovery command").
+  it('persists neither a transcript nor a recovery command', async () => {
+    // Both are absent by construction now: `PlatformAdapter` has no scrollback
+    // reader, and the recovery command is host-owned and rides the boot payload
+    // rather than the session. This pins the second half — a save must not
+    // reintroduce the field, because a carried-forward value would outlive the
+    // destructive read of the recovery record and be re-run on a later restore
+    // (docs/specs/transport.md -> "Consuming it").
     const platform = createPlatform(null);
 
     await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
@@ -241,7 +242,7 @@ describe('saveSession', () => {
     const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
     const pane = saved.panes.find((p) => p.id === 'pane-a')!;
     expect('scrollback' in pane).toBe(false);
-    expect(pane.resumeCommand).toBeNull();
+    expect('resumeCommand' in pane).toBe(false);
   });
 
   it('writes the Lath layout and never a legacy dockview `layout` key', async () => {

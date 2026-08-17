@@ -29,8 +29,9 @@ export function serveWebview(
   mediaPath: string,
   initialState?: unknown,
   selectedShell?: { shell?: string; args?: string[] } | null,
+  recoveryCommands?: Record<string, string> | null,
 ): WebviewChannel {
-  const { html, messageToken } = getWebviewHtml(webview, mediaPath, initialState, selectedShell);
+  const { html, messageToken } = getWebviewHtml(webview, mediaPath, initialState, selectedShell, recoveryCommands);
   webview.html = html;
 
   return {

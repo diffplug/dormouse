@@ -16,8 +16,12 @@ vi.mock('./terminal-registry', () => ({
 
 import { restoreSession } from './session-restore';
 
-function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
+function createPlatform(
+  savedState: PersistedSession | null,
+  recoveryCommands: Record<string, string> = {},
+): PlatformAdapter {
   return {
+    getRecoveryCommands: vi.fn(() => recoveryCommands),
     init: async () => {},
     shutdown: () => {},
     getAvailableShells: vi.fn(async () => []),
@@ -63,15 +67,17 @@ describe('restoreSession', () => {
   });
 
   it('hands each restored terminal its recovery command to auto-run', () => {
+    // The command comes from the host's boot payload, keyed by pane id — never
+    // from the persisted pane, which no longer carries one.
     const saved: PersistedSession = {
       version: 3,
       panes: [
-        { id: 'pane-a', title: 'A', cwd: null, resumeCommand: 'claude --resume abc', untouched: false },
-        { id: 'pane-b', title: 'B', cwd: null, resumeCommand: null, untouched: false },
+        { id: 'pane-a', title: 'A', cwd: null, untouched: false },
+        { id: 'pane-b', title: 'B', cwd: null, untouched: false },
       ],
     };
 
-    restoreSession(createPlatform(saved));
+    restoreSession(createPlatform(saved, { 'pane-a': 'claude --resume abc' }));
 
     expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith(
       'pane-a',
@@ -83,10 +89,24 @@ describe('restoreSession', () => {
     );
   });
 
+  it('resumes nothing when the host captured nothing', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      panes: [{ id: 'pane-a', title: 'A', cwd: null, untouched: false }],
+    };
+
+    restoreSession(createPlatform(saved));
+
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith(
+      'pane-a',
+      expect.objectContaining({ resumeCommand: null }),
+    );
+  });
+
   it('never replays a transcript — restore carries no scrollback at all', () => {
     const saved: PersistedSession = {
       version: 3,
-      panes: [{ id: 'pane-a', title: 'A', cwd: null, resumeCommand: null, untouched: false }],
+      panes: [{ id: 'pane-a', title: 'A', cwd: null, untouched: false }],
     };
 
     restoreSession(createPlatform(saved));
@@ -99,13 +119,13 @@ describe('restoreSession', () => {
     const saved: PersistedSession = {
       version: 3,
       panes: [
-        // A browser pane's terminal-only fields are always blank, but routing must
-        // key off surface kind rather than trusting that.
-        { id: 'pane-web', title: 'localhost', cwd: null, resumeCommand: 'claude --resume abc', untouched: false, surfaceType: 'browser' },
+        // Routing keys off surface kind, so a captured command for a browser pane
+        // is simply never reached.
+        { id: 'pane-web', title: 'localhost', cwd: null, untouched: false, surfaceType: 'browser' },
       ],
     };
 
-    restoreSession(createPlatform(saved));
+    restoreSession(createPlatform(saved, { 'pane-web': 'claude --resume abc' }));
 
     expect(terminalRegistryMocks.restoreTerminal).not.toHaveBeenCalled();
   });
@@ -118,7 +138,7 @@ describe('restoreSession', () => {
     const saved: PersistedSession = {
       version: 3,
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: 'C:\\repo', resumeCommand: null },
+        { id: 'pane-a', title: 'Pane A', cwd: 'C:\\repo' },
       ],
     };
 
@@ -138,7 +158,7 @@ describe('restoreSession', () => {
     const saved: PersistedSession = {
       version: 3,
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null, resumeCommand: null, untouched: true },
+        { id: 'pane-a', title: 'Pane A', cwd: null, untouched: true },
       ],
     };
 
@@ -153,8 +173,8 @@ describe('restoreSession', () => {
     const saved: PersistedSession = {
       version: 3,
       panes: [
-        { id: 'pane-term', title: 'Terminal', cwd: null, resumeCommand: null, untouched: false },
-        { id: 'pane-web', title: 'localhost', cwd: null, resumeCommand: null, untouched: false, surfaceType: 'browser' },
+        { id: 'pane-term', title: 'Terminal', cwd: null, untouched: false },
+        { id: 'pane-web', title: 'localhost', cwd: null, untouched: false, surfaceType: 'browser' },
       ],
     };
 
@@ -176,7 +196,7 @@ describe('restoreSession', () => {
       version: 3,
       lathLayout,
       panes: [
-        { id: 'pane-a', title: 'A', cwd: null, resumeCommand: null, untouched: false },
+        { id: 'pane-a', title: 'A', cwd: null, untouched: false },
       ],
     };
 
@@ -191,7 +211,7 @@ describe('restoreSession', () => {
       surfaceRefs: { 'pane-a': 'surface:1', 'closed-pane': 'surface:2' },
       surfaceRefsNext: 9,
       panes: [
-        { id: 'pane-a', title: 'A', cwd: null, resumeCommand: null, untouched: false },
+        { id: 'pane-a', title: 'A', cwd: null, untouched: false },
       ],
     };
 
@@ -207,7 +227,7 @@ describe('restoreSession', () => {
       surfaceRefs: { 'pane-a': 'surface:1' },
       surfaceRefsNext: 0,
       panes: [
-        { id: 'pane-a', title: 'A', cwd: null, resumeCommand: null, untouched: false },
+        { id: 'pane-a', title: 'A', cwd: null, untouched: false },
       ],
     } as unknown as PersistedSession;
 
@@ -222,7 +242,7 @@ describe('restoreSession', () => {
       version: 3,
       surfaceRefs: { 'pane-a': 'pane:1', 'pane-b': 'surface:2' },
       panes: [
-        { id: 'pane-a', title: 'A', cwd: null, resumeCommand: null, untouched: false },
+        { id: 'pane-a', title: 'A', cwd: null, untouched: false },
       ],
     } as unknown as PersistedSession;
 
@@ -239,7 +259,6 @@ describe('restoreSession', () => {
           id: 'pane-web',
           title: 'localhost',
           cwd: null,
-          resumeCommand: null,
           untouched: false,
           surfaceType: 'browser',
           alert: { status: 'WATCHING_DISABLED', watchingEnabled: false, todo: true, notification: null },

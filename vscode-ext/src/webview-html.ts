@@ -21,6 +21,13 @@ export function getWebviewHtml(
   mediaPath: string,
   initialState?: unknown,
   selectedShell?: { shell?: string; args?: string[] } | null,
+  /**
+   * Surface id -> agent resume invocation, captured by the last teardown. Rides
+   * the boot payload rather than `initialState` because it is host-owned and
+   * single-use: the webview never writes it back, so no save/restore cycle can
+   * replay it (docs/specs/transport.md -> "Consuming it").
+   */
+  recoveryCommands?: Record<string, string> | null,
 ): { html: string; messageToken: string } {
   const indexPath = path.join(mediaPath, 'index.html');
   let html = fs.readFileSync(indexPath, 'utf-8');
@@ -65,7 +72,7 @@ export function getWebviewHtml(
   // get a duplicate nonce attribute from the regex above.
   html = html.replace(
     '</head>',
-    `    <script nonce="${nonce}">globalThis.${HOST_MESSAGE_TOKEN_GLOBAL} = ${serializeForInlineScript(messageToken)};\nglobalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};</script>\n  </head>`,
+    `    <script nonce="${nonce}">globalThis.${HOST_MESSAGE_TOKEN_GLOBAL} = ${serializeForInlineScript(messageToken)};\nglobalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};\nglobalThis.__DORMOUSE_RECOVERY__ = ${serializeForInlineScript(recoveryCommands ?? null)};</script>\n  </head>`,
   );
 
   return { html, messageToken };

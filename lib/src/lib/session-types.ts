@@ -24,15 +24,15 @@ export type PersistedSurfaceType = 'terminal' | 'browser';
 /**
  * Durable structure for one pane — furniture, never content. Scrollback is
  * deliberately absent: it is not persisted by any writer (docs/specs/transport.md
- * -> "What is persisted"). `resumeCommand` is the single recovery field, written
- * only by a host teardown that interrupted a running agent, and consumed by the
- * next cold restore.
+ * -> "What is persisted"). Nor is the agent recovery command: it is host-owned and
+ * single-use, so it travels out of band on the boot payload
+ * (`PlatformAdapter.getRecoveryCommands`) rather than through anything the webview
+ * can save back.
  */
 export interface PersistedPane {
   id: string;
   cwd: string | null;
   title: string;
-  resumeCommand: string | null;
   untouched: boolean;
   alert?: PersistedAlertState | null;
   surfaceType?: PersistedSurfaceType;
@@ -40,7 +40,7 @@ export interface PersistedPane {
 
 /**
  * Build the persisted record for a browser surface. Browser panes have no PTY,
- * so the terminal-only fields (cwd/resumeCommand/untouched) are always
+ * so the terminal-only fields (cwd/untouched) are always
  * blank; the persisted layout reconstructs the surface and `alert` carries the
  * optional TODO. Single source of truth shared by the renderer save path
  * (`session-save.ts`) and the VS Code host refresh (`vscode-ext/session-state.ts`).
@@ -53,7 +53,6 @@ export function browserPersistedPane(
     id: pane.id,
     title: pane.title,
     cwd: null,
-    resumeCommand: null,
     untouched: false,
     alert,
     surfaceType: 'browser',
@@ -158,9 +157,9 @@ function isPersistedPaneShape(value: unknown): boolean {
     typeof value.id === 'string' &&
     typeof value.title === 'string' &&
     (typeof value.cwd === 'string' || value.cwd === null) &&
-    // `scrollback` is not checked at all: legacy blobs carry one and are still
-    // readable, new ones never do. `normalizeSessionV3` strips it either way.
-    (value.resumeCommand === undefined || typeof value.resumeCommand === 'string' || value.resumeCommand === null) &&
+    // Neither `scrollback` nor `resumeCommand` is checked: legacy blobs carry
+    // them and stay readable, new ones never do, and `normalizeSessionV3` strips
+    // both either way.
     (value.untouched === undefined || typeof value.untouched === 'boolean') &&
     (value.surfaceType === undefined || value.surfaceType === 'terminal' || value.surfaceType === 'browser') &&
     (value.alert === undefined || isPersistedAlertShape(value.alert))
@@ -221,54 +220,6 @@ export function carrySurfaceRefs(
 }
 
 /**
- * Stamp `resumeCommand` onto the panes a host captured one for, leaving every
- * other pane and every other field untouched. Returns the ids that actually
- * landed on a pane — a captured id whose pane is gone must not be reported as
- * applied. Shared by both consumers of a recovery record: the in-webview overlay
- * (`withRecoveryCommands`) and the VS Code host's cold-restore read.
- */
-export function applyRecoveryCommands(
-  session: PersistedSession,
-  commands: ReadonlyMap<string, string> | Readonly<Record<string, string>>,
-): { session: PersistedSession; applied: string[] } {
-  const lookup = commands instanceof Map ? commands : new Map(Object.entries(commands));
-  const applied: string[] = [];
-  const panes = session.panes.map((pane) => {
-    const command = lookup.get(pane.id);
-    if (!command) return pane;
-    applied.push(pane.id);
-    return { ...pane, resumeCommand: command };
-  });
-  return { session: { ...session, panes }, applied };
-}
-
-/**
- * Overlay host-captured recovery commands onto a webview-owned snapshot.
- *
- * `resumeCommand` is the one persisted field the **host** owns exclusively: only a
- * teardown that interrupted a running agent writes one, and the webview's own copy
- * is always a carry-forward of whatever it last saw — which is `null`, because its
- * final save happens before the interrupt. A host whose state read prefers the
- * webview copy (VS Code persists it across a window reload) would therefore drop
- * every captured command on exactly the boundary the field exists for.
- *
- * Layout, cwd, titles and alert state still come from the webview copy, which is
- * fresher for everything the webview actually owns.
- */
-export function withRecoveryCommands(webviewState: unknown, hostState: unknown): unknown {
-  const host = readPersistedSession(hostState);
-  if (!host) return webviewState;
-  const commands = new Map(
-    host.panes.filter((pane) => pane.resumeCommand).map((pane) => [pane.id, pane.resumeCommand!]),
-  );
-  if (commands.size === 0) return webviewState;
-  const webview = readPersistedSession(webviewState);
-  // No usable webview copy at all — the host snapshot is all there is.
-  if (!webview) return hostState;
-  return applyRecoveryCommands(webview, commands).session;
-}
-
-/**
  * Parse a persisted session blob (`version: 3`), or null if nothing usable is
  * present. A blob that is absent/empty returns null silently; one that is present
  * but unreadable (bad JSON, wrong shape) is logged and discarded so a corrupt save
@@ -286,16 +237,15 @@ function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession 
   const surfaceRefs = normalizeSurfaceRefs(session.surfaceRefs);
   const surfaceRefsNext = normalizeSurfaceRefsNext(session.surfaceRefsNext);
   const { surfaceRefs: _rawRefs, surfaceRefsNext: _rawNext, ...rest } = session;
-  // Every pane is rebuilt field by field rather than spread, so a transcript in a
-  // pre-upgrade blob is dropped here and cannot survive into a parsed Session —
-  // the one place that guarantees no reader hands one to a writer
-  // (docs/specs/transport.md -> "Retiring the transcripts already on disk").
+  // Every pane is rebuilt field by field rather than spread, so a transcript — or
+  // a `resumeCommand` — in a pre-upgrade blob is dropped here and cannot survive
+  // into a parsed Session; the one place that guarantees no reader hands either to
+  // a writer (docs/specs/transport.md -> "Retiring the transcripts already on disk").
   const panes: PersistedPane[] = session.panes.map((pane) => {
     const next: PersistedPane = {
       id: pane.id,
       cwd: pane.cwd,
       title: pane.title,
-      resumeCommand: pane.resumeCommand ?? null,
       untouched: pane.untouched ?? false,
     };
     if (pane.alert !== undefined) next.alert = pane.alert;

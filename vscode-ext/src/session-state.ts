@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as ptyManager from './pty-manager';
 import type { AlertState } from '../../lib/src/lib/alert-manager';
-import { applyRecoveryCommands, browserPersistedPane, readPersistedSession, type PersistedAlertState, type PersistedPane, type PersistedSession } from '../../lib/src/lib/session-types';
+import { browserPersistedPane, readPersistedSession, type PersistedAlertState, type PersistedPane, type PersistedSession } from '../../lib/src/lib/session-types';
 import { detectResumeCommand } from '../../lib/src/lib/resume-patterns';
 import { stripTerminalControls } from '../../lib/src/lib/terminal-controls';
 import { log } from './log';
@@ -302,17 +302,20 @@ export async function captureAgentRecoveryCommands(
 const RECOVERY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * Consume the recovery commands and overlay them onto the session handed to a
- * cold-starting webview. A destructive read: the durable copy is cleared before
- * the webview can act on it, so a resume is offered exactly once and a failed
- * activation does not replay it.
+ * Read and clear the recovery record, returning `surfaceId -> invocation` for the
+ * boot payload of a cold-starting webview.
+ *
+ * A destructive read: the durable copy is gone before the webview can act on it,
+ * so a resume happens exactly once and a failed activation does not replay it.
+ * The result never joins the persisted session — it rides its own boot global, so
+ * the webview has nothing to write back and no save/restore cycle can resurrect it
+ * (docs/specs/transport.md -> "Consuming it").
  */
-export async function consumeRecoveryCommands(
+export function consumeRecoveryCommands(
   context: vscode.ExtensionContext,
-): Promise<PersistedSession | null> {
-  const saved = getSavedSessionState(context);
+): Record<string, string> {
   const file = recoveryFilePath(context);
-  if (!file || !fs.existsSync(file)) return saved;
+  if (!file || !fs.existsSync(file)) return {};
 
   let recovery: PersistedRecovery | null = null;
   try {
@@ -328,24 +331,18 @@ export async function consumeRecoveryCommands(
     // If it cannot be removed, do not use it — better to lose one recovery than
     // to re-run an agent on every activation from a record we cannot clear.
     log.error('[recovery] could not clear record; ignoring it');
-    return saved;
+    return {};
   }
-  if (!recovery) return saved;
+  if (!recovery) return {};
 
   const age = Date.now() - (recovery.createdAt ?? 0);
   if (age > RECOVERY_MAX_AGE_MS) {
     log.info(`[recovery] discarding record ${Math.round(age / 86_400_000)}d old`);
-    return saved;
+    return {};
   }
-  if (!saved) return saved;
 
   const commands = recovery.commands ?? {};
-  const { session, applied } = applyRecoveryCommands(saved, commands);
-  for (const id of applied) log.info(`[recovery]   ${id} -> ${commands[id]}`);
-  // Report what actually landed on a pane, not what the record held: a captured
-  // id whose PTY no longer maps to a pane would otherwise be reported as applied.
-  const orphans = Object.keys(commands).filter((id) => !applied.includes(id));
-  log.info(`[recovery] applied ${applied.length}/${Object.keys(commands).length} command(s) into cold restore`);
-  if (orphans.length > 0) log.error(`[recovery] ${orphans.length} command(s) matched no pane: ${orphans.join(', ')}`);
-  return session;
+  for (const [id, command] of Object.entries(commands)) log.info(`[recovery]   ${id} -> ${command}`);
+  log.info(`[recovery] handing ${Object.keys(commands).length} command(s) to the cold restore`);
+  return commands;
 }
