@@ -222,7 +222,15 @@ export async function captureAgentRecoveryCommands(
     for (const id of pending()) {
       const scrollback = ptyManager.getScrollback(id);
       if (!scrollback) continue;
-      const detected = detectResumeCommand(scrollback);
+      // Recovery commands are executable state, so only trust bytes that arrived
+      // after this teardown started interrupting the pane. Scanning the existing
+      // buffer would let an old launch echo or a previous agent hint run on the
+      // next restore. If bounded scrollback evicted old bytes in the meantime,
+      // slicing at the old length can only discard fresh output; it cannot expose
+      // stale output as fresh.
+      const outputSinceInterrupt = scrollback.slice(startLen.get(id) ?? scrollback.length);
+      if (!outputSinceInterrupt) continue;
+      const detected = detectResumeCommand(outputSinceInterrupt);
       if (detected) {
         commands[id] = detected;
         log.info(`[recovery]   ${id} -> ${detected} (+${Date.now() - started}ms)`);
@@ -231,7 +239,7 @@ export async function captureAgentRecoveryCommands(
       }
       // Strip presentation controls first — claude renders that prompt inside its
       // TUI, so the raw buffer can carry escapes through the phrase.
-      if (ASKS_FOR_SECOND_PRESS.test(stripTerminalControls(scrollback.slice(-ASK_TAIL_CHARS)))) {
+      if (ASKS_FOR_SECOND_PRESS.test(stripTerminalControls(outputSinceInterrupt.slice(-ASK_TAIL_CHARS)))) {
         asked.add(id);
       }
     }
