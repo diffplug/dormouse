@@ -456,6 +456,30 @@ test('subscriptions hides rows registered under an old VAPID key', async () => {
   assert.deepEqual(await res.json(), { subscriptions: [] });
 });
 
+test('a malformed stored row is dropped rather than surfaced as a live one', async () => {
+  // `push-subscriptions.json` is hand-editable by design — revoking a device is
+  // deleting its rows — so a half-finished edit has to read as a missing
+  // registration, which re-offers Enable, not as one that cannot be delivered to.
+  const { app, stateDir, host, sessionToken } = await pushApp();
+  const client = await SimClient.create({ origin: ORIGIN });
+  await subscribe(app, { sessionToken, host, client });
+
+  const path = join(stateDir, 'push-subscriptions.json');
+  const stored = JSON.parse(await readFile(path, 'utf8'));
+  delete stored[0].keys;
+  await writeFile(path, `${JSON.stringify(stored, null, 2)}\n`);
+
+  const res = await app.request(API_ROUTES.pushSubscriptions, {
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  assert.deepEqual(await res.json(), { subscriptions: [] });
+
+  // And re-subscribing over it succeeds instead of throwing out of the route.
+  const repair = await subscribe(app, { sessionToken, host, client });
+  assert.equal(repair.status, 200);
+  assert.deepEqual((await repair.json()).hostIds, [host.hostId]);
+});
+
 test('subscriptions requires a session and rejects a host token', async () => {
   const { app, host } = await pushApp();
   assert.equal((await app.request(API_ROUTES.pushSubscriptions)).status, 401);

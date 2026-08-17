@@ -102,8 +102,11 @@ POST whose response was lost is repaired by its own idempotent retry. Scoping
 that answer to the device is safe where `GET /api/push/subscriptions` must not
 be: the request carries a device signature, so the caller has proven it owns the
 identity being reported on. The row holds no label — the Server never learns
-one. Source of truth: `PushSubscriptionStore.upsert` in `server/src/state.ts`
-and the subscribe route in `server/src/app.ts`.
+one. Rows are validated as they are read, so a hand-edit that leaves one
+malformed reads as a missing registration (which Pocket repairs by re-offering
+Enable) instead of a live one nothing can be delivered to. Source of truth:
+`PushSubscriptionStore.list` / `.upsert` in `server/src/state.ts` and the
+subscribe route in `server/src/app.ts`.
 
 `hosts.json` stores `hostToken` — the host↔server relay bearer secret — in
 plaintext, and `vapid.json` a private key, so both files are written owner-only:

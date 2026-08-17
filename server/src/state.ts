@@ -251,8 +251,20 @@ export class PushSubscriptionStore extends JsonFileStore {
     super(stateDir, 'push-subscriptions.json', now);
   }
 
-  list(): Promise<StoredPushSubscription[]> {
-    return this.read<StoredPushSubscription[]>([]);
+  /**
+   * The rows this Server can act on.
+   *
+   * Malformed rows are dropped here rather than defended against at each
+   * consumer: this file is hand-editable by design — revoking a device is
+   * deleting its rows — so a half-finished edit is a real case, and one guard
+   * at the read boundary is what lets {@link StoredPushSubscription} be true
+   * for every caller downstream. A mangled row therefore reads as a missing
+   * registration, which re-offers Enable and repairs itself, instead of as a
+   * live one that cannot be delivered to.
+   */
+  async list(): Promise<StoredPushSubscription[]> {
+    const rows = await this.read<unknown>([]);
+    return Array.isArray(rows) ? rows.filter(isStoredPushSubscription) : [];
   }
 
   async listForHost(hostId: string): Promise<StoredPushSubscription[]> {
@@ -319,14 +331,29 @@ function samePushAddress(
   left: Omit<StoredPushSubscription, 'subscribedAt'>,
   right: Omit<StoredPushSubscription, 'subscribedAt'>,
 ): boolean {
-  // Optional chaining because `left` is whatever is on disk: this file is
-  // hand-editable by design, and a row missing `keys` must read as a different
-  // address (forcing a reset) rather than throw out of the subscribe route.
   return (
     left.endpoint === right.endpoint &&
-    left.keys?.p256dh === right.keys?.p256dh &&
-    left.keys?.auth === right.keys?.auth &&
+    left.keys.p256dh === right.keys.p256dh &&
+    left.keys.auth === right.keys.auth &&
     left.vapidPublicKey === right.vapidPublicKey
+  );
+}
+
+/**
+ * Whether an on-disk row is a subscription this Server can use. Guards
+ * {@link PushSubscriptionStore.list}, which is the only way rows enter the
+ * process — so every field the type declares is present past that point.
+ */
+function isStoredPushSubscription(row: unknown): row is StoredPushSubscription {
+  const s = row as Partial<StoredPushSubscription> | null;
+  return (
+    typeof s?.hostId === 'string' &&
+    typeof s.devicePublicKey === 'string' &&
+    typeof s.endpoint === 'string' &&
+    typeof s.keys?.p256dh === 'string' &&
+    typeof s.keys.auth === 'string' &&
+    typeof s.vapidPublicKey === 'string' &&
+    typeof s.subscribedAt === 'number'
   );
 }
 
