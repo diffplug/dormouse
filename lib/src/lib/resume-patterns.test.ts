@@ -127,6 +127,22 @@ describe('screen-region seams', () => {
     expect(detectResumeCommand(scrollback)).toBe('codex resume bbbb');
   });
 
+  it('treats the non-CSI cursor moves as seams too', () => {
+    // `ESC M` (RI) scrolls up, `ESC 7`/`ESC 8` bracket a redraw, `ESC c` resets,
+    // and VT/FF move down — a rule that seamed only CSI left every one of these
+    // welding an id to the next screen region.
+    for (const move of ['\x1bM', '\x1bD', '\x1bE', '\x1b7', '\x1b8', '\x1bc', '\x0b', '\x0c']) {
+      expect(detectResumeCommand(`claude --resume old-aaa${move}codex resume new-bbb\n`))
+        .toBe('codex resume new-bbb');
+    }
+  });
+
+  it('does not read an id out of a CSI the buffer was cut off inside', () => {
+    // A tail slice routinely lands mid-sequence; the parameters must not read as
+    // text and extend the id sitting in front of them.
+    expect(detectResumeCommand('codex resume abc\x1b[38;5')).toBe('codex resume abc');
+  });
+
   it('still reads an id through a colour change, which does not move the cursor', () => {
     expect(detectResumeCommand('claude --resume \x1b[1m4f2c9b1e-6a03\x1b[0m\n'))
       .toBe('claude --resume 4f2c9b1e-6a03');
