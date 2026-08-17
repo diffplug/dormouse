@@ -28,6 +28,12 @@
  *      canopy's `@xterm/xterm` pin `…-beta.<NNN>`, and the release tag and the
  *      .tgz filename in that URL must agree. Renovate cannot see tarball URLs
  *      (canopy/README.md), so this is the only thing holding them together.
+ *      Known limit: upstream restarts the beta counter on each release line
+ *      (5.6.0-beta.1..143, then 6.1.0-beta.1..302), and the -sdfNNN tag records
+ *      only the counter — so once a new line opens, a stale tarball whose
+ *      counter happens to equal the new pin's would pass. Closing that needs
+ *      the fork tag to encode the full core version (FORK.md § Versioning);
+ *      until then this check is exact within a release line only.
  *   5. Format sanity: finding no `@xterm/*` entries at all is a failure, not a
  *      pass — it means the lockfile format moved.
  */

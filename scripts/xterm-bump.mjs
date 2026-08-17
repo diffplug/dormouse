@@ -38,6 +38,16 @@ const canopyVersion = canopyFlag === -1 ? null : args[canopyFlag + 1] ?? '';
 
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf-8');
 const betaOf = (v) => Number(/-beta\.(\d+)$/.exec(v)?.[1] ?? NaN);
+// Upstream restarts the beta counter at 1 on every release line (5.4.0-beta.1..34,
+// 5.5.0-beta.1..12, 5.6.0-beta.1..143, 6.1.0-beta.1..302), so betaOf alone neither
+// orders nor identifies a version — four different versions answer to beta.12.
+// Order and disambiguate on the whole tuple; betaOf is only for printing an sdf tag.
+const rankOf = (v) => (/^(\d+)\.(\d+)\.(\d+)-beta\.(\d+)$/.exec(v)?.slice(1) ?? []).map(Number);
+const newestFirst = (a, b) => {
+  const [x, y] = [rankOf(a), rankOf(b)];
+  for (let i = 0; i < 4; i++) if (y[i] !== x[i]) return y[i] - x[i];
+  return 0;
+};
 
 /** version → { gitHead, peer } for every published beta of a package. */
 async function betas(name) {
@@ -75,10 +85,21 @@ if (canopyFlag !== -1) {
   }
   const coreBeta = Number(sdf[1]);
   const [core, webgl] = await Promise.all([betas(CORE), betas('@xterm/addon-webgl')]);
-  const coreVersion = [...core.keys()].find((v) => betaOf(v) === coreBeta);
+  // The -sdfNNN tag records only the counter, which repeats across release lines, so
+  // registry order would hand back the OLDEST line carrying it. Take the newest, and
+  // say so when the tag was ambiguous — the tag cannot prove which line it meant.
+  const candidates = [...core.keys()].filter((v) => betaOf(v) === coreBeta).sort(newestFirst);
+  const coreVersion = candidates[0];
   if (!coreVersion) {
     console.error(`no published ${CORE} at beta.${coreBeta} — is the fork version right?`);
     process.exit(1);
+  }
+  if (candidates.length > 1) {
+    console.log(
+      `note: beta.${coreBeta} exists on ${candidates.length} release lines ` +
+      `(${candidates.join(', ')}); assuming the newest. Confirm against the fork's base commit ` +
+      'before trusting the pins below.\n',
+    );
   }
   const head = core.get(coreVersion).gitHead;
   const webglVersion = [...webgl.entries()].find(([, m]) => m.gitHead === head)?.[0];
@@ -92,12 +113,15 @@ if (canopyFlag !== -1) {
   }
   const url = `https://github.com/diffplug/xterm.js/releases/download/sdf-v${canopyVersion}/diffplug-xterm-addon-webgl-sdf-${canopyVersion}.tgz`;
   repin('canopy/package.json', { [FORK_ADDON]: url, '@xterm/addon-webgl': webglVersion, [CORE]: coreVersion });
-  console.log(`canopy → fork ${canopyVersion}, ${CORE} ${coreVersion}, @xterm/addon-webgl ${webglVersion}`);
+  console.log(
+    `canopy → fork ${canopyVersion}, ${CORE} ${coreVersion}, @xterm/addon-webgl ${webglVersion}` +
+    (dryRun ? '  (--dry-run: no files written)' : ''),
+  );
   console.log(`upstream base commit: ${head}`);
   console.log(
     '\nAlso update the version-correspondence comment at the UpstreamWebglAddon import in\n' +
     'canopy/src/GlTerminal.stories.tsx and the same triple in canopy/README.md, then run ' +
-    `${dryRun ? '' : '`pnpm install`'}.`,
+    '`pnpm install`.',
   );
   process.exit(0);
 }
@@ -108,7 +132,7 @@ const packuments = new Map(
   await Promise.all([CORE, ...ADDONS].map(async (n) => [n, await betas(n)])),
 );
 
-const coreVersions = [...packuments.get(CORE).keys()].sort((a, b) => betaOf(b) - betaOf(a));
+const coreVersions = [...packuments.get(CORE).keys()].sort(newestFirst);
 let chosen = null;
 for (const version of coreVersions) {
   const { gitHead } = packuments.get(CORE).get(version);
