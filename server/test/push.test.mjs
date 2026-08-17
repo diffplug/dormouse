@@ -113,6 +113,18 @@ function sendAs(app, hostToken, body) {
   return authed(app, API_ROUTES.pushSend, hostToken, body);
 }
 
+/**
+ * Model a Server VAPID rotation while preserving the existing state file: the
+ * stored endpoints are now unusable with the current signer, and every read
+ * path must treat them as absent rather than as "Alerts on".
+ */
+async function rotateStoredVapidKey(stateDir) {
+  const path = join(stateDir, 'push-subscriptions.json');
+  const stored = JSON.parse(await readFile(path, 'utf8'));
+  for (const row of stored) row.vapidPublicKey = 'BOldVapidPublicKey';
+  await writeFile(path, `${JSON.stringify(stored, null, 2)}\n`);
+}
+
 // --- config ----------------------------------------------------------------
 
 test('config reports the VAPID public key without auth', async () => {
@@ -390,13 +402,7 @@ test('subscriptions hides rows registered under an old VAPID key', async () => {
   const client = await SimClient.create({ origin: ORIGIN });
   await subscribe(app, { sessionToken, host, client });
 
-  // Model a Server key rotation while preserving the existing state file. The
-  // endpoint is now unusable with the current signer and Pocket must be offered
-  // the repair action instead of seeing "Alerts on."
-  const path = join(stateDir, 'push-subscriptions.json');
-  const stored = JSON.parse(await readFile(path, 'utf8'));
-  stored[0].vapidPublicKey = 'BOldVapidPublicKey';
-  await writeFile(path, `${JSON.stringify(stored, null, 2)}\n`);
+  await rotateStoredVapidKey(stateDir);
 
   const res = await app.request(API_ROUTES.pushSubscriptions, {
     headers: { Authorization: `Bearer ${sessionToken}` },
@@ -459,10 +465,7 @@ test('devices hides subscriptions registered under an old VAPID key', async () =
   const client = await SimClient.create({ origin: ORIGIN });
   await subscribe(app, { sessionToken, host, client });
 
-  const path = join(stateDir, 'push-subscriptions.json');
-  const stored = JSON.parse(await readFile(path, 'utf8'));
-  stored[0].vapidPublicKey = 'BOldVapidPublicKey';
-  await writeFile(path, `${JSON.stringify(stored, null, 2)}\n`);
+  await rotateStoredVapidKey(stateDir);
 
   const res = await app.request(API_ROUTES.pushDevices, {
     headers: { Authorization: `Bearer ${host.hostToken}` },
@@ -549,10 +552,7 @@ test('send treats a subscription registered under an old VAPID key as unknown', 
   const client = await SimClient.create({ origin: ORIGIN });
   await subscribe(app, { sessionToken, host, client });
 
-  const path = join(stateDir, 'push-subscriptions.json');
-  const stored = JSON.parse(await readFile(path, 'utf8'));
-  stored[0].vapidPublicKey = 'BOldVapidPublicKey';
-  await writeFile(path, `${JSON.stringify(stored, null, 2)}\n`);
+  await rotateStoredVapidKey(stateDir);
 
   const res = await sendAs(app, host.hostToken, {
     devicePublicKeys: [client.deviceKey.devicePublicKey],
