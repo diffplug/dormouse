@@ -403,28 +403,46 @@ That last row is the open bug. A second press was added for it (`docs/specs/tran
 → "Capturing the recovery command"), but whether two presses are sufficient from
 that state is unverified.
 
-### The next step is a harness, not another round trip
+### Measured: what actually elicits codex's hint
 
-Each hypothesis so far cost one dogfood-plus-reload and returned one bit. Replace
-that loop with a matrix run against a real agent in a pty:
+A matrix run against real codex sessions in a pty (states x gestures, recording
+bytes emitted, time to hint, and whether the process exited):
 
-- **states**: idle after a reply; idle after a long pause; mid-response; with
-  unsent text typed into the input; immediately after launch
-- **gestures**: one `^C`; two `^C` (150 ms apart); `^C` then wait then `^C`;
-  `^D`; `/quit`+Enter
-- **record per cell**: bytes emitted, time to first byte, whether
-  `detectResumeCommand` matches, and whether the process exited
+| State when interrupted | Gesture | Hint | At |
+| --- | --- | --- | --- |
+| idle after a pause | one `^C` | yes | 262 ms |
+| idle after a pause | two `^C`, 150 ms apart | **no** | — |
+| idle after a pause | `^C`, 800 ms, `^C` | yes | 855 ms |
+| unsent text in the input | one `^C` | **no** | — |
+| unsent text in the input | two `^C`, 150 ms apart | yes | 464 ms |
+| unsent text in the input | `^C`, 800 ms, `^C` | yes | 1061 ms |
+| freshly launched, no conversation | one `^C` | no (correctly — nothing to resume) | — |
 
-The output is a table of which gesture reliably elicits a hint from which state,
-which is what the capture logic should then encode. `^C` may simply not be the
-right gesture for codex from every state.
+The mechanism: **codex's `^C` is consumed by the input line first.** With text
+typed, the first press only clears it and codex keeps running — that is the
+real-pane failure, and it looks like a TUI repaint (+256 bytes of cursor
+positioning) rather than a shutdown. With an empty input the first press exits and
+prints at ~262 ms, and a second press inside that window aborts the print.
+
+That is why each earlier attempt broke exactly one state: a blanket second press
+destroys the idle case, an ask-gated one never fires for codex at all. Note
+`Press Ctrl-C again` was **absent from every codex cell** — codex never asks, so
+the phrase gate can only ever serve claude and a timed fallback is required.
+
+Press-wait-press is the only gesture that covers both states, which is what the
+capture loop implements. The timings above are what its constants are sized
+against: the idle case yields at 262 ms and is therefore excluded from the retry
+before the ~600 ms fallback arrives, and the unsent-text case yields ~260 ms after
+that retry, inside the ceiling.
+
+**Still unverified in a real pane.** The matrix says the gesture is right; the
+capture loop that implements it has not yet been observed capturing codex from a
+Dormouse pane.
 
 ### Before this ships
 
-- **Remove the `NO HINT` diagnostic** in `captureAgentRecoveryCommands`
-  (`vscode-ext/src/session-state.ts`). It writes up to 320 bytes of escaped
-  terminal output into the extension log, which is exactly the disclosure this
-  scope exists to stop. It was added to find this bug and must not ship.
+- **Verify codex capture in a real pane.** The gesture is settled by measurement
+  above; the loop implementing it has only been exercised by hand for claude.
 - **Add coverage for the capture path.** `vscode-ext` has no test harness today,
   so `captureAgentRecoveryCommands` and `consumeRecoveryCommands` are exercised
   only by hand.

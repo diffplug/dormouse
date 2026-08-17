@@ -284,16 +284,15 @@ export async function captureAgentRecoveryCommands(
 
   const found = Object.keys(commands).length;
   log.info(`[recovery] settled with ${found} command(s) across ${liveIds.length} live PTY(s) at +${Date.now() - started}ms`);
-  // Diagnostic for a pane that yielded nothing: did the interrupt produce any
-  // output at all, and if so what did it actually look like? Distinguishes "the
-  // ^C never landed" from "it printed something we cannot parse" — the two are
-  // indistinguishable from a count, and guessing between them has cost several
-  // rounds. Escaped so control sequences are legible in the log.
+  // A pane that yielded nothing is worth a line, but only its shape — never its
+  // output. Whether the interrupt produced *any* bytes separates "the ^C never
+  // landed" from "it ran and kept going", which is the fork that matters, and it
+  // is the one piece of this that can be logged forever: dumping the actual tail
+  // would write terminal output into a log file, which is precisely the
+  // disclosure this whole scope exists to remove.
   for (const id of pending()) {
-    const buf = ptyManager.getScrollback(id) ?? '';
-    const after = buf.length - (startLen.get(id) ?? 0);
-    const tail = buf.slice(-320).replace(/\x1b/g, '<ESC>').replace(/\r/g, '<CR>').replace(/\n/g, '<LF>');
-    log.info(`[recovery]   NO HINT ${id}: +${after} bytes since interrupt; tail=${tail}`);
+    const after = ((ptyManager.getScrollback(id) ?? '').length) - (startLen.get(id) ?? 0);
+    log.info(`[recovery]   no hint from ${id}: +${after} bytes since interrupt, asked=${asksAgain(id)}, pressedTwice=${pressedTwice.has(id)}`);
   }
   // Nothing to write here: every command was persisted the moment it was found.
 }
