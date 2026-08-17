@@ -1,13 +1,13 @@
 import { type PointerEvent as ReactPointerEvent } from 'react';
+import { clsx } from 'clsx';
 import { BellIcon, SpeakerHighIcon } from '@phosphor-icons/react';
 import type { AlertSpeechState, SessionStatus, TodoState } from '../lib/terminal-registry';
 import { useTodoPillContent } from './TodoPillBody';
-import { bellIconClass } from './bell-icon-class';
+import { alertSpeakingAnimationClass, bellIconClass } from './bell-icon-class';
 import {
   ALERT_SPEECH_TRACKING_CLASS,
   TERMINAL_TOP_RADIUS_CLASS,
   TODO_PILL_TRACKING_CLASS,
-  alertSpeakingAnimationClass,
 } from './design';
 
 export interface DoorProps {
@@ -36,12 +36,6 @@ export function Door({
   const showBell = status !== 'WATCHING_DISABLED';
   const alertRinging = status === 'ALERT_RINGING';
   const todoPill = useTodoPillContent(todo);
-  // Only `speaking` takes the whole badge slot, and it is genuinely brief — one
-  // utterance. `spoken` persists for as long as the ring goes unattended, which
-  // is unbounded, so it may not evict the bell and TODO pill: those are the
-  // baseboard's persistent status signals and a Door showing neither would be
-  // indistinguishable from a quiet one. It gets a speaker icon beside them
-  // instead, plus the inset contrast ring on the Door itself.
   const speaking = speechState === 'speaking';
   const spoken = speechState === 'spoken';
 
@@ -55,15 +49,15 @@ export function Door({
   return (
     <button
       data-door-id={doorId}
-      className={[
+      className={clsx(
         'relative flex h-6 max-w-[220px] min-w-[68px] items-center gap-2 overflow-hidden px-2.5',
+        'text-sm font-medium font-mono',
         TERMINAL_TOP_RADIUS_CLASS,
         speaking
-          ? `bg-alarm-vs-door text-door-bg ${alertSpeakingAnimationClass()}`
+          ? clsx('bg-alarm-vs-door text-door-bg', alertSpeakingAnimationClass())
           : 'bg-door-bg text-door-fg',
-        spoken ? 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]' : '',
-        'text-sm font-medium font-mono',
-      ].join(' ')}
+        spoken && 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]',
+      )}
       onClick={onClick}
       onPointerDown={onPointerDown}
       title={speechState ? `${title} — ${speechState}` : title}
@@ -73,13 +67,10 @@ export function Door({
       <span className="min-w-0 flex-1 truncate">
         {title}
       </span>
+      {/* `spoken` is unbounded (it lasts until the ring is attended), so it joins
+          the badge cluster instead of replacing it — see docs/specs/layout.md. */}
       {speaking ? (
-        <span
-          className={[
-            'flex shrink-0 items-center gap-1 text-xs font-bold',
-            ALERT_SPEECH_TRACKING_CLASS,
-          ].join(' ')}
-        >
+        <span className={clsx('flex shrink-0 items-center gap-1 text-xs font-bold', ALERT_SPEECH_TRACKING_CLASS)}>
           <SpeakerHighIcon size={13} weight="fill" />
           <span>SPEAKING</span>
         </span>

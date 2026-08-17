@@ -114,12 +114,14 @@ The pane body paints `--color-terminal-bg` on the React pane wrapper and the `Te
 
 A terminal Session with transient speech-delivery state gets a pointer-transparent overlay spanning its whole Lath leaf; browser surfaces never render it. It resolves through the tiling engine's per-leaf overlay slot (`docs/specs/tiling-engine.md`), never intercepts pointer/focus routing, and never changes leaf geometry.
 
-It renders as **two layers straddling the header's stacking context**. `.lath-leaf-header` is `position: relative; z-index: 20`, which traps everything inside it — including the `z-[1000]` shared popover surface — at z-20 among the leaf's children, so a single overlay above the header would cover and tint every header popover (context menu, title candidates, TODO preview, rename warning):
+It renders as **two layers straddling the header's stacking context** (`.lath-leaf-header` is `position: relative; z-index: 20`):
 
-- **Wash + label at `z-index: 19`** — below the header, so popovers open over them; above terminal content; below the `z-index: 20` pane-corner banners (resume offer, mouse override). This also leaves the header band unwashed, where `--color-alarm-vs-terminal` (picked against the terminal body) carries no contrast guarantee. `SPEAKING` uses a 20% contrast wash, `SPOKEN` 10%. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered.
-- **Perimeter ring at `z-index: 25`** — above the header so the treatment still reads as one rounded rectangle around the whole Pane, below the `z-index: 30` sashes. An inset border at the leaf's edge covers and tints nothing. 5px for `SPEAKING`, 3px for `SPOKEN`.
+- **Wash + label at `z-index: 19`** — below the header, so the wash never tints the header band, where `--color-alarm-vs-terminal` (picked against the *terminal body*) carries no contrast guarantee; above terminal content; below the `z-index: 20` pane-corner banners (resume offer, mouse override), which therefore stay untinted. Only `SPEAKING` washes, at 20%: `SPOKEN` persists until the ring is attended, which is unbounded, and a tint degrading terminal-text contrast for that whole window is the same mistake the Door's badge cluster avoids. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered, in both states.
+- **Perimeter ring at `z-index: 25`** — above the header so the treatment still reads as one rounded rectangle around the whole Pane, below the `z-index: 30` sashes. An inset border at the leaf's edge covers nothing. 5px for `SPEAKING`, 3px for `SPOKEN`; it is what carries `SPOKEN` on its own.
 
-Both layers use the runtime `--color-alarm-vs-terminal` contrast pick and wear the leaf's own rounding (header radius on top, terminal radius on the bottom). Under `SPEAKING` both pulse when motion is allowed and `cfg.alert.ringingPaused` is not set. Behavior and clearing rules belong to `docs/specs/alert.md`. Source of truth: `AlertSpeechIndicator.tsx`, registered as the `terminal` overlay by `LathHost.tsx`.
+Header popovers are not a factor in this layering: every one of them (pane context menu, title candidates, notification preview, rename warning) portals to `document.body` with `position: fixed`, so they render in the root stacking context above the whole wall regardless of leaf z-indices.
+
+Both layers wear the leaf's own rounding (header radius on top, terminal radius on the bottom). Under `SPEAKING` both pulse when motion is allowed and `cfg.alert.ringingPaused` is not set. Behavior and clearing rules belong to `docs/specs/alert.md`. Source of truth: `AlertSpeechIndicator.tsx`, registered as the `terminal` overlay by `LathHost.tsx`.
 
 ### Pane header responsive sizing
 

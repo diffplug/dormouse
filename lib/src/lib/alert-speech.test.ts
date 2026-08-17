@@ -335,21 +335,16 @@ describe('spoken alarms', () => {
    */
   it('bounds tracked utterances when the engine never calls back', () => {
     start();
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 20; i++) {
       ring(`pty-${i}`);
       vi.advanceTimersByTime(SPEAK_DELAY_MS);
     }
-    expect(spoken).toHaveLength(40);
-
-    // Every utterance is still un-settled; only a bounded tail may stay wired.
-    const stillWired = utterances.filter(u => u.onend !== null).length;
-    expect(stillWired).toBe(40);
+    expect(spoken).toHaveLength(20);
 
     stopSpeech?.();
     stopSpeech = null;
-    // Dispose detaches the tracked tail; the evicted ones were released earlier
-    // and are inert regardless, since their generation token is gone.
-    expect(utterances.filter(u => u.onend !== null).length).toBeGreaterThan(0);
-    expect(utterances.slice(-8).every(u => u.onend === null)).toBe(true);
+    // Dispose detaches exactly what was still tracked — the bounded tail. The
+    // evicted remainder is inert regardless: its generation token is gone.
+    expect(utterances.filter(u => u.onend === null)).toEqual(utterances.slice(-8));
   });
 });

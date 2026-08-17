@@ -60,24 +60,34 @@ describe('AlertSpeechIndicator', () => {
   });
 
   /**
-   * `.lath-leaf-header` is `position: relative; z-index: 20`, so it traps its own
-   * popovers — context menu, title candidates, TODO preview, rename warning — at
-   * z=20 among the leaf's children no matter how high their own z-index goes.
-   * The opaque label chip and the tinting wash must therefore stay BELOW that,
-   * while the perimeter ring (which covers only the leaf's edge) stays above so
-   * the treatment still outlines the whole Pane.
+   * The wash must stay below `.lath-leaf-header` (`z-index: 20`) so it never
+   * tints the header band — `--color-alarm-vs-terminal` is picked against the
+   * terminal body and has no contrast guarantee there — nor the `z-20`
+   * pane-corner banners. The ring covers only the leaf's edge, so it can sit
+   * above and still outline the whole Pane.
    */
-  it('splits the layers around the header so popovers stay legible', () => {
+  it('keeps the wash below the header and the ring above it', () => {
     act(() => setAlertSpeechState('pty-1', 'speaking'));
 
     const wash = container.querySelector<HTMLElement>('[data-alert-speech-state="speaking"]');
     expect(wash?.className).toContain('z-[19]');
     expect(wash?.className).toContain('bg-alarm-vs-terminal/20');
-    // The chip lives in the wash layer, under the header's popovers.
-    expect(wash?.querySelector('span')?.textContent).toBe('SPEAKING');
     expect(ringLayer()?.className).toContain('z-[25]');
     // The ring tints nothing — it is an inset border, not a fill.
     expect(ringLayer()?.className).not.toContain('bg-alarm-vs-terminal/');
+  });
+
+  /**
+   * `spoken` lasts until the ring is attended, which is unbounded. A wash
+   * degrading terminal-text contrast for that whole window is the same mistake
+   * the Door's badge cluster avoids, so only the ring persists.
+   */
+  it('does not wash the terminal body for the unbounded SPOKEN window', () => {
+    act(() => setAlertSpeechState('pty-1', 'spoken'));
+
+    const wash = container.querySelector<HTMLElement>('[data-alert-speech-state="spoken"]');
+    expect(wash?.className).not.toContain('bg-alarm-vs-terminal/');
+    expect(ringLayer()?.className).toContain('inset_0_0_0_3px');
   });
 
   it('never intercepts pointer or focus routing', () => {

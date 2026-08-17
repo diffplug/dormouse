@@ -59,9 +59,9 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   // below runs during render, so a re-measure that only wrote a ref would leave
   // the visible row fitted against the previous widths with nothing scheduled to
   // correct it — and a SPEAKING/SPOKEN Door is materially wider than its resting
-  // form, so that stale frame overflows the baseboard and persists until some
-  // unrelated change re-renders. Only a real change commits, so this converges
-  // in one extra pass instead of looping.
+  // form, so that stale frame overflows the baseboard and persists. The equality
+  // guard on write keeps this to one extra render on a real width change, rather
+  // than one on every activity notification.
   const [doorWidths, setDoorWidths] = useState<number[]>([]);
   const arrowMeasureEl = useRef<HTMLButtonElement>(null);
   const rightClusterEl = useRef<HTMLDivElement>(null);

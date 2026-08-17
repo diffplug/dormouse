@@ -36,14 +36,10 @@ import { deriveSessionLabel } from './session-label';
 const SPEECH_LIMIT = 120;
 
 /**
- * Cap on tracked in-flight utterances.
- *
- * The tracking Set exists only so teardown can detach handlers, and an utterance
- * the engine silently drops (see `toSpokenText`) never fires a callback to retire
- * itself — so a wedged synthesizer would grow the Set, and the handler closures it
- * pins, for the life of the app. Evicting the oldest bounds it without detaching:
- * an evicted utterance that does still fire settles normally, and after teardown
- * the generation-token check makes any late callback inert.
+ * Cap on tracked in-flight utterances. A dropped utterance (see `toSpokenText`)
+ * never fires a callback to retire itself, so a wedged synthesizer would grow the
+ * Set forever. Evicting the oldest bounds it *without* detaching, so an evicted
+ * utterance that does still fire settles normally.
  */
 const MAX_TRACKED_UTTERANCES = 8;
 
@@ -141,11 +137,12 @@ export function startAlertSpeech(): () => void {
     utterance.onerror = null;
   };
 
+  // Only insertion point, one entry per call — so the size can never exceed the
+  // cap and a single eviction is enough.
   const track = (utterance: SpeechSynthesisUtterance): void => {
-    while (utterances.size >= MAX_TRACKED_UTTERANCES) {
+    if (utterances.size >= MAX_TRACKED_UTTERANCES) {
       const oldest = utterances.values().next().value;
-      if (!oldest) break;
-      utterances.delete(oldest);
+      if (oldest) utterances.delete(oldest);
     }
     utterances.add(utterance);
   };
@@ -185,9 +182,9 @@ export function startAlertSpeech(): () => void {
 
   const clearResolvedSpeech = (): void => {
     // Runs on every activity notification — i.e. constantly during terminal
-    // output — and `getActivitySnapshot()` rebuilds the Map that notification
-    // just invalidated. Delivery state is absent in the overwhelming majority of
-    // those calls, so bail before paying for the rebuild.
+    // output — and has nothing to do in the overwhelming majority of them.
+    // (`getActivitySnapshot()` memoizes, so this is an early-out, not a saving:
+    // Baseboard's own subscriber rebuilds that Map in the same notification.)
     const speech = getAlertSpeechSnapshot();
     if (speech.size === 0) return;
     const activity = getActivitySnapshot();

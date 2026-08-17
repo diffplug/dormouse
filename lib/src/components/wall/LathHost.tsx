@@ -118,9 +118,8 @@ function TerminalLeafOverlay({ id }: PaneProps) {
 
 // Whole-leaf overlays keyed by `leafMeta.component`: pointer-transparent chrome
 // spanning header *and* body, which neither the Body nor the Tab slot can cover.
-// Resolved through the same registry as those two deliberately — LathHost is the
-// content-agnostic engine adapter, so a feature registers a slot here rather than
-// the adapter growing a branch (and an import) per feature.
+// Keyed off the same metadata as those two so leaf content resolves one way, not
+// one way plus a surface-kind branch in the render path.
 const OVERLAY_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalLeafOverlay,
 };
@@ -148,7 +147,7 @@ type LeafCallbacks = {
  *  identity (id / meta / resolved components / the stable header-press handler), so a
  *  geometry-only frame — a sash-drag preview or a resize commit re-renders the
  *  positioned wrapper — never re-renders the header or body. Returned as a fragment so
- *  the header/body and pointer-transparent speech overlay stay direct children of
+ *  the header/body and the whole-leaf overlay stay direct children of
  *  `.lath-leaf`. A mounted leaf is always
  *  engine-visible, so the pane props carry no visibility flag (docs/specs/
  *  tiling-engine.md → "Pane props contract"). */

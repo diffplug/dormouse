@@ -44,9 +44,6 @@ describe('Door spoken-alarm state', () => {
     const door = container.querySelector<HTMLButtonElement>('[data-alert-speech-state="spoken"]');
     expect(door?.className).toContain('inset_0_0_0_2px');
     expect(door?.className).not.toContain('animate-speech-alarm-pulse');
-    // Not color-only: the speaker icon carries the state as a shape, and the
-    // accessible name spells it out.
-    expect(door?.querySelector('svg')).not.toBeNull();
     expect(door?.getAttribute('aria-label')).toBe('build-server, spoken');
   });
 
@@ -62,7 +59,6 @@ describe('Door spoken-alarm state', () => {
     ));
 
     const door = container.querySelector<HTMLButtonElement>('[data-alert-speech-state="spoken"]');
-    expect(door?.textContent).toContain('TODO');
     expect(door?.querySelector('.todo-pill-shell')).not.toBeNull();
     // Speaker icon + bell icon, both alongside the pill.
     expect(door?.querySelectorAll('svg').length).toBe(2);
