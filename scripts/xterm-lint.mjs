@@ -215,8 +215,8 @@ if (canopy) {
       );
     } else if (sdf[1] !== beta[1]) {
       problems.push(
-        `canopy/package.json: fork release ${tagVersion} was built from @xterm/xterm ` +
-        `6.1.0-beta.${sdf[1]}, but canopy pins ${core}. The addon bundles core internals — ` +
+        `canopy/package.json: fork release ${tagVersion} encodes @xterm/xterm beta.${sdf[1]}, ` +
+        `but canopy pins ${core}. The addon bundles core internals — ` +
         'both move together (docs/specs/webgl-text.md → Following upstream)',
       );
     }

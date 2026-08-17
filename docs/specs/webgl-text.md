@@ -60,7 +60,9 @@ WebGL?" is answered by layout.md, not here.
   three things this depends on: every addon pin's peer range equals `^` its
   workspace's core pin — the SDF fork tarball included, which is what makes the
   canopy lockstep exact rather than counter-deep — `lib` and `standalone` agree,
-  and canopy's tarball URL is internally consistent. `scripts/xterm-bump.mjs`
+  and canopy's tarball URL is self-consistent (tag, filename and `-sdfNNN`
+  counter agree with the core pin, which independently catches a release whose
+  tag misstates the base its peer range declares). `scripts/xterm-bump.mjs`
   (`pnpm bump:xterm`) derives the newest set that all four packages published
   from one commit and writes it.
 - **Releases are hand-cut today** (build, `npm pack`, `gh release create` per
