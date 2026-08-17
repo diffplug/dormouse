@@ -526,7 +526,7 @@ export function createApp(config: AppConfig): CreatedApp {
     });
     const res: PushSubscribeResponse = {
       subscribedAt: stored.subscription.subscribedAt,
-      deviceRegistrationsReset: stored.deviceRegistrationsReset,
+      hostIds: [...stored.deviceHostIds],
     };
     return c.json(res);
   });

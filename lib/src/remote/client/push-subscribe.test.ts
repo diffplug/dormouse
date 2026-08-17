@@ -210,7 +210,7 @@ describe('subscribeToPushInBrowser', () => {
   it('explains a missing worker instead of hanging on serviceWorker.ready', async () => {
     stubBrowser({});
     getRegistration.mockResolvedValue(null);
-    await expect(subscribeToPushInBrowser('BKey')).rejects.toThrow(/background worker/i);
+    await expect(subscribeToPushInBrowser('BKey', () => {})).rejects.toThrow(/background worker/i);
   });
 
   it('does not prompt for permission when there is no worker to subscribe with', async () => {
@@ -220,7 +220,7 @@ describe('subscribeToPushInBrowser', () => {
     (globalThis.Notification as unknown as { requestPermission: unknown }).requestPermission =
       requestPermission;
 
-    await expect(subscribeToPushInBrowser('BKey')).rejects.toThrow();
+    await expect(subscribeToPushInBrowser('BKey', () => {})).rejects.toThrow();
     expect(requestPermission).not.toHaveBeenCalled();
   });
 
@@ -228,7 +228,7 @@ describe('subscribeToPushInBrowser', () => {
     stubBrowser({});
     (globalThis.Notification as unknown as { requestPermission: unknown }).requestPermission =
       async () => 'denied';
-    await expect(subscribeToPushInBrowser('BKey')).rejects.toThrow(/browser settings/i);
+    await expect(subscribeToPushInBrowser('BKey', () => {})).rejects.toThrow(/browser settings/i);
   });
 
   it('reuses a scope-wide subscription minted for the same VAPID key', async () => {
@@ -249,16 +249,16 @@ describe('subscribeToPushInBrowser', () => {
     getRegistration.mockResolvedValue({
       pushManager: { getSubscription: async () => existing, subscribe },
     });
+    const onReplaced = vi.fn();
 
-    await expect(subscribeToPushInBrowser('AQID')).resolves.toEqual({
-      subscription: {
-        endpoint: 'https://push.example/existing',
-        keys: { p256dh: 'p256dh', auth: 'auth' },
-      },
-      subscriptionChanged: false,
+    await expect(subscribeToPushInBrowser('AQID', onReplaced)).resolves.toEqual({
+      endpoint: 'https://push.example/existing',
+      keys: { p256dh: 'p256dh', auth: 'auth' },
     });
     expect(unsubscribe).not.toHaveBeenCalled();
     expect(subscribe).not.toHaveBeenCalled();
+    // The address other Hosts registered is still live, so nothing was replaced.
+    expect(onReplaced).not.toHaveBeenCalled();
   });
 
   it('rotates the subscription when the VAPID key changed', async () => {
@@ -284,13 +284,13 @@ describe('subscribeToPushInBrowser', () => {
       },
     });
 
-    await expect(subscribeToPushInBrowser('AQID')).resolves.toEqual({
-      subscription: {
-        endpoint: 'https://push.example/replacement',
-        keys: { p256dh: 'new-p256dh', auth: 'new-auth' },
-      },
-      subscriptionChanged: true,
+    const onReplaced = vi.fn();
+
+    await expect(subscribeToPushInBrowser('AQID', onReplaced)).resolves.toEqual({
+      endpoint: 'https://push.example/replacement',
+      keys: { p256dh: 'new-p256dh', auth: 'new-auth' },
     });
+    expect(onReplaced).toHaveBeenCalledOnce();
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(subscribe).toHaveBeenCalledWith({
       userVisibleOnly: true,

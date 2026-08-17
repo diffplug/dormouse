@@ -11,26 +11,6 @@
 import { fromBase64Url, type PushSubscriptionPayload } from 'server-lib-common';
 import { getPushServiceWorkerRegistration } from '../pocket-app/service-worker';
 
-export interface BrowserPushSubscription {
-  subscription: PushSubscriptionPayload;
-  /**
-   * True when this call created a new delivery address. The Pocket shell keeps
-   * this fact until the Server registration succeeds, because a committed POST
-   * whose response was lost reports an idempotent `false` when retried.
-   */
-  subscriptionChanged: boolean;
-}
-
-/**
- * Called the moment the previously registered delivery address stops being
- * valid — before the replacement is minted, so the fact survives a `subscribe()`
- * that throws. {@link BrowserPushSubscription.subscriptionChanged} reports the
- * same thing on the success path; this exists because a throw between
- * `unsubscribe()` and the return would otherwise leave every other Host still
- * claiming alerts through an endpoint that is already dead.
- */
-export type DeliveryAddressReplacedCallback = () => void;
-
 /**
  * Why the user cannot subscribe right now, or `ready` if they can.
  *
@@ -136,11 +116,17 @@ export async function hasCurrentPushSubscription(
  *
  * Returns the subscription in the shape the Server stores, or throws with a
  * message worth showing.
+ *
+ * `onDeliveryAddressReplaced` is called the moment the previously registered
+ * address stops being valid, before the replacement is minted. It is required
+ * rather than optional because a caller that ignored it would leave every other
+ * Host claiming alerts through an endpoint that is already dead — including
+ * when the `subscribe()` below throws, which no return value can report.
  */
 export async function subscribeToPushInBrowser(
   applicationServerKey: string,
-  onDeliveryAddressReplaced?: DeliveryAddressReplacedCallback,
-): Promise<BrowserPushSubscription> {
+  onDeliveryAddressReplaced: () => void,
+): Promise<PushSubscriptionPayload> {
   // Checked before the permission prompt so a missing worker fails with an
   // explanation rather than after the user has already answered a dialog.
   const registration = await getPushServiceWorkerRegistration();
@@ -174,13 +160,12 @@ export async function subscribeToPushInBrowser(
     subscription = null;
   }
 
-  // Nullish rather than `=== null` so it cannot disagree with the `??=` below,
-  // which is what actually decides whether a new address gets minted.
-  const subscriptionChanged = subscription == null;
-  // Announced before the round trip, not after: the old address is already gone
-  // (either unsubscribed above or never there), so a `subscribe()` that throws
-  // must not take that fact with it.
-  if (subscriptionChanged) onDeliveryAddressReplaced?.();
+  // Nullish rather than falsy so this cannot disagree with the `??=` below,
+  // which is what actually decides whether a new address gets minted. Announced
+  // before the round trip, not after: the old address is already gone (either
+  // unsubscribed above or never there), so a `subscribe()` that throws must not
+  // take that fact with it.
+  if (subscription == null) onDeliveryAddressReplaced();
   subscription ??= await registration.pushManager.subscribe({
     // Mandatory in Chrome and on iOS: a promise that every push we receive
     // becomes a visible notification. `sw.js` keeps it.
@@ -197,10 +182,7 @@ export async function subscribeToPushInBrowser(
   if (!endpoint || !p256dh || !auth) {
     throw new Error('The browser returned an incomplete push subscription.');
   }
-  return {
-    subscription: { endpoint, keys: { p256dh, auth } },
-    subscriptionChanged,
-  };
+  return { endpoint, keys: { p256dh, auth } };
 }
 
 /**

@@ -225,10 +225,12 @@ export interface StoredPushSubscription {
 export interface PushSubscriptionUpsertResult {
   readonly subscription: StoredPushSubscription;
   /**
-   * True when the incoming delivery address differed from an existing row for
-   * this device, so all of the device's previous Host rows were invalidated.
+   * Every Host this device is registered with after the mutation, including the
+   * one just written. Computed inside the mutex, so it is the whole truth for
+   * the device at the instant it was committed rather than a delta the caller
+   * has to reconstruct.
    */
-  readonly deviceRegistrationsReset: boolean;
+  readonly deviceHostIds: readonly string[];
 }
 
 /**
@@ -282,7 +284,14 @@ export class PushSubscriptionStore extends JsonFileStore {
       );
       kept.push(stored);
       await this.writeAtomic(kept);
-      return { subscription: stored, deviceRegistrationsReset };
+      // Every surviving row for this device necessarily shares `stored`'s
+      // address, and `samePushAddress` compares the VAPID key too — so a row
+      // minted under a rotated key is never among these, and the caller needs
+      // no further filtering to know they are all deliverable.
+      const deviceHostIds = kept
+        .filter((s) => s.devicePublicKey === record.devicePublicKey)
+        .map((s) => s.hostId);
+      return { subscription: stored, deviceHostIds };
     });
   }
 

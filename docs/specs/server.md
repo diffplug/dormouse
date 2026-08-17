@@ -95,10 +95,15 @@ registered under, so a key rotation makes the Client readback treat the row as
 stale and offer re-registration rather than claiming delivery still works.
 Because one service-worker scope has only one subscription, an upsert whose
 endpoint, encryption keys, or VAPID key differs from an existing row for that
-device atomically deletes all of the device's prior Host rows; the response
-tells Pocket to discard the same stale Host ids. It holds no label — the Server
-never learns one. Source of truth: `PushSubscriptionStore.upsert` in
-`server/src/state.ts` and the subscribe route in `server/src/app.ts`.
+device atomically deletes all of the device's prior Host rows. The response
+reports the state that mutation left behind — every Host this device is still
+registered with — rather than the fact that a deletion happened, so a committed
+POST whose response was lost is repaired by its own idempotent retry. Scoping
+that answer to the device is safe where `GET /api/push/subscriptions` must not
+be: the request carries a device signature, so the caller has proven it owns the
+identity being reported on. The row holds no label — the Server never learns
+one. Source of truth: `PushSubscriptionStore.upsert` in `server/src/state.ts`
+and the subscribe route in `server/src/app.ts`.
 
 `hosts.json` stores `hostToken` — the host↔server relay bearer secret — in
 plaintext, and `vapid.json` a private key, so both files are written owner-only:

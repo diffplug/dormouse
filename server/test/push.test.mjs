@@ -354,12 +354,58 @@ test('rotating a device subscription invalidates its registrations for other Hos
   });
   const replacementBody = await replacement.json();
   assert.equal(typeof replacementBody.subscribedAt, 'number');
-  assert.equal(replacementBody.deviceRegistrationsReset, true);
+  // The response is the device's whole surviving set, so the dropped sibling is
+  // reported by its absence rather than by a flag the Client has to interpret.
+  assert.deepEqual(replacementBody.hostIds, [host.hostId]);
 
   const stored = JSON.parse(await readFile(join(stateDir, 'push-subscriptions.json'), 'utf8'));
   assert.equal(stored.length, 1);
   assert.equal(stored[0].hostId, host.hostId);
   assert.equal(stored[0].endpoint, 'https://push.example.com/replacement');
+});
+
+test('subscribe answers with every Host this device is registered with', async () => {
+  const { app, host, sessionToken } = await pushApp();
+  const { body: other } = await enrollHost(app, { label: 'Other laptop' });
+  const client = await SimClient.create({ origin: ORIGIN });
+  const otherClient = await SimClient.create({ origin: ORIGIN });
+
+  const first = await subscribe(app, { sessionToken, host, client });
+  assert.deepEqual((await first.json()).hostIds, [host.hostId]);
+
+  // Same address, second Host: both rows survive, and the answer grows.
+  const second = await subscribe(app, { sessionToken, host: other, client });
+  assert.deepEqual((await second.json()).hostIds.sort(), [host.hostId, other.hostId].sort());
+
+  // Another device's rows are never mixed in — the response is scoped to the
+  // identity that signed the request.
+  const foreign = await subscribe(app, {
+    sessionToken,
+    host,
+    client: otherClient,
+    sub: subscription('https://push.example.com/other-device'),
+  });
+  assert.deepEqual((await foreign.json()).hostIds, [host.hostId]);
+});
+
+test('a retried subscribe whose first response was lost still reports the truth', async () => {
+  // The Client cannot tell a lost response from a failed request, so it retries.
+  // The mutation is idempotent and cannot re-announce the sibling rows it
+  // already deleted — but it can always answer what is registered now, which is
+  // what lets the Client repair its view without remembering what it did.
+  const { app, host, sessionToken } = await pushApp();
+  const { body: other } = await enrollHost(app, { label: 'Other laptop' });
+  const client = await SimClient.create({ origin: ORIGIN });
+  await subscribe(app, { sessionToken, host, client });
+  await subscribe(app, { sessionToken, host: other, client });
+
+  const rotated = subscription('https://push.example.com/rotated');
+  const committed = await subscribe(app, { sessionToken, host, client, sub: rotated });
+  assert.deepEqual((await committed.json()).hostIds, [host.hostId]);
+
+  const retry = await subscribe(app, { sessionToken, host, client, sub: rotated });
+  assert.equal(retry.status, 200);
+  assert.deepEqual((await retry.json()).hostIds, [host.hostId]);
 });
 
 // --- subscriptions (client-facing) -----------------------------------------

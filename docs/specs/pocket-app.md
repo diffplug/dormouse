@@ -269,20 +269,18 @@ identities and is filtered to this device by `PocketClient`. It is deliberately
 not parameterized by `devicePublicKey`: an endpoint answering "which Hosts is
 device X registered with" would be an enumeration primitive over an input the
 caller need not own, where the account's own rows are already its to read — the
-same scoping `GET /api/hosts` uses. The response is authoritative and replaces
-the set, except that a registration completed while the read was in flight
-wins, since it is the newer fact: Pocket records each Host's latest completion
-with a globally increasing version and the current browser-subscription reset
-epoch. It merges only records that advanced after the request began and belong
-to the latest epoch (including a repeated repair of the same Host), so a later
-reset cannot let an earlier completion restore a deleted row. Earlier local ids
-remain subject to authoritative removal. Pocket clears the previous snapshot
-when a read begins; if the read fails, only registrations that completed since
-then can have added themselves back. That re-offers an idempotent action instead
-of preserving a stale **Alerts on** claim.
-Source of truth: `getPushAvailability` in
+same scoping `GET /api/hosts` uses. `POST /api/push/subscribe` answers with the
+same thing — every Host this device is registered with after the mutation — so
+both answers are complete for the device and neither is a delta. There is
+therefore nothing to merge: the only question is which is newer. Pocket counts
+completed registrations, captures that count when a read begins, and discards
+the read's snapshot if a registration overtook it. Earlier local ids remain
+subject to authoritative removal. Pocket clears the previous snapshot when a
+read begins; if the read fails, only a registration that completed since then
+can have set one. That re-offers an idempotent action instead of preserving a
+stale **Alerts on** claim. Source of truth: `getPushAvailability` in
 `lib/src/remote/client/push-subscribe.ts`,
-`PocketClient.listPushSubscribedHosts`, and `reconcilePushSubscribedHosts` in
+`PocketClient.listPushSubscribedHosts`, and the hosts-phase effect in
 `lib/src/remote/pocket-app/App.tsx`.
 
 The row is necessary but not sufficient for **Alerts on**: Pocket also verifies
@@ -301,17 +299,23 @@ scope's existing `PushSubscription` when its `applicationServerKey` matches the
 Server's VAPID public key byte-for-byte. Pocket unsubscribes and creates a new
 endpoint only when the key differs, because replacing a matching subscription
 would invalidate the endpoint already stored for every other Host. If the
-subscription disappeared or had to rotate, Pocket records that browser-side
-reset fact at the moment the old delivery address stops being valid — before
-the replacement is minted, so a `subscribe()` that throws cannot take it away —
-and retains it until a subscribe response arrives. It therefore keeps only the Host
-it just repaired even when the first POST committed but lost its response and
-the idempotent retry can no longer report that the Server atomically invalidated
-the other Host rows. A subscriptions read that began before that reset cannot
-restore its stale snapshot. Source of truth:
-`subscribeToPushInBrowser` in `lib/src/remote/client/push-subscribe.ts`,
-`PushSubscriptionStore.upsert` in `server/src/state.ts`, and the reset/version
-reconciliation in `lib/src/remote/pocket-app/App.tsx`.
+subscription disappeared or had to rotate, the Server drops that device's other
+Host rows in the same mutation and its response lists what survived, so Pocket
+learns the consequence from the answer rather than tracking what it did. That is
+what makes a committed POST whose response was lost self-repairing: the
+idempotent retry cannot re-announce a deletion it already performed, but it can
+always say what is registered now.
+
+`subscribeToPushInBrowser` still reports the replacement through a required
+callback, fired at the moment the old delivery address stops being valid —
+before the replacement is minted, so a `subscribe()` that throws cannot take it
+away, which is why the fact is not a return value. Its one job is the UI: Pocket
+stops claiming **Alerts on** for every Host at that instant, since they all
+pointed at the address that just died, and a throw leaves no response to correct
+the view with. Source of truth: `subscribeToPushInBrowser` in
+`lib/src/remote/client/push-subscribe.ts`, `PushSubscriptionStore.upsert` in
+`server/src/state.ts`, and `onEnablePush` in
+`lib/src/remote/pocket-app/App.tsx`.
 
 The existing static serving needs no special-casing: `serveStatic` already
 answers `application/manifest+json` for `.webmanifest` and `text/javascript` for

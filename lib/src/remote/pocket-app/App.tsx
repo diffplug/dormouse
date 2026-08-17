@@ -13,7 +13,7 @@
  * below and docs/specs/theme.md.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { tv } from 'tailwind-variants';
 import {
@@ -28,7 +28,6 @@ import {
   hasCurrentPushSubscription,
   isInstalledWebApp,
   subscribeToPushInBrowser,
-  type BrowserPushSubscription,
   type PushAvailability,
 } from '../client/push-subscribe';
 import { RemotePtyAdapter } from '../client/remote-adapter';
@@ -52,13 +51,6 @@ type PushConfigState =
   | { status: 'ready'; key: string }
   | { status: 'disabled' }
   | { status: 'error' };
-
-export interface PushEnableCompletion {
-  /** Globally increasing so replacing an older record is always detectable. */
-  version: number;
-  /** The browser-subscription reset epoch in which this registration completed. */
-  resetVersion: number;
-}
 
 /**
  * The label this Client suggests at pairing.
@@ -167,26 +159,12 @@ export default function App(): React.ReactElement {
   const [pushSubscriptionCurrent, setPushSubscriptionCurrent] = useState(false);
   const [pushConfig, setPushConfig] = useState<PushConfigState>({ status: 'loading' });
   /**
-   * The latest registration completion for each Host. The Server read below
-   * replaces the whole set, except for Hosts whose completion advanced after
-   * that read began in the current reset epoch.
+   * Advances on every completed registration. Both the subscribe response and
+   * the subscriptions read answer with this device's whole Host set, so the
+   * only question between them is which is newer: a read that this counter
+   * overtook is stale and gets dropped rather than merged.
    */
-  const pushEnableCompletionsRef = useRef<Map<string, PushEnableCompletion>>(new Map());
-  /** Monotonic across reset epochs so replacing an older Host record still advances. */
-  const pushEnableCompletionVersionRef = useRef(0);
-  /**
-   * Advances when the Server atomically drops this device's old Host rows
-   * after a browser subscription rotation. A read that began before the reset
-   * must not restore its now-stale snapshot.
-   */
-  const pushRegistrationResetVersionRef = useRef(0);
-  /**
-   * Set the moment the browser replaces its delivery address and cleared only
-   * after a Server response. If the POST committed but its response was lost —
-   * or `subscribe()` itself threw after the old address was already gone — the
-   * next attempt still knows the cached Host set is invalid.
-   */
-  const pushRegistrationResetPendingRef = useRef(false);
+  const pushRegistrationVersionRef = useRef(0);
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
 
   // Availability depends on browser state the app cannot change (permission,
@@ -220,27 +198,20 @@ export default function App(): React.ReactElement {
     // holds a row for. Authoritative rather than merged, so a row pruned after
     // a 410 stops claiming alerts are on.
     setPushSubscribedHostIds(new Set());
-    const enableCompletionsAtStart = new Map(pushEnableCompletionsRef.current);
-    const resetVersionAtStart = pushRegistrationResetVersionRef.current;
+    const registrationVersionAtStart = pushRegistrationVersionRef.current;
     void client
       .listPushSubscribedHosts()
       .then((hostIds) => {
-        if (live) {
-          setPushSubscribedHostIds(
-            reconcilePushSubscribedHosts(
-              hostIds,
-              enableCompletionsAtStart,
-              pushEnableCompletionsRef.current,
-              resetVersionAtStart,
-              pushRegistrationResetVersionRef.current,
-            ),
-          );
-        }
+        // A registration that landed while this was in flight already answered
+        // the same question about the same device, and did so later. Nothing to
+        // merge — the newer complete answer simply stands.
+        if (!live || pushRegistrationVersionRef.current !== registrationVersionAtStart) return;
+        setPushSubscribedHostIds(new Set(hostIds));
       })
       .catch(() => {
         // Best-effort: the previous snapshot was cleared before this request,
-        // while any Enable that completed since then added itself back. That
-        // re-offers an idempotent action instead of preserving a stale claim.
+        // while any Enable that completed since then set its own. That re-offers
+        // an idempotent action instead of preserving a stale claim.
       });
     return () => {
       live = false;
@@ -339,28 +310,20 @@ export default function App(): React.ReactElement {
       if (pushConfig.status !== 'ready') {
         throw new Error('Check the server configuration before enabling alerts.');
       }
-      const browserSubscription = await subscribeToPushInBrowser(pushConfig.key, () => {
-        pushRegistrationResetPendingRef.current = true;
+      const subscription = await subscribeToPushInBrowser(pushConfig.key, () => {
+        // The scope no longer holds an address the Server can reach, so no Host
+        // may keep claiming alerts through it. Stated the moment it becomes
+        // true, which is what re-offers Enable if minting the replacement then
+        // throws and there is no response to correct the UI with.
+        setPushSubscriptionCurrent(false);
       });
-      const deviceRegistrationsReset = await completePushSubscriptionRegistration(
-        browserSubscription,
-        pushRegistrationResetPendingRef,
-        (subscription) => client.subscribeToPush(host.hostId, subscription),
-      );
-      if (deviceRegistrationsReset) {
-        pushRegistrationResetVersionRef.current += 1;
-        // Every surviving record belongs to a dead epoch and can never match the
-        // gate in `reconcilePushSubscribedHosts` again.
-        pushEnableCompletionsRef.current.clear();
-      }
-      pushEnableCompletionsRef.current.set(host.hostId, {
-        version: ++pushEnableCompletionVersionRef.current,
-        resetVersion: pushRegistrationResetVersionRef.current,
-      });
+      const { hostIds } = await client.subscribeToPush(host.hostId, subscription);
+      pushRegistrationVersionRef.current += 1;
       setPushSubscriptionCurrent(true);
-      setPushSubscribedHostIds((prev) =>
-        deviceRegistrationsReset ? new Set([host.hostId]) : new Set(prev).add(host.hostId),
-      );
+      // Authoritative and complete for this device — including after a retry
+      // whose first attempt committed but lost its response — so it replaces
+      // the set rather than adding to it.
+      setPushSubscribedHostIds(new Set(hostIds));
     });
 
   // A config retry deliberately stops after caching the key. The next tap on
@@ -444,57 +407,6 @@ export default function App(): React.ReactElement {
       <div className={clsx(PK.body, PK.bodyCenter)}>…</div>
     </div>
   );
-}
-
-/**
- * Register one browser subscription while retaining evidence of a browser-side
- * replacement until a Server response arrives. A lost response may mean the
- * Server already deleted sibling Host rows; its idempotent retry cannot report
- * that deletion again, so the retained browser fact must win.
- *
- * `pendingReset` may already be set by `subscribeToPushInBrowser`'s
- * replacement callback; re-reading `subscriptionChanged` keeps this correct for
- * a caller that did not pass one.
- */
-export async function completePushSubscriptionRegistration(
-  browserSubscription: BrowserPushSubscription,
-  pendingReset: RefObject<boolean>,
-  register: (
-    subscription: BrowserPushSubscription['subscription'],
-  ) => Promise<{ deviceRegistrationsReset: boolean }>,
-): Promise<boolean> {
-  if (browserSubscription.subscriptionChanged) pendingReset.current = true;
-  const result = await register(browserSubscription.subscription);
-  const deviceRegistrationsReset = pendingReset.current || result.deviceRegistrationsReset;
-  pendingReset.current = false;
-  return deviceRegistrationsReset;
-}
-
-/**
- * Apply an authoritative Server snapshot without losing a registration that
- * completed after the read began. Earlier local ids are deliberately omitted
- * when the Server no longer reports them: pruning must self-correct the UI.
- */
-export function reconcilePushSubscribedHosts(
-  serverHostIds: readonly string[],
-  enableCompletionsAtReadStart: ReadonlyMap<string, PushEnableCompletion>,
-  enableCompletionsNow: ReadonlyMap<string, PushEnableCompletion>,
-  // Required, not defaulted: an omitted epoch would silently discard every
-  // completion recorded after a reset and trust a snapshot taken before it.
-  resetVersionAtReadStart: number,
-  resetVersionNow: number,
-): Set<string> {
-  const reconciled =
-    resetVersionNow > resetVersionAtReadStart ? new Set<string>() : new Set(serverHostIds);
-  for (const [hostId, completion] of enableCompletionsNow) {
-    if (
-      completion.resetVersion === resetVersionNow &&
-      completion.version > (enableCompletionsAtReadStart.get(hostId)?.version ?? 0)
-    ) {
-      reconciled.add(hostId);
-    }
-  }
-  return reconciled;
 }
 
 // --- ConnectedView ---------------------------------------------------------

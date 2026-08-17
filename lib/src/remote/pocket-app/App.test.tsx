@@ -5,13 +5,7 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  completePushSubscriptionRegistration,
-  HostsView,
-  reconcilePushSubscribedHosts,
-  type HostView,
-  type PushConfigStatus,
-} from './App';
+import { HostsView, type HostView, type PushConfigStatus } from './App';
 import type { PushAvailability } from '../client/push-subscribe';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -166,87 +160,5 @@ describe('HostsView push registration', () => {
     expect(enableButtonIn(row)).toBeNull();
     act(() => retryButtonIn(row)!.click());
     expect(onRetryPushConfig).toHaveBeenCalledOnce();
-  });
-});
-
-describe('push registration reconciliation', () => {
-  it('retains a browser subscription reset across a lost registration response', async () => {
-    const pendingReset = { current: false };
-    const replacement = {
-      subscription: {
-        endpoint: 'https://push.example/replacement',
-        keys: { p256dh: 'p256dh', auth: 'auth' },
-      },
-      subscriptionChanged: true,
-    };
-
-    await expect(
-      completePushSubscriptionRegistration(replacement, pendingReset, async () => {
-        throw new Error('response lost');
-      }),
-    ).rejects.toThrow('response lost');
-    expect(pendingReset.current).toBe(true);
-
-    const reset = await completePushSubscriptionRegistration(
-      { ...replacement, subscriptionChanged: false },
-      pendingReset,
-      async () => ({ deviceRegistrationsReset: false }),
-    );
-    expect(reset).toBe(true);
-    expect(pendingReset.current).toBe(false);
-  });
-
-  it('keeps the server snapshot plus only registrations completed during the read', () => {
-    const reconciled = reconcilePushSubscribedHosts(
-      ['host-a', 'host-b'],
-      new Map([['stale-local', { version: 1, resetVersion: 0 }]]),
-      new Map([
-        ['stale-local', { version: 1, resetVersion: 0 }],
-        ['host-c', { version: 2, resetVersion: 0 }],
-      ]),
-      0,
-      0,
-    );
-
-    expect([...reconciled]).toEqual(['host-a', 'host-b', 'host-c']);
-  });
-
-  it('keeps a repeated registration of the same Host completed during the read', () => {
-    const reconciled = reconcilePushSubscribedHosts(
-      [],
-      new Map([['host-a', { version: 1, resetVersion: 0 }]]),
-      new Map([['host-a', { version: 2, resetVersion: 0 }]]),
-      0,
-      0,
-    );
-
-    expect([...reconciled]).toEqual(['host-a']);
-  });
-
-  it('discards a snapshot taken before the browser subscription was replaced', () => {
-    const reconciled = reconcilePushSubscribedHosts(
-      ['stale-host-a', 'stale-host-b'],
-      new Map(),
-      new Map([['repaired-host', { version: 1, resetVersion: 1 }]]),
-      0,
-      1,
-    );
-
-    expect([...reconciled]).toEqual(['repaired-host']);
-  });
-
-  it('drops Enable completions from before a later reset during the read', () => {
-    const reconciled = reconcilePushSubscribedHosts(
-      ['snapshot-host'],
-      new Map(),
-      new Map([
-        ['pre-reset-host', { version: 1, resetVersion: 0 }],
-        ['repaired-host', { version: 2, resetVersion: 1 }],
-      ]),
-      0,
-      1,
-    );
-
-    expect([...reconciled]).toEqual(['repaired-host']);
   });
 });
