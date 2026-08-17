@@ -38,4 +38,18 @@ describe('readInjectedRecoveryCommands', () => {
 
     expect(readInjectedRecoveryCommands()).toEqual({ 'pane-a': 'claude --continue' });
   });
+
+  it('never answers a lookup with an inherited Object member', () => {
+    // The caller looks up by arbitrary surface id. On a plain object literal
+    // `commands['constructor']` is a *function*, which the per-entry shape check
+    // above never sees (it only visits own keys) — and a function reaching
+    // `normalizeResumeCommand` throws out of `restoreSession`, losing every
+    // persisted pane rather than just this one.
+    inject({ 'pane-a': 'claude --continue' });
+    const commands = readInjectedRecoveryCommands();
+
+    for (const inherited of ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__']) {
+      expect(commands[inherited]).toBeUndefined();
+    }
+  });
 });

@@ -24,8 +24,13 @@ export const RECOVERY_COMMANDS_GLOBAL = '__DORMOUSE_RECOVERY__';
  */
 export function readInjectedRecoveryCommands(): Record<string, string> {
   const raw = (globalThis as unknown as Record<string, unknown>)[RECOVERY_COMMANDS_GLOBAL];
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
-  const commands: Record<string, string> = {};
+  // Null-prototype, because the caller looks this up by arbitrary surface id: on a
+  // plain literal an id of `constructor` or `toString` reads back as an inherited
+  // *function*, which sails past the shape check below (it never ran for that key)
+  // and reaches `normalizeResumeCommand` as a non-string — throwing out of
+  // `restoreSession` and costing the user every persisted pane, not just this one.
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return Object.create(null);
+  const commands: Record<string, string> = Object.create(null);
   for (const [id, command] of Object.entries(raw as Record<string, unknown>)) {
     if (typeof command === 'string' && command.length > 0) commands[id] = command;
   }

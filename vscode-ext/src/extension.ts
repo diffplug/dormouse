@@ -6,7 +6,7 @@ import { attachRouter, flushAllSessions, getAlertStates } from './message-router
 import { closePoppedOutSessions } from './agent-browser-host';
 import { serveWebview } from './webview-messaging';
 import { log } from './log';
-import { captureAgentRecoveryCommands, mergeAlertStates, refreshSavedSessionStateFromPtys } from './session-state';
+import { captureAgentRecoveryCommands, mergeAlertStates, refreshSavedSessionStateFromPtys, takeRecoveryCommands } from './session-state';
 import { readPersistedSession } from '../../lib/src/lib/session-types';
 import { workspaceTitle } from './workspace-chrome';
 import { resolveSelectedShell, setSelectedShellPath, getSelectedShellPath } from './shell-selection';
@@ -47,12 +47,21 @@ function setupPanel(
     light: vscode.Uri.file(path.join(context.extensionPath, 'icon-tiny-light.png')),
     dark: vscode.Uri.file(path.join(context.extensionPath, 'icon-tiny-dark.png')),
   };
-  const channel = serveWebview(panel.webview, mediaPath, initialState, getSelectedShell?.());
+  const savedSession = readPersistedSession(initialState);
+  // A panel's panes are interrupted by the teardown capture along with every
+  // other live PTY, so they have a recovery command waiting too — claimed by
+  // pane id, since the Dormouse view is claiming its own share of the same
+  // record (docs/specs/transport.md -> "Consuming it").
+  const recoveryCommands = takeRecoveryCommands(
+    context,
+    (savedSession?.panes ?? []).map((pane) => pane.id),
+  );
+  const channel = serveWebview(panel.webview, mediaPath, initialState, getSelectedShell?.(), recoveryCommands);
 
   const router = attachRouter(channel, {
     reconnect: !!savedState,
     killOnDispose: true,
-    savedSession: readPersistedSession(initialState),
+    savedSession,
     getSelectedShell,
     // Reflect this panel's Workspace union onto the editor-tab title
     // (`<title> 🔔 [TODO]`). Icon stays the Dormouse mascot.
@@ -225,10 +234,15 @@ export async function deactivate() {
   // joined after, so it overlaps the capture poll instead of adding its own round
   // trips to the serial teardown.
   step('closing popped-out browser windows');
-  const poppedOutClosed = closePoppedOutSessions();
-  // Marks the rejection handled so it can't surface as an unhandledRejection
-  // while capture is awaited; the join below still throws it.
-  poppedOutClosed.catch(() => {});
+  // Absorbed rather than propagated. Two reasons it must not throw out of the
+  // join below: it would surface as an unhandledRejection while capture is
+  // awaited, and — because it is joined *after* the capture rather than before —
+  // it would skip the session flush, the live-PTY refresh, and both kills,
+  // leaking the pty host and every PTY under it. An orphaned Chrome window is a
+  // far smaller failure than an unkilled pty host.
+  const poppedOutClosed = closePoppedOutSessions().catch((err) => {
+    log.error('[deactivate] could not close popped-out browser windows:', String(err));
+  });
   step('capturing agent recovery commands');
   await captureAgentRecoveryCommands(extensionContext, 1200);
   await poppedOutClosed;

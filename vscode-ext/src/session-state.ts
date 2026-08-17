@@ -167,6 +167,24 @@ export async function captureAgentRecoveryCommands(
   maxWaitMs = 1300,
 ): Promise<void> {
   const started = Date.now();
+  const file = recoveryFilePath(context);
+  if (!file) {
+    log.error('[recovery] no storage path available; cannot persist');
+    return;
+  }
+
+  // Clear the previous record before anything below can return early. A record is
+  // only ever consumed by a cold activation that actually opens the Dormouse view,
+  // so a teardown that captures nothing must not leave the last one sitting there:
+  // otherwise a session where the view is never opened carries the record forward,
+  // and a much later restore auto-runs a week-old invocation unprompted. The write
+  // path below re-creates it the moment anything is detected.
+  try {
+    fs.rmSync(file, { force: true });
+  } catch (err) {
+    log.error('[recovery] could not clear the previous record:', String(err));
+  }
+
   // Exited PTYs are kept in the buffer map until `kill()`, and one can neither
   // receive a `^C` nor ever yield a hint — including them would scan them on every
   // tick and permanently defeat the `pending().length === 0` early exit.
@@ -176,18 +194,19 @@ export async function captureAgentRecoveryCommands(
     return;
   }
 
-  const file = recoveryFilePath(context);
-  if (!file) {
-    log.error('[recovery] no storage path available; cannot persist');
-    return;
-  }
-
-  const commands: Record<string, string> = {};
-  // Lengths come from the exact counter the buffer already maintains — watching a
-  // pane for growth must not cost a ~1MB join per pane per tick.
-  const startLen = new Map(liveIds.map((id) => [id, ptyManager.getScrollbackLength(id)]));
-  const lastLen = new Map(startLen);
-  const lastGrewAt = new Map(liveIds.map((id) => [id, Date.now()]));
+  // Null-prototype: surface ids are arbitrary strings, and on a plain literal an
+  // id of `constructor` or `toString` reads back as an inherited function — the
+  // pane would test as already-captured on the very first tick and never be
+  // scanned, interrupted again, or waited for.
+  const commands: Record<string, string> = noCommands();
+  // Marks come from the exact monotonic counter the buffer already maintains, not
+  // from its *length*: a pane at the 1MB cap holds its length pinned while output
+  // keeps flowing, so a length is neither a usable growth signal nor a usable
+  // offset — and that pane is exactly the long-running agent this exists for.
+  const startMark = new Map(liveIds.map((id) => [id, ptyManager.getScrollbackReceived(id)]));
+  const lastMark = new Map(startMark);
+  // Seeded once the interrupt is acked, not here — see `interruptedAt`.
+  const lastGrewAt = new Map<string, number>();
 
   // Persist on every change rather than once at the end. The write is a few
   // hundred bytes and costs well under a millisecond, so there is no reason for
@@ -220,15 +239,13 @@ export async function captureAgentRecoveryCommands(
     asked.clear();
     let changed = false;
     for (const id of pending()) {
-      const scrollback = ptyManager.getScrollback(id);
-      if (!scrollback) continue;
       // Recovery commands are executable state, so only trust bytes that arrived
       // after this teardown started interrupting the pane. Scanning the existing
       // buffer would let an old launch echo or a previous agent hint run on the
-      // next restore. If bounded scrollback evicted old bytes in the meantime,
-      // slicing at the old length can only discard fresh output; it cannot expose
-      // stale output as fresh.
-      const outputSinceInterrupt = scrollback.slice(startLen.get(id) ?? scrollback.length);
+      // next restore. If bounded scrollback evicted bytes past the mark in the
+      // meantime, this can only return less than the pane printed; it cannot
+      // expose stale output as fresh.
+      const outputSinceInterrupt = ptyManager.getScrollbackSince(id, startMark.get(id) ?? Infinity);
       if (!outputSinceInterrupt) continue;
       const detected = detectResumeCommand(outputSinceInterrupt);
       if (detected) {
@@ -250,6 +267,16 @@ export async function captureAgentRecoveryCommands(
   // One press to everything, then press again only where a pane asks for it.
   // `interrupt` is already bounded and always settles within its own timeout.
   await ptyManager.interrupt(liveIds);
+  // The clock the second-press rules run on, taken *after* the ack rather than at
+  // entry. `BLIND_SECOND_PRESS_MS` is a statement about the agent ("long enough
+  // that a one-press agent would already have spoken"), and the agent's clock
+  // starts when the `^C` lands. Measuring from `started` folds the interrupt's own
+  // round trip — up to its 400ms timeout — into the window, which at worst leaves
+  // a claude 200ms to answer in and fires the blind press while codex is still on
+  // its first ~255ms of silence. The wall-clock `deadline` below stays anchored to
+  // `started`, because *that* is a shutdown budget rather than an agent timing.
+  const interruptedAt = Date.now();
+  for (const id of liveIds) lastGrewAt.set(id, interruptedAt);
   const pressedTwice = new Set<string>();
 
   // Poll to the ceiling. Do NOT try to finish early on quiet: codex says nothing
@@ -273,19 +300,19 @@ export async function captureAgentRecoveryCommands(
     // once enough time has passed that a one-press agent would already have
     // spoken. Panes that have yielded are excluded either way, so codex is never
     // the one retried.
-    const elapsed = Date.now() - started;
+    const elapsed = Date.now() - interruptedAt;
     for (const id of pending()) {
-      const len = ptyManager.getScrollbackLength(id);
-      if (len !== lastLen.get(id)) { lastLen.set(id, len); lastGrewAt.set(id, Date.now()); }
+      const mark = ptyManager.getScrollbackReceived(id);
+      if (mark !== lastMark.get(id)) { lastMark.set(id, mark); lastGrewAt.set(id, Date.now()); }
     }
-    const quietFor = (id: string) => Date.now() - (lastGrewAt.get(id) ?? started);
+    const quietFor = (id: string) => Date.now() - (lastGrewAt.get(id) ?? interruptedAt);
     const retry = pending().filter((id) => !pressedTwice.has(id)
       && (asked.has(id)
         || (elapsed >= BLIND_SECOND_PRESS_MS && quietFor(id) >= QUIET_BEFORE_RETRY_MS)));
     if (retry.length > 0) {
       const why = retry.some((id) => asked.has(id)) ? 'asked' : `silent past ${BLIND_SECOND_PRESS_MS}ms`;
       retry.forEach((id) => pressedTwice.add(id));
-      log.info(`[recovery] second press for ${retry.length} pane(s) at +${elapsed}ms (${why})`);
+      log.info(`[recovery] second press for ${retry.length} pane(s) at +${elapsed}ms after ^C (${why})`);
       await ptyManager.interrupt(retry);
     }
   }
@@ -299,7 +326,7 @@ export async function captureAgentRecoveryCommands(
   // would write terminal output into a log file, which is precisely the
   // disclosure this whole scope exists to remove.
   for (const id of pending()) {
-    const after = ((ptyManager.getScrollback(id) ?? '').length) - (startLen.get(id) ?? 0);
+    const after = ptyManager.getScrollbackReceived(id) - (startMark.get(id) ?? 0);
     log.info(`[recovery]   no hint from ${id}: +${after} bytes since interrupt, asked=${asked.has(id)}, pressedTwice=${pressedTwice.has(id)}`);
   }
   // Nothing to write here: every command was persisted the moment it was found.
@@ -310,20 +337,61 @@ export async function captureAgentRecoveryCommands(
 const RECOVERY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * Read and clear the recovery record, returning `surfaceId -> invocation` for the
- * boot payload of a cold-starting webview.
+ * What is left of this activation's record, once the file has been read and
+ * removed. `null` until the first `takeRecoveryCommands` call.
  *
- * A destructive read: the durable copy is gone before the webview can act on it,
- * so a resume happens exactly once and a failed activation does not replay it.
+ * The record is not the property of any one webview: `captureAgentRecoveryCommands`
+ * interrupts every live PTY, and those panes are spread across the Dormouse view
+ * and any number of editor panels, each restoring its own pane ids from its own
+ * saved state. Holding the remainder here lets every container claim its share of
+ * one file read, while entries leave the map as they are claimed so no id is ever
+ * handed out twice.
+ */
+let unclaimedRecovery: Record<string, string> | null = null;
+
+/** Null-prototype throughout, for the same reason the capture side is: these are
+ *  keyed by arbitrary surface id, and on a plain literal an id of `constructor` or
+ *  `toString` reads back as an inherited function while `__proto__` refuses to be
+ *  stored at all. */
+const noCommands = (): Record<string, string> => Object.create(null);
+
+/**
+ * Claim the recovery commands belonging to `paneIds` — `surfaceId -> invocation`
+ * for the boot payload of one cold-starting webview.
+ *
+ * Exactly-once holds on two levels. The file is read and unlinked on the first
+ * call of an activation, so the durable copy is gone before any webview can act
+ * on it and a failed activation cannot replay it. Within the activation each
+ * entry is removed as it is claimed, so a view that is disposed and re-resolved
+ * (moving the panel container, say) restores without re-running the agent.
+ *
  * The result never joins the persisted session — it rides its own boot global, so
  * the webview has nothing to write back and no save/restore cycle can resurrect it
  * (docs/specs/transport.md -> "Consuming it").
  */
-export function consumeRecoveryCommands(
+export function takeRecoveryCommands(
+  context: vscode.ExtensionContext,
+  paneIds: Iterable<string>,
+): Record<string, string> {
+  unclaimedRecovery ??= readAndClearRecoveryRecord(context);
+  const claimed: Record<string, string> = noCommands();
+  for (const id of paneIds) {
+    const command = unclaimedRecovery[id];
+    if (command === undefined) continue;
+    claimed[id] = command;
+    delete unclaimedRecovery[id];
+    log.info(`[recovery]   ${id} -> ${command}`);
+  }
+  log.info(`[recovery] handing ${Object.keys(claimed).length} command(s) to a cold restore`
+    + ` (${Object.keys(unclaimedRecovery).length} unclaimed)`);
+  return claimed;
+}
+
+function readAndClearRecoveryRecord(
   context: vscode.ExtensionContext,
 ): Record<string, string> {
   const file = recoveryFilePath(context);
-  if (!file || !fs.existsSync(file)) return {};
+  if (!file || !fs.existsSync(file)) return noCommands();
 
   let recovery: PersistedRecovery | null = null;
   try {
@@ -339,18 +407,33 @@ export function consumeRecoveryCommands(
     // If it cannot be removed, do not use it — better to lose one recovery than
     // to re-run an agent on every activation from a record we cannot clear.
     log.error('[recovery] could not clear record; ignoring it');
-    return {};
+    return noCommands();
   }
-  if (!recovery) return {};
+  if (!recovery) return noCommands();
 
   const age = Date.now() - (recovery.createdAt ?? 0);
   if (age > RECOVERY_MAX_AGE_MS) {
     log.info(`[recovery] discarding record ${Math.round(age / 86_400_000)}d old`);
-    return {};
+    return noCommands();
   }
 
-  const commands = recovery.commands ?? {};
-  for (const [id, command] of Object.entries(commands)) log.info(`[recovery]   ${id} -> ${command}`);
-  log.info(`[recovery] handing ${Object.keys(commands).length} command(s) to the cold restore`);
+  // Shape-guard every entry, the way every other persisted blob here is guarded.
+  // This file is plain JSON on disk and its values end up typed into a shell, so
+  // a torn or hand-edited record must fail as one dropped entry rather than as
+  // something later code has to survive. `readInjectedRecoveryCommands` guards
+  // again on the webview side — this one keeps the bad value out of the boot
+  // payload in the first place, and says so in the log where it can be seen.
+  const raw: unknown = recovery.commands;
+  const commands: Record<string, string> = noCommands();
+  if (raw && typeof raw === 'object') {
+    for (const [id, command] of Object.entries(raw)) {
+      if (typeof command !== 'string') {
+        log.error(`[recovery] dropping ${id}: expected a string, got ${typeof command}`);
+        continue;
+      }
+      commands[id] = command;
+    }
+  }
+  log.info(`[recovery] read ${Object.keys(commands).length} command(s) from the record`);
   return commands;
 }
