@@ -347,28 +347,50 @@ For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getO
 
 - **Create**: `getOrCreateTerminal` spawns xterm.js + UnicodeGraphemesAddon + FitAddon + PTY, returns existing if already created. The xterm instance sets `allowProposedApi: true` because UnicodeGraphemesAddon activates through xterm's proposed Unicode API. The WebGL addon is *not* loaded at create — it is claimed lazily on the session's first mount (see "Renderer" below).
 - **Resume**: `resumeTerminal` creates xterm entry and writes replay data without spawning a new PTY. Used when the webview is recreated while the host retains Live PTYs (Link: Severed → Resuming → Live).
-- **Restore**: `restoreTerminal` creates xterm entry and spawns a new PTY with saved cwd and scrollback. Used on cold start from a saved Snapshot (Link: Cold → Live).
-- **Resume offer**: a restored pane whose snapshot carried a `resumeCommand` (`docs/specs/transport.md`) offers to run it — the replayed scrollback ends in an agent's resume hint, but the process that wrote it is gone and the pane now holds a fresh shell. See "Resume offer" below.
+- **Restore**: `restoreTerminal` creates xterm entry and spawns a new PTY with the saved cwd. It replays no transcript — scrollback is not persisted (`docs/specs/transport.md` → "What is persisted"). Used on cold start from a saved Snapshot (Link: Cold → Live).
+- **Agent resume**: a restored pane the host captured a resume invocation for re-runs it automatically. See "Agent resume on cold restore" below.
 - **Untouched**: new `getOrCreateTerminal` sessions start untouched. `isUntouched(id)` exposes the flag, and user-originated PTY input clears it via the registry input paths. Resume/restore seed the persisted flag; missing legacy snapshot data defaults to touched (`false`) so close confirmation remains conservative.
 - **Shell selection replacement**: the standalone shell dropdown and VS Code shell picker send `dormouse:new-terminal` with `replaceUntouched` when the selected shell type changes. `Wall` always creates a new session id and a fresh `surface:N` ref for that request. If the currently selected pane or door is untouched, the new terminal takes over the same leaf via a Lath `replace` op (an atomic identity swap; doors first reattach through the normal restore path), the old untouched session is disposed, and the replaced Surface's ref is retired. If the selected terminal is touched or no terminal is selected, the request spawns a new pane beside the selected one. Announced shell-selection spawns show a transient pane-anchored notice such as `Switched to zsh` or `Opened bash`.
-- During resume/restore replay, xterm.js may emit terminal-generated replies for OSC/CSI/DCS queries that were embedded in saved output. The registry drops those replay-time replies before they reach the new shell. This filter is limited to query/focus reports, and must not swallow user keyboard escape sequences such as arrows, function keys, or bracketed paste.
+- During **resume** replay, xterm.js may emit terminal-generated replies for OSC/CSI/DCS queries that were embedded in buffered output. The registry drops those replay-time replies before they reach the new shell. This filter is limited to query/focus reports, and must not swallow user keyboard escape sequences such as arrows, function keys, or bracketed paste.
 - **mount / unmount (DOM)**: `mountElement` reparents the persistent DOM element into a container; `unmountElement` removes it. The Registry entry survives.
 - **Dispose**: `disposeSession` kills the PTY, disposes xterm, removes the registry entry. Only called on explicit kill (`x`).
 - **Swap**: the Cmd/Ctrl+Arrow swap trades two leaf identities via a Lath `swap` op — per-leaf metadata and registry entries are keyed by id, so they follow the swap with no DOM reattach or title swap (see "Cmd/Ctrl+Arrow swap" above).
 
-### Resume offer
+### Agent resume on cold restore
 
-A cold **restore** replays a Session's saved scrollback into a *fresh* shell. When that scrollback ended in an agent's resume hint, the snapshot carries the command as `PersistedPane.resumeCommand` (`docs/specs/transport.md`), and the restored pane offers to run it: two buttons at the pane's bottom-right, `Run <invocation>` and `Dismiss`.
+A cold **restore** spawns a *fresh* shell and replays nothing. What can come back
+is the agent the host interrupted on its way down: when the host's boot payload
+carries an invocation for that surface (`PlatformAdapter.getRecoveryCommands`;
+`docs/specs/transport.md` → "The recovery command"), the restored pane runs it —
+no prompt, no button.
 
-- **Seeded by restore only.** `restoreSession` seeds the offer per terminal pane; **resume** never does, because there the process is still Live and has nothing to resume. Browser surfaces are skipped with the rest of the terminal restore path.
-- **Retired** by taking it, dismissing it, the user's first input into the pane, the pane's process exiting, or session dispose. Input counts from every path that reaches the PTY: keyboard input through xterm, direct clipboard paste, file-drop path insertion, a Pocket client's remote keystrokes (`remote-api.ts` → `#write`), and `dor send`. Only the xterm path runs through `onData`; each direct platform write retires the offer itself. Replay-shaped terminal reports do not count. It does not survive into the next save — the offer lives only in the runtime store, and the next restore re-seeds from the snapshot.
-- **Untouched is not the gate.** A Session that ran an agent is touched by definition, so `isUntouched` would suppress the offer in exactly the case it exists for. Retirement keys off *post-restore* input instead.
-- **Hidden, not retired, while a command is running** (`activity.kind === 'running'`): the offer types into the shell, and a shell with a foreground process is not listening. Shells without OSC integration report `unknown` and keep the offer.
-- **Taking it** selects the pane, enters passthrough, and uses the normal deferred pane-click focus transition. It revalidates the command, drops out if the Session has no registry entry or its process already exited (a dead shell can run nothing, and the seed below would be a command start nothing ever finishes — the pane would count as running forever in `countRunningSessions`), marks the Session touched, seeds `commandLine` + `commandStart(user_input)` so semantic state is already `running`, then writes `<command>\r` straight to the PTY. The explicit seed is required because the platform write bypasses xterm's keystroke fallback; an OSC-integrated shell may replace it with authoritative boundaries afterward. Not a bracketed paste — bracketing exists to stop an embedded newline from executing, which is the opposite of the intent. A click landing before the fresh shell has drawn its first prompt can still be swallowed by shell startup, the same hazard `typeCommandWhenPromptReady` guards for launched commands; the offer accepts it rather than delaying the button, since restore-then-click is far slower than spawn-then-type.
-- **The button carries the invocation, not the command.** `Run claude --resume`, never `Run claude --resume <uuid>` — the session id is already on screen in the replayed scrollback directly above. The full command is the button's tooltip.
-- **Chrome is the pane-overlay vocabulary**, not the modal one: a `PopupButtonRow` owning the border/background/shadow, with `popupButton` segments inside — the same recipe as `MouseOverrideBanner` in the opposite corner. Run takes the row's `primary` tone (`DESIGN.md` → Popup Button); Dismiss is `muted`.
+- **Restore only.** `restoreSession` passes the command to `restoreTerminal` per
+  terminal pane; **resume** never does, because there the agent is still Live and
+  has nothing to resume. Browser surfaces are skipped with the rest of the terminal
+  restore path.
+- **Revalidated, not trusted.** `normalizeResumeCommand` re-checks the invocation
+  before it is typed, so a snapshot written by an older detector cannot execute
+  something the current grammar would reject.
+- **Typed at the prompt, not at spawn.** The command goes through the same
+  `typeCommandWhenPromptReady` wait as a `dor split` launch: spawn-then-type is
+  exactly the window in which shell startup swallows keystrokes. `commandLine` +
+  `commandStart(user_input)` are seeded synchronously first, because the platform
+  write bypasses xterm's keystroke fallback and a non-integrated shell would
+  otherwise never count the agent as running (`docs/specs/terminal-state.md`).
+- **The pane announces it.** One dim line — `⟲ resuming agent session: <command>` —
+  written to xterm, not the PTY. With no transcript to explain the pane, it is the
+  only thing saying why an agent appeared, and it marks the discontinuity the
+  resume otherwise hides: the interrupted turn did **not** continue. It is a
+  notice, not a control; it has no dismiss and no retirement rules.
+- **No confirmation gate.** `claude --resume <id>` restores the conversation, lands
+  at an idle prompt, and issues no request until the user types; the command came
+  from a process the host had already interrupted itself and read back within one
+  bounded wait; and a wrong id fails closed, since agent session files are per-user
+  and per-project-directory. The reasoning is recorded in `docs/specs/transport.md`
+  → "Consuming it".
 
-Source of truth: `lib/src/lib/resume-offers.ts` (store), `runResumeCommand` in `lib/src/lib/terminal-lifecycle.ts`, `lib/src/components/wall/ResumeBanner.tsx` (the pane-mounted offer + its presentational `ResumeBannerView`), seeded in `lib/src/lib/session-restore.ts`.
+Source of truth: `restoreTerminal` in `lib/src/lib/terminal-lifecycle.ts`, called
+from `lib/src/lib/session-restore.ts`.
 
 ### Renderer
 
@@ -531,12 +553,10 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/lib/activity-monitor.ts` | Per-session activity state machine: output timing → alert escalation |
 | `lib/src/lib/alert-manager.ts` | Manages ActivityMonitors + attention tracking + TODO state per session |
 | `lib/src/lib/session-types.ts` | Type definitions for persisted sessions (`PersistedPane`, `PersistedDoor`, `PersistedSession`) |
-| `lib/src/lib/session-save.ts` | Serialization: collects layout, scrollback, cwd, alert state for persistence |
+| `lib/src/lib/session-save.ts` | Serialization: collects layout, cwd, alert state for persistence (never scrollback) |
 | `lib/src/lib/session-restore.ts` | Deserialization: loads saved session, calls `restoreTerminal()` for each pane |
 | `lib/src/lib/reconnect.ts` | Priority-based recovery: live PTYs first, then saved session, then empty |
-| `lib/src/lib/resume-patterns.ts` | Detects resumable commands (`claude --resume`, etc.) in scrollback, newest line first, and labels them with the invocation alone |
-| `lib/src/lib/resume-offers.ts` | Pending resume offers per Session — seeded by cold restore, retired on take/dismiss/input/dispose |
-| `lib/src/components/wall/ResumeBanner.tsx` | The restored pane's `Run <invocation>` / `Dismiss` offer |
+| `lib/src/lib/resume-patterns.ts` | Detects an agent resume invocation in a live buffer — rightmost (newest) match in the tail window, rebuilt as invocation + captured id |
 | `lib/src/index.css` | Lath host styling — `.lath-host` / `.lath-leaf` / `.lath-sash` / drop-preview layout and background flattening |
 | `lib/src/theme.css` | Two-layer VSCode theme token system (`@theme --color-*` → `--vscode-*`) and Tailwind v4 `@theme` integration |
 

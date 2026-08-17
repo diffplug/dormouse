@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectResumeCommand, resumeCommandLabel } from './resume-patterns';
+import { detectResumeCommand } from './resume-patterns';
 
 describe('detectResumeCommand', () => {
   it('detects codex resume command', () => {
@@ -111,17 +111,47 @@ describe('detectResumeCommand', () => {
   });
 });
 
-describe('resumeCommandLabel', () => {
-  it('drops the session argument', () => {
-    expect(resumeCommandLabel('claude --resume 4f2c9b1e-6a03-4d5e')).toBe('claude --resume');
-    expect(resumeCommandLabel('codex resume 01JCX8ZK5Q7M3N')).toBe('codex resume');
+describe('screen-region seams', () => {
+  // Observed in the wild: capture stored `claude --resume <uuid>codex`. A redraw
+  // put a cursor move between the tail of an old echoed command and the start of
+  // a new one; stripping it without a boundary welded them, and the greedy id
+  // pattern ate across the seam.
+  it('does not weld an id to text from another screen region', () => {
+    const scrollback =
+      'claude --resume 32ce9e59-ae07-4caf-8d71-6d90c3ea67ac\x1b[K\x1b[1;1Hcodex resume 01JCX8ZK\n';
+    expect(detectResumeCommand(scrollback)).toBe('codex resume 01JCX8ZK');
   });
 
-  it('keeps an argument-free command whole', () => {
-    expect(resumeCommandLabel('claude --continue')).toBe('claude --continue');
+  it('treats a backspace redraw as a seam too', () => {
+    const scrollback = 'claude --resume aaaa\x08\x08\x08\x08codex resume bbbb\n';
+    expect(detectResumeCommand(scrollback)).toBe('codex resume bbbb');
   });
 
-  it('falls back to the command itself when no pattern claims it', () => {
-    expect(resumeCommandLabel('nvim -S Session.vim')).toBe('nvim -S Session.vim');
+  it('treats the non-CSI cursor moves as seams too', () => {
+    // `ESC M` (RI) scrolls up, `ESC 7`/`ESC 8` bracket a redraw, `ESC c` resets,
+    // and VT/FF move down — a rule that seamed only CSI left every one of these
+    // welding an id to the next screen region.
+    for (const move of ['\x1bM', '\x1bD', '\x1bE', '\x1b7', '\x1b8', '\x1bc', '\x0b', '\x0c']) {
+      expect(detectResumeCommand(`claude --resume old-aaa${move}codex resume new-bbb\n`))
+        .toBe('codex resume new-bbb');
+    }
+  });
+
+  it('does not read an id out of a CSI the buffer was cut off inside', () => {
+    // A tail slice routinely lands mid-sequence; the parameters must not read as
+    // text and extend the id sitting in front of them.
+    expect(detectResumeCommand('codex resume abc\x1b[38;5')).toBe('codex resume abc');
+  });
+
+  it('still reads an id through a colour change, which does not move the cursor', () => {
+    expect(detectResumeCommand('claude --resume \x1b[1m4f2c9b1e-6a03\x1b[0m\n'))
+      .toBe('claude --resume 4f2c9b1e-6a03');
+  });
+
+  it('picks the newest hint when a redraw seam separates two agents', () => {
+    // The real shape of the failure: a stale echoed claude command still on
+    // screen, and the codex hint printed after a cursor move.
+    const scrollback = 'x\nclaude --resume old-id-aaa\x1b[2Kcodex resume new-id-bbb\n$ ';
+    expect(detectResumeCommand(scrollback)).toBe('codex resume new-id-bbb');
   });
 });

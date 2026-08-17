@@ -342,12 +342,32 @@ function resolvePaneStateIdByPtyId(ptyId: string): string {
 // up as the last visible line.
 function detectReturnedShellPrompt(output: string): string | null {
   const visible = stripAltScreenSpans(output);
-  const text = stripTerminalControls(visible).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const normalizeBreaks = (value: string) => value.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  // Boundary mode, for the same reason `detectResumeCommand` uses it: deleting a
+  // redraw's cursor move welds text that was never adjacent on screen, and this
+  // reads the result as a *line*. Without it, `building...\x1b[1;1H➜  ~ ` reads
+  // as the single line `building...➜  ~ `, and the prompt goes undetected.
+  const text = normalizeBreaks(stripTerminalControls(visible, { boundaries: true }));
+  // A boundary is not a real line break, though, and the difference decides the
+  // safe direction. A genuine trailing newline means nothing has been painted on
+  // the current line yet — no prompt — and that must keep returning null, because
+  // a false positive here flips a running command back to idle. A *boundary* at
+  // the tail means only that a control sequence closed the line: a prompt that
+  // clears to end-of-line after painting itself (`➜  ~ \x1b[K`) is the common
+  // case, and treating that as an empty last line would hide every such prompt.
+  // Stripping without boundaries leaves exactly the real breaks, so it answers
+  // which one this is.
+  const endsOnRealNewline = /\n$/.test(normalizeBreaks(stripTerminalControls(visible)));
+  let searchEnd = text.length;
+  if (!endsOnRealNewline) {
+    while (searchEnd > 0 && text[searchEnd - 1] === '\n') searchEnd--;
+  }
+  const head = text.slice(0, searchEnd);
   // Prompts usually come on a fresh line; that rejects arbitrary command output
   // that happens to end with a prompt-like character. The spawn-time first
   // prompt may be the whole buffer with no leading newline, so accept that too.
-  const newlineIndex = text.lastIndexOf('\n');
-  const lastLine = (newlineIndex === -1 ? text : text.slice(newlineIndex + 1)).trimStart();
+  const newlineIndex = head.lastIndexOf('\n');
+  const lastLine = (newlineIndex === -1 ? head : head.slice(newlineIndex + 1)).trimStart();
   if (lastLine.length > 200) return null;
   // PowerShell `PS C:\path>` (with optional trailing space).
   if (/^PS\s+\S.*>\s?$/.test(lastLine)) return lastLine;
@@ -361,7 +381,7 @@ function detectReturnedShellPrompt(output: string): string | null {
   // preceding non-blank line carries prompt context, so stray output ending in
   // `$ ` doesn't match.
   if (/^[$#%]\s*$/.test(lastLine)) {
-    return precedingLineHasPromptContext(text, newlineIndex) ? lastLine : null;
+    return precedingLineHasPromptContext(head, newlineIndex) ? lastLine : null;
   }
   // Generic single-line prompts: require a path/user context signal AND a
   // trailing prompt char + space. The context check rejects lines like

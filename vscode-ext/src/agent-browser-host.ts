@@ -22,7 +22,9 @@ import { log } from './log';
 import { createAgentBrowserHost } from '../../lib/src/host/agent-browser-host';
 
 const host = createAgentBrowserHost({
-  writeClipboardText: (text) => vscode.env.clipboard.writeText(text),
+  // Awaited rather than returned: `vscode.env.clipboard.writeText` yields a
+  // `Thenable`, VS Code's minimal promise interface, which is not a `Promise`.
+  writeClipboardText: async (text) => { await vscode.env.clipboard.writeText(text); },
   log: (message) => log.info(message),
 });
 

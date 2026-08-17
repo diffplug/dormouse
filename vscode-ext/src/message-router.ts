@@ -354,13 +354,6 @@ export function attachRouter(
           post({ type: 'pty:openPorts', id: msg.id, ports, requestId: msg.requestId } satisfies ExtensionMessage);
         });
         break;
-      case 'pty:getScrollback':
-        post({
-          type: 'pty:scrollback', id: msg.id,
-          data: ptyManager.getScrollback(msg.id),
-          requestId: msg.requestId,
-        } satisfies ExtensionMessage);
-        break;
       case 'pty:getShells':
         ptyManager.getAvailableShells().then((shells) => {
           post({

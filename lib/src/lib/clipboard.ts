@@ -4,7 +4,6 @@ import { extractSelectionText } from './selection-text';
 import { getPlatform } from './platform';
 import { shellEscapePath } from './shell-escape';
 import { getTerminalInstance, markSessionTouched } from './terminal-registry';
-import { clearResumeOffer } from './resume-offers';
 
 async function writeText(text: string): Promise<void> {
   if (!text) return;
@@ -48,10 +47,9 @@ function writePasteToPty(terminalId: string, text: string): void {
   if (!text) return;
   const bracketed = getMouseSelectionState(terminalId).bracketedPaste;
   const payload = bracketed ? `\x1b[200~${text}\x1b[201~` : text;
+  // Paste and file-drop input bypass xterm's onData handler, so the touch has to
+  // be marked here rather than by the keystroke path.
   markSessionTouched(terminalId);
-  // Paste and file-drop input bypass xterm's onData handler, so retire the
-  // restored-pane offer here before writing directly to the platform PTY.
-  clearResumeOffer(terminalId);
   getPlatform().writePty(terminalId, payload);
 }
 

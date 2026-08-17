@@ -5,7 +5,6 @@ const mocks = vi.hoisted(() => ({
   readClipboardImageAsFilePath: vi.fn<() => Promise<string | null>>(),
   writePty: vi.fn<(id: string, data: string) => void>(),
   readText: vi.fn<() => Promise<string>>(),
-  clearResumeOffer: vi.fn<(id: string) => void>(),
 }));
 
 vi.mock('./platform', () => ({
@@ -25,10 +24,6 @@ vi.mock('./mouse-selection', () => ({
 vi.mock('./terminal-registry', () => ({
   getTerminalInstance: () => null,
   markSessionTouched: vi.fn(),
-}));
-
-vi.mock('./resume-offers', () => ({
-  clearResumeOffer: mocks.clearResumeOffer,
 }));
 
 import { doPaste } from './clipboard';
@@ -52,7 +47,6 @@ describe('doPaste three-tier fallthrough', () => {
     expect(mocks.readClipboardImageAsFilePath).not.toHaveBeenCalled();
     expect(mocks.writePty).toHaveBeenCalledTimes(1);
     expect(mocks.writePty).toHaveBeenCalledWith('t1', '/tmp/a.png /tmp/b\\ file.png ');
-    expect(mocks.clearResumeOffer).toHaveBeenCalledWith('t1');
   });
 
   it('falls through to text when no file refs', async () => {
@@ -64,7 +58,6 @@ describe('doPaste three-tier fallthrough', () => {
 
     expect(mocks.readClipboardImageAsFilePath).not.toHaveBeenCalled();
     expect(mocks.writePty).toHaveBeenCalledWith('t1', 'hello world');
-    expect(mocks.clearResumeOffer).toHaveBeenCalledWith('t1');
   });
 
   it('falls through to image when no files and no text', async () => {
@@ -75,7 +68,6 @@ describe('doPaste three-tier fallthrough', () => {
     await doPaste('t1');
 
     expect(mocks.writePty).toHaveBeenCalledWith('t1', '/tmp/img.png ');
-    expect(mocks.clearResumeOffer).toHaveBeenCalledWith('t1');
   });
 
   it('is a no-op when all tiers come back empty', async () => {
@@ -86,7 +78,6 @@ describe('doPaste three-tier fallthrough', () => {
     await doPaste('t1');
 
     expect(mocks.writePty).not.toHaveBeenCalled();
-    expect(mocks.clearResumeOffer).not.toHaveBeenCalled();
   });
 
   it('swallows file-ref adapter errors and falls through to text', async () => {

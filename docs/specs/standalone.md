@@ -64,9 +64,9 @@ stderr, which Rust appends to the log file). Webview → Rust is the Tauri
 `pty_get_scrollback` / `pty_graceful_kill_all` / `get_available_shells`,
 `dor_control_response`, `iframe_create_proxy_url`, the `agent_browser_*` family,
 the `clipboard` readers, `read_update_log`, and `kill_sidecar_now` — each a thin
-forwarder to the corresponding sidecar message. `load_session` / `save_session` are the
-exception that is *not* forwarded: they read/write the per-window session file
-directly in Rust (§Persistence). Two further carve-outs: on Windows the
+forwarder to the corresponding sidecar message. `load_session` / `save_session` /
+`clear_session` are the exception that is *not* forwarded: they read, write, and
+delete the per-window session file directly in Rust (§Persistence). Two further carve-outs: on Windows the
 clipboard readers skip the sidecar and read the Win32 clipboard natively
 (`clipboard_win.rs`; behavior in `docs/specs/mouse-and-clipboard.md` §8.6),
 and `agent_browser_screenshot` receives a temp-file *path* from the sidecar
@@ -268,8 +268,27 @@ through `saveState`, then `drainSessionSaves` awaits `TauriSessionStore.drain()`
 (resolves when the write pipeline goes idle) under a bounded timeout, and each
 `save_session` is itself durable through the temp-then-rename (dir fsync). So the
 final debounce/heartbeat window is no longer lost — the regression from the old
-WebKit-flush-on-teardown `localStorage` path is closed. Unclean exits (crash,
-force-kill) stay best-effort.
+WebKit-flush-on-teardown `localStorage` path is closed.
+
+**Standalone persists no Session state.** Quitting the app is a deliberate ending
+and a crash captured nothing, so every launch starts fresh
+(`docs/specs/transport.md` → "The governing rule"). One `PERSIST_SESSION` gate
+drives all of it: `TauriAdapter.getState` returns null, `saveState` is a no-op, and
+the adapter reports `persistsSession: false` so `saveSession` skips building a
+record at all. That last part is why the gate is not merely cosmetic — otherwise
+every debounced save, every 30s heartbeat, and both quit-time flushes would still
+spend a `getCwd` round trip per terminal pane (a synchronous `lsof` in the sidecar
+on macOS) to produce a blob that is then dropped. `init()` also **deletes** any
+pre-upgrade snapshot via the `clear_session` command — those carry transcripts, so
+ignoring the slot is not enough, and a blanking write would leave the bytes on disk
+until some later save while forcing every reader to treat `''` as a third state
+alongside present and absent. Cleanup runs even when `load_session` finds no main
+file and removes both `<label>.json` and an orphaned `<label>.json.tmp`, because a
+crash between the temp write and rename can leave the transcript only in the temp
+artifact. The store beneath the gate is intact and still needed by the
+workspaces-rollout scope (`docs/specs/layout.md` → `## Future`); restoring
+VS Code-style recovery here later is flipping that gate plus adding capture to the
+quit teardown, which already has the right ordering (flush → kill → flush → drain).
 
 ## Quit flow
 
@@ -278,7 +297,8 @@ the `quit_ack` / `quit_progress` / `quit_cancel` / `quit_proceed` commands, the 
 `ExitRequested` arms) and `standalone/src/quit.ts` (the webview orchestrator).
 
 Quitting ends every terminal. Rust intercepts **every** quit trigger so the
-webview can tear terminals down gracefully — capturing their final scrollback —
+webview can tear terminals down gracefully — historically to capture their final
+scrollback, and now to keep the ordering the workspaces-rollout scope will reuse —
 and durably write the freshest session before the process exits.
 
 **Trigger interception.** Two Rust arms funnel into `request_quit(app)`:

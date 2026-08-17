@@ -126,9 +126,31 @@ export interface PlatformAdapter {
   resizePty(id: string, cols: number, rows: number): void;
   killPty(id: string): void;
 
+  /**
+   * Whether this host keeps a Session snapshot across a restart. `false` means
+   * `saveSession` does no work at all rather than building a record for a
+   * `saveState` that discards it — the gate belongs above the per-pane `getCwd`
+   * round trips, not below them.
+   *
+   * Absent reads as `true`. Standalone sets it `false`: quitting is a deliberate
+   * ending and a crash captured nothing, so every launch starts fresh
+   * (docs/specs/transport.md -> "The governing rule").
+   */
+  persistsSession?: boolean;
+
+  /**
+   * Agent resume invocations the host captured when it last tore down, keyed by
+   * surface id — consumed once by a cold restore (`session-restore.ts`).
+   *
+   * Deliberately *not* part of the persisted session: it is host-owned and
+   * single-use, and a webview that could save it back would replay a stale
+   * invocation on a later restore. Absent on adapters whose host captures
+   * nothing (docs/specs/transport.md -> "Consuming it").
+   */
+  getRecoveryCommands?(): Record<string, string>;
+
   // PTY queries
   getCwd(id: string): Promise<string | null>;
-  getScrollback(id: string): Promise<string | null>;
   /** TCP listening ports opened by this terminal's process tree (shell + descendants). */
   getOpenPorts(id: string): Promise<OpenPort[]>;
 

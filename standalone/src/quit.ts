@@ -71,9 +71,14 @@ async function runQuitTeardown(): Promise<void> {
     if (adapter) {
       await withTimeout(
         (async () => {
+          // The two flushes are near-free while standalone persists nothing —
+          // `saveSession` returns immediately on `persistsSession: false`, so
+          // neither one runs a `getCwd` round trip. The shape is kept because
+          // the ordering is the load-bearing part and the workspaces-rollout
+          // scope turns persistence back on (docs/specs/layout.md -> `## Future`).
           await adapter.requestSessionFlush(1500); // save while PTYs are alive
           await adapter.gracefulKillAllPtys(2000); // SIGTERM; scrollback survives
-          await adapter.requestSessionFlush(1500); // capture final scrollback
+          await adapter.requestSessionFlush(1500); // final post-exit save
           await adapter.drainSessionSaves(2000); // last write reaches disk
         })(),
         8000,

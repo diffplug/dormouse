@@ -19,11 +19,11 @@ function stubLocalStorage(): void {
 
 const sessionA: PersistedSession = {
   version: 3,
-  panes: [{ id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null, untouched: false }],
+  panes: [{ id: 'pane-a', title: 'A', cwd: null, untouched: false }],
 };
 const sessionB: PersistedSession = {
   version: 3,
-  panes: [{ id: 'pane-b', title: 'B', cwd: null, scrollback: null, resumeCommand: null, untouched: false }],
+  panes: [{ id: 'pane-b', title: 'B', cwd: null, untouched: false }],
 };
 
 describe('window-persistence', () => {

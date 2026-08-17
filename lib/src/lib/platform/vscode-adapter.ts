@@ -1,6 +1,7 @@
 import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
 import type { AlertSettings } from '../alert-settings';
+import { readInjectedRecoveryCommands } from '../vscode-recovery-global';
 import { setDefaultShellOpts } from '../shell-defaults';
 import {
   collectTerminalSemanticEvents,
@@ -220,10 +221,6 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   getCwd(id: string): Promise<string | null> {
     return this.requestResponse('pty:getCwd', 'pty:cwd', { id }, (msg) => msg.cwd);
-  }
-
-  getScrollback(id: string): Promise<string | null> {
-    return this.requestResponse('pty:getScrollback', 'pty:scrollback', { id }, (msg) => msg.data);
   }
 
   async getOpenPorts(id: string): Promise<OpenPort[]> {
@@ -484,5 +481,17 @@ export class VSCodeAdapter implements PlatformAdapter {
     // first resolveWebviewView call. Fall back to hostState on the very
     // first load, before any setState has run.
     return this.vscode.getState() ?? this.hostState;
+  }
+
+  /**
+   * The recovery commands the extension host captured at its last teardown, from
+   * the boot payload. Host-owned and single-use: this is a separate global rather
+   * than a field on the persisted session precisely so the webview cannot write it
+   * back — a `getState`/`saveState` cycle has nothing to carry forward, so no
+   * later restore can replay a stale invocation
+   * (docs/specs/transport.md -> "Consuming it").
+   */
+  getRecoveryCommands(): Record<string, string> {
+    return readInjectedRecoveryCommands();
   }
 }

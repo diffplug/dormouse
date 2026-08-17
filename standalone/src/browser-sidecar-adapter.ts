@@ -111,10 +111,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     try { return await this.host.invoke("pty_get_cwd", { id }); } catch { return null; }
   }
 
-  async getScrollback(id: string): Promise<string | null> {
-    try { return await this.host.invoke("pty_get_scrollback", { id }); } catch { return null; }
-  }
-
   async getOpenPorts(id: string): Promise<OpenPort[]> {
     try { return await this.host.invoke("pty_get_open_ports", { id }); } catch { return []; }
   }

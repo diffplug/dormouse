@@ -1,5 +1,5 @@
 import type { PlatformAdapter } from './platform/types';
-import { browserPersistedPane, readPersistedSession, terminalPersistedContent, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedSurfaceType } from './session-types';
+import { browserPersistedPane, readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedSurfaceType } from './session-types';
 import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched, resolveTerminalSessionId } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 
@@ -25,6 +25,12 @@ export async function saveSession(
   // `surfaceRefs` so pruned (killed) entries never cause a number to be reused.
   surfaceRefsNext?: number,
 ): Promise<void> {
+  // Gate the work, not just the write. Building the record costs a `getCwd`
+  // round trip per terminal pane — on standalone that lands on a synchronous
+  // `lsof` in the sidecar — and a host that persists nothing would spend all of
+  // it on every debounced save, every 30s heartbeat, and twice more per quit,
+  // only for `saveState` to drop the result.
+  if (platform.persistsSession === false) return;
   const previousPanes = getPreviousPaneMap(platform);
   const allPanes = new Map<string, { id: string; title: string; surfaceType: PersistedSurfaceType }>();
   for (const pane of panes) {
@@ -50,15 +56,11 @@ export async function saveSession(
 
       const liveAlert = getLivePersistedAlertState(pane.id);
       const sessionId = resolveTerminalSessionId(pane.id);
-      const [scrollback, cwd] = await Promise.all([
-        platform.getScrollback(sessionId),
-        platform.getCwd(sessionId),
-      ]);
+      const cwd = await platform.getCwd(sessionId);
       return {
         id: pane.id,
         title: pane.title,
         cwd: cwd ?? previousPane?.cwd ?? null,
-        ...terminalPersistedContent(scrollback ?? previousPane?.scrollback ?? null),
         untouched: isUntouched(pane.id),
         alert: liveAlert ?? previousPane?.alert ?? null,
       };

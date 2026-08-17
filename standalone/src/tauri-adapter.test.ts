@@ -14,6 +14,7 @@ vi.mock("@tauri-apps/plugin-shell", () => ({
   open: vi.fn(async () => {}),
 }));
 
+import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { TauriAdapter } from "./tauri-adapter";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -79,5 +80,20 @@ describe("TauriAdapter session-flush handshake", () => {
   it("drainSessionSaves resolves immediately when the store pipeline is idle", async () => {
     const adapter = new TauriAdapter();
     await adapter.drainSessionSaves(1000);
+  });
+});
+
+describe("TauriAdapter legacy session cleanup", () => {
+  it("asks Rust to clear orphaned temp state when no main snapshot exists", async () => {
+    const invoke = vi.mocked(rawInvoke);
+    invoke.mockClear();
+    invoke.mockResolvedValue(undefined);
+    const adapter = new TauriAdapter();
+
+    await adapter.init();
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "load_session");
+    expect(invoke).toHaveBeenNthCalledWith(2, "clear_session");
+    adapter.shutdown();
   });
 });
