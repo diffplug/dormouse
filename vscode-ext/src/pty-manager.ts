@@ -1,4 +1,4 @@
-import { fork, ChildProcess } from 'child_process';
+import { fork, ChildProcess, type Serializable } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
 import * as vscode from 'vscode';
@@ -374,7 +374,7 @@ export function kill(id: string): void {
  * matching ack, and resolve anyway once `timeoutMs` elapses. Nothing on a
  * teardown path may wait unbounded, and every one of these runs on one.
  */
-function awaitChildAck(msg: unknown, ackType: string, timeoutMs: number): Promise<void> {
+function awaitChildAck(msg: Serializable, ackType: string, timeoutMs: number): Promise<void> {
   return new Promise((resolve) => {
     if (!child?.connected) { resolve(); return; }
     const finish = () => {

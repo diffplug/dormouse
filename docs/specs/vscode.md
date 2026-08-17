@@ -244,8 +244,23 @@ Source of truth:
 | Scope | Source | Covers |
 | --- | --- | --- |
 | Root commands | `package.json` | `pnpm build:vscode`, `pnpm dogfood:vscode` orchestration |
-| Extension scripts | `vscode-ext/package.json` | `build:frontend`, `build`, `dogfood` package-local steps |
+| Extension scripts | `vscode-ext/package.json` | `build:frontend`, `build`, `typecheck`, `test`, `dogfood` package-local steps |
+| Typecheck config | `vscode-ext/tsconfig.json` | check-only program; `tsc` never emits here |
 | F5 launch | `.vscode/launch.json` + `.vscode/tasks.json` | Extension Development Host debugging chain |
+
+**The build does not typecheck.** `pnpm build` bundles with esbuild, which strips
+types without checking them, so `tsc` runs separately as `pnpm typecheck` — wired
+into the package's `test` script so the root `pnpm test` covers it. This is the
+package's only automated check; it exists because a reference to a deleted function
+once reached a commit and surfaced as a runtime throw during `deactivate()`, which
+has no `try`/`catch` and would have skipped every teardown step behind it.
+
+The checked program deliberately spans two runtimes: `src/` is extension-host Node
+code, but it imports shared modules from `../lib/src/`, some of which are webview
+code. The config therefore carries both DOM and Node libs — looser than either
+environment alone, with each side checked precisely by its own project
+(`lib/tsconfig.app.json` for the webview). What it reliably catches is vscode-ext's
+own code referring to something that no longer exists.
 
 `pnpm dogfood:vscode` uninstalls the legacy `diffplug.mouseterm` extension
 before packaging and installing the current Dormouse VSIX, then the VS Code
