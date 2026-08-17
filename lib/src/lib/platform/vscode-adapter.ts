@@ -1,6 +1,7 @@
 import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
 import type { AlertSettings } from '../alert-settings';
+import { readInjectedRecoveryCommands } from '../vscode-recovery-global';
 import { setDefaultShellOpts } from '../shell-defaults';
 import {
   collectTerminalSemanticEvents,
@@ -491,8 +492,6 @@ export class VSCodeAdapter implements PlatformAdapter {
    * (docs/specs/transport.md -> "Consuming it").
    */
   getRecoveryCommands(): Record<string, string> {
-    return (globalThis as typeof globalThis & {
-      __DORMOUSE_RECOVERY__?: Record<string, string> | null;
-    }).__DORMOUSE_RECOVERY__ ?? {};
+    return readInjectedRecoveryCommands();
   }
 }

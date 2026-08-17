@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { randomBytes } from 'crypto';
 import { HOST_MESSAGE_TOKEN_GLOBAL } from '../../lib/src/lib/vscode-message-token';
+import { RECOVERY_COMMANDS_GLOBAL } from '../../lib/src/lib/vscode-recovery-global';
 
 function serializeForInlineScript(value: unknown): string {
   return JSON.stringify(value ?? null)
@@ -72,7 +73,7 @@ export function getWebviewHtml(
   // get a duplicate nonce attribute from the regex above.
   html = html.replace(
     '</head>',
-    `    <script nonce="${nonce}">globalThis.${HOST_MESSAGE_TOKEN_GLOBAL} = ${serializeForInlineScript(messageToken)};\nglobalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};\nglobalThis.__DORMOUSE_RECOVERY__ = ${serializeForInlineScript(recoveryCommands ?? null)};</script>\n  </head>`,
+    `    <script nonce="${nonce}">globalThis.${HOST_MESSAGE_TOKEN_GLOBAL} = ${serializeForInlineScript(messageToken)};\nglobalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};\nglobalThis.${RECOVERY_COMMANDS_GLOBAL} = ${serializeForInlineScript(recoveryCommands ?? null)};</script>\n  </head>`,
   );
 
   return { html, messageToken };
