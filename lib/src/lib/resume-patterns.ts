@@ -1,11 +1,9 @@
 import { stripTerminalControls } from './terminal-controls';
 
 interface ResumePattern {
-  /** The invocation without its volatile session argument. What the UI offers to
-   *  run: the session id is already on screen in the scrollback above the offer,
-   *  so repeating it in chrome buys nothing and costs the button its shape. The
-   *  detected command is this label plus the captured argument, so the button can
-   *  never name something different from what it runs. */
+  /** The invocation without its volatile session argument. A detected command is
+   *  this label plus the captured argument, rebuilt rather than sliced out of the
+   *  buffer — so what is stored can only ever be a known invocation. */
   label: string;
   /** Capture group 1 is the session argument, when the invocation takes one.
    *  Global (scanning wants every match in a line); every use must therefore
@@ -75,28 +73,29 @@ export function normalizeResumeCommand(command: string): string | null {
 }
 
 /**
- * Scan the last 50 lines of scrollback for known resume commands, newest line
- * first. Returns the full resume command string for the most recent match, or
- * null if none found. Within one LF-delimited raw output segment, the rightmost
- * match wins (PTY redraws may use CR without LF). Recency matters: a pane that
- * resumed more than once prints a fresh resume hint each time, and only the
- * latest one resumes the *current* session — scanning oldest-first or preferring
- * pattern order would persist a stale session id.
+ * Scan the last 50 lines of scrollback for known resume commands and return the
+ * rightmost — i.e. most recent — match, or null if there is none. Recency
+ * matters: a pane that resumed more than once prints a fresh resume hint each
+ * time, and only the latest one resumes the *current* session, so preferring
+ * pattern order or an earlier position would resume a stale session id. (PTY
+ * redraws may use CR without LF, so "most recent" is a position in the window,
+ * not a line number.)
  *
- * Walks the tail rather than splitting the whole buffer: this runs per pane on
- * every save, over scrollback capped at 100k chars (`scrollback-trim.ts`), and
- * all but the last 50 lines would be allocated only to be discarded.
+ * Slices a tail window rather than scanning the whole buffer: this runs per pane
+ * on every poll of a host teardown (`captureAgentRecoveryCommands`) against a
+ * live buffer that runs to 1MB, and all but the last 50 lines would be stripped
+ * only to be discarded.
  *
- * The window is stripped once, *before* it is split into segments, so a string
- * control whose payload contains an LF is removed as a unit — stripping each
- * raw segment independently would hand the second half of an OSC title back as
- * visible text. For the same reason an unterminated control swallows the rest
- * of the window rather than the rest of its segment: with no terminator in
- * view, everything after the introducer is payload as far as this can tell, and
- * failing toward "no offer" is the safe direction. A payload whose introducer
- * fell off the front of the window (a trim or a chunk eviction can strand one)
- * is not recoverable here — nothing marks it as payload — but it grants no more
- * than ordinary output does, which is already a source of offers.
+ * The window is stripped whole, in one pass, so a string control whose payload
+ * contains an LF is removed as a unit — stripping line by line would hand the
+ * second half of an OSC title back as visible text. For the same reason an
+ * unterminated control swallows the rest of the window rather than the rest of
+ * its line: with no terminator in view, everything after the introducer is
+ * payload as far as this can tell, and failing toward "no match" is the safe
+ * direction. A payload whose introducer fell off the front of the window (a
+ * chunk eviction can strand one) is not recoverable here — nothing marks it as
+ * payload — but it grants no more than ordinary output does, which is already a
+ * source of matches.
  */
 export function detectResumeCommand(scrollback: string): string | null {
   let cursor = scrollback.length;
@@ -105,25 +104,15 @@ export function detectResumeCommand(scrollback: string): string | null {
     windowStart = scrollback.lastIndexOf('\n', cursor - 1) + 1;
     cursor = windowStart - 1;
   }
-  const segments = stripTerminalControls(scrollback.slice(windowStart)).split('\n');
-  for (let i = segments.length - 1; i >= 0; i--) {
-    const found = resumeCommandInVisible(segments[i]);
-    if (found) return found;
-  }
-  return null;
-}
-
-/**
- * The label for a detected resume command — its invocation with the session
- * argument dropped (`claude --resume <uuid>` → `claude --resume`). Falls back to
- * the command itself for a string no pattern claims.
- */
-export function resumeCommandLabel(command: string): string {
-  for (const { label } of BUILTIN_PATTERNS) {
-    // A canonical command is exactly `label` or `label <id>` (normalizeResumeCommand),
-    // so a prefix test is exact here — and it can't be tripped by a shared
-    // pattern's `lastIndex` the way `regex.test` would be.
-    if (command === label || command.startsWith(`${label} `)) return label;
-  }
-  return command;
+  // Boundaries on: this reads the window as words, and a stripped cursor move
+  // would otherwise weld two screen regions into one id (see the option's docs).
+  // No split is needed on top of that — `resumeCommandInVisible` already returns
+  // the rightmost match, and no pattern can span the `\n` a boundary leaves
+  // behind, so scanning the window whole gives the same answer for a fraction of
+  // the work. (Boundaries mode turns every non-SGR CSI into a `\n`, so a redraw
+  // -heavy window would otherwise explode into tens of thousands of segments,
+  // each paying for three fresh `matchAll` iterators.)
+  return resumeCommandInVisible(
+    stripTerminalControls(scrollback.slice(windowStart), { boundaries: true }),
+  );
 }

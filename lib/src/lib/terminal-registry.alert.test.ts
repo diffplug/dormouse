@@ -119,7 +119,6 @@ import {
   markSessionTodo,
   resumeTerminal,
   restoreTerminal,
-  runResumeCommand,
   setPendingShellOpts,
   subscribeToActivity,
   toggleSessionAlert,
@@ -350,7 +349,7 @@ describe('terminal-registry alert behavior', () => {
 
   it('does not mark replay-time terminal reports as touched', () => {
     const id = 'replay-report-untouched';
-    const entry = restoreTerminal(id, { scrollback: 'saved output', untouched: true }) as TestTerminalEntry;
+    const entry = restoreTerminal(id, { untouched: true }) as TestTerminalEntry;
 
     entry.terminal.emitInput('\x1b[?1;2c');
 
@@ -359,7 +358,7 @@ describe('terminal-registry alert behavior', () => {
 
   it('marks a replayed session touched for user keyboard CSI input', () => {
     const id = 'replay-arrow-touched';
-    const entry = restoreTerminal(id, { scrollback: 'saved output', untouched: true }) as TestTerminalEntry;
+    const entry = restoreTerminal(id, { untouched: true }) as TestTerminalEntry;
 
     entry.terminal.emitInput('\x1b[A');
 
@@ -375,32 +374,31 @@ describe('terminal-registry alert behavior', () => {
     expect(isUntouched(id)).toBe(false);
   });
 
-  it('rejects an unsafe persisted resume command before PTY execution', () => {
+  it('rejects an unsafe persisted resume command before it can be typed', async () => {
     const id = 'unsafe-resume-command';
     const received: string[] = [];
-    createSession(id);
     fakePlatform.setInputHandler(id, (data) => received.push(data));
 
-    runResumeCommand(id, 'claude --resume $(touch${IFS}/tmp/pwn)');
+    // Revalidated at restore rather than trusted: the snapshot may have been
+    // written by an older detector, and this string is about to be executed.
+    restoreTerminal(id, { resumeCommand: 'claude --resume $(touch${IFS}/tmp/pwn)' });
+    await vi.advanceTimersByTimeAsync(20_000);
 
     expect(received).toEqual([]);
-    expect(isUntouched(id)).toBe(true);
+    expect(countRunningSessions()).toBe(0);
   });
 
-  it('seeds semantic command state before writing a resume command', () => {
+  it('auto-runs a restored resume command once the fresh shell reaches a prompt', async () => {
     const id = 'tracked-resume-command';
     const received: string[] = [];
-    let stateAtWrite: ReturnType<typeof getTerminalPaneState> | null = null;
-    createSession(id);
-    fakePlatform.setInputHandler(id, (data) => {
-      received.push(data);
-      stateAtWrite = getTerminalPaneState(id);
-    });
+    fakePlatform.setInputHandler(id, (data) => received.push(data));
 
-    runResumeCommand(id, 'claude --resume 4f2c9b1e-6a03');
+    restoreTerminal(id, { resumeCommand: 'claude --resume 4f2c9b1e-6a03' });
 
-    expect(received).toEqual(['claude --resume 4f2c9b1e-6a03\r']);
-    expect(stateAtWrite).toMatchObject({
+    // Seeded synchronously — the platform write below bypasses xterm's keystroke
+    // fallback, so without this a non-integrated shell would never count the
+    // agent as running.
+    expect(getTerminalPaneState(id)).toMatchObject({
       activity: { kind: 'running' },
       currentCommand: {
         rawCommandLine: 'claude --resume 4f2c9b1e-6a03',
@@ -408,22 +406,22 @@ describe('terminal-registry alert behavior', () => {
       },
     });
     expect(countRunningSessions()).toBe(1);
+    // Not yet typed: spawn-then-type is exactly the window shell startup
+    // swallows keystrokes in.
+    expect(received).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(received).toEqual(['claude --resume 4f2c9b1e-6a03\r']);
   });
 
-  it('does not run a resume command in a pane whose process has exited', () => {
-    const id = 'dead-resume-command';
-    const received: string[] = [];
-    const entry = createSession(id);
-    fakePlatform.setInputHandler(id, (data) => received.push(data));
-    // The shell a restore spawned died (e.g. its saved cwd is gone), so there is
-    // nothing to type into — and seeding a command start nothing will ever
-    // finish would leave this pane counted as running forever.
-    entry.exited = true;
+  it('announces the resume in the pane instead of replaying a transcript', () => {
+    const id = 'noticed-resume-command';
+    const entry = restoreTerminal(id, { resumeCommand: 'codex resume 01JCX8ZK' });
 
-    runResumeCommand(id, 'claude --resume 4f2c9b1e-6a03');
-
-    expect(received).toEqual([]);
-    expect(countRunningSessions()).toBe(0);
+    // The pane has no scrollback to explain itself with, so the notice is the
+    // only thing saying why an agent appeared — and that the interrupted turn
+    // did not continue.
+    expect(entry.terminal.writes.join('')).toContain('codex resume 01JCX8ZK');
   });
 
   it('seeds untouched state on resume and restore while defaulting missing state to touched', () => {
@@ -874,10 +872,13 @@ describe('terminal-registry alert behavior', () => {
     expect(getActivity(id).todo).toBe(true);
   });
 
-  it('preserves keyboard CSI input during restore replay while dropping query replies', () => {
-    const id = 'restore-replay-input';
+  it('preserves keyboard CSI input during resume replay while dropping query replies', () => {
+    const id = 'resume-replay-input';
     const received: string[] = [];
-    const entry = restoreTerminal(id, { scrollback: 'saved output' }) as TestTerminalEntry;
+    // Resume attaches to a PTY the host already owns, so the fake adapter needs
+    // one registered before writePty has anywhere to deliver keystrokes.
+    fakePlatform.spawnPty(id, { cols: 80, rows: 24 });
+    const entry = resumeTerminal(id, 'saved output', { alive: true }) as TestTerminalEntry;
     fakePlatform.setInputHandler(id, (data) => received.push(data));
 
     entry.terminal.emitInput('\x1b[A');
@@ -891,9 +892,12 @@ describe('terminal-registry alert behavior', () => {
   });
 
   it('drops DCS status-string replies during replay', () => {
-    const id = 'restore-replay-dcs-input';
+    const id = 'resume-replay-dcs-input';
     const received: string[] = [];
-    const entry = restoreTerminal(id, { scrollback: 'saved output' }) as TestTerminalEntry;
+    // Resume attaches to a PTY the host already owns, so the fake adapter needs
+    // one registered before writePty has anywhere to deliver keystrokes.
+    fakePlatform.spawnPty(id, { cols: 80, rows: 24 });
+    const entry = resumeTerminal(id, 'saved output', { alive: true }) as TestTerminalEntry;
     fakePlatform.setInputHandler(id, (data) => received.push(data));
 
     // xterm.js emits DECRPSS replies for replayed DECRQSS queries such as
@@ -908,9 +912,12 @@ describe('terminal-registry alert behavior', () => {
   });
 
   it('drops DA3 (DECRPTUI) and DECREQTPARM replies during replay', () => {
-    const id = 'restore-replay-da3-input';
+    const id = 'resume-replay-da3-input';
     const received: string[] = [];
-    const entry = restoreTerminal(id, { scrollback: 'saved output' }) as TestTerminalEntry;
+    // Resume attaches to a PTY the host already owns, so the fake adapter needs
+    // one registered before writePty has anywhere to deliver keystrokes.
+    fakePlatform.spawnPty(id, { cols: 80, rows: 24 });
+    const entry = resumeTerminal(id, 'saved output', { alive: true }) as TestTerminalEntry;
     fakePlatform.setInputHandler(id, (data) => received.push(data));
 
     // DA3 (CSI = c) → DECRPTUI: DCS ! | <hex id> ST.
@@ -1198,22 +1205,11 @@ describe('typeCommandWhenPromptReady — dor ensure requires OSC 633', () => {
   });
 });
 
-describe('restore/resume replay mode-reset tail', () => {
+// Restore has no reset tail to append: it replays nothing (docs/specs/transport.md
+// -> "What is persisted"), so the mode reset is now purely a resume concern.
+describe('resume replay mode-reset tail', () => {
   beforeEach(installRegistryTestGlobals);
   afterEach(uninstallRegistryTestGlobals);
-
-  it('restore appends the reset tail while still under replay (before spawning the shell)', () => {
-    const entry = restoreTerminal('restore-reset', {
-      scrollback: 'ncmatrix\x1b[?1000h\x1b[?1006h\x1b[?1049h\x1b[?25l',
-    }) as TestTerminalEntry;
-
-    // The tail rides inside writeReplay: scrollback, then REPLAY_MODE_RESET,
-    // then the '\r\n' separator, all before the freshly spawned shell prompt.
-    const resetAt = entry.terminal.writes.indexOf(REPLAY_MODE_RESET);
-    const sepAt = entry.terminal.writes.indexOf('\r\n');
-    expect(resetAt).toBeGreaterThan(0);
-    expect(sepAt).toBeGreaterThan(resetAt);
-  });
 
   it('resume of a DEAD session emits the reset tail before the exit line', () => {
     const entry = resumeTerminal(

@@ -14,7 +14,6 @@ export type WebviewMessage =
   | { type: 'pty:kill'; id: string }
   | { type: 'pty:getCwd'; id: string; requestId?: string }
   | { type: 'pty:getOpenPorts'; id: string; requestId?: string }
-  | { type: 'pty:getScrollback'; id: string; requestId?: string }
   | { type: 'pty:getShells'; requestId?: string }
   | { type: 'clipboard:readFiles'; requestId: string }
   | { type: 'clipboard:readImage'; requestId: string }
@@ -63,7 +62,6 @@ export type ExtensionMessage =
   | { type: 'pty:replay'; id: string; data: string }
   | { type: 'pty:cwd'; id: string; cwd: string | null; requestId?: string }
   | { type: 'pty:openPorts'; id: string; ports: OpenPort[]; requestId?: string }
-  | { type: 'pty:scrollback'; id: string; data: string | null; requestId?: string }
   | { type: 'pty:shells'; shells: Array<{ name: string; path: string; args: string[] }>; requestId?: string }
   | { type: 'clipboard:files'; paths: string[] | null; requestId: string }
   | { type: 'clipboard:image'; path: string | null; requestId: string }

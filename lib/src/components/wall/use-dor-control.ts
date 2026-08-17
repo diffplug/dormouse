@@ -12,7 +12,6 @@ import type {
 import type { OpenPort } from '../../lib/platform/types';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import {
-  clearResumeOffer,
   getDefaultShellOpts,
   getTerminalInstance,
   getTerminalPaneState,
@@ -796,9 +795,6 @@ export function useDorControl({
         }
         const target = requireTerminalSurface(params.surface, detail);
         if (!target) return;
-        // Direct PTY write, so xterm's onData never sees it — retire the
-        // cold-restore resume offer here (docs/specs/layout.md -> Resume offer).
-        clearResumeOffer(target.id);
         getPlatform().writePty(target.id, input);
         detail.respond({
           ok: true,

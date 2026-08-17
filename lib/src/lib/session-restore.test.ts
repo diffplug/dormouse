@@ -15,10 +15,13 @@ vi.mock('./terminal-registry', () => ({
 }));
 
 import { restoreSession } from './session-restore';
-import { __resetResumeOffersForTests, getResumeOffer } from './resume-offers';
 
-function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
+function createPlatform(
+  savedState: PersistedSession | null,
+  recoveryCommands: Record<string, string> = {},
+): PlatformAdapter {
   return {
+    getRecoveryCommands: vi.fn(() => recoveryCommands),
     init: async () => {},
     shutdown: () => {},
     getAvailableShells: vi.fn(async () => []),
@@ -27,7 +30,6 @@ function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
     resizePty: vi.fn(),
     killPty: vi.fn(),
     getCwd: vi.fn(async () => null),
-    getScrollback: vi.fn(async () => null),
     readClipboardFilePaths: vi.fn(async () => null),
     readClipboardImageAsFilePath: vi.fn(async () => null),
     onPtyData: vi.fn(),
@@ -62,37 +64,70 @@ function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
 describe('restoreSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    __resetResumeOffersForTests();
   });
 
-  it('offers the saved resume command to each restored terminal', () => {
+  it('hands each restored terminal its recovery command to auto-run', () => {
+    // The command comes from the host's boot payload, keyed by pane id — never
+    // from the persisted pane, which no longer carries one.
     const saved: PersistedSession = {
       version: 3,
       panes: [
-        { id: 'pane-a', title: 'A', cwd: null, scrollback: 'claude --resume abc\n', resumeCommand: 'claude --resume abc', untouched: false },
-        { id: 'pane-b', title: 'B', cwd: null, scrollback: 'no agent here\n', resumeCommand: null, untouched: false },
+        { id: 'pane-a', title: 'A', cwd: null, untouched: false },
+        { id: 'pane-b', title: 'B', cwd: null, untouched: false },
       ],
+    };
+
+    restoreSession(createPlatform(saved, { 'pane-a': 'claude --resume abc' }));
+
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith(
+      'pane-a',
+      expect.objectContaining({ resumeCommand: 'claude --resume abc' }),
+    );
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith(
+      'pane-b',
+      expect.objectContaining({ resumeCommand: null }),
+    );
+  });
+
+  it('resumes nothing when the host captured nothing', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      panes: [{ id: 'pane-a', title: 'A', cwd: null, untouched: false }],
     };
 
     restoreSession(createPlatform(saved));
 
-    expect(getResumeOffer('pane-a')).toBe('claude --resume abc');
-    expect(getResumeOffer('pane-b')).toBeNull();
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith(
+      'pane-a',
+      expect.objectContaining({ resumeCommand: null }),
+    );
   });
 
-  it('makes no resume offer for a browser surface', () => {
+  it('never replays a transcript — restore carries no scrollback at all', () => {
     const saved: PersistedSession = {
       version: 3,
-      panes: [
-        // A browser pane's terminal-only fields are always blank, but the offer
-        // must be keyed off surface kind rather than trusting that.
-        { id: 'pane-web', title: 'localhost', cwd: null, scrollback: null, resumeCommand: 'claude --resume abc', untouched: false, surfaceType: 'browser' },
-      ],
+      panes: [{ id: 'pane-a', title: 'A', cwd: null, untouched: false }],
     };
 
     restoreSession(createPlatform(saved));
 
-    expect(getResumeOffer('pane-web')).toBeNull();
+    const opts = terminalRegistryMocks.restoreTerminal.mock.calls[0]![1] as Record<string, unknown>;
+    expect('scrollback' in opts).toBe(false);
+  });
+
+  it('restores no terminal, and so no resume, for a browser surface', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      panes: [
+        // Routing keys off surface kind, so a captured command for a browser pane
+        // is simply never reached.
+        { id: 'pane-web', title: 'localhost', cwd: null, untouched: false, surfaceType: 'browser' },
+      ],
+    };
+
+    restoreSession(createPlatform(saved, { 'pane-web': 'claude --resume abc' }));
+
+    expect(terminalRegistryMocks.restoreTerminal).not.toHaveBeenCalled();
   });
 
   it('spawns restored terminals with the configured default shell', () => {
@@ -103,7 +138,7 @@ describe('restoreSession', () => {
     const saved: PersistedSession = {
       version: 3,
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: 'C:\\repo', scrollback: 'hello', resumeCommand: null },
+        { id: 'pane-a', title: 'Pane A', cwd: 'C:\\repo' },
       ],
     };
 
@@ -111,11 +146,11 @@ describe('restoreSession', () => {
 
     expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith('pane-a', {
       cwd: 'C:\\repo',
-      scrollback: 'hello',
       title: 'Pane A',
       shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
       args: ['-NoLogo'],
       untouched: false,
+      resumeCommand: null,
     });
   });
 
@@ -123,7 +158,7 @@ describe('restoreSession', () => {
     const saved: PersistedSession = {
       version: 3,
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null, untouched: true },
+        { id: 'pane-a', title: 'Pane A', cwd: null, untouched: true },
       ],
     };
 
@@ -138,8 +173,8 @@ describe('restoreSession', () => {
     const saved: PersistedSession = {
       version: 3,
       panes: [
-        { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
-        { id: 'pane-web', title: 'localhost', cwd: null, scrollback: null, resumeCommand: null, untouched: false, surfaceType: 'browser' },
+        { id: 'pane-term', title: 'Terminal', cwd: null, untouched: false },
+        { id: 'pane-web', title: 'localhost', cwd: null, untouched: false, surfaceType: 'browser' },
       ],
     };
 
@@ -161,7 +196,7 @@ describe('restoreSession', () => {
       version: 3,
       lathLayout,
       panes: [
-        { id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
+        { id: 'pane-a', title: 'A', cwd: null, untouched: false },
       ],
     };
 
@@ -176,7 +211,7 @@ describe('restoreSession', () => {
       surfaceRefs: { 'pane-a': 'surface:1', 'closed-pane': 'surface:2' },
       surfaceRefsNext: 9,
       panes: [
-        { id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
+        { id: 'pane-a', title: 'A', cwd: null, untouched: false },
       ],
     };
 
@@ -192,7 +227,7 @@ describe('restoreSession', () => {
       surfaceRefs: { 'pane-a': 'surface:1' },
       surfaceRefsNext: 0,
       panes: [
-        { id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
+        { id: 'pane-a', title: 'A', cwd: null, untouched: false },
       ],
     } as unknown as PersistedSession;
 
@@ -207,7 +242,7 @@ describe('restoreSession', () => {
       version: 3,
       surfaceRefs: { 'pane-a': 'pane:1', 'pane-b': 'surface:2' },
       panes: [
-        { id: 'pane-a', title: 'A', cwd: null, scrollback: null, resumeCommand: null, untouched: false },
+        { id: 'pane-a', title: 'A', cwd: null, untouched: false },
       ],
     } as unknown as PersistedSession;
 
@@ -224,8 +259,6 @@ describe('restoreSession', () => {
           id: 'pane-web',
           title: 'localhost',
           cwd: null,
-          scrollback: null,
-          resumeCommand: null,
           untouched: false,
           surfaceType: 'browser',
           alert: { status: 'WATCHING_DISABLED', watchingEnabled: false, todo: true, notification: null },

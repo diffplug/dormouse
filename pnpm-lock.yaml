@@ -291,6 +291,9 @@ importers:
       '@tailwindcss/vite':
         specifier: ^4.3.0
         version: 4.3.3(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0))
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
       '@types/vscode':
         specifier: 1.85.0
         version: 1.85.0

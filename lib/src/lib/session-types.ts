@@ -1,7 +1,5 @@
 import type { SessionStatus } from './activity-monitor';
 import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
-import { detectResumeCommand } from './resume-patterns';
-import { trimPersistedScrollback } from './scrollback-trim';
 
 /**
  * Only the TODO reminder and its notification detail survive a restart.
@@ -17,45 +15,32 @@ export interface PersistedAlertState {
 
 /**
  * Surface kind recorded per pane (`docs/specs/glossary.md`). Absent reads as
- * `'terminal'`. A `'browser'` pane has no PTY, scrollback, or registry entry; it
+ * `'terminal'`. A `'browser'` pane has no PTY or registry entry; it
  * is reconstructed from the persisted layout, so restore/resume must route it
  * differently from a terminal (see `session-restore.ts`, `reconnect.ts`).
  */
 export type PersistedSurfaceType = 'terminal' | 'browser';
 
+/**
+ * Durable structure for one pane — furniture, never content. Scrollback is
+ * deliberately absent: it is not persisted by any writer (docs/specs/transport.md
+ * -> "What is persisted"). Nor is the agent recovery command: it is host-owned and
+ * single-use, so it travels out of band on the boot payload
+ * (`PlatformAdapter.getRecoveryCommands`) rather than through anything the webview
+ * can save back.
+ */
 export interface PersistedPane {
   id: string;
   cwd: string | null;
   title: string;
-  scrollback: string | null;
-  resumeCommand: string | null;
   untouched: boolean;
   alert?: PersistedAlertState | null;
   surfaceType?: PersistedSurfaceType;
 }
 
 /**
- * Trim a terminal Session's scrollback for persistence and derive the resume
- * command from *that* trimmed text. The two must move together: the resume
- * command has to describe the scrollback actually being written, or a pane
- * persists a stale hint and restore offers the wrong session. Single source of
- * truth shared by the renderer save path (`session-save.ts`) and the VS Code
- * host refresh (`vscode-ext/session-state.ts`); detection is unaffected by the
- * trim because resume patterns live at the tail.
- */
-export function terminalPersistedContent(
-  scrollback: string | null,
-): Pick<PersistedPane, 'scrollback' | 'resumeCommand'> {
-  const trimmed = trimPersistedScrollback(scrollback);
-  return {
-    scrollback: trimmed,
-    resumeCommand: trimmed ? detectResumeCommand(trimmed) : null,
-  };
-}
-
-/**
  * Build the persisted record for a browser surface. Browser panes have no PTY,
- * so the terminal-only fields (cwd/scrollback/resumeCommand/untouched) are always
+ * so the terminal-only fields (cwd/untouched) are always
  * blank; the persisted layout reconstructs the surface and `alert` carries the
  * optional TODO. Single source of truth shared by the renderer save path
  * (`session-save.ts`) and the VS Code host refresh (`vscode-ext/session-state.ts`).
@@ -68,8 +53,6 @@ export function browserPersistedPane(
     id: pane.id,
     title: pane.title,
     cwd: null,
-    scrollback: null,
-    resumeCommand: null,
     untouched: false,
     alert,
     surfaceType: 'browser',
@@ -174,8 +157,9 @@ function isPersistedPaneShape(value: unknown): boolean {
     typeof value.id === 'string' &&
     typeof value.title === 'string' &&
     (typeof value.cwd === 'string' || value.cwd === null) &&
-    (typeof value.scrollback === 'string' || value.scrollback === null) &&
-    (typeof value.resumeCommand === 'string' || value.resumeCommand === null) &&
+    // Neither `scrollback` nor `resumeCommand` is checked: legacy blobs carry
+    // them and stay readable, new ones never do, and `normalizeSessionV3` strips
+    // both either way.
     (value.untouched === undefined || typeof value.untouched === 'boolean') &&
     (value.surfaceType === undefined || value.surfaceType === 'terminal' || value.surfaceType === 'browser') &&
     (value.alert === undefined || isPersistedAlertShape(value.alert))
@@ -253,11 +237,26 @@ function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession 
   const surfaceRefs = normalizeSurfaceRefs(session.surfaceRefs);
   const surfaceRefsNext = normalizeSurfaceRefsNext(session.surfaceRefsNext);
   const { surfaceRefs: _rawRefs, surfaceRefsNext: _rawNext, ...rest } = session;
-  // Fill the `untouched` default only when the blob predates it; otherwise keep
-  // the panes as-is.
-  const panes: PersistedPane[] = session.panes.every((pane) => typeof pane.untouched === 'boolean')
-    ? (session.panes as PersistedPane[])
-    : session.panes.map((pane) => ({ ...pane, untouched: pane.untouched ?? false }));
+  // A transcript — or a `resumeCommand` — in a pre-upgrade blob is dropped here
+  // and cannot survive into a parsed Session; the one place that guarantees no
+  // reader hands either to a writer (docs/specs/transport.md -> "Retiring the
+  // transcripts already on disk").
+  //
+  // Named as a deny-list rather than rebuilt from an allow-list, because the scrub
+  // is the special case and the carry-through is the rule: an allow-list makes
+  // every *future* `PersistedPane` field silently vanish on read until someone
+  // remembers to add it here, with no type error to catch it — the field
+  // round-trips through the save fine and only shows up as "my setting doesn't
+  // survive a restart". Neither retired field is on `PersistedPaneInput`, hence
+  // the widening.
+  const panes: PersistedPane[] = session.panes.map((pane) => {
+    const {
+      scrollback: _retiredScrollback,
+      resumeCommand: _retiredResumeCommand,
+      ...carried
+    } = pane as PersistedPaneInput & { scrollback?: unknown; resumeCommand?: unknown };
+    return { ...carried, untouched: pane.untouched ?? false };
+  });
   return {
     ...(rest as Omit<PersistedSession, 'panes' | 'surfaceRefs' | 'surfaceRefsNext'>),
     panes,

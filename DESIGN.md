@@ -208,9 +208,8 @@ The icon-and-tooltip button used inside pane headers (kill, alert toggle, todo, 
 - **Tooltip:** rendered through a portal as a `PopupButtonRow` 8px below the button, with `text-sm` primary line and an optional muted detail line. Keybindings inside the tooltip auto-render as `[bracketed]` shortcuts.
 
 #### Popup Button (`popupButton`)
-The flat segments inside a `PopupButtonRow` — the row owns the border, background, shadow, and `text-sm`, so a segment contributes only padding and tone.
-- **Tones:** `foreground` (default), `muted` (`text-muted`, hover to full foreground), and `primary` — `bg-header-active-bg` + `text-header-active-fg`, for the one emphasized action in rows that ask rather than offer (the restored pane's resume offer).
-- **Hover:** the default wash is `hover:bg-foreground/10`. A filled tone holds its fill instead — the wash sets *background*, so on `primary` it would replace the accent rather than sit over it. This matches the modal primary button, which likewise has no hover treatment.
+The flat segments inside a `PopupButtonRow` — the row owns the border, background, shadow, and `text-sm`, so a segment contributes only padding and state. Every segment currently inherits the row's foreground; these rows offer rather than ask, so none of them carries an emphasized action.
+- **Hover:** `hover:bg-foreground/10`, a wash over the row's surface.
 - **Flash:** `flashed` swaps in `animate-copy-flash` with `bg-header-active-bg/25` for copy-confirm moments.
 
 #### Chrome Button (window controls)

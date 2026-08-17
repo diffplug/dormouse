@@ -1085,6 +1085,14 @@ module.exports.create = function create(send, ptyModule) {
     } catch (err) {
       console.error(`[pty-core] spawn failed for ${id}:`, err.message);
       send('error', { id, message: err.message });
+      // A PTY that never spawned is a dead PTY, and `error` is a host-side log
+      // line that reaches no webview. Follow it with the `exit` every consumer
+      // already knows how to handle: without one the pane keeps whatever command
+      // was seeded for it as permanently running — a phantom running header, a
+      // `countRunningSessions` that never returns to zero, and a quit
+      // confirmation on every attempt to close. Reachable whenever a persisted
+      // or selected shell binary is gone.
+      send('exit', { id, exitCode: 1, signal: undefined });
       return;
     }
 
@@ -1157,6 +1165,12 @@ module.exports.create = function create(send, ptyModule) {
     send('openPorts', { id, ports: p ? getOpenPortsForPid(p.pid) : [], requestId });
   }
 
+  // Reserved: the standalone counterpart of vscode-ext's `ptyManager.getScrollback`.
+  // No renderer reads it today — `PlatformAdapter` dropped its `getScrollback` once
+  // scrollback stopped being persisted — but this buffer is what a standalone-side
+  // recovery capture reads, and it is why `gracefulKillAll` deliberately preserves
+  // scrollback where `kill`/`killAll` clear it (docs/specs/transport.md -> `## Future`,
+  // scope codex-recovery).
   function getScrollback(id, requestId) {
     const entry = scrollback.get(id);
     send('scrollback', {
@@ -1164,6 +1178,37 @@ module.exports.create = function create(send, ptyModule) {
       data: entry && entry.chunks.length > 0 ? entry.chunks.join('') : null,
       requestId,
     });
+  }
+
+  // Send ONE ^C to the given PTYs (all live ones when `ids` is omitted), so an
+  // agent prints its resume invocation before the host tears the process down
+  // (docs/specs/transport.md -> "Capturing the recovery command"). Writes ^C into
+  // the pty rather than signalling a pid: the tty line discipline delivers SIGINT
+  // to the foreground process group itself, so this needs neither tcgetpgrp nor
+  // the master fd node-pty does not expose, and it is the one mechanism both
+  // agents honour (SIGTERM to the pty leader is ignored by an interactive shell,
+  // and codex prints nothing on SIGTERM at all).
+  //
+  // The caller decides whether a second press is warranted, per PTY, because the
+  // two agents want opposite things and a blanket second press breaks one of them:
+  // codex exits on the first press and prints its hint ~255ms later, and a second
+  // press landing in that window aborts the print entirely ("Shutting down...^C"
+  // and nothing else). Claude needs the second press and prints nothing without
+  // it. Only the host can tell them apart, because only the host sees what came
+  // back (docs/specs/transport.md -> "Capturing the recovery command").
+  //
+  // "Omitted" therefore means omitted, never "an empty list": a caller that
+  // forwards a computed set that happened to come out empty must get a no-op, not
+  // a broadcast. The blanket second press above is exactly what this must never
+  // do by accident, and an emptiness test turns one dropped length guard in the
+  // caller into a silent hint-destroying press on every pane.
+  function interrupt(ids, requestId) {
+    const targets = Array.isArray(ids) ? ids : [...ptys.keys()];
+    for (const id of targets) {
+      // Guarded per id: one already-dead pty must not abort the rest.
+      try { write(id, '\x03'); } catch { /* already dead */ }
+    }
+    send('interruptDone', { requestId });
   }
 
   function gracefulKillAll(timeout = 2000, requestId) {
@@ -1194,5 +1239,5 @@ module.exports.create = function create(send, ptyModule) {
     send('shells', { shells: detectAvailableShells(), requestId });
   }
 
-  return { spawn, write, resize, kill, killAll, list, getCwd, getOpenPorts, getScrollback, gracefulKillAll, getShells };
+  return { spawn, write, resize, kill, killAll, list, getCwd, getOpenPorts, getScrollback, interrupt, gracefulKillAll, getShells };
 };

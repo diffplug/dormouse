@@ -37,7 +37,6 @@ export {
 
 export { resolveTerminalSessionId } from './terminal-store';
 
-export { clearResumeOffer } from './resume-offers';
 
 export {
   disposeAllSessions,
@@ -53,7 +52,6 @@ export {
   registerSurfaceFocusHandle,
   restoreTerminal,
   resumeTerminal,
-  runResumeCommand,
   setPendingShellOpts,
   unmountElement,
 } from './terminal-lifecycle';

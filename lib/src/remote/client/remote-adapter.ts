@@ -13,7 +13,7 @@
  *   onPtyExit        ← terminal.closed
  *
  * Everything outside that PTY core no-ops or is absent — the interface is built
- * for capability degradation (getCwd/getScrollback → null, getOpenPorts → [],
+ * for capability degradation (getCwd → null, getOpenPorts → [],
  * shells/clipboard empty, alerts no-op; alert/TODO/ringing badges instead ride
  * the directory snapshot and are read via {@link getDirectoryEntries}).
  *
@@ -315,10 +315,6 @@ export class RemotePtyAdapter implements PlatformAdapter {
   }
 
   async getCwd(): Promise<string | null> {
-    return null;
-  }
-
-  async getScrollback(): Promise<string | null> {
     return null;
   }
 
