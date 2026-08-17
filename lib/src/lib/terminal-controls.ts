@@ -1,14 +1,26 @@
 export interface StripTerminalControlsOptions {
   /**
-   * Replace cursor-*moving* sequences with a newline instead of deleting them.
+   * Replace every CSI *except* SGR — plus backspace — with a newline instead of
+   * deleting it.
    *
    * Deleting them welds together text that was never adjacent on screen: a
    * redraw like `<uuid>\x1b[K\x1b[1;1Hcodex resume ...` collapses to
    * `<uuid>codex resume ...`, and a greedy id pattern then swallows across the
    * seam — observed in the wild as a captured `claude --resume <uuid>codex`.
-   * Any consumer that reads the result as *words* rather than as a blob wants
-   * this. SGR (`m`) is exempt: colour changes do not move the cursor, so the
-   * text either side of one really is contiguous.
+   * Cursor moves are the obvious case, but erasures are discontinuities too:
+   * `\x1b[2K` means the text before it on that line is gone, so what follows
+   * belongs to a different region. SGR (`m`) is the exemption — colour changes
+   * neither move the cursor nor erase, so the text either side really is
+   * contiguous.
+   *
+   * Any consumer that reads the result as *lines* or *words* rather than as a
+   * blob wants this: `detectResumeCommand` (`resume-patterns.ts`) and the
+   * keystroke-fallback prompt detector (`terminal-state-store.ts`) both do.
+   *
+   * Note for line-oriented callers: a boundary is not a real line break, so a
+   * trailing one leaves an empty final line. `detectReturnedShellPrompt` has to
+   * tell the two apart — see its trailing-boundary trim, and
+   * `docs/specs/terminal-state.md`.
    */
   boundaries?: boolean;
 }

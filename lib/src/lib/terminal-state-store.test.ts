@@ -294,6 +294,39 @@ describe('terminal command input via rendered buffer', () => {
 
     expect(getTerminalPaneState('pane').currentCommand).toBeNull();
   });
+
+  it('reads a prompt painted after a redraw, not welded to the output above it', () => {
+    // The same seam `detectResumeCommand` guards against. Deleting the cursor
+    // move leaves the single line `building...C:\Users\ntwigg>`, which no longer
+    // starts with a drive letter — so the anchored cmd.exe shape stops matching
+    // and the pane never looks idle. Verified to return null without the
+    // boundary strip.
+    recordTerminalOutput('pane', 'building...\x1b[1;1HC:\\Users\\ntwigg>');
+    recordTerminalUserInput('pane', 'claude\r', lineReader('C:\\Users\\ntwigg>claude'));
+
+    expect(getTerminalPaneState('pane').currentCommand?.rawCommandLine).toBe('claude');
+  });
+
+  it('reads a prompt that clears to end-of-line after painting itself', () => {
+    // The regression a bare boundary strip would introduce, and why the trailing
+    // boundary is trimmed: `\x1b[K` closes the line, so splitting on it naively
+    // leaves an empty last line and hides every self-clearing prompt. Verified to
+    // return null with that trim removed.
+    recordTerminalOutput('pane', 'C:\\Users\\ntwigg>\x1b[K');
+    recordTerminalUserInput('pane', 'claude\r', lineReader('C:\\Users\\ntwigg>claude'));
+
+    expect(getTerminalPaneState('pane').currentCommand?.rawCommandLine).toBe('claude');
+  });
+
+  it('still treats a real trailing newline as "no prompt yet"', () => {
+    // The distinction the trim rests on. A genuine line break means nothing is
+    // painted on the current line, and that must keep reading as "no prompt" —
+    // a false positive here flips a running command back to idle.
+    recordTerminalOutput('pane', 'building ~/app...\r\n');
+    recordTerminalUserInput('pane', 'claude\r', lineReader('claude'));
+
+    expect(getTerminalPaneState('pane').currentCommand).toBeNull();
+  });
 });
 
 describe('countRunningSessions (quit-confirmation gate)', () => {
