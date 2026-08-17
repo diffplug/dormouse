@@ -20,7 +20,7 @@ import {
  * wash and label below it at `z-[19]`, the perimeter ring above at `z-[25]`.
  * Keeping the wash under the header is what stops it tinting the header band,
  * where `--color-alarm-vs-terminal` — picked against the terminal body — carries
- * no contrast guarantee, and what keeps it off the `z-20` pane-corner banners.
+ * no contrast guarantee, and what keeps it off the `z-20` mouse-override banner.
  * The ring still outlines the whole Pane. See `docs/specs/layout.md` →
  * Spoken-alarm overlay.
  */

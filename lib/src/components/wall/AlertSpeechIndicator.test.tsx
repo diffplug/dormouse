@@ -63,7 +63,7 @@ describe('AlertSpeechIndicator', () => {
    * The wash must stay below `.lath-leaf-header` (`z-index: 20`) so it never
    * tints the header band — `--color-alarm-vs-terminal` is picked against the
    * terminal body and has no contrast guarantee there — nor the `z-20`
-   * pane-corner banners. The ring covers only the leaf's edge, so it can sit
+   * mouse-override banner. The ring covers only the leaf's edge, so it can sit
    * above and still outline the whole Pane.
    */
   it('keeps the wash below the header and the ring above it', () => {
