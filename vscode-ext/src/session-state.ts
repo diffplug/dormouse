@@ -292,7 +292,7 @@ export async function captureAgentRecoveryCommands(
   // disclosure this whole scope exists to remove.
   for (const id of pending()) {
     const after = ((ptyManager.getScrollback(id) ?? '').length) - (startLen.get(id) ?? 0);
-    log.info(`[recovery]   no hint from ${id}: +${after} bytes since interrupt, asked=${asksAgain(id)}, pressedTwice=${pressedTwice.has(id)}`);
+    log.info(`[recovery]   no hint from ${id}: +${after} bytes since interrupt, asked=${asked.has(id)}, pressedTwice=${pressedTwice.has(id)}`);
   }
   // Nothing to write here: every command was persisted the moment it was found.
 }
