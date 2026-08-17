@@ -541,10 +541,10 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   /**
-   * Delete any pre-upgrade snapshot. Those carry transcripts, so ignoring the slot
-   * is not enough — the bytes have to leave the disk (docs/specs/transport.md ->
-   * "Retiring the transcripts already on disk"). Called from init() after the
-   * store hydrates.
+   * Delete any pre-upgrade snapshot or orphaned temp write. Those carry
+   * transcripts, so ignoring the slot is not enough — the bytes have to leave the
+   * disk (docs/specs/transport.md -> "Retiring the transcripts already on disk").
+   * Called from init() after the store hydrates.
    *
    * Deletes the file through the Rust store that owns it rather than blanking the
    * slot: a sentinel would leave the bytes in place until some later write, and
@@ -552,11 +552,15 @@ export class TauriAdapter implements PlatformAdapter {
    * and absent.
    */
   private async clearLegacySessionState(): Promise<void> {
-    if (this.sessionStore.getItem(TauriAdapter.STATE_KEY) === null) return;
+    const hadReadableSnapshot = this.sessionStore.getItem(TauriAdapter.STATE_KEY) !== null;
     try {
+      // Always ask Rust to clear: load_session cannot see a .json.tmp left by a
+      // crash before rename, but that file still contains the legacy transcript.
       await rawInvoke<void>("clear_session");
       this.sessionStore.hydrate(null);
-      console.info('[tauri-adapter] Cleared legacy persisted session (transcripts are no longer stored)');
+      if (hadReadableSnapshot) {
+        console.info('[tauri-adapter] Cleared legacy persisted session (transcripts are no longer stored)');
+      }
     } catch (err) {
       console.error('[tauri-adapter] Failed to clear legacy session state:', err);
     }

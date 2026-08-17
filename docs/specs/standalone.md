@@ -282,7 +282,10 @@ on macOS) to produce a blob that is then dropped. `init()` also **deletes** any
 pre-upgrade snapshot via the `clear_session` command — those carry transcripts, so
 ignoring the slot is not enough, and a blanking write would leave the bytes on disk
 until some later save while forcing every reader to treat `''` as a third state
-alongside present and absent. The store beneath the gate is intact and still needed by the
+alongside present and absent. Cleanup runs even when `load_session` finds no main
+file and removes both `<label>.json` and an orphaned `<label>.json.tmp`, because a
+crash between the temp write and rename can leave the transcript only in the temp
+artifact. The store beneath the gate is intact and still needed by the
 workspaces-rollout scope (`docs/specs/layout.md` → `## Future`); restoring
 VS Code-style recovery here later is flipping that gate plus adding capture to the
 quit teardown, which already has the right ordering (flush → kill → flush → drain).

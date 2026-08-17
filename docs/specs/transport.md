@@ -167,7 +167,8 @@ enough — the bytes have to go.
   into a parsed Session, so nothing downstream can persist it forward.
 - The first save after upgrade therefore rewrites each store without transcripts.
   Standalone, which stops reading its store entirely, clears the slot outright at
-  boot rather than waiting for a save that may never come.
+  boot rather than waiting for a save that may never come, including an orphaned
+  sibling temp file left by a crash before atomic rename.
 - No writer accepts a transcript-bearing Session shape afterward.
 
 ### The governing rule

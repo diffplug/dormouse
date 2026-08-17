@@ -803,15 +803,24 @@ async fn save_session(window: tauri::Window, state: String) -> Result<(), String
 }
 
 fn remove_session_from(dir: &Path, label: &str) -> Result<(), String> {
-    match std::fs::remove_file(dir.join(session_file_name(label))) {
-        Ok(()) => Ok(()),
-        // Already gone is the desired end state, not a failure.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(format!("remove session {label}: {e}")),
+    let file_name = session_file_name(label);
+    let paths = [dir.join(&file_name), dir.join(format!("{file_name}.tmp"))];
+    let mut first_error = None;
+    for path in paths {
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            // Already gone is the desired end state, not a failure.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) if first_error.is_none() => {
+                first_error = Some(format!("remove session artifact {}: {e}", path.display()));
+            }
+            Err(_) => {}
+        }
     }
+    first_error.map_or(Ok(()), Err)
 }
 
-/// Delete this window's snapshot outright.
+/// Delete this window's snapshot and any orphaned temp write outright.
 ///
 /// Deleting rather than blanking matters: a pre-upgrade snapshot carries a
 /// transcript, and the point of clearing it is that those bytes stop being on
@@ -1707,6 +1716,8 @@ mod tests {
         let dir = TempDir::new("sessions-clear");
         write_session_to(dir.path(), "main", r#"{"v":1,"who":"main"}"#).unwrap();
         write_session_to(dir.path(), "win-2", r#"{"v":1,"who":"win-2"}"#).unwrap();
+        fs::write(dir.path().join("main.json.tmp"), b"main transcript").unwrap();
+        fs::write(dir.path().join("win-2.json.tmp"), b"win-2 transcript").unwrap();
 
         remove_session_from(dir.path(), "main").unwrap();
 
@@ -1714,10 +1725,23 @@ mod tests {
         // point of clearing is that those bytes leave the disk.
         assert_eq!(read_session_from(dir.path(), "main").unwrap(), None);
         assert!(!dir.path().join("main.json").exists());
+        assert!(!dir.path().join("main.json.tmp").exists());
         assert_eq!(
             read_session_from(dir.path(), "win-2").unwrap().as_deref(),
             Some(r#"{"v":1,"who":"win-2"}"#),
         );
+        assert!(dir.path().join("win-2.json.tmp").exists());
+    }
+
+    #[test]
+    fn clearing_an_orphaned_temp_session_removes_it() {
+        let dir = TempDir::new("sessions-clear-orphaned-temp");
+        let tmp = dir.path().join("main.json.tmp");
+        fs::write(&tmp, b"legacy transcript").unwrap();
+
+        remove_session_from(dir.path(), "main").unwrap();
+
+        assert!(!tmp.exists());
     }
 
     #[test]
