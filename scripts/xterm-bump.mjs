@@ -15,7 +15,7 @@
  * version to cut. Reading that diff and judging the merge stays human work.
  *
  *   node scripts/xterm-bump.mjs [--dry-run]
- *   node scripts/xterm-bump.mjs --canopy 0.20.0-sdf301.0
+ *   node scripts/xterm-bump.mjs --canopy 0.20.0-sdf301.1
  *
  * `--canopy <forkVersion>` repins canopy onto a fork release that has already
  * been cut: the tarball URL, the pristine upstream addon and core, all to the

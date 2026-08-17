@@ -15,8 +15,8 @@ importers:
   canopy:
     dependencies:
       '@diffplug/xterm-addon-webgl-sdf':
-        specifier: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf301.0/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf301.0.tgz
-        version: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf301.0/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf301.0.tgz
+        specifier: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf301.1/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf301.1.tgz
+        version: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf301.1/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf301.1.tgz(@xterm/xterm@6.1.0-beta.301)
       '@xterm/addon-webgl':
         specifier: 0.20.0-beta.298
         version: 0.20.0-beta.298(@xterm/xterm@6.1.0-beta.301)
@@ -628,9 +628,11 @@ packages:
     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
     engines: {node: '>=20.19.0'}
 
-  '@diffplug/xterm-addon-webgl-sdf@https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf301.0/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf301.0.tgz':
-    resolution: {integrity: sha512-R8d/RSXCbZSj4QE91/Y8Kq2Jp61sizDSSo4t4TP+4dBULLSN0ub2cX9wJkorsYUSir+72m2SumLbHDJvvSFk6g==, tarball: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf301.0/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf301.0.tgz}
-    version: 0.20.0-sdf301.0
+  '@diffplug/xterm-addon-webgl-sdf@https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf301.1/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf301.1.tgz':
+    resolution: {integrity: sha512-LSK8Nd/JaWa7lQzfStzdOL1s83qLdYxWjGjwyDXQq7AMqz2GtA4/QkPxIhqeKyNYUqJPU3MFrEAJkN6DRl2aQg==, tarball: https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf301.1/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf301.1.tgz}
+    version: 0.20.0-sdf301.1
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.301
 
   '@emnapi/core@1.11.2':
     resolution: {integrity: sha512-TC8MkTuZUtcTSiFeuC0ksCh9QIJ5+F21MvZ4Wn4ORfYaFJ/0dsiudv5tVkejgwZlwQ39jL9WWDe2lz8x0WglOA==}
@@ -4621,7 +4623,9 @@ snapshots:
 
   '@csstools/css-tokenizer@4.0.0': {}
 
-  '@diffplug/xterm-addon-webgl-sdf@https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf301.0/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf301.0.tgz': {}
+  '@diffplug/xterm-addon-webgl-sdf@https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf301.1/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf301.1.tgz(@xterm/xterm@6.1.0-beta.301)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.301
 
   '@emnapi/core@1.11.2':
     dependencies:

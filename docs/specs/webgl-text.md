@@ -25,10 +25,16 @@ WebGL?" is answered by layout.md, not here.
   Upstreamable fixes branch off `master` and are cherry-picked into `sdf`.
 - **Versioning**: the addon is published as `@diffplug/xterm-addon-webgl-sdf`
   with versions shaped `<addon-version>-sdf<coreBeta>.<iteration>` (e.g.
-  `0.20.0-sdf291.0` = built from the commit of `@xterm/xterm@6.1.0-beta.291`,
-  iteration 0). The addon bundles xterm core internals, so consumers must pin
-  the exact `@xterm/xterm` beta encoded in the version — the pins in
-  `canopy/package.json` move in lockstep.
+  `0.20.0-sdf301.1` = built from the commit of `@xterm/xterm@6.1.0-beta.301`,
+  iteration 1). The addon bundles xterm core internals, so consumers must pin
+  the exact `@xterm/xterm` beta it was built from — the pins in
+  `canopy/package.json` move in lockstep. Since `0.20.0-sdf301.1` the tarball
+  also declares `peerDependencies: { '@xterm/xterm': '^<that beta>' }`, which is
+  what the lint checks: upstream's `bin/publish.js` injects that field at publish
+  time and our hand-cut `npm pack` release does not run it, so earlier fork
+  tarballs shipped without any peer range. It is also the only record of the
+  base as a *full* version — the `-sdfNNN` counter repeats across upstream
+  release lines (`5.6.0-beta.1..143`, then `6.1.0-beta.1..302`).
 - **Distribution**: GitHub Release assets consumed as a pnpm tarball-URL
   dependency. Deliberately not an npm registry: GitHub Packages requires auth
   even for public reads, and release assets need none. The lockfile records a
@@ -52,8 +58,9 @@ WebGL?" is answered by layout.md, not here.
   or pnpm complains while addons run against core internals they were not
   compiled against. `scripts/xterm-lint.mjs` (offline, in `pnpm test`) enforces
   three things this depends on: every addon pin's peer range equals `^` its
-  workspace's core pin, `lib` and `standalone` agree, and canopy's `-sdfNNN`
-  tarball version matches its core pin. `scripts/xterm-bump.mjs`
+  workspace's core pin — the SDF fork tarball included, which is what makes the
+  canopy lockstep exact rather than counter-deep — `lib` and `standalone` agree,
+  and canopy's tarball URL is internally consistent. `scripts/xterm-bump.mjs`
   (`pnpm bump:xterm`) derives the newest set that all four packages published
   from one commit and writes it.
 - **Releases are hand-cut today** (build, `npm pack`, `gh release create` per

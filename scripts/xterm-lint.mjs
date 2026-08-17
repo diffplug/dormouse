@@ -18,8 +18,10 @@
  * network, no `node_modules`, so it works in a clean checkout.
  *
  * Checks:
- *   1. Provenance: in every workspace, each `@xterm/addon-*` pin's peer range
- *      equals `^<that workspace's @xterm/xterm pin>`.
+ *   1. Provenance: in every workspace, each addon pin's peer range equals
+ *      `^<that workspace's @xterm/xterm pin>`. Covers the SDF fork tarball too,
+ *      which declares the same peer field as of 0.20.0-sdf301.1 — that is the
+ *      only place its base is recorded as a full version.
  *   2. Exact pins: every `@xterm/*` specifier is a bare version, no range
  *      operator — these are commit-coupled, a caret would let them drift.
  *   3. lib ≡ standalone: the two hand-maintained pin sets must be identical.
@@ -27,13 +29,12 @@
  *      `@diffplug/xterm-addon-webgl-sdf` release-tarball URL must match
  *      canopy's `@xterm/xterm` pin `…-beta.<NNN>`, and the release tag and the
  *      .tgz filename in that URL must agree. Renovate cannot see tarball URLs
- *      (canopy/README.md), so this is the only thing holding them together.
- *      Known limit: upstream restarts the beta counter on each release line
- *      (5.6.0-beta.1..143, then 6.1.0-beta.1..302), and the -sdfNNN tag records
- *      only the counter — so once a new line opens, a stale tarball whose
- *      counter happens to equal the new pin's would pass. Closing that needs
- *      the fork tag to encode the full core version (FORK.md § Versioning);
- *      until then this check is exact within a release line only.
+ *      (canopy/README.md), so nothing else keeps the URL honest. The tag alone
+ *      cannot carry provenance — upstream restarts the beta counter on each
+ *      release line (5.6.0-beta.1..143, then 6.1.0-beta.1..302), so a `-sdfNNN`
+ *      counter does not say which line it came from. Check 1 is what closes
+ *      that, via the fork's declared peer range; this check catches the cheaper
+ *      mistake of a URL whose tag, filename and counter disagree.
  *   5. Format sanity: finding no `@xterm/*` entries at all is a failure, not a
  *      pass — it means the lockfile format moved.
  */
@@ -77,10 +78,11 @@ function xtermPins(dir) {
 }
 
 /**
- * `'@xterm/<name>@<version>'` → its declared `@xterm/xterm` peer range, scanned
- * out of the lockfile's top-level `packages:` block. Entries there carry only
- * metadata (resolution/engines/peerDependencies/…); the resolved dependency
- * graph lives in `snapshots:`, which this deliberately stops before.
+ * `'<name>@<version>'` → its declared `@xterm/xterm` peer range, scanned out of
+ * the lockfile's top-level `packages:` block, for both `@xterm/*` and the
+ * `@diffplug/*` fork tarball (whose "version" is its URL). Entries there carry
+ * only metadata (resolution/engines/peerDependencies/…); the resolved
+ * dependency graph lives in `snapshots:`, which this deliberately stops before.
  */
 function peerRanges() {
   const out = new Map();
@@ -91,7 +93,7 @@ function peerRanges() {
     if (/^packages:\s*$/.test(line)) { inPackages = true; continue; }
     if (!inPackages) continue;
     if (/^\S/.test(line)) break; // next top-level key (`snapshots:`) ends the block
-    const entry = /^ {2}'?(@xterm\/[a-z0-9-]+)@([^']+?)'?:\s*$/.exec(line);
+    const entry = /^ {2}'?(@(?:xterm|diffplug)\/[a-z0-9-]+)@(.+?)'?:\s*$/.exec(line);
     if (entry) { key = `${entry[1]}@${entry[2]}`; inPeers = false; continue; }
     if (!key) continue;
     if (/^ {4}\S/.test(line)) inPeers = /^ {4}peerDependencies:\s*$/.test(line);
@@ -129,24 +131,36 @@ for (const { dir, rel, pins } of workspaces) {
   }
 
   // --- Check 1: provenance ---------------------------------------------------
-  const addons = Object.keys(pins).filter((n) => n.startsWith('@xterm/addon-'));
+  const addons = Object.keys(pins).filter(
+    (n) => n.startsWith('@xterm/addon-') || n === FORK_ADDON,
+  );
   if (addons.length > 0 && !core) {
     problems.push(`${rel}: declares ${addons.join(', ')} but no @xterm/xterm pin to check them against`);
   }
   for (const name of addons) {
     if (!core) break;
+    const isFork = name === FORK_ADDON;
+    // The fork's key in the lockfile is its tarball URL, which is also its pin.
+    const shown = isFork ? `${FORK_ADDON} (${/sdf-v([^/]+)\//.exec(pins[name])?.[1] ?? '?'})` : `${name}@${pins[name]}`;
     const range = peers.get(`${name}@${pins[name]}`);
     if (range === undefined) {
       problems.push(
-        `pnpm-lock.yaml: no entry for ${name}@${pins[name]} (pinned by ${rel}) — run \`pnpm install\``,
+        isFork
+          ? `pnpm-lock.yaml: ${shown} declares no @xterm/xterm peer range, so nothing records ` +
+            'which core version it bundles internals from. Fork releases carry that field as of ' +
+            '0.20.0-sdf301.1 (FORK.md § Versioning) — re-cut the release, or run `pnpm install` ' +
+            'if the lockfile is merely stale'
+          : `pnpm-lock.yaml: no entry for ${shown} (pinned by ${rel}) — run \`pnpm install\``,
       );
       continue;
     }
     if (range !== `^${core}`) {
       problems.push(
-        `${rel}: ${name}@${pins[name]} was built against @xterm/xterm ${range}, ` +
+        `${rel}: ${shown} was built against @xterm/xterm ${range}, ` +
         `but ${dir} pins ${core}. They are from different upstream commits; ` +
-        'run `node scripts/xterm-bump.mjs` for a coherent set',
+        (isFork
+          ? 'run `node scripts/xterm-bump.mjs --canopy <forkVersion>` after rebasing the fork'
+          : 'run `node scripts/xterm-bump.mjs` for a coherent set'),
       );
     }
   }
