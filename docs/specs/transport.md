@@ -257,6 +257,33 @@ deliberate: if the wording changes, claude's recovery is lost — visibly and
 recoverably — whereas a mistimed window destroys codex's every single time. Only
 the host can make this call, because only the host sees what came back.
 
+**Why press-wait-press.** Both agents' reaction to `^C` is state-dependent, and
+codex's is the constraining case: its `^C` is consumed by the input line first.
+Measured against real sessions in a pty:
+
+| State when interrupted | Gesture | Hint | At |
+| --- | --- | --- | --- |
+| idle after a pause | one `^C` | yes | 262 ms |
+| idle after a pause | two `^C`, 150 ms apart | **no** | — |
+| idle after a pause | `^C`, 800 ms, `^C` | yes | 855 ms |
+| unsent text in the input | one `^C` | **no** | — |
+| unsent text in the input | two `^C`, 150 ms apart | yes | 464 ms |
+| unsent text in the input | `^C`, 800 ms, `^C` | yes | 1061 ms |
+| freshly launched, no conversation | one `^C` | no — correctly, nothing to resume | — |
+
+With text typed, the first press only clears the line and codex keeps running,
+which on screen looks like a TUI repaint rather than a shutdown. With an empty
+input the first press exits and prints at ~262 ms, and a second press inside that
+window aborts the print. So a blanket second press destroys the idle case and an
+ask-gated one never fires at all — `Press Ctrl-C again` was absent from every
+codex cell, meaning the phrase gate can only ever serve claude. Press-wait-press
+is the only gesture covering both, and the loop's constants are sized against
+these numbers: the idle case yields at 262 ms and so leaves the retry set before
+the ~600 ms fallback arrives.
+
+Confirmed end to end in a real pane: fallback press at +625 ms, hint detected at
++789 ms, applied on the next activation.
+
 Every live terminal PTY is interrupted, not just recognized agents. A foreground
 gate would need the host to learn each pane's running command — it receives only
 `alert:state` today — and it buys nothing at this boundary, because every one of
@@ -377,78 +404,11 @@ These rules apply to every adapter. Adapter-specific layering (deactivate orderi
 
 ## Future
 
-**Scope: codex-recovery** — recovery works end to end for claude and does not yet
-work for codex. Everything below the fold in this spec is built and verified in the
-real app; this is the remainder.
+### Recovery for editor-tab panels
 
-### What is known
-
-Detection is not the problem. `detectResumeCommand` matches real codex output,
-including in a 2×1 pty, verified against captured bytes:
-
-```
-To continue this session, run codex resume 01a00e6e-efdc-7f61-a544-1082c5c954d5
-```
-
-The problem is *eliciting* that output. Both agents' reaction to `^C` is
-state-dependent, and the states that matter were only ever reached by accident:
-
-| Agent | State when interrupted | Reaction |
-| --- | --- | --- |
-| claude | idle right after a reply | `Press Ctrl-C again to exit`, then hint on the second press |
-| codex | idle right after a reply | exits on one press, hint ~255 ms later |
-| codex | as reached in a real pane | **repaints its TUI (+256 bytes) and keeps running** — no hint, never asks |
-
-That last row is the open bug. A second press was added for it (`docs/specs/transport.md`
-→ "Capturing the recovery command"), but whether two presses are sufficient from
-that state is unverified.
-
-### Measured: what actually elicits codex's hint
-
-A matrix run against real codex sessions in a pty (states x gestures, recording
-bytes emitted, time to hint, and whether the process exited):
-
-| State when interrupted | Gesture | Hint | At |
-| --- | --- | --- | --- |
-| idle after a pause | one `^C` | yes | 262 ms |
-| idle after a pause | two `^C`, 150 ms apart | **no** | — |
-| idle after a pause | `^C`, 800 ms, `^C` | yes | 855 ms |
-| unsent text in the input | one `^C` | **no** | — |
-| unsent text in the input | two `^C`, 150 ms apart | yes | 464 ms |
-| unsent text in the input | `^C`, 800 ms, `^C` | yes | 1061 ms |
-| freshly launched, no conversation | one `^C` | no (correctly — nothing to resume) | — |
-
-The mechanism: **codex's `^C` is consumed by the input line first.** With text
-typed, the first press only clears it and codex keeps running — that is the
-real-pane failure, and it looks like a TUI repaint (+256 bytes of cursor
-positioning) rather than a shutdown. With an empty input the first press exits and
-prints at ~262 ms, and a second press inside that window aborts the print.
-
-That is why each earlier attempt broke exactly one state: a blanket second press
-destroys the idle case, an ask-gated one never fires for codex at all. Note
-`Press Ctrl-C again` was **absent from every codex cell** — codex never asks, so
-the phrase gate can only ever serve claude and a timed fallback is required.
-
-Press-wait-press is the only gesture that covers both states, which is what the
-capture loop implements. The timings above are what its constants are sized
-against: the idle case yields at 262 ms and is therefore excluded from the retry
-before the ~600 ms fallback arrives, and the unsent-text case yields ~260 ms after
-that retry, inside the ceiling.
-
-**Still unverified in a real pane.** The matrix says the gesture is right; the
-capture loop that implements it has not yet been observed capturing codex from a
-Dormouse pane.
-
-### Before this ships
-
-- **Verify codex capture in a real pane.** The gesture is settled by measurement
-  above; the loop implementing it has only been exercised by hand for claude.
-- **Add coverage for the capture path.** `vscode-ext` has no test harness today,
-  so `captureAgentRecoveryCommands` and `consumeRecoveryCommands` are exercised
-  only by hand.
-- **Editor-tab panels** still get no recovery, by design for now (see "VS Code
-  teardown ordering"). Revisit if panels become a primary surface.
-- **Panes spawn at `2×1`** before layout settles (`[pty-core] spawned: … (/bin/zsh, 2x1)`).
-  Unrelated to recovery as far as anything here shows — codex prints its hint
-  correctly at that size — but it is not obviously harmless for TUI agents and
-  nobody has looked at it.
+An editor `WebviewPanel` persists through webview-side `vscode.setState()`, which
+the extension host cannot write during `deactivate()`, so recovery is scoped to
+the `WebviewView` (see "VS Code teardown ordering"). Supporting panels needs a
+host-side per-panel store — a `workspaceState` slot keyed by panel id, written by
+the same `onSaveState` the view already uses — so that teardown has somewhere to
+read from and write to. The capture and auto-run machinery underneath is unchanged.
