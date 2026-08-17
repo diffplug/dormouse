@@ -1085,6 +1085,14 @@ module.exports.create = function create(send, ptyModule) {
     } catch (err) {
       console.error(`[pty-core] spawn failed for ${id}:`, err.message);
       send('error', { id, message: err.message });
+      // A PTY that never spawned is a dead PTY, and `error` is a host-side log
+      // line that reaches no webview. Follow it with the `exit` every consumer
+      // already knows how to handle: without one the pane keeps whatever command
+      // was seeded for it as permanently running — a phantom running header, a
+      // `countRunningSessions` that never returns to zero, and a quit
+      // confirmation on every attempt to close. Reachable whenever a persisted
+      // or selected shell binary is gone.
+      send('exit', { id, exitCode: 1, signal: undefined });
       return;
     }
 
@@ -1188,8 +1196,14 @@ module.exports.create = function create(send, ptyModule) {
   // and nothing else). Claude needs the second press and prints nothing without
   // it. Only the host can tell them apart, because only the host sees what came
   // back (docs/specs/transport.md -> "Capturing the recovery command").
+  //
+  // "Omitted" therefore means omitted, never "an empty list": a caller that
+  // forwards a computed set that happened to come out empty must get a no-op, not
+  // a broadcast. The blanket second press above is exactly what this must never
+  // do by accident, and an emptiness test turns one dropped length guard in the
+  // caller into a silent hint-destroying press on every pane.
   function interrupt(ids, requestId) {
-    const targets = Array.isArray(ids) && ids.length > 0 ? ids : [...ptys.keys()];
+    const targets = Array.isArray(ids) ? ids : [...ptys.keys()];
     for (const id of targets) {
       // Guarded per id: one already-dead pty must not abort the rest.
       try { write(id, '\x03'); } catch { /* already dead */ }

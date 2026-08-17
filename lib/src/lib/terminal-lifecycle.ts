@@ -401,7 +401,12 @@ function typeCommandWhenPromptReady(id: string, command: string, requireIntegrat
   const timeoutMs = requireIntegration ? INTEGRATION_TYPE_TIMEOUT_MS : LAUNCH_PROMPT_TIMEOUT_MS;
   let elapsed = 0;
   const timer = setInterval(() => {
-    if (!registry.has(id)) {
+    // A gone shell can't run anything. `exited` also covers a spawn that failed
+    // outright (pty-core answers a spawn error with an exit), where the seeded
+    // command has just been cleared and `ready` would otherwise read as true —
+    // typing into a pty that never existed.
+    const entry = registry.get(id);
+    if (!entry || entry.exited) {
       clearInterval(timer);
       return;
     }
