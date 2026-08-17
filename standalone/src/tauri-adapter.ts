@@ -187,7 +187,7 @@ export class TauriAdapter implements PlatformAdapter {
       console.error("[tauri-adapter] load_session failed:", err);
     }
     this.sessionStore.hydrate(seed);
-    this.clearLegacySessionState();
+    await this.clearLegacySessionState();
   }
 
   shutdown(): void {
@@ -541,21 +541,24 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   /**
-   * Delete any pre-upgrade blob. Those carry transcripts, so ignoring the slot is
-   * not enough — the bytes have to go (docs/specs/transport.md -> "Retiring the
-   * transcripts already on disk"). Called from init() after the store hydrates.
+   * Delete any pre-upgrade snapshot. Those carry transcripts, so ignoring the slot
+   * is not enough — the bytes have to leave the disk (docs/specs/transport.md ->
+   * "Retiring the transcripts already on disk"). Called from init() after the
+   * store hydrates.
+   *
+   * Deletes the file through the Rust store that owns it rather than blanking the
+   * slot: a sentinel would leave the bytes in place until some later write, and
+   * would oblige every reader to treat `''` as a third state alongside present
+   * and absent.
    */
-  private clearLegacySessionState(): void {
+  private async clearLegacySessionState(): Promise<void> {
+    if (this.sessionStore.getItem(TauriAdapter.STATE_KEY) === null) return;
     try {
-      const existing = this.sessionStore.getItem(TauriAdapter.STATE_KEY);
-      if (existing === null || existing === '') return;
-      // The store surface is get/set only, so overwrite rather than delete — the
-      // point is that the transcript bytes stop being on disk, which a blanking
-      // write achieves as well as a removal would.
-      this.sessionStore.setItem(TauriAdapter.STATE_KEY, '');
+      await rawInvoke<void>("clear_session");
+      this.sessionStore.hydrate(null);
       console.info('[tauri-adapter] Cleared legacy persisted session (transcripts are no longer stored)');
-    } catch {
-      console.error('[tauri-adapter] Failed to clear legacy session state');
+    } catch (err) {
+      console.error('[tauri-adapter] Failed to clear legacy session state:', err);
     }
   }
 

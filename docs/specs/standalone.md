@@ -64,9 +64,9 @@ stderr, which Rust appends to the log file). Webview → Rust is the Tauri
 `pty_get_scrollback` / `pty_graceful_kill_all` / `get_available_shells`,
 `dor_control_response`, `iframe_create_proxy_url`, the `agent_browser_*` family,
 the `clipboard` readers, `read_update_log`, and `kill_sidecar_now` — each a thin
-forwarder to the corresponding sidecar message. `load_session` / `save_session` are the
-exception that is *not* forwarded: they read/write the per-window session file
-directly in Rust (§Persistence). Two further carve-outs: on Windows the
+forwarder to the corresponding sidecar message. `load_session` / `save_session` /
+`clear_session` are the exception that is *not* forwarded: they read, write, and
+delete the per-window session file directly in Rust (§Persistence). Two further carve-outs: on Windows the
 clipboard readers skip the sidecar and read the Win32 clipboard natively
 (`clipboard_win.rs`; behavior in `docs/specs/mouse-and-clipboard.md` §8.6),
 and `agent_browser_screenshot` receives a temp-file *path* from the sidecar
@@ -278,9 +278,11 @@ the adapter reports `persistsSession: false` so `saveSession` skips building a
 record at all. That last part is why the gate is not merely cosmetic — otherwise
 every debounced save, every 30s heartbeat, and both quit-time flushes would still
 spend a `getCwd` round trip per terminal pane (a synchronous `lsof` in the sidecar
-on macOS) to produce a blob that is then dropped. `init()` also blanks any
-pre-upgrade blob — those carry transcripts, so ignoring the slot is not
-enough. The store beneath the gate is intact and still needed by the
+on macOS) to produce a blob that is then dropped. `init()` also **deletes** any
+pre-upgrade snapshot via the `clear_session` command — those carry transcripts, so
+ignoring the slot is not enough, and a blanking write would leave the bytes on disk
+until some later save while forcing every reader to treat `''` as a third state
+alongside present and absent. The store beneath the gate is intact and still needed by the
 workspaces-rollout scope (`docs/specs/layout.md` → `## Future`); restoring
 VS Code-style recovery here later is flipping that gate plus adding capture to the
 quit teardown, which already has the right ordering (flush → kill → flush → drain).

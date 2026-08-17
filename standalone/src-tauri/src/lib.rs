@@ -802,6 +802,27 @@ async fn save_session(window: tauri::Window, state: String) -> Result<(), String
     write_session_to(&sessions_dir(window.app_handle())?, window.label(), &state)
 }
 
+fn remove_session_from(dir: &Path, label: &str) -> Result<(), String> {
+    match std::fs::remove_file(dir.join(session_file_name(label))) {
+        Ok(()) => Ok(()),
+        // Already gone is the desired end state, not a failure.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("remove session {label}: {e}")),
+    }
+}
+
+/// Delete this window's snapshot outright.
+///
+/// Deleting rather than blanking matters: a pre-upgrade snapshot carries a
+/// transcript, and the point of clearing it is that those bytes stop being on
+/// disk (docs/specs/transport.md -> "Retiring the transcripts already on disk").
+/// Overwriting with an empty string would also leave every reader of the store
+/// obliged to treat `""` as a distinct third state alongside present and absent.
+#[tauri::command]
+async fn clear_session(window: tauri::Window) -> Result<(), String> {
+    remove_session_from(&sessions_dir(window.app_handle())?, window.label())
+}
+
 #[tauri::command]
 fn kill_sidecar_now(state: tauri::State<'_, SidecarState>) {
     kill_sidecar_and_wait(&state.child);
@@ -1393,6 +1414,7 @@ pub fn run() {
             read_update_log,
             load_session,
             save_session,
+            clear_session,
             agent_browser_command,
             agent_browser_edit,
             agent_browser_screenshot,
@@ -1430,8 +1452,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_node_binary, read_session_from, resolve_dor_cli_paths, resolve_sidecar_path,
-        session_file_name, strip_windows_verbatim_prefix, write_session_to,
+        find_node_binary, read_session_from, remove_session_from, resolve_dor_cli_paths,
+        resolve_sidecar_path, session_file_name, strip_windows_verbatim_prefix, write_session_to,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -1678,6 +1700,31 @@ mod tests {
             read_session_from(dir.path(), "main").unwrap().as_deref(),
             Some(r#"{"v":2}"#),
         );
+    }
+
+    #[test]
+    fn clearing_a_session_removes_the_file_and_leaves_other_windows_alone() {
+        let dir = TempDir::new("sessions-clear");
+        write_session_to(dir.path(), "main", r#"{"v":1,"who":"main"}"#).unwrap();
+        write_session_to(dir.path(), "win-2", r#"{"v":1,"who":"win-2"}"#).unwrap();
+
+        remove_session_from(dir.path(), "main").unwrap();
+
+        // Absent, not blank: a pre-upgrade snapshot carries a transcript, and the
+        // point of clearing is that those bytes leave the disk.
+        assert_eq!(read_session_from(dir.path(), "main").unwrap(), None);
+        assert!(!dir.path().join("main.json").exists());
+        assert_eq!(
+            read_session_from(dir.path(), "win-2").unwrap().as_deref(),
+            Some(r#"{"v":1,"who":"win-2"}"#),
+        );
+    }
+
+    #[test]
+    fn clearing_an_absent_session_succeeds() {
+        // Already gone is the desired end state; a first launch must not error.
+        let dir = TempDir::new("sessions-clear-missing");
+        assert!(remove_session_from(dir.path(), "main").is_ok());
     }
 
     #[test]
