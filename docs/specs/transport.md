@@ -296,6 +296,19 @@ Detection runs over the **live in-memory buffer**, not over persisted scrollback
 `detectResumeCommand` is unchanged, but its input moves. The transcript is
 discarded immediately after detection and never reaches a writer.
 
+**Only post-interrupt bytes count.** Each pane's buffer length is recorded before
+the first `^C`, and detection reads only what arrived after it. This is a
+correctness boundary, not an optimisation: a recovery command is executed on the
+next restore, so the only bytes allowed to become executable state are the ones
+produced *in response to Dormouse's own interrupt*. Scanning the whole buffer let
+an old launch echo or a previous agent's hint win — observed as a codex pane
+capturing a stale `claude --resume` id, and as an id welded to text from an
+earlier screen region. It also fails in the safe direction: if the bounded buffer
+evicted bytes in the meantime, slicing at the old length can only discard fresh
+output, never promote stale output as fresh. Widening this scan would quietly
+weaken the provenance argument that lets recovery run without confirmation
+("Consuming it" below).
+
 Both real-world hints are covered by the existing patterns, and both shapes matter:
 
 ```
@@ -323,9 +336,10 @@ Auto-run is safe to do without a confirmation:
 
 - `claude --resume <id>` restores the conversation, lands at an idle prompt, and
   makes no request until the user types. It does not resume interrupted work.
-- Provenance is tight. The command came from a process Dormouse had already
-  identified as an agent, interrupted itself, and read back within one bounded
-  wait — not from a scan of arbitrary saved history.
+- Provenance is tight, and structurally so: detection reads *only* the bytes a
+  pane emitted after Dormouse interrupted it (see "Only post-interrupt bytes
+  count" above), within one bounded wait — never a scan of arbitrary saved
+  history, and never output that predates the teardown.
 - A wrong id fails closed. Agent session files are per-user and per-project
   directory, so an id cannot be planted to be resumed into, and `RESUME_ID` keeps
   shell punctuation out of what is executed.
