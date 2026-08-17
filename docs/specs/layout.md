@@ -110,6 +110,19 @@ The alert bell and TODO pill are defined in `docs/specs/alert.md` (visual states
 
 The pane body paints `--color-terminal-bg` on the React pane wrapper and the `TerminalPane` mount point. The persistent xterm host element, `.xterm-screen`, and xterm scroll container are also painted with the concrete background from `getTerminalTheme()`. This is intentional: xterm.js only paints its own rendered terminal surface, and integer row fitting can leave a sub-row remainder at the bottom of the pane. The host background must match the terminal screen exactly and clip to the pane's shared rounded bottom corners so the terminal surface reaches the selection overlay cleanly.
 
+### Spoken-alarm overlay
+
+A terminal Session with transient speech-delivery state gets a pointer-transparent overlay spanning its whole Lath leaf; browser surfaces never render it. It resolves through the tiling engine's per-leaf overlay slot (`docs/specs/tiling-engine.md`), never intercepts pointer/focus routing, and never changes leaf geometry.
+
+It renders as **two layers straddling the header's stacking context** (`.lath-leaf-header` is `position: relative; z-index: 20`):
+
+- **Wash + label at `z-index: 19`** — below the header, so the wash never tints the header band, where `--color-alarm-vs-terminal` (picked against the *terminal body*) carries no contrast guarantee; above terminal content; below the `z-index: 20` pane-corner mouse-override banner, which therefore stays untinted. Only `SPEAKING` washes, at 20%: `SPOKEN` persists until the ring is attended, which is unbounded, and a tint degrading terminal-text contrast for that whole window is the same mistake the Door's badge cluster avoids. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered, in both states.
+- **Perimeter ring at `z-index: 25`** — above the header so the treatment still reads as one rounded rectangle around the whole Pane, below the `z-index: 30` sashes. An inset border at the leaf's edge covers nothing. 5px for `SPEAKING`, 3px for `SPOKEN`; it is what carries `SPOKEN` on its own.
+
+Header popovers are not a factor in this layering: every one of them (pane context menu, title candidates, notification preview, rename warning) portals to `document.body` with `position: fixed`, so they render in the root stacking context above the whole wall regardless of leaf z-indices.
+
+Both layers wear the leaf's own rounding (header radius on top, terminal radius on the bottom). Under `SPEAKING` both pulse when motion is allowed and `cfg.alert.ringingPaused` is not set. Behavior and clearing rules belong to `docs/specs/alert.md`. Source of truth: `AlertSpeechIndicator.tsx`, registered as the `terminal` overlay by `LathHost.tsx`.
+
 ### Pane header responsive sizing
 
 The header adapts to available width via ResizeObserver in three tiers:
@@ -126,9 +139,9 @@ Below the content area is the baseboard (`h-7`, 28px). It is visible by default 
 
 `Wall` accepts `showBaseboard={false}` for constrained embedders such as the website's mobile Pocket playground, where a separate bottom navigation owns the area below the terminal and door workflows are outside the prototype scope. The main app shell keeps the default `showBaseboard=true`.
 
-The far right of the baseboard is a single flex cluster, right-aligned as a unit: the `N more →` overflow arrow, then the host-supplied `notice` slot (standalone puts the update banner there), then an always-present **Alarm settings** button opening the dialog specified in `docs/specs/alert.md` → Alarm settings. Every baseboard-level button shares one class constant in `Baseboard.tsx`. The cluster's always-present part is measured and subtracted from the door-fitting budget below; the overflow arrow stays out of that measurement because its presence is an *output* of the fit, so measuring it would feed back into its own input.
+The far right of the baseboard is a single flex cluster, right-aligned as a unit: the `N more →` overflow arrow, then the host-supplied `notice` slot (standalone puts the update banner there), then three always-present 24px **Alarm settings** controls. The first is a 16px speaker/slashed-speaker reflecting spoken alarms enabled/disabled; the second is a 16px ringing-bell/slashed-bell reflecting push notifications enabled/disabled; the third is the 16px sliders icon for general settings. Shape and accessible text both carry each state, so the status does not rely on color. All three open the same dialog specified in `docs/specs/alert.md` → Alarm settings; the status controls do not toggle settings directly. Every baseboard-level button shares one class constant in `Baseboard.tsx`. The cluster's always-present part is measured and subtracted from the door-fitting budget below; the overflow arrow stays out of that measurement because its presence is an *output* of the fit, so measuring it would feed back into its own input.
 
-When a session is minimized, it becomes a **door** on the baseboard. The door displays the same derived terminal label as the pane header, a TODO badge (if set), and an alert bell icon with activity dot. It uses the bottom edge of the window as its bottom border, with left, top, and right borders using the shared terminal top radius from `lib/src/components/design.tsx` — resembling a mouse hole and matching pane rounding. Door dimensions: `min-w-[68px] max-w-[220px] h-6`.
+When a session is minimized, it becomes a **door** on the baseboard. The door displays the same derived terminal label as the pane header, a TODO badge (if set), and an alert bell icon with activity dot. Speech state is layered on top: `SPEAKING` takes the whole badge slot — a speaker plus label, inverting and pulsing the entire Door — because it lasts exactly one utterance. `SPOKEN` does **not**: it persists until the ring is attended, which is unbounded, so it adds a speaker icon *beside* the TODO pill and bell rather than replacing them, plus a static 2px contrast inset on the Door. A Door that hid both persistent signals for that whole window would be indistinguishable from a quiet one. Both states name themselves in the Door's `title` and accessible name. It uses the bottom edge of the window as its bottom border, with left, top, and right borders using the shared terminal top radius from `lib/src/components/design.tsx` — resembling a mouse hole and matching pane rounding. Door dimensions: `min-w-[68px] max-w-[220px] h-6`.
 
 ### Door interaction
 
@@ -142,7 +155,7 @@ When a session is minimized, it becomes a **door** on the baseboard. The door di
 
 Doors are measured in a hidden off-screen container first:
 
-- Subtract the measured right cluster (notice + alarm settings) and its gap from the available width before fitting anything — that space is never available to doors.
+- Subtract the measured right cluster (notice + the three alarm-settings controls) and its gap from the available width before fitting anything — that space is never available to doors.
 - If they all fit, display them all. If there is remaining space, show the keyboard shortcut hint.
 - If they do not all fit:
   - Reserve space for a `N more →` button on the right edge
@@ -511,6 +524,7 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/components/Wall.tsx` | Main layout orchestrator: selected mode/state, session actions, minimize/reattach, provider composition |
 | `lib/src/components/wall/wall-types.ts` / `wall-context.tsx` | Shared Wall types and React contexts used by Wall, pane headers, panels, overlays, and the baseboard |
 | `lib/src/components/wall/LathHost.tsx` | The tiling engine's HTML adapter: leaf divs, sashes, the pane/door drag gesture, and imperative animator frame application. Engine internals are mapped in `docs/specs/tiling-engine.md`. |
+| `lib/src/components/wall/AlertSpeechIndicator.tsx` | Pointer-transparent whole-Pane `SPEAKING` / `SPOKEN` overlay |
 | `lib/src/components/wall/TerminalPanel.tsx` | Pane body wrapper; registers the pane's DOM element (`usePaneChrome`) |
 | `lib/src/components/wall/TerminalPaneHeader.tsx` | Pane header with rename, alert/TODO, mouse override, split/zoom/minimize/kill controls, and the right-click context menu |
 | `lib/src/components/wall/PaneHeaderContextMenu.tsx` | Pane-header right-click menu: the `surface:N` handle plus the pane's bound TCP ports; a port click connects it to the default browser (`docs/specs/dor-browser.md`) |
@@ -523,7 +537,7 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/components/wall/use-session-persistence.ts` | Debounced layout/session save, flush requests, pagehide, PTY exit, file-drop paste routing |
 | `lib/src/components/wall/use-dor-control.ts` | The `dor` CLI's webview control-plane hook (`useDorControl`): the `dormouse:control-request` handler for `surface.*` methods plus its surface-resolution/param-coercion/command-quoting helpers (`docs/specs/dor-cli.md`) |
 | `lib/src/components/wall/use-window-focused.ts` | Window focus tracking hook for header and selection overlay dimming |
-| `lib/src/components/Baseboard.tsx` | Always-visible bottom strip with door components, overflow arrows, shortcut hints, and the right cluster (notice slot + alarm settings button) |
+| `lib/src/components/Baseboard.tsx` | Always-visible bottom strip with door components, overflow arrows, shortcut hints, and the right cluster (notice slot + three alarm settings/status buttons) |
 | `lib/src/components/Door.tsx` | Individual door element — mouse-hole styled button with alert/TODO indicators |
 | `lib/src/components/TerminalPane.tsx` | Thin xterm.js mount point — mounts/unmounts persistent session elements |
 | `lib/src/lib/terminal-registry.ts` | Public facade preserving registry imports |

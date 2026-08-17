@@ -52,7 +52,7 @@ chrome in `lib/src/remote/pocket-app/App.tsx`.
 Source of truth: `lib/src/theme.css` defines token→VSCode-key bindings. The
 runtime-picked `--color-door-bg` / `--color-door-fg`, `--color-focus-ring`, and
 the per-surface alarm tints
-(`--color-alarm-vs-{header-active,header-inactive,door}`) are computed by
+(`--color-alarm-vs-{header-active,header-inactive,door,terminal}`) are computed by
 `computeDynamicPalette()` in `lib/src/lib/themes/dynamic-palette.ts` using OKLab
 distance/chroma helpers from `lib/src/lib/color-contrast.ts`;
 `useDynamicPalette()` in `lib/src/lib/themes/use-dynamic-palette.ts` publishes
@@ -65,9 +65,10 @@ the chosen variables on `document.body`. Public theme helpers are exported from
 - Focus ring prefers a chromatic `focusBorder`, then a chromatic active-header
   background, then the highest contrast fallback.
 - Each alarm tint is plain white or black, picked by the OKLab lightness of
-  the background the ringing bell sits on (`pickAlarmColor`): the active
-  header, the inactive header, or the door. The `--vscode-terminal-ansiYellow`
-  binding in `theme.css` is only the pre-publish baseline. Because
+  the background the alert treatment sits on (`pickAlarmColor`): the active
+  header, the inactive header, the door, or the terminal body. The terminal
+  variant drives the whole-Pane spoken-alarm overlay. The
+  `--vscode-terminal-ansiYellow` binding in `theme.css` is only the pre-publish baseline. Because
   `--color-alarm-vs-door` derives from `--color-door-bg`, which the same pass
   computes, the first pass after a theme change reads the previous door bg —
   the `MutationObserver` re-fires on the pass's own `body.style` write, so the
@@ -111,7 +112,7 @@ state saying a theme is active while xterm.js sees fallback colors.
 declarations so Tailwind can generate utility classes, but treat the body-level
 declarations as the runtime source of truth.
 Dynamic palette tokens (`--color-door-bg`, `--color-door-fg`,
-`--color-focus-ring`, and the three `--color-alarm-vs-*` tokens) also have
+`--color-focus-ring`, and the four `--color-alarm-vs-*` tokens) also have
 body-level baseline bindings matching the `@theme` declarations, so direct
 CSS-var consumers such as the mobile gesture SVG — and a ringing bell before
 the first dynamic pass — render visibly before `useDynamicPalette()` publishes
@@ -179,7 +180,7 @@ defines Storybook's default simulated host theme, with fallback to the first
 bundled theme so a renamed or removed bundle cannot leave stories without theme
 vars.
 The Storybook preview decorator also computes and publishes the dynamic palette
-vars (door pair, focus ring, and the `--color-alarm-vs-*` tints) through the
+vars (door pair, focus ring, and the four `--color-alarm-vs-*` tints) through the
 shared `computeDynamicPalette()` helper, matching the runtime
 `useDynamicPalette()` hook for stories that render doors, baseboards, focus
 rings, or ringing bells outside a full Wall instance.
