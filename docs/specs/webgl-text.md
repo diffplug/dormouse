@@ -38,9 +38,13 @@ WebGL?" is answered by layout.md, not here.
   is invisible to it, Renovate would otherwise drift canopy's two sibling pins
   off the fork base unnoticed, so `.github/renovate.json` disables `@xterm/**`
   scoped to `canopy/package.json` — both pins move only by hand. `lib/` and
-  `standalone/` keep tracking upstream betas (as one grouped `xterm` PR, since
-  core and its addons peer on the exact matching beta), so between fork rebases
-  the two can sit on different `@xterm/xterm` betas. That divergence is
+  `standalone/` keep tracking upstream betas as one grouped `xterm` PR (matched
+  on the `@xterm/**` scope, so a newly added addon is grouped automatically),
+  which buys core and the addons arriving and being tested together — not a
+  satisfied peer range: the beta counters are not aligned, `addon-webgl`'s
+  being offset from core's, so even a grouped bump can resolve to a pair whose
+  peer range is unsatisfied. Between fork rebases canopy and `lib`/`standalone`
+  can therefore sit on different `@xterm/xterm` betas. That divergence is
   expected and confined to the Storybook-only lab.
 - **Releases are hand-cut today** (build, `npm pack`, `gh release create` per
   FORK.md); automating this is staged in `## Future`.
