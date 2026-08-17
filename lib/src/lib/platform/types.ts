@@ -128,7 +128,6 @@ export interface PlatformAdapter {
 
   // PTY queries
   getCwd(id: string): Promise<string | null>;
-  getScrollback(id: string): Promise<string | null>;
   /** TCP listening ports opened by this terminal's process tree (shell + descendants). */
   getOpenPorts(id: string): Promise<OpenPort[]>;
 

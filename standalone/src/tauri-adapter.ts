@@ -230,12 +230,6 @@ export class TauriAdapter implements PlatformAdapter {
     } catch { return null; }
   }
 
-  async getScrollback(id: string): Promise<string | null> {
-    try {
-      return await rawInvoke<string | null>("pty_get_scrollback", { id });
-    } catch { return null; }
-  }
-
   // Warn-and-proceed: a stalled graceful kill must not wedge a quit teardown.
   // Callers own the timeout — the teardown bounds live in one place, quit.ts.
   async gracefulKillAllPtys(timeoutMs: number): Promise<void> {

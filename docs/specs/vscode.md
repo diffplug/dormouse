@@ -70,7 +70,7 @@ Frontend Library (lib/src/)
 
 Universal PTY/transport invariants live in `docs/specs/transport.md`. The rules below are specific to running inside the VS Code extension host.
 
-- **Save before kill.** `deactivate()` must save session state *before* killing PTYs. CWD and scrollback queries need live processes. See ordering in `extension.ts:deactivate()`.
+- **Save before kill.** `deactivate()` must save session state *before* killing PTYs — CWD queries need live processes, and recovery capture needs an agent still running to interrupt. See ordering in `extension.ts:deactivate()`.
 - **Alert state is global.** A single `AlertManager` instance in `message-router.ts` is shared across all routers and survives router disposal. PTY data feeds into it at module level, regardless of webview visibility.
 - **WATCHING rules are host-authoritative.** The first webview seeds the shared host rule set after extension-host startup. Later webviews cannot replace it: rule edits arrive as per-command mutations, and `WatchedCommandHost` broadcasts the resulting canonical snapshot to every renderer so their dialogs and persisted mirrors stay synchronized.
 - **PTY ownership tracking.** Each router tracks its PTYs in `ownedPtyIds`. A module-level `globalOwnedPtyIds` set prevents a resuming router from stealing PTYs owned by another webview.
@@ -172,7 +172,7 @@ The persisted-session shape (`PersistedSession` / `PersistedPane` / `PersistedAl
 1. Frontend saves state periodically (debounced 500ms + 30s interval) via `dormouse:saveState` message.
 2. Router's `onSaveState` callback merges in current alert states via `mergeAlertStates()`.
 3. WebviewView writes to `workspaceState`; WebviewPanels persist via `vscode.setState()` (per-panel, no clobbering).
-4. On deactivate: flush all sessions from webviews (1s timeout), then refresh from live PTYs (queries CWD + scrollback while processes are still alive).
+4. On deactivate: capture agent recovery commands, then flush all sessions from webviews (1s timeout), then refresh from live PTYs (queries CWD while processes are still alive).
 5. Graceful shutdown: save state → interrupt + capture → SIGTERM → 2s wait → force kill.
 6. On activate: saved state loaded and passed to routers for cold-start restore via `readPersistedSession()` (defined in `docs/specs/transport.md`), which tolerates both parsed objects and JSON-stringified blobs returned by VS Code state APIs.
 

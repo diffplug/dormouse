@@ -26,7 +26,6 @@ function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
     resizePty: vi.fn(),
     killPty: vi.fn(),
     getCwd: vi.fn(async () => null),
-    getScrollback: vi.fn(async () => null),
     readClipboardFilePaths: vi.fn(async () => null),
     readClipboardImageAsFilePath: vi.fn(async () => null),
     onPtyData: vi.fn(),

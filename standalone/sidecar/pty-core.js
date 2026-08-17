@@ -1157,6 +1157,12 @@ module.exports.create = function create(send, ptyModule) {
     send('openPorts', { id, ports: p ? getOpenPortsForPid(p.pid) : [], requestId });
   }
 
+  // Reserved: the standalone counterpart of vscode-ext's `ptyManager.getScrollback`.
+  // No renderer reads it today — `PlatformAdapter` dropped its `getScrollback` once
+  // scrollback stopped being persisted — but this buffer is what a standalone-side
+  // recovery capture reads, and it is why `gracefulKillAll` deliberately preserves
+  // scrollback where `kill`/`killAll` clear it (docs/specs/transport.md -> `## Future`,
+  // scope codex-recovery).
   function getScrollback(id, requestId) {
     const entry = scrollback.get(id);
     send('scrollback', {

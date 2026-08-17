@@ -60,7 +60,7 @@ This means:
 `pty-manager` maintains two buffer types per PTY:
 
 - **replayChunks**: cleared on first consume, used for resume (webview hidden then shown).
-- **scrollbackChunks**: never cleared, used for repeat resumes and session save.
+- **scrollbackChunks**: never cleared, used for repeat resumes and for recovery capture at teardown. Host-side only — no adapter exposes it to the renderer.
 
 Both are capped at 1M chars per PTY. When the cap is reached, oldest chunks are trimmed.
 
@@ -395,7 +395,7 @@ These rules apply to every adapter. Adapter-specific layering (deactivate orderi
 
 - **Scrollback buffers survive PTY exit.** In the shared `pty-core.js`, only the hard `kill`/`killAll` (or host-process exit) clears a PTY's scrollback buffer; natural exit, signal-driven exit, and `gracefulKillAll` leave it readable via `getScrollback`. Both hosts' teardown orderings rest on this contract — capture-after-graceful-kill is only correct because the buffer outlives the process.
 - **Shell login args are shell-specific.** The shared `pty-core.js` launches POSIX shells with `-l` only for shells that accept it. `csh`/`tcsh` must be spawned without `-l` so users whose login shell is C-shell-derived can open a usable terminal in any adapter.
-- **Scrollback trailing newline.** Restored scrollback must end with `\n` to avoid zsh printing a `%` artifact at the top of the terminal.
+- **Replayed scrollback ends with a newline.** Output replayed into xterm.js on **resume** must end with `\n`, or zsh prints a `%` artifact at the top of the terminal. (Cold **restore** replays nothing — scrollback is not persisted.)
 - **Replay drops terminal replies only.** While saved output is being replayed into xterm.js, terminal-generated OSC/CSI/DCS query and focus reports are dropped so they do not enter the resumed/restored shell's input buffer. The replay filter must preserve user keyboard escape sequences, including arrows, function keys, and bracketed paste.
 - **Untouched defaults conservatively.** New saved panes include `untouched`; a pane read without the field defaults to `untouched: false`, so it still requires kill confirmation.
 - **PTY ownership.** Each message router tracks the PTY ids it owns. A PTY routed to one webview must not be stolen by another router; new routers attaching to a host must respect existing ownership.

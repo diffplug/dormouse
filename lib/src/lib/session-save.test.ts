@@ -33,7 +33,6 @@ function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
     killPty: () => {},
     getAvailableShells: vi.fn(async () => []),
     getCwd: vi.fn(async () => '/tmp/live'),
-    getScrollback: vi.fn(async () => 'echo hello\n'),
     readClipboardFilePaths: vi.fn(async () => null),
     readClipboardImageAsFilePath: vi.fn(async () => null),
     onPtyData: () => {},
@@ -229,21 +228,20 @@ describe('saveSession', () => {
     expect(platform.getCwd).not.toHaveBeenCalledWith('door-web');
   });
 
-  it('never persists scrollback, however much of it the host is holding', async () => {
+  it('never persists scrollback, and never derives a resume command', async () => {
+    // There is no longer a renderer-side way to read scrollback at all —
+    // `PlatformAdapter` has no `getScrollback` — so the strongest statement here
+    // is about the record: it carries no transcript and no guessed hint. Only a
+    // host teardown that interrupted a running agent writes `resumeCommand`
+    // (docs/specs/transport.md -> "Capturing the recovery command").
     const platform = createPlatform(null);
-    vi.mocked(platform.getScrollback).mockResolvedValue(
-      'noise line\n'.repeat(15_000) + 'claude --resume sess_abc\n',
-    );
 
     await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
 
     const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
     const pane = saved.panes.find((p) => p.id === 'pane-a')!;
     expect('scrollback' in pane).toBe(false);
-    // Nor is a resume command derived here: only a host teardown that interrupted
-    // a running agent writes one (docs/specs/transport.md).
     expect(pane.resumeCommand).toBeNull();
-    expect(platform.getScrollback).not.toHaveBeenCalled();
   });
 
   it('writes the Lath layout and never a legacy dockview `layout` key', async () => {
