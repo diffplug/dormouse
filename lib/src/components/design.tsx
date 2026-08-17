@@ -4,6 +4,7 @@ import { XIcon } from '@phosphor-icons/react';
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { stepFocus } from './focus-step';
+import { cfg } from '../cfg';
 
 // App-wide type scale, color strategy, and chrome conventions: see
 // docs/specs/theme.md and AGENTS.md.
@@ -68,12 +69,25 @@ export const HEADER_PALETTE_TRANSITION_CLASS =
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
 
-// Spoken-alarm delivery is intentionally louder than resting chrome. The
-// animation freezes under reduced motion; `--color-alarm-vs-terminal` is the
-// dynamic black/white contrast pick for the terminal body behind the overlay.
+// Spoken-alarm delivery is intentionally louder than resting chrome.
+// `--color-alarm-vs-terminal` is the dynamic black/white contrast pick for the
+// terminal body behind the overlay.
 export const ALERT_SPEECH_TRACKING_CLASS = 'tracking-[0.12em]';
-export const ALERT_SPEAKING_ANIMATION_CLASS =
-  'motion-safe:animate-speech-alarm-pulse motion-reduce:animate-none';
+
+/**
+ * The pulse worn by a Session the renderer is currently speaking.
+ *
+ * Frozen under `cfg.alert.ringingPaused` on the same rule as `bellIconClass` —
+ * an infinite opacity cycle otherwise snapshots at whatever phase the Chromatic
+ * runner happens to land on, so every build diffs against itself. Unlike the
+ * bell there is no static substitute to swap in: the ring and wash already carry
+ * the state without motion. `motion-safe:` alone handles reduced motion (a
+ * `motion-reduce:` counterpart would be dead — the animation is never emitted
+ * there to override).
+ */
+export function alertSpeakingAnimationClass(): string {
+  return cfg.alert.ringingPaused ? '' : 'motion-safe:animate-speech-alarm-pulse';
+}
 
 // Chrome for small anchored popovers (title candidates, TODO preview, pane
 // context menu, rename warning). Text size and padding vary per popover and

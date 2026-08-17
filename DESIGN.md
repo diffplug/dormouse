@@ -197,7 +197,7 @@ Doors are the pane-header indicators on the baseboard. The most signature compon
 - **Dimensions:** `h-6` (24px), `min-w-[68px]`, `max-w-[220px]`, horizontal padding `px-2.5` (10px), `gap-2` between title and badges.
 - **Type:** `text-sm font-medium font-mono`.
 - **Content:** truncated title; optional TODO pill (`text-xs font-semibold tracking-[0.08em]`, success-tinted when flourishing); optional bell icon (`size={11}`, `weight="fill"`), `text-alarm-vs-door` when ringing.
-- **Spoken alarm:** transient delivery outranks the compact TODO/bell cluster. `SPEAKING` inverts and pulses the whole Door; `SPOKEN` retains a static 2px inset. Both include a speaker icon plus explicit text, so neither depends on color or motion.
+- **Spoken alarm:** `SPEAKING` inverts and pulses the whole Door and takes the badge slot for its speaker-plus-label — it lasts one utterance. `SPOKEN` persists until the ring is attended, so it keeps a static 2px inset and adds its speaker icon *beside* the TODO pill and bell instead of evicting them. Both carry a speaker icon (shape, not color) and name the state in the accessible name.
 - **Hover/Focus:** no decorative hover. The whole door is a button; the focus state is conveyed by the parent pane's selection ring, not by a per-door treatment.
 
 ### Buttons

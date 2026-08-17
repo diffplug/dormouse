@@ -55,7 +55,14 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [startIndex, setStartIndex] = useState(0);
-  const doorWidthsRef = useRef<number[]>([]);
+  // Measured door widths, held as *state* rather than a ref. The fitting budget
+  // below runs during render, so a re-measure that only wrote a ref would leave
+  // the visible row fitted against the previous widths with nothing scheduled to
+  // correct it — and a SPEAKING/SPOKEN Door is materially wider than its resting
+  // form, so that stale frame overflows the baseboard and persists until some
+  // unrelated change re-renders. Only a real change commits, so this converges
+  // in one extra pass instead of looping.
+  const [doorWidths, setDoorWidths] = useState<number[]>([]);
   const arrowMeasureEl = useRef<HTMLButtonElement>(null);
   const rightClusterEl = useRef<HTMLDivElement>(null);
   const [rightClusterWidth, setRightClusterWidth] = useState(0);
@@ -104,7 +111,9 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     for (let i = 0; i < el.children.length; i++) {
       widths.push((el.children[i] as HTMLElement).offsetWidth);
     }
-    doorWidthsRef.current = widths;
+    setDoorWidths(prev =>
+      prev.length === widths.length && prev.every((w, i) => w === widths[i]) ? prev : widths,
+    );
 
     // Measure layout metrics from DOM to stay in sync with CSS classes
     const container = containerRef.current;
@@ -135,7 +144,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   let usedWidth = 0;
 
   if (items.length > 0) {
-    const widths = doorWidthsRef.current;
+    const widths = doorWidths;
     const { doorGap, arrowWidth } = layoutMetrics.current;
     const hasLeftOverflow = startIndex > 0;
     const budget = availableWidth

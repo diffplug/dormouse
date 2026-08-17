@@ -36,6 +36,18 @@ import { deriveSessionLabel } from './session-label';
 const SPEECH_LIMIT = 120;
 
 /**
+ * Cap on tracked in-flight utterances.
+ *
+ * The tracking Set exists only so teardown can detach handlers, and an utterance
+ * the engine silently drops (see `toSpokenText`) never fires a callback to retire
+ * itself — so a wedged synthesizer would grow the Set, and the handler closures it
+ * pins, for the life of the app. Evicting the oldest bounds it without detaching:
+ * an evicted utterance that does still fire settles normally, and after teardown
+ * the generation-token check makes any late callback inert.
+ */
+const MAX_TRACKED_UTTERANCES = 8;
+
+/**
  * Reduce a display label to something safe to hand a speech engine.
  *
  * WebKit (standalone on macOS) silently drops an utterance containing angle
@@ -62,35 +74,58 @@ export function toSpokenText(label: string): string {
 }
 
 interface SpeechLifecycle {
+  /** The utterance exists and is about to be handed to the engine. Fires *before*
+   *  dispatch so tracking is already in place for an engine that settles inside
+   *  `speak()`. */
+  readonly onQueued: (utterance: SpeechSynthesisUtterance) => void;
   readonly onStart: () => void;
-  readonly onEnd: () => void;
-  readonly onError: () => void;
+  /** `end`, `error`, or a refused dispatch — the engine is done with this
+   *  utterance either way, and this Session's delivery state resolves. */
+  readonly onSettle: (utterance: SpeechSynthesisUtterance) => void;
 }
 
-function speak(text: string, lifecycle: SpeechLifecycle): SpeechSynthesisUtterance | null {
+/**
+ * Hand one utterance to the engine.
+ *
+ * Nothing here may depend on `speak()` having returned. An engine is free to
+ * dispatch `start` and then `end`/`error` **synchronously** inside
+ * `synth.speak()` — Chrome reports `error: not-allowed` that way when speech is
+ * invoked without a user gesture, which is exactly this code path. So the
+ * handlers close over the utterance itself rather than reading a variable the
+ * caller assigns afterward, and `onQueued` runs before dispatch. Reading a
+ * caller-assigned variable instead would silently drop the settle and leave the
+ * Session pinned at `speaking`.
+ */
+function speak(text: string, lifecycle: SpeechLifecycle): void {
   const synth = globalThis.speechSynthesis;
   // Absent in jsdom and in webviews with no speech backend — staying silent is
   // the correct degradation, not an error.
-  if (!synth || typeof globalThis.SpeechSynthesisUtterance !== 'function') return null;
+  if (!synth || typeof globalThis.SpeechSynthesisUtterance !== 'function') return;
 
   let utterance: SpeechSynthesisUtterance;
   try {
     utterance = new globalThis.SpeechSynthesisUtterance(toSpokenText(text));
-    utterance.onstart = lifecycle.onStart;
-    utterance.onend = lifecycle.onEnd;
-    utterance.onerror = lifecycle.onError;
-    synth.speak(utterance);
-    return utterance;
   } catch {
     // A speech engine that refuses the utterance must never break the alert path.
-    return null;
+    return;
+  }
+  utterance.onstart = lifecycle.onStart;
+  utterance.onend = () => lifecycle.onSettle(utterance);
+  utterance.onerror = () => lifecycle.onSettle(utterance);
+  lifecycle.onQueued(utterance);
+  try {
+    synth.speak(utterance);
+  } catch {
+    // Settle a refused dispatch rather than leaving the Session pinned at
+    // `speaking` behind an utterance no callback will ever retire.
+    lifecycle.onSettle(utterance);
   }
 }
 
 /**
  * Watch the activity store for fresh rings and speak the unattended ones.
- * Returns a disposer that cancels pending ring timers and detaches delivery
- * callbacks from utterances already handed to the engine.
+ * Returns a disposer that cancels pending ring timers, silences the engine, and
+ * detaches delivery callbacks from utterances already handed to it.
  */
 export function startAlertSpeech(): () => void {
   // A callback from an old or already-attended utterance must not overwrite the
@@ -100,11 +135,24 @@ export function startAlertSpeech(): () => void {
   const utterances = new Set<SpeechSynthesisUtterance>();
   clearAllAlertSpeechStates();
 
-  const settle = (sessionId: string, token: object, utterance: SpeechSynthesisUtterance): void => {
-    utterances.delete(utterance);
+  const detach = (utterance: SpeechSynthesisUtterance): void => {
     utterance.onstart = null;
     utterance.onend = null;
     utterance.onerror = null;
+  };
+
+  const track = (utterance: SpeechSynthesisUtterance): void => {
+    while (utterances.size >= MAX_TRACKED_UTTERANCES) {
+      const oldest = utterances.values().next().value;
+      if (!oldest) break;
+      utterances.delete(oldest);
+    }
+    utterances.add(utterance);
+  };
+
+  const settle = (sessionId: string, token: object, utterance: SpeechSynthesisUtterance): void => {
+    utterances.delete(utterance);
+    detach(utterance);
     if (currentToken.get(sessionId) !== token) return;
     currentToken.delete(sessionId);
     // An utterance that really started counts as spoken even if the engine later
@@ -121,8 +169,8 @@ export function startAlertSpeech(): () => void {
     delayMs: () => getAlertSettings().speakDelayMs,
     fire: (sessionId) => {
       const token = {};
-      let utterance: SpeechSynthesisUtterance | null = null;
-      const lifecycle: SpeechLifecycle = {
+      speak(deriveSessionLabel(sessionId), {
+        onQueued: track,
         onStart: () => {
           // The engine can queue several Sessions. Re-check at the actual start,
           // not merely when `speak()` accepted the queued utterance.
@@ -130,39 +178,40 @@ export function startAlertSpeech(): () => void {
           currentToken.set(sessionId, token);
           setAlertSpeechState(sessionId, 'speaking');
         },
-        onEnd: () => {
-          if (utterance) settle(sessionId, token, utterance);
-        },
-        onError: () => {
-          if (utterance) settle(sessionId, token, utterance);
-        },
-      };
-      utterance = speak(deriveSessionLabel(sessionId), lifecycle);
-      if (utterance) utterances.add(utterance);
+        onSettle: (utterance) => settle(sessionId, token, utterance),
+      });
     },
   });
 
   const clearResolvedSpeech = (): void => {
+    // Runs on every activity notification — i.e. constantly during terminal
+    // output — and `getActivitySnapshot()` rebuilds the Map that notification
+    // just invalidated. Delivery state is absent in the overwhelming majority of
+    // those calls, so bail before paying for the rebuild.
+    const speech = getAlertSpeechSnapshot();
+    if (speech.size === 0) return;
     const activity = getActivitySnapshot();
-    for (const sessionId of getAlertSpeechSnapshot().keys()) {
+    for (const sessionId of speech.keys()) {
       if (activity.get(sessionId)?.status === 'ALERT_RINGING') continue;
       currentToken.delete(sessionId);
       clearAlertSpeechState(sessionId);
     }
   };
-  clearResolvedSpeech();
+  // No seed call: `clearAllAlertSpeechStates()` above already leaves the map
+  // empty, and `watchUnattendedRings` cannot fire before this returns.
   const unsubscribeActivity = subscribeToActivity(clearResolvedSpeech);
 
   return () => {
     stopRingWatch();
     unsubscribeActivity();
     currentToken.clear();
-    for (const utterance of utterances) {
-      utterance.onstart = null;
-      utterance.onend = null;
-      utterance.onerror = null;
-    }
+    for (const utterance of utterances) detach(utterance);
     utterances.clear();
+    // Detaching handlers only stops *our* state from being touched after
+    // teardown; the engine still owns its queue. Without this, a webview that
+    // unmounts mid-alarm keeps reading Pane names aloud with no visible source
+    // and no UI left to stop it.
+    globalThis.speechSynthesis?.cancel();
     clearAllAlertSpeechStates();
   };
 }

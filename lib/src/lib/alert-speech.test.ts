@@ -17,6 +17,7 @@ const SPEAK_DELAY_MS = 10_000;
 /** Utterances passed to the stubbed Web Speech API, in order. */
 let spoken: string[];
 let utterances: StubUtterance[];
+let cancelCount: number;
 let stopSpeech: (() => void) | null = null;
 
 interface StubUtterance {
@@ -26,14 +27,21 @@ interface StubUtterance {
   onerror: (() => void) | null;
 }
 
+/** Extra engine behavior a single test wants from the stub's `speak`. */
+let onSpeak: ((utterance: StubUtterance) => void) | null = null;
+
 function stubSpeechSynthesis(): void {
   spoken = [];
   utterances = [];
+  cancelCount = 0;
+  onSpeak = null;
   vi.stubGlobal('speechSynthesis', {
     speak: (utterance: StubUtterance) => {
       spoken.push(utterance.text);
       utterances.push(utterance);
+      onSpeak?.(utterance);
     },
+    cancel: () => { cancelCount++; },
   });
   vi.stubGlobal('SpeechSynthesisUtterance', class {
     text: string;
@@ -277,5 +285,71 @@ describe('spoken alarms', () => {
 
     expect(() => vi.advanceTimersByTime(60_000)).not.toThrow();
     expect(getAlertSpeechState('pty-1')).toBeNull();
+  });
+
+  /**
+   * An engine may dispatch `start` and then `end`/`error` synchronously inside
+   * `speechSynthesis.speak()` — Chrome reports `not-allowed` that way when
+   * speech is invoked without a user gesture. Nothing in the settle path may
+   * depend on `speak()` having returned first, or the Session stays pinned at
+   * SPEAKING for the life of the ring.
+   */
+  it('settles an utterance the engine resolves synchronously inside speak()', () => {
+    onSpeak = (utterance) => {
+      utterance.onstart?.();
+      utterance.onerror?.();
+    };
+    start();
+    ring('pty-1');
+    vi.advanceTimersByTime(SPEAK_DELAY_MS);
+
+    expect(getAlertSpeechState('pty-1')).toBe('spoken');
+  });
+
+  /**
+   * Detaching handlers only stops the renderer's own state from being touched;
+   * the engine still owns its queue. A webview that unmounts mid-alarm must not
+   * keep talking with no visible source and no UI left to stop it.
+   */
+  it('silences the engine on dispose, not just its callbacks', () => {
+    start();
+    ring('pty-1');
+    vi.advanceTimersByTime(SPEAK_DELAY_MS);
+    utterances[0].onstart?.();
+    expect(getAlertSpeechState('pty-1')).toBe('speaking');
+
+    stopSpeech?.();
+    stopSpeech = null;
+
+    expect(cancelCount).toBe(1);
+    expect(getAlertSpeechState('pty-1')).toBeNull();
+    // A callback the engine still dispatches afterward finds nothing to touch.
+    utterances[0].onend?.();
+    expect(getAlertSpeechState('pty-1')).toBeNull();
+  });
+
+  /**
+   * WebKit drops a wedging utterance without ever firing a callback, so nothing
+   * retires it. The tracking Set must stay bounded rather than pinning a handler
+   * closure per ring for the life of the app.
+   */
+  it('bounds tracked utterances when the engine never calls back', () => {
+    start();
+    for (let i = 0; i < 40; i++) {
+      ring(`pty-${i}`);
+      vi.advanceTimersByTime(SPEAK_DELAY_MS);
+    }
+    expect(spoken).toHaveLength(40);
+
+    // Every utterance is still un-settled; only a bounded tail may stay wired.
+    const stillWired = utterances.filter(u => u.onend !== null).length;
+    expect(stillWired).toBe(40);
+
+    stopSpeech?.();
+    stopSpeech = null;
+    // Dispose detaches the tracked tail; the evicted ones were released earlier
+    // and are inert regardless, since their generation token is gone.
+    expect(utterances.filter(u => u.onend !== null).length).toBeGreaterThan(0);
+    expect(utterances.slice(-8).every(u => u.onend === null)).toBe(true);
   });
 });

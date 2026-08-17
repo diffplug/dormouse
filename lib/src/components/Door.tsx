@@ -4,10 +4,10 @@ import type { AlertSpeechState, SessionStatus, TodoState } from '../lib/terminal
 import { useTodoPillContent } from './TodoPillBody';
 import { bellIconClass } from './bell-icon-class';
 import {
-  ALERT_SPEAKING_ANIMATION_CLASS,
   ALERT_SPEECH_TRACKING_CLASS,
   TERMINAL_TOP_RADIUS_CLASS,
   TODO_PILL_TRACKING_CLASS,
+  alertSpeakingAnimationClass,
 } from './design';
 
 export interface DoorProps {
@@ -36,7 +36,14 @@ export function Door({
   const showBell = status !== 'WATCHING_DISABLED';
   const alertRinging = status === 'ALERT_RINGING';
   const todoPill = useTodoPillContent(todo);
-  const speechLabel = speechState === 'speaking' ? 'SPEAKING' : speechState === 'spoken' ? 'SPOKEN' : null;
+  // Only `speaking` takes the whole badge slot, and it is genuinely brief — one
+  // utterance. `spoken` persists for as long as the ring goes unattended, which
+  // is unbounded, so it may not evict the bell and TODO pill: those are the
+  // baseboard's persistent status signals and a Door showing neither would be
+  // indistinguishable from a quiet one. It gets a speaker icon beside them
+  // instead, plus the inset contrast ring on the Door itself.
+  const speaking = speechState === 'speaking';
+  const spoken = speechState === 'spoken';
 
   const onPointerDown = onDragPress
     ? (e: ReactPointerEvent<HTMLButtonElement>): void => {
@@ -51,36 +58,36 @@ export function Door({
       className={[
         'relative flex h-6 max-w-[220px] min-w-[68px] items-center gap-2 overflow-hidden px-2.5',
         TERMINAL_TOP_RADIUS_CLASS,
-        speechState === 'speaking'
-          ? `bg-alarm-vs-door text-door-bg ${ALERT_SPEAKING_ANIMATION_CLASS}`
+        speaking
+          ? `bg-alarm-vs-door text-door-bg ${alertSpeakingAnimationClass()}`
           : 'bg-door-bg text-door-fg',
-        speechState === 'spoken'
-          ? 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]'
-          : '',
+        spoken ? 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]' : '',
         'text-sm font-medium font-mono',
       ].join(' ')}
       onClick={onClick}
       onPointerDown={onPointerDown}
-      title={speechLabel ? `${title} — ${speechLabel.toLowerCase()}` : title}
-      aria-label={speechLabel ? `${title}, ${speechLabel.toLowerCase()}` : undefined}
+      title={speechState ? `${title} — ${speechState}` : title}
+      aria-label={speechState ? `${title}, ${speechState}` : undefined}
       data-alert-speech-state={speechState}
     >
       <span className="min-w-0 flex-1 truncate">
         {title}
       </span>
-      {speechLabel ? (
+      {speaking ? (
         <span
           className={[
             'flex shrink-0 items-center gap-1 text-xs font-bold',
             ALERT_SPEECH_TRACKING_CLASS,
-            speechState === 'spoken' ? 'text-alarm-vs-door' : '',
           ].join(' ')}
         >
           <SpeakerHighIcon size={13} weight="fill" />
-          <span>{speechLabel}</span>
+          <span>SPEAKING</span>
         </span>
-      ) : (todoPill.visible || showBell) && (
+      ) : (spoken || todoPill.visible || showBell) && (
         <span className="flex shrink-0 items-center gap-1.5">
+          {spoken && (
+            <SpeakerHighIcon size={12} weight="fill" className="text-alarm-vs-door" />
+          )}
           {todoPill.visible && (
             <span
               className={`todo-pill-shell text-xs font-semibold ${TODO_PILL_TRACKING_CLASS}`}
