@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlatformAdapter } from './platform/types';
-import { PERSISTED_SCROLLBACK_MAX_CHARS } from './scrollback-trim';
 import type { PersistedSession } from './session-types';
 
 const terminalRegistryMocks = vi.hoisted(() => ({
@@ -87,7 +86,7 @@ describe('saveSession', () => {
     const platform = createPlatform({
       version: 3,
       layout: null,
-      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null, alert: null }],
+      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, resumeCommand: null, alert: null }],
     });
 
     terminalRegistryMocks.getLivePersistedAlertState.mockReturnValue({ status: 'NOTHING_TO_SHOW', todo: true });
@@ -112,7 +111,6 @@ describe('saveSession', () => {
 
     await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
 
-    expect(platform.getScrollback).toHaveBeenCalledWith('pane-b');
     expect(platform.getCwd).toHaveBeenCalledWith('pane-b');
     expect(platform.saveState).toHaveBeenCalledWith({
       version: 3,
@@ -121,7 +119,6 @@ describe('saveSession', () => {
         expect.objectContaining({
           id: 'pane-a',
           cwd: '/tmp/live',
-          scrollback: 'echo hello\n',
         }),
       ],
     });
@@ -213,9 +210,7 @@ describe('saveSession', () => {
     const web = saved.panes.find((p) => p.id === 'pane-web')!;
     expect('surfaceType' in term).toBe(false);
     expect(web.surfaceType).toBe('browser');
-    expect(platform.getScrollback).toHaveBeenCalledWith('pane-term');
     expect(platform.getCwd).toHaveBeenCalledWith('pane-term');
-    expect(platform.getScrollback).not.toHaveBeenCalledWith('pane-web');
     expect(platform.getCwd).not.toHaveBeenCalledWith('pane-web');
   });
 
@@ -231,27 +226,24 @@ describe('saveSession', () => {
 
     const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
     expect(saved.panes.find((p) => p.id === 'door-web')!.surfaceType).toBe('browser');
-    expect(platform.getScrollback).not.toHaveBeenCalledWith('door-web');
     expect(platform.getCwd).not.toHaveBeenCalledWith('door-web');
   });
 
-  it('trims persisted scrollback that exceeds the 100k cap, keeping the tail and detecting resume commands', async () => {
+  it('never persists scrollback, however much of it the host is holding', async () => {
     const platform = createPlatform(null);
-    // ~165k chars of noise, then a resume command printed at the very end.
-    const bigScrollback = 'noise line\n'.repeat(15_000) + 'claude --resume sess_abc\n';
-    expect(bigScrollback.length).toBeGreaterThan(PERSISTED_SCROLLBACK_MAX_CHARS);
-    vi.mocked(platform.getScrollback).mockResolvedValue(bigScrollback);
+    vi.mocked(platform.getScrollback).mockResolvedValue(
+      'noise line\n'.repeat(15_000) + 'claude --resume sess_abc\n',
+    );
 
     await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
 
     const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
     const pane = saved.panes.find((p) => p.id === 'pane-a')!;
-    expect(pane.scrollback!.length).toBeLessThanOrEqual(PERSISTED_SCROLLBACK_MAX_CHARS);
-    // The persisted content is the tail of the live buffer.
-    expect(bigScrollback.endsWith(pane.scrollback!)).toBe(true);
-    expect(pane.scrollback!.endsWith('claude --resume sess_abc\n')).toBe(true);
-    // Resume detection still works because the pattern lives at the tail.
-    expect(pane.resumeCommand).toBe('claude --resume sess_abc');
+    expect('scrollback' in pane).toBe(false);
+    // Nor is a resume command derived here: only a host teardown that interrupted
+    // a running agent writes one (docs/specs/transport.md).
+    expect(pane.resumeCommand).toBeNull();
+    expect(platform.getScrollback).not.toHaveBeenCalled();
   });
 
   it('writes the Lath layout and never a legacy dockview `layout` key', async () => {

@@ -1,4 +1,5 @@
 import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo } from './types';
+import { withRecoveryCommands } from '../session-types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
 import type { AlertSettings } from '../alert-settings';
 import { setDefaultShellOpts } from '../shell-defaults';
@@ -16,6 +17,7 @@ import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 
 export class VSCodeAdapter implements PlatformAdapter {
   private vscode: ReturnType<typeof acquireVsCodeApi>;
+  private hostRecoveryOverlaid = false;
   private hostState: unknown = (globalThis as typeof globalThis & { __DORMOUSE_HOST_STATE__?: unknown }).__DORMOUSE_HOST_STATE__ ?? null;
   // Captured once, at construction, from the global the extension host injects
   // at webview boot — so a later same-document write can't move the goalposts.
@@ -483,6 +485,15 @@ export class VSCodeAdapter implements PlatformAdapter {
     // hostState only reflects what the extension put in the HTML at the
     // first resolveWebviewView call. Fall back to hostState on the very
     // first load, before any setState has run.
-    return this.vscode.getState() ?? this.hostState;
+    const webviewState = this.vscode.getState();
+    if (!webviewState) return this.hostState;
+    // ...with one exception: recovery commands are host-authoritative, and the
+    // webview copy survives a window reload carrying a stale `null` for them
+    // (docs/specs/transport.md -> "The recovery command"). Overlay once — the
+    // first read is the cold restore that consumes them, and re-applying on
+    // later reads would re-run the agent on every save/restore cycle.
+    if (this.hostRecoveryOverlaid) return webviewState;
+    this.hostRecoveryOverlaid = true;
+    return withRecoveryCommands(webviewState, this.hostState);
   }
 }

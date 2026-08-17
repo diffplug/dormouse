@@ -360,6 +360,30 @@ export function kill(id: string): void {
   sendToChild({ type: 'kill', id });
 }
 
+/**
+ * Send one `^C` to the named PTYs. Whether a second press follows is the caller's
+ * decision, per PTY — codex and claude want opposite things and a blanket second
+ * press destroys codex's hint (docs/specs/transport.md).
+ */
+export function interrupt(ids: string[], timeoutMs = 400): Promise<void> {
+  return new Promise((resolve) => {
+    if (!child?.connected) { resolve(); return; }
+    const timeout = setTimeout(() => {
+      child?.off('message', handler);
+      resolve();
+    }, timeoutMs);
+    const handler = (msg: any) => {
+      if (msg.type === 'interruptDone') {
+        clearTimeout(timeout);
+        child?.off('message', handler);
+        resolve();
+      }
+    };
+    child.on('message', handler);
+    child.send({ type: 'interrupt', ids });
+  });
+}
+
 export function gracefulKillAll(timeoutMs = 2000): Promise<void> {
   return new Promise((resolve) => {
     if (!child?.connected) { resolve(); return; }

@@ -268,11 +268,17 @@ through `saveState`, then `drainSessionSaves` awaits `TauriSessionStore.drain()`
 (resolves when the write pipeline goes idle) under a bounded timeout, and each
 `save_session` is itself durable through the temp-then-rename (dir fsync). So the
 final debounce/heartbeat window is no longer lost — the regression from the old
-WebKit-flush-on-teardown `localStorage` path is closed. Unclean exits (crash,
-force-kill) stay best-effort. The completed quit does not clear the file: the
-next boot reads this same transcript-bearing snapshot and cold-restores it
-automatically. There is no clean-shutdown marker or redacted persistence path
-today.
+WebKit-flush-on-teardown `localStorage` path is closed.
+
+**Standalone persists no Session state.** Quitting the app is a deliberate ending
+and a crash captured nothing, so every launch starts fresh
+(`docs/specs/transport.md` → "The governing rule"). `TauriAdapter.getState` returns
+null and `saveState` is a no-op behind one `PERSIST_SESSION` gate, and `init()`
+blanks any pre-upgrade blob — those carry transcripts, so ignoring the slot is not
+enough. The store beneath the gate is intact and still needed by the
+workspaces-rollout scope (`docs/specs/layout.md` → `## Future`); restoring
+VS Code-style recovery here later is flipping that gate plus adding capture to the
+quit teardown, which already has the right ordering (flush → kill → flush → drain).
 
 ## Quit flow
 
@@ -464,10 +470,3 @@ root `package.json` for the `dev:standalone*` orchestration.
 | `standalone/sidecar/clipboard-ops.js` | OS clipboard tiers (owned by `docs/specs/mouse-and-clipboard.md`) |
 | `standalone/scripts/build-sidecar-proxy.mjs` | Bundles `lib/src/host/` into the sidecar `.cjs` copies |
 | `standalone/scripts/dev-agent-browser.mjs` | `dev:standalone:ab` entry (owned by `docs/specs/transport.md`) |
-
-## Future
-
-The cross-host close/restart persistence redesign is owned by
-`docs/specs/transport.md` `## Future` (**Scope: recovery-retention**). Its
-standalone stages will be promoted into Persistence and Quit flow here when
-implemented; this spec keeps no second rollout ledger.

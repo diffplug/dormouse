@@ -10,7 +10,25 @@
  * called idle. One implementation so a hardening step can't reach only one of
  * them.
  */
-export function stripTerminalControls(input: string): string {
+export interface StripTerminalControlsOptions {
+  /**
+   * Replace cursor-*moving* sequences with a newline instead of deleting them.
+   *
+   * Deleting them welds together text that was never adjacent on screen: a
+   * redraw like `<uuid>\x1b[K\x1b[1;1Hcodex resume ...` collapses to
+   * `<uuid>codex resume ...`, and a greedy id pattern then swallows across the
+   * seam — observed in the wild as a captured `claude --resume <uuid>codex`.
+   * Any consumer that reads the result as *words* rather than as a blob wants
+   * this. SGR (`m`) is exempt: colour changes do not move the cursor, so the
+   * text either side of one really is contiguous.
+   */
+  boundaries?: boolean;
+}
+
+export function stripTerminalControls(input: string, options: StripTerminalControlsOptions = {}): string {
+  const csi = options.boundaries
+    ? (match: string) => (match.endsWith('m') ? '' : '\n')
+    : () => '';
   return (
     input
       // String controls: OSC (BEL or ST terminated); DCS/SOS/PM/APC (ST
@@ -29,9 +47,12 @@ export function stripTerminalControls(input: string): string {
       // whatever remains really is an unclosed payload.
       .replace(/\x1b[\]PX^_][\s\S]*$/, '')
       // CSI, charset designators, and remaining two-byte ESC sequences.
-      .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+      .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, csi)
       .replace(/\x1b[()][A-Za-z0-9]/g, '')
       .replace(/\x1b[@-_]/g, '')
+      // Backspace moves the cursor, so it seams two regions the same way a CSI
+      // move does — give it the same boundary when the caller asked for them.
+      .replace(/\x08/g, options.boundaries ? '\n' : '')
       // Preserve LF/CR/TAB as text boundaries; discard other C0/C1 controls.
       .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, '')
   );

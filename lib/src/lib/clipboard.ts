@@ -4,7 +4,6 @@ import { extractSelectionText } from './selection-text';
 import { getPlatform } from './platform';
 import { shellEscapePath } from './shell-escape';
 import { getTerminalInstance, markSessionTouched } from './terminal-registry';
-import { clearResumeOffer } from './resume-offers';
 
 async function writeText(text: string): Promise<void> {
   if (!text) return;
@@ -51,7 +50,6 @@ function writePasteToPty(terminalId: string, text: string): void {
   markSessionTouched(terminalId);
   // Paste and file-drop input bypass xterm's onData handler, so retire the
   // restored-pane offer here before writing directly to the platform PTY.
-  clearResumeOffer(terminalId);
   getPlatform().writePty(terminalId, payload);
 }
 

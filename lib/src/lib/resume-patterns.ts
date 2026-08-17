@@ -105,7 +105,9 @@ export function detectResumeCommand(scrollback: string): string | null {
     windowStart = scrollback.lastIndexOf('\n', cursor - 1) + 1;
     cursor = windowStart - 1;
   }
-  const segments = stripTerminalControls(scrollback.slice(windowStart)).split('\n');
+  // Boundaries on: this reads the window as words, and a stripped cursor move
+  // would otherwise weld two screen regions into one id (see the option's docs).
+  const segments = stripTerminalControls(scrollback.slice(windowStart), { boundaries: true }).split('\n');
   for (let i = segments.length - 1; i >= 0; i--) {
     const found = resumeCommandInVisible(segments[i]);
     if (found) return found;

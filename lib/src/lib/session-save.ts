@@ -1,5 +1,5 @@
 import type { PlatformAdapter } from './platform/types';
-import { browserPersistedPane, readPersistedSession, terminalPersistedContent, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedSurfaceType } from './session-types';
+import { browserPersistedPane, readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedSurfaceType } from './session-types';
 import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched, resolveTerminalSessionId } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 
@@ -50,15 +50,16 @@ export async function saveSession(
 
       const liveAlert = getLivePersistedAlertState(pane.id);
       const sessionId = resolveTerminalSessionId(pane.id);
-      const [scrollback, cwd] = await Promise.all([
-        platform.getScrollback(sessionId),
-        platform.getCwd(sessionId),
-      ]);
+      const cwd = await platform.getCwd(sessionId);
       return {
         id: pane.id,
         title: pane.title,
         cwd: cwd ?? previousPane?.cwd ?? null,
-        ...terminalPersistedContent(scrollback ?? previousPane?.scrollback ?? null),
+        // Never derived here. A recovery command is written only by a host
+        // teardown that interrupted a running agent, strictly after this save
+        // (docs/specs/transport.md -> "Capturing the recovery command"), so a
+        // periodic save must not clobber it with a stale value or a guess.
+        resumeCommand: previousPane?.resumeCommand ?? null,
         untouched: isUntouched(pane.id),
         alert: liveAlert ?? previousPane?.alert ?? null,
       };

@@ -25,6 +25,7 @@ process.on('message', (msg) => {
     case 'resize':  mgr.resize(msg.id, msg.cols, msg.rows); break;
     case 'kill':    mgr.kill(msg.id); break;
     case 'killAll': mgr.killAll(); break;
+    case 'interrupt': mgr.interrupt(msg.ids, msg.requestId); break;
     case 'gracefulKillAll': mgr.gracefulKillAll(msg.timeout); break;
     case 'getCwd':  mgr.getCwd(msg.id); break;
     case 'getOpenPorts': mgr.getOpenPorts(msg.id); break;

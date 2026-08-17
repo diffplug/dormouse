@@ -37,6 +37,11 @@ const ITERM2_COMPAT_VERSION = '3.5.0';
 // means the caller wants a specific invocation we must not clobber.
 const BASH_INJECTABLE_ARGS = new Set(['-i', '-l', '--login']);
 
+// Gap between the two ^C presses of interruptAll. Claude requires a second press
+// "in rapid succession" to exit and only prints its resume hint then; too long a
+// gap and the first press expires instead of arming the second.
+const INTERRUPT_GAP_MS = 150;
+
 function bashArgsAreInjectable(shellArgs) {
   return (shellArgs || []).every((arg) => BASH_INJECTABLE_ARGS.has(arg));
 }
@@ -1166,6 +1171,39 @@ module.exports.create = function create(send, ptyModule) {
     });
   }
 
+  // Interrupt every live PTY so an agent prints its resume invocation before the
+  // host tears the process down (docs/specs/transport.md -> "Capturing the
+  // recovery command"). Writes ^C into the pty rather than signalling a pid: the
+  // tty line discipline delivers SIGINT to the foreground process group itself,
+  // so this needs neither tcgetpgrp nor the master fd node-pty does not expose,
+  // and it is the one mechanism both agents honour (SIGTERM to the pty leader is
+  // ignored by an interactive shell, and codex prints nothing on SIGTERM at all).
+  //
+  // Two presses, ~150ms apart, unconditionally: claude prints "Press Ctrl-C again
+  // to exit" on the first and only emits its hint on the second, while codex has
+  // already exited by then and its second ^C lands harmlessly on the shell prompt
+  // behind it. The shell survives either way, so the hint arrives as ordinary
+  // data into the same scrollback buffer getScrollback already reads.
+  // Send ONE ^C to the given PTYs (all live ones when `ids` is omitted).
+  //
+  // The caller decides whether a second press is warranted, per PTY, because the
+  // two agents want opposite things and a blanket second press breaks one of them:
+  // codex exits on the first press and prints its hint ~255ms later, and a second
+  // press landing in that window aborts the print entirely ("Shutting down...^C"
+  // and nothing else). Claude needs the second press and prints nothing without
+  // it. Only the host can tell them apart, because only the host sees what came
+  // back (docs/specs/transport.md -> "Capturing the recovery command").
+  function interrupt(ids, requestId) {
+    const done = () => send('interruptDone', { requestId });
+    const targets = Array.isArray(ids) && ids.length > 0 ? ids : [...ptys.keys()];
+    for (const id of targets) {
+      const p = ptys.get(id);
+      if (!p) continue;
+      try { p.write('\x03'); } catch { /* already dead */ }
+    }
+    setTimeout(done, 0);
+  }
+
   function gracefulKillAll(timeout = 2000, requestId) {
     const done = () => send('gracefulKillDone', { requestId });
     // Nothing live to SIGTERM, but a just-exited PTY can still deliver final
@@ -1194,5 +1232,5 @@ module.exports.create = function create(send, ptyModule) {
     send('shells', { shells: detectAvailableShells(), requestId });
   }
 
-  return { spawn, write, resize, kill, killAll, list, getCwd, getOpenPorts, getScrollback, gracefulKillAll, getShells };
+  return { spawn, write, resize, kill, killAll, list, getCwd, getOpenPorts, getScrollback, interrupt, gracefulKillAll, getShells };
 };

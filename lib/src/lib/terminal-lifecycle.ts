@@ -14,7 +14,6 @@ import {
   setSelection as setMouseSelection,
 } from './mouse-selection';
 import { extractSelectionText } from './selection-text';
-import { clearResumeOffer } from './resume-offers';
 import { normalizeResumeCommand } from './resume-patterns';
 import {
   pendingShellOpts,
@@ -233,9 +232,6 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
     // The process is gone, so any command we seeded for this pane is no longer
     // live; clear it so `dor ensure` stops matching a dead surface.
     finishLaunchedCommandByPtyId(id, detail.exitCode);
-    // Same reason retires the resume offer: it types into a shell, and there is
-    // no shell left (docs/specs/layout.md -> Resume offer).
-    clearResumeOffer(id);
   };
   platform.onPtyData(handleData);
   platform.onPtyExit(handleExit);
@@ -266,8 +262,6 @@ function wireXtermHandlers(
 
     if (!isReplayTerminalReport) {
       markSessionTouched(id);
-      // Answered by doing something else (docs/specs/layout.md -> Resume offer).
-      clearResumeOffer(id);
     }
 
     const isSyntheticTerminalReport = inputIsSyntheticTerminalReport(input);
@@ -482,9 +476,12 @@ export function resumeTerminal(
   return entry;
 }
 
+// A cold restore never replays a transcript — scrollback is not persisted
+// (docs/specs/transport.md -> "What is persisted"). What can come back is the
+// agent the host interrupted on its way down, which this pane re-runs itself.
 export function restoreTerminal(
   id: string,
-  opts: { cwd?: string | null; scrollback?: string | null; title?: string | null; cwdWarning?: string | null; shell?: string; args?: string[]; untouched?: boolean },
+  opts: { cwd?: string | null; title?: string | null; cwdWarning?: string | null; shell?: string; args?: string[]; untouched?: boolean; resumeCommand?: string | null },
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
@@ -497,13 +494,6 @@ export function restoreTerminal(
     setTerminalUserTitle(id, trimmedTitle);
   }
 
-  if (opts.scrollback) {
-    // Saved process is gone: append the reset tail (see REPLAY_MODE_RESET),
-    // inside writeReplay so `isReplaying` covers it, and before the '\r\n'
-    // separator so the alt-screen exit lands before the separator line.
-    writeReplay(entry, opts.scrollback, REPLAY_MODE_RESET, '\r\n');
-    seedPromptShapeFromScrollback(id, opts.scrollback);
-  }
   if (opts.cwdWarning) {
     entry.terminal.write(`\r\n\x1b[33m${opts.cwdWarning}\x1b[0m\r\n`);
   }
@@ -517,6 +507,21 @@ export function restoreTerminal(
     args: opts.args,
   });
   seedProcessCwdAfterSpawn(id);
+
+  // Revalidated rather than trusted: the snapshot may have been written by an
+  // older detector, and this string is about to be executed.
+  const resume = opts.resumeCommand ? normalizeResumeCommand(opts.resumeCommand) : null;
+  if (resume) {
+    // A passive notice, not a dialog: the pane has no transcript, so without it
+    // an agent simply appears. It also states the discontinuity the resume hides
+    // — the interrupted turn did not continue.
+    entry.terminal.write(`\x1b[2m⟲ resuming agent session: ${resume}\x1b[0m\r\n`);
+    // Seeded before the write because this bypasses xterm's keystroke fallback,
+    // and typed only once the fresh shell reaches a prompt — spawn-then-type is
+    // exactly the window shell startup swallows keystrokes in.
+    seedLaunchedCommand(id, resume, opts.cwd ?? undefined);
+    typeCommandWhenPromptReady(id, resume, false);
+  }
 
   return entry;
 }
@@ -557,30 +562,7 @@ export function disposeSession(id: string): void {
   registry.delete(id);
   removeTerminalPaneState(id);
   removeMouseSelectionState(id);
-  clearResumeOffer(id);
   notifyActivityListeners();
-}
-
-/**
- * Take a restored pane's resume offer: type the command at its fresh shell and
- * run it. Written straight to the PTY rather than through a bracketed paste —
- * bracketed paste exists to stop an embedded newline from executing, which is
- * the opposite of what this button is for.
- */
-export function runResumeCommand(id: string, command: string): void {
-  const normalized = normalizeResumeCommand(command);
-  clearResumeOffer(id);
-  const entry = registry.get(id);
-  // A gone shell can't run anything, and the seed below would then be a command
-  // start nothing ever finishes — `countRunningSessions` would count this pane as
-  // running forever (a spurious quit confirmation, a phantom running header).
-  if (!normalized || !entry || entry.exited) return;
-  markSessionTouched(id);
-  // This direct platform write bypasses xterm's onData keystroke fallback.
-  // Seed the same semantic command state first so non-integrated shells still
-  // report a running agent for headers, grouping, and quit protection.
-  seedLaunchedCommand(id, normalized);
-  getPlatform().writePty(id, `${normalized}\r`);
 }
 
 export function refitSession(id: string): void {

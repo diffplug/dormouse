@@ -125,3 +125,32 @@ describe('resumeCommandLabel', () => {
     expect(resumeCommandLabel('nvim -S Session.vim')).toBe('nvim -S Session.vim');
   });
 });
+
+describe('screen-region seams', () => {
+  // Observed in the wild: capture stored `claude --resume <uuid>codex`. A redraw
+  // put a cursor move between the tail of an old echoed command and the start of
+  // a new one; stripping it without a boundary welded them, and the greedy id
+  // pattern ate across the seam.
+  it('does not weld an id to text from another screen region', () => {
+    const scrollback =
+      'claude --resume 32ce9e59-ae07-4caf-8d71-6d90c3ea67ac\x1b[K\x1b[1;1Hcodex resume 01JCX8ZK\n';
+    expect(detectResumeCommand(scrollback)).toBe('codex resume 01JCX8ZK');
+  });
+
+  it('treats a backspace redraw as a seam too', () => {
+    const scrollback = 'claude --resume aaaa\x08\x08\x08\x08codex resume bbbb\n';
+    expect(detectResumeCommand(scrollback)).toBe('codex resume bbbb');
+  });
+
+  it('still reads an id through a colour change, which does not move the cursor', () => {
+    expect(detectResumeCommand('claude --resume \x1b[1m4f2c9b1e-6a03\x1b[0m\n'))
+      .toBe('claude --resume 4f2c9b1e-6a03');
+  });
+
+  it('picks the newest hint when a redraw seam separates two agents', () => {
+    // The real shape of the failure: a stale echoed claude command still on
+    // screen, and the codex hint printed after a cursor move.
+    const scrollback = 'x\nclaude --resume old-id-aaa\x1b[2Kcodex resume new-id-bbb\n$ ';
+    expect(detectResumeCommand(scrollback)).toBe('codex resume new-id-bbb');
+  });
+});

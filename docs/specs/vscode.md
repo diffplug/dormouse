@@ -4,7 +4,7 @@
 
 ## What's built
 
-Dormouse has two hosting modes: a `WebviewView` in the bottom panel (alongside Terminal, Problems, Output) and `WebviewPanel` editor tabs (via `dormouse.open`, supports multiple instances). Both restore across "Developer: Reload Window". PTY lifecycle is fully decoupled from the webview — PTYs live in the extension host via `pty-manager.ts`, survive panel visibility toggling, and replay buffered output on **resume**. Session persistence works across cold **restore**: pane layout, CWD, scrollback, and alert state (enabled/disabled + todo) are saved and restored on cold start, and each pane's detected resume command comes back as its resume offer (`docs/specs/layout.md` → "Resume offer"). The deactivate-time PTY refresh re-derives that command from the scrollback it writes, so it never lags the buffer it came from (`docs/specs/transport.md` → "The resume command"). The view uses `workspaceState` for persistence; editor panels use VS Code's per-panel `vscode.setState()` so multiple panels don't clobber each other. Alert state is merged into every periodic save (not just deactivate) so it survives even if VS Code kills the extension host before deactivate completes. A `WebviewPanelSerializer` handles editor tab restoration; `onWebviewPanel:dormouse` activation event ensures the extension activates early enough. Theme integration uses VSCode `--vscode-*` tokens plus Dormouse semantic `--color-*` tokens, with a small resolver that materializes missing consumed VSCode colors from registry defaults. CSP is strict with nonce-gated scripts.
+Dormouse has two hosting modes: a `WebviewView` in the bottom panel (alongside Terminal, Problems, Output) and `WebviewPanel` editor tabs (via `dormouse.open`, supports multiple instances). Both restore across "Developer: Reload Window". PTY lifecycle is fully decoupled from the webview — PTYs live in the extension host via `pty-manager.ts`, survive panel visibility toggling, and replay buffered output on **resume**. Session persistence works across cold **restore**: pane layout, CWD, and alert state (enabled/disabled + todo) are saved and restored on cold start. Scrollback is never persisted (`docs/specs/transport.md` → "Persistence policy"); instead `deactivate()` interrupts the live PTYs and records each pane's agent resume invocation, which the next cold restore auto-runs (`docs/specs/layout.md` → "Agent resume on cold restore"). The view uses `workspaceState` for persistence; editor panels use VS Code's per-panel `vscode.setState()` so multiple panels don't clobber each other. Alert state is merged into every periodic save (not just deactivate) so it survives even if VS Code kills the extension host before deactivate completes. A `WebviewPanelSerializer` handles editor tab restoration; `onWebviewPanel:dormouse` activation event ensures the extension activates early enough. Theme integration uses VSCode `--vscode-*` tokens plus Dormouse semantic `--color-*` tokens, with a small resolver that materializes missing consumed VSCode colors from registry defaults. CSP is strict with nonce-gated scripts.
 
 **Architecture:**
 
@@ -56,8 +56,7 @@ Frontend Library (lib/src/)
     ├── session-save.ts           — periodic save (debounced 500ms + 30s interval)
     ├── session-restore.ts        — cold-start pane restoration
     ├── session-types.ts          — PersistedSession/PersistedPane/PersistedAlertState types
-    ├── resume-patterns.ts        — detect resumable commands from scrollback
-    ├── resume-offers.ts          — pending resume offers, seeded by cold restore
+    ├── resume-patterns.ts        — detect an agent resume invocation in a buffer
     ├── resolve-pane-element.ts   — resolve a pane element to its Lath leaf (overlay measurement)
     ├── vscode-message-token.ts   — host-message token constants + the `isHostMessage` guard
     └── platform/
@@ -174,13 +173,15 @@ The persisted-session shape (`PersistedSession` / `PersistedPane` / `PersistedAl
 2. Router's `onSaveState` callback merges in current alert states via `mergeAlertStates()`.
 3. WebviewView writes to `workspaceState`; WebviewPanels persist via `vscode.setState()` (per-panel, no clobbering).
 4. On deactivate: flush all sessions from webviews (1s timeout), then refresh from live PTYs (queries CWD + scrollback while processes are still alive).
-5. Graceful shutdown: save state → SIGTERM → 2s wait → force kill.
+5. Graceful shutdown: save state → interrupt + capture → SIGTERM → 2s wait → force kill.
 6. On activate: saved state loaded and passed to routers for cold-start restore via `readPersistedSession()` (defined in `docs/specs/transport.md`), which tolerates both parsed objects and JSON-stringified blobs returned by VS Code state APIs.
 
-The explicit host refresh in step 4 happens before SIGTERM. PTY exit can trigger
-a frontend flush after step 5 begins, but `deactivate()` does not request or await
-a second post-signal refresh; output printed only during graceful termination is
-therefore not a dependable part of the saved snapshot.
+Step 5 is where recovery is captured, and the ordering is the whole feature: the
+resume hint exists only between the interrupt and the kill, so the step-4 refresh
+(which runs before both) can never contain it. `captureAgentRecoveryCommands`
+writes `^C` into every live PTY, waits bounded for what they print, scans those
+buffers, and records the invocation — then `killAll()` runs
+(`docs/specs/transport.md` → "VS Code teardown ordering").
 
 ### Theme integration
 
@@ -255,13 +256,6 @@ window must be reloaded to pick up changes.
 The Vite config for the extension (`vscode-ext/vite.config.ts`) sets `root: ../lib` and `outDir: ./media`, building the shared React frontend directly into the extension's media folder.
 
 ## Future
-
-### Recovery retention
-
-The cross-host close/restart persistence redesign is owned by
-`docs/specs/transport.md` `## Future` (**Scope: recovery-retention**). Its VS Code
-stages will be promoted into Webview hosting and Serialization and restore here
-when implemented; this spec keeps no second rollout ledger.
 
 ### Webview→host Surface-state channel
 

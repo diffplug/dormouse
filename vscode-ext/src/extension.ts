@@ -6,7 +6,7 @@ import { attachRouter, flushAllSessions, getAlertStates } from './message-router
 import { closePoppedOutSessions } from './agent-browser-host';
 import { serveWebview } from './webview-messaging';
 import { log } from './log';
-import { mergeAlertStates, refreshSavedSessionStateFromPtys } from './session-state';
+import { captureAgentRecoveryCommands, mergeAlertStates, refreshSavedSessionStateFromPtys } from './session-state';
 import { readPersistedSession } from '../../lib/src/lib/session-types';
 import { workspaceTitle } from './workspace-chrome';
 import { resolveSelectedShell, setSelectedShellPath, getSelectedShellPath } from './shell-selection';
@@ -207,21 +207,31 @@ export function activate(context: vscode.ExtensionContext) {
 
 export async function deactivate() {
   if (!extensionContext) return;
-  log.info('[deactivate] starting');
-  // Close any headed pop-out windows first so quitting never orphans a real
-  // Chrome window (spec → "Headed Pop-Out" lifecycle).
-  log.info('[deactivate] closing popped-out browser windows');
+  const t0 = Date.now();
+  const step = (name: string) => log.info(`[deactivate] ${name} (+${Date.now() - t0}ms)`);
+  step('starting');
+  // Recovery goes FIRST, and this ordering is load-bearing rather than tidy.
+  // `[deactivate] done` has never once been reached in a real shutdown — VS Code
+  // kills the extension host on a budget we do not control — so the single step
+  // whose data cannot be reconstructed afterwards runs before the steps whose
+  // data can (cwd re-reads, alert merges, pop-out cleanup). The resume hint
+  // exists only between the interrupt and the kill; miss that window and it is
+  // gone (docs/specs/transport.md -> "VS Code teardown ordering").
+  step('capturing agent recovery commands');
+  await captureAgentRecoveryCommands(extensionContext, 1200);
+  // Close any headed pop-out windows so quitting never orphans a real Chrome
+  // window (spec → "Headed Pop-Out" lifecycle).
+  step('closing popped-out browser windows');
   await closePoppedOutSessions();
-  // Save session state while PTYs are still alive — CWD and scrollback
-  // queries need live processes. Must happen before gracefulKillAll.
-  log.info('[deactivate] flushing sessions from webview');
+  // Save session state while PTYs are still alive — CWD queries need live
+  // processes. Must happen before gracefulKillAll.
+  step('flushing sessions from webview');
   await flushAllSessions(1000);
-  log.info('[deactivate] refreshing session state from live PTYs');
+  step('refreshing session state from live PTYs');
   await refreshSavedSessionStateFromPtys(extensionContext, getAlertStates());
-  log.info('[deactivate] graceful kill');
-  // Now give PTYs time to print resume commands (SIGTERM instead of SIGHUP)
+  step('graceful kill');
   await ptyManager.gracefulKillAll(2000);
   // Force kill anything still alive and clean up
   ptyManager.killAll();
-  log.info('[deactivate] done');
+  step('done');
 }

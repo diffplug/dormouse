@@ -35,7 +35,6 @@ import {
   type TerminalWriteParams,
 } from 'server-lib-common';
 import { getPlatform } from '../../lib/platform';
-import { clearResumeOffer } from '../../lib/resume-offers';
 import { registry } from '../../lib/terminal-store';
 import type { TerminalEntry } from '../../lib/terminal-store';
 import { subscribeToActivity } from '../../lib/session-activity-store';
@@ -328,7 +327,6 @@ export class RemoteApiSession {
     // This bypasses xterm's onData, so retire the Host's cold-restore resume
     // offer here — a phone keystroke answers it exactly as a local one does
     // (docs/specs/layout.md -> Resume offer).
-    clearResumeOffer(attachment.ptyId);
     getPlatform().writePty(attachment.ptyId, utf8Decode(fromBase64Url(params.bytes)));
     this.#ok(request, {});
   }

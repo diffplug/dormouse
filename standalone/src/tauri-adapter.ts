@@ -187,6 +187,7 @@ export class TauriAdapter implements PlatformAdapter {
       console.error("[tauri-adapter] load_session failed:", err);
     }
     this.sessionStore.hydrate(seed);
+    this.clearLegacySessionState();
   }
 
   shutdown(): void {
@@ -508,11 +509,21 @@ export class TauriAdapter implements PlatformAdapter {
 
   private static STATE_KEY = 'dormouse.session';
 
-  // Persisted blob is a PersistedWindow when the workspaces flag is on, a bare
-  // PersistedSession when off (docs/specs/transport.md). The window-persistence
-  // helpers own the translation + JSON plumbing; the backing store is the
-  // Rust-backed cache (hydrated in init()), not WebKit localStorage.
+  // Standalone persists no Session state: quitting the app is a deliberate
+  // ending, and a crash captured nothing, so every launch starts fresh
+  // (docs/specs/transport.md -> "The governing rule").
+  //
+  // This is a gate at the adapter boundary, not a removal of the store. The
+  // plumbing below it — TauriSessionStore, the Rust temp-then-rename file store,
+  // the quit flush/drain ordering — is intact and still needed by the
+  // workspaces-rollout scope (docs/specs/layout.md -> `## Future`). Bringing
+  // VS Code-style restoration to standalone later is flipping this flag plus
+  // adding capture to the existing quit teardown, which already has the right
+  // shape (flush -> kill -> flush -> drain).
+  private static PERSIST_SESSION = false;
+
   saveState(state: unknown): void {
+    if (!TauriAdapter.PERSIST_SESSION) return;
     try {
       saveSessionState(this.sessionStore, TauriAdapter.STATE_KEY, state);
     } catch {
@@ -521,10 +532,30 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   getState(): unknown {
+    if (!TauriAdapter.PERSIST_SESSION) return null;
     try {
       return loadSessionState(this.sessionStore, TauriAdapter.STATE_KEY);
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Delete any pre-upgrade blob. Those carry transcripts, so ignoring the slot is
+   * not enough — the bytes have to go (docs/specs/transport.md -> "Retiring the
+   * transcripts already on disk"). Called from init() after the store hydrates.
+   */
+  private clearLegacySessionState(): void {
+    try {
+      const existing = this.sessionStore.getItem(TauriAdapter.STATE_KEY);
+      if (existing === null || existing === '') return;
+      // The store surface is get/set only, so overwrite rather than delete — the
+      // point is that the transcript bytes stop being on disk, which a blanking
+      // write achieves as well as a removal would.
+      this.sessionStore.setItem(TauriAdapter.STATE_KEY, '');
+      console.info('[tauri-adapter] Cleared legacy persisted session (transcripts are no longer stored)');
+    } catch {
+      console.error('[tauri-adapter] Failed to clear legacy session state');
     }
   }
 

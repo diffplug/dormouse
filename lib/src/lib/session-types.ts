@@ -1,7 +1,5 @@
 import type { SessionStatus } from './activity-monitor';
 import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
-import { detectResumeCommand } from './resume-patterns';
-import { trimPersistedScrollback } from './scrollback-trim';
 
 /**
  * Only the TODO reminder and its notification detail survive a restart.
@@ -17,17 +15,23 @@ export interface PersistedAlertState {
 
 /**
  * Surface kind recorded per pane (`docs/specs/glossary.md`). Absent reads as
- * `'terminal'`. A `'browser'` pane has no PTY, scrollback, or registry entry; it
+ * `'terminal'`. A `'browser'` pane has no PTY or registry entry; it
  * is reconstructed from the persisted layout, so restore/resume must route it
  * differently from a terminal (see `session-restore.ts`, `reconnect.ts`).
  */
 export type PersistedSurfaceType = 'terminal' | 'browser';
 
+/**
+ * Durable structure for one pane — furniture, never content. Scrollback is
+ * deliberately absent: it is not persisted by any writer (docs/specs/transport.md
+ * -> "What is persisted"). `resumeCommand` is the single recovery field, written
+ * only by a host teardown that interrupted a running agent, and consumed by the
+ * next cold restore.
+ */
 export interface PersistedPane {
   id: string;
   cwd: string | null;
   title: string;
-  scrollback: string | null;
   resumeCommand: string | null;
   untouched: boolean;
   alert?: PersistedAlertState | null;
@@ -35,27 +39,8 @@ export interface PersistedPane {
 }
 
 /**
- * Trim a terminal Session's scrollback for persistence and derive the resume
- * command from *that* trimmed text. The two must move together: the resume
- * command has to describe the scrollback actually being written, or a pane
- * persists a stale hint and restore offers the wrong session. Single source of
- * truth shared by the renderer save path (`session-save.ts`) and the VS Code
- * host refresh (`vscode-ext/session-state.ts`); detection is unaffected by the
- * trim because resume patterns live at the tail.
- */
-export function terminalPersistedContent(
-  scrollback: string | null,
-): Pick<PersistedPane, 'scrollback' | 'resumeCommand'> {
-  const trimmed = trimPersistedScrollback(scrollback);
-  return {
-    scrollback: trimmed,
-    resumeCommand: trimmed ? detectResumeCommand(trimmed) : null,
-  };
-}
-
-/**
  * Build the persisted record for a browser surface. Browser panes have no PTY,
- * so the terminal-only fields (cwd/scrollback/resumeCommand/untouched) are always
+ * so the terminal-only fields (cwd/resumeCommand/untouched) are always
  * blank; the persisted layout reconstructs the surface and `alert` carries the
  * optional TODO. Single source of truth shared by the renderer save path
  * (`session-save.ts`) and the VS Code host refresh (`vscode-ext/session-state.ts`).
@@ -68,7 +53,6 @@ export function browserPersistedPane(
     id: pane.id,
     title: pane.title,
     cwd: null,
-    scrollback: null,
     resumeCommand: null,
     untouched: false,
     alert,
@@ -174,8 +158,9 @@ function isPersistedPaneShape(value: unknown): boolean {
     typeof value.id === 'string' &&
     typeof value.title === 'string' &&
     (typeof value.cwd === 'string' || value.cwd === null) &&
-    (typeof value.scrollback === 'string' || value.scrollback === null) &&
-    (typeof value.resumeCommand === 'string' || value.resumeCommand === null) &&
+    // `scrollback` is not checked at all: legacy blobs carry one and are still
+    // readable, new ones never do. `normalizeSessionV3` strips it either way.
+    (value.resumeCommand === undefined || typeof value.resumeCommand === 'string' || value.resumeCommand === null) &&
     (value.untouched === undefined || typeof value.untouched === 'boolean') &&
     (value.surfaceType === undefined || value.surfaceType === 'terminal' || value.surfaceType === 'browser') &&
     (value.alert === undefined || isPersistedAlertShape(value.alert))
@@ -241,6 +226,38 @@ export function carrySurfaceRefs(
  * but unreadable (bad JSON, wrong shape) is logged and discarded so a corrupt save
  * can never block startup — the caller starts fresh (`docs/specs/transport.md`).
  */
+/**
+ * Overlay host-captured recovery commands onto a webview-owned snapshot.
+ *
+ * `resumeCommand` is the one persisted field the **host** owns exclusively: only a
+ * teardown that interrupted a running agent writes one, and the webview's own copy
+ * is always a carry-forward of whatever it last saw — which is `null`, because its
+ * final save happens before the interrupt. A host whose state read prefers the
+ * webview copy (VS Code persists it across a window reload) would therefore drop
+ * every captured command on exactly the boundary the field exists for.
+ *
+ * Layout, cwd, titles and alert state still come from the webview copy, which is
+ * fresher for everything the webview actually owns.
+ */
+export function withRecoveryCommands(webviewState: unknown, hostState: unknown): unknown {
+  const host = readPersistedSession(hostState);
+  if (!host) return webviewState;
+  const commands = new Map(
+    host.panes.filter((pane) => pane.resumeCommand).map((pane) => [pane.id, pane.resumeCommand!]),
+  );
+  if (commands.size === 0) return webviewState;
+  const webview = readPersistedSession(webviewState);
+  // No usable webview copy at all — the host snapshot is all there is.
+  if (!webview) return hostState;
+  return {
+    ...webview,
+    panes: webview.panes.map((pane) => {
+      const command = commands.get(pane.id);
+      return command ? { ...pane, resumeCommand: command } : pane;
+    }),
+  };
+}
+
 export function readPersistedSession(raw: unknown): PersistedSession | null {
   if (isEmptyState(raw)) return null;
   const value = parseJsonString(raw);
@@ -253,11 +270,22 @@ function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession 
   const surfaceRefs = normalizeSurfaceRefs(session.surfaceRefs);
   const surfaceRefsNext = normalizeSurfaceRefsNext(session.surfaceRefsNext);
   const { surfaceRefs: _rawRefs, surfaceRefsNext: _rawNext, ...rest } = session;
-  // Fill the `untouched` default only when the blob predates it; otherwise keep
-  // the panes as-is.
-  const panes: PersistedPane[] = session.panes.every((pane) => typeof pane.untouched === 'boolean')
-    ? (session.panes as PersistedPane[])
-    : session.panes.map((pane) => ({ ...pane, untouched: pane.untouched ?? false }));
+  // Every pane is rebuilt field by field rather than spread, so a transcript in a
+  // pre-upgrade blob is dropped here and cannot survive into a parsed Session —
+  // the one place that guarantees no reader hands one to a writer
+  // (docs/specs/transport.md -> "Retiring the transcripts already on disk").
+  const panes: PersistedPane[] = session.panes.map((pane) => {
+    const next: PersistedPane = {
+      id: pane.id,
+      cwd: pane.cwd,
+      title: pane.title,
+      resumeCommand: pane.resumeCommand ?? null,
+      untouched: pane.untouched ?? false,
+    };
+    if (pane.alert !== undefined) next.alert = pane.alert;
+    if (pane.surfaceType !== undefined) next.surfaceType = pane.surfaceType;
+    return next;
+  });
   return {
     ...(rest as Omit<PersistedSession, 'panes' | 'surfaceRefs' | 'surfaceRefsNext'>),
     panes,
