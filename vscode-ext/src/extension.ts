@@ -210,19 +210,28 @@ export async function deactivate() {
   const t0 = Date.now();
   const step = (name: string) => log.info(`[deactivate] ${name} (+${Date.now() - t0}ms)`);
   step('starting');
-  // Recovery goes FIRST, and this ordering is load-bearing rather than tidy.
-  // `[deactivate] done` has never once been reached in a real shutdown — VS Code
-  // kills the extension host on a budget we do not control — so the single step
-  // whose data cannot be reconstructed afterwards runs before the steps whose
-  // data can (cwd re-reads, alert merges, pop-out cleanup). The resume hint
-  // exists only between the interrupt and the kill; miss that window and it is
-  // gone (docs/specs/transport.md -> "VS Code teardown ordering").
+  // Recovery gets the budget FIRST, and this ordering is load-bearing rather than
+  // tidy. `[deactivate] done` has never once been reached in a real shutdown — VS
+  // Code kills the extension host on a budget we do not control — so the single
+  // step whose data cannot be reconstructed afterwards runs before the steps whose
+  // data can (cwd re-reads, alert merges). The resume hint exists only between the
+  // interrupt and the kill; miss that window and it is gone
+  // (docs/specs/transport.md -> "VS Code teardown ordering").
+  //
+  // Closing any headed pop-out window (so quitting never orphans a real Chrome
+  // window — spec → "Headed Pop-Out" lifecycle) is the one step that does not have
+  // to queue behind it: it shares no state with the PTY interrupt and spends its
+  // time in external processes rather than on this thread. Kicked off first but
+  // joined after, so it overlaps the capture poll instead of adding its own round
+  // trips to the serial teardown.
+  step('closing popped-out browser windows');
+  const poppedOutClosed = closePoppedOutSessions();
+  // Marks the rejection handled so it can't surface as an unhandledRejection
+  // while capture is awaited; the join below still throws it.
+  poppedOutClosed.catch(() => {});
   step('capturing agent recovery commands');
   await captureAgentRecoveryCommands(extensionContext, 1200);
-  // Close any headed pop-out windows so quitting never orphans a real Chrome
-  // window (spec → "Headed Pop-Out" lifecycle).
-  step('closing popped-out browser windows');
-  await closePoppedOutSessions();
+  await poppedOutClosed;
   // Save session state while PTYs are still alive — CWD queries need live
   // processes. Must happen before gracefulKillAll.
   step('flushing sessions from webview');

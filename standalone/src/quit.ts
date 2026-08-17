@@ -73,7 +73,7 @@ async function runQuitTeardown(): Promise<void> {
         (async () => {
           await adapter.requestSessionFlush(1500); // save while PTYs are alive
           await adapter.gracefulKillAllPtys(2000); // SIGTERM; scrollback survives
-          await adapter.requestSessionFlush(1500); // capture final scrollback
+          await adapter.requestSessionFlush(1500); // final post-exit save
           await adapter.drainSessionSaves(2000); // last write reaches disk
         })(),
         8000,

@@ -203,7 +203,7 @@ The agents print their resume invocation when **interrupted**, not when signalle
 | --- | --- | --- |
 | SIGTERM to the pty leader | inert — an interactive shell ignores it | inert |
 | SIGTERM to the foreground process group | prints | silent |
-| **`^C` written to the pty** | prints, needs two ~150 ms apart | prints, one is enough |
+| **`^C` written to the pty** | prints, but only on a second press | prints, and a second press destroys it |
 
 So capture writes `\x03` to the pty rather than signalling a pid. The tty line
 discipline delivers SIGINT to the foreground process group itself, which means no
@@ -322,22 +322,45 @@ prompt.
 
 ### VS Code teardown ordering
 
-`deactivate()` today refreshes saved state from the PTYs *before* killing them, so
-anything printed during teardown is written into a buffer that is then discarded.
-The corrected order is:
+Capture runs **first**, and that is load-bearing rather than tidy: `[deactivate]
+done` has never once been reached in a real shutdown, because VS Code kills the
+extension host on a budget we do not control. The one step whose data cannot be
+reconstructed afterwards therefore goes before the steps whose data can. The order
+is:
 
-1. close popped-out browser windows;
-2. flush structural state from the webview (no scrollback);
-3. for each pane whose foreground command is a recognized agent, write `^C` twice;
-4. wait bounded for output, then scan those panes' live buffers and record the
-   recovery command on their structural rows;
-5. `killAll()`.
+1. start closing popped-out browser windows — kicked off here but joined at step 3,
+   so it overlaps the poll instead of spending budget of its own. It shares no
+   state with the interrupt and spends its time in external processes;
+2. `captureAgentRecoveryCommands` — one `^C` to every live PTY, then poll to a
+   ~1.2 s ceiling, second-pressing only the panes that ask (above);
+3. join the pop-out close;
+4. flush structural state from the webview (no scrollback);
+5. re-read CWD from the live PTYs and merge alert state;
+6. `gracefulKillAll` then `killAll()`.
 
-Each wait is bounded and a timeout loses the recovery command rather than delaying
-shutdown. Step 4 writes through `workspaceState` for the `WebviewView`; an editor
-`WebviewPanel` persists via webview-side `vscode.setState()`, which the extension
-host cannot write during teardown, so recovery is scoped to the view until a
-host-side per-panel store exists.
+Each wait is bounded, and a timeout loses the recovery command rather than delaying
+shutdown.
+
+Step 2 writes its own record — `recovery.json` under `context.storageUri`, written
+synchronously and replaced temp-then-rename — rather than `workspaceState` or
+`PersistedPane.resumeCommand`. Two reasons, and both are the sort that only show up
+in a real shutdown. `workspaceState.update()` hands its value to VS Code's storage
+service, which batches the SQLite flush on its own schedule; by `deactivate()` that
+service is already tearing down, so the write never lands however early it is issued
+(measured: detection complete at +276 ms, record never written). And a later
+`flushAllSessions` would overwrite the session blob with the webview's copy, whose
+`resumeCommand` is the stale `null` it last saw — a separate record makes the write
+order stop mattering. The record is written the moment each command is found, so
+being killed mid-poll costs at most a late agent's command rather than everything
+detected so far.
+
+Recovery is scoped to the `WebviewView`. An editor `WebviewPanel` persists via
+webview-side `vscode.setState()`, which the extension host cannot write during
+teardown, so panels get no recovery until a host-side per-panel store exists.
+
+Source of truth: `captureAgentRecoveryCommands` / `consumeRecoveryCommands` in
+`vscode-ext/src/session-state.ts`, `deactivate()` in `vscode-ext/src/extension.ts`,
+`interrupt` in `vscode-ext/src/pty-manager.ts`.
 
 ## Universal invariants
 

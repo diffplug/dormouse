@@ -108,6 +108,15 @@ export function getScrollback(id: string): string | null {
   return entry.scrollbackChunks.join('');
 }
 
+/**
+ * Buffered length without materialising the buffer. `scrollbackChars` is already
+ * maintained exactly by `bufferData`, so a caller watching a pane for growth pays
+ * nothing instead of a ~1MB `join()` per poll.
+ */
+export function getScrollbackLength(id: string): number {
+  return ptyBuffers.get(id)?.scrollbackChars ?? 0;
+}
+
 let child: ChildProcess | null = null;
 let childReady = false;
 let pendingMessages: any[] = [];
@@ -361,46 +370,37 @@ export function kill(id: string): void {
 }
 
 /**
+ * Fire-and-wait for a whole-host pty-host operation: send `msg`, resolve on the
+ * matching ack, and resolve anyway once `timeoutMs` elapses. Nothing on a
+ * teardown path may wait unbounded, and every one of these runs on one.
+ */
+function awaitChildAck(msg: unknown, ackType: string, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (!child?.connected) { resolve(); return; }
+    const finish = () => {
+      clearTimeout(timeout);
+      child?.off('message', handler);
+      resolve();
+    };
+    const timeout = setTimeout(finish, timeoutMs);
+    const handler = (reply: any) => { if (reply.type === ackType) finish(); };
+    child.on('message', handler);
+    child.send(msg);
+  });
+}
+
+/**
  * Send one `^C` to the named PTYs. Whether a second press follows is the caller's
  * decision, per PTY — codex and claude want opposite things and a blanket second
  * press destroys codex's hint (docs/specs/transport.md).
  */
 export function interrupt(ids: string[], timeoutMs = 400): Promise<void> {
-  return new Promise((resolve) => {
-    if (!child?.connected) { resolve(); return; }
-    const timeout = setTimeout(() => {
-      child?.off('message', handler);
-      resolve();
-    }, timeoutMs);
-    const handler = (msg: any) => {
-      if (msg.type === 'interruptDone') {
-        clearTimeout(timeout);
-        child?.off('message', handler);
-        resolve();
-      }
-    };
-    child.on('message', handler);
-    child.send({ type: 'interrupt', ids });
-  });
+  return awaitChildAck({ type: 'interrupt', ids }, 'interruptDone', timeoutMs);
 }
 
 export function gracefulKillAll(timeoutMs = 2000): Promise<void> {
-  return new Promise((resolve) => {
-    if (!child?.connected) { resolve(); return; }
-    const timeout = setTimeout(() => {
-      child?.off('message', handler);
-      resolve();
-    }, timeoutMs + 500); // extra margin beyond the pty-host timeout
-    const handler = (msg: any) => {
-      if (msg.type === 'gracefulKillDone') {
-        clearTimeout(timeout);
-        child?.off('message', handler);
-        resolve();
-      }
-    };
-    child.on('message', handler);
-    child.send({ type: 'gracefulKillAll', timeout: timeoutMs });
-  });
+  // Extra margin beyond the pty-host's own timeout.
+  return awaitChildAck({ type: 'gracefulKillAll', timeout: timeoutMs }, 'gracefulKillDone', timeoutMs + 500);
 }
 
 export function killAll(): void {

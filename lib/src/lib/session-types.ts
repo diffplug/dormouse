@@ -221,11 +221,27 @@ export function carrySurfaceRefs(
 }
 
 /**
- * Parse a persisted session blob (`version: 3`), or null if nothing usable is
- * present. A blob that is absent/empty returns null silently; one that is present
- * but unreadable (bad JSON, wrong shape) is logged and discarded so a corrupt save
- * can never block startup — the caller starts fresh (`docs/specs/transport.md`).
+ * Stamp `resumeCommand` onto the panes a host captured one for, leaving every
+ * other pane and every other field untouched. Returns the ids that actually
+ * landed on a pane — a captured id whose pane is gone must not be reported as
+ * applied. Shared by both consumers of a recovery record: the in-webview overlay
+ * (`withRecoveryCommands`) and the VS Code host's cold-restore read.
  */
+export function applyRecoveryCommands(
+  session: PersistedSession,
+  commands: ReadonlyMap<string, string> | Readonly<Record<string, string>>,
+): { session: PersistedSession; applied: string[] } {
+  const lookup = commands instanceof Map ? commands : new Map(Object.entries(commands));
+  const applied: string[] = [];
+  const panes = session.panes.map((pane) => {
+    const command = lookup.get(pane.id);
+    if (!command) return pane;
+    applied.push(pane.id);
+    return { ...pane, resumeCommand: command };
+  });
+  return { session: { ...session, panes }, applied };
+}
+
 /**
  * Overlay host-captured recovery commands onto a webview-owned snapshot.
  *
@@ -249,15 +265,15 @@ export function withRecoveryCommands(webviewState: unknown, hostState: unknown):
   const webview = readPersistedSession(webviewState);
   // No usable webview copy at all — the host snapshot is all there is.
   if (!webview) return hostState;
-  return {
-    ...webview,
-    panes: webview.panes.map((pane) => {
-      const command = commands.get(pane.id);
-      return command ? { ...pane, resumeCommand: command } : pane;
-    }),
-  };
+  return applyRecoveryCommands(webview, commands).session;
 }
 
+/**
+ * Parse a persisted session blob (`version: 3`), or null if nothing usable is
+ * present. A blob that is absent/empty returns null silently; one that is present
+ * but unreadable (bad JSON, wrong shape) is logged and discarded so a corrupt save
+ * can never block startup — the caller starts fresh (`docs/specs/transport.md`).
+ */
 export function readPersistedSession(raw: unknown): PersistedSession | null {
   if (isEmptyState(raw)) return null;
   const value = parseJsonString(raw);

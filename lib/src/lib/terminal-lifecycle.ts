@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { getPlatform, IS_MAC, IS_WINDOWS } from './platform';
+import { DIM, RESET } from './ansi';
 import { cfg } from '../cfg';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
 import { attachMouseModeObserver } from './mouse-mode-observer';
@@ -515,7 +516,7 @@ export function restoreTerminal(
     // A passive notice, not a dialog: the pane has no transcript, so without it
     // an agent simply appears. It also states the discontinuity the resume hides
     // — the interrupted turn did not continue.
-    entry.terminal.write(`\x1b[2m⟲ resuming agent session: ${resume}\x1b[0m\r\n`);
+    entry.terminal.write(`${DIM}⟲ resuming agent session: ${resume}${RESET}\r\n`);
     // Seeded before the write because this bypasses xterm's keystroke fallback,
     // and typed only once the fresh shell reaches a prompt — spawn-then-type is
     // exactly the window shell startup swallows keystrokes in.

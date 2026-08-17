@@ -795,8 +795,6 @@ export function useDorControl({
         }
         const target = requireTerminalSurface(params.surface, detail);
         if (!target) return;
-        // Direct PTY write, so xterm's onData never sees it — retire the
-        // cold-restore resume offer here (docs/specs/layout.md -> Resume offer).
         getPlatform().writePty(target.id, input);
         detail.respond({
           ok: true,

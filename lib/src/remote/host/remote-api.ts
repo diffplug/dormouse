@@ -324,9 +324,6 @@ export class RemoteApiSession {
     if (!resolved) return;
     const { params, attachment } = resolved;
     // Feed the existing PTY input path; the local echo returns via onPtyData.
-    // This bypasses xterm's onData, so retire the Host's cold-restore resume
-    // offer here — a phone keystroke answers it exactly as a local one does
-    // (docs/specs/layout.md -> Resume offer).
     getPlatform().writePty(attachment.ptyId, utf8Decode(fromBase64Url(params.bytes)));
     this.#ok(request, {});
   }

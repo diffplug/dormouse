@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as ptyManager from './pty-manager';
 import type { AlertState } from '../../lib/src/lib/alert-manager';
-import { browserPersistedPane, readPersistedSession, type PersistedAlertState, type PersistedPane, type PersistedSession } from '../../lib/src/lib/session-types';
+import { applyRecoveryCommands, browserPersistedPane, readPersistedSession, type PersistedAlertState, type PersistedPane, type PersistedSession } from '../../lib/src/lib/session-types';
 import { detectResumeCommand } from '../../lib/src/lib/resume-patterns';
 import { stripTerminalControls } from '../../lib/src/lib/terminal-controls';
 import { log } from './log';
@@ -109,42 +109,6 @@ interface PersistedRecovery {
   commands: Record<string, string>;
 }
 
-/** Nothing in a shutdown path may wait unbounded. `workspaceState.update()` in
- *  particular can stop resolving once VS Code begins tearing the host down, and
- *  an un-bounded await there starves every step behind it. */
-function withDeadline<T>(work: Thenable<T> | Promise<T>, ms: number, label: string): Promise<T | null> {
-  let timer: NodeJS.Timeout | undefined;
-  const deadline = new Promise<null>((resolve) => {
-    timer = setTimeout(() => {
-      log.info(`[recovery] ${label} exceeded ${ms}ms; continuing`);
-      resolve(null);
-    }, ms);
-  });
-  // Clearing on the winning path matters for more than tidiness: the loser of the
-  // race still runs, so an uncleared timer logs "exceeded" long after the work
-  // succeeded — which is exactly the sort of false trail that costs an hour when
-  // the only evidence available is a shutdown log.
-  return Promise.race([Promise.resolve(work), deadline]).finally(() => clearTimeout(timer));
-}
-
-/**
- * Interrupt the live PTYs, then record each pane's agent resume invocation.
- *
- * The only writer of recovery state (docs/specs/transport.md -> "Capturing the
- * recovery command"). Two properties earn their complexity:
- *
- * 1. **Runs first in `deactivate()`.** The extension host is killed on a budget
- *    that has never once been generous enough to reach `[deactivate] done`, so
- *    the one step whose data cannot be reconstructed goes before the ones whose
- *    data can (cwd re-reads, alert merges).
- * 2. **Writes its own key, not `PersistedPane.resumeCommand`.** A later
- *    `flushAllSessions` would otherwise overwrite the session blob with the
- *    webview's copy, whose `resumeCommand` is always the stale `null` it last
- *    saw. A separate key makes the write order stop mattering.
- *
- * The scrollback read here never leaves this function — only the detected
- * invocation is stored, so no transcript reaches persisted state.
- */
 // Claude's own words when it wants a second press. This is the ONLY trigger for
 // pressing a pane again — a timing window is not good enough, because a second
 // press that lands while codex is still printing destroys its hint outright, and
@@ -174,12 +138,39 @@ const BLIND_SECOND_PRESS_MS = 600;
 // already in flight.
 const QUIET_BEFORE_RETRY_MS = 200;
 
+// `Press Ctrl-C again` is a live TUI footer, so it is always within a few hundred
+// bytes of the tail. Bounding the strip matters: the scrollback buffer runs to
+// 1MB, and stripping all of it costs ~3.5ms per pane on every 40ms tick — stolen
+// from the same thread that has to deliver the hints being polled for.
+const ASK_TAIL_CHARS = 8192;
+
+/**
+ * Interrupt the live PTYs, then record each pane's agent resume invocation.
+ *
+ * The only writer of recovery state (docs/specs/transport.md -> "Capturing the
+ * recovery command"). Two properties earn their complexity:
+ *
+ * 1. **Runs first in `deactivate()`.** The extension host is killed on a budget
+ *    that has never once been generous enough to reach `[deactivate] done`, so
+ *    the one step whose data cannot be reconstructed goes before the ones whose
+ *    data can (cwd re-reads, alert merges).
+ * 2. **Writes its own file, not `PersistedPane.resumeCommand`.** A later
+ *    `flushAllSessions` would otherwise overwrite the session blob with the
+ *    webview's copy, whose `resumeCommand` is always the stale `null` it last
+ *    saw. A separate record makes the write order stop mattering.
+ *
+ * The scrollback read here never leaves this function — only the detected
+ * invocation is stored, so no transcript reaches persisted state.
+ */
 export async function captureAgentRecoveryCommands(
   context: vscode.ExtensionContext,
   maxWaitMs = 1300,
 ): Promise<void> {
   const started = Date.now();
-  const liveIds = [...ptyManager.getBufferedPtys().keys()];
+  // Exited PTYs are kept in the buffer map until `kill()`, and one can neither
+  // receive a `^C` nor ever yield a hint — including them would scan them on every
+  // tick and permanently defeat the `pending().length === 0` early exit.
+  const liveIds = [...ptyManager.getBufferedPtys()].filter(([, e]) => e.alive).map(([id]) => id);
   if (liveIds.length === 0) {
     log.info('[recovery] no live PTYs to interrupt');
     return;
@@ -192,7 +183,9 @@ export async function captureAgentRecoveryCommands(
   }
 
   const commands: Record<string, string> = {};
-  const startLen = new Map(liveIds.map((id) => [id, (ptyManager.getScrollback(id) ?? '').length]));
+  // Lengths come from the exact counter the buffer already maintains — watching a
+  // pane for growth must not cost a ~1MB join per pane per tick.
+  const startLen = new Map(liveIds.map((id) => [id, ptyManager.getScrollbackLength(id)]));
   const lastLen = new Map(startLen);
   const lastGrewAt = new Map(liveIds.map((id) => [id, Date.now()]));
 
@@ -217,28 +210,38 @@ export async function captureAgentRecoveryCommands(
       log.error('[recovery] write failed:', String(err));
     }
   };
-  const rescan = () => {
+  const pending = () => liveIds.filter((id) => !commands[id]);
+  // Panes that asked for a second press during the most recent scan.
+  const asked = new Set<string>();
+  // One buffer read per pending pane per tick, shared by both things a tick needs
+  // to know about that pane: joining the chunks is the expensive part, so asking
+  // twice would double the cost of the poll for no new information.
+  const scanPending = () => {
+    asked.clear();
     let changed = false;
-    for (const id of liveIds) {
-      if (commands[id]) continue;
+    for (const id of pending()) {
       const scrollback = ptyManager.getScrollback(id);
-      const detected = scrollback ? detectResumeCommand(scrollback) : null;
+      if (!scrollback) continue;
+      const detected = detectResumeCommand(scrollback);
       if (detected) {
         commands[id] = detected;
         log.info(`[recovery]   ${id} -> ${detected} (+${Date.now() - started}ms)`);
         changed = true;
+        continue;
+      }
+      // Strip presentation controls first — claude renders that prompt inside its
+      // TUI, so the raw buffer can carry escapes through the phrase.
+      if (ASKS_FOR_SECOND_PRESS.test(stripTerminalControls(scrollback.slice(-ASK_TAIL_CHARS)))) {
+        asked.add(id);
       }
     }
     if (changed) persist();
   };
-  const pending = () => liveIds.filter((id) => !commands[id]);
-  // Strip presentation controls first — claude renders that prompt inside its
-  // TUI, so the raw buffer can carry escapes through the phrase.
-  const asksAgain = (id: string) => ASKS_FOR_SECOND_PRESS.test(stripTerminalControls(ptyManager.getScrollback(id) ?? ''));
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   // One press to everything, then press again only where a pane asks for it.
-  await withDeadline(ptyManager.interrupt(liveIds), 400, 'first interrupt');
+  // `interrupt` is already bounded and always settles within its own timeout.
+  await ptyManager.interrupt(liveIds);
   const pressedTwice = new Set<string>();
 
   // Poll to the ceiling. Do NOT try to finish early on quiet: codex says nothing
@@ -255,7 +258,7 @@ export async function captureAgentRecoveryCommands(
   const deadline = started + maxWaitMs;
   while (Date.now() < deadline) {
     await sleep(40);
-    rescan();
+    scanPending();
     if (pending().length === 0) break;
 
     // Press a second time when the pane asks, or — for a claude that never asks —
@@ -263,19 +266,19 @@ export async function captureAgentRecoveryCommands(
     // spoken. Panes that have yielded are excluded either way, so codex is never
     // the one retried.
     const elapsed = Date.now() - started;
-    for (const id of liveIds) {
-      const len = (ptyManager.getScrollback(id) ?? '').length;
+    for (const id of pending()) {
+      const len = ptyManager.getScrollbackLength(id);
       if (len !== lastLen.get(id)) { lastLen.set(id, len); lastGrewAt.set(id, Date.now()); }
     }
     const quietFor = (id: string) => Date.now() - (lastGrewAt.get(id) ?? started);
     const retry = pending().filter((id) => !pressedTwice.has(id)
-      && (asksAgain(id)
+      && (asked.has(id)
         || (elapsed >= BLIND_SECOND_PRESS_MS && quietFor(id) >= QUIET_BEFORE_RETRY_MS)));
     if (retry.length > 0) {
-      const why = retry.some(asksAgain) ? 'asked' : `silent past ${BLIND_SECOND_PRESS_MS}ms`;
+      const why = retry.some((id) => asked.has(id)) ? 'asked' : `silent past ${BLIND_SECOND_PRESS_MS}ms`;
       retry.forEach((id) => pressedTwice.add(id));
       log.info(`[recovery] second press for ${retry.length} pane(s) at +${elapsed}ms (${why})`);
-      await withDeadline(ptyManager.interrupt(retry), 400, 'second interrupt');
+      await ptyManager.interrupt(retry);
     }
   }
 
@@ -338,18 +341,12 @@ export async function consumeRecoveryCommands(
   if (!saved) return saved;
 
   const commands = recovery.commands ?? {};
-  const applied: string[] = [];
-  const panes = saved.panes.map((pane) => {
-    const command = commands[pane.id];
-    if (!command) return pane;
-    applied.push(pane.id);
-    log.info(`[recovery]   ${pane.id} -> ${command}`);
-    return { ...pane, resumeCommand: command };
-  });
-  // Count what actually landed on a pane, not what the record held: a captured
+  const { session, applied } = applyRecoveryCommands(saved, commands);
+  for (const id of applied) log.info(`[recovery]   ${id} -> ${commands[id]}`);
+  // Report what actually landed on a pane, not what the record held: a captured
   // id whose PTY no longer maps to a pane would otherwise be reported as applied.
   const orphans = Object.keys(commands).filter((id) => !applied.includes(id));
   log.info(`[recovery] applied ${applied.length}/${Object.keys(commands).length} command(s) into cold restore`);
   if (orphans.length > 0) log.error(`[recovery] ${orphans.length} command(s) matched no pane: ${orphans.join(', ')}`);
-  return { ...saved, panes };
+  return session;
 }

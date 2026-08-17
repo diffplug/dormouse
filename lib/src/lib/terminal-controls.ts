@@ -1,15 +1,3 @@
-/**
- * Remove terminal presentation controls, leaving the text a user would see.
- *
- * Shared by every consumer that interprets raw PTY output as *content* rather
- * than as a stream: resume-hint detection (`resume-patterns.ts`) and the
- * keystroke-fallback prompt detector (`terminal-state-store.ts`). Both read a
- * tail slice of a buffer, so both are routinely handed input that starts or
- * ends mid-sequence — and a payload that leaks through reads as terminal output
- * in a place where that decides whether a command is offered or a shell is
- * called idle. One implementation so a hardening step can't reach only one of
- * them.
- */
 export interface StripTerminalControlsOptions {
   /**
    * Replace cursor-*moving* sequences with a newline instead of deleting them.
@@ -25,6 +13,18 @@ export interface StripTerminalControlsOptions {
   boundaries?: boolean;
 }
 
+/**
+ * Remove terminal presentation controls, leaving the text a user would see.
+ *
+ * Shared by every consumer that interprets raw PTY output as *content* rather
+ * than as a stream: resume-hint detection (`resume-patterns.ts`) and the
+ * keystroke-fallback prompt detector (`terminal-state-store.ts`). Both read a
+ * tail slice of a buffer, so both are routinely handed input that starts or
+ * ends mid-sequence — and a payload that leaks through reads as terminal output
+ * in a place where that decides whether a command is offered or a shell is
+ * called idle. One implementation so a hardening step can't reach only one of
+ * them.
+ */
 export function stripTerminalControls(input: string, options: StripTerminalControlsOptions = {}): string {
   const csi = options.boundaries
     ? (match: string) => (match.endsWith('m') ? '' : '\n')
