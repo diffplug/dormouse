@@ -237,20 +237,25 @@ function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession 
   const surfaceRefs = normalizeSurfaceRefs(session.surfaceRefs);
   const surfaceRefsNext = normalizeSurfaceRefsNext(session.surfaceRefsNext);
   const { surfaceRefs: _rawRefs, surfaceRefsNext: _rawNext, ...rest } = session;
-  // Every pane is rebuilt field by field rather than spread, so a transcript — or
-  // a `resumeCommand` — in a pre-upgrade blob is dropped here and cannot survive
-  // into a parsed Session; the one place that guarantees no reader hands either to
-  // a writer (docs/specs/transport.md -> "Retiring the transcripts already on disk").
+  // A transcript — or a `resumeCommand` — in a pre-upgrade blob is dropped here
+  // and cannot survive into a parsed Session; the one place that guarantees no
+  // reader hands either to a writer (docs/specs/transport.md -> "Retiring the
+  // transcripts already on disk").
+  //
+  // Named as a deny-list rather than rebuilt from an allow-list, because the scrub
+  // is the special case and the carry-through is the rule: an allow-list makes
+  // every *future* `PersistedPane` field silently vanish on read until someone
+  // remembers to add it here, with no type error to catch it — the field
+  // round-trips through the save fine and only shows up as "my setting doesn't
+  // survive a restart". Neither retired field is on `PersistedPaneInput`, hence
+  // the widening.
   const panes: PersistedPane[] = session.panes.map((pane) => {
-    const next: PersistedPane = {
-      id: pane.id,
-      cwd: pane.cwd,
-      title: pane.title,
-      untouched: pane.untouched ?? false,
-    };
-    if (pane.alert !== undefined) next.alert = pane.alert;
-    if (pane.surfaceType !== undefined) next.surfaceType = pane.surfaceType;
-    return next;
+    const {
+      scrollback: _retiredScrollback,
+      resumeCommand: _retiredResumeCommand,
+      ...carried
+    } = pane as PersistedPaneInput & { scrollback?: unknown; resumeCommand?: unknown };
+    return { ...carried, untouched: pane.untouched ?? false };
   });
   return {
     ...(rest as Omit<PersistedSession, 'panes' | 'surfaceRefs' | 'surfaceRefsNext'>),
