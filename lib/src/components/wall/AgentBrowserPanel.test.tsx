@@ -10,7 +10,7 @@ import type { PaneProps } from './pane-props';
 import { AgentBrowserPanel, HIDDEN_PARK_DELAY_MS } from './AgentBrowserPanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { disposeAllAgentBrowserSurfaceControllers } from './agent-browser-surface-controller';
-import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, type PaneWriteActions, type WallActions } from './wall-context';
+import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, type PaneWriteActions } from './wall-context';
 import { stubWallActions as stubActions } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;

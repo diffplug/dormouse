@@ -10,12 +10,17 @@ import {
   applyTerminalSemanticEventsByPtyId,
 } from '../terminal-state-store';
 import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
+import { isHostMessage, readHostMessageToken } from '../vscode-message-token';
 import type { DorControlResult } from 'dor/protocol';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 
 export class VSCodeAdapter implements PlatformAdapter {
   private vscode: ReturnType<typeof acquireVsCodeApi>;
   private hostState: unknown = (globalThis as typeof globalThis & { __DORMOUSE_HOST_STATE__?: unknown }).__DORMOUSE_HOST_STATE__ ?? null;
+  // Captured once, at construction, from the global the extension host injects
+  // at webview boot — so a later same-document write can't move the goalposts.
+  // Every `message` listener below checks it before reading anything else.
+  private readonly hostMessageToken = readHostMessageToken();
   private dataHandlers = new Set<(detail: { id: string; data: string }) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
@@ -59,8 +64,11 @@ export class VSCodeAdapter implements PlatformAdapter {
     onTerminalThemeChange(() => this.pushThemeColors());
 
     window.addEventListener('message', (event: MessageEvent) => {
+      // Authenticate the sender before looking at `type` at all — see
+      // ../vscode-message-token.ts.
+      if (!isHostMessage(event.data, this.hostMessageToken)) return;
       const msg = event.data;
-      if (!msg || !msg.type) return;
+      if (!msg.type) return;
 
       if (msg.type === 'pty:data') {
         for (const handler of this.dataHandlers) {
@@ -161,8 +169,12 @@ export class VSCodeAdapter implements PlatformAdapter {
         resolve(null);
       }, timeoutMs);
       const handler = (event: MessageEvent) => {
+        // Same guard as the main listener: a request/response reply carries
+        // host-supplied data (a proxy URL, scrollback, clipboard contents), and
+        // a forged one racing the real reply would win on first match.
+        if (!isHostMessage(event.data, this.hostMessageToken)) return;
         const msg = event.data;
-        if (msg?.type === responseType && msg.requestId === requestId) {
+        if (msg.type === responseType && msg.requestId === requestId) {
           clearTimeout(timeout);
           window.removeEventListener('message', handler);
           resolve(extract(msg));

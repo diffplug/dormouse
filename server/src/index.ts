@@ -11,10 +11,10 @@ import { serve } from '@hono/node-server';
 
 import { createApp } from './app.js';
 import {
-  DEFAULT_VAPID_SUBJECT,
   assertVapidKeyPair,
   assertVapidSubject,
   createWebPushSender,
+  defaultVapidSubject,
   generateVapidKeys,
 } from './push.js';
 import { VapidStore } from './state.js';
@@ -55,13 +55,26 @@ const vapid =
   envVapidPublic && envVapidPrivate
     ? { publicKey: envVapidPublic, privateKey: envVapidPrivate }
     : await new VapidStore(stateDir).loadOrCreate(generateVapidKeys);
-const vapidSubject = process.env.DORMOUSE_VAPID_SUBJECT ?? DEFAULT_VAPID_SUBJECT;
+// The JWT is signed with an operator contact, so no subject means no push at
+// all — `web-push` cannot construct a send without one. An unset
+// DORMOUSE_VAPID_SUBJECT therefore falls back to this server's own origin,
+// which is unusable only for a loopback dev server. There push is switched off
+// rather than left half-working: a phone cannot route to localhost anyway, and
+// booting with a subject a push service rejects is what made every iPhone
+// delivery fail silently before.
+const vapidSubject = process.env.DORMOUSE_VAPID_SUBJECT ?? defaultVapidSubject(origin);
 try {
   assertVapidKeyPair(vapid);
-  assertVapidSubject(vapidSubject);
+  if (vapidSubject !== null) assertVapidSubject(vapidSubject);
 } catch (err) {
   console.error(`Invalid VAPID configuration: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
+}
+if (vapidSubject === null) {
+  console.warn(
+    `push is disabled: no VAPID subject. DORMOUSE_ORIGIN (${origin}) cannot serve as one — ` +
+      'set DORMOUSE_VAPID_SUBJECT to a routable mailto: or https: contact to enable it.',
+  );
 }
 
 const { app, injectWebSocket } = createApp({
@@ -69,8 +82,14 @@ const { app, injectWebSocket } = createApp({
   origin,
   stateDir,
   pocketDir,
-  vapidPublicKey: vapid.publicKey,
-  pushSender: createWebPushSender(vapid, vapidSubject),
+  // Both together or neither: advertising a key the server has no subject to
+  // sign with would let a phone register against a push it can never receive.
+  ...(vapidSubject === null
+    ? {}
+    : {
+        vapidPublicKey: vapid.publicKey,
+        pushSender: createWebPushSender(vapid, vapidSubject),
+      }),
 });
 
 const server = serve({ fetch: app.fetch, port }, (info) => {

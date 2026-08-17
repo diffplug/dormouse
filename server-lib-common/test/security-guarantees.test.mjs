@@ -147,7 +147,7 @@ test('every trusted client must be explicitly paired with every host', async () 
 });
 
 test('every connection requires fresh user presence', async () => {
-  const { server, host, authenticator, client } = await world();
+  const { host, authenticator, client } = await world();
   await client.pair(host, { accountId: ACCOUNT, authenticator });
 
   // First connection: fine. Reusing any part of it: refused. The passkey

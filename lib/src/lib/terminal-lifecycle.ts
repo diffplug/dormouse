@@ -14,6 +14,8 @@ import {
   setSelection as setMouseSelection,
 } from './mouse-selection';
 import { extractSelectionText } from './selection-text';
+import { clearResumeOffer } from './resume-offers';
+import { normalizeResumeCommand } from './resume-patterns';
 import {
   pendingShellOpts,
   registry,
@@ -231,6 +233,9 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
     // The process is gone, so any command we seeded for this pane is no longer
     // live; clear it so `dor ensure` stops matching a dead surface.
     finishLaunchedCommandByPtyId(id, detail.exitCode);
+    // Same reason retires the resume offer: it types into a shell, and there is
+    // no shell left (docs/specs/layout.md -> Resume offer).
+    clearResumeOffer(id);
   };
   platform.onPtyData(handleData);
   platform.onPtyExit(handleExit);
@@ -261,6 +266,8 @@ function wireXtermHandlers(
 
     if (!isReplayTerminalReport) {
       markSessionTouched(id);
+      // Answered by doing something else (docs/specs/layout.md -> Resume offer).
+      clearResumeOffer(id);
     }
 
     const isSyntheticTerminalReport = inputIsSyntheticTerminalReport(input);
@@ -550,7 +557,30 @@ export function disposeSession(id: string): void {
   registry.delete(id);
   removeTerminalPaneState(id);
   removeMouseSelectionState(id);
+  clearResumeOffer(id);
   notifyActivityListeners();
+}
+
+/**
+ * Take a restored pane's resume offer: type the command at its fresh shell and
+ * run it. Written straight to the PTY rather than through a bracketed paste —
+ * bracketed paste exists to stop an embedded newline from executing, which is
+ * the opposite of what this button is for.
+ */
+export function runResumeCommand(id: string, command: string): void {
+  const normalized = normalizeResumeCommand(command);
+  clearResumeOffer(id);
+  const entry = registry.get(id);
+  // A gone shell can't run anything, and the seed below would then be a command
+  // start nothing ever finishes — `countRunningSessions` would count this pane as
+  // running forever (a spurious quit confirmation, a phantom running header).
+  if (!normalized || !entry || entry.exited) return;
+  markSessionTouched(id);
+  // This direct platform write bypasses xterm's onData keystroke fallback.
+  // Seed the same semantic command state first so non-integrated shells still
+  // report a running agent for headers, grouping, and quit protection.
+  seedLaunchedCommand(id, normalized);
+  getPlatform().writePty(id, `${normalized}\r`);
 }
 
 export function refitSession(id: string): void {

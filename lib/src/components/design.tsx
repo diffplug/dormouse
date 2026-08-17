@@ -101,12 +101,22 @@ export const popupButton = tv({
     tone: {
       foreground: '',
       muted: 'text-muted hover:text-foreground',
+      // The row's one emphasized action, for popups that ask rather than offer
+      // (the restored pane's resume offer). Same accent pair as a modal's
+      // primary button — the Active-Header-Doubles-As-Accent rule (DESIGN.md).
+      primary: 'bg-header-active-bg text-header-active-fg',
     },
     flashed: {
       true: 'animate-copy-flash bg-header-active-bg/25 text-header-active-bg',
       false: 'hover:bg-foreground/10',
     },
   },
+  compoundVariants: [
+    // The unflashed hover is a background wash, which would REPLACE a filled
+    // tone's background rather than sit over it. Hold the fill instead; a filled
+    // button already reads as the action without a hover cue.
+    { tone: 'primary', flashed: false, class: 'hover:bg-header-active-bg' },
+  ],
   defaultVariants: { tone: 'foreground', flashed: false },
 });
 

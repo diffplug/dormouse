@@ -10,6 +10,7 @@ import {
 import { SelectionOverlay } from './SelectionOverlay';
 import { SelectionPopup } from './SelectionPopup';
 import { MouseOverrideBanner } from './wall/MouseOverrideBanner';
+import { ResumeBanner } from './wall/ResumeBanner';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from './design';
 import { throttleTrailing } from '../lib/throttle';
 
@@ -70,6 +71,7 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
       <SelectionOverlay terminalId={id} />
       <SelectionPopup terminalId={id} />
       <MouseOverrideBanner terminalId={id} />
+      <ResumeBanner terminalId={id} />
     </div>
   );
 }

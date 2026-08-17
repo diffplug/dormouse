@@ -1,5 +1,7 @@
 import type { SessionStatus } from './activity-monitor';
 import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
+import { detectResumeCommand } from './resume-patterns';
+import { trimPersistedScrollback } from './scrollback-trim';
 
 /**
  * Only the TODO reminder and its notification detail survive a restart.
@@ -30,6 +32,25 @@ export interface PersistedPane {
   untouched: boolean;
   alert?: PersistedAlertState | null;
   surfaceType?: PersistedSurfaceType;
+}
+
+/**
+ * Trim a terminal Session's scrollback for persistence and derive the resume
+ * command from *that* trimmed text. The two must move together: the resume
+ * command has to describe the scrollback actually being written, or a pane
+ * persists a stale hint and restore offers the wrong session. Single source of
+ * truth shared by the renderer save path (`session-save.ts`) and the VS Code
+ * host refresh (`vscode-ext/session-state.ts`); detection is unaffected by the
+ * trim because resume patterns live at the tail.
+ */
+export function terminalPersistedContent(
+  scrollback: string | null,
+): Pick<PersistedPane, 'scrollback' | 'resumeCommand'> {
+  const trimmed = trimPersistedScrollback(scrollback);
+  return {
+    scrollback: trimmed,
+    resumeCommand: trimmed ? detectResumeCommand(trimmed) : null,
+  };
 }
 
 /**
