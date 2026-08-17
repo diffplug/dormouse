@@ -33,9 +33,8 @@ const UPSTREAM_REPO = 'xtermjs/xterm.js';
 
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
-const canopyVersion = args[args.indexOf('--canopy') + 1] && args.includes('--canopy')
-  ? args[args.indexOf('--canopy') + 1]
-  : null;
+const canopyFlag = args.indexOf('--canopy');
+const canopyVersion = canopyFlag === -1 ? null : args[canopyFlag + 1] ?? '';
 
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf-8');
 const betaOf = (v) => Number(/-beta\.(\d+)$/.exec(v)?.[1] ?? NaN);
@@ -68,7 +67,7 @@ function repin(rel, pins) {
 
 // --- canopy mode: repin onto an already-cut fork release ---------------------
 
-if (canopyVersion) {
+if (canopyFlag !== -1) {
   const sdf = /-sdf(\d+)\.\d+$/.exec(canopyVersion);
   if (!sdf) {
     console.error(`--canopy expects <addon-version>-sdf<coreBeta>.<iteration>, got "${canopyVersion}"`);
@@ -114,12 +113,13 @@ let chosen = null;
 for (const version of coreVersions) {
   const { gitHead } = packuments.get(CORE).get(version);
   const set = { [CORE]: version };
-  const complete = ADDONS.every((name) => {
+  // Resolve every addon before judging the set — short-circuiting would make the
+  // "missing" list below name addons that were simply never looked up.
+  for (const name of ADDONS) {
     const hit = [...packuments.get(name).entries()].find(([, m]) => m.gitHead === gitHead);
     if (hit) set[name] = hit[0];
-    return Boolean(hit);
-  });
-  if (complete) { chosen = { set, gitHead }; break; }
+  }
+  if (ADDONS.every((name) => name in set)) { chosen = { set, gitHead }; break; }
   if (version === coreVersions[0]) {
     const missing = ADDONS.filter((n) => !(n in set)).map((n) => n.replace('@xterm/', ''));
     console.log(
