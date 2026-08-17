@@ -539,6 +539,13 @@ When changing layout behavior:
 
 ## Future
 
+### Recovery-created resume offers
+
+The scrollback-free cold-start decision and the corresponding resume-offer
+presentation are owned by `docs/specs/transport.md` `## Future`
+(**Scope: recovery-retention**). They will be promoted into Session lifecycle
+here when implemented; this spec keeps no second rollout ledger.
+
 **Scope: workspaces-rollout** — the remaining stages of the multi-Workspace feature. The model, container verbs, persistence, and union projection are implemented, dormant behind `dormouse.flags.workspaces` (see [Workspaces](#workspaces) above; persisted containers in `docs/specs/transport.md`, union projection in `docs/specs/alert.md`). This ledger is the single home for what remains; other specs link here rather than restating it.
 
 ### Stage 3 — workspace strip and switching UI (standalone)

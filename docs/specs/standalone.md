@@ -269,7 +269,10 @@ through `saveState`, then `drainSessionSaves` awaits `TauriSessionStore.drain()`
 `save_session` is itself durable through the temp-then-rename (dir fsync). So the
 final debounce/heartbeat window is no longer lost — the regression from the old
 WebKit-flush-on-teardown `localStorage` path is closed. Unclean exits (crash,
-force-kill) stay best-effort.
+force-kill) stay best-effort. The completed quit does not clear the file: the
+next boot reads this same transcript-bearing snapshot and cold-restores it
+automatically. There is no clean-shutdown marker or redacted persistence path
+today.
 
 ## Quit flow
 
@@ -461,3 +464,10 @@ root `package.json` for the `dev:standalone*` orchestration.
 | `standalone/sidecar/clipboard-ops.js` | OS clipboard tiers (owned by `docs/specs/mouse-and-clipboard.md`) |
 | `standalone/scripts/build-sidecar-proxy.mjs` | Bundles `lib/src/host/` into the sidecar `.cjs` copies |
 | `standalone/scripts/dev-agent-browser.mjs` | `dev:standalone:ab` entry (owned by `docs/specs/transport.md`) |
+
+## Future
+
+The cross-host close/restart persistence redesign is owned by
+`docs/specs/transport.md` `## Future` (**Scope: recovery-retention**). Its
+standalone stages will be promoted into Persistence and Quit flow here when
+implemented; this spec keeps no second rollout ledger.

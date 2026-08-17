@@ -158,3 +158,149 @@ These rules apply to every adapter. Adapter-specific layering (deactivate orderi
 - **Untouched defaults conservatively.** New saved panes include `untouched`; a pane read without the field defaults to `untouched: false`, so it still requires kill confirmation.
 - **PTY ownership.** Each message router tracks the PTY ids it owns. A PTY routed to one webview must not be stolen by another router; new routers attaching to a host must respect existing ownership.
 - **Replay filtering does not re-fire alerts.** `pty:replay` re-injects buffered output into xterm.js but must not re-trigger `AlertManager`, activity-monitor events, or protocol notifications.
+
+## Future
+
+**Scope: recovery-retention** — stop treating terminal scrollback as ordinary
+persisted application state. Keep it in bounded host memory for live consumers,
+and write only the smallest recovery record needed at a lifecycle boundary where
+the host is about to destroy a resumable agent without a Dormouse confirmation.
+The remaining work, in order, is:
+
+1. split runtime snapshots, durable structural state, and minimal recovery
+   records into separate types and storage paths;
+2. remove scrollback from every periodic and page-lifecycle disk save;
+3. make standalone clean quit discard all restorable Session state and make VS
+   Code shutdown persist only newly detected agent recovery records; and
+4. gate cold recovery on an explicit user decision and enforce the storage rules
+   below with cross-adapter tests.
+
+### Three storage classes
+
+Dormouse separates state by why it exists:
+
+| Class | Contains | Lifetime | May contain scrollback? |
+| --- | --- | --- | --- |
+| **Runtime Session** | Live PTYs, xterm state, semantic state, layout, browser params, host replay/scrollback buffers | Process lifetime | Yes, in memory only |
+| **Durable structure** | The minimum non-transcript state a host needs to reconnect a surviving PTY/webview or deserialize its container | Host-defined; overwritten as structure changes | No |
+| **Recovery record** | One or more canonical agent resume commands plus the CWD needed to run each in a fresh shell, creation time, and owning Workspace identity | One cold-start attempt, at most seven days | No |
+
+Terminal scrollback commonly contains source, pasted secrets, access tokens,
+commands, and program output. The 100,000 character persisted cap bounds size,
+not disclosure. No normal save path writes scrollback to disk, including the 500
+ms structural debounce, 30 s heartbeat, PTY exit, `pagehide`, webview unmount,
+or standalone quit flush. `resumeCommand` is likewise absent from durable
+structure: it is derived from scrollback and is itself a sensitive pointer into
+an agent's stored conversation.
+
+The existing 1M-character host buffers remain in memory. They continue to serve
+live resume, repeat webview reconstruction, Pocket/mobile snapshots, and remote
+clients while the Host and PTY exist. Removing disk persistence must not reduce
+those live capabilities or their current memory caps.
+
+Durable structure is deliberately narrow. It may carry container identity,
+Surface ids and kinds, layout topology, Door placement, and untouched state. It
+does not carry scrollback, resume commands, command lines, CWDs, user-derived
+titles, notification text, or browser URLs. If a consumer cannot reconstruct a
+feature without one of those fields, that feature remains runtime-only until it
+has a separately justified storage design; it does not widen the structural
+format by convenience.
+
+### Recovery record
+
+A recovery record is not a saved terminal. It is the minimum needed to offer a
+fresh shell that can resume an interrupted agent:
+
+```typescript
+interface PersistedRecoveryRecord {
+  version: 1;
+  createdAt: number;
+  workspaceId: string;
+  offers: Array<{
+    cwd: string;
+    resumeCommand: string;
+  }>;
+}
+```
+
+The exact type name may change during implementation; the data boundary may not.
+It contains no scrollback, terminal title, notification, browser state, or layout
+snapshot. CWD and the allowlisted command are retained because they are required
+to resume the intended agent context; both are still private and receive the
+short lifetime below.
+
+Only a host-controlled shutdown that gives Dormouse no confirmation opportunity
+may create this record. The host remembers which terminal Sessions had a known
+running foreground command before shutdown, sends the graceful signal, inspects
+their final in-memory scrollback for a canonical resume command, and immediately
+discards the transcript after detection. Output from an idle or unknown Session
+never becomes a recovery record. If no previously-running Session yields a valid
+command, nothing is written and next launch starts fresh.
+
+Terminal output is untrusted. Detection and canonical revalidation keep shell
+punctuation out of the stored command, but do not prove which program printed
+the text. Recovery therefore never executes automatically: the user first accepts
+the Workspace-level recovery prompt, then the existing per-pane Run action is the
+sole execution authority. Because no transcript is replayed, recovery UI cannot
+rely on "the id is in the scrollback above": the prompt identifies each offer by
+invocation and CWD, and the pane action makes the full command inspectable without
+executing it. A hover-only tooltip is insufficient for Pocket/touch clients.
+
+### Lifecycle policy
+
+| Boundary | Process outcome | Durable outcome | Next presentation |
+| --- | --- | --- | --- |
+| Webview hide/show or reconstruction while host PTYs remain | PTYs stay Live | Structural state only | Resume live PTYs; no prompt |
+| Pocket/mobile attach | Host PTYs stay Live | No new disk write | Serve the bounded in-memory snapshot |
+| Explicit Pane kill or Workspace/editor-tab close | Target Surfaces are killed | Remove their structural rows and any pending recovery offer | No recovery prompt for the disposed target |
+| Standalone clean quit, all-idle or confirmed | All PTYs are terminated | Clear structural state and any legacy transcript-bearing snapshot; write no recovery record | Next launch starts fresh |
+| Standalone crash/force-kill | PTYs and in-memory history are lost | No transcript checkpoint exists | Next launch starts fresh |
+| VS Code extension-host shutdown, reload, or application restart | PTYs are terminated without Dormouse confirmation | Persist only valid recovery records derived from previously-running Sessions | Ask once on next cold activation when at least one offer exists |
+| Fresh install/new panel/no valid recovery record | No PTYs | Structural state at most | Start fresh without prompting |
+
+The loss of transcript recovery after a crash is intentional. Avoiding continuous
+secret-bearing writes takes precedence over reconstructing output after a process
+dies without a shutdown boundary.
+
+### Cold-start decision and retention
+
+`resumeOrRestore` keeps live resume as its first priority. With no live PTY, it
+does not interpret durable structure as a saved terminal and never replays
+scrollback from it. A valid, unexpired recovery record produces one
+Workspace-level choice before any fresh shells are spawned:
+
+- **Resume agents** consumes the record into memory, creates one fresh terminal
+  per offer in its recorded CWD, and seeds the validated per-pane Run actions.
+  It does not reconstruct old output or run a command automatically.
+- **Start fresh** consumes and drops the record, then creates the default terminal.
+
+Consumption is a destructive read: the host removes the durable record before
+handing its contents to the webview. If removal fails, it starts fresh rather
+than copying a sensitive record into another layer while leaving the durable copy
+behind. A record is offered only on the next cold activation of its Workspace and
+expires after seven days, whichever happens first. Canceling or closing the host
+without choosing does not rewrite it; because it was already consumed from disk,
+that recovery opportunity is intentionally one-shot.
+
+Legacy `PersistedSession` blobs may already contain scrollback. The rollout treats
+each as a one-time legacy recovery input: read it into memory, clear the durable
+blob before rendering, and offer Restore/Start fresh once. After that migration,
+no durable writer accepts a transcript-bearing Session shape.
+
+### Host shutdown ordering
+
+Standalone keeps its current confirmation and graceful PTY teardown, but removes
+both transcript-bearing quit saves. A confirmed quit and an all-idle quit
+converge on the same tail: terminate processes, durably clear Session storage and
+its write-through cache, install any pending update, and exit. Cancel leaves
+processes untouched. The browser-dev harness remains non-durable and outside this
+native quit guarantee.
+
+VS Code cannot add a Dormouse-specific confirmation to window shutdown, reload,
+extension restart, or extension-host failure. Ordinary panel visibility changes
+remain live resumes, and explicitly closing a `WebviewPanel` remains disposal.
+At `deactivate()`, it snapshots the ids known to be running, sends SIGTERM, waits
+for final output while the in-memory host buffers still exist, derives minimal
+recovery records for those ids, persists them through the owning view/panel, and
+only then calls `killAll()`. Each wait is bounded; a timeout loses recovery rather
+than falling back to an earlier transcript-bearing checkpoint.

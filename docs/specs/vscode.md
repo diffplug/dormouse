@@ -107,6 +107,9 @@ VS Code-specific consequences:
 
 - Hiding the Dormouse panel doesn't kill its PTYs.
 - VS Code toggling the panel visibility doesn't destroy sessions.
+- Closing a Dormouse editor-tab `WebviewPanel` is different from hiding it:
+  `setupPanel` attaches its router with `killOnDispose: true`, so disposal kills
+  that panel's owned PTYs and VS Code removes the tab's per-panel state.
 - Multiple VS Code windows each get their own extension host process, and therefore their own pty-host child process.
 
 PTY lifecycle, buffering, the reconnection sequence, and the full message protocol live in `docs/specs/transport.md`.
@@ -173,6 +176,11 @@ The persisted-session shape (`PersistedSession` / `PersistedPane` / `PersistedAl
 4. On deactivate: flush all sessions from webviews (1s timeout), then refresh from live PTYs (queries CWD + scrollback while processes are still alive).
 5. Graceful shutdown: save state → SIGTERM → 2s wait → force kill.
 6. On activate: saved state loaded and passed to routers for cold-start restore via `readPersistedSession()` (defined in `docs/specs/transport.md`), which tolerates both parsed objects and JSON-stringified blobs returned by VS Code state APIs.
+
+The explicit host refresh in step 4 happens before SIGTERM. PTY exit can trigger
+a frontend flush after step 5 begins, but `deactivate()` does not request or await
+a second post-signal refresh; output printed only during graceful termination is
+therefore not a dependable part of the saved snapshot.
 
 ### Theme integration
 
@@ -247,6 +255,13 @@ window must be reloaded to pick up changes.
 The Vite config for the extension (`vscode-ext/vite.config.ts`) sets `root: ../lib` and `outDir: ./media`, building the shared React frontend directly into the extension's media folder.
 
 ## Future
+
+### Recovery retention
+
+The cross-host close/restart persistence redesign is owned by
+`docs/specs/transport.md` `## Future` (**Scope: recovery-retention**). Its VS Code
+stages will be promoted into Webview hosting and Serialization and restore here
+when implemented; this spec keeps no second rollout ledger.
 
 ### Webview→host Surface-state channel
 
