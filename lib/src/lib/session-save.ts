@@ -25,6 +25,12 @@ export async function saveSession(
   // `surfaceRefs` so pruned (killed) entries never cause a number to be reused.
   surfaceRefsNext?: number,
 ): Promise<void> {
+  // Gate the work, not just the write. Building the record costs a `getCwd`
+  // round trip per terminal pane — on standalone that lands on a synchronous
+  // `lsof` in the sidecar — and a host that persists nothing would spend all of
+  // it on every debounced save, every 30s heartbeat, and twice more per quit,
+  // only for `saveState` to drop the result.
+  if (platform.persistsSession === false) return;
   const previousPanes = getPreviousPaneMap(platform);
   const allPanes = new Map<string, { id: string; title: string; surfaceType: PersistedSurfaceType }>();
   for (const pane of panes) {

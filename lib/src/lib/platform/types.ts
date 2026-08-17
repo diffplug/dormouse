@@ -127,6 +127,18 @@ export interface PlatformAdapter {
   killPty(id: string): void;
 
   /**
+   * Whether this host keeps a Session snapshot across a restart. `false` means
+   * `saveSession` does no work at all rather than building a record for a
+   * `saveState` that discards it — the gate belongs above the per-pane `getCwd`
+   * round trips, not below them.
+   *
+   * Absent reads as `true`. Standalone sets it `false`: quitting is a deliberate
+   * ending and a crash captured nothing, so every launch starts fresh
+   * (docs/specs/transport.md -> "The governing rule").
+   */
+  persistsSession?: boolean;
+
+  /**
    * Agent resume invocations the host captured when it last tore down, keyed by
    * surface id — consumed once by a cold restore (`session-restore.ts`).
    *

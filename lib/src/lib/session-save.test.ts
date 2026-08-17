@@ -324,4 +324,25 @@ describe('saveSession', () => {
       notification: null,
     });
   });
+
+  it('does no work at all for a host that persists nothing', async () => {
+    // The gate is above the record build, not at the write: `getCwd` is a
+    // per-pane round trip that lands on a synchronous `lsof` in the standalone
+    // sidecar, and it would otherwise run on every debounced save, every 30s
+    // heartbeat, and twice more per quit, for a blob that is then dropped.
+    const platform = { ...createPlatform(null), persistsSession: false };
+
+    await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
+
+    expect(platform.getCwd).not.toHaveBeenCalled();
+    expect(platform.saveState).not.toHaveBeenCalled();
+  });
+
+  it('still saves for a host that does not declare the flag', async () => {
+    const platform = createPlatform(null);
+
+    await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
+
+    expect(platform.saveState).toHaveBeenCalled();
+  });
 });

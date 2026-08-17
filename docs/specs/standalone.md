@@ -272,9 +272,14 @@ WebKit-flush-on-teardown `localStorage` path is closed.
 
 **Standalone persists no Session state.** Quitting the app is a deliberate ending
 and a crash captured nothing, so every launch starts fresh
-(`docs/specs/transport.md` → "The governing rule"). `TauriAdapter.getState` returns
-null and `saveState` is a no-op behind one `PERSIST_SESSION` gate, and `init()`
-blanks any pre-upgrade blob — those carry transcripts, so ignoring the slot is not
+(`docs/specs/transport.md` → "The governing rule"). One `PERSIST_SESSION` gate
+drives all of it: `TauriAdapter.getState` returns null, `saveState` is a no-op, and
+the adapter reports `persistsSession: false` so `saveSession` skips building a
+record at all. That last part is why the gate is not merely cosmetic — otherwise
+every debounced save, every 30s heartbeat, and both quit-time flushes would still
+spend a `getCwd` round trip per terminal pane (a synchronous `lsof` in the sidecar
+on macOS) to produce a blob that is then dropped. `init()` also blanks any
+pre-upgrade blob — those carry transcripts, so ignoring the slot is not
 enough. The store beneath the gate is intact and still needed by the
 workspaces-rollout scope (`docs/specs/layout.md` → `## Future`); restoring
 VS Code-style recovery here later is flipping that gate plus adding capture to the
@@ -287,7 +292,8 @@ the `quit_ack` / `quit_progress` / `quit_cancel` / `quit_proceed` commands, the 
 `ExitRequested` arms) and `standalone/src/quit.ts` (the webview orchestrator).
 
 Quitting ends every terminal. Rust intercepts **every** quit trigger so the
-webview can tear terminals down gracefully — capturing their final scrollback —
+webview can tear terminals down gracefully — historically to capture their final
+scrollback, and now to keep the ordering the workspaces-rollout scope will reuse —
 and durably write the freshest session before the process exits.
 
 **Trigger interception.** Two Rust arms funnel into `request_quit(app)`:

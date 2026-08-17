@@ -516,6 +516,12 @@ export class TauriAdapter implements PlatformAdapter {
   // shape (flush -> kill -> flush -> drain).
   private static PERSIST_SESSION = false;
 
+  /**
+   * Read by `saveSession`, which skips the whole record build — not just the
+   * write — when a host persists nothing (`PlatformAdapter.persistsSession`).
+   */
+  readonly persistsSession = TauriAdapter.PERSIST_SESSION;
+
   saveState(state: unknown): void {
     if (!TauriAdapter.PERSIST_SESSION) return;
     try {
