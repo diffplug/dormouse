@@ -73,7 +73,7 @@ const singletonHolders = new Map<string, SingletonClaimant>();
  * arbitrates across windows on shared storage; nothing is granted here until it
  * says this window won.
  */
-let windowLeaseHeld = false;
+let windowLeaseHeld: boolean | null = null;
 
 function wantedSingletonNames(): Set<string> {
   const names = new Set<string>();
@@ -99,7 +99,7 @@ function onWindowLeaseChange(held: boolean): void {
 }
 
 function electSingleton(name: string): void {
-  if (!windowLeaseHeld) return;
+  if (windowLeaseHeld !== true) return;
   let holder = singletonHolders.get(name);
   if (!holder) {
     holder = [...singletonClaimants].find((claimant) => claimant.wants.has(name));

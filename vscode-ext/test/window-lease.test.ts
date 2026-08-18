@@ -57,6 +57,20 @@ describe('window lease over a real directory', () => {
     expect(second.holdsWindowLease()).toBe(false);
   });
 
+  it('reports an initial non-holder result', async () => {
+    const first = await openWindow();
+    first.ensureWindowLease(() => {});
+    await waitFor(() => first.holdsWindowLease());
+
+    const second = await openWindow();
+    const changes: boolean[] = [];
+    second.ensureWindowLease((held) => changes.push(held));
+    await waitFor(() => changes.length > 0);
+
+    expect(changes).toEqual([false]);
+    expect(second.holdsWindowLease()).toBe(false);
+  });
+
   it('hands the role over when the holder disposes', async () => {
     const first = await openWindow();
     first.ensureWindowLease(() => {});

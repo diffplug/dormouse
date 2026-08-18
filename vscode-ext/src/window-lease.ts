@@ -40,7 +40,8 @@ const CLAIM_VERIFY_MS = 250;
 interface LeaseState {
   file: string;
   selfId: string;
-  held: boolean;
+  /** Null until the first arbitration cycle reports this window's role. */
+  held: boolean | null;
   timer: ReturnType<typeof setInterval> | null;
   watcher: FSWatcher | null;
   onChange: (held: boolean) => void;
@@ -121,7 +122,7 @@ async function tick(current: LeaseState): Promise<void> {
  */
 export function ensureWindowLease(onChange: (held: boolean) => void): void {
   if (state) {
-    onChange(state.held);
+    onChange(state.held ?? false);
     return;
   }
   const context = extensionContext;
@@ -131,7 +132,7 @@ export function ensureWindowLease(onChange: (held: boolean) => void): void {
   const current: LeaseState = {
     file: join(dir, LEASE_FILE),
     selfId: randomUUID(),
-    held: false,
+    held: null,
     timer: null,
     watcher: null,
     onChange,
@@ -157,7 +158,7 @@ export function ensureWindowLease(onChange: (held: boolean) => void): void {
         // intended I/O, with overlapping writes colliding and each failure
         // dropping the role. Only a window waiting for the lease needs the
         // accelerator.
-        if (current.held) return;
+        if (current.held === true) return;
         void tick(current);
       });
     } catch {
@@ -170,7 +171,7 @@ export function ensureWindowLease(onChange: (held: boolean) => void): void {
 
 /** Whether this window currently owns the Host role. */
 export function holdsWindowLease(): boolean {
-  return state?.held ?? false;
+  return state?.held === true;
 }
 
 /**
@@ -184,9 +185,8 @@ export async function disposeWindowLease(): Promise<void> {
   if (current.timer) clearInterval(current.timer);
   current.watcher?.close();
 
-  if (!current.held) return;
+  if (current.held !== true) return;
   const record = await readRecord(current.file);
   if (record?.owner !== current.selfId) return;
   await unlink(current.file).catch(() => {});
 }
-

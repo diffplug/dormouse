@@ -316,6 +316,10 @@ The lease makes this one-directional. Because the webview lease is gated on the 
 
 Roles follow the lease: acquire it and the window starts serving and publishes a rendezvous file (`remote-host.peer.json`, mode 0600, in `globalStorageUri`) naming the socket path and a token; lose it and the window tears the server down and connects as a client instead. Clients watch that file, so a handover does not wait out the reconnect backoff. The socket lives in the temp dir rather than beside the rendezvous file because macOS caps a unix socket path near 104 bytes and the extension's `globalStorage` path is most of that on its own.
 
+The first arbitration result is a role transition even when it is `false`: a
+window that starts while another owns the lease immediately enters the client
+role and watches/connects to that broker.
+
 A peer window answers a `request` frame by running its **own in-window** fan-out — never the cross-window one, or a request would loop back out. That is why `configurePeerLink` is handed only `brokerRequest`, and why the link is injected with what it needs rather than importing the router (which imports the link).
 
 Both tiers are asked at once rather than one after the other: what is asked about lives in exactly one webview of one window, and asking in series would pay a whole tier's budget — or a hung window's — before reaching the tier that owns it.
