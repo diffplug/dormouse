@@ -53,6 +53,7 @@ export interface PeerLinkDeps {
   deliverRemotePtyExit(ptyId: string, exitCode: number): void;
   deliverRemotePeerChange(topic: string | null): void;
   onProcessedPtyData(listener: (id: string, data: string) => void): () => void;
+  onProcessedPtyExit(listener: (id: string, exitCode: number) => void): () => void;
   writePty(ptyId: string, data: string): void;
   resizePty(ptyId: string, cols: number, rows: number): void;
 }
@@ -347,10 +348,21 @@ async function onClientFrame(frame: unknown): Promise<void> {
       break;
     case 'subscribe': {
       if (forwarding.has(request.ptyId)) break;
-      const stop = deps?.onProcessedPtyData((id, data) => {
+      if (!deps) break;
+      const stops: Array<() => void> = [];
+      const stop = () => {
+        for (const dispose of stops) dispose();
+      };
+      stops.push(deps.onProcessedPtyData((id, data) => {
         if (id === request.ptyId) respond({ kind: 'data', ptyId: id, data });
-      });
-      if (stop) forwarding.set(request.ptyId, stop);
+      }));
+      stops.push(deps.onProcessedPtyExit((id, exitCode) => {
+        if (id !== request.ptyId) return;
+        respond({ kind: 'exit', ptyId: id, exitCode });
+        stop();
+        forwarding.delete(request.ptyId);
+      }));
+      forwarding.set(request.ptyId, stop);
       break;
     }
     case 'unsubscribe':

@@ -160,6 +160,7 @@ configurePeerLink({
   deliverRemotePtyData,
   deliverRemotePtyExit,
   onProcessedPtyData,
+  onProcessedPtyExit,
   writePty: (ptyId, data) => ptyManager.write(ptyId, data),
   resizePty: (ptyId, cols, rows) => ptyManager.resize(ptyId, cols, rows),
 });
@@ -280,12 +281,19 @@ const themeColorProvider: TerminalColorProvider = (target) => latestThemeColors?
 // the protocol parser once per chunk regardless of webview count.
 type ProcessedDataListener = (id: string, visibleData: string) => void;
 const processedDataListeners = new Set<ProcessedDataListener>();
+type ProcessedExitListener = (id: string, exitCode: number) => void;
+const processedExitListeners = new Set<ProcessedExitListener>();
 type SemanticEventsListener = (id: string, events: TerminalSemanticEvent[]) => void;
 const semanticEventsListeners = new Set<SemanticEventsListener>();
 
 export function onProcessedPtyData(listener: ProcessedDataListener): () => void {
   processedDataListeners.add(listener);
   return () => { processedDataListeners.delete(listener); };
+}
+
+export function onProcessedPtyExit(listener: ProcessedExitListener): () => void {
+  processedExitListeners.add(listener);
+  return () => { processedExitListeners.delete(listener); };
 }
 
 function onTerminalSemanticEvents(listener: SemanticEventsListener): () => void {
@@ -326,6 +334,7 @@ ptyManager.addCallbacks({
     log.info(`[alert-feed] ${id}: PTY exited`);
     alertManager.onExit(id, exitCode);
     alertProtocolParsers.delete(id);
+    for (const listener of processedExitListeners) listener(id, exitCode);
   },
 });
 
@@ -526,12 +535,9 @@ export function attachRouter(
       if (!ownedPtyIds.has(id)) return;
       post({ type: 'terminal:semanticEvents', id, events } satisfies ExtensionMessage);
     });
-    const removePtyCallbacks = ptyManager.addCallbacks({
-      onData() {},
-      onExit(id: string, exitCode: number) {
-        if (!ownedPtyIds.has(id)) return;
-        post({ type: 'pty:exit', id, exitCode } satisfies ExtensionMessage);
-      },
+    const removeExitListener = onProcessedPtyExit((id, exitCode) => {
+      if (!ownedPtyIds.has(id) && !subscribedPtyIds.has(id)) return;
+      post({ type: 'pty:exit', id, exitCode } satisfies ExtensionMessage);
     });
 
     const removeAlertListener = alertManager.onStateChange((id, state) => {
@@ -551,7 +557,7 @@ export function attachRouter(
     return () => {
       removeProcessedListener();
       removeSemanticListener();
-      removePtyCallbacks();
+      removeExitListener();
       removeAlertListener();
     };
   }

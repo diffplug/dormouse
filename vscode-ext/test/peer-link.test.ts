@@ -22,6 +22,7 @@ function fakeWindow(options: {
   surfaces?: Record<string, { ptyId: string; cols: number; rows: number }>;
 } = {}) {
   const dataListeners = new Set<(id: string, data: string) => void>();
+  const exitListeners = new Set<(id: string, exitCode: number) => void>();
   return {
     entries: options.entries ?? [],
     surfaces: options.surfaces ?? {},
@@ -32,6 +33,9 @@ function fakeWindow(options: {
     peerChanges: [] as Array<string | null>,
     emitData(id: string, data: string) {
       for (const listener of dataListeners) listener(id, data);
+    },
+    emitExit(id: string, exitCode: number) {
+      for (const listener of exitListeners) listener(id, exitCode);
     },
     deps() {
       return {
@@ -51,6 +55,10 @@ function fakeWindow(options: {
         onProcessedPtyData: (listener: (id: string, data: string) => void) => {
           dataListeners.add(listener);
           return () => dataListeners.delete(listener);
+        },
+        onProcessedPtyExit: (listener: (id: string, exitCode: number) => void) => {
+          exitListeners.add(listener);
+          return () => exitListeners.delete(listener);
         },
         writePty: (ptyId: string, data: string) => void this.writes.push({ ptyId, data }),
         resizePty: (ptyId: string, cols: number, rows: number) =>
@@ -184,6 +192,20 @@ describe('peer link between windows', () => {
     peerSide.emitData('pty-other', 'not subscribed');
     await tick(100);
     expect(brokerSide.delivered).toEqual([]);
+  });
+
+  it('forwards a subscribed PTY exit and forgets its route', async () => {
+    const peerSide = farWindow();
+    const { broker, brokerSide } = await linkedPair(fakeWindow(), peerSide);
+    await attachFar(broker);
+    broker.remoteSubscribe('pty-far');
+    await tick();
+
+    peerSide.emitExit('pty-far', 17);
+
+    await waitFor(() => brokerSide.exits.length > 0);
+    expect(brokerSide.exits).toEqual([{ ptyId: 'pty-far', exitCode: 17 }]);
+    expect(broker.isRemotePty('pty-far')).toBe(false);
   });
 
   it('stops the stream on unsubscribe', async () => {

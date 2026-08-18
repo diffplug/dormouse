@@ -288,7 +288,7 @@ The extension host brokers, since it is the only party that can see every webvie
 
 - **PTY input and resize are not ownership-gated.** `pty:input` and `pty:resize` go straight to `ptyManager`, so the Host webview can already drive a sibling's PTY.
 - **Pane ids are unique across webviews.** They are minted `pane-<counter>-<random>` (`lib/src/components/Wall.tsx`), so surface ids need no namespacing to be routed.
-- **Streaming needed one change.** `pty:data` was delivered only to the owning webview; a webview may now also `pty:subscribe` to a PTY it does not own. Subscriptions are tracked separately from `ownedPtyIds`, so they never affect Workspace union status, `killOnDispose`, or who the host considers the owner. Semantic events stay owner-only — they drive the owner's pane state, and a subscriber is streaming bytes, not keeping a second copy of that state.
+- **Streaming needed one change.** `pty:data` and `pty:exit` were delivered only to the owning webview; a webview may now also `pty:subscribe` to a PTY it does not own. Subscriptions are tracked separately from `ownedPtyIds`, so they never affect Workspace union status, `killOnDispose`, or who the host considers the owner. Semantic events stay owner-only — they drive the owner's pane state, and a subscriber is streaming bytes plus process lifetime, not keeping a second copy of that state.
 
 Every webview installs a responder (`lib/src/remote/host/peer-surfaces.ts`) whether or not it is the Host, so its terminals are reachable from whichever one is. It carries none of the relay, enrollment, or pairing machinery — a registry lookup, the directory collector, and a resize.
 
