@@ -31,7 +31,8 @@ import {
 import { VSCODE_THEMES, VSCODE_THEME_TYPES } from './themes';
 import { cfg } from '../src/cfg';
 import type { DormouseTheme } from '../src/lib/themes';
-import { seedShellStore, type ShellEntry } from '../src/lib/shell-store';
+import { clearPersistedShellSelection, seedShellStore } from '../src/lib/shell-store';
+import type { ShellEntry } from '../src/lib/shell-defaults';
 
 // Initialize fake platform once at module scope
 const fakePlatform = initPlatform('fake');
@@ -257,7 +258,7 @@ const preview: Preview = {
       // emptying it is). The persisted selection goes with it: it is shared
       // localStorage like the themes above.
       const primedShells = context.parameters?.primedShells as ShellEntry[] | undefined;
-      window.localStorage.removeItem('dormouse:selected-shell');
+      clearPersistedShellSelection();
       seedShellStore(primedShells ?? []);
 
       useEffect(() => {

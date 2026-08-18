@@ -43,8 +43,10 @@ Source of truth: `standalone/src/main.tsx` (`bootstrap()`).
 4. `getAvailableShells()` seeds the shell store (`lib/src/lib/shell-store.ts`),
    which restores the persisted selection (`dormouse:selected-shell`) and
    publishes it via `setDefaultShellOpts` (the default-shell slot used by
-   split/spawn/restore paths, `docs/specs/layout.md`). Seeding runs before the
-   Wall mounts, so the first restored pane already spawns with that shell.
+   split/spawn/restore paths, `docs/specs/layout.md`). The call is *started*
+   right after `init()` so its webview → Rust → sidecar round trip overlaps
+   step 3, and awaited here: seeding must complete before the Wall mounts, so
+   the first restored pane already spawns with that shell.
 5. `resumeOrRestore(platform)` runs the priority-based recovery from
    `docs/specs/transport.md`.
 6. `startUpdateCheck()` (`docs/specs/auto-update.md`), then render `AppBar` +

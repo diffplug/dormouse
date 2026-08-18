@@ -131,8 +131,9 @@ export function ThemePicker({
         <CaretDownIcon size={10} weight="bold" className="shrink-0 opacity-65" aria-hidden="true" />
       </button>
 
-      {/* z-50 earns its keep in both variants — see `useAnchoredMenu` for why
-          the dialog one needs it. */}
+      {/* z-50 is here for `compact`, which ignores `menuStyle` and so gets no
+          stacking from `useAnchoredMenu` (the dialog variant takes it from
+          there, and the class is a harmless restatement). */}
       {open ? (
         <div
           ref={setMenuEl}

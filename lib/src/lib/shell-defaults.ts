@@ -10,8 +10,7 @@
 // between terminal-registry and platform/vscode-adapter.
 
 /** One detected shell. The canonical shape every adapter's
- *  `getAvailableShells()` returns. Re-exported from `shell-store.ts` for the
- *  UI-side importers. */
+ *  `getAvailableShells()` returns. */
 export interface ShellEntry {
   name: string;
   path: string;

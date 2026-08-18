@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   MODAL_OVERLAY_INSET,
   ModalCloseButton,
@@ -72,6 +72,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   // One union rather than a boolean per picker, so two menus can never be open
   // at once and Escape has a single thing to close.
   const [openMenu, setOpenMenu] = useState<'theme' | 'shell' | null>(null);
+  // Stable, because an open picker feeds this to `useCloseOnOutsideAndEscape`:
+  // a fresh arrow each render would tear down and re-add its three window
+  // listeners on every re-render of this dialog.
+  const onThemeOpenChange = useCallback((open: boolean) => setOpenMenu(open ? 'theme' : null), []);
+  const onShellOpenChange = useCallback((open: boolean) => setOpenMenu(open ? 'shell' : null), []);
 
   // VS Code owns the theme and has its own picker, so Dormouse offers none
   // there. Every other host sets its theme here rather than in host chrome.
@@ -113,7 +118,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <ThemePicker
             variant="settings-dialog"
             open={openMenu === 'theme'}
-            onOpenChange={(open) => setOpenMenu(open ? 'theme' : null)}
+            onOpenChange={onThemeOpenChange}
           />
         </section>
       ) : null}
@@ -127,7 +132,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <span>Shell:</span>
           <ShellPicker
             open={openMenu === 'shell'}
-            onOpenChange={(open) => setOpenMenu(open ? 'shell' : null)}
+            onOpenChange={onShellOpenChange}
           />
         </section>
       ) : null}

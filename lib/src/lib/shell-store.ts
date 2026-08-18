@@ -1,5 +1,5 @@
 import { setDefaultShellOpts, type ShellEntry } from './shell-defaults';
-import { getStorage } from './safe-storage';
+import { getStorage, loadJson, saveJson } from './local-json-store';
 
 /**
  * The Window's detected shells and which one is selected, for the Settings
@@ -17,10 +17,7 @@ import { getStorage } from './safe-storage';
 
 const SELECTED_KEY = 'dormouse:selected-shell';
 
-/** Lives in `shell-defaults.ts` — the dependency-free module the Node-side
- *  `PlatformAdapter` contract can also import — and is re-exported here so
- *  UI-side callers have one shell import. */
-export type { ShellEntry } from './shell-defaults';
+const isString = (value: unknown): value is string => typeof value === 'string';
 
 export interface ShellsState {
   shells: ShellEntry[];
@@ -62,13 +59,20 @@ function publishSelected(selected: ShellEntry | undefined): void {
  * once it returns, rather than being silently replaced by the fallback. Only
  * `selectShell` writes.
  *
- * An empty list empties the store, which is what `resetShellStore` is. Emptying
- * an already-empty store is skipped outright: Storybook resets every story, and
- * a notification with nothing behind it only churns subscribers.
+ * An empty list empties the store, which is what `resetShellStore` is — it
+ * unpublishes the default and touches storage not at all, since there is no
+ * selection to restore. Emptying an already-empty store is skipped outright:
+ * Storybook resets every story, and a notification with nothing behind it only
+ * churns subscribers.
  */
 export function seedShellStore(shells: ShellEntry[]): void {
-  if (shells.length === 0 && state.shells.length === 0) return;
-  const savedPath = getStorage()?.getItem(SELECTED_KEY) ?? null;
+  if (shells.length === 0) {
+    if (state.shells.length === 0) return;
+    publishSelected(undefined);
+    emit({ shells: [], selected: undefined });
+    return;
+  }
+  const savedPath = loadJson<string, null>(SELECTED_KEY, null, isString);
   const selected = shells.find((shell) => shell.path === savedPath) ?? shells[0];
   publishSelected(selected);
   emit({ shells: [...shells], selected });
@@ -85,7 +89,7 @@ export function seedShellStore(shells: ShellEntry[]): void {
  */
 export function selectShell(shell: ShellEntry): void {
   if (shell.path === state.selected?.path) return;
-  getStorage()?.setItem(SELECTED_KEY, shell.path);
+  saveJson(SELECTED_KEY, shell.path);
   publishSelected(shell);
   emit({ ...state, selected: shell });
   window.dispatchEvent(
@@ -110,4 +114,15 @@ export function selectShell(shell: ShellEntry): void {
  */
 export function resetShellStore(): void {
   seedShellStore([]);
+}
+
+/**
+ * Forget the persisted selection, so the next seed starts from nothing.
+ *
+ * Storybook's only caller: `localStorage` is shared by every story, so a story
+ * that names its shells would otherwise inherit whichever one an earlier story
+ * selected. Emptying the store (above) deliberately leaves the key alone.
+ */
+export function clearPersistedShellSelection(): void {
+  getStorage()?.removeItem(SELECTED_KEY);
 }

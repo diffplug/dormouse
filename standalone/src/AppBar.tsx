@@ -163,9 +163,8 @@ export function AppBar() {
           <button
             className={chromeButton({ kind: 'labeled' })}
             onClick={() => getPlatform().openExternal?.(WORKSPACES_ISSUE_URL)}
-            aria-label="New workspace"
           >
-            <PlusIcon size={12} weight="bold" />
+            <PlusIcon size={12} weight="bold" aria-hidden="true" />
             <span>New workspace</span>
           </button>
         </Tip>

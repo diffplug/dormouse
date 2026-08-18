@@ -1,5 +1,5 @@
 import type { DormouseTheme } from './types';
-import { getStorage } from '../safe-storage';
+import { getStorage } from '../local-json-store';
 // JSON import types are inferred too narrowly — cast at the boundary.
 import _bundledThemes from './bundled.json';
 const bundledThemes = _bundledThemes as unknown as DormouseTheme[];

@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties, type RefObject } from 'react';
-import { useMeasuredElementRect } from './design';
+import { MODAL_LAYERS, useMeasuredElementRect } from './design';
 import { clampOverlayPosition } from '../lib/ui-geometry';
 
 /** Gap between the trigger's bottom edge and the top of the menu. */
@@ -16,13 +16,13 @@ const MENU_GAP_PX = 4;
  * is why the returned style keeps the menu hidden until it has been measured.
  * Any height cap belongs on the panel, not in this style.
  *
- * Callers own the stacking: give the menu `z-50`. Inside the Settings dialog the
- * alarm sections' `opacity-50` wrappers are stacking contexts too, and being
- * later in tree order they would otherwise paint through the menu.
+ * The style also carries the stacking (`MODAL_LAYERS.app`): inside the Settings
+ * dialog the alarm sections' `opacity-50` wrappers are stacking contexts too,
+ * and being later in tree order they would otherwise paint through the menu.
  *
  * `open` gates the measurement, so pass `false` for a variant that positions
  * itself some other way (`ThemePicker`'s free-floating `compact`) and ignore
- * `menuStyle` there.
+ * `menuStyle` there — such a variant owns its own stacking.
  */
 export function useAnchoredMenu(
   open: boolean,
@@ -40,6 +40,7 @@ export function useAnchoredMenu(
 
   const menuStyle: CSSProperties = {
     width: widthPx,
+    zIndex: MODAL_LAYERS.app,
     ...(triggerRect
       ? clampOverlayPosition({
           left: triggerRect.left,

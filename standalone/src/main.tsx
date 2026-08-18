@@ -84,6 +84,10 @@ async function bootstrap() {
   const platform = await createPlatform();
   setPlatform(platform);
   await platform.init();
+  // Shell detection is a webview -> Rust -> sidecar round trip, so start it now
+  // and await it below: it overlaps the dynamic imports and theme restore
+  // rather than adding its latency to cold boot.
+  const shellsPromise = platform.getAvailableShells();
   // Quit orchestrator (docs/specs/standalone.md §Quit flow). Tauri-only: the
   // browser-dev harness has no Rust quit interception, and quit.ts pulls the
   // Tauri APIs. !BROWSER_DEV_HOST is exactly the createPlatform branch that
@@ -103,11 +107,11 @@ async function bootstrap() {
 
   // Seed the shell store from the active host backend: it restores the
   // persisted selection and publishes it as the default shell, and it feeds the
-  // Settings dialog's Shell row. Must run before resumeOrRestore/render so the
-  // first restored pane already spawns with the selected shell. Detecting
+  // Settings dialog's Shell row. Must complete before resumeOrRestore/render so
+  // the first restored pane already spawns with the selected shell. Detecting
   // nothing seeds nothing, which publishes no default — every spawn path then
   // omits `shell` and the sidecar resolves the OS default itself.
-  seedShellStore(await platform.getAvailableShells());
+  seedShellStore(await shellsPromise);
 
   const result = await resumeOrRestore(platform);
 

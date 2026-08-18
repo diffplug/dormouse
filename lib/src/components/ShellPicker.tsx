@@ -51,43 +51,40 @@ export function ShellPicker({ open, onOpenChange }: ShellPickerProps) {
         <CaretDownIcon size={10} weight="bold" className="shrink-0 opacity-65" aria-hidden="true" />
       </button>
 
-      {/* z-50 for the reason `useAnchoredMenu` documents. */}
       {open ? (
-        <div ref={setMenuEl} className="z-50" style={menuStyle}>
-          {/* `PopupButtonRow` takes no ref, so the fixed positioning and the
-              measured rect live on the wrapper above it. */}
-          <PopupButtonRow
-            role="menu"
-            aria-label="Select shell"
-            className={`w-full flex-col ${OVERLAY_MAX_HEIGHT.popover}`}
-          >
-            <div className="min-h-0 flex-1 overflow-y-auto py-1">
-              {shells.map((shell) => {
-                const isSelected = shell.path === selected?.path;
-                return (
-                  <button
-                    key={shell.path}
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={isSelected}
-                    className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-foreground/10"
-                    onClick={() => {
-                      selectShell(shell);
-                      onOpenChange(false);
-                    }}
-                  >
-                    {/* Fixed-width slot so the names line up whether or not the
-                        row is the selected one. */}
-                    <span className="flex w-3.5 shrink-0 items-center justify-center">
-                      {isSelected ? <CheckIcon size={12} weight="bold" /> : null}
-                    </span>
-                    <span className="min-w-0 truncate">{shell.name}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </PopupButtonRow>
-        </div>
+        <PopupButtonRow
+          ref={setMenuEl}
+          role="menu"
+          aria-label="Select shell"
+          className={`flex-col ${OVERLAY_MAX_HEIGHT.popover}`}
+          style={menuStyle}
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto py-1">
+            {shells.map((shell) => {
+              const isSelected = shell.path === selected?.path;
+              return (
+                <button
+                  key={shell.path}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={isSelected}
+                  className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-foreground/10"
+                  onClick={() => {
+                    selectShell(shell);
+                    onOpenChange(false);
+                  }}
+                >
+                  {/* Fixed-width slot so the names line up whether or not the
+                      row is the selected one. */}
+                  <span className="flex w-3.5 shrink-0 items-center justify-center">
+                    {isSelected ? <CheckIcon size={12} weight="bold" /> : null}
+                  </span>
+                  <span className="min-w-0 truncate">{shell.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </PopupButtonRow>
       ) : null}
     </div>
   );
