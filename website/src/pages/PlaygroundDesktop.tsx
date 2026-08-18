@@ -314,6 +314,7 @@ function PlaygroundDesktopExperience() {
           <WallModule.Wall
             restoredLathLayout={DESKTOP_PLAYGROUND_LAYOUT}
             initialMode="passthrough"
+            defaultThemeId={POCKET_THEME_ID}
             onEvent={handleWallEvent}
           />
         ) : null}

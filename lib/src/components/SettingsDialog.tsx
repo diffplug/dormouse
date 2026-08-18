@@ -58,7 +58,14 @@ function describePushTargets(push: PushDevicesState): string {
  * This dialog and the bell popover are the two places a rule set on a
  * since-closed Pane can be found and removed.
  */
-export function SettingsDialog({ onClose }: { onClose: () => void }) {
+export function SettingsDialog({
+  onClose,
+  defaultThemeId,
+}: {
+  onClose: () => void;
+  /** Host fallback used when the active installed theme is removed. */
+  defaultThemeId?: string;
+}) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
@@ -98,6 +105,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <span>Theme:</span>
           <ThemePicker
             variant="settings-dialog"
+            defaultThemeId={defaultThemeId}
             open={themeMenuOpen}
             onOpenChange={setThemeMenuOpen}
           />

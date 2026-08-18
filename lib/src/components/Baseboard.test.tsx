@@ -12,17 +12,39 @@ vi.mock('../lib/platform', () => ({
 
 import { Baseboard } from './Baseboard';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from '../lib/alert-settings';
+import {
+  addInstalledTheme,
+  getActiveThemeId,
+  setActiveThemeId,
+  type DormouseTheme,
+} from '../lib/themes';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
 let root: Root;
 
+const KIMBIE_DARK = 'vscode.theme-kimbie-dark.kimbie-dark';
+const INSTALLED_THEME: DormouseTheme = {
+  id: 'review.installed-theme',
+  label: 'Review Installed',
+  type: 'dark',
+  swatch: '#111111',
+  accent: '#eeeeee',
+  vars: {},
+  origin: {
+    kind: 'installed',
+    extensionId: 'review/installed-theme',
+    installedAt: '2026-08-17T00:00:00.000Z',
+  },
+};
+
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
     disconnect() {}
   });
+  window.localStorage.clear();
   applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -33,6 +55,7 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -82,5 +105,28 @@ describe('Baseboard settings controls', () => {
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog?.textContent).toContain('Settings');
     expect(dialog?.textContent).not.toContain('Theme:');
+  });
+
+  it('uses the host fallback after deleting the active installed theme', () => {
+    addInstalledTheme(INSTALLED_THEME);
+    setActiveThemeId(INSTALLED_THEME.id);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    act(() => root.render(
+      <Baseboard
+        items={[]}
+        onReattach={() => {}}
+        defaultThemeId={KIMBIE_DARK}
+      />,
+    ));
+    act(() => container.querySelector<HTMLButtonElement>('[data-open-settings]')?.click());
+
+    const trigger = document.querySelector<HTMLButtonElement>('[aria-label="Theme: Review Installed"]');
+    expect(trigger).not.toBeNull();
+    act(() => trigger?.click());
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Delete Review Installed"]')?.click());
+
+    expect(getActiveThemeId()).toBe(KIMBIE_DARK);
+    expect(document.querySelector('[aria-label="Theme: Kimbie Dark"]')).not.toBeNull();
   });
 });

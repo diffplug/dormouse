@@ -35,13 +35,15 @@ export interface BaseboardProps {
   items: DooredItem[];
   onReattach: (item: DooredItem) => void;
   notice?: ReactNode;
+  /** Host fallback used by the Settings theme picker. */
+  defaultThemeId?: string;
   /** A visible Door received a primary-button press (drag-out): the item + the press
    *  point, so the Wall can start LathHost's threshold-gated external drag. Absent
    *  (constrained embedders without a Wall) leaves Doors click-only. */
   onDoorDragStart?: (item: DooredItem, press: { clientX: number; clientY: number }) => void;
 }
 
-export function Baseboard({ items, onReattach, notice, onDoorDragStart }: BaseboardProps) {
+export function Baseboard({ items, onReattach, notice, defaultThemeId, onDoorDragStart }: BaseboardProps) {
   const { elements: doorElements, bumpVersion } = useContext(DoorElementsContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const speechStates = useSyncExternalStore(subscribeToAlertSpeech, getAlertSpeechSnapshot);
@@ -320,7 +322,12 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         </div>
       </div>
 
-      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsDialog
+          defaultThemeId={defaultThemeId}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -199,8 +199,11 @@ playground navbar — carries no theme control.
   `useRestoredTheme()` hook in `lib/src/lib/themes/use-restored-theme.ts` for
   the playground pages. It applies the theme at render init and repeats after
   commit, because React Router document hydration can reconcile the render-time
-  `body.style` writes away. `restorePocketTheme()` passes itself as the hook's
-  `restore` argument so Pocket layers its browser-chrome sync
+  `body.style` writes away. A host with a baseboard also passes that same
+  `defaultThemeId` through `Wall` and `Baseboard` to the Settings picker, so
+  deleting the active installed theme returns to the host fallback rather than
+  the first bundle. `restorePocketTheme()` passes itself as the hook's `restore`
+  argument so Pocket layers its browser-chrome sync
   (`color-scheme`, `meta[name="theme-color"]`) onto the same lifecycle.
 - The two `/playground/pocket` marketing mounts keep the free-floating
   `compact` picker: those pages render a mobile prototype with no baseboard, so
