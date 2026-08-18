@@ -16,6 +16,7 @@
 
 import { API_ROUTES, type HostEnrollResponse } from 'server-lib-common';
 import { loadJson, removeJson, saveJson } from '../../lib/local-json-store';
+import { ENROLLMENT_KEY } from './store';
 
 export interface HostEnrollment {
   /** Origin the Server is reachable at, e.g. `https://dormouse.tailnet.ts.net`. */
@@ -29,8 +30,7 @@ export interface HostEnrollment {
   rpId: string;
 }
 
-/** Single store key holding the whole enrollment blob. */
-export const ENROLLMENT_KEY = 'dormouse.remote-host.enrollment';
+export { ENROLLMENT_KEY } from './store';
 
 function isEnrollment(value: unknown): value is HostEnrollment {
   if (!value || typeof value !== 'object') return false;

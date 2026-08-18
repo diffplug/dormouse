@@ -123,20 +123,25 @@ function remoteHostStatus(): RemoteHostConsoleStatus {
 export function installRemoteHostConsoleHook(): void {
   // A host that can show several webviews arbitrates which one is the Host.
   // Start un-owned so two webviews racing to mount cannot both activate before
-  // the first lease answer arrives.
-  const claimSingleton = getPlatform().claimSingleton;
-  if (claimSingleton) {
+  // the first lease answer arrives, and let the grant do the activating.
+  // Called through the platform object, never a detached reference — the
+  // adapter's methods are `this`-bound to their message channel.
+  const platform = getPlatform();
+  if (platform.claimSingleton) {
     owned = false;
-    claimSingleton('remote-host', setRemoteHostOwnership);
+    platform.claimSingleton('remote-host', setRemoteHostOwnership);
+  } else {
+    activateRemoteHost();
   }
-  activateRemoteHost();
   const target = globalThis as unknown as { dormouseRemoteHost?: unknown };
   if (target.dormouseRemoteHost) return;
   target.dormouseRemoteHost = {
     async enroll(serverUrl: string, password: string, label: string) {
       const enrollment = await enrollHost(serverUrl, password, label);
       stopRemoteHost();
-      current = startFromEnrollment(enrollment);
+      // Enrolling does not override the lease: a webview that is not the holder
+      // persists the credentials and leaves starting to whichever one is.
+      if (owned) current = startFromEnrollment(enrollment);
       return { hostId: enrollment.hostId, serverUrl: enrollment.serverUrl };
     },
     status: remoteHostStatus,

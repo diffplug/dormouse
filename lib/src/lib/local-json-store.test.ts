@@ -1,14 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadJson, removeJson, saveJson, setJsonStoreBackend } from './local-json-store';
 
+/** A Map-backed `Storage` surface, usable as a stub or as a claimed backend. */
+function memoryStore() {
+  const map = new Map<string, string>();
+  return {
+    map,
+    getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
+    setItem: (k: string, v: string) => void map.set(k, v),
+    removeItem: (k: string) => void map.delete(k),
+  };
+}
+
 function stubLocalStorage(): Map<string, string> {
-  const store = new Map<string, string>();
-  vi.stubGlobal('localStorage', {
-    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
-    setItem: (k: string, v: string) => store.set(k, v),
-    removeItem: (k: string) => store.delete(k),
-  });
-  return store;
+  const backend = memoryStore();
+  vi.stubGlobal('localStorage', backend);
+  return backend.map;
 }
 
 interface Widget {
@@ -100,24 +107,11 @@ describe('local-json-store', () => {
   });
 
   describe('prefix-claimed backends', () => {
-    function fakeBackend() {
-      const map = new Map<string, string>();
-      return {
-        map,
-        getItem: (key: string) => map.get(key) ?? null,
-        setItem: (key: string, value: string) => void map.set(key, value),
-        removeItem: (key: string) => void map.delete(key),
-      };
-    }
-
-    afterEach(() => {
-      setJsonStoreBackend('a.', null);
-      setJsonStoreBackend('a.b.', null);
-    });
+    afterEach(() => setJsonStoreBackend('a.', null));
 
     it('routes a claimed prefix to its backend and leaves other keys on localStorage', () => {
       const local = stubLocalStorage();
-      const backend = fakeBackend();
+      const backend = memoryStore();
       setJsonStoreBackend('a.', backend);
 
       saveJson('a.one', { id: 'w1' });
@@ -134,24 +128,9 @@ describe('local-json-store', () => {
       expect(loadJson<Widget, null>('other.two', null, isWidget)).toEqual({ id: 'w2' });
     });
 
-    it('prefers the longest matching prefix', () => {
-      stubLocalStorage();
-      const outer = fakeBackend();
-      const inner = fakeBackend();
-      setJsonStoreBackend('a.', outer);
-      setJsonStoreBackend('a.b.', inner);
-
-      saveJson('a.b.key', 1);
-      saveJson('a.key', 2);
-
-      expect(inner.map.has('a.b.key')).toBe(true);
-      expect(outer.map.has('a.b.key')).toBe(false);
-      expect(outer.map.has('a.key')).toBe(true);
-    });
-
     it('releases a claim back to localStorage', () => {
       const local = stubLocalStorage();
-      const backend = fakeBackend();
+      const backend = memoryStore();
       setJsonStoreBackend('a.', backend);
       setJsonStoreBackend('a.', null);
 
@@ -163,7 +142,7 @@ describe('local-json-store', () => {
 
     it('removeJson deletes through the claimed backend', () => {
       stubLocalStorage();
-      const backend = fakeBackend();
+      const backend = memoryStore();
       setJsonStoreBackend('a.', backend);
       saveJson('a.one', { id: 'w1' });
 

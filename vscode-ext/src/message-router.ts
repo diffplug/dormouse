@@ -45,26 +45,31 @@ const globalOwnedPtyIds = new Set<string>();
  */
 interface SingletonClaimant {
   wants: Set<string>;
-  holds: Set<string>;
   notify(name: string, held: boolean): void;
 }
 const singletonClaimants = new Set<SingletonClaimant>();
+/** Who currently holds each role — the one place the answer is stored. */
+const singletonHolders = new Map<string, SingletonClaimant>();
 
 function electSingleton(name: string): void {
-  const holder = [...singletonClaimants].find((c) => c.holds.has(name));
-  if (holder) return;
-  const next = [...singletonClaimants].find((c) => c.wants.has(name));
-  if (!next) return;
-  next.holds.add(name);
-  next.notify(name, true);
+  let holder = singletonHolders.get(name);
+  if (!holder) {
+    holder = [...singletonClaimants].find((claimant) => claimant.wants.has(name));
+    if (!holder) return;
+    singletonHolders.set(name, holder);
+  }
+  // Idempotent: re-claiming (a webview remounting) re-answers the holder.
+  holder.notify(name, true);
 }
 
 function releaseSingletons(claimant: SingletonClaimant): void {
-  const released = [...claimant.holds];
-  claimant.holds.clear();
   claimant.wants.clear();
   singletonClaimants.delete(claimant);
-  for (const name of released) electSingleton(name);
+  for (const [name, holder] of singletonHolders) {
+    if (holder !== claimant) continue;
+    singletonHolders.delete(name);
+    electSingleton(name);
+  }
 }
 interface ActiveRouter {
   flushSessionSave(timeoutMs?: number): Promise<void>;
@@ -209,7 +214,6 @@ export function attachRouter(
   // This webview's stake in the window-wide single-instance roles.
   const claimant: SingletonClaimant = {
     wants: new Set<string>(),
-    holds: new Set<string>(),
     notify: (name, held) =>
       void post({ type: 'singleton:lease', name, held } satisfies ExtensionMessage),
   };
@@ -538,21 +542,17 @@ export function attachRouter(
         break;
       case 'singleton:claim':
         claimant.wants.add(msg.name);
-        if (claimant.holds.has(msg.name)) claimant.notify(msg.name, true);
-        else electSingleton(msg.name);
+        electSingleton(msg.name);
         break;
       case 'store:read':
         // The Host's enrollment + ACL live in extension-host storage, not in
         // webview localStorage (remote-host-store.ts explains why). Both sides
         // gate on the key prefix.
-        readStore(typeof msg.prefix === 'string' ? msg.prefix : '').then(
-          (entries) => post({
+        readStore(typeof msg.prefix === 'string' ? msg.prefix : '')
+          .catch(() => ({}))
+          .then((entries) => post({
             type: 'store:entries', requestId: msg.requestId, entries,
-          } satisfies ExtensionMessage),
-          () => post({
-            type: 'store:entries', requestId: msg.requestId, entries: {},
-          } satisfies ExtensionMessage),
-        );
+          } satisfies ExtensionMessage));
         break;
       case 'store:write':
         void writeStore(msg.key, msg.value);

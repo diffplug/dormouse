@@ -32,7 +32,7 @@ initAlertStateReceiver();
 // immediately and keep localStorage.
 Promise.all([
   resumeOrRestore(platform),
-  platform.hydrateScopedStore?.(REMOTE_HOST_STORE_PREFIX) ?? Promise.resolve(),
+  platform.hydrateScopedStore?.(REMOTE_HOST_STORE_PREFIX),
 ]).then(([result]) => {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

@@ -1,16 +1,18 @@
 import * as vscode from 'vscode';
 
+import * as path from 'path';
+import * as fs from 'fs';
+
+import { randomBytes } from 'crypto';
+import { HOST_MESSAGE_TOKEN_GLOBAL } from '../../lib/src/lib/vscode-message-token';
+import { RECOVERY_COMMANDS_GLOBAL } from '../../lib/src/lib/vscode-recovery-global';
+
 /**
  * Remote-server `connect-src` sources, substituted by esbuild at build time
  * (`scripts/esbuild.mjs`). Declared rather than imported so the value is a
  * literal in the bundle and cannot be changed at runtime.
  */
 declare const __DORMOUSE_REMOTE_CONNECT_SRC__: string;
-import * as path from 'path';
-import * as fs from 'fs';
-import { randomBytes } from 'crypto';
-import { HOST_MESSAGE_TOKEN_GLOBAL } from '../../lib/src/lib/vscode-message-token';
-import { RECOVERY_COMMANDS_GLOBAL } from '../../lib/src/lib/vscode-recovery-global';
 
 function serializeForInlineScript(value: unknown): string {
   return JSON.stringify(value ?? null)

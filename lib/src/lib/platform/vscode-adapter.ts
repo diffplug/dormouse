@@ -31,6 +31,7 @@ export class VSCodeAdapter implements PlatformAdapter {
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private watchedCommandHandlers = new Set<(names: string[]) => void>();
   private alertSettingsHandlers = new Set<(settings: AlertSettings) => void>();
+  private singletonHandlers = new Map<string, (held: boolean) => void>();
 
   constructor() {
     this.vscode = acquireVsCodeApi();
@@ -152,6 +153,8 @@ export class VSCodeAdapter implements PlatformAdapter {
             respond,
           },
         }));
+      } else if (msg.type === 'singleton:lease') {
+        this.singletonHandlers.get(msg.name)?.(!!msg.held);
       }
     });
   }
@@ -199,11 +202,11 @@ export class VSCodeAdapter implements PlatformAdapter {
    * the Host to another open one rather than dropping it until reload.
    */
   claimSingleton(name: string, onChange: (held: boolean) => void): void {
-    window.addEventListener('message', (event: MessageEvent) => {
-      if (!isHostMessage(event.data, this.hostMessageToken)) return;
-      const msg = event.data;
-      if (msg.type === 'singleton:lease' && msg.name === name) onChange(!!msg.held);
-    });
+    // One entry per role, dispatched from the constructor's authenticated
+    // listener: re-claiming (a React effect remounting, StrictMode's double
+    // mount) replaces the handler instead of stacking another listener on the
+    // busiest message path in the app.
+    this.singletonHandlers.set(name, onChange);
     this.vscode.postMessage({ type: 'singleton:claim', name });
   }
 

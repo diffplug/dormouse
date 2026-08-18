@@ -257,6 +257,8 @@ Source of truth: `vscode-ext/src/remote-host-store.ts`, `lib/src/lib/platform/vs
 
 On the webview side `activation.ts` starts un-owned whenever the adapter offers `claimSingleton`, so two webviews racing to mount cannot both activate before the first answer arrives. Adapters without the hook (standalone, the website) are single-instance and stay owned from the start.
 
+**Scope of the lease.** It is per-window, because the extension host is per-window — but the enrollment it guards lives in `SecretStorage`/`globalState`, which are machine-wide. Two VS Code windows each showing a Dormouse view therefore elect one holder *each*, and the relay displaces whichever connected first. The lease removes the multi-webview case, not the multi-window one; a cross-window lease would have to be arbitrated on shared state rather than in extension-host memory. Until then the server remains the final arbiter, which is correct but noisier than it should be.
+
 Source of truth: the `SingletonClaimant` arbiter in `vscode-ext/src/message-router.ts`, `PlatformAdapter.claimSingleton`, `setRemoteHostOwnership` in `lib/src/remote/host/activation.ts`, tested in `lib/src/remote/host/activation.test.ts`.
 
 **Lifetime.** The Host lives as long as a Dormouse webview exists in the window. `retainContextWhenHidden: true` is set on both hosting modes, so hiding the panel keeps it connected; only disposing every Dormouse view, or closing the window, takes it offline.

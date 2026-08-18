@@ -57,11 +57,24 @@ async function freshModule() {
 beforeEach(() => {
   started.length = 0;
   claimSingleton = undefined;
+  // The console hook lives on globalThis and outlives `vi.resetModules()`;
+  // leaving it set would make the next test call the previous module's closure.
+  delete (globalThis as { dormouseRemoteHost?: unknown }).dormouseRemoteHost;
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+async function installWithLease() {
+  let grant!: (held: boolean) => void;
+  claimSingleton = (_name, onChange) => {
+    grant = onChange;
+  };
+  const mod = await freshModule();
+  mod.installRemoteHostConsoleHook();
+  return { mod, grant: (held: boolean) => grant(held) };
+}
 
 describe('remote host activation lease', () => {
   it('activates immediately on a host with no lease (standalone)', async () => {
@@ -71,45 +84,32 @@ describe('remote host activation lease', () => {
   });
 
   it('waits for the lease on a host that arbitrates', async () => {
-    let grant: ((held: boolean) => void) | null = null;
-    claimSingleton = (_name, onChange) => {
-      grant = onChange;
-    };
-
-    const mod = await freshModule();
-    mod.installRemoteHostConsoleHook();
+    const { grant } = await installWithLease();
 
     // Mount alone must not start a Host — the answer has not arrived yet.
     expect(started).toHaveLength(0);
 
-    grant!(true);
+    grant(true);
     expect(started).toHaveLength(1);
     expect(started[0].stopped).toBe(false);
   });
 
   it('stops when the lease is revoked and restarts when re-granted', async () => {
-    let grant: ((held: boolean) => void) | null = null;
-    claimSingleton = (_name, onChange) => {
-      grant = onChange;
-    };
-
-    const mod = await freshModule();
-    mod.installRemoteHostConsoleHook();
-    grant!(true);
+    const { grant } = await installWithLease();
+    grant(true);
     expect(started).toHaveLength(1);
 
-    grant!(false);
+    grant(false);
     expect(started[0].stopped).toBe(true);
 
-    grant!(true);
+    grant(true);
     expect(started).toHaveLength(2);
   });
 
   it('a repeated grant does not start a second Host', async () => {
-    const mod = await freshModule();
-    mod.installRemoteHostConsoleHook();
-    mod.setRemoteHostOwnership(true);
-    mod.setRemoteHostOwnership(true);
+    const { grant } = await installWithLease();
+    grant(true);
+    grant(true);
     expect(started).toHaveLength(1);
   });
 
@@ -121,5 +121,15 @@ describe('remote host activation lease', () => {
     mod.installRemoteHostConsoleHook();
 
     expect(names).toEqual(['remote-host']);
+  });
+
+  it('enrolling from a non-holder does not start a competing Host', async () => {
+    await installWithLease();
+    const hook = (globalThis as { dormouseRemoteHost?: { enroll: (a: string, b: string, c: string) => Promise<unknown> } })
+      .dormouseRemoteHost!;
+
+    await hook.enroll('https://relay.example.ts.net', 'password', 'Laptop');
+
+    expect(started).toHaveLength(0);
   });
 });

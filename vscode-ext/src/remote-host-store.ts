@@ -19,11 +19,12 @@
 
 import type * as vscode from 'vscode';
 
-/** Mirrors `lib/src/remote/host/store.ts`; both sides gate on it. */
-export const REMOTE_HOST_STORE_PREFIX = 'dormouse.remote-host.';
+// Imported, not mirrored: a prefix that drifted between the two sides would
+// break the gate in one direction only. `store.ts` is dependency-free so it
+// costs the extension bundle nothing.
+import { ENROLLMENT_KEY, REMOTE_HOST_STORE_PREFIX } from '../../lib/src/remote/host/store';
 
-/** Mirrors `lib/src/remote/host/enrollment.ts`; the one secret-backed key. */
-const ENROLLMENT_KEY = 'dormouse.remote-host.enrollment';
+export { REMOTE_HOST_STORE_PREFIX };
 
 /**
  * Enough for an enrollment blob or a sizable ACL, small enough that a
@@ -50,15 +51,18 @@ export async function readStore(prefix: string): Promise<Record<string, string>>
   if (!context || !allowed(prefix)) return {};
   const entries: Record<string, string> = {};
 
-  const enrollment = await context.secrets.get(ENROLLMENT_KEY);
-  if (enrollment !== undefined && ENROLLMENT_KEY.startsWith(prefix)) {
-    entries[ENROLLMENT_KEY] = enrollment;
-  }
-
+  // `allowed(prefix)` above already proved every in-range key is in namespace.
   for (const key of context.globalState.keys()) {
-    if (!allowed(key) || !key.startsWith(prefix) || key === ENROLLMENT_KEY) continue;
+    if (!key.startsWith(prefix) || key === ENROLLMENT_KEY) continue;
     const value = context.globalState.get<string>(key);
     if (typeof value === 'string') entries[key] = value;
+  }
+
+  // Guard before the read: a narrower prefix must not pay for a keychain hit
+  // whose result it would discard.
+  if (ENROLLMENT_KEY.startsWith(prefix)) {
+    const enrollment = await context.secrets.get(ENROLLMENT_KEY);
+    if (enrollment !== undefined) entries[ENROLLMENT_KEY] = enrollment;
   }
 
   return entries;

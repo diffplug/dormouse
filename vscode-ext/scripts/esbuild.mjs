@@ -13,13 +13,9 @@
 
 import * as esbuild from 'esbuild';
 
-/** The remote-server sources baked into the published extension. */
-export const DEFAULT_REMOTE_CONNECT_SRC = 'https://*.dormouse.sh wss://*.dormouse.sh';
+import { resolveRemoteConnectSrc } from '../../scripts/csp-defaults.mjs';
 
-const remoteSrc = process.env.DORMOUSE_REMOTE_CONNECT_SRC?.trim() || DEFAULT_REMOTE_CONNECT_SRC;
-if (remoteSrc !== DEFAULT_REMOTE_CONNECT_SRC) {
-  console.error(`[esbuild] webview connect-src remote sources overridden: ${remoteSrc}`);
-}
+const remoteSrc = resolveRemoteConnectSrc(process.env, 'esbuild');
 
 const watch = process.argv.includes('--watch');
 
@@ -41,7 +37,6 @@ const builds = [
     ...common,
     entryPoints: ['src/pty-host.js'],
     outfile: 'dist/pty-host.js',
-    external: ['node-pty'],
   },
 ];
 

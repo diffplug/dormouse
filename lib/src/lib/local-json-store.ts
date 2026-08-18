@@ -29,8 +29,8 @@ export interface JsonStoreBackend {
   removeItem(key: string): void;
 }
 
-/** Prefix claims, longest-first so a more specific prefix wins. */
-const backends: Array<{ prefix: string; backend: JsonStoreBackend }> = [];
+/** Claimed prefixes. Claims must not overlap; the first match wins. */
+const backends = new Map<string, JsonStoreBackend>();
 
 /**
  * Route every key starting with `prefix` to `backend`. Pass `null` to release
@@ -38,17 +38,13 @@ const backends: Array<{ prefix: string; backend: JsonStoreBackend }> = [];
  * every access, so an async store has to be hydrated into memory first.
  */
 export function setJsonStoreBackend(prefix: string, backend: JsonStoreBackend | null): void {
-  const at = backends.findIndex((entry) => entry.prefix === prefix);
-  if (at !== -1) backends.splice(at, 1);
-  if (backend) {
-    backends.push({ prefix, backend });
-    backends.sort((a, b) => b.prefix.length - a.prefix.length);
-  }
+  if (backend) backends.set(prefix, backend);
+  else backends.delete(prefix);
 }
 
 function backendFor(key: string): JsonStoreBackend | undefined {
-  for (const entry of backends) {
-    if (key.startsWith(entry.prefix)) return entry.backend;
+  for (const [prefix, backend] of backends) {
+    if (key.startsWith(prefix)) return backend;
   }
   return globalThis.localStorage as JsonStoreBackend | undefined;
 }

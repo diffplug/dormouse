@@ -1,7 +1,7 @@
 {
   "name": "dormouse",
-  "displayName": "Dormouse \u2014 Terminal Multiplexer",
-  "description": "A persistent multitasking terminal \u2014 tmux keybindings, mouse support, and a built-in alert system that buzzes you when builds, agents, or scripts finish.",
+  "displayName": "Dormouse — Terminal Multiplexer",
+  "description": "A persistent multitasking terminal — tmux keybindings, mouse support, and a built-in alert system that buzzes you when builds, agents, or scripts finish.",
   "version": "1.1.0",
   "publisher": "diffplug",
   "license": "FSL-1.1-MIT",
@@ -106,7 +106,7 @@
     "test": "pnpm typecheck",
     "build": "pnpm stage:dor-cli && node scripts/esbuild.mjs && cp -RL node_modules/node-pty dist/node-pty && rm -rf dist/shell-integration && cp -RL ../standalone/sidecar/shell-integration dist/shell-integration",
     "stage:dor-cli": "pnpm --filter dor build && node ../scripts/stage-dor-cli.mjs vscode-ext/dor-cli",
-    "watch": "pnpm build --watch",
+    "watch": "pnpm stage:dor-cli && node scripts/esbuild.mjs --watch",
     "package": "vsce package --no-dependencies --out dormouse.vsix",
     "dogfood": "node ../scripts/dogfood-vscode.mjs",
     "publish:marketplace": "vsce publish --no-dependencies",
