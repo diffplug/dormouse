@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { userEvent, within } from 'storybook/test';
 import type { DormouseTheme } from '../lib/themes';
+import { OVERLAY_MAX_HEIGHT_VAR } from '../components/design';
 import { ThemePicker } from '../components/ThemePicker';
 
 /**
@@ -14,9 +15,12 @@ import { ThemePicker } from '../components/ThemePicker';
  * `right-0` from the trigger, so it needs room to its left, and the open list
  * needs room beneath.
  */
-function PickerStory() {
+function PickerStory({ maxHeight }: { maxHeight?: string }) {
   return (
-    <div className="flex h-[28rem] items-start justify-end bg-app-bg p-4">
+    <div
+      className="flex h-[28rem] items-start justify-end bg-app-bg p-4"
+      style={maxHeight ? ({ [OVERLAY_MAX_HEIGHT_VAR]: maxHeight } as React.CSSProperties) : undefined}
+    >
       <ThemePicker variant="compact" />
     </div>
   );
@@ -70,6 +74,24 @@ export const Open: Story = {
  * pinned below it rather than being pushed off.
  */
 export const OpenWithInstalledThemes: Story = {
+  parameters: {
+    primedInstalledThemes: Array.from({ length: 10 }, (_, i) => installedTheme(i)),
+  },
+  play: openMenu,
+};
+
+/**
+ * The short-viewport case, and the one this component's layout exists for: the
+ * panel is capped shorter than its content, so the theme list has to give up
+ * height while the footer actions stay on screen. Pushing the footer off is the
+ * failure mode.
+ *
+ * Narrowed through `OVERLAY_MAX_HEIGHT_VAR` rather than by shrinking the
+ * browser, because Chromatic controls snapshot width and never height — a
+ * `dvh`-based cap would render at full height here and prove nothing.
+ */
+export const OpenOnShortViewport: Story = {
+  args: { maxHeight: '260px' },
   parameters: {
     primedInstalledThemes: Array.from({ length: 10 }, (_, i) => installedTheme(i)),
   },

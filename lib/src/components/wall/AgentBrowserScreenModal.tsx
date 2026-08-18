@@ -27,7 +27,14 @@ import {
   LockSimpleIcon,
   XIcon,
 } from '@phosphor-icons/react';
-import { ModalCloseButton, ModalFrame, NumericInput, modalActionButton } from '../design';
+import {
+  MODAL_OVERLAY_INSET,
+  modalActionButton,
+  ModalCloseButton,
+  ModalFrame,
+  NumericInput,
+  OVERLAY_MAX_HEIGHT,
+} from '../design';
 import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-browser-screen';
 import { useAgentBrowserScreenSnapshot } from './agent-browser-screen';
 
@@ -198,8 +205,8 @@ export function AgentBrowserScreenModal({
       layer="critical"
       backdrop="strong"
       elevation="modal"
-      overlayClassName="px-4 py-6"
-      className="max-h-[85vh] w-full max-w-[30rem] overflow-y-auto"
+      overlayClassName={MODAL_OVERLAY_INSET}
+      className={`${OVERLAY_MAX_HEIGHT.modal} w-full max-w-[30rem] overflow-y-auto`}
       initialFocusRef={cancelRef}
       onEscape={onClose}
     >

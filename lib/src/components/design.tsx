@@ -142,6 +142,40 @@ export const modalOverlay = tv({
 
 export type ModalOverlayVariants = VariantProps<typeof modalOverlay>;
 
+/**
+ * The inset a modal overlay reserves around its surface. Hoisted because
+ * `OVERLAY_MAX_HEIGHT.modal` below is derived from it — `py-6`, doubled — and
+ * Tailwind needs both as literals, so the pair can only be kept honest by
+ * living side by side.
+ */
+export const MODAL_OVERLAY_INSET = 'px-4 py-6';
+
+/**
+ * The custom property every viewport-bounded overlay reads for its height cap.
+ *
+ * Exists so the bound can be *narrowed* by an ancestor: a story overrides it to
+ * snapshot the short-viewport layout deterministically, which no `dvh` value
+ * can (Chromatic controls snapshot width, never height). Unset everywhere in
+ * the app, so each entry below falls through to the real viewport.
+ */
+export const OVERLAY_MAX_HEIGHT_VAR = '--overlay-max-h';
+
+/**
+ * Height caps for things that float over the viewport. One spelling per kind of
+ * inset, rather than the six hand-rolled `vh`/`dvh` literals these replaced.
+ *
+ * `dvh` rather than `vh` so a mobile browser's collapsing chrome counts. Written
+ * as whole literals because Tailwind scans source statically and cannot see a
+ * value assembled from a constant — `design.test.ts` pins `popover` to
+ * `OVERLAY_VIEWPORT_MARGIN_PX` so the two cannot drift.
+ */
+export const OVERLAY_MAX_HEIGHT = {
+  /** A `ModalFrame` surface: the viewport minus `MODAL_OVERLAY_INSET` doubled. */
+  modal: 'max-h-[var(--overlay-max-h,calc(100dvh-3rem))]',
+  /** An anchored popover, matching `clampOverlayPosition`'s viewport margin. */
+  popover: 'max-h-[var(--overlay-max-h,calc(100dvh-24px))]',
+} as const;
+
 export const modalSurface = tv({
   base: 'rounded-lg border border-border bg-surface-raised font-mono text-foreground shadow-lg',
   variants: {

@@ -218,7 +218,8 @@ playground navbar — carries no theme control.
   the key first.
 - The collapsed trigger shows the active theme's `ThemeSwatch` beside its name,
   so it reads as the same control as the row it stands in for.
-- **No `window.confirm` anywhere in the theme UI.** The standalone webview
+- **No `window.confirm` here** — no native dialog anywhere, see `DESIGN.md` →
+  "Don't", since the cause is the webview rather than the theme UI. The standalone webview
   implements no confirm panel, so WebKit resolves the call `false` without
   showing anything — an uninstall gated on it silently did nothing on the
   desktop app. Uninstalling an installed theme (the row's `X`, and the store
@@ -226,13 +227,14 @@ playground navbar — carries no theme control.
   control in the same dialog; re-installing is one click away in the menu
   footer. Removing the *active* installed theme falls back through
   `defaultThemeId`, which the host threads down for that purpose.
-- Heights follow the viewport, never a fixed pixel budget: the Settings dialog
-  caps at `calc(100dvh - 3rem)` — exactly the overlay's own `py-6` inset — and
-  the menu panel at `calc(100dvh - 24px)`, matching
-  `OVERLAY_VIEWPORT_MARGIN_PX`. The list's `320px` is a preferred *ceiling* on a
-  tall screen, not a floor: it is `flex-1 min-h-0`, so the panel cap shrinks it
-  on a short one while the footer actions stay put. `dvh` rather than `vh` so a
-  mobile browser's collapsing chrome is accounted for.
+- Heights follow the viewport, never a fixed pixel budget. Both surfaces take
+  their cap from `OVERLAY_MAX_HEIGHT` in `lib/src/components/design.tsx` — the
+  dialog uses `.modal`, the dropdown `.popover` — rather than spelling a `dvh`
+  value of their own (see DESIGN.md → Cards / Containers). The list's `max-h-80`
+  is a preferred *ceiling* on a tall screen, not a floor: it is `flex-1
+  min-h-0`, so the panel cap shrinks it on a short one while the footer actions
+  stay put. That geometry is pinned by the `OpenOnShortViewport` story rather
+  than a unit test, since jsdom runs no layout.
 
 Storybook simulates VSCode themes through `lib/.storybook/themes.ts`. It must
 also run bundled theme vars through `completeThemeVars()` (with the same host

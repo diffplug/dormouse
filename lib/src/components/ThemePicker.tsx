@@ -14,8 +14,8 @@ import { ThemeSwatch } from './theme-picker/ThemeSwatch';
 import { ThemeStoreDialog } from './theme-picker/ThemeStoreDialog';
 import { useCloseOnOutsideAndEscape } from './theme-picker/use-close-on-outside';
 import { themePickerStyles as styles } from './theme-picker/styles';
-import { chromeButton, modalIconButton, useMeasuredElementRect } from './design';
-import { clampOverlayPosition, OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
+import { chromeButton, modalIconButton, OVERLAY_MAX_HEIGHT, useMeasuredElementRect } from './design';
+import { clampOverlayPosition } from '../lib/ui-geometry';
 
 /**
  * `compact` is the free-floating trigger used by the website's Pocket
@@ -43,11 +43,6 @@ const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLa
 /** Menu width. Mirrored by the `w-[280px]` literal on the non-dialog variant,
  *  which Tailwind must be able to scan statically. */
 const MENU_WIDTH_PX = 280;
-const MENU_MAX_HEIGHT = `calc(100dvh - ${OVERLAY_VIEWPORT_MARGIN_PX * 2}px)`;
-
-/** Preferred cap on the scrolling list. A ceiling on a tall screen, never a
- *  floor: the panel's viewport cap shrinks it further on a short one. */
-const MENU_LIST_MAX_PX = 320;
 
 export function ThemePicker({
   variant,
@@ -113,14 +108,10 @@ export function ThemePicker({
 
   const deleteTheme = (theme: DormouseTheme) => {
     if (theme.origin.kind !== 'installed') return;
-
     removeInstalledTheme(theme.id);
-    setThemes(getAllThemes());
-
-    if (theme.id === activeId) {
-      const fallback = restoreActiveTheme(defaultThemeId);
-      if (fallback) setActiveId(fallback.id);
-    }
+    // Re-resolves the active theme through `defaultThemeId`, which is what
+    // uninstalling the *active* theme needs; a no-op re-apply otherwise.
+    refreshThemes();
   };
 
   // Anchor the dialog menu off the measured trigger rect: the Settings dialog
@@ -129,17 +120,13 @@ export function ThemePicker({
   // ancestor sets `transform`. The menu's own rect feeds the viewport clamp, so
   // a long theme list can't run off the bottom of a short window; it is 0 on
   // the first pass, which is why the menu stays hidden until measured. The
-  // panel itself is viewport-bounded; its flexing theme list scrolls while the
-  // footer actions stay visible.
+  // height cap is `OVERLAY_MAX_HEIGHT.popover` on the panel below, not part of
+  // this style.
   const triggerRect = useMeasuredElementRect(inDialog && open ? triggerEl : null);
   const menuRect = useMeasuredElementRect(inDialog && open ? menuEl : null);
-  const viewportBoundedPanelStyle: CSSProperties = {
-    ...styles.panel,
-    maxHeight: MENU_MAX_HEIGHT,
-  };
   const menuStyle: CSSProperties = inDialog
     ? {
-        ...viewportBoundedPanelStyle,
+        ...styles.panel,
         width: MENU_WIDTH_PX,
         ...(triggerRect
           ? clampOverlayPosition({
@@ -150,7 +137,7 @@ export function ThemePicker({
             })
           : { position: 'fixed', visibility: 'hidden' }),
       }
-    : viewportBoundedPanelStyle;
+    : styles.panel;
 
   return (
     <div ref={rootRef} className="relative flex items-center">
@@ -178,12 +165,14 @@ export function ThemePicker({
           ref={setMenuEl}
           role="menu"
           aria-label="Select theme"
-          className={`z-50 flex flex-col overflow-hidden rounded border font-mono shadow-2xl ${
+          className={`z-50 flex flex-col overflow-hidden rounded border font-mono shadow-2xl ${OVERLAY_MAX_HEIGHT.popover} ${
             inDialog ? '' : 'absolute right-0 top-full mt-1 w-[280px]'
           }`}
           style={menuStyle}
         >
-          <div className="min-h-0 flex-1 overflow-y-auto py-1" style={{ maxHeight: MENU_LIST_MAX_PX }}>
+          {/* max-h-80 is a ceiling on a tall screen, never a floor: the
+              panel's own viewport cap shrinks this further on a short one. */}
+          <div className="max-h-80 min-h-0 flex-1 overflow-y-auto py-1">
             {themes.map((theme) => {
               const isActive = theme.id === activeId;
               const isInstalled = theme.origin.kind === 'installed';

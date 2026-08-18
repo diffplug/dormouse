@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
+  MODAL_OVERLAY_INSET,
   ModalCloseButton,
   ModalFrame,
+  OVERLAY_MAX_HEIGHT,
   NumericInput,
   OnOffSwitch,
   Shortcut,
@@ -85,8 +87,8 @@ export function SettingsDialog({
       titleId={TITLE_ID}
       layer="app"
       padding="spacious"
-      overlayClassName="px-4 py-6"
-      className="max-h-[calc(100dvh-3rem)] w-full max-w-[26rem] overflow-y-auto"
+      overlayClassName={MODAL_OVERLAY_INSET}
+      className={`${OVERLAY_MAX_HEIGHT.modal} w-full max-w-[26rem] overflow-y-auto`}
       initialFocusRef={closeRef}
       // ModalFrame's Escape handler is a capture-phase window listener that
       // stops propagation, so the picker's own Escape never fires. Route it:

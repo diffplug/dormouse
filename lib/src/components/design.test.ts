@@ -9,7 +9,11 @@ import {
   PANE_SELECTION_RING_RADIUS_PX,
   FOCUS_MOTION_MS,
   HEADER_PALETTE_TRANSITION_CLASS,
+  MODAL_OVERLAY_INSET,
+  OVERLAY_MAX_HEIGHT,
+  OVERLAY_MAX_HEIGHT_VAR,
 } from './design';
+import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 
 // The terminal radius is consumed by SVG path math (px), Tailwind classes,
 // and inline border-radius styles. They are all derived from one source —
@@ -48,6 +52,30 @@ describe('terminal radius constants', () => {
 // ring's travel. Tailwind can't build a class from a JS constant, so the class
 // is a hand-written literal — this ties it back to FOCUS_MOTION_MS and the house
 // curve so the two can't silently drift apart.
+// Same reason as above: Tailwind scans source statically, so the viewport caps
+// are hand-written literals. These tie them back to the constants they are
+// derived from — `clampOverlayPosition`'s margin, and the modal overlay's own
+// inset — so a change to either can't silently leave the cap behind.
+describe('viewport-bounded overlay caps', () => {
+  it('the popover cap matches clampOverlayPosition\'s viewport margin', () => {
+    expect(OVERLAY_VIEWPORT_MARGIN_PX).toBe(12);
+    expect(OVERLAY_MAX_HEIGHT.popover).toContain(`calc(100dvh-${OVERLAY_VIEWPORT_MARGIN_PX * 2}px)`);
+  });
+
+  it('the modal cap matches the overlay inset it sits inside', () => {
+    // `py-6` is 1.5rem a side, so the surface gives up 3rem of viewport.
+    expect(MODAL_OVERLAY_INSET).toContain('py-6');
+    expect(OVERLAY_MAX_HEIGHT.modal).toContain('calc(100dvh-3rem)');
+  });
+
+  it('both caps are overridable through one custom property', () => {
+    // The escape hatch stories use to snapshot the short-viewport layout.
+    for (const cap of Object.values(OVERLAY_MAX_HEIGHT)) {
+      expect(cap).toContain(`var(${OVERLAY_MAX_HEIGHT_VAR},`);
+    }
+  });
+});
+
 describe('focus-ring motion timing', () => {
   it('header crossfade duration + curve track FOCUS_MOTION_MS', () => {
     expect(FOCUS_MOTION_MS).toBe(220);
