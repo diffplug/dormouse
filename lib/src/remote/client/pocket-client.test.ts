@@ -14,6 +14,7 @@ import {
   SELFHOST_ACCOUNT_ID,
   generateDeviceKeyPair,
   hashPasskeyPublicKey,
+  pushEndpointFingerprint,
   toBase64Url,
   type DeviceKeyPair,
   type PasskeyAssertion,
@@ -97,6 +98,7 @@ function makeFetch(routes: Record<string, (body: unknown) => { status?: number; 
 function memoryStorage(): PocketStorage {
   const passkeys = new Map<string, string>();
   const paired = new Set<string>();
+  let pushEndpoint: string | null = null;
   return {
     getPasskeyPublicKey: (id) => passkeys.get(id) ?? null,
     setPasskeyPublicKey: (id, pk) => void passkeys.set(id, pk),
@@ -104,6 +106,8 @@ function memoryStorage(): PocketStorage {
     isPaired: (hostId) => paired.has(hostId),
     markPaired: (hostId) => void paired.add(hostId),
     unmarkPaired: (hostId) => void paired.delete(hostId),
+    getRegisteredPushEndpoint: () => pushEndpoint,
+    setRegisteredPushEndpoint: (fingerprint) => void (pushEndpoint = fingerprint),
   };
 }
 
@@ -304,6 +308,52 @@ describe('setup + signin', () => {
       '/api/setup/begin': () => ({ status: 401, json: { error: 'invalid setup password' } }),
     });
     await expect(harness.client.setup('wrong', 'Phone')).rejects.toThrow('invalid setup password');
+  });
+});
+
+describe('subscribeToPush', () => {
+  const SUBSCRIPTION = {
+    endpoint: 'https://push.example/original',
+    keys: { p256dh: 'p256dh', auth: 'auth' },
+  };
+  const PUSH_ROUTES = {
+    ...AUTH_ROUTES,
+    '/api/push/challenge': () => ({ json: { challenge: b64uChallenge(3), expiresAt: 1 } }),
+    '/api/push/subscribe': () => ({ json: { subscribedAt: 1, hostIds: ['h1'] } }),
+  };
+
+  /**
+   * A push service may rotate an endpoint on its own, with the VAPID key
+   * unchanged, which leaves every stored row pointing somewhere unreachable
+   * while the browser still reports a valid subscription. Recording what was
+   * registered is the only way the next app open can notice.
+   */
+  it('records the registered delivery address so a later rotation is detectable', async () => {
+    const harness = makeClient(PUSH_ROUTES);
+    await harness.client.setup('pw', 'My Phone');
+    await harness.client.signin();
+    expect(harness.client.registeredPushEndpoint()).toBeNull();
+
+    await harness.client.subscribeToPush('h1', SUBSCRIPTION);
+
+    expect(harness.client.registeredPushEndpoint()).toBe(
+      await pushEndpointFingerprint(SUBSCRIPTION.endpoint),
+    );
+    // A digest, not the address itself — the endpoint is a bearer capability and
+    // equality is all the check needs.
+    expect(harness.client.registeredPushEndpoint()).not.toContain('push.example');
+  });
+
+  it('records nothing when the Server rejected the registration', async () => {
+    const harness = makeClient({
+      ...PUSH_ROUTES,
+      '/api/push/subscribe': () => ({ status: 401, json: { error: 'device signature rejected' } }),
+    });
+    await harness.client.setup('pw', 'My Phone');
+    await harness.client.signin();
+
+    await expect(harness.client.subscribeToPush('h1', SUBSCRIPTION)).rejects.toThrow();
+    expect(harness.client.registeredPushEndpoint()).toBeNull();
   });
 });
 

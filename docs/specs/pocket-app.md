@@ -155,8 +155,9 @@ output by hand.
   useless without a live relay connection, so an offline cache would buy no
   working screens while actively fighting `registerPocketServing`, which
   re-reads `index.html` per request precisely because a rebuild swaps in new
-  content-hashed assets. It handles `push` and `notificationclick`, and nothing
-  else.
+  content-hashed assets. It handles `push` and `notificationclick`, plus
+  `install`/`activate` to take over immediately (`skipWaiting` + `clients.claim`,
+  which cost nothing when there is no cache to migrate), and nothing else.
 - **A push that cannot be parsed still shows a notification.** Subscribing with
   `userVisibleOnly: true` promises the browser that every delivery becomes
   visible; a browser that catches the worker showing none substitutes its own
@@ -284,15 +285,41 @@ stale **Alerts on** claim. Source of truth: `getPushAvailability` in
 `lib/src/remote/pocket-app/App.tsx`.
 
 The row is necessary but not sufficient for **Alerts on**: Pocket also verifies
-that notification permission remains granted and the service-worker scope still
-holds a `PushSubscription` minted for the Server's current VAPID key. A missing
-subscription, revoked permission, or VAPID rotation therefore exposes Enable
-again instead of letting a stale Server row hide the repair path. The Server
-also omits rows registered under an old VAPID key, so repairing one Host after a
-rotation cannot make the other Hosts' old endpoints look current. Source of
-truth: `hasCurrentPushSubscription` in
-`lib/src/remote/client/push-subscribe.ts`, the `vapidPublicKey` field in
+that notification permission remains granted, that the service-worker scope
+still holds a `PushSubscription` minted for the Server's current VAPID key, and
+that it still points at the address that was actually registered. A missing
+subscription, revoked permission, VAPID rotation, or a rotated endpoint
+therefore exposes Enable again instead of letting a stale Server row hide the
+repair path. The Server also omits rows registered under an old VAPID key, so
+repairing one Host after a rotation cannot make the other Hosts' old endpoints
+look current.
+
+The endpoint check exists because a push service may rotate an address on its
+own, with the VAPID key unchanged. The subscription stays valid and correctly
+keyed, so every other check passes while every stored row points somewhere
+unreachable. Pocket therefore records a SHA-256 digest of the address each time
+the Server accepts a registration (`dormouse-pocket:push-endpoint`, beside the
+existing `:passkey:` and `:paired:` keys) and compares it on open. A digest
+rather than the address, because the endpoint is a bearer capability and
+equality is the only question being asked. One key per device, not per Host —
+one service-worker scope holds one subscription, so if it moves, every Host row
+for that device is stale at once. **Absent reads as no opinion, not as a
+mismatch**, so a device that registered before this was recorded — or one whose
+storage was cleared — is not forced to re-register. Source of truth:
+`hasCurrentPushSubscription` in `lib/src/remote/client/push-subscribe.ts`,
+`pushEndpointFingerprint` in `server-lib-common/src/security/push.ts`,
+`PocketClient.subscribeToPush`, the `vapidPublicKey` field in
 `server/src/state.ts`, and the subscriptions read in `server/src/app.ts`.
+
+Detection is all the page can do, and `sw.js` is deliberately not where it
+happens. A `pushsubscriptionchange` handler could reach the device key (it is a
+non-extractable `CryptoKey` in IndexedDB, which a worker can open) but not a
+session token: that lives only in memory on `PocketClient`, is never persisted,
+and is minted solely by `POST /api/signin/finish` behind a fresh WebAuthn
+assertion — and `navigator.credentials` does not exist in a worker. Re-
+registering unattended would need a long-lived credential that
+[remote-security-model.md](./remote-security-model.md) does not grant, so the
+repair is deliberately deferred to the next time the user opens the app.
 
 Registering another Host or retrying that POST reuses the service-worker
 scope's existing `PushSubscription` when its `applicationServerKey` matches the

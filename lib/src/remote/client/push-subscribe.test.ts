@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { pushEndpointFingerprint } from 'server-lib-common';
 
 const getRegistration = vi.fn();
 vi.mock('../pocket-app/service-worker', () => ({
@@ -173,7 +174,7 @@ describe('hasCurrentPushSubscription', () => {
       }),
     );
 
-    await expect(hasCurrentPushSubscription('AQID')).resolves.toBe(true);
+    await expect(hasCurrentPushSubscription('AQID', null)).resolves.toBe(true);
   });
 
   it('rejects a subscription minted for an old VAPID key', async () => {
@@ -184,7 +185,7 @@ describe('hasCurrentPushSubscription', () => {
       }),
     );
 
-    await expect(hasCurrentPushSubscription('AQID')).resolves.toBe(false);
+    await expect(hasCurrentPushSubscription('AQID', null)).resolves.toBe(false);
   });
 
   it('rejects a stored subscription after notification permission is revoked', async () => {
@@ -195,14 +196,42 @@ describe('hasCurrentPushSubscription', () => {
       }),
     );
 
-    await expect(hasCurrentPushSubscription('AQID')).resolves.toBe(false);
+    await expect(hasCurrentPushSubscription('AQID', null)).resolves.toBe(false);
   });
 
   it('rejects a missing browser subscription even if the Server may still hold a row', async () => {
     stubBrowser({ permission: 'granted' });
     getRegistration.mockResolvedValue(registration(null));
 
-    await expect(hasCurrentPushSubscription('AQID')).resolves.toBe(false);
+    await expect(hasCurrentPushSubscription('AQID', null)).resolves.toBe(false);
+  });
+
+  it('rejects an endpoint the push service rotated behind our back', async () => {
+    // The VAPID key still matches and the subscription is perfectly valid — it
+    // just points somewhere new, so every row the Server holds is unreachable.
+    stubBrowser({ permission: 'granted' });
+    getRegistration.mockResolvedValue(
+      registration({
+        endpoint: 'https://push.example/rotated',
+        options: { applicationServerKey: Uint8Array.of(1, 2, 3).buffer },
+      }),
+    );
+    const registered = await pushEndpointFingerprint('https://push.example/original');
+
+    await expect(hasCurrentPushSubscription('AQID', registered)).resolves.toBe(false);
+  });
+
+  it('accepts the endpoint that was actually registered', async () => {
+    stubBrowser({ permission: 'granted' });
+    getRegistration.mockResolvedValue(
+      registration({
+        endpoint: 'https://push.example/original',
+        options: { applicationServerKey: Uint8Array.of(1, 2, 3).buffer },
+      }),
+    );
+    const registered = await pushEndpointFingerprint('https://push.example/original');
+
+    await expect(hasCurrentPushSubscription('AQID', registered)).resolves.toBe(true);
   });
 });
 

@@ -184,7 +184,7 @@ export default function App(): React.ReactElement {
       .getPushConfig()
       .then(async (key) => {
         const subscriptionCurrent =
-          key !== null ? await hasCurrentPushSubscription(key).catch(() => false) : false;
+          key !== null ? await hasCurrentPushSubscription(key, client.registeredPushEndpoint()).catch(() => false) : false;
         if (live) {
           setPushConfig(key === null ? { status: 'disabled' } : { status: 'ready', key });
           setPushSubscriptionCurrent(subscriptionCurrent);
@@ -334,7 +334,7 @@ export default function App(): React.ReactElement {
       try {
         const key = await client.getPushConfig();
         const subscriptionCurrent =
-          key !== null ? await hasCurrentPushSubscription(key).catch(() => false) : false;
+          key !== null ? await hasCurrentPushSubscription(key, client.registeredPushEndpoint()).catch(() => false) : false;
         setPushConfig(key === null ? { status: 'disabled' } : { status: 'ready', key });
         setPushSubscriptionCurrent(subscriptionCurrent);
       } catch (err) {
