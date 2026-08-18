@@ -15,7 +15,7 @@ Each platform adapter wraps a PTY-spawning runtime and a transport channel betwe
 
 Optional members of `PlatformAdapter` are capability flags: absent means "this
 host cannot do it", and the UI hides whatever is not backed by a capability
-rather than branching on which host it is running in. Two are plain booleans
+rather than branching on which host it is running in. Three are plain booleans
 rather than methods:
 
 - `persistsSession?` — absent reads as `true`; standalone sets it `false` (see
@@ -23,6 +23,9 @@ rather than methods:
 - `hostOwnsTheme?` — absent reads as `false`; `VSCodeAdapter` sets it `true`, so
   the Settings dialog hides its theme picker there
   (`docs/specs/theme.md` → "Where the user picks a theme").
+- `hostOwnsShells?` — absent reads as `false`; `VSCodeAdapter` sets it `true`, so
+  the Settings dialog hides its Shell row there in favor of the native
+  QuickPick (`docs/specs/vscode.md` → "Shell selection").
 
 ### Standalone browser-dev harness
 

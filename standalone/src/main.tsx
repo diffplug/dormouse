@@ -3,14 +3,14 @@ import { createRoot } from "react-dom/client";
 import { setPlatform } from "dormouse-lib/lib/platform";
 import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
 import { resumeOrRestore } from "dormouse-lib/lib/reconnect";
-import { setDefaultShellOpts } from "dormouse-lib/lib/shell-defaults";
+import { seedShellStore, type ShellEntry } from "dormouse-lib/lib/shell-store";
 import { restoreActiveTheme } from "dormouse-lib/lib/themes";
 import App from "dormouse-lib/App";
 import "dormouse-lib/index.css";
 import { UpdateBanner } from "./UpdateBanner";
 import { UpdateDebugModal } from "./UpdateDebugModal";
 import { QuitConfirmModalHost } from "./QuitConfirmModal";
-import { AppBar, type ShellEntry } from "./AppBar";
+import { AppBar } from "./AppBar";
 import {
   startUpdateCheck,
   useUpdateState,
@@ -101,11 +101,13 @@ async function bootstrap() {
   initAlertStateReceiver();
   restoreActiveTheme();
 
-  // Fetch app bar data from the active host backend.
+  // Seed the shell store from the active host backend: it restores the
+  // persisted selection and publishes it as the default shell, and it feeds the
+  // Settings dialog's Shell row. Must run before resumeOrRestore/render so the
+  // first restored pane already spawns with the selected shell.
   const detectedShells = await platform.getAvailableShells();
   const shells: ShellEntry[] = detectedShells.length > 0 ? detectedShells : [{ name: 'shell', path: '' }];
-  const initialShell = shells[0];
-  setDefaultShellOpts(initialShell ? { shell: initialShell.path, args: initialShell.args } : null);
+  seedShellStore(shells);
 
   const result = await resumeOrRestore(platform);
 
@@ -113,7 +115,7 @@ async function bootstrap() {
 
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <AppBar shells={shells} />
+      <AppBar />
       <App
         initialPaneIds={result.paneIds}
         restoredLathLayout={result.lathLayout}
