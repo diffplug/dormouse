@@ -9,7 +9,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { WS_ROUTES, WS_TOKEN_PARAM, hashPasskeyPublicKey } from 'server-lib-common';
+import {
+  WS_CLOSE_HOST_REPLACED,
+  WS_CLOSE_HOST_REPLACED_REASON,
+  WS_ROUTES,
+  WS_TOKEN_PARAM,
+  hashPasskeyPublicKey,
+} from 'server-lib-common';
 
 import { connectClient, connectHost, freshApp, startServer, wsConnect } from './helpers.mjs';
 
@@ -252,8 +258,12 @@ test('a new host socket replaces the old one for the same hostId', async () => {
     );
     await second.ready;
 
-    // The displaced socket is closed by the hub.
-    await first.socket.closed;
+    // The displaced socket is closed by the hub, carrying the code the evicted
+    // Host keys its stand-down on (lib/src/remote/host/remote-host.ts). Pinned
+    // here because a changed code would silently restore the reconnect fight.
+    const closeEvent = await first.socket.closed;
+    assert.equal(closeEvent.code, WS_CLOSE_HOST_REPLACED);
+    assert.equal(closeEvent.reason, WS_CLOSE_HOST_REPLACED_REASON);
 
     // The new socket serves the same hostId: a client connect reaches it.
     const { socket: clientWs } = await connectClient(app, server);

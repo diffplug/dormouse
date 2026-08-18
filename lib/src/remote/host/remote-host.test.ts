@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_PAIRING_TTL_MS,
+  WS_CLOSE_HOST_REPLACED,
   concatBytes,
   ecdsaRawToDer,
   generateDeviceKeyPair,
@@ -34,8 +35,13 @@ class FakeSocket implements WebSocketLike {
   }
 
   close(): void {
+    this.closeWith(1000);
+  }
+
+  /** Emit a close event with a specific code, as the relay or the network would. */
+  closeWith(code: number): void {
     this.readyState = 3;
-    this.#emit('close', { code: 1000 });
+    this.#emit('close', { code });
   }
 
   #emit(type: string, ev: unknown): void {
@@ -382,5 +388,109 @@ describe('RemoteHost frame handling', () => {
     expect(disposed).toBe(1);
     socket.receive({ t: 'msg', clientId: 'c1', data: { requestId: 'r2', method: 'hello' } });
     expect(handled).toHaveLength(1);
+  });
+});
+
+describe('RemoteHost close-code policy', () => {
+  /** Every socket the host has opened, in order. */
+  let sockets: FakeSocket[] = [];
+  let live: RemoteHost | null = null;
+
+  /** A host with the real reconnect policy (backoff timers under fake timers). */
+  function makeHost(): RemoteHost {
+    sockets = [];
+    const host = new RemoteHost({
+      enrollment: ENROLLMENT,
+      createWebSocket: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      loadAcl: () => [],
+      saveAcl: () => {},
+      requestApproval: () => {},
+      dismissApproval: () => {},
+    });
+    live = host;
+    host.start();
+    sockets[0]!.open();
+    expect(host.status).toBe('connected');
+    return host;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    live?.stop();
+    live = null;
+    vi.useRealTimers();
+  });
+
+  it('reconnects after a transient close', () => {
+    const host = makeHost();
+
+    sockets[0]!.closeWith(1006); // abnormal closure — a Wi-Fi blip
+    expect(host.status).toBe('disconnected');
+    expect(sockets).toHaveLength(1);
+
+    vi.advanceTimersByTime(1_000);
+    expect(sockets).toHaveLength(2);
+    sockets[1]!.open();
+    expect(host.status).toBe('connected');
+  });
+
+  it('stands down on a displacement close instead of reconnecting', () => {
+    const host = makeHost();
+
+    sockets[0]!.closeWith(WS_CLOSE_HOST_REPLACED);
+    expect(host.status).toBe('displaced');
+
+    // No timer brings it back — fighting the newer Host for the hostId is the
+    // bug this close code exists to prevent.
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(sockets).toHaveLength(1);
+    expect(host.status).toBe('displaced');
+  });
+
+  it('start() is the explicit way back from displaced', () => {
+    const host = makeHost();
+    sockets[0]!.closeWith(WS_CLOSE_HOST_REPLACED);
+    expect(host.status).toBe('displaced');
+
+    host.start();
+    expect(sockets).toHaveLength(2);
+    sockets[1]!.open();
+    expect(host.status).toBe('connected');
+
+    // And the reconnect policy is intact afterwards.
+    sockets[1]!.closeWith(1006);
+    vi.advanceTimersByTime(1_000);
+    expect(sockets).toHaveLength(3);
+  });
+
+  it('ignores a close from a socket it no longer owns', () => {
+    const host = makeHost();
+    sockets[0]!.closeWith(1006);
+    vi.advanceTimersByTime(1_000);
+    sockets[1]!.open();
+    expect(host.status).toBe('connected');
+
+    // The relay evicts the *dead* first socket. That close says nothing about
+    // the live one, so it must not stand this Host down.
+    sockets[0]!.closeWith(WS_CLOSE_HOST_REPLACED);
+    expect(host.status).toBe('connected');
+    expect(sockets).toHaveLength(2);
+  });
+
+  it('stop() wins over a displacement close', () => {
+    const host = makeHost();
+    host.stop();
+    expect(host.status).toBe('stopped');
+
+    // `stop()` drops the socket reference without waiting for its close event.
+    sockets[0]!.closeWith(WS_CLOSE_HOST_REPLACED);
+    expect(host.status).toBe('stopped');
   });
 });
