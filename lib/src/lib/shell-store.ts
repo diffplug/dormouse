@@ -4,8 +4,9 @@ import { getStorage, loadJson, saveJson } from './local-json-store';
 /**
  * The Window's detected shells and which one is selected, for the Settings
  * dialog's Shell row (`ShellPicker`). Selection is persisted under
- * `dormouse:selected-shell` (the path, not the name — names collide across
- * install locations).
+ * `dormouse:selected-shell` as the executable path plus ordered arguments.
+ * Names are display-only, while paths alone collide for WSL distributions and
+ * Windows Developer shells.
  *
  * Only standalone seeds this store, and only from `main.tsx` *before* the Wall
  * mounts, so the first restored pane already spawns with the persisted shell
@@ -18,6 +19,44 @@ import { getStorage, loadJson, saveJson } from './local-json-store';
 const SELECTED_KEY = 'dormouse:selected-shell';
 
 const isString = (value: unknown): value is string => typeof value === 'string';
+
+interface PersistedShellIdentity {
+  path: string;
+  args: string[];
+}
+
+type StoredShellSelection = PersistedShellIdentity | string;
+
+/** Accept the current identity object and the legacy path-only string. */
+function isStoredShellSelection(value: unknown): value is StoredShellSelection {
+  if (isString(value)) return true;
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Partial<PersistedShellIdentity>;
+  return isString(candidate.path)
+    && Array.isArray(candidate.args)
+    && candidate.args.every(isString);
+}
+
+type ShellIdentity = Pick<ShellEntry, 'path' | 'args'>;
+
+/** Paths are not unique on Windows: arguments distinguish WSL distributions
+ *  and Developer shells that share one executable. */
+export function shellIdentityEquals(
+  left: ShellIdentity | undefined,
+  right: ShellIdentity | undefined,
+): boolean {
+  if (!left || !right) return left === right;
+  if (left.path !== right.path) return false;
+  const leftArgs = left.args ?? [];
+  const rightArgs = right.args ?? [];
+  return leftArgs.length === rightArgs.length
+    && leftArgs.every((arg, index) => arg === rightArgs[index]);
+}
+
+/** Stable identity for keyed rendering; see `shellIdentityEquals`. */
+export function shellIdentityKey(shell: ShellIdentity): string {
+  return JSON.stringify([shell.path, shell.args ?? []]);
+}
 
 export interface ShellsState {
   shells: ShellEntry[];
@@ -52,7 +91,7 @@ function publishSelected(selected: ShellEntry | undefined): void {
 
 /**
  * Install the detected shells and restore the persisted selection, falling back
- * to the first detected shell when the saved path is gone.
+ * to the first detected shell when the saved identity is gone.
  *
  * Seeding deliberately does **not** write the key back: a shell that is
  * temporarily missing (a version bump mid-reinstall) recovers its selection
@@ -72,8 +111,16 @@ export function seedShellStore(shells: ShellEntry[]): void {
     emit({ shells: [], selected: undefined });
     return;
   }
-  const savedPath = loadJson<string, null>(SELECTED_KEY, null, isString);
-  const selected = shells.find((shell) => shell.path === savedPath) ?? shells[0];
+  const saved = loadJson<StoredShellSelection, null>(
+    SELECTED_KEY,
+    null,
+    isStoredShellSelection,
+  );
+  // Path-only values were written before arguments became part of identity.
+  const selected = (typeof saved === 'string'
+    ? shells.find((shell) => shell.path === saved)
+    : shells.find((shell) => shellIdentityEquals(shell, saved ?? undefined)))
+    ?? shells[0];
   publishSelected(selected);
   emit({ shells: [...shells], selected });
 }
@@ -88,8 +135,8 @@ export function seedShellStore(shells: ShellEntry[]): void {
  * without a rendered dialog.
  */
 export function selectShell(shell: ShellEntry): void {
-  if (shell.path === state.selected?.path) return;
-  saveJson(SELECTED_KEY, shell.path);
+  if (shellIdentityEquals(shell, state.selected)) return;
+  saveJson(SELECTED_KEY, { path: shell.path, args: shell.args ?? [] });
   publishSelected(shell);
   emit({ ...state, selected: shell });
   window.dispatchEvent(

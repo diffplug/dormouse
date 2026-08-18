@@ -21,6 +21,9 @@ const BASH = { name: 'bash', path: '/bin/bash', args: ['-l'] };
 const SHELLS = [ZSH, BASH];
 /** Detected on the machine that saved the selection, missing on this one. */
 const FISH = { name: 'fish', path: '/opt/homebrew/bin/fish' };
+const WSL_PATH = 'C:\\Windows\\System32\\wsl.exe';
+const UBUNTU = { name: 'Ubuntu', path: WSL_PATH, args: ['-d', 'Ubuntu'] };
+const DEBIAN = { name: 'Debian', path: WSL_PATH, args: ['-d', 'Debian'] };
 
 describe('shell store', () => {
   /** Every `dormouse:new-terminal` detail dispatched during a test. The store
@@ -42,7 +45,7 @@ describe('shell store', () => {
     vi.unstubAllGlobals();
   });
 
-  it('restores the saved selection by path', () => {
+  it('restores the saved selection by path and arguments', () => {
     // A previous run's selection, written the only way the app writes it.
     seedShellStore(SHELLS);
     selectShell(BASH);
@@ -76,7 +79,10 @@ describe('shell store', () => {
     selectShell(BASH);
 
     // JSON-encoded, because the store persists through `local-json-store.ts`.
-    expect(localStorage.getItem(SELECTED_KEY)).toBe(JSON.stringify(BASH.path));
+    expect(JSON.parse(localStorage.getItem(SELECTED_KEY)!)).toEqual({
+      path: BASH.path,
+      args: BASH.args,
+    });
     expect(getShellsSnapshot().selected).toEqual(BASH);
     expect(getDefaultShellOpts()).toEqual({ shell: BASH.path, args: BASH.args });
     expect(spawns).toEqual([
@@ -89,6 +95,36 @@ describe('shell store', () => {
         announce: true,
       },
     ]);
+  });
+
+  it('distinguishes and restores shells that share an executable path', () => {
+    seedShellStore([UBUNTU, DEBIAN]);
+
+    selectShell(DEBIAN);
+
+    expect(getShellsSnapshot().selected).toEqual(DEBIAN);
+    expect(getDefaultShellOpts()).toEqual({ shell: WSL_PATH, args: DEBIAN.args });
+    expect(spawns).toEqual([
+      {
+        shell: WSL_PATH,
+        args: DEBIAN.args,
+        name: DEBIAN.name,
+        replaceUntouched: true,
+        announce: true,
+      },
+    ]);
+
+    resetShellStore();
+    seedShellStore([UBUNTU, DEBIAN]);
+    expect(getShellsSnapshot().selected).toEqual(DEBIAN);
+  });
+
+  it('restores a legacy path-only selection', () => {
+    localStorage.setItem(SELECTED_KEY, JSON.stringify(BASH.path));
+
+    seedShellStore(SHELLS);
+
+    expect(getShellsSnapshot().selected).toEqual(BASH);
   });
 
   it('unpublishes the default shell when the store is emptied', () => {
@@ -105,7 +141,8 @@ describe('shell store', () => {
     seedShellStore(SHELLS);
     clearPersistedShellSelection();
 
-    // Same path, different object: identity must not be the test.
+    // Same path and arguments, different object: reference identity must not
+    // be the test.
     selectShell({ ...ZSH });
 
     expect(spawns).toEqual([]);

@@ -147,6 +147,22 @@ describe('Baseboard settings controls', () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
+  it('distinguishes shell rows that share an executable path', () => {
+    const wslPath = 'C:\\Windows\\System32\\wsl.exe';
+    seedShellStore([
+      { name: 'Ubuntu', path: wslPath, args: ['-d', 'Ubuntu'] },
+      { name: 'Debian', path: wslPath, args: ['-d', 'Debian'] },
+    ]);
+
+    act(() => root.render(<Baseboard items={[]} onReattach={() => {}} />));
+    act(() => container.querySelector<HTMLButtonElement>('[data-open-settings]')?.click());
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Shell: Ubuntu"]')?.click());
+
+    const rows = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+    expect(rows.map((row) => row.textContent)).toEqual(['Ubuntu', 'Debian']);
+    expect(rows.map((row) => row.getAttribute('aria-checked'))).toEqual(['true', 'false']);
+  });
+
   it('hides the Shell row when the host owns shell selection', async () => {
     const platform = await import('../lib/platform');
     vi.spyOn(platform, 'getPlatform').mockReturnValue({

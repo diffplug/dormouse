@@ -190,11 +190,15 @@ Shell selection lives in the Settings dialog's **Shell** row
 (`lib/src/components/ShellPicker.tsx` over `lib/src/lib/shell-store.ts`),
 hidden when fewer than two shells were detected or when the host owns shell
 selection itself (`hostOwnsShells`, VS Code). Picking a shell persists the
-choice in `localStorage`, updates `setDefaultShellOpts`, and dispatches
+choice in `localStorage`, keyed by executable path plus ordered arguments (WSL
+distributions and Windows Developer shells can share a path), updates
+`setDefaultShellOpts`, and dispatches
 `dormouse:new-terminal` with `replaceUntouched: true, announce: true`, so an
 untouched selected terminal is replaced in place (`docs/specs/layout.md`, Shell
-selection replacement). The choice dismisses the Settings dialog before that
-replacement takes keyboard focus on the next animation frame.
+selection replacement). Legacy path-only selections restore the first matching
+entry and gain the full identity on the next choice. The choice dismisses the
+Settings dialog before that replacement takes keyboard focus on the next
+animation frame.
 
 The workspace strip lands here when the workspaces rollout reaches stage 3 —
 `docs/specs/layout.md` `## Future` (workspaces-rollout).

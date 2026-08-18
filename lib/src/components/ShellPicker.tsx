@@ -3,6 +3,8 @@ import { CaretDownIcon, CheckIcon } from '@phosphor-icons/react';
 import {
   getShellsSnapshot,
   selectShell,
+  shellIdentityEquals,
+  shellIdentityKey,
   subscribeToShells,
 } from '../lib/shell-store';
 import { useAnchoredMenu, useCloseOnOutsideAndEscape } from './use-anchored-menu';
@@ -64,10 +66,10 @@ export function ShellPicker({ open, onOpenChange, onSelect }: ShellPickerProps) 
         >
           <div className="min-h-0 flex-1 overflow-y-auto py-1">
             {shells.map((shell) => {
-              const isSelected = shell.path === selected?.path;
+              const isSelected = shellIdentityEquals(shell, selected);
               return (
                 <button
-                  key={shell.path}
+                  key={shellIdentityKey(shell)}
                   type="button"
                   role="menuitemradio"
                   aria-checked={isSelected}
