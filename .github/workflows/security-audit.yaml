@@ -132,10 +132,45 @@ jobs:
       # This repo is public, so the artifact is world-readable. That is
       # consistent with the audit reports already posted to public
       # issues. It is NOT consistent with log masking: `***` redaction
-      # applies to step logs, not to artifact contents. Nothing may
-      # print `$AUDIT_PAT` or `$CLAUDE_CODE_OAUTH_TOKEN` — the prompt
-      # only ever passes `$AUDIT_PAT` through an unexpanded `GH_TOKEN=`
-      # prefix, and `gh api` responses never carry secret values.
+      # applies to step logs, not to artifact contents, and the SDK
+      # serializes every message into this file — Bash `tool_result`
+      # bodies included — so raw tool output ships verbatim.
+      #
+      # The prompt only passes `$AUDIT_PAT` through an unexpanded
+      # `GH_TOKEN=` prefix and `gh api` never returns secret values, but
+      # that is a convention, not a control: the agent holds unrestricted
+      # Bash and is asked to audit code that touches secrets, so one
+      # `printenv` or one `set -x` would publish an admin-read PAT for
+      # the artifact's whole retention. The step below strips the values
+      # verbatim first. That does not stop an agent that encodes a
+      # secret, but it closes the accidental-print path, which is the
+      # one that actually happens.
+      - name: Redact secrets from transcript
+        if: always()
+        env:
+          AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          f="$RUNNER_TEMP/claude-execution-output.json"
+          [ -f "$f" ] || exit 0
+          node -e '
+            const fs = require("fs");
+            const p = process.argv[1];
+            let s = fs.readFileSync(p, "utf8");
+            let hits = 0;
+            for (const name of ["AUDIT_PAT", "CLAUDE_CODE_OAUTH_TOKEN"]) {
+              const v = process.env[name];
+              // Guard against a short or empty value turning into a
+              // global replace of something innocuous.
+              if (!v || v.length < 8) continue;
+              const parts = s.split(v);
+              hits += parts.length - 1;
+              s = parts.join("***");
+            }
+            fs.writeFileSync(p, s);
+            console.log(`redacted ${hits} literal secret occurrence(s)`);
+          ' "$f"
+
       - name: Archive audit transcript
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -201,7 +236,7 @@ jobs:
           if [ -n "$ART_ID" ]; then
             TRANSCRIPT_URL="$RUN_URL/artifacts/$ART_ID"
           else
-            TRANSCRIPT_URL="$RUN_URL"
+            TRANSCRIPT_URL=""
           fi
 
           if [ "$STATUS" = "MISSING" ]; then
@@ -209,14 +244,24 @@ jobs:
             {
               echo "Audit produced no verdict at $DATE. [Run]($RUN_URL)"
               echo
-              echo "The audit step exited without writing \`audit-status.txt\`, so"
-              echo "**this is not a security finding** — the audit did not reach one."
-              echo "Treat it as a failed audit run, not a failed audit."
-              echo
-              echo "[Download the transcript]($TRANSCRIPT_URL) to see where it stopped."
+              echo "The audit step exited without writing \`audit-status.txt\`."
+              if [ -s audit-report.md ]; then
+                echo "It did leave a partial \`audit-report.md\`, reproduced below,"
+                echo "which may itself contain a real finding — read it first. The"
+                echo "prompt writes the report before the status file, so a report"
+                echo "without a verdict is the expected shape of a session that died"
+                echo "mid-write."
+              else
+                echo "**This is not a security finding** — the audit did not reach"
+                echo "one. Treat it as a failed audit run, not a failed audit."
+              fi
+              if [ -n "$TRANSCRIPT_URL" ]; then
+                echo
+                echo "[Download the transcript]($TRANSCRIPT_URL) to see where it stopped."
+              fi
               if [ -s audit-report.md ]; then
                 echo
-                echo "A partial \`audit-report.md\` was written:"
+                echo "---"
                 echo
                 cat audit-report.md
               fi
@@ -229,7 +274,9 @@ jobs:
                 > audit-report.md
             fi
             {
-              echo "Audit failed at $DATE. [Run]($RUN_URL) · [Transcript]($TRANSCRIPT_URL)"
+              LINKS="[Run]($RUN_URL)"
+              [ -n "$TRANSCRIPT_URL" ] && LINKS="$LINKS · [Transcript]($TRANSCRIPT_URL)"
+              echo "Audit failed at $DATE. $LINKS"
               echo
               cat audit-report.md
             } > audit-comment.md
@@ -239,7 +286,8 @@ jobs:
                        --state open --json number --jq '.[0].number' || true)
           if [ -n "$EXISTING" ]; then
             gh issue comment "$EXISTING" --body-file audit-comment.md
-            echo "Appended $STATUS to issue #$EXISTING"
+            gh issue edit "$EXISTING" --title "$TITLE"
+            echo "Appended $STATUS to issue #$EXISTING (retitled: $TITLE)"
           else
             gh issue create \
               --title "$TITLE" \
