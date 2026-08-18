@@ -13,6 +13,8 @@ export default {
       "/pocket",
       "/changelog",
       "/docs",
+      "/docs/dor",
+      "/docs/agent-skill",
       "/supply-chain",
     ];
   },
