@@ -15,7 +15,7 @@ import { ThemeStoreDialog } from './theme-picker/ThemeStoreDialog';
 import { useCloseOnOutsideAndEscape } from './theme-picker/use-close-on-outside';
 import { themePickerStyles as styles } from './theme-picker/styles';
 import { chromeButton, useMeasuredElementRect } from './design';
-import { clampOverlayPosition } from '../lib/ui-geometry';
+import { clampOverlayPosition, OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 
 /**
  * `compact` is the free-floating trigger used by the website's Pocket
@@ -43,6 +43,7 @@ const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLa
 /** Menu width. Mirrored by the `w-[280px]` literal on the non-dialog variant,
  *  which Tailwind must be able to scan statically. */
 const MENU_WIDTH_PX = 280;
+const MENU_MAX_HEIGHT = `calc(100vh - ${OVERLAY_VIEWPORT_MARGIN_PX * 2}px)`;
 
 export function ThemePicker({
   variant,
@@ -125,12 +126,18 @@ export function ThemePicker({
   // menu. A fixed descendant escapes ancestor overflow because no modal
   // ancestor sets `transform`. The menu's own rect feeds the viewport clamp, so
   // a long theme list can't run off the bottom of a short window; it is 0 on
-  // the first pass, which is why the menu stays hidden until measured.
+  // the first pass, which is why the menu stays hidden until measured. The
+  // panel itself is viewport-bounded; its flexing theme list scrolls while the
+  // footer actions stay visible.
   const triggerRect = useMeasuredElementRect(inDialog && open ? triggerEl : null);
   const menuRect = useMeasuredElementRect(inDialog && open ? menuEl : null);
+  const viewportBoundedPanelStyle: CSSProperties = {
+    ...styles.panel,
+    maxHeight: MENU_MAX_HEIGHT,
+  };
   const menuStyle: CSSProperties = inDialog
     ? {
-        ...styles.panel,
+        ...viewportBoundedPanelStyle,
         width: MENU_WIDTH_PX,
         ...(triggerRect
           ? clampOverlayPosition({
@@ -141,7 +148,7 @@ export function ThemePicker({
             })
           : { position: 'fixed', visibility: 'hidden' }),
       }
-    : styles.panel;
+    : viewportBoundedPanelStyle;
 
   return (
     <div ref={rootRef} className="relative flex items-center">
@@ -168,12 +175,12 @@ export function ThemePicker({
           ref={setMenuEl}
           role="menu"
           aria-label="Select theme"
-          className={`z-50 overflow-hidden rounded border font-mono shadow-2xl ${
+          className={`z-50 flex flex-col overflow-hidden rounded border font-mono shadow-2xl ${
             inDialog ? '' : 'absolute right-0 top-full mt-1 w-[280px]'
           }`}
           style={menuStyle}
         >
-          <div className="overflow-y-auto py-1" style={{ maxHeight: 320 }}>
+          <div className="min-h-0 overflow-y-auto py-1" style={{ maxHeight: 320 }}>
             {themes.map((theme) => {
               const isActive = theme.id === activeId;
               const isInstalled = theme.origin.kind === 'installed';
@@ -215,7 +222,7 @@ export function ThemePicker({
             })}
           </div>
 
-          <div className="border-t p-1" style={styles.border}>
+          <div className="shrink-0 border-t p-1" style={styles.border}>
             <button
               type="button"
               onClick={() => {

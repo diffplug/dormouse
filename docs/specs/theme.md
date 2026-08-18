@@ -211,9 +211,11 @@ playground navbar — carries no theme control.
 - Inside the dialog the menu renders `position: fixed`, anchored off the
   measured trigger rect, because the dialog surface is `overflow-y-auto` and
   would clip an absolutely-positioned one. It closes on scroll rather than
-  drifting away from its trigger, and the dialog owns the dropdown's open state
-  so `Escape` closes the menu before the dialog — `ModalFrame`'s capture-phase
-  Escape handler would otherwise swallow the key first.
+  drifting away from its trigger. The panel is capped to the viewport inset;
+  its theme list flex-shrinks and scrolls while the footer remains visible. The
+  dialog owns the dropdown's open state so `Escape` closes the menu before the
+  dialog — `ModalFrame`'s capture-phase Escape handler would otherwise swallow
+  the key first.
 
 Storybook simulates VSCode themes through `lib/.storybook/themes.ts`. It must
 also run bundled theme vars through `completeThemeVars()` (with the same host
