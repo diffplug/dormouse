@@ -9,8 +9,10 @@
 // — see docs/specs/server.md. The default lives in src-tauri/tauri.conf.json;
 // this module is the single place that knows how to retarget it.
 
-/** The remote-server `connect-src` sources baked into the shipped binary. */
-export const DEFAULT_REMOTE_CONNECT_SRC = 'https://*.dormouse.sh wss://*.dormouse.sh';
+// Defined once for both Hosts in scripts/csp-defaults.mjs; re-exported here so
+// this module stays the single entry point for the standalone CSP rules.
+export { DEFAULT_REMOTE_CONNECT_SRC } from '../../scripts/csp-defaults.mjs';
+import { DEFAULT_REMOTE_CONNECT_SRC } from '../../scripts/csp-defaults.mjs';
 
 /**
  * Return `baseCsp` with its default remote-server sources replaced by

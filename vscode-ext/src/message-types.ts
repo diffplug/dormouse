@@ -28,6 +28,19 @@ export type WebviewMessage =
   | { type: 'agentBrowser:popOut'; session: string; url?: string; rect?: { x: number; y: number; width: number; height: number }; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:popIn'; session: string; url?: string; binaryPath?: string; requestId: string }
   | { type: 'iframe:createProxyUrl'; url: string; requestId: string }
+  | { type: 'singleton:claim'; name: string }
+  // Peer surfaces: one webview is the remote Host, but the terminals live in
+  // whichever webview opened them. See docs/specs/vscode.md → "Peer surfaces".
+  // `op` is opaque to the router: the operation map lives in
+  // `lib/src/remote/host/peer-surfaces.ts`, so a new peer operation adds no
+  // message type here.
+  | { type: 'pty:subscribe'; id: string }
+  | { type: 'pty:unsubscribe'; id: string }
+  | { type: 'peer:request'; requestId: string; op: string; params: unknown }
+  | { type: 'peer:answer'; requestId: string; results: unknown[] }
+  | { type: 'peer:notify'; topic: string }
+  | { type: 'store:read'; prefix: string; requestId: string }
+  | { type: 'store:write'; key: string; value: string | null }
   | { type: 'dormouse:init' }
   | ({ type: 'dormouse:themeColors' } & TerminalColors)
   | { type: 'dormouse:saveState'; state: unknown }
@@ -73,6 +86,13 @@ export type ExtensionMessage =
   | { type: 'agentBrowser:openResult'; requestId: string; ok: boolean; session?: string; wsPort?: number; binaryPath?: string; error?: string }
   | { type: 'agentBrowser:popResult'; requestId: string; ok: boolean; wsPort?: number; error?: string }
   | { type: 'iframe:proxyUrl'; requestId: string; result: IframeProxyResult }
+  | { type: 'store:entries'; requestId: string; entries: Record<string, string> }
+  | { type: 'singleton:lease'; name: string; held: boolean }
+  | { type: 'store:changed'; key: string; value: string | null }
+  | { type: 'store:snapshot'; prefix: string; entries: Record<string, string> }
+  | { type: 'peer:ask'; requestId: string; op: string; params: unknown }
+  | { type: 'peer:results'; requestId: string; results: unknown[] }
+  | { type: 'peer:changed'; topic: string | null }
   | {
       type: 'dormouse:newTerminal';
       shell?: string;

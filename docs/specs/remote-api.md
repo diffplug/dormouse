@@ -164,6 +164,11 @@ any change the Host coalesces (150ms window, `DIRECTORY_DEBOUNCE_MS`) and
 resends the whole thing. Delta events are a future optimization there is no
 current reason to pay for.
 
+In VS Code, peer webviews and windows signal directory invalidation whenever
+their pane state, activity, focus, or membership changes. The Host feeds that
+signal through the same coalescer and re-queries all peers before sending the
+replacement snapshot.
+
 The picker renders from titles, activity, and the `ringing`/`hasTODO` badges;
 thumbnails are staged (see [Future](#future)). Browser panes are not listed;
 iframe surfaces additionally refuse attachment by design (see
@@ -256,6 +261,15 @@ rather than re-resolving the old `surfaceId` through the current registry slot.
 When that PTY exits, the Host emits `terminal.closed` and then drops the
 attachment, so a later `terminal.write`/`terminal.resize` for the surface is
 rejected ("surface is not attached") instead of acting on the disposed terminal.
+Disposing the Viewer, and any newer `surface.attach`, invalidate an in-flight
+peer surface resolution: a handle that resolves late is released immediately and
+never becomes an attachment. That is what keeps last-attach-wins true when the
+two resolutions take different lengths of time — a sibling window's pane is a
+round trip away while a local one resolves immediately, so without it the older,
+slower attach would land last and take the attachment. A superseded attach is
+answered with an error rather than left pending, since the client holds a
+request open until it is answered; a disposed session has no transport left to
+answer on.
 
 #### Size authority: last-attach-wins
 

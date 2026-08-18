@@ -5,6 +5,7 @@ import {
   subscribePairingApproval,
 } from './pairing-approval';
 import { installRemoteHostConsoleHook } from './activation';
+import { hostStoreReady } from './store';
 
 /**
  * Renders the head of the pairing-approval queue and, on mount, activates the
@@ -21,7 +22,17 @@ export function RemotePairingModalHost({
   const head = pending[0] ?? null;
 
   useEffect(() => {
-    installRemoteHostConsoleHook();
+    // The Host's enrollment and ACL may live outside the webview (VS Code), in
+    // which case boot started an async read that must land before anything
+    // reads those keys. First paint deliberately does not wait on it, so this
+    // is where the ordering is enforced.
+    let cancelled = false;
+    void hostStoreReady().then(() => {
+      if (!cancelled) installRemoteHostConsoleHook();
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

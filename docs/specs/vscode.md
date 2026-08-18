@@ -22,6 +22,12 @@ Extension Host (vscode-ext/src/)
 ├── agent-browser-host.ts     — extension-host wiring + stream relay for the agent-browser surface
 ├── iframe-proxy-host.ts      — VS Code binding for the iframe transparent proxy (injects the logger)
 ├── webview-html.ts           — CSP injection, nonce + message-token generation, asset URI rewriting
+├── remote-host-store.ts      — SecretStorage/globalState backing for the webview's remote-Host keys
+├── window-lease.ts           — cross-window Host lease: heartbeat record in globalStorageUri
+├── peer-link.ts              — socket between windows: broker serves, other windows report in
+│                             (peer-surface brokering lives in message-router.ts)
+├── watch-dir-file.ts         — fs.watch on one file, degrading to no watcher instead of an uncaught error
+├── (../scripts/esbuild.mjs)  — outside src/: extension + pty-host bundles; bakes the webview's remote `connect-src`
 ├── webview-messaging.ts      — serveWebview: pairs a document with its message token, returns the WebviewChannel
 └── log.ts                    — extension logging
 
@@ -214,6 +220,8 @@ TUIs query the terminal's foreground/background/cursor colors with `OSC 10/11/12
 
 Source of truth: `vscode-ext/src/webview-html.ts` assembles the CSP directives (`randomSecret()` + the directive list).
 
+The remote-server `connect-src` sources are a build-time constant, not a runtime value: `vscode-ext/scripts/esbuild.mjs` substitutes `__DORMOUSE_REMOTE_CONNECT_SRC__` into the bundle, defaulting to the SaaS origin (`https://*.dormouse.sh wss://*.dormouse.sh`). Without them a VS Code Host cannot hold its `/ws/host` socket at all. A selfhoster widens it for their own build with `DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode` — the same variable and the same per-build opt-in as the standalone binary (`docs/specs/server.md` → "Host webview CSP"). It is a `declare const` rather than an import so the value is a literal in the bundle and nothing at runtime can move it.
+
 `unsafe-inline` for styles is needed because VS Code injects theme CSS variables via inline styles on the body element. Scripts remain nonce-gated, with a fresh per-render nonce of 24 CSPRNG bytes (`node:crypto` `randomBytes`) base64url-encoded to 32 characters — a nonce that is guessable is a nonce that is not there, so `Math.random()` is not acceptable here. The webview HTML is built by Vite from the `lib` package, then at runtime `webview-html.ts` rewrites asset URLs to webview URIs, injects the CSP meta tag, applies nonces to all script tags, and injects initial state via a nonce-gated inline script.
 
 ### Webview message authentication
@@ -236,6 +244,123 @@ This is the same shape as the origin check the Wall already applies to messages 
 Scope is VS Code. The standalone adapters receive the equivalent events over Tauri's `listen()` IPC and the dev harness's host WebSocket (`docs/specs/standalone.md`, `docs/specs/transport.md`), never `window.postMessage`, so they have no forgeable inbox to guard.
 
 Source of truth: `lib/src/lib/vscode-message-token.ts` (constants + `isHostMessage`), `vscode-ext/src/webview-messaging.ts` (`WebviewChannel` + `serveWebview`), `vscode-ext/src/webview-html.ts` (mint + injection), `lib/src/lib/platform/vscode-adapter.ts` (both guards). Tests: the `host message authentication` block in `lib/src/lib/platform/vscode-adapter.test.ts`.
+
+### Remote Host: store and lease
+
+VS Code is a first-class remote Host. Two things have to be true that standalone gets for free, because standalone is one webview per app and VS Code is many webviews over one extension host.
+
+**The store.** The Host's enrollment (`{ serverUrl, hostId, hostToken, origin, rpId }`) and its ACL persist through `local-json-store`, which defaults to `localStorage`. That is wrong here twice over: webview `localStorage` is not VS Code's persistence story, and `hostToken` is a bearer credential that grants the `/ws/host` socket. So the webview claims the `dormouse.remote-host.` prefix and backs it with the extension host — enrollment in `SecretStorage` (OS keychain), ACL in `globalState`, both global because a Host identity belongs to the machine and not to a folder.
+
+`local-json-store` is synchronous by contract, so the store is pulled across at boot and installed as an in-memory, write-through backend. First paint deliberately does not wait on it: the read is gated on an OS keychain unlock, and a blank terminal for that long reads as a hang. The real constraint is narrower — hydrated before anything reads a `dormouse.remote-host.` key — so `lib/src/main.tsx` starts the read and publishes it with `setHostStoreReady`, and the lazily-mounted `RemotePairingModalHost` awaits `hostStoreReady()` before calling `installRemoteHostConsoleHook`. A read that never answers installs an empty cache and warns: the Host reads as un-enrolled, which is fail-safe for the data but would otherwise be silent.
+
+A broadcast that lands while a webview is still hydrating is buffered and applied on top of the snapshot, because the host reads `globalState` before it waits on the keychain — so the snapshot in flight can be older than a write that has already committed.
+
+Both sides gate on the prefix. The webview names the keys, so `remote-host-store.ts` refuses any key outside the Host namespace and caps values at 64 KiB; a compromised webview can neither read nor write unrelated extension state.
+
+A boot-time snapshot alone would be wrong, because the lease hands the Host between webviews and windows: a webview that hydrated before another approved a pairing could later take the lease, read its stale ACL, and write that back — dropping the pairing permanently. A committed write is therefore broadcast to every webview in its window (`store:changed`) and applied to each cache. Before a newly elected window grants the webview-level Host role, it also rereads the whole prefix and sends every webview a replacement `store:snapshot`; the snapshot is ordered before the `singleton:lease { held: true }` grant and clears keys deleted by the previous holder. The per-write broadcast goes to the writer too; re-applying your own write is a no-op, and skipping self would mean identifying it. Only writes that actually happened are announced, which is why `writeStore` returns whether it wrote.
+
+Source of truth: `vscode-ext/src/remote-host-store.ts`, `lib/src/lib/platform/vscode-adapter.ts` (`hydrateScopedStore`), `lib/src/lib/local-json-store.ts` (prefix claims), `lib/src/remote/host/store.ts` (the shared prefix).
+
+**The lease.** A window can show a `WebviewView` and any number of `WebviewPanel`s at once. Each mounts the same Wall, so each would start its own `RemoteHost` against the same enrollment — they would displace each other on the single `/ws/host` socket (`server/test/relay-displaced.test.mjs`) and each would arm its own alarm push. The extension host arbitrates instead, because it is the only party that sees every webview and outlives each one: `message-router.ts` grants the named role `remote-host` to the first claimant and re-offers it when the holder is disposed, so closing the Dormouse view hands the Host to another open one rather than dropping it until a reload.
+
+On the webview side `activation.ts` starts un-owned whenever the adapter offers `peers`, so two webviews racing to mount cannot both activate before the first answer arrives. Adapters without it (standalone, the website) are single-instance and stay owned from the start. Having peers at all is exactly the condition that needs arbitrating, which is why the role lease and the sibling RPC hang off one optional member (`PeerBridge`) rather than two that a host could implement half of.
+
+**Across windows.** The election above is per-window, because the extension host is — but the enrollment it guards is machine-wide, so window-local arbitration alone is not enough. Left there, every window would elect its own Host, all of them would connect `/ws/host` with the same enrollment, and the server would close the displaced socket (`server/src/relay.ts`) whose `close` handler reconnects and displaces the next one: an endless fight, with each window arming its own alarm push.
+
+So there is a second tier. A window may grant the role only while it holds a lease recorded in the extension's `globalStorageUri` — per-extension, shared by every window, and (unlike `globalState`) with no cross-window change event to depend on, so ownership is a heartbeat with a TTL rather than a flag. The holder re-stamps every 5s; a record unstamped for 15s is free. That TTL is what recovers the role from a window that died without running its disposables; a clean dispose deletes the record so the handoff is prompt, and a filesystem watcher makes the next window notice without waiting for its poll. Both watchers in the extension — this one and the rendezvous — go through `watch-dir-file.ts`, which turns either kind of `fs.watch` failure (refused up front, or an `'error'` event later, which an unheard `EventEmitter` rethrows and would kill the extension host) into no watcher at all; that is safe precisely because each caller's timer converges on its own.
+The watcher is only an accelerator: construction failures and later asynchronous
+`error` events close and clear it, while the interval continues to arbitrate.
+
+A fresh claim is confirmed by re-reading: two windows can judge the same record stale in the same instant and both write, and the loser must not believe it won. Renewing skips that round trip, since the record already named the renewer. A heartbeat stamped far in the *future* counts as stale too — otherwise a clock jump would lock every window out of the role until the skew elapsed.
+
+Losing the window lease is not merely losing the right to be re-offered the role: any webview holding it is told `held: false` and stops its Host. That is the one path that sends a revocation, and it is why the lease is a boolean rather than a one-way grant.
+
+Nothing here starts until a hydrated webview finds a persisted enrollment, or
+a first enrollment succeeds and initiates the claim. A user who never enrolls
+a Host therefore gets no heartbeat file, timer, or peer socket merely by
+opening Dormouse.
+
+Source of truth: the rules and the cycle in `lib/src/lib/vscode-window-lease.ts` (tested in `lib/src/lib/vscode-window-lease.test.ts`), the filesystem and timers around them in `vscode-ext/src/window-lease.ts`, and `windowLeaseHeld` gating `electSingleton` in `vscode-ext/src/message-router.ts`.
+
+Source of truth: the `SingletonClaimant` arbiter in `vscode-ext/src/message-router.ts`, `PeerBridge.claimSingleton` in `lib/src/lib/platform/types.ts`, `setRemoteHostOwnership` in `lib/src/remote/host/activation.ts`, tested in `lib/src/remote/host/activation.test.ts`.
+
+**Lifetime.** The Host lives as long as a Dormouse webview exists in the window. `retainContextWhenHidden: true` is set on both hosting modes, so hiding the panel keeps it connected; only disposing every Dormouse view, or closing the window, takes it offline.
+
+### Peer surfaces
+
+The Host runs in one webview, but a window's terminals are spread across all of them: each webview is its own JS realm with its own xterm registry (`lib/src/lib/terminal-store.ts`). Left alone the phone would see one webview's panes — not the window's — because `collectDirectorySnapshot` iterates the local registry and `surface.attach` resolves against it.
+
+The extension host brokers, since it is the only party that can see every webview. Three things make it work, and two of them were already true:
+
+- **PTY input and resize are not ownership-gated.** `pty:input` and `pty:resize` go straight to `ptyManager`, so the Host webview can already drive a sibling's PTY.
+- **Pane ids are unique across webviews.** They are minted `pane-<counter>-<random>` (`lib/src/components/Wall.tsx`), so surface ids need no namespacing to be routed.
+- **Streaming needed one change.** `pty:data` and `pty:exit` were delivered only to the owning webview; a webview may now also `pty:subscribe` to a PTY it does not own. Subscriptions are tracked separately from `ownedPtyIds`, so they never affect Workspace union status, `killOnDispose`, or who the host considers the owner. Semantic events stay owner-only — they drive the owner's pane state, and a subscriber is streaming bytes plus process lifetime, not keeping a second copy of that state.
+
+Every webview installs a responder (`lib/src/remote/host/peer-surfaces.ts`) whether or not it is the Host, so its terminals are reachable from whichever one is. It carries none of the relay, enrollment, or pairing machinery — a registry lookup, the directory collector, and a resize.
+
+**One generic seam, one fan-out rule.** A peer request is `(op, params)` and an answer is *zero or more results*; that is the whole contract the adapter, the extension-host broker, and the cross-window socket implement. `op` is opaque to all three, because *what* a peer may be asked belongs to the remote Host and not to the transport: the operation map — `directory` and `surfaceOp`, with their real parameter and result types — lives in `lib/src/remote/host/peer-surfaces.ts` alongside the responder that answers them, so adding an operation is one entry there plus its caller, not a parallel ladder of types at every layer.
+
+Absence *is* the miss: a webview that owns nothing the request named answers with no results, so there is no `ok` flag anywhere and every field of a result that does come back is required. Every webview answers regardless, which is what lets the broker settle a fan-out as fast on a miss as on a hit; it settles when all of them have replied or a 1s budget expires, so a webview with no live content cannot hang the picker.
+
+The one field the transport itself reads out of an answer is a reserved `ptyId` (`routedPtyId`): an answer naming a PTY is claiming it, which is how the cross-window broker learns which window that PTY lives in. Nothing else about an answer is interpreted below the Host.
+
+Peer query results are snapshots, so the same bridge carries generic topic
+invalidations. Every webview announces `directory` when local pane state,
+activity, or focus changes; webview/window membership changes invalidate all
+topics. The Host subscribes to that topic and coalesces a fresh fan-out rather
+than retaining the old directory indefinitely.
+
+`attach` and `resize` on a foreign surface go to the owner rather than to the PTY, because attach-is-the-resize has to drive the live xterm or the owning pane's own view drifts from the size the phone set. The owner replies with the size it settled at and the `ptyId`; the Host then subscribes and streams. `detach` has nothing to undo on the owner — the Host stops streaming and the pane keeps its size, which is what last-attach-wins means.
+
+**Which webview owns a pane never reaches the protocol layer.** `resolveSurface(surfaceId, size)` answers with a `SurfaceHandle` — `ptyId`, the size it stands at, `resize`, `release` — or `null` if nobody owns it, and `remote-api.ts` holds one of those per attachment. That is the same trick the rest of the feature already plays: foreign `pty:data` is injected into the ordinary data path and `pty:input` / `pty:resize` route by table before falling back to the local manager, so `terminal.write` has no branch either. It makes local attach asynchronous too, which is the honest shape — a pane in another window *is* a round trip away, and the alternative was one path that answered synchronously and one that did not.
+
+Resolving a peer's surface *is* the attach: the requested size travels with it, because the owner has to apply it inside that round trip — there is no reaching into its xterm afterwards without a second one. A local pane is left alone at resolve and resized by the caller, which subscribes to the PTY first so a synchronous repaint is not lost. Either way the handle reports the size as it stands and the caller reconciles, which is why the same-size repaint bounce fires for a peer attach (its owner already applied the size) and the resize path fires for a local one.
+
+Subscribing is a subscription, not a pair of calls: `peers.streamPty(ptyId)` returns its own unsubscribe, so a caller cannot leak a stream by losing track of the id it opened it with.
+The router reference-counts those handles per PTY: only zero-to-one starts
+cross-window forwarding and only one-to-zero stops it, so detaching one of two
+concurrent viewers cannot silence the other.
+Router disposal releases every still-counted cross-window PTY once before
+clearing the counts, so document teardown cannot leave an owner forwarding to
+a webview that no longer exists.
+
+The directory emits **twice**: the local entries immediately, then a merged snapshot once the peers answer. The phone should not wait on a round trip to see the panes that are already here.
+
+### Peer surfaces across windows
+
+The same problem one level out, and it cannot be solved the same way: VS Code runs one extension host per window, so there is no shared process to broker through. The window holding the Host lease therefore listens on a local socket and every other window connects to it.
+
+The lease makes this one-directional. Because the webview lease is gated on the window lease, the broker window *is* the Host window — so the broker never has to relay a request back out to a remote Host, and a peer window only ever answers.
+
+Roles follow the lease: acquire it and the window starts serving and publishes a rendezvous file (`remote-host.peer.json`, mode 0600, in `globalStorageUri`) naming the socket path and a token; lose it and the window tears the server down and connects as a client instead. Clients watch that file, so a handover does not wait out the reconnect backoff. Neither transition is instant — serving binds a socket and then writes and renames the rendezvous, standing down tears that back down — so a flip can land inside one, and each direction re-checks the role it is transitioning into before its last step: the broker claims the server slot in the same tick it decides to serve and abandons a half-started server rather than publishing a rendezvous naming a socket the teardown already unlinked (peers would dial it, fail, and back off until a later broker rewrote the file), and the client side skips installing the rendezvous watcher if it is the broker again by the time its teardown finishes (a broker watching would wake on its own writes). The socket lives in the temp dir rather than beside the rendezvous file because macOS caps a unix socket path near 104 bytes and the extension's `globalStorage` path is most of that on its own.
+
+The first arbitration result is a role transition even when it is `false`: a
+window that starts while another owns the lease immediately enters the client
+role and watches/connects to that broker.
+
+A peer window answers a `request` frame by running its **own in-window** fan-out — never the cross-window one, or a request would loop back out. That is why `configurePeerLink` is handed only `brokerRequest`, and why the link is injected with what it needs rather than importing the router (which imports the link).
+
+Both tiers are asked at once rather than one after the other: what is asked about lives in exactly one webview of one window, and asking in series would pay a whole tier's budget — or a hung window's — before reaching the tier that owns it.
+
+Once an answer names a `ptyId` the broker records which window it came from, because a PTY id says nothing about where it lives and input and resizes have to reach that window. `pty:input` and `pty:resize` consult that table first and fall back to the local `ptyManager`; `pty:subscribe` asks the owning window to start streaming, and its bytes are injected into the subscriber's normal `pty:data` path, so the Host webview cannot tell a remote terminal from a local one. When a peer disconnects, every PTY routed to it is dropped and reported as exited — a terminal in a closed window is gone, and a later write must not be posted into a dead socket.
+
+Trust: the socket is user-owned, its path is published only in a mode-0600 file, and a client's first frame must carry the token from that file — the same bar as the `dor` control socket.
+
+Socket bind errors reject startup and are handled as an unavailable peer link;
+they never leave the listen promise pending or surface as an uncaught extension
+host error.
+
+Source of truth: `vscode-ext/src/peer-link.ts` for the sockets and roles, `lib/src/lib/vscode-peer-link-protocol.ts` for the frames, framing, and PTY routing table (tested in `lib/src/lib/vscode-peer-link-protocol.test.ts`), and the `remote*` calls in `vscode-ext/src/message-router.ts`.
+
+Source of truth: the broker in `vscode-ext/src/message-router.ts` (`brokerRequest`, the `peer:*` cases, `subscribedPtyIds`), `PeerBridge` in `lib/src/lib/platform/types.ts` with its VS Code implementation in `vscode-adapter.ts`, the operation map and responder in `lib/src/remote/host/peer-surfaces.ts`, the resolver in `lib/src/remote/host/surface-resolve.ts`, and the attachment it backs in `lib/src/remote/host/remote-api.ts`, tested in `lib/src/remote/host/peer-surfaces.test.ts`.
+
+### Testing the extension host
+
+`vscode-ext` runs vitest (`pnpm --filter dormouse test`, which typechecks first). The `vscode` module only exists inside a running editor, so `vitest.config.mts` aliases it to a stub providing just the output channel `log.ts` opens — most modules worth testing import `vscode` as `import type`, which erases.
+
+The tests that matter here are the ones that need real I/O, since the pure halves already live in `lib`: `test/window-lease.test.ts` drives two module instances against a real directory (two windows contending, and a handover on dispose), and `test/peer-link.test.ts` stands up a broker and a peer over a real socket to cover the rendezvous handshake, a lease that flips back mid-startup, PTY routing, streaming, token rejection, and what a disconnect does to in-flight terminals. Separate module instances come from `vi.resetModules()` plus a dynamic import, which is what makes one process able to play two windows.
+
+Not covered: anything needing the real editor — command registration, webview hosting, the theme observer. Those would need `@vscode/test-electron`.
 
 ### Build and development
 

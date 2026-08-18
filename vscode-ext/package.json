@@ -103,10 +103,10 @@
     "build:frontend": "vite build --config vite.config.ts",
     "pretypecheck": "pnpm --filter dor-lib-common build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "pnpm typecheck",
-    "build": "pnpm stage:dor-cli && esbuild src/extension.ts --bundle --outdir=dist --external:vscode --external:node-pty --format=cjs --platform=node && esbuild src/pty-host.js --bundle --outfile=dist/pty-host.js --external:node-pty --format=cjs --platform=node && cp -RL node_modules/node-pty dist/node-pty && rm -rf dist/shell-integration && cp -RL ../standalone/sidecar/shell-integration dist/shell-integration",
+    "test": "pnpm typecheck && vitest run",
+    "build": "pnpm stage:dor-cli && node scripts/esbuild.mjs && cp -RL node_modules/node-pty dist/node-pty && rm -rf dist/shell-integration && cp -RL ../standalone/sidecar/shell-integration dist/shell-integration",
     "stage:dor-cli": "pnpm --filter dor build && node ../scripts/stage-dor-cli.mjs vscode-ext/dor-cli",
-    "watch": "pnpm build --watch",
+    "watch": "pnpm stage:dor-cli && node scripts/esbuild.mjs --watch",
     "package": "vsce package --no-dependencies --out dormouse.vsix",
     "dogfood": "node ../scripts/dogfood-vscode.mjs",
     "publish:marketplace": "vsce publish --no-dependencies",
@@ -125,6 +125,7 @@
     "ovsx": "^1.0.0",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
-    "vite": "^8.0.14"
+    "vite": "^8.0.14",
+    "vitest": "^4.1.6"
   }
 }

@@ -29,6 +29,7 @@ import {
 } from '../terminal-protocol';
 import { HOST_MESSAGE_TOKEN_FIELD, HOST_MESSAGE_TOKEN_GLOBAL } from '../vscode-message-token';
 import { VSCodeAdapter } from './vscode-adapter';
+import { loadJson, saveJson, setJsonStoreBackend } from '../local-json-store';
 
 /** Stand-in for the per-boot token the extension host injects at webview boot. */
 const HOST_TOKEN = 'test-host-message-token';
@@ -44,36 +45,39 @@ function hostMessage(data: Record<string, unknown>, token: unknown = HOST_TOKEN)
   });
 }
 
-describe('VSCodeAdapter PTY exit handling', () => {
-  let windowTarget: EventTarget;
-  let postMessage: ReturnType<typeof vi.fn>;
+let windowTarget: EventTarget;
+let postMessage: ReturnType<typeof vi.fn>;
 
-  beforeEach(() => {
-    windowTarget = new EventTarget();
-    postMessage = vi.fn();
-    terminalThemeMocks.listeners.clear();
-    terminalThemeMocks.getTerminalTheme.mockReturnValue({ foreground: '#eeeeee', background: '#111111', cursor: '#abcabc' });
-    class TestCustomEvent<T = unknown> extends Event {
-      readonly detail: T;
+/** The globals the adapter captures at construction. Shared by the suites below. */
+function stubWebviewEnv(): void {
+  windowTarget = new EventTarget();
+  postMessage = vi.fn();
+  terminalThemeMocks.listeners.clear();
+  terminalThemeMocks.getTerminalTheme.mockReturnValue({ foreground: '#eeeeee', background: '#111111', cursor: '#abcabc' });
+  class TestCustomEvent<T = unknown> extends Event {
+    readonly detail: T;
 
-      constructor(type: string, eventInitDict?: CustomEventInit<T>) {
-        super(type, eventInitDict);
-        this.detail = eventInitDict?.detail as T;
-      }
-
-      initCustomEvent(): void {}
+    constructor(type: string, eventInitDict?: CustomEventInit<T>) {
+      super(type, eventInitDict);
+      this.detail = eventInitDict?.detail as T;
     }
-    vi.stubGlobal('window', windowTarget);
-    vi.stubGlobal('CustomEvent', TestCustomEvent);
-    // The adapter captures this at construction, so it must be stubbed before
-    // any `new VSCodeAdapter()` below.
-    vi.stubGlobal(HOST_MESSAGE_TOKEN_GLOBAL, HOST_TOKEN);
-    vi.stubGlobal('acquireVsCodeApi', () => ({
-      postMessage,
-      getState: vi.fn(),
-      setState: vi.fn(),
-    }));
-  });
+
+    initCustomEvent(): void {}
+  }
+  vi.stubGlobal('window', windowTarget);
+  vi.stubGlobal('CustomEvent', TestCustomEvent);
+  // The adapter captures this at construction, so it must be stubbed before
+  // any `new VSCodeAdapter()`.
+  vi.stubGlobal(HOST_MESSAGE_TOKEN_GLOBAL, HOST_TOKEN);
+  vi.stubGlobal('acquireVsCodeApi', () => ({
+    postMessage,
+    getState: vi.fn(),
+    setState: vi.fn(),
+  }));
+}
+
+describe('VSCodeAdapter PTY exit handling', () => {
+  beforeEach(stubWebviewEnv);
 
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -375,5 +379,153 @@ describe('VSCodeAdapter PTY exit handling', () => {
 
       expect(exits).toEqual([]);
     });
+  });
+});
+
+
+describe('VSCodeAdapter host store', () => {
+  const PREFIX = 'dormouse.remote-host.';
+  const KEY = `${PREFIX}acl.host-1`;
+
+  beforeEach(stubWebviewEnv);
+
+  afterEach(() => {
+    setJsonStoreBackend(PREFIX, null);
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  /** Answer the `store:read` the adapter just posted, as the host would. */
+  function answerRead(entries: Record<string, string>): void {
+    const request = postMessage.mock.calls.map((call) => call[0]).find((m) => m.type === 'store:read');
+    expect(request).toBeTruthy();
+    windowTarget.dispatchEvent(
+      hostMessage({ type: 'store:entries', requestId: request.requestId, entries }),
+    );
+  }
+
+  async function hydrated(entries: Record<string, string>) {
+    const adapter = new VSCodeAdapter();
+    const done = adapter.hydrateScopedStore(PREFIX);
+    answerRead(entries);
+    await done;
+    return adapter;
+  }
+
+  it('serves reads from the hydrated snapshot', async () => {
+    await hydrated({ [KEY]: JSON.stringify([{ id: 'a' }]) });
+    expect(loadJson<unknown[]>(KEY, [])).toEqual([{ id: 'a' }]);
+  });
+
+  it('writes through to the host', async () => {
+    await hydrated({});
+    saveJson(KEY, [{ id: 'b' }]);
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'store:write',
+      key: KEY,
+      value: JSON.stringify([{ id: 'b' }]),
+    });
+  });
+
+  it("applies another webview's committed write, so a later lease grant is not stale", async () => {
+    await hydrated({ [KEY]: JSON.stringify([{ id: 'a' }]) });
+
+    // The webview holding the lease approves a pairing; the host broadcasts it.
+    windowTarget.dispatchEvent(
+      hostMessage({ type: 'store:changed', key: KEY, value: JSON.stringify([{ id: 'a' }, { id: 'b' }]) }),
+    );
+
+    // Without this the next holder would start from the boot snapshot and write
+    // it back, dropping the pairing permanently.
+    expect(loadJson<unknown[]>(KEY, [])).toEqual([{ id: 'a' }, { id: 'b' }]);
+  });
+
+  it('applies a broadcast deletion', async () => {
+    await hydrated({ [KEY]: JSON.stringify([{ id: 'a' }]) });
+
+    windowTarget.dispatchEvent(hostMessage({ type: 'store:changed', key: KEY, value: null }));
+
+    expect(loadJson<unknown[], null>(KEY, null)).toBeNull();
+  });
+
+  it('replaces stale cached keys from a lease-handoff snapshot', async () => {
+    const enrollmentKey = `${PREFIX}enrollment`;
+    await hydrated({
+      [KEY]: JSON.stringify([{ id: 'old' }]),
+      [enrollmentKey]: JSON.stringify({ hostId: 'host-1' }),
+    });
+
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'store:snapshot',
+      prefix: PREFIX,
+      entries: { [KEY]: JSON.stringify([{ id: 'new' }]) },
+    }));
+
+    expect(loadJson<unknown[]>(KEY, [])).toEqual([{ id: 'new' }]);
+    expect(loadJson<unknown, null>(enrollmentKey, null)).toBeNull();
+  });
+
+  it('uses a lease-handoff snapshot that arrives during hydration', async () => {
+    const adapter = new VSCodeAdapter();
+    const done = adapter.hydrateScopedStore(PREFIX);
+
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'store:snapshot',
+      prefix: PREFIX,
+      entries: { [KEY]: JSON.stringify([{ id: 'fresh' }]) },
+    }));
+    answerRead({ [KEY]: JSON.stringify([{ id: 'stale' }]) });
+    await done;
+
+    expect(loadJson<unknown[]>(KEY, [])).toEqual([{ id: 'fresh' }]);
+  });
+
+  it('ignores an unauthenticated broadcast', async () => {
+    await hydrated({ [KEY]: JSON.stringify([{ id: 'a' }]) });
+
+    windowTarget.dispatchEvent(
+      hostMessage({ type: 'store:changed', key: KEY, value: JSON.stringify([]) }, 'wrong-token'),
+    );
+
+    expect(loadJson<unknown[]>(KEY, [])).toEqual([{ id: 'a' }]);
+  });
+
+  it('keeps a write committed while the read is still in flight', async () => {
+    const adapter = new VSCodeAdapter();
+    const done = adapter.hydrateScopedStore(PREFIX);
+
+    // The host snapshots globalState before it waits on the keychain, so the
+    // holder can commit a pairing that the in-flight snapshot cannot contain.
+    windowTarget.dispatchEvent(
+      hostMessage({ type: 'store:changed', key: KEY, value: JSON.stringify([{ id: 'a' }, { id: 'b' }]) }),
+    );
+    answerRead({ [KEY]: JSON.stringify([{ id: 'a' }]) });
+    await done;
+
+    expect(loadJson<unknown[]>(KEY, [])).toEqual([{ id: 'a' }, { id: 'b' }]);
+  });
+
+  it('keeps a deletion committed while the read is still in flight', async () => {
+    const adapter = new VSCodeAdapter();
+    const done = adapter.hydrateScopedStore(PREFIX);
+
+    windowTarget.dispatchEvent(hostMessage({ type: 'store:changed', key: KEY, value: null }));
+    answerRead({ [KEY]: JSON.stringify([{ id: 'a' }]) });
+    await done;
+
+    expect(loadJson<unknown[], null>(KEY, null)).toBeNull();
+  });
+
+  it('installs an empty cache when the host never answers', async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new VSCodeAdapter();
+      const done = adapter.hydrateScopedStore(PREFIX);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await done;
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(loadJson<unknown[], null>(KEY, null)).toBeNull();
   });
 });

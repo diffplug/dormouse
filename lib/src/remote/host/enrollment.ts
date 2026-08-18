@@ -6,12 +6,17 @@
  * Host's `ConnectionPolicy` — the Server tells the Host what it must enforce,
  * and the Host enforces it as final authority regardless.
  *
- * Persisted in `localStorage` (browser-only, no platform adapter dependency) so
- * the standalone app can rehydrate and reconnect on the next launch.
+ * Persisted through `local-json-store` (browser-only, no platform adapter
+ * dependency) so the standalone app can rehydrate and reconnect on the next
+ * launch. The VS Code webview claims the `dormouse.remote-host.` prefix and
+ * backs it with the extension host's `SecretStorage` — `hostToken` is a bearer
+ * credential, and webview `localStorage` is not the VS Code persistence story
+ * (docs/specs/vscode.md).
  */
 
 import { API_ROUTES, type HostEnrollResponse } from 'server-lib-common';
-import { loadJson, saveJson } from '../../lib/local-json-store';
+import { loadJson, removeJson, saveJson } from '../../lib/local-json-store';
+import { ENROLLMENT_KEY } from './store';
 
 export interface HostEnrollment {
   /** Origin the Server is reachable at, e.g. `https://dormouse.tailnet.ts.net`. */
@@ -25,8 +30,7 @@ export interface HostEnrollment {
   rpId: string;
 }
 
-/** Single localStorage key holding the whole enrollment blob. */
-export const ENROLLMENT_KEY = 'dormouse.remote-host.enrollment';
+export { ENROLLMENT_KEY } from './store';
 
 function isEnrollment(value: unknown): value is HostEnrollment {
   if (!value || typeof value !== 'object') return false;
@@ -46,11 +50,7 @@ export function getEnrollment(): HostEnrollment | null {
 }
 
 export function clearEnrollment(): void {
-  try {
-    globalThis.localStorage?.removeItem(ENROLLMENT_KEY);
-  } catch {
-    // No localStorage (some host/test contexts): nothing to clear.
-  }
+  removeJson(ENROLLMENT_KEY);
 }
 
 function saveEnrollment(enrollment: HostEnrollment): void {
