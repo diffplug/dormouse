@@ -231,8 +231,11 @@ playground navbar — carries no theme control.
   UI. An uninstall gated on `confirm` silently did nothing on the desktop app:
   the call returned there without ever showing a dialog. Uninstalling an installed theme (the row's `X`, and the store
   dialog's `Remove`) is a single click, matching `WatchedCommandList`'s remove
-  control in the same dialog; re-installing is one click away in the menu
-  footer.
+  control in the same dialog. Recovery is not symmetric, though: the store
+  dialog's own `Remove` leaves the extension row on screen to re-install, while
+  the picker row's `X` means re-finding the extension through an OpenVSX
+  search — so that control keeps a gap from the row's select target rather than
+  sitting flush against it.
 - Heights follow the viewport, never a fixed pixel budget. Both surfaces take
   their cap from `OVERLAY_MAX_HEIGHT` in `lib/src/components/design.tsx` — the
   dialog uses `.modal`, the dropdown `.popover` — rather than spelling a `dvh`

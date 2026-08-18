@@ -1,14 +1,16 @@
 import { useEffect, type RefObject } from 'react';
 
 /**
- * Close on pointerdown outside the ref, on Escape, or on a scroll that moves
- * the dropdown's anchor.
+ * Close on pointerdown outside the ref, on Escape, or on a scroll that actually
+ * moves the dropdown's anchor.
  *
- * The scroll rule follows `wall/use-dismiss-overlay.ts`: a capture-phase
- * listener, *except* scrolls originating inside `ref` itself. The theme list
- * has its own `overflow-y-auto`, and scrolling it does not move the trigger, so
- * it must not dismiss — without the guard, installing a couple of OpenVSX
- * themes makes the list overflow and the menu closes the moment you scroll it.
+ * The scroll rule is narrower than `wall/use-dismiss-overlay.ts`'s. That one
+ * exempts scrolls originating *inside* the overlay; a capture-phase listener on
+ * `window` still sees every other scroller in the document, which for this
+ * dropdown means a background terminal pane auto-scrolling closes a theme list
+ * the user is reading. Only a scroller the trigger actually sits inside can
+ * move it, so that is the test — which also exempts the theme list's own
+ * `overflow-y-auto` (a descendant, never an ancestor) for free.
  */
 export function useCloseOnOutsideAndEscape(
   open: boolean,
@@ -28,7 +30,16 @@ export function useCloseOnOutsideAndEscape(
       if (event.key === 'Escape') onClose();
     };
     const closeOnScroll = (event: Event) => {
-      if (!containedInRef(event.target)) onClose();
+      const root = ref.current;
+      if (!root) return;
+      // The document scrolling moves everything, including a `fixed` anchor's
+      // reference point; otherwise only an ancestor scroller matters.
+      const target = event.target;
+      if (target === document || target === window) {
+        onClose();
+        return;
+      }
+      if (target instanceof Node && target.contains(root)) onClose();
     };
 
     window.addEventListener('pointerdown', closeOnPointerDown, true);

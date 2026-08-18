@@ -35,7 +35,6 @@ export interface BaseboardProps {
   items: DooredItem[];
   onReattach: (item: DooredItem) => void;
   notice?: ReactNode;
-  /** Host fallback used by the Settings theme picker. */
   /** A visible Door received a primary-button press (drag-out): the item + the press
    *  point, so the Wall can start LathHost's threshold-gated external drag. Absent
    *  (constrained embedders without a Wall) leaves Doors click-only. */

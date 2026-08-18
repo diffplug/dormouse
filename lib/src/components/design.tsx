@@ -151,14 +151,22 @@ export type ModalOverlayVariants = VariantProps<typeof modalOverlay>;
 export const MODAL_OVERLAY_INSET = 'px-4 py-6';
 
 /**
- * The custom property every viewport-bounded overlay reads for its height cap.
+ * The custom properties viewport-bounded overlays read for their height caps.
  *
- * Exists so the bound can be *narrowed* by an ancestor: a story overrides it to
- * snapshot the short-viewport layout deterministically, which no `dvh` value
- * can (Chromatic controls snapshot width, never height). Unset everywhere in
- * the app, so each entry below falls through to the real viewport.
+ * These exist so a bound can be *narrowed* by an ancestor: a story overrides one
+ * to snapshot the short-viewport layout deterministically, which no `dvh` value
+ * can (Chromatic controls snapshot width, never height). Unset everywhere in the
+ * app, so each entry below falls through to the real viewport.
+ *
+ * One property per kind, not one shared: inside the Settings dialog the popover
+ * is a DOM descendant of the modal surface, and custom properties inherit
+ * through `position: fixed` — so a single knob narrowed to constrain the
+ * dropdown would silently cap the dialog containing it too.
  */
-export const OVERLAY_MAX_HEIGHT_VAR = '--overlay-max-h';
+export const OVERLAY_MAX_HEIGHT_VAR = {
+  modal: '--overlay-max-h-modal',
+  popover: '--overlay-max-h-popover',
+} as const;
 
 /**
  * Height caps for things that float over the viewport. One spelling per kind of
@@ -171,9 +179,9 @@ export const OVERLAY_MAX_HEIGHT_VAR = '--overlay-max-h';
  */
 export const OVERLAY_MAX_HEIGHT = {
   /** A `ModalFrame` surface: the viewport minus `MODAL_OVERLAY_INSET` doubled. */
-  modal: 'max-h-[var(--overlay-max-h,calc(100dvh-3rem))]',
+  modal: 'max-h-[var(--overlay-max-h-modal,calc(100dvh-3rem))]',
   /** An anchored popover, matching `clampOverlayPosition`'s viewport margin. */
-  popover: 'max-h-[var(--overlay-max-h,calc(100dvh-24px))]',
+  popover: 'max-h-[var(--overlay-max-h-popover,calc(100dvh-24px))]',
 } as const;
 
 export const modalSurface = tv({

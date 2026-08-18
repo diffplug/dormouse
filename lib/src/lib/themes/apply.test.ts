@@ -1,8 +1,13 @@
 /**
  * @vitest-environment jsdom
  */
-import { beforeEach, describe, expect, it } from 'vitest';
-import { applyTheme, restoreActiveTheme, setDefaultThemeId } from './apply';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  applyTheme,
+  restoreActiveTheme,
+  setDefaultThemeId,
+  subscribeToActiveTheme,
+} from './apply';
 
 import {
   addInstalledTheme,
@@ -90,5 +95,37 @@ describe('applyTheme', () => {
     removeInstalledTheme(INSTALLED_THEME.id);
 
     expect(restoreActiveTheme()?.id).toBe(getBundledThemes()[0]?.id);
+  });
+
+  // `getInstalledThemes()` re-parses its JSON on every call, so an installed
+  // theme is a *different object* each time even though it is the same theme.
+  // An identity check here reported every restore as a fresh user choice.
+  it('does not notify when an already-active installed theme is re-restored', () => {
+    setDefaultThemeId(null);
+    addInstalledTheme(INSTALLED_THEME);
+    setActiveThemeId(INSTALLED_THEME.id);
+    restoreActiveTheme();
+
+    const listener = vi.fn();
+    const unsubscribe = subscribeToActiveTheme(listener);
+    restoreActiveTheme();
+    restoreActiveTheme();
+    unsubscribe();
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('notifies once when the active theme actually changes', () => {
+    addInstalledTheme(INSTALLED_THEME);
+    setActiveThemeId(INSTALLED_THEME.id);
+    restoreActiveTheme();
+
+    const listener = vi.fn();
+    const unsubscribe = subscribeToActiveTheme(listener);
+    const kimbie = getTheme(KIMBIE_DARK);
+    if (kimbie) applyTheme(kimbie);
+    unsubscribe();
+
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });

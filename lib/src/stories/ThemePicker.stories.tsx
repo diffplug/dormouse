@@ -19,7 +19,11 @@ function PickerStory({ maxHeight }: { maxHeight?: string }) {
   return (
     <div
       className="flex h-[28rem] items-start justify-end bg-app-bg p-4"
-      style={maxHeight ? ({ [OVERLAY_MAX_HEIGHT_VAR]: maxHeight } as React.CSSProperties) : undefined}
+      style={
+        maxHeight
+          ? ({ [OVERLAY_MAX_HEIGHT_VAR.popover]: maxHeight } as React.CSSProperties)
+          : undefined
+      }
     >
       <ThemePicker variant="compact" />
     </div>

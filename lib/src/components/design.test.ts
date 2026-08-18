@@ -68,11 +68,14 @@ describe('viewport-bounded overlay caps', () => {
     expect(OVERLAY_MAX_HEIGHT.modal).toContain('calc(100dvh-3rem)');
   });
 
-  it('both caps are overridable through one custom property', () => {
-    // The escape hatch stories use to snapshot the short-viewport layout.
-    for (const cap of Object.values(OVERLAY_MAX_HEIGHT)) {
-      expect(cap).toContain(`var(${OVERLAY_MAX_HEIGHT_VAR},`);
-    }
+  it('each cap is overridable through its own custom property', () => {
+    // The escape hatch stories use to snapshot the short-viewport layout. One
+    // property per kind: the popover renders *inside* the modal surface in the
+    // Settings dialog, and custom properties inherit, so a shared knob would
+    // cap the dialog whenever a caller narrowed the dropdown.
+    expect(OVERLAY_MAX_HEIGHT.modal).toContain(`var(${OVERLAY_MAX_HEIGHT_VAR.modal},`);
+    expect(OVERLAY_MAX_HEIGHT.popover).toContain(`var(${OVERLAY_MAX_HEIGHT_VAR.popover},`);
+    expect(OVERLAY_MAX_HEIGHT_VAR.modal).not.toBe(OVERLAY_MAX_HEIGHT_VAR.popover);
   });
 });
 

@@ -3,7 +3,6 @@ export { CONSUMED_VSCODE_KEYS, convertVscodeThemeColors, uiThemeToType } from '.
 export {
   applyTheme,
   getAppliedThemeSnapshot,
-  getDefaultThemeId,
   restoreActiveTheme,
   setDefaultThemeId,
   subscribeToActiveTheme,

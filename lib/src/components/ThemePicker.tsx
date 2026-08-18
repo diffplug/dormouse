@@ -183,7 +183,9 @@ export function ThemePicker({
                     role="menuitemradio"
                     aria-checked={isActive}
                     onClick={() => selectTheme(theme.id)}
-                    className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm"
+                    className={`flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-3 text-left text-sm ${
+                      isInstalled ? 'pr-1' : 'pr-3'
+                    }`}
                     style={{ color: 'inherit' }}
                   >
                     <ThemeSwatch theme={theme} />
@@ -194,7 +196,7 @@ export function ThemePicker({
                       type="button"
                       aria-label={`Uninstall ${theme.label}`}
                       title={`Uninstall ${theme.label}`}
-                      className={`mr-2 ${modalIconButton()}`}
+                      className={`mr-2 ml-1 p-1.5 ${modalIconButton()}`}
                       style={{ color: 'inherit' }}
                       onClick={(event) => {
                         event.preventDefault();

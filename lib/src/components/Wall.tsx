@@ -234,7 +234,6 @@ export function Wall({
   initialSurfaceRefsNext?: number;
   onEvent?: (event: WallEvent) => void;
   baseboardNotice?: ReactNode;
-  /** Host fallback used by the Settings theme picker when no persisted theme resolves. */
   /**
    * Host-provided modal host(s) (e.g. the standalone quit-confirmation dialog),
    * mounted beside the built-in modal hosts inside the Wall's

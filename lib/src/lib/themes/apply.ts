@@ -53,7 +53,10 @@ export function applyTheme(theme: DormouseTheme): void {
 
   // Captured before the write: a hydration re-apply of the *same* theme still
   // runs the body writes below, and must not be reported as a theme change.
-  const previousTheme = appliedThemeSnapshot?.theme ?? null;
+  // Compared by id, not identity — `getInstalledThemes()` re-parses its JSON on
+  // every call, so an installed theme is a fresh object each time and an
+  // identity check would report every restore as a change.
+  const previousThemeId = appliedThemeSnapshot?.theme.id ?? null;
 
   if (appliedThemeSnapshot && theme !== appliedThemeSnapshot.theme) {
     for (const name of Object.keys(appliedThemeSnapshot.resolvedVars)) {
@@ -90,7 +93,7 @@ export function applyTheme(theme: DormouseTheme): void {
   // Pocket) inherits it from one place instead of guessing in each HTML shell.
   document.body.style.colorScheme = theme.type === 'light' ? 'light' : 'dark';
 
-  if (previousTheme !== theme) {
+  if (previousThemeId !== theme.id) {
     for (const listener of activeThemeListeners) listener();
   }
 }
@@ -113,9 +116,6 @@ export function setDefaultThemeId(id: string | null): void {
   defaultThemeId = id;
 }
 
-export function getDefaultThemeId(): string | null {
-  return defaultThemeId;
-}
 
 /** Apply the persisted active theme. When nothing is persisted yet — or the
  *  persisted theme no longer resolves — fall back to `setDefaultThemeId`'s
