@@ -6,31 +6,19 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThemePicker } from './ThemePicker';
+import { installLocalStorageStub } from '../lib/test-local-storage';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
 let root: Root;
 
-function installStorageStub(): void {
-  const values = new Map<string, string>();
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: {
-      clear: () => values.clear(),
-      getItem: (key: string) => values.get(key) ?? null,
-      removeItem: (key: string) => values.delete(key),
-      setItem: (key: string, value: string) => values.set(key, value),
-    },
-  });
-}
-
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
     disconnect() {}
   });
-  installStorageStub();
+  installLocalStorageStub();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);

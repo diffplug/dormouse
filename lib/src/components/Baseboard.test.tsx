@@ -11,6 +11,7 @@ vi.mock('../lib/platform', () => ({
 }));
 
 import { Baseboard } from './Baseboard';
+import { installLocalStorageStub } from '../lib/test-local-storage';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from '../lib/alert-settings';
 import {
   addInstalledTheme,
@@ -44,6 +45,7 @@ beforeEach(() => {
     observe() {}
     disconnect() {}
   });
+  installLocalStorageStub();
   window.localStorage.clear();
   applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
   container = document.createElement('div');
