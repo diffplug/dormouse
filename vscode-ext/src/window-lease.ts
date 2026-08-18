@@ -89,6 +89,17 @@ function setHeld(current: LeaseState, held: boolean): void {
   current.onChange(held);
 }
 
+/** Make an FSWatcher failure degrade to polling instead of becoming uncaught. */
+export function installWatcherErrorFallback(
+  watcher: FSWatcher,
+  onUnavailable: (error: Error) => void,
+): void {
+  watcher.once('error', (error) => {
+    watcher.close();
+    onUnavailable(error);
+  });
+}
+
 async function tick(current: LeaseState): Promise<void> {
   // `state !== current` is how a disposed lease stops; a separate flag would be
   // a second copy of the same fact.
@@ -151,7 +162,7 @@ export function ensureWindowLease(onChange: (held: boolean) => void): void {
       // The heartbeat alone would make a clean handoff take up to a TTL; the
       // watcher turns "the holder released it" into a prompt takeover. Purely
       // an accelerator — correctness is the timer's job.
-      current.watcher = watch(dir, (_event, filename) => {
+      const watcher = watch(dir, (_event, filename) => {
         if (filename && filename !== LEASE_FILE) return;
         // The holder's own heartbeat lands here too, and re-ticking on it turns
         // the heartbeat into a write loop that re-arms itself — ~50x the
@@ -160,6 +171,11 @@ export function ensureWindowLease(onChange: (held: boolean) => void): void {
         // accelerator.
         if (current.held === true) return;
         void tick(current);
+      });
+      current.watcher = watcher;
+      installWatcherErrorFallback(watcher, (error) => {
+        log.error(`[window-lease] watcher failed; falling back to polling: ${String(error)}`);
+        if (current.watcher === watcher) current.watcher = null;
       });
     } catch {
       // No watcher on this platform/filesystem: the interval still converges.

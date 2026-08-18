@@ -267,6 +267,8 @@ On the webview side `activation.ts` starts un-owned whenever the adapter offers 
 **Across windows.** The election above is per-window, because the extension host is — but the enrollment it guards is machine-wide, so window-local arbitration alone is not enough. Left there, every window would elect its own Host, all of them would connect `/ws/host` with the same enrollment, and the server would close the displaced socket (`server/src/relay.ts`) whose `close` handler reconnects and displaces the next one: an endless fight, with each window arming its own alarm push.
 
 So there is a second tier. A window may grant the role only while it holds a lease recorded in the extension's `globalStorageUri` — per-extension, shared by every window, and (unlike `globalState`) with no cross-window change event to depend on, so ownership is a heartbeat with a TTL rather than a flag. The holder re-stamps every 5s; a record unstamped for 15s is free. That TTL is what recovers the role from a window that died without running its disposables; a clean dispose deletes the record so the handoff is prompt, and a filesystem watcher makes the next window notice without waiting for its poll.
+The watcher is only an accelerator: construction failures and later asynchronous
+`error` events close and clear it, while the interval continues to arbitrate.
 
 A fresh claim is confirmed by re-reading: two windows can judge the same record stale in the same instant and both write, and the loser must not believe it won. Renewing skips that round trip, since the record already named the renewer. A heartbeat stamped far in the *future* counts as stale too — otherwise a clock jump would lock every window out of the role until the skew elapsed.
 
