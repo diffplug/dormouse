@@ -11,6 +11,7 @@ import { readPersistedSession } from '../../lib/src/lib/session-types';
 import { workspaceTitle } from './workspace-chrome';
 import { resolveSelectedShell, setSelectedShellPath, getSelectedShellPath } from './shell-selection';
 import type { ExtensionMessage } from './message-types';
+import { initRemoteHostStore } from './remote-host-store';
 
 type NewTerminalMessage = Extract<ExtensionMessage, { type: 'dormouse:newTerminal' }>;
 
@@ -73,6 +74,10 @@ function setupPanel(
 }
 
 export function activate(context: vscode.ExtensionContext) {
+  // The remote Host's enrollment (SecretStorage) and ACL (globalState) are
+  // read by the webview through `store:read`; give the store its context
+  // before any webview can ask. See remote-host-store.ts.
+  initRemoteHostStore(context);
   log.init();
   extensionContext = context;
   ptyManager.setExtensionPath(context.extensionPath);

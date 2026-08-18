@@ -21,6 +21,7 @@ import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
+import { readStore, writeStore } from './remote-host-store';
 import { log } from './log';
 import type { WebviewChannel } from './webview-messaging';
 
@@ -32,6 +33,39 @@ const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
 // Global set of PTY IDs claimed by any router instance.
 // Prevents reconnecting routers from stealing PTYs owned by other webviews.
 const globalOwnedPtyIds = new Set<string>();
+
+/**
+ * Arbiter for named single-instance roles across this window's webviews — today
+ * only `remote-host`, so exactly one webview holds the `/ws/host` socket and
+ * arms alarm push (see `lib/src/remote/host/activation.ts`). The extension host
+ * arbitrates because it is the only party that sees every webview and outlives
+ * each one. First claimant wins; when the holder is disposed the role is
+ * re-offered, so closing the Dormouse view hands the Host to another open one
+ * instead of dropping it until a reload.
+ */
+interface SingletonClaimant {
+  wants: Set<string>;
+  holds: Set<string>;
+  notify(name: string, held: boolean): void;
+}
+const singletonClaimants = new Set<SingletonClaimant>();
+
+function electSingleton(name: string): void {
+  const holder = [...singletonClaimants].find((c) => c.holds.has(name));
+  if (holder) return;
+  const next = [...singletonClaimants].find((c) => c.wants.has(name));
+  if (!next) return;
+  next.holds.add(name);
+  next.notify(name, true);
+}
+
+function releaseSingletons(claimant: SingletonClaimant): void {
+  const released = [...claimant.holds];
+  claimant.holds.clear();
+  claimant.wants.clear();
+  singletonClaimants.delete(claimant);
+  for (const name of released) electSingleton(name);
+}
 interface ActiveRouter {
   flushSessionSave(timeoutMs?: number): Promise<void>;
   ownsPty(id: string): boolean;
@@ -171,6 +205,15 @@ export function attachRouter(
 
   // Track which PTY IDs were spawned (or reconnected) through this webview
   const ownedPtyIds = new Set<string>();
+
+  // This webview's stake in the window-wide single-instance roles.
+  const claimant: SingletonClaimant = {
+    wants: new Set<string>(),
+    holds: new Set<string>(),
+    notify: (name, held) =>
+      void post({ type: 'singleton:lease', name, held } satisfies ExtensionMessage),
+  };
+  singletonClaimants.add(claimant);
   const pendingFlushRequests = new Map<string, { resolve: () => void; timeout: ReturnType<typeof setTimeout> }>();
   let disposed = false;
 
@@ -493,6 +536,27 @@ export function attachRouter(
           } satisfies ExtensionMessage),
         );
         break;
+      case 'singleton:claim':
+        claimant.wants.add(msg.name);
+        if (claimant.holds.has(msg.name)) claimant.notify(msg.name, true);
+        else electSingleton(msg.name);
+        break;
+      case 'store:read':
+        // The Host's enrollment + ACL live in extension-host storage, not in
+        // webview localStorage (remote-host-store.ts explains why). Both sides
+        // gate on the key prefix.
+        readStore(typeof msg.prefix === 'string' ? msg.prefix : '').then(
+          (entries) => post({
+            type: 'store:entries', requestId: msg.requestId, entries,
+          } satisfies ExtensionMessage),
+          () => post({
+            type: 'store:entries', requestId: msg.requestId, entries: {},
+          } satisfies ExtensionMessage),
+        );
+        break;
+      case 'store:write':
+        void writeStore(msg.key, msg.value);
+        break;
       case 'dormouse:themeColors':
         // Webview reports its resolved terminal theme; cache for OSC color replies.
         latestThemeColors = { foreground: msg.foreground, background: msg.background, cursor: msg.cursor };
@@ -661,6 +725,7 @@ export function attachRouter(
       if (disposed) return;
       disposed = true;
       activeRouters.delete(router);
+      releaseSingletons(claimant);
       removeWatchedCommandListener();
       removeAlertSettingsListener();
       resolveAllFlushRequests();

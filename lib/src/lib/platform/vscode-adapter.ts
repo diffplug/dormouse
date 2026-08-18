@@ -14,6 +14,7 @@ import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
 import { isHostMessage, readHostMessageToken } from '../vscode-message-token';
 import type { DorControlResult } from 'dor/protocol';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
+import { setJsonStoreBackend } from '../local-json-store';
 
 export class VSCodeAdapter implements PlatformAdapter {
   private vscode: ReturnType<typeof acquireVsCodeApi>;
@@ -188,6 +189,58 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   async init(): Promise<void> {
     // No initialization needed — the webview is already running
+  }
+
+  /**
+   * Ask the extension host for a named single-instance role and report every
+   * grant/revoke. The extension host is the arbiter because it is the only
+   * thing that outlives and sees all of this window's webviews; it re-offers
+   * the role when the holder is disposed, so closing the Dormouse view hands
+   * the Host to another open one rather than dropping it until reload.
+   */
+  claimSingleton(name: string, onChange: (held: boolean) => void): void {
+    window.addEventListener('message', (event: MessageEvent) => {
+      if (!isHostMessage(event.data, this.hostMessageToken)) return;
+      const msg = event.data;
+      if (msg.type === 'singleton:lease' && msg.name === name) onChange(!!msg.held);
+    });
+    this.vscode.postMessage({ type: 'singleton:claim', name });
+  }
+
+  /**
+   * Pull every `prefix`-scoped value out of extension-host storage and install
+   * a synchronous, write-through backend over it (docs/specs/vscode.md → "Host
+   * store"). Webview `localStorage` is not the VS Code persistence story, and
+   * the remote Host's enrollment carries a bearer credential that belongs in
+   * `SecretStorage`, so the store has to live on the other side of the message
+   * boundary. A failed read installs an empty cache rather than throwing: the
+   * Host then behaves as un-enrolled instead of blocking webview boot.
+   */
+  async hydrateScopedStore(prefix: string): Promise<void> {
+    let entries: Record<string, string> = {};
+    try {
+      entries =
+        (await this.requestResponse(
+          'store:read',
+          'store:entries',
+          { prefix },
+          (msg) => msg.entries as Record<string, string>,
+        )) ?? {};
+    } catch {
+      // Timed out or the host declined — fall through with an empty cache.
+    }
+    const cache = new Map(Object.entries(entries));
+    setJsonStoreBackend(prefix, {
+      getItem: (key) => cache.get(key) ?? null,
+      setItem: (key, value) => {
+        cache.set(key, value);
+        this.vscode.postMessage({ type: 'store:write', key, value });
+      },
+      removeItem: (key) => {
+        cache.delete(key);
+        this.vscode.postMessage({ type: 'store:write', key, value: null });
+      },
+    });
   }
 
   shutdown(): void {

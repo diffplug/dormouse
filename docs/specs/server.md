@@ -48,6 +48,22 @@ policy all use that normalized origin.
 
 ## Host webview CSP (self-host builds)
 
+Both Hosts — the standalone Tauri app and the VS Code extension — render the
+webview that holds the relay socket, so in both the webview `connect-src` bounds
+where the Host can reach a relay server. Both default to the SaaS origin only
+and take the same build-time override, `DORMOUSE_REMOTE_CONNECT_SRC`:
+
+```sh
+DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:standalone
+DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode
+```
+
+The standalone path is described below; the VS Code path substitutes the sources
+into the extension bundle at build time (`docs/specs/vscode.md` → "CSP policy"),
+and the rest of that Host's selfhost story — where its enrollment and ACL live,
+and which webview owns the socket — is in `docs/specs/vscode.md` → "Remote Host:
+store and lease".
+
 The standalone Host is a Tauri app, and its webview `connect-src` bounds where
 the Host can reach a relay server. The shipped binary is scoped to the SaaS
 origin only (`https://*.dormouse.sh wss://*.dormouse.sh`, plus localhost for

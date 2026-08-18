@@ -28,6 +28,9 @@ export type WebviewMessage =
   | { type: 'agentBrowser:popOut'; session: string; url?: string; rect?: { x: number; y: number; width: number; height: number }; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:popIn'; session: string; url?: string; binaryPath?: string; requestId: string }
   | { type: 'iframe:createProxyUrl'; url: string; requestId: string }
+  | { type: 'singleton:claim'; name: string }
+  | { type: 'store:read'; prefix: string; requestId: string }
+  | { type: 'store:write'; key: string; value: string | null }
   | { type: 'dormouse:init' }
   | ({ type: 'dormouse:themeColors' } & TerminalColors)
   | { type: 'dormouse:saveState'; state: unknown }
@@ -73,6 +76,8 @@ export type ExtensionMessage =
   | { type: 'agentBrowser:openResult'; requestId: string; ok: boolean; session?: string; wsPort?: number; binaryPath?: string; error?: string }
   | { type: 'agentBrowser:popResult'; requestId: string; ok: boolean; wsPort?: number; error?: string }
   | { type: 'iframe:proxyUrl'; requestId: string; result: IframeProxyResult }
+  | { type: 'store:entries'; requestId: string; entries: Record<string, string> }
+  | { type: 'singleton:lease'; name: string; held: boolean }
   | {
       type: 'dormouse:newTerminal';
       shell?: string;

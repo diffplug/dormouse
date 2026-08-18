@@ -117,6 +117,25 @@ export interface PlatformAdapter {
   init(): Promise<void>;
   shutdown(): void;
 
+  /**
+   * Make every key under `prefix` readable synchronously from a host-owned
+   * store instead of `localStorage`, then keep it written through. Optional:
+   * only hosts whose real storage lives outside the webview implement it (VS
+   * Code, where the extension host holds `SecretStorage`). Callers must await
+   * it before any module reads those keys, because `local-json-store` is
+   * synchronous by contract. Adapters that omit it leave `localStorage` in
+   * charge, which is correct for standalone and the website.
+   */
+  hydrateScopedStore?(prefix: string): Promise<void>;
+
+  /**
+   * Claim a named role that at most one app instance may hold, and be told
+   * whenever the claim is granted or revoked. Optional: only hosts that can
+   * show several webviews over one backend implement it (VS Code). Adapters
+   * that omit it are single-instance, so callers treat the role as held.
+   */
+  claimSingleton?(name: string, onChange: (held: boolean) => void): void;
+
   // Shell detection
   getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]>;
 

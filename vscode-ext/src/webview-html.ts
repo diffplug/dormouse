@@ -1,4 +1,11 @@
 import * as vscode from 'vscode';
+
+/**
+ * Remote-server `connect-src` sources, substituted by esbuild at build time
+ * (`scripts/esbuild.mjs`). Declared rather than imported so the value is a
+ * literal in the bundle and cannot be changed at runtime.
+ */
+declare const __DORMOUSE_REMOTE_CONNECT_SRC__: string;
 import * as path from 'path';
 import * as fs from 'fs';
 import { randomBytes } from 'crypto';
@@ -50,8 +57,12 @@ export function getWebviewHtml(
     `font-src ${webview.cspSource}`,
     `img-src ${webview.cspSource} data: blob:`,
     // ws: entries cover the agent-browser stream relay (frames + input for
-    // browser surfaces; see docs/specs/dor-browser.md).
-    `connect-src ${webview.cspSource} ws://127.0.0.1:* ws://localhost:*`,
+    // browser surfaces; see docs/specs/dor-browser.md). The remote sources are
+    // baked in at build time (scripts/esbuild.mjs) — the published extension
+    // reaches the SaaS relay only, and a selfhoster widens it for their own
+    // build with DORMOUSE_REMOTE_CONNECT_SRC, exactly as the standalone binary
+    // does. Without them a VS Code Host cannot hold its `/ws/host` socket.
+    `connect-src ${webview.cspSource} ws://127.0.0.1:* ws://localhost:* ${__DORMOUSE_REMOTE_CONNECT_SRC__}`,
     // `dor iframe` frames its target through a loopback transparent proxy that
     // the extension host stands up (iframe-proxy-host.ts), so the only origin we
     // ever embed is 127.0.0.1/localhost on an OS-assigned port. Without a

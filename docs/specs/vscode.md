@@ -22,6 +22,8 @@ Extension Host (vscode-ext/src/)
 ├── agent-browser-host.ts     — extension-host wiring + stream relay for the agent-browser surface
 ├── iframe-proxy-host.ts      — VS Code binding for the iframe transparent proxy (injects the logger)
 ├── webview-html.ts           — CSP injection, nonce + message-token generation, asset URI rewriting
+├── remote-host-store.ts      — SecretStorage/globalState backing for the webview's remote-Host keys
+├── scripts/esbuild.mjs       — extension + pty-host bundles; bakes the webview's remote `connect-src`
 ├── webview-messaging.ts      — serveWebview: pairs a document with its message token, returns the WebviewChannel
 └── log.ts                    — extension logging
 
@@ -214,6 +216,8 @@ TUIs query the terminal's foreground/background/cursor colors with `OSC 10/11/12
 
 Source of truth: `vscode-ext/src/webview-html.ts` assembles the CSP directives (`randomSecret()` + the directive list).
 
+The remote-server `connect-src` sources are a build-time constant, not a runtime value: `vscode-ext/scripts/esbuild.mjs` substitutes `__DORMOUSE_REMOTE_CONNECT_SRC__` into the bundle, defaulting to the SaaS origin (`https://*.dormouse.sh wss://*.dormouse.sh`). Without them a VS Code Host cannot hold its `/ws/host` socket at all. A selfhoster widens it for their own build with `DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode` — the same variable and the same per-build opt-in as the standalone binary (`docs/specs/server.md` → "Host webview CSP"). It is a `declare const` rather than an import so the value is a literal in the bundle and nothing at runtime can move it.
+
 `unsafe-inline` for styles is needed because VS Code injects theme CSS variables via inline styles on the body element. Scripts remain nonce-gated, with a fresh per-render nonce of 24 CSPRNG bytes (`node:crypto` `randomBytes`) base64url-encoded to 32 characters — a nonce that is guessable is a nonce that is not there, so `Math.random()` is not acceptable here. The webview HTML is built by Vite from the `lib` package, then at runtime `webview-html.ts` rewrites asset URLs to webview URIs, injects the CSP meta tag, applies nonces to all script tags, and injects initial state via a nonce-gated inline script.
 
 ### Webview message authentication
@@ -236,6 +240,26 @@ This is the same shape as the origin check the Wall already applies to messages 
 Scope is VS Code. The standalone adapters receive the equivalent events over Tauri's `listen()` IPC and the dev harness's host WebSocket (`docs/specs/standalone.md`, `docs/specs/transport.md`), never `window.postMessage`, so they have no forgeable inbox to guard.
 
 Source of truth: `lib/src/lib/vscode-message-token.ts` (constants + `isHostMessage`), `vscode-ext/src/webview-messaging.ts` (`WebviewChannel` + `serveWebview`), `vscode-ext/src/webview-html.ts` (mint + injection), `lib/src/lib/platform/vscode-adapter.ts` (both guards). Tests: the `host message authentication` block in `lib/src/lib/platform/vscode-adapter.test.ts`.
+
+### Remote Host: store and lease
+
+VS Code is a first-class remote Host. Two things have to be true that standalone gets for free, because standalone is one webview per app and VS Code is many webviews over one extension host.
+
+**The store.** The Host's enrollment (`{ serverUrl, hostId, hostToken, origin, rpId }`) and its ACL persist through `local-json-store`, which defaults to `localStorage`. That is wrong here twice over: webview `localStorage` is not VS Code's persistence story, and `hostToken` is a bearer credential that grants the `/ws/host` socket. So the webview claims the `dormouse.remote-host.` prefix and backs it with the extension host — enrollment in `SecretStorage` (OS keychain), ACL in `globalState`, both global because a Host identity belongs to the machine and not to a folder.
+
+`local-json-store` is synchronous by contract, so the store is pulled across at boot and installed as an in-memory, write-through backend before anything reads it: `lib/src/main.tsx` awaits `PlatformAdapter.hydrateScopedStore` alongside `resumeOrRestore`. A failed read installs an empty cache rather than throwing — the Host then behaves as un-enrolled instead of blocking webview boot.
+
+Both sides gate on the prefix. The webview names the keys, so `remote-host-store.ts` refuses any key outside the Host namespace and caps values at 64 KiB; a compromised webview can neither read nor write unrelated extension state.
+
+Source of truth: `vscode-ext/src/remote-host-store.ts`, `lib/src/lib/platform/vscode-adapter.ts` (`hydrateScopedStore`), `lib/src/lib/local-json-store.ts` (prefix claims), `lib/src/remote/host/store.ts` (the shared prefix).
+
+**The lease.** A window can show a `WebviewView` and any number of `WebviewPanel`s at once. Each mounts the same Wall, so each would start its own `RemoteHost` against the same enrollment — they would displace each other on the single `/ws/host` socket (`server/test/relay-displaced.test.mjs`) and each would arm its own alarm push. The extension host arbitrates instead, because it is the only party that sees every webview and outlives each one: `message-router.ts` grants the named role `remote-host` to the first claimant and re-offers it when the holder is disposed, so closing the Dormouse view hands the Host to another open one rather than dropping it until a reload.
+
+On the webview side `activation.ts` starts un-owned whenever the adapter offers `claimSingleton`, so two webviews racing to mount cannot both activate before the first answer arrives. Adapters without the hook (standalone, the website) are single-instance and stay owned from the start.
+
+Source of truth: the `SingletonClaimant` arbiter in `vscode-ext/src/message-router.ts`, `PlatformAdapter.claimSingleton`, `setRemoteHostOwnership` in `lib/src/remote/host/activation.ts`, tested in `lib/src/remote/host/activation.test.ts`.
+
+**Lifetime.** The Host lives as long as a Dormouse webview exists in the window. `retainContextWhenHidden: true` is set on both hosting modes, so hiding the panel keeps it connected; only disposing every Dormouse view, or closing the window, takes it offline.
 
 ### Build and development
 

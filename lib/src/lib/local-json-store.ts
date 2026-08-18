@@ -13,7 +13,45 @@
  * Each caller supplies its own key, fallback, and (optionally) a type guard, so
  * the fallback and validation stay caller-specific while the boilerplate lives
  * here once.
+ *
+ * `localStorage` is the default backend, but a host whose storage lives
+ * elsewhere can claim a key prefix with {@link setJsonStoreBackend} — the VS
+ * Code webview routes `dormouse.remote-host.*` to the extension host, whose
+ * `SecretStorage` holds the Host's bearer credential (docs/specs/vscode.md).
+ * The claim is per-prefix rather than global so unrelated stores (alert
+ * settings, watched commands) keep their own backend.
  */
+
+/** The minimal `localStorage` surface these helpers use. */
+export interface JsonStoreBackend {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+/** Prefix claims, longest-first so a more specific prefix wins. */
+const backends: Array<{ prefix: string; backend: JsonStoreBackend }> = [];
+
+/**
+ * Route every key starting with `prefix` to `backend`. Pass `null` to release
+ * the claim. Backends must be synchronous: callers read at module init and on
+ * every access, so an async store has to be hydrated into memory first.
+ */
+export function setJsonStoreBackend(prefix: string, backend: JsonStoreBackend | null): void {
+  const at = backends.findIndex((entry) => entry.prefix === prefix);
+  if (at !== -1) backends.splice(at, 1);
+  if (backend) {
+    backends.push({ prefix, backend });
+    backends.sort((a, b) => b.prefix.length - a.prefix.length);
+  }
+}
+
+function backendFor(key: string): JsonStoreBackend | undefined {
+  for (const entry of backends) {
+    if (key.startsWith(entry.prefix)) return entry.backend;
+  }
+  return globalThis.localStorage as JsonStoreBackend | undefined;
+}
 
 /**
  * Read and JSON-parse the value at `key`, returning `fallback` if storage is
@@ -26,7 +64,7 @@ export function loadJson<V, F = V>(
   validate?: (value: unknown) => value is V,
 ): V | F {
   try {
-    const raw = globalThis.localStorage?.getItem(key);
+    const raw = backendFor(key)?.getItem(key);
     if (!raw) return fallback;
     const parsed: unknown = JSON.parse(raw);
     if (validate && !validate(parsed)) return fallback;
@@ -42,8 +80,21 @@ export function loadJson<V, F = V>(
  */
 export function saveJson(key: string, value: unknown): void {
   try {
-    globalThis.localStorage?.setItem(key, JSON.stringify(value));
+    backendFor(key)?.setItem(key, JSON.stringify(value));
   } catch {
     // No localStorage / quota exceeded: the in-memory value still works.
+  }
+}
+
+/**
+ * Delete the value at `key`, swallowing any failure. Callers must go through
+ * this rather than touching `localStorage` directly, or a claimed prefix would
+ * clear the wrong store.
+ */
+export function removeJson(key: string): void {
+  try {
+    backendFor(key)?.removeItem(key);
+  } catch {
+    // No storage: nothing to clear.
   }
 }
