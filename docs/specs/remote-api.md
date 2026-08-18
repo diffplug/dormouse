@@ -261,6 +261,9 @@ rather than re-resolving the old `surfaceId` through the current registry slot.
 When that PTY exits, the Host emits `terminal.closed` and then drops the
 attachment, so a later `terminal.write`/`terminal.resize` for the surface is
 rejected ("surface is not attached") instead of acting on the disposed terminal.
+Disposing the Viewer also invalidates an in-flight peer surface resolution; a
+handle that resolves after disposal is released immediately and never becomes
+an attachment.
 
 #### Size authority: last-attach-wins
 

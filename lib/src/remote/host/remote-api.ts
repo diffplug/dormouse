@@ -79,6 +79,8 @@ export class RemoteApiSession {
   #unsubDirectory: (() => void) | null = null;
   #directoryTimer: ReturnType<typeof setTimeout> | null = null;
   #attachment: Attachment | null = null;
+  #lifecycleGeneration = 0;
+  #disposed = false;
 
   constructor(options: RemoteApiSessionOptions) {
     this.#hostId = options.hostId;
@@ -86,6 +88,7 @@ export class RemoteApiSession {
   }
 
   handle(data: unknown): void {
+    if (this.#disposed) return;
     const request = data as RemoteRequest;
     if (!request || typeof request.requestId !== 'string' || typeof request.method !== 'string') {
       return;
@@ -113,6 +116,9 @@ export class RemoteApiSession {
   }
 
   dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.#lifecycleGeneration += 1;
     this.#directorySubId = null;
     if (this.#directoryTimer) {
       clearTimeout(this.#directoryTimer);
@@ -232,7 +238,14 @@ export class RemoteApiSession {
     // Where the pane lives — this webview's registry or a sibling's — is a fact
     // about VS Code webview hosting, not a protocol concept, so it is settled
     // below this line and never seen here (`surface-resolve.ts`).
+    const generation = this.#lifecycleGeneration;
     void resolveSurface(params.surfaceId, params).then((handle) => {
+      if (this.#disposed || this.#lifecycleGeneration !== generation) {
+        // A foreign resolve starts its stream before returning the handle. If
+        // the session died during that round trip, unwind it immediately.
+        handle?.release();
+        return;
+      }
       if (!handle) {
         this.#fail(request, `no such surface: ${params.surfaceId}`);
         return;

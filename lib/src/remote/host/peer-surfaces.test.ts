@@ -36,6 +36,7 @@ class PeerPlatform {
   /** Surfaces the imaginary sibling webview owns. */
   peerSurfaces = new Map<string, { ptyId: string; cols: number; rows: number }>();
   peerEntries: unknown[] = [];
+  surfaceRequestGate: Promise<void> | null = null;
 
   /**
    * One generic seam: `op` is opaque to the adapter, and a peer answers with
@@ -45,6 +46,7 @@ class PeerPlatform {
     claimSingleton: () => {},
     request: async (op: string, params: unknown) => {
       if (op === 'directory') return this.peerEntries;
+      await this.surfaceRequestGate;
       const { surfaceId, op: surfaceOp, cols, rows } =
         params as { surfaceId: string; op: string; cols?: number; rows?: number };
       this.ops.push({ surfaceId, op: surfaceOp, cols, rows });
@@ -219,6 +221,29 @@ describe('remote-api peer surfaces', () => {
 
     // Otherwise the host keeps forwarding a PTY nobody is reading.
     expect(platform.unsubscribed).toEqual(['pty-far']);
+  });
+
+  it('releases a peer handle that resolves after session disposal', async () => {
+    const platform = new PeerPlatform();
+    platform.peerSurfaces.set('surface-far', { ptyId: 'pty-far', cols: 80, rows: 24 });
+    let finishResolve!: () => void;
+    platform.surfaceRequestGate = new Promise<void>((resolve) => {
+      finishResolve = resolve;
+    });
+    const { api, sent } = session(platform);
+
+    api.handle({
+      requestId: 'attach-1',
+      method: REMOTE_METHODS.surfaceAttach,
+      params: { surfaceId: 'surface-far', cols: 80, rows: 24 },
+    });
+    api.dispose();
+    finishResolve();
+    await settle();
+
+    expect(platform.subscribed).toEqual(['pty-far']);
+    expect(platform.unsubscribed).toEqual(['pty-far']);
+    expect(sent.some((p) => (p as RemoteResponse).requestId === 'attach-1')).toBe(false);
   });
 
   it('fails cleanly when no webview owns the surface', async () => {
