@@ -15,6 +15,7 @@ import { isHostMessage, readHostMessageToken } from '../vscode-message-token';
 import type { DorControlResult } from 'dor/protocol';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 import type { PeerBridge } from './types';
+import { PEER_REQUEST_TIMEOUT_MS } from '../vscode-peer-link-protocol';
 import { setJsonStoreBackend } from '../local-json-store';
 
 /**
@@ -24,12 +25,7 @@ import { setJsonStoreBackend } from '../local-json-store';
  */
 const HOST_STORE_READ_TIMEOUT_MS = 10_000;
 
-/**
- * Budget for a peer round trip. Comfortably above the broker's own
- * `PEER_REPLY_BUDGET_MS`, so a slow sibling shows up as an incomplete directory
- * rather than as a timeout on this side.
- */
-const PEER_REQUEST_TIMEOUT_MS = 3_000;
+
 
 export class VSCodeAdapter implements PlatformAdapter {
   private vscode: ReturnType<typeof acquireVsCodeApi>;
@@ -191,12 +187,15 @@ export class VSCodeAdapter implements PlatformAdapter {
           entries: this.peerHandlers?.directory() ?? [],
         });
       } else if (msg.type === 'peer:surfaceRequest') {
-        // Only the owner answers; a miss stays silent so it cannot beat the
-        // real owner's reply to the broker.
+        // Answer either way: the broker settles once every webview has replied,
+        // so staying silent on a miss would make it wait out the full budget.
+        // Only an `ok` claims the surface, so a miss cannot beat the owner.
         const result = this.peerHandlers?.surfaceOp(msg.surfaceId, msg.op, msg.cols, msg.rows);
-        if (result?.ok) {
-          this.vscode.postMessage({ type: 'peer:surfaceResult', requestId: msg.requestId, ...result });
-        }
+        this.vscode.postMessage({
+          type: 'peer:surfaceResult',
+          requestId: msg.requestId,
+          ...(result ?? { ok: false }),
+        });
       }
     });
   }

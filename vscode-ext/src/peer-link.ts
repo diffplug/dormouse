@@ -20,9 +20,9 @@
  * token read from that file. That is the same bar as the `dor` control socket.
  */
 
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { watch, type FSWatcher } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -31,19 +31,16 @@ import type * as vscode from 'vscode';
 
 import {
   FrameDecoder,
-  PeerRouteTable,
+  PEER_REPLY_BUDGET_MS,
   encodeFrame,
+  forgetPeerRoutes,
+  type PeerLinkHello,
   type PeerLinkRequest,
   type PeerLinkResponse,
+  type PeerSurfaceOp,
+  type PeerSurfaceResult,
 } from '../../lib/src/lib/vscode-peer-link-protocol';
 import { log } from './log';
-
-export interface PeerSurfaceResult {
-  ok: boolean;
-  ptyId?: string;
-  cols?: number;
-  rows?: number;
-}
 
 /**
  * What this module needs from the router, injected rather than imported: the
@@ -55,7 +52,7 @@ export interface PeerLinkDeps {
   brokerDirectory(): Promise<unknown[]>;
   brokerSurfaceOp(
     surfaceId: string,
-    op: 'attach' | 'detach' | 'resize',
+    op: PeerSurfaceOp,
     cols?: number,
     rows?: number,
   ): Promise<PeerSurfaceResult>;
@@ -74,8 +71,19 @@ export function configurePeerLink(next: PeerLinkDeps): void {
 
 const RENDEZVOUS_FILE = 'remote-host.peer.json';
 
-/** Matches the in-window fan-out budget; a window that cannot answer is skipped. */
-const PEER_REPLY_BUDGET_MS = 1_000;
+/**
+ * Constant-time token compare, mirroring `tokenMatches` in
+ * `standalone/sidecar/dor-control-server.js`. That module is CommonJS and the
+ * shared protocol module must stay Node-free for the webview, so this is a
+ * deliberate second copy — but the property cannot differ: `!==` leaks the
+ * token byte-by-byte to a co-resident local process that can time the response.
+ */
+function tokenMatches(provided: unknown, expected: string): boolean {
+  if (typeof provided !== 'string') return false;
+  const a = createHash('sha256').update(provided).digest();
+  const b = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(a, b);
+}
 
 /** Backoff for a client whose broker went away before a new one took the lease. */
 const RECONNECT_MS = 2_000;
@@ -116,10 +124,10 @@ interface PeerClient {
 }
 
 let server: Server | null = null;
-let serverToken = '';
-let serverSocketPath = '';
+/** Set exactly while `server` is listening; the two move together. */
+let rendezvous: Rendezvous | null = null;
 const clients = new Set<PeerClient>();
-const routes = new PeerRouteTable<PeerClient>();
+const routes = new Map<string, PeerClient>();
 const pendingRequests = new Map<string, (frame: PeerLinkResponse) => void>();
 let nextRequestId = 0;
 
@@ -166,7 +174,7 @@ export async function remoteDirectory(): Promise<unknown[]> {
  */
 export async function remoteSurfaceOp(
   surfaceId: string,
-  op: 'attach' | 'detach' | 'resize',
+  op: PeerSurfaceOp,
   cols?: number,
   rows?: number,
 ): Promise<PeerSurfaceResult> {
@@ -177,7 +185,7 @@ export async function remoteSurfaceOp(
     if (reply?.kind !== 'surfaceResult' || !reply.ok) continue;
     // Remember where this PTY lives: a ptyId alone says nothing about which
     // window owns it, and input and resizes have to reach that window.
-    if (reply.ptyId) routes.claim(reply.ptyId, client);
+    if (reply.ptyId) routes.set(reply.ptyId, client);
     return { ok: true, ptyId: reply.ptyId, cols: reply.cols, rows: reply.rows };
   }
   return { ok: false };
@@ -185,30 +193,30 @@ export async function remoteSurfaceOp(
 
 /** Whether this PTY is streaming from another window. */
 export function isRemotePty(ptyId: string): boolean {
-  return routes.peerFor(ptyId) !== undefined;
+  return routes.get(ptyId) !== undefined;
 }
 
 export function remoteSubscribe(ptyId: string): void {
-  const client = routes.peerFor(ptyId);
+  const client = routes.get(ptyId);
   if (client) send(client, { kind: 'subscribe', id: `r${++nextRequestId}`, ptyId });
 }
 
 export function remoteUnsubscribe(ptyId: string): void {
-  const client = routes.peerFor(ptyId);
+  const client = routes.get(ptyId);
   if (!client) return;
   send(client, { kind: 'unsubscribe', id: `r${++nextRequestId}`, ptyId });
-  routes.release(ptyId);
+  routes.delete(ptyId);
 }
 
 export function remoteWrite(ptyId: string, data: string): boolean {
-  const client = routes.peerFor(ptyId);
+  const client = routes.get(ptyId);
   if (!client) return false;
   send(client, { kind: 'write', id: `r${++nextRequestId}`, ptyId, data });
   return true;
 }
 
 export function remoteResize(ptyId: string, cols: number, rows: number): boolean {
-  const client = routes.peerFor(ptyId);
+  const client = routes.get(ptyId);
   if (!client) return false;
   send(client, { kind: 'resizePty', id: `r${++nextRequestId}`, ptyId, cols, rows });
   return true;
@@ -218,7 +226,7 @@ function dropClient(client: PeerClient): void {
   clients.delete(client);
   // A window that went away takes its terminals with it; a later write must not
   // be routed into a dead socket.
-  for (const ptyId of routes.forgetPeer(client)) deps?.deliverRemotePtyExit(ptyId, 0);
+  for (const ptyId of forgetPeerRoutes(routes, client)) deps?.deliverRemotePtyExit(ptyId, 0);
   client.socket.destroy();
 }
 
@@ -228,8 +236,8 @@ function onServerFrame(client: PeerClient, frame: unknown): void {
   };
   if (!client.authenticated) {
     // First frame must be the hello; anything else is not a peer of ours.
-    const hello = message as { kind: string; token?: string };
-    if (hello.kind !== 'hello' || hello.token !== serverToken) {
+    const hello = message as Partial<PeerLinkHello>;
+    if (hello.kind !== 'hello' || !rendezvous || !tokenMatches(hello.token, rendezvous.token)) {
       log.error('[peer-link] rejected a client with a bad hello');
       dropClient(client);
       return;
@@ -244,7 +252,7 @@ function onServerFrame(client: PeerClient, frame: unknown): void {
     return;
   }
   if (response.kind === 'exit') {
-    routes.release(response.ptyId);
+    routes.delete(response.ptyId);
     deps?.deliverRemotePtyExit(response.ptyId, response.exitCode);
     return;
   }
@@ -255,9 +263,8 @@ async function startServer(): Promise<void> {
   const path = rendezvousPath();
   if (!path || server) return;
 
-  serverToken = randomUUID();
-  serverSocketPath = newSocketPath();
-  await rm(serverSocketPath, { force: true }).catch(() => {});
+  const next: Rendezvous = { socketPath: newSocketPath(), token: randomUUID() };
+  await rm(next.socketPath, { force: true }).catch(() => {});
 
   server = createServer((socket) => {
     const client: PeerClient = { socket, decoder: new FrameDecoder(), authenticated: false };
@@ -271,13 +278,16 @@ async function startServer(): Promise<void> {
   });
 
   try {
-    await new Promise<void>((resolve) => server!.listen(serverSocketPath, resolve));
+    rendezvous = next;
+    await new Promise<void>((resolve) => server!.listen(next.socketPath, resolve));
     await mkdir(join(path, '..'), { recursive: true }).catch(() => {});
-    const rendezvous: Rendezvous = { socketPath: serverSocketPath, token: serverToken };
-    await writeFile(path, JSON.stringify(rendezvous), 'utf8');
     // The token is the only thing standing between another local process and
-    // this window's terminals.
-    await chmod(path, 0o600).catch(() => {});
+    // this window's terminals, so it is never briefly world-readable: written
+    // 0600 to a temp file and renamed into place, which also means a reader
+    // never sees a half-written rendezvous and falls into the retry backoff.
+    const temp = `${path}.${randomUUID()}.tmp`;
+    await writeFile(temp, JSON.stringify(next), { encoding: 'utf8', mode: 0o600 });
+    await rename(temp, path);
     log.info('[peer-link] serving peers');
   } catch (err) {
     // Started fire-and-forget from the lease callback, so a rejection here
@@ -291,10 +301,12 @@ async function startServer(): Promise<void> {
 async function stopServer(): Promise<void> {
   if (!server) return;
   const path = rendezvousPath();
+  const socketPath = rendezvous?.socketPath;
   for (const client of [...clients]) dropClient(client);
   server.close();
   server = null;
-  await rm(serverSocketPath, { force: true }).catch(() => {});
+  rendezvous = null;
+  if (socketPath) await rm(socketPath, { force: true }).catch(() => {});
   if (path) await rm(path, { force: true }).catch(() => {});
 }
 
@@ -329,13 +341,11 @@ async function onClientFrame(frame: unknown): Promise<void> {
         if (id === request.ptyId) respond({ kind: 'data', ptyId: id, data });
       });
       if (stop) forwarding.set(request.ptyId, stop);
-      respond({ kind: 'ack', id: request.id });
       break;
     }
     case 'unsubscribe':
       forwarding.get(request.ptyId)?.();
       forwarding.delete(request.ptyId);
-      respond({ kind: 'ack', id: request.id });
       break;
     case 'write':
       deps?.writePty(request.ptyId, request.data);
@@ -421,32 +431,43 @@ function disconnectClient(): void {
 export function setPeerLinkRole(isBroker: boolean): void {
   if (isBroker) {
     disconnectClient();
+    stopWatchingRendezvous();
     void startServer();
     return;
   }
-  void stopServer().then(() => {
-    // Watch the rendezvous rather than only retrying: when a new window takes
-    // the lease it publishes a fresh socket path, and polling would make every
-    // handover wait out the backoff.
-    if (!rendezvousWatcher && context) {
-      const dir = context.globalStorageUri.fsPath;
-      try {
-        rendezvousWatcher = watch(dir, (_event, filename) => {
-          if (filename && filename !== RENDEZVOUS_FILE) return;
-          disconnectClient();
-          void connectClient();
-        });
-      } catch {
-        // No watcher here: the reconnect timer still converges.
-      }
-    }
-    void connectClient();
-  });
+  void (async () => {
+    await stopServer();
+    watchRendezvous();
+    await connectClient();
+  })();
+}
+
+/**
+ * Watch the rendezvous rather than only retrying: a new broker publishes a
+ * fresh socket path, and polling alone would make every handover wait out the
+ * backoff. Only a client needs it — a broker watching would wake on its own
+ * writes.
+ */
+function watchRendezvous(): void {
+  if (rendezvousWatcher || !context) return;
+  try {
+    rendezvousWatcher = watch(context.globalStorageUri.fsPath, (_event, filename) => {
+      if (filename && filename !== RENDEZVOUS_FILE) return;
+      disconnectClient();
+      void connectClient();
+    });
+  } catch {
+    // No watcher here: the reconnect timer still converges.
+  }
+}
+
+function stopWatchingRendezvous(): void {
+  rendezvousWatcher?.close();
+  rendezvousWatcher = null;
 }
 
 export async function disposePeerLink(): Promise<void> {
-  rendezvousWatcher?.close();
-  rendezvousWatcher = null;
+  stopWatchingRendezvous();
   disconnectClient();
   await stopServer();
 }

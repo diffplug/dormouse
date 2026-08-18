@@ -22,6 +22,11 @@ import type { DorControlRequest } from './pty-manager';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
 import { readStore, writeStore } from './remote-host-store';
+import {
+  PEER_REPLY_BUDGET_MS,
+  type PeerSurfaceOp,
+  type PeerSurfaceResult,
+} from '../../lib/src/lib/vscode-peer-link-protocol';
 import { ensureWindowLease } from './window-lease';
 import {
   configurePeerLink,
@@ -130,7 +135,7 @@ interface ActiveRouter {
   askSurface(
     requestId: string,
     surfaceId: string,
-    op: 'attach' | 'detach' | 'resize',
+    op: PeerSurfaceOp,
     cols?: number,
     rows?: number,
   ): void;
@@ -146,7 +151,6 @@ interface ActiveRouter {
  * host is the only party that can ask, so it brokers. See docs/specs/vscode.md
  * → "Peer surfaces".
  */
-const PEER_REPLY_BUDGET_MS = 1_000;
 
 let nextBrokerRequestId = 0;
 
@@ -159,26 +163,21 @@ interface PendingDirectory {
 const peerDirectoryRequests = new Map<string, PendingDirectory>();
 
 interface PendingSurface {
+  /** Answers still outstanding, so a miss settles as fast as a hit. */
+  pending: Set<ActiveRouter>;
   settle: (result: PeerSurfaceResult) => void;
   timer: ReturnType<typeof setTimeout>;
 }
 const peerSurfaceRequests = new Map<string, PendingSurface>();
 
-export interface PeerSurfaceResult {
-  ok: boolean;
-  ptyId?: string;
-  cols?: number;
-  rows?: number;
-}
-
 // The link reaches other windows; it must never call back into a fan-out that
 // would reach them again, so it only ever gets the in-window brokers.
 configurePeerLink({
-  brokerDirectory: () => brokerDirectory(),
-  brokerSurfaceOp: (surfaceId, op, cols, rows) => brokerSurfaceOp(surfaceId, op, cols, rows),
-  deliverRemotePtyData: (ptyId, data) => deliverRemotePtyData(ptyId, data),
-  deliverRemotePtyExit: (ptyId, code) => deliverRemotePtyExit(ptyId, code),
-  onProcessedPtyData: (listener) => onProcessedPtyData(listener),
+  brokerDirectory,
+  brokerSurfaceOp,
+  deliverRemotePtyData,
+  deliverRemotePtyExit,
+  onProcessedPtyData,
   writePty: (ptyId, data) => ptyManager.write(ptyId, data),
   resizePty: (ptyId, cols, rows) => ptyManager.resize(ptyId, cols, rows),
 });
@@ -191,7 +190,7 @@ configurePeerLink({
  * from a webview request (the Host asking) and from a peer window's socket
  * (tier 2), which is why it is a plain promise rather than message plumbing.
  */
-export function brokerDirectory(exclude?: ActiveRouter): Promise<unknown[]> {
+function brokerDirectory(exclude?: ActiveRouter): Promise<unknown[]> {
   const peers = [...activeRouters].filter((router) => router !== exclude);
   if (peers.length === 0) return Promise.resolve([]);
 
@@ -220,9 +219,9 @@ export function brokerDirectory(exclude?: ActiveRouter): Promise<unknown[]> {
  * Broadcast rather than tracking surfaceId ownership: a window holds a handful
  * of webviews, and the owner is the only one that can act anyway.
  */
-export function brokerSurfaceOp(
+function brokerSurfaceOp(
   surfaceId: string,
-  op: 'attach' | 'detach' | 'resize',
+  op: PeerSurfaceOp,
   cols?: number,
   rows?: number,
   exclude?: ActiveRouter,
@@ -240,6 +239,7 @@ export function brokerSurfaceOp(
       resolve(result);
     };
     peerSurfaceRequests.set(requestId, {
+      pending: new Set(peers),
       settle,
       timer: setTimeout(() => settle({ ok: false }), PEER_REPLY_BUDGET_MS),
     });
@@ -255,12 +255,12 @@ export function brokerSurfaceOp(
  * route the subscriber already expects. Only webviews that asked for this PTY
  * receive it, exactly as with a local subscription.
  */
-export function deliverRemotePtyData(ptyId: string, data: string): void {
+function deliverRemotePtyData(ptyId: string, data: string): void {
   for (const router of activeRouters) router.deliverForeignData(ptyId, data);
 }
 
 /** As {@link deliverRemotePtyData}, for that PTY ending. */
-export function deliverRemotePtyExit(ptyId: string, exitCode: number): void {
+function deliverRemotePtyExit(ptyId: string, exitCode: number): void {
   for (const router of activeRouters) router.deliverForeignExit(ptyId, exitCode);
 }
 
@@ -793,11 +793,17 @@ export function attachRouter(
         break;
       }
       case 'peer:surfaceResult': {
-        // Only the owner replies `ok`; a miss from a non-owner is not an answer.
-        if (!msg.ok) break;
-        peerSurfaceRequests.get(msg.requestId)?.settle({
-          ok: true, ptyId: msg.ptyId, cols: msg.cols, rows: msg.rows,
-        });
+        const request = peerSurfaceRequests.get(msg.requestId);
+        if (!request) break;
+        if (msg.ok) {
+          request.settle({ ok: true, ptyId: msg.ptyId, cols: msg.cols, rows: msg.rows });
+          break;
+        }
+        // Every webview answers, so "nobody owns it" settles immediately
+        // instead of waiting out the budget — which is the common case when the
+        // surface actually lives in another window.
+        request.pending.delete(router);
+        if (request.pending.size === 0) request.settle({ ok: false });
         break;
       }
       case 'singleton:claim':
@@ -1014,7 +1020,7 @@ export function attachRouter(
     askSurface(
       requestId: string,
       surfaceId: string,
-      op: 'attach' | 'detach' | 'resize',
+      op: PeerSurfaceOp,
       cols?: number,
       rows?: number,
     ) {
@@ -1031,6 +1037,10 @@ export function attachRouter(
       for (const request of peerDirectoryRequests.values()) {
         if (!request.pending.delete(router)) continue;
         if (request.pending.size === 0) request.settle();
+      }
+      for (const request of peerSurfaceRequests.values()) {
+        if (!request.pending.delete(router)) continue;
+        if (request.pending.size === 0) request.settle({ ok: false });
       }
       subscribedPtyIds.clear();
       releaseSingletons(claimant);

@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  FrameDecoder,
-  PeerRouteTable,
-  encodeFrame,
-} from './vscode-peer-link-protocol';
+import { FrameDecoder, encodeFrame, forgetPeerRoutes } from './vscode-peer-link-protocol';
 
 describe('FrameDecoder', () => {
   it('reads one frame per line', () => {
@@ -54,42 +50,24 @@ describe('FrameDecoder', () => {
   });
 });
 
-describe('PeerRouteTable', () => {
-  it('routes a pty to the peer that claimed it', () => {
-    const table = new PeerRouteTable<string>();
-    table.claim('pty-1', 'window-a');
-    table.claim('pty-2', 'window-b');
-
-    expect(table.peerFor('pty-1')).toBe('window-a');
-    expect(table.peerFor('pty-2')).toBe('window-b');
-    expect(table.peerFor('pty-3')).toBeUndefined();
-  });
-
-  it('releases a single pty', () => {
-    const table = new PeerRouteTable<string>();
-    table.claim('pty-1', 'window-a');
-    table.release('pty-1');
-    expect(table.peerFor('pty-1')).toBeUndefined();
-  });
-
-  it('forgets every pty behind a peer that disconnected', () => {
-    const table = new PeerRouteTable<string>();
-    table.claim('pty-1', 'window-a');
-    table.claim('pty-2', 'window-a');
-    table.claim('pty-3', 'window-b');
+describe('forgetPeerRoutes', () => {
+  it('drops every pty behind a peer that disconnected, and reports them', () => {
+    const routes = new Map<string, string>([
+      ['pty-1', 'window-a'],
+      ['pty-2', 'window-a'],
+      ['pty-3', 'window-b'],
+    ]);
 
     // Otherwise a later write would be routed into a dead socket.
-    expect(table.forgetPeer('window-a').sort()).toEqual(['pty-1', 'pty-2']);
-    expect(table.peerFor('pty-1')).toBeUndefined();
-    expect(table.peerFor('pty-3')).toBe('window-b');
-    expect(table.size).toBe(1);
+    expect(forgetPeerRoutes(routes, 'window-a').sort()).toEqual(['pty-1', 'pty-2']);
+    expect(routes.get('pty-1')).toBeUndefined();
+    expect(routes.get('pty-3')).toBe('window-b');
+    expect(routes.size).toBe(1);
   });
 
-  it('re-claiming moves a pty to the newer peer', () => {
-    const table = new PeerRouteTable<string>();
-    table.claim('pty-1', 'window-a');
-    table.claim('pty-1', 'window-b');
-    expect(table.peerFor('pty-1')).toBe('window-b');
-    expect(table.forgetPeer('window-a')).toEqual([]);
+  it('reports nothing for a peer that owns no routes', () => {
+    const routes = new Map<string, string>([['pty-1', 'window-a']]);
+    expect(forgetPeerRoutes(routes, 'window-b')).toEqual([]);
+    expect(routes.size).toBe(1);
   });
 });

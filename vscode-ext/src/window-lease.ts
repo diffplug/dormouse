@@ -38,14 +38,14 @@ const LEASE_FILE = 'remote-host.lease.json';
 const CLAIM_VERIFY_MS = 250;
 
 interface LeaseState {
-  dir: string;
   file: string;
   selfId: string;
   held: boolean;
   timer: ReturnType<typeof setInterval> | null;
   watcher: FSWatcher | null;
   onChange: (held: boolean) => void;
-  stopped: boolean;
+  /** A cycle is in flight; overlapping them races their temp files. */
+  ticking: boolean;
 }
 
 let state: LeaseState | null = null;
@@ -70,22 +70,29 @@ async function readRecord(file: string): Promise<WindowLeaseRecord | null> {
   }
 }
 
-/** Write via temp + rename so a reader never sees a half-written record. */
+/**
+ * Write via temp + rename so a reader never sees a half-written record. The
+ * temp name is unique per write, not per window: two overlapping writes sharing
+ * one name make the second rename fail with ENOENT.
+ */
 async function writeRecord(current: LeaseState, record: WindowLeaseRecord): Promise<void> {
-  const temp = `${current.file}.${current.selfId}.tmp`;
+  const temp = `${current.file}.${randomUUID()}.tmp`;
   await writeFile(temp, JSON.stringify(record), 'utf8');
   await rename(temp, current.file);
 }
 
 function setHeld(current: LeaseState, held: boolean): void {
-  if (current.held === held || current.stopped) return;
+  if (current.held === held || state !== current) return;
   current.held = held;
   log.info(`[window-lease] ${held ? 'acquired' : 'released'} the remote-host role`);
   current.onChange(held);
 }
 
 async function tick(current: LeaseState): Promise<void> {
-  if (current.stopped) return;
+  // `state !== current` is how a disposed lease stops; a separate flag would be
+  // a second copy of the same fact.
+  if (state !== current || current.ticking) return;
+  current.ticking = true;
   try {
     const held = await runWindowLeaseCycle(
       {
@@ -102,6 +109,8 @@ async function tick(current: LeaseState): Promise<void> {
     // run a Host this window may not own.
     log.error(`[window-lease] cycle failed: ${String(err)}`);
     setHeld(current, false);
+  } finally {
+    current.ticking = false;
   }
 }
 
@@ -120,21 +129,20 @@ export function ensureWindowLease(onChange: (held: boolean) => void): void {
 
   const dir = context.globalStorageUri.fsPath;
   const current: LeaseState = {
-    dir,
     file: join(dir, LEASE_FILE),
     selfId: randomUUID(),
     held: false,
     timer: null,
     watcher: null,
     onChange,
-    stopped: false,
+    ticking: false,
   };
   state = current;
 
   void (async () => {
     // VS Code does not create globalStorageUri until something writes to it.
     await mkdir(dir, { recursive: true }).catch(() => {});
-    if (current.stopped) return;
+    if (state !== current) return;
     await tick(current);
 
     current.timer = setInterval(() => void tick(current), LEASE_RENEW_MS);
@@ -144,6 +152,12 @@ export function ensureWindowLease(onChange: (held: boolean) => void): void {
       // an accelerator — correctness is the timer's job.
       current.watcher = watch(dir, (_event, filename) => {
         if (filename && filename !== LEASE_FILE) return;
+        // The holder's own heartbeat lands here too, and re-ticking on it turns
+        // the heartbeat into a write loop that re-arms itself — ~50x the
+        // intended I/O, with overlapping writes colliding and each failure
+        // dropping the role. Only a window waiting for the lease needs the
+        // accelerator.
+        if (current.held) return;
         void tick(current);
       });
     } catch {
@@ -167,7 +181,6 @@ export async function disposeWindowLease(): Promise<void> {
   const current = state;
   if (!current) return;
   state = null;
-  current.stopped = true;
   if (current.timer) clearInterval(current.timer);
   current.watcher?.close();
 
@@ -177,8 +190,3 @@ export async function disposeWindowLease(): Promise<void> {
   await unlink(current.file).catch(() => {});
 }
 
-/** Test seam: forget any running lease without touching the filesystem. */
-export function resetWindowLeaseForTest(): void {
-  state = null;
-  extensionContext = null;
-}

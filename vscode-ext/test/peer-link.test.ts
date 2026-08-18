@@ -7,10 +7,9 @@
  * PTY routing, and what happens when a window goes away.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { access, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { join } from 'node:path';
+import { fakeContext, freshModule, removeDir, tempStorageDir, tick, waitFor, waitForFile } from './helpers';
 
 type LinkModule = typeof import('../src/peer-link');
 
@@ -57,22 +56,21 @@ function fakeWindow(options: {
 }
 
 async function openWindow(deps: ReturnType<typeof fakeWindow>): Promise<LinkModule> {
-  vi.resetModules();
-  const mod: LinkModule = await import('../src/peer-link');
-  mod.initPeerLink({ globalStorageUri: { fsPath: dir }, subscriptions: [] } as never);
+  const mod = await freshModule<LinkModule>(() => import('../src/peer-link'));
+  mod.initPeerLink(fakeContext(dir));
   mod.configurePeerLink(deps.deps());
   opened.push(mod);
   return mod;
 }
 
-async function waitFor(predicate: () => boolean | Promise<boolean>, budgetMs = 5_000): Promise<void> {
-  const deadline = Date.now() + budgetMs;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  throw new Error('timed out waiting for the peer link');
-}
+const waitForRendezvous = () => waitForFile(join(dir, 'remote-host.peer.json'));
+
+/** A window owning one terminal, which is what most of these tests need. */
+const farWindow = () =>
+  fakeWindow({
+    entries: [{ surfaceId: 'far-1' }],
+    surfaces: { 'far-1': { ptyId: 'pty-far', cols: 80, rows: 24 } },
+  });
 
 /**
  * Start a broker and a peer, and wait until they can actually talk. The peer
@@ -85,14 +83,7 @@ async function linkedPair(
 ) {
   const broker = await openWindow(brokerSide);
   broker.setPeerLinkRole(true);
-  await waitFor(async () => {
-    try {
-      await access(join(dir, 'remote-host.peer.json'));
-      return true;
-    } catch {
-      return false;
-    }
-  });
+  await waitForRendezvous();
 
   const peer = await openWindow(peerSide);
   peer.setPeerLinkRole(false);
@@ -102,13 +93,13 @@ async function linkedPair(
 }
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'dormouse-peer-'));
+  dir = await tempStorageDir();
 });
 
 afterEach(async () => {
   for (const mod of opened) await mod.disposePeerLink();
   opened.length = 0;
-  await rm(dir, { recursive: true, force: true });
+  await removeDir(dir);
 });
 
 describe('peer link between windows', () => {
@@ -122,14 +113,7 @@ describe('peer link between windows', () => {
   it('returns nothing when no other window is connected', async () => {
     const broker = await openWindow(fakeWindow());
     broker.setPeerLinkRole(true);
-    await waitFor(async () => {
-      try {
-        await access(join(dir, 'remote-host.peer.json'));
-        return true;
-      } catch {
-        return false;
-      }
-    });
+    await waitForRendezvous();
     expect(await broker.remoteDirectory()).toEqual([]);
   });
 
@@ -153,15 +137,12 @@ describe('peer link between windows', () => {
   });
 
   it('streams a subscribed PTY from the owning window', async () => {
-    const peerSide = fakeWindow({
-      entries: [{ surfaceId: 'far-1' }],
-      surfaces: { 'far-1': { ptyId: 'pty-far', cols: 80, rows: 24 } },
-    });
+    const peerSide = farWindow();
     const { broker, brokerSide } = await linkedPair(fakeWindow(), peerSide);
     await broker.remoteSurfaceOp('far-1', 'attach', 80, 24);
 
     broker.remoteSubscribe('pty-far');
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await tick();
     peerSide.emitData('pty-far', 'output from the other window');
 
     await waitFor(() => brokerSide.delivered.length > 0);
@@ -169,32 +150,26 @@ describe('peer link between windows', () => {
   });
 
   it('does not stream PTYs it never subscribed to', async () => {
-    const peerSide = fakeWindow({
-      entries: [{ surfaceId: 'far-1' }],
-      surfaces: { 'far-1': { ptyId: 'pty-far', cols: 80, rows: 24 } },
-    });
+    const peerSide = farWindow();
     const { broker, brokerSide } = await linkedPair(fakeWindow(), peerSide);
     await broker.remoteSurfaceOp('far-1', 'attach', 80, 24);
 
     peerSide.emitData('pty-other', 'not subscribed');
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await tick(100);
     expect(brokerSide.delivered).toEqual([]);
   });
 
   it('stops the stream on unsubscribe', async () => {
-    const peerSide = fakeWindow({
-      entries: [{ surfaceId: 'far-1' }],
-      surfaces: { 'far-1': { ptyId: 'pty-far', cols: 80, rows: 24 } },
-    });
+    const peerSide = farWindow();
     const { broker, brokerSide } = await linkedPair(fakeWindow(), peerSide);
     await broker.remoteSurfaceOp('far-1', 'attach', 80, 24);
     broker.remoteSubscribe('pty-far');
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await tick();
 
     broker.remoteUnsubscribe('pty-far');
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await tick();
     peerSide.emitData('pty-far', 'after unsubscribe');
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await tick(100);
 
     expect(brokerSide.delivered).toEqual([]);
     // Unsubscribing also forgets the route, so a later write is not misrouted.
@@ -202,10 +177,7 @@ describe('peer link between windows', () => {
   });
 
   it('routes input and resize to the owning window', async () => {
-    const peerSide = fakeWindow({
-      entries: [{ surfaceId: 'far-1' }],
-      surfaces: { 'far-1': { ptyId: 'pty-far', cols: 80, rows: 24 } },
-    });
+    const peerSide = farWindow();
     const { broker } = await linkedPair(fakeWindow(), peerSide);
     await broker.remoteSurfaceOp('far-1', 'attach', 80, 24);
 
@@ -225,10 +197,7 @@ describe('peer link between windows', () => {
   });
 
   it('reports terminals as exited when their window disconnects', async () => {
-    const peerSide = fakeWindow({
-      entries: [{ surfaceId: 'far-1' }],
-      surfaces: { 'far-1': { ptyId: 'pty-far', cols: 80, rows: 24 } },
-    });
+    const peerSide = farWindow();
     const { broker, brokerSide, peer } = await linkedPair(fakeWindow(), peerSide);
     await broker.remoteSurfaceOp('far-1', 'attach', 80, 24);
     expect(broker.isRemotePty('pty-far')).toBe(true);
@@ -248,14 +217,7 @@ describe('peer link between windows', () => {
     const broker = await openWindow(brokerSide);
     broker.setPeerLinkRole(true);
     const rendezvousPath = join(dir, 'remote-host.peer.json');
-    await waitFor(async () => {
-      try {
-        await access(rendezvousPath);
-        return true;
-      } catch {
-        return false;
-      }
-    });
+    await waitForRendezvous();
 
     const { readFile } = await import('node:fs/promises');
     const { socketPath } = JSON.parse(await readFile(rendezvousPath, 'utf8'));

@@ -4,10 +4,10 @@
  * instances — standing in for two VS Code windows — against a real directory.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fakeContext, freshModule, removeDir, tempStorageDir, waitFor } from './helpers';
 
 type LeaseModule = typeof import('../src/window-lease');
 
@@ -16,30 +16,20 @@ const opened: LeaseModule[] = [];
 
 /** A separate module instance, so each behaves like its own extension host. */
 async function openWindow(): Promise<LeaseModule> {
-  vi.resetModules();
-  const mod: LeaseModule = await import('../src/window-lease');
-  mod.initWindowLease({ globalStorageUri: { fsPath: dir }, subscriptions: [] } as never);
+  const mod = await freshModule<LeaseModule>(() => import('../src/window-lease'));
+  mod.initWindowLease(fakeContext(dir));
   opened.push(mod);
   return mod;
 }
 
-async function waitFor(predicate: () => boolean, budgetMs = 3_000): Promise<void> {
-  const deadline = Date.now() + budgetMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error('timed out waiting for the lease');
-}
-
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'dormouse-lease-'));
+  dir = await tempStorageDir();
 });
 
 afterEach(async () => {
   for (const mod of opened) await mod.disposeWindowLease();
   opened.length = 0;
-  await rm(dir, { recursive: true, force: true });
+  await removeDir(dir);
 });
 
 describe('window lease over a real directory', () => {
@@ -104,9 +94,28 @@ describe('window lease over a real directory', () => {
     expect(seen).toEqual([true]);
   });
 
+  it('does not let its own heartbeat re-trigger itself', async () => {
+    const window = await openWindow();
+    window.ensureWindowLease(() => {});
+    await waitFor(() => window.holdsWindowLease());
+
+    // The directory watcher sees the holder's own rename. Re-ticking on that
+    // turns the 5s heartbeat into a write loop that re-arms itself, and the
+    // colliding writes drop the role on each failure.
+    const stamps = new Set<number>();
+    for (let i = 0; i < 15; i++) {
+      const record = JSON.parse(await readFile(join(dir, 'remote-host.lease.json'), 'utf8'));
+      stamps.add(record.heartbeatAt);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    // 1.5s at a 5s renew is one write, maybe two across a boundary.
+    expect(stamps.size).toBeLessThanOrEqual(2);
+    expect(window.holdsWindowLease()).toBe(true);
+  });
+
   it('does nothing before it is told where to store the record', async () => {
-    vi.resetModules();
-    const mod: LeaseModule = await import('../src/window-lease');
+    const mod = await freshModule<LeaseModule>(() => import('../src/window-lease'));
     opened.push(mod);
     mod.ensureWindowLease(() => {});
     await new Promise((resolve) => setTimeout(resolve, 100));

@@ -9,9 +9,31 @@
  * sockets in it: the frame shapes, the newline-delimited framing, and the table
  * that remembers which window a streaming PTY came from.
  *
- * Kept pure so the protocol's edge cases (a split frame, a peer that vanishes
- * mid-attach) are testable without spawning processes.
+ * Kept free of sockets — and of Node imports, so the webview side can share
+ * its types and budgets — meaning the protocol's edge cases (a split frame, a peer
+ * that vanishes mid-attach) are testable without spawning processes.
  */
+
+/** What the broker can ask a window to do with one of its surfaces. */
+export type PeerSurfaceOp = 'attach' | 'detach' | 'resize';
+
+/** What a window reports back about a surface it owns. */
+export interface PeerSurfaceResult {
+  ok: boolean;
+  ptyId?: string;
+  cols?: number;
+  rows?: number;
+}
+
+/** How long the broker waits for a window to answer before giving up on it. */
+export const PEER_REPLY_BUDGET_MS = 1_000;
+
+/**
+ * The webview's budget for a round trip through the broker. Must exceed
+ * {@link PEER_REPLY_BUDGET_MS}, or a slow sibling shows up as a timeout on the
+ * asking side instead of as an incomplete answer.
+ */
+export const PEER_REQUEST_TIMEOUT_MS = 3_000;
 
 /** Broker → peer window. */
 export type PeerLinkRequest =
@@ -20,7 +42,7 @@ export type PeerLinkRequest =
       kind: 'surfaceOp';
       id: string;
       surfaceId: string;
-      op: 'attach' | 'detach' | 'resize';
+      op: PeerSurfaceOp;
       cols?: number;
       rows?: number;
     }
@@ -32,15 +54,7 @@ export type PeerLinkRequest =
 /** Peer window → broker. */
 export type PeerLinkResponse =
   | { kind: 'directoryResult'; id: string; entries: unknown[] }
-  | {
-      kind: 'surfaceResult';
-      id: string;
-      ok: boolean;
-      ptyId?: string;
-      cols?: number;
-      rows?: number;
-    }
-  | { kind: 'ack'; id: string }
+  | ({ kind: 'surfaceResult'; id: string } & PeerSurfaceResult)
   /** Unsolicited: bytes from a PTY the broker subscribed to. */
   | { kind: 'data'; ptyId: string; data: string }
   /** Unsolicited: that PTY ended. */
@@ -100,40 +114,20 @@ export class FrameDecoder {
 }
 
 /**
- * Which peer a streaming PTY belongs to.
+ * Drop every PTY routed to `peer`, and report what was dropped.
  *
- * The broker learns this when an attach succeeds, and needs it afterwards to
- * send input and resizes to the right window — a `ptyId` alone says nothing
- * about where it lives. Entries are dropped when the peer disconnects so a
- * later attach cannot be routed into a dead socket.
+ * The broker records where a streaming PTY lives when an attach succeeds — a
+ * `ptyId` alone says nothing about which window owns it, and input and resizes
+ * have to reach that window. When the window goes away its terminals go with
+ * it, and a later write must not be posted into a dead socket. The routes
+ * themselves are a plain `Map`; only this needs explaining.
  */
-export class PeerRouteTable<T> {
-  readonly #byPty = new Map<string, T>();
-
-  claim(ptyId: string, peer: T): void {
-    this.#byPty.set(ptyId, peer);
+export function forgetPeerRoutes<T>(routes: Map<string, T>, peer: T): string[] {
+  const dropped: string[] = [];
+  for (const [ptyId, owner] of routes) {
+    if (owner !== peer) continue;
+    dropped.push(ptyId);
+    routes.delete(ptyId);
   }
-
-  release(ptyId: string): void {
-    this.#byPty.delete(ptyId);
-  }
-
-  peerFor(ptyId: string): T | undefined {
-    return this.#byPty.get(ptyId);
-  }
-
-  /** Forget everything routed to `peer`, and report what was dropped. */
-  forgetPeer(peer: T): string[] {
-    const dropped: string[] = [];
-    for (const [ptyId, owner] of this.#byPty) {
-      if (owner !== peer) continue;
-      dropped.push(ptyId);
-      this.#byPty.delete(ptyId);
-    }
-    return dropped;
-  }
-
-  get size(): number {
-    return this.#byPty.size;
-  }
+  return dropped;
 }

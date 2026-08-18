@@ -4,6 +4,7 @@ import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 // Defined in its own dependency-free file so the Node proxy in lib/src/host can
 // share it without pulling this browser-typed module into a Node tsconfig.
 import type { IframeProxyResult } from './iframe-proxy-types';
+import type { PeerSurfaceOp, PeerSurfaceResult } from '../vscode-peer-link-protocol';
 
 export interface PtyInfo {
   id: string;
@@ -112,14 +113,6 @@ export interface AgentBrowserPopResult {
   error?: string;
 }
 
-/** What a peer webview reports back about a surface it owns. */
-export interface PeerSurfaceResult {
-  ok: boolean;
-  ptyId?: string;
-  cols?: number;
-  rows?: number;
-}
-
 /**
  * Reach terminals that belong to another webview of the same host window.
  *
@@ -129,13 +122,15 @@ export interface PeerSurfaceResult {
  * process brokers, and this is the webview end of that. See
  * docs/specs/vscode.md → "Peer surfaces".
  */
+export type { PeerSurfaceOp, PeerSurfaceResult };
+
 export interface PeerBridge {
   /** Directory entries contributed by every other webview in this window. */
   directory(): Promise<unknown[]>;
   /** Drive a surface owned by another webview; `ok: false` if nobody owns it. */
   surfaceOp(
     surfaceId: string,
-    op: 'attach' | 'detach' | 'resize',
+    op: PeerSurfaceOp,
     cols?: number,
     rows?: number,
   ): Promise<PeerSurfaceResult>;
@@ -147,7 +142,7 @@ export interface PeerBridge {
     directory: () => unknown[];
     surfaceOp: (
       surfaceId: string,
-      op: 'attach' | 'detach' | 'resize',
+      op: PeerSurfaceOp,
       cols?: number,
       rows?: number,
     ) => PeerSurfaceResult;

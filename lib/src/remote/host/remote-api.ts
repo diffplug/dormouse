@@ -337,8 +337,7 @@ export class RemoteApiSession {
     // stream is subscribed first because some PTYs repaint synchronously.
     // A peer owner already applied the size in its own xterm before replying,
     // so only the local path still has a resize to perform here.
-    const sized = targetSize(target);
-    if (sized.cols !== cols || sized.rows !== rows) {
+    if (current.cols !== cols || current.rows !== rows) {
       if (target.kind === 'local') target.entry.terminal.resize(cols, rows);
       else void this.#resizePeer(target, cols, rows);
     } else {
