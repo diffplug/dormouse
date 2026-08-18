@@ -22,6 +22,7 @@ import {
   assertVapidKeyPair,
   assertVapidSubject,
   createWebPushSender,
+  defaultVapidSubject,
   generateVapidKeys,
 } from '../dist/push.js';
 import { ORIGIN, enrollHost, fakePushSender, freshApp, ownerSession, post } from './helpers.mjs';
@@ -64,6 +65,45 @@ test('real delivery gives push-service requests a bounded socket timeout', async
     assert.equal(PUSH_REQUEST_TIMEOUT_MS, 10_000);
   } finally {
     webpush.sendNotification = originalSendNotification;
+  }
+});
+
+// Apple answers 403 BadJwtToken for a loopback subject, so accepting one would
+// boot a server that reports success and delivers nothing to any iPhone.
+test('VAPID subject validation rejects loopback contacts', () => {
+  for (const subject of [
+    'mailto:admin@localhost',
+    'mailto:admin@dev.localhost',
+    'mailto:admin@127.0.0.1',
+    'https://localhost:3000',
+    'https://127.0.0.1:3000',
+    'https://[::1]:3000',
+  ]) {
+    assert.throws(() => assertVapidSubject(subject), /loopback host/, subject);
+  }
+});
+
+test('default VAPID subject is the https origin, and absent for one push cannot use', () => {
+  assert.equal(
+    defaultVapidSubject('https://dormouse.example.com'),
+    'https://dormouse.example.com',
+  );
+  // Only the origin — a path or trailing slash is not part of the contact.
+  assert.equal(
+    defaultVapidSubject('https://dormouse.example.com/pocket/'),
+    'https://dormouse.example.com',
+  );
+
+  // No usable contact → push off rather than a placeholder a service rejects.
+  for (const origin of [
+    'http://localhost:3000',
+    'https://localhost:3000',
+    'https://127.0.0.1:3000',
+    'https://[::1]:3000',
+    'http://dormouse.example.com',
+    'not a url',
+  ]) {
+    assert.equal(defaultVapidSubject(origin), null, origin);
   }
 });
 

@@ -24,6 +24,7 @@ import {
   hasRecoverablePairingFailure,
   PASSKEY_UNAVAILABLE_MESSAGE,
   PocketClient,
+  SessionExpiredError,
   type PocketSocket,
   type PocketStorage,
   type PocketClientDeps,
@@ -162,6 +163,12 @@ class FakeSocket implements PocketSocket {
   fireOpen(): void {
     this.readyState = 1;
     this.#emit('open', {});
+  }
+
+  /** A rejected upgrade: the browser fires `error` with no status, never `open`. */
+  fireError(): void {
+    this.readyState = 3;
+    this.#emit('error', {});
   }
 
   /** Simulate the server sending a frame to this client. */
@@ -590,6 +597,65 @@ async function connectEstablished(harness: Harness): Promise<void> {
   socket.server({ t: 'decision', allowed: true });
   await connecting;
 }
+
+describe('session expiry', () => {
+  /** Signed in, with `/api/hosts` switchable between healthy and session-gate 401. */
+  async function withHostsRoute(
+    response: () => { status?: number; json: unknown },
+  ): Promise<Harness> {
+    const harness = makeClient({ ...AUTH_ROUTES, '/api/hosts': response });
+    await harness.client.setup('pw', 'My Phone');
+    await harness.client.signin();
+    return harness;
+  }
+
+  it('discards the token and reports expiry on the session gate 401', async () => {
+    let live = true;
+    const harness = await withHostsRoute(() =>
+      live ? { json: { hosts: [] } } : { status: 401, json: { error: 'unauthorized' } },
+    );
+    expect(harness.client.sessionToken).toBe('tok-abc');
+
+    live = false;
+    await expect(harness.client.listHosts()).rejects.toBeInstanceOf(SessionExpiredError);
+    // Keeping it would leave the UI believing it is still signed in.
+    expect(harness.client.sessionToken).toBeNull();
+  });
+
+  // A wrong setup password and a rejected device signature also answer 401;
+  // treating those as expiry would sign the user out mid-action.
+  it('leaves a 401 that is not the session gate as an ordinary failure', async () => {
+    const harness = await withHostsRoute(() => ({
+      status: 401,
+      json: { error: 'device signature rejected' },
+    }));
+
+    await expect(harness.client.listHosts()).rejects.toThrow('device signature rejected');
+    expect(harness.client.sessionToken).toBe('tok-abc');
+  });
+
+  it('turns a rejected relay upgrade into expiry when the session is the reason', async () => {
+    let live = true;
+    const harness = await withHostsRoute(() =>
+      live ? { json: { hosts: [] } } : { status: 401, json: { error: 'unauthorized' } },
+    );
+
+    live = false;
+    const opening = harness.client.openSocket();
+    harness.socket.fireError();
+    await expect(opening).rejects.toBeInstanceOf(SessionExpiredError);
+    expect(harness.client.sessionToken).toBeNull();
+  });
+
+  it('keeps a socket failure a socket failure while the session is alive', async () => {
+    const harness = await withHostsRoute(() => ({ json: { hosts: [] } }));
+
+    const opening = harness.client.openSocket();
+    harness.socket.fireError();
+    await expect(opening).rejects.toThrow('relay socket error');
+    expect(harness.client.sessionToken).toBe('tok-abc');
+  });
+});
 
 describe('socket lifecycle', () => {
   it('an unexpected close fires host-gone for an established session and resets the socket', async () => {

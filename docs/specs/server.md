@@ -35,7 +35,7 @@ UI lives in `lib`/`standalone`.
 | `DORMOUSE_STATE_DIR`      | Where the JSON state files live. Default `./data`.         |
 | `PORT`                    | Default 3000.                                              |
 | `DORMOUSE_VAPID_PUBLIC_KEY` / `DORMOUSE_VAPID_PRIVATE_KEY` | Web Push signing keypair. Set both or neither. At startup the Server decodes both, derives the P-256 public point from the private key, and exits on a missing, malformed, or mismatched pair. Unset, the server mints a pair on first boot and persists it to `vapid.json`. |
-| `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292). Default `mailto:admin@localhost`. The Server parses and validates it at startup and exits on an invalid value. |
+| `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292). Defaults to `DORMOUSE_ORIGIN` when that origin is https and not loopback; otherwise there is no default and push stays off. The Server parses and validates it at startup and exits on an invalid value — including a loopback contact, which Apple rejects. |
 
 WebAuthn requires a secure context: `localhost` works for development; for a
 real phone, put the server behind TLS (`tailscale serve` is the intended
@@ -170,6 +170,14 @@ so `node --test` can drive setup → pairing → connect end to end via
 The setup password is compared in constant time with a small fixed delay on
 failure; that is the extent of the hardening today.
 
+Every session-gated route — including the `/ws/client` upgrade, which is
+rejected before `injectWebSocket` ever sees it — answers an unknown or expired
+token with 401 and the shared `UNAUTHORIZED_ERROR` from
+`server-lib-common/src/remote/wire.ts`. That exact string is load-bearing:
+Pocket keys its "sign in again" recovery on it, and a bare 401 is ambiguous,
+since a wrong setup password and a rejected device signature answer 401 as well
+([pocket-app.md](./pocket-app.md) -> An expired session drops to sign-in).
+
 ### Web Push
 
 The relay routes between two live sockets; a push has to reach a phone whose app
@@ -230,22 +238,41 @@ Source of truth: `server/src/push.ts` and the routes in `server/src/app.ts`.
   never silent: the refusal is logged (origin only — the endpoint is a bearer
   capability) and counted in the response's `failed`, since the route answers
   200 either way and the Host needs to tell an all-failed fan-out from
-  success. Delivery is bounded twice, and both bounds resolve as `failed` — so
-  the row survives to be retried, unlike a 404/410. The inner bound is a
-  10-second socket-inactivity timeout on each push-service request. The outer
-  is a 15-second wall-clock deadline per send, which catches what inactivity
-  cannot: a service that trickles bytes or stalls mid-handshake resets the
-  inactivity timer indefinitely. The deadline is applied by the route rather
-  than by the sender, so it holds for any injected `PushSender`, and because
-  every send in a fan-out starts at once it also bounds the route as a whole
-  regardless of device count. It bounds the *route*, not the socket: `web-push`
-  accepts no `AbortSignal`, so a request that loses the race is left to its own
-  inactivity timeout rather than cancelled. What this prevents is a wedged push
-  service holding the handler open while successive alarms stack concurrent
-  sends behind it. Both are separate from the 300-second provider TTL, which
-  prevents a delayed alarm from arriving after it is useful.
-- Push is disabled, not half-working, when no VAPID key is configured: the
-  config route reports `null` and subscribe/send answer 503.
+  success. The log carries the push service's own reason body alongside the
+  status — whitespace-collapsed and capped at 200 characters so an HTML error
+  page cannot flood it — because a status alone does not separate a bad subject
+  from a bad key from a bad payload, and this is the only place that
+  explanation is ever visible. Delivery is bounded twice, and both bounds
+  resolve as `failed` — so the row survives to be retried, unlike a 404/410.
+  The inner bound is a 10-second socket-inactivity timeout on each push-service
+  request. The outer is a 15-second wall-clock deadline per send, which catches
+  what inactivity cannot: a service that trickles bytes or stalls mid-handshake
+  resets the inactivity timer indefinitely. The deadline is applied by the
+  route rather than by the sender, so it holds for any injected `PushSender`,
+  and because every send in a fan-out starts at once it also bounds the route
+  as a whole regardless of device count. It bounds the *route*, not the socket:
+  `web-push` accepts no `AbortSignal`, so a request that loses the race is left
+  to its own inactivity timeout rather than cancelled. What this prevents is a
+  wedged push service holding the handler open while successive alarms stack
+  concurrent sends behind it. Both are separate from the 300-second provider
+  TTL — an alarm that arrives an hour late is noise, not information.
+- Push is disabled, not half-working, when no VAPID key **or no VAPID subject**
+  is configured: the config route reports `null` and subscribe/send answer 503.
+  The key and the subject are advertised together or not at all — a phone that
+  registered against a key the Server has no contact to sign with would be
+  subscribed to a push it can never receive.
+- **A VAPID subject naming a loopback host is a startup error, not a default.**
+  Apple answers `403 {"reason":"BadJwtToken"}` for one — verified against
+  `web.push.apple.com` for `mailto:admin@localhost` and `https://localhost:3000`,
+  while `mailto:admin@example.com` and an ordinary https origin were accepted, so
+  the rule is loopback specifically and not reachability of the contact.
+  `web-push` only warns about the https form, at send time, and says nothing
+  about `mailto:` at `localhost`. This mattered: the previous default
+  (`mailto:admin@localhost`) let a Server boot clean, answer 200 on send, and
+  deliver nothing to any iPhone — the one platform the feature targets. Hence
+  the origin-derived default, and hence a loopback dev server turning push off
+  instead of guessing a placeholder contact. Source of truth:
+  `defaultVapidSubject` / `assertVapidSubject` in `server/src/push.ts`.
 
 ## Relay
 
@@ -401,6 +428,18 @@ Builds the Pocket app (`lib/dist-pocket`) and the server, then serves both on
 `DORMOUSE_ORIGIN` to your TLS origin (e.g. via `tailscale serve`) — WebAuthn
 needs a secure context, and only `localhost` is exempt.
 
+On the default localhost origin **push is off** and the server says so at
+startup: there is no routable operator contact to sign a VAPID JWT with, and a
+phone could not route to localhost anyway. Setting `DORMOUSE_ORIGIN` to an https
+origin enables it with no further configuration, since that origin becomes the
+subject. To exercise push against a desktop browser on localhost, supply a
+contact explicitly:
+
+```sh
+DORMOUSE_SETUP_PASSWORD=hunter2 DORMOUSE_VAPID_SUBJECT=mailto:you@example.com \
+  pnpm dev:pocket-server
+```
+
 **2. Host** (the laptop being controlled): `pnpm dev:standalone`, then enroll
 once from the devtools console of the standalone webview:
 
@@ -421,6 +460,14 @@ differ).
 First-time setup (password + label) creates the passkey and signs you in →
 Hosts → **Pair** → approve in the modal on the laptop → **Connect** (one
 biometric prompt) → pick a pane → type.
+
+To test push, **add Pocket to the Home Screen before signing in** and do all of
+the above inside the installed app: iOS delivers Web Push only there, and the
+install is a separate storage partition needing its own pairing, so setting up
+in the tab first means doing it twice ([pocket-app.md](./pocket-app.md) ->
+Installable web app). Alerts are then a per-Host opt-in — **Enable alerts** on the Host's
+row, which is the user gesture iOS requires before it will prompt for
+permission. Connecting alone does not subscribe.
 
 Limitations to know about: each browser storage partition has its own device key
 and therefore needs its own Host pairing, even when a synced passkey signs it

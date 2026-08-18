@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
-import { CaretLeftIcon, CaretRightIcon, SlidersHorizontalIcon } from '@phosphor-icons/react';
+import {
+  BellRingingIcon,
+  BellSlashIcon,
+  CaretLeftIcon,
+  CaretRightIcon,
+  SlidersHorizontalIcon,
+  SpeakerHighIcon,
+  SpeakerSlashIcon,
+} from '@phosphor-icons/react';
 import { AlertSettingsDialog } from './AlertSettingsDialog';
 import { Door } from './Door';
 import { DialogKeyboardContext, DoorElementsContext } from './wall/wall-context';
@@ -9,15 +17,19 @@ import {
   buildAppTitleResolver,
   DEFAULT_ACTIVITY_STATE,
   getActivitySnapshot,
+  getAlertSettings,
+  getAlertSpeechSnapshot,
   getTerminalPaneStateSnapshot,
   subscribeToActivity,
+  subscribeToAlertSettings,
+  subscribeToAlertSpeech,
   subscribeToTerminalPaneState,
 } from '../lib/terminal-registry';
 import { createTerminalPaneState, deriveSurfaceLabel, type TerminalPaneState } from '../lib/terminal-state';
 
 /** Shared look for every baseboard-level button (DESIGN.md -> Navigation). */
 const BASEBOARD_BUTTON_CLASS =
-  'flex h-5 shrink-0 items-center gap-1 rounded px-1.5 pb-px text-sm font-medium font-mono text-muted transition-colors hover:bg-surface-raised hover:text-foreground';
+  'flex h-6 min-w-6 shrink-0 items-center justify-center gap-1 rounded px-1.5 pb-px text-sm font-medium font-mono text-muted transition-colors hover:bg-surface-raised hover:text-foreground';
 
 export interface BaseboardProps {
   items: DooredItem[];
@@ -32,6 +44,8 @@ export interface BaseboardProps {
 export function Baseboard({ items, onReattach, notice, onDoorDragStart }: BaseboardProps) {
   const { elements: doorElements, bumpVersion } = useContext(DoorElementsContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
+  const speechStates = useSyncExternalStore(subscribeToAlertSpeech, getAlertSpeechSnapshot);
+  const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
   const allPaneStates = useMemo(() => [...terminalStates.values()], [terminalStates]);
   const appTitleForPane = useMemo(
@@ -41,7 +55,14 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [startIndex, setStartIndex] = useState(0);
-  const doorWidthsRef = useRef<number[]>([]);
+  // Measured door widths, held as *state* rather than a ref. The fitting budget
+  // below runs during render, so a re-measure that only wrote a ref would leave
+  // the visible row fitted against the previous widths with nothing scheduled to
+  // correct it — and a SPEAKING/SPOKEN Door is materially wider than its resting
+  // form, so that stale frame overflows the baseboard and persists. The equality
+  // guard on write keeps this to one extra render on a real width change, rather
+  // than one on every activity notification.
+  const [doorWidths, setDoorWidths] = useState<number[]>([]);
   const arrowMeasureEl = useRef<HTMLButtonElement>(null);
   const rightClusterEl = useRef<HTMLDivElement>(null);
   const [rightClusterWidth, setRightClusterWidth] = useState(0);
@@ -90,7 +111,9 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     for (let i = 0; i < el.children.length; i++) {
       widths.push((el.children[i] as HTMLElement).offsetWidth);
     }
-    doorWidthsRef.current = widths;
+    setDoorWidths(prev =>
+      prev.length === widths.length && prev.every((w, i) => w === widths[i]) ? prev : widths,
+    );
 
     // Measure layout metrics from DOM to stay in sync with CSS classes
     const container = containerRef.current;
@@ -100,7 +123,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     if (arrowMeasureEl.current) {
       layoutMetrics.current.arrowWidth = arrowMeasureEl.current.offsetWidth;
     }
-  }, [items, activityStates, terminalStates]);
+  }, [items, activityStates, speechStates, terminalStates]);
 
   // Reset startIndex when the set of door items changes (not just count)
   const itemKey = useMemo(() => items.map(i => i.id).join('\0'), [items]);
@@ -121,7 +144,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   let usedWidth = 0;
 
   if (items.length > 0) {
-    const widths = doorWidthsRef.current;
+    const widths = doorWidths;
     const { doorGap, arrowWidth } = layoutMetrics.current;
     const hasLeftOverflow = startIndex > 0;
     const budget = availableWidth
@@ -197,7 +220,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
               title={title}
               status={activity.status}
               todo={activity.todo}
-
+              speechState={speechStates.get(item.id)}
             />
           );
         })}
@@ -232,6 +255,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
             title={title}
             status={activity.status}
             todo={activity.todo}
+            speechState={speechStates.get(item.id)}
             onClick={() => onReattach(item)}
             onDragPress={onDoorDragStart ? (press) => onDoorDragStart(item, press) : undefined}
           />
@@ -258,12 +282,40 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
           {notice}
 
           <button
+            className={`${BASEBOARD_BUTTON_CLASS} ${settings.speakEnabled ? 'text-app-fg' : ''}`}
+            aria-label={`Spoken alarms ${settings.speakEnabled ? 'enabled' : 'disabled'}; open Alarm settings`}
+            title={`Spoken alarms ${settings.speakEnabled ? 'enabled' : 'disabled'}`}
+            aria-haspopup="dialog"
+            data-alarm-setting="speech"
+            onClick={() => setSettingsOpen(true)}
+          >
+            {settings.speakEnabled
+              ? <SpeakerHighIcon size={16} weight="fill" />
+              : <SpeakerSlashIcon size={16} weight="bold" />}
+          </button>
+
+          <button
+            className={`${BASEBOARD_BUTTON_CLASS} ${settings.pushEnabled ? 'text-app-fg' : ''}`}
+            aria-label={`Push notifications ${settings.pushEnabled ? 'enabled' : 'disabled'}; open Alarm settings`}
+            title={`Push notifications ${settings.pushEnabled ? 'enabled' : 'disabled'}`}
+            aria-haspopup="dialog"
+            data-alarm-setting="push"
+            onClick={() => setSettingsOpen(true)}
+          >
+            {settings.pushEnabled
+              ? <BellRingingIcon size={16} weight="fill" />
+              : <BellSlashIcon size={16} weight="bold" />}
+          </button>
+
+          <button
             className={BASEBOARD_BUTTON_CLASS}
             aria-label="Alarm settings"
             title="Alarm settings"
+            aria-haspopup="dialog"
+            data-alarm-setting="settings"
             onClick={() => setSettingsOpen(true)}
           >
-            <SlidersHorizontalIcon size={11} weight="bold" />
+            <SlidersHorizontalIcon size={16} weight="bold" />
           </button>
         </div>
       </div>

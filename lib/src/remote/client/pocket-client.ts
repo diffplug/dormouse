@@ -21,6 +21,7 @@ import {
   REMOTE_EVENTS,
   REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
+  UNAUTHORIZED_ERROR,
   WS_ROUTES,
   WS_TOKEN_PARAM,
   hashPasskeyPublicKey,
@@ -115,6 +116,27 @@ export interface PairResult {
   readonly approved: boolean;
   readonly record?: HostAclRecord;
   readonly error?: string;
+}
+
+/** Shown when the Server no longer accepts our session token. */
+export const SESSION_EXPIRED_MESSAGE = 'Your session expired. Sign in again to continue.';
+
+/**
+ * The Server rejected our session token, so nothing works until the user signs
+ * in again. Distinct from an ordinary failure because the UI must react rather
+ * than report: sessions live only in the Server's memory (docs/specs/server.md),
+ * so they die on a 12h expiry *and* on every Server restart, and an installed
+ * Pocket has no address bar to reload from. Left as a message, the user is
+ * stuck holding a dead token with force-quitting the app as the only way out.
+ *
+ * {@link PocketClient} clears the token before throwing this, so recovery is
+ * exactly "sign in again" with the passkey and paired-host markers intact.
+ */
+export class SessionExpiredError extends Error {
+  constructor() {
+    super(SESSION_EXPIRED_MESSAGE);
+    this.name = 'SessionExpiredError';
+  }
 }
 
 interface Waiter {
@@ -331,7 +353,17 @@ export class PocketClient {
   }
 
   /** Open the `/ws/client` relay socket; resolves once it is open. */
-  openSocket(): Promise<void> {
+  async openSocket(): Promise<void> {
+    try {
+      await this.#openSocket();
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      if (error instanceof SessionExpiredError) throw error;
+      await this.#diagnoseSocketFailure(error);
+    }
+  }
+
+  #openSocket(): Promise<void> {
     const token = this.#requireToken();
     const url = `${this.#wsBase}${WS_ROUTES.client}?${WS_TOKEN_PARAM}=${encodeURIComponent(token)}`;
     const ws = this.#createWebSocket(url);
@@ -669,8 +701,40 @@ export class PocketClient {
       ...(method === 'GET' ? {} : { body: JSON.stringify(body ?? {}) }),
     });
     const parsed = (await response.json().catch(() => ({}))) as T & { error?: string };
+    // Only the session gate's 401 means "sign in again" — a wrong setup
+    // password and a rejected device signature answer 401 too, and bouncing the
+    // user to sign-in for those would be a worse bug than the one this fixes.
+    if (response.status === 401 && parsed.error === UNAUTHORIZED_ERROR) {
+      // Drop the token here rather than at the call site: every later request
+      // and every relay upgrade would fail the same way, and keeping it would
+      // let the UI believe it is still signed in.
+      this.#sessionToken = null;
+      throw new SessionExpiredError();
+    }
     if (!response.ok) throw new Error(parsed.error ?? `request failed (${response.status})`);
     return parsed;
+  }
+
+  /**
+   * Turn a relay-socket failure into a {@link SessionExpiredError} when the
+   * session is the reason. A rejected WS upgrade reaches the browser as a bare
+   * `error` event with no status, so the only way to tell "session died" from
+   * "network is down" is to ask an authenticated route — which answers the
+   * question and costs one request on a path that has already failed.
+   */
+  async #diagnoseSocketFailure(original: Error): Promise<never> {
+    if (this.#sessionToken === null) throw original;
+    try {
+      await this.#api<HostsResponse>(API_ROUTES.hosts, undefined, {
+        method: 'GET',
+        headers: { authorization: `Bearer ${this.#sessionToken}` },
+      });
+    } catch (err) {
+      if (err instanceof SessionExpiredError) throw err;
+      // Probe failed for its own reason — report the socket failure, which is
+      // what the user actually hit.
+    }
+    throw original;
   }
 
   #requireToken(): string {

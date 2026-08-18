@@ -366,6 +366,36 @@ that test silently mislabels it. The header is staged on the context *before*
 built and cannot add to it. Source of truth: `registerPocketServing` in
 `server/src/app.ts`.
 
+### An expired session drops to sign-in
+
+Sessions live only in the Server's memory ([server.md](./server.md)), so they
+end on their 12h expiry *and* on every Server restart, while the passkey and the
+paired-host markers in `localStorage` outlive both. Recovery is therefore one
+passkey prompt — but only if the user is offered it.
+
+Pocket treats a dead session as actionable rather than reportable:
+`PocketClient` clears its in-memory token and throws `SessionExpiredError`, and
+the app tears down any live adapter and returns to the sign-in screen carrying
+that message. Signing back in restores the Hosts list with pairing and push
+registration intact. Source of truth: `SessionExpiredError` in
+`lib/src/remote/client/pocket-client.ts`, handled in `run` in
+`lib/src/remote/pocket-app/App.tsx`.
+
+Two details this depends on:
+
+- **The trigger is the session gate specifically**, matched on the shared
+  `UNAUTHORIZED_ERROR` from `server-lib-common/src/remote/wire.ts` — a 401 alone
+  is ambiguous, since a wrong setup password and a rejected device signature
+  answer 401 too, and signing the user out for those would be worse than the bug
+  this fixes.
+- **A rejected relay upgrade carries no status.** The browser surfaces it as a
+  bare `error` event, so `openSocket` asks an authenticated route what happened:
+  a 401 there means expiry, anything else leaves it an ordinary socket failure.
+
+Without this an installed Pocket is stuck — there is no address bar to reload
+from, and the in-app Refresh re-sends the same dead token — leaving force-quitting
+the app as the only way back in.
+
 ## Deployment: same-origin, always
 
 WebAuthn binds passkeys to the serving origin, and Chrome's Private Network

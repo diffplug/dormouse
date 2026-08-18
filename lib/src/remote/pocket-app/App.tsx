@@ -18,6 +18,7 @@ import { clsx } from 'clsx';
 import { tv } from 'tailwind-variants';
 import {
   PocketClient,
+  SessionExpiredError,
   type ConnectDecision,
   type PocketSocket,
 } from '../client/pocket-client';
@@ -226,17 +227,40 @@ export default function App(): React.ReactElement {
     if (!client.socketOpen) await client.openSocket();
   }, [client]);
 
-  const run = useCallback(async (label: string, fn: () => Promise<void>) => {
-    setError(null);
-    setBusy(label);
-    try {
-      await fn();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(null);
-    }
+  /** Tear down the live session and return to the hosts list. */
+  const teardownAdapter = useCallback(() => {
+    void adapterRef.current?.dispose();
+    adapterRef.current = null;
+    disposeAllSessions();
   }, []);
+
+  const run = useCallback(
+    async (label: string, fn: () => Promise<void>) => {
+      setError(null);
+      setBusy(label);
+      try {
+        await fn();
+      } catch (err) {
+        // A dead session is not reportable, it is actionable: the token is
+        // already discarded, so every view above sign-in would fail the same
+        // way, and an installed Pocket has no reload affordance to escape with.
+        // Drop to sign-in, where one passkey prompt restores everything —
+        // pairing and push registration both outlive the session.
+        if (err instanceof SessionExpiredError) {
+          teardownAdapter();
+          client.close();
+          setActiveHost(null);
+          setPhase('auth');
+          setError(err.message);
+          return;
+        }
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [client, teardownAdapter],
+  );
 
   const loadHosts = useCallback(async () => {
     await ensureSocket();
@@ -245,13 +269,6 @@ export default function App(): React.ReactElement {
     setPairedIds(new Set(list.filter((h) => client.isPaired(h.hostId)).map((h) => h.hostId)));
     setPhase('hosts');
   }, [client, ensureSocket]);
-
-  /** Tear down the live session and return to the hosts list. */
-  const teardownAdapter = useCallback(() => {
-    void adapterRef.current?.dispose();
-    adapterRef.current = null;
-    disposeAllSessions();
-  }, []);
 
   // Socket drop / host-gone: dispose the adapter and fall back to Hosts.
   useEffect(() => {

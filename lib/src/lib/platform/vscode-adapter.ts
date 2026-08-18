@@ -1,6 +1,7 @@
 import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
 import type { AlertSettings } from '../alert-settings';
+import { readInjectedRecoveryCommands } from '../vscode-recovery-global';
 import { setDefaultShellOpts } from '../shell-defaults';
 import {
   collectTerminalSemanticEvents,
@@ -10,12 +11,17 @@ import {
   applyTerminalSemanticEventsByPtyId,
 } from '../terminal-state-store';
 import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
+import { isHostMessage, readHostMessageToken } from '../vscode-message-token';
 import type { DorControlResult } from 'dor/protocol';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 
 export class VSCodeAdapter implements PlatformAdapter {
   private vscode: ReturnType<typeof acquireVsCodeApi>;
   private hostState: unknown = (globalThis as typeof globalThis & { __DORMOUSE_HOST_STATE__?: unknown }).__DORMOUSE_HOST_STATE__ ?? null;
+  // Captured once, at construction, from the global the extension host injects
+  // at webview boot — so a later same-document write can't move the goalposts.
+  // Every `message` listener below checks it before reading anything else.
+  private readonly hostMessageToken = readHostMessageToken();
   private dataHandlers = new Set<(detail: { id: string; data: string }) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
@@ -59,8 +65,11 @@ export class VSCodeAdapter implements PlatformAdapter {
     onTerminalThemeChange(() => this.pushThemeColors());
 
     window.addEventListener('message', (event: MessageEvent) => {
+      // Authenticate the sender before looking at `type` at all — see
+      // ../vscode-message-token.ts.
+      if (!isHostMessage(event.data, this.hostMessageToken)) return;
       const msg = event.data;
-      if (!msg || !msg.type) return;
+      if (!msg.type) return;
 
       if (msg.type === 'pty:data') {
         for (const handler of this.dataHandlers) {
@@ -161,8 +170,12 @@ export class VSCodeAdapter implements PlatformAdapter {
         resolve(null);
       }, timeoutMs);
       const handler = (event: MessageEvent) => {
+        // Same guard as the main listener: a request/response reply carries
+        // host-supplied data (a proxy URL, scrollback, clipboard contents), and
+        // a forged one racing the real reply would win on first match.
+        if (!isHostMessage(event.data, this.hostMessageToken)) return;
         const msg = event.data;
-        if (msg?.type === responseType && msg.requestId === requestId) {
+        if (msg.type === responseType && msg.requestId === requestId) {
           clearTimeout(timeout);
           window.removeEventListener('message', handler);
           resolve(extract(msg));
@@ -208,10 +221,6 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   getCwd(id: string): Promise<string | null> {
     return this.requestResponse('pty:getCwd', 'pty:cwd', { id }, (msg) => msg.cwd);
-  }
-
-  getScrollback(id: string): Promise<string | null> {
-    return this.requestResponse('pty:getScrollback', 'pty:scrollback', { id }, (msg) => msg.data);
   }
 
   async getOpenPorts(id: string): Promise<OpenPort[]> {
@@ -472,5 +481,17 @@ export class VSCodeAdapter implements PlatformAdapter {
     // first resolveWebviewView call. Fall back to hostState on the very
     // first load, before any setState has run.
     return this.vscode.getState() ?? this.hostState;
+  }
+
+  /**
+   * The recovery commands the extension host captured at its last teardown, from
+   * the boot payload. Host-owned and single-use: this is a separate global rather
+   * than a field on the persisted session precisely so the webview cannot write it
+   * back — a `getState`/`saveState` cycle has nothing to carry forward, so no
+   * later restore can replay a stale invocation
+   * (docs/specs/transport.md -> "Consuming it").
+   */
+  getRecoveryCommands(): Record<string, string> {
+    return readInjectedRecoveryCommands();
   }
 }

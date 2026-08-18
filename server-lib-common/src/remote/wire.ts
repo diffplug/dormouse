@@ -30,6 +30,15 @@ export const API_ROUTES = {
   pushSend: '/api/push/send',
 } as const;
 
+/**
+ * The `error` a session-gated route answers 401 with when the session token is
+ * unknown or expired. Shared because Pocket keys recovery on it: a 401 alone is
+ * ambiguous (a wrong setup password and a rejected device signature also answer
+ * 401), and only this one means "sign in again". Changing the string on one
+ * side without the other would silently strand users on a dead session.
+ */
+export const UNAUTHORIZED_ERROR = 'unauthorized';
+
 export const WS_ROUTES = {
   host: '/ws/host',
   client: '/ws/client',

@@ -43,7 +43,6 @@ function createPlatform(ptys: PtyInfo[], savedState: PersistedSession | null): P
     resizePty: vi.fn(),
     killPty: vi.fn(),
     getCwd: vi.fn(async () => null),
-    getScrollback: vi.fn(async () => null),
     readClipboardFilePaths: vi.fn(async () => null),
     readClipboardImageAsFilePath: vi.fn(async () => null),
     onPtyData: vi.fn(),
@@ -96,9 +95,9 @@ describe('resumeOrRestore', () => {
       lathLayout,
       doors,
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null },
-        { id: 'pane-b', title: 'Pane B', cwd: null, scrollback: null, resumeCommand: null },
-        { id: 'pane-c', title: 'Pane C', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'pane-a', title: 'Pane A', cwd: null },
+        { id: 'pane-b', title: 'Pane B', cwd: null },
+        { id: 'pane-c', title: 'Pane C', cwd: null },
       ],
     };
 
@@ -126,7 +125,7 @@ describe('resumeOrRestore', () => {
       lathLayout: lathLayoutFor('pane-a'),
       surfaceRefs: { 'pane-a': 'surface:1', 'closed-pane': 'surface:2' },
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'pane-a', title: 'Pane A', cwd: null },
       ],
     };
 
@@ -142,7 +141,7 @@ describe('resumeOrRestore', () => {
       version: 3,
       lathLayout: lathLayoutFor('pane-a'),
       panes: [
-        { id: 'pane-a', title: 'Production API', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'pane-a', title: 'Production API', cwd: null },
       ],
     };
 
@@ -162,7 +161,7 @@ describe('resumeOrRestore', () => {
       version: 3,
       lathLayout: lathLayoutFor('pane-a'),
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null, untouched: true },
+        { id: 'pane-a', title: 'Pane A', cwd: null, untouched: true },
       ],
     };
 
@@ -183,7 +182,7 @@ describe('resumeOrRestore', () => {
       version: 3 as const,
       lathLayout: lathLayoutFor('pane-a'),
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'pane-a', title: 'Pane A', cwd: null },
       ],
     };
 
@@ -207,7 +206,7 @@ describe('resumeOrRestore', () => {
         title: 'Renamed Door',
       }],
       panes: [
-        { id: 'pane-a', title: 'Renamed Door', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'pane-a', title: 'Renamed Door', cwd: null },
       ],
     };
 
@@ -227,8 +226,8 @@ describe('resumeOrRestore', () => {
       version: 3,
       lathLayout: lathLayoutFor('pane-a', 'pane-b'),
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null },
-        { id: 'pane-b', title: 'Pane B', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'pane-a', title: 'Pane A', cwd: null },
+        { id: 'pane-b', title: 'Pane B', cwd: null },
       ],
     };
 
@@ -257,9 +256,9 @@ describe('resumeOrRestore', () => {
       lathLayout: lathLayoutFor(),
       doors,
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null },
-        { id: 'pane-b', title: 'Pane B', cwd: null, scrollback: null, resumeCommand: null },
-        { id: 'stale-pane', title: 'Stale Pane', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'pane-a', title: 'Pane A', cwd: null },
+        { id: 'pane-b', title: 'Pane B', cwd: null },
+        { id: 'stale-pane', title: 'Stale Pane', cwd: null },
       ],
     };
 
@@ -282,9 +281,9 @@ describe('resumeOrRestore', () => {
       version: 3,
       lathLayout,
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null, scrollback: null, resumeCommand: null },
-        { id: 'pane-b', title: 'Pane B', cwd: null, scrollback: null, resumeCommand: null },
-        { id: 'stale-pane', title: 'Stale Pane', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'pane-a', title: 'Pane A', cwd: null },
+        { id: 'pane-b', title: 'Pane B', cwd: null },
+        { id: 'stale-pane', title: 'Stale Pane', cwd: null },
       ],
     };
 
@@ -306,8 +305,8 @@ describe('resumeOrRestore', () => {
       version: 3,
       lathLayout,
       panes: [
-        { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null },
-        { id: 'pane-web', title: 'localhost', cwd: null, scrollback: null, resumeCommand: null, surfaceType: 'browser' },
+        { id: 'pane-term', title: 'Terminal', cwd: null },
+        { id: 'pane-web', title: 'localhost', cwd: null, surfaceType: 'browser' },
       ],
     };
 
@@ -330,13 +329,11 @@ describe('resumeOrRestore', () => {
       version: 3,
       lathLayout: lathLayoutFor('pane-term', 'pane-web'),
       panes: [
-        { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null },
+        { id: 'pane-term', title: 'Terminal', cwd: null },
         {
           id: 'pane-web',
           title: 'localhost',
           cwd: null,
-          scrollback: null,
-          resumeCommand: null,
           surfaceType: 'browser',
           alert: { status: 'WATCHING_DISABLED', watchingEnabled: false, todo: true, notification: null },
         },
@@ -364,9 +361,9 @@ describe('resumeOrRestore', () => {
       version: 3,
       lathLayout: lathLayoutFor('pane-term', 'stale-term', 'pane-web'),
       panes: [
-        { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null },
-        { id: 'stale-term', title: 'Stale terminal', cwd: null, scrollback: null, resumeCommand: null },
-        { id: 'pane-web', title: 'localhost', cwd: null, scrollback: null, resumeCommand: null, surfaceType: 'browser' },
+        { id: 'pane-term', title: 'Terminal', cwd: null },
+        { id: 'stale-term', title: 'Stale terminal', cwd: null },
+        { id: 'pane-web', title: 'localhost', cwd: null, surfaceType: 'browser' },
       ],
     };
 
@@ -394,8 +391,8 @@ describe('resumeOrRestore', () => {
       lathLayout,
       doors,
       panes: [
-        { id: 'pane-term', title: 'Terminal', cwd: null, scrollback: null, resumeCommand: null },
-        { id: 'door-web', title: 'localhost', cwd: null, scrollback: null, resumeCommand: null, surfaceType: 'browser' },
+        { id: 'pane-term', title: 'Terminal', cwd: null },
+        { id: 'door-web', title: 'localhost', cwd: null, surfaceType: 'browser' },
       ],
     };
 

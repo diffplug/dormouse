@@ -3,9 +3,13 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { WebglAddon } from '@diffplug/xterm-addon-webgl-sdf';
 // The pristine upstream addon, pinned to the exact commit the fork's sdf branch is based on
-// (addon 0.20.0-beta.290 and core 6.1.0-beta.291 share gitHead 699f5537) — the regression
+// (addon 0.20.0-beta.298 and core 6.1.0-beta.301 share gitHead 8c9b9fdb) — the regression
 // baseline for the RendererComparison story.
 import { WebglAddon as UpstreamWebglAddon } from '@xterm/addon-webgl';
+// Read the two versions rather than restating them, so the on-screen labels cannot drift from
+// the pins the way a hand-typed version does.
+import forkPkg from '@diffplug/xterm-addon-webgl-sdf/package.json';
+import upstreamPkg from '@xterm/addon-webgl/package.json';
 import '@xterm/xterm/css/xterm.css';
 
 const ESC = '\x1b[';
@@ -289,9 +293,9 @@ export const SdfVsRasterAt3x: StoryObj = {
 };
 
 const RENDERER_LABELS: Record<RendererKind, string> = {
-  'upstream': 'upstream @xterm/addon-webgl 0.20.0-beta.290 — same commit as the fork base (regression baseline)',
-  'fork-raster': 'fork, sdf: false — isolates the instance-layout/shader changes',
-  'fork-sdf': 'fork, sdf: true — isolates the SDF glyph path',
+  'upstream': `upstream @xterm/addon-webgl ${upstreamPkg.version} — same commit as the fork base (regression baseline)`,
+  'fork-raster': `fork ${forkPkg.version}, sdf: false — isolates the instance-layout/shader changes`,
+  'fork-sdf': `fork ${forkPkg.version}, sdf: true — isolates the SDF glyph path`,
 };
 
 /**

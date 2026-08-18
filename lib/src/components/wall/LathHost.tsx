@@ -42,6 +42,7 @@ import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
+import { AlertSpeechIndicator } from './AlertSpeechIndicator';
 
 /** Widened pointer target over each (thin) sash band, in px. */
 const SASH_HIT = 8;
@@ -91,11 +92,12 @@ function presentationTargets(tree: LathTree, rect: Rect, zoomedId: string | null
   return { targets, layers };
 }
 
-/** Test seam: swap the resolved body/tab components (keyed by component name) so
- *  jsdom tests never mount the real TerminalPane/xterm. */
+/** Test seam: swap the resolved body/tab/overlay components (keyed by component
+ *  name) so jsdom tests never mount the real TerminalPane/xterm. */
 export type LathComponentsOverride = {
   bodies?: Record<string, ComponentType<PaneProps>>;
   tabs?: Record<string, ComponentType<PaneProps>>;
+  overlays?: Record<string, ComponentType<PaneProps>>;
 };
 
 // Body components keyed by `leafMeta.component`; `surface` headers to
@@ -107,6 +109,19 @@ const BODY_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
 const TAB_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalPaneHeader,
   surface: SurfacePaneHeader,
+};
+
+/** For a terminal Surface the pane id is its session id (docs/specs/layout.md). */
+function TerminalLeafOverlay({ id }: PaneProps) {
+  return <AlertSpeechIndicator sessionId={id} />;
+}
+
+// Whole-leaf overlays keyed by `leafMeta.component`: pointer-transparent chrome
+// spanning header *and* body, which neither the Body nor the Tab slot can cover.
+// Keyed off the same metadata as those two so leaf content resolves one way, not
+// one way plus a surface-kind branch in the render path.
+const OVERLAY_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
+  terminal: TerminalLeafOverlay,
 };
 
 type DragState = {
@@ -132,7 +147,8 @@ type LeafCallbacks = {
  *  identity (id / meta / resolved components / the stable header-press handler), so a
  *  geometry-only frame — a sash-drag preview or a resize commit re-renders the
  *  positioned wrapper — never re-renders the header or body. Returned as a fragment so
- *  the header/body stay direct flex children of `.lath-leaf`. A mounted leaf is always
+ *  the header/body and the whole-leaf overlay stay direct children of
+ *  `.lath-leaf`. A mounted leaf is always
  *  engine-visible, so the pane props carry no visibility flag (docs/specs/
  *  tiling-engine.md → "Pane props contract"). */
 const LathLeafContent = memo(function LathLeafContent({
@@ -140,12 +156,14 @@ const LathLeafContent = memo(function LathLeafContent({
   meta,
   Body,
   Tab,
+  Overlay,
   onHeaderPointerDown,
 }: {
   id: string;
   meta: LeafMeta | undefined;
   Body: ComponentType<PaneProps> | undefined;
   Tab: ComponentType<PaneProps> | undefined;
+  Overlay: ComponentType<PaneProps> | undefined;
   /** Header-press → maybe a pane drag (threshold-gated in the drag controller). Stable. */
   onHeaderPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
@@ -156,6 +174,7 @@ const LathLeafContent = memo(function LathLeafContent({
         {Tab ? <Tab {...paneProps} /> : null}
       </div>
       <div className="lath-leaf-body">{Body ? <Body {...paneProps} /> : null}</div>
+      {Overlay ? <Overlay {...paneProps} /> : null}
     </>
   );
 });
@@ -171,6 +190,7 @@ const LathLeaf = memo(function LathLeaf({
   meta,
   Body,
   Tab,
+  Overlay,
   left,
   top,
   width,
@@ -185,6 +205,7 @@ const LathLeaf = memo(function LathLeaf({
   meta: LeafMeta | undefined;
   Body: ComponentType<PaneProps> | undefined;
   Tab: ComponentType<PaneProps> | undefined;
+  Overlay: ComponentType<PaneProps> | undefined;
   left: number;
   top: number;
   width: number;
@@ -206,7 +227,14 @@ const LathLeaf = memo(function LathLeaf({
       ref={registerEl}
       onFocusCapture={() => onLeafFocused?.(id)}
     >
-      <LathLeafContent id={id} meta={meta} Body={Body} Tab={Tab} onHeaderPointerDown={onHeaderPointerDown} />
+      <LathLeafContent
+        id={id}
+        meta={meta}
+        Body={Body}
+        Tab={Tab}
+        Overlay={Overlay}
+        onHeaderPointerDown={onHeaderPointerDown}
+      />
     </div>
   );
 });
@@ -542,6 +570,8 @@ export function LathHost({
     componentsOverride?.bodies?.[component] ?? BODY_COMPONENTS[component];
   const resolveTab = (tabComponent: string): ComponentType<PaneProps> | undefined =>
     componentsOverride?.tabs?.[tabComponent] ?? TAB_COMPONENTS[tabComponent];
+  const resolveOverlay = (component: string): ComponentType<PaneProps> | undefined =>
+    componentsOverride?.overlays?.[component] ?? OVERLAY_COMPONENTS[component];
 
   return (
     <div ref={containerRef} className="lath-host">
@@ -570,6 +600,7 @@ export function LathHost({
             meta={meta}
             Body={meta ? resolveBody(meta.component) : undefined}
             Tab={meta ? resolveTab(meta.tabComponent) : undefined}
+            Overlay={meta ? resolveOverlay(meta.component) : undefined}
             {...geom}
             registerEl={cb.registerEl}
             onHeaderPointerDown={cb.onHeaderPointerDown}

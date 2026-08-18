@@ -1,4 +1,4 @@
-import { fork, ChildProcess } from 'child_process';
+import { fork, ChildProcess, type Serializable } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
 import * as vscode from 'vscode';
@@ -30,6 +30,10 @@ interface PtyBufferEntry {
   replayChars: number;
   scrollbackChunks: string[];
   scrollbackChars: number;
+  /** Every char ever buffered for this pane, never decremented by a trim — so it
+   *  is a stable coordinate space for marking a position in the stream, which
+   *  `scrollbackChars` is not once the cap starts evicting. */
+  receivedChars: number;
   alive: boolean;
   exitCode?: number;
 }
@@ -52,6 +56,7 @@ function createBufferEntry(alive: boolean, exitCode?: number): PtyBufferEntry {
     replayChars: 0,
     scrollbackChunks: [],
     scrollbackChars: 0,
+    receivedChars: 0,
     alive,
     exitCode,
   };
@@ -70,6 +75,7 @@ function bufferData(id: string, data: string): void {
 
   entry.scrollbackChunks.push(data);
   entry.scrollbackChars += data.length;
+  entry.receivedChars += data.length;
   entry.scrollbackChars = trimChunks(entry.scrollbackChunks, entry.scrollbackChars);
 }
 
@@ -106,6 +112,44 @@ export function getScrollback(id: string): string | null {
   const entry = ptyBuffers.get(id);
   if (!entry || entry.scrollbackChunks.length === 0) return null;
   return entry.scrollbackChunks.join('');
+}
+
+/**
+ * A mark in the pane's output stream, cheap enough to take on every poll tick:
+ * `receivedChars` is maintained exactly by `bufferData`, so a caller watching a
+ * pane for growth pays nothing instead of a ~1MB `join()`.
+ *
+ * Counts everything ever received, NOT what is currently buffered. A pane at the
+ * 1MB cap — precisely the long-running agent pane recovery cares about — holds
+ * `scrollbackChars` pinned at the cap while output keeps flowing, so a buffer
+ * length is neither a usable growth signal nor a usable offset there.
+ */
+export function getScrollbackReceived(id: string): number {
+  return ptyBuffers.get(id)?.receivedChars ?? 0;
+}
+
+/**
+ * The output received after a `getScrollbackReceived` mark, clamped to what the
+ * bounded buffer still holds. Joins only the chunks that span the mark, so
+ * repeatedly reading a pane's recent tail costs the tail, not the buffer.
+ */
+export function getScrollbackSince(id: string, mark: number): string {
+  const entry = ptyBuffers.get(id);
+  if (!entry) return '';
+  // Chunk eviction can have carried the mark off the front; the oldest char the
+  // buffer still holds is the furthest back this can honestly answer.
+  const oldestHeld = entry.receivedChars - entry.scrollbackChars;
+  const wanted = entry.receivedChars - Math.max(mark, oldestHeld);
+  if (wanted <= 0) return '';
+  const tail: string[] = [];
+  let held = 0;
+  for (let i = entry.scrollbackChunks.length - 1; i >= 0 && held < wanted; i--) {
+    const chunk = entry.scrollbackChunks[i];
+    tail.unshift(chunk);
+    held += chunk.length;
+  }
+  const joined = tail.join('');
+  return held > wanted ? joined.slice(held - wanted) : joined;
 }
 
 let child: ChildProcess | null = null;
@@ -360,23 +404,50 @@ export function kill(id: string): void {
   sendToChild({ type: 'kill', id });
 }
 
-export function gracefulKillAll(timeoutMs = 2000): Promise<void> {
+let ackRequestSeq = 0;
+
+/**
+ * Fire-and-wait for a whole-host pty-host operation: send `msg`, resolve on the
+ * matching ack, and resolve anyway once `timeoutMs` elapses. Nothing on a
+ * teardown path may wait unbounded, and every one of these runs on one.
+ *
+ * Acks are correlated by request id, not merely by type, precisely *because* the
+ * timeout exists: a timed-out call's ack still arrives afterwards, and a
+ * type-only match let that stale reply resolve the next call the instant it was
+ * issued. The caller would then act on an interrupt whose `^C` had not been
+ * written yet — deciding the next second press against a state that never
+ * happened. The pty-host echoes `requestId` on both acks.
+ */
+function awaitChildAck(msg: Record<string, unknown>, ackType: string, timeoutMs: number): Promise<void> {
   return new Promise((resolve) => {
     if (!child?.connected) { resolve(); return; }
-    const timeout = setTimeout(() => {
+    const requestId = `ack-${++ackRequestSeq}`;
+    const finish = () => {
+      clearTimeout(timeout);
       child?.off('message', handler);
       resolve();
-    }, timeoutMs + 500); // extra margin beyond the pty-host timeout
-    const handler = (msg: any) => {
-      if (msg.type === 'gracefulKillDone') {
-        clearTimeout(timeout);
-        child?.off('message', handler);
-        resolve();
-      }
+    };
+    const timeout = setTimeout(finish, timeoutMs);
+    const handler = (reply: any) => {
+      if (reply.type === ackType && reply.requestId === requestId) finish();
     };
     child.on('message', handler);
-    child.send({ type: 'gracefulKillAll', timeout: timeoutMs });
+    child.send({ ...msg, requestId } as Serializable);
   });
+}
+
+/**
+ * Send one `^C` to the named PTYs. Whether a second press follows is the caller's
+ * decision, per PTY — codex and claude want opposite things and a blanket second
+ * press destroys codex's hint (docs/specs/transport.md).
+ */
+export function interrupt(ids: string[], timeoutMs = 400): Promise<void> {
+  return awaitChildAck({ type: 'interrupt', ids }, 'interruptDone', timeoutMs);
+}
+
+export function gracefulKillAll(timeoutMs = 2000): Promise<void> {
+  // Extra margin beyond the pty-host's own timeout.
+  return awaitChildAck({ type: 'gracefulKillAll', timeout: timeoutMs }, 'gracefulKillDone', timeoutMs + 500);
 }
 
 export function killAll(): void {

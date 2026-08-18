@@ -38,9 +38,13 @@ describe('throttleTrailing', () => {
     expect(duringBurst).toBeLessThanOrEqual(5);
 
     // Let everything settle — a final trailing call fits the resting geometry.
+    // Strictly greater than the burst count: the last frame left a trailing
+    // call pending, so exactly one more fire must land after settling.
+    // (`> duringBurst - 1` would be `>= duringBurst`, which holds even if no
+    // trailing call fired, defeating the check.)
     vi.advanceTimersByTime(300);
     const total = fn.mock.calls.length;
-    expect(total).toBeGreaterThan(duringBurst - 1);
+    expect(total).toBeGreaterThan(duringBurst);
     expect(total).toBeLessThanOrEqual(5);
   });
 

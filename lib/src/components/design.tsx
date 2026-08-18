@@ -68,6 +68,12 @@ export const HEADER_PALETTE_TRANSITION_CLASS =
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
 
+// Spoken-alarm delivery is intentionally louder than resting chrome.
+// `--color-alarm-vs-terminal` is the dynamic black/white contrast pick for the
+// terminal body behind the overlay. The pulse itself is `alertSpeakingAnimationClass`
+// in `bell-icon-class.ts`, beside the other Chromatic-frozen alert animation.
+export const ALERT_SPEECH_TRACKING_CLASS = 'tracking-[0.12em]';
+
 // Chrome for small anchored popovers (title candidates, TODO preview, pane
 // context menu, rename warning). Text size and padding vary per popover and
 // stay at the call site; the surface recipe is shared so they can't drift.
@@ -91,16 +97,12 @@ export function PopupButtonRow({
 export const popupButton = tv({
   base: 'm-0 px-1.5 py-0.5',
   variants: {
-    tone: {
-      foreground: '',
-      muted: 'text-muted hover:text-foreground',
-    },
     flashed: {
       true: 'animate-copy-flash bg-header-active-bg/25 text-header-active-bg',
       false: 'hover:bg-foreground/10',
     },
   },
-  defaultVariants: { tone: 'foreground', flashed: false },
+  defaultVariants: { flashed: false },
 });
 
 export type PopupButtonVariants = VariantProps<typeof popupButton>;

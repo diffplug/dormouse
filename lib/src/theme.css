@@ -83,6 +83,7 @@
   --color-alarm-vs-header-active: var(--vscode-terminal-ansiYellow);
   --color-alarm-vs-header-inactive: var(--vscode-terminal-ansiYellow);
   --color-alarm-vs-door: var(--vscode-terminal-ansiYellow);
+  --color-alarm-vs-terminal: var(--vscode-terminal-ansiYellow);
 
   /* Inputs — used by ThemePicker */
   --color-input-bg: var(--vscode-input-background);
@@ -90,6 +91,7 @@
 
   /* Animation */
   --animate-bell-ring: bell-ring 800ms ease-in-out infinite;
+  --animate-speech-alarm-pulse: speech-alarm-pulse 650ms ease-in-out infinite;
   --animate-shake-x: shake-x 400ms ease-out;
 }
 
@@ -123,6 +125,7 @@ body {
   --color-alarm-vs-header-active: var(--vscode-terminal-ansiYellow);
   --color-alarm-vs-header-inactive: var(--vscode-terminal-ansiYellow);
   --color-alarm-vs-door: var(--vscode-terminal-ansiYellow);
+  --color-alarm-vs-terminal: var(--vscode-terminal-ansiYellow);
   --color-input-bg: var(--vscode-input-background);
   --color-input-border: var(--vscode-input-border);
 }
@@ -130,6 +133,11 @@ body {
 @keyframes bell-ring {
   0%, 100% { transform: rotate(45deg); }
   50%      { transform: rotate(-45deg); }
+}
+
+@keyframes speech-alarm-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
 }
 
 @keyframes shake-x {

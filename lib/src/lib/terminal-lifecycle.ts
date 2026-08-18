@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { getPlatform, IS_MAC, IS_WINDOWS } from './platform';
+import { DIM, RESET } from './ansi';
 import { cfg } from '../cfg';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
 import { attachMouseModeObserver } from './mouse-mode-observer';
@@ -14,6 +15,7 @@ import {
   setSelection as setMouseSelection,
 } from './mouse-selection';
 import { extractSelectionText } from './selection-text';
+import { normalizeResumeCommand } from './resume-patterns';
 import {
   pendingShellOpts,
   registry,
@@ -399,7 +401,12 @@ function typeCommandWhenPromptReady(id: string, command: string, requireIntegrat
   const timeoutMs = requireIntegration ? INTEGRATION_TYPE_TIMEOUT_MS : LAUNCH_PROMPT_TIMEOUT_MS;
   let elapsed = 0;
   const timer = setInterval(() => {
-    if (!registry.has(id)) {
+    // A gone shell can't run anything. `exited` also covers a spawn that failed
+    // outright (pty-core answers a spawn error with an exit), where the seeded
+    // command has just been cleared and `ready` would otherwise read as true —
+    // typing into a pty that never existed.
+    const entry = registry.get(id);
+    if (!entry || entry.exited) {
       clearInterval(timer);
       return;
     }
@@ -475,9 +482,12 @@ export function resumeTerminal(
   return entry;
 }
 
+// A cold restore never replays a transcript — scrollback is not persisted
+// (docs/specs/transport.md -> "What is persisted"). What can come back is the
+// agent the host interrupted on its way down, which this pane re-runs itself.
 export function restoreTerminal(
   id: string,
-  opts: { cwd?: string | null; scrollback?: string | null; title?: string | null; cwdWarning?: string | null; shell?: string; args?: string[]; untouched?: boolean },
+  opts: { cwd?: string | null; title?: string | null; cwdWarning?: string | null; shell?: string; args?: string[]; untouched?: boolean; resumeCommand?: string | null },
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
@@ -490,13 +500,6 @@ export function restoreTerminal(
     setTerminalUserTitle(id, trimmedTitle);
   }
 
-  if (opts.scrollback) {
-    // Saved process is gone: append the reset tail (see REPLAY_MODE_RESET),
-    // inside writeReplay so `isReplaying` covers it, and before the '\r\n'
-    // separator so the alt-screen exit lands before the separator line.
-    writeReplay(entry, opts.scrollback, REPLAY_MODE_RESET, '\r\n');
-    seedPromptShapeFromScrollback(id, opts.scrollback);
-  }
   if (opts.cwdWarning) {
     entry.terminal.write(`\r\n\x1b[33m${opts.cwdWarning}\x1b[0m\r\n`);
   }
@@ -510,6 +513,21 @@ export function restoreTerminal(
     args: opts.args,
   });
   seedProcessCwdAfterSpawn(id);
+
+  // Revalidated rather than trusted: the snapshot may have been written by an
+  // older detector, and this string is about to be executed.
+  const resume = opts.resumeCommand ? normalizeResumeCommand(opts.resumeCommand) : null;
+  if (resume) {
+    // A passive notice, not a dialog: the pane has no transcript, so without it
+    // an agent simply appears. It also states the discontinuity the resume hides
+    // — the interrupted turn did not continue.
+    entry.terminal.write(`${DIM}⟲ resuming agent session: ${resume}${RESET}\r\n`);
+    // Seeded before the write because this bypasses xterm's keystroke fallback,
+    // and typed only once the fresh shell reaches a prompt — spawn-then-type is
+    // exactly the window shell startup swallows keystrokes in.
+    seedLaunchedCommand(id, resume, opts.cwd ?? undefined);
+    typeCommandWhenPromptReady(id, resume, false);
+  }
 
   return entry;
 }

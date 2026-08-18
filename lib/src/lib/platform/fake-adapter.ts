@@ -185,7 +185,6 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
 
   async getCwd(_id: string): Promise<string | null> { return null; }
-  async getScrollback(_id: string): Promise<string | null> { return null; }
 
   /** Ports the playground/tests want a given terminal to report. */
   setOpenPorts(id: string, ports: OpenPort[]): void {

@@ -110,6 +110,19 @@ The alert bell and TODO pill are defined in `docs/specs/alert.md` (visual states
 
 The pane body paints `--color-terminal-bg` on the React pane wrapper and the `TerminalPane` mount point. The persistent xterm host element, `.xterm-screen`, and xterm scroll container are also painted with the concrete background from `getTerminalTheme()`. This is intentional: xterm.js only paints its own rendered terminal surface, and integer row fitting can leave a sub-row remainder at the bottom of the pane. The host background must match the terminal screen exactly and clip to the pane's shared rounded bottom corners so the terminal surface reaches the selection overlay cleanly.
 
+### Spoken-alarm overlay
+
+A terminal Session with transient speech-delivery state gets a pointer-transparent overlay spanning its whole Lath leaf; browser surfaces never render it. It resolves through the tiling engine's per-leaf overlay slot (`docs/specs/tiling-engine.md`), never intercepts pointer/focus routing, and never changes leaf geometry.
+
+It renders as **two layers straddling the header's stacking context** (`.lath-leaf-header` is `position: relative; z-index: 20`):
+
+- **Wash + label at `z-index: 19`** — below the header, so the wash never tints the header band, where `--color-alarm-vs-terminal` (picked against the *terminal body*) carries no contrast guarantee; above terminal content; below the `z-index: 20` pane-corner mouse-override banner, which therefore stays untinted. Only `SPEAKING` washes, at 20%: `SPOKEN` persists until the ring is attended, which is unbounded, and a tint degrading terminal-text contrast for that whole window is the same mistake the Door's badge cluster avoids. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered, in both states.
+- **Perimeter ring at `z-index: 25`** — above the header so the treatment still reads as one rounded rectangle around the whole Pane, below the `z-index: 30` sashes. An inset border at the leaf's edge covers nothing. 5px for `SPEAKING`, 3px for `SPOKEN`; it is what carries `SPOKEN` on its own.
+
+Header popovers are not a factor in this layering: every one of them (pane context menu, title candidates, notification preview, rename warning) portals to `document.body` with `position: fixed`, so they render in the root stacking context above the whole wall regardless of leaf z-indices.
+
+Both layers wear the leaf's own rounding (header radius on top, terminal radius on the bottom). Under `SPEAKING` both pulse when motion is allowed and `cfg.alert.ringingPaused` is not set. Behavior and clearing rules belong to `docs/specs/alert.md`. Source of truth: `AlertSpeechIndicator.tsx`, registered as the `terminal` overlay by `LathHost.tsx`.
+
 ### Pane header responsive sizing
 
 The header adapts to available width via ResizeObserver in three tiers:
@@ -126,9 +139,9 @@ Below the content area is the baseboard (`h-7`, 28px). It is visible by default 
 
 `Wall` accepts `showBaseboard={false}` for constrained embedders such as the website's mobile Pocket playground, where a separate bottom navigation owns the area below the terminal and door workflows are outside the prototype scope. The main app shell keeps the default `showBaseboard=true`.
 
-The far right of the baseboard is a single flex cluster, right-aligned as a unit: the `N more →` overflow arrow, then the host-supplied `notice` slot (standalone puts the update banner there), then an always-present **Alarm settings** button opening the dialog specified in `docs/specs/alert.md` → Alarm settings. Every baseboard-level button shares one class constant in `Baseboard.tsx`. The cluster's always-present part is measured and subtracted from the door-fitting budget below; the overflow arrow stays out of that measurement because its presence is an *output* of the fit, so measuring it would feed back into its own input.
+The far right of the baseboard is a single flex cluster, right-aligned as a unit: the `N more →` overflow arrow, then the host-supplied `notice` slot (standalone puts the update banner there), then three always-present 24px **Alarm settings** controls. The first is a 16px speaker/slashed-speaker reflecting spoken alarms enabled/disabled; the second is a 16px ringing-bell/slashed-bell reflecting push notifications enabled/disabled; the third is the 16px sliders icon for general settings. Shape and accessible text both carry each state, so the status does not rely on color. All three open the same dialog specified in `docs/specs/alert.md` → Alarm settings; the status controls do not toggle settings directly. Every baseboard-level button shares one class constant in `Baseboard.tsx`. The cluster's always-present part is measured and subtracted from the door-fitting budget below; the overflow arrow stays out of that measurement because its presence is an *output* of the fit, so measuring it would feed back into its own input.
 
-When a session is minimized, it becomes a **door** on the baseboard. The door displays the same derived terminal label as the pane header, a TODO badge (if set), and an alert bell icon with activity dot. It uses the bottom edge of the window as its bottom border, with left, top, and right borders using the shared terminal top radius from `lib/src/components/design.tsx` — resembling a mouse hole and matching pane rounding. Door dimensions: `min-w-[68px] max-w-[220px] h-6`.
+When a session is minimized, it becomes a **door** on the baseboard. The door displays the same derived terminal label as the pane header, a TODO badge (if set), and an alert bell icon with activity dot. Speech state is layered on top: `SPEAKING` takes the whole badge slot — a speaker plus label, inverting and pulsing the entire Door — because it lasts exactly one utterance. `SPOKEN` does **not**: it persists until the ring is attended, which is unbounded, so it adds a speaker icon *beside* the TODO pill and bell rather than replacing them, plus a static 2px contrast inset on the Door. A Door that hid both persistent signals for that whole window would be indistinguishable from a quiet one. Both states name themselves in the Door's `title` and accessible name. It uses the bottom edge of the window as its bottom border, with left, top, and right borders using the shared terminal top radius from `lib/src/components/design.tsx` — resembling a mouse hole and matching pane rounding. Door dimensions: `min-w-[68px] max-w-[220px] h-6`.
 
 ### Door interaction
 
@@ -142,7 +155,7 @@ When a session is minimized, it becomes a **door** on the baseboard. The door di
 
 Doors are measured in a hidden off-screen container first:
 
-- Subtract the measured right cluster (notice + alarm settings) and its gap from the available width before fitting anything — that space is never available to doors.
+- Subtract the measured right cluster (notice + the three alarm-settings controls) and its gap from the available width before fitting anything — that space is never available to doors.
 - If they all fit, display them all. If there is remaining space, show the keyboard shortcut hint.
 - If they do not all fit:
   - Reserve space for a `N more →` button on the right edge
@@ -332,22 +345,62 @@ Submitted values are rejected when empty or when they fail the `setTerminalUserT
 
 For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getOrCreateTerminal(id)` on React mount and `unmountElement(id)` on React unmount. The session (xterm.js instance, PTY, DOM element) persists in the registry across mount/unmount cycles — the DOM element is detached from its container but the Registry entry stays `Mounted`. A browser surface's pane ID is a Surface id with no registry entry or PTY (`docs/specs/glossary.md`); its DOM is hosted by LathHost's leaf div and it is reconstructed from persisted params, not from the registry.
 
-- **Create**: `getOrCreateTerminal` spawns xterm.js + UnicodeGraphemesAddon + FitAddon + WebglAddon + PTY, returns existing if already created. The xterm instance sets `allowProposedApi: true` because UnicodeGraphemesAddon activates through xterm's proposed Unicode API. The WebGL addon must load *after* `terminal.open()`; the others may load before (see "Renderer" below).
+- **Create**: `getOrCreateTerminal` spawns xterm.js + UnicodeGraphemesAddon + FitAddon + PTY, returns existing if already created. The xterm instance sets `allowProposedApi: true` because UnicodeGraphemesAddon activates through xterm's proposed Unicode API. The WebGL addon is *not* loaded at create — it is claimed lazily on the session's first mount (see "Renderer" below).
 - **Resume**: `resumeTerminal` creates xterm entry and writes replay data without spawning a new PTY. Used when the webview is recreated while the host retains Live PTYs (Link: Severed → Resuming → Live).
-- **Restore**: `restoreTerminal` creates xterm entry and spawns a new PTY with saved cwd and scrollback. Used on cold start from a saved Snapshot (Link: Cold → Live).
+- **Restore**: `restoreTerminal` creates xterm entry and spawns a new PTY with the saved cwd. It replays no transcript — scrollback is not persisted (`docs/specs/transport.md` → "What is persisted"). Used on cold start from a saved Snapshot (Link: Cold → Live).
+- **Agent resume**: a restored pane the host captured a resume invocation for re-runs it automatically. See "Agent resume on cold restore" below.
 - **Untouched**: new `getOrCreateTerminal` sessions start untouched. `isUntouched(id)` exposes the flag, and user-originated PTY input clears it via the registry input paths. Resume/restore seed the persisted flag; missing legacy snapshot data defaults to touched (`false`) so close confirmation remains conservative.
 - **Shell selection replacement**: the standalone shell dropdown and VS Code shell picker send `dormouse:new-terminal` with `replaceUntouched` when the selected shell type changes. `Wall` always creates a new session id and a fresh `surface:N` ref for that request. If the currently selected pane or door is untouched, the new terminal takes over the same leaf via a Lath `replace` op (an atomic identity swap; doors first reattach through the normal restore path), the old untouched session is disposed, and the replaced Surface's ref is retired. If the selected terminal is touched or no terminal is selected, the request spawns a new pane beside the selected one. Announced shell-selection spawns show a transient pane-anchored notice such as `Switched to zsh` or `Opened bash`.
-- During resume/restore replay, xterm.js may emit terminal-generated replies for OSC/CSI/DCS queries that were embedded in saved output. The registry drops those replay-time replies before they reach the new shell. This filter is limited to query/focus reports, and must not swallow user keyboard escape sequences such as arrows, function keys, or bracketed paste.
+- During **resume** replay, xterm.js may emit terminal-generated replies for OSC/CSI/DCS queries that were embedded in buffered output. The registry drops those replay-time replies before they reach the new shell. This filter is limited to query/focus reports, and must not swallow user keyboard escape sequences such as arrows, function keys, or bracketed paste.
 - **mount / unmount (DOM)**: `mountElement` reparents the persistent DOM element into a container; `unmountElement` removes it. The Registry entry survives.
 - **Dispose**: `disposeSession` kills the PTY, disposes xterm, removes the registry entry. Only called on explicit kill (`x`).
 - **Swap**: the Cmd/Ctrl+Arrow swap trades two leaf identities via a Lath `swap` op — per-leaf metadata and registry entries are keyed by id, so they follow the swap with no DOM reattach or title swap (see "Cmd/Ctrl+Arrow swap" above).
 
+### Agent resume on cold restore
+
+A cold **restore** spawns a *fresh* shell and replays nothing. What can come back
+is the agent the host interrupted on its way down: when the host's boot payload
+carries an invocation for that surface (`PlatformAdapter.getRecoveryCommands`;
+`docs/specs/transport.md` → "The recovery command"), the restored pane runs it —
+no prompt, no button.
+
+- **Restore only.** `restoreSession` passes the command to `restoreTerminal` per
+  terminal pane; **resume** never does, because there the agent is still Live and
+  has nothing to resume. Browser surfaces are skipped with the rest of the terminal
+  restore path.
+- **Revalidated, not trusted.** `normalizeResumeCommand` re-checks the invocation
+  before it is typed, so a snapshot written by an older detector cannot execute
+  something the current grammar would reject.
+- **Typed at the prompt, not at spawn.** The command goes through the same
+  `typeCommandWhenPromptReady` wait as a `dor split` launch: spawn-then-type is
+  exactly the window in which shell startup swallows keystrokes. `commandLine` +
+  `commandStart(user_input)` are seeded synchronously first, because the platform
+  write bypasses xterm's keystroke fallback and a non-integrated shell would
+  otherwise never count the agent as running (`docs/specs/terminal-state.md`).
+- **The pane announces it.** One dim line — `⟲ resuming agent session: <command>` —
+  written to xterm, not the PTY. With no transcript to explain the pane, it is the
+  only thing saying why an agent appeared, and it marks the discontinuity the
+  resume otherwise hides: the interrupted turn did **not** continue. It is a
+  notice, not a control; it has no dismiss and no retirement rules.
+- **No confirmation gate.** `claude --resume <id>` restores the conversation, lands
+  at an idle prompt, and issues no request until the user types; the command came
+  from a process the host had already interrupted itself and read back within one
+  bounded wait; and a wrong id fails closed, since agent session files are per-user
+  and per-project-directory. The reasoning is recorded in `docs/specs/transport.md`
+  → "Consuming it".
+
+Source of truth: `restoreTerminal` in `lib/src/lib/terminal-lifecycle.ts`, called
+from `lib/src/lib/session-restore.ts`.
+
 ### Renderer
 
-Every terminal renders through stock `@xterm/addon-webgl`, loaded in
-`createXtermHost` immediately after `terminal.open()` (the addon reaches for the
-screen element, so load order matters). xterm's built-in DOM renderer is the
-fallback, never the default.
+Every terminal renders through stock `@xterm/addon-webgl`, claimed lazily by
+`tryEnableWebglRenderer` on a session's first `mountElement` — not in
+`createXtermHost` — and guarded by `webglAttempted` so each session claims at
+most one GL context. First paint is the earliest point worth the context: a
+session created but never mounted (e.g. a minimized door awaiting restore) never
+allocates one, keeping scarce GL contexts for terminals that are actually shown.
+xterm's built-in DOM renderer is the fallback, never the default.
 
 The DOM renderer emits one `<span>` per style run per row, so a TUI that paints
 every cell its own truecolor collapses to one span-with-inline-style *per cell*,
@@ -471,6 +524,7 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/components/Wall.tsx` | Main layout orchestrator: selected mode/state, session actions, minimize/reattach, provider composition |
 | `lib/src/components/wall/wall-types.ts` / `wall-context.tsx` | Shared Wall types and React contexts used by Wall, pane headers, panels, overlays, and the baseboard |
 | `lib/src/components/wall/LathHost.tsx` | The tiling engine's HTML adapter: leaf divs, sashes, the pane/door drag gesture, and imperative animator frame application. Engine internals are mapped in `docs/specs/tiling-engine.md`. |
+| `lib/src/components/wall/AlertSpeechIndicator.tsx` | Pointer-transparent whole-Pane `SPEAKING` / `SPOKEN` overlay |
 | `lib/src/components/wall/TerminalPanel.tsx` | Pane body wrapper; registers the pane's DOM element (`usePaneChrome`) |
 | `lib/src/components/wall/TerminalPaneHeader.tsx` | Pane header with rename, alert/TODO, mouse override, split/zoom/minimize/kill controls, and the right-click context menu |
 | `lib/src/components/wall/PaneHeaderContextMenu.tsx` | Pane-header right-click menu: the `surface:N` handle plus the pane's bound TCP ports; a port click connects it to the default browser (`docs/specs/dor-browser.md`) |
@@ -483,7 +537,7 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/components/wall/use-session-persistence.ts` | Debounced layout/session save, flush requests, pagehide, PTY exit, file-drop paste routing |
 | `lib/src/components/wall/use-dor-control.ts` | The `dor` CLI's webview control-plane hook (`useDorControl`): the `dormouse:control-request` handler for `surface.*` methods plus its surface-resolution/param-coercion/command-quoting helpers (`docs/specs/dor-cli.md`) |
 | `lib/src/components/wall/use-window-focused.ts` | Window focus tracking hook for header and selection overlay dimming |
-| `lib/src/components/Baseboard.tsx` | Always-visible bottom strip with door components, overflow arrows, shortcut hints, and the right cluster (notice slot + alarm settings button) |
+| `lib/src/components/Baseboard.tsx` | Always-visible bottom strip with door components, overflow arrows, shortcut hints, and the right cluster (notice slot + three alarm settings/status buttons) |
 | `lib/src/components/Door.tsx` | Individual door element — mouse-hole styled button with alert/TODO indicators |
 | `lib/src/components/TerminalPane.tsx` | Thin xterm.js mount point — mounts/unmounts persistent session elements |
 | `lib/src/lib/terminal-registry.ts` | Public facade preserving registry imports |
@@ -499,10 +553,10 @@ The refill adopts the replacement (`selectPane`) only when the current selection
 | `lib/src/lib/activity-monitor.ts` | Per-session activity state machine: output timing → alert escalation |
 | `lib/src/lib/alert-manager.ts` | Manages ActivityMonitors + attention tracking + TODO state per session |
 | `lib/src/lib/session-types.ts` | Type definitions for persisted sessions (`PersistedPane`, `PersistedDoor`, `PersistedSession`) |
-| `lib/src/lib/session-save.ts` | Serialization: collects layout, scrollback, cwd, alert state for persistence |
+| `lib/src/lib/session-save.ts` | Serialization: collects layout, cwd, alert state for persistence (never scrollback) |
 | `lib/src/lib/session-restore.ts` | Deserialization: loads saved session, calls `restoreTerminal()` for each pane |
 | `lib/src/lib/reconnect.ts` | Priority-based recovery: live PTYs first, then saved session, then empty |
-| `lib/src/lib/resume-patterns.ts` | Detects resumable commands (`claude --resume`, etc.) in scrollback |
+| `lib/src/lib/resume-patterns.ts` | Detects an agent resume invocation in a live buffer — rightmost (newest) match in the tail window, rebuilt as invocation + captured id |
 | `lib/src/index.css` | Lath host styling — `.lath-host` / `.lath-leaf` / `.lath-sash` / drop-preview layout and background flattening |
 | `lib/src/theme.css` | Two-layer VSCode theme token system (`@theme --color-*` → `--vscode-*`) and Tailwind v4 `@theme` integration |
 

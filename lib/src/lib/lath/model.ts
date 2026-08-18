@@ -182,7 +182,8 @@ export function normalize(node: LathNode): LathNode | null {
 
 /** Replace the subtree at `path` (root is `[]`) with `replacement`, sharing structure
  *  outside the rewritten spine. Callers pass valid paths; a path that leaves the tree
- *  returns `replacement` unchanged from wherever the walk stopped. */
+ *  (hits a leaf before `path` is exhausted, or names a missing child) returns the
+ *  subtree reached so far unchanged, without inserting `replacement`. */
 export function replaceAtPath(root: LathNode, path: number[], replacement: LathNode): LathNode {
   if (path.length === 0) return replacement;
   if (root.kind !== 'split') return root;

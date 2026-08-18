@@ -8,7 +8,7 @@
   },
   {
     "name": "@stricli/core",
-    "version": "1.2.9",
+    "version": "1.3.0",
     "license": "Apache-2.0",
     "author": "Michael Molisani <mmolisani@bloomberg.net>",
     "homepage": "https://github.com/bloomberg/stricli/tree/main/packages/core"
@@ -47,6 +47,13 @@
     "license": "MIT",
     "author": "The xterm.js authors",
     "homepage": "https://github.com/xtermjs/xterm.js/tree/master/addons/addon-unicode-graphemes"
+  },
+  {
+    "name": "@xterm/addon-webgl",
+    "version": "0.20.0-beta.291",
+    "license": "MIT",
+    "author": "The xterm.js authors",
+    "homepage": "https://github.com/xtermjs/xterm.js/tree/master/addons/addon-webgl"
   },
   {
     "name": "@xterm/xterm",
@@ -99,7 +106,7 @@
   },
   {
     "name": "node-pty",
-    "version": "1.2.0-beta.14",
+    "version": "1.2.0-beta.15",
     "license": "MIT",
     "author": "Microsoft Corporation",
     "homepage": "https://github.com/microsoft/node-pty"
@@ -113,14 +120,14 @@
   },
   {
     "name": "react",
-    "version": "19.2.7",
+    "version": "19.2.8",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
   },
   {
     "name": "react-dom",
-    "version": "19.2.7",
+    "version": "19.2.8",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"

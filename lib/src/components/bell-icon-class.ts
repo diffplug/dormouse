@@ -15,3 +15,18 @@ export function bellIconClass(status: SessionStatus): string {
     ),
   ].filter(Boolean).join(' ');
 }
+
+/**
+ * The pulse worn by a Session the renderer is currently speaking.
+ *
+ * Lives beside `bellIconClass` because it needs the same `cfg.alert.ringingPaused`
+ * freeze: an infinite animation otherwise snapshots at whatever phase the
+ * Chromatic runner lands on, so every build diffs against itself. Unlike the bell
+ * there is no static substitute to swap in — the overlay's ring already carries
+ * the state without motion. `motion-safe:` alone covers reduced motion; a
+ * `motion-reduce:` counterpart would be dead, since the animation is never
+ * emitted there to override.
+ */
+export function alertSpeakingAnimationClass(): string {
+  return cfg.alert.ringingPaused ? '' : 'motion-safe:animate-speech-alarm-pulse';
+}

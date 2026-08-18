@@ -22,6 +22,7 @@ colors:
   error: "var(--vscode-terminal-ansiRed)"
   success: "var(--vscode-terminal-ansiGreen)"
   alarm: "var(--vscode-terminal-ansiYellow)"
+  alarm-vs-terminal: "var(--color-alarm-vs-terminal)"
   window-close-hover: "#b92a1b"
 typography:
   body:
@@ -136,7 +137,7 @@ This system has no "primary" accent in the brand sense. The closest analogue is 
 - **Terminal Background / Foreground** (`var(--vscode-terminal-background)` / `var(--vscode-terminal-foreground)`): the terminal content surface and xterm default text. Orthogonal to the chrome.
 - **Error** (`var(--vscode-terminal-ansiRed)`): destructive actions and kill-confirm letter flash.
 - **Success** (`var(--vscode-terminal-ansiGreen)`): TODO check, theme-store install confirm.
-- **Alarm** (`var(--vscode-terminal-ansiYellow)` baseline; runtime-overridden): bell-ringing alert tint. `computeDynamicPalette()` replaces each `--color-alarm-vs-*` token with plain white or black by the OKLab lightness of the bg the bell sits on (active header, inactive header, or door), so the ringing bell stays maximally legible on any surface.
+- **Alarm** (`var(--vscode-terminal-ansiYellow)` baseline; runtime-overridden): alert tint. `computeDynamicPalette()` replaces each `--color-alarm-vs-*` token with plain white or black by the OKLab lightness of its background (active header, inactive header, Door, or terminal body), so ringing bells and the whole-Pane spoken-alarm treatment stay maximally legible on any surface.
 
 ### Fixed Exception
 - **Window Close Hover** (`#b92a1b`): the only literal color in the whole system. Native OS close-button hover on Windows/Linux chrome buttons; matches the platform convention across themes.
@@ -196,6 +197,7 @@ Doors are the pane-header indicators on the baseboard. The most signature compon
 - **Dimensions:** `h-6` (24px), `min-w-[68px]`, `max-w-[220px]`, horizontal padding `px-2.5` (10px), `gap-2` between title and badges.
 - **Type:** `text-sm font-medium font-mono`.
 - **Content:** truncated title; optional TODO pill (`text-xs font-semibold tracking-[0.08em]`, success-tinted when flourishing); optional bell icon (`size={11}`, `weight="fill"`), `text-alarm-vs-door` when ringing.
+- **Spoken alarm:** `SPEAKING` inverts and pulses the whole Door and takes the badge slot for its speaker-plus-label — it lasts one utterance. `SPOKEN` persists until the ring is attended, so it keeps a static 2px inset and adds its speaker icon *beside* the TODO pill and bell instead of evicting them. Both carry a speaker icon (shape, not color) and name the state in the accessible name.
 - **Hover/Focus:** no decorative hover. The whole door is a button; the focus state is conveyed by the parent pane's selection ring, not by a per-door treatment.
 
 ### Buttons
@@ -206,6 +208,11 @@ The icon-and-tooltip button used inside pane headers (kill, alert toggle, todo, 
 - **Color:** `text-inherit` — inherits the header's foreground, so it tints with the active/inactive header palette.
 - **Hover:** `hover:bg-current/10` — a 10%-opacity wash of the current text color. Theme-agnostic, works light or dark.
 - **Tooltip:** rendered through a portal as a `PopupButtonRow` 8px below the button, with `text-sm` primary line and an optional muted detail line. Keybindings inside the tooltip auto-render as `[bracketed]` shortcuts.
+
+#### Popup Button (`popupButton`)
+The flat segments inside a `PopupButtonRow` — the row owns the border, background, shadow, and `text-sm`, so a segment contributes only padding and state. Every segment currently inherits the row's foreground; these rows offer rather than ask, so none of them carries an emphasized action.
+- **Hover:** `hover:bg-foreground/10`, a wash over the row's surface.
+- **Flash:** `flashed` swaps in `animate-copy-flash` with `bg-header-active-bg/25` for copy-confirm moments.
 
 #### Chrome Button (window controls)
 The Windows/Linux native-style window control row in the standalone app bar.

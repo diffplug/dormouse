@@ -397,14 +397,18 @@ export class AlertManager {
     const watch = entry.commandExitWatch;
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
-    this.applyWatchingRule(id, entry);
+    // Disposing the WATCHING monitor flips `watchingEnabled`/status, so its
+    // change must propagate even when command-exit never armed — otherwise a
+    // watched command that finishes leaves subscribers on stale WATCHING state
+    // until the next command starts.
+    const watchingChanged = this.applyWatchingRule(id, entry);
 
     const wasArmed = entry.commandExitStatus === 'COMMAND_EXIT_ARMED';
     if (entry.commandExitStatus !== 'ALERT_RINGING') {
       entry.commandExitStatus = 'IDLE';
     }
 
-    if (!watch || !wasArmed) return wasArmed;
+    if (!watch || !wasArmed) return watchingChanged;
     if (this.hasAttention(id)) return true;
 
     if (Date.now() - watch.startedAt < this.inactivityTimeoutMs) return true;

@@ -67,13 +67,9 @@
       "separateMajorMinor": false
     },
     {
-      "description": "xterm core and its first-party addons ship from one repo on one beta counter, and each addon peers on the exact core beta it was built against — an addon at beta.N requires ^6.1.0-beta.N, which no earlier core beta satisfies. The addons also compile against core internals, so a partial bump lands an unsatisfied peer range and mismatched internals; keep them in one PR. canopy's fork-base pins are excluded below",
+      "description": "xterm core and its first-party addons ship from one repo but carry INDEPENDENT beta counters (an addon is only published when its own content changes), and each addon peers on the exact core version published from the commit it was built from. So the latest of each is routinely a set spanning two commits — today's newest core has no matching addon publish at all — and since ^6.1.0-beta.N admits every later beta, npm and pnpm stay silent about the mismatch while the addons run against core internals they were not compiled for. This group only guarantees core and the addons arrive in one PR and are tested together; scripts/xterm-lint.mjs is what rejects an incoherent set, and `pnpm bump:xterm` writes the newest coherent one. Matched by scope so a newly added addon is grouped automatically; canopy's fork-base pins are excluded below",
       "matchManagers": ["npm"],
-      "matchPackageNames": [
-        "@xterm/xterm",
-        "@xterm/addon-fit",
-        "@xterm/addon-unicode-graphemes"
-      ],
+      "matchPackageNames": ["@xterm/**"],
       "groupName": "xterm",
       "groupSlug": "xterm",
       "separateMajorMinor": false
